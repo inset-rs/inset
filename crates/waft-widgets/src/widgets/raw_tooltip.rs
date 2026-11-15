@@ -1880,14 +1880,14 @@ mod tests {
 
         /// Dart's `find.byKey(key)` finding one widget.
         fn finds(&self, key: &GlobalKey) -> bool {
-            key.current_context(&mut self.cell.borrow_mut()).is_some()
+            key.current_context(&self.cell.borrow_mut()).is_some()
         }
 
         /// The global rectangle of the box `key` is on.
         fn rect_of(&self, key: &GlobalKey) -> Rect {
-            let mut app = self.cell.borrow_mut();
+            let app = self.cell.borrow();
             let render_box = key
-                .current_context(&mut app)
+                .current_context(&app)
                 .expect("mounted")
                 .find_render_object(&app)
                 .and_then(|render_object| render_object.as_box())
@@ -1897,7 +1897,7 @@ mod tests {
         }
 
         fn state(&self, key: &GlobalKey) -> Handle<RawTooltipState> {
-            key.current_state::<RawTooltipState>(&mut self.cell.borrow_mut())
+            key.current_state::<RawTooltipState>(&self.cell.borrow_mut())
                 .expect("the tooltip is mounted")
         }
     }
@@ -2877,7 +2877,7 @@ mod tests {
         });
         assert!(tester.finds(&child_key));
         let state = child_key
-            .current_context(&mut tester.cell.borrow_mut())
+            .current_context(&tester.cell.borrow_mut())
             .expect("mounted");
         let app = tester.cell.borrow();
         assert!(
@@ -2894,8 +2894,8 @@ mod tests {
 
     /// The text direction of the paragraph `key` is on.
     fn text_direction_of(tester: &Tester, key: &GlobalKey) -> TextDirection {
-        let mut app = tester.cell.borrow_mut();
-        key.current_context(&mut app)
+        let app = tester.cell.borrow();
+        key.current_context(&app)
             .expect("mounted")
             .find_render_object(&app)
             .and_then(|render_object| render_object.downcast::<RenderParagraph>(&app))
@@ -3040,7 +3040,7 @@ mod tests {
 
         // The recorded divergence: Dart's `?? false` through the key, as Material's `TooltipState`
         // reaches it; the stale handle itself is gone.
-        let state = tooltip_key.current_state::<RawTooltipState>(&mut tester.cell.borrow_mut());
+        let state = tooltip_key.current_state::<RawTooltipState>(&tester.cell.borrow_mut());
         let visible =
             state.is_some_and(|state| state.ensure_tooltip_visible(&mut tester.cell.borrow_mut()));
         assert!(!visible);

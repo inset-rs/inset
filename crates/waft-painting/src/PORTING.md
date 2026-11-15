@@ -28,6 +28,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - placeholder_span.rs → placeholder_span.dart
 - image_stream.rs → image_stream.dart (ImageInfo, ImageStreamListener, completer listener/keep-alive lifetime)
 - image_cache.rs → image_cache.dart (pending/live/LRU tracking, limits, status, and post-frame retention release)
+- gradient.rs → gradient.dart (with the dart:ui `Gradient.linear`, `.radial` and `.sweep` it calls)
 
 ## borders.rs (`AnyBorderSide`), text_style.rs (`AnyTextStyle`) → the `BorderSide` and `TextStyle` subclass mechanism
 
@@ -43,8 +44,8 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## draw.rs
 
-- Change: `draw_rrect` / `draw_drrect` / `draw_oval` / `draw_rsuperellipse` / `draw_arc` are free functions that reduce the dart:ui `Canvas` methods to an rrect or a path.
-  Reason: platform — valo has no `drawDRRect`, `drawOval`, `drawRSuperellipse` or `drawArc` primitive.
+- Change: `draw_rrect` / `draw_drrect` / `draw_oval` / `draw_rsuperellipse` / `draw_arc` / `draw_line` are free functions that reduce the dart:ui `Canvas` methods to an rrect or a path.
+  Reason: platform — valo has no `drawDRRect`, `drawOval`, `drawRSuperellipse`, `drawArc` or `drawLine` primitive.
   Affect: a display-list dump shows an rrect or a path where Flutter's shows the shape.
 
 ## clip.rs → clip.dart
@@ -105,19 +106,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## notched_shapes.rs → notched_shapes.dart
 
-- Change: `AutomaticNotchedShape::get_outer_path` returns the host shape's path and ignores the guest.
-  Reason: platform — waiting on Valo: path boolean operations, for `Path.combine(PathOperation.difference, ...)`.
-  Affect: a notch drawn from a guest `ShapeBorder` is missing; the host is drawn whole.
-
-## gradient.rs → gradient.dart
-
-- Change: `create_shader` paints `TileMode::Decal` as clamp.
-  Reason: platform — waiting on Valo: a gradient shader has no transparent (decal) spread.
-  Affect: a decal gradient extends its edge colours beyond its ends instead of turning transparent.
-
-- Change: `SweepGradient::create_shader` passes only `start_angle`; `end_angle` and `tile_mode` reach no shader.
-  Reason: platform — waiting on Valo: its sweep is one full clockwise turn from the start angle, with no spread.
-  Affect: a sweep that ends short of 2π, or tiles other than clamp, paints a full-turn gradient; with the defaults it paints as Flutter's.
+- Change: `AutomaticNotchedShape::get_outer_path` returns the host less the guest as `path_combine` writes it, which its users fill, clip and hit-test with the non-zero rule, where Dart's combined path fills with the even-odd rule it carries.
+  Reason: platform — valo `Path` carries no `fillType` (the clip.rs entry), and Skia's `Op` winds the contours it writes for the even-odd rule.
+  Affect: a guest wholly inside the host leaves no hole in it; a guest that crosses the host's edge, as a docked button does, notches it as in Flutter.
 
 ## Deferred
 
@@ -137,7 +128,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - `ui.Locale`, `ImageConfiguration.locale`, `TextStyle.locale`. Trigger: locale-specific assets or region-specific glyphs.
 - `AssetBundle.loadString` / `loadStructuredData` / `loadBuffer` / caching, `NetworkAssetBundle`, `rootBundle`. Trigger: string or structured assets, or a default bundle on `App`.
 - `StarBorder`. Trigger: a star or polygon `ShapeBorder`.
-- `NotchedShape` / `CircularNotchedRectangle` / `AutomaticNotchedShape`. Trigger: `BottomAppBar`; valo has no `Path.arcToPoint` or `Path.combine`.
 - The rest of `PaintingBinding`. Trigger: image cache / shader warm-up.
 - `strut_style.dart` and `TextPainter.strutStyle`. Trigger: a paragraph that sets strut; the host has no strut.
 - `TextPainter.locale` / `TextSpan.locale` / `TextSpan.spellOut`. Trigger: `Locale`.

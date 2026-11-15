@@ -2723,7 +2723,7 @@ mod tests {
         // The sheet measures the drag against the height of the box the drag gesture
         // detector renders. Mark it dirty so the drag ends before the next layout.
         let detector = sheet_key
-            .current_context(&mut app)
+            .current_context(&app)
             .expect("the sheet content is mounted")
             .find_ancestor_state_of_type::<CupertinoDragGestureDetectorState>(&app)
             .expect("the sheet content is under the drag gesture detector");
@@ -2941,7 +2941,7 @@ mod tests {
         // The sheet measures the drag against the height of its content. Mark the content
         // dirty so the drag ends before the next layout.
         view_key
-            .current_context(&mut app)
+            .current_context(&app)
             .expect("the scroll view is mounted")
             .find_render_object(&app)
             .expect("the scroll view has a render object")

@@ -1,12 +1,13 @@
 //! Flutter counterpart: `widgets/stretch_effect.dart`.
 //!
 //! Flutter draws the stretch with a fragment shader where the engine supports shader image
-//! filters, and with a matrix scale everywhere else. Waft has no custom shaders, so the matrix
-//! scale is the one path; it is the look Flutter's own fallback gives.
+//! filters, and with a matrix scale everywhere else. The shader stretch is deferred
+//! (`PORTING.md`), so the matrix scale is the one path; it is the look Flutter's own fallback
+//! gives.
 
 use std::fmt::{self, Debug};
 
-use waft_embedder::{Matrix4, TextDirection};
+use waft_embedder::{FilterQuality, Matrix4, TextDirection};
 use waft_foundation::App;
 use waft_painting::{AlignmentDirectional, AlignmentGeometry, Axis};
 
@@ -136,10 +137,15 @@ impl StatelessWidget for StretchEffect {
         }
 
         // Dart's `Matrix4.diagonal3Values(x, y, 1.0)`.
-        Transform::new(Matrix4::scale(x as f32, y as f32))
+        let mut transform = Transform::new(Matrix4::scale(x as f32, y as f32))
             .alignment(self.get_alignment(text_direction))
-            .child(self.child.clone())
-            .into_widget()
+            .child(self.child.clone());
+        transform.filter_quality = if self.stretch_strength == 0.0 {
+            None
+        } else {
+            Some(FilterQuality::Medium)
+        };
+        transform.into_widget()
     }
 }
 
@@ -230,6 +236,24 @@ mod tests {
                 "{strength} {text_direction:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_stretch_filters_at_medium_quality_and_a_resting_one_does_not() {
+        let stretched = built(
+            StretchEffect::new(Axis::Vertical, SizedBox::shrink()).stretch_strength(0.5),
+            TextDirection::Ltr,
+        );
+        assert_eq!(
+            transform_of(&stretched).filter_quality,
+            Some(FilterQuality::Medium)
+        );
+
+        let resting = built(
+            StretchEffect::new(Axis::Vertical, SizedBox::shrink()),
+            TextDirection::Ltr,
+        );
+        assert_eq!(transform_of(&resting).filter_quality, None);
     }
 
     #[test]

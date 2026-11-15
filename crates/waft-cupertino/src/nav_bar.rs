@@ -796,6 +796,10 @@ impl StatefulWidget for CupertinoNavigationBar {
         self.key.as_ref()
     }
 
+    fn as_preferred_size_widget(&self) -> Option<&dyn PreferredSizeWidget> {
+        Some(self)
+    }
+
     fn create_state(&self) -> CupertinoNavigationBarState {
         CupertinoNavigationBarState {
             state: StateData::new(),

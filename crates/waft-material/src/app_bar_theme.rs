@@ -496,7 +496,7 @@ impl AppBarTheme {
     pub fn of(app: &mut App, context: BuildContext) -> AppBarThemeData {
         match context.depend_on_inherited_widget_of_exact_type::<AppBarTheme>(app) {
             Some(app_bar_theme) => app_bar_theme.data(),
-            None => Theme::of(app, context).app_bar_theme,
+            None => Theme::of(app, context).app_bar_theme.clone(),
         }
     }
 

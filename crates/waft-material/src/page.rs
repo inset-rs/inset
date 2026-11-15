@@ -386,7 +386,7 @@ pub trait MaterialRouteTransitionMixin: PageRoute {
         secondary_animation: AnyAnimation<f64>,
         child: WidgetRef,
     ) -> WidgetRef {
-        let theme = Theme::of(app, context).page_transitions_theme;
+        let theme = Theme::of(app, context).page_transitions_theme.clone();
         theme.build_transitions(
             app,
             PageRoute::as_page_route(self),
@@ -474,7 +474,7 @@ fn material_delegated_transition(
     child: Option<&WidgetRef>,
 ) -> Option<WidgetRef> {
     let theme_data = Theme::of(app, context);
-    let theme = theme_data.page_transitions_theme;
+    let theme = theme_data.page_transitions_theme.clone();
     let platform = theme_data.platform;
     let theme_delegated_transition = theme.delegated_transition(platform);
     match theme_delegated_transition {
@@ -2083,7 +2083,7 @@ mod tests {
                 // the pop is underway because route.navigator.userGestureInProgress.
                 {
                     let mut app = tester.cell.borrow_mut();
-                    let context = scaffold_key.current_context(&mut app).expect("mounted");
+                    let context = scaffold_key.current_context(&app).expect("mounted");
                     let route = route_scaffold(&mut app);
                     Navigator::push(&mut app, context, route);
                 }
@@ -2124,9 +2124,7 @@ mod tests {
         page_tap_count: &Rc<Cell<u32>>,
     ) {
         let mut app = tester.cell.borrow_mut();
-        let context = home_scaffold_key
-            .current_context(&mut app)
-            .expect("mounted");
+        let context = home_scaffold_key.current_context(&app).expect("mounted");
         let page_key = page_scaffold_key.clone();
         let page_taps = Rc::clone(page_tap_count);
         let route = MaterialPageRoute::new(
@@ -2245,9 +2243,7 @@ mod tests {
 
                 let notifier = {
                     let mut app = tester.cell.borrow_mut();
-                    let context = home_scaffold_key
-                        .current_context(&mut app)
-                        .expect("mounted");
+                    let context = home_scaffold_key.current_context(&app).expect("mounted");
                     Navigator::of(&mut app, context, false).user_gesture_in_progress_notifier(&app)
                 };
                 assert!(!*tester.cell.borrow().get(notifier).value());
@@ -2283,7 +2279,7 @@ mod tests {
                 assert!(!*tester.cell.borrow().get(notifier).value());
                 assert!(
                     page_scaffold_key
-                        .current_context(&mut tester.cell.borrow_mut())
+                        .current_context(&tester.cell.borrow_mut())
                         .is_none()
                 );
 
@@ -2339,7 +2335,7 @@ mod tests {
             {
                 let mut app = tester.cell.borrow_mut();
                 navigator_key
-                    .current_state::<NavigatorState>(&mut app)
+                    .current_state::<NavigatorState>(&app)
                     .expect("a navigator")
                     .pop(&mut app, None);
             }

@@ -48,9 +48,9 @@ fn grid_measures_layout_builder_and_constrains_remaining_star_row() {
             ]);
         run_app(app, grid.into_widget());
     });
-    let mut app = fixture.cell.borrow_mut();
-    let auto = auto_key.current_context(&mut app).unwrap();
-    let star = star_key.current_context(&mut app).unwrap();
+    let app = fixture.cell.borrow();
+    let auto = auto_key.current_context(&app).unwrap();
+    let star = star_key.current_context(&app).unwrap();
     let auto = auto.find_render_object(&app).unwrap().as_box().unwrap();
     let star = star.find_render_object(&app).unwrap().as_box().unwrap();
     assert_eq!(auto.size(&app), Size::new(300.0, 30.0));

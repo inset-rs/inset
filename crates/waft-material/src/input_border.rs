@@ -3,7 +3,6 @@
 //! `InputBorder` is a trait over [`ShapeBorder`] whose `paint` takes the floating label's gap;
 //! each border's `ShapeBorder::paint` is that `paint` with Dart's default gap arguments, so a
 //! caller holding a `dyn InputBorder` names the trait: `InputBorder::paint(&*border, ..)`.
-//! `ShapedInputBorder` waits for Valo (see this folder's `PORTING.md`).
 
 use std::any::Any;
 use std::f64::consts::PI;
@@ -11,8 +10,8 @@ use std::fmt::{self, Debug};
 use std::sync::Arc;
 
 use waft_embedder::{
-    Canvas, FillRule, Offset, Paint, Path, PathBuilder, RRect, Radius, Rect, clamp_double,
-    lerp_double, rrect_radii_elliptical,
+    Canvas, FillRule, Offset, Paint, Path, PathBuilder, PathOperation, RRect, Radius, Rect,
+    clamp_double, lerp_double, path_combine, rrect_radii_elliptical,
 };
 use waft_painting::{
     BorderRadius, BorderSide, BorderStyle, BoxBorder, BoxShape, EdgeInsetsGeometry, ShapeBorder,
@@ -543,8 +542,8 @@ impl Debug for UnderlineInputBorder {
 ///
 ///  * [`UnderlineInputBorder`], the default `InputDecorator` border which
 ///    draws a horizontal line at the bottom of the input decorator's container.
-///  * `ShapedInputBorder`, an `InputDecorator` border which draws a custom
-///    `ShapeBorder` around the input decorator's container.
+///  * [`ShapedInputBorder`], an `InputDecorator` border which draws a custom
+///    [`ShapeBorder`] around the input decorator's container.
 ///  * `InputDecoration`, which is used to configure an `InputDecorator`.
 #[derive(Clone, Copy, PartialEq)]
 pub struct OutlineInputBorder {
@@ -953,6 +952,330 @@ impl Debug for OutlineInputBorder {
     }
 }
 
+/// Draws a custom shape around an `InputDecorator`'s container.
+///
+/// This border allows any [`ShapeBorder`] to be used as an input decorator border.
+/// This provides maximum flexibility for custom border shapes while maintaining
+/// the gap functionality for floating labels.
+///
+/// When the input decorator's label is floating, for example because its
+/// input child has the focus, the label appears in a gap in the border outline.
+///
+/// The input decorator's "container" is the optionally filled area above the
+/// decorator's helper, error, and counter.
+///
+/// See also:
+///
+///  * [`OutlineInputBorder`], a traditional rounded rectangle border.
+///  * [`UnderlineInputBorder`], the default `InputDecorator` border which
+///    draws a horizontal line at the bottom of the input decorator's container.
+///  * `RoundedSuperellipseBorder`, which can be used with this border for iOS-style shapes.
+///  * `InputDecoration`, which is used to configure an `InputDecorator`.
+pub struct ShapedInputBorder {
+    /// Defines the border line's color and weight.
+    pub border_side: BorderSide,
+
+    /// Horizontal padding on either side of the border's
+    /// `InputDecoration.labelText` width gap.
+    ///
+    /// This value is used by the [`paint`](InputBorder::paint) method to compute the actual
+    /// gap width.
+    pub gap_padding: f64,
+
+    /// The shape of the border.
+    pub shape: Box<dyn ShapeBorder>,
+}
+
+impl ShapedInputBorder {
+    /// Creates a shaped outline border for an `InputDecorator`.
+    ///
+    /// The `shape` parameter defines the custom border shape. It can be any
+    /// [`ShapeBorder`] such as `RoundedSuperellipseBorder`, `StadiumBorder`,
+    /// `BeveledRectangleBorder`, or a custom shape.
+    ///
+    /// If the [`border_side`](Self::border_side) parameter is [`BorderSide::NONE`], it will
+    /// not draw a border. However, it will still define a shape (which you can see if
+    /// `InputDecoration.filled` is true).
+    ///
+    /// If an application does not specify a `border_side` parameter of
+    /// value [`BorderSide::NONE`], the input decorator substitutes its own, using
+    /// `copy_with`, based on the current theme and `InputDecorator.isFocused`.
+    ///
+    /// See also:
+    ///
+    ///  * `InputDecoration.floatingLabelBehavior`, which should be set to
+    ///    `FloatingLabelBehavior.never` when the `border_side` is
+    ///    [`BorderSide::NONE`]. If left as `FloatingLabelBehavior.auto`, the label
+    ///    will extend beyond the container as if the border were still being
+    ///    drawn.
+    pub fn new(shape: impl Into<Box<dyn ShapeBorder>>) -> ShapedInputBorder {
+        ShapedInputBorder {
+            border_side: BorderSide::default(),
+            gap_padding: 4.0,
+            shape: shape.into(),
+        }
+    }
+
+    /// Dart `ShapedInputBorder(borderSide:)`.
+    pub fn border_side(mut self, border_side: BorderSide) -> ShapedInputBorder {
+        self.border_side = border_side;
+        self
+    }
+
+    /// Dart `ShapedInputBorder(gapPadding:)`.
+    pub fn gap_padding(mut self, gap_padding: f64) -> ShapedInputBorder {
+        debug_assert!(gap_padding >= 0.0);
+        self.gap_padding = gap_padding;
+        self
+    }
+
+    /// Creates a copy of this border with the given fields replaced.
+    pub fn copy_with(
+        &self,
+        border_side: Option<BorderSide>,
+        shape: Option<Box<dyn ShapeBorder>>,
+        gap_padding: Option<f64>,
+    ) -> ShapedInputBorder {
+        ShapedInputBorder::new(shape.unwrap_or_else(|| self.shape.clone_box()))
+            .border_side(border_side.unwrap_or(self.border_side))
+            .gap_padding(gap_padding.unwrap_or(self.gap_padding))
+    }
+
+    /// Creates a copy of this border, scaled by the factor `t`.
+    pub fn scale(&self, t: f64) -> ShapedInputBorder {
+        ShapedInputBorder::new(self.shape.scale(t))
+            .border_side(self.border_side.scale(t))
+            .gap_padding(self.gap_padding * t)
+    }
+
+    fn gap_border_path(
+        &self,
+        rect: Rect,
+        start: f64,
+        extent: f64,
+        text_direction: Option<TextDirection>,
+    ) -> Arc<Path> {
+        // Create a continuous path for the border with a gap in the top edge.
+        let outer_path = self.shape.get_outer_path(rect, text_direction);
+
+        // If there's no meaningful gap, return the full outline.
+        if start <= 0.0 && extent <= 0.0 {
+            return outer_path;
+        }
+
+        // Create a rectangle that represents the gap area.
+        // The gap is on the top edge, so we create a rect that covers the gap region.
+        let gap_left = start;
+        let gap_right = start + extent;
+
+        // Create a path that excludes the gap area by combining with a difference operation.
+        // We'll subtract a small rectangle at the top where the gap should be.
+        let gap_rect = rect_path(Rect::from_ltrb(
+            clamp_double(gap_left, rect.left, rect.right),
+            rect.top - 1.0, // Extend slightly beyond to ensure clean cut.
+            clamp_double(gap_right, rect.left, rect.right),
+            rect.top + 1.0, // Small height to only affect top edge.
+        ));
+
+        path_combine(PathOperation::Difference, &outer_path, &gap_rect)
+    }
+}
+
+impl Clone for ShapedInputBorder {
+    fn clone(&self) -> ShapedInputBorder {
+        ShapedInputBorder {
+            border_side: self.border_side,
+            gap_padding: self.gap_padding,
+            shape: self.shape.clone_box(),
+        }
+    }
+}
+
+impl PartialEq for ShapedInputBorder {
+    fn eq(&self, other: &ShapedInputBorder) -> bool {
+        other.border_side == self.border_side
+            && other.shape.eq_shape(&*self.shape)
+            && other.gap_padding == self.gap_padding
+    }
+}
+
+impl ShapeBorder for ShapedInputBorder {
+    fn dimensions(&self) -> EdgeInsetsGeometry {
+        EdgeInsetsGeometry::all(self.border_side.width)
+    }
+
+    fn scale(&self, t: f64) -> Box<dyn ShapeBorder> {
+        Box::new(ShapedInputBorder::scale(self, t))
+    }
+
+    fn lerp_from(&self, a: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
+        if let Some(a) = a.and_then(|a| a.as_any().downcast_ref::<ShapedInputBorder>()) {
+            return Some(Box::new(
+                ShapedInputBorder::new(
+                    <dyn ShapeBorder>::lerp(Some(&*a.shape), Some(&*self.shape), t)
+                        .expect("two shapes lerp to a shape"),
+                )
+                .border_side(BorderSide::lerp(a.border_side, self.border_side, t))
+                .gap_padding(a.gap_padding),
+            ));
+        }
+        if a.is_none() {
+            Some(ShapeBorder::scale(self, t))
+        } else {
+            None
+        }
+    }
+
+    fn lerp_to(&self, b: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
+        if let Some(b) = b.and_then(|b| b.as_any().downcast_ref::<ShapedInputBorder>()) {
+            return Some(Box::new(
+                ShapedInputBorder::new(
+                    <dyn ShapeBorder>::lerp(Some(&*self.shape), Some(&*b.shape), t)
+                        .expect("two shapes lerp to a shape"),
+                )
+                .border_side(BorderSide::lerp(self.border_side, b.border_side, t))
+                .gap_padding(b.gap_padding),
+            ));
+        }
+        if b.is_none() {
+            Some(ShapeBorder::scale(self, 1.0 - t))
+        } else {
+            None
+        }
+    }
+
+    fn get_inner_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Arc<Path> {
+        self.shape
+            .get_inner_path(rect.deflate(self.border_side.width), text_direction)
+    }
+
+    fn get_outer_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Arc<Path> {
+        self.shape.get_outer_path(rect, text_direction)
+    }
+
+    fn paint_interior(
+        &self,
+        canvas: &mut Canvas,
+        rect: Rect,
+        paint: &Paint,
+        text_direction: Option<TextDirection>,
+    ) {
+        if self.shape.prefer_paint_interior() {
+            self.shape
+                .paint_interior(canvas, rect, paint, text_direction);
+        } else {
+            // Fallback for shapes that don't support paintInterior.
+            canvas.draw_path(
+                &self.shape.get_outer_path(rect, text_direction),
+                FillRule::NonZero,
+                paint,
+            );
+        }
+    }
+
+    fn prefer_paint_interior(&self) -> bool {
+        self.shape.prefer_paint_interior()
+    }
+
+    fn paint(&self, canvas: &mut Canvas, rect: Rect, text_direction: Option<TextDirection>) {
+        InputBorder::paint(self, canvas, rect, None, 0.0, 0.0, text_direction);
+    }
+
+    fn clone_box(&self) -> Box<dyn ShapeBorder> {
+        Box::new(self.clone())
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn eq_shape(&self, other: &dyn ShapeBorder) -> bool {
+        other
+            .as_any()
+            .downcast_ref::<ShapedInputBorder>()
+            .is_some_and(|other| other == self)
+    }
+}
+
+impl InputBorder for ShapedInputBorder {
+    fn border_side(&self) -> BorderSide {
+        self.border_side
+    }
+
+    fn copy_with(&self, border_side: Option<BorderSide>) -> Box<dyn InputBorder> {
+        Box::new(ShapedInputBorder::copy_with(self, border_side, None, None))
+    }
+
+    fn is_outline(&self) -> bool {
+        true
+    }
+
+    /// Draw the custom shape around `rect`.
+    ///
+    /// The [`border_side`](ShapedInputBorder::border_side) defines the line's color and
+    /// weight.
+    ///
+    /// The top side of the border may be interrupted by a single gap
+    /// if `gap_extent` is non-null. In that case the gap begins at
+    /// `gap_start - gap_padding` (assuming that the `text_direction` is [`TextDirection::Ltr`]).
+    /// The gap's width is `(gap_padding + gap_extent + gap_padding) * gap_percentage`.
+    fn paint(
+        &self,
+        canvas: &mut Canvas,
+        rect: Rect,
+        gap_start: Option<f64>,
+        gap_extent: f64,
+        gap_percentage: f64,
+        text_direction: Option<TextDirection>,
+    ) {
+        debug_assert!((0.0..=1.0).contains(&gap_percentage));
+
+        let paint = self.border_side.to_paint();
+        let deflated_rect = rect.deflate(self.border_side.width / 2.0);
+
+        match gap_start {
+            Some(gap_start) if gap_extent > 0.0 && gap_percentage != 0.0 => {
+                let extent = lerp_double(
+                    Some(0.0),
+                    Some(gap_extent + self.gap_padding * 2.0),
+                    gap_percentage,
+                )
+                .expect("both ends are given");
+                let start = match text_direction.expect("a gap needs a text direction") {
+                    TextDirection::Rtl => gap_start + self.gap_padding - extent,
+                    TextDirection::Ltr => gap_start - self.gap_padding,
+                };
+                let path =
+                    self.gap_border_path(deflated_rect, start.max(0.0), extent, text_direction);
+                canvas.draw_path(&path, FillRule::NonZero, &paint);
+            }
+            // Draw the shape without a gap.
+            _ => match self.shape.as_outlined_border() {
+                Some(outlined_shape) => {
+                    // Create a copy with our border side.
+                    let shaped_border = outlined_shape.copy_with(Some(self.border_side));
+                    shaped_border.paint(canvas, deflated_rect, text_direction);
+                }
+                None => canvas.draw_path(
+                    &self.shape.get_outer_path(deflated_rect, text_direction),
+                    FillRule::NonZero,
+                    &paint,
+                ),
+            },
+        }
+    }
+
+    fn clone_input_border(&self) -> Box<dyn InputBorder> {
+        Box::new(self.clone())
+    }
+}
+
+impl Debug for ShapedInputBorder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("ShapedInputBorder()")
+    }
+}
+
 /// Dart's `shape as InputBorder` on a border that `ShapeBorder::lerp` gave back: the input
 /// border it is, when it is one of this crate's input borders.
 ///
@@ -970,6 +1293,9 @@ pub(crate) fn input_border_of(shape: &dyn ShapeBorder) -> Option<Box<dyn InputBo
     if let Some(border) = any.downcast_ref::<OutlineInputBorder>() {
         return Some(border.clone_input_border());
     }
+    if let Some(border) = any.downcast_ref::<ShapedInputBorder>() {
+        return Some(border.clone_input_border());
+    }
     if let Some(border) = any.downcast_ref::<crate::material_state::WidgetStateInputBorder>() {
         return Some(border.clone_input_border());
     }
@@ -984,4 +1310,214 @@ pub(crate) fn input_border_of(shape: &dyn ShapeBorder) -> Option<Box<dyn InputBo
         return Some(border.clone_input_border());
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use waft_embedder::valo::{Op, Point};
+    use waft_foundation::TargetPlatform;
+    use waft_painting::{RoundedRectangleBorder, RoundedSuperellipseBorder, StadiumBorder};
+    use waft_widgets::{Center, IntoWidget};
+
+    use super::*;
+    use crate::colors::Colors;
+    use crate::input_decorator::{FloatingLabelBehavior, InputDecoration};
+    use crate::scaffold::Scaffold;
+    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::text_field::TextField;
+    use crate::theme_data::ThemeData;
+
+    fn superellipse(radius: f64) -> RoundedSuperellipseBorder {
+        RoundedSuperellipseBorder::new(
+            BorderSide::NONE,
+            Some(BorderRadius::all(Radius::circular(radius)).into()),
+        )
+    }
+
+    fn width(width: f64) -> BorderSide {
+        BorderSide {
+            width,
+            ..BorderSide::default()
+        }
+    }
+
+    fn blue(width: f64) -> BorderSide {
+        BorderSide {
+            color: Colors::BLUE.primary(),
+            width,
+            ..BorderSide::default()
+        }
+    }
+
+    #[test]
+    fn shaped_input_border_constructor() {
+        let input_border = ShapedInputBorder::new(RoundedRectangleBorder::default());
+        assert_eq!(input_border.border_side, BorderSide::default());
+        assert!(
+            input_border
+                .shape
+                .eq_shape(&RoundedRectangleBorder::default())
+        );
+        assert_eq!(input_border.gap_padding, 4.0);
+        assert!(input_border.is_outline());
+    }
+
+    #[test]
+    fn shaped_input_border_with_rounded_superellipse_border() {
+        let input_border = ShapedInputBorder::new(superellipse(12.0));
+        assert_eq!(input_border.border_side, BorderSide::default());
+        assert!(input_border.shape.eq_shape(&superellipse(12.0)));
+        assert_eq!(input_border.gap_padding, 4.0);
+        assert!(input_border.is_outline());
+    }
+
+    #[test]
+    fn shaped_input_border_copy_with_and_equality() {
+        let input_border = ShapedInputBorder::new(RoundedRectangleBorder::default());
+        let copy = input_border.copy_with(None, None, None);
+        assert!(input_border == copy);
+
+        let copy2 = input_border.copy_with(
+            Some(blue(1.0)),
+            Some(Box::new(StadiumBorder::new(BorderSide::NONE))),
+            Some(8.0),
+        );
+        assert_eq!(copy2.border_side, blue(1.0));
+        assert!(copy2.shape.eq_shape(&StadiumBorder::new(BorderSide::NONE)));
+        assert_eq!(copy2.gap_padding, 8.0);
+        assert!(input_border != copy2);
+    }
+
+    #[test]
+    fn shaped_input_border_scale() {
+        let input_border = ShapedInputBorder::new(superellipse(10.0)).border_side(width(2.0));
+        let scaled = input_border.scale(2.0);
+        assert_eq!(scaled.border_side.width, 4.0);
+        assert!(scaled.shape.eq_shape(&superellipse(20.0)));
+        assert_eq!(scaled.gap_padding, 8.0);
+    }
+
+    #[test]
+    fn shaped_input_border_lerp() {
+        let input_border1 = ShapedInputBorder::new(superellipse(4.0)).gap_padding(2.0);
+        let input_border2 = ShapedInputBorder::new(superellipse(12.0))
+            .border_side(width(3.0))
+            .gap_padding(6.0);
+
+        let lerped = <dyn ShapeBorder>::lerp(Some(&input_border1), Some(&input_border2), 0.5)
+            .expect("two shaped input borders lerp");
+        let lerped = lerped
+            .as_any()
+            .downcast_ref::<ShapedInputBorder>()
+            .expect("a shaped input border");
+        assert_eq!(lerped.border_side.width, 2.0);
+        assert!(lerped.shape.eq_shape(&superellipse(8.0)));
+        // gapPadding is not interpolated, it takes the value from the source
+        assert_eq!(lerped.gap_padding, 2.0);
+    }
+
+    #[test]
+    fn shaped_input_border_dimensions() {
+        let input_border =
+            ShapedInputBorder::new(RoundedRectangleBorder::default()).border_side(width(4.0));
+        assert_eq!(input_border.dimensions(), EdgeInsetsGeometry::all(4.0));
+    }
+
+    fn pump_text_field(
+        border: fn() -> ShapedInputBorder,
+        floating_label_behavior: FloatingLabelBehavior,
+    ) {
+        with_main_thread_stack(move || {
+            let mut tester = WidgetTester::on(TargetPlatform::Android);
+            tester.install_platform_fonts();
+            let theme = ThemeData::new(&tester.cell.borrow());
+            let app = material_app(
+                theme,
+                Scaffold::new()
+                    .body(
+                        Center::new().child(
+                            TextField::new().decoration(Some(
+                                InputDecoration::new()
+                                    .border(border())
+                                    .label_text("Test Label")
+                                    .floating_label_behavior(floating_label_behavior),
+                            )),
+                        ),
+                    )
+                    .into_widget(),
+            );
+            tester.pump_widget(app);
+            tester.pump_and_settle();
+        });
+    }
+
+    #[test]
+    fn shaped_input_border_paint_with_rounded_superellipse_border() {
+        pump_text_field(
+            || ShapedInputBorder::new(superellipse(12.0)).border_side(blue(2.0)),
+            FloatingLabelBehavior::Auto,
+        );
+    }
+
+    #[test]
+    fn shaped_input_border_paint_with_gap() {
+        pump_text_field(
+            || ShapedInputBorder::new(superellipse(12.0)).border_side(blue(2.0)),
+            FloatingLabelBehavior::Always,
+        );
+    }
+
+    #[test]
+    fn shaped_input_border_paint_with_stadium_border() {
+        pump_text_field(
+            || ShapedInputBorder::new(StadiumBorder::new(BorderSide::NONE)).border_side(blue(2.0)),
+            FloatingLabelBehavior::Auto,
+        );
+    }
+
+    #[test]
+    fn shaped_input_border_paint_interior() {
+        let input_border = ShapedInputBorder::new(superellipse(12.0));
+        assert!(input_border.prefer_paint_interior());
+
+        let mut canvas = Canvas::new();
+        input_border.paint_interior(
+            &mut canvas,
+            Rect::from_ltrb(10.0, 20.0, 30.0, 40.0),
+            &Paint::default(),
+            None,
+        );
+        canvas.build();
+    }
+
+    /// The gap Dart's `paint` cuts for a floating label: the shape's area less a rectangle two
+    /// pixels high over the gap's span of the top edge, whose outline the border strokes.
+    #[test]
+    fn a_shaped_input_border_cuts_its_gap_from_the_top_edge() {
+        let input_border = ShapedInputBorder::new(RoundedRectangleBorder::default());
+        let mut canvas = Canvas::new();
+        InputBorder::paint(
+            &input_border,
+            &mut canvas,
+            Rect::from_ltrb(0.0, 0.0, 200.0, 50.0),
+            Some(40.0),
+            60.0,
+            1.0,
+            Some(TextDirection::Ltr),
+        );
+        let list = canvas.build();
+        let Some(Op::DrawPath { path, .. }) = list
+            .ops()
+            .iter()
+            .find(|op| matches!(op, Op::DrawPath { .. }))
+        else {
+            panic!("the border is drawn as a path");
+        };
+        // The deflated rect's top is at 0.5; the gap runs from 40 - 4 to 36 + 60 + 2 * 4.
+        let contains = |x, y| path.contains(Point::new(x, y), FillRule::EvenOdd);
+        assert!(contains(20.0, 1.0), "the top edge before the gap");
+        assert!(!contains(70.0, 1.0), "the gap");
+        assert!(contains(70.0, 10.0), "below the gap");
+        assert!(contains(150.0, 1.0), "the top edge after the gap");
+    }
 }

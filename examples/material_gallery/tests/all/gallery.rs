@@ -138,7 +138,7 @@ impl Fixture {
 
     fn navigator(&mut self) -> Handle<NavigatorState> {
         self.navigator
-            .current_state::<NavigatorState>(&mut self.cell.borrow_mut())
+            .current_state::<NavigatorState>(&self.cell.borrow_mut())
             .expect("the MaterialApp's navigator is mounted")
     }
 

@@ -6,6 +6,7 @@
 
 use std::any::{Any, TypeId};
 use std::fmt::{self, Debug};
+use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 use indexmap::IndexMap;
@@ -22,12 +23,14 @@ use crate::action_icons_theme::ActionIconThemeData;
 use crate::app_bar_theme::AppBarThemeData;
 use crate::badge_theme::BadgeThemeData;
 use crate::banner_theme::MaterialBannerThemeData;
+use crate::bottom_navigation_bar_theme::BottomNavigationBarThemeData;
 use crate::bottom_sheet_theme::BottomSheetThemeData;
 use crate::card_theme::CardThemeData;
 use crate::checkbox_theme::CheckboxThemeData;
 use crate::color_scheme::ColorScheme;
 use crate::colors::{Colors, MaterialColor};
 use crate::constants::{K_DEFAULT_ICON_DARK_COLOR, K_DEFAULT_ICON_LIGHT_COLOR};
+use crate::dialog_theme::DialogThemeData;
 use crate::divider_theme::DividerThemeData;
 use crate::drawer_theme::DrawerThemeData;
 use crate::elevated_button_theme::ElevatedButtonThemeData;
@@ -46,14 +49,22 @@ use crate::ink_splash::InkSplash;
 use crate::ink_well::InteractiveInkFeatureFactoryRef;
 use crate::input_decorator::InputDecorationThemeData;
 use crate::list_tile_theme::ListTileThemeData;
+use crate::menu_bar_theme::MenuBarThemeData;
+use crate::menu_button_theme::MenuButtonThemeData;
+use crate::menu_theme::MenuThemeData;
+use crate::navigation_bar_theme::NavigationBarThemeData;
+use crate::navigation_drawer_theme::NavigationDrawerThemeData;
+use crate::navigation_rail_theme::NavigationRailThemeData;
 use crate::outlined_button_theme::OutlinedButtonThemeData;
 use crate::page_transitions_theme::PageTransitionsTheme;
+use crate::popup_menu_theme::PopupMenuThemeData;
 use crate::progress_indicator_theme::ProgressIndicatorThemeData;
 use crate::radio_theme::RadioThemeData;
 use crate::scrollbar_theme::ScrollbarThemeData;
 use crate::slider_theme::SliderThemeData;
 use crate::snack_bar_theme::SnackBarThemeData;
 use crate::switch_theme::SwitchThemeData;
+use crate::tab_bar_theme::TabBarThemeData;
 use crate::text_button_theme::TextButtonThemeData;
 use crate::text_selection_theme::TextSelectionThemeData;
 use crate::text_theme::TextTheme;
@@ -600,6 +611,9 @@ pub struct ThemeData {
     pub badge_theme: BadgeThemeData,
     /// A theme for customizing the color and text style of a `MaterialBanner`.
     pub banner_theme: MaterialBannerThemeData,
+    /// A theme for customizing the appearance and layout of `BottomNavigationBar`
+    /// widgets.
+    pub bottom_navigation_bar_theme: BottomNavigationBarThemeData,
     /// A theme for customizing the color, elevation, and shape of a bottom sheet.
     pub bottom_sheet_theme: BottomSheetThemeData,
     /// A theme for customizing the color, elevation, and shape of a [`Card`](crate::Card).
@@ -608,6 +622,8 @@ pub struct ThemeData {
     pub card_theme: CardThemeData,
     /// A theme for customizing the appearance and layout of `Checkbox` widgets.
     pub checkbox_theme: CheckboxThemeData,
+    /// A theme for customizing the shape of a dialog.
+    pub dialog_theme: DialogThemeData,
     /// A theme for customizing the appearance of [`Divider`](crate::Divider)s,
     /// `VerticalDivider`s, dividers between `ListTile`s, and dividers between rows in
     /// `DataTable`s.
@@ -630,9 +646,30 @@ pub struct ThemeData {
     pub icon_button_theme: IconButtonThemeData,
     /// A theme for customizing the appearance of `ListTile` widgets.
     pub list_tile_theme: ListTileThemeData,
+    /// A theme for customizing the color, shape, elevation, and other `MenuStyle`
+    /// aspects of the menu bar created by the `MenuBar` widget.
+    pub menu_bar_theme: MenuBarThemeData,
+    /// A theme for customizing the color, shape, elevation, and text style of
+    /// cascading menu buttons created by `SubmenuButton` or `MenuItemButton`.
+    pub menu_button_theme: MenuButtonThemeData,
+    /// A theme for customizing the color, shape, elevation, and other `MenuStyle`
+    /// attributes of menus created by the `SubmenuButton` widget.
+    pub menu_theme: MenuThemeData,
+    /// A theme for customizing the background color, text style, and icon themes
+    /// of a `NavigationBar`.
+    pub navigation_bar_theme: NavigationBarThemeData,
+    /// A theme for customizing the background color, text style, and icon themes
+    /// of a `NavigationDrawer`.
+    pub navigation_drawer_theme: NavigationDrawerThemeData,
+    /// A theme for customizing the background color, elevation, text style, and
+    /// icon themes of a `NavigationRail`.
+    pub navigation_rail_theme: NavigationRailThemeData,
     /// A theme for customizing the appearance and internal layout of
     /// `OutlinedButton`s.
     pub outlined_button_theme: OutlinedButtonThemeData,
+    /// A theme for customizing the color, shape, elevation, and text style of
+    /// popup menus.
+    pub popup_menu_theme: PopupMenuThemeData,
     /// A theme for customizing the appearance and layout of `ProgressIndicator` widgets.
     pub progress_indicator_theme: ProgressIndicatorThemeData,
     /// A theme for customizing the appearance and layout of `Radio` widgets.
@@ -645,6 +682,8 @@ pub struct ThemeData {
     pub snack_bar_theme: SnackBarThemeData,
     /// A theme for customizing the appearance and layout of `Switch` widgets.
     pub switch_theme: SwitchThemeData,
+    /// A theme for customizing the size, shape, and color of the tab bar indicator.
+    pub tab_bar_theme: TabBarThemeData,
     /// A theme for customizing the appearance and internal layout of
     /// `TextButton`s.
     pub text_button_theme: TextButtonThemeData,
@@ -838,6 +877,12 @@ impl ThemeData {
         }
     }
 
+    // The number 5 was chosen without any real science or research behind it. It
+    // just seemed like a number that's not too big (we should be able to fit 5
+    // copies of ThemeData in memory comfortably) and not too small (most apps
+    // shouldn't have more than 5 theme/localization pairs).
+    const LOCALIZED_THEME_DATA_CACHE_SIZE: usize = 5;
+
     /// Returns a new theme built by merging the text geometry provided by the
     /// `local_text_geometry` theme with the `base_theme`.
     ///
@@ -845,12 +890,42 @@ impl ThemeData {
     /// is set to true, the returned theme's text styles inherit the geometric properties
     /// of `local_text_geometry`. The resulting text styles' `inherit` is
     /// set to those provided by `local_text_geometry`.
-    pub fn localize(base_theme: &ThemeData, local_text_geometry: &TextTheme) -> ThemeData {
-        base_theme
-            .copy_with()
-            .primary_text_theme(local_text_geometry.merge(Some(&base_theme.primary_text_theme)))
-            .text_theme(local_text_geometry.merge(Some(&base_theme.text_theme)))
-            .build()
+    pub fn localize(
+        app: &mut App,
+        base_theme: &Rc<ThemeData>,
+        local_text_geometry: &Rc<TextTheme>,
+    ) -> Rc<ThemeData> {
+        // WARNING: this method memoizes the result in a cache based on the
+        // previously seen baseTheme and localTextGeometry. Memoization is safe
+        // because all inputs and outputs of this function are deeply immutable, and
+        // the computations are referentially transparent. It only short-circuits
+        // the computation if the new inputs are identical() to the previous ones.
+        // It does not use the == operator, which performs a costly deep comparison.
+        //
+        // When changing this method, make sure the memoization logic is correct.
+        // Remember:
+        //
+        // There are only two hard things in Computer Science: cache invalidation
+        // and naming things. -- Phil Karlton
+
+        let localized_theme_data_cache = app.singleton::<LocalizedThemeDataCache>();
+        app.get_mut(localized_theme_data_cache).0.put_if_absent(
+            IdentityThemeDataCacheKey {
+                base_theme: Rc::clone(base_theme),
+                local_text_geometry: Rc::clone(local_text_geometry),
+            },
+            || {
+                Rc::new(
+                    base_theme
+                        .copy_with()
+                        .primary_text_theme(
+                            local_text_geometry.merge(Some(&base_theme.primary_text_theme)),
+                        )
+                        .text_theme(local_text_geometry.merge(Some(&base_theme.text_theme)))
+                        .build(),
+                )
+            },
+        )
     }
 
     /// Determines whether the given [`Color`] is [`Brightness::Light`] or
@@ -1031,6 +1106,11 @@ impl ThemeData {
                 Some(&b.banner_theme),
                 t,
             ),
+            bottom_navigation_bar_theme: BottomNavigationBarThemeData::lerp(
+                Some(&a.bottom_navigation_bar_theme),
+                Some(&b.bottom_navigation_bar_theme),
+                t,
+            ),
             bottom_sheet_theme: BottomSheetThemeData::lerp(
                 Some(&a.bottom_sheet_theme),
                 Some(&b.bottom_sheet_theme),
@@ -1043,6 +1123,7 @@ impl ThemeData {
                 Some(&b.checkbox_theme),
                 t,
             ),
+            dialog_theme: DialogThemeData::lerp(Some(&a.dialog_theme), Some(&b.dialog_theme), t),
             divider_theme: DividerThemeData::lerp(
                 Some(&a.divider_theme),
                 Some(&b.divider_theme),
@@ -1086,9 +1167,47 @@ impl ThemeData {
                 t,
             )
             .expect("both sides"),
+            menu_bar_theme: MenuBarThemeData::lerp(
+                Some(&a.menu_bar_theme),
+                Some(&b.menu_bar_theme),
+                t,
+            )
+            .expect("both sides"),
+            menu_button_theme: MenuButtonThemeData::lerp(
+                Some(&a.menu_button_theme),
+                Some(&b.menu_button_theme),
+                t,
+            )
+            .expect("both sides"),
+            menu_theme: MenuThemeData::lerp(Some(&a.menu_theme), Some(&b.menu_theme), t)
+                .expect("both sides"),
+            navigation_bar_theme: NavigationBarThemeData::lerp(
+                Some(&a.navigation_bar_theme),
+                Some(&b.navigation_bar_theme),
+                t,
+            )
+            .expect("both sides"),
+            navigation_drawer_theme: NavigationDrawerThemeData::lerp(
+                Some(&a.navigation_drawer_theme),
+                Some(&b.navigation_drawer_theme),
+                t,
+            )
+            .expect("both sides"),
+            navigation_rail_theme: NavigationRailThemeData::lerp(
+                Some(&a.navigation_rail_theme),
+                Some(&b.navigation_rail_theme),
+                t,
+            )
+            .expect("both sides"),
             outlined_button_theme: OutlinedButtonThemeData::lerp(
                 Some(&a.outlined_button_theme),
                 Some(&b.outlined_button_theme),
+                t,
+            )
+            .expect("both sides"),
+            popup_menu_theme: PopupMenuThemeData::lerp(
+                Some(&a.popup_menu_theme),
+                Some(&b.popup_menu_theme),
                 t,
             )
             .expect("both sides"),
@@ -1106,6 +1225,7 @@ impl ThemeData {
                 t,
             ),
             switch_theme: SwitchThemeData::lerp(Some(&a.switch_theme), Some(&b.switch_theme), t),
+            tab_bar_theme: TabBarThemeData::lerp(&a.tab_bar_theme, &b.tab_bar_theme, t),
             text_button_theme: TextButtonThemeData::lerp(
                 Some(&a.text_button_theme),
                 Some(&b.text_button_theme),
@@ -1191,9 +1311,11 @@ impl PartialEq for ThemeData {
             && other.app_bar_theme == self.app_bar_theme
             && other.badge_theme == self.badge_theme
             && other.banner_theme == self.banner_theme
+            && other.bottom_navigation_bar_theme == self.bottom_navigation_bar_theme
             && other.bottom_sheet_theme == self.bottom_sheet_theme
             && other.card_theme == self.card_theme
             && other.checkbox_theme == self.checkbox_theme
+            && other.dialog_theme == self.dialog_theme
             && other.divider_theme == self.divider_theme
             && other.drawer_theme == self.drawer_theme
             && other.elevated_button_theme == self.elevated_button_theme
@@ -1202,12 +1324,20 @@ impl PartialEq for ThemeData {
             && other.floating_action_button_theme == self.floating_action_button_theme
             && other.icon_button_theme == self.icon_button_theme
             && other.list_tile_theme == self.list_tile_theme
+            && other.menu_bar_theme == self.menu_bar_theme
+            && other.menu_button_theme == self.menu_button_theme
+            && other.menu_theme == self.menu_theme
+            && other.navigation_bar_theme == self.navigation_bar_theme
+            && other.navigation_drawer_theme == self.navigation_drawer_theme
+            && other.navigation_rail_theme == self.navigation_rail_theme
             && other.outlined_button_theme == self.outlined_button_theme
+            && other.popup_menu_theme == self.popup_menu_theme
             && other.progress_indicator_theme == self.progress_indicator_theme
             && other.radio_theme == self.radio_theme
             && other.slider_theme == self.slider_theme
             && other.snack_bar_theme == self.snack_bar_theme
             && other.switch_theme == self.switch_theme
+            && other.tab_bar_theme == self.tab_bar_theme
             && other.text_button_theme == self.text_button_theme
             && other.text_selection_theme == self.text_selection_theme
             && other.tooltip_theme == self.tooltip_theme
@@ -1229,9 +1359,9 @@ pub struct ThemeDataBuilder {
     // GENERAL CONFIGURATION
     adaptations: Option<Vec<AdaptationRef>>,
     apply_elevation_overlay_color: Option<bool>,
-    cupertino_override_theme: Option<NoDefaultCupertinoThemeData>,
+    cupertino_override_theme: Option<Box<NoDefaultCupertinoThemeData>>,
     extensions: Option<Vec<ThemeExtensionRef>>,
-    input_decoration_theme: Option<InputDecorationThemeData>,
+    input_decoration_theme: Option<Box<InputDecorationThemeData>>,
     material_tap_target_size: Option<MaterialTapTargetSize>,
     page_transitions_theme: Option<PageTransitionsTheme>,
     platform: Option<TargetPlatform>,
@@ -1275,29 +1405,39 @@ pub struct ThemeDataBuilder {
     typography: Option<Box<Typography>>,
     // COMPONENT THEMES
     action_icon_theme: Option<ActionIconThemeData>,
-    app_bar_theme: Option<AppBarThemeData>,
-    badge_theme: Option<BadgeThemeData>,
-    banner_theme: Option<MaterialBannerThemeData>,
-    bottom_sheet_theme: Option<BottomSheetThemeData>,
-    card_theme: Option<CardThemeData>,
-    checkbox_theme: Option<CheckboxThemeData>,
-    divider_theme: Option<DividerThemeData>,
-    drawer_theme: Option<DrawerThemeData>,
-    elevated_button_theme: Option<ElevatedButtonThemeData>,
-    expansion_tile_theme: Option<ExpansionTileThemeData>,
-    filled_button_theme: Option<FilledButtonThemeData>,
-    floating_action_button_theme: Option<FloatingActionButtonThemeData>,
-    icon_button_theme: Option<IconButtonThemeData>,
-    list_tile_theme: Option<ListTileThemeData>,
-    outlined_button_theme: Option<OutlinedButtonThemeData>,
-    progress_indicator_theme: Option<ProgressIndicatorThemeData>,
-    radio_theme: Option<RadioThemeData>,
-    slider_theme: Option<SliderThemeData>,
-    snack_bar_theme: Option<SnackBarThemeData>,
-    switch_theme: Option<SwitchThemeData>,
-    text_button_theme: Option<TextButtonThemeData>,
-    text_selection_theme: Option<TextSelectionThemeData>,
-    tooltip_theme: Option<TooltipThemeData>,
+    app_bar_theme: Option<Box<AppBarThemeData>>,
+    badge_theme: Option<Box<BadgeThemeData>>,
+    banner_theme: Option<Box<MaterialBannerThemeData>>,
+    bottom_navigation_bar_theme: Option<Box<BottomNavigationBarThemeData>>,
+    bottom_sheet_theme: Option<Box<BottomSheetThemeData>>,
+    card_theme: Option<Box<CardThemeData>>,
+    checkbox_theme: Option<Box<CheckboxThemeData>>,
+    dialog_theme: Option<Box<DialogThemeData>>,
+    divider_theme: Option<Box<DividerThemeData>>,
+    drawer_theme: Option<Box<DrawerThemeData>>,
+    elevated_button_theme: Option<Box<ElevatedButtonThemeData>>,
+    expansion_tile_theme: Option<Box<ExpansionTileThemeData>>,
+    filled_button_theme: Option<Box<FilledButtonThemeData>>,
+    floating_action_button_theme: Option<Box<FloatingActionButtonThemeData>>,
+    icon_button_theme: Option<Box<IconButtonThemeData>>,
+    list_tile_theme: Option<Box<ListTileThemeData>>,
+    menu_bar_theme: Option<Box<MenuBarThemeData>>,
+    menu_button_theme: Option<Box<MenuButtonThemeData>>,
+    menu_theme: Option<Box<MenuThemeData>>,
+    navigation_bar_theme: Option<Box<NavigationBarThemeData>>,
+    navigation_drawer_theme: Option<Box<NavigationDrawerThemeData>>,
+    navigation_rail_theme: Option<Box<NavigationRailThemeData>>,
+    outlined_button_theme: Option<Box<OutlinedButtonThemeData>>,
+    popup_menu_theme: Option<Box<PopupMenuThemeData>>,
+    progress_indicator_theme: Option<Box<ProgressIndicatorThemeData>>,
+    radio_theme: Option<Box<RadioThemeData>>,
+    slider_theme: Option<Box<SliderThemeData>>,
+    snack_bar_theme: Option<Box<SnackBarThemeData>>,
+    switch_theme: Option<Box<SwitchThemeData>>,
+    tab_bar_theme: Option<Box<TabBarThemeData>>,
+    text_button_theme: Option<Box<TextButtonThemeData>>,
+    text_selection_theme: Option<Box<TextSelectionThemeData>>,
+    tooltip_theme: Option<Box<TooltipThemeData>>,
     // DEPRECATED (newest deprecations at the bottom)
     dialog_background_color: Option<Color>,
     indicator_color: Option<Color>,
@@ -1325,7 +1465,7 @@ impl ThemeDataBuilder {
         mut self,
         cupertino_override_theme: NoDefaultCupertinoThemeData,
     ) -> ThemeDataBuilder {
-        self.cupertino_override_theme = Some(cupertino_override_theme);
+        self.cupertino_override_theme = Some(Box::new(cupertino_override_theme));
         self
     }
 
@@ -1341,7 +1481,7 @@ impl ThemeDataBuilder {
         mut self,
         input_decoration_theme: impl Into<InputDecorationThemeData>,
     ) -> ThemeDataBuilder {
-        self.input_decoration_theme = Some(input_decoration_theme.into());
+        self.input_decoration_theme = Some(Box::new(input_decoration_theme.into()));
         self
     }
 
@@ -1581,19 +1721,28 @@ impl ThemeDataBuilder {
 
     /// Dart `ThemeData(appBarTheme:)`.
     pub fn app_bar_theme(mut self, app_bar_theme: impl Into<AppBarThemeData>) -> ThemeDataBuilder {
-        self.app_bar_theme = Some(app_bar_theme.into());
+        self.app_bar_theme = Some(Box::new(app_bar_theme.into()));
         self
     }
 
     /// Dart `ThemeData(badgeTheme:)`.
     pub fn badge_theme(mut self, badge_theme: BadgeThemeData) -> ThemeDataBuilder {
-        self.badge_theme = Some(badge_theme);
+        self.badge_theme = Some(Box::new(badge_theme));
         self
     }
 
     /// Dart `ThemeData(bannerTheme:)`.
     pub fn banner_theme(mut self, banner_theme: MaterialBannerThemeData) -> ThemeDataBuilder {
-        self.banner_theme = Some(banner_theme);
+        self.banner_theme = Some(Box::new(banner_theme));
+        self
+    }
+
+    /// Dart `ThemeData(bottomNavigationBarTheme:)`.
+    pub fn bottom_navigation_bar_theme(
+        mut self,
+        bottom_navigation_bar_theme: BottomNavigationBarThemeData,
+    ) -> ThemeDataBuilder {
+        self.bottom_navigation_bar_theme = Some(Box::new(bottom_navigation_bar_theme));
         self
     }
 
@@ -1602,31 +1751,37 @@ impl ThemeDataBuilder {
         mut self,
         bottom_sheet_theme: BottomSheetThemeData,
     ) -> ThemeDataBuilder {
-        self.bottom_sheet_theme = Some(bottom_sheet_theme);
+        self.bottom_sheet_theme = Some(Box::new(bottom_sheet_theme));
         self
     }
 
     /// Dart `ThemeData(cardTheme:)`.
     pub fn card_theme(mut self, card_theme: CardThemeData) -> ThemeDataBuilder {
-        self.card_theme = Some(card_theme);
+        self.card_theme = Some(Box::new(card_theme));
         self
     }
 
     /// Dart `ThemeData(checkboxTheme:)`.
     pub fn checkbox_theme(mut self, checkbox_theme: CheckboxThemeData) -> ThemeDataBuilder {
-        self.checkbox_theme = Some(checkbox_theme);
+        self.checkbox_theme = Some(Box::new(checkbox_theme));
+        self
+    }
+
+    /// Dart `ThemeData(dialogTheme:)`.
+    pub fn dialog_theme(mut self, dialog_theme: DialogThemeData) -> ThemeDataBuilder {
+        self.dialog_theme = Some(Box::new(dialog_theme));
         self
     }
 
     /// Dart `ThemeData(dividerTheme:)`.
     pub fn divider_theme(mut self, divider_theme: DividerThemeData) -> ThemeDataBuilder {
-        self.divider_theme = Some(divider_theme);
+        self.divider_theme = Some(Box::new(divider_theme));
         self
     }
 
     /// Dart `ThemeData(drawerTheme:)`.
     pub fn drawer_theme(mut self, drawer_theme: DrawerThemeData) -> ThemeDataBuilder {
-        self.drawer_theme = Some(drawer_theme);
+        self.drawer_theme = Some(Box::new(drawer_theme));
         self
     }
 
@@ -1635,7 +1790,7 @@ impl ThemeDataBuilder {
         mut self,
         elevated_button_theme: ElevatedButtonThemeData,
     ) -> ThemeDataBuilder {
-        self.elevated_button_theme = Some(elevated_button_theme);
+        self.elevated_button_theme = Some(Box::new(elevated_button_theme));
         self
     }
 
@@ -1644,7 +1799,7 @@ impl ThemeDataBuilder {
         mut self,
         expansion_tile_theme: ExpansionTileThemeData,
     ) -> ThemeDataBuilder {
-        self.expansion_tile_theme = Some(expansion_tile_theme);
+        self.expansion_tile_theme = Some(Box::new(expansion_tile_theme));
         self
     }
 
@@ -1653,7 +1808,7 @@ impl ThemeDataBuilder {
         mut self,
         filled_button_theme: FilledButtonThemeData,
     ) -> ThemeDataBuilder {
-        self.filled_button_theme = Some(filled_button_theme);
+        self.filled_button_theme = Some(Box::new(filled_button_theme));
         self
     }
 
@@ -1662,19 +1817,64 @@ impl ThemeDataBuilder {
         mut self,
         floating_action_button_theme: FloatingActionButtonThemeData,
     ) -> ThemeDataBuilder {
-        self.floating_action_button_theme = Some(floating_action_button_theme);
+        self.floating_action_button_theme = Some(Box::new(floating_action_button_theme));
         self
     }
 
     /// Dart `ThemeData(iconButtonTheme:)`.
     pub fn icon_button_theme(mut self, icon_button_theme: IconButtonThemeData) -> ThemeDataBuilder {
-        self.icon_button_theme = Some(icon_button_theme);
+        self.icon_button_theme = Some(Box::new(icon_button_theme));
         self
     }
 
     /// Dart `ThemeData(listTileTheme:)`.
     pub fn list_tile_theme(mut self, list_tile_theme: ListTileThemeData) -> ThemeDataBuilder {
-        self.list_tile_theme = Some(list_tile_theme);
+        self.list_tile_theme = Some(Box::new(list_tile_theme));
+        self
+    }
+
+    /// Dart `ThemeData(menuBarTheme:)`.
+    pub fn menu_bar_theme(mut self, menu_bar_theme: MenuBarThemeData) -> ThemeDataBuilder {
+        self.menu_bar_theme = Some(Box::new(menu_bar_theme));
+        self
+    }
+
+    /// Dart `ThemeData(menuButtonTheme:)`.
+    pub fn menu_button_theme(mut self, menu_button_theme: MenuButtonThemeData) -> ThemeDataBuilder {
+        self.menu_button_theme = Some(Box::new(menu_button_theme));
+        self
+    }
+
+    /// Dart `ThemeData(menuTheme:)`.
+    pub fn menu_theme(mut self, menu_theme: MenuThemeData) -> ThemeDataBuilder {
+        self.menu_theme = Some(Box::new(menu_theme));
+        self
+    }
+
+    /// Dart `ThemeData(navigationBarTheme:)`.
+    pub fn navigation_bar_theme(
+        mut self,
+        navigation_bar_theme: NavigationBarThemeData,
+    ) -> ThemeDataBuilder {
+        self.navigation_bar_theme = Some(Box::new(navigation_bar_theme));
+        self
+    }
+
+    /// Dart `ThemeData(navigationDrawerTheme:)`.
+    pub fn navigation_drawer_theme(
+        mut self,
+        navigation_drawer_theme: NavigationDrawerThemeData,
+    ) -> ThemeDataBuilder {
+        self.navigation_drawer_theme = Some(Box::new(navigation_drawer_theme));
+        self
+    }
+
+    /// Dart `ThemeData(navigationRailTheme:)`.
+    pub fn navigation_rail_theme(
+        mut self,
+        navigation_rail_theme: NavigationRailThemeData,
+    ) -> ThemeDataBuilder {
+        self.navigation_rail_theme = Some(Box::new(navigation_rail_theme));
         self
     }
 
@@ -1683,7 +1883,13 @@ impl ThemeDataBuilder {
         mut self,
         outlined_button_theme: OutlinedButtonThemeData,
     ) -> ThemeDataBuilder {
-        self.outlined_button_theme = Some(outlined_button_theme);
+        self.outlined_button_theme = Some(Box::new(outlined_button_theme));
+        self
+    }
+
+    /// Dart `ThemeData(popupMenuTheme:)`.
+    pub fn popup_menu_theme(mut self, popup_menu_theme: PopupMenuThemeData) -> ThemeDataBuilder {
+        self.popup_menu_theme = Some(Box::new(popup_menu_theme));
         self
     }
 
@@ -1692,37 +1898,43 @@ impl ThemeDataBuilder {
         mut self,
         progress_indicator_theme: ProgressIndicatorThemeData,
     ) -> ThemeDataBuilder {
-        self.progress_indicator_theme = Some(progress_indicator_theme);
+        self.progress_indicator_theme = Some(Box::new(progress_indicator_theme));
         self
     }
 
     /// Dart `ThemeData(radioTheme:)`.
     pub fn radio_theme(mut self, radio_theme: RadioThemeData) -> ThemeDataBuilder {
-        self.radio_theme = Some(radio_theme);
+        self.radio_theme = Some(Box::new(radio_theme));
         self
     }
 
     /// Dart `ThemeData(sliderTheme:)`.
     pub fn slider_theme(mut self, slider_theme: SliderThemeData) -> ThemeDataBuilder {
-        self.slider_theme = Some(slider_theme);
+        self.slider_theme = Some(Box::new(slider_theme));
         self
     }
 
     /// Dart `ThemeData(snackBarTheme:)`.
     pub fn snack_bar_theme(mut self, snack_bar_theme: SnackBarThemeData) -> ThemeDataBuilder {
-        self.snack_bar_theme = Some(snack_bar_theme);
+        self.snack_bar_theme = Some(Box::new(snack_bar_theme));
         self
     }
 
     /// Dart `ThemeData(switchTheme:)`.
     pub fn switch_theme(mut self, switch_theme: SwitchThemeData) -> ThemeDataBuilder {
-        self.switch_theme = Some(switch_theme);
+        self.switch_theme = Some(Box::new(switch_theme));
+        self
+    }
+
+    /// Dart `ThemeData(tabBarTheme:)`.
+    pub fn tab_bar_theme(mut self, tab_bar_theme: TabBarThemeData) -> ThemeDataBuilder {
+        self.tab_bar_theme = Some(Box::new(tab_bar_theme));
         self
     }
 
     /// Dart `ThemeData(textButtonTheme:)`.
     pub fn text_button_theme(mut self, text_button_theme: TextButtonThemeData) -> ThemeDataBuilder {
-        self.text_button_theme = Some(text_button_theme);
+        self.text_button_theme = Some(Box::new(text_button_theme));
         self
     }
 
@@ -1731,13 +1943,13 @@ impl ThemeDataBuilder {
         mut self,
         text_selection_theme: TextSelectionThemeData,
     ) -> ThemeDataBuilder {
-        self.text_selection_theme = Some(text_selection_theme);
+        self.text_selection_theme = Some(Box::new(text_selection_theme));
         self
     }
 
     /// Dart `ThemeData(tooltipTheme:)`.
     pub fn tooltip_theme(mut self, tooltip_theme: TooltipThemeData) -> ThemeDataBuilder {
-        self.tooltip_theme = Some(tooltip_theme);
+        self.tooltip_theme = Some(Box::new(tooltip_theme));
         self
     }
 
@@ -1809,9 +2021,11 @@ impl ThemeDataBuilder {
             app_bar_theme,
             badge_theme,
             banner_theme,
+            bottom_navigation_bar_theme,
             bottom_sheet_theme,
             card_theme,
             checkbox_theme,
+            dialog_theme,
             divider_theme,
             drawer_theme,
             elevated_button_theme,
@@ -1820,12 +2034,20 @@ impl ThemeDataBuilder {
             floating_action_button_theme,
             icon_button_theme,
             list_tile_theme,
+            menu_bar_theme,
+            menu_button_theme,
+            menu_theme,
+            navigation_bar_theme,
+            navigation_drawer_theme,
+            navigation_rail_theme,
             outlined_button_theme,
+            popup_menu_theme,
             progress_indicator_theme,
             radio_theme,
             slider_theme,
             snack_bar_theme,
             switch_theme,
+            tab_bar_theme,
             text_button_theme,
             text_selection_theme,
             tooltip_theme,
@@ -2059,16 +2281,16 @@ impl ThemeDataBuilder {
                 Typography::material2014().platform(Some(platform)).build()
             }
         });
-        let mut default_text_theme = if is_dark {
-            typography.white.clone()
+        let mut default_text_theme = TextTheme::clone(if is_dark {
+            &typography.white
         } else {
-            typography.black.clone()
-        };
-        let mut default_primary_text_theme = if primary_is_dark {
-            typography.white.clone()
+            &typography.black
+        });
+        let mut default_primary_text_theme = TextTheme::clone(if primary_is_dark {
+            &typography.white
         } else {
-            typography.black.clone()
-        };
+            &typography.black
+        });
         if let Some(font_family) = &font_family {
             default_text_theme = default_text_theme
                 .apply()
@@ -2142,7 +2364,7 @@ impl ThemeDataBuilder {
             apply_elevation_overlay_color,
             cupertino_override_theme,
             extensions: ThemeData::theme_extension_iterable_to_map(extensions),
-            input_decoration_theme: input_decoration_theme.unwrap_or_default(),
+            input_decoration_theme: unboxed_or_default(input_decoration_theme),
             material_tap_target_size: material_tap_target_size.expect("defaulted per platform"),
             page_transitions_theme,
             platform,
@@ -2176,34 +2398,49 @@ impl ThemeDataBuilder {
             primary_icon_theme,
             // COMPONENT THEMES
             action_icon_theme,
-            app_bar_theme: app_bar_theme.unwrap_or_default(),
-            badge_theme: badge_theme.unwrap_or_default(),
-            banner_theme: banner_theme.unwrap_or_default(),
-            bottom_sheet_theme: bottom_sheet_theme.unwrap_or_default(),
-            card_theme: card_theme.unwrap_or_default(),
-            checkbox_theme: checkbox_theme.unwrap_or_default(),
-            divider_theme: divider_theme.unwrap_or_default(),
-            drawer_theme: drawer_theme.unwrap_or_default(),
-            elevated_button_theme: elevated_button_theme.unwrap_or_default(),
-            expansion_tile_theme: expansion_tile_theme.unwrap_or_default(),
-            filled_button_theme: filled_button_theme.unwrap_or_default(),
-            floating_action_button_theme: floating_action_button_theme.unwrap_or_default(),
-            icon_button_theme: icon_button_theme.unwrap_or_default(),
-            list_tile_theme: list_tile_theme.unwrap_or_default(),
-            outlined_button_theme: outlined_button_theme.unwrap_or_default(),
-            progress_indicator_theme: progress_indicator_theme.unwrap_or_default(),
-            radio_theme: radio_theme.unwrap_or_default(),
-            slider_theme: slider_theme.unwrap_or_default(),
-            snack_bar_theme: snack_bar_theme.unwrap_or_default(),
-            switch_theme: switch_theme.unwrap_or_default(),
-            text_button_theme: text_button_theme.unwrap_or_default(),
-            text_selection_theme: text_selection_theme.unwrap_or_default(),
-            tooltip_theme: tooltip_theme.unwrap_or_default(),
+            app_bar_theme: unboxed_or_default(app_bar_theme),
+            badge_theme: unboxed_or_default(badge_theme),
+            banner_theme: unboxed_or_default(banner_theme),
+            bottom_navigation_bar_theme: unboxed_or_default(bottom_navigation_bar_theme),
+            bottom_sheet_theme: unboxed_or_default(bottom_sheet_theme),
+            card_theme: unboxed_or_default(card_theme),
+            checkbox_theme: unboxed_or_default(checkbox_theme),
+            dialog_theme: unboxed_or_default(dialog_theme),
+            divider_theme: unboxed_or_default(divider_theme),
+            drawer_theme: unboxed_or_default(drawer_theme),
+            elevated_button_theme: unboxed_or_default(elevated_button_theme),
+            expansion_tile_theme: unboxed_or_default(expansion_tile_theme),
+            filled_button_theme: unboxed_or_default(filled_button_theme),
+            floating_action_button_theme: unboxed_or_default(floating_action_button_theme),
+            icon_button_theme: unboxed_or_default(icon_button_theme),
+            list_tile_theme: unboxed_or_default(list_tile_theme),
+            menu_bar_theme: unboxed_or_default(menu_bar_theme),
+            menu_button_theme: unboxed_or_default(menu_button_theme),
+            menu_theme: unboxed_or_default(menu_theme),
+            navigation_bar_theme: unboxed_or_default(navigation_bar_theme),
+            navigation_drawer_theme: unboxed_or_default(navigation_drawer_theme),
+            navigation_rail_theme: unboxed_or_default(navigation_rail_theme),
+            outlined_button_theme: unboxed_or_default(outlined_button_theme),
+            popup_menu_theme: unboxed_or_default(popup_menu_theme),
+            progress_indicator_theme: unboxed_or_default(progress_indicator_theme),
+            radio_theme: unboxed_or_default(radio_theme),
+            slider_theme: unboxed_or_default(slider_theme),
+            snack_bar_theme: unboxed_or_default(snack_bar_theme),
+            switch_theme: unboxed_or_default(switch_theme),
+            tab_bar_theme: unboxed_or_default(tab_bar_theme),
+            text_button_theme: unboxed_or_default(text_button_theme),
+            text_selection_theme: unboxed_or_default(text_selection_theme),
+            tooltip_theme: unboxed_or_default(tooltip_theme),
             // DEPRECATED (newest deprecations at the bottom)
             dialog_background_color,
             indicator_color,
         }
     }
+}
+
+/// A boxed builder argument, or the type's default when it was not given.
+fn unboxed_or_default<T: Default>(value: Option<Box<T>>) -> T {
+    value.map_or_else(T::default, |value| *value)
 }
 
 /// `Colors.grey[shade]` for a shade without its own accessor.
@@ -2217,14 +2454,14 @@ fn grey(shade: i32) -> Color {
 #[derive(Clone, Debug)]
 pub struct ThemeDataFromBuilder {
     color_scheme: ColorScheme,
-    text_theme: Option<TextTheme>,
+    text_theme: Option<Box<TextTheme>>,
     use_material3: Option<bool>,
 }
 
 impl ThemeDataFromBuilder {
     /// Dart `ThemeData.from(textTheme:)`.
     pub fn text_theme(mut self, text_theme: TextTheme) -> ThemeDataFromBuilder {
-        self.text_theme = Some(text_theme);
+        self.text_theme = Some(Box::new(text_theme));
         self
     }
 
@@ -2264,7 +2501,7 @@ impl ThemeDataFromBuilder {
             .apply_elevation_overlay_color(is_dark)
             .color_scheme(color_scheme);
         if let Some(text_theme) = self.text_theme {
-            builder = builder.text_theme(text_theme);
+            builder = builder.text_theme(*text_theme);
         }
         if let Some(use_material3) = self.use_material3 {
             builder = builder.use_material3(use_material3);
@@ -2537,6 +2774,15 @@ impl ThemeDataCopyWith {
         self
     }
 
+    /// Dart `copyWith(bottomNavigationBarTheme:)`.
+    pub fn bottom_navigation_bar_theme(
+        mut self,
+        bottom_navigation_bar_theme: BottomNavigationBarThemeData,
+    ) -> ThemeDataCopyWith {
+        self.theme.bottom_navigation_bar_theme = bottom_navigation_bar_theme;
+        self
+    }
+
     /// Dart `copyWith(bottomSheetTheme:)`.
     pub fn bottom_sheet_theme(
         mut self,
@@ -2555,6 +2801,12 @@ impl ThemeDataCopyWith {
     /// Dart `copyWith(checkboxTheme:)`.
     pub fn checkbox_theme(mut self, checkbox_theme: CheckboxThemeData) -> ThemeDataCopyWith {
         self.theme.checkbox_theme = checkbox_theme;
+        self
+    }
+
+    /// Dart `copyWith(dialogTheme:)`.
+    pub fn dialog_theme(mut self, dialog_theme: DialogThemeData) -> ThemeDataCopyWith {
+        self.theme.dialog_theme = dialog_theme;
         self
     }
 
@@ -2621,12 +2873,66 @@ impl ThemeDataCopyWith {
         self
     }
 
+    /// Dart `copyWith(menuBarTheme:)`.
+    pub fn menu_bar_theme(mut self, menu_bar_theme: MenuBarThemeData) -> ThemeDataCopyWith {
+        self.theme.menu_bar_theme = menu_bar_theme;
+        self
+    }
+
+    /// Dart `copyWith(menuButtonTheme:)`.
+    pub fn menu_button_theme(
+        mut self,
+        menu_button_theme: MenuButtonThemeData,
+    ) -> ThemeDataCopyWith {
+        self.theme.menu_button_theme = menu_button_theme;
+        self
+    }
+
+    /// Dart `copyWith(menuTheme:)`.
+    pub fn menu_theme(mut self, menu_theme: MenuThemeData) -> ThemeDataCopyWith {
+        self.theme.menu_theme = menu_theme;
+        self
+    }
+
+    /// Dart `copyWith(navigationBarTheme:)`.
+    pub fn navigation_bar_theme(
+        mut self,
+        navigation_bar_theme: NavigationBarThemeData,
+    ) -> ThemeDataCopyWith {
+        self.theme.navigation_bar_theme = navigation_bar_theme;
+        self
+    }
+
+    /// Dart `copyWith(navigationDrawerTheme:)`.
+    pub fn navigation_drawer_theme(
+        mut self,
+        navigation_drawer_theme: NavigationDrawerThemeData,
+    ) -> ThemeDataCopyWith {
+        self.theme.navigation_drawer_theme = navigation_drawer_theme;
+        self
+    }
+
+    /// Dart `copyWith(navigationRailTheme:)`.
+    pub fn navigation_rail_theme(
+        mut self,
+        navigation_rail_theme: NavigationRailThemeData,
+    ) -> ThemeDataCopyWith {
+        self.theme.navigation_rail_theme = navigation_rail_theme;
+        self
+    }
+
     /// Dart `copyWith(outlinedButtonTheme:)`.
     pub fn outlined_button_theme(
         mut self,
         outlined_button_theme: OutlinedButtonThemeData,
     ) -> ThemeDataCopyWith {
         self.theme.outlined_button_theme = outlined_button_theme;
+        self
+    }
+
+    /// Dart `copyWith(popupMenuTheme:)`.
+    pub fn popup_menu_theme(mut self, popup_menu_theme: PopupMenuThemeData) -> ThemeDataCopyWith {
+        self.theme.popup_menu_theme = popup_menu_theme;
         self
     }
 
@@ -2660,6 +2966,12 @@ impl ThemeDataCopyWith {
     /// Dart `copyWith(switchTheme:)`.
     pub fn switch_theme(mut self, switch_theme: SwitchThemeData) -> ThemeDataCopyWith {
         self.theme.switch_theme = switch_theme;
+        self
+    }
+
+    /// Dart `copyWith(tabBarTheme:)`.
+    pub fn tab_bar_theme(mut self, tab_bar_theme: TabBarThemeData) -> ThemeDataCopyWith {
+        self.theme.tab_bar_theme = tab_bar_theme;
         self
     }
 
@@ -2728,6 +3040,82 @@ impl ThemeDataCopyWith {
     }
 }
 
+/// Dart's static `ThemeData._localizedThemeDataCache`, one per app.
+struct LocalizedThemeDataCache(FifoCache<IdentityThemeDataCacheKey, Rc<ThemeData>>);
+
+impl Default for LocalizedThemeDataCache {
+    fn default() -> LocalizedThemeDataCache {
+        LocalizedThemeDataCache(FifoCache::new(ThemeData::LOCALIZED_THEME_DATA_CACHE_SIZE))
+    }
+}
+
+/// Dart's `_IdentityThemeDataCacheKey`: equal only to a key holding the same two objects.
+///
+/// It holds both, so neither allocation is reused for another theme while the key is cached.
+struct IdentityThemeDataCacheKey {
+    base_theme: Rc<ThemeData>,
+    local_text_geometry: Rc<TextTheme>,
+}
+
+impl Hash for IdentityThemeDataCacheKey {
+    // Using XOR to make the hash function as fast as possible (e.g. Jenkins is
+    // noticeably slower).
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        (Rc::as_ptr(&self.base_theme).addr() ^ Rc::as_ptr(&self.local_text_geometry).addr())
+            .hash(state);
+    }
+}
+
+impl PartialEq for IdentityThemeDataCacheKey {
+    fn eq(&self, other: &IdentityThemeDataCacheKey) -> bool {
+        Rc::ptr_eq(&other.base_theme, &self.base_theme)
+            && Rc::ptr_eq(&other.local_text_geometry, &self.local_text_geometry)
+    }
+}
+
+impl Eq for IdentityThemeDataCacheKey {}
+
+/// Cache of objects of limited size that uses the first in first out eviction
+/// strategy (a.k.a least recently inserted).
+///
+/// The key that was inserted before all other keys is evicted first, i.e. the
+/// one inserted least recently.
+struct FifoCache<K, V> {
+    /// An [`IndexMap`] keeps its keys in the order they were inserted, as Dart's map
+    /// literal does.
+    cache: IndexMap<K, V>,
+
+    /// Maximum number of entries to store in the cache.
+    ///
+    /// Once this many entries have been cached, the entry inserted least recently
+    /// is evicted when adding a new entry.
+    maximum_size: usize,
+}
+
+impl<K: Hash + Eq, V: Clone> FifoCache<K, V> {
+    fn new(maximum_size: usize) -> FifoCache<K, V> {
+        debug_assert!(maximum_size > 0);
+        FifoCache {
+            cache: IndexMap::new(),
+            maximum_size,
+        }
+    }
+
+    /// Returns the previously cached value for the given key, if available;
+    /// if not, calls the given callback to obtain it first.
+    fn put_if_absent(&mut self, key: K, loader: impl FnOnce() -> V) -> V {
+        if let Some(result) = self.cache.get(&key) {
+            return result.clone();
+        }
+        if self.cache.len() == self.maximum_size {
+            self.cache.shift_remove_index(0);
+        }
+        let result = loader();
+        self.cache.insert(key, result.clone());
+        result
+    }
+}
+
 fn default_m3_color_scheme(brightness: Brightness, contrast_level: f64) -> ColorScheme {
     match (brightness, contrast_level) {
         (Brightness::Light, ContrastLevel::MEDIUM) => color_scheme_light_medium_contrast_m3(),
@@ -2788,7 +3176,7 @@ fn debug_is_using_predefined_contrast_level(contrast_level: f64) -> bool {
 // comes from the Material theme unless overridden.
 #[derive(Debug)]
 pub struct MaterialBasedCupertinoThemeData {
-    material_theme: ThemeData,
+    material_theme: Rc<ThemeData>,
 }
 
 impl MaterialBasedCupertinoThemeData {
@@ -2798,9 +3186,9 @@ impl MaterialBasedCupertinoThemeData {
         clippy::new_ret_no_self,
         reason = "Dart's subclass constructor; the value is the base type with the overrides set"
     )]
-    pub fn new(material_theme: &ThemeData) -> CupertinoThemeData {
+    pub fn new(material_theme: &Rc<ThemeData>) -> CupertinoThemeData {
         MaterialBasedCupertinoThemeData::raw(
-            material_theme.clone(),
+            Rc::clone(material_theme),
             material_theme
                 .cupertino_override_theme
                 .clone()
@@ -2809,7 +3197,7 @@ impl MaterialBasedCupertinoThemeData {
     }
 
     fn raw(
-        material_theme: ThemeData,
+        material_theme: Rc<ThemeData>,
         cupertino_override_theme: NoDefaultCupertinoThemeData,
     ) -> CupertinoThemeData {
         // Pass all values to the superclass so Material-agnostic properties
@@ -2888,7 +3276,7 @@ impl CupertinoThemeDataOverrides for MaterialBasedCupertinoThemeData {
         let mut cupertino_override_theme_with_text_theme = this.no_default().copy_with();
         cupertino_override_theme_with_text_theme.text_theme = Some(this.text_theme());
         MaterialBasedCupertinoThemeData::raw(
-            self.material_theme.clone(),
+            Rc::clone(&self.material_theme),
             cupertino_override_theme_with_text_theme.resolve_from(app, context),
         )
     }
@@ -2906,7 +3294,7 @@ impl CupertinoThemeDataOverrides for MaterialBasedCupertinoThemeData {
 #[derive(Clone, Debug)]
 pub struct CupertinoBasedMaterialThemeData {
     /// The Material theme data with colors based on an existing [`CupertinoThemeData`].
-    pub material_theme: ThemeData,
+    pub material_theme: Rc<ThemeData>,
 }
 
 impl CupertinoBasedMaterialThemeData {
@@ -2914,15 +3302,17 @@ impl CupertinoBasedMaterialThemeData {
     /// a [`CupertinoThemeData`].
     pub fn new(app: &App, theme_data: &CupertinoThemeData) -> CupertinoBasedMaterialThemeData {
         CupertinoBasedMaterialThemeData {
-            material_theme: ThemeData::builder()
-                .color_scheme(
-                    ColorScheme::from_seed(theme_data.primary_color().color())
-                        .brightness(theme_data.brightness().unwrap_or(Brightness::Light))
-                        .build()
-                        .with_primary(theme_data.primary_color().color())
-                        .with_on_primary(theme_data.primary_contrasting_color().color()),
-                )
-                .build(app),
+            material_theme: Rc::new(
+                ThemeData::builder()
+                    .color_scheme(
+                        ColorScheme::from_seed(theme_data.primary_color().color())
+                            .brightness(theme_data.brightness().unwrap_or(Brightness::Light))
+                            .build()
+                            .with_primary(theme_data.primary_color().color())
+                            .with_on_primary(theme_data.primary_contrasting_color().color()),
+                    )
+                    .build(app),
+            ),
         }
     }
 }
@@ -3157,10 +3547,14 @@ mod tests {
     use waft_painting::TextStyle;
 
     use super::*;
+    use crate::bottom_navigation_bar::BottomNavigationBarType;
     use crate::elevated_button::ElevatedButton;
     use crate::filled_button::FilledButton;
     use crate::icon_button::IconButton;
     use crate::input_border::{InputBorder, OutlineInputBorder};
+    use crate::material_state::MaterialStatePropertyAll;
+    use crate::menu_anchor::MenuItemButton;
+    use crate::menu_style::MenuStyle;
     use crate::outlined_button::OutlinedButton;
     use crate::test_support::{test_cell, test_cell_on, with_main_thread_stack};
     use crate::text_button::TextButton;
@@ -4355,9 +4749,12 @@ mod tests {
             app_bar_theme: AppBarThemeData::new().elevation(1.0),
             badge_theme: BadgeThemeData::new().small_size(1.0),
             banner_theme: MaterialBannerThemeData::new().elevation(1.0),
+            bottom_navigation_bar_theme: BottomNavigationBarThemeData::new()
+                .r#type(BottomNavigationBarType::Fixed),
             bottom_sheet_theme: BottomSheetThemeData::new().elevation(1.0),
             card_theme: CardThemeData::new().elevation(1.0),
             checkbox_theme: CheckboxThemeData::new(),
+            dialog_theme: DialogThemeData::new().background_color(Colors::BLACK),
             divider_theme: DividerThemeData::new().color(Colors::BLACK),
             drawer_theme: DrawerThemeData::new().elevation(1.0),
             elevated_button_theme: ElevatedButtonThemeData::new().style(
@@ -4378,11 +4775,29 @@ mod tests {
                     .build(),
             ),
             list_tile_theme: ListTileThemeData::new(),
+            menu_bar_theme: MenuBarThemeData::new().style(
+                MenuStyle::new()
+                    .background_color(Rc::new(MaterialStatePropertyAll::new(Some(Colors::BLACK)))),
+            ),
+            menu_button_theme: MenuButtonThemeData::new().style(
+                MenuItemButton::style_from()
+                    .background_color(Colors::BLACK)
+                    .build(),
+            ),
+            menu_theme: MenuThemeData::new().style(
+                MenuStyle::new()
+                    .background_color(Rc::new(MaterialStatePropertyAll::new(Some(Colors::BLACK)))),
+            ),
+            navigation_bar_theme: NavigationBarThemeData::new().background_color(Colors::BLACK),
+            navigation_drawer_theme: NavigationDrawerThemeData::new()
+                .background_color(Colors::BLACK),
+            navigation_rail_theme: NavigationRailThemeData::new().background_color(Colors::BLACK),
             outlined_button_theme: OutlinedButtonThemeData::new().style(
                 OutlinedButton::style_from()
                     .foreground_color(Colors::BLUE.primary())
                     .build(),
             ),
+            popup_menu_theme: PopupMenuThemeData::new().color(Colors::BLACK),
             progress_indicator_theme: ProgressIndicatorThemeData::new(),
             radio_theme: RadioThemeData::new(),
             slider_theme: SliderThemeData::from_primary_colors(
@@ -4393,6 +4808,7 @@ mod tests {
             ),
             snack_bar_theme: SnackBarThemeData::new().elevation(1.0),
             switch_theme: SwitchThemeData::new(),
+            tab_bar_theme: TabBarThemeData::new().label_color(Colors::BLACK),
             text_button_theme: TextButtonThemeData::new().style(
                 TextButton::style_from()
                     .foreground_color(Colors::RED.primary())
@@ -4463,9 +4879,12 @@ mod tests {
             app_bar_theme: AppBarThemeData::new().elevation(2.0),
             badge_theme: BadgeThemeData::new().small_size(2.0),
             banner_theme: MaterialBannerThemeData::new().elevation(2.0),
+            bottom_navigation_bar_theme: BottomNavigationBarThemeData::new()
+                .r#type(BottomNavigationBarType::Shifting),
             bottom_sheet_theme: BottomSheetThemeData::new().elevation(2.0),
             card_theme: CardThemeData::new().elevation(2.0),
             checkbox_theme: CheckboxThemeData::new(),
+            dialog_theme: DialogThemeData::new().background_color(Colors::WHITE),
             divider_theme: DividerThemeData::new().color(Colors::WHITE),
             drawer_theme: DrawerThemeData::new().elevation(2.0),
             elevated_button_theme: ElevatedButtonThemeData::new(),
@@ -4474,7 +4893,25 @@ mod tests {
             floating_action_button_theme: FloatingActionButtonThemeData::new().elevation(2.0),
             icon_button_theme: IconButtonThemeData::new(),
             list_tile_theme: ListTileThemeData::new(),
+            menu_bar_theme: MenuBarThemeData::new().style(
+                MenuStyle::new()
+                    .background_color(Rc::new(MaterialStatePropertyAll::new(Some(Colors::WHITE)))),
+            ),
+            menu_button_theme: MenuButtonThemeData::new().style(
+                MenuItemButton::style_from()
+                    .background_color(Colors::BLACK)
+                    .build(),
+            ),
+            menu_theme: MenuThemeData::new().style(
+                MenuStyle::new()
+                    .background_color(Rc::new(MaterialStatePropertyAll::new(Some(Colors::WHITE)))),
+            ),
+            navigation_bar_theme: NavigationBarThemeData::new().background_color(Colors::WHITE),
+            navigation_drawer_theme: NavigationDrawerThemeData::new()
+                .background_color(Colors::WHITE),
+            navigation_rail_theme: NavigationRailThemeData::new().background_color(Colors::WHITE),
             outlined_button_theme: OutlinedButtonThemeData::new(),
+            popup_menu_theme: PopupMenuThemeData::new().color(Colors::WHITE),
             progress_indicator_theme: ProgressIndicatorThemeData::new(),
             radio_theme: RadioThemeData::new(),
             slider_theme: SliderThemeData::from_primary_colors(
@@ -4485,6 +4922,7 @@ mod tests {
             ),
             snack_bar_theme: SnackBarThemeData::new().elevation(2.0),
             switch_theme: SwitchThemeData::new(),
+            tab_bar_theme: TabBarThemeData::new().label_color(Colors::WHITE),
             text_button_theme: TextButtonThemeData::new(),
             text_selection_theme: TextSelectionThemeData::new().cursor_color(Colors::WHITE),
             tooltip_theme: TooltipThemeData::new().height(100.0),
@@ -4544,9 +4982,11 @@ mod tests {
             .app_bar_theme(other_theme.app_bar_theme.clone())
             .badge_theme(other_theme.badge_theme.clone())
             .banner_theme(other_theme.banner_theme.clone())
+            .bottom_navigation_bar_theme(other_theme.bottom_navigation_bar_theme.clone())
             .bottom_sheet_theme(other_theme.bottom_sheet_theme.clone())
             .card_theme(other_theme.card_theme.clone())
             .checkbox_theme(other_theme.checkbox_theme.clone())
+            .dialog_theme(other_theme.dialog_theme.clone())
             .divider_theme(other_theme.divider_theme.clone())
             .drawer_theme(other_theme.drawer_theme.clone())
             .elevated_button_theme(other_theme.elevated_button_theme.clone())
@@ -4555,12 +4995,20 @@ mod tests {
             .floating_action_button_theme(other_theme.floating_action_button_theme.clone())
             .icon_button_theme(other_theme.icon_button_theme.clone())
             .list_tile_theme(other_theme.list_tile_theme.clone())
+            .menu_bar_theme(other_theme.menu_bar_theme.clone())
+            .menu_button_theme(other_theme.menu_button_theme.clone())
+            .menu_theme(other_theme.menu_theme.clone())
+            .navigation_bar_theme(other_theme.navigation_bar_theme.clone())
+            .navigation_drawer_theme(other_theme.navigation_drawer_theme.clone())
+            .navigation_rail_theme(other_theme.navigation_rail_theme.clone())
             .outlined_button_theme(other_theme.outlined_button_theme.clone())
+            .popup_menu_theme(other_theme.popup_menu_theme.clone())
             .progress_indicator_theme(other_theme.progress_indicator_theme)
             .radio_theme(other_theme.radio_theme.clone())
             .slider_theme(other_theme.slider_theme.clone())
             .snack_bar_theme(other_theme.snack_bar_theme.clone())
             .switch_theme(other_theme.switch_theme.clone())
+            .tab_bar_theme(other_theme.tab_bar_theme.clone())
             .text_button_theme(other_theme.text_button_theme.clone())
             .text_selection_theme(other_theme.text_selection_theme.clone())
             .tooltip_theme(other_theme.tooltip_theme.clone())
@@ -4672,11 +5120,16 @@ mod tests {
             assert_eq!(theme_data_copy.badge_theme, other_theme.badge_theme);
             assert_eq!(theme_data_copy.banner_theme, other_theme.banner_theme);
             assert_eq!(
+                theme_data_copy.bottom_navigation_bar_theme,
+                other_theme.bottom_navigation_bar_theme
+            );
+            assert_eq!(
                 theme_data_copy.bottom_sheet_theme,
                 other_theme.bottom_sheet_theme
             );
             assert_eq!(theme_data_copy.card_theme, other_theme.card_theme);
             assert_eq!(theme_data_copy.checkbox_theme, other_theme.checkbox_theme);
+            assert_eq!(theme_data_copy.dialog_theme, other_theme.dialog_theme);
             assert_eq!(theme_data_copy.divider_theme, other_theme.divider_theme);
             assert_eq!(theme_data_copy.drawer_theme, other_theme.drawer_theme);
             assert_eq!(
@@ -4700,9 +5153,31 @@ mod tests {
                 other_theme.icon_button_theme
             );
             assert_eq!(theme_data_copy.list_tile_theme, other_theme.list_tile_theme);
+            assert_eq!(theme_data_copy.menu_bar_theme, other_theme.menu_bar_theme);
+            assert_eq!(
+                theme_data_copy.menu_button_theme,
+                other_theme.menu_button_theme
+            );
+            assert_eq!(theme_data_copy.menu_theme, other_theme.menu_theme);
+            assert_eq!(
+                theme_data_copy.navigation_bar_theme,
+                other_theme.navigation_bar_theme
+            );
+            assert_eq!(
+                theme_data_copy.navigation_drawer_theme,
+                other_theme.navigation_drawer_theme
+            );
+            assert_eq!(
+                theme_data_copy.navigation_rail_theme,
+                other_theme.navigation_rail_theme
+            );
             assert_eq!(
                 theme_data_copy.outlined_button_theme,
                 other_theme.outlined_button_theme
+            );
+            assert_eq!(
+                theme_data_copy.popup_menu_theme,
+                other_theme.popup_menu_theme
             );
             assert_eq!(
                 theme_data_copy.progress_indicator_theme,
@@ -4712,6 +5187,7 @@ mod tests {
             assert_eq!(theme_data_copy.slider_theme, other_theme.slider_theme);
             assert_eq!(theme_data_copy.snack_bar_theme, other_theme.snack_bar_theme);
             assert_eq!(theme_data_copy.switch_theme, other_theme.switch_theme);
+            assert_eq!(theme_data_copy.tab_bar_theme, other_theme.tab_bar_theme);
             assert_eq!(
                 theme_data_copy.text_button_theme,
                 other_theme.text_button_theme
@@ -4840,10 +5316,12 @@ mod tests {
 
     #[test]
     fn localize_merges_the_text_geometry_under_the_theme_text_styles() {
-        android(|app| {
-            let theme = ThemeData::new(app);
-            let geometry = theme.typography.english_like.clone();
-            let localized = ThemeData::localize(&theme, &geometry);
+        with_main_thread_stack(|| {
+            let cell = test_cell();
+            let mut app = cell.borrow_mut();
+            let theme = Rc::new(ThemeData::new(&app));
+            let geometry = Rc::clone(&theme.typography.english_like);
+            let localized = ThemeData::localize(&mut app, &theme, &geometry);
             assert_eq!(
                 localized.text_theme,
                 geometry.merge(Some(&theme.text_theme))
@@ -4852,7 +5330,11 @@ mod tests {
                 localized.primary_text_theme,
                 geometry.merge(Some(&theme.primary_text_theme))
             );
-            let body = localized.text_theme.body_medium.expect("a body style");
+            let body = localized
+                .text_theme
+                .body_medium
+                .clone()
+                .expect("a body style");
             assert_eq!(body.font_size, Some(14.0));
             assert!(!body.inherit);
         });

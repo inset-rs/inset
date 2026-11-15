@@ -420,7 +420,7 @@ impl TextTheme {
     /// * [`TextTheme::primary_of`], which returns the `ThemeData.primary_text_theme` property
     ///   of the ambient `Theme` instead.
     pub fn of(app: &mut App, context: BuildContext) -> TextTheme {
-        Theme::of(app, context).text_theme
+        Theme::of(app, context).text_theme.clone()
     }
 
     /// The `ThemeData.primary_text_theme` property of the ambient `Theme`.
@@ -432,7 +432,7 @@ impl TextTheme {
     /// * [`TextTheme::of`], which returns the `ThemeData.text_theme` property of the ambient
     ///   `Theme` instead.
     pub fn primary_of(app: &mut App, context: BuildContext) -> TextTheme {
-        Theme::of(app, context).primary_text_theme
+        Theme::of(app, context).primary_text_theme.clone()
     }
 }
 
@@ -739,19 +739,22 @@ mod tests {
     #[test]
     fn copy_with_apply_and_merge_of_typography_black() {
         let typography = Typography::material2018().build();
-        assert_eq!(typography.black, typography.black.copy_with());
-        assert_eq!(typography.black, typography.black.apply().into_text_theme());
-        assert_eq!(typography.black, typography.black.merge(None));
+        assert_eq!(*typography.black, typography.black.copy_with());
         assert_eq!(
-            typography.black,
+            *typography.black,
+            typography.black.apply().into_text_theme()
+        );
+        assert_eq!(*typography.black, typography.black.merge(None));
+        assert_eq!(
+            *typography.black,
             TextTheme::new().merge(Some(&typography.black))
         );
         assert_eq!(
-            typography.black,
+            *typography.black,
             typography.black.merge(Some(&typography.black))
         );
         assert_eq!(
-            typography.white,
+            *typography.white,
             typography.black.merge(Some(&typography.white))
         );
         assert_ne!(typography.black, typography.white);
@@ -780,7 +783,7 @@ mod tests {
             .label_large(style(&white.label_large))
             .label_medium(style(&white.label_medium))
             .label_small(style(&white.label_small));
-        assert_eq!(typography.white, white_copy);
+        assert_eq!(*typography.white, white_copy);
     }
 
     #[test]

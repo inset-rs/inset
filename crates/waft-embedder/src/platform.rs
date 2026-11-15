@@ -561,6 +561,16 @@ pub trait Platform: Any {
         let _ = locale;
     }
 
+    /// Whether briefly displaying the characters as you type in obscured text fields is enabled
+    /// in system settings (Flutter `PlatformDispatcher.brieflyShowPassword`).
+    ///
+    /// Defaults to `true`, dart:ui's value until a host reports the setting. dart:ui has no
+    /// callback for its change: a host answers the setting as it is now, and the framework reads
+    /// it as it needs it, as `EditableText` does at each tick of its cursor.
+    fn briefly_show_password(&self) -> bool {
+        true
+    }
+
     /// The platform's light/dark preference (Flutter
     /// `PlatformDispatcher.platformBrightness`).
     ///
@@ -1018,6 +1028,11 @@ mod tests {
     #[test]
     fn inert_platform_is_android() {
         assert_eq!(InertPlatform.target_platform(), TargetPlatform::Android);
+    }
+
+    #[test]
+    fn inert_platform_briefly_shows_passwords() {
+        assert!(InertPlatform.briefly_show_password());
     }
 
     #[test]

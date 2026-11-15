@@ -1095,7 +1095,7 @@ mod tests {
                         child,
                     };
                     build(&self.cell, CupertinoApp::new().home(home).into_widget());
-                    self.host = key.current_state::<HostState>(&mut self.cell.borrow_mut());
+                    self.host = key.current_state::<HostState>(&self.cell.borrow_mut());
                 }
             }
             self.pump();
@@ -1197,9 +1197,9 @@ mod tests {
         }
 
         fn custom_paint(&self, key: &GlobalKey) -> RenderHandle<RenderCustomPaint> {
-            let mut app = self.cell.borrow_mut();
+            let app = self.cell.borrow();
             let root = key
-                .current_context(&mut app)
+                .current_context(&app)
                 .expect("the radio mounted")
                 .find_render_object(&app)
                 .expect("the radio has been laid out");
@@ -1611,7 +1611,7 @@ mod tests {
         tester.press();
         // While the pointer is down, the widget disappears.
         tester.pump_app(None, shown(false));
-        assert!(key.current_context(&mut tester.cell.borrow_mut()).is_none());
+        assert!(key.current_context(&tester.cell.borrow_mut()).is_none());
         // Release pointer after widget disappeared.
         tester.release();
     }
@@ -1669,7 +1669,7 @@ mod tests {
         // Dart pins these with goldens; the painter's colours are what the goldens show.
         let mut tester = Tester::new();
         let key = GlobalKey::new();
-        let cases: [(Option<CupertinoThemeData>, bool, i32, u32, u32, u32); 8] = [
+        let cases: Vec<(Option<CupertinoThemeData>, bool, i32, u32, u32, u32)> = vec![
             (None, true, 1, 0xff007aff, 0xffffffff, 0x00000000),
             (None, true, 2, 0xff007aff, 0xffffffff, 0xffd1d1d6),
             (dark(), true, 1, 0xff3264d7, 0xffdee8f8, 0x00000000),
@@ -1998,7 +1998,7 @@ mod tests {
                 .into_widget(),
         );
         let context = key
-            .current_context(&mut tester.cell.borrow_mut())
+            .current_context(&tester.cell.borrow_mut())
             .expect("the radio mounted");
         let size = context.size(&tester.cell.borrow());
         assert_eq!(size, Some(Size::ZERO));

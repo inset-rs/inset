@@ -5,7 +5,6 @@ Ported against: 34b89b2086d4
 ## Identical
 - constants.rs → constants.dart
 - text_theme.rs → text_theme.dart
-- typography.rs → typography.dart
 - generated/typography_defaults_m3.rs → generated/typography_defaults_m3.g.dart
 - generated/color_scheme_defaults.rs → generated/color_scheme_defaults.g.dart
 - material_localizations.rs → material_localizations.dart
@@ -78,12 +77,24 @@ Ported against: 34b89b2086d4
 - input_border.rs → input_border.dart
 - generated/input_decorator_defaults_m3.rs → generated/input_decorator_defaults_m3.g.dart
 - desktop_text_selection_toolbar_button.rs → desktop_text_selection_toolbar_button.dart
+- tab_controller.rs → tab_controller.dart
+- tab_indicator.rs → tab_indicator.dart
+- generated/tabs_defaults_m3.rs → generated/tabs_defaults_m3.g.dart
 - desktop_text_selection_toolbar.rs → desktop_text_selection_toolbar.dart
 - text_selection.rs → text_selection.dart
 - desktop_text_selection.rs → desktop_text_selection.dart
 - adaptive_text_selection_toolbar.rs → adaptive_text_selection_toolbar.dart
 - spell_check_suggestions_toolbar_layout_delegate.rs → spell_check_suggestions_toolbar_layout_delegate.dart
 - spell_check_suggestions_toolbar.rs → spell_check_suggestions_toolbar.dart
+- generated/navigation_bar_defaults_m3.rs → generated/navigation_bar_defaults_m3.g.dart
+- navigation_rail_theme.rs → navigation_rail_theme.dart
+- generated/navigation_rail_defaults_m3.rs → generated/navigation_rail_defaults_m3.g.dart
+- dialog_theme.rs → dialog_theme.dart
+- generated/dialog_defaults_m3.rs → generated/dialog_defaults_m3.g.dart
+- generated/dialog_fullscreen_defaults_m3.rs → generated/dialog_fullscreen_defaults_m3.g.dart
+- generated/popup_menu_defaults_m3.rs → generated/popup_menu_defaults_m3.g.dart
+- menu_button_theme.rs → menu_button_theme.dart
+- generated/menu_defaults_m3.rs → generated/menu_defaults_m3.g.dart
 
 ## colors.rs → colors.dart
 - Change: `MaterialColor` and `MaterialAccentColor` are colour extensions of their own that deref to painting's `ColorSwatch<i32>`; each `Colors` swatch is one of them, and it becomes a `Color` through `primary()` or an `AnyColor` through `into_any()`.
@@ -95,6 +106,11 @@ Ported against: 34b89b2086d4
   Reason: language — dart:ui `Color` is a value here and cannot be subclassed, and only the fields the framework resolves or type-checks carry an `AnyColor` (waft-painting's colors.rs entry).
   Affect: `ColorScheme::from_swatch().build().primary` equals `Colors::BLUE.primary()`, where Dart's `primary` is the swatch itself and equals only `Colors.blue`.
 
+## typography.rs → typography.dart
+- Change: `Typography`'s text-theme constants (`english_like2014()`, `black_mountain_view()` and the rest) are functions that build a new `TextTheme` on each call, and each `Typography` holds its own shared copy of the five it was given.
+  Reason: language — a `TextTheme` holds `String`s, so it has no `const` value, and Dart's `static const` canonicalization has no Rust counterpart.
+  Affect: two typographies built from the same defaults hold different text-theme objects, so `ThemeData::localize` given a freshly built constant misses the cache that Dart's one constant object hits.
+
 ## theme_data.rs → theme_data.dart
 - Change: `ThemeData`'s colours are plain `Color`s; a `primary_swatch` is stored as its primary colour.
   Reason: language — dart:ui `Color` is a value here and cannot be subclassed (waft-painting's colors.rs entry).
@@ -105,9 +121,6 @@ Ported against: 34b89b2086d4
 - Change: `Adaptation<T>` is a trait erased into `AdaptationRef`, keyed by `TypeId::of::<T>()`, compared by identity.
   Reason: language — Dart stores generic instances in a `Map<Type, Adaptation<Object>>` under their type argument.
   Affect: `get_adaptation::<T>()` returns `&dyn Adaptation<T>`; an `==` override on an adaptation has no counterpart.
-- Change: `ThemeData::localize` builds a new theme on every call; there is no `_FifoCache` or `_IdentityThemeDataCacheKey`.
-  Reason: language — a `ThemeData` value has no identity to key Dart's identity cache.
-  Affect: every `Theme::of` copies the theme and merges two text themes.
 - Change: `MaterialBasedCupertinoThemeData` is the `CupertinoThemeDataOverrides` a `CupertinoThemeData` holds, and `MaterialBasedCupertinoThemeData::new` returns that theme data; its override theme is the theme data's construction time specifications.
   Reason: language — waft-cupertino's `CupertinoThemeData` is a struct whose subclass members are an overrides object (waft-cupertino's theme.rs entry).
   Affect: `new`, `copy_with` and `resolve_from` give a `CupertinoThemeData`, whose `brightness()` is an `Option` though it is always `Some` here.
@@ -450,9 +463,6 @@ Ported against: 34b89b2086d4
 - Change: the static field `adaptiveMagnifierConfiguration` has no setter.
   Reason: language — the configuration is built on each call from the app's platform (entry above), so there is no stored value to replace.
   Affect: code cannot replace the adaptive configuration globally; it passes its own `TextMagnifierConfiguration` to the text field.
-- Change: `Magnifier` and `TextMagnifier` draw through `RawMagnifier`, whose lens shows the content under it unscaled.
-  Reason: platform — waiting on Valo's `ImageFilter::matrix` (built in Valo, unreleased).
-  Affect: the 1.25 magnification does not show.
 
 ## text_field.rs → text_field.dart (and generated/text_field_defaults_m3.g.dart)
 
@@ -471,6 +481,126 @@ Ported against: 34b89b2086d4
   Reason: platform — `Matrix4` is valo's f32 matrix, so `force_to_point` rounds the centre to f32.
   Affect: a debug build accepts the rounded centre where Dart asserts exact equality.
 
+## navigation_bar.rs → navigation_bar.dart, navigation_bar_theme.rs → navigation_bar_theme.dart
+- Change: `overlay_color`, `label_text_style` and `icon_theme` take a `WidgetStateProperty<Option<T>>`; a `WidgetStateColor` or a property of the non-null type cannot be given as it is.
+  Reason: language — Rust generics are invariant, where Dart's `WidgetStateProperty<Color>` is a `WidgetStateProperty<Color?>`.
+  Affect: a caller writes `resolve_with(|states| Some(..))` or `WidgetStatePropertyAll::new(Some(..))` where Dart passes the property itself.
+- Change: `NavigationBarThemeData`'s `==` compares `label_text_style`, `icon_theme` and `overlay_color` by identity (`Rc::ptr_eq`).
+  Reason: language — `WidgetStateProperty` is a trait object with no equality method.
+  Affect: two themes built from separately made but equal `WidgetStatePropertyAll`s are unequal; in Dart they are equal.
+- Change: Dart's `NavigationBar` constructor asserts (at least two destinations, `selected_index` among them) run when the bar is turned into a `WidgetRef` (`into_widget`).
+  Reason: language — a fluent chain has no point at which it has seen every argument.
+  Affect: a bad combination panics where the bar is handed to the tree, not where it is made.
+- Change: `_IndicatorInkWell` is a widget holding an `InkResponse` (with `override_get_rect_callback`) that it builds.
+  Reason: language — a Rust struct cannot extend `InkResponse` (ink_well.rs entry).
+  Affect: a type lookup finds an `InkResponse` element under each destination's private ink well.
+- Change: `_CurvedAnimationBuilderState` keeps each build's `CurveTween` and the animation it drives until the build after next, and frees the last two in `dispose`.
+  Reason: language — no collector, and the widgets the last build made still listen to its animation until they update to this build's.
+  Affect: a destination whose labels show only when selected holds up to two curved animations in the arena at once.
+
+## navigation_rail.rs → navigation_rail.dart
+- Change: `_IndicatorInkWell` is the `InkResponse` its constructor makes, with its `getRectCallback` filled through `override_get_rect_callback`.
+  Reason: language — a Rust struct cannot extend `InkResponse` (ink_well.rs entry).
+  Affect: a destination's ink well is an `InkResponse` to a type lookup.
+- Change: Dart's `NavigationRail` constructor asserts that relate two arguments (`minExtendedWidth >= minWidth`, `extended` only with `labelType` none) run when the rail is turned into a `WidgetRef` (`into_widget`).
+  Reason: language — a fluent chain has no point at which it has seen every argument.
+  Affect: a bad combination panics where the rail is handed to the tree, not on its first build.
+- Change: `_NavigationRailState` keeps the controllers and the extended `CurvedAnimation` that a change in the number of destinations replaces, after disposing them, until the state is disposed.
+  Reason: language — no collector, and the destinations and the widgets that read `NavigationRail::extended_animation` still unsubscribe from them after the reset.
+  Affect: each change in the number of destinations keeps the old controllers and one `CurvedAnimation` in the arena for the rail's life.
+- Change: `_RailDestinationState` makes each label fade (`drive(CurveTween(curve: Interval(..)))`) once per parent animation and interval and keeps it until disposed, where Dart makes a new one on each build.
+  Reason: language — no collector frees the animation each build would replace.
+  Affect: the label's `FadeTransition` keeps one animation across builds (at most three per destination, plus those of earlier parents after a reset).
+
+## navigation_drawer.rs → navigation_drawer.dart (and generated/navigation_drawer_defaults_m3.g.dart), navigation_drawer_theme.rs → navigation_drawer_theme.dart
+- Change: the Material 3 navigation drawer defaults read `Theme::of` when they are made, so `NavigationDrawerDestination` and its private builder always depend on the theme.
+  Reason: language — Dart's `_NavigationDrawerDefaultsM3` getters run only when read (and `??` skips them), and `NavigationDrawerThemeData` here is a value whose fields are filled when it is made (drawer.rs entry).
+  Affect: a destination under a `NavigationDrawerTheme` that gives every value still rebuilds when the ambient `Theme` changes.
+- Change: `NavigationDrawerThemeData`'s `==` compares `label_text_style` and `icon_theme` by identity (`Rc::ptr_eq`).
+  Reason: language — `WidgetStateProperty` is a trait object with no equality method.
+  Affect: two themes built from separately made but equal `WidgetStatePropertyAll`s are unequal; in Dart they are equal.
+
+## bottom_navigation_bar.rs → bottom_navigation_bar.dart, bottom_navigation_bar_theme.rs → bottom_navigation_bar_theme.dart
+- Change: `BottomNavigationBar::selected_item_color` and `fixed_color` hold what the caller gave; `effective_selected_item_color()` and `effective_fixed_color()` give Dart's `selectedItemColor ?? fixedColor`.
+  Reason: language — a fluent setter sees one argument at a time, so the constructor's derived field is worked out when it is read (patterns/derived-fields.md).
+  Affect: `BottomNavigationBar::new(items).fixed_color(c).selected_item_color` is `None`, where Dart's `selectedItemColor` is `c`.
+- Change: Dart's `BottomNavigationBar` constructor asserts that relate two arguments (`currentIndex` among the items, every item labelled, `selectedItemColor` and `fixedColor` not both given) run when the bar is turned into a `WidgetRef` (`into_widget`).
+  Reason: language — a fluent chain has no point at which it has seen every argument.
+  Affect: a bad combination panics where the bar is handed to the tree, not where it is made.
+- Change: `BottomNavigationBarState` makes its three `ColorTween`s and the flex `Tween` once, in `init_state`, and sets the colour tweens' ends on each build; Dart's build makes new colour tweens each time, and its `_flexTween` is a static.
+  Reason: language — no collector frees the tweens each build would replace, and a Rust static cannot hold an arena object.
+  Affect: the tiles of every build share one tween of each kind, so a tile widget kept from an earlier build reads the latest build's colours.
+- Change: the label that fades out when `show_selected_labels` is false uses one `Tween(1.0, 0.0)` driven animation per item, made with the state's animations in `_resetState`; Dart's `_Label` makes a new one on every build.
+  Reason: language — no collector frees the animation each build would replace (the input_decorator.rs `_HelperErrorState` entry).
+  Affect: the label's `FadeTransition` keeps one opacity animation across rebuilds; the opacity values are the same.
+- Change: `BottomNavigationBarThemeData::mouse_cursor` takes a `WidgetStateProperty<Option<MouseCursorRef>>`; a `WidgetStateMouseCursor` cannot be given to it as it is.
+  Reason: language — Rust generics are invariant, where Dart's `WidgetStateMouseCursor` is a `WidgetStateProperty<MouseCursor?>`.
+  Affect: a caller wraps the cursor in `resolve_with(|states| Some(cursor.resolve(states)))`.
+- Change: `BottomNavigationBarThemeData`'s `==` compares `mouse_cursor` by identity (`Rc::ptr_eq`).
+  Reason: language — `WidgetStateProperty` is a trait object with no equality method.
+  Affect: two themes built from separately made equal cursor properties are unequal; in Dart they are equal.
+
+## tabs.rs → tabs.dart
+- Change: a `TabBar` never frees the `_ChangeAnimation`s, `_DragAnimation`s and `ReverseAnimation`s each build makes for its styled tabs.
+  Reason: language — no collector, and Dart's removal of their listeners is skipped once the controller's animation is gone (a disposed or replaced `TabController`), which leaves them subscribed to that animation.
+  Affect: each `TabBar` build keeps up to five small animations in the arena for the app's life.
+- Change: `_TabsDefaultsM2` turns the indicator white when the scheme's `secondary` has `Colors::BLUE`'s value in a light theme, whatever made it.
+  Reason: language — a `ColorScheme` colour is a plain `Color` here, where Dart's `secondary == Colors.blue` is true only for the `MaterialColor` itself (`Color.==` compares runtime types), as `ColorScheme.fromSwatch` gives it.
+  Affect: a Material 2 light theme whose scheme's secondary is a plain `Color(0xFF2196F3)` gets a white default indicator where Flutter keeps it blue.
+
+## tab_bar_theme.rs → tab_bar_theme.dart
+- Change: `TabBarThemeData`'s `==` compares `overlay_color` and `mouse_cursor` by identity (`Rc::ptr_eq`).
+  Reason: language — `WidgetStateProperty` is a trait object with no equality method.
+  Affect: two themes built from separately made but equal `WidgetStatePropertyAll`s are unequal, so a `TabBarTheme` rebuilt with one notifies its dependents; in Dart they are equal.
+
+## dialog.rs → dialog.dart
+- Change: `Dialog::fullscreen` and `AlertDialog::adaptive` share their type's setters with `new`; on a fullscreen dialog `inset_padding` still pads and the other setters only Dart's `Dialog` takes do nothing, and on a dialog made by `AlertDialog::new` the adaptive setters (`scroll_controller`, `action_scroll_controller`, `inset_animation_duration`, `inset_animation_curve`) do nothing.
+  Reason: language — one set of fluent setters serves both of Dart's constructors, and only `Dialog` and `AlertDialog.adaptive` have those parameters.
+  Affect: `Dialog::fullscreen().elevation(8.0)` and `AlertDialog::new().scroll_controller(c)` compile and change nothing, and `Dialog::fullscreen().inset_padding(p)` pads by `p`, where Dart rejects all three; and an `AlertDialog::adaptive()` is found by a lookup of type `AlertDialog`, where Dart's is a private subclass that `find.byType(AlertDialog)` misses.
+- Change: `DialogRoute::new` reads `MaterialLocalizations::modal_barrier_dismiss_label` for its default barrier label whether or not `barrier_label` is set after it.
+  Reason: language — the route's optional arguments are setters called after it is made, so its constructor cannot see whether a label will be given, where Dart's `barrierLabel ?? …` sees every argument at once.
+  Affect: a `DialogRoute` made where no `MaterialLocalizations` is found panics even when it is then given a barrier label; `show_dialog` checks for them first, as Dart's does.
+
+## popup_menu.rs → popup_menu.dart
+- Change: a menu's entries are `PopupMenuEntryRef<T>`s, each erasing an entry widget with its `height` and `represents`, and `PopupMenuDivider` is a `PopupMenuEntry<T>` of every `T`.
+  Reason: language — Dart's `List<PopupMenuEntry<T>>` holds any subclass through the abstract class, and `PopupMenuEntry<Never>` is one of every `T` by covariance.
+  Affect: an item builder wraps each entry in `PopupMenuEntryRef::new`, and one list holds entries of one `T`, where Dart's list of `void` items can also hold a `CheckedPopupMenuItem<int>`.
+- Change: `PopupMenuItem` and `CheckedPopupMenuItem` are leaves of `PopupMenuItemLeaf`, holding Dart's `PopupMenuItem` fields as a `PopupMenuItemData` bag, and their states are leaves of `PopupMenuItemStateLeaf`, whose `build_child`, `handle_tap` and `build_semantics` default to `PopupMenuItemState`'s bodies; `PopupMenuItemState<T>` is the state of `PopupMenuItem<T>` alone.
+  Reason: language — Dart's `PopupMenuItemState<T, W extends PopupMenuItem<T>>` is a class a subclass's state extends, and Rust has no class inheritance.
+  Affect: an item subclass implements `PopupMenuItemLeaf` on its widget and `PopupMenuItemStateLeaf` on its own state, whose `State::build` runs `PopupMenuItemState::build`.
+- Change: `_PopupMenuRouteLayout` fits the menu into the whole overlay, with no avoid bounds and no display-feature sub-screens.
+  Reason: platform — `DisplayFeatureSubScreen` needs `MediaQuery.displayFeatures`, which no host reports (Deferred).
+  Affect: on a folded or hinged display the menu can straddle the hinge instead of keeping to the sub-screen nearest its button.
+
+## popup_menu_theme.rs → popup_menu_theme.dart
+- Change: `PopupMenuThemeData`'s `==` compares `label_text_style` and `mouse_cursor` by identity (`Rc::ptr_eq`).
+  Reason: language — `WidgetStateProperty` is a trait object with no equality method.
+  Affect: two themes built from separately made but equal `WidgetStatePropertyAll`s are unequal, so a `PopupMenuTheme` rebuilt with one notifies its dependents; in Dart they are equal.
+
+## menu_style.rs → menu_style.dart, menu_theme.rs → menu_theme.dart
+- Change: `MenuStyle`'s `==` compares its property fields by identity (`Rc::ptr_eq`), and `MenuThemeData`'s compares its `submenu_icon` property the same way.
+  Reason: language — `WidgetStateProperty` is a trait object with no equality method.
+  Affect: two styles or themes built from separately made but equal `WidgetStatePropertyAll`s are unequal; in Dart they are equal.
+
+## menu_bar_theme.rs → menu_bar_theme.dart
+- Change: `MenuBarThemeData` is a type of its own that holds the `MenuThemeData` Dart's subclass is and derefs to it; its constructor sets only `style`.
+  Reason: language — a Rust struct cannot extend `MenuThemeData`.
+  Affect: a `MenuBarThemeData` reads `style` and `submenu_icon` through `Deref`, and is a `MenuThemeData` only as `&*data`.
+
+## menu_anchor.rs → menu_anchor.dart (and generated/menu_defaults_m3.g.dart)
+- Change: `_MenuAnchorState` is a base trait whose fields are a bag that `MenuAnchorState` and the menu bar's state carry, and `_MenuBarAnchor` holds the `MenuAnchor` it extends; `_MenuAnchorScope` holds the state erased.
+  Reason: language — a Rust struct cannot extend another.
+  Affect: a menu bar's anchor does not downcast to a `MenuAnchor`, where Dart's `is MenuAnchor` is true; a type lookup misses it in both.
+- Change: `MenuAnchor` and `SubmenuButton` free the internal `MenuController` they replace in `did_update_widget`, and the anchor frees the item fades `_resolveMenuItems` replaces; each stays readable until the next checkpoint.
+  Reason: language — no collector, and the anchor below still detaches from the replaced controller, and the fades still listen to the replaced animations, until they rebuild.
+  Affect: a handle to a replaced internal controller is stale after the next checkpoint.
+- Change: each anchor state makes the `DismissMenuAction` Dart's `_Submenu` makes on every build once, on its first overlay build, gives it the current controller on every build and frees it in `dispose`; the menu bar's `DismissMenuAction`, which Dart makes once with the controller of its first build, keeps that controller readable after its owner frees it.
+  Reason: language — no collector frees the action each build replaces, nor keeps a freed controller alive for the action that holds it.
+  Affect: the menu's `Actions` holds the same action across builds, so widgets that found `DismissIntent` through it are not rebuilt when the menu rebuilds, as Dart's new action makes them.
+- Change: `_MenuLayout` fits the menu into the whole overlay, with no avoid bounds and no display-feature sub-screens.
+  Reason: platform — `DisplayFeatureSubScreen` needs `MediaQuery.displayFeatures`, which no host reports (Deferred).
+  Affect: on a folded or hinged display the menu can straddle the hinge instead of keeping to the sub-screen nearest its anchor.
+
 ## Deferred
 - input_decorator.rs: the 13 cases Dart runs on a `TextField`, the 16 Material 2 cases and the `customLabel` twins listed in the step 11 review. Trigger: none, portable now.
 - text_form_field.rs: the ~38 text_form_field_test cases not ported. Trigger: none, portable now.
@@ -482,8 +612,6 @@ Ported against: 34b89b2086d4
 - circle_avatar.rs: `backgroundImage`, `foregroundImage`, `onBackgroundImageError` and `onForegroundImageError`, their two constructor asserts, and the image in the decorations. Trigger: `DecorationImage`.
 - checkbox.rs, switch.rs, radio.rs and waft-cupertino's twins: one `ToggleablePainter` per state, as Dart keeps `_painter`; each build hands a new painter. Trigger: `CustomPaint` and `build_toggleable` taking an existing `Rc<dyn CustomPainter>` in waft-widgets (with the lead).
 - app.rs: app_test 'Can get text scale from media query' (asserts `isSystemTextScaler(withScaleFactor: 1.0)`). Trigger: `SystemTextScaler` in waft-widgets media_query.rs.
-- scrollbar.rs: scrollbar_test 'Scrollbar.thumbVisibility triggers assertion when multiple ScrollPositions are attached.' Trigger: tabs.dart (`TabBarView`, `DefaultTabController`), and widgets' `debug_check_has_valid_scroll_position` carrying Dart's hint lines.
-- app_bar.rs: the medium and large expanded titles sit at their unrounded paragraph height (95.92 where Flutter has 96). Trigger: the Valo release that rounds a line's height as skparagraph's `InternalLineMetrics::height()` does (modules/skparagraph/src/Run.h:483-485); fixed in Valo, waiting for its release. The case is ported and ignored until then.
 - slider.rs: `_RenderSlider`'s `assembleSemanticsNode`, `describeSemanticsConfiguration` and `onFocusAction`, and the use of `semantic_formatter_callback`. Trigger: the semantics tree.
 - switch.rs, bottom_sheet.rs, drawer.rs: the gesture detectors' `excludeFromSemantics`. Trigger: the semantics tree.
 - checkbox.rs, switch.rs, radio.rs, progress_indicator.rs: their tests' semantics cases. Trigger: the semantics tree.
@@ -505,28 +633,37 @@ Ported against: 34b89b2086d4
 - page_transitions_theme.rs: `PageTransitionsTheme`'s `hashCode` (`Hash`). Trigger: the first map or set keyed by one.
 - page.rs: `debugLabel` of both routes. Trigger: App-aware `Debug` (`TransitionRoute::debug_label` takes no App).
 - predictive_back_page_transitions_builder.rs: the case 'uses display corner radii when available'. Trigger: a test view that reports display corner radii.
-- app_bar.rs: app_bar_test 'Material3 - Passing no AppBarTheme returns defaults' and the cases on `MaterialPageRoute`, `TabBar` and `PopupMenuButton`. Trigger: `TabBar` and `PopupMenuButton`; the `MaterialPageRoute` cases on the next edit of app_bar.rs (page.rs exists).
+- app_bar.rs: app_bar_test 'Material3 - Passing no AppBarTheme returns defaults' and the cases on `MaterialPageRoute` and `PopupMenuButton`. Trigger: `PopupMenuButton`; the `MaterialPageRoute` cases on the next edit of app_bar.rs (page.rs exists).
 - scaffold.rs: the status-bar tap reaching `handle_status_bar_tap`. Trigger: a status-bar-tap callback on the binding observer.
 - bottom_sheet.rs: `ModalBottomSheetRoute.anchorPoint` and `DisplayFeatureSubScreen`. Trigger: `display_feature_sub_screen.dart`.
+- dialog.rs: `anchorPoint` on `showDialog`, `showAdaptiveDialog` and `DialogRoute`, which feeds `RawDialogRoute`'s `DisplayFeatureSubScreen`. Trigger: `display_feature_sub_screen.dart`.
+- popup_menu.rs: the route layout's avoid bounds and sub-screens (`DisplayFeatureSubScreen.subScreensInBounds`/`avoidBounds`). Trigger: `display_feature_sub_screen.dart`.
+- menu_anchor.rs: `_MenuLayout`'s avoid bounds and sub-screens (`DisplayFeatureSubScreen.subScreensInBounds`/`avoidBounds`). Trigger: `display_feature_sub_screen.dart`.
+- menu_anchor.rs: `FadeTransition(alwaysIncludeSemantics: true)` around the menu panel and the animated items. Trigger: the semantics tree.
+- menu_anchor.rs: `_debugMenuInfo` logging (off in Dart, `_kDebugMenus` is false) and the diagnostics of the menu widgets. Trigger: diagnostics.
+- menu_anchor.rs: menu_anchor_test cases whose numbers include a `MenuBar` of `createTestMenus`, whose last label 'Menu 5 & 6 ' ends in a space that Valo leaves out of a paragraph's max intrinsic width (14px narrower than Flutter): 'Menu responds to density changes', 'unconstrained menus show up in the right place in LTR'/'in RTL', 'constrained menus show up in the right place in LTR'/'in RTL', the four 'submenus account for … density' cases and the two 'submenus account for padding' cases, and the last assert of 'geometry' and 'geometry with RTL direction' (the unexpanded bar at 145..655). Trigger: Valo counting trailing whitespace in a paragraph's max intrinsic width.
+- menu_anchor.rs: menu_anchor_test 'Menu scrollbar does not inherit MediaQuery padding'. Trigger: a test_support view whose padding and pixel ratio a case sets, and access to a `ScrollbarPainter`'s padding.
+- menu_anchor.rs: menu_anchor_test's semantics cases ('Semantics' group, 'MenuAnchor applies semanticLabel to the expanded menu overlay'). Trigger: the semantics tree.
+- menu_style.rs: menu_style_test 'Material parameters are honored' (its menu shape is a `StarBorder`). Trigger: `star_border.dart`.
+- menu_theme.rs: menu_theme_test's two `debugFillProperties` cases. Trigger: diagnostics.
 - icon_button.rs: `icon_button_test.dart` 'IconButton AppBar size' and `icon_button_theme_test.dart` 'IconButton in an AppBar with a custom foregroundColor uses the inherited variant'. Trigger: the next edit of icon_button.rs (`app_bar.rs` exists).
 - icon_button_theme.rs: `icon_button_theme_test.dart` 'IconButton in an InputDecorator suffix icon uses the inherited variant'. Trigger: the next edit of icon_button_theme.rs (`TextField` exists).
 - theme_data.rs: `ThemeData.appBarTheme` is `Object?` in Dart with a TODO to retype it to `AppBarThemeData`; here its setters take `impl Into<AppBarThemeData>`. Trigger: Flutter retyping it.
 - flexible_space_bar.rs: `_FlexibleSpaceHeaderOpacity`'s `alwaysIncludeSemantics`. Trigger: the semantics tree.
-- action_icons_theme.rs, card_theme.rs, badge_theme.rs, expansion_tile_theme.rs, checkbox_theme.rs, switch_theme.rs, radio_theme.rs, slider_theme.rs, progress_indicator_theme.rs, elevated_button_theme.rs, filled_button_theme.rs, outlined_button_theme.rs, text_button_theme.rs, icon_button_theme.rs, app_bar_theme.rs, banner_theme.rs, snack_bar_theme.rs, bottom_sheet_theme.rs, floating_action_button_theme.rs, drawer_theme.rs, divider_theme.rs, list_tile_theme.rs: each theme data's `hashCode` (`Hash`). Trigger: the first map or set keyed by one.
+- action_icons_theme.rs, card_theme.rs, badge_theme.rs, expansion_tile_theme.rs, checkbox_theme.rs, switch_theme.rs, radio_theme.rs, slider_theme.rs, progress_indicator_theme.rs, elevated_button_theme.rs, filled_button_theme.rs, outlined_button_theme.rs, text_button_theme.rs, icon_button_theme.rs, app_bar_theme.rs, banner_theme.rs, snack_bar_theme.rs, bottom_sheet_theme.rs, floating_action_button_theme.rs, drawer_theme.rs, divider_theme.rs, list_tile_theme.rs, navigation_bar_theme.rs, navigation_rail_theme.rs, navigation_drawer_theme.rs, bottom_navigation_bar_theme.rs, dialog_theme.rs, popup_menu_theme.rs, menu_theme.rs, menu_bar_theme.rs, menu_button_theme.rs: each theme data's `hashCode` (`Hash`). Trigger: the first map or set keyed by one.
 - material.rs: `assert(vsync == renderObject.vsync)` in `_MaterialState`. Trigger: an identity hook on `TickerProvider`.
-- button_style.rs: `ButtonStyle`'s `hashCode` (`Hash`). Trigger: the first map or set keyed by a `ButtonStyle`.
-- button_style.rs, scrollbar_theme.rs: value equality of `WidgetStatePropertyAll` and `WidgetStateMapper` in `ButtonStyle ==` and `ScrollbarThemeData ==`. Trigger: an equality method on `WidgetStateProperty` in waft-widgets.
+- button_style.rs, menu_style.rs: `ButtonStyle`'s and `MenuStyle`'s `hashCode` (`Hash`). Trigger: the first map or set keyed by one.
+- button_style.rs, scrollbar_theme.rs, menu_style.rs, menu_theme.rs, navigation_bar_theme.rs, navigation_drawer_theme.rs, bottom_navigation_bar_theme.rs, popup_menu_theme.rs, tab_bar_theme.rs: value equality of `WidgetStatePropertyAll` and `WidgetStateMapper` in each one's `==`. Trigger: an equality method on `WidgetStateProperty` in waft-widgets.
 - tooltip_theme.rs: `TooltipThemeData`'s `hashCode` (`Hash`). Trigger: the first map or set keyed by a `TooltipThemeData`.
 - ink_well.rs: `InkResponse(onDoubleTap:)` reaching the gesture detector (the field and `handleDoubleTap` exist; a double tap never fires). Trigger: `DoubleTapGestureRecognizer` (waft-widgets gesture_detector deferral).
 - ink_decoration.rs: `Ink.image`. Trigger: `DecorationImage`.
 - debug.rs: the `describeMissingAncestor` part of the messages. Trigger: `BuildContext::describe_missing_ancestor` in waft-widgets.
-- theme_data.rs: the component theme fields, each with its factory and `copyWith` argument and its `lerp` and `==` branches: bottom_app_bar_theme, bottom_navigation_bar_theme, button_theme, carousel_view_theme (`carousel_theme.dart`), chip_theme, data_table_theme, date_picker_theme, dialog_theme, dropdown_menu_theme, menu_bar_theme, menu_button_theme, menu_theme, navigation_bar_theme, navigation_drawer_theme, navigation_rail_theme, popup_menu_theme, search_bar_theme, search_view_theme, segmented_button_theme, tab_bar_theme, time_picker_theme, toggle_buttons_theme, button_bar_theme (`button_theme`'s factory default also reads `disabledColor`, `focusColor`, `hoverColor`, `highlightColor` and `splashColor`). Trigger: each one's `*_theme.dart`, with its component.
+- theme_data.rs: the component theme fields, each with its factory and `copyWith` argument and its `lerp` and `==` branches: bottom_app_bar_theme, button_theme, carousel_view_theme (`carousel_theme.dart`), chip_theme, data_table_theme, date_picker_theme, dropdown_menu_theme, search_bar_theme, search_view_theme, segmented_button_theme, time_picker_theme, toggle_buttons_theme, button_bar_theme (`button_theme`'s factory default also reads `disabledColor`, `focusColor`, `hoverColor`, `highlightColor` and `splashColor`). Trigger: each one's `*_theme.dart`, with its component.
 - theme_data.rs: `ThemeData(useSystemColors:)` and `_overrideWithSystemColors`. Trigger: dart:ui `SystemColor` in waft-embedder, with `floating_action_button_theme`.
 - theme_data.rs: `ThemeData`'s `hashCode` (`Hash`). Trigger: the first map or set keyed by a `ThemeData`.
 - time.rs: `TimeOfDay.now`. Trigger: local time in Waft (waft-foundation's `DateTime` is UTC only and no host gives a time zone).
 - `ColorScheme.fromImageProvider` with `_extractColorsFromImageProvider`, `_imageProviderToScaled` and `_getArgbFromAbgr`. Trigger: reading an image's pixels back (`Image.toByteData`, deferred in waft-embedder) and `Picture.toImage`.
 - `ColorScheme`'s `hashCode` (`Hash`). Trigger: the first map or set keyed by a `ColorScheme`.
-- input_border.rs: `ShapedInputBorder` and `shaped_input_border_test.dart`. Trigger: `Path.combine` (`PathOperation.difference`), with the lead (Skia's PathOps is ~20k lines; Valo has not built it).
 - input_decorator.rs: the `Semantics` wrappers and what feeds them (helper/error containers and live region, the counter's wrapper, the affixes' `sortKey`/`tagForChildren` with the state's `OrdinalSortKey`s and `SemanticsTag`s, the prefix/suffix icon tags, the error `hint`, `_RenderDecoration.visitChildrenForSemantics`, `_childSemanticsConfigurationDelegate`, `describeSemanticsConfiguration`, `markNeedsSemanticsUpdate` in `isFocused`, the counter's `semanticsLabel`, `copyWith(semanticsService:)`). Trigger: the next edit of input_decorator.rs for the wrappers (the semantics widgets exist); the semantics tree for the rest.
 - input_decorator.rs: `InputDecoration`'s and `InputDecorationThemeData`'s `hashCode` (`Hash`). Trigger: the first map or set keyed by one.
 - theme_data.rs, input_decorator.rs: Dart's `ThemeData(inputDecorationTheme:)` and `InputDecoration.applyDefaults` take `Object` with a TODO to retype them; here they take `impl Into<InputDecorationThemeData>`. Trigger: Flutter retyping them.
@@ -547,3 +684,12 @@ Ported against: 34b89b2086d4
 - text_field.rs, selectable_text.rs: spell-check fetch, scribble and floating-cursor cases. Trigger: those features.
 - selectable_text.rs: handle-drag, magnifier, PageView, force-press, span-recognizer, mouse-cursor, keep-alive, context-menu-group cases (portable now) and the two takeException cases (Trigger: `FlutterError.reportError`).
 - scaffold.rs, drawer.rs: the "The context used was" lines of the `of` messages print the widget's type where Dart describes the element. Trigger: diagnostics.
+- navigation_bar.rs, navigation_rail.rs, bottom_navigation_bar.rs: `FadeTransition(alwaysIncludeSemantics: true)` around the labels. Trigger: the semantics tree.
+- navigation_bar.rs, navigation_rail.rs, navigation_drawer.rs, bottom_navigation_bar.rs: their tests' semantics cases (navigation_bar_test's three 'Navigation bar … semantics', navigation_rail_test's five 'Semantics - …', navigation_drawer_test 'Navigation drawer semantics', bottom_navigation_bar_test's 'BottomNavigationBar.fixed semantics', '.shifting semantics', the two '[showSelectedLabels]=false and [showUnselectedLabels]=false semantics', 'excludes semantics' and 'BottomNavigationBarItem.semanticsLabel overrides Text semantics'). Trigger: the semantics tree.
+- bottom_navigation_bar.rs: bottom_navigation_bar_test 'Material2 - BottomNavigationBar paints circles'. Trigger: a test_support `paints` matcher that keeps translate, save and restore.
+- bottom_navigation_bar.rs: bottom_navigation_bar_test's 'feedback' group (five cases). Trigger: `SystemSound`.
+- tabs.rs: tabs_test 'indicatorPadding update test', which pumps to `EnginePhase.build` and reads `debugNeedsPaint`. Trigger: a build-only pump in the test harness.
+- tabs.rs: tabs_test "Tab's ink response splashColor matches resolved Tab overlayColor for WidgetState.pressed": at its 200 ms the splash is a circle of radius 0, which Valo does not record (an empty path draws nothing). Trigger: Valo recording an empty path's draw.
+- tabs.rs: tabs_test 'correct semantics', 'correct scrolling semantics', 'can override semantics of tabs' and 'Test semantics of TabPageSelector'. Trigger: the semantics tree.
+- tab_controller.rs: tab_controller_test '$TabController dispatches creation in constructor.' Trigger: leak tracking.
+- tab_bar_theme.rs: tab_bar_theme_test's `debugFillProperties` cases and the `hashCode` assert. Trigger: diagnostics; `Hash`.

@@ -1016,7 +1016,7 @@ pub(crate) mod tests {
     /// Dart's `tooltipKey.currentState?.ensureTooltipVisible()`.
     pub(crate) fn ensure_tooltip_visible(tester: &WidgetTester, key: &GlobalKey) -> bool {
         let mut app = tester.cell.borrow_mut();
-        key.current_state::<TooltipState>(&mut app)
+        key.current_state::<TooltipState>(&app)
             .is_some_and(|state| state.ensure_tooltip_visible(&mut app))
     }
 
@@ -1064,13 +1064,6 @@ pub(crate) mod tests {
     /// The size of the tooltip's paragraph: Dart's `tester.getSize(find.text(tooltipText))`.
     pub(crate) fn paragraph_size(tester: &WidgetTester) -> Size {
         size(tester, text_box(tester))
-    }
-
-    /// The height of a Material 3 `bodyMedium` line at `font_size`: its `height` of 1.43 times
-    /// the size, as Valo lays it out in `f32`. Flutter's engine rounds a line's height to whole
-    /// pixels (20.0 at 14.0), and its tests assert the rounded value; Valo does not round.
-    pub(crate) fn m3_line(font_size: f64) -> f64 {
-        f64::from(font_size as f32 * 1.43_f32)
     }
 
     pub(crate) fn found(tester: &WidgetTester, text: &str) -> bool {
@@ -1178,8 +1171,7 @@ pub(crate) mod tests {
     fn material3_does_tooltip_end_up_in_the_right_place_top_left() {
         with_main_thread_stack(|| {
             let (_tester, tip) = top_left_case(m3);
-            // Flutter's 30.0: a 20.0 line + 5.0 padding * 2 (top, bottom).
-            assert_eq!(tip.height(), m3_line(14.0) + 10.0);
+            assert_eq!(tip.height(), 30.0); // 20.0 height + 5.0 padding * 2 (top, bottom)
             assert_eq!(tip.top_left(), Offset::new(10.0, 20.0));
         });
     }
@@ -1253,11 +1245,10 @@ pub(crate) mod tests {
     fn material3_does_tooltip_end_up_in_the_right_place_way_off_to_the_right() {
         with_main_thread_stack(|| {
             let (_tester, tip) = right_edge_case(m3, 1600.0);
-            // Flutter's 20.0 and 330.0: a 20.0 line.
-            assert_eq!(tip.height(), m3_line(14.0));
+            assert_eq!(tip.height(), 20.0);
             assert_eq!(tip.top, 310.0);
             assert_eq!(tip.right, 790.0);
-            assert_eq!(tip.bottom, 310.0 + m3_line(14.0));
+            assert_eq!(tip.bottom, 330.0);
         });
     }
 
@@ -1276,11 +1267,10 @@ pub(crate) mod tests {
     fn material3_does_tooltip_end_up_in_the_right_place_near_the_edge() {
         with_main_thread_stack(|| {
             let (_tester, tip) = right_edge_case(m3, 780.0);
-            // Flutter's 20.0 and 330.0: a 20.0 line.
-            assert_eq!(tip.height(), m3_line(14.0));
+            assert_eq!(tip.height(), 20.0);
             assert_eq!(tip.top, 310.0);
             assert_eq!(tip.right, 790.0);
-            assert_eq!(tip.bottom, 310.0 + m3_line(14.0));
+            assert_eq!(tip.bottom, 330.0);
         });
     }
 
@@ -1603,10 +1593,9 @@ pub(crate) mod tests {
                 let tester = desktop_case(platform, m3);
                 let paragraph = tester.first::<RenderParagraph>();
                 let text_size = paragraph.text_size(&tester.cell.borrow());
-                // Flutter's 17.0 and 25.0: a 17.0 line.
-                assert_eq!(text_size.height(), m3_line(12.0));
+                assert_eq!(text_size.height(), 17.0);
                 let tip = size(&tester, tooltip_container(&tester));
-                assert_eq!(tip.height(), m3_line(12.0) + 8.0);
+                assert_eq!(tip.height(), 25.0);
                 assert_default_look(&tester, EdgeInsets::symmetric(4.0, 8.0));
             }
         });
@@ -1679,13 +1668,12 @@ pub(crate) mod tests {
     fn material3_tooltip_text_scales_with_text_scale_factor() {
         with_main_thread_stack(|| {
             let [(text, tip), (scaled_text, scaled_tip)] = text_scale_case(m3);
-            // Flutter's 20.0, 80.0 and 88.0: lines of 20.0 and 80.0.
             assert_eq!(text.width(), 42.75);
-            assert_eq!(text.height(), m3_line(14.0));
+            assert_eq!(text.height(), 20.0);
             assert_eq!(tip, 32.0);
             assert_eq!(scaled_text.width(), 168.75);
-            assert_eq!(scaled_text.height(), m3_line(56.0));
-            assert_eq!(scaled_tip, m3_line(56.0) + 8.0);
+            assert_eq!(scaled_text.height(), 80.0);
+            assert_eq!(scaled_tip, 88.0);
         });
     }
 

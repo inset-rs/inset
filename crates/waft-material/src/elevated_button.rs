@@ -1254,7 +1254,7 @@ mod tests {
             assert_eq!(tester.find_by_type::<Icon>().len(), 1);
             assert!(
                 label_key
-                    .current_context(&mut tester.cell.borrow_mut())
+                    .current_context(&tester.cell.borrow_mut())
                     .is_some()
             );
 
@@ -1268,7 +1268,7 @@ mod tests {
             assert!(tester.find_by_type::<Icon>().is_empty());
             assert!(
                 label_key
-                    .current_context(&mut tester.cell.borrow_mut())
+                    .current_context(&tester.cell.borrow_mut())
                     .is_some()
             );
             assert!(tester.find_by_type::<Row>().is_empty());
@@ -1680,7 +1680,7 @@ mod tests {
             let padding_rect =
                 tester.global_rect(tester.render_box_of(in_button::<Padding>(&tester)));
             let label = label_key
-                .current_context(&mut tester.cell.borrow_mut())
+                .current_context(&tester.cell.borrow_mut())
                 .expect("mounted");
             let label_rect = tester.global_rect(tester.render_box_of(label));
             let icon_rect = icon_rect(&tester);
@@ -2027,7 +2027,7 @@ mod tests {
             // label.x = 46 + 50 + 8 = 104
             let rect = |key: &GlobalKey| {
                 let context = key
-                    .current_context(&mut tester.cell.borrow_mut())
+                    .current_context(&tester.cell.borrow_mut())
                     .expect("mounted");
                 tester.global_rect(tester.render_box_of(context))
             };

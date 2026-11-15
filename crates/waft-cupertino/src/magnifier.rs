@@ -1,8 +1,4 @@
 //! Flutter counterpart: `cupertino/magnifier.dart`.
-//!
-//! `CupertinoMagnifier` draws through `waft-widgets`' `RawMagnifier`, whose lens waits on Valo
-//! for its magnification: it shows the content under it unscaled (see `waft-widgets`'
-//! `PORTING.md`). The positioning, the in / out animation and the styling here are whole.
 
 use std::fmt::{self, Debug};
 use std::rc::Rc;
@@ -812,9 +808,9 @@ mod tests {
                 .into_widget(),
         );
         let mut app = cell.borrow_mut();
-        let context = placeholder.current_context(&mut app).expect("mounted");
+        let context = placeholder.current_context(&app).expect("mounted");
         let tap_point_render_box = fake_text_field
-            .current_context(&mut app)
+            .current_context(&app)
             .and_then(|context| context.find_render_object(&app))
             .and_then(|render_object| render_object.as_box())
             .expect("laid out");
@@ -845,7 +841,7 @@ mod tests {
         let home = GlobalKey::new();
         let cell = mount_app(home.clone());
         let mut app = cell.borrow_mut();
-        let context = home.current_context(&mut app).expect("mounted");
+        let context = home.current_context(&app).expect("mounted");
         let width = MediaQuery::size_of(&mut app, context).width();
         // The tap position is far out of the right side of the app.
         let magnifier_info = app.create(ValueNotifier::new(info(Offset::new(width + 100.0, 0.0))));
@@ -863,7 +859,7 @@ mod tests {
         let home = GlobalKey::new();
         let cell = mount_app(home.clone());
         let mut app = cell.borrow_mut();
-        let context = home.current_context(&mut app).expect("mounted");
+        let context = home.current_context(&app).expect("mounted");
         let drag_position_below_text_field = REASONABLE_TEXT_FIELD.center().dy() + 30.0;
         let width = MediaQuery::size_of(&mut app, context).width();
         let magnifier_info = app.create(ValueNotifier::new(info(Offset::new(
@@ -915,7 +911,7 @@ mod tests {
         let home = GlobalKey::new();
         let cell = mount_app(home.clone());
         let mut app = cell.borrow_mut();
-        let context = home.current_context(&mut app).expect("mounted");
+        let context = home.current_context(&app).expect("mounted");
         let (magnifier_controller, _, _) = shown_then_dragged_below(&mut app, context);
         magnifier_controller.remove_from_overlay(&mut app);
     }
@@ -925,7 +921,7 @@ mod tests {
         let home = GlobalKey::new();
         let cell = mount_app(home.clone());
         let mut app = cell.borrow_mut();
-        let context = home.current_context(&mut app).expect("mounted");
+        let context = home.current_context(&app).expect("mounted");
         let (magnifier_controller, magnifier_info, at) =
             shown_then_dragged_below(&mut app, context);
 

@@ -17,6 +17,7 @@ use std::rc::Rc;
 use waft_foundation::{App, Key, ValueKey};
 
 use crate::framework::{BuildContext, IntoWidget, KeyRef, WidgetRef};
+use crate::widgets::automatic_keep_alive::AutomaticKeepAlive;
 use crate::widgets::basic::{IndexedSemantics, KeyedSubtree, RepaintBoundary};
 
 /// Signature for a function that creates a widget for a given index, e.g., in a list, but may
@@ -255,12 +256,14 @@ fn unsalt(key: &KeyRef) -> KeyRef {
 }
 
 /// Wraps a built child the way both delegates do: a repaint boundary, an [`IndexedSemantics`],
-/// then a [`KeyedSubtree`] carrying the salted key.
+/// an [`AutomaticKeepAlive`], then a [`KeyedSubtree`] carrying the salted key.
 ///
-/// Flutter also wraps in `AutomaticKeepAlive`; that waits (see `PORTING.md`).
+/// Flutter puts a `_SelectionKeepAlive` inside the `AutomaticKeepAlive`; that waits (see
+/// `PORTING.md`).
 fn wrap_child(
     child: WidgetRef,
     index: i32,
+    add_automatic_keep_alives: bool,
     add_repaint_boundaries: bool,
     add_semantic_indexes: bool,
     semantic_index_callback: &SemanticIndexCallback,
@@ -278,6 +281,9 @@ fn wrap_child(
         child = IndexedSemantics::new(semantic_index + semantic_index_offset)
             .child(child)
             .into_widget();
+    }
+    if add_automatic_keep_alives {
+        child = AutomaticKeepAlive::new(child).into_widget();
     }
     let subtree = KeyedSubtree::new(child);
     match key {
@@ -506,6 +512,7 @@ impl SliverChildDelegate for SliverChildBuilderDelegate {
         Some(wrap_child(
             child,
             index,
+            self.add_automatic_keep_alives,
             self.add_repaint_boundaries,
             self.add_semantic_indexes,
             &self.semantic_index_callback,
@@ -713,6 +720,7 @@ impl SliverChildDelegate for SliverChildListDelegate {
         Some(wrap_child(
             child,
             index,
+            self.add_automatic_keep_alives,
             self.add_repaint_boundaries,
             self.add_semantic_indexes,
             &self.semantic_index_callback,

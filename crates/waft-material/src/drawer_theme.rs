@@ -227,7 +227,7 @@ impl DrawerTheme {
     pub fn of(app: &mut App, context: BuildContext) -> DrawerThemeData {
         match context.depend_on_inherited_widget_of_exact_type::<DrawerTheme>(app) {
             Some(drawer_theme) => drawer_theme.data.clone(),
-            None => Theme::of(app, context).drawer_theme,
+            None => Theme::of(app, context).drawer_theme.clone(),
         }
     }
 }

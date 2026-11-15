@@ -2075,7 +2075,7 @@ mod tests {
                 .into_widget(),
             );
             let host = host_key
-                .current_state::<HostState>(&mut cell.borrow_mut())
+                .current_state::<HostState>(&cell.borrow_mut())
                 .expect("the host mounted");
             Fixture {
                 cell,
@@ -2096,7 +2096,7 @@ mod tests {
 
         fn state(&self) -> Handle<CupertinoSwitchState> {
             let key = self.cell.borrow().get(self.host).switch_key.clone();
-            key.current_state::<CupertinoSwitchState>(&mut self.cell.borrow_mut())
+            key.current_state::<CupertinoSwitchState>(&self.cell.borrow_mut())
                 .expect("the switch mounted")
         }
 
@@ -2215,9 +2215,9 @@ mod tests {
 
         fn first<T: RenderObject>(&self) -> RenderHandle<T> {
             let key = self.cell.borrow().get(self.host).switch_key.clone();
-            let mut app = self.cell.borrow_mut();
+            let app = self.cell.borrow();
             let root = key
-                .current_context(&mut app)
+                .current_context(&app)
                 .expect("the switch mounted")
                 .find_render_object(&app)
                 .expect("the switch has been laid out");
@@ -2914,9 +2914,9 @@ mod tests {
             )
             .into_widget(),
         );
-        let mut app = cell.borrow_mut();
+        let app = cell.borrow();
         let render = key
-            .current_context(&mut app)
+            .current_context(&app)
             .and_then(|context| context.find_render_object(&app))
             .and_then(|object| object.as_box())
             .expect("the switch laid out");

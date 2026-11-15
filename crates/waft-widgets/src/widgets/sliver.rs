@@ -2220,6 +2220,7 @@ mod tests {
         ];
         children.extend((1..8).map(item));
         let sliver = SliverList::list(children)
+            .add_automatic_keep_alives(false)
             .add_repaint_boundaries(false)
             .add_semantic_indexes(false)
             .into_widget();
@@ -2317,6 +2318,7 @@ mod tests {
         children.extend((1..40).map(item));
         let tiles = SliverGridDelegateWithFixedCrossAxisCount::new(2).child_aspect_ratio(3.0);
         let sliver = SliverGrid::list(Rc::new(tiles), children)
+            .add_automatic_keep_alives(false)
             .add_repaint_boundaries(false)
             .add_semantic_indexes(false)
             .into_widget();

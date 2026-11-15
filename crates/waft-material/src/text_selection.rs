@@ -591,9 +591,9 @@ mod tests {
     /// `materialTextSelectionControls.canSelectAll(key.currentState!)`.
     #[allow(deprecated)]
     fn can_select_all(tester: &WidgetTester, key: &GlobalKey) -> bool {
-        let mut app = tester.cell.borrow_mut();
+        let app = tester.cell.borrow();
         let state = key
-            .current_state::<EditableTextState>(&mut app)
+            .current_state::<EditableTextState>(&app)
             .expect("the EditableText is mounted");
         material_text_selection_controls().can_select_all(&app, state.as_text_selection_delegate())
     }

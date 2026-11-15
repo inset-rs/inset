@@ -1237,7 +1237,7 @@ mod tests {
                 .into_widget(),
             );
             let host = host_key
-                .current_state::<HostState>(&mut cell.borrow_mut())
+                .current_state::<HostState>(&cell.borrow_mut())
                 .expect("the host mounted");
             Fixture {
                 cell,
@@ -1395,9 +1395,9 @@ mod tests {
 
         fn render_object(&self) -> AnyRenderObject {
             let key = self.cell.borrow().get(self.host).slider_key.clone();
-            let mut app = self.cell.borrow_mut();
+            let app = self.cell.borrow();
             let root = key
-                .current_context(&mut app)
+                .current_context(&app)
                 .expect("the slider mounted")
                 .find_render_object(&app)
                 .expect("the slider has been laid out");
@@ -1409,9 +1409,9 @@ mod tests {
 
         fn opacity(&self) -> f64 {
             let key = self.cell.borrow().get(self.host).slider_key.clone();
-            let mut app = self.cell.borrow_mut();
+            let app = self.cell.borrow();
             let root = key
-                .current_context(&mut app)
+                .current_context(&app)
                 .expect("the slider mounted")
                 .find_render_object(&app)
                 .expect("the slider has been laid out");
@@ -1718,9 +1718,9 @@ mod tests {
             // Every variant is transparent, and a transparent draw is not recorded, so the
             // resolved colour is read where Dart's `paints..rrect(color:)` would find it drawn.
             let key = fixture.cell.borrow().get(fixture.host).slider_key.clone();
-            let mut app = fixture.cell.borrow_mut();
+            let app = fixture.cell.borrow();
             let render = key
-                .current_context(&mut app)
+                .current_context(&app)
                 .and_then(|context| context.find_render_object(&app))
                 .expect("laid out");
             let slider = find(&app, render, &|app, node| {
@@ -1821,9 +1821,9 @@ mod tests {
             )
             .into_widget(),
         );
-        let mut app = cell.borrow_mut();
+        let app = cell.borrow();
         let render = key
-            .current_context(&mut app)
+            .current_context(&app)
             .and_then(|context| context.find_render_object(&app))
             .and_then(|object| object.as_box())
             .expect("the slider laid out");

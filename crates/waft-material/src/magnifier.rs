@@ -1,8 +1,4 @@
 //! Flutter counterpart: `material/magnifier.dart`.
-//!
-//! `Magnifier` draws through `waft-widgets`' `RawMagnifier`, whose lens waits on Valo for its
-//! magnification: it shows the content under it unscaled (see `waft-widgets`' `PORTING.md`).
-//! The positioning, the line-jump animation and the styling here are whole.
 
 use std::rc::Rc;
 use std::time::Duration;
@@ -560,7 +556,7 @@ mod tests {
         let home = GlobalKey::new();
         pump_app(&mut tester, &home);
         let context = home
-            .current_context(&mut tester.cell.borrow_mut())
+            .current_context(&tester.cell.borrow_mut())
             .expect("mounted");
         (tester, context)
     }

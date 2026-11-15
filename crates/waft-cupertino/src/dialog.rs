@@ -4513,7 +4513,7 @@ mod tests {
         let center = rect_of(&mut app, &action).center();
         send(&mut app, PointerChange::Down, center, center);
         let state = dialog
-            .current_state::<CupertinoAlertDialogState>(&mut app)
+            .current_state::<CupertinoAlertDialogState>(&app)
             .expect("the dialog is mounted");
         assert_eq!(app.get(state).pressed_index, Some(0));
         pump(&mut app, Duration::ZERO);
@@ -4581,7 +4581,7 @@ mod tests {
         let mut app = cell.borrow_mut();
 
         let state = sheet
-            .current_state::<CupertinoActionSheetState>(&mut app)
+            .current_state::<CupertinoActionSheetState>(&app)
             .expect("the sheet is mounted");
         let first_center = rect_of(&mut app, &first).center();
         let second_center = rect_of(&mut app, &second).center();

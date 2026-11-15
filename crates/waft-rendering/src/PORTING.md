@@ -123,10 +123,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — a Rust trait has no fields, no constructor, no `runtimeType` and no identity equality on a boxed value.
   Affect: a fresh `Rc` around an equal clipper counts as a different clipper and re-subscribes; `old_clipper` is read with `as_any().downcast_ref()`.
 
-- Change: `RenderTransform` has no `filterQuality`.
-  Reason: platform — the filtered path is an `ImageFilterLayer` over `ImageFilter.matrix`, which the embedder's `ImageFilter` lacks, as valo has no matrix filter.
-  Affect: a transform always paints through `push_transform`, or through the child's paint offset when the matrix is a translation.
-
 - Change: `RenderColoredBox` does not pass `is_anti_alias` to the canvas.
   Reason: platform — valo's `Paint` has no anti-alias flag.
   Affect: the fill is drawn the way valo draws it, and setting the flag only marks a repaint.
@@ -278,5 +274,5 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - `RenderEditable` inline children, the custom-paint child boxes and the internal tap / long-press recognizers. Trigger: the next edit of editable.rs for the inline children (`WidgetSpan` exists); a field that does not set `ignorePointer` for the recognizers.
 - `SliverConstraints.debugAssertIsValid` extra numeric checks. Trigger: a caller that relies on those messages.
 - `RenderIgnoreBaseline`, which reports no baseline for a child that has one, so that a baseline-aligned row puts that child at the top. Trigger: a child a baseline-aligned `Row` should not align by its baseline.
-- `RenderTransform.filterQuality` and Dart's `ImageFilterLayer` path, which waits on `ImageFilter.matrix`. Trigger: the first `Transform(filterQuality:)`, with `PaintingContext.pushColorFilter`.
+- `PaintingContext.pushColorFilter`. Trigger: its first caller.
 - proxy_box.rs: the physical models' diagnostics. Trigger: diagnostics.

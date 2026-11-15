@@ -73,6 +73,19 @@ pub struct BottomNavigationBarItem {
     ///
     /// Defaults to `None`, in which case the tooltip is not shown.
     pub tooltip: Option<String>,
+
+    /// The semantic label for this [`BottomNavigationBarItem`].
+    ///
+    /// This is used by accessibility tools to describe the item. When provided,
+    /// it overrides the default [`label`](Self::label) String when read by accessibility
+    /// tools.
+    ///
+    /// This is useful when the visual label does not fully describe the action
+    /// or destination, or when you want to provide additional context for
+    /// screen reader users.
+    ///
+    /// If null, the default semantic description is used.
+    pub semantics_label: Option<String>,
 }
 
 impl BottomNavigationBarItem {
@@ -90,6 +103,7 @@ impl BottomNavigationBarItem {
             label: None,
             background_color: None,
             tooltip: None,
+            semantics_label: None,
         }
     }
 
@@ -123,6 +137,15 @@ impl BottomNavigationBarItem {
     /// Dart `BottomNavigationBarItem(tooltip:)`.
     pub fn tooltip(mut self, tooltip: impl Into<String>) -> BottomNavigationBarItem {
         self.tooltip = Some(tooltip.into());
+        self
+    }
+
+    /// Dart `BottomNavigationBarItem(semanticsLabel:)`.
+    pub fn semantics_label(
+        mut self,
+        semantics_label: impl Into<String>,
+    ) -> BottomNavigationBarItem {
+        self.semantics_label = Some(semantics_label.into());
         self
     }
 }

@@ -241,7 +241,7 @@ impl Fixture {
     /// `GetRectFromCharacterIndex` of the box.
     fn rect_of(&self, index: i32, trailing_edge: bool) -> Option<Rect> {
         let mut app = self.cell.borrow_mut();
-        let state = self.key.current_state::<TextBoxState>(&mut app).unwrap();
+        let state = self.key.current_state::<TextBoxState>(&app).unwrap();
         state.get_rect_from_character_index(&mut app, index, trailing_edge)
     }
 

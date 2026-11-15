@@ -159,8 +159,8 @@ impl ThemeMode {
 ///  * [`MaterialPageRoute`], which defines an app page that transitions in a material-specific way.
 ///  * [`WidgetsApp`], which defines the basic app elements but does not depend on the material library.
 ///
-/// The four themes are boxed: a [`ThemeData`] is some 160 KB, and four held inline would be
-/// copied through every fluent setter, past what a thread's stack holds.
+/// The four themes are shared, as Dart shares the one [`ThemeData`] object: the theme a build
+/// selects is the one given, so `ThemeData::localize`'s identity cache hits across rebuilds.
 pub struct MaterialApp {
     /// See [`Widget::key`](waft_widgets::Widget::key).
     pub key: Option<KeyRef>,
@@ -244,7 +244,7 @@ pub struct MaterialApp {
     ///    [`theme`](Self::theme) and [`dark_theme`](Self::dark_theme) in [`MaterialApp`].
     ///  * [`ThemeData::brightness`], which indicates the [`Brightness`] of a theme's
     ///    colors.
-    pub theme: Option<Box<ThemeData>>,
+    pub theme: Option<Rc<ThemeData>>,
 
     /// The [`ThemeData`] to use when a 'dark mode' is requested by the system.
     ///
@@ -267,7 +267,7 @@ pub struct MaterialApp {
     ///    [`theme`](Self::theme) and [`dark_theme`](Self::dark_theme) in [`MaterialApp`].
     ///  * [`ThemeData::brightness`], which is typically set to the value of
     ///    `MediaQueryData::platform_brightness`.
-    pub dark_theme: Option<Box<ThemeData>>,
+    pub dark_theme: Option<Rc<ThemeData>>,
 
     /// The [`ThemeData`] to use when 'high contrast' is requested by the system.
     ///
@@ -280,7 +280,7 @@ pub struct MaterialApp {
     ///
     ///  * `MediaQueryData::high_contrast`, which indicates the platform's
     ///    desire to increase contrast.
-    pub high_contrast_theme: Option<Box<ThemeData>>,
+    pub high_contrast_theme: Option<Rc<ThemeData>>,
 
     /// The [`ThemeData`] to use when a 'dark mode' and 'high contrast' is requested
     /// by the system.
@@ -296,7 +296,7 @@ pub struct MaterialApp {
     ///
     ///  * `MediaQueryData::high_contrast`, which indicates the platform's
     ///    desire to increase contrast.
-    pub high_contrast_dark_theme: Option<Box<ThemeData>>,
+    pub high_contrast_dark_theme: Option<Rc<ThemeData>>,
 
     /// Determines which theme will be used by the application if both [`theme`](Self::theme)
     /// and [`dark_theme`](Self::dark_theme) are provided.
@@ -637,26 +637,32 @@ impl MaterialApp {
     }
 
     /// Dart `MaterialApp(theme:)`.
-    pub fn theme(mut self, theme: ThemeData) -> MaterialApp {
-        self.theme = Some(Box::new(theme));
+    pub fn theme(mut self, theme: impl Into<Rc<ThemeData>>) -> MaterialApp {
+        self.theme = Some(theme.into());
         self
     }
 
     /// Dart `MaterialApp(darkTheme:)`.
-    pub fn dark_theme(mut self, dark_theme: ThemeData) -> MaterialApp {
-        self.dark_theme = Some(Box::new(dark_theme));
+    pub fn dark_theme(mut self, dark_theme: impl Into<Rc<ThemeData>>) -> MaterialApp {
+        self.dark_theme = Some(dark_theme.into());
         self
     }
 
     /// Dart `MaterialApp(highContrastTheme:)`.
-    pub fn high_contrast_theme(mut self, high_contrast_theme: ThemeData) -> MaterialApp {
-        self.high_contrast_theme = Some(Box::new(high_contrast_theme));
+    pub fn high_contrast_theme(
+        mut self,
+        high_contrast_theme: impl Into<Rc<ThemeData>>,
+    ) -> MaterialApp {
+        self.high_contrast_theme = Some(high_contrast_theme.into());
         self
     }
 
     /// Dart `MaterialApp(highContrastDarkTheme:)`.
-    pub fn high_contrast_dark_theme(mut self, high_contrast_dark_theme: ThemeData) -> MaterialApp {
-        self.high_contrast_dark_theme = Some(Box::new(high_contrast_dark_theme));
+    pub fn high_contrast_dark_theme(
+        mut self,
+        high_contrast_dark_theme: impl Into<Rc<ThemeData>>,
+    ) -> MaterialApp {
+        self.high_contrast_dark_theme = Some(high_contrast_dark_theme.into());
         self
     }
 
@@ -995,7 +1001,7 @@ impl MaterialAppState {
         delegates
     }
 
-    fn theme_builder(self: Handle<Self>, app: &mut App, context: BuildContext) -> ThemeData {
+    fn theme_builder(self: Handle<Self>, app: &mut App, context: BuildContext) -> Rc<ThemeData> {
         // Resolve which theme to use based on brightness and high contrast.
         let mode = self.widget(app).theme_mode.unwrap_or(ThemeMode::System);
         let platform_brightness = MediaQuery::platform_brightness_of(app, context);
@@ -1003,17 +1009,17 @@ impl MaterialAppState {
             || (mode == ThemeMode::System && platform_brightness == Brightness::Dark);
         let high_contrast = MediaQuery::high_contrast_of(app, context);
         let widget = self.widget(app);
-        let mut theme: Option<&ThemeData> = None;
+        let mut theme: Option<&Rc<ThemeData>> = None;
         if use_dark_theme && high_contrast && widget.high_contrast_dark_theme.is_some() {
-            theme = widget.high_contrast_dark_theme.as_deref();
+            theme = widget.high_contrast_dark_theme.as_ref();
         } else if use_dark_theme && widget.dark_theme.is_some() {
-            theme = widget.dark_theme.as_deref();
+            theme = widget.dark_theme.as_ref();
         } else if high_contrast && widget.high_contrast_theme.is_some() {
-            theme = widget.high_contrast_theme.as_deref();
+            theme = widget.high_contrast_theme.as_ref();
         }
-        let theme = match theme.or(widget.theme.as_deref()) {
-            Some(theme) => theme.clone(),
-            None => ThemeData::new(app),
+        let theme = match theme.or(widget.theme.as_ref()) {
+            Some(theme) => Rc::clone(theme),
+            None => Rc::new(ThemeData::new(app)),
         };
         if let Some(view) = View::maybe_of(app, context) {
             SystemChrome::set_system_ui_overlay_style(
@@ -1284,7 +1290,7 @@ mod tests {
     }
 
     /// A `Builder` that keeps the theme it sees in `seen`, each time it builds.
-    fn theme_probe(seen: &Rc<RefCell<Option<ThemeData>>>) -> Builder {
+    fn theme_probe(seen: &Rc<RefCell<Option<Rc<ThemeData>>>>) -> Builder {
         let seen = Rc::clone(seen);
         Builder::new(move |app, context| {
             *seen.borrow_mut() = Some(Theme::of(app, context));
@@ -1301,7 +1307,7 @@ mod tests {
         })
     }
 
-    fn applied(seen: &Rc<RefCell<Option<ThemeData>>>) -> ThemeData {
+    fn applied(seen: &Rc<RefCell<Option<Rc<ThemeData>>>>) -> Rc<ThemeData> {
         seen.borrow().clone().expect("the probe built")
     }
 
@@ -1636,7 +1642,7 @@ mod tests {
             let key = GlobalKey::new();
             let color = Color::new(0xFF112233);
             let current = |tester: &WidgetTester, key: &GlobalKey| {
-                key.current_state::<NavigatorState>(&mut tester.cell.borrow_mut())
+                key.current_state::<NavigatorState>(&tester.cell.borrow_mut())
             };
 
             pump(&mut tester, |_| {
@@ -1680,7 +1686,7 @@ mod tests {
                     .home(SizedBox::new())
             });
             assert!(
-                key.current_state::<ScaffoldMessengerState>(&mut tester.cell.borrow_mut())
+                key.current_state::<ScaffoldMessengerState>(&tester.cell.borrow_mut())
                     .is_some()
             );
         });
@@ -2063,7 +2069,7 @@ mod tests {
             {
                 let mut app = tester.cell.borrow_mut();
                 let navigator = navigator_key
-                    .current_state::<NavigatorState>(&mut app)
+                    .current_state::<NavigatorState>(&app)
                     .expect("the navigator");
                 navigator.pop(&mut app, None);
             }

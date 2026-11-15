@@ -63,8 +63,8 @@ pub fn size_under_center(
                 .into_widget()
         }),
     );
-    let mut app = fixture.cell.borrow_mut();
-    let context = key.current_context(&mut app).unwrap();
+    let app = fixture.cell.borrow();
+    let context = key.current_context(&app).unwrap();
     let object = context.find_render_object(&app).unwrap().as_box().unwrap();
     object.size(&app)
 }

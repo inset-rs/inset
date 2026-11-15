@@ -2325,7 +2325,7 @@ impl SwitchConfigCupertino {
     /// Dart's `_SwitchConfigCupertino(context)`.
     fn new(app: &mut App, context: BuildContext) -> SwitchConfigCupertino {
         SwitchConfigCupertino {
-            colors: Theme::of(app, context).color_scheme,
+            colors: Theme::of(app, context).color_scheme.clone(),
         }
     }
 }

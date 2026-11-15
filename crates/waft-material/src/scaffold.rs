@@ -5414,7 +5414,7 @@ mod tests {
 
     /// Dart's `tester.state(find.byType(Scaffold))`, through the scaffold's key.
     fn scaffold_state(tester: &WidgetTester, key: &GlobalKey) -> Handle<ScaffoldState> {
-        key.current_state::<ScaffoldState>(&mut tester.cell.borrow_mut())
+        key.current_state::<ScaffoldState>(&tester.cell.borrow_mut())
             .expect("a mounted scaffold")
     }
 
@@ -5681,8 +5681,8 @@ mod tests {
                 )
             };
             let app_bar_found = |tester: &WidgetTester| {
-                let mut app = tester.cell.borrow_mut();
-                app_bar_key.current_context(&mut app).is_some()
+                let app = tester.cell.borrow();
+                app_bar_key.current_context(&app).is_some()
             };
 
             // When an appbar is provided, the Scaffold's body is built within a
@@ -7245,7 +7245,7 @@ mod tests {
         call: impl FnOnce(&mut App, BuildContext),
     ) -> String {
         let mut app = tester.cell.borrow_mut();
-        let context = key.current_context(&mut app).expect("a mounted builder");
+        let context = key.current_context(&app).expect("a mounted builder");
         let outcome =
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| call(&mut app, context)));
         panic_message(outcome.expect_err("the call panics"))
@@ -8053,14 +8053,14 @@ mod tests {
             // The bottom sheet is dismissed.
             assert!(
                 sheet_key
-                    .current_context(&mut tester.cell.borrow_mut())
+                    .current_context(&tester.cell.borrow_mut())
                     .is_none()
             );
         });
     }
 
     fn is_mounted(tester: &WidgetTester, key: &GlobalKey) -> bool {
-        key.current_context(&mut tester.cell.borrow_mut()).is_some()
+        key.current_context(&tester.cell.borrow_mut()).is_some()
     }
 
     // 'can rebuild and remove bottomSheet at the same time'.
@@ -8351,7 +8351,7 @@ mod tests {
 
             let get_opacity = |tester: &WidgetTester| {
                 let scrim = scrim_key
-                    .current_context(&mut tester.cell.borrow_mut())
+                    .current_context(&tester.cell.borrow_mut())
                     .expect("a scrim");
                 tester.widget(scrim, |scrim: &ColoredBox| scrim.color.color().a)
             };
@@ -8639,7 +8639,7 @@ mod tests {
             // Trigger a rebuild to update the "dirty" value.
             {
                 let mut app = tester.cell.borrow_mut();
-                let element = builder_key.current_context(&mut app).expect("mounted");
+                let element = builder_key.current_context(&app).expect("mounted");
                 element.mark_needs_build(&mut app);
             }
             tester.pump(crate::Durations::SHORT1);
@@ -8752,7 +8752,7 @@ mod tests {
                     .into_widget()
             });
             let context = root_key
-                .current_context(&mut tester.cell.borrow_mut())
+                .current_context(&tester.cell.borrow_mut())
                 .expect("the home route is mounted");
             push_page(&tester, context, false, || {
                 Scaffold::new()
@@ -8811,7 +8811,7 @@ mod tests {
                         .into_widget()
                 });
                 let context = body_key
-                    .current_context(&mut tester.cell.borrow_mut())
+                    .current_context(&tester.cell.borrow_mut())
                     .expect("the first page is mounted");
                 push_page(&tester, context, true, || {
                     Scaffold::new()

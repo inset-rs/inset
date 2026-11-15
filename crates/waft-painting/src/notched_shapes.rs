@@ -1,14 +1,13 @@
 //! Flutter counterpart: `painting/notched_shapes.dart`.
 //!
 //! [`NotchedShape`] is an abstract class, so a trait; a widget that holds one holds a
-//! [`NotchedShapeRef`]. [`AutomaticNotchedShape`] cannot subtract its guest from its host until
-//! Valo has path boolean operations (`PORTING.md`).
+//! [`NotchedShapeRef`].
 
 use std::fmt::Debug;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use waft_embedder::{Offset, Path, PathBuilder, Rect};
+use waft_embedder::{Offset, Path, PathBuilder, PathOperation, Rect, path_combine};
 
 use crate::borders::ShapeBorder;
 
@@ -243,11 +242,13 @@ impl Clone for AutomaticNotchedShape {
 }
 
 impl NotchedShape for AutomaticNotchedShape {
-    /// Dart returns `Path.combine(PathOperation.difference, hostPath, guestPath)` when there is
-    /// a guest and a guest rectangle; Valo has no path boolean operations, so the host path is
-    /// returned unnotched.
-    fn get_outer_path(&self, host_rect: Rect, _guest_rect: Option<Rect>) -> Arc<Path> {
-        self.host.get_outer_path(host_rect, None)
+    fn get_outer_path(&self, host_rect: Rect, guest_rect: Option<Rect>) -> Arc<Path> {
+        let host_path = self.host.get_outer_path(host_rect, None);
+        if let (Some(guest), Some(guest_rect)) = (&self.guest, guest_rect) {
+            let guest_path = guest.get_outer_path(guest_rect, None);
+            return path_combine(PathOperation::Difference, &host_path, &guest_path);
+        }
+        host_path
     }
 }
 
@@ -387,6 +388,35 @@ mod tests {
             &actual,
             &rect_path(host),
             host.inflate(800.0),
+            100
+        ));
+    }
+
+    /// Dart's `AutomaticNotchedShape - with guest`. Its expected path keeps the overlap and
+    /// cuts the host's bottom right instead, and passes only because Dart's `coversSameAreaAs`
+    /// samples from the origin, outside both paths; here the expected path is the host with
+    /// the guest's overlap cut out, which is what `Path.combine` gives.
+    #[test]
+    fn an_automatic_notched_shape_with_a_guest_cuts_the_guest_from_the_host() {
+        let actual = AutomaticNotchedShape::new(RoundedRectangleBorder::default())
+            .guest(RoundedRectangleBorder::default())
+            .get_outer_path(
+                Rect::from_ltwh(-200.0, -100.0, 50.0, 100.0),
+                Some(Rect::from_ltwh(-175.0, -110.0, 100.0, 100.0)),
+            );
+
+        let mut expected = PathBuilder::new();
+        expected.move_to(Offset::new(-200.0, -100.0));
+        expected.line_to(Offset::new(-175.0, -100.0));
+        expected.line_to(Offset::new(-175.0, -10.0));
+        expected.line_to(Offset::new(-150.0, -10.0));
+        expected.line_to(Offset::new(-150.0, 0.0));
+        expected.line_to(Offset::new(-200.0, 0.0));
+        expected.close();
+        assert!(covers_same_area_as(
+            &actual,
+            &expected.build(),
+            Rect::from_ltwh(-300.0, -300.0, 600.0, 600.0),
             100
         ));
     }

@@ -121,7 +121,7 @@ impl FilledButtonTheme {
     pub fn of(app: &mut App, context: BuildContext) -> FilledButtonThemeData {
         match context.depend_on_inherited_widget_of_exact_type::<FilledButtonTheme>(app) {
             Some(button_theme) => button_theme.data.clone(),
-            None => Theme::of(app, context).filled_button_theme,
+            None => Theme::of(app, context).filled_button_theme.clone(),
         }
     }
 }

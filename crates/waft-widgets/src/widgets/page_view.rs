@@ -321,6 +321,17 @@ impl ScrollControllerLeaf for PageController {
 pub struct PageMetrics {
     fixed: FixedScrollMetrics,
     viewport_fraction: f64,
+    // Set only on the snapshot a page view's position makes of itself
+    // (`ScrollPosition::copy_with`), which stands for the position where Dart hands the
+    // position itself to the physics: `PageScrollPhysics` answers it as Dart's
+    // `position is _PagePosition`. Every copy drops it, as Dart's copy is no position.
+    position: Option<PagePositionSnapshot>,
+}
+
+/// What a `_PagePosition` answers beyond its [`PageMetrics`] when its snapshot was taken.
+#[derive(Clone, Copy)]
+struct PagePositionSnapshot {
+    cached_page: Option<f64>,
 }
 
 impl PageMetrics {
@@ -344,12 +355,16 @@ impl PageMetrics {
                 device_pixel_ratio,
             ),
             viewport_fraction,
+            position: None,
         }
     }
 
     /// Dart's `PageMetrics.copyWith`; the `with_*` setters on the copy replace its values.
     pub fn copy_with(&self) -> PageMetrics {
-        *self
+        PageMetrics {
+            position: None,
+            ..*self
+        }
     }
 
     /// Dart `copyWith(minScrollExtent:)`.
@@ -413,9 +428,40 @@ impl PageMetrics {
     pub fn viewport_fraction(&self) -> f64 {
         self.viewport_fraction
     }
+
+    /// Dart's `_PagePosition.page`, answered from the position's snapshot.
+    fn position_page(&self, position: PagePositionSnapshot) -> Option<f64> {
+        if !self.has_pixels() {
+            return None;
+        }
+        if self.has_content_dimensions() {
+            Some(position.cached_page.unwrap_or_else(|| {
+                page_from_pixels(
+                    clamp_double(
+                        self.pixels(),
+                        self.min_scroll_extent(),
+                        self.max_scroll_extent(),
+                    ),
+                    self.viewport_dimension(),
+                    self.viewport_fraction,
+                )
+            }))
+        } else {
+            None
+        }
+    }
+
+    /// Dart's `_PagePosition.getPixelsFromPage`, answered from the position's snapshot.
+    fn position_pixels_from_page(&self, page: f64) -> f64 {
+        pixels_from_page(page, self.viewport_dimension(), self.viewport_fraction)
+    }
 }
 
 impl ScrollMetrics for PageMetrics {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
     fn min_scroll_extent(&self) -> f64 {
         self.fixed.min_scroll_extent()
     }
@@ -523,14 +569,9 @@ impl PagePosition {
         }
     }
 
-    // The amount of offset that will be added to [minScrollExtent] and subtracted
-    // from [maxScrollExtent], such that every page will properly snap to the center
-    // of the viewport when viewportFraction is greater than 1.
-    //
-    // The value is 0 if viewportFraction is less than or equal to 1, larger than 0
-    // otherwise.
+    /// Dart's `_initialPageOffset`; see [`initial_page_offset`].
     fn initial_page_offset(self: Handle<Self>, app: &App) -> f64 {
-        (self.viewport_dimension(app) * (self.viewport_fraction(app) - 1.0) / 2.0).max(0.0)
+        initial_page_offset(self.viewport_dimension(app), self.viewport_fraction(app))
     }
 
     fn get_page_from_pixels(
@@ -539,19 +580,15 @@ impl PagePosition {
         pixels: f64,
         viewport_dimension: f64,
     ) -> f64 {
-        debug_assert!(viewport_dimension > 0.0);
-        let actual = (pixels - self.initial_page_offset(app)).max(0.0)
-            / (viewport_dimension * self.viewport_fraction(app));
-        let round = actual.round();
-        if (actual - round).abs() < PRECISION_ERROR_TOLERANCE {
-            return round;
-        }
-        actual
+        page_from_pixels(pixels, viewport_dimension, self.viewport_fraction(app))
     }
 
     fn get_pixels_from_page(self: Handle<Self>, app: &App, page: f64) -> f64 {
-        page * self.viewport_dimension(app) * self.viewport_fraction(app)
-            + self.initial_page_offset(app)
+        pixels_from_page(
+            page,
+            self.viewport_dimension(app),
+            self.viewport_fraction(app),
+        )
     }
 
     fn page(self: Handle<Self>, app: &App) -> Option<f64> {
@@ -586,6 +623,34 @@ impl PagePosition {
             self.get_page_from_pixels(app, self.pixels(app), self.viewport_dimension(app))
         })
     }
+}
+
+// The amount of offset that will be added to [minScrollExtent] and subtracted
+// from [maxScrollExtent], such that every page will properly snap to the center
+// of the viewport when viewportFraction is greater than 1.
+//
+// The value is 0 if viewportFraction is less than or equal to 1, larger than 0
+// otherwise.
+fn initial_page_offset(viewport_dimension: f64, viewport_fraction: f64) -> f64 {
+    (viewport_dimension * (viewport_fraction - 1.0) / 2.0).max(0.0)
+}
+
+/// Dart's `_PagePosition.getPageFromPixels`, over the values it reads.
+fn page_from_pixels(pixels: f64, viewport_dimension: f64, viewport_fraction: f64) -> f64 {
+    debug_assert!(viewport_dimension > 0.0);
+    let actual = (pixels - initial_page_offset(viewport_dimension, viewport_fraction)).max(0.0)
+        / (viewport_dimension * viewport_fraction);
+    let round = actual.round();
+    if (actual - round).abs() < PRECISION_ERROR_TOLERANCE {
+        return round;
+    }
+    actual
+}
+
+/// Dart's `_PagePosition.getPixelsFromPage`, over the values it reads.
+fn pixels_from_page(page: f64, viewport_dimension: f64, viewport_fraction: f64) -> f64 {
+    page * viewport_dimension * viewport_fraction
+        + initial_page_offset(viewport_dimension, viewport_fraction)
 }
 
 impl ChangeNotifier for PagePosition {
@@ -702,6 +767,24 @@ impl ViewportOffset for PagePosition {
 
 impl ScrollPosition for PagePosition {
     crate::scroll_position_with_single_context_overrides!();
+
+    fn copy_with(self: Handle<Self>, app: &App) -> Rc<dyn ScrollMetrics> {
+        let has_content_dimensions = self.has_content_dimensions(app);
+        let mut metrics = PageMetrics::new(
+            has_content_dimensions.then(|| self.min_scroll_extent(app)),
+            has_content_dimensions.then(|| self.max_scroll_extent(app)),
+            self.has_pixels(app).then(|| self.pixels(app)),
+            self.has_viewport_dimension(app)
+                .then(|| self.viewport_dimension(app)),
+            ScrollPosition::axis_direction(self, app),
+            self.viewport_fraction(app),
+            self.device_pixel_ratio(app),
+        );
+        metrics.position = Some(PagePositionSnapshot {
+            cached_page: app.get(self).cached_page,
+        });
+        Rc::new(metrics)
+    }
 
     fn ensure_visible(
         self: Handle<Self>,
@@ -863,20 +946,21 @@ impl PageScrollPhysics {
         self
     }
 
-    // `get_page` and `get_pixels` count pages in whole viewports. Dart's first branch answers a
-    // `_PagePosition` with its own `page` and `getPixelsFromPage`, which count its
-    // `viewportFraction` and the offset of pages wider than the viewport. Here the physics are
-    // handed the `FixedScrollMetrics` that `ScrollPosition::copy_with` makes, which cannot say
-    // it comes from a page position, so a page view's position takes Dart's second branch too:
-    // the same targets while the page view's viewport fraction is 1.0 and the position is in
-    // range, other targets otherwise.
-    // TODO: Dart's `_PagePosition` branch, once the lead decides how physics reach the
-    // position they act on (`copy_with` returning page metrics, or the position itself).
+    // The physics are handed a page view's position as the snapshot its `copy_with` makes;
+    // `page_position` is Dart's `position is _PagePosition` on it.
     fn get_page(&self, position: &dyn ScrollMetrics) -> f64 {
+        if let Some((metrics, snapshot)) = page_position(position) {
+            return metrics
+                .position_page(snapshot)
+                .expect("a page position with dimensions has a page");
+        }
         position.pixels() / position.viewport_dimension()
     }
 
     fn get_pixels(&self, position: &dyn ScrollMetrics, page: f64) -> f64 {
+        if let Some((metrics, _)) = page_position(position) {
+            return metrics.position_pixels_from_page(page);
+        }
         page * position.viewport_dimension()
     }
 
@@ -894,6 +978,12 @@ impl PageScrollPhysics {
         }
         self.get_pixels(position, page.round())
     }
+}
+
+/// The page metrics and the position's snapshot when `position` is a page view's position.
+fn page_position(position: &dyn ScrollMetrics) -> Option<(&PageMetrics, PagePositionSnapshot)> {
+    let metrics = position.as_any().downcast_ref::<PageMetrics>()?;
+    metrics.position.map(|snapshot| (metrics, snapshot))
 }
 
 impl ScrollPhysics for PageScrollPhysics {
@@ -1426,16 +1516,11 @@ impl PageViewState {
             && let Some(on_page_changed) = on_page_changed
             && notification.as_any().is::<ScrollUpdateNotification>()
         {
-            // Dart reads `notification.metrics as PageMetrics`, which `_PagePosition.copyWith`
-            // makes. `ScrollPosition::copy_with` makes a `FixedScrollMetrics`, so the page
-            // metrics are made here from it and the controller's viewport fraction, which
-            // `PageController::attach` gave the position; the page reported is Dart's.
-            let metrics = notification.metrics().copy_with();
-            let viewport_fraction = self.controller(app).viewport_fraction(app);
-            let metrics = PageMetrics {
-                fixed: metrics,
-                viewport_fraction,
-            };
+            let metrics = notification
+                .metrics()
+                .as_any()
+                .downcast_ref::<PageMetrics>()
+                .expect("a page view's position reports page metrics");
             let current_page = metrics.page().expect("page metrics have a page").round() as i32;
             if current_page != app.get(self).last_reported_page {
                 app.get_mut(self).last_reported_page = current_page;
@@ -2559,6 +2644,24 @@ mod tests {
         tester.settle();
 
         assert_eq!(center_of(&tester, 2), Offset::new(400.0, 300.0));
+    }
+
+    /// Not in page_view_test.dart: Dart's `PageScrollPhysics` count a page view's pages in its
+    /// own pages (`_PagePosition.page`, `getPixelsFromPage`), here through the snapshot its
+    /// position's `copy_with` makes.
+    #[test]
+    fn a_large_viewport_fraction_settles_on_the_page_dragged_past_halfway() {
+        let mut tester = WidgetTester::new();
+        let controller = new_controller(&tester, 0, 5.0 / 4.0);
+        tester.pump_widget(built_page_view(controller, 3));
+
+        // Pages are 1000 wide and start 100 in: 600 dragged is past halfway to page 1, whose
+        // pixels are 1100, where whole viewports would have counted page 1 at 800.
+        tester.drag_from(CENTER, Offset::new(-600.0, 0.0));
+        tester.settle();
+
+        assert_eq!(page(&tester, controller), Some(1.0));
+        assert_eq!(center_of(&tester, 1), Offset::new(400.0, 300.0));
     }
 
     #[test]

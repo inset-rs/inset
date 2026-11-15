@@ -122,7 +122,7 @@ impl OutlinedButtonTheme {
     pub fn of(app: &mut App, context: BuildContext) -> OutlinedButtonThemeData {
         match context.depend_on_inherited_widget_of_exact_type::<OutlinedButtonTheme>(app) {
             Some(button_theme) => button_theme.data.clone(),
-            None => Theme::of(app, context).outlined_button_theme,
+            None => Theme::of(app, context).outlined_button_theme.clone(),
         }
     }
 }

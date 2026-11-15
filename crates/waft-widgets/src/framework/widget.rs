@@ -20,6 +20,7 @@ use super::elements::{
 };
 use super::state::State;
 use crate::widgets::inherited_theme::InheritedTheme;
+use crate::widgets::preferred_size::PreferredSizeWidget;
 
 /// A widget's key (Dart's `Key?` on a widget): a local key, or a [`GlobalKey`], which is a
 /// key the element tree registers.
@@ -135,6 +136,16 @@ pub trait Widget: Any + Debug {
     fn as_inherited_theme(&self) -> Option<&dyn InheritedTheme> {
         None
     }
+
+    /// Dart's `widget is PreferredSizeWidget`: this widget as a [`PreferredSizeWidget`], when
+    /// it is one.
+    ///
+    /// The erased forms of a stateless and a stateful widget forward it, from
+    /// [`StatelessWidget::as_preferred_size_widget`] and
+    /// [`StatefulWidget::as_preferred_size_widget`].
+    fn as_preferred_size_widget(&self) -> Option<&dyn PreferredSizeWidget> {
+        None
+    }
 }
 
 /// Dart's `Widget._debugConcreteSubtype` classes.
@@ -230,6 +241,13 @@ pub trait StatelessWidget: Debug + 'static {
     /// An assert on one argument stays in that argument's setter.
     fn debug_check_constructor(&self) {}
 
+    /// Dart's `this is PreferredSizeWidget`: a widget that implements [`PreferredSizeWidget`]
+    /// answers with itself, which is what a parent asking an erased child for its preferred
+    /// size reads.
+    fn as_preferred_size_widget(&self) -> Option<&dyn PreferredSizeWidget> {
+        None
+    }
+
     /// Describes the part of the user interface represented by this widget.
     ///
     /// The framework calls this method when this widget is inserted into the tree in a given
@@ -278,6 +296,10 @@ impl<W: StatelessWidget> Widget for Stateless<W> {
     fn kind(&self) -> WidgetKind {
         WidgetKind::Stateless
     }
+
+    fn as_preferred_size_widget(&self) -> Option<&dyn PreferredSizeWidget> {
+        self.0.as_preferred_size_widget()
+    }
 }
 
 impl<W: StatelessWidget> Debug for Stateless<W> {
@@ -312,6 +334,11 @@ pub trait StatefulWidget: Debug + 'static {
 
     /// See [`StatelessWidget::debug_check_constructor`].
     fn debug_check_constructor(&self) {}
+
+    /// See [`StatelessWidget::as_preferred_size_widget`].
+    fn as_preferred_size_widget(&self) -> Option<&dyn PreferredSizeWidget> {
+        None
+    }
 
     /// See [`Widget::type_name`]. A stateful form another widget kind becomes (an animated or
     /// status transition widget) names the widget it wraps.
@@ -368,6 +395,10 @@ impl<W: StatefulWidget> Widget for Stateful<W> {
 
     fn kind(&self) -> WidgetKind {
         WidgetKind::Stateful
+    }
+
+    fn as_preferred_size_widget(&self) -> Option<&dyn PreferredSizeWidget> {
+        self.0.as_preferred_size_widget()
     }
 }
 
@@ -938,7 +969,7 @@ impl GlobalKey {
     ///
     /// The current context is `None` if there is no widget in the tree that matches this
     /// global key.
-    pub fn current_context(&self, app: &mut App) -> Option<BuildContext> {
+    pub fn current_context(&self, app: &App) -> Option<BuildContext> {
         self.current_element(app)
     }
 
@@ -946,7 +977,7 @@ impl GlobalKey {
     ///
     /// The current widget is `None` if there is no widget in the tree that matches this
     /// global key.
-    pub fn current_widget(&self, app: &mut App) -> Option<WidgetRef> {
+    pub fn current_widget(&self, app: &App) -> Option<WidgetRef> {
         let element = self.current_element(app)?;
         Some(element.widget(app).clone())
     }
@@ -956,12 +987,12 @@ impl GlobalKey {
     /// The current state is `None` if (1) there is no widget in the tree that matches this
     /// global key, (2) that widget is not a [`StatefulWidget`], or the associated [`State`]
     /// object is not an `S`.
-    pub fn current_state<S: State>(&self, app: &mut App) -> Option<waft_foundation::Handle<S>> {
+    pub fn current_state<S: State>(&self, app: &App) -> Option<waft_foundation::Handle<S>> {
         let element = self.current_element(app)?;
         element.state_handle::<S>(app)
     }
 
-    fn current_element(&self, app: &mut App) -> Option<AnyElement> {
+    fn current_element(&self, app: &App) -> Option<AnyElement> {
         let owner = crate::binding::current_build_owner(app)?;
         owner.global_key_element(app, self)
     }

@@ -44,6 +44,7 @@ pub(crate) fn snackbar_defaults_m3(app: &mut App, context: BuildContext) -> Snac
             Theme::of(app, context)
                 .text_theme
                 .body_medium
+                .clone()
                 .expect("a theme's text theme has a body medium style")
                 .copy_with()
                 .color(colors.on_inverse_surface()),

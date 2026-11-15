@@ -1,10 +1,4 @@
 //! Flutter counterpart: `widgets/magnifier.dart`.
-//!
-//! `RawMagnifier` paints its lens through `_RenderMagnification`, which in Flutter pushes a
-//! `BackdropFilterLayer` with `ImageFilter.matrix`. The embedder cannot build a matrix filter
-//! (valo has none), so the render object keeps the transform's geometry and paints its child
-//! without the layer: the lens shows the content under it, unscaled. Pushing the layer is the
-//! one change once valo has the filter; see `PORTING.md`.
 
 use std::any::Any;
 use std::fmt::{self, Debug};
@@ -12,15 +6,18 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use waft_animation::AnimationController;
-use waft_embedder::{Clip, Matrix4, Offset, Path, PathBuilder, Rect, Size, TextBaseline};
+use waft_embedder::{
+    Clip, FilterQuality, ImageFilter, Matrix4, Offset, Path, PathBuilder, Rect, Size, TextBaseline,
+};
 use waft_foundation::{App, Handle, Listener, ValueNotifier};
 use waft_painting::{
     Alignment, AlignmentGeometry, BoxShadow, RoundedRectangleBorder, ShapeBorder, ShapeDecoration,
 };
 use waft_rendering::{
-    AnyRenderBox, AnyRenderObject, BoxConstraints, BoxHitTestResult, CustomClipper,
-    PaintingContext, RenderBox, RenderBoxData, RenderHandle, RenderObject, RenderObjectData,
-    RenderObjectWithChildData, RenderObjectWithChildMixin, RenderProxyBoxMixin,
+    AnyRenderBox, AnyRenderObject, BackdropFilterLayer, BoxConstraints, BoxHitTestResult,
+    ContainerLayer, CustomClipper, PaintingContext, RenderBox, RenderBoxData, RenderHandle,
+    RenderObject, RenderObjectData, RenderObjectWithChildData, RenderObjectWithChildMixin,
+    RenderProxyBoxMixin,
 };
 use waft_scheduler::TickerFuture;
 
@@ -807,11 +804,8 @@ impl SingleChildRenderObjectWidget for Magnifier {
     }
 }
 
-/// Dart's `_RenderMagnification`: a proxy box that shows, over its child, what was painted
+/// Dart's `_RenderMagnification`: a proxy box that shows, under its child, what was painted
 /// before it, moved and scaled by [`magnification_matrix`](Self::magnification_matrix).
-///
-/// Waiting on Valo: the backdrop needs `ImageFilter.matrix`, so [`paint`](RenderObject::paint)
-/// paints the child alone and the content under the lens shows unscaled.
 struct RenderMagnification {
     render_object: RenderObjectData,
     render_box: RenderBoxData,
@@ -868,13 +862,6 @@ impl RenderMagnification {
     /// The transform Dart's `paint` hands `ImageFilter.matrix` for the backdrop painted at
     /// `offset`: a scale by [`magnification_scale`](Self::magnification_scale) about this
     /// box's center, which brings the focal point under the center.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "waiting on Valo: ImageFilter.matrix for a backdrop"
-        )
-    )]
     fn magnification_matrix(self: RenderHandle<Self>, app: &App, offset: Offset) -> Matrix4 {
         let this_center = Alignment::CENTER.along_size(self.size(app)) + offset;
         let magnification_scale = self.magnification_scale(app);
@@ -929,9 +916,27 @@ impl RenderObject for RenderMagnification {
         context: &mut PaintingContext,
         offset: Offset,
     ) {
-        // Dart pushes a `BackdropFilterLayer` of `ImageFilter.matrix(magnification_matrix)`
-        // around this call; valo has no matrix filter.
-        RenderProxyBoxMixin::paint(self, app, context, offset);
+        let filter =
+            ImageFilter::matrix(self.magnification_matrix(app, offset), FilterQuality::High);
+
+        let layer = match self.as_object().layer_as::<BackdropFilterLayer>(app) {
+            Some(layer) => layer,
+            None => {
+                let layer = BackdropFilterLayer::new(app);
+                self.as_object()
+                    .set_layer(app, Some(layer.as_container_layer()));
+                layer
+            }
+        };
+        layer.set_filter(app, Some(filter));
+
+        context.push_layer(
+            app,
+            layer.as_container_layer(),
+            |app, context, offset| RenderProxyBoxMixin::paint(self, app, context, offset),
+            offset,
+            None,
+        );
     }
 
     fn visit_children(
@@ -1237,6 +1242,39 @@ mod tests {
     }
 
     #[test]
+    fn the_lens_filters_the_backdrop_through_its_magnification_matrix() {
+        let cell = binding_cell();
+        binding_mount(
+            &cell,
+            Directionality::new(
+                TextDirection::Ltr,
+                Center::new().child(
+                    RawMagnifier::new(Size::new(100.0, 100.0))
+                        .focal_point_offset(Offset::new(50.0, 50.0))
+                        .magnification_scale(2.0),
+                ),
+            )
+            .into_widget(),
+        );
+        let mut app = cell.borrow_mut();
+        let lens = render_objects::<RenderMagnification>(&mut app)[0];
+        // The lens paints at the origin of the opacity layer `RawMagnifier` fades it in, as
+        // `PaintingContext.pushOpacity` paints its child at `Offset.zero`.
+        let offset = Offset::ZERO;
+        let layer = lens
+            .as_object()
+            .layer_as::<BackdropFilterLayer>(&app)
+            .expect("the lens pushes a backdrop filter layer");
+        assert_eq!(
+            layer.filter(&app),
+            Some(&ImageFilter::matrix(
+                lens.magnification_matrix(&app, offset),
+                FilterQuality::High
+            ))
+        );
+    }
+
+    #[test]
     fn the_decoration_is_painted_over_the_lens_through_a_negative_clip() {
         let cell = binding_cell();
         let shadow = BoxShadow::new(
@@ -1379,7 +1417,7 @@ mod tests {
         let home = GlobalKey::new();
         app_with_overlay(&cell, home.clone());
         let mut app = cell.borrow_mut();
-        let context = home.current_context(&mut app).expect("mounted");
+        let context = home.current_context(&app).expect("mounted");
         let magnifier_controller = MagnifierController::new(&mut app);
 
         magnifier_controller.show(
@@ -1402,7 +1440,7 @@ mod tests {
         let home = GlobalKey::new();
         app_with_overlay(&cell, home.clone());
         let mut app = cell.borrow_mut();
-        let context = home.current_context(&mut app).expect("mounted");
+        let context = home.current_context(&app).expect("mounted");
         let duration = Duration::from_secs(120);
         let animation_controller = AnimationController::create(
             &mut app,
@@ -1457,7 +1495,7 @@ mod tests {
         let home = GlobalKey::new();
         app_with_overlay(&cell, home.clone());
         let mut app = cell.borrow_mut();
-        let context = home.current_context(&mut app).expect("mounted");
+        let context = home.current_context(&app).expect("mounted");
         let magnifier_controller = MagnifierController::new(&mut app);
         let fake_magnifier: KeyRef = UniqueKey::new().into();
         let fake_before: KeyRef = UniqueKey::new().into();
@@ -1509,7 +1547,7 @@ mod tests {
         let home = GlobalKey::new();
         app_with_overlay(&cell, home.clone());
         let mut app = cell.borrow_mut();
-        let context = home.current_context(&mut app).expect("mounted");
+        let context = home.current_context(&app).expect("mounted");
         let magnifier_controller = MagnifierController::new(&mut app);
         let first: KeyRef = UniqueKey::new().into();
         let second: KeyRef = UniqueKey::new().into();

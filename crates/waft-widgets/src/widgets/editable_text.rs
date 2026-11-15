@@ -3041,9 +3041,35 @@ impl EditableTextState {
         let style = app.get(self).style.clone();
         let value = self.value(app);
         if obscure_text {
-            let n = value.text.chars().count();
-            let text = obscuring_character.repeat(n);
-            return TextSpan::new().style(style).text(text);
+            let mut text: Vec<u16> = obscuring_character
+                .encode_utf16()
+                .cycle()
+                .take(value.text.encode_utf16().count())
+                .collect();
+            // Reveal the latest character in an obscured field only on mobile.
+            let mobile_platforms = [
+                TargetPlatform::Android,
+                TargetPlatform::Fuchsia,
+                TargetPlatform::IOS,
+            ];
+            let platform = app.platform();
+            let briefly_show_password = platform.briefly_show_password()
+                && mobile_platforms.contains(&platform.target_platform());
+            if briefly_show_password {
+                let o = if app.get(self).obscure_show_char_ticks_pending > 0 {
+                    app.get(self).obscure_latest_char_index
+                } else {
+                    None
+                };
+                if let Some(o) = o.and_then(|o| usize::try_from(o).ok())
+                    && o < text.len()
+                {
+                    text[o] = value.text.encode_utf16().nth(o).expect("o < text.length");
+                }
+            }
+            return TextSpan::new()
+                .style(style)
+                .text(String::from_utf16_lossy(&text));
         }
         let with_composing = !read_only && self.has_focus(app);
         if self.spell_check_results_received(app) {
@@ -4471,7 +4497,12 @@ impl EditableTextState {
 
     fn on_cursor_tick(self: Handle<Self>, app: &mut App) {
         if app.get(self).obscure_show_char_ticks_pending > 0 {
-            app.get_mut(self).obscure_show_char_ticks_pending -= 1;
+            app.get_mut(self).obscure_show_char_ticks_pending =
+                if app.platform().briefly_show_password() {
+                    app.get(self).obscure_show_char_ticks_pending - 1
+                } else {
+                    0
+                };
             if app.get(self).obscure_show_char_ticks_pending == 0 {
                 self.set_state(app, |_| {});
             }
@@ -5411,6 +5442,7 @@ impl TextInputClient for EditableTextState {
             let current = self.value(app);
             let reveal_obscured_input = self.has_input_connection(app)
                 && self.widget(app).obscure_text
+                && app.platform().briefly_show_password()
                 && utf16_len(&value.text) == utf16_len(&current.text) + 1;
             app.get_mut(self).obscure_show_char_ticks_pending = if reveal_obscured_input {
                 K_OBSCURE_SHOW_LATEST_CHAR_CURSOR_TICKS
@@ -7020,7 +7052,7 @@ mod tests {
             let harness = Harness::mount(&mut app, tree);
             harness.pump(&mut app);
             let state = key
-                .current_state::<EditableTextState>(&mut app)
+                .current_state::<EditableTextState>(&app)
                 .expect("the field is mounted");
             (harness, state)
         };
@@ -7089,7 +7121,7 @@ mod tests {
             let harness = Harness::mount(&mut app, tree);
             harness.pump(&mut app);
             let state = key
-                .current_state::<EditableTextState>(&mut app)
+                .current_state::<EditableTextState>(&app)
                 .expect("the field is mounted");
             (harness, state, controller, focus_node, scroll_controller)
         };
@@ -7156,7 +7188,7 @@ mod tests {
         .into_widget();
         binding_mount(&cell, tree);
         let state = key
-            .current_state::<EditableTextState>(&mut cell.borrow_mut())
+            .current_state::<EditableTextState>(&cell.borrow_mut())
             .expect("the field is mounted");
         focus_node.request_focus(&mut cell.borrow_mut(), None);
         binding_pump(&mut cell.borrow_mut(), Duration::from_millis(16));
@@ -7461,5 +7493,211 @@ mod tests {
             shown.set_value(&mut app, false);
         }
         pump(&cell);
+    }
+
+    /// Dart's `tester` over an obscured `EditableText` on a host claiming to be `target`, its
+    /// platform kept so a case can change the host's settings while the field runs
+    /// (`tester.binding.platformDispatcher.*TestValue`).
+    struct FieldTester {
+        cell: Rc<AppCell>,
+        platform: Rc<waft_test::TestPlatform>,
+        state: Handle<EditableTextState>,
+        /// The `obscureText` the field is built with, which a `StatefulBuilder` holds in Dart.
+        obscure_text: Rc<Cell<bool>>,
+        /// What rebuilds the field: the `StatefulBuilder`'s `setState`.
+        rebuild: Handle<waft_foundation::ValueNotifier<u32>>,
+        now: Duration,
+    }
+
+    impl FieldTester {
+        /// Dart's `tester.pumpWidget(EditableText(obscureText: true, ..))` over a controller
+        /// and a focus node of the field's own.
+        fn obscured(target: TargetPlatform) -> FieldTester {
+            use crate::framework::GlobalKey;
+            use crate::{ListenableBuilder, run_app};
+            use waft_foundation::ValueNotifier;
+
+            let platform = Rc::new(
+                waft_test::TestPlatform::new()
+                    .on(target)
+                    .with_view(Rc::new(waft_test::TestView::new(800.0, 600.0))),
+            );
+            let cell = AppCell::with_platform(Rc::clone(&platform) as waft_embedder::PlatformRef);
+            let key = GlobalKey::new();
+            let obscure_text = Rc::new(Cell::new(true));
+            let rebuild = {
+                let mut app = cell.borrow_mut();
+                install_fonts(&mut app);
+                let rebuild = app.create(ValueNotifier::new(0));
+                let controller = TextEditingController::new(&mut app);
+                let focus_node = FocusNode::new(&mut app);
+                let field_key = key.clone();
+                let obscured = Rc::clone(&obscure_text);
+                let field = ListenableBuilder::new(Rc::new(rebuild), move |_, _, _| {
+                    EditableText::new(
+                        controller.as_controller(),
+                        focus_node,
+                        TextStyle::new(),
+                        Color::from_argb(255, 0, 0, 255),
+                        Color::from_argb(255, 128, 128, 128),
+                    )
+                    .obscure_text(obscured.get())
+                    .key(field_key.clone().into())
+                    .into_widget()
+                });
+                run_app(
+                    &mut app,
+                    MediaQuery::new(
+                        MediaQueryData::new(),
+                        Directionality::new(TextDirection::Ltr, field),
+                    )
+                    .into_widget(),
+                );
+                rebuild
+            };
+            // `run_app` attaches the root widget on the next timer turn.
+            cell.elapse(Duration::ZERO);
+            crate::test_harness::pump_every_view(&mut cell.borrow_mut(), Duration::ZERO);
+            let state = key
+                .current_state::<EditableTextState>(&cell.borrow())
+                .expect("the field is mounted");
+            FieldTester {
+                cell,
+                platform,
+                state,
+                obscure_text,
+                rebuild,
+                now: Duration::ZERO,
+            }
+        }
+
+        /// Dart's `tester.pump(duration)`: fires the timers due by then and runs a frame then.
+        fn pump(&mut self, duration: Duration) {
+            self.now += duration;
+            self.cell.elapse(duration);
+            crate::test_harness::pump_every_view(&mut self.cell.borrow_mut(), self.now);
+            self.cell.checkpoint();
+        }
+
+        /// Dart's `tester.showKeyboard`: the field takes the focus and opens its connection.
+        fn show_keyboard(&mut self) {
+            self.state.request_keyboard(&mut self.cell.borrow_mut());
+            self.pump(Duration::ZERO);
+        }
+
+        /// Dart's `tester.enterText`: the keyboard is shown, then the platform sends `text`
+        /// with the caret at its end.
+        fn enter_text(&mut self, text: &str) {
+            self.show_keyboard();
+            let value = TextEditingValue::new()
+                .text(text)
+                .selection(TextSelection::collapsed(
+                    utf16_len(text),
+                    TextAffinity::Downstream,
+                ));
+            TextInputClient::update_editing_value(self.state, &mut self.cell.borrow_mut(), value);
+            self.cell.checkpoint();
+        }
+
+        /// The `StatefulBuilder`'s `setState(() { obscureText = obscure_text; })`.
+        fn set_obscure_text(&mut self, obscure_text: bool) {
+            self.obscure_text.set(obscure_text);
+            let mut app = self.cell.borrow_mut();
+            let next = *app.get(self.rebuild).value() + 1;
+            self.rebuild.set_value(&mut app, next);
+        }
+
+        /// Dart's `(findRenderEditable(tester).text! as TextSpan).text`.
+        fn shown_text(&self) -> String {
+            let mut app = self.cell.borrow_mut();
+            let render_editable = self.state.render_editable(&app);
+            render_editable.plain_text(&mut app)
+        }
+    }
+
+    const HALF_A_BLINK: Duration = Duration::from_millis(500);
+
+    const MOBILE: [TargetPlatform; 3] = [
+        TargetPlatform::IOS,
+        TargetPlatform::Android,
+        TargetPlatform::Fuchsia,
+    ];
+
+    #[test]
+    fn password_briefly_shows_last_character_when_entered_on_mobile() {
+        for target in MOBILE {
+            let mut tester = FieldTester::obscured(target);
+
+            tester.enter_text("AA");
+            tester.pump(Duration::ZERO);
+            tester.enter_text("AAA");
+            tester.pump(Duration::ZERO);
+
+            assert_eq!(tester.shown_text(), "\u{2022}\u{2022}A", "on {target:?}");
+            tester.pump(HALF_A_BLINK);
+            tester.pump(HALF_A_BLINK);
+            tester.pump(HALF_A_BLINK);
+            assert_eq!(
+                tester.shown_text(),
+                "\u{2022}\u{2022}\u{2022}",
+                "on {target:?}"
+            );
+        }
+    }
+
+    /// Dart's case runs on flutter_test's default platform, Android.
+    #[test]
+    fn password_briefly_does_not_show_last_character_when_disabled_by_system() {
+        let mut tester = FieldTester::obscured(TargetPlatform::Android);
+
+        tester.enter_text("AA");
+        tester.pump(Duration::ZERO);
+        tester.enter_text("AAA");
+        tester.pump(Duration::ZERO);
+
+        tester.platform.set_briefly_show_password(false);
+        assert_eq!(tester.shown_text(), "\u{2022}\u{2022}A");
+        tester.pump(HALF_A_BLINK);
+        assert_eq!(tester.shown_text(), "\u{2022}\u{2022}\u{2022}");
+        tester.pump(HALF_A_BLINK);
+        tester.pump(HALF_A_BLINK);
+        tester.pump(HALF_A_BLINK);
+        assert_eq!(tester.shown_text(), "\u{2022}\u{2022}\u{2022}");
+    }
+
+    #[test]
+    fn prevent_last_character_visibility_in_obscure_text_when_obscure_text_is_toggled_on_mobile() {
+        for target in MOBILE {
+            let mut tester = FieldTester::obscured(target);
+            tester.show_keyboard();
+
+            tester.enter_text("H");
+            tester.pump(Duration::ZERO);
+            tester.enter_text("HH");
+            tester.pump(Duration::ZERO);
+
+            assert_eq!(tester.shown_text(), "\u{2022}H", "on {target:?}");
+            tester.pump(HALF_A_BLINK);
+            tester.pump(HALF_A_BLINK);
+            tester.pump(HALF_A_BLINK);
+            assert_eq!(tester.shown_text(), "\u{2022}\u{2022}", "on {target:?}");
+
+            tester.enter_text("HHH");
+            tester.pump(Duration::ZERO);
+
+            assert_eq!(tester.shown_text(), "\u{2022}\u{2022}H", "on {target:?}");
+
+            tester.set_obscure_text(false);
+            tester.pump(Duration::ZERO);
+            assert_eq!(tester.shown_text(), "HHH", "on {target:?}");
+
+            tester.set_obscure_text(true);
+            tester.pump(Duration::ZERO);
+            assert_eq!(
+                tester.shown_text(),
+                "\u{2022}\u{2022}\u{2022}",
+                "on {target:?}"
+            );
+        }
     }
 }

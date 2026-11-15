@@ -695,7 +695,7 @@ mod tests {
         );
         let mut app = cell.borrow_mut();
         let state = tile_key
-            .current_state::<CupertinoListTileState>(&mut app)
+            .current_state::<CupertinoListTileState>(&app)
             .expect("the tile mounted");
 
         send(&mut app, PointerChange::Down, 200.0, 20.0, Duration::ZERO);
@@ -742,7 +742,7 @@ mod tests {
         );
         let mut app = cell.borrow_mut();
         let state = tile_key
-            .current_state::<CupertinoListTileState>(&mut app)
+            .current_state::<CupertinoListTileState>(&app)
             .expect("the tile mounted");
 
         tap(&mut app);

@@ -75,8 +75,8 @@ impl MediumScrollUnderFlexibleConfig {
     pub(crate) fn new(app: &mut App, context: BuildContext) -> MediumScrollUnderFlexibleConfig {
         let theme = Theme::of(app, context);
         MediumScrollUnderFlexibleConfig {
-            colors: theme.color_scheme,
-            text_theme: theme.text_theme,
+            colors: theme.color_scheme.clone(),
+            text_theme: theme.text_theme.clone(),
         }
     }
 }
@@ -115,8 +115,8 @@ impl LargeScrollUnderFlexibleConfig {
     pub(crate) fn new(app: &mut App, context: BuildContext) -> LargeScrollUnderFlexibleConfig {
         let theme = Theme::of(app, context);
         LargeScrollUnderFlexibleConfig {
-            colors: theme.color_scheme,
-            text_theme: theme.text_theme,
+            colors: theme.color_scheme.clone(),
+            text_theme: theme.text_theme.clone(),
         }
     }
 }

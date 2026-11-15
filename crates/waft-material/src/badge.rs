@@ -888,7 +888,7 @@ pub(crate) mod tests {
     #[derive(Clone, Default)]
     pub(crate) struct Seen {
         pub(crate) label_style: Rc<RefCell<Option<TextStyle>>>,
-        theme: Rc<RefCell<Option<ThemeData>>>,
+        theme: Rc<RefCell<Option<Rc<ThemeData>>>>,
     }
 
     impl Seen {
@@ -899,7 +899,7 @@ pub(crate) mod tests {
                 .expect("the label was built")
         }
 
-        fn theme(&self) -> ThemeData {
+        fn theme(&self) -> Rc<ThemeData> {
             self.theme.borrow().clone().expect("the probe was built")
         }
     }

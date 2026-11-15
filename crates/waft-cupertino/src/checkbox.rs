@@ -1235,7 +1235,7 @@ mod tests {
             };
             build(&cell, root);
             let host = host_key
-                .current_state::<HostState>(&mut cell.borrow_mut())
+                .current_state::<HostState>(&cell.borrow_mut())
                 .expect("the host mounted");
             Fixture {
                 cell,
@@ -1366,8 +1366,8 @@ mod tests {
 
         fn root(&self) -> AnyRenderObject {
             let key = self.cell.borrow().get(self.host).checkbox_key.clone();
-            let mut app = self.cell.borrow_mut();
-            key.current_context(&mut app)
+            let app = self.cell.borrow();
+            key.current_context(&app)
                 .expect("the checkbox mounted")
                 .find_render_object(&app)
                 .expect("the checkbox has been laid out")
@@ -1903,9 +1903,9 @@ mod tests {
                 )
                 .into_widget(),
         );
-        let mut app = cell.borrow_mut();
+        let app = cell.borrow();
         let render = key
-            .current_context(&mut app)
+            .current_context(&app)
             .and_then(|context| context.find_render_object(&app))
             .and_then(|object| object.as_box())
             .expect("the checkbox laid out");
@@ -1917,7 +1917,7 @@ mod tests {
         let fixture = Setup::new().mount();
         let key = fixture.cell.borrow().get(fixture.host).checkbox_key.clone();
         let state = key
-            .current_state::<CupertinoCheckboxState>(&mut fixture.cell.borrow_mut())
+            .current_state::<CupertinoCheckboxState>(&fixture.cell.borrow_mut())
             .expect("the checkbox mounted");
         let painter = fixture.cell.borrow().get(state).painter.expect("created");
         build(&fixture.cell, SizedBox::shrink().into_widget());

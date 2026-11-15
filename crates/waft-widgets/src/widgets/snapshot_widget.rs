@@ -974,8 +974,7 @@ mod tests {
     use waft_foundation::AppCell;
     use waft_painting::TextDirection;
     use waft_rendering::{
-        AnyLayer, CustomPainter, ErasedLayer, LayerHandle, OpacityLayer, PictureLayer,
-        TransformLayer,
+        AnyLayer, CustomPainter, LayerHandle, OpacityLayer, PictureLayer, TransformLayer,
     };
 
     use super::*;
@@ -1185,24 +1184,7 @@ mod tests {
 
     /// Flutter's `tester.layers`: the layer tree from the root, depth first.
     fn layers(app: &App, harness: &Harness) -> Vec<AnyLayer> {
-        fn walk(app: &App, layer: AnyLayer, layers: &mut Vec<AnyLayer>) {
-            layers.push(layer);
-            if let Some(container) = layer.as_container_layer() {
-                let mut child = container.first_child(app);
-                while let Some(current) = child {
-                    walk(app, current, layers);
-                    child = current.next_sibling(app);
-                }
-            }
-        }
-        let root = harness
-            .render_root(app)
-            .as_object()
-            .layer(app)
-            .expect("the root's layer");
-        let mut layers = Vec::new();
-        walk(app, root.as_layer(), &mut layers);
-        layers
+        harness.layers(app)
     }
 
     #[test]

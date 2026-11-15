@@ -74,7 +74,7 @@ pub struct ScrollPositionData {
     have_dimensions: bool,
     did_change_viewport_dimension_or_receive_correction: bool,
     pending_dimensions: bool,
-    last_metrics: Option<FixedScrollMetrics>,
+    last_metrics: Option<Rc<dyn ScrollMetrics>>,
     have_scheduled_update_notification: bool,
     last_axis: Option<Axis>,
     is_scrolling_notifier: Handle<ValueNotifier<bool>>,
@@ -298,9 +298,9 @@ pub trait ScrollPosition: ViewportOffset {
     ///
     /// This is what to hand to anything that reads the metrics — the physics, a
     /// [`ScrollNotification`](crate::ScrollNotification), `ScrollIncrementDetails`.
-    fn copy_with(self: Handle<Self>, app: &App) -> FixedScrollMetrics {
+    fn copy_with(self: Handle<Self>, app: &App) -> Rc<dyn ScrollMetrics> {
         let has_content_dimensions = self.has_content_dimensions(app);
-        FixedScrollMetrics::new(
+        Rc::new(FixedScrollMetrics::new(
             has_content_dimensions.then(|| self.min_scroll_extent(app)),
             has_content_dimensions.then(|| self.max_scroll_extent(app)),
             self.has_pixels(app).then(|| self.pixels(app)),
@@ -308,7 +308,7 @@ pub trait ScrollPosition: ViewportOffset {
                 .then(|| self.viewport_dimension(app)),
             self.axis_direction(app),
             self.device_pixel_ratio(app),
-        )
+        ))
     }
 
     /// Whether [`viewport_dimension`](Self::viewport_dimension),
@@ -942,7 +942,7 @@ impl ScrollPositionBase {
     ) -> f64 {
         let physics = this.physics(app);
         let metrics = this.copy_with(app);
-        let result = physics.apply_boundary_conditions(&metrics, value);
+        let result = physics.apply_boundary_conditions(&*metrics, value);
         debug_assert!(
             result.abs() <= (value - this.pixels(app)).abs(),
             "{physics:?}.applyBoundaryConditions returned invalid overscroll value. The \
@@ -973,7 +973,7 @@ impl ScrollPositionBase {
     fn is_metrics_changed<P: ScrollPosition>(this: Handle<P>, app: &App) -> bool {
         debug_assert!(this.have_dimensions(app));
         let current_metrics = this.copy_with(app);
-        let Some(last_metrics) = this.scroll_position_data(app).last_metrics else {
+        let Some(last_metrics) = this.scroll_position_data(app).last_metrics.clone() else {
             return true;
         };
         !(current_metrics.extent_before() == last_metrics.extent_before()
@@ -1006,14 +1006,14 @@ impl ScrollPositionBase {
             data.max_scroll_extent = Some(max_scroll_extent);
             data.last_axis = Some(axis);
             let current_metrics = this.have_dimensions(app).then(|| this.copy_with(app));
-            let last_metrics = this.scroll_position_data(app).last_metrics;
+            let last_metrics = this.scroll_position_data(app).last_metrics.clone();
             let data = this.scroll_position_data_mut(app);
             data.did_change_viewport_dimension_or_receive_correction = false;
             data.pending_dimensions = true;
             if this.have_dimensions(app) {
                 let last_metrics = last_metrics.expect("dimensions imply the last metrics");
                 let current_metrics = current_metrics.expect("dimensions imply current metrics");
-                if !P::correct_for_new_dimensions(this, app, &last_metrics, &current_metrics) {
+                if !P::correct_for_new_dimensions(this, app, &*last_metrics, &*current_metrics) {
                     return false;
                 }
             }
@@ -1261,7 +1261,7 @@ impl ScrollPositionBase {
 
     /// See [`ScrollPosition::did_start_scroll`].
     pub fn did_start_scroll<P: ScrollPosition>(this: Handle<P>, app: &mut App) {
-        let metrics: Rc<dyn ScrollMetrics> = Rc::new(this.copy_with(app));
+        let metrics = this.copy_with(app);
         let context = this.context(app).notification_context(app);
         this.activity(app)
             .expect("a position has an activity")
@@ -1274,7 +1274,7 @@ impl ScrollPositionBase {
         app: &mut App,
         delta: f64,
     ) {
-        let metrics: Rc<dyn ScrollMetrics> = Rc::new(this.copy_with(app));
+        let metrics = this.copy_with(app);
         let context = notification_context(this, app);
         this.activity(app)
             .expect("a position has an activity")
@@ -1283,7 +1283,7 @@ impl ScrollPositionBase {
 
     /// See [`ScrollPosition::did_end_scroll`].
     pub fn did_end_scroll<P: ScrollPosition>(this: Handle<P>, app: &mut App) {
-        let metrics: Rc<dyn ScrollMetrics> = Rc::new(this.copy_with(app));
+        let metrics = this.copy_with(app);
         let context = notification_context(this, app);
         this.activity(app)
             .expect("a position has an activity")
@@ -1298,7 +1298,7 @@ impl ScrollPositionBase {
     pub fn did_overscroll_by<P: ScrollPosition>(this: Handle<P>, app: &mut App, value: f64) {
         let activity = this.activity(app).expect("a position has an activity");
         debug_assert!(activity.is_scrolling(app));
-        let metrics: Rc<dyn ScrollMetrics> = Rc::new(this.copy_with(app));
+        let metrics = this.copy_with(app);
         let context = notification_context(this, app);
         activity.dispatch_overscroll_notification(app, metrics, context, value);
     }
@@ -1309,7 +1309,7 @@ impl ScrollPositionBase {
         app: &mut App,
         direction: ScrollDirection,
     ) {
-        let metrics: Rc<dyn ScrollMetrics> = Rc::new(this.copy_with(app));
+        let metrics = this.copy_with(app);
         let context = notification_context(this, app);
         UserScrollNotification::new(metrics, context, direction).dispatch(app, Some(context));
     }
@@ -1326,7 +1326,7 @@ impl ScrollPositionBase {
         this.scroll_position_data_mut(app)
             .have_scheduled_update_notification = false;
         if let Some(context) = this.context(app).notification_context(app) {
-            let metrics: Rc<dyn ScrollMetrics> = Rc::new(this.copy_with(app));
+            let metrics = this.copy_with(app);
             ScrollMetricsNotification::new(metrics, context).dispatch(app, Some(context));
         }
     }
@@ -1341,7 +1341,7 @@ impl ScrollPositionBase {
         let velocity = activity.velocity(app) + this.scroll_position_data(app).implied_velocity;
         let metrics = this.copy_with(app);
         let physics = this.physics(app);
-        physics.recommend_deferred_loading(app, velocity, &metrics, context)
+        physics.recommend_deferred_loading(app, velocity, &*metrics, context)
     }
 
     /// See [`ScrollPosition::dispose`].
@@ -1447,7 +1447,7 @@ struct ScrollPositionVTable {
     has_viewport_dimension: fn(&App, HandleId) -> bool,
     axis_direction: fn(&App, HandleId) -> AxisDirection,
     device_pixel_ratio: fn(&App, HandleId) -> f64,
-    copy_with: fn(&App, HandleId) -> FixedScrollMetrics,
+    copy_with: fn(&App, HandleId) -> Rc<dyn ScrollMetrics>,
     have_dimensions: fn(&App, HandleId) -> bool,
     should_ignore_pointer: fn(&App, HandleId) -> bool,
     absorb: fn(&mut App, HandleId, AnyScrollPosition),
@@ -1673,7 +1673,7 @@ impl AnyScrollPosition {
     }
 
     /// See [`ScrollPosition::copy_with`].
-    pub fn copy_with(self, app: &App) -> FixedScrollMetrics {
+    pub fn copy_with(self, app: &App) -> Rc<dyn ScrollMetrics> {
         (self.vtable.copy_with)(app, self.id)
     }
 

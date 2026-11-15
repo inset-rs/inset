@@ -460,7 +460,7 @@ impl SnackBarTheme {
     pub fn of(app: &mut App, context: BuildContext) -> SnackBarThemeData {
         match context.depend_on_inherited_widget_of_exact_type::<SnackBarTheme>(app) {
             Some(snack_bar_theme) => snack_bar_theme.data.clone(),
-            None => Theme::of(app, context).snack_bar_theme,
+            None => Theme::of(app, context).snack_bar_theme.clone(),
         }
     }
 }

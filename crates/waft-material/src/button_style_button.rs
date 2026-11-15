@@ -2009,9 +2009,9 @@ mod tests {
     }
 
     fn is_inside(tester: &WidgetTester, ancestor: AnyRenderObject, key: &GlobalKey) -> bool {
-        let mut app = tester.cell.borrow_mut();
+        let app = tester.cell.borrow();
         let mut node = key
-            .current_context(&mut app)
+            .current_context(&app)
             .and_then(|context| context.find_render_object(&app));
         while let Some(current) = node {
             if current == ancestor {
@@ -2082,7 +2082,7 @@ mod tests {
             assert_eq!(decoration_colors(&tester), vec![Some(background_color)]);
             assert!(
                 child_key
-                    .current_context(&mut tester.cell.borrow_mut())
+                    .current_context(&tester.cell.borrow_mut())
                     .is_none()
             );
         });
@@ -2109,7 +2109,7 @@ mod tests {
             assert_eq!(decoration_colors(&tester), vec![Some(foreground_color)]);
             assert!(
                 child_key
-                    .current_context(&mut tester.cell.borrow_mut())
+                    .current_context(&tester.cell.borrow_mut())
                     .is_none()
             );
         });
