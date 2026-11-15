@@ -169,6 +169,12 @@ fn info_plist(
     );
     // Without a launch screen entry iOS runs the app letterboxed at a legacy size.
     put("UILaunchScreen", Value::Dictionary(Dictionary::new()));
+    // UIKit's scene lifecycle, which iOS 27 requires of an app built with its SDK: each window
+    // scene's delegate is Waft's host's, which the host registers before UIKit starts.
+    put("UIApplicationSceneManifest", scene_manifest());
+    // A ProMotion screen's full rate for the host's display link, which an iPhone caps at 60 Hz
+    // otherwise.
+    put("CADisableMinimumFrameDurationOnPhone", Value::Boolean(true));
     put(
         "UISupportedInterfaceOrientations",
         Value::Array(
@@ -201,6 +207,36 @@ fn info_plist(
         put("CFBundleIcons~ipad", Value::Dictionary(icons));
     }
     Value::Dictionary(info)
+}
+
+/// One kind of scene, the app's window, whose delegate is `WaftSceneDelegate`, the iOS host's; one
+/// scene at a time.
+fn scene_manifest() -> Value {
+    let text = |s: &str| Value::String(s.to_owned());
+    let mut window = Dictionary::new();
+    window.insert(
+        "UISceneConfigurationName".to_owned(),
+        text("Default Configuration"),
+    );
+    window.insert(
+        "UISceneDelegateClassName".to_owned(),
+        text("WaftSceneDelegate"),
+    );
+    let mut configurations = Dictionary::new();
+    configurations.insert(
+        "UIWindowSceneSessionRoleApplication".to_owned(),
+        Value::Array(vec![Value::Dictionary(window)]),
+    );
+    let mut manifest = Dictionary::new();
+    manifest.insert(
+        "UIApplicationSupportsMultipleScenes".to_owned(),
+        Value::Boolean(false),
+    );
+    manifest.insert(
+        "UISceneConfigurations".to_owned(),
+        Value::Dictionary(configurations),
+    );
+    Value::Dictionary(manifest)
 }
 
 /// Legacy icon files, which need no asset catalog. Returns the base names for `CFBundleIconFiles`.
@@ -662,6 +698,42 @@ mod tests {
         assert!(dict.get("CFBundleIcons").is_none());
         assert!(dict.get("UIRequiredDeviceCapabilities").is_none());
         assert!(dict.get("NSCameraUsageDescription").is_none());
+    }
+
+    #[test]
+    fn info_plist_adopts_the_scene_lifecycle_with_the_hosts_delegate() {
+        let project = test_project();
+        let plist = info_plist(&project, Destination::Simulator, "15.0", &[]);
+        let dict = plist.as_dictionary().unwrap();
+        let manifest = dict
+            .get("UIApplicationSceneManifest")
+            .and_then(Value::as_dictionary)
+            .expect("a scene manifest");
+        assert_eq!(
+            manifest
+                .get("UIApplicationSupportsMultipleScenes")
+                .and_then(Value::as_boolean),
+            Some(false)
+        );
+        let window = manifest
+            .get("UISceneConfigurations")
+            .and_then(Value::as_dictionary)
+            .and_then(|configurations| configurations.get("UIWindowSceneSessionRoleApplication"))
+            .and_then(Value::as_array)
+            .and_then(|configurations| configurations.first())
+            .and_then(Value::as_dictionary)
+            .expect("the window scene's configuration");
+        assert_eq!(
+            window
+                .get("UISceneDelegateClassName")
+                .and_then(Value::as_string),
+            Some("WaftSceneDelegate")
+        );
+        assert_eq!(
+            dict.get("CADisableMinimumFrameDurationOnPhone")
+                .and_then(Value::as_boolean),
+            Some(true)
+        );
     }
 
     #[test]

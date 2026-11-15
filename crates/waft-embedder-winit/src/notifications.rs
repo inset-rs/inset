@@ -40,7 +40,7 @@ impl NotificationActivations {
     }
 
     /// Clicks handed to `send` with the identity they carry, as a test hears them.
-    #[cfg(test)]
+    #[cfg(all(test, any(target_os = "linux", target_os = "windows")))]
     pub(crate) fn to(
         send: impl Fn(Option<String>, NotificationActivation) + Send + Sync + 'static,
     ) -> NotificationActivations {
@@ -63,12 +63,7 @@ impl NotificationActivations {
     }
 
     #[cfg_attr(
-        not(any(
-            target_os = "macos",
-            target_os = "ios",
-            target_os = "windows",
-            target_os = "linux"
-        )),
+        not(any(target_os = "macos", target_os = "windows", target_os = "linux")),
         allow(dead_code, reason = "a system without notifications reports no click")
     )]
     pub(crate) fn send(&self, activation: NotificationActivation) {

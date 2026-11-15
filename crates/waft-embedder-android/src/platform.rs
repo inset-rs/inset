@@ -39,6 +39,7 @@ use crate::loop_waker::LoopWaker;
 use crate::media::{NdkCameras, NdkFrameReaders};
 use crate::notifications::AndroidNotifications;
 use crate::opener::IntentOpener;
+use crate::shortcuts::Shortcuts;
 use crate::view_requests::ViewRequests;
 use crate::views::Views;
 use crate::vsync_waiter::{ChoreographerWaiter, Waits};
@@ -89,6 +90,8 @@ pub struct AndroidPlatform {
     cameras: Option<NdkCameras>,
     /// The readers a camera's frames go to (`media/`).
     video_frame_readers: NdkFrameReaders,
+    /// The app's shortcuts on the home screen and its icon's menu (`shortcuts.rs`).
+    pub(crate) shortcuts: Shortcuts,
 }
 
 impl AndroidPlatform {
@@ -113,6 +116,7 @@ impl AndroidPlatform {
             notifications: AndroidNotifications::new(application.clone(), Rc::clone(&views), first),
             cameras: NdkCameras::new(application.clone(), Rc::clone(&views)),
             video_frame_readers: NdkFrameReaders,
+            shortcuts: Shortcuts::new(application.clone()),
             views,
             wakes: Arc::new(Wakes {
                 timer_wakeup: Mutex::new(None),
@@ -146,6 +150,12 @@ impl AndroidPlatform {
     /// The platform's clock at `instant`, since its origin.
     pub(crate) fn elapsed_at(&self, instant: Instant) -> Duration {
         instant.saturating_duration_since(self.origin)
+    }
+
+    /// The app's shortcuts: pinned on the home screen, and dynamic, on the app icon's menu.
+    /// Android's alone, so reached by downcasting the platform.
+    pub fn shortcuts(&self) -> &Shortcuts {
+        &self.shortcuts
     }
 
     /// The renderer's image store, on the device every view draws with: an image made

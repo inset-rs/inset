@@ -20,8 +20,12 @@ import android.net.Uri;
  * for. The invariant a later editor will break: the view's initial data is the data and nothing
  * else, since the data is all of a request that outlives the process.
  *
+ * <p>A shortcut on the home screen may start the activity too ({@link #shortcutIntent}): the same
+ * data, an action, and no request, so a view the platform gave.
+ *
  * <p>The intent is never something to open: the native code reads it as the view's, not as an
- * intent to view, and hands on none that reaches the activity later. waft-cli compiles this class
+ * intent to view, and hands on none that reaches the activity later, such as a shortcut's tapped
+ * while its task runs, which only brings the task forward. waft-cli compiles this class
  * into every Android app.
  */
 public final class WaftDocumentActivity extends WaftActivity {
@@ -54,9 +58,28 @@ public final class WaftDocumentActivity extends WaftActivity {
         context.startActivity(intent);
     }
 
+    /**
+     * The intent of a shortcut that opens the view carrying {@code initialData}: the activity's
+     * intent with that data, as a request's, and with an action, which a shortcut's intent needs,
+     * but neither a request's number nor {@code FLAG_ACTIVITY_MULTIPLE_TASK}. So a tap finds the
+     * task Android keeps with that data, which it finds by the activity and the data alone, or
+     * starts one whose view the platform gives the app, a request of no process's.
+     */
+    static Intent shortcutIntent(Context context, String initialData) {
+        Intent intent = new Intent(Intent.ACTION_MAIN);
+        intent.setClass(context, WaftDocumentActivity.class);
+        intent.setData(Uri.fromParts(SCHEME, initialData, null));
+        return intent;
+    }
+
     /** The view's initial data, as the activity's intent carries it; null for none. */
     String initialData() {
-        Uri data = getIntent().getData();
+        return initialDataOf(getIntent());
+    }
+
+    /** The view's initial data {@code intent} carries, under {@link #SCHEME}; null for none. */
+    static String initialDataOf(Intent intent) {
+        Uri data = intent.getData();
         if (data == null || !SCHEME.equals(data.getScheme())) {
             return null;
         }

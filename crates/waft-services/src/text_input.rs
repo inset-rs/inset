@@ -10,9 +10,9 @@ use waft_embedder::{
 use waft_foundation::{App, Handle, HandleId, K_IS_WEB, Listener, Task};
 
 pub use waft_embedder::{
-    AutofillConfiguration, FloatingCursorDragState, RawFloatingCursorPoint, SmartDashesType,
-    SmartQuotesType, TextCapitalization, TextEditingValue, TextInputAction, TextInputConfiguration,
-    TextInputType,
+    AutofillConfiguration, FloatingCursorDragState, RawFloatingCursorPoint, SelectionRect,
+    SmartDashesType, SmartQuotesType, TextCapitalization, TextEditingValue, TextInputAction,
+    TextInputConfiguration, TextInputType,
 };
 use waft_foundation::OptionRetained;
 use waft_foundation::Ref;
@@ -59,39 +59,6 @@ pub enum SelectionChangedCause {
     /// Currently, this is only supported on iPadOS 14+ via the Scribble feature,
     /// or on Android API 34+ via the Scribe feature.
     StylusHandwriting,
-}
-
-/// Represents a selection rect for a character and it's position in the text.
-///
-/// This is used to report the current text selection rect and position data
-/// to the engine for Scribble support on iPadOS 14.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct SelectionRect {
-    /// The position of this selection rect within the text String.
-    pub position: i32,
-    /// The rectangle representing the bounds of this selection rect within the
-    /// currently focused `RenderEditable`'s coordinate space.
-    pub bounds: Rect,
-    /// The direction text flows within this selection rect.
-    pub direction: TextDirection,
-}
-
-impl SelectionRect {
-    /// Constructor for creating a [`SelectionRect`] from a text `position` and
-    /// `bounds`.
-    pub const fn new(position: i32, bounds: Rect, direction: TextDirection) -> SelectionRect {
-        SelectionRect {
-            position,
-            bounds,
-            direction,
-        }
-    }
-}
-
-impl std::fmt::Display for SelectionRect {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "SelectionRect({}, {:?})", self.position, self.bounds)
-    }
 }
 
 /// Text styling information for the current input client.
@@ -654,7 +621,8 @@ impl TextInputConnection {
         if app.get(self).cached_selection_rects == selection_rects {
             return;
         }
-        app.get_mut(self).cached_selection_rects = selection_rects;
+        app.get_mut(self).cached_selection_rects = selection_rects.clone();
+        TextInput::instance(app).set_selection_rects(app, &selection_rects);
     }
 
     /// Send text styling information.
@@ -879,6 +847,14 @@ impl TextInput {
             && let Some(text_input) = view.host().text_input()
         {
             text_input.set_caret_rect(rect);
+        }
+    }
+
+    fn set_selection_rects(self: Handle<Self>, app: &App, selection_rects: &[SelectionRect]) {
+        if let Some(view) = self.target_view(app)
+            && let Some(text_input) = view.host().text_input()
+        {
+            text_input.set_selection_rects(selection_rects);
         }
     }
 

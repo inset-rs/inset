@@ -168,6 +168,10 @@ Signing happens when credentials are present, never by flag.
 
 `panic = "abort"` changes nothing on wasm. `new` writes the LTO pair, which mostly buys speed; add `opt-level = "s"` when download size matters more than native speed.
 
+## iOS
+
+The CLI puts the `.app` together itself, with no Xcode project: the executable, the `Info.plist`, the icons and the resources. The `Info.plist` adopts UIKit's scene lifecycle, which iOS 27 requires of an app built with its SDK: its `UIApplicationSceneManifest` names `WaftSceneDelegate`, the scene delegate of Waft's iOS host (`waft-embedder-ios`), for the app's one window scene; and `CADisableMinimumFrameDurationOnPhone` lets a ProMotion iPhone draw the app at its full rate.
+
 ## macOS
 
 The CLI puts the `.app` together itself, as it does an iOS app: the executable in `Contents/MacOS`, the `Info.plist`, the icon (an `.icns` made by `iconutil`) and the resources in `Contents/Resources`, signed with `codesign` as [Signing](#signing) says. `build dmg` makes the disk image around it with `hdiutil`: the app beside a link to Applications in a 600 by 400 window, laid out by a `.DS_Store` the CLI writes, so no Finder window opens while it builds, and the app's icon as the volume's.
@@ -182,15 +186,16 @@ The CLI puts the `.app` together itself, as it does an iOS app: the executable i
 
 ## Android
 
-The `.apk` is built without Gradle and without any Java source of your own; prebuilt Android libraries are merged in (see [Android libraries](#android-libraries)). The Java is Waft's seven classes (`android/rs/waft/`), which `javac` and `d8` compile into the package's `classes.dex`:
+The `.apk` is built without Gradle and without any Java source of your own; prebuilt Android libraries are merged in (see [Android libraries](#android-libraries)). The Java is Waft's eight classes (`android/rs/waft/`), which `javac` and `d8` compile into the package's `classes.dex`:
 
 - `rs.waft.WaftActivity`, the activity: Android's `NativeActivity`, which loads your library, where Waft's host starts your app's thread with the process's first activity and calls the `android_main` that `#[waft::main]` emits once for the process, each activity a view of the app, with the results of the activities your app starts, the intents that reach it while it runs and the user's answers to the permissions it asks for handed on to it, as the file dialogs, being opened and notifications need.
-- `rs.waft.WaftDocumentActivity`, the same activity in a task of its own, a card in Recents, which the app starts for each view it asks for (`Platform::request_view`); the manifest declares it beside the launcher's `singleTask` activity, not exported, `standard` and `intoExisting`, Recents keeping 50 of its tasks.
+- `rs.waft.WaftDocumentActivity`, the same activity in a task of its own, a card in Recents, which the app starts for each view it asks for (`Platform::request_view`), and a shortcut starts for the view it opens; the manifest declares it beside the launcher's `singleTask` activity, not exported, `standard` and `intoExisting`, Recents keeping 50 of its tasks.
 - `rs.waft.WaftTask`, which describes a task's card, its label and icon, and brings a task forward or removes it.
 - `rs.waft.WaftFileProvider`, a content provider at `<package>.waft.files`, not exported, through which the opener shares a file of the app's with the app that opens it.
 - `rs.waft.WaftNotificationReceiver`, a broadcast receiver, not exported, which builds and shows the app's notifications, and shows a scheduled one when its alarm goes off, whether or not the app runs.
 - `rs.waft.WaftTextInput`, the view the activity adds beside its own, which the system's keyboards type into a text field through.
 - `rs.waft.WaftWindowInsets`, the listener the activity sets on its window, which tells your app what the system's bars and the keyboard cover of it: `MediaQuery`'s padding and view insets.
+- `rs.waft.WaftShortcuts`, which makes your app's shortcuts through the framework's `ShortcutManager`, pinned on the home screen or on your app icon's menu, and reads them back (`AndroidPlatform::shortcuts`): one opens a view in a task of its own through the document activity, or brings the activity forward with an action of your app's.
 
 The manifest's `<queries>` names viewing `http`, `https` and `mailto` links, so the opener can say whether some app takes one; the application's meta-data `rs.waft.queried_schemes` lists the same schemes for it. It asks for `POST_NOTIFICATIONS`, which Android 13 asks the user for when the app asks (`NotificationPermission::request`), and `SCHEDULE_EXACT_ALARM`, which Android 14 leaves to the user to grant under the app's Alarms & reminders setting: without it a scheduled notification may come late. A scheduled notification does not survive a restart of the device.
 

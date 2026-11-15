@@ -1,13 +1,15 @@
 //! Flutter counterpart: `services/text_input.dart` (value types and
 //! [`TextInputConfiguration`]).
 //!
-//! Lives here because [`crate::View`] and [`crate::EmbedderClient`] name these
-//! types. The connection and client stay in `waft-services`.
+//! Lives here because [`crate::View`], [`crate::ViewHost`]'s text input and
+//! [`crate::EmbedderClient`] name these types. The connection and client stay in `waft-services`.
 
 use std::fmt;
 
 use crate::text_editing::TextSelection;
-use crate::{Brightness, Locale, Offset, TextAffinity, TextPosition, TextRange};
+use crate::{
+    Brightness, Locale, Offset, Rect, TextAffinity, TextDirection, TextPosition, TextRange,
+};
 
 /// Indicates how to handle the intelligent replacement of dashes in text input.
 ///
@@ -1239,6 +1241,39 @@ fn text_range_is_valid(range: TextRange, text: &str) -> bool {
         range.end
     );
     true
+}
+
+/// Represents a selection rect for a character and it's position in the text.
+///
+/// This is used to report the current text selection rect and position data
+/// to the engine for Scribble support on iPadOS 14.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SelectionRect {
+    /// The position of this selection rect within the text String.
+    pub position: i32,
+    /// The rectangle representing the bounds of this selection rect within the
+    /// currently focused `RenderEditable`'s coordinate space.
+    pub bounds: Rect,
+    /// The direction text flows within this selection rect.
+    pub direction: TextDirection,
+}
+
+impl SelectionRect {
+    /// Constructor for creating a [`SelectionRect`] from a text `position` and
+    /// `bounds`.
+    pub const fn new(position: i32, bounds: Rect, direction: TextDirection) -> SelectionRect {
+        SelectionRect {
+            position,
+            bounds,
+            direction,
+        }
+    }
+}
+
+impl std::fmt::Display for SelectionRect {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SelectionRect({}, {:?})", self.position, self.bounds)
+    }
 }
 
 #[cfg(test)]

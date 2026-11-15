@@ -32,8 +32,8 @@ use waft_embedder::ContentFuture;
 
 use super::super::abort_on_panic;
 use super::waiting;
-use crate::os::apple::app_futures;
-use crate::os::apple::promised_files::{FileProducer, produce_at};
+use waft_embedder_apple::app_futures;
+use waft_embedder_apple::promised_files::{FileProducer, produce_at};
 
 /// How long a paste waits for a promised form, on the main thread, before it gets nothing.
 pub(super) const PROMISE_WAIT: Duration = Duration::from_secs(10);

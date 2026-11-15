@@ -1,6 +1,6 @@
 //! Android: the `.apk` Gradle would produce, assembled from a cargo library.
 //!
-//! No Gradle project and no Java of the app's own. The Java is Waft's seven classes (under
+//! No Gradle project and no Java of the app's own. The Java is Waft's eight classes (under
 //! `android/rs/waft/` in this crate). The activity, `rs.waft.WaftActivity`, is the platform's
 //! `NativeActivity`, which loads the app's shared library and calls into Waft's host in it, with the
 //! results of the activities the app starts, the intents that reach it while it runs and the
@@ -13,7 +13,8 @@
 //! when its alarm goes off, whether or not the app runs. The text input, `rs.waft.WaftTextInput`,
 //! is the view the activity adds for the system's keyboards to edit text through. The window
 //! insets listener, `rs.waft.WaftWindowInsets`, tells the app what the system's bars and the
-//! keyboard cover of its window. So the package is that library, the classes compiled to
+//! keyboard cover of its window. The shortcuts, `rs.waft.WaftShortcuts`, make and read the app's
+//! shortcuts on the home screen and its icon's menu. So the package is that library, the classes compiled to
 //! `classes.dex`, a manifest, and icons, put together with the SDK's own tools: `javac` and `d8`
 //! compile the classes, `aapt2` links the manifest and resources, `zipalign` aligns, `apksigner`
 //! signs with the debug key, and `adb` installs and launches it on an emulator or a device. The
@@ -86,7 +87,7 @@ const PERMISSIONS: [&str; 2] = [
     "android.permission.SCHEDULE_EXACT_ALARM",
 ];
 /// The Java classes every app's package compiles, by their paths under the sources' root.
-const JAVA_SOURCES: [(&str, &str); 7] = [
+const JAVA_SOURCES: [(&str, &str); 8] = [
     (
         "rs/waft/WaftActivity.java",
         include_str!("../android/rs/waft/WaftActivity.java"),
@@ -114,6 +115,10 @@ const JAVA_SOURCES: [(&str, &str); 7] = [
     (
         "rs/waft/WaftWindowInsets.java",
         include_str!("../android/rs/waft/WaftWindowInsets.java"),
+    ),
+    (
+        "rs/waft/WaftShortcuts.java",
+        include_str!("../android/rs/waft/WaftShortcuts.java"),
     ),
 ];
 /// The schemes of the links whose viewers the app may ask about (`<queries>`): from Android 11 the

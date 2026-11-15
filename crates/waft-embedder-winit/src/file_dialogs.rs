@@ -28,12 +28,6 @@ impl ParentWindows {
     pub(crate) fn window(&self, parent: Option<ViewId>) -> Option<Arc<dyn Window>> {
         Some(self.0.windows().by_view(parent?)?.window)
     }
-
-    /// The app's first window, for a system whose dialogs always show on one.
-    #[cfg(target_os = "ios")]
-    pub(crate) fn first_window(&self) -> Option<Arc<dyn Window>> {
-        Some(self.0.windows().first_window()?.window)
-    }
 }
 
 /// The system's side of a dialog's answer: given once, from any thread, or a failure if dropped

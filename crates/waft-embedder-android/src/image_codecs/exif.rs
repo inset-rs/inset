@@ -5,7 +5,7 @@
 //! commas, a date as `YYYY:MM:DD HH:MM:SS` and its offset from UTC as `+HH:MM`.
 //!
 //! Each field of the trait's record is read from the tag Apple's host reads it from through
-//! Image I/O (`waft-embedder-winit`'s `os/apple/image_codecs/exif.rs`), so the two hosts answer
+//! Image I/O (`waft-embedder-apple`'s `image_codecs/exif.rs`), so the two hosts answer
 //! the same for the same file, but for one: the framework's `ExifInterface` knows no `LensModel`
 //! (AndroidX's does), so the lens is `None` on Android while it does not, though asked for.
 

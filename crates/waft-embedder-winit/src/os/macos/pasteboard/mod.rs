@@ -42,9 +42,9 @@ use waft_embedder::{
 
 use super::AppKit;
 use crate::clipboard::ClipboardChanges;
-use crate::os::apple::pasteboard_types as types;
 use crate::os::capabilities::SystemClipboard;
 use promises::{PromisedFile, PromisedForms};
+use waft_embedder_apple::pasteboard_types as types;
 
 /// The type macOS's clipboard managers leave out of their history, previews and sync.
 const CONCEALED: &str = "org.nspasteboard.ConcealedType";

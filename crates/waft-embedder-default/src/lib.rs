@@ -1,9 +1,9 @@
-//! The host an application gets without choosing one: winit on the desktops and iOS, the
-//! activity's own loop on Android, the canvas WebGPU host in the browser.
+//! The host an application gets without choosing one: winit on the desktops, UIKit's application
+//! and scenes on iOS, the activity's own loop on Android, the canvas WebGPU host in the browser.
 //!
 //! An application depends on this crate instead of picking an embedder and repeating
 //! target-cfg dependencies. `DefaultEmbedder::run` is the same closure on all of them; what
-//! differs is what each host needs before it can start, which is nothing on the desktops, a
+//! differs is what each host needs before it can start, which is nothing on the desktops and iOS, a
 //! canvas in the browser, and the `AndroidApp` Waft's Android host hands `android_main`, once a
 //! process.
 //!
@@ -15,16 +15,18 @@ use waft_embedder::EmbedderClient;
 
 #[cfg(target_os = "android")]
 pub use waft_embedder_android::AndroidApp;
-#[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
 pub use waft_embedder_winit::{LinuxSettings, WindowsSettings};
 
 /// Runs the application on this target's host.
 #[derive(Default)]
 pub struct DefaultEmbedder {
-    #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
+    #[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
     inner: waft_embedder_winit::WinitEmbedder,
     #[cfg(target_os = "android")]
     app: Option<AndroidApp>,
+    #[cfg(target_os = "ios")]
+    inner: waft_embedder_ios::IosEmbedder,
     #[cfg(target_arch = "wasm32")]
     inner: waft_embedder_web::WebEmbedder,
 }
@@ -40,7 +42,7 @@ impl DefaultEmbedder {
     /// Whether every window draws on the system's software adapter, WebGPU's
     /// `forceFallbackAdapter`: lavapipe or llvmpipe on Linux, WARP on Windows. Off by default,
     /// which takes a hardware adapter wherever there is one.
-    #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
+    #[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
     pub fn force_fallback_adapter(mut self, force: bool) -> DefaultEmbedder {
         self.inner = self.inner.force_fallback_adapter(force);
         self
@@ -49,7 +51,7 @@ impl DefaultEmbedder {
     /// What the app tells Linux's desktops, its app id among it; ignored on every other system.
     /// `#[waft::main]` gives the app id from the manifest; an entry written by hand gives
     /// `waft::linux_app_id!()`.
-    #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
+    #[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
     pub fn linux(mut self, settings: LinuxSettings) -> DefaultEmbedder {
         self.inner = self.inner.linux(settings);
         self
@@ -58,7 +60,7 @@ impl DefaultEmbedder {
     /// What the app tells Windows' shell, its AppUserModelID among it; ignored on every other
     /// system. `#[waft::main]` gives the manifest's `identifier`, which `cargo waft`'s installers
     /// put on the app's shortcuts; an entry written by hand gives the same.
-    #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
+    #[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
     pub fn windows(mut self, settings: WindowsSettings) -> DefaultEmbedder {
         self.inner = self.inner.windows(settings);
         self
@@ -77,12 +79,12 @@ impl DefaultEmbedder {
     /// started the app (`WinitEmbedder::attach_to_parent_console`). `#[waft::main]`'s entry calls
     /// it first; an entry written out calls it before it writes anything. Nothing elsewhere.
     pub fn attach_to_parent_console() {
-        #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
+        #[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
         waft_embedder_winit::WinitEmbedder::attach_to_parent_console();
     }
 
     /// Starts the host loop. `start` runs once, at launch, with the views the host has then,
-    /// and returns the client the host drives. On Android the loop runs for the rest of the
+    /// and returns the client the host drives. On iOS and Android the loop runs for the rest of the
     /// process, and this never returns.
     pub fn run<C: EmbedderClient + 'static>(
         self,

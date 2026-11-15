@@ -68,18 +68,6 @@ pub(crate) trait OperatingSystem:
     /// The platform the framework is told it runs on, where Flutter's `defaultTargetPlatform`
     /// bottoms out in `dart:io`'s `Platform.isAndroid` chain.
     const TARGET_PLATFORM: TargetPlatform;
-
-    /// Whether the window is the screen, which the system sizes: a phone's. A desktop's
-    /// windows are sized by the app.
-    const WINDOW_IS_THE_SCREEN: bool = false;
-
-    /// Whether the app may open windows of its own beside the screen view's: a desktop's may
-    /// at once, an iPhone's may not, and an iPad's would ask the system, which this embedder does
-    /// not.
-    const APP_MAY_OPEN_WINDOWS: bool = true;
-
-    /// Whether the app may quit itself. iOS gives it no way to (Apple's QA1561).
-    const APP_MAY_QUIT: bool = true;
 }
 
 /// What winit sets up of the application as it builds its event loop, which the system's module
@@ -298,8 +286,8 @@ pub(crate) trait DisplayLink: Sized {
     fn vsync_time(&self) -> Option<Instant>;
 }
 
-/// The system's compositor for composition layers, Core Animation's on macOS and iOS, and why it
-/// is shaped as it is, in `apple/composition`; and what a view shows into on this system, one kind
+/// The system's compositor for composition layers, Core Animation's on macOS, and why it
+/// is shaped as it is, in `waft-embedder-apple`'s `composition`; and what a view shows into on this system, one kind
 /// for every view.
 pub(crate) trait NativeComposition {
     /// What every view shows into on this system.
@@ -356,7 +344,7 @@ pub(crate) trait NativeComposition {
 
 /// What a view shows into: the source of the surface it draws on, and the place of the composition
 /// layers its scenes place, beneath its drawing. On macOS a composition layer of the view's own,
-/// whose content is a `CAMetalLayer` the view draws into (`apple/composition/view_layer.rs`);
+/// whose content is a `CAMetalLayer` the view draws into (`waft-embedder-apple`'s `composition/view_layer.rs`);
 /// elsewhere the view's window, which the view draws into through the window's handle
 /// (`window_handle_layer.rs`).
 ///
@@ -505,8 +493,8 @@ pub(crate) trait SystemFileDialogs {
 }
 
 /// The system's media stack: its players, its reading of media without playing it, its cameras
-/// and the frame readers they feed (`apple/media` on macOS and iOS), and the user's caption
-/// settings (`apple/caption_appearance`).
+/// and the frame readers they feed (`waft-embedder-apple`'s `media` on macOS), and the user's caption
+/// settings (`waft-embedder-apple`'s `caption_appearance`).
 pub(crate) trait SystemMedia {
     /// The system's players, or `None` where the embedder has none.
     fn players() -> Option<Rc<dyn Players>> {
@@ -535,8 +523,8 @@ pub(crate) trait SystemMedia {
     }
 }
 
-/// The system's image codecs, which the app decodes and encodes images with (`apple/image_codecs`
-/// on macOS and iOS).
+/// The system's image codecs, which the app decodes and encodes images with (`waft-embedder-apple`'s `image_codecs`
+/// on macOS).
 pub(crate) trait SystemImageCodecs {
     /// The system's image codecs, or `None` where the embedder has none.
     fn image_codecs() -> Option<Rc<dyn ImageCodecs>> {

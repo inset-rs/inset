@@ -1,6 +1,6 @@
 [package]
 name = "waft-embedder-default"
-description = "Default host for Waft: winit on native, canvas WebGPU on wasm"
+description = "Default host for Waft: winit on the desktops, its own hosts on iOS and Android, canvas WebGPU on wasm"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,8 +9,11 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
-[target.'cfg(not(any(target_arch = "wasm32", target_os = "android")))'.dependencies]
+[target.'cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))'.dependencies]
 waft-embedder-winit.workspace = true
+
+[target.'cfg(target_os = "ios")'.dependencies]
+waft-embedder-ios.workspace = true
 
 [target.'cfg(target_os = "android")'.dependencies]
 waft-embedder-android.workspace = true

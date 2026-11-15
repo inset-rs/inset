@@ -13,16 +13,16 @@
 //! above and blue below; the animation, `tests/media/three-frames.gif`, three frames of 8 by 8,
 //! red, green and blue, each shown a tenth of a second.
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[cfg(target_os = "macos")]
 fn main() {
     codecs::decode_and_encode_through_image_io();
     println!("an_image_decodes_and_encodes_through_the_systems_codecs: ok");
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+#[cfg(not(target_os = "macos"))]
 fn main() {}
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[cfg(target_os = "macos")]
 mod codecs {
     use std::future::Future;
     use std::path::PathBuf;

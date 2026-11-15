@@ -22,7 +22,9 @@ waft = { version = "0.5.0", path = "crates/waft" }
 waft-animation = { version = "0.5.0", path = "crates/waft-animation" }
 waft-cupertino = { version = "0.5.0", path = "crates/waft-cupertino" }
 waft-embedder = { version = "0.5.0", path = "crates/waft-embedder" }
+waft-embedder-apple = { version = "0.5.0", path = "crates/waft-embedder-apple" }
 waft-embedder-android = { version = "0.5.0", path = "crates/waft-embedder-android" }
+waft-embedder-ios = { version = "0.5.0", path = "crates/waft-embedder-ios" }
 waft-embedder-default = { version = "0.5.0", path = "crates/waft-embedder-default" }
 waft-embedder-web = { version = "0.5.0", path = "crates/waft-embedder-web" }
 waft-embedder-winit = { version = "0.5.0", path = "crates/waft-embedder-winit" }
