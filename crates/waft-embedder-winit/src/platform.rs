@@ -90,7 +90,7 @@ pub struct WinitPlatform {
     players: Option<Rc<dyn Players>>,
     media_assets: Option<Rc<dyn MediaAssets>>,
     cameras: Option<Rc<dyn Cameras>>,
-    /// The system's image codecs, where it has them (`os/apple/image_codecs`).
+    /// The system's image codecs, where it has them (`waft-embedder-apple`'s `image_codecs`).
     image_codecs: Option<Rc<dyn ImageCodecs>>,
     video_frame_readers: Option<Rc<dyn VideoFrameReaders>>,
     /// The user's caption settings, where the system keeps them.
@@ -336,7 +336,7 @@ impl Platform for WinitPlatform {
         images.import_texture(texture, false).ok()
     }
 
-    /// Metal's texture over the buffer's `IOSurface` on macOS and iOS (`os/apple/gpu_interop`),
+    /// Metal's texture over the buffer's `IOSurface` on macOS and iOS (`waft-embedder-apple`'s `gpu_interop`),
     /// and none elsewhere, where the host hands out no buffers.
     fn import_texture(
         &self,
@@ -346,7 +346,7 @@ impl Platform for WinitPlatform {
         System::import_texture(buffer, device)
     }
 
-    /// The allocator of the system's `IOSurface`s on macOS and iOS (`os/apple/hardware_buffers`).
+    /// The allocator of the system's `IOSurface`s on macOS and iOS (`waft-embedder-apple`'s `hardware_buffers`).
     fn hardware_buffer_allocator(&self) -> Option<Arc<dyn HardwareBufferAllocator>> {
         self.hardware_buffer_allocator.clone()
     }

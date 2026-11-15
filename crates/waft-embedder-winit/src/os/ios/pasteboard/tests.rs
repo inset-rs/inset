@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use super::*;
-use crate::os::apple::app_futures::LocalFuture;
+use waft_embedder_apple::app_futures::LocalFuture;
 
 /// A pasteboard of the test's own, with no notices.
 fn private_pasteboard() -> Pasteboard {

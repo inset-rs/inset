@@ -47,8 +47,8 @@ use waft_embedder::{
 };
 
 use crate::clipboard::ClipboardChanges;
-use crate::os::apple::pasteboard_types as types;
 use notices::Notices;
+use waft_embedder_apple::pasteboard_types as types;
 
 /// A pasteboard, the general one but in tests, as this app reaches it, on the main thread.
 pub(crate) struct Pasteboard {

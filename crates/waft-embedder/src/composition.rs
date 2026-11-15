@@ -1,6 +1,6 @@
 //! Native content the OS compositor shows beside the framework's picture: the capability a host
 //! with a compositor hands out, and the composition layer a producer feeds from a thread of its
-//! own. The Core Animation host's `os/apple/composition` module, in `waft-embedder-winit`, says
+//! own. The Core Animation hosts' `composition` module, in `waft-embedder-apple`, says
 //! why it is shaped as it is. A producer that paces by the screen's refreshes waits on the
 //! platform's [`VsyncWaiter`](crate::VsyncWaiter).
 //!

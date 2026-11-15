@@ -23,9 +23,9 @@ use objc2_foundation::{
 };
 use waft_embedder::{ClipboardError, ClipboardItem, Content, ContentFuture};
 
-use crate::os::apple::app_futures;
-use crate::os::apple::pasteboard_types as types;
-use crate::os::apple::promised_files::{FileProducer, produce_at};
+use waft_embedder_apple::app_futures;
+use waft_embedder_apple::pasteboard_types as types;
+use waft_embedder_apple::promised_files::{FileProducer, produce_at};
 
 /// What produces one form, each time someone pastes it.
 type FormProducer = std::rc::Rc<dyn Fn() -> ContentFuture>;

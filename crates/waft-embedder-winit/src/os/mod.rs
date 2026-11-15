@@ -21,7 +21,7 @@
 //! link and DirectComposition's composition layers, a view drawn on a visual of its own
 //! (`windows`); Linux has the desktop's tray and its notification server (`linux`); every other
 //! system winit covers by itself (`winit_only`). What macOS and iOS share, their notification
-//! center and the compositor of composition layers among it, is in `apple`.
+//! center and the compositor of composition layers among it, is in `waft-embedder-apple`.
 //!
 //! A system's module is compiled for its own target only, so a change to a trait is checked
 //! against that system's answers only when building for it: build every target a change
@@ -29,16 +29,14 @@
 
 #[cfg(not(target_os = "macos"))]
 mod absent;
-#[cfg(any(target_os = "macos", target_os = "ios"))]
-mod apple;
-#[cfg(target_os = "macos")]
-pub(crate) use apple::composition::{place_layer_in, show_system_layer};
-#[cfg(any(target_os = "macos", target_os = "ios"))]
-pub use apple::hardware_buffers::SurfaceBuffer;
-#[cfg(any(target_os = "macos", target_os = "ios"))]
-pub use apple::media::CoreVideoFrame;
 #[cfg(target_os = "linux")]
 pub use linux::DmabufBuffer;
+#[cfg(target_os = "macos")]
+pub(crate) use waft_embedder_apple::composition::{place_layer_in, show_system_layer};
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+pub use waft_embedder_apple::hardware_buffers::SurfaceBuffer;
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+pub use waft_embedder_apple::media::CoreVideoFrame;
 #[cfg(target_os = "windows")]
 pub use windows::SharedTexture;
 pub(crate) mod capabilities;

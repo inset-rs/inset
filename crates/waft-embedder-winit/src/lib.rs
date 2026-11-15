@@ -36,9 +36,6 @@ mod linux;
 mod locales;
 mod macos;
 mod main_loop;
-// Only the systems with players and cameras use what their media share.
-#[cfg(any(target_os = "macos", target_os = "ios"))]
-mod media;
 mod menus;
 mod mouse_cursor;
 mod notifications;

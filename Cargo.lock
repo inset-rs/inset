@@ -5169,6 +5169,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "waft-embedder-apple"
+version = "0.5.0"
+dependencies = [
+ "block2",
+ "dispatch2",
+ "objc2",
+ "objc2-av-foundation",
+ "objc2-core-foundation",
+ "objc2-core-graphics",
+ "objc2-core-media",
+ "objc2-core-text",
+ "objc2-core-video",
+ "objc2-foundation",
+ "objc2-image-io",
+ "objc2-io-surface",
+ "objc2-media-accessibility",
+ "objc2-metal",
+ "objc2-quartz-core",
+ "objc2-uniform-type-identifiers",
+ "objc2-user-notifications",
+ "png 0.18.1",
+ "pollster",
+ "valo",
+ "valo-codec",
+ "valo-codec-apple",
+ "valo-geometry",
+ "waft-embedder",
+ "wgpu",
+]
+
+[[package]]
 name = "waft-embedder-default"
 version = "0.5.0"
 dependencies = [
@@ -5205,30 +5236,21 @@ dependencies = [
  "libloading",
  "objc2",
  "objc2-app-kit",
- "objc2-av-foundation",
  "objc2-core-foundation",
- "objc2-core-graphics",
- "objc2-core-media",
- "objc2-core-text",
  "objc2-core-video",
  "objc2-foundation",
- "objc2-image-io",
- "objc2-io-surface",
- "objc2-media-accessibility",
- "objc2-metal",
  "objc2-quartz-core",
  "objc2-ui-kit",
  "objc2-uniform-type-identifiers",
- "objc2-user-notifications",
  "png 0.18.1",
  "pollster",
  "sys-locale",
  "valo",
  "valo-codec",
- "valo-codec-apple",
  "valo-codec-software",
  "valo-geometry",
  "waft-embedder",
+ "waft-embedder-apple",
  "waft-embedder-winit",
  "wayland-backend",
  "wayland-client",

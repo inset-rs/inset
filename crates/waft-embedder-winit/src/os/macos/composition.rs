@@ -1,7 +1,7 @@
-//! macOS's compositor: Core Animation's, which iOS shares (`apple/composition`), in the layer of
+//! macOS's compositor: Core Animation's, which iOS shares (`waft-embedder-apple`'s `composition`), in the layer of
 //! winit's `NSView`; and what a window's code does for its view there, as an app does for a view it
 //! adds on a layer of its own: it makes the composition layer the view draws into
-//! (`apple/composition/view_layer.rs`), places it in the layer of winit's view, filling it, and
+//! (`waft-embedder-apple`'s `composition/view_layer.rs`), places it in the layer of winit's view, filling it, and
 //! keeps a hold on it ([`ViewLayerFilling`]) that places it again whenever that layer's bounds or
 //! scale change.
 //!
@@ -24,15 +24,17 @@ use objc2_foundation::{
     NSObjectNSKeyValueObserverRegistration, NSString,
 };
 use objc2_quartz_core::CALayer;
-use waft_embedder::{CompositionLayer, Compositor, HardwareBufferAllocator};
+use waft_embedder::{CompositionLayer, Compositor, HardwareBufferAllocator, Placement, ViewId};
 use winit::window::Window;
 
 use super::{AppKit, abort_on_panic, ns_view};
-use crate::os::apple::composition::{
-    CoreAnimationCompositor, CoreAnimationViewLayer, WindowLayer, place_filling,
+use waft_embedder_apple::composition::{
+    CoreAnimationCompositor, CoreAnimationViewLayer, place_filling,
 };
-use crate::os::apple::hardware_buffers::SurfaceBufferAllocator;
-use crate::os::capabilities::NativeComposition;
+use waft_embedder_apple::hardware_buffers::SurfaceBufferAllocator;
+
+use crate::gpu::Gpu;
+use crate::os::capabilities::{NativeComposition, ViewLayer};
 
 impl NativeComposition for AppKit {
     type ViewLayer = CoreAnimationViewLayer;
@@ -67,9 +69,40 @@ impl NativeComposition for AppKit {
     }
 }
 
-impl WindowLayer for AppKit {
-    fn window_layer(window: &dyn Window) -> Option<Retained<CALayer>> {
-        ns_view(window)?.layer()
+/// The layer of `window`'s view, which holds the layers of its content; `None` off the main thread,
+/// or for a view without one.
+fn window_layer(window: &dyn Window) -> Option<Retained<CALayer>> {
+    ns_view(window)?.layer()
+}
+
+/// Core Animation's, which shows the composition layer and the composition layers in it over its
+/// background whether or not anything is drawn above them.
+impl ViewLayer for CoreAnimationViewLayer {
+    const SHOWS_FRAMES_UNDRAWN: bool = true;
+
+    fn set_scale(&self, scale: f64) {
+        self.set_drawing_scale(scale);
+    }
+
+    fn make_surface(
+        &self,
+        gpu: &Gpu,
+        size: [u32; 2],
+        alpha: valo::SurfaceAlpha,
+    ) -> Result<valo::Surface, String> {
+        self.make_surface_on(&gpu.instance, &gpu.adapter, &gpu.device, size, alpha)
+    }
+
+    fn place<'a>(
+        &self,
+        placements: impl IntoIterator<Item = (&'a Arc<dyn CompositionLayer>, &'a Placement)>,
+        view: ViewId,
+    ) {
+        self.place_scene_layers(placements, view);
+    }
+
+    fn show_background(&self, color: valo::Color) {
+        self.show_background_color(color);
     }
 }
 
@@ -87,7 +120,7 @@ pub(crate) struct ViewLayerFilling {
 impl ViewLayerFilling {
     /// Places `layer` in the layer of `window`'s view, filling it, and keeps it filling it.
     fn new(window: &dyn Window, layer: Arc<dyn CompositionLayer>) -> ViewLayerFilling {
-        let Some(parent) = AppKit::window_layer(window) else {
+        let Some(parent) = window_layer(window) else {
             eprintln!("waft: a window's view has no layer; the view drawn in it is not shown");
             return ViewLayerFilling { observer: None };
         };

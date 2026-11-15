@@ -1,4 +1,4 @@
-//! iOS's compositor: Core Animation's, which macOS shares (`apple/composition`), in the layer of
+//! iOS's compositor: Core Animation's, which macOS shares (`waft-embedder-apple`'s `composition`), in the layer of
 //! winit's `UIView`. A view draws through its window's handle (`window_handle_layer.rs`), into the
 //! `CAMetalLayer` wgpu makes in that layer, with the composition layers its scenes place beneath it.
 
@@ -15,16 +15,16 @@ use waft_embedder::{Compositor, HardwareBufferAllocator};
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
 
+use waft_embedder_apple::composition::CoreAnimationCompositor;
+use waft_embedder_apple::hardware_buffers::SurfaceBufferAllocator;
+
 use super::Ios;
-use crate::os::apple::composition::{
-    CoreAnimationCompositor, CoreAnimationWindowComposition, WindowLayer,
-};
-use crate::os::apple::hardware_buffers::SurfaceBufferAllocator;
+use super::window_composition::CoreAnimationWindowComposition;
 use crate::os::capabilities::NativeComposition;
 use crate::os::window_handle_layer::{NoWindowHold, WindowHandleLayer};
 
 impl NativeComposition for Ios {
-    type ViewLayer = WindowHandleLayer<CoreAnimationWindowComposition<Ios>>;
+    type ViewLayer = WindowHandleLayer<CoreAnimationWindowComposition>;
     type WindowHold = NoWindowHold;
 
     fn compositor() -> Option<Arc<dyn Compositor>> {
@@ -40,14 +40,14 @@ impl NativeComposition for Ios {
     }
 }
 
-impl WindowLayer for Ios {
-    fn window_layer(window: &dyn Window) -> Option<Retained<CALayer>> {
-        MainThreadMarker::new()?;
-        let RawWindowHandle::UiKit(uikit) = window.window_handle().ok()?.as_raw() else {
-            return None;
-        };
-        // SAFETY: winit's view of a live window, on the main thread, checked above.
-        let view = unsafe { Retained::retain(uikit.ui_view.cast::<UIView>().as_ptr()) }?;
-        Some(view.layer())
-    }
+/// The layer of `window`'s view, which holds the layers of its content; `None` off the main thread,
+/// or for a view without one.
+pub(super) fn window_layer(window: &dyn Window) -> Option<Retained<CALayer>> {
+    MainThreadMarker::new()?;
+    let RawWindowHandle::UiKit(uikit) = window.window_handle().ok()?.as_raw() else {
+        return None;
+    };
+    // SAFETY: winit's view of a live window, on the main thread, checked above.
+    let view = unsafe { Retained::retain(uikit.ui_view.cast::<UIView>().as_ptr()) }?;
+    Some(view.layer())
 }

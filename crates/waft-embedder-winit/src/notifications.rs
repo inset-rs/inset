@@ -40,7 +40,7 @@ impl NotificationActivations {
     }
 
     /// Clicks handed to `send` with the identity they carry, as a test hears them.
-    #[cfg(test)]
+    #[cfg(all(test, any(target_os = "linux", target_os = "windows")))]
     pub(crate) fn to(
         send: impl Fn(Option<String>, NotificationActivation) + Send + Sync + 'static,
     ) -> NotificationActivations {
