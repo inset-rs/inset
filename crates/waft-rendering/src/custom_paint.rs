@@ -742,7 +742,7 @@ mod tests {
 
         notifier.set_value(&mut app, 1);
         assert!(custom.as_object().debug_needs_paint(&app));
-        pump_frame(&mut app, *owner);
+        pump_frame(&mut app, owner.handle());
         assert_eq!(painter.paints.get(), 2);
     }
 
@@ -786,7 +786,7 @@ mod tests {
         });
         custom.set_painter(&mut app, Some(eager.clone()));
         assert!(custom.as_object().debug_needs_paint(&app));
-        pump_frame(&mut app, *owner);
+        pump_frame(&mut app, owner.handle());
         assert_eq!((quiet.paints.get(), eager.paints.get()), (0, 1));
 
         custom.set_painter(&mut app, None);

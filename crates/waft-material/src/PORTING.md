@@ -323,7 +323,7 @@ Ported against: 34b89b2086d4
 
 ## arc.rs → arc.dart
 - Change: `MaterialPointArcTween`, `MaterialRectArcTween` and `MaterialRectCenterArcTween` are plain value structs that implement `Animatable` (and `RectTweenObject` for the rect ones), not `Handle`s that extend `Tween`; the arc is worked out in `new` and in `set_begin`/`set_end` once both ends are set, not lazily behind a `_dirty` flag.
-  Reason: language — no collector: a hero flight's tween as an arena object would never be freed.
+  Reason: language — nobody writes the tween after it is driven, so a value saves an arena object.
   Affect: a driven copy does not see a later `set_begin`.
 
 ## page_transitions_theme.rs → page_transitions_theme.dart

@@ -304,116 +304,98 @@ impl ContentDialog {
     }
 
     /// Sets Title.
-    pub fn title<K>(self: Ref<Self>, app: &mut App, title: impl IntoWidget<K>) -> Ref<Self> {
+    pub fn title<K>(self: Handle<Self>, app: &mut App, title: impl IntoWidget<K>) {
         self.change(app, |dialog| dialog.title = Some(title.into_widget()))
     }
 
     /// Sets Content.
-    pub fn content<K>(self: Ref<Self>, app: &mut App, content: impl IntoWidget<K>) -> Ref<Self> {
+    pub fn content<K>(self: Handle<Self>, app: &mut App, content: impl IntoWidget<K>) {
         self.change(app, |dialog| dialog.content = Some(content.into_widget()))
     }
 
     /// Sets PrimaryButtonText.
-    pub fn primary_button_text(
-        self: Ref<Self>,
-        app: &mut App,
-        text: impl Into<String>,
-    ) -> Ref<Self> {
+    pub fn primary_button_text(self: Handle<Self>, app: &mut App, text: impl Into<String>) {
         self.change(app, |dialog| dialog.primary_button_text = text.into())
     }
 
     /// Sets SecondaryButtonText.
-    pub fn secondary_button_text(
-        self: Ref<Self>,
-        app: &mut App,
-        text: impl Into<String>,
-    ) -> Ref<Self> {
+    pub fn secondary_button_text(self: Handle<Self>, app: &mut App, text: impl Into<String>) {
         self.change(app, |dialog| dialog.secondary_button_text = text.into())
     }
 
     /// Sets CloseButtonText.
-    pub fn close_button_text(self: Ref<Self>, app: &mut App, text: impl Into<String>) -> Ref<Self> {
+    pub fn close_button_text(self: Handle<Self>, app: &mut App, text: impl Into<String>) {
         self.change(app, |dialog| dialog.close_button_text = text.into())
     }
 
     /// Sets IsPrimaryButtonEnabled.
-    pub fn is_primary_button_enabled(self: Ref<Self>, app: &mut App, value: bool) -> Ref<Self> {
+    pub fn is_primary_button_enabled(self: Handle<Self>, app: &mut App, value: bool) {
         self.change(app, |dialog| dialog.is_primary_button_enabled = value)
     }
 
     /// Sets IsSecondaryButtonEnabled.
-    pub fn is_secondary_button_enabled(self: Ref<Self>, app: &mut App, value: bool) -> Ref<Self> {
+    pub fn is_secondary_button_enabled(self: Handle<Self>, app: &mut App, value: bool) {
         self.change(app, |dialog| dialog.is_secondary_button_enabled = value)
     }
 
     /// Sets DefaultButton.
-    pub fn default_button(
-        self: Ref<Self>,
-        app: &mut App,
-        button: ContentDialogButton,
-    ) -> Ref<Self> {
+    pub fn default_button(self: Handle<Self>, app: &mut App, button: ContentDialogButton) {
         self.change(app, |dialog| dialog.default_button = button)
     }
 
     /// Sets FullSizeDesired.
-    pub fn full_size_desired(self: Ref<Self>, app: &mut App, value: bool) -> Ref<Self> {
+    pub fn full_size_desired(self: Handle<Self>, app: &mut App, value: bool) {
         self.change(app, |dialog| dialog.full_size_desired = value)
     }
 
     /// Sets the PrimaryButtonClick handler.
     pub fn primary_button_click(
-        self: Ref<Self>,
+        self: Handle<Self>,
         app: &mut App,
         handler: impl Fn(&mut App, &Rc<ContentDialogButtonClickEventArgs>) + 'static,
-    ) -> Ref<Self> {
-        app.get_mut(&self).primary_button_click = Some(Rc::new(handler));
-        self
+    ) {
+        app.get_mut(self).primary_button_click = Some(Rc::new(handler));
     }
 
     /// Sets the SecondaryButtonClick handler.
     pub fn secondary_button_click(
-        self: Ref<Self>,
+        self: Handle<Self>,
         app: &mut App,
         handler: impl Fn(&mut App, &Rc<ContentDialogButtonClickEventArgs>) + 'static,
-    ) -> Ref<Self> {
-        app.get_mut(&self).secondary_button_click = Some(Rc::new(handler));
-        self
+    ) {
+        app.get_mut(self).secondary_button_click = Some(Rc::new(handler));
     }
 
     /// Sets the CloseButtonClick handler.
     pub fn close_button_click(
-        self: Ref<Self>,
+        self: Handle<Self>,
         app: &mut App,
         handler: impl Fn(&mut App, &Rc<ContentDialogButtonClickEventArgs>) + 'static,
-    ) -> Ref<Self> {
-        app.get_mut(&self).close_button_click = Some(Rc::new(handler));
-        self
+    ) {
+        app.get_mut(self).close_button_click = Some(Rc::new(handler));
     }
 
     /// Sets the Opened handler.
-    pub fn opened(self: Ref<Self>, app: &mut App, handler: Listener) -> Ref<Self> {
-        app.get_mut(&self).opened = Some(handler);
-        self
+    pub fn opened(self: Handle<Self>, app: &mut App, handler: Listener) {
+        app.get_mut(self).opened = Some(handler);
     }
 
     /// Sets the Closing handler.
     pub fn closing(
-        self: Ref<Self>,
+        self: Handle<Self>,
         app: &mut App,
         handler: impl Fn(&mut App, &Rc<ContentDialogClosingEventArgs>) + 'static,
-    ) -> Ref<Self> {
-        app.get_mut(&self).closing = Some(Rc::new(handler));
-        self
+    ) {
+        app.get_mut(self).closing = Some(Rc::new(handler));
     }
 
     /// Sets the Closed handler.
     pub fn closed(
-        self: Ref<Self>,
+        self: Handle<Self>,
         app: &mut App,
         handler: impl Fn(&mut App, ContentDialogClosedEventArgs) + 'static,
-    ) -> Ref<Self> {
-        app.get_mut(&self).closed = Some(Rc::new(handler));
-        self
+    ) {
+        app.get_mut(self).closed = Some(Rc::new(handler));
     }
 
     /// `ShowAsync`: shows the dialog over the window of `context`'s root navigator. The future
@@ -476,10 +458,9 @@ impl ContentDialog {
     }
 
     /// Applies `change` to the dialog's properties and rebuilds a shown presenter.
-    fn change(self: Ref<Self>, app: &mut App, change: impl FnOnce(&mut Self)) -> Ref<Self> {
-        change(app.get_mut(&self));
+    fn change(self: Handle<Self>, app: &mut App, change: impl FnOnce(&mut Self)) {
+        change(app.get_mut(self));
         self.notify_listeners(app);
-        self
     }
 
     /// The route the dialog is shown in, with the smoke layer of `resources`.
@@ -732,7 +713,7 @@ impl ContentDialog {
     }
 
     fn notifier_dispose(self: Handle<Self>, app: &mut App) {
-        app.get_mut(self).notifier.dispose();
+        ChangeNotifierData::dispose(app, self);
     }
 }
 
@@ -945,10 +926,9 @@ impl RawDialogRouteLeaf for ContentDialogRoute {
     /// `SmokeLayerBackground`: blocks input to the page beneath and fades with the dialog.
     fn build_modal_barrier(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
         let animation = TransitionRoute::animation(self, app).expect("an installed route");
-        let kept = HandleId::from(animation)
+        let kept = animation
             .upgrade(app)
-            .expect("the route keeps its animation")
-            .into_map(|_| animation);
+            .expect("the route keeps its animation");
         let smoke = self
             .raw_dialog_route_data(app)
             .barrier_color

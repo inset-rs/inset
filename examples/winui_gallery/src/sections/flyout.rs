@@ -127,7 +127,7 @@ impl State for FlyoutDemoState {
                                     FlyoutPlacementMode::Right => FlyoutPlacementMode::Full,
                                     _ => FlyoutPlacementMode::Top,
                                 };
-                                flyout.clone().placement(app, next);
+                                flyout.placement(app, next);
                                 self.set_state(app, |state| state.placement = next);
                             }
                         }),
@@ -149,7 +149,7 @@ impl State for FlyoutDemoState {
                         FlyoutShowMode::Transient => FlyoutShowMode::TransientWithDismissOnPointerMoveAway,
                         _ => FlyoutShowMode::Standard,
                     };
-                    flyout.clone().show_mode(app, next);
+                    flyout.show_mode(app, next);
                     self.set_state(app, |state| state.mode = next);
                 }})).into_widget(),
                 CheckBox::new(Some(prevent_close), move |app, checked| {

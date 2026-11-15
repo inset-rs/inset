@@ -1722,7 +1722,7 @@ mod tests {
     impl LeafRenderObjectWidget for Sized {}
 
     fn new_controller(app: &mut App) -> Ref<AnimationController> {
-        AnimationController::create(
+        AnimationController::new(
             app,
             None,
             Some(Duration::from_millis(100)),
@@ -2311,7 +2311,7 @@ mod tests {
         );
         harness.pump(&mut app);
         assert_eq!(builds.get(), 1);
-        assert!(has_listeners(&app, *notifier));
+        assert!(has_listeners(&app, notifier.handle()));
         assert_eq!(root_child_size(&harness, &app), Size::new(10.0, 10.0));
 
         notifier.set_value(&mut app, 20.0);
@@ -2341,10 +2341,10 @@ mod tests {
         harness.set_child(&mut app, grower(second.clone()));
         harness.pump(&mut app);
         assert!(
-            !has_listeners(&app, *first),
+            !has_listeners(&app, first.handle()),
             "did_update_widget left the old listenable"
         );
-        assert!(has_listeners(&app, *second));
+        assert!(has_listeners(&app, second.handle()));
         assert_eq!(root_child_size(&harness, &app), Size::new(30.0, 10.0));
 
         harness.set_child(
@@ -2356,7 +2356,7 @@ mod tests {
         );
         harness.pump(&mut app);
         assert!(
-            !has_listeners(&app, *second),
+            !has_listeners(&app, second.handle()),
             "dispose removed the listener"
         );
         let builds_before = builds.get();

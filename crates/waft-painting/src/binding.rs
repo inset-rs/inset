@@ -64,7 +64,7 @@ impl PaintingBinding {
         let mut fonts = FontCollection::new();
         install(&mut fonts);
         let fonts = app.create(fonts);
-        let handle = *fonts;
+        let handle = fonts.handle();
         app.get_mut(self).fonts = Some(fonts);
         handle
     }

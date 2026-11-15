@@ -227,7 +227,7 @@ impl BreadcrumbBarState {
             })
             .collect();
         let flyout = app.get(self).flyout.clone().unwrap();
-        flyout.clone().content(
+        flyout.content(
             app,
             Column::new()
                 .main_axis_size(MainAxisSize::Min)

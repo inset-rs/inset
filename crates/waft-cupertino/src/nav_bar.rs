@@ -15,8 +15,7 @@ use waft_embedder::{
     TextBaseline, TextDirection, clamp_double,
 };
 use waft_foundation::{
-    App, Handle, HandleId, ListenableObject, Listener, OptionRetained, Ref, ValueChanged,
-    ValueListenable,
+    App, Handle, ListenableObject, Listener, OptionRetained, Ref, ValueChanged, ValueListenable,
 };
 use waft_painting::{
     Alignment, AlignmentGeometry, AnyColor, AxisDirection, Border, BorderSide, BorderStyle,
@@ -1762,7 +1761,7 @@ impl State for CupertinoSliverNavigationBarState {
     waft_widgets::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
-        let animation_controller = AnimationController::create(
+        let animation_controller = AnimationController::new(
             app,
             None,
             Some(K_NAV_BAR_SEARCH_DURATION),
@@ -1773,7 +1772,7 @@ impl State for CupertinoSliverNavigationBarState {
             self,
         );
         app.get_mut(self).animation_controller = Some(animation_controller.clone());
-        let search_animation = CurvedAnimation::create(
+        let search_animation = CurvedAnimation::new(
             app,
             animation_controller.erase(),
             k_nav_bar_search_curve(),
@@ -3953,10 +3952,9 @@ impl NavigationBarComponentsTransition {
             .downcast::<CurvedAnimation>(app)
             .expect("the hero flight drives a CurvedAnimation");
         let parent = AnimationWithParent::parent(curved, app);
-        HandleId::from(parent)
+        parent
             .upgrade(app)
             .expect("the hero animation keeps its parent")
-            .into_map(|_| parent)
     }
 
     fn bottom_nav_bar_background(&self, app: &mut App) -> Option<WidgetRef> {

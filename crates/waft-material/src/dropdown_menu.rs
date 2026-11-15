@@ -1393,7 +1393,7 @@ impl<T: Clone + PartialEq + 'static> DropdownMenuState<T> {
             if entry_is_selected {
                 if let Some(replaced) = app.get_mut(self).highlighted_item_states_controller.take()
                 {
-                    app.get_mut(&replaced).dispose();
+                    replaced.dispose(app);
                 }
                 let focused: WidgetStates = [WidgetState::Focused].into_iter().collect();
                 let states_controller = WidgetStatesController::new(app, Some(focused.clone()));
@@ -2046,7 +2046,7 @@ impl<T: Clone + PartialEq + 'static> State for DropdownMenuState<T> {
         }
         if let Some(states_controller) = app.get_mut(self).highlighted_item_states_controller.take()
         {
-            app.get_mut(&states_controller).dispose();
+            states_controller.dispose(app);
         }
     }
 

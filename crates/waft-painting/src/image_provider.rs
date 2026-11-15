@@ -415,7 +415,7 @@ impl ImageProvider for AssetImage {
         let _loading = app.spawn(async move |async_app| {
             let bytes = loading.await;
             async_app.update(move |app| {
-                let completer = *retained;
+                let completer = retained.handle();
                 if !app.is_disposed(completer) {
                     match bytes {
                         Ok(bytes) => decode_into(app, completer, Arc::from(bytes), scale),
@@ -433,7 +433,7 @@ impl ImageProvider for AssetImage {
 /// Asks the host to decode `bytes` and drives the answer into a fresh completer.
 fn decode_into_completer(app: &mut App, bytes: Arc<[u8]>, scale: f64) -> Ref<ImageStreamCompleter> {
     let completer = ImageStreamCompleter::new(app);
-    decode_into(app, *completer, bytes, scale);
+    decode_into(app, completer.handle(), bytes, scale);
     completer
 }
 
@@ -517,7 +517,7 @@ impl ImagePlayback {
         let _opening = app.spawn(async move |async_app| {
             let opened = opening.await;
             async_app.update(move |app| {
-                let playback = *retained;
+                let playback = retained.handle();
                 if !app.is_disposed(playback) {
                     playback.codec_opened(app, opened);
                 }
@@ -568,7 +568,7 @@ impl ImagePlayback {
         let _decoding = app.spawn(async move |async_app| {
             let frame = codec.next_frame().await;
             async_app.update(move |app| {
-                let playback = *retained;
+                let playback = retained.handle();
                 if !app.is_disposed(playback) {
                     playback.frame_decoded(app, codec, frame);
                 }

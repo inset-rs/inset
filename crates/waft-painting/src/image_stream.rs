@@ -402,7 +402,7 @@ impl ImageStream {
             "an ImageStream takes its completer once"
         );
         let kept = completer.clone();
-        let completer = *completer;
+        let completer = completer.handle();
         app.get_mut(self).completer = Some(kept);
         for listener in app.get(self).listeners.clone() {
             completer.add_listener(app, listener);
@@ -574,9 +574,9 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let stream_ref = ImageStream::new(&mut app);
-        let stream = *stream_ref;
+        let stream = stream_ref.handle();
         let completer_ref = ImageStreamCompleter::new(&mut app);
-        let completer = *completer_ref;
+        let completer = completer_ref.handle();
         stream.set_completer(&mut app, completer_ref.clone());
         stream.add_listener(
             &mut app,

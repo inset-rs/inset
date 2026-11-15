@@ -120,7 +120,7 @@ impl Widget for LayoutBuilder {
     }
 
     fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
-        LayoutBuilderElement::create(app, this).as_element()
+        LayoutBuilderElement::new(app, this).as_element()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -178,7 +178,7 @@ pub struct LayoutBuilderElement {
 }
 
 impl LayoutBuilderElement {
-    fn create(app: &mut App, widget: WidgetRef) -> Handle<LayoutBuilderElement> {
+    fn new(app: &mut App, widget: WidgetRef) -> Handle<LayoutBuilderElement> {
         debug_assert!(downcast_widget::<LayoutBuilder>(&*widget).is_some());
         let this = app
             .create(LayoutBuilderElement {

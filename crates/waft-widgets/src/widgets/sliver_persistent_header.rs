@@ -264,7 +264,7 @@ where
     }
 
     fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
-        SliverPersistentHeaderElement::<W>::create(app, this).as_element()
+        SliverPersistentHeaderElement::<W>::new(app, this).as_element()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -601,7 +601,7 @@ impl<W: SliverPersistentHeaderRenderObjectWidget> SliverPersistentHeaderElement<
 where
     W::RenderObject: RenderSliverPersistentHeaderForWidgets,
 {
-    fn create(app: &mut App, widget: WidgetRef) -> Handle<SliverPersistentHeaderElement<W>> {
+    fn new(app: &mut App, widget: WidgetRef) -> Handle<SliverPersistentHeaderElement<W>> {
         let floating = downcast_widget::<W>(&*widget)
             .expect("a header element is created from its own widget")
             .floating();
@@ -1497,7 +1497,7 @@ mod tests {
         assert_eq!(header.geometry(&app).max_scroll_obstruction_extent, 40.0);
         assert_eq!(*shrink_offsets.borrow(), vec![0.0]);
 
-        scroll_to(&harness, &mut app, *offset, 100.0);
+        scroll_to(&harness, &mut app, offset.handle(), 100.0);
 
         // Shrunk to the minimum extent, still painting at the leading edge.
         assert_eq!(header.geometry(&app).paint_extent, 40.0);
@@ -1523,7 +1523,7 @@ mod tests {
         assert_eq!(header.geometry(&app).paint_extent, 120.0);
         assert_eq!(*shrink_offsets.borrow(), vec![0.0]);
 
-        scroll_to(&harness, &mut app, *offset, 100.0);
+        scroll_to(&harness, &mut app, offset.handle(), 100.0);
 
         assert_eq!(header.geometry(&app).paint_extent, 20.0);
         assert_eq!(header.geometry(&app).max_scroll_obstruction_extent, 0.0);

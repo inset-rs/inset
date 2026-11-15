@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 use waft_embedder::{Matrix4, Offset, PointerDeviceKind};
-use waft_foundation::{App, Handle, Listener, ValueChanged};
+use waft_foundation::{App, Handle, Listener, OptionRetained, ValueChanged};
 
 use crate::arena::GestureDisposition;
 use crate::constants::K_PRESS_TIMEOUT;
@@ -524,7 +524,7 @@ impl TapGestureRecognizer {
 
     /// The team that this recognizer belongs to, if any.
     pub fn team(self: Handle<Self>, app: &App) -> Option<Handle<GestureArenaTeam>> {
-        app.get(self).one_sequence.team.as_deref().copied()
+        app.get(self).one_sequence.team.handle()
     }
 
     /// The [`team`](Self::team) can only be set once.
@@ -1342,9 +1342,11 @@ mod tests {
         let down1 = down(1, Offset::new(10.0, 10.0));
         tap.add_pointer(&mut app, down1.clone());
         let competitor = TestMember::new(&mut app);
-        GestureBinding::instance(&mut app)
-            .gesture_arena(&app)
-            .add(&mut app, 1, *competitor);
+        GestureBinding::instance(&mut app).gesture_arena(&app).add(
+            &mut app,
+            1,
+            competitor.handle(),
+        );
         close_arena(&mut app, 1);
         route(&mut app, PointerEvent::Down(down1));
         assert!(!down_fired.get());
@@ -1408,9 +1410,11 @@ mod tests {
         let down1 = down(1, Offset::new(10.0, 10.0));
         tap.add_pointer(&mut app, down1.clone());
         let member = TestMember::new(&mut app);
-        let entry = GestureBinding::instance(&mut app)
-            .gesture_arena(&app)
-            .add(&mut app, 1, *member);
+        let entry = GestureBinding::instance(&mut app).gesture_arena(&app).add(
+            &mut app,
+            1,
+            member.handle(),
+        );
         GestureBinding::instance(&mut app)
             .gesture_arena(&app)
             .hold(&mut app, 1);
@@ -1436,9 +1440,11 @@ mod tests {
         let down1 = down(1, Offset::new(10.0, 10.0));
         tap.add_pointer(&mut app, down1.clone());
         let member = TestMember::new(&mut app);
-        let entry = GestureBinding::instance(&mut app)
-            .gesture_arena(&app)
-            .add(&mut app, 1, *member);
+        let entry = GestureBinding::instance(&mut app).gesture_arena(&app).add(
+            &mut app,
+            1,
+            member.handle(),
+        );
         GestureBinding::instance(&mut app)
             .gesture_arena(&app)
             .hold(&mut app, 1);

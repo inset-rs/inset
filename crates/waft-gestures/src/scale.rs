@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use indexmap::IndexMap;
 use waft_embedder::{Matrix4, Offset, PointerDeviceKind};
-use waft_foundation::{App, Handle, ValueChanged};
+use waft_foundation::{App, Handle, OptionRetained, ValueChanged};
 
 use crate::arena::GestureDisposition;
 use crate::constants::{K_MAX_FLING_VELOCITY, K_MIN_FLING_VELOCITY};
@@ -565,7 +565,7 @@ impl ScaleGestureRecognizer {
 
     /// The team that this recognizer belongs to, if any.
     pub fn team(self: Handle<Self>, app: &App) -> Option<Handle<GestureArenaTeam>> {
-        app.get(self).one_sequence.team.as_deref().copied()
+        app.get(self).one_sequence.team.handle()
     }
 
     /// The [`team`](Self::team) can only be set once.
@@ -1426,7 +1426,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let scale = ScaleGestureRecognizer::new(&mut app);
         let tap = TapGestureRecognizer::new(&mut app);
-        let r = record(&mut app, *scale);
+        let r = record(&mut app, scale.handle());
         let did_tap = Rc::new(Cell::new(false));
         let tapped = Rc::clone(&did_tap);
         tap.set_on_tap(
@@ -1660,7 +1660,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let scale = ScaleGestureRecognizer::new(&mut app)
             .supported_devices(&mut app, [PointerDeviceKind::Touch]);
-        let r = record(&mut app, *scale);
+        let r = record(&mut app, scale.handle());
 
         let mut mouse_pointer = TestPointer::with_kind(1, PointerDeviceKind::Mouse);
         let down = mouse_pointer.down(Offset::ZERO);
@@ -1792,7 +1792,7 @@ mod tests {
         assert_eq!(log.take(), ["scale-end"]);
 
         scale.dispose(&mut app);
-        DragGestureRecognizer::dispose(*drag, &mut app);
+        DragGestureRecognizer::dispose(drag.handle(), &mut app);
     }
 
     #[test]
@@ -1801,7 +1801,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let scale = ScaleGestureRecognizer::new(&mut app);
         let drag = HorizontalDragGestureRecognizer::new(&mut app);
-        let r = record(&mut app, *scale);
+        let r = record(&mut app, scale.handle());
 
         let mut pointer1 = TestPointer::with_kind(2, PointerDeviceKind::Trackpad);
         let start = pointer1.pan_zoom_start(Offset::ZERO);
@@ -1888,7 +1888,7 @@ mod tests {
         assert!(r.did_end_scale.replace(false));
 
         scale.dispose(&mut app);
-        DragGestureRecognizer::dispose(*drag, &mut app);
+        DragGestureRecognizer::dispose(drag.handle(), &mut app);
     }
 
     #[test]
@@ -1898,7 +1898,7 @@ mod tests {
         let scale = ScaleGestureRecognizer::new(&mut app);
         scale.set_drag_start_behavior(&mut app, DragStartBehavior::Start);
         scale.set_trackpad_scroll_causes_scale(&mut app, true);
-        let r = record(&mut app, *scale);
+        let r = record(&mut app, scale.handle());
         // Flutter's test listens for the start and the end only.
         scale.set_on_update(&mut app, None);
 

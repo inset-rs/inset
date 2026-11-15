@@ -65,7 +65,7 @@ impl TabController {
         vsync: impl TickerProvider,
     ) -> Ref<TabController> {
         debug_assert!(length == 0 || initial_index < length);
-        let animation_controller = AnimationController::create_unbounded(
+        let animation_controller = AnimationController::unbounded(
             app,
             initial_index as f64,
             None,
@@ -332,7 +332,7 @@ impl TabController {
         if let Some(animation_controller) = app.get_mut(self).animation_controller.take() {
             animation_controller.dispose(app);
         }
-        app.get_mut(self).change_notifier.dispose();
+        ChangeNotifierData::dispose(app, self);
     }
 }
 

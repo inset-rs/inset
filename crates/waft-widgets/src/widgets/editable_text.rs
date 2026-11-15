@@ -350,10 +350,12 @@ impl TextEditingController {
                 .into_span(),
         ])
     }
+}
 
-    /// Discards any resources used by the object.
-    pub fn dispose(&mut self) {
-        self.change_notifier.dispose();
+impl TextEditingController {
+    /// Discards any resources used by the object; see [`ChangeNotifierData::dispose`].
+    pub fn dispose(self: Handle<Self>, app: &mut App) {
+        ChangeNotifierData::dispose(app, self);
     }
 }
 
@@ -399,9 +401,7 @@ impl TextEditingControllerVTable {
             },
             notify_listeners: |app, id| Handle::<C>::from_id(id).notify_listeners(app),
             dispose_change_notifier: |app, id| {
-                app.get_mut(Handle::<C>::from_id(id))
-                    .change_notifier_data_mut()
-                    .dispose();
+                ChangeNotifierData::dispose(app, Handle::<C>::from_id(id));
             },
             data: |app, id| C::text_editing_controller_data(Handle::from_id(id), app),
             data_mut: |app, id| C::text_editing_controller_data_mut(Handle::from_id(id), app),
@@ -430,6 +430,14 @@ impl From<AnyTextEditingController> for HandleId {
 
 /// A field Dart types as the erased object, kept: AnyTextEditingController with its count.
 pub type TextEditingControllerRef = Retained<AnyTextEditingController>;
+
+impl AnyTextEditingController {
+    /// A [`TextEditingControllerRef`] while something still keeps the object; see
+    /// [`Handle::upgrade`](waft_foundation::Handle::upgrade).
+    pub fn upgrade(self, app: &App) -> Option<TextEditingControllerRef> {
+        Retained::upgrade(app, self)
+    }
+}
 
 /// A kept object erases to a [`TextEditingControllerRef`] with [`Retained::erase`]: Dart's upcast.
 impl<T: TextEditingControllerLeaf> From<Handle<T>> for AnyTextEditingController {
@@ -3225,7 +3233,7 @@ impl EditableTextState {
         {
             return controller;
         }
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             app,
             None,
             None,
@@ -5263,7 +5271,7 @@ impl State for EditableTextState {
             clipboard.dispose(app);
         }
         if let Some(notifier) = app.get(self).cursor_visibility_notifier.handle() {
-            app.get_mut(notifier).dispose();
+            notifier.dispose(app);
         }
         if let Some(listener) = app.get(self).app_lifecycle_listener.handle() {
             listener.dispose(app);
@@ -7424,7 +7432,7 @@ mod tests {
             let shown = app.create(ValueNotifier::new(true));
             let controller = TextEditingController::new(&mut app).text(&mut app, "hello");
             let focus_node = FocusNode::new(&mut app);
-            let visible = *shown;
+            let visible = shown.handle();
             let field = ListenableBuilder::new(Rc::new(shown.clone()), move |app, _, _| {
                 if !*app.get(visible).value() {
                     return SizedBox::shrink().into_widget();
@@ -7516,7 +7524,7 @@ mod tests {
             let shown = app.create(ValueNotifier::new(true));
             let controller = TextEditingController::new(&mut app).text(&mut app, "hello");
             let focus_node = FocusNode::new(&mut app);
-            let visible = *shown;
+            let visible = shown.handle();
             let field = ListenableBuilder::new(Rc::new(shown.clone()), move |app, _, _| {
                 if !*app.get(visible).value() {
                     return SizedBox::shrink().into_widget();

@@ -391,7 +391,7 @@ impl ScaffoldMessengerState {
             );
             app.get_mut(self).snack_bar_controller = Some(controller);
         }
-        let snack_bar_controller = self.snack_bar_controller(app);
+        let snack_bar_controller = self.snack_bar_controller(app).handle();
         if app.get(self).snack_bars.is_empty() {
             debug_assert!(snack_bar_controller.is_dismissed(app));
             snack_bar_controller.forward(app, None);
@@ -406,7 +406,7 @@ impl ScaffoldMessengerState {
                     // match in structure, material ink splashes and highlights don't survive
                     // from one to the next.
                     snack_bar.with_animation(
-                        self.snack_bar_controller_ref(app).erase(),
+                        self.snack_bar_controller(app).erase(),
                         Some(KeyRef::Local(Rc::new(UniqueKey::new()))),
                     ),
                     Completer::new(),
@@ -478,25 +478,17 @@ impl ScaffoldMessengerState {
         }
     }
 
-    fn snack_bar_controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
-        self.snack_bar_controller_ref(app).handle()
-    }
-
-    fn snack_bar_controller_ref(self: Handle<Self>, app: &App) -> Ref<AnimationController> {
+    fn snack_bar_controller(self: Handle<Self>, app: &App) -> &Ref<AnimationController> {
         app.get(self)
             .snack_bar_controller
-            .clone()
+            .as_ref()
             .expect("a snack bar was shown")
     }
 
-    fn material_banner_controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
-        self.material_banner_controller_ref(app).handle()
-    }
-
-    fn material_banner_controller_ref(self: Handle<Self>, app: &App) -> Ref<AnimationController> {
+    fn material_banner_controller(self: Handle<Self>, app: &App) -> &Ref<AnimationController> {
         app.get(self)
             .material_banner_controller
-            .clone()
+            .as_ref()
             .expect("a material banner was shown")
     }
 
@@ -565,7 +557,7 @@ impl ScaffoldMessengerState {
             .expect("checked above")
             .completer
             .clone();
-        let controller = self.snack_bar_controller(app);
+        let controller = self.snack_bar_controller(app).handle();
         if app.get(self).accessible_navigation {
             controller.set_value(app, 0.0);
             completer.complete(app, reason);
@@ -648,7 +640,7 @@ impl ScaffoldMessengerState {
             );
             app.get_mut(self).material_banner_controller = Some(controller);
         }
-        let material_banner_controller = self.material_banner_controller(app);
+        let material_banner_controller = self.material_banner_controller(app).handle();
         if app.get(self).material_banners.is_empty() {
             debug_assert!(material_banner_controller.is_dismissed(app));
             material_banner_controller.forward(app, None);
@@ -663,7 +655,7 @@ impl ScaffoldMessengerState {
                     // to match in structure, material ink splashes and highlights don't survive
                     // from one to the next.
                     material_banner.with_animation(
-                        self.material_banner_controller_ref(app).erase(),
+                        self.material_banner_controller(app).erase(),
                         Some(KeyRef::Local(Rc::new(UniqueKey::new()))),
                     ),
                     Completer::new(),
@@ -760,7 +752,7 @@ impl ScaffoldMessengerState {
             .expect("checked above")
             .completer
             .clone();
-        let controller = self.material_banner_controller(app);
+        let controller = self.material_banner_controller(app).handle();
         if app.get(self).accessible_navigation {
             controller.set_value(app, 0.0);
             completer.complete(app, reason);
@@ -835,7 +827,7 @@ impl State for ScaffoldMessengerState {
         if let Some(first) = app.get(self).snack_bars.front().cloned() {
             let route = AnyModalRoute::of(app, context);
             if route.is_none_or(|route| route.as_route().is_current(app)) {
-                let controller = self.snack_bar_controller(app);
+                let controller = self.snack_bar_controller(app).handle();
                 if controller.is_completed(app) && app.get(self).snack_bar_timer.is_none() {
                     let snack_bar = first.widget();
                     let persist = snack_bar.effective_persist();
@@ -1206,7 +1198,7 @@ impl ScaffoldGeometryNotifier {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        app.get_mut(self).change_notifier.dispose();
+        ChangeNotifierData::dispose(app, self);
     }
 }
 
@@ -2007,7 +1999,7 @@ impl FloatingActionButtonTransitionState {
         );
         // Get the animations for exit and entrance.
         let previous_exit_scale_animation =
-            CurvedAnimation::create(app, previous_controller.erase(), Curves::ease_in(), None);
+            CurvedAnimation::new(app, previous_controller.erase(), Curves::ease_in(), None);
         app.get_mut(self).previous_exit_scale_animation =
             Some(previous_exit_scale_animation.clone());
         FloatingActionButtonTransitionState::dispose_curved_animation(
@@ -2017,7 +2009,7 @@ impl FloatingActionButtonTransitionState {
                 .handle(),
         );
         let previous_exit_rotation_curved_animation =
-            CurvedAnimation::create(app, previous_controller.erase(), Curves::ease_in(), None);
+            CurvedAnimation::new(app, previous_controller.erase(), Curves::ease_in(), None);
         app.get_mut(self).previous_exit_rotation_curved_animation =
             Some(previous_exit_rotation_curved_animation.clone());
 
@@ -2031,7 +2023,7 @@ impl FloatingActionButtonTransitionState {
         );
         let current_controller = self.widget(app).current_controller.clone();
         let current_entrance_scale_animation =
-            CurvedAnimation::create(app, current_controller.erase(), Curves::ease_in(), None);
+            CurvedAnimation::new(app, current_controller.erase(), Curves::ease_in(), None);
         app.get_mut(self).current_entrance_scale_animation =
             Some(current_entrance_scale_animation.clone());
         let entrance_turn_tween = FloatingActionButtonTransitionState::entrance_turn_tween(app);
@@ -2059,8 +2051,8 @@ impl FloatingActionButtonTransitionState {
             (
                 move_scale_animation.clone(),
                 move_scale_animation,
-                TrainHoppingAnimation::create(app, move_rotation_animation.clone(), None, None),
-                TrainHoppingAnimation::create(app, move_rotation_animation, None, None),
+                TrainHoppingAnimation::new(app, move_rotation_animation.clone(), None, None),
+                TrainHoppingAnimation::new(app, move_rotation_animation, None, None),
             )
         } else {
             let previous_scale = AnimationMin::new(
@@ -2078,13 +2070,13 @@ impl FloatingActionButtonTransitionState {
             (
                 previous_scale,
                 current_scale,
-                TrainHoppingAnimation::create(
+                TrainHoppingAnimation::new(
                     app,
                     previous_exit_rotation_animation,
                     Some(move_rotation_animation.clone()),
                     None,
                 ),
-                TrainHoppingAnimation::create(
+                TrainHoppingAnimation::new(
                     app,
                     current_entrance_rotation_animation,
                     Some(move_rotation_animation),
@@ -2183,7 +2175,7 @@ impl State for FloatingActionButtonTransitionState {
     waft_widgets::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
-        let previous_controller = AnimationController::create(
+        let previous_controller = AnimationController::new(
             app,
             None,
             Some(K_FLOATING_ACTION_BUTTON_SEGUE),
@@ -4262,7 +4254,7 @@ impl State for ScaffoldState {
             .floating_action_button_animator
             .clone()
             .unwrap_or_else(default_floating_action_button_animator);
-        let floating_action_button_move_controller = AnimationController::create(
+        let floating_action_button_move_controller = AnimationController::new(
             app,
             Some(1.0),
             Some(K_FLOATING_ACTION_BUTTON_SEGUE * 2),
@@ -4273,7 +4265,7 @@ impl State for ScaffoldState {
             self,
         );
 
-        let floating_action_button_visibility_controller = AnimationController::create(
+        let floating_action_button_visibility_controller = AnimationController::new(
             app,
             None,
             Some(K_FLOATING_ACTION_BUTTON_SEGUE),
@@ -4284,7 +4276,7 @@ impl State for ScaffoldState {
             self,
         );
 
-        let bottom_sheet_scrim_animation_controller = AnimationController::create(
+        let bottom_sheet_scrim_animation_controller = AnimationController::new(
             app,
             None,
             None,
@@ -8042,7 +8034,7 @@ mod tests {
             let mut tester = tester();
             let sheet_key = GlobalKey::new();
             pump_bottom_sheet_app(&mut tester, &sheet_key, None);
-            tester.assert_leaves_behind(&[], |tester| {
+            tester.assert_leaves_nothing_behind(|tester| {
                 tap_text(tester, "X", 1);
                 tester.pump_and_settle();
                 tap_text(tester, "Close", 2);

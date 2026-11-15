@@ -950,7 +950,7 @@ impl ShortcutManagerVTable {
             },
             dispose: |app, id| {
                 let handle: Handle<L> = resolve(id);
-                app.get_mut(handle).change_notifier_data_mut().dispose();
+                ChangeNotifierData::dispose(app, handle);
             },
         }
     }
@@ -973,6 +973,14 @@ impl From<AnyShortcutManager> for HandleId {
 
 /// A field Dart types as the erased object, kept: AnyShortcutManager with its count.
 pub type ShortcutManagerRef = Retained<AnyShortcutManager>;
+
+impl AnyShortcutManager {
+    /// A [`ShortcutManagerRef`] while something still keeps the object; see
+    /// [`Handle::upgrade`](waft_foundation::Handle::upgrade).
+    pub fn upgrade(self, app: &App) -> Option<ShortcutManagerRef> {
+        Retained::upgrade(app, self)
+    }
+}
 
 /// A kept object erases to a [`ShortcutManagerRef`] with [`Retained::erase`]: Dart's upcast.
 impl<T: ShortcutManagerBase> From<Handle<T>> for AnyShortcutManager {
@@ -1298,7 +1306,7 @@ impl State for ShortcutsState {
         if self.widget(app).manager != old_widget.manager {
             if self.widget(app).manager.is_some() {
                 if let Some(internal) = app.get_mut(self).internal_manager.take() {
-                    app.get_mut(&internal).change_notifier.dispose();
+                    ChangeNotifierData::dispose(app, &internal);
                 }
             } else if app.get(self).internal_manager.is_none() {
                 let manager = ShortcutManager::new(app);
@@ -1313,7 +1321,7 @@ impl State for ShortcutsState {
 
     fn dispose(self: Handle<Self>, app: &mut App) {
         if let Some(internal) = app.get(self).internal_manager.handle() {
-            app.get_mut(internal).change_notifier.dispose();
+            ChangeNotifierData::dispose(app, internal);
         }
     }
 
@@ -1518,9 +1526,8 @@ impl ShortcutRegistry {
 
     /// Discards any resources used by this object.
     pub fn dispose(self: Handle<Self>, app: &mut App) {
-        let this = app.get_mut(self);
-        this.change_notifier.dispose();
-        this.disposed = true;
+        ChangeNotifierData::dispose(app, self);
+        app.get_mut(self).disposed = true;
     }
 
     /// Gets the combined shortcut bindings from all contexts that are registered with this
@@ -1810,7 +1817,7 @@ impl State for ShortcutRegistrarState {
         }
         registry.dispose(app);
         let manager = self.manager(app);
-        app.get_mut(manager).change_notifier.dispose();
+        ChangeNotifierData::dispose(app, manager);
     }
 
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {

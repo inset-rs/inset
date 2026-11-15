@@ -106,7 +106,7 @@ impl Ticker {
     /// every frame for `None`, while running.
     #[track_caller]
     pub fn new(app: &mut App, on_tick: TickerCallback, view: Option<ViewId>) -> Ref<Ticker> {
-        app.create(Ticker {
+        let ticker = app.create(Ticker {
             future: None,
             force_frames: false,
             muted: false,
@@ -115,7 +115,9 @@ impl Ticker {
             animation_id: None,
             view,
             remove_from_creator: None,
-        })
+        });
+        app.expect_dispose(&ticker);
+        ticker
     }
 
     /// Dart's `_WidgetTicker(onTick, creator)`: a provider that keeps the tickers it vends in a
@@ -760,7 +762,7 @@ mod tests {
             FrameCallback::new(|_app, _t| {}),
             Some(IMPLICIT_VIEW_ID),
         );
-        absorber.absorb_ticker(&mut app, *original);
+        absorber.absorb_ticker(&mut app, original.handle());
 
         assert!(absorber.is_active(&app));
 
@@ -885,7 +887,7 @@ mod tests {
             let mut app = cell.borrow_mut();
             let ticker = Ticker::new(&mut app, elapsed_recorder(&log), Some(IMPLICIT_VIEW_ID));
             ticker.start(&mut app);
-            *ticker
+            ticker.handle()
         };
         cell.checkpoint();
         assert!(!cell.borrow().contains(ticker));

@@ -60,6 +60,21 @@ impl<T: RendererBindingOverridesObject> RendererBindingOverrides for Handle<T> {
     }
 }
 
+/// An override object the renderer binding keeps, for one nothing else keeps.
+impl<T: RendererBindingOverridesObject> RendererBindingOverrides for Ref<T> {
+    fn will_draw_frame(&self, app: &mut App) {
+        T::will_draw_frame(self.handle(), app);
+    }
+
+    fn did_draw_frame(&self, app: &mut App) {
+        T::did_draw_frame(self.handle(), app);
+    }
+
+    fn did_handle_metrics_changed(&self, app: &mut App) {
+        T::did_handle_metrics_changed(self.handle(), app);
+    }
+}
+
 /// Dart's `_BindingPipelineManifold`: the [`PipelineManifold`] the binding attaches its
 /// root [`PipelineOwner`] to. Its `semanticsEnabled` waits with semantics.
 struct BindingPipelineManifold;

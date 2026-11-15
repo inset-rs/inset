@@ -1655,7 +1655,7 @@ impl ZoomEnterTransitionPainter {
         );
         LayerHandle::set_layer(app, |app| &mut app.get_mut(self).opacity_handle, None);
         LayerHandle::set_layer(app, |app| &mut app.get_mut(self).transform_handler, None);
-        app.get_mut(self).change_notifier.dispose();
+        ChangeNotifierData::dispose(app, self);
     }
 }
 
@@ -1808,7 +1808,7 @@ impl ZoomExitTransitionPainter {
             app,
             &AnimationStatusListener::handle_method(self, Self::on_status_change),
         );
-        app.get_mut(self).change_notifier.dispose();
+        ChangeNotifierData::dispose(app, self);
     }
 }
 
@@ -2158,7 +2158,7 @@ mod tests {
         animation: ValueTween<f64>,
         secondary_animation: ValueTween<f64>,
     ) -> Ref<AnimationController> {
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             &mut tester.cell.borrow_mut(),
             None,
             Some(Duration::from_millis(100)),
@@ -3234,7 +3234,7 @@ mod tests {
     fn the_zoom_painters_compare_their_animation_values_to_repaint() {
         let cell = crate::test_support::test_cell();
         let mut app = cell.borrow_mut();
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             &mut app,
             None,
             Some(Duration::from_millis(100)),
@@ -3271,7 +3271,7 @@ mod tests {
         let mut tester = tester_on(TargetPlatform::Android);
         let animation = {
             let mut app = tester.cell.borrow_mut();
-            AnimationController::create(
+            AnimationController::new(
                 &mut app,
                 None,
                 Some(Duration::from_millis(100)),

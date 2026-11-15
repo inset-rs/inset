@@ -307,7 +307,7 @@ mod tests {
         });
 
         let router = PointerRouter::new(&mut app);
-        let router_handle = *router;
+        let router_handle = router.handle();
         let to_remove = callback.clone();
         router.add_route(
             &mut app,
@@ -332,7 +332,7 @@ mod tests {
         let second_flag = Rc::clone(&second_ran);
 
         let router = PointerRouter::new(&mut app);
-        let router_handle = *router;
+        let router_handle = router.handle();
         router.add_global_route(
             &mut app,
             PointerRoute::new(move |app, _event| {
@@ -365,7 +365,7 @@ mod tests {
         });
 
         let router = PointerRouter::new(&mut app);
-        let router_handle = *router;
+        let router_handle = router.handle();
         let to_remove = callback.clone();
         router.add_global_route(
             &mut app,
@@ -389,8 +389,17 @@ mod tests {
         }
         let flag = app.create(Flag(Cell::new(false)));
         let router = PointerRouter::new(&mut app);
-        router.add_route(&mut app, 1, PointerRoute::handle_method(*flag, mark), None);
-        router.remove_route(&mut app, 1, &PointerRoute::handle_method(*flag, mark));
+        router.add_route(
+            &mut app,
+            1,
+            PointerRoute::handle_method(flag.handle(), mark),
+            None,
+        );
+        router.remove_route(
+            &mut app,
+            1,
+            &PointerRoute::handle_method(flag.handle(), mark),
+        );
         router.route(&mut app, down(1));
         assert!(!app.get(&flag).0.get());
     }
@@ -405,7 +414,7 @@ mod tests {
         }
         let cell = AppCell::new();
         let router = PointerRouter::new(&mut cell.borrow_mut());
-        let flag = *cell.borrow_mut().create(Flag);
+        let flag = cell.borrow_mut().create(Flag).handle();
         router.add_route(
             &mut cell.borrow_mut(),
             1,

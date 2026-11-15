@@ -572,7 +572,7 @@ mod tests {
         let focus = FocusManager::new(&mut app);
         let owner = BuildOwner::with_focus_manager(&mut app, None, focus);
         for element in [pending, cleaned] {
-            element.assign_owner(&mut app, *owner);
+            element.assign_owner(&mut app, owner.handle());
             let handle = element
                 .downcast::<SingleChildRenderObjectElement<SizedBox>>(&app)
                 .unwrap();

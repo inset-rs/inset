@@ -2402,7 +2402,7 @@ impl DialogRoute {
                 .as_ref()
                 .and_then(|style| style.reverse_curve.clone())
                 .unwrap_or_else(Curves::ease_out);
-            let curved = CurvedAnimation::create(app, animation, curve, Some(reverse_curve));
+            let curved = CurvedAnimation::new(app, animation, curve, Some(reverse_curve));
             app.get_mut(self).curved_animation = Some(curved);
         }
     }
@@ -2909,7 +2909,7 @@ pub(crate) mod tests {
                 m3,
                 AlertDialog::new().content(Text::new("Body")),
             );
-            tester.assert_leaves_behind(&[], |tester| {
+            tester.assert_leaves_nothing_behind(|tester| {
                 open(tester);
                 let body = only(tester.find_onstage_text("Body"));
                 Navigator::pop(&mut tester.cell.borrow_mut(), body, None);

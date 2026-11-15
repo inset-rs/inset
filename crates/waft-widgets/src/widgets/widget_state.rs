@@ -1911,9 +1911,9 @@ impl WidgetStatesController {
         self.notify_listeners(app);
     }
 
-    /// Discards any resources used by the object.
-    pub fn dispose(&mut self) {
-        self.change_notifier.dispose();
+    /// Discards any resources used by the object; see [`ChangeNotifierData::dispose`].
+    pub fn dispose(self: Handle<Self>, app: &mut App) {
+        ChangeNotifierData::dispose(app, self);
     }
 
     /// Adds `state` to [`value`](Self::value) if `add` is true, and removes it otherwise,
@@ -2664,7 +2664,7 @@ mod tests {
         controller.set_value(&mut app, states([WidgetState::Hovered]));
         assert_eq!(count.get(), 2);
 
-        app.get_mut(&controller).dispose();
+        controller.dispose(&mut app);
         assert!(!app.get(&controller).change_notifier_data().has_listeners());
     }
 }

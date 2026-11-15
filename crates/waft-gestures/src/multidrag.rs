@@ -189,6 +189,14 @@ pub struct AnyMultiDragPointerState {
     table: &'static PointerStateVTable,
 }
 
+/// A kept pointer state erases to `Retained<AnyMultiDragPointerState>` with
+/// [`Retained::into_erased`](waft_foundation::Retained::into_erased).
+impl<S: MultiDragPointerState> From<Handle<S>> for AnyMultiDragPointerState {
+    fn from(state: Handle<S>) -> AnyMultiDragPointerState {
+        state.as_pointer_state()
+    }
+}
+
 impl From<AnyMultiDragPointerState> for HandleId {
     fn from(state: AnyMultiDragPointerState) -> HandleId {
         state.id
@@ -482,7 +490,7 @@ impl DelayedPointerState {
         let timer = Timer::new(
             app,
             delay,
-            Listener::handle_method(*this, Self::delay_passed),
+            Listener::handle_method(this.handle(), Self::delay_passed),
         );
         app.get_mut(&this).timer = Some(timer);
         this
@@ -629,8 +637,7 @@ recognizer!(
             event.kind,
             app.get(this).recognizer.gesture_settings,
         );
-        app.create(ImmediatePointerState { state })
-            .into_map(|state| state.as_pointer_state())
+        app.create(ImmediatePointerState { state }).into_erased()
     }
 );
 
@@ -643,8 +650,7 @@ recognizer!(
             event.kind,
             app.get(this).recognizer.gesture_settings,
         );
-        app.create(HorizontalPointerState { state })
-            .into_map(|state| state.as_pointer_state())
+        app.create(HorizontalPointerState { state }).into_erased()
     }
 );
 
@@ -657,8 +663,7 @@ recognizer!(
             event.kind,
             app.get(this).recognizer.gesture_settings,
         );
-        app.create(VerticalPointerState { state })
-            .into_map(|state| state.as_pointer_state())
+        app.create(VerticalPointerState { state }).into_erased()
     }
 );
 
@@ -673,7 +678,7 @@ recognizer!(
             event.kind,
             app.get(this).recognizer.gesture_settings,
         )
-        .into_map(|state| state.as_pointer_state())
+        .into_erased()
     },
     delay: Duration = K_LONG_PRESS_TIMEOUT
 );

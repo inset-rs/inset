@@ -388,7 +388,7 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
             .as_route()
             .navigator(app)
             .expect("an installed route has a navigator");
-        AnimationController::create(
+        AnimationController::new(
             app,
             None,
             Some(duration),
@@ -776,7 +776,7 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
                         let kept_next_train = next_train
                             .upgrade(app)
                             .expect("an installed route keeps its animation");
-                        let new_animation = TrainHoppingAnimation::create(
+                        let new_animation = TrainHoppingAnimation::new(
                             app,
                             current_train,
                             Some(kept_next_train),
@@ -1076,6 +1076,13 @@ pub struct AnyTransitionRoute {
     vtable: &'static TransitionRouteVTable,
 }
 
+/// A kept route as a [`RouteRef`], through [`Retained::erase`]: Dart's upcast.
+impl From<AnyTransitionRoute> for AnyRoute {
+    fn from(route: AnyTransitionRoute) -> AnyRoute {
+        route.as_route()
+    }
+}
+
 impl From<AnyTransitionRoute> for HandleId {
     fn from(handle: AnyTransitionRoute) -> HandleId {
         handle.id
@@ -1109,9 +1116,7 @@ impl Debug for AnyTransitionRoute {
 impl AnyTransitionRoute {
     /// A [`TransitionRouteRef`] while something still keeps the route; see [`Handle::upgrade`].
     pub fn upgrade(self, app: &App) -> Option<TransitionRouteRef> {
-        self.id
-            .upgrade(app)
-            .map(|retained| retained.into_map(|_| self))
+        Retained::upgrade(app, self)
     }
 
     /// This transition route as the erased [`AnyRoute`].
@@ -1394,8 +1399,8 @@ pub trait LocalHistoryRoute: TransitionRoute {
         debug_assert!(app.get(entry).owner == Some(self.as_route()));
         let data = self.local_history_route_data_mut(app);
         let history = data.local_history.as_mut().expect("a local history");
-        debug_assert!(history.iter().any(|held| **held == entry));
-        let position = history.iter().position(|held| **held == entry);
+        debug_assert!(history.iter().any(|held| held.handle() == entry));
+        let position = history.iter().position(|held| held.handle() == entry);
         let mut internal_state_changed = false;
         if let Some(position) = position {
             history.remove(position);
@@ -2820,6 +2825,19 @@ pub struct AnyModalRoute {
     vtable: &'static ModalRouteVTable,
 }
 
+/// A kept route as a [`RouteRef`], through [`Retained::erase`]: Dart's upcast.
+impl From<AnyModalRoute> for AnyRoute {
+    fn from(route: AnyModalRoute) -> AnyRoute {
+        route.as_route()
+    }
+}
+
+impl From<AnyModalRoute> for AnyTransitionRoute {
+    fn from(route: AnyModalRoute) -> AnyTransitionRoute {
+        route.as_transition_route()
+    }
+}
+
 impl From<AnyModalRoute> for HandleId {
     fn from(handle: AnyModalRoute) -> HandleId {
         handle.id
@@ -2859,9 +2877,7 @@ impl Debug for AnyModalRoute {
 impl AnyModalRoute {
     /// A [`ModalRouteRef`] while something still keeps the route; see [`Handle::upgrade`].
     pub fn upgrade(self, app: &App) -> Option<ModalRouteRef> {
-        self.id
-            .upgrade(app)
-            .map(|retained| retained.into_map(|_| self))
+        Retained::upgrade(app, self)
     }
 
     /// The route's [`animation`](Self::animation) and
@@ -3421,7 +3437,7 @@ impl RouteObserver {
                 .get(self)
                 .listeners
                 .iter()
-                .any(|(held, _)| **held == route);
+                .any(|(held, _)| held.handle() == route);
         }
         contained
     }
@@ -3441,7 +3457,10 @@ impl RouteObserver {
             .upgrade(app)
             .expect("a route subscribed to is kept by its navigator");
         let listeners = &mut app.get_mut(self).listeners;
-        let subscribers = match listeners.iter_mut().find(|(held, _)| **held == route) {
+        let subscribers = match listeners
+            .iter_mut()
+            .find(|(held, _)| held.handle() == route)
+        {
             Some((_, subscribers)) => subscribers,
             None => {
                 listeners.push((kept, Vec::new()));
@@ -3478,7 +3497,7 @@ impl RouteObserver {
         app.get(self)
             .listeners
             .iter()
-            .find(|(held, _)| **held == route)
+            .find(|(held, _)| held.handle() == route)
             .map(|(_, subscribers)| subscribers.clone())
     }
 
@@ -4597,7 +4616,7 @@ mod tests {
         navigator_state.push(&mut app, dialog.clone().into_erased());
         let mut at = settle(&mut app, at);
         let rebuild_barrier = |app: &mut App, at: &mut Duration| {
-            ModalRoute::changed_internal_state(*dialog, app);
+            ModalRoute::changed_internal_state(dialog.handle(), app);
             *at += Duration::from_millis(20);
             pump_every_view(app, *at);
         };
@@ -4677,7 +4696,7 @@ mod tests {
                 .secondary_animation
                 .parent(app)
         };
-        let dismissed = *k_always_dismissed_animation(&mut app);
+        let dismissed = k_always_dismissed_animation(&mut app).handle();
         assert_eq!(secondary_parent(&app), Some(dismissed));
 
         let two: RouteRef = page_route(&mut app, None, "two").into_erased();
@@ -4768,8 +4787,8 @@ mod tests {
             let removed = Rc::clone(&removed);
             Listener::new(move |_app| removed.set(true))
         });
-        LocalHistoryRoute::add_local_history_entry(*second, &mut app, entry);
-        assert!(Route::will_handle_pop_internally(*second, &app));
+        LocalHistoryRoute::add_local_history_entry(second.handle(), &mut app, entry);
+        assert!(Route::will_handle_pop_internally(second.handle(), &app));
 
         navigator_state.pop(&mut app, None);
         pump_every_view(&mut app, at);
@@ -4853,7 +4872,7 @@ mod tests {
             popped: Cell::new(0),
             popped_next: Cell::new(0),
         });
-        observer.subscribe(&mut app, Rc::new(*watcher), first);
+        observer.subscribe(&mut app, Rc::new(watcher.handle()), first);
         assert_eq!(app.get(&watcher).pushed.get(), 1);
 
         let second: RouteRef = page_route(&mut app, None, "second").into_erased();

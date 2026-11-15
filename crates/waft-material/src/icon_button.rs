@@ -1100,7 +1100,7 @@ impl State for SelectableIconButtonState {
             if self.widget(app).states_controller.is_some()
                 && let Some(internal) = app.get_mut(self).internal_states_controller.take()
             {
-                app.get_mut(&internal).dispose();
+                internal.dispose(app);
             }
             self.init_states_controller(app);
         }
@@ -1145,7 +1145,7 @@ impl State for SelectableIconButtonState {
 
     fn dispose(self: Handle<Self>, app: &mut App) {
         if let Some(internal) = app.get_mut(self).internal_states_controller.take() {
-            app.get_mut(&internal).dispose();
+            internal.dispose(app);
         }
     }
 }

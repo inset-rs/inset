@@ -534,7 +534,7 @@ impl RenderCupertinoSlider {
     ) -> RenderHandle<RenderCupertinoSlider> {
         debug_assert!((0.0..=1.0).contains(&value));
         let drag = HorizontalDragGestureRecognizer::new(app);
-        let position = AnimationController::create(
+        let position = AnimationController::new(
             app,
             Some(value),
             Some(K_DISCRETE_TRANSITION_DURATION),

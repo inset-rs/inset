@@ -35,6 +35,10 @@ struct HandleEntry {
     tree_owner: Option<Rc<Keep>>,
     /// Dart's `dispose` has run, whether or not something still keeps the object readable.
     disposed: bool,
+    /// The object has a `dispose` its holder must call ([`HandleMap::expect_dispose`]): freed
+    /// without it, a debug build reports it.
+    #[cfg(debug_assertions)]
+    expects_dispose: bool,
     #[cfg(debug_assertions)]
     created_at: &'static Location<'static>,
 }
@@ -99,23 +103,25 @@ impl<H: Copy> Retained<H> {
     /// # Panics
     ///
     /// In debug builds, if `to` names another object.
-    pub fn map<U: Copy + Into<HandleId>>(&self, to: impl FnOnce(H) -> U) -> Retained<U>
+    pub(crate) fn map<U: Copy + Into<HandleId>>(&self, to: impl FnOnce(H) -> U) -> Retained<U>
     where
         H: Into<HandleId>,
     {
+        let handle = same_object(self.handle, to(self.handle));
         Retained {
-            handle: same_object(self.handle, to(self.handle)),
+            handle,
             keep: Rc::clone(&self.keep),
         }
     }
 
     /// [`map`](Self::map), giving this reference's part of the count to the result.
-    pub fn into_map<U: Copy + Into<HandleId>>(self, to: impl FnOnce(H) -> U) -> Retained<U>
+    pub(crate) fn into_map<U: Copy + Into<HandleId>>(self, to: impl FnOnce(H) -> U) -> Retained<U>
     where
         H: Into<HandleId>,
     {
+        let handle = same_object(self.handle, to(self.handle));
         Retained {
-            handle: same_object(self.handle, to(self.handle)),
+            handle,
             keep: self.keep,
         }
     }
@@ -144,6 +150,19 @@ impl<H: Copy> Retained<H> {
         H: Into<HandleId>,
     {
         self.map(Into::into)
+    }
+
+    /// A reference to `handle`'s object while something still keeps it, `None` once it is freed or
+    /// its last keeper has let go: the body of an erased handle's own `upgrade`, as
+    /// [`Handle::upgrade`] is a typed handle's.
+    pub fn upgrade(app: &App, handle: H) -> Option<Retained<H>>
+    where
+        H: Into<HandleId>,
+    {
+        handle
+            .into()
+            .upgrade(app)
+            .map(|retained| retained.into_map(|_| handle))
     }
 
     /// Gives this reference's part of the count to the tree code, for a tree node (an element, a
@@ -235,6 +254,19 @@ impl<H: Copy> OptionRetained<H> for Option<Retained<H>> {
     }
 }
 
+/// A live object as a debug build describes it: what [`App::debug_live_objects`] lists, for a
+/// test that checks a cycle leaves nothing behind.
+#[cfg(debug_assertions)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DebugObject {
+    /// The object.
+    pub id: HandleId,
+    /// The type it was created as.
+    pub type_name: &'static str,
+    /// Where it was created.
+    pub created_at: &'static Location<'static>,
+}
+
 /// What a debug build remembers of a freed entry, for the stale-read message.
 #[cfg(debug_assertions)]
 struct FreedEntry {
@@ -247,6 +279,24 @@ struct FreedEntry {
 #[cfg(debug_assertions)]
 const FREED_ENTRIES_REMEMBERED: usize = 1 << 16;
 
+/// How many checkpoints a disposed object may stay kept before a debug build reports it as not
+/// collected: long enough for the holder that disposed it to be freed in turn.
+#[cfg(debug_assertions)]
+const NOT_COLLECTED_AFTER_CHECKPOINTS: u64 = 2;
+
+/// Flutter's two leak kinds, as a debug build finds them: an object freed without the `dispose`
+/// it expects, and one disposed but still kept some checkpoints later (a ring of [`Ref`]s, or a
+/// holder that forgot it).
+#[cfg(debug_assertions)]
+#[derive(Default)]
+struct LeakReports {
+    /// Disposed objects in the order they were disposed, with the checkpoint they were disposed
+    /// in, to check for the not-collected kind.
+    disposed: std::collections::VecDeque<(HandleId, u64)>,
+    not_disposed: Vec<String>,
+    not_collected: Vec<String>,
+}
+
 /// The entries, the counts dropped since the last sweep, and the checkpoint count.
 pub(crate) struct HandleMap {
     entries: SlotMap<HandleId, HandleEntry>,
@@ -257,6 +307,8 @@ pub(crate) struct HandleMap {
     freed: std::collections::HashMap<HandleId, FreedEntry>,
     #[cfg(debug_assertions)]
     freed_order: std::collections::VecDeque<HandleId>,
+    #[cfg(debug_assertions)]
+    leaks: LeakReports,
 }
 
 impl HandleMap {
@@ -269,6 +321,8 @@ impl HandleMap {
             freed: std::collections::HashMap::new(),
             #[cfg(debug_assertions)]
             freed_order: std::collections::VecDeque::new(),
+            #[cfg(debug_assertions)]
+            leaks: LeakReports::default(),
         }
     }
 
@@ -289,6 +343,8 @@ impl HandleMap {
                 keep: Rc::downgrade(&strong),
                 tree_owner: None,
                 disposed: false,
+                #[cfg(debug_assertions)]
+                expects_dispose: false,
                 #[cfg(debug_assertions)]
                 created_at,
             };
@@ -366,7 +422,24 @@ impl HandleMap {
 
     /// Dart's `dispose` ran on the object: a fact for tooling, which keeps it readable.
     pub(crate) fn mark_disposed(&mut self, id: HandleId) {
-        self.resolve_mut(id).disposed = true;
+        let entry = self.resolve_mut(id);
+        let first = !entry.disposed;
+        entry.disposed = true;
+        #[cfg(debug_assertions)]
+        if first {
+            self.leaks.disposed.push_back((id, self.checkpoint));
+        }
+        let _ = first;
+    }
+
+    /// The object has a `dispose` its holder must call: Flutter's
+    /// `FlutterMemoryAllocations.dispatchObjectCreated`.
+    pub(crate) fn expect_dispose(&mut self, id: HandleId) {
+        #[cfg(debug_assertions)]
+        {
+            self.resolve_mut(id).expects_dispose = true;
+        }
+        let _ = id;
     }
 
     /// Whether Dart's `dispose` has run on the object. `false` for a freed one.
@@ -377,6 +450,8 @@ impl HandleMap {
     /// A checkpoint begins: the frees from here on are dated by it.
     pub(crate) fn begin_checkpoint(&mut self) {
         self.checkpoint += 1;
+        #[cfg(debug_assertions)]
+        self.report_kept_disposed();
     }
 
     /// Frees every entry whose last keeper went since the last sweep, and the entries those
@@ -397,11 +472,66 @@ impl HandleMap {
                     entry.type_name
                 );
                 self.remember_freed(id, &entry);
+                self.report_freed_undisposed(&entry);
                 // Dropping the object drops the references in its fields, which report
                 // themselves for the next round of this loop.
                 drop(entry);
             }
         }
+    }
+
+    #[cfg(debug_assertions)]
+    fn report_freed_undisposed(&mut self, entry: &HandleEntry) {
+        if entry.expects_dispose && !entry.disposed {
+            self.leaks.not_disposed.push(format!(
+                "a `{}` created at {} was freed without `dispose`",
+                entry.type_name, entry.created_at
+            ));
+        }
+    }
+
+    #[cfg(not(debug_assertions))]
+    fn report_freed_undisposed(&mut self, _entry: &HandleEntry) {}
+
+    /// Reports the objects disposed long enough ago that are still kept: the not-collected kind.
+    #[cfg(debug_assertions)]
+    pub(crate) fn report_kept_disposed(&mut self) {
+        while let Some(&(id, disposed_at)) = self.leaks.disposed.front() {
+            if disposed_at + NOT_COLLECTED_AFTER_CHECKPOINTS > self.checkpoint {
+                return;
+            }
+            self.leaks.disposed.pop_front();
+            if let Some(entry) = self.entries.get(id) {
+                self.leaks.not_collected.push(format!(
+                    "a `{}` created at {} was disposed at checkpoint {disposed_at} and is still \
+                     kept at checkpoint {}",
+                    entry.type_name, entry.created_at, self.checkpoint
+                ));
+            }
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    pub(crate) fn take_not_disposed(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.leaks.not_disposed)
+    }
+
+    #[cfg(debug_assertions)]
+    pub(crate) fn take_not_collected(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.leaks.not_collected)
+    }
+
+    /// Every live entry, with its type and creation site, for a test's snapshot.
+    #[cfg(debug_assertions)]
+    pub(crate) fn debug_live_objects(&self) -> Vec<DebugObject> {
+        self.entries
+            .iter()
+            .map(|(id, entry)| DebugObject {
+                id,
+                type_name: entry.type_name,
+                created_at: entry.created_at,
+            })
+            .collect()
     }
 
     #[cfg(debug_assertions)]
@@ -555,6 +685,7 @@ fn downcast_entry_mut<T: 'static>(entry: &mut HandleEntry, id: HandleId) -> &mut
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ListenableObject;
 
     struct Holder(#[allow(dead_code, reason = "kept for its drop")] Ref<u32>);
 
@@ -563,7 +694,7 @@ mod tests {
         let mut handles = HandleMap::new();
         let first = handles.create(7u32);
         let second = first.clone();
-        let handle = *first;
+        let handle = first.handle();
         drop(first);
         handles.free_dropped();
         assert_eq!(*handles.get(handle), 7, "the clone keeps it");
@@ -584,7 +715,7 @@ mod tests {
     fn freeing_an_object_frees_what_its_fields_kept() {
         let mut handles = HandleMap::new();
         let inner = handles.create(1u32);
-        let inner_handle = *inner;
+        let inner_handle = inner.handle();
         let outer = handles.create(Holder(inner));
         drop(outer);
         handles.free_dropped();
@@ -598,10 +729,14 @@ mod tests {
     fn upgrade_answers_a_ref_while_the_object_is_kept() {
         let mut handles = HandleMap::new();
         let first = handles.create(3u8);
-        let upgraded = handles.upgrade(*first).expect("kept");
+        let upgraded = handles.upgrade(first.handle()).expect("kept");
         drop(first);
         handles.free_dropped();
-        assert_eq!(*handles.get(*upgraded), 3, "the upgraded ref keeps it");
+        assert_eq!(
+            *handles.get(upgraded.handle()),
+            3,
+            "the upgraded ref keeps it"
+        );
     }
 
     #[test]
@@ -630,7 +765,7 @@ mod tests {
         app.release_tree_node(node);
         drop(app);
         cell.checkpoint();
-        assert_eq!(*cell.borrow().get(*kept), 5);
+        assert_eq!(*cell.borrow().get(kept.handle()), 5);
     }
 
     #[test]
@@ -648,7 +783,7 @@ mod tests {
     #[cfg(debug_assertions)]
     fn a_stale_read_names_the_type_the_creation_site_and_the_checkpoint() {
         let cell = crate::AppCell::new();
-        let handle = *cell.borrow_mut().create(9u64);
+        let handle = cell.borrow_mut().create(9u64).handle();
         cell.checkpoint();
         let message = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let _ = cell.borrow().get(handle);
@@ -660,5 +795,46 @@ mod tests {
         assert!(message.contains("`u64`"), "{message}");
         assert!(message.contains("handle_map.rs"), "{message}");
         assert!(message.contains("freed at checkpoint 1"), "{message}");
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    fn a_notifier_freed_without_dispose_is_reported_not_disposed() {
+        let cell = crate::AppCell::new();
+        let mut app = cell.borrow_mut();
+        let notifier = app.create(crate::ValueNotifier::new(0));
+        notifier.add_listener(&mut app, crate::Listener::new(|_| {}));
+        let disposed = app.create(crate::ValueNotifier::new(0));
+        disposed.add_listener(&mut app, crate::Listener::new(|_| {}));
+        disposed.dispose(&mut app);
+        drop((notifier, disposed));
+        drop(app);
+        cell.checkpoint();
+        let reports = cell.borrow_mut().debug_take_not_disposed();
+        assert_eq!(reports.len(), 1, "{reports:?}");
+        assert!(reports[0].contains("ValueNotifier<i32>"), "{reports:?}");
+        assert!(reports[0].contains("handle_map.rs"), "{reports:?}");
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    fn a_disposed_object_still_kept_two_checkpoints_later_is_reported_not_collected() {
+        let cell = crate::AppCell::new();
+        let mut app = cell.borrow_mut();
+        let kept = app.create(crate::ValueNotifier::new(0));
+        let freed = app.create(crate::ValueNotifier::new(0));
+        kept.dispose(&mut app);
+        freed.dispose(&mut app);
+        drop(freed);
+        drop(app);
+        cell.checkpoint();
+        assert!(cell.borrow_mut().debug_take_not_collected().is_empty());
+        cell.checkpoint();
+        cell.checkpoint();
+        let reports = cell.borrow_mut().debug_take_not_collected();
+        assert_eq!(reports.len(), 1, "{reports:?}");
+        assert!(reports[0].contains("ValueNotifier<i32>"), "{reports:?}");
+        assert!(reports[0].contains("still kept"), "{reports:?}");
+        drop(kept);
     }
 }

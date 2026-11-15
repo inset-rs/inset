@@ -900,7 +900,7 @@ impl DismissibleState {
                 }
             }
             Some(resize_duration) => {
-                let resize_controller = AnimationController::create(
+                let resize_controller = AnimationController::new(
                     app,
                     None,
                     Some(resize_duration),
@@ -1021,7 +1021,7 @@ impl State for DismissibleState {
 
     fn init_state(self: Handle<Self>, app: &mut App) {
         let movement_duration = self.widget(app).movement_duration;
-        let move_controller = AnimationController::create(
+        let move_controller = AnimationController::new(
             app,
             None,
             Some(movement_duration),

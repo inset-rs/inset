@@ -199,7 +199,7 @@ impl InkRipple {
         let handle = this.handle();
         let vsync = controller.vsync(app);
         let create_controller = |app: &mut App, duration: Duration| {
-            AnimationController::create(
+            AnimationController::new(
                 app,
                 None,
                 Some(duration),

@@ -766,14 +766,10 @@ pub struct LinearProgressIndicatorState {
 }
 
 impl LinearProgressIndicatorState {
-    fn internal_controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
-        self.internal_controller_ref(app).handle()
-    }
-
-    fn internal_controller_ref(self: Handle<Self>, app: &App) -> Ref<AnimationController> {
+    fn internal_controller(self: Handle<Self>, app: &App) -> &Ref<AnimationController> {
         app.get(self)
             .internal_controller
-            .clone()
+            .as_ref()
             .expect("created in init_state")
     }
 
@@ -792,12 +788,12 @@ impl LinearProgressIndicatorState {
                     .find_ancestor_widget_of_exact_type::<Theme>(app)
                     .and_then(|theme| theme.data.progress_indicator_theme.controller.clone())
             })
-            .unwrap_or_else(|| self.internal_controller_ref(app))
+            .unwrap_or_else(|| self.internal_controller(app).clone())
     }
 
     fn update_controller_animating_status(self: Handle<Self>, app: &mut App) {
         let effective_value = self.widget(app).progress_indicator.effective_value();
-        let internal_controller = self.internal_controller(app);
+        let internal_controller = self.internal_controller(app).handle();
         if effective_value.is_none() && !internal_controller.is_animating(app) {
             internal_controller.repeat(app, None, None, false, None, None);
         } else if effective_value.is_some() && internal_controller.is_animating(app) {
@@ -934,7 +930,7 @@ impl State for LinearProgressIndicatorState {
     waft_widgets::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
-        let internal_controller = AnimationController::create(
+        let internal_controller = AnimationController::new(
             app,
             None,
             Some(LinearProgressIndicator::DEFAULT_ANIMATION_DURATION),
@@ -957,7 +953,7 @@ impl State for LinearProgressIndicatorState {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        let internal_controller = self.internal_controller(app);
+        let internal_controller = self.internal_controller(app).handle();
         internal_controller.dispose(app);
         SingleTickerProviderStateMixin::dispose(self, app);
     }
@@ -1536,7 +1532,7 @@ trait CircularProgressIndicatorStateBase:
     fn circular_widget(self: Handle<Self>, app: &App) -> &CircularProgressIndicator;
 
     fn init_state(self: Handle<Self>, app: &mut App) {
-        let internal_controller = AnimationController::create(
+        let internal_controller = AnimationController::new(
             app,
             None,
             Some(CircularProgressIndicator::DEFAULT_ANIMATION_DURATION),
@@ -1555,19 +1551,15 @@ trait CircularProgressIndicatorStateBase:
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        let internal_controller = self.internal_controller(app);
+        let internal_controller = self.internal_controller(app).handle();
         internal_controller.dispose(app);
         SingleTickerProviderStateMixin::dispose(self, app);
     }
 
-    fn internal_controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
-        self.internal_controller_ref(app).handle()
-    }
-
-    fn internal_controller_ref(self: Handle<Self>, app: &App) -> Ref<AnimationController> {
+    fn internal_controller(self: Handle<Self>, app: &App) -> &Ref<AnimationController> {
         self.circular_state_data(app)
             .internal_controller
-            .clone()
+            .as_ref()
             .expect("created in init_state")
     }
 
@@ -1586,7 +1578,7 @@ trait CircularProgressIndicatorStateBase:
                     .find_ancestor_widget_of_exact_type::<Theme>(app)
                     .and_then(|theme| theme.data.progress_indicator_theme.controller.clone())
             })
-            .unwrap_or_else(|| self.internal_controller_ref(app))
+            .unwrap_or_else(|| self.internal_controller(app).clone())
     }
 
     fn update_controller_animating_status(self: Handle<Self>, app: &mut App) {
@@ -1594,7 +1586,7 @@ trait CircularProgressIndicatorStateBase:
             .circular_widget(app)
             .progress_indicator
             .effective_value();
-        let internal_controller = self.internal_controller(app);
+        let internal_controller = self.internal_controller(app).handle();
         if effective_value.is_none() && !internal_controller.is_animating(app) {
             internal_controller.repeat(app, None, None, false, None, None);
         } else if effective_value.is_some() && internal_controller.is_animating(app) {
@@ -2844,7 +2836,7 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn controller_at(tester: &WidgetTester, value: f64) -> Ref<AnimationController> {
-        AnimationController::create(
+        AnimationController::new(
             &mut tester.cell.borrow_mut(),
             Some(value),
             None,

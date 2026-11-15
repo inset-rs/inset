@@ -10,8 +10,8 @@ use std::time::Duration;
 use waft_animation::Curve;
 use waft_embedder::{Rect, clamp_double};
 use waft_foundation::{
-    App, CompleterFuture, Handle, HandleId, Listenable, ListenableObject, Listener, OptionRetained,
-    PRECISION_ERROR_TOLERANCE, Retained, ValueNotifier,
+    App, ChangeNotifierData, CompleterFuture, Handle, HandleId, Listenable, ListenableObject,
+    Listener, OptionRetained, PRECISION_ERROR_TOLERANCE, Retained, ValueNotifier,
 };
 use waft_gestures::{Drag, DragStartDetails};
 use waft_painting::{Axis, AxisDirection, axis_direction_to_axis, transform_rect};
@@ -1357,8 +1357,8 @@ impl ScrollPositionBase {
         }
         this.scroll_position_data_mut(app).activity = None;
         let is_scrolling_notifier = this.is_scrolling_notifier(app);
-        app.get_mut(is_scrolling_notifier).dispose();
-        app.get_mut(this).change_notifier_data_mut().dispose();
+        is_scrolling_notifier.dispose(app);
+        ChangeNotifierData::dispose(app, this);
     }
 
     /// See [`ScrollPosition::debug_fill_description`].
@@ -1601,6 +1601,14 @@ impl From<AnyScrollPosition> for HandleId {
 
 /// A field Dart types as the erased object, kept: AnyScrollPosition with its count.
 pub type ScrollPositionRef = Retained<AnyScrollPosition>;
+
+impl AnyScrollPosition {
+    /// A [`ScrollPositionRef`] while something still keeps the object; see
+    /// [`Handle::upgrade`](waft_foundation::Handle::upgrade).
+    pub fn upgrade(self, app: &App) -> Option<ScrollPositionRef> {
+        Retained::upgrade(app, self)
+    }
+}
 
 /// A kept object erases to a [`ScrollPositionRef`] with [`Retained::erase`]: Dart's upcast.
 impl<T: ScrollPosition> From<Handle<T>> for AnyScrollPosition {

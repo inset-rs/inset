@@ -209,7 +209,7 @@ pub trait CupertinoRouteTransitionMixin: PageRoute {
             .previous_title
             .handle()
         {
-            app.get_mut(previous_title).dispose();
+            previous_title.dispose(app);
         }
         TransitionRoute::dispose(self, app);
     }
@@ -1266,7 +1266,7 @@ impl CupertinoPageTransition {
         child: Option<&WidgetRef>,
     ) -> Option<WidgetRef> {
         let _ = (animation, allow_snapshotting);
-        let animation = CurvedAnimation::create(
+        let animation = CurvedAnimation::new(
             app,
             secondary_animation,
             Curves::linear_to_ease_out(),
@@ -1341,19 +1341,19 @@ impl CupertinoPageTransitionState {
         let primary_route_animation = widget.primary_route_animation.clone();
         let secondary_route_animation = widget.secondary_route_animation.clone();
         if !widget.linear_transition {
-            let primary_position_curve = CurvedAnimation::create(
+            let primary_position_curve = CurvedAnimation::new(
                 app,
                 primary_route_animation.clone(),
                 Curves::fast_ease_in_to_slow_ease_out(),
                 Some(Rc::new(Curves::fast_ease_in_to_slow_ease_out().flipped())),
             );
-            let secondary_position_curve = CurvedAnimation::create(
+            let secondary_position_curve = CurvedAnimation::new(
                 app,
                 secondary_route_animation.clone(),
                 Curves::linear_to_ease_out(),
                 Some(Curves::ease_in_to_linear()),
             );
-            let primary_shadow_curve = CurvedAnimation::create(
+            let primary_shadow_curve = CurvedAnimation::new(
                 app,
                 primary_route_animation.clone(),
                 Curves::linear_to_ease_out(),
@@ -1539,7 +1539,7 @@ impl CupertinoFullscreenDialogTransitionState {
         let primary_route_animation = widget.primary_route_animation.clone();
         let secondary_route_animation = widget.secondary_route_animation.clone();
         let linear_transition = widget.linear_transition;
-        let primary_position_curve = CurvedAnimation::create(
+        let primary_position_curve = CurvedAnimation::new(
             app,
             primary_route_animation,
             Curves::linear_to_ease_out(),
@@ -1552,7 +1552,7 @@ impl CupertinoFullscreenDialogTransitionState {
         let secondary_parent = if linear_transition {
             secondary_route_animation
         } else {
-            let secondary_position_curve = CurvedAnimation::create(
+            let secondary_position_curve = CurvedAnimation::new(
                 app,
                 secondary_route_animation,
                 Curves::linear_to_ease_out(),
@@ -3077,7 +3077,7 @@ mod tests {
         );
         let mut app = cell.borrow_mut();
         let state = navigator_state(&navigator_key, &mut app);
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             &mut app,
             None,
             Some(Duration::from_millis(100)),

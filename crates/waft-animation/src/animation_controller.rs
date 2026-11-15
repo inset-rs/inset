@@ -5,7 +5,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use waft_embedder::{clamp_double, lerp_double};
-use waft_foundation::{App, Handle, ListenableObject, Listener, Ref};
+use waft_foundation::{App, Handle, ListenableObject, Listener, OptionRetained, Ref};
 use waft_physics::{Simulation, SpringDescription, SpringSimulation, SpringType, Tolerance};
 use waft_scheduler::{FrameCallback, Ticker, TickerFuture, TickerProvider};
 
@@ -137,7 +137,7 @@ impl AnimationController {
     /// ticker, so creation goes through the [`App`].
     #[allow(clippy::too_many_arguments)]
     #[track_caller]
-    pub fn create(
+    pub fn new(
         app: &mut App,
         value: Option<f64>,
         duration: Option<Duration>,
@@ -165,9 +165,10 @@ impl AnimationController {
             local_listeners: AnimationLocalListenersData::new(),
             local_status_listeners: AnimationLocalStatusListenersData::new(),
         });
+        app.expect_dispose(&this);
         let ticker = vsync.create_ticker(
             app,
-            FrameCallback::handle_method(*this, AnimationController::tick),
+            FrameCallback::handle_method(this.handle(), AnimationController::tick),
         );
         app.get_mut(&this).ticker = Some(ticker);
         this.internal_set_value(app, value.unwrap_or(lower_bound));
@@ -179,7 +180,7 @@ impl AnimationController {
     ///
     /// Dart's defaults: `value` 0.0, `animation_behavior` `Preserve`.
     #[track_caller]
-    pub fn create_unbounded(
+    pub fn unbounded(
         app: &mut App,
         value: f64,
         duration: Option<Duration>,
@@ -204,9 +205,10 @@ impl AnimationController {
             local_listeners: AnimationLocalListenersData::new(),
             local_status_listeners: AnimationLocalStatusListenersData::new(),
         });
+        app.expect_dispose(&this);
         let ticker = vsync.create_ticker(
             app,
-            FrameCallback::handle_method(*this, AnimationController::tick),
+            FrameCallback::handle_method(this.handle(), AnimationController::tick),
         );
         app.get_mut(&this).ticker = Some(ticker);
         this.internal_set_value(app, value);
@@ -360,7 +362,7 @@ impl AnimationController {
         self.drain_pending_direction(app);
         let controller = app.get_mut(self);
         controller.value = clamp_double(x, controller.lower_bound, controller.upper_bound);
-        let ticker = *controller.ticker.as_deref().expect("started after dispose");
+        let ticker = controller.ticker.handle().expect("started after dispose");
         let result = ticker.start(app);
         let controller = app.get_mut(self);
         controller.status = if controller.direction == AnimationDirection::Forward {
@@ -508,7 +510,7 @@ impl Animation<f64> for AnimationController {
     // (`animation_controller.dart:449`): a muted or off-screen controller is
     // animating even while its status says otherwise.
     fn is_animating(self: Handle<Self>, app: &App) -> bool {
-        match app.get(self).ticker.as_deref().copied() {
+        match app.get(self).ticker.handle() {
             Some(ticker) => ticker.is_active(app),
             None => false,
         }
@@ -694,7 +696,7 @@ impl AnimationController {
             .ticker
             .replace(ticker.clone())
             .expect("resync after dispose");
-        ticker.absorb_ticker(app, *old_ticker);
+        ticker.absorb_ticker(app, old_ticker.handle());
     }
 
     /// Stops the animation controller and sets the current value of the
@@ -973,7 +975,7 @@ impl AnimationController {
         let controller = app.get_mut(self);
         controller.simulation = None;
         controller.last_elapsed_duration = None;
-        let ticker = *controller.ticker.as_deref().unwrap();
+        let ticker = controller.ticker.handle().unwrap();
         ticker.stop(app, canceled);
     }
 
@@ -1056,7 +1058,7 @@ mod tests {
     }
 
     fn controller_with_duration(app: &mut App, ms: u64) -> Ref<AnimationController> {
-        AnimationController::create(
+        AnimationController::new(
             app,
             None,
             Some(Duration::from_millis(ms)),

@@ -424,7 +424,7 @@ impl KeepAliveHandle {
     /// Dart's `KeepAliveHandle.dispose`: notifies, then disposes the notifier.
     pub fn dispose(self: Handle<Self>, app: &mut App) {
         self.notify_listeners(app);
-        app.get_mut(self).change_notifier.dispose();
+        ChangeNotifierData::dispose(app, self);
     }
 }
 

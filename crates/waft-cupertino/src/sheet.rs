@@ -454,7 +454,7 @@ impl CupertinoSheetTransition {
             Curves::ease_in_to_linear()
         };
         let curved_animation =
-            CurvedAnimation::create(app, secondary_animation.clone(), curve, Some(reverse_curve));
+            CurvedAnimation::new(app, secondary_animation.clone(), curve, Some(reverse_curve));
 
         let device_corner_radius = MediaQuery::maybe_view_padding_of(app, context)
             .map_or(0.0, |view_padding| view_padding.top)
@@ -548,7 +548,7 @@ impl CupertinoSheetTransition {
         let curve = Curves::linear_to_ease_out();
         let reverse_curve = Curves::ease_in_to_linear();
         let curved_animation =
-            CurvedAnimation::create(app, secondary_animation, curve, Some(reverse_curve));
+            CurvedAnimation::new(app, secondary_animation, curve, Some(reverse_curve));
 
         let slide_animation = curved_animation.drive(app, K_MID_UP_TWEEN);
         let scale_animation = curved_animation.drive(app, K_SCALE_TWEEN);
@@ -625,13 +625,13 @@ impl CupertinoSheetTransitionState {
         let primary_route_animation = widget.primary_route_animation.clone();
         let secondary_route_animation = widget.secondary_route_animation.clone();
         let top_gap = widget.top_gap;
-        let primary_position_curve = CurvedAnimation::create(
+        let primary_position_curve = CurvedAnimation::new(
             app,
             primary_route_animation,
             Curves::fast_ease_in_to_slow_ease_out(),
             Some(Rc::new(Curves::fast_ease_in_to_slow_ease_out().flipped())),
         );
-        let secondary_position_curve = CurvedAnimation::create(
+        let secondary_position_curve = CurvedAnimation::new(
             app,
             secondary_route_animation,
             Curves::linear_to_ease_out(),
@@ -693,7 +693,7 @@ impl CupertinoSheetTransitionState {
         } else {
             Rc::new(Curves::fast_ease_in_to_slow_ease_out().flipped())
         };
-        let curved_animation = CurvedAnimation::create(app, animation, curve, Some(reverse_curve));
+        let curved_animation = CurvedAnimation::new(app, animation, curve, Some(reverse_curve));
 
         let position_animation = curved_animation.drive(app, offset_tween);
 
@@ -759,7 +759,7 @@ impl State for CupertinoSheetTransitionState {
     waft_widgets::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
-        let stretch_drag_controller = AnimationController::create(
+        let stretch_drag_controller = AnimationController::new(
             app,
             None,
             Some(Duration::from_micros(1)),

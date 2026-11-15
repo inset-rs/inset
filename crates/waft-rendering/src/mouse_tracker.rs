@@ -263,7 +263,7 @@ impl MouseTracker {
     /// Discards any resources used by the object. After this is called, the
     /// object is not in a usable state and should be discarded.
     pub fn dispose(self: Handle<Self>, app: &mut App) {
-        app.get_mut(self).change_notifier.dispose();
+        ChangeNotifierData::dispose(app, self);
     }
 
     /// The remembered annotations keep their render objects past a rebuild, as Dart's map holds
@@ -854,7 +854,7 @@ mod tests {
         let region = RenderMouseRegion::new(&mut app, true, None);
         assert!(region.valid_for_mouse_tracker(&app));
         let owner = PipelineOwner::new(&mut app, None, None);
-        region.as_object().attach(&mut app, *owner);
+        region.as_object().attach(&mut app, owner.handle());
         assert!(region.valid_for_mouse_tracker(&app));
         region.as_object().detach(&mut app);
         assert!(!region.valid_for_mouse_tracker(&app));

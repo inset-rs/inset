@@ -307,7 +307,7 @@ impl State for ExpandIconState {
     fn init_state(self: Handle<Self>, app: &mut App) {
         let half_turn_tween = Tween::new(app, Some(0.0), Some(0.5));
         let fast_out_slow_in_tween = CurveTween::new(app, Curves::fast_out_slow_in());
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             app,
             None,
             Some(K_THEME_ANIMATION_DURATION),

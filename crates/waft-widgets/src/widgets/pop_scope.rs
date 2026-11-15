@@ -227,7 +227,7 @@ impl State for PopScopeState {
             .can_pop_notifier
             .handle()
             .expect("init_state has run");
-        app.get_mut(notifier).dispose();
+        notifier.dispose(app);
     }
 
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {

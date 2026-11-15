@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use waft_foundation::{App, Handle, ListenableObject, Listener, Ref};
+use waft_foundation::{App, Handle, ListenableObject, Listener, OptionRetained, Ref};
 
 use crate::animation::{
     Animation, AnimationRef, AnimationStatus, AnimationStatusListener, AnyAnimation,
@@ -270,7 +270,7 @@ impl ProxyAnimation {
     /// The bare handle, which the proxy keeps alive while it is the parent; a
     /// caller that keeps it takes [`AnyAnimation::upgrade`].
     pub fn parent(self: Handle<Self>, app: &App) -> Option<AnyAnimation<f64>> {
-        app.get(self).parent.as_deref().copied()
+        app.get(self).parent.handle()
     }
 
     /// Changes the animation whose value this animation proxies.
@@ -647,7 +647,7 @@ impl CurvedAnimation {
     /// the [`App`]: the entity exists first, then the constructor body runs in
     /// Dart's statement order.
     #[track_caller]
-    pub fn create(
+    pub fn new(
         app: &mut App,
         parent: AnimationRef<f64>,
         curve: Rc<dyn Curve>,
@@ -660,11 +660,15 @@ impl CurvedAnimation {
             curve_direction: None,
             is_disposed: false,
         });
+        app.expect_dispose(&this);
         let status = parent.status(app);
         this.update_curve_direction(app, status);
         parent.add_status_listener(
             app,
-            AnimationStatusListener::handle_method(*this, CurvedAnimation::update_curve_direction),
+            AnimationStatusListener::handle_method(
+                this.handle(),
+                CurvedAnimation::update_curve_direction,
+            ),
         );
         this
     }
@@ -820,7 +824,7 @@ impl TrainHoppingAnimation {
     /// animation and never hop. Dart's constructor registers tear-offs of the
     /// object under construction, so creation goes through the [`App`].
     #[track_caller]
-    pub fn create(
+    pub fn new(
         app: &mut App,
         current_train: AnimationRef<f64>,
         next_train: Option<AnimationRef<f64>>,
@@ -852,16 +856,16 @@ impl TrainHoppingAnimation {
         });
         current_train.add_status_listener(
             app,
-            AnimationStatusListener::handle_method(*this, Self::status_change_handler),
+            AnimationStatusListener::handle_method(this.handle(), Self::status_change_handler),
         );
         current_train.add_listener(
             app,
-            Listener::handle_method(*this, Self::value_change_handler),
+            Listener::handle_method(this.handle(), Self::value_change_handler),
         );
         if let Some(next) = next_train {
             next.add_listener(
                 app,
-                Listener::handle_method(*this, Self::value_change_handler),
+                Listener::handle_method(this.handle(), Self::value_change_handler),
             );
         }
         debug_assert!(app.get(&this).mode.is_some() || app.get(&this).next_train.is_none());
@@ -875,7 +879,7 @@ impl TrainHoppingAnimation {
     ///
     /// [`on_switched_train`]: TrainHoppingAnimation::on_switched_train
     pub fn current_train(&self) -> Option<AnyAnimation<f64>> {
-        self.current_train.as_deref().copied()
+        self.current_train.handle()
     }
 
     fn status_change_handler(self: Handle<Self>, app: &mut App, status: AnimationStatus) {
@@ -893,8 +897,8 @@ impl TrainHoppingAnimation {
         if app.get(self).next_train.is_some() {
             debug_assert!(app.get(self).mode.is_some());
             let animation = app.get(self);
-            let current = animation.current_train.as_deref().copied().unwrap();
-            let next = animation.next_train.as_deref().copied().unwrap();
+            let current = animation.current_train.handle().unwrap();
+            let next = animation.next_train.handle().unwrap();
             hop = match animation.mode.unwrap() {
                 TrainHoppingMode::Minimize => next.value(app) <= current.value(app),
                 TrainHoppingMode::Maximize => next.value(app) >= current.value(app),
@@ -949,7 +953,7 @@ impl TrainHoppingAnimation {
             &Listener::handle_method(self, Self::value_change_handler),
         );
         let _current_train = app.get_mut(self).current_train.take();
-        if let Some(next) = app.get(self).next_train.as_deref().copied() {
+        if let Some(next) = app.get(self).next_train.handle() {
             next.remove_listener(
                 app,
                 &Listener::handle_method(self, Self::value_change_handler),
@@ -1742,10 +1746,10 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let parent_ref = app.create(AlwaysStoppedAnimation::new(0.5));
-        let parent = *parent_ref;
+        let parent = parent_ref.handle();
         let curve_ref =
-            CurvedAnimation::create(&mut app, parent_ref.into_erased(), Curves::linear(), None);
-        let curve = *curve_ref;
+            CurvedAnimation::new(&mut app, parent_ref.into_erased(), Curves::linear(), None);
+        let curve = curve_ref.handle();
         let driven = crate::tween::CallbackAnimatable::from_callback(|value| value * 10.0)
             .animate(&mut app, curve_ref.into_erased());
         let listener = Listener::new(|_| {});
@@ -2055,7 +2059,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let half: AnimationRef<f64> = app.create(AlwaysStoppedAnimation::new(0.5)).into_erased();
-        let curved = CurvedAnimation::create(&mut app, half, Curves::ease(), None);
+        let curved = CurvedAnimation::new(&mut app, half, Curves::ease(), None);
 
         assert_eq!(
             curved.as_animation().value(&app),
@@ -2074,7 +2078,7 @@ mod tests {
             app.create(AlwaysStoppedAnimation::new(0.25)).into_erased();
         let parent: AnimationRef<f64> = ReverseAnimation::new(&mut app, stopped).into_erased();
         let curved =
-            CurvedAnimation::create(&mut app, parent, Curves::ease(), Some(Curves::ease_out()));
+            CurvedAnimation::new(&mut app, parent, Curves::ease(), Some(Curves::ease_out()));
 
         // The constructor saw status Reverse while animating, so the curve
         // direction is pinned to Reverse and the reverse curve is active.
@@ -2103,7 +2107,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let zero: AnimationRef<f64> = app.create(AlwaysStoppedAnimation::new(0.0)).into_erased();
-        let curved = CurvedAnimation::create(&mut app, zero, Rc::new(BogusCurve), None);
+        let curved = CurvedAnimation::new(&mut app, zero, Rc::new(BogusCurve), None);
         let _ = curved.as_animation().value(&app);
     }
 
@@ -2114,7 +2118,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let driver = ProxyAnimation::new(&mut app, None);
-        let curved = CurvedAnimation::create(&mut app, driver.erase(), Curves::ease(), None);
+        let curved = CurvedAnimation::new(&mut app, driver.erase(), Curves::ease(), None);
         assert!(!driver.local_status_listeners_data(&app).is_empty());
 
         curved.dispose(&mut app);
@@ -2134,7 +2138,7 @@ mod tests {
         let train_b = ProxyAnimation::new(&mut app, Some(low));
 
         let switched = Rc::new(Cell::new(false));
-        let train = TrainHoppingAnimation::create(
+        let train = TrainHoppingAnimation::new(
             &mut app,
             train_a.erase(),
             Some(train_b.erase()),
@@ -2168,7 +2172,7 @@ mod tests {
 
         let switched = Rc::new(Cell::new(false));
         let b_handle = b.handle();
-        let train = TrainHoppingAnimation::create(
+        let train = TrainHoppingAnimation::new(
             &mut app,
             a,
             Some(b),
@@ -2192,7 +2196,7 @@ mod tests {
         let train_b = ProxyAnimation::new(&mut app, Some(low));
 
         let train =
-            TrainHoppingAnimation::create(&mut app, train_a.erase(), Some(train_b.erase()), None);
+            TrainHoppingAnimation::new(&mut app, train_a.erase(), Some(train_b.erase()), None);
         assert!(!train_a.local_listeners_data(&app).is_empty());
         assert!(!train_a.local_status_listeners_data(&app).is_empty());
         assert!(!train_b.local_listeners_data(&app).is_empty());
@@ -2262,7 +2266,7 @@ mod tests {
         let current = falling.animate(&mut app, driver.erase());
         let next = rising.animate(&mut app, driver.erase());
 
-        let animation = TrainHoppingAnimation::create(&mut app, current, Some(next), None);
+        let animation = TrainHoppingAnimation::new(&mut app, current, Some(next), None);
 
         let status_log = Rc::new(RefCell::new(Vec::new()));
         animation.as_animation().add_status_listener(
@@ -2312,7 +2316,7 @@ mod tests {
 
         let parent = ProxyAnimation::new(&mut app, Some(forward_half.clone()));
         let curved =
-            CurvedAnimation::create(&mut app, parent.erase(), forward_curve, Some(reverse_curve));
+            CurvedAnimation::new(&mut app, parent.erase(), forward_curve, Some(reverse_curve));
         let curved_handle: AnimationRef<f64> = curved.erase();
 
         // Forward at 0.5: the forward interval maps it to 1.0.

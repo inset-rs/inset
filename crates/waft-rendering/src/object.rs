@@ -2643,7 +2643,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let owner = PipelineOwner::new(&mut app, None, None);
         let node = RenderHandle::new_box(&mut app, leaf(Rc::new(Cell::new(0))));
-        node.as_object().attach(&mut app, *owner);
+        node.as_object().attach(&mut app, owner.handle());
         assert!(owner.nodes_needing_layout(&app).is_empty());
 
         node.layout(&mut app, tight(), false);
@@ -2680,7 +2680,7 @@ mod tests {
             parent(Some(child.as_box()), Rc::new(Cell::new(0)), true, true),
         );
         parent.adopt_child(&mut app, child.as_object());
-        parent.as_object().attach(&mut app, *owner);
+        parent.as_object().attach(&mut app, owner.handle());
         parent.layout(&mut app, loose(), false);
         assert!(!parent.debug_needs_layout(&app));
         assert!(!child.debug_needs_layout(&app));
@@ -2712,10 +2712,10 @@ mod tests {
         );
         assert!(!child.attached(&app));
 
-        parent.as_object().attach(&mut app, *owner);
+        parent.as_object().attach(&mut app, owner.handle());
         assert!(parent.attached(&app));
         assert!(child.attached(&app));
-        assert_eq!(child.owner(&app), Some(*owner));
+        assert_eq!(child.owner(&app), Some(owner.handle()));
 
         parent.drop_child(&mut app, child.as_object());
         assert!(child.parent(&app).is_none());
@@ -2818,7 +2818,7 @@ mod tests {
             },
         );
         parent.adopt_child(&mut app, child.as_object());
-        parent.as_object().attach(&mut app, *owner);
+        parent.as_object().attach(&mut app, owner.handle());
         parent.layout(&mut app, tight(), false);
         child.layout(&mut app, tight(), false);
         parent.as_object().mark_needs_layout(&mut app);

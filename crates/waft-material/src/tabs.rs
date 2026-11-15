@@ -1007,9 +1007,7 @@ impl IndicatorPainter {
         if let Some(painter) = self.painter.borrow_mut().as_mut() {
             painter.dispose();
         }
-        app.get_mut(&self.repaint_notifier)
-            .change_notifier
-            .dispose();
+        ChangeNotifierData::dispose(app, &self.repaint_notifier);
     }
 
     fn save_tab_offsets(
@@ -4216,7 +4214,7 @@ impl TabPageSelectorState {
             .animation(app)
             .and_then(|animation| animation.upgrade(app))
             .expect("a selector's controller is valid");
-        let animation = CurvedAnimation::create(app, parent, Curves::fast_out_slow_in(), None);
+        let animation = CurvedAnimation::new(app, parent, Curves::fast_out_slow_in(), None);
         app.get_mut(self).animation = Some(animation);
     }
 

@@ -316,7 +316,7 @@ impl Widget for Table {
     }
 
     fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
-        TableElement::create(app, this).as_element()
+        TableElement::new(app, this).as_element()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -402,7 +402,7 @@ struct TableElement {
 }
 
 impl TableElement {
-    fn create(app: &mut App, widget: WidgetRef) -> Handle<TableElement> {
+    fn new(app: &mut App, widget: WidgetRef) -> Handle<TableElement> {
         debug_assert!(downcast_widget::<Table>(&*widget).is_some());
         app.create(TableElement {
             element: ElementData::new(widget),

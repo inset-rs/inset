@@ -92,7 +92,7 @@ impl State for TextExamplesState {
 
     fn dispose(self: Handle<Self>, app: &mut App) {
         for controller in app.get(self).controllers.clone() {
-            app.get_mut(&controller).dispose();
+            controller.dispose(app);
         }
     }
 

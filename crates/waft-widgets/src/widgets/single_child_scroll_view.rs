@@ -424,7 +424,7 @@ impl SingleChildRenderObjectWidget for SingleChildViewport {
     }
 
     fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
-        SingleChildViewportElement::create(app, this).as_element()
+        SingleChildViewportElement::new(app, this).as_element()
     }
 }
 
@@ -438,7 +438,7 @@ pub struct SingleChildViewportElement {
 
 impl SingleChildViewportElement {
     /// Creates an element that uses the given widget as its configuration.
-    pub fn create(app: &mut App, widget: WidgetRef) -> Handle<SingleChildViewportElement> {
+    pub fn new(app: &mut App, widget: WidgetRef) -> Handle<SingleChildViewportElement> {
         debug_assert!(downcast_widget::<SingleChildViewport>(&*widget).is_some());
         app.create(SingleChildViewportElement {
             element: ElementData::new(widget),
@@ -659,13 +659,13 @@ impl RenderSingleChildViewport {
     /// Sets [`offset`](Self::offset).
     pub fn set_offset(self: RenderHandle<Self>, app: &mut App, value: ViewportOffsetRef) {
         let old = self.offset(app);
-        if *value == old {
+        if value.handle() == old {
             return;
         }
         if self.attached(app) {
             old.remove_listener(app, &self.has_scrolled_listener());
         }
-        let new = *value;
+        let new = value.handle();
         // The old offset goes when this local does, after the listener moved off it.
         let _old = std::mem::replace(&mut self.get_mut(app).offset, value);
         if self.attached(app) {

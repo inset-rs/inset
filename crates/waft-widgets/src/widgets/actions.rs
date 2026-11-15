@@ -704,9 +704,7 @@ impl AnyAction {
 
     /// An [`ActionRef`] while something still keeps the action; see [`Handle::upgrade`].
     pub fn upgrade(self, app: &App) -> Option<ActionRef> {
-        self.id
-            .upgrade(app)
-            .map(|retained| retained.into_map(|_| self))
+        Retained::upgrade(app, self)
     }
 
     /// See [`Action::intent_type`].
@@ -1181,7 +1179,12 @@ impl Actions {
                 // Could be that the action was enabled when the closure was created, but is now
                 // no longer enabled, so check again.
                 if action.is_enabled(app, &*intent, Some(context)) {
-                    Actions::of(app, context).invoke_action(app, *action, &*intent, Some(context));
+                    Actions::of(app, context).invoke_action(
+                        app,
+                        action.handle(),
+                        &*intent,
+                        Some(context),
+                    );
                 }
             }));
         }
@@ -2547,10 +2550,9 @@ trait OverridableActionMixin: ContextAction {
         if let Some(override_action) = override_action {
             override_action.update_calling_action(app, Some(default_action.clone()));
         }
-        let return_value =
-            override_action
-                .unwrap_or(*default_action)
-                .is_enabled(app, intent.as_intent(), context);
+        let return_value = override_action
+            .unwrap_or(default_action.handle())
+            .is_enabled(app, intent.as_intent(), context);
         if let Some(override_action) = override_action {
             override_action.update_calling_action(app, None);
         }
@@ -2579,7 +2581,7 @@ trait OverridableActionMixin: ContextAction {
             override_action.update_calling_action(app, Some(default_action.clone()));
         }
         let is_enabled = override_action
-            .unwrap_or(*default_action)
+            .unwrap_or(default_action.handle())
             .consumes_key(app, intent.as_intent());
         if let Some(override_action) = override_action {
             override_action.update_calling_action(app, None);
@@ -3099,7 +3101,7 @@ mod tests {
 
         assert_eq!(
             Actions::maybe_find(&mut app, context, TypeId::of::<CountIntent>()),
-            Some(Action::as_action(*action))
+            Some(Action::as_action(action.handle()))
         );
         assert_eq!(
             Actions::maybe_find(&mut app, context, TypeId::of::<OtherIntent>()),

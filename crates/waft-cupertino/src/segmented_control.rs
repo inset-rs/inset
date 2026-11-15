@@ -453,7 +453,7 @@ pub struct SegmentedControlState<T: Copy + Eq + Hash + Debug + 'static> {
 impl<T: Copy + Eq + Hash + Debug + 'static> SegmentedControlState<T> {
     /// Dart's `createAnimationController`.
     fn create_animation_controller(self: Handle<Self>, app: &mut App) -> Ref<AnimationController> {
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             app,
             Some(0.0),
             Some(K_FADE_DURATION),

@@ -3245,7 +3245,7 @@ impl LeaderLayer {
     /// See [`link`](Self::link).
     pub fn set_link(self: Handle<Self>, app: &mut App, value: Ref<LayerLink>) {
         let current = self.link(app);
-        if current == *value {
+        if current == value.handle() {
             return;
         }
         if self.as_layer().attached(app) {
@@ -3416,7 +3416,7 @@ impl FollowerLayer {
 
     /// See [`link`](Self::link).
     pub fn set_link(self: Handle<Self>, app: &mut App, value: Ref<LayerLink>) {
-        if self.link(app) == *value {
+        if self.link(app) == value.handle() {
             return;
         }
         app.get_mut(self).link = value;
@@ -4543,7 +4543,7 @@ mod tests {
         let link2 = LayerLink::new(&mut app);
         leader.set_link(&mut app, link2.clone());
         leader.as_layer().detach(&mut app);
-        assert_eq!(leader.link(&app), *link2);
+        assert_eq!(leader.link(&app), link2.handle());
         assert!(link.leader(&app).is_none());
         assert!(link2.leader(&app).is_none());
     }

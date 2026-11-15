@@ -732,10 +732,9 @@ impl PredictiveBackSharedElementPageTransitionState {
         let commit_interval: Rc<dyn waft_animation::Curve> =
             Rc::new(PredictiveBackSharedElementPageTransitionState::k_commit_interval());
         let curved_animation =
-            CurvedAnimation::create(app, animation.clone(), Rc::clone(&commit_interval), None);
+            CurvedAnimation::new(app, animation.clone(), Rc::clone(&commit_interval), None);
         let reversed = ReverseAnimation::new(app, animation).into_erased();
-        let curved_animation_reversed =
-            CurvedAnimation::create(app, reversed, commit_interval, None);
+        let curved_animation_reversed = CurvedAnimation::new(app, reversed, commit_interval, None);
         let state = app.get_mut(self);
         state.curved_animation = Some(curved_animation);
         state.curved_animation_reversed = Some(curved_animation_reversed);

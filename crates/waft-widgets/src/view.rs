@@ -236,6 +236,7 @@ impl WidgetsBindingObserverObject for ViewState {
             ViewFocusState::Unfocused => {
                 FocusManager::instance(app)
                     .root_scope(app)
+                    .handle()
                     .request_scope_focus(app);
             }
         }
@@ -282,10 +283,8 @@ impl State for ViewState {
             .clone()
             .expect("created in init_state");
         let policy = app.get(self).policy.clone().expect("created in init_state");
-        let root_scope = FocusManager::instance(app)
-            .root_scope(app)
-            .upgrade(app)
-            .expect("the focus manager keeps its root scope");
+        let manager = FocusManager::instance(app);
+        let root_scope = manager.root_scope(app).clone();
         // Attach this view's focus subtree directly to the root scope rather than nesting it
         // under an enclosing view's scope (which happens when a view is rendered inside another
         // via a `ViewAnchor`). Each view is an independent focus root: nesting would otherwise
@@ -426,7 +425,7 @@ impl Widget for RawViewInternal {
     }
 
     fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
-        RawViewElement::create(app, this).as_element()
+        RawViewElement::new(app, this).as_element()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -456,7 +455,7 @@ pub struct RawViewElement {
 }
 
 impl RawViewElement {
-    fn create(app: &mut App, widget: WidgetRef) -> Handle<RawViewElement> {
+    fn new(app: &mut App, widget: WidgetRef) -> Handle<RawViewElement> {
         app.create(RawViewElement {
             element: ElementData::new(widget),
             render_object_element: RenderObjectElementData::default(),
@@ -819,7 +818,7 @@ impl Widget for MultiChildComponentWidget {
     }
 
     fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
-        MultiChildComponentElement::create(app, this).as_element()
+        MultiChildComponentElement::new(app, this).as_element()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -878,7 +877,7 @@ impl Widget for ViewCollection {
     }
 
     fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
-        MultiChildComponentElement::create(app, this).as_element()
+        MultiChildComponentElement::new(app, this).as_element()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -971,7 +970,7 @@ pub struct MultiChildComponentElement {
 }
 
 impl MultiChildComponentElement {
-    fn create(app: &mut App, widget: WidgetRef) -> Handle<MultiChildComponentElement> {
+    fn new(app: &mut App, widget: WidgetRef) -> Handle<MultiChildComponentElement> {
         app.create(MultiChildComponentElement {
             element: ElementData::new(widget),
             view_elements: Vec::new(),
@@ -1264,6 +1263,7 @@ mod tests {
             assert!(
                 FocusManager::instance(&mut app)
                     .root_scope(&app)
+                    .handle()
                     .has_primary_focus(&app)
             );
         }

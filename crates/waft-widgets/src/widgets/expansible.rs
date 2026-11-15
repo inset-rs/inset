@@ -172,7 +172,7 @@ impl ExpansibleController {
 
     /// Discards any resources used by the object.
     pub fn dispose(self: Handle<Self>, app: &mut App) {
-        app.get_mut(self).change_notifier.dispose();
+        ChangeNotifierData::dispose(app, self);
     }
 
     /// Finds the [`ExpansibleController`] for the closest [`Expansible`] instance
@@ -567,7 +567,7 @@ impl State for ExpansibleState {
 
     fn init_state(self: Handle<Self>, app: &mut App) {
         let duration = ExpansibleState::duration(self.widget(app));
-        let animation_controller = AnimationController::create(
+        let animation_controller = AnimationController::new(
             app,
             None,
             Some(duration),
@@ -594,7 +594,7 @@ impl State for ExpansibleState {
         let parent = animation_controller.drive(app, height_factor_tween.clone());
         let curve = ExpansibleState::curve(self.widget(app));
         let reverse_curve = ExpansibleState::reverse_curve(self.widget(app));
-        let height_factor = CurvedAnimation::create(app, parent, curve, reverse_curve);
+        let height_factor = CurvedAnimation::new(app, parent, curve, reverse_curve);
         let state = app.get_mut(self);
         state.height_factor_tween = Some(height_factor_tween);
         state.height_factor = Some(height_factor);

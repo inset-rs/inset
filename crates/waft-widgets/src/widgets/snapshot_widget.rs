@@ -106,7 +106,7 @@ impl SnapshotController {
 
     /// Discards any resources used by the object. Dart's inherited `ChangeNotifier.dispose`.
     pub fn dispose(self: Handle<Self>, app: &mut App) {
-        app.get_mut(self).change_notifier.dispose();
+        ChangeNotifierData::dispose(app, self);
     }
 }
 
@@ -828,6 +828,14 @@ impl From<AnySnapshotPainter> for HandleId {
 
 /// A field Dart types as the erased object, kept: AnySnapshotPainter with its count.
 pub type SnapshotPainterRef = Retained<AnySnapshotPainter>;
+
+impl AnySnapshotPainter {
+    /// A [`SnapshotPainterRef`] while something still keeps the object; see
+    /// [`Handle::upgrade`](waft_foundation::Handle::upgrade).
+    pub fn upgrade(self, app: &App) -> Option<SnapshotPainterRef> {
+        Retained::upgrade(app, self)
+    }
+}
 
 /// A kept object erases to a [`SnapshotPainterRef`] with [`Retained::erase`]: Dart's upcast.
 impl<T: SnapshotPainter> From<Handle<T>> for AnySnapshotPainter {

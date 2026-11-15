@@ -614,7 +614,7 @@ impl<T: Clone + PartialEq + 'static> State for RadioGroupState<T> {
 
     fn dispose(self: Handle<Self>, app: &mut App) {
         if let Some(manager) = app.get(self).radio_group_shortcut_manager.handle() {
-            app.get_mut(manager).change_notifier.dispose();
+            ChangeNotifierData::dispose(app, manager);
         }
     }
 

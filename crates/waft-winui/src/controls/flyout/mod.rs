@@ -322,36 +322,32 @@ impl Flyout {
     }
 
     /// Sets Content and updates the retained presenter.
-    pub fn content<K>(self: Ref<Self>, app: &mut App, content: impl IntoWidget<K>) -> Ref<Self> {
-        app.get_mut(&self).content = content.into_widget();
+    pub fn content<K>(self: Handle<Self>, app: &mut App, content: impl IntoWidget<K>) {
+        app.get_mut(self).content = content.into_widget();
         self.invalidate(app);
-        self
     }
 
     /// Sets Placement.
-    pub fn placement(self: Ref<Self>, app: &mut App, placement: FlyoutPlacementMode) -> Ref<Self> {
-        app.get_mut(&self).placement = placement;
+    pub fn placement(self: Handle<Self>, app: &mut App, placement: FlyoutPlacementMode) {
+        app.get_mut(self).placement = placement;
         self.invalidate(app);
-        self
     }
 
     /// Sets ShowMode.
-    pub fn show_mode(self: Ref<Self>, app: &mut App, mode: FlyoutShowMode) -> Ref<Self> {
-        app.get_mut(&self).show_mode = mode.effective();
+    pub fn show_mode(self: Handle<Self>, app: &mut App, mode: FlyoutShowMode) {
+        app.get_mut(self).show_mode = mode.effective();
         self.update_pointer_route(app);
         self.invalidate(app);
-        self
     }
 
     /// Sets the presenter style callback.
     pub fn flyout_presenter_style(
-        self: Ref<Self>,
+        self: Handle<Self>,
         app: &mut App,
         builder: FlyoutPresenterBuilder,
-    ) -> Ref<Self> {
-        app.get_mut(&self).flyout_presenter_style = Some(builder);
+    ) {
+        app.get_mut(self).flyout_presenter_style = Some(builder);
         self.invalidate(app);
-        self
     }
 
     /// Whether the popup is shown, including its initial layout frame.
@@ -510,7 +506,7 @@ impl Flyout {
         app.get_mut(metadata)
             .staged
             .retain(|_, (flyout, _, _)| *flyout != self);
-        app.get_mut(self).notifier.dispose();
+        ChangeNotifierData::dispose(app, self);
     }
 
     /// Updates derived presenter content without broadcasting an open-state change.

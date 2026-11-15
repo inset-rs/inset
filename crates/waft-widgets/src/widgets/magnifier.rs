@@ -1398,7 +1398,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let context = home.current_context(&app).expect("mounted");
         let duration = Duration::from_secs(120);
-        let animation_controller = AnimationController::create(
+        let animation_controller = AnimationController::new(
             &mut app,
             None,
             Some(duration),
@@ -1479,7 +1479,7 @@ mod tests {
             Rc::new(move |_app: &mut App, _context: BuildContext| {
                 SizedBox::new().key(magnifier_key.clone()).into_widget()
             }),
-            Some(*fake_before_overlay_entry),
+            Some(fake_before_overlay_entry.handle()),
         );
         binding_pump(&mut app, at(0));
 

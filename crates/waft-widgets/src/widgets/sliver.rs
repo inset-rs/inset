@@ -77,12 +77,12 @@ where
     /// Creates the element that lazily builds this widget's children.
     ///
     /// Dart's `createElement`; an implementor that needs the moved children replaced passes
-    /// `true` (see [`SliverMultiBoxAdaptorElement::create`]).
+    /// `true` (see [`SliverMultiBoxAdaptorElement::new`]).
     fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement
     where
         Self: Sized,
     {
-        SliverMultiBoxAdaptorElement::<Self>::create(app, this, false).as_element()
+        SliverMultiBoxAdaptorElement::<Self>::new(app, this, false).as_element()
     }
 
     /// Returns an estimate of the max scroll extent for all the children.
@@ -279,7 +279,7 @@ impl SliverMultiBoxAdaptorWidget for SliverList {
     }
 
     fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
-        SliverMultiBoxAdaptorElement::<SliverList>::create(app, this, true).as_element()
+        SliverMultiBoxAdaptorElement::<SliverList>::new(app, this, true).as_element()
     }
 }
 
@@ -1339,7 +1339,7 @@ where
     /// their children without looking at the layout offset of existing children this should be
     /// set to false (example: `RenderSliverFixedExtentList`) to avoid inflating unnecessary
     /// children.
-    pub fn create(
+    pub fn new(
         app: &mut App,
         widget: WidgetRef,
         replace_moved_children: bool,

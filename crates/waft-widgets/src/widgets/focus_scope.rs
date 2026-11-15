@@ -957,7 +957,7 @@ impl FocusScope {
                     .owner(app)
                     .expect("a mounted element has a build owner");
                 let manager = owner.focus_manager(app);
-                manager.root_scope(app)
+                manager.root_scope(app).handle()
             })
     }
 }
@@ -1112,7 +1112,7 @@ impl Widget for FocusInheritedScope {
     }
 
     fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
-        FocusInheritedScopeElement::create(app, this)
+        FocusInheritedScopeElement::new(app, this).as_element()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -1139,7 +1139,7 @@ struct FocusInheritedScopeElement {
 }
 
 impl FocusInheritedScopeElement {
-    fn create(app: &mut App, widget: WidgetRef) -> AnyElement {
+    fn new(app: &mut App, widget: WidgetRef) -> Handle<Self> {
         let node = FocusInheritedScopeElement::widget_of(&widget).node.handle();
         let this = app
             .create(FocusInheritedScopeElement {
@@ -1153,7 +1153,7 @@ impl FocusInheritedScopeElement {
             app,
             Listener::handle_method(this, FocusInheritedScopeElement::handle_update),
         );
-        this.as_element()
+        this
     }
 
     fn widget_of(widget: &WidgetRef) -> &FocusInheritedScope {
@@ -1499,11 +1499,11 @@ mod tests {
         let mut app = cell.borrow_mut();
         let manager = FocusManager::instance(&mut app);
         let view_scope = scope_node.get().expect("FocusScope.of ran");
-        assert_ne!(view_scope, manager.root_scope(&app));
+        assert_ne!(view_scope, manager.root_scope(&app).handle());
         assert_eq!(view_scope.debug_label(&app).as_deref(), Some("View Scope"));
         assert_eq!(
             view_scope.enclosing_scope(&mut app),
-            Some(manager.root_scope(&app))
+            Some(manager.root_scope(&app).handle())
         );
 
         // A FocusScope widget below the view scopes its own subtree instead.
@@ -1524,7 +1524,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let manager = FocusManager::instance(&mut app);
         let scope = scope_node.get().expect("FocusScope.of ran");
-        assert_ne!(scope, manager.root_scope(&app));
+        assert_ne!(scope, manager.root_scope(&app).handle());
         assert_eq!(scope.debug_label(&app).as_deref(), Some("scope"));
         assert_eq!(
             scope

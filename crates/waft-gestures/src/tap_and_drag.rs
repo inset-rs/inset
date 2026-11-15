@@ -13,7 +13,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use waft_embedder::{Offset, PointerDeviceKind};
-use waft_foundation::{App, Handle, Listener, Timer, ValueChanged};
+use waft_foundation::{App, Handle, Listener, OptionRetained, Timer, ValueChanged};
 
 use crate::arena::GestureDisposition;
 use crate::constants::{K_DOUBLE_TAP_SLOP, K_DOUBLE_TAP_TIMEOUT, K_PRESS_TIMEOUT};
@@ -1937,7 +1937,7 @@ macro_rules! tap_and_drag_gesture_recognizer_leaf {
 
             /// The team that this recognizer belongs to, if any.
             pub fn team(self: Handle<Self>, app: &App) -> Option<Handle<GestureArenaTeam>> {
-                app.get(self).one_sequence.team.as_deref().copied()
+                app.get(self).one_sequence.team.handle()
             }
 
             /// The [`team`](Self::team) can only be set once.
@@ -2375,7 +2375,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let tap_and_drag = TapAndPanGestureRecognizer::new(&mut app);
         let events = Rc::new(RefCell::new(Vec::new()));
-        wire_pan(*tap_and_drag, &mut app, &events);
+        wire_pan(tap_and_drag.handle(), &mut app, &events);
 
         let down1 = down(1, Offset::new(10.0, 10.0));
         let up1 = up(1, Offset::new(11.0, 9.0));
@@ -2408,7 +2408,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let tap_and_drag = TapAndPanGestureRecognizer::new(&mut app);
         let events = Rc::new(RefCell::new(Vec::new()));
-        wire_pan(*tap_and_drag, &mut app, &events);
+        wire_pan(tap_and_drag.handle(), &mut app, &events);
 
         let down1 = down(1, Offset::new(10.0, 10.0));
         let up1 = up(1, Offset::new(11.0, 9.0));
@@ -2441,7 +2441,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let tap_and_drag = TapAndPanGestureRecognizer::new(&mut app);
         let events = Rc::new(RefCell::new(Vec::new()));
-        wire_pan(*tap_and_drag, &mut app, &events);
+        wire_pan(tap_and_drag.handle(), &mut app, &events);
 
         let mut pointer = TestPointer::new(5);
         let down_event = pointer.down(Offset::new(10.0, 10.0));
@@ -2468,7 +2468,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let tap_and_drag = TapAndHorizontalDragGestureRecognizer::new(&mut app);
         let events = Rc::new(RefCell::new(Vec::new()));
-        wire_horizontal(*tap_and_drag, &mut app, &events);
+        wire_horizontal(tap_and_drag.handle(), &mut app, &events);
 
         let vertical = VerticalDragGestureRecognizer::new(&mut app);
         let vertical_events = Rc::clone(&events);
@@ -2527,6 +2527,6 @@ mod tests {
         );
 
         tap_and_drag.dispose(&mut app);
-        DragGestureRecognizer::dispose(*vertical, &mut app);
+        DragGestureRecognizer::dispose(vertical.handle(), &mut app);
     }
 }

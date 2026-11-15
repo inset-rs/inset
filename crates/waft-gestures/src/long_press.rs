@@ -5,7 +5,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use waft_embedder::{Offset, PointerDeviceKind};
-use waft_foundation::{App, Handle, Listener, ValueChanged};
+use waft_foundation::{App, Handle, Listener, OptionRetained, ValueChanged};
 
 use crate::arena::GestureDisposition;
 use crate::constants::K_LONG_PRESS_TIMEOUT;
@@ -585,7 +585,7 @@ impl LongPressGestureRecognizer {
 
     /// The team that this recognizer belongs to, if any.
     pub fn team(self: Handle<Self>, app: &App) -> Option<Handle<GestureArenaTeam>> {
-        app.get(self).one_sequence.team.as_deref().copied()
+        app.get(self).one_sequence.team.handle()
     }
 
     /// The [`team`](Self::team) can only be set once.
@@ -1157,7 +1157,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let gesture = LongPressGestureRecognizer::new(&mut app);
         let log = Rc::new(RefCell::new(Vec::new()));
-        set_handlers(*gesture, &mut app, &log);
+        set_handlers(gesture.handle(), &mut app, &log);
 
         let down1 = down(5, Offset::new(10.0, 10.0));
         gesture.add_pointer(&mut app, down1.clone());
@@ -1182,7 +1182,7 @@ mod tests {
         let gesture = LongPressGestureRecognizer::new(&mut app)
             .duration(&mut app, Duration::from_millis(100));
         let log = Rc::new(RefCell::new(Vec::new()));
-        set_handlers(*gesture, &mut app, &log);
+        set_handlers(gesture.handle(), &mut app, &log);
 
         let down1 = down(5, Offset::new(10.0, 10.0));
         gesture.add_pointer(&mut app, down1.clone());
@@ -1205,7 +1205,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let gesture = LongPressGestureRecognizer::new(&mut app);
         let log = Rc::new(RefCell::new(Vec::new()));
-        set_handlers(*gesture, &mut app, &log);
+        set_handlers(gesture.handle(), &mut app, &log);
 
         let down1 = down(5, Offset::new(10.0, 10.0));
         gesture.add_pointer(&mut app, down1.clone());
@@ -1231,7 +1231,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let gesture = LongPressGestureRecognizer::new(&mut app);
         let log = Rc::new(RefCell::new(Vec::new()));
-        set_handlers(*gesture, &mut app, &log);
+        set_handlers(gesture.handle(), &mut app, &log);
 
         let down1 = down(5, Offset::new(10.0, 10.0));
         gesture.add_pointer(&mut app, down1.clone());
@@ -1265,7 +1265,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let gesture = LongPressGestureRecognizer::new(&mut app);
         let log = Rc::new(RefCell::new(Vec::new()));
-        set_handlers(*gesture, &mut app, &log);
+        set_handlers(gesture.handle(), &mut app, &log);
 
         let down1 = down(5, Offset::new(10.0, 10.0));
         gesture.add_pointer(&mut app, down1.clone());
@@ -1298,7 +1298,7 @@ mod tests {
         let gesture = LongPressGestureRecognizer::new(&mut app);
         let tap = TapGestureRecognizer::new(&mut app);
         let log = Rc::new(RefCell::new(Vec::new()));
-        set_handlers(*gesture, &mut app, &log);
+        set_handlers(gesture.handle(), &mut app, &log);
         let tap_log = Rc::clone(&log);
         tap.set_on_tap_down(
             &mut app,
@@ -1331,7 +1331,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let gesture = LongPressGestureRecognizer::new(&mut app);
         let log = Rc::new(RefCell::new(Vec::new()));
-        set_handlers(*gesture, &mut app, &log);
+        set_handlers(gesture.handle(), &mut app, &log);
 
         let down1 = down(5, Offset::new(10.0, 10.0));
         gesture.add_pointer(&mut app, down1.clone());

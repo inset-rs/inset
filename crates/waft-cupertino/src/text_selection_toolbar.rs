@@ -740,7 +740,7 @@ impl State for CupertinoTextSelectionToolbarContentState {
     waft_widgets::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             app,
             Some(1.0),
             Some(K_TOOLBAR_TRANSITION_DURATION),
@@ -980,7 +980,7 @@ impl Widget for CupertinoTextSelectionToolbarItems {
     }
 
     fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
-        CupertinoTextSelectionToolbarItemsElement::create(app, this).as_element()
+        CupertinoTextSelectionToolbarItemsElement::new(app, this).as_element()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -1038,10 +1038,7 @@ struct CupertinoTextSelectionToolbarItemsElement {
 }
 
 impl CupertinoTextSelectionToolbarItemsElement {
-    fn create(
-        app: &mut App,
-        widget: WidgetRef,
-    ) -> Handle<CupertinoTextSelectionToolbarItemsElement> {
+    fn new(app: &mut App, widget: WidgetRef) -> Handle<CupertinoTextSelectionToolbarItemsElement> {
         debug_assert!(downcast_widget::<CupertinoTextSelectionToolbarItems>(&*widget).is_some());
         app.create(CupertinoTextSelectionToolbarItemsElement {
             element: ElementData::new(widget),

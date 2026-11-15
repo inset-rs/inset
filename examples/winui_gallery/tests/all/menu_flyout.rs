@@ -101,10 +101,8 @@ fn fixture() -> (Fixture, Rc<Probe>) {
         winui_gallery::install_fonts(app);
         let menu = MenuFlyout::new(app, items(shared.clone()));
         *shared.menu.borrow_mut() = Some(menu.clone());
-        let flyout = menu
-            .as_flyout(app)
-            .clone()
-            .placement(app, FlyoutPlacementMode::BottomEdgeAlignedLeft);
+        let flyout = menu.as_flyout(app).clone();
+        flyout.placement(app, FlyoutPlacementMode::BottomEdgeAlignedLeft);
         let entry = OverlayEntry::new(
             app,
             Rc::new(move |_, _| {

@@ -13,7 +13,7 @@ use waft_rendering::{
     RenderObjectWithChildMixin,
 };
 
-use super::element::{AnyElement, BuildContext};
+use super::element::{AnyElement, BuildContext, Element};
 use super::elements::{
     InheritedElement, LeafRenderObjectElement, MultiChildRenderObjectElement, ParentDataElement,
     SingleChildRenderObjectElement, StatefulElement, StatelessElement,
@@ -285,7 +285,7 @@ impl<W: StatelessWidget> Widget for Stateless<W> {
     }
 
     fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
-        StatelessElement::<W>::create(app, this)
+        StatelessElement::<W>::new(app, this).as_element()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -385,7 +385,7 @@ impl<W: StatefulWidget> Widget for Stateful<W> {
     }
 
     fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
-        StatefulElement::<W>::create(app, this)
+        StatefulElement::<W>::new(app, this).as_element()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -477,7 +477,7 @@ impl<W: InheritedWidget> Widget for Inherited<W> {
     }
 
     fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
-        InheritedElement::<W>::create(app, this)
+        InheritedElement::<W>::new(app, this).as_element()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -584,7 +584,7 @@ impl<W: ParentDataWidget> Widget for ParentDataWrapper<W> {
     }
 
     fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
-        ParentDataElement::<W>::create(app, this)
+        ParentDataElement::<W>::new(app, this).as_element()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -692,7 +692,7 @@ impl<W: LeafRenderObjectWidget> Widget for LeafRenderObject<W> {
     }
 
     fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
-        LeafRenderObjectElement::<W>::create(app, this)
+        LeafRenderObjectElement::<W>::new(app, this).as_element()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -739,7 +739,7 @@ where
     where
         Self: Sized,
     {
-        SingleChildRenderObjectElement::<Self>::create(app, this)
+        SingleChildRenderObjectElement::<Self>::new(app, this).as_element()
     }
 }
 
@@ -836,7 +836,7 @@ where
     where
         Self: Sized,
     {
-        MultiChildRenderObjectElement::<Self>::create(app, this)
+        MultiChildRenderObjectElement::<Self>::new(app, this).as_element()
     }
 }
 

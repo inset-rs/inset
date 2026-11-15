@@ -412,7 +412,7 @@ impl State for AnimatedCrossFadeState {
         let cross_fade_state = widget.cross_fade_state;
         let first_curve = Rc::clone(&widget.first_curve);
         let second_curve = Rc::clone(&widget.second_curve);
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             app,
             None,
             Some(duration),

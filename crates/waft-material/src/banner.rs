@@ -372,7 +372,7 @@ impl MaterialBanner {
         app: &mut App,
         vsync: impl TickerProvider,
     ) -> Ref<AnimationController> {
-        AnimationController::create(
+        AnimationController::new(
             app,
             None,
             Some(MATERIAL_BANNER_TRANSITION_DURATION),
@@ -480,14 +480,14 @@ impl MaterialBannerState {
         );
         match self.widget(app).animation.clone() {
             Some(animation) => {
-                let height_animation = CurvedAnimation::create(
+                let height_animation = CurvedAnimation::new(
                     app,
                     animation.clone(),
                     material_banner_height_curve(),
                     None,
                 );
                 let slide_out_curved_animation =
-                    CurvedAnimation::create(app, animation, Rc::new(Threshold::new(0.0)), None);
+                    CurvedAnimation::new(app, animation, Rc::new(Threshold::new(0.0)), None);
                 let this = app.get_mut(self);
                 this.height_animation = Some(height_animation);
                 this.slide_out_curved_animation = Some(slide_out_curved_animation);

@@ -893,7 +893,7 @@ mod tests {
         assert_eq!(size_of(&tester, &key).height(), 600.0);
 
         for pixels in [50.0, -100.0, 0.0] {
-            jump_to(&mut tester, *controller, pixels);
+            jump_to(&mut tester, controller.handle(), pixels);
             assert_eq!(size_of(&tester, &key).height(), 600.0, "at {pixels}");
         }
     }
@@ -918,7 +918,7 @@ mod tests {
         assert_eq!(size_of(&tester, &key).height(), 500.0);
 
         for (pixels, height) in [(50.0, 550.0), (-100.0, 400.0), (0.0, 500.0)] {
-            jump_to(&mut tester, *controller, pixels);
+            jump_to(&mut tester, controller.handle(), pixels);
             assert_eq!(size_of(&tester, &key).height(), height, "at {pixels}");
         }
     }
@@ -938,10 +938,10 @@ mod tests {
             Some(controller.clone()),
             Axis::Vertical,
         ));
-        assert_eq!(offset(&tester, *controller), 0.0);
+        assert_eq!(offset(&tester, controller.handle()), 0.0);
         controller.jump_to(&mut tester.cell.borrow_mut(), 150.0);
         tester.settle();
-        assert_eq!(offset(&tester, *controller), 150.0);
+        assert_eq!(offset(&tester, controller.handle()), 150.0);
         assert_eq!(rect_of(&tester, &fill_key).top, 0.0);
     }
 
@@ -1003,10 +1003,10 @@ mod tests {
             Some(controller.clone()),
             Axis::Vertical,
         ));
-        assert_eq!(offset(&tester, *controller), 0.0);
+        assert_eq!(offset(&tester, controller.handle()), 0.0);
         controller.jump_to(&mut tester.cell.borrow_mut(), 150.0);
         tester.settle();
-        assert_eq!(offset(&tester, *controller), 0.0);
+        assert_eq!(offset(&tester, controller.handle()), 0.0);
     }
 
     #[test]
@@ -1400,13 +1400,13 @@ mod tests {
 
             // Overscroll by 200: the preceding box frees up 150 of paint room
             // and the remaining 50 become this sliver's scrollOffset.
-            jump_to(&mut tester, *controller, 200.0);
+            jump_to(&mut tester, controller.handle(), 200.0);
 
             let rect = rect_of(&tester, &fill_key);
             assert_eq!(rect.bottom, 600.0, "{platform:?}");
             assert_eq!(rect.height(), 650.0, "{platform:?}");
 
-            jump_to(&mut tester, *controller, 0.0);
+            jump_to(&mut tester, controller.handle(), 0.0);
             assert_eq!(
                 rect_of(&tester, &fill_key),
                 Rect::from_ltrb(0.0, 150.0, 800.0, 600.0),
@@ -1432,13 +1432,13 @@ mod tests {
                 "{platform:?}"
             );
 
-            jump_to(&mut tester, *controller, 50.0);
+            jump_to(&mut tester, controller.handle(), 50.0);
 
             let rect = rect_of(&tester, &fill_key);
             assert_eq!(rect.bottom, 600.0, "{platform:?}");
             assert_eq!(rect.height(), 650.0, "{platform:?}");
 
-            jump_to(&mut tester, *controller, 0.0);
+            jump_to(&mut tester, controller.handle(), 0.0);
             assert_eq!(
                 rect_of(&tester, &fill_key),
                 Rect::from_ltrb(0.0, 0.0, 800.0, 600.0),
@@ -1513,7 +1513,7 @@ mod tests {
                 "{platform:?}"
             );
 
-            jump_to(&mut tester, *controller, 50.0);
+            jump_to(&mut tester, controller.handle(), 50.0);
 
             let rect = rect_of(&tester, &fill_key);
             assert_eq!(rect.top, 0.0, "{platform:?}");
@@ -1523,7 +1523,7 @@ mod tests {
             tester.up(gesture);
             assert_eq!(taps.get(), 1, "{platform:?}");
 
-            jump_to(&mut tester, *controller, 0.0);
+            jump_to(&mut tester, controller.handle(), 0.0);
             assert_eq!(
                 rect_of(&tester, &fill_key),
                 Rect::from_ltrb(0.0, 0.0, 800.0, 600.0),
@@ -1551,13 +1551,13 @@ mod tests {
                 "{platform:?}"
             );
 
-            jump_to(&mut tester, *controller, 50.0);
+            jump_to(&mut tester, controller.handle(), 50.0);
 
             let rect = rect_of(&tester, &fill_key);
             assert_eq!(rect.left, 0.0, "{platform:?}");
             assert_eq!(rect.width(), 850.0, "{platform:?}");
 
-            jump_to(&mut tester, *controller, 0.0);
+            jump_to(&mut tester, controller.handle(), 0.0);
             assert_eq!(
                 rect_of(&tester, &fill_key),
                 Rect::from_ltrb(0.0, 0.0, 800.0, 600.0),
@@ -1617,7 +1617,7 @@ mod tests {
             ));
 
             // Scroll to the end
-            jump_to_max_scroll_extent(&mut tester, *controller);
+            jump_to_max_scroll_extent(&mut tester, controller.handle());
             assert_eq!(
                 size_of(&tester, &key).height(),
                 148.0 + density_vertical * 4.0,
@@ -1680,7 +1680,7 @@ mod tests {
             assert!(!fixed_extent_item_is_onstage(&tester, 4), "{platform:?}");
 
             // Scroll to bottom
-            jump_to_max_scroll_extent(&mut tester, *controller);
+            jump_to_max_scroll_extent(&mut tester, controller.handle());
             // End of list
             assert!(!fill_is_onstage(&tester), "{platform:?}");
             assert!(fixed_extent_item_is_onstage(&tester, 4), "{platform:?}");
@@ -1725,7 +1725,7 @@ mod tests {
         assert!(!fixed_extent_item_is_onstage(&tester, 4));
 
         // Scroll to bottom
-        jump_to_max_scroll_extent(&mut tester, *controller);
+        jump_to_max_scroll_extent(&mut tester, controller.handle());
 
         // End of list
         assert!(!fill_is_onstage(&tester));
@@ -1784,7 +1784,7 @@ mod tests {
         ));
 
         // Scroll to the end
-        jump_to_max_scroll_extent(&mut tester, *controller);
+        jump_to_max_scroll_extent(&mut tester, controller.handle());
         assert_eq!(size_of(&tester, &key).height(), 148.0);
 
         // Check that the button alignment is true to expectations

@@ -260,7 +260,7 @@ impl State for CupertinoScrollbarState {
 
     fn init_state(self: Handle<Self>, app: &mut App) {
         RawScrollbarState::init_state(self, app);
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             app,
             None,
             Some(K_SCROLLBAR_RESIZE_DURATION),

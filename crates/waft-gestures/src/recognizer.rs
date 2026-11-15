@@ -16,7 +16,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use waft_embedder::{Matrix4, Offset, PointerDeviceKind};
-use waft_foundation::{App, Handle, HandleId, Listener, Timer};
+use waft_foundation::{App, Handle, HandleId, Listener, OptionRetained, Timer};
 
 use crate::arena::{GestureArenaEntry, GestureArenaMember, GestureDisposition};
 use crate::binding::GestureBinding;
@@ -574,6 +574,14 @@ pub trait GestureRecognizerLeaf: Sized + 'static {
 /// A field Dart types as `GestureRecognizer`, kept: the erased recognizer with its count.
 pub type RecognizerRef = Retained<AnyGestureRecognizer>;
 
+impl AnyGestureRecognizer {
+    /// A [`RecognizerRef`] while something still keeps the object; see
+    /// [`Handle::upgrade`](waft_foundation::Handle::upgrade).
+    pub fn upgrade(self, app: &App) -> Option<RecognizerRef> {
+        Retained::upgrade(app, self)
+    }
+}
+
 /// A kept recognizer erases to a [`RecognizerRef`] with [`Retained::erase`].
 impl<R: GestureRecognizerLeaf> From<Handle<R>> for AnyGestureRecognizer {
     fn from(recognizer: Handle<R>) -> AnyGestureRecognizer {
@@ -973,7 +981,7 @@ impl OneSequenceGestureRecognizer {
         app: &mut App,
         pointer: i64,
     ) -> GestureArenaEntry {
-        let team = app.get(this).one_sequence().team.as_deref().copied();
+        let team = app.get(this).one_sequence().team.handle();
         if let Some(team) = team {
             team.add(app, pointer, this)
         } else {
@@ -1278,7 +1286,10 @@ mod tests {
         assert_ne!(erased, long_press.as_recognizer());
         assert_eq!(erased.id(), tap.id());
         assert_eq!(erased.type_id(), TypeId::of::<TapGestureRecognizer>());
-        assert_eq!(erased.downcast::<TapGestureRecognizer>(&app), Some(*tap));
+        assert_eq!(
+            erased.downcast::<TapGestureRecognizer>(&app),
+            Some(tap.handle())
+        );
         assert_eq!(erased.downcast::<LongPressGestureRecognizer>(&app), None);
         assert_eq!(erased.debug_description(), "tap");
         assert_eq!(long_press.as_recognizer().debug_description(), "long press");

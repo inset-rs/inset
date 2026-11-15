@@ -550,7 +550,7 @@ impl PagePosition {
             cached_page: None,
             viewport_fraction,
         });
-        ScrollPositionWithSingleContext::init(*this, app, None, old_position);
+        ScrollPositionWithSingleContext::init(this.handle(), app, None, old_position);
         this
     }
 
@@ -2139,7 +2139,7 @@ mod tests {
     fn a_page_controller_cannot_return_its_page_while_unattached() {
         let tester = WidgetTester::new();
         let controller = PageController::default(&mut tester.cell.borrow_mut());
-        page(&tester, *controller);
+        page(&tester, controller.handle());
     }
 
     #[test]
@@ -2379,20 +2379,20 @@ mod tests {
             Curves::ease(),
         ));
         assert_eq!(
-            page(&tester, *controller),
+            page(&tester, controller.handle()),
             Some(f64::from(index_of("Iowa")))
         );
 
         controller.jump_to_page(&mut tester.cell.borrow_mut(), index_of("Illinois"));
         assert_eq!(
-            page(&tester, *controller),
+            page(&tester, controller.handle()),
             Some(f64::from(index_of("Illinois")))
         );
 
         // Resize from zero viewport to non-zero, the latest state should not lost.
         tester.pump_widget(sized_page_view(Size::new(200.0, 200.0), &controller));
         assert_eq!(
-            page(&tester, *controller),
+            page(&tester, controller.handle()),
             Some(f64::from(index_of("Illinois")))
         );
         assert!(finds(&tester, "Illinois"));
@@ -2674,7 +2674,7 @@ mod tests {
         tester.drag_from(CENTER, Offset::new(-600.0, 0.0));
         tester.settle();
 
-        assert_eq!(page(&tester, *controller), Some(1.0));
+        assert_eq!(page(&tester, controller.handle()), Some(1.0));
         assert_eq!(center_of(&tester, 1), Offset::new(400.0, 300.0));
     }
 
@@ -2753,27 +2753,33 @@ mod tests {
     fn a_page_view_restores_its_page_from_page_storage() {
         let mut tester = WidgetTester::new();
         let controller = PageController::default(&mut tester.cell.borrow_mut());
-        assert_eq!(page_assert_message(&tester, *controller), PAGE_BEFORE_BUILD);
+        assert_eq!(
+            page_assert_message(&tester, controller.handle()),
+            PAGE_BEFORE_BUILD
+        );
         let bucket = PageStorageBucket::new(&mut tester.cell.borrow_mut());
         tester.pump_widget(stored_page_view(
             bucket.clone(),
             "PageView",
             controller.clone(),
         ));
-        assert_eq!(page(&tester, *controller), Some(0.0));
+        assert_eq!(page(&tester, controller.handle()), Some(0.0));
         controller.jump_to_page(&mut tester.cell.borrow_mut(), 2);
         // Flutter settles in 2 pumps; its second is the semantics update the jump asks for, and
         // accessibility is deferred, so this settles in 1.
         assert_eq!(tester.pump_and_settle(Duration::from_secs(60)), 1);
-        assert_eq!(page(&tester, *controller), Some(2.0));
+        assert_eq!(page(&tester, controller.handle()), Some(2.0));
         tester.pump_widget(PageStorage::new(bucket.clone(), SizedBox::new()));
-        assert_eq!(page_assert_message(&tester, *controller), PAGE_BEFORE_BUILD);
+        assert_eq!(
+            page_assert_message(&tester, controller.handle()),
+            PAGE_BEFORE_BUILD
+        );
         tester.pump_widget(stored_page_view(
             bucket.clone(),
             "PageView",
             controller.clone(),
         ));
-        assert_eq!(page(&tester, *controller), Some(2.0));
+        assert_eq!(page(&tester, controller.handle()), Some(2.0));
 
         let controller2 =
             PageController::new(&mut tester.cell.borrow_mut(), 0, false, 1.0, None, None);
@@ -2782,7 +2788,7 @@ mod tests {
             "Check it again against your list and see consistency!",
             controller2.clone(),
         ));
-        assert_eq!(page(&tester, *controller2), Some(0.0));
+        assert_eq!(page(&tester, controller2.handle()), Some(0.0));
     }
 
     #[test]
@@ -2811,7 +2817,7 @@ mod tests {
         // Simulate precision error.
         let position = controller.position(&tester.cell.borrow());
         position.jump_to(&mut tester.cell.borrow_mut(), 799.99999999999);
-        assert_eq!(page(&tester, *controller), Some(1.0));
+        assert_eq!(page(&tester, controller.handle()), Some(1.0));
     }
 
     #[test]
@@ -3402,7 +3408,7 @@ mod tests {
         // A rebuild, as the test's `setState` asks for.
         tester.pump_widget(page_view());
         assert_eq!(current_page_is_none.get(), Some(false));
-        assert!(page(&tester, *controller).is_some());
+        assert!(page(&tester, controller.handle()).is_some());
     }
 
     /// A page view in an offstage overlay entry that keeps its state, under an opaque one: built
@@ -3493,7 +3499,7 @@ mod tests {
 
             // Should scroll.
             assert_eq!(
-                page(&tester, *controller),
+                page(&tester, controller.handle()),
                 Some(1.0),
                 "{scroll_cache_extent:?}"
             );
@@ -3556,12 +3562,12 @@ mod tests {
             .children(states())));
         tester.drag_from(CENTER, Offset::new(-300.0, 0.0));
         tester.settle();
-        assert_eq!(page(&tester, *controller), Some(0.0));
+        assert_eq!(page(&tester, controller.handle()), Some(0.0));
         tester.drag_from(CENTER, Offset::new(-500.0, 0.0));
         tester.settle();
-        assert_eq!(page(&tester, *controller), Some(1.0));
+        assert_eq!(page(&tester, controller.handle()), Some(1.0));
         tester.fling_from(CENTER, Offset::new(-100.0, 0.0), 1000.0);
         tester.settle();
-        assert_eq!(page(&tester, *controller), Some(2.0));
+        assert_eq!(page(&tester, controller.handle()), Some(2.0));
     }
 }

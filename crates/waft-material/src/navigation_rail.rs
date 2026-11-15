@@ -951,7 +951,7 @@ impl NavigationRailState {
         let destinations_len = self.widget(app).destinations.len();
         let destination_controllers: Vec<Ref<AnimationController>> = (0..destinations_len)
             .map(|_| {
-                let controller = AnimationController::create(
+                let controller = AnimationController::new(
                     app,
                     None,
                     Some(K_THEME_ANIMATION_DURATION),
@@ -977,7 +977,7 @@ impl NavigationRailState {
             destination_controllers[selected_index].set_value(app, 1.0);
         }
         let extended = self.widget(app).extended;
-        let extended_controller = AnimationController::create(
+        let extended_controller = AnimationController::new(
             app,
             Some(if extended { 1.0 } else { 0.0 }),
             Some(K_THEME_ANIMATION_DURATION),
@@ -987,7 +987,7 @@ impl NavigationRailState {
             AnimationBehavior::Normal,
             self,
         );
-        let extended_animation = CurvedAnimation::create(
+        let extended_animation = CurvedAnimation::new(
             app,
             extended_controller.erase(),
             Curves::ease_in_out(),
@@ -1071,7 +1071,7 @@ impl RailDestinationState {
     fn set_position_animation(self: Handle<Self>, app: &mut App) {
         let destination_animation = self.widget(app).destination_animation.clone();
         let reversed = ReverseAnimation::new(app, destination_animation);
-        let curved = CurvedAnimation::create(
+        let curved = CurvedAnimation::new(
             app,
             reversed.erase(),
             Curves::ease_in_out(),

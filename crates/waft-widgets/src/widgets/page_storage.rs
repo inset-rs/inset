@@ -422,7 +422,7 @@ mod tests {
         );
         harness.pump(&mut app);
         let context = context.get().expect("the probe built");
-        assert_eq!(PageStorage::maybe_of(&app, context), Some(*bucket));
+        assert_eq!(PageStorage::maybe_of(&app, context), Some(bucket.handle()));
 
         let identifier: KeyRef = waft_foundation::ValueKey::new("scroll").into();
         bucket.write_state(&mut app, context, Rc::new(4.5f64), Some(identifier.clone()));

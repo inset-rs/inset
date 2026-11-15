@@ -788,7 +788,7 @@ impl SnackBar {
         duration: Option<Duration>,
         reverse_duration: Option<Duration>,
     ) -> Ref<AnimationController> {
-        AnimationController::create(
+        AnimationController::new(
             app,
             None,
             Some(duration.unwrap_or(SNACK_BAR_TRANSITION_DURATION)),
@@ -894,19 +894,19 @@ impl SnackBarState {
         debug_assert!(self.widget(app).animation.is_some());
         let animation = self.animation(app);
         let height_animation =
-            CurvedAnimation::create(app, animation.clone(), snack_bar_height_curve(), None);
+            CurvedAnimation::new(app, animation.clone(), snack_bar_height_curve(), None);
         let fade_in_animation =
-            CurvedAnimation::create(app, animation.clone(), snack_bar_fade_in_curve(), None);
+            CurvedAnimation::new(app, animation.clone(), snack_bar_fade_in_curve(), None);
         let fade_in_m3_animation =
-            CurvedAnimation::create(app, animation.clone(), snack_bar_m3_fade_in_curve(), None);
-        let fade_out_animation = CurvedAnimation::create(
+            CurvedAnimation::new(app, animation.clone(), snack_bar_m3_fade_in_curve(), None);
+        let fade_out_animation = CurvedAnimation::new(
             app,
             animation.clone(),
             snack_bar_fade_out_curve(),
             Some(Rc::new(Threshold::new(0.0))),
         );
         // Material 3 Animation has a height animation on entry, but a direct fade out on exit.
-        let height_m3_animation = CurvedAnimation::create(
+        let height_m3_animation = CurvedAnimation::new(
             app,
             animation,
             snack_bar_m3_height_curve(),

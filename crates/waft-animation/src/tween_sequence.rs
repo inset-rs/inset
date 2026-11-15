@@ -188,7 +188,7 @@ mod tests {
 
         assert_eq!(animation.value(&app), 5.0);
         for (t, expected) in [(0.2, 7.5), (0.4, 10.0), (0.6, 10.0), (0.8, 7.5), (1.0, 5.0)] {
-            set_value(&mut app, *driver, t);
+            set_value(&mut app, driver.handle(), t);
             assert_eq!(animation.value(&app), expected, "at t = {t}");
         }
     }
@@ -219,7 +219,7 @@ mod tests {
 
         assert_eq!(animation.value(&app), 5.0);
         for (t, expected) in [(0.2, 5.0), (0.4, 10.0), (0.6, 10.0), (0.8, 5.0), (1.0, 5.0)] {
-            set_value(&mut app, *driver, t);
+            set_value(&mut app, driver.handle(), t);
             assert_eq!(animation.value(&app), expected, "at t = {t}");
         }
     }
@@ -237,9 +237,9 @@ mod tests {
         let animation = sequence.animate(&mut app, driver.erase());
 
         assert_eq!(animation.value(&app), 5.0);
-        set_value(&mut app, *driver, 0.5);
+        set_value(&mut app, driver.handle(), 0.5);
         assert_eq!(animation.value(&app), 7.5);
-        set_value(&mut app, *driver, 1.0);
+        set_value(&mut app, driver.handle(), 1.0);
         assert_eq!(animation.value(&app), 10.0);
     }
 

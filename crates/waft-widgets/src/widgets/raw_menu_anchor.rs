@@ -749,10 +749,9 @@ trait RawMenuAnchorBaseMixin: State {
             let position =
                 Scrollable::maybe_of(app, context, None).map(|state| state.position(app));
             let kept_position = position.map(|position| {
-                HandleId::from(position)
+                position
                     .upgrade(app)
                     .expect("the scroll position is kept by its Scrollable")
-                    .into_map(|_| position)
             });
             self.raw_menu_anchor_base_data_mut(app).scroll_position = kept_position;
             if let Some(position) = position {
@@ -1684,9 +1683,7 @@ impl AnyMenuController {
     /// A [`MenuControllerRef`] while something still keeps the controller; see
     /// [`Handle::upgrade`].
     pub fn upgrade(self, app: &App) -> Option<MenuControllerRef> {
-        self.id
-            .upgrade(app)
-            .map(|retained| retained.into_map(|_| self))
+        Retained::upgrade(app, self)
     }
 
     /// The [`MenuControllerRef`] a widget keeps of the controller its anchor was given.
@@ -2702,7 +2699,7 @@ mod tests {
         assert_eq!(tester.count_text("b.a"), 0);
 
         // Focus should stay on the anchor button.
-        assert_eq!(primary_focus(&mut tester.app()), Some(*focus_node));
+        assert_eq!(primary_focus(&mut tester.app()), Some(focus_node.handle()));
     }
 
     #[test]
@@ -2882,7 +2879,7 @@ mod tests {
         assert_eq!(tester.count_text("b.a"), 1);
 
         // Close the root menu panel.
-        close(*controller, &mut tester.app());
+        close(controller.handle(), &mut tester.app());
         tester.pump();
 
         assert!(!controller.is_open(&tester.app()));
@@ -3287,16 +3284,16 @@ mod tests {
             demo_controller_two.clone(),
         ));
 
-        assert_ne!(panel_controller.get(), Some(*controller));
-        assert_ne!(anchor_controller.get(), Some(*controller));
+        assert_ne!(panel_controller.get(), Some(controller.handle()));
+        assert_ne!(anchor_controller.get(), Some(controller.handle()));
 
         tester.pump_widget(build_anchor(
             controller.clone(),
             demo_controller_two.clone(),
         ));
 
-        assert_eq!(panel_controller.get(), Some(*controller));
-        assert_ne!(anchor_controller.get(), Some(*controller));
+        assert_eq!(panel_controller.get(), Some(controller.handle()));
+        assert_ne!(anchor_controller.get(), Some(controller.handle()));
         assert_eq!(panel_builds.get(), 2);
         assert_eq!(anchor_builds.get(), 2);
 
@@ -3320,9 +3317,9 @@ mod tests {
             controller.clone(),
         ));
 
-        assert_ne!(panel_controller.get(), Some(*controller));
-        assert_eq!(anchor_controller.get(), Some(*controller));
-        assert_eq!(overlay_controller.get(), Some(*controller));
+        assert_ne!(panel_controller.get(), Some(controller.handle()));
+        assert_eq!(anchor_controller.get(), Some(controller.handle()));
+        assert_eq!(overlay_controller.get(), Some(controller.handle()));
         assert_eq!(panel_builds.get(), 3);
         assert_eq!(anchor_builds.get(), 3);
         assert_eq!(overlay_builds.get(), 2);
@@ -3555,7 +3552,10 @@ mod tests {
         a_focus_node.request_focus(&mut tester.app(), None);
         tester.pump();
 
-        assert_eq!(primary_focus(&mut tester.app()), Some(*a_focus_node));
+        assert_eq!(
+            primary_focus(&mut tester.app()),
+            Some(a_focus_node.handle())
+        );
         assert_eq!(tester.count_text("b.a"), 1);
 
         // Test panel child can close siblings with escape key.
@@ -3571,7 +3571,10 @@ mod tests {
         baa_focus_node.request_focus(&mut tester.app(), None);
         tester.pump();
 
-        assert_eq!(primary_focus(&mut tester.app()), Some(*baa_focus_node));
+        assert_eq!(
+            primary_focus(&mut tester.app()),
+            Some(baa_focus_node.handle())
+        );
 
         // Test ancestors menus are closed with escape key.
         tester.send_key_event(PhysicalKeyboardKey::ESCAPE, LogicalKeyboardKey::ESCAPE);
@@ -3717,7 +3720,7 @@ mod tests {
             let context = focus_node.context(&app);
             PlainActionDispatcher::new().invoke_action(
                 &mut app,
-                Action::as_action(*action),
+                Action::as_action(action.handle()),
                 &DismissIntent::new(),
                 context,
             );
@@ -4996,7 +4999,7 @@ mod tests {
             let context = focus_node.context(&app);
             PlainActionDispatcher::new().invoke_action(
                 &mut app,
-                Action::as_action(*action),
+                Action::as_action(action.handle()),
                 &DismissIntent::new(),
                 context,
             );

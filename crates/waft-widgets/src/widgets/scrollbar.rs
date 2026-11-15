@@ -209,7 +209,7 @@ impl ScrollbarPainter {
         });
         fadeout_opacity_animation.add_listener(
             app,
-            Listener::handle_method(*this, Handle::<ScrollbarPainter>::notify_listeners),
+            Listener::handle_method(this.handle(), Handle::<ScrollbarPainter>::notify_listeners),
         );
         this
     }
@@ -1117,7 +1117,7 @@ impl ScrollbarPainter {
             app,
             &Listener::handle_method(self, Handle::<ScrollbarPainter>::notify_listeners),
         );
-        app.get_mut(self).change_notifier.dispose();
+        ChangeNotifierData::dispose(app, self);
     }
 }
 
@@ -1916,7 +1916,7 @@ impl RawScrollbarState {
         S::Widget: RawScrollbarLeaf,
     {
         let fade_duration = this.widget(app).raw_scrollbar_data().fade_duration;
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             app,
             None,
             Some(fade_duration),
@@ -1927,12 +1927,12 @@ impl RawScrollbarState {
             this,
         );
         AnimationLocalStatusListenersMixin::add_status_listener(
-            *controller,
+            controller.handle(),
             app,
             AnimationStatusListener::handle_method(this, validate_interactions::<S>),
         );
         let opacity =
-            CurvedAnimation::create(app, controller.erase(), Curves::fast_out_slow_in(), None);
+            CurvedAnimation::new(app, controller.erase(), Curves::fast_out_slow_in(), None);
         this.raw_scrollbar_state_data_mut(app)
             .fadeout_animation_controller = Some(controller);
         this.raw_scrollbar_state_data_mut(app)
@@ -3879,7 +3879,7 @@ mod tests {
         // The metrics notification is dispatched from a microtask after layout, so the
         // painter only knows the metrics from the second frame on.
         binding_pump(&mut cell.borrow_mut(), Duration::from_millis(16));
-        (key, *controller)
+        (key, controller.handle())
     }
 
     fn painter(app: &mut App, key: &GlobalKey) -> Handle<ScrollbarPainter> {

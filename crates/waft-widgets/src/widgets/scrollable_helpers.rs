@@ -760,7 +760,7 @@ mod tests {
         });
         // 50 pixels per second: a 10 pixel overdrag scrolls 10 pixels in 20 milliseconds.
         let scroller = EdgeDraggingAutoScroller::new(app, state, Some(on_scrolled), 50.0);
-        scroller_slot.set(Some(*scroller));
+        scroller_slot.set(Some(scroller.handle()));
         AutoScrollDrag {
             scroller,
             scrolls,
@@ -959,7 +959,7 @@ mod tests {
         harness.pump(&mut app);
         let context = captured.get().expect("the builder ran");
         assert!(!ContextAction::is_enabled(
-            *action,
+            action.handle(),
             &mut app,
             &ScrollIntent::new(AxisDirection::Down),
             Some(context)

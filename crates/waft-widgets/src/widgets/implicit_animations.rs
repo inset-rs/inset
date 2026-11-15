@@ -977,7 +977,7 @@ where
     /// Dart's `ImplicitlyAnimatedWidgetState.initState`.
     fn init_state(self: Handle<Self>, app: &mut App) {
         let duration = self.widget(app).implicitly_animated_widget_data().duration;
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             app,
             None,
             Some(duration),
@@ -1125,7 +1125,7 @@ where
         .expect("created in init_state")
         .erase();
     let curve = Rc::clone(&this.widget(app).implicitly_animated_widget_data().curve);
-    CurvedAnimation::create(app, parent, curve, None)
+    CurvedAnimation::new(app, parent, curve, None)
 }
 
 /// Dart's private `_constructTweens`.

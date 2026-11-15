@@ -799,12 +799,12 @@ impl RenderLeaderLayer {
     /// Sets [`link`](Self::link).
     pub fn set_link(self: RenderHandle<Self>, app: &mut App, value: Ref<LayerLink>) {
         let link = self.link(app);
-        if link == *value {
+        if link == value.handle() {
             return;
         }
         let old = app.get_mut(link);
         old.leader_size = None;
-        let new = *value;
+        let new = value.handle();
         self.get_mut(app).link = value;
         if let Some(size) = self.get(app).previous_layout_size {
             app.get_mut(new).leader_size = Some(size);
@@ -1371,7 +1371,7 @@ pub trait RenderAnimatedOpacityMixin:
         {
             opacity.remove_listener(app, &self.opacity_listener());
         }
-        let new = *value;
+        let new = value.handle();
         // The old animation goes when this local does, after the listener moved off it.
         let _old = self.animated_opacity_data_mut(app).opacity.replace(value);
         if self.attached(app) {
@@ -9709,13 +9709,13 @@ mod tests {
         assert!(layer.as_layer().attached(&app), "this time it painted");
 
         opacity.set_opacity(&mut app, 0.0);
-        pump_frame(&mut app, *owner);
+        pump_frame(&mut app, owner.handle());
         assert!(inner.as_object().debug_layer(&app).is_none());
         let layer = boundary.as_object().debug_layer(&app).expect("kept");
         assert!(!layer.as_layer().attached(&app), "this time it did not");
 
         opacity.set_opacity(&mut app, 0.5);
-        pump_frame(&mut app, *owner);
+        pump_frame(&mut app, owner.handle());
         let layer = boundary.as_object().debug_layer(&app).expect("kept");
         assert!(layer.as_layer().attached(&app), "this time it did again");
     }
@@ -9735,7 +9735,7 @@ mod tests {
         fade.set_opacity(&mut app, complete);
         assert!(fade.as_object().is_repaint_boundary(&app));
         assert!(fade.as_object().debug_needs_paint(&app));
-        pump_frame(&mut app, *owner);
+        pump_frame(&mut app, owner.handle());
         let layer = fade.as_object().debug_layer(&app).expect("a boundary now");
         let opacity = app
             .handle::<OpacityLayer>(layer.id())
@@ -10121,7 +10121,7 @@ mod tests {
             "the clipper's notification dropped the cached clip"
         );
         assert!(clip.as_object().debug_needs_paint(&app));
-        pump_frame(&mut app, *owner);
+        pump_frame(&mut app, owner.handle());
         assert!(clip.custom_clip_data(&app).clip.is_some());
 
         clip.layout(
@@ -10383,7 +10383,7 @@ mod tests {
         assert!(!offstage.as_object().paints_child(&app, child.as_object()));
 
         offstage.set_offstage(&mut app, false);
-        pump_frame(&mut app, *owner);
+        pump_frame(&mut app, owner.handle());
         assert_eq!(
             drawn_rects(&app, root.as_object()),
             [fill(Rect::from_ltwh(0.0, 0.0, 100.0, 100.0), RED)]
@@ -10545,7 +10545,7 @@ mod tests {
 
         let key = BackdropKey::new();
         filter.set_backdrop_key(&mut app, Some(key));
-        pump_frame(&mut app, *owner);
+        pump_frame(&mut app, owner.handle());
         let ops = scene_ops(&mut app, root.as_object());
         assert!(
             ops.iter().any(|op| matches!(
@@ -10562,7 +10562,7 @@ mod tests {
         );
 
         filter.set_enabled(&mut app, false);
-        pump_frame(&mut app, *owner);
+        pump_frame(&mut app, owner.handle());
         let ops = scene_ops(&mut app, root.as_object());
         assert!(
             !ops.iter().any(|op| matches!(
@@ -10827,11 +10827,11 @@ mod tests {
         assert!(!model.as_object().needs_compositing(&app));
 
         model.set_elevation(&mut app, 1.0);
-        pump_frame(&mut app, *owner);
+        pump_frame(&mut app, owner.handle());
         assert!(!model.as_object().needs_compositing(&app));
 
         model.set_elevation(&mut app, 0.0);
-        pump_frame(&mut app, *owner);
+        pump_frame(&mut app, owner.handle());
         assert!(!model.as_object().needs_compositing(&app));
     }
 
@@ -10847,7 +10847,7 @@ mod tests {
         assert_eq!(shadow_count(&app, root.as_object()), 0);
 
         model.set_elevation(&mut app, 1.0);
-        pump_frame(&mut app, *owner);
+        pump_frame(&mut app, owner.handle());
         assert_eq!(shadow_count(&app, root.as_object()), 1);
     }
 
@@ -10883,7 +10883,7 @@ mod tests {
         // Mark for repaint otherwise pump_frame is a noop.
         clip.as_object().mark_needs_paint(app);
         assert!(clip.as_object().debug_needs_paint(app));
-        pump_frame(app, *owner);
+        pump_frame(app, owner.handle());
         assert!(!clip.as_object().debug_needs_paint(app));
         assert!(clip.as_object().layer_as::<L>(app) == Some(layer));
     }
@@ -11189,10 +11189,10 @@ mod tests {
         let owner = first_frame(&mut app, root.as_box());
         assert!(!shape.as_object().needs_compositing(&app));
         shape.set_elevation(&mut app, 1.0);
-        pump_frame(&mut app, *owner);
+        pump_frame(&mut app, owner.handle());
         assert!(!shape.as_object().needs_compositing(&app));
         shape.set_elevation(&mut app, 0.0);
-        pump_frame(&mut app, *owner);
+        pump_frame(&mut app, owner.handle());
         assert!(!shape.as_object().needs_compositing(&app));
     }
 

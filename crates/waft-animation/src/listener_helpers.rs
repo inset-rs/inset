@@ -646,7 +646,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let host_ref = app.create(LazyHost::default());
-        let host = *host_ref;
+        let host = host_ref.handle();
         let log = Rc::clone(&app.get(host).log);
 
         let first = recording(&log, "first");
@@ -672,7 +672,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let host_ref = app.create(LazyHost::default());
-        let host = *host_ref;
+        let host = host_ref.handle();
         let log = Rc::clone(&app.get(host).log);
 
         let registered = recording(&log, "registered");
@@ -689,7 +689,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let host_ref = app.create(LazyHost::default());
-        let host = *host_ref;
+        let host = host_ref.handle();
         let log = Rc::clone(&app.get(host).log);
 
         let listener = recording(&log, "listener");
@@ -705,7 +705,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let host_ref = app.create(EagerHost::default());
-        let host = *host_ref;
+        let host = host_ref.handle();
         let log: Log = Log::default();
 
         host.add_listener(&mut app, recording(&log, "listener"));
@@ -724,7 +724,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let host_ref = app.create(EagerHost::default());
-        let host = *host_ref;
+        let host = host_ref.handle();
         let log: Log = Log::default();
 
         host.add_listener(&mut app, recording(&log, "one"));
@@ -748,7 +748,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let host_ref = app.create(EagerHost::default());
-        let host = *host_ref;
+        let host = host_ref.handle();
         let log: Log = Log::default();
 
         let doomed = recording(&log, "doomed");
@@ -778,7 +778,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let host_ref = app.create(ReverseHost::default());
-        let host = *host_ref;
+        let host = host_ref.handle();
         let log = Rc::clone(&app.get(host).log);
 
         let listener = recording_status(&log, "status");
@@ -805,7 +805,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let host_ref = app.create(ReverseHost::default());
-        let host = *host_ref;
+        let host = host_ref.handle();
         let log = Rc::clone(&app.get(host).log);
 
         let doomed = recording_status(&log, "doomed");
@@ -842,9 +842,9 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let parent_ref = app.create(EagerHost::default());
-        let parent = *parent_ref;
+        let parent = parent_ref.handle();
         let proxy_ref = app.create(ProxyLikeHost::default());
-        let proxy = *proxy_ref;
+        let proxy = proxy_ref.handle();
         let log = Rc::clone(&app.get(proxy).log);
         app.get_mut(proxy).parent = Some(parent);
 
@@ -874,7 +874,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let host_ref = app.create(LazyHost::default());
-        let host = *host_ref;
+        let host = host_ref.handle();
         let log = Rc::clone(&app.get(host).log);
 
         host.add_listener(&mut app, recording(&log, "listener"));

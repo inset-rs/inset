@@ -448,13 +448,13 @@ impl RenderEditable {
         value: Ref<ValueNotifier<bool>>,
     ) {
         let old = self.get(app).show_cursor.handle();
-        if old == *value {
+        if old == value.handle() {
             return;
         }
         if self.attached(app) {
             old.remove_listener(app, &self.mark_needs_paint_listener());
         }
-        let new = *value;
+        let new = value.handle();
         // The old notifier goes when this local does, after the listener moved off it.
         let _old = std::mem::replace(&mut self.get_mut(app).show_cursor, value);
         self.get_mut(app).dispose_show_cursor = false;
@@ -612,13 +612,13 @@ impl RenderEditable {
     /// Sets [`offset`](Self::offset).
     pub fn set_offset(self: RenderHandle<Self>, app: &mut App, value: ViewportOffsetRef) {
         let old = self.offset(app);
-        if old == *value {
+        if old == value.handle() {
             return;
         }
         if self.attached(app) {
             old.remove_listener(app, &self.mark_needs_paint_listener());
         }
-        let new = *value;
+        let new = value.handle();
         // The old offset goes when this local does, after the listener moved off it.
         let _old = std::mem::replace(&mut self.get_mut(app).offset, value);
         if self.attached(app) {
@@ -1927,8 +1927,8 @@ impl RenderObject for RenderEditable {
         LayerHandle::set_layer(app, |app| &mut self.get_mut(app).clip_rect_layer, None);
         let start_in_viewport = self.get(app).selection_start_in_viewport.handle();
         let end_in_viewport = self.get(app).selection_end_in_viewport.handle();
-        app.get_mut(start_in_viewport).dispose();
-        app.get_mut(end_in_viewport).dispose();
+        start_in_viewport.dispose(app);
+        end_in_viewport.dispose(app);
         crate::object::RenderObjectBase::dispose(self, app);
     }
 

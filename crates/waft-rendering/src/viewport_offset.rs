@@ -421,6 +421,14 @@ impl From<AnyViewportOffset> for HandleId {
 /// A field Dart types as `ViewportOffset`, kept: a viewport keeps the scroll position it shows.
 pub type ViewportOffsetRef = Retained<AnyViewportOffset>;
 
+impl AnyViewportOffset {
+    /// A [`ViewportOffsetRef`] while something still keeps the object; see
+    /// [`Handle::upgrade`](waft_foundation::Handle::upgrade).
+    pub fn upgrade(self, app: &App) -> Option<ViewportOffsetRef> {
+        Retained::upgrade(app, self)
+    }
+}
+
 /// A kept viewport offset erases to a [`ViewportOffsetRef`] with [`Retained::erase`].
 impl<T: ViewportOffset> From<Handle<T>> for AnyViewportOffset {
     fn from(offset: Handle<T>) -> AnyViewportOffset {

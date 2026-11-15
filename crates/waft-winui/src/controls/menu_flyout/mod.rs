@@ -30,6 +30,9 @@ pub(crate) type MenuKeyHandler =
     Rc<dyn Fn(&mut App, Handle<MenuFlyout>, &KeyEvent) -> KeyEventResult>;
 
 /// Persistent owner of a collection displayed by a MenuFlyoutPresenter.
+///
+/// Keep the `MenuFlyout` for as long as its flyout (see `as_flyout`) is in use: the flyout's
+/// closures name the menu without keeping it.
 pub struct MenuFlyout {
     /// Shared flyout lifecycle and overlay ownership.
     flyout: Ref<Flyout>,
@@ -73,11 +76,16 @@ impl MenuFlyout {
 
     /// Creates a root menu; checked values follow the kit's owner-state convention.
     pub fn new(app: &mut App, items: Vec<MenuFlyoutItem>) -> Ref<Self> {
-        Self::create(app, items, None)
+        Self::with_root(app, items, None)
     }
 
-    /// Creates a child collection with the same root invocation owner.
-    fn create(app: &mut App, items: Vec<MenuFlyoutItem>, root: Option<Handle<Self>>) -> Ref<Self> {
+    /// Creates a menu whose invocations report to `root`'s owner (a submenu), or a root menu
+    /// for `None`.
+    fn with_root(
+        app: &mut App,
+        items: Vec<MenuFlyoutItem>,
+        root: Option<Handle<Self>>,
+    ) -> Ref<Self> {
         InputDevice::initialize(app);
         let flyout = Flyout::new(app, SizedBox::shrink());
         let owner = app.create(Self {

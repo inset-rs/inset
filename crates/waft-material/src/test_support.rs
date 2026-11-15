@@ -8,7 +8,7 @@ use std::time::Duration;
 use waft_embedder::{TargetPlatform, ViewId, ViewRef};
 use waft_foundation::{App, AppCell};
 use waft_scheduler::SchedulerBinding;
-use waft_test::{TestPlatform, TestView};
+use waft_test::{TestPlatform, TestView, assert_no_new_objects, object_snapshot};
 use waft_widgets::{BuildContext, Builder, IntoWidget, SizedBox, View, WidgetRef, run_widget};
 
 /// The 800x600 physical view at 2x every test app draws into.
@@ -548,41 +548,21 @@ impl WidgetTester {
         }
     }
 
-    /// What Flutter's leak tracking checks: `cycle` (say, opening and closing a route) leaves
-    /// no object behind in the arena but `expected`, so many objects of each type (named as
-    /// `std::any::type_name` names them); `&[]` is nothing at all. The first run warms up what
-    /// is made once and kept, such as a singleton or a theme's cached value, and the second is
-    /// measured. While a known leak is being fixed, a fix that frees some of what is expected
-    /// fails this until its count here is brought down; a failure lists what the cycle left.
-    pub(crate) fn assert_leaves_behind(
+    /// What Flutter's leak tracking checks: `cycle` (say, opening and closing a route) leaves no
+    /// object behind in the arena. The first run warms up what is made once and kept, such as a
+    /// singleton or a theme's cached value; the second is checked with
+    /// [`assert_no_new_objects`], which names each object left behind with its type and creation
+    /// site.
+    pub(crate) fn assert_leaves_nothing_behind(
         &mut self,
-        expected: &[(&str, i64)],
         mut cycle: impl FnMut(&mut WidgetTester),
     ) {
         cycle(self);
-        let before = self.cell.borrow().debug_object_counts_by_type();
+        self.cell.checkpoint();
+        let snapshot = object_snapshot(&self.cell.borrow());
         cycle(self);
-        let after = self.cell.borrow().debug_object_counts_by_type();
-        let mut left: std::collections::BTreeMap<&str, i64> = std::collections::BTreeMap::new();
-        for name in before.keys().chain(after.keys()) {
-            let was = before.get(name).copied().unwrap_or(0) as i64;
-            let is = after.get(name).copied().unwrap_or(0) as i64;
-            if was != is {
-                left.insert(name, is - was);
-            }
-        }
-        let expected: std::collections::BTreeMap<&str, i64> = expected.iter().copied().collect();
-        if left == expected {
-            return;
-        }
-        let mut diff = String::new();
-        for (name, count) in &left {
-            diff.push_str(&format!("\n  {count:+} {name}"));
-        }
-        panic!(
-            "the cycle left these objects behind, not the {} kinds expected:{diff}",
-            expected.len()
-        );
+        self.cell.checkpoint();
+        assert_no_new_objects(&self.cell.borrow(), &snapshot);
     }
 
     /// A touch pointer with the primary button, as `tester.startGesture` makes.

@@ -556,7 +556,7 @@ pub trait FocusTraversalPolicy: Sized + 'static {
                 }
                 TraversalEdgeBehavior::ParentScope => {
                     let parent_scope = nearest_scope.enclosing_scope(app);
-                    let root_scope = FocusManager::instance(app).root_scope(app);
+                    let root_scope = FocusManager::instance(app).root_scope(app).handle();
                     if let Some(parent_scope) = parent_scope
                         && parent_scope != root_scope
                     {
@@ -602,7 +602,7 @@ pub trait FocusTraversalPolicy: Sized + 'static {
                 }
                 TraversalEdgeBehavior::ParentScope => {
                     let parent_scope = nearest_scope.enclosing_scope(app);
-                    let root_scope = FocusManager::instance(app).root_scope(app);
+                    let root_scope = FocusManager::instance(app).root_scope(app).handle();
                     if let Some(parent_scope) = parent_scope
                         && parent_scope != root_scope
                     {
@@ -880,6 +880,14 @@ impl From<AnyFocusTraversalPolicy> for HandleId {
 
 /// A field Dart types as the erased object, kept: AnyFocusTraversalPolicy with its count.
 pub type FocusTraversalPolicyRef = Retained<AnyFocusTraversalPolicy>;
+
+impl AnyFocusTraversalPolicy {
+    /// A [`FocusTraversalPolicyRef`] while something still keeps the object; see
+    /// [`Handle::upgrade`](waft_foundation::Handle::upgrade).
+    pub fn upgrade(self, app: &App) -> Option<FocusTraversalPolicyRef> {
+        Retained::upgrade(app, self)
+    }
+}
 
 /// A kept object erases to a [`FocusTraversalPolicyRef`] with [`Retained::erase`]: Dart's upcast.
 impl<T: FocusTraversalPolicy> From<Handle<T>> for AnyFocusTraversalPolicy {
@@ -1320,7 +1328,7 @@ pub trait DirectionalFocusTraversalPolicyMixin: FocusTraversalPolicy {
                 ScrollPositionAlignmentPolicy::KeepVisibleAtEnd
             }
         };
-        self.request_focus(app, *last_node, Some(alignment_policy), group_node);
+        self.request_focus(app, last_node.handle(), Some(alignment_policy), group_node);
         true
     }
 
@@ -1441,7 +1449,7 @@ pub trait DirectionalFocusTraversalPolicyMixin: FocusTraversalPolicy {
             }
             TraversalEdgeBehavior::ParentScope => {
                 let parent_scope = nearest_scope.enclosing_scope(app);
-                let root_scope = FocusManager::instance(app).root_scope(app);
+                let root_scope = FocusManager::instance(app).root_scope(app).handle();
                 if let Some(parent_scope) = parent_scope
                     && parent_scope != root_scope
                 {
@@ -2999,7 +3007,7 @@ impl Action for RequestFocusAction {
         intent: &RequestFocusIntent,
     ) -> Option<Rc<dyn Any>> {
         let callback = Rc::clone(&intent.request_focus_callback);
-        callback(app, *intent.focus_node, None, None, None, None);
+        callback(app, intent.focus_node.handle(), None, None, None, None);
         None
     }
 }

@@ -547,9 +547,9 @@ mod tests {
             drop(app);
             GestureTester {
                 cell,
-                arena: *arena,
-                first: *first,
-                second: *second,
+                arena: arena.handle(),
+                first: first.handle(),
+                second: second.handle(),
                 first_entry: None,
                 second_entry: None,
             }
@@ -788,9 +788,9 @@ mod tests {
         let member_b = TestMember::new(&mut app);
         let member_c = TestMember::new(&mut app);
 
-        let entry_a = arena.add(&mut app, PRIMARY_KEY, *member_a);
-        arena.add(&mut app, PRIMARY_KEY, *member_b);
-        arena.add(&mut app, PRIMARY_KEY, *member_c);
+        let entry_a = arena.add(&mut app, PRIMARY_KEY, member_a.handle());
+        arena.add(&mut app, PRIMARY_KEY, member_b.handle());
+        arena.add(&mut app, PRIMARY_KEY, member_c.handle());
 
         entry_a.resolve(&mut app, GestureDisposition::Accepted);
         assert!(!member_a.accept_ran(&app));
@@ -818,7 +818,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let arena = GestureArenaManager::new(&mut app);
         let member = TestMember::new(&mut app);
-        arena.add(&mut app, PRIMARY_KEY, *member);
+        arena.add(&mut app, PRIMARY_KEY, member.handle());
         arena.close(&mut app, PRIMARY_KEY);
         assert!(!member.accept_ran(&app));
         app.drain_microtasks();

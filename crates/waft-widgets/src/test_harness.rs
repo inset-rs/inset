@@ -69,7 +69,7 @@ pub(crate) struct TestRootElement {
 }
 
 impl TestRootElement {
-    pub(crate) fn create(app: &mut App, widget: WidgetRef) -> Handle<TestRootElement> {
+    pub(crate) fn new(app: &mut App, widget: WidgetRef) -> Handle<TestRootElement> {
         app.create(TestRootElement {
             element: ElementData::new(widget),
             render_object_element: RenderObjectElementData::default(),
@@ -228,7 +228,7 @@ impl Harness {
         // the one `GlobalKey` lookups consult.
         let owner = WidgetsBinding::instance(app).build_owner(app);
         let widget: WidgetRef = Rc::new(TestRootErased(TestRoot { child }));
-        let root = TestRootElement::create(app, widget);
+        let root = TestRootElement::new(app, widget);
         root.as_element().assign_owner(app, owner);
         owner.build_scope(
             app,
@@ -315,7 +315,7 @@ impl Widget for TestRootErased {
     }
 
     fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
-        TestRootElement::create(app, this).as_element()
+        TestRootElement::new(app, this).as_element()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -474,7 +474,7 @@ pub(crate) fn mount_scroll_harness(app: &mut App) -> ScrollHarness {
     let listener = harness.root.as_element().children(app)[0];
     let inner = listener.children(app)[0];
     let context = TestScrollContext::new(app, inner);
-    let scroll_context: Rc<dyn ScrollContext> = Rc::new(*context);
+    let scroll_context: Rc<dyn ScrollContext> = Rc::new(context.handle());
     ScrollHarness {
         harness,
         context,

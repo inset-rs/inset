@@ -290,7 +290,7 @@ impl State for CupertinoTextMagnifierState {
     waft_widgets::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
-        let io_animation_controller = AnimationController::create(
+        let io_animation_controller = AnimationController::new(
             app,
             Some(0.0),
             Some(CupertinoMagnifier::K_IN_OUT_ANIMATION_DURATION),
@@ -316,7 +316,7 @@ impl State for CupertinoTextMagnifierState {
             Listener::handle_method(self, Self::determine_magnifier_position_and_focal_point),
         );
         let io_curved_animation =
-            CurvedAnimation::create(app, io_animation_controller.erase(), animation_curve, None);
+            CurvedAnimation::new(app, io_animation_controller.erase(), animation_curve, None);
         let io_tween = Tween::new(app, Some(0.0), Some(1.0));
         let io_animation = io_tween.animate(app, io_curved_animation.erase());
         let state = app.get_mut(self);
@@ -1035,7 +1035,7 @@ mod tests {
         let cell = test_cell();
         install_fonts(&mut cell.borrow_mut());
         let mut app = cell.borrow_mut();
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             &mut app,
             None,
             None,

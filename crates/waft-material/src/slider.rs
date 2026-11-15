@@ -814,45 +814,24 @@ impl SliderState {
     const ENABLE_ANIMATION_DURATION: Duration = Duration::from_millis(75);
     const VALUE_INDICATOR_ANIMATION_DURATION: Duration = Duration::from_millis(100);
 
-    fn overlay_controller_ref(self: Handle<Self>, app: &App) -> Ref<AnimationController> {
+    fn overlay_controller(self: Handle<Self>, app: &App) -> &Ref<AnimationController> {
         app.get(self)
             .overlay_controller
-            .clone()
+            .as_ref()
             .expect("init_state made the overlay controller")
     }
 
-    fn value_indicator_controller_ref(self: Handle<Self>, app: &App) -> Ref<AnimationController> {
+    fn value_indicator_controller(self: Handle<Self>, app: &App) -> &Ref<AnimationController> {
         app.get(self)
             .value_indicator_controller
-            .clone()
+            .as_ref()
             .expect("init_state made the value indicator controller")
     }
 
-    fn enable_controller_ref(self: Handle<Self>, app: &App) -> Ref<AnimationController> {
+    fn enable_controller(self: Handle<Self>, app: &App) -> &Ref<AnimationController> {
         app.get(self)
             .enable_controller
-            .clone()
-            .expect("init_state made the enable controller")
-    }
-
-    fn overlay_controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
-        app.get(self)
-            .overlay_controller
-            .handle()
-            .expect("init_state made the overlay controller")
-    }
-
-    fn value_indicator_controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
-        app.get(self)
-            .value_indicator_controller
-            .handle()
-            .expect("init_state made the value indicator controller")
-    }
-
-    fn enable_controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
-        app.get(self)
-            .enable_controller
-            .handle()
+            .as_ref()
             .expect("init_state made the enable controller")
     }
 
@@ -1404,7 +1383,7 @@ impl State for SliderState {
         app.get_mut(self).layer_link = Some(layer_link);
 
         let controller = |app: &mut App, duration: Duration| {
-            AnimationController::create(
+            AnimationController::new(
                 app,
                 None,
                 Some(duration),
@@ -1456,9 +1435,9 @@ impl State for SliderState {
             timer.cancel(app);
         }
         let controllers = [
-            self.overlay_controller(app),
-            self.value_indicator_controller(app),
-            self.enable_controller(app),
+            self.overlay_controller(app).handle(),
+            self.value_indicator_controller(app).handle(),
+            self.enable_controller(app).handle(),
             self.position_controller(app),
         ];
         for controller in controllers {
@@ -1662,21 +1641,21 @@ impl RenderSlider {
         debug_assert!(secondary_track_value.is_none_or(|value| (0.0..=1.0).contains(&value)));
         let drag = HorizontalDragGestureRecognizer::new(app);
         let tap = TapGestureRecognizer::new(app);
-        let overlay_animation = CurvedAnimation::create(
+        let overlay_animation = CurvedAnimation::new(
             app,
-            state.overlay_controller_ref(app).erase(),
+            state.overlay_controller(app).erase(),
             Curves::fast_out_slow_in(),
             None,
         );
-        let value_indicator_animation = CurvedAnimation::create(
+        let value_indicator_animation = CurvedAnimation::new(
             app,
-            state.value_indicator_controller_ref(app).erase(),
+            state.value_indicator_controller(app).erase(),
             Curves::fast_out_slow_in(),
             None,
         );
-        let enable_animation = CurvedAnimation::create(
+        let enable_animation = CurvedAnimation::new(
             app,
-            state.enable_controller_ref(app).erase(),
+            state.enable_controller(app).erase(),
             Curves::ease_in_out(),
             None,
         );
@@ -2019,7 +1998,7 @@ impl RenderSlider {
         let was_interactive = self.is_interactive(app);
         self.get_mut(app).on_changed = value;
         if was_interactive != self.is_interactive(app) {
-            let enable_controller = self.get(app).state.enable_controller(app);
+            let enable_controller = self.get(app).state.enable_controller(app).handle();
             if self.is_interactive(app) {
                 enable_controller.forward(app, None);
             } else {
@@ -2310,7 +2289,8 @@ impl RenderSlider {
                         Self::MINIMUM_INTERACTION_TIME.mul_f64(time_dilation),
                         Listener::new(move |app: &mut App| {
                             app.get_mut(state).interaction_timer = None;
-                            let value_indicator_controller = state.value_indicator_controller(app);
+                            let value_indicator_controller =
+                                state.value_indicator_controller(app).handle();
                             let active = app.get(&this).active;
                             if !active && value_indicator_controller.is_completed(app) {
                                 value_indicator_controller.reverse(app, None);
@@ -3000,9 +2980,9 @@ pub(crate) struct RenderValueIndicator {
 
 impl RenderValueIndicator {
     fn new(app: &mut App, state: Handle<SliderState>) -> RenderHandle<RenderValueIndicator> {
-        let value_indicator_animation = CurvedAnimation::create(
+        let value_indicator_animation = CurvedAnimation::new(
             app,
-            state.value_indicator_controller_ref(app).erase(),
+            state.value_indicator_controller(app).erase(),
             Curves::fast_out_slow_in(),
             None,
         );

@@ -150,7 +150,7 @@ impl CameraSession {
         let session = app.get_mut(self);
         session.host = None;
         session.preview_layer = None;
-        session.change_notifier.dispose();
+        ChangeNotifierData::dispose(app, self);
     }
 
     /// The host's session.

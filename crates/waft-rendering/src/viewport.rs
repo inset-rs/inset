@@ -490,13 +490,13 @@ pub trait RenderViewportBase:
     /// Sets [`offset`](Self::offset).
     fn set_offset(self: RenderHandle<Self>, app: &mut App, value: ViewportOffsetRef) {
         let old = self.offset(app);
-        if *value == old {
+        if value.handle() == old {
             return;
         }
         if self.attached(app) {
             old.remove_listener(app, &self.mark_needs_layout_listener());
         }
-        let new = *value;
+        let new = value.handle();
         // The old offset goes when this local does, after the listener moved off it.
         let _old = std::mem::replace(&mut self.viewport_data_mut(app).offset, value);
         if self.attached(app) {
@@ -2525,7 +2525,7 @@ mod tests {
             .schedule_initial_paint(app, paint_root.as_container_layer());
         owner.flush_compositing_bits(app);
         owner.flush_paint(app);
-        *owner
+        owner.handle()
     }
 
     fn vertical_viewport(

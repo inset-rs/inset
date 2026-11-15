@@ -7,7 +7,7 @@ use std::fmt::{self, Debug};
 use std::rc::Rc;
 
 use waft_embedder::{Offset, PointerDeviceKind, clamp_double};
-use waft_foundation::{App, Handle, ValueChanged};
+use waft_foundation::{App, Handle, OptionRetained, ValueChanged};
 
 use crate::arena::GestureDisposition;
 use crate::events::{PointerDownEvent, PointerEvent, compute_hit_slop};
@@ -235,7 +235,7 @@ impl ForcePressGestureRecognizer {
 
     /// The team that this recognizer belongs to, if any.
     pub fn team(self: Handle<Self>, app: &App) -> Option<Handle<GestureArenaTeam>> {
-        app.get(self).one_sequence.team.as_deref().copied()
+        app.get(self).one_sequence.team.handle()
     }
 
     /// The [`team`](Self::team) can only be set once.

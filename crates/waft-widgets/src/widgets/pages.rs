@@ -163,6 +163,20 @@ pub struct AnyPageRoute {
     vtable: &'static PageRouteVTable,
 }
 
+/// A kept page route as a [`RouteRef`] or a [`ModalRouteRef`], through
+/// [`Retained::erase`]: Dart's upcast.
+impl From<AnyPageRoute> for AnyRoute {
+    fn from(route: AnyPageRoute) -> AnyRoute {
+        route.as_route()
+    }
+}
+
+impl From<AnyPageRoute> for AnyModalRoute {
+    fn from(route: AnyPageRoute) -> AnyModalRoute {
+        route.as_modal_route()
+    }
+}
+
 impl From<AnyPageRoute> for HandleId {
     fn from(handle: AnyPageRoute) -> HandleId {
         handle.id
@@ -196,9 +210,7 @@ impl Debug for AnyPageRoute {
 impl AnyPageRoute {
     /// A [`PageRouteRef`] while something still keeps the route; see [`Handle::upgrade`].
     pub fn upgrade(self, app: &App) -> Option<PageRouteRef> {
-        self.id
-            .upgrade(app)
-            .map(|retained| retained.into_map(|_| self))
+        Retained::upgrade(app, self)
     }
 
     /// This page route as the erased [`AnyRoute`].

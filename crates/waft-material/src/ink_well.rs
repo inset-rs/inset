@@ -117,6 +117,14 @@ pub trait InteractiveInkFeatureObject: Sized + 'static {
 /// What a field Dart types as `InteractiveInkFeature` holds: an ink response's splashes.
 pub type InteractiveInkFeatureRef = Retained<AnyInteractiveInkFeature>;
 
+impl AnyInteractiveInkFeature {
+    /// A [`InteractiveInkFeatureRef`] while something still keeps the object; see
+    /// [`Handle::upgrade`](waft_foundation::Handle::upgrade).
+    pub fn upgrade(self, app: &App) -> Option<InteractiveInkFeatureRef> {
+        Retained::upgrade(app, self)
+    }
+}
+
 impl<F: InteractiveInkFeatureLeaf> From<Handle<F>> for AnyInteractiveInkFeature {
     fn from(feature: Handle<F>) -> AnyInteractiveInkFeature {
         feature.as_interactive_ink_feature()
@@ -1927,7 +1935,7 @@ impl State for InkResponseState {
             if self.widget(app).response.states_controller.is_some()
                 && let Some(internal) = app.get_mut(self).internal_states_controller.take()
             {
-                app.get_mut(&internal).dispose();
+                internal.dispose(app);
             }
             self.init_states_controller(app);
         }
@@ -1997,7 +2005,7 @@ impl State for InkResponseState {
             &Listener::handle_method(self, Self::handle_states_controller_change),
         );
         if let Some(internal) = app.get_mut(self).internal_states_controller.take() {
-            app.get_mut(&internal).dispose();
+            internal.dispose(app);
         }
         if let Some(timer) = app.get_mut(self).activation_timer.take() {
             timer.cancel(app);

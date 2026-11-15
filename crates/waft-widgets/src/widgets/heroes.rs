@@ -769,7 +769,7 @@ impl HeroFlightManifest {
             .upgrade(app)
             .expect("an installed route keeps its animation");
         let reverse_curve = (!app.get(self).is_diverted).then_some(reverse_curve);
-        let animation = CurvedAnimation::create(app, parent, curve, reverse_curve);
+        let animation = CurvedAnimation::new(app, parent, curve, reverse_curve);
         let erased = animation.erase();
         app.get_mut(self).animation = Some(animation);
         erased
@@ -896,7 +896,7 @@ struct HeroFlight {
 }
 
 impl HeroFlight {
-    fn create(app: &mut App, on_flight_ended: OnFlightEnded) -> Ref<HeroFlight> {
+    fn new(app: &mut App, on_flight_ended: OnFlightEnded) -> Ref<HeroFlight> {
         let hero_opacity = k_always_complete_animation(app);
         let proxy_animation = ProxyAnimation::new(app, None);
         let proxy = proxy_animation.handle();
@@ -916,7 +916,10 @@ impl HeroFlight {
         });
         proxy.add_status_listener(
             app,
-            AnimationStatusListener::handle_method(*this, HeroFlight::handle_animation_update),
+            AnimationStatusListener::handle_method(
+                this.handle(),
+                HeroFlight::handle_animation_update,
+            ),
         );
         this
     }
@@ -976,7 +979,7 @@ impl HeroFlight {
             move |app, _context, child| {
                 let rect = self
                     .hero_rect_tween(app)
-                    .evaluate(app, *proxy_animation)
+                    .evaluate(app, proxy_animation.handle())
                     .expect("the hero rect tween has both ends");
                 let mut fade = FadeTransition::new(app.get(self).hero_opacity.clone());
                 if let Some(child) = child {
@@ -1569,7 +1572,7 @@ impl HeroController {
                         Some(existing_flight) => existing_flight.divert(app, manifest),
                         None => {
                             // Dart's cascade runs `start` before the map assignment.
-                            let flight = HeroFlight::create(
+                            let flight = HeroFlight::new(
                                 app,
                                 Rc::new(move |app, flight| self.handle_flight_ended(app, flight)),
                             );
@@ -1632,11 +1635,11 @@ impl HeroController {
             let padding = match flight_direction {
                 HeroFlightDirection::Push => {
                     EdgeInsetsTween::new(Some(from_hero_padding), Some(to_hero_padding))
-                        .evaluate(app, *animation)
+                        .evaluate(app, animation.handle())
                 }
                 HeroFlightDirection::Pop => {
                     EdgeInsetsTween::new(Some(to_hero_padding), Some(from_hero_padding))
-                        .evaluate(app, *animation)
+                        .evaluate(app, animation.handle())
                 }
             };
             MediaQuery::new(
@@ -1956,7 +1959,7 @@ mod tests {
         // The observer's post-frame callback measures the destination and starts the flight.
         let mut at = at + Duration::from_millis(20);
         pump_every_view(&mut app, at);
-        let flight = only_flight(&app, *controller);
+        let flight = only_flight(&app, controller.handle());
         let manifest = flight.manifest(&app);
         let (from_hero, to_hero) = (
             app.get(manifest).from_hero.handle(),
@@ -2075,7 +2078,7 @@ mod tests {
         navigator.pop(&mut app, None);
         let mut at = at + Duration::from_millis(20);
         pump_every_view(&mut app, at);
-        let flight = only_flight(&app, *controller);
+        let flight = only_flight(&app, controller.handle());
         let manifest = flight.manifest(&app);
         assert_eq!(
             app.get(manifest).r#type,

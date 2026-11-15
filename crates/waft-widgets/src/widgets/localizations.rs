@@ -957,7 +957,7 @@ impl LocalizationsResolver {
         if let Some(observer) = app.get_mut(self).observer.take() {
             WidgetsBinding::instance(app).remove_observer(app, &observer);
         }
-        app.get_mut(self).change_notifier.dispose();
+        ChangeNotifierData::dispose(app, self);
     }
 
     /// Updates the resolver with the given configuration, re-resolving the locale when
@@ -1487,7 +1487,7 @@ mod tests {
         assert_eq!(resolver.localizations_delegates(&app).len(), 1);
 
         resolver.dispose(&mut app);
-        let freed = *resolver;
+        let freed = resolver.handle();
         drop(resolver);
         drop(app);
         cell.checkpoint();

@@ -402,7 +402,7 @@ impl State for BorderContainerState {
         let is_hovering = widget.is_hovering;
         let border = widget.border.clone();
         let hover_color = widget.hover_color;
-        let hover_color_controller = AnimationController::create(
+        let hover_color_controller = AnimationController::new(
             app,
             Some(if is_hovering { 1.0 } else { 0.0 }),
             Some(BorderContainerState::K_HOVER_DURATION),
@@ -412,7 +412,7 @@ impl State for BorderContainerState {
             AnimationBehavior::Normal,
             self,
         );
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             app,
             None,
             Some(K_TRANSITION_DURATION),
@@ -422,7 +422,7 @@ impl State for BorderContainerState {
             AnimationBehavior::Normal,
             self,
         );
-        let border_animation = CurvedAnimation::create(
+        let border_animation = CurvedAnimation::new(
             app,
             controller.erase(),
             k_transition_curve(),
@@ -430,7 +430,7 @@ impl State for BorderContainerState {
         );
         let border_tween = Rc::new(InputBorderTween::new(border.clone(), border));
         let hover_animation =
-            CurvedAnimation::create(app, hover_color_controller.erase(), Curves::linear(), None);
+            CurvedAnimation::new(app, hover_color_controller.erase(), Curves::linear(), None);
 
         // Animate between transparent [widget.hoverColor] and [widget.hoverColor].
         let hover_color_tween = BorderContainerState::new_hover_color_tween(app, hover_color);
@@ -712,7 +712,7 @@ impl State for HelperErrorState {
     waft_widgets::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             app,
             None,
             Some(K_TRANSITION_DURATION),
@@ -3426,7 +3426,7 @@ impl InputDecoratorState {
             if let Some(curved) = current {
                 curved.dispose(app);
             }
-            let curved = CurvedAnimation::create(app, animation, k_transition_curve(), None);
+            let curved = CurvedAnimation::new(app, animation, k_transition_curve(), None);
             app.get_mut(self).curved_animation = Some(curved);
         }
 
@@ -3480,7 +3480,7 @@ impl State for InputDecoratorState {
         let border_gap = InputBorderGap::new(app);
         app.get_mut(self).border_gap = Some(border_gap);
 
-        let floating_label_controller = AnimationController::create(
+        let floating_label_controller = AnimationController::new(
             app,
             None,
             Some(K_TRANSITION_DURATION),
@@ -3492,14 +3492,14 @@ impl State for InputDecoratorState {
         );
         floating_label_controller
             .add_listener(app, Listener::handle_method(self, Self::handle_change));
-        let floating_label_animation = CurvedAnimation::create(
+        let floating_label_animation = CurvedAnimation::new(
             app,
             floating_label_controller.erase(),
             k_transition_curve(),
             Some(Rc::new(k_transition_curve().flipped())),
         );
 
-        let shaking_label_controller = AnimationController::create(
+        let shaking_label_controller = AnimationController::new(
             app,
             None,
             Some(K_TRANSITION_DURATION),
@@ -3545,9 +3545,7 @@ impl State for InputDecoratorState {
         floating_label_controller.dispose(app);
         floating_label_animation.dispose(app);
         shaking_label_controller.dispose(app);
-        app.get_mut(&border_gap)
-            .change_notifier_data_mut()
-            .dispose();
+        ChangeNotifierData::dispose(app, &border_gap);
         if let Some(curved_animation) = curved_animation {
             curved_animation.dispose(app);
         }

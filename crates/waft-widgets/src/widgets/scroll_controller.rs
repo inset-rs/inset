@@ -603,11 +603,7 @@ impl ScrollControllerVTable {
             remove_listener: |app, id, listener| {
                 ListenableObject::remove_listener(resolve::<C>(id), app, listener);
             },
-            dispose_change_notifier: |app, id| {
-                app.get_mut(resolve::<C>(id))
-                    .change_notifier_data_mut()
-                    .dispose();
-            },
+            dispose_change_notifier: |app, id| ChangeNotifierData::dispose(app, resolve::<C>(id)),
             data: |app, id| C::scroll_controller_data(resolve(id), app),
             data_mut: |app, id| C::scroll_controller_data_mut(resolve(id), app),
             notification_listener: |id| C::notification_listener(resolve(id)),
@@ -643,6 +639,14 @@ impl From<AnyScrollController> for HandleId {
 
 /// A field Dart types as the erased object, kept: AnyScrollController with its count.
 pub type ScrollControllerRef = Retained<AnyScrollController>;
+
+impl AnyScrollController {
+    /// A [`ScrollControllerRef`] while something still keeps the object; see
+    /// [`Handle::upgrade`](waft_foundation::Handle::upgrade).
+    pub fn upgrade(self, app: &App) -> Option<ScrollControllerRef> {
+        Retained::upgrade(app, self)
+    }
+}
 
 /// A kept object erases to a [`ScrollControllerRef`] with [`Retained::erase`]: Dart's upcast.
 impl<T: ScrollControllerLeaf> From<Handle<T>> for AnyScrollController {
@@ -939,14 +943,14 @@ mod tests {
 
         assert!(controller.has_clients(&app));
         assert_eq!(controller.offset(&app), 25.0);
-        assert_eq!(controller.positions(&app), vec![*position]);
+        assert_eq!(controller.positions(&app), vec![position.handle()]);
         assert!(
             controller
                 .describe(&app)
                 .contains("one client, offset 25.0")
         );
 
-        controller.detach(&mut app, *position);
+        controller.detach(&mut app, position.handle());
         assert!(!controller.has_clients(&app));
         assert!(controller.describe(&app).contains("no clients"));
     }
@@ -962,7 +966,7 @@ mod tests {
         let notified = Rc::new(Cell::new(0));
         let counter = notified.clone();
         ListenableObject::add_listener(
-            *controller,
+            controller.handle(),
             &mut app,
             Listener::new(move |_app| counter.set(counter.get() + 1)),
         );
@@ -971,7 +975,7 @@ mod tests {
         assert_eq!(controller.offset(&app), 60.0);
         assert_eq!(notified.get(), 1);
 
-        controller.detach(&mut app, *position);
+        controller.detach(&mut app, position.handle());
         position.jump_to(&mut app, 90.0);
         assert_eq!(notified.get(), 1);
     }
@@ -1039,7 +1043,7 @@ mod tests {
         assert_eq!(attaches.get(), 1);
         assert_eq!(detaches.get(), 0);
 
-        controller.detach(&mut app, *position);
+        controller.detach(&mut app, position.handle());
         assert_eq!(detaches.get(), 1);
     }
 
@@ -1059,10 +1063,10 @@ mod tests {
         assert_eq!(controller.initial_scroll_offset(&app), 80.0);
         assert_eq!(
             controller.most_recently_updated_position(&app),
-            Some(*position)
+            Some(position.handle())
         );
 
-        controller.detach(&mut app, *position);
+        controller.detach(&mut app, position.handle());
         assert!(controller.most_recently_updated_position(&app).is_none());
         assert_eq!(controller.initial_scroll_offset(&app), 10.0);
     }

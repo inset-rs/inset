@@ -622,7 +622,7 @@ impl State for CupertinoButtonState {
         app.get_mut(self)
             .action_map
             .insert(TypeId::of::<ActivateIntent>(), activate.into_erased());
-        let animation_controller = AnimationController::create(
+        let animation_controller = AnimationController::new(
             app,
             Some(0.0),
             Some(Duration::from_millis(200)),

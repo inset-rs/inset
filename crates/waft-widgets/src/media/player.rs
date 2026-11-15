@@ -148,7 +148,7 @@ impl Player {
         let player = app.get_mut(self);
         player.host = None;
         player.video_output = None;
-        player.change_notifier.dispose();
+        ChangeNotifierData::dispose(app, self);
     }
 
     /// The host's player.
@@ -356,13 +356,13 @@ impl State for PlayerPictureState {
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &PlayerPicture) {
         let player = self.widget(app).player.handle();
-        if player == *old_widget.player {
+        if player == old_widget.player.handle() {
             return;
         }
         let listener = Listener::handle_method(self, Self::player_changed);
         old_widget.player.remove_listener(app, &listener);
         player.add_listener(app, listener);
-        self.release(app, *old_widget.player);
+        self.release(app, old_widget.player.handle());
         self.show(app, player);
     }
 
@@ -399,7 +399,7 @@ fn with_overlay(video: WidgetRef, overlay: WidgetRef) -> WidgetRef {
 fn subtitles_of(player: Ref<Player>) -> WidgetRef {
     let listenable: Rc<dyn Listenable> = Rc::new(player.clone());
     ListenableBuilder::new(listenable, move |app, _, _| {
-        SubtitleView::new(Player::cues(*player, app).to_vec()).into_widget()
+        SubtitleView::new(Player::cues(player.handle(), app).to_vec()).into_widget()
     })
     .into_widget()
 }

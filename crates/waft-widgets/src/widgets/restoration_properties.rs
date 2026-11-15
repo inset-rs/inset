@@ -1544,7 +1544,7 @@ impl RestorableListenable for RestorableTextEditingController {
 
 impl RestorableChangeNotifier for RestorableTextEditingController {
     fn dispose_value(self: Handle<Self>, app: &mut App, value: Ref<TextEditingController>) {
-        app.get_mut(&value).dispose();
+        value.dispose(app);
     }
 }
 
@@ -1608,7 +1608,7 @@ mod tests {
     }
 
     impl Properties {
-        fn create(app: &mut App) -> Properties {
+        fn new(app: &mut App) -> Properties {
             Properties {
                 int: RestorableInt::new(app, 1),
                 double: RestorableDouble::new(app, 1.5),
@@ -1687,7 +1687,7 @@ mod tests {
             let properties = match app.get(self).properties.clone() {
                 Some(properties) => properties,
                 None => {
-                    let properties = Properties::create(app);
+                    let properties = Properties::new(app);
                     app.get_mut(self).properties = Some(properties.clone());
                     properties
                 }
@@ -1932,10 +1932,10 @@ mod tests {
             &mut app,
             TextEditingValue::new().text("hello"),
         );
-        let controller = RestorableProperty::create_default_value(*property, &mut app);
+        let controller = RestorableProperty::create_default_value(property.handle(), &mut app);
         assert_eq!(controller.text_value(&app), "hello");
         let restored = RestorableProperty::from_primitives(
-            *property,
+            property.handle(),
             &mut app,
             &RestorationData::String("hello".into()),
         );

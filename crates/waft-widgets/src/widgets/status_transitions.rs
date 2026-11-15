@@ -186,7 +186,7 @@ mod tests {
     fn a_status_transition_rebuilds_on_status_changes_only() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             &mut app,
             None,
             Some(Duration::from_millis(100)),

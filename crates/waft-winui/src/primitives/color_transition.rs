@@ -111,7 +111,7 @@ impl State for ColorTransitionState {
             let widget = self.widget(app);
             (widget.color, widget.duration)
         };
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             app,
             Some(1.0),
             Some(duration),

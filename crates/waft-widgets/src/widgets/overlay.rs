@@ -241,7 +241,9 @@ impl OverlayEntry {
             return;
         }
 
-        app.get_mut(overlay).entries.retain(|entry| **entry != self);
+        app.get_mut(overlay)
+            .entries
+            .retain(|entry| entry.handle() != self);
         if SchedulerBinding::scheduler_phase(app) == SchedulerPhase::PersistentCallbacks {
             SchedulerBinding::add_post_frame_callback(
                 app,
@@ -273,7 +275,7 @@ impl OverlayEntry {
 
     fn dispose_notifier(self: Handle<Self>, app: &mut App) {
         if let Some(notifier) = app.get_mut(self).overlay_entry_state_notifier.take() {
-            app.get_mut(&notifier).dispose();
+            notifier.dispose(app);
         }
     }
 
@@ -408,7 +410,7 @@ impl OverlayEntryWidgetState {
         let children = app.get_mut(self).sorted_theater_siblings.as_mut();
         debug_assert!(children.is_some());
         let Some(children) = children else { return };
-        let position = children.iter().position(|other| **other == child);
+        let position = children.iter().position(|other| other.handle() == child);
         debug_assert!(position.is_some(), "the child was in the collection");
         if let Some(position) = position {
             children.remove(position);
@@ -703,13 +705,13 @@ impl OverlayState {
         if let Some(below) = below {
             return entries
                 .iter()
-                .position(|entry| **entry == below)
+                .position(|entry| entry.handle() == below)
                 .expect("`below` is in this Overlay");
         }
         if let Some(above) = above {
             return entries
                 .iter()
-                .position(|entry| **entry == above)
+                .position(|entry| entry.handle() == above)
                 .expect("`above` is in this Overlay")
                 + 1;
         }
@@ -723,7 +725,10 @@ impl OverlayState {
         );
         let current_overlay = app.get(entry).overlay;
         assert!(
-            !app.get(self).entries.iter().any(|kept| **kept == entry),
+            !app.get(self)
+                .entries
+                .iter()
+                .any(|kept| kept.handle() == entry),
             "The specified entry is already present in the target Overlay. Consider calling \
              remove on the OverlayEntry before inserting it to a different Overlay."
         );
@@ -750,7 +755,7 @@ impl OverlayState {
         above: Option<Handle<OverlayEntry>>,
     ) {
         debug_assert!(self.debug_verify_insert_position(app, above, below, None));
-        debug_assert!(self.debug_can_insert_entry(app, *entry));
+        debug_assert!(self.debug_can_insert_entry(app, entry.handle()));
         app.get_mut(&entry).overlay = Some(self);
         let index = self.insertion_index(app, below, above);
         self.set_state(app, |state| state.entries.insert(index, entry));
@@ -773,7 +778,7 @@ impl OverlayState {
         debug_assert!(self.debug_verify_insert_position(app, above, below, None));
         if cfg!(debug_assertions) {
             for entry in &entries {
-                assert!(self.debug_can_insert_entry(app, **entry));
+                assert!(self.debug_can_insert_entry(app, entry.handle()));
             }
         }
         if entries.is_empty() {
@@ -802,8 +807,13 @@ impl OverlayState {
         );
         let present = |entry: Handle<OverlayEntry>| {
             app.get(entry).overlay == Some(self)
-                && app.get(self).entries.iter().any(|kept| **kept == entry)
-                && new_entries.is_none_or(|entries| entries.iter().any(|kept| **kept == entry))
+                && app
+                    .get(self)
+                    .entries
+                    .iter()
+                    .any(|kept| kept.handle() == entry)
+                && new_entries
+                    .is_none_or(|entries| entries.iter().any(|kept| kept.handle() == entry))
         };
         assert!(
             above.is_none_or(present),
@@ -877,12 +887,12 @@ impl OverlayState {
             if let Some(below) = below {
                 entries
                     .iter()
-                    .position(|entry| **entry == below)
+                    .position(|entry| entry.handle() == below)
                     .expect("`below` is in `new_entries`")
             } else if let Some(above) = above {
                 entries
                     .iter()
-                    .position(|entry| **entry == above)
+                    .position(|entry| entry.handle() == above)
                     .expect("`above` is in `new_entries`")
                     + 1
             } else {
@@ -913,7 +923,12 @@ impl OverlayState {
     /// always returns false in release mode.
     pub fn debug_is_visible(self: Handle<Self>, app: &App, entry: Handle<OverlayEntry>) -> bool {
         let mut result = false;
-        debug_assert!(app.get(self).entries.iter().any(|kept| **kept == entry));
+        debug_assert!(
+            app.get(self)
+                .entries
+                .iter()
+                .any(|kept| kept.handle() == entry)
+        );
         if cfg!(debug_assertions) {
             let entries = app.get(self).entries.clone();
             for index in (1..entries.len()).rev() {
@@ -1149,7 +1164,7 @@ impl Widget for Theater {
     }
 
     fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
-        TheaterElement::create(app, this).as_element()
+        TheaterElement::new(app, this).as_element()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -1209,7 +1224,7 @@ struct TheaterElement {
 }
 
 impl TheaterElement {
-    fn create(app: &mut App, widget: WidgetRef) -> Handle<TheaterElement> {
+    fn new(app: &mut App, widget: WidgetRef) -> Handle<TheaterElement> {
         debug_assert!(downcast_widget::<Theater>(&*widget).is_some());
         app.create(TheaterElement {
             element: ElementData::new(widget),
@@ -1633,7 +1648,8 @@ impl TheaterChildren {
                         self.candidate = (|| {
                             let model = app.get(candidate).child_model;
                             let list = app.get(model).sorted_theater_siblings.as_ref()?;
-                            let index = list.iter().position(|value| **value == candidate)?;
+                            let index =
+                                list.iter().position(|value| value.handle() == candidate)?;
                             let next = if self.reversed {
                                 index.checked_sub(1).and_then(|i| list.get(i))
                             } else {
@@ -2642,7 +2658,7 @@ impl OverlayPortalState {
             !app.get(self).child_model_may_have_changed || {
                 let found = RenderTheaterMarker::of(app, context, target_root_overlay);
                 marker = Some(found);
-                OverlayPortalState::is_the_same_location(app, **cached, &found)
+                OverlayPortalState::is_the_same_location(app, cached.handle(), &found)
             }
         });
         app.get_mut(self).child_model_may_have_changed = false;
@@ -3054,7 +3070,7 @@ impl Widget for RawOverlayPortal {
     }
 
     fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
-        RawOverlayPortalElement::create(app, this).as_element()
+        RawOverlayPortalElement::new(app, this).as_element()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -3097,7 +3113,7 @@ struct RawOverlayPortalElement {
 }
 
 impl RawOverlayPortalElement {
-    fn create(app: &mut App, widget: WidgetRef) -> Handle<RawOverlayPortalElement> {
+    fn new(app: &mut App, widget: WidgetRef) -> Handle<RawOverlayPortalElement> {
         debug_assert!(downcast_widget::<RawOverlayPortal>(&*widget).is_some());
         app.create(RawOverlayPortalElement {
             element: ElementData::new(widget),
@@ -3828,7 +3844,7 @@ impl Widget for OverlayChildLayoutBuilderWidget {
     }
 
     fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
-        OverlayChildLayoutBuilderElement::create(app, this).as_element()
+        OverlayChildLayoutBuilderElement::new(app, this).as_element()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -3886,7 +3902,7 @@ struct OverlayChildLayoutBuilderElement {
 }
 
 impl OverlayChildLayoutBuilderElement {
-    fn create(app: &mut App, widget: WidgetRef) -> Handle<OverlayChildLayoutBuilderElement> {
+    fn new(app: &mut App, widget: WidgetRef) -> Handle<OverlayChildLayoutBuilderElement> {
         debug_assert!(downcast_widget::<OverlayChildLayoutBuilderWidget>(&*widget).is_some());
         let this = app
             .create(OverlayChildLayoutBuilderElement {
@@ -4420,7 +4436,7 @@ mod tests {
         let theater = theater_of(&harness, &app);
         assert_eq!(
             entries_in_render_order(&app, theater),
-            vec![*first, *second]
+            vec![first.handle(), second.handle()]
         );
 
         let overlay = app
@@ -4428,11 +4444,11 @@ mod tests {
             .overlay
             .expect("inserted by initial_entries");
         let third = test_entry(&mut app);
-        overlay.insert(&mut app, third.clone(), Some(*first), None);
+        overlay.insert(&mut app, third.clone(), Some(first.handle()), None);
         harness.pump(&mut app);
         assert_eq!(
             entries_in_render_order(&app, theater),
-            vec![*third, *first, *second]
+            vec![third.handle(), first.handle(), second.handle()]
         );
 
         let fourth = test_entry(&mut app);
@@ -4440,7 +4456,12 @@ mod tests {
         harness.pump(&mut app);
         assert_eq!(
             entries_in_render_order(&app, theater),
-            vec![*third, *first, *second, *fourth]
+            vec![
+                third.handle(),
+                first.handle(),
+                second.handle(),
+                fourth.handle()
+            ]
         );
 
         // `first` and `second` move to the bottom; the entries not mentioned stay on top.
@@ -4448,7 +4469,12 @@ mod tests {
         harness.pump(&mut app);
         assert_eq!(
             entries_in_render_order(&app, theater),
-            vec![*second, *first, *third, *fourth]
+            vec![
+                second.handle(),
+                first.handle(),
+                third.handle(),
+                fourth.handle()
+            ]
         );
 
         second.remove(&mut app);
@@ -4456,7 +4482,7 @@ mod tests {
         harness.pump(&mut app);
         assert_eq!(
             entries_in_render_order(&app, theater),
-            vec![*first, *third, *fourth]
+            vec![first.handle(), third.handle(), fourth.handle()]
         );
     }
 
@@ -4486,14 +4512,14 @@ mod tests {
         assert_eq!(theater.skip_count(&app), 1);
         let painted = RenderTheaterMixin::children_in_paint_order(theater, &app).collect(&app);
         assert_eq!(painted.len(), 1);
-        assert_eq!(entry_of(&app, painted[0]), *top);
+        assert_eq!(entry_of(&app, painted[0]), top.handle());
 
         // Without maintain_state an offstage entry is not built at all.
         bottom.set_maintain_state(&mut app, false);
         harness.pump(&mut app);
         assert_eq!(theater.child_count(&app), 1);
         assert_eq!(theater.skip_count(&app), 0);
-        assert_eq!(entries_in_render_order(&app, theater), vec![*top]);
+        assert_eq!(entries_in_render_order(&app, theater), vec![top.handle()]);
 
         // Dropping the opacity brings it back onstage.
         top.set_opaque(&mut app, false);

@@ -28,8 +28,8 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — a Rust future cannot hold the `App` across an `await`; it borrows the cell per step, as gpui does.
   Affect: everything after an `await` lands at a later checkpoint, and dropping a `Task` does not cancel it.
 
-- Change: an object lives while a `Ref` keeps it (`App::create` returns the first, `Clone` makes more, `Handle::upgrade` makes one from a bare handle) and is freed at the checkpoint after the last one drops; an element, a state, a render object or a layer is kept by the tree code from `Retained::into_tree_node` to `App::release_tree_node`. `dispose` frees nothing, and the last drop runs no `dispose`. A debug build counts the arena's objects with `App::debug_object_count`, and by type with `App::debug_object_counts_by_type`.
-  Reason: language — there is no collector, so a count per object and a free deferred to the checkpoint stand in for Dart's references, and a test for leaks needs a count where Flutter's leak tracking watches the collector.
+- Change: an object lives while a `Ref` keeps it (`App::create` returns the first, `Clone` makes more, `Handle::upgrade` makes one from a bare handle) and is freed at the checkpoint after the last one drops; an element, a state, a render object or a layer is kept by the tree code from `Retained::into_tree_node` to `App::release_tree_node`. `dispose` frees nothing, and the last drop runs no `dispose`. A debug build counts the arena's objects with `App::debug_object_count`, and by type with `App::debug_object_counts_by_type`, and reports Flutter's two leak kinds: an object freed without the `dispose` it expects (`App::debug_take_not_disposed`), and one disposed and still kept two checkpoints later (`App::debug_take_not_collected`).
+  Reason: language — there is no collector, so a count per object and a free deferred to the checkpoint stand in for Dart's references, and a test for leaks reads the arena where Flutter's leak tracking watches the collector.
   Affect: an object nothing keeps can still be read until the next checkpoint and panics after it, naming its type, where it was created and the checkpoint that freed it; a ring of `Ref`s is never freed, where Dart's collector frees an unreachable ring; a release build has no count.
 
 - Change: a tear-off (`Listener::handle_method`, `AnimationStatusListener::handle_method`, `FrameCallback::handle_method`, `PointerRoute::handle_method`) does not keep its receiver, and is skipped once the receiver is freed; a debug build reports the skipped receiver once, with its type and creation site.
@@ -99,6 +99,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - Change: a `Listenable` held as a value is an `Rc<dyn Listenable>`, and an arena object is one as a `Retained` (a `Ref`, or an erased reference such as an animation's), never as a bare `Handle`.
   Reason: language — no collector: Dart's reference to a listenable keeps it alive, and a bare handle keeps nothing.
   Affect: whatever holds the `Rc` keeps the object it listens to, so an `AnimatedWidget` whose owner let go of the animation it handed down still removes its listener from it.
+
+- Change: `Listener::downgrade` gives a `WeakListener`, which does not keep the listener's closure, for a closure that removes itself.
+  Reason: language — a Rust closure cannot name itself, and one that held its own listener strongly would be a ring of `Rc`s that outlives its removal, where Dart's `late` local names the closure and the collector frees it.
+  Affect: a self-removing listener holds a weak copy of itself and removes what that upgrades to; once nothing else holds the listener, the upgrade answers `None`.
 
 ## Deferred
 

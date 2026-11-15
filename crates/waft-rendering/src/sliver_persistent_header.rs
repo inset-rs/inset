@@ -945,7 +945,7 @@ pub trait RenderSliverFloatingPersistentHeader: RenderSliverPersistentHeader {
         let controller = match self.floating_data(app).controller.clone() {
             Some(controller) => controller,
             None => {
-                let controller = AnimationController::create(
+                let controller = AnimationController::new(
                     app,
                     None,
                     Some(duration),
@@ -1696,7 +1696,9 @@ mod tests {
         let vsync = app.create(Vsync);
         let other_vsync = app.create(Vsync);
 
-        assert!(TickerProviderRef::new(*vsync) == TickerProviderRef::new(*vsync));
-        assert!(TickerProviderRef::new(*vsync) != TickerProviderRef::new(*other_vsync));
+        assert!(TickerProviderRef::new(vsync.handle()) == TickerProviderRef::new(vsync.handle()));
+        assert!(
+            TickerProviderRef::new(vsync.handle()) != TickerProviderRef::new(other_vsync.handle())
+        );
     }
 }

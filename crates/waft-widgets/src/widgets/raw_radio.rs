@@ -521,7 +521,7 @@ mod tests {
         let build = |captured: &Rc<Cell<Option<AnyToggleableState>>>| {
             raw_radio(
                 node.clone(),
-                Some(*registry),
+                Some(registry.handle()),
                 true,
                 true,
                 Rc::clone(captured),
@@ -566,7 +566,15 @@ mod tests {
 
         binding_mount(
             &cell,
-            raw_radio(node, Some(*registry), false, true, captured, painted_box).into_widget(),
+            raw_radio(
+                node,
+                Some(registry.handle()),
+                false,
+                true,
+                captured,
+                painted_box,
+            )
+            .into_widget(),
         );
         tap(&cell);
 
@@ -679,7 +687,7 @@ mod tests {
             &cell,
             raw_radio(
                 node,
-                Some(*registry),
+                Some(registry.handle()),
                 true,
                 false,
                 Rc::new(Cell::new(None)),
@@ -695,9 +703,14 @@ mod tests {
         let node = focus_node(&cell);
         let registry = registry(&mut cell.borrow_mut());
         let captured = Rc::new(Cell::new(None));
-        let radio = raw_radio(node, Some(*registry), true, false, captured.clone(), || {
-            SizedBox::square(Some(24.0)).into_widget()
-        });
+        let radio = raw_radio(
+            node,
+            Some(registry.handle()),
+            true,
+            false,
+            captured.clone(),
+            || SizedBox::square(Some(24.0)).into_widget(),
+        );
 
         binding_mount(
             &cell,

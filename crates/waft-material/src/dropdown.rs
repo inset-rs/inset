@@ -251,11 +251,11 @@ impl<T: Clone + PartialEq + Debug + 'static> DropdownMenuItemButtonState<T> {
             .and_then(|animation| animation.upgrade(app))
             .expect("an installed route has an animation");
         let opacity_animation = if item_index == selected_index {
-            CurvedAnimation::create(app, animation, Rc::new(Threshold::new(0.0)), None)
+            CurvedAnimation::new(app, animation, Rc::new(Threshold::new(0.0)), None)
         } else {
             let start = (0.5 + (item_index as f64 + 1.0) * unit).clamp(0.0, 1.0);
             let end = (start + 1.5 * unit).clamp(0.0, 1.0);
-            CurvedAnimation::create(
+            CurvedAnimation::new(
                 app,
                 animation,
                 Rc::new(Interval::new(start, end, Curves::linear())),
@@ -482,13 +482,13 @@ impl<T: Clone + PartialEq + Debug + 'static> State for DropdownMenuState<T> {
         let animation: AnimationRef<f64> = ModalRoute::animation(route, app)
             .and_then(|animation| animation.upgrade(app))
             .expect("an installed route has an animation");
-        let fade_opacity = CurvedAnimation::create(
+        let fade_opacity = CurvedAnimation::new(
             app,
             animation.clone(),
             Rc::new(Interval::new(0.0, 0.25, Curves::linear())),
             Some(Rc::new(Interval::new(0.75, 1.0, Curves::linear()))),
         );
-        let resize = CurvedAnimation::create(
+        let resize = CurvedAnimation::new(
             app,
             animation,
             Rc::new(Interval::new(0.25, 0.5, Curves::linear())),
@@ -9906,7 +9906,7 @@ mod tests {
         with_main_thread_stack(|| {
             let mut tester = tester();
             pump_frame(&mut tester, &frame().on_changed(on_changed()));
-            tester.assert_leaves_behind(&[], |tester| {
+            tester.assert_leaves_nothing_behind(|tester| {
                 tap_text(tester, "two");
                 tester.pump_and_settle();
                 assert!(!tester.find_by_type::<DropdownMenu<String>>().is_empty());

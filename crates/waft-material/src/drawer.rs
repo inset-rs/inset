@@ -1029,7 +1029,7 @@ impl State for DrawerControllerState {
         } else {
             0.0
         };
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             app,
             Some(value),
             Some(K_BASE_SETTLE_DURATION),

@@ -87,13 +87,13 @@ fn reporting_dialog(
     name: &str,
     events: &Rc<RefCell<Vec<String>>>,
 ) -> Ref<ContentDialog> {
-    let dialog = ContentDialog::new(app)
-        .title(app, Text::new(name.to_owned()))
-        .content(app, Text::new("Both answers keep the draft."))
-        .primary_button_text(app, "Keep")
-        .secondary_button_text(app, "Send")
-        .close_button_text(app, "Cancel")
-        .default_button(app, ContentDialogButton::Primary);
+    let dialog = ContentDialog::new(app);
+    dialog.title(app, Text::new(name.to_owned()));
+    dialog.content(app, Text::new("Both answers keep the draft."));
+    dialog.primary_button_text(app, "Keep");
+    dialog.secondary_button_text(app, "Send");
+    dialog.close_button_text(app, "Cancel");
+    dialog.default_button(app, ContentDialogButton::Primary);
     let closing = events.clone();
     app.get_mut(&dialog).closing = Some(Rc::new(move |_, args| {
         closing

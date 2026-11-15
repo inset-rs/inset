@@ -783,7 +783,7 @@ mod tests {
                 paints: Rc::new(Cell::new(0)),
             },
         );
-        node.as_object().attach(&mut app, *owner);
+        node.as_object().attach(&mut app, owner.handle());
         assert!(owner.nodes_needing_paint(&app).is_empty());
 
         node.mark_needs_paint(&mut app);
@@ -803,7 +803,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let tree = tree(&mut app, true);
-        frame(&mut app, *tree.owner);
+        frame(&mut app, tree.owner.handle());
         assert_eq!(paints(&tree), (1, 1));
         assert!(leaf_layer_attached(&app, &tree));
         let parent_layer = tree.parent.as_object().debug_layer(&app).expect("parent");
@@ -815,7 +815,7 @@ mod tests {
             tree.owner.nodes_needing_paint(&app),
             vec![tree.leaf.as_object()]
         );
-        frame(&mut app, *tree.owner);
+        frame(&mut app, tree.owner.handle());
         assert_eq!(paints(&tree), (1, 2));
         let parent_layer = tree.parent.as_object().debug_layer(&app).expect("parent");
         let leaf_layer = tree.leaf.as_object().debug_layer(&app).expect("leaf");
@@ -827,7 +827,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let tree = tree(&mut app, true);
-        frame(&mut app, *tree.owner);
+        frame(&mut app, tree.owner.handle());
 
         tree.leaf.get_mut(&mut app).alpha = 128;
         tree.leaf.mark_needs_composited_layer_update(&mut app);
@@ -836,7 +836,7 @@ mod tests {
                 .as_object()
                 .debug_needs_composited_layer_update(&app)
         );
-        frame(&mut app, *tree.owner);
+        frame(&mut app, tree.owner.handle());
         assert_eq!(paints(&tree), (1, 1));
         let layer = tree.leaf.as_object().debug_layer(&app).expect("layer");
         let opacity = app
@@ -851,17 +851,17 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let tree = tree(&mut app, true);
-        frame(&mut app, *tree.owner);
+        frame(&mut app, tree.owner.handle());
         assert!(leaf_layer_attached(&app, &tree));
 
         tree.parent.get_mut(&mut app).paints_child = false;
         tree.parent.mark_needs_paint(&mut app);
-        frame(&mut app, *tree.owner);
+        frame(&mut app, tree.owner.handle());
         assert_eq!(paints(&tree), (2, 1));
         assert!(!leaf_layer_attached(&app, &tree));
 
         tree.leaf.mark_needs_paint(&mut app);
-        frame(&mut app, *tree.owner);
+        frame(&mut app, tree.owner.handle());
         assert_eq!(
             paints(&tree),
             (2, 1),
@@ -871,7 +871,7 @@ mod tests {
 
         tree.parent.get_mut(&mut app).paints_child = true;
         tree.parent.mark_needs_paint(&mut app);
-        frame(&mut app, *tree.owner);
+        frame(&mut app, tree.owner.handle());
         assert_eq!(paints(&tree), (3, 2));
         assert!(leaf_layer_attached(&app, &tree));
     }
@@ -881,7 +881,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let tree = tree(&mut app, false);
-        frame(&mut app, *tree.owner);
+        frame(&mut app, tree.owner.handle());
         assert_eq!(paints(&tree), (1, 1));
         assert!(tree.leaf.as_object().debug_layer(&app).is_none());
 
@@ -890,7 +890,7 @@ mod tests {
             tree.owner.nodes_needing_paint(&app),
             vec![tree.parent.as_object()]
         );
-        frame(&mut app, *tree.owner);
+        frame(&mut app, tree.owner.handle());
         assert_eq!(paints(&tree), (2, 2));
     }
 
@@ -900,7 +900,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let tree = tree(&mut app, true);
         tree.leaf.get_mut(&mut app).alpha = 128;
-        frame(&mut app, *tree.owner);
+        frame(&mut app, tree.owner.handle());
 
         let layer = tree.parent.as_object().layer(&app).expect("painted");
         let scene = layer.build_scene(&mut app, SceneBuilder::new());

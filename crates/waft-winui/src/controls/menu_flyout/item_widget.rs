@@ -382,7 +382,7 @@ impl State for MenuItemState {
             .insert(widget.index, self);
         if let MenuFlyoutItemKind::SubItem { items } = widget.item.kind {
             let root = widget.menu.root(app);
-            let menu = MenuFlyout::create(app, items, Some(root));
+            let menu = MenuFlyout::with_root(app, items, Some(root));
             app.get_mut(&menu).owner_item = Some(self);
             app.get_mut(self).submenu = Some(menu);
         }
@@ -410,7 +410,7 @@ impl State for MenuItemState {
             }
             (None, MenuFlyoutItemKind::SubItem { items }) => {
                 let root = widget.menu.root(app);
-                let menu = MenuFlyout::create(app, items.clone(), Some(root));
+                let menu = MenuFlyout::with_root(app, items.clone(), Some(root));
                 app.get_mut(&menu).owner_item = Some(self);
                 app.get_mut(self).submenu = Some(menu);
             }

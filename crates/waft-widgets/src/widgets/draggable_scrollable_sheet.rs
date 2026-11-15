@@ -168,7 +168,7 @@ impl DraggableScrollableController {
         let extent = app.get(attached).extent.clone();
         let position = attached.position(app);
         let vsync = position.context(app).vsync();
-        let animation_controller = AnimationController::create_unbounded(
+        let animation_controller = AnimationController::unbounded(
             app,
             extent.current_size(app),
             None,
@@ -246,7 +246,7 @@ impl DraggableScrollableController {
 
     /// Discards any resources used by the object.
     pub fn dispose(self: Handle<Self>, app: &mut App) {
-        app.get_mut(self).change_notifier.dispose();
+        ChangeNotifierData::dispose(app, self);
     }
 
     fn assert_attached(self: Handle<Self>, app: &App) {
@@ -889,7 +889,7 @@ impl DraggableSheetExtent {
     /// Discards any resources used by the object.
     pub fn dispose(self: Handle<Self>, app: &mut App) {
         let current_size = app.get(self).current_size.handle();
-        app.get_mut(current_size).dispose();
+        current_size.dispose(app);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1322,7 +1322,7 @@ impl DraggableScrollableSheetScrollPosition {
             get_extent,
             ballistic_controllers: Vec::new(),
         });
-        ScrollPositionWithSingleContext::init(*this, app, Some(0.0), old_position);
+        ScrollPositionWithSingleContext::init(this.handle(), app, Some(0.0), old_position);
         this
     }
 
@@ -1469,7 +1469,7 @@ impl ScrollPositionWithSingleContextLeaf for DraggableScrollableSheetScrollPosit
         };
 
         let vsync = self.context(app).vsync();
-        let ballistic_controller = AnimationController::create_unbounded(
+        let ballistic_controller = AnimationController::unbounded(
             app,
             0.0,
             None,
@@ -1682,7 +1682,7 @@ impl ResetNotifier {
 
     /// Discards any resources used by the object.
     fn dispose(self: Handle<Self>, app: &mut App) {
-        app.get_mut(self).change_notifier.dispose();
+        ChangeNotifierData::dispose(app, self);
     }
 }
 
@@ -2005,7 +2005,7 @@ mod tests {
         let notified = Rc::new(Cell::new(0));
         let counter = Rc::clone(&notified);
         ListenableObject::add_listener(
-            *controller,
+            controller.handle(),
             &mut app,
             Listener::new(move |_app| counter.set(counter.get() + 1)),
         );

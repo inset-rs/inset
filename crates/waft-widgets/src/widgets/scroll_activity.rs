@@ -460,6 +460,14 @@ impl From<AnyScrollActivity> for HandleId {
 /// A field Dart types as the erased object, kept: AnyScrollActivity with its count.
 pub type ScrollActivityRef = Retained<AnyScrollActivity>;
 
+impl AnyScrollActivity {
+    /// A [`ScrollActivityRef`] while something still keeps the object; see
+    /// [`Handle::upgrade`](waft_foundation::Handle::upgrade).
+    pub fn upgrade(self, app: &App) -> Option<ScrollActivityRef> {
+        Retained::upgrade(app, self)
+    }
+}
+
 /// A kept object erases to a [`ScrollActivityRef`] with [`Retained::erase`]: Dart's upcast.
 impl<T: ScrollActivity> From<Handle<T>> for AnyScrollActivity {
     fn from(handle: Handle<T>) -> AnyScrollActivity {
@@ -1175,7 +1183,7 @@ impl BallisticScrollActivity {
         vsync: impl TickerProvider,
         should_ignore_pointer: bool,
     ) -> Ref<BallisticScrollActivity> {
-        let controller = AnimationController::create_unbounded(
+        let controller = AnimationController::unbounded(
             app,
             0.0,
             None,
@@ -1188,10 +1196,10 @@ impl BallisticScrollActivity {
             controller: controller.clone(),
             should_ignore_pointer,
         });
-        controller.add_listener(app, Listener::handle_method(*this, Self::tick));
+        controller.add_listener(app, Listener::handle_method(this.handle(), Self::tick));
         let done = controller.animate_with(app, simulation);
         // Won't trigger if we dispose the controller before it completes.
-        done.when_complete(app, Listener::handle_method(*this, Self::end));
+        done.when_complete(app, Listener::handle_method(this.handle(), Self::end));
         this
     }
 
@@ -1309,7 +1317,7 @@ impl DrivenScrollActivity {
     ) -> Ref<DrivenScrollActivity> {
         debug_assert!(duration > Duration::ZERO);
         let completer = Completer::new();
-        let controller = AnimationController::create_unbounded(
+        let controller = AnimationController::unbounded(
             app,
             from,
             None,
@@ -1322,10 +1330,10 @@ impl DrivenScrollActivity {
             completer,
             controller: controller.clone(),
         });
-        controller.add_listener(app, Listener::handle_method(*this, Self::tick));
+        controller.add_listener(app, Listener::handle_method(this.handle(), Self::tick));
         let done = controller.animate_to(app, to, Some(duration), curve);
         // Won't trigger if we dispose the controller before it completes.
-        done.when_complete(app, Listener::handle_method(*this, Self::end));
+        done.when_complete(app, Listener::handle_method(this.handle(), Self::end));
         this
     }
 
@@ -1338,7 +1346,7 @@ impl DrivenScrollActivity {
         vsync: impl TickerProvider,
     ) -> Ref<DrivenScrollActivity> {
         let completer = Completer::new();
-        let controller = AnimationController::create_unbounded(
+        let controller = AnimationController::unbounded(
             app,
             0.0,
             None,
@@ -1351,10 +1359,10 @@ impl DrivenScrollActivity {
             completer,
             controller: controller.clone(),
         });
-        controller.add_listener(app, Listener::handle_method(*this, Self::tick));
+        controller.add_listener(app, Listener::handle_method(this.handle(), Self::tick));
         let done = controller.animate_with(app, simulation);
         // Won't trigger if we dispose the controller before it completes.
-        done.when_complete(app, Listener::handle_method(*this, Self::end));
+        done.when_complete(app, Listener::handle_method(this.handle(), Self::end));
         this
     }
 

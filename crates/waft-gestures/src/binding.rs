@@ -4,7 +4,7 @@ use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 
 use waft_embedder::{Offset, PointerDataPacket, ViewId};
-use waft_foundation::{App, Handle, Listener};
+use waft_foundation::{App, Handle, Listener, OptionRetained};
 
 use crate::arena::GestureArenaManager;
 use crate::converter::PointerEventConverter;
@@ -141,8 +141,7 @@ impl GestureBinding {
     pub fn pointer_router(self: Handle<Self>, app: &App) -> Handle<PointerRouter> {
         app.get(self)
             .pointer_router
-            .as_deref()
-            .copied()
+            .handle()
             .expect("GestureBinding::instance must run first")
     }
 
@@ -151,8 +150,7 @@ impl GestureBinding {
     pub fn gesture_arena(self: Handle<Self>, app: &App) -> Handle<GestureArenaManager> {
         app.get(self)
             .gesture_arena
-            .as_deref()
-            .copied()
+            .handle()
             .expect("GestureBinding::instance must run first")
     }
 
@@ -162,8 +160,7 @@ impl GestureBinding {
     pub fn pointer_signal_resolver(self: Handle<Self>, app: &App) -> Handle<PointerSignalResolver> {
         app.get(self)
             .pointer_signal_resolver
-            .as_deref()
-            .copied()
+            .handle()
             .expect("GestureBinding::instance must run first")
     }
 
@@ -233,7 +230,7 @@ impl GestureBinding {
         );
 
         // A cached result retains the objects on its path (Dart holds them; see
-        // `HitTestResult::retain_targets`), so a target a rebuild destroyed mid-press still
+        // `HitTestResult::keep_targets`), so a target a rebuild destroyed mid-press still
         // receives the pointer's later events, as it does in Flutter.
         let (hit_test_result, cache_after) = if is_new_hit_test {
             debug_assert!(
@@ -271,10 +268,10 @@ impl GestureBinding {
         }
         if let Some(mut result) = hit_test_result {
             if cache_after {
-                result.retain_targets(app);
+                result.keep_targets(app);
                 app.get_mut(self).hit_tests.insert(pointer, result);
             } else {
-                result.release_targets(app);
+                result.release_targets();
             }
         }
     }
@@ -344,7 +341,7 @@ impl GestureBinding {
     pub fn reset_gesture_binding(self: Handle<Self>, app: &mut App) {
         let hit_tests = std::mem::take(&mut app.get_mut(self).hit_tests);
         for mut result in hit_tests.into_values() {
-            result.release_targets(app);
+            result.release_targets();
         }
     }
 }

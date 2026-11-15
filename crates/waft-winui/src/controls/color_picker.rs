@@ -1144,7 +1144,7 @@ impl State for ColorPickerState {
         for part in std::mem::take(&mut app.get_mut(self).text_boxes) {
             part.focus.remove_listener(app, &part.focus_listener);
             part.focus.dispose(app);
-            app.get_mut(&part.controller).dispose();
+            part.controller.dispose(app);
         }
     }
 

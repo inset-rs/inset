@@ -380,7 +380,7 @@ impl BottomSheet {
         vsync: impl waft_scheduler::TickerProvider,
         sheet_animation_style: Option<&AnimationStyle>,
     ) -> Ref<AnimationController> {
-        AnimationController::create(
+        AnimationController::new(
             app,
             None,
             Some(
@@ -1263,7 +1263,7 @@ impl ModalBottomSheetState {
             .as_ref()
             .and_then(|style| style.reverse_curve.clone())
             .unwrap_or_else(k_modal_bottom_sheet_curve);
-        let drag_end_curved_animation = CurvedAnimation::create(
+        let drag_end_curved_animation = CurvedAnimation::new(
             app,
             route_animation,
             Rc::new(Split::new(current_progress, Curves::linear(), curve)),
@@ -1291,7 +1291,7 @@ impl State for ModalBottomSheetState {
     fn init_state(self: Handle<Self>, app: &mut App) {
         let route_animation = self.route_animation(app);
         let animation_style = self.widget(app).animation_style.clone();
-        let curved_sheet_animation = CurvedAnimation::create(
+        let curved_sheet_animation = CurvedAnimation::new(
             app,
             route_animation,
             animation_style
@@ -1936,7 +1936,7 @@ impl Route for ModalBottomSheetRoute {
 
     fn dispose(self: Handle<Self>, app: &mut App) {
         let clip_details_notifier = app.get(self).clip_details_notifier.clone();
-        app.get_mut(&clip_details_notifier).dispose();
+        clip_details_notifier.dispose(app);
         TransitionRoute::dispose(self, app)
     }
 }
@@ -3129,7 +3129,7 @@ mod tests {
 
     /// `AnimationController(vsync: const TestVSync(), duration: 2s, reverseDuration: 2s)`.
     fn two_second_controller(tester: &WidgetTester) -> Ref<AnimationController> {
-        AnimationController::create(
+        AnimationController::new(
             &mut tester.cell.borrow_mut(),
             None,
             Some(Duration::from_secs(2)),

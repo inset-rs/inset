@@ -5408,6 +5408,7 @@ name = "waft-test"
 version = "0.5.0"
 dependencies = [
  "waft-embedder",
+ "waft-foundation",
  "wgpu",
 ]
 

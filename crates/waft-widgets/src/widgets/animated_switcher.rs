@@ -515,7 +515,7 @@ impl AnimatedSwitcherState {
         let switch_in_curve = Rc::clone(&widget.switch_in_curve);
         let switch_out_curve = Rc::clone(&widget.switch_out_curve);
         let builder = widget.transition_builder.clone();
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             app,
             None,
             Some(duration),
@@ -525,7 +525,7 @@ impl AnimatedSwitcherState {
             AnimationBehavior::Normal,
             self,
         );
-        let animation = CurvedAnimation::create(
+        let animation = CurvedAnimation::new(
             app,
             controller.erase(),
             switch_in_curve,
@@ -566,11 +566,11 @@ impl AnimatedSwitcherState {
                             state
                                 .outgoing_entries
                                 .iter()
-                                .any(|entry| *entry.controller == controller)
+                                .any(|entry| entry.controller.handle() == controller)
                         );
                         state
                             .outgoing_entries
-                            .retain(|entry| *entry.controller != controller);
+                            .retain(|entry| entry.controller.handle() != controller);
                         state.outgoing_widgets = None;
                     });
                     controller.dispose(app);
@@ -1318,18 +1318,29 @@ mod tests {
         let mut app = cell.borrow_mut();
         let host = app.create(Host);
         let other_host = app.create(Host);
-        let tear_off = AnimatedSwitcherTransitionBuilder::handle_method(*host, build_transition);
+        let tear_off =
+            AnimatedSwitcherTransitionBuilder::handle_method(host.handle(), build_transition);
 
         assert!(
-            tear_off == AnimatedSwitcherTransitionBuilder::handle_method(*host, build_transition)
+            tear_off
+                == AnimatedSwitcherTransitionBuilder::handle_method(
+                    host.handle(),
+                    build_transition
+                )
         );
         assert!(
             tear_off
-                != AnimatedSwitcherTransitionBuilder::handle_method(*other_host, build_transition)
+                != AnimatedSwitcherTransitionBuilder::handle_method(
+                    other_host.handle(),
+                    build_transition
+                )
         );
         assert!(
             tear_off
-                != AnimatedSwitcherTransitionBuilder::handle_method(*host, other_build_transition)
+                != AnimatedSwitcherTransitionBuilder::handle_method(
+                    host.handle(),
+                    other_build_transition
+                )
         );
         assert!(tear_off != AnimatedSwitcher::new(DURATION).transition_builder);
         assert!(

@@ -82,7 +82,7 @@ impl RenderAnimatedSize {
         on_end: Option<Listener>,
         child: Option<AnyRenderBox>,
     ) -> RenderHandle<Self> {
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             app,
             None,
             Some(duration),
@@ -92,9 +92,9 @@ impl RenderAnimatedSize {
             AnimationBehavior::Normal,
             vsync.clone(),
         );
-        let animation = CurvedAnimation::create(app, controller.erase(), curve, None);
+        let animation = CurvedAnimation::new(app, controller.erase(), curve, None);
         let size_tween = SizeTween::new(app, None, None);
-        let controller_handle = *controller;
+        let controller_handle = controller.handle();
         let this = RenderHandle::new_box(
             app,
             RenderAnimatedSize {

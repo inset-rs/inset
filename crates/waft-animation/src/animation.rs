@@ -364,9 +364,7 @@ impl<T: 'static> AnyAnimation<T> {
     /// An [`AnimationRef`] while something still keeps the animation; see
     /// [`Handle::upgrade`].
     pub fn upgrade(self, app: &App) -> Option<AnimationRef<T>> {
-        self.id
-            .upgrade(app)
-            .map(|retained| retained.into_map(|_| self))
+        Retained::upgrade(app, self)
     }
 
     /// Calls the listener every time the value of the animation changes.
@@ -599,9 +597,9 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let a_ref = app.create(Host);
-        let a = *a_ref;
+        let a = a_ref.handle();
         let b_ref = app.create(Host);
-        let b = *b_ref;
+        let b = b_ref.handle();
 
         assert_eq!(
             AnimationStatusListener::handle_method(a, hook),
@@ -711,7 +709,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let counter_ref = app.create(Counter(1));
-        let counter = *counter_ref;
+        let counter = counter_ref.handle();
         let erased: AnimationRef<f64> = counter_ref.erase();
 
         // The concrete member stays reachable after erasing — the failure that
@@ -736,7 +734,7 @@ mod tests {
     fn an_animation_ref_keeps_the_object_its_typed_ref_made() {
         let cell = AppCell::new();
         let counter = cell.borrow_mut().create(Counter(1));
-        let handle = *counter;
+        let handle = counter.handle();
         let erased: AnimationRef<f64> = counter.into_erased();
         cell.checkpoint();
         assert!(cell.borrow().contains(handle), "the erased ref keeps it");

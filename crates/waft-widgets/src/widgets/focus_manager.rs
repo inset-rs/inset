@@ -104,7 +104,7 @@ impl Autofocus {
     fn apply_if_valid(self, app: &mut App, manager: Handle<FocusManager>) {
         let scope = self.scope.as_node();
         let should_apply = (scope.parent(app).is_some()
-            || self.scope.handle() == app.get(manager).root_scope.handle())
+            || self.scope.handle() == manager.root_scope(app).handle())
             && scope.manager(app) == Some(manager)
             && self.scope.focused_child(app).is_none()
             && self.autofocus_node.ancestors(app).contains(&scope);
@@ -225,7 +225,7 @@ impl FocusAttachment {
                     context
                         .owner(app)
                         .map(|owner| owner.focus_manager(app))
-                        .map(|manager| app.get(manager).root_scope.as_node())
+                        .map(|manager| manager.root_scope(app).as_node())
                 })
                 .expect("the element's build owner has a focus manager");
             parent.reparent_child(app, node);
@@ -611,11 +611,7 @@ impl FocusNodeVTable {
                     .remove_listener(listener)
             },
             notify_listeners: |app, id| resolve::<L>(id).notify_listeners(app),
-            dispose_notifier: |app, id| {
-                app.get_mut(resolve::<L>(id))
-                    .change_notifier_data_mut()
-                    .dispose()
-            },
+            dispose_notifier: |app, id| ChangeNotifierData::dispose(app, resolve::<L>(id)),
         }
     }
 }
@@ -690,9 +686,7 @@ impl AnyFocusNode {
 
     /// A [`FocusNodeRef`] while something still keeps the node; see [`Handle::upgrade`].
     pub fn upgrade(self, app: &App) -> Option<FocusNodeRef> {
-        self.id
-            .upgrade(app)
-            .map(|retained| retained.into_map(|_| self))
+        Retained::upgrade(app, self)
     }
 
     /// The [`FocusNodeRef`] a field keeps of a node whose owner holds it while a method of the
@@ -1143,7 +1137,7 @@ impl AnyFocusNode {
                         .enclosing_scope(app)
                         .or_else(|| {
                             self.manager(app)
-                                .map(|manager| app.get(manager).root_scope.handle())
+                                .map(|manager| manager.root_scope(app).handle())
                         })
                         .expect("a node with a scope has a manager");
                 }
@@ -1163,7 +1157,7 @@ impl AnyFocusNode {
                         .enclosing_scope(app)
                         .or_else(|| {
                             self.manager(app)
-                                .map(|manager| app.get(manager).root_scope.handle())
+                                .map(|manager| manager.root_scope(app).handle())
                         })
                         .expect("a node with a scope has a manager");
                 }
@@ -1244,7 +1238,7 @@ impl AnyFocusNode {
         debug_assert!(match self.manager(app) {
             None => true,
             Some(manager) => {
-                let root = app.get(manager).root_scope.as_node();
+                let root = manager.root_scope(app).as_node();
                 !root.descendants(app).contains(&node)
             }
         });
@@ -1287,7 +1281,7 @@ impl AnyFocusNode {
         }
         debug_assert!(match self.manager(app) {
             None => true,
-            Some(manager) => child != app.get(manager).root_scope.as_node(),
+            Some(manager) => child != manager.root_scope(app).as_node(),
         });
         debug_assert!(
             !self.ancestors(app).contains(&child),
@@ -2090,8 +2084,8 @@ impl FocusManager {
             WidgetsBinding::instance(app).remove_observer(app, &listener);
         }
         app.get(self).highlight_manager.dispose(app);
-        app.get(self).root_scope.dispose(app);
-        app.get_mut(self).change_notifier.dispose();
+        self.root_scope(app).handle().dispose(app);
+        ChangeNotifierData::dispose(app, self);
     }
 
     /// Provides convenient access to the current [`FocusManager`] singleton from the
@@ -2222,8 +2216,8 @@ impl FocusManager {
     ///
     /// This field is rarely used directly. To find the nearest [`FocusScopeNode`] for a given
     /// [`FocusNode`], call [`AnyFocusNode::nearest_scope`].
-    pub fn root_scope(self: Handle<Self>, app: &App) -> Handle<FocusScopeNode> {
-        app.get(self).root_scope.handle()
+    pub fn root_scope(self: Handle<Self>, app: &App) -> &Ref<FocusScopeNode> {
+        &app.get(self).root_scope
     }
 
     /// The node that currently has the primary focus.
@@ -2232,7 +2226,7 @@ impl FocusManager {
     }
 
     fn app_lifecycle_change(self: Handle<Self>, app: &mut App, state: AppLifecycleState) {
-        let root_scope: FocusNodeRef = app.get(self).root_scope.erase();
+        let root_scope: FocusNodeRef = self.root_scope(app).erase();
         let root_has_primary_focus = self.primary_focus(app) == Some(root_scope.handle());
         if state == AppLifecycleState::Resumed {
             if !root_has_primary_focus {
@@ -2330,7 +2324,7 @@ impl FocusManager {
         if app.get(self).primary_focus.is_none() && app.get(self).marked_for_focus.is_none() {
             // If we don't have any current focus, and nobody has asked to focus yet, then
             // revert to the root scope.
-            let root_scope: FocusNodeRef = app.get(self).root_scope.erase();
+            let root_scope: FocusNodeRef = self.root_scope(app).erase();
             app.get_mut(self).marked_for_focus = Some(root_scope);
         }
         // A node has requested to be the next focus, and isn't already the primary focus.
@@ -2919,7 +2913,7 @@ pub(crate) mod tests {
         let (cell, context) = mounted_context();
         let mut app = cell.borrow_mut();
         let manager = FocusManager::instance(&mut app);
-        let root = manager.root_scope(&app);
+        let root = manager.root_scope(&app).handle();
         let scope = FocusScopeNode::new(&mut app);
         attach_under(&mut app, scope.as_node(), context, root.as_node());
         let node = FocusNode::new(&mut app);
@@ -2943,7 +2937,7 @@ pub(crate) mod tests {
         let (cell, context) = mounted_context();
         let mut app = cell.borrow_mut();
         let manager = FocusManager::instance(&mut app);
-        let root = manager.root_scope(&app);
+        let root = manager.root_scope(&app).handle();
         let scope = FocusScopeNode::new(&mut app);
         attach_under(&mut app, scope.as_node(), context, root.as_node());
         let child1 = FocusNode::new(&mut app);
@@ -2974,12 +2968,12 @@ pub(crate) mod tests {
         let (cell, context) = mounted_context();
         let mut app = cell.borrow_mut();
         let manager = FocusManager::instance(&mut app);
-        let root = manager.root_scope(&app);
+        let root = manager.root_scope(&app).handle();
         let scope1 = FocusScopeNode::new(&mut app);
         attach_under(&mut app, scope1.as_node(), context, root.as_node());
         let scope2 = FocusScopeNode::new(&mut app);
 
-        scope1.set_first_focus(&mut app, *scope2);
+        scope1.set_first_focus(&mut app, scope2.handle());
         assert_eq!(scope2.parent(&app), Some(scope1.as_node()));
         assert_eq!(scope1.focused_child(&mut app), Some(scope2.as_node()));
         assert!(!scope2.has_focus(&mut app));
@@ -2994,7 +2988,7 @@ pub(crate) mod tests {
         let (cell, context) = mounted_context();
         let mut app = cell.borrow_mut();
         let manager = FocusManager::instance(&mut app);
-        let root = manager.root_scope(&app);
+        let root = manager.root_scope(&app).handle();
         let scope = FocusScopeNode::new(&mut app);
         attach_under(&mut app, scope.as_node(), context, root.as_node());
         let node = FocusNode::new(&mut app);
@@ -3013,7 +3007,7 @@ pub(crate) mod tests {
         let (cell, context) = mounted_context();
         let mut app = cell.borrow_mut();
         let manager = FocusManager::instance(&mut app);
-        let root = manager.root_scope(&app);
+        let root = manager.root_scope(&app).handle();
         let scope = FocusScopeNode::new(&mut app);
         attach_under(&mut app, scope.as_node(), context, root.as_node());
         let node = FocusNode::new(&mut app);
@@ -3041,7 +3035,7 @@ pub(crate) mod tests {
         let (cell, context) = mounted_context();
         let mut app = cell.borrow_mut();
         let manager = FocusManager::instance(&mut app);
-        let root = manager.root_scope(&app);
+        let root = manager.root_scope(&app).handle();
         let scope = FocusScopeNode::new(&mut app);
         attach_under(&mut app, scope.as_node(), context, root.as_node());
         let node = FocusNode::new(&mut app);
@@ -3106,7 +3100,7 @@ pub(crate) mod tests {
         let (cell, context) = mounted_context_on(target);
         let (node, attachment) = {
             let mut app = cell.borrow_mut();
-            let root = FocusManager::instance(&mut app).root_scope(&app);
+            let root = FocusManager::instance(&mut app).root_scope(&app).handle();
             let scope = FocusScopeNode::new(&mut app);
             attach_under(&mut app, scope.as_node(), context, root.as_node());
             let node = FocusNode::new(&mut app);
@@ -3179,7 +3173,7 @@ pub(crate) mod tests {
         ] {
             let (cell, context) = mounted_context_on(target);
             let mut app = cell.borrow_mut();
-            let root = FocusManager::instance(&mut app).root_scope(&app);
+            let root = FocusManager::instance(&mut app).root_scope(&app).handle();
             let scope = FocusScopeNode::new(&mut app);
             attach_under(&mut app, scope.as_node(), context, root.as_node());
             let node_a = FocusNode::new(&mut app);
@@ -3213,7 +3207,7 @@ pub(crate) mod tests {
         let (cell, context) = mounted_context();
         let mut app = cell.borrow_mut();
         let manager = FocusManager::instance(&mut app);
-        let root = manager.root_scope(&app);
+        let root = manager.root_scope(&app).handle();
         let scope = FocusScopeNode::new(&mut app);
         attach_under(&mut app, scope.as_node(), context, root.as_node());
         let node = FocusNode::new(&mut app);

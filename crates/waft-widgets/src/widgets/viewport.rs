@@ -313,7 +313,7 @@ impl MultiChildRenderObjectWidget for Viewport {
     }
 
     fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
-        ViewportElement::create(app, this).as_element()
+        ViewportElement::new(app, this).as_element()
     }
 }
 
@@ -329,7 +329,7 @@ pub struct ViewportElement {
 
 impl ViewportElement {
     /// Creates an element that uses the given widget as its configuration.
-    pub fn create(app: &mut App, widget: WidgetRef) -> Handle<ViewportElement> {
+    pub fn new(app: &mut App, widget: WidgetRef) -> Handle<ViewportElement> {
         debug_assert!(downcast_widget::<Viewport>(&*widget).is_some());
         app.create(ViewportElement {
             element: ElementData::new(widget),

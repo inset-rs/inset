@@ -408,7 +408,7 @@ impl App {
             return existing;
         }
         let singleton = self.create(T::default());
-        let handle = *singleton;
+        let handle = singleton.handle();
         self.singletons
             .insert(std::any::TypeId::of::<T>(), singleton.to_any());
         handle
@@ -571,6 +571,42 @@ impl App {
         live
     }
 
+    /// Records that the object has a `dispose` its holder must call, as Flutter's
+    /// `FlutterMemoryAllocations.dispatchObjectCreated` does: a debug build reports it if it is
+    /// freed without one ([`debug_take_not_disposed`]). A [`ChangeNotifier`] records itself when
+    /// it gets its first listener, as Dart's does; other types call this in their constructor.
+    /// Nothing in a release build.
+    ///
+    /// [`debug_take_not_disposed`]: Self::debug_take_not_disposed
+    /// [`ChangeNotifier`]: crate::ChangeNotifier
+    pub fn expect_dispose(&mut self, handle: impl Into<HandleId>) {
+        self.handles.expect_dispose(handle.into());
+    }
+
+    /// Flutter's "not disposed" leaks reported since the last call: objects that expected a
+    /// `dispose` ([`expect_dispose`](Self::expect_dispose)) and were freed without one, each with
+    /// its type and creation site. For a test that turns them into a failure.
+    #[cfg(debug_assertions)]
+    pub fn debug_take_not_disposed(&mut self) -> Vec<String> {
+        self.handles.take_not_disposed()
+    }
+
+    /// Flutter's "not collected" leaks reported since the last call: objects disposed
+    /// ([`mark_disposed`](Self::mark_disposed)) and still kept two checkpoints later, each with
+    /// its type and creation site; a ring of `Ref`s, or a holder that disposed an object and kept
+    /// it. For a test that turns them into a failure.
+    #[cfg(debug_assertions)]
+    pub fn debug_take_not_collected(&mut self) -> Vec<String> {
+        self.handles.take_not_collected()
+    }
+
+    /// Every object the arena holds, kept or waiting for the next checkpoint, with its type and
+    /// creation site: what a test's snapshot records to say afterwards which objects are new.
+    #[cfg(debug_assertions)]
+    pub fn debug_live_objects(&self) -> Vec<crate::DebugObject> {
+        self.handles.debug_live_objects()
+    }
+
     /// The skipped tear-offs reported since the last call, for a test that turns them into a
     /// failure.
     #[cfg(debug_assertions)]
@@ -685,7 +721,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let counter_ref = app.create(Counter(1));
-        let counter = *counter_ref;
+        let counter = counter_ref.handle();
 
         assert_eq!(app.get(counter), &Counter(1));
         app.get_mut(counter).0 = 7;
@@ -697,9 +733,9 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let counter_ref = app.create(Counter(1));
-        let counter = *counter_ref;
+        let counter = counter_ref.handle();
         let label_ref = app.create(Label("hello"));
-        let label = *label_ref;
+        let label = label_ref.handle();
 
         assert_eq!(app.get(counter), &Counter(1));
         assert_eq!(app.get(label), &Label("hello"));
@@ -713,7 +749,7 @@ mod tests {
 
         let mut app = cell.borrow_mut();
         let second_ref = app.create(Counter(2));
-        let second = *second_ref;
+        let second = second_ref.handle();
         // slotmap: version in high 32 bits, index in low 32. Without reuse this test is vacuous.
         let entry_index = |id: HandleId| slotmap::Key::data(&id).as_ffi() & 0xffff_ffff;
         assert_eq!(
@@ -731,7 +767,7 @@ mod tests {
     fn a_dropped_ref_keeps_the_object_readable_until_the_checkpoint() {
         let cell = AppCell::new();
         let counter_ref = cell.borrow_mut().create(Counter(3));
-        let counter = *counter_ref;
+        let counter = counter_ref.handle();
         let before = cell.borrow().debug_object_count();
 
         drop(counter_ref);
@@ -749,7 +785,7 @@ mod tests {
     #[should_panic(expected = "stale handle")]
     fn reading_through_a_stale_handle_panics() {
         let cell = AppCell::new();
-        let counter = *cell.borrow_mut().create(Counter(1));
+        let counter = cell.borrow_mut().create(Counter(1)).handle();
         cell.checkpoint();
         cell.borrow().get(counter);
     }
@@ -758,7 +794,7 @@ mod tests {
     fn the_checked_path_from_an_untyped_id_answers_none_rather_than_panicking() {
         let cell = AppCell::new();
         let counter_ref = cell.borrow_mut().create(Counter(1));
-        let counter = *counter_ref;
+        let counter = counter_ref.handle();
         let id = counter.id();
 
         assert_eq!(cell.borrow().handle::<Counter>(id), Some(counter));
@@ -793,7 +829,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let counter_ref = app.create(Counter(1));
-        let counter = *counter_ref;
+        let counter = counter_ref.handle();
 
         struct Edge {
             target: Handle<Counter>,
@@ -810,7 +846,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let counter_ref = app.create(Counter(0));
-        let counter = *counter_ref;
+        let counter = counter_ref.handle();
         app.schedule_microtask(crate::Listener::new(move |app| {
             app.get_mut(counter).0 = 1;
         }));
@@ -826,7 +862,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let counter_ref = app.create(Counter(0));
-        let counter = *counter_ref;
+        let counter = counter_ref.handle();
         app.schedule_microtask(crate::Listener::new(move |app| {
             app.get_mut(counter).0 = 1;
             app.schedule_microtask(crate::Listener::new(move |app| {
@@ -842,7 +878,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let log_ref = app.create(Vec::<&'static str>::new());
-        let log = *log_ref;
+        let log = log_ref.handle();
         app.schedule_microtask(crate::Listener::new(move |app| {
             app.get_mut(log).push("micro");
         }));
@@ -882,7 +918,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let counter_ref = app.create(Counter(0));
-        let counter = *counter_ref;
+        let counter = counter_ref.handle();
         let timer = Timer::new(
             &mut app,
             Duration::from_millis(10),
@@ -903,9 +939,9 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let a_ref = app.create(1u32);
-        let a = *a_ref;
+        let a = a_ref.handle();
         let b_ref = app.create(String::from("x"));
-        let b = *b_ref;
+        let b = b_ref.handle();
         let (a_value, b_value) = app.get_disjoint_mut(a, b);
         *a_value += 1;
         b_value.push('y');
@@ -919,7 +955,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let a_ref = app.create(1u32);
-        let a = *a_ref;
+        let a = a_ref.handle();
         let _ = app.get_disjoint_mut(a, a);
     }
 
@@ -928,7 +964,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let minted_ref = app.create(Counter(7));
-        let minted = *minted_ref;
+        let minted = minted_ref.handle();
         let rebuilt = Handle::<Counter>::from_id(minted.id());
         assert_eq!(rebuilt, minted);
         assert_eq!(app.get(rebuilt).0, 7);

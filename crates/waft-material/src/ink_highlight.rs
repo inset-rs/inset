@@ -104,7 +104,7 @@ impl InkHighlight {
         });
         let handle = this.handle();
         let vsync = controller.vsync(app);
-        let alpha_controller = AnimationController::create(
+        let alpha_controller = AnimationController::new(
             app,
             None,
             Some(fade_duration),

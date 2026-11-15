@@ -18,7 +18,8 @@ use waft_animation::{
 };
 use waft_embedder::{Canvas, Color, Offset, Paint, Size};
 use waft_foundation::{
-    App, ChangeNotifier, Handle, HandleId, Listenable, Listener, OptionRetained, ValueChanged,
+    App, ChangeNotifier, ChangeNotifierData, Handle, HandleId, Listenable, Listener,
+    OptionRetained, ValueChanged,
 };
 use waft_gestures::{TapDownDetails, TapUpDetails};
 use waft_rendering::CustomPainter;
@@ -241,7 +242,7 @@ pub trait ToggleableStateMixin: TickerProviderStateMixin + TickerProviderObject 
         } else {
             1.0
         };
-        let position_controller = AnimationController::create(
+        let position_controller = AnimationController::new(
             app,
             Some(position_value),
             Some(K_TOGGLE_DURATION),
@@ -251,7 +252,7 @@ pub trait ToggleableStateMixin: TickerProviderStateMixin + TickerProviderObject 
             AnimationBehavior::Normal,
             self,
         );
-        let position = CurvedAnimation::create(
+        let position = CurvedAnimation::new(
             app,
             position_controller.erase(),
             Curves::ease_in(),
@@ -260,7 +261,7 @@ pub trait ToggleableStateMixin: TickerProviderStateMixin + TickerProviderObject 
         let reaction_duration = self
             .reaction_animation_duration(app)
             .unwrap_or(K_REACTION_ANIMATION_DURATION);
-        let reaction_controller = AnimationController::create(
+        let reaction_controller = AnimationController::new(
             app,
             None,
             Some(reaction_duration),
@@ -270,7 +271,7 @@ pub trait ToggleableStateMixin: TickerProviderStateMixin + TickerProviderObject 
             AnimationBehavior::Normal,
             self,
         );
-        let reaction = CurvedAnimation::create(
+        let reaction = CurvedAnimation::new(
             app,
             reaction_controller.erase(),
             Curves::fast_out_slow_in(),
@@ -284,7 +285,7 @@ pub trait ToggleableStateMixin: TickerProviderStateMixin + TickerProviderObject 
                 0.0
             }
         };
-        let reaction_hover_fade_controller = AnimationController::create(
+        let reaction_hover_fade_controller = AnimationController::new(
             app,
             Some(fade_value),
             Some(K_REACTION_FADE_DURATION),
@@ -294,13 +295,13 @@ pub trait ToggleableStateMixin: TickerProviderStateMixin + TickerProviderObject 
             AnimationBehavior::Normal,
             self,
         );
-        let reaction_hover_fade = CurvedAnimation::create(
+        let reaction_hover_fade = CurvedAnimation::new(
             app,
             reaction_hover_fade_controller.erase(),
             Curves::fast_out_slow_in(),
             None,
         );
-        let reaction_focus_fade_controller = AnimationController::create(
+        let reaction_focus_fade_controller = AnimationController::new(
             app,
             Some(fade_value),
             Some(K_REACTION_FADE_DURATION),
@@ -310,7 +311,7 @@ pub trait ToggleableStateMixin: TickerProviderStateMixin + TickerProviderObject 
             AnimationBehavior::Normal,
             self,
         );
-        let reaction_focus_fade = CurvedAnimation::create(
+        let reaction_focus_fade = CurvedAnimation::new(
             app,
             reaction_focus_fade_controller.erase(),
             Curves::fast_out_slow_in(),
@@ -1275,7 +1276,7 @@ pub trait ToggleablePainter: ChangeNotifier {
         for animation in animations.into_iter().flatten() {
             animation.remove_listener(app, &notify);
         }
-        app.get_mut(self).change_notifier_data_mut().dispose();
+        ChangeNotifierData::dispose(app, self);
     }
 }
 

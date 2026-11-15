@@ -768,7 +768,7 @@ trait MenuAnchorStateLeaf: SingleTickerProviderStateMixin + TickerProviderObject
     /// Dart's `initState` body.
     fn init_state(self: Handle<Self>, app: &mut App) {
         let menu_scope_node = FocusScopeNode::new(app);
-        let animation_controller = AnimationController::create(
+        let animation_controller = AnimationController::new(
             app,
             None,
             None,
@@ -778,13 +778,13 @@ trait MenuAnchorStateLeaf: SingleTickerProviderStateMixin + TickerProviderObject
             waft_animation::AnimationBehavior::Normal,
             self,
         );
-        let height_animation = CurvedAnimation::create(
+        let height_animation = CurvedAnimation::new(
             app,
             animation_controller.erase(),
             menu_panel_height_forward_curve(),
             Some(menu_panel_height_reverse_curve()),
         );
-        let opacity_animation = CurvedAnimation::create(
+        let opacity_animation = CurvedAnimation::new(
             app,
             animation_controller.erase(),
             menu_panel_opacity_forward_curve(),
@@ -936,7 +936,7 @@ trait MenuAnchorStateLeaf: SingleTickerProviderStateMixin + TickerProviderObject
                 waft_animation::Curves::linear(),
             );
 
-            let animation = CurvedAnimation::create(
+            let animation = CurvedAnimation::new(
                 app,
                 parent.clone(),
                 Rc::new(forward_curve),

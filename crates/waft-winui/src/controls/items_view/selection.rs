@@ -35,7 +35,7 @@ impl ItemsViewSelection {
 
     /// Releases the listeners; the selection is not used after.
     pub fn dispose(self: Handle<Self>, app: &mut App) {
-        app.get_mut(self).notifier.dispose();
+        ChangeNotifierData::dispose(app, self);
     }
 
     /// `IsSelected`.

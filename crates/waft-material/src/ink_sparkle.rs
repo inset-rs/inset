@@ -188,7 +188,7 @@ impl InkSparkle {
 
         // Immediately begin animating the ink.
         let vsync = controller.vsync(app);
-        let animation_controller = AnimationController::create(
+        let animation_controller = AnimationController::new(
             app,
             None,
             Some(Self::ANIMATION_DURATION),

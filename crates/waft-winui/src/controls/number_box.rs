@@ -946,7 +946,7 @@ impl State for NumberBoxState {
         );
         focus.remove_listener(app, &Listener::handle_method(self, Self::focus_changed));
         focus.dispose(app);
-        app.get_mut(&controller).dispose();
+        controller.dispose(app);
         drop(popup);
     }
 

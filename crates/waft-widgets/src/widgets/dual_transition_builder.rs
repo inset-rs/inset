@@ -367,7 +367,7 @@ mod tests {
     }
 
     fn controller(app: &mut App, value: Option<f64>) -> Ref<AnimationController> {
-        AnimationController::create(
+        AnimationController::new(
             app,
             value,
             Some(Duration::from_millis(300)),

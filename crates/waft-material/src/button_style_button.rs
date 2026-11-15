@@ -687,7 +687,7 @@ where
             if widget_states_controller.is_some()
                 && let Some(internal) = app.get_mut(self).internal_states_controller.take()
             {
-                app.get_mut(&internal).dispose();
+                internal.dispose(app);
             }
             self.init_states_controller(app);
         }
@@ -717,7 +717,7 @@ where
             &Listener::handle_method(self, Self::handle_states_controller_change),
         );
         if let Some(internal) = app.get_mut(self).internal_states_controller.take() {
-            app.get_mut(&internal).dispose();
+            internal.dispose(app);
         }
         if let Some(controller) = app.get(self).controller.handle() {
             controller.dispose(app);
@@ -864,7 +864,7 @@ where
                 if let Some(controller) = controller {
                     controller.dispose(app);
                 }
-                let controller = AnimationController::create(
+                let controller = AnimationController::new(
                     app,
                     None,
                     Some(resolved_animation_duration),

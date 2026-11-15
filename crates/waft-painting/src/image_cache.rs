@@ -214,8 +214,8 @@ impl ImageCache {
             return kept(app, completer);
         }
         let completer = load(app);
-        self.track_live_image(app, key.clone(), *completer, None);
-        self.watch_for_completion(app, key, *completer);
+        self.track_live_image(app, key.clone(), completer.handle(), None);
+        self.watch_for_completion(app, key, completer.handle());
         completer
     }
 
@@ -678,7 +678,7 @@ mod tests {
         finish_frame(&mut app);
         assert!(app.is_disposed(&completer));
         assert!(completer.current_image(&app).is_none());
-        let handle = *completer;
+        let handle = completer.handle();
         drop((app, completer, retained));
         cell.checkpoint();
         assert!(!cell.borrow().contains(handle));

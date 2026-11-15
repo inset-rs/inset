@@ -309,7 +309,7 @@ impl OpenUpwardsPageTransitionState {
         let widget = self.widget(app);
         let animation = widget.animation.clone();
         let secondary_animation = widget.secondary_animation.clone();
-        let primary_animation = CurvedAnimation::create(
+        let primary_animation = CurvedAnimation::new(
             app,
             animation,
             OpenUpwardsPageTransition::transition_curve(),
@@ -317,7 +317,7 @@ impl OpenUpwardsPageTransitionState {
                 OpenUpwardsPageTransition::transition_curve().flipped(),
             )),
         );
-        let secondary_translation_curved_animation = CurvedAnimation::create(
+        let secondary_translation_curved_animation = CurvedAnimation::new(
             app,
             secondary_animation,
             OpenUpwardsPageTransition::transition_curve(),

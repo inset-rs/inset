@@ -1114,7 +1114,7 @@ impl SwitchPainter {
         if let Some(color_animation) = app.get_mut(self).color_animation.take() {
             color_animation.dispose(app);
         }
-        let color_animation = CurvedAnimation::create(
+        let color_animation = CurvedAnimation::new(
             app,
             value.erase(),
             Curves::ease_out(),

@@ -674,9 +674,9 @@ impl UndoHistoryController {
     pub fn dispose(self: Handle<Self>, app: &mut App) {
         let on_undo = self.on_undo(app);
         let on_redo = self.on_redo(app);
-        app.get_mut(on_undo).dispose();
-        app.get_mut(on_redo).dispose();
-        app.get_mut(self).change_notifier.dispose();
+        ChangeNotifierData::dispose(app, on_undo);
+        ChangeNotifierData::dispose(app, on_redo);
+        ChangeNotifierData::dispose(app, self);
     }
 }
 
@@ -883,7 +883,7 @@ mod tests {
         let value = app.create(ValueNotifier::new(0i32));
         let focus_node = FocusNode::new(&mut app);
         let key = GlobalKey::new();
-        let notifier = *value;
+        let notifier = value.handle();
         let widget = UndoHistory::new(
             value.clone(),
             move |app, next| {

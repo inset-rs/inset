@@ -1684,7 +1684,7 @@ impl State for TextFieldState {
             if self.widget(app).states_controller.is_some()
                 && let Some(internal) = app.get_mut(self).internal_states_controller.take()
             {
-                app.get_mut(&internal).dispose();
+                internal.dispose(app);
             }
             self.init_states_controller(app);
         }
@@ -1706,7 +1706,7 @@ impl State for TextFieldState {
             &Listener::handle_method(self, Self::handle_states_controller_change),
         );
         if let Some(internal) = app.get_mut(self).internal_states_controller.take() {
-            app.get_mut(&internal).dispose();
+            internal.dispose(app);
         }
         self.dispose_restoration(app);
     }

@@ -2387,7 +2387,7 @@ impl State for ComboBoxState {
         for node in [scope_focus, focus, text_focus].into_iter().chain(items) {
             node.dispose(app);
         }
-        app.get_mut(&text).dispose();
+        text.dispose(app);
         drop(popup);
         if let Some(scroll) = scroll {
             scroll.dispose(app);

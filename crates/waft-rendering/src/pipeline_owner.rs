@@ -432,7 +432,7 @@ impl PipelineOwner {
             "Cannot modify child list after layout."
         );
         let kept = child;
-        let child = *kept;
+        let child = kept.handle();
         app.get_mut(self).children.push(kept);
         if cfg!(debug_assertions) {
             app.get_mut(child).debug_parent = Some(self);
@@ -446,7 +446,12 @@ impl PipelineOwner {
     /// [`adopt_child`](Self::adopt_child).
     pub fn drop_child(self: Handle<Self>, app: &mut App, child: Handle<PipelineOwner>) {
         debug_assert_eq!(app.get(child).debug_parent, Some(self));
-        debug_assert!(app.get(self).children.iter().any(|kept| **kept == child));
+        debug_assert!(
+            app.get(self)
+                .children
+                .iter()
+                .any(|kept| kept.handle() == child)
+        );
         debug_assert!(
             !app.get(self).debug_doing_child_layout,
             "Cannot modify child list after layout."
@@ -454,7 +459,7 @@ impl PipelineOwner {
         let children = &mut app.get_mut(self).children;
         let index = children
             .iter()
-            .position(|candidate| **candidate == child)
+            .position(|candidate| candidate.handle() == child)
             .expect("child was in the list");
         children.remove(index);
         if cfg!(debug_assertions) {
@@ -568,7 +573,7 @@ mod tests {
         let second = RenderHandle::new_box(&mut app, leaf(None));
         owner.set_root_node(&mut app, Some(first.as_object()));
         assert!(first.attached(&app));
-        assert_eq!(first.owner(&app), Some(*owner));
+        assert_eq!(first.owner(&app), Some(owner.handle()));
 
         owner.set_root_node(&mut app, Some(second.as_object()));
         assert!(!first.attached(&app));
@@ -632,7 +637,7 @@ mod tests {
         adopted_after.request_visual_update(&mut app);
         assert_eq!(manifold.requests.get(), 3, "adopt_child attaches the child");
 
-        root.drop_child(&mut app, *adopted_after);
+        root.drop_child(&mut app, adopted_after.handle());
         adopted_after.request_visual_update(&mut app);
         assert_eq!(manifold.requests.get(), 3, "drop_child detaches the child");
 

@@ -551,7 +551,7 @@ impl GlowController {
         color: Color,
         axis: Axis,
     ) -> Ref<GlowController> {
-        let glow_controller = AnimationController::create(
+        let glow_controller = AnimationController::new(
             app,
             None,
             None,
@@ -589,7 +589,7 @@ impl GlowController {
             AnimationStatusListener::handle_method(handle, GlowController::change_phase),
         );
         let decelerator =
-            CurvedAnimation::create(app, glow_controller.erase(), Curves::decelerate(), None);
+            CurvedAnimation::new(app, glow_controller.erase(), Curves::decelerate(), None);
         decelerator.add_listener(
             app,
             Listener::handle_method(handle, Handle::<GlowController>::notify_listeners),
@@ -671,7 +671,7 @@ impl GlowController {
         self.decelerator(app).dispose(app);
         self.displacement_ticker(app).dispose(app);
         self.cancel_pull_recede_timer(app);
-        app.get_mut(self).change_notifier.dispose();
+        ChangeNotifierData::dispose(app, self);
     }
 
     /// Handle a scroll slamming into the edge at a particular velocity.
@@ -1540,7 +1540,7 @@ impl StretchController {
     /// Automatically disposes the controller when the animation completes.
     fn animate(self: Handle<Self>, app: &mut App, simulation: Box<dyn Simulation>) {
         let vsync = app.get(self).vsync.clone();
-        let controller = AnimationController::create_unbounded(
+        let controller = AnimationController::unbounded(
             app,
             0.0,
             None,
@@ -1621,7 +1621,7 @@ impl StretchController {
             controller.dispose(app);
         }
         let notifier = app.get(self).overscroll_notifier.handle();
-        app.get_mut(notifier).dispose();
+        notifier.dispose(app);
     }
 }
 

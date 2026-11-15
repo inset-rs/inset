@@ -136,8 +136,8 @@ impl TransformPart {
 pub struct HitTestResult {
     path: Vec<HitTestEntry>,
     /// The references that keep the path's targets while the result outlives its turn;
-    /// empty until [`retain_targets`](Self::retain_targets).
-    retained: Vec<AnyRef>,
+    /// empty until [`keep_targets`](Self::keep_targets).
+    kept: Vec<AnyRef>,
     // A stack of transform parts.
     //
     // The transform part stack leading from global to the current object is stored
@@ -159,7 +159,7 @@ impl HitTestResult {
     pub fn new() -> HitTestResult {
         HitTestResult {
             path: Vec::new(),
-            retained: Vec::new(),
+            kept: Vec::new(),
             transforms: vec![Matrix4::IDENTITY],
             local_transforms: Vec::new(),
         }
@@ -168,11 +168,11 @@ impl HitTestResult {
     /// Keeps every object on the path, for a result kept past this turn (Dart keeps them alive
     /// by holding the path). The references live in the result: dropping it, or
     /// [`release_targets`](Self::release_targets), lets go of them.
-    pub fn retain_targets(&mut self, app: &mut App) {
-        if !self.retained.is_empty() {
+    pub fn keep_targets(&mut self, app: &App) {
+        if !self.kept.is_empty() {
             return;
         }
-        self.retained = self
+        self.kept = self
             .path
             .iter()
             .filter_map(|entry| entry.target.retained_handle())
@@ -180,10 +180,9 @@ impl HitTestResult {
             .collect();
     }
 
-    /// Lets go of what [`retain_targets`](Self::retain_targets) kept.
-    pub fn release_targets(&mut self, app: &mut App) {
-        let _ = app;
-        self.retained.clear();
+    /// Lets go of what [`keep_targets`](Self::keep_targets) kept.
+    pub fn release_targets(&mut self) {
+        self.kept.clear();
     }
 
     /// An unmodifiable list of [`HitTestEntry`] objects recorded during the hit test.

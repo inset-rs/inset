@@ -1301,7 +1301,7 @@ pub(crate) mod viewport_test_support {
             ScrollHarness {
                 owner,
                 viewport,
-                offset: *offset,
+                offset: offset.handle(),
             }
         }
 

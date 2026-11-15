@@ -717,7 +717,7 @@ pub trait RestorableProperty: ChangeNotifier + Sized + 'static {
         if let Some(owner) = self.restorable_property_data(app).owner {
             owner.unregister(app, self.as_property());
         }
-        app.get_mut(self).change_notifier_data_mut().dispose();
+        ChangeNotifierData::dispose(app, self);
         self.restorable_property_data_mut(app).disposed = true;
         self.did_dispose(app);
     }
@@ -860,9 +860,7 @@ impl AnyRestorableProperty {
     /// A [`RestorablePropertyRef`] while something still keeps the property; see
     /// [`Handle::upgrade`].
     pub fn upgrade(self, app: &App) -> Option<RestorablePropertyRef> {
-        self.id
-            .upgrade(app)
-            .map(|retained| retained.into_map(|_| self))
+        Retained::upgrade(app, self)
     }
 
     /// Dart's `property as T`: the typed handle when this property is a `T`, else `None`.
@@ -1273,7 +1271,7 @@ pub trait RestorationMixin: State + Sized + 'static {
                 .debug_properties_waiting_for_reregistration
                 .as_mut()
         {
-            waiting.retain(|other| **other != property);
+            waiting.retain(|other| other.handle() != property);
         }
     }
 
@@ -1563,7 +1561,7 @@ pub trait RestorationMixin: State + Sized + 'static {
                 .debug_properties_waiting_for_reregistration
                 .as_mut()
         {
-            waiting.retain(|other| **other != property);
+            waiting.retain(|other| other.handle() != property);
         }
         property.remove_listener(app, &listener);
         property.unregister(app);

@@ -264,12 +264,14 @@ impl RestorationManager {
     ) {
         debug_assert!(app.get(bucket).manager == Some(self));
         debug_assert!(!app.get(self).debug_doing_update);
-        let bucket = bucket
-            .upgrade(app)
-            .expect("a bucket that schedules its serialization is kept by its owner");
-        app.get_mut(self)
-            .buckets_needing_serialization
-            .insert(bucket);
+        // Dart's set holds the bucket until the frame's serialization. One that nothing keeps any
+        // more is freed before then and its data with it, so there is nothing of it to finalize;
+        // the serialization is still scheduled for the change it made.
+        if let Some(bucket) = bucket.upgrade(app) {
+            app.get_mut(self)
+                .buckets_needing_serialization
+                .insert(bucket);
+        }
         if !app.get(self).serialization_scheduled {
             app.get_mut(self).serialization_scheduled = true;
             SchedulerBinding::add_post_frame_callback(
@@ -356,7 +358,7 @@ impl RestorationManager {
         if let Some(root_bucket) = app.get(self).root_bucket.handle() {
             root_bucket.dispose(app);
         }
-        app.get_mut(self).change_notifier.dispose();
+        ChangeNotifierData::dispose(app, self);
     }
 }
 
@@ -500,7 +502,9 @@ impl RestorationBucket {
         debug_owner: Option<Rc<dyn Debug>>,
     ) -> Ref<RestorationBucket> {
         let bucket = RestorationBucket::new(restoration_id, RestorationMap::new(), debug_owner);
-        app.create(bucket)
+        let bucket = app.create(bucket);
+        app.expect_dispose(&bucket);
+        bucket
     }
 
     /// Creates the root [`RestorationBucket`] for the provided restoration
@@ -534,7 +538,9 @@ impl RestorationBucket {
             cfg!(debug_assertions).then(|| Rc::new(manager) as Rc<dyn Debug>);
         let mut bucket = RestorationBucket::new("root", raw_data.unwrap_or_default(), debug_owner);
         bucket.manager = Some(manager);
-        app.create(bucket)
+        let bucket = app.create(bucket);
+        app.expect_dispose(&bucket);
+        bucket
     }
 
     /// Creates a child bucket initialized with the data that the provided
@@ -560,7 +566,9 @@ impl RestorationBucket {
         bucket.raw_data = RawData::InParent;
         bucket.manager = app.get(parent).manager;
         bucket.parent = Some(parent);
-        app.create(bucket)
+        let bucket = app.create(bucket);
+        app.expect_dispose(&bucket);
+        bucket
     }
 
     fn new(
@@ -846,7 +854,7 @@ impl RestorationBucket {
     pub fn adopt_child(self: Handle<Self>, app: &mut App, child: &Ref<RestorationBucket>) {
         debug_assert!(self.debug_assert_not_disposed(app));
         let kept = child.clone();
-        let child = *kept;
+        let child = kept.handle();
         if app.get(child).parent != Some(self) {
             if let Some(old_parent) = app.get(child).parent {
                 old_parent.remove_child_data(app, child);
@@ -975,7 +983,7 @@ impl RestorationBucket {
         let Some(pending) = app.get_mut(self).children_to_add.get_mut(&child_id) else {
             return;
         };
-        if let Some(index) = pending.iter().position(|bucket| **bucket == child) {
+        if let Some(index) = pending.iter().position(|bucket| bucket.handle() == child) {
             pending.remove(index);
         }
         if pending.is_empty() {
@@ -1008,7 +1016,7 @@ impl RestorationBucket {
         debug_assert!(
             self.with_raw_children(app, |children| !children.contains_key(&data_key(&child_id)))
         );
-        let child_handle = *child;
+        let child_handle = child.handle();
         app.get_mut(self)
             .claimed_children
             .insert(child_id.clone(), child);
@@ -1079,14 +1087,15 @@ impl RestorationBucket {
         if new_restoration_id == app.get(self).restoration_id {
             return;
         }
+        // Taken before the parent lets go of the bucket, which may be what keeps it.
+        let kept = self.upgrade(app);
         if let Some(parent) = app.get(self).parent {
             parent.remove_child_data(app, self);
         }
         app.get_mut(self).restoration_id = new_restoration_id.to_string();
-        if let Some(parent) = app.get(self).parent {
-            let kept = self
-                .upgrade(app)
-                .expect("a bucket being renamed is kept by its owner");
+        if let Some(parent) = app.get(self).parent
+            && let Some(kept) = kept
+        {
             parent.add_child_data(app, kept);
         }
     }
@@ -1474,6 +1483,39 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(puts.len(), 1);
         assert_eq!(at(&puts[0], &["v", "value1"]), Some(&22i64.into()));
+    }
+
+    /// Dart's `dispose` calls `unscheduleSerializationFor`, so the set that holds the buckets
+    /// waiting for the frame's serialization does not keep a disposed one alive.
+    #[test]
+    fn a_disposed_bucket_is_not_kept_for_serialization() {
+        let (mut fixture, root) = Fixture::restored(raw_data_set());
+        let child = root.claim_child(&mut fixture.cell.borrow_mut(), "child1", None);
+        child.write(&mut fixture.cell.borrow_mut(), "foo", 1i64);
+        let id = child.handle();
+        child.dispose(&mut fixture.cell.borrow_mut());
+        drop(child);
+        fixture.cell.checkpoint();
+        assert!(!fixture.cell.borrow().contains(id));
+
+        fixture.pump();
+        assert_eq!(fixture.restoration.puts.borrow().len(), 1);
+    }
+
+    /// A bucket nothing keeps any more that changes before the checkpoint frees it is not held
+    /// for the frame's serialization, and the change is still sent.
+    #[test]
+    fn a_bucket_nothing_keeps_still_schedules_the_serialization() {
+        let (mut fixture, root) = Fixture::restored(raw_data_set());
+        let child = RestorationBucket::child(&mut fixture.cell.borrow_mut(), "child1", root, None);
+        let id = child.handle();
+        drop(child);
+        id.write(&mut fixture.cell.borrow_mut(), "foo", 1i64);
+        fixture.cell.checkpoint();
+        assert!(!fixture.cell.borrow().contains(id));
+
+        fixture.pump();
+        assert_eq!(fixture.restoration.puts.borrow().len(), 1);
     }
 
     #[test]

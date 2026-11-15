@@ -171,7 +171,7 @@ impl ScrollViewportController {
             native.remove_listener(app, &listener);
         }
         ScrollControllerLeaf::dispose(native.handle(), app);
-        app.get_mut(self).notifier.dispose();
+        ChangeNotifierData::dispose(app, self);
     }
 
     /// Coalesces native offset, activity and layout notifications after the current frame.

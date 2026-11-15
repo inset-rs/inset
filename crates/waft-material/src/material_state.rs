@@ -873,7 +873,7 @@ mod tests {
         assert_eq!(*app.get(&controller).value(), WidgetStates::new());
         assert_eq!(count.get(), 1);
 
-        app.get_mut(&controller).dispose();
+        controller.dispose(&mut app);
         assert!(!app.get(&controller).change_notifier_data().has_listeners());
     }
 }

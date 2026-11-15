@@ -78,7 +78,7 @@ impl State for BottomMessageState {
 
     fn dispose(self: Handle<Self>, app: &mut App) {
         if let Some(controller) = app.get_mut(self).controller.take() {
-            app.get_mut(&controller).dispose();
+            controller.dispose(app);
         }
     }
 

@@ -1218,6 +1218,14 @@ pub trait InkFeatureObject: Sized + 'static {
 /// What a field Dart types as `InkFeature` holds: the material's list, an ink well's state.
 pub type InkFeatureRef = Retained<AnyInkFeature>;
 
+impl AnyInkFeature {
+    /// A [`InkFeatureRef`] while something still keeps the object; see
+    /// [`Handle::upgrade`](waft_foundation::Handle::upgrade).
+    pub fn upgrade(self, app: &App) -> Option<InkFeatureRef> {
+        Retained::upgrade(app, self)
+    }
+}
+
 impl<F: InkFeatureLeaf> From<Handle<F>> for AnyInkFeature {
     fn from(feature: Handle<F>) -> AnyInkFeature {
         feature.as_ink_feature()

@@ -339,7 +339,7 @@ impl ClipboardStatusNotifier {
         }
         self.stop_listening_to_the_clipboard(app);
         app.get_mut(self).disposed = true;
-        app.get_mut(self).change_notifier.dispose();
+        ChangeNotifierData::dispose(app, self);
     }
 }
 
@@ -481,7 +481,7 @@ impl LiveTextInputStatusNotifier {
             WidgetsBinding::instance(app).remove_observer(app, &observer);
         }
         app.get_mut(self).disposed = true;
-        app.get_mut(self).change_notifier.dispose();
+        ChangeNotifierData::dispose(app, self);
     }
 }
 
@@ -1308,9 +1308,9 @@ impl TextSelectionOverlay {
         let toolbar = app.get(self).effective_toolbar_visibility.handle();
         let start = app.get(self).effective_start_handle_visibility.handle();
         let end = app.get(self).effective_end_handle_visibility.handle();
-        app.get_mut(toolbar).dispose();
-        app.get_mut(start).dispose();
-        app.get_mut(end).dispose();
+        toolbar.dispose(app);
+        start.dispose(app);
+        end.dispose(app);
         self.hide_toolbar(app);
     }
 
@@ -2601,7 +2601,7 @@ impl SelectionOverlay {
     pub fn dispose(self: Handle<Self>, app: &mut App) {
         self.hide(app);
         let magnifier_info = app.get(self).magnifier_info.handle();
-        app.get_mut(magnifier_info).dispose();
+        magnifier_info.dispose(app);
     }
 
     fn build_start_handle(self: Handle<Self>, app: &App, _context: BuildContext) -> WidgetRef {
@@ -2891,7 +2891,7 @@ impl State for SelectionToolbarWrapperState {
     crate::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             app,
             None,
             Some(SelectionOverlay::FADE_DURATION),
@@ -3164,7 +3164,7 @@ impl State for SelectionHandleOverlayState {
     crate::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             app,
             None,
             Some(SelectionOverlay::FADE_DURATION),
@@ -4569,47 +4569,63 @@ pub trait TextSelectionGestureDetectorBuilderBase: TextSelectionGestureDetectorB
         let mut detector = TextSelectionGestureDetector::new(child)
             .on_tap_track_start(Listener::new({
                 let this = this.clone();
-                move |app| TextSelectionGestureDetectorBuilder::on_tap_track_start(*this, app)
+                move |app| {
+                    TextSelectionGestureDetectorBuilder::on_tap_track_start(this.handle(), app)
+                }
             }))
             .on_tap_track_reset(Listener::new({
                 let this = this.clone();
-                move |app| TextSelectionGestureDetectorBuilder::on_tap_track_reset(*this, app)
+                move |app| {
+                    TextSelectionGestureDetectorBuilder::on_tap_track_reset(this.handle(), app)
+                }
             }))
             .on_tap_down(Rc::new({
                 let this = this.clone();
                 move |app, details| {
-                    TextSelectionGestureDetectorBuilder::on_tap_down(*this, app, details)
+                    TextSelectionGestureDetectorBuilder::on_tap_down(this.handle(), app, details)
                 }
             }))
             .on_secondary_tap(Listener::new({
                 let this = this.clone();
-                move |app| TextSelectionGestureDetectorBuilder::on_secondary_tap(*this, app)
+                move |app| TextSelectionGestureDetectorBuilder::on_secondary_tap(this.handle(), app)
             }))
             .on_secondary_tap_down(Rc::new({
                 let this = this.clone();
                 move |app, details| {
-                    TextSelectionGestureDetectorBuilder::on_secondary_tap_down(*this, app, details)
+                    TextSelectionGestureDetectorBuilder::on_secondary_tap_down(
+                        this.handle(),
+                        app,
+                        details,
+                    )
                 }
             }))
             .on_single_tap_up(Rc::new({
                 let this = this.clone();
                 move |app, details| {
-                    TextSelectionGestureDetectorBuilder::on_single_tap_up(*this, app, details)
+                    TextSelectionGestureDetectorBuilder::on_single_tap_up(
+                        this.handle(),
+                        app,
+                        details,
+                    )
                 }
             }))
             .on_single_tap_cancel(Listener::new({
                 let this = this.clone();
-                move |app| TextSelectionGestureDetectorBuilder::on_single_tap_cancel(*this, app)
+                move |app| {
+                    TextSelectionGestureDetectorBuilder::on_single_tap_cancel(this.handle(), app)
+                }
             }))
             .on_user_tap(Listener::new({
                 let this = this.clone();
-                move |app| TextSelectionGestureDetectorBuilder::on_user_tap(*this, app)
+                move |app| TextSelectionGestureDetectorBuilder::on_user_tap(this.handle(), app)
             }))
             .on_single_long_tap_start(Rc::new({
                 let this = this.clone();
                 move |app, details| {
                     TextSelectionGestureDetectorBuilder::on_single_long_tap_start(
-                        *this, app, details,
+                        this.handle(),
+                        app,
+                        details,
                     )
                 }
             }))
@@ -4617,39 +4633,58 @@ pub trait TextSelectionGestureDetectorBuilderBase: TextSelectionGestureDetectorB
                 let this = this.clone();
                 move |app, details| {
                     TextSelectionGestureDetectorBuilder::on_single_long_tap_move_update(
-                        *this, app, details,
+                        this.handle(),
+                        app,
+                        details,
                     )
                 }
             }))
             .on_single_long_tap_end(Rc::new({
                 let this = this.clone();
                 move |app, details| {
-                    TextSelectionGestureDetectorBuilder::on_single_long_tap_end(*this, app, details)
+                    TextSelectionGestureDetectorBuilder::on_single_long_tap_end(
+                        this.handle(),
+                        app,
+                        details,
+                    )
                 }
             }))
             .on_single_long_tap_cancel(Listener::new({
                 let this = this.clone();
                 move |app| {
-                    TextSelectionGestureDetectorBuilder::on_single_long_tap_cancel(*this, app)
+                    TextSelectionGestureDetectorBuilder::on_single_long_tap_cancel(
+                        this.handle(),
+                        app,
+                    )
                 }
             }))
             .on_double_tap_down(Rc::new({
                 let this = this.clone();
                 move |app, details| {
-                    TextSelectionGestureDetectorBuilder::on_double_tap_down(*this, app, details)
+                    TextSelectionGestureDetectorBuilder::on_double_tap_down(
+                        this.handle(),
+                        app,
+                        details,
+                    )
                 }
             }))
             .on_triple_tap_down(Rc::new({
                 let this = this.clone();
                 move |app, details| {
-                    TextSelectionGestureDetectorBuilder::on_triple_tap_down(*this, app, details)
+                    TextSelectionGestureDetectorBuilder::on_triple_tap_down(
+                        this.handle(),
+                        app,
+                        details,
+                    )
                 }
             }))
             .on_drag_selection_start(Rc::new({
                 let this = this.clone();
                 move |app, details| {
                     TextSelectionGestureDetectorBuilder::on_drag_selection_start(
-                        *this, app, details,
+                        this.handle(),
+                        app,
+                        details,
                     )
                 }
             }))
@@ -4657,14 +4692,20 @@ pub trait TextSelectionGestureDetectorBuilderBase: TextSelectionGestureDetectorB
                 let this = this.clone();
                 move |app, details| {
                     TextSelectionGestureDetectorBuilder::on_drag_selection_update(
-                        *this, app, details,
+                        this.handle(),
+                        app,
+                        details,
                     )
                 }
             }))
             .on_drag_selection_end(Rc::new({
                 let this = this.clone();
                 move |app, details| {
-                    TextSelectionGestureDetectorBuilder::on_drag_selection_end(*this, app, details)
+                    TextSelectionGestureDetectorBuilder::on_drag_selection_end(
+                        this.handle(),
+                        app,
+                        details,
+                    )
                 }
             }))
             .on_user_tap_always_called(
@@ -4676,14 +4717,20 @@ pub trait TextSelectionGestureDetectorBuilderBase: TextSelectionGestureDetectorB
                     let this = this.clone();
                     move |app, details| {
                         TextSelectionGestureDetectorBuilder::on_force_press_start(
-                            *this, app, details,
+                            this.handle(),
+                            app,
+                            details,
                         )
                     }
                 }))
                 .on_force_press_end(Rc::new({
                     let this = this.clone();
                     move |app, details| {
-                        TextSelectionGestureDetectorBuilder::on_force_press_end(*this, app, details)
+                        TextSelectionGestureDetectorBuilder::on_force_press_end(
+                            this.handle(),
+                            app,
+                            details,
+                        )
                     }
                 }));
         }
@@ -5850,7 +5897,7 @@ mod tests {
             let shown = app.create(ValueNotifier::new(true));
             let controller = TextEditingController::new(&mut app).text(&mut app, "hello");
             let focus_node = FocusNode::new(&mut app);
-            let visible = *shown;
+            let visible = shown.handle();
             let field = ListenableBuilder::new(Rc::new(shown.clone()), move |app, _, _| {
                 if !*app.get(visible).value() {
                     return SizedBox::shrink().into_widget();

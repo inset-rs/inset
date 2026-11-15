@@ -585,7 +585,7 @@ impl State for MaterialScrollbarState {
 
     fn init_state(self: Handle<Self>, app: &mut App) {
         RawScrollbarState::init_state(self, app);
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             app,
             None,
             Some(Duration::from_millis(200)),

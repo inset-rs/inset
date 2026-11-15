@@ -2617,7 +2617,7 @@ mod tests {
         assert_eq!(tester.count_text("foo/error"), 0);
 
         // Enter text in the first TextFormField.
-        focus(&mut tester, *node1);
+        focus(&mut tester, node1.handle());
         tester.enter_text(&key1, "foo");
         tester.pump();
 
@@ -2626,14 +2626,14 @@ mod tests {
 
         // Tap on the second TextFormField to trigger validation.
         // This should trigger validation for the first TextFormField as well.
-        focus(&mut tester, *node2);
+        focus(&mut tester, node2.handle());
 
         // Verify that the error text is displayed for the first TextFormField.
         assert_eq!(tester.count_text("foo/error"), 1);
         assert_eq!(tester.count_text("bar/error"), 0);
 
         // Tap on the first TextFormField to trigger validation.
-        focus(&mut tester, *node1);
+        focus(&mut tester, node1.handle());
 
         // Verify that the both error texts are displayed.
         assert_eq!(tester.count_text("foo/error"), 1);
@@ -2674,19 +2674,19 @@ mod tests {
         assert_eq!(tester.count_text("foo/error"), 1);
 
         // Enter text in the TextFormField.
-        focus(&mut tester, *node1);
+        focus(&mut tester, node1.handle());
         tester.enter_text(&key1, "foo");
         tester.pump();
 
         // Click in the second TextFormField to trigger validation.
-        focus(&mut tester, *node2);
+        focus(&mut tester, node2.handle());
 
         // No error text is visible yet for the second TextFormField.
         assert_eq!(tester.count_text("bar/error"), 0);
 
         // Now click in the first TextFormField to trigger validation for the second
         // TextFormField.
-        focus(&mut tester, *node1);
+        focus(&mut tester, node1.handle());
 
         // Verify that the error text is displayed for the second TextFormField.
         assert_eq!(tester.count_text("bar/error"), 1);
@@ -2723,7 +2723,7 @@ mod tests {
         );
 
         // Focus on the first field.
-        focus(&mut tester, *node1);
+        focus(&mut tester, node1.handle());
 
         // Check no error messages are displayed initially.
         assert_eq!(tester.count_text("foo/error"), 0);

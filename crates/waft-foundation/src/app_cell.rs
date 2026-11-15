@@ -389,7 +389,7 @@ mod tests {
     fn a_task_reaches_the_app_through_update() {
         let cell = AppCell::new();
         let handle_ref = cell.borrow_mut().create(3u32);
-        let handle = *handle_ref;
+        let handle = handle_ref.handle();
         cell.borrow().spawn(async move |cx| {
             cx.update(|app| *app.get_mut(handle) += 4);
         });
@@ -519,7 +519,7 @@ mod tests {
         let queued = token.clone();
         cell.borrow().spawn(async move |_cx| drop(queued));
         let completer_ref = cell.borrow_mut().create(Completer::<()>::new());
-        let completer = *completer_ref;
+        let completer = completer_ref.handle();
         let future = cell.borrow().get(completer).future();
         let pending = token.clone();
         cell.borrow().spawn(async move |_cx| {

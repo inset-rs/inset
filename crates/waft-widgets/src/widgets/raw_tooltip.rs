@@ -928,7 +928,7 @@ impl RawTooltipState {
         }
         let show_duration = self.show_duration(app);
         let hide_duration = self.hide_duration(app);
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             app,
             None,
             Some(show_duration),
@@ -960,7 +960,7 @@ impl RawTooltipState {
             .erase();
         let show_curve = self.show_curve(app);
         let hide_curve = self.hide_curve(app);
-        let overlay_animation = CurvedAnimation::create(app, parent, show_curve, hide_curve);
+        let overlay_animation = CurvedAnimation::new(app, parent, show_curve, hide_curve);
         let handle = overlay_animation.handle();
         app.get_mut(self).backing_overlay_animation = Some(overlay_animation);
         handle

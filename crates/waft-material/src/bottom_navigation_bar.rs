@@ -1089,7 +1089,7 @@ impl BottomNavigationBarState {
         let items_length = self.widget(app).items.len();
         let controllers: Vec<Ref<AnimationController>> = (0..items_length)
             .map(|_| {
-                let controller = AnimationController::create(
+                let controller = AnimationController::new(
                     app,
                     None,
                     Some(K_THEME_ANIMATION_DURATION),
@@ -1106,7 +1106,7 @@ impl BottomNavigationBarState {
         let animations: Vec<Ref<CurvedAnimation>> = controllers
             .iter()
             .map(|controller| {
-                CurvedAnimation::create(
+                CurvedAnimation::new(
                     app,
                     controller.erase(),
                     Curves::fast_out_slow_in(),
@@ -1668,7 +1668,7 @@ impl Circle {
         color: Color,
         vsync: impl waft_scheduler::TickerProvider,
     ) -> Circle {
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             app,
             None,
             Some(K_THEME_ANIMATION_DURATION),
@@ -1679,7 +1679,7 @@ impl Circle {
             vsync,
         );
         let animation =
-            CurvedAnimation::create(app, controller.erase(), Curves::fast_out_slow_in(), None);
+            CurvedAnimation::new(app, controller.erase(), Curves::fast_out_slow_in(), None);
         controller.forward(app, None);
         Circle {
             state,

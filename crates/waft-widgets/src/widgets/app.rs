@@ -45,7 +45,7 @@ use crate::widgets::navigator::{
     RouteRef, RouteSettings,
 };
 use crate::widgets::notification_listener::{NotificationListener, NotificationListenerCallback};
-use crate::widgets::pages::{AnyPageRoute, PageRouteRef};
+use crate::widgets::pages::PageRouteRef;
 use crate::widgets::raw_tooltip::RawTooltip;
 use crate::widgets::restoration::RootRestorationScope;
 use crate::widgets::scrollable_helpers::{ScrollAction, ScrollIncrementType, ScrollIntent};
@@ -1408,7 +1408,7 @@ impl WidgetsAppState {
                  pageRouteBuilder set if the home or routes properties are set.",
             );
             let route = page_route_builder(app, settings, page_content_builder);
-            return Some(route.into_map(AnyPageRoute::as_route));
+            return Some(route.into_erased());
         }
         let on_generate_route = self.widget(app).on_generate_route.clone();
         if let Some(on_generate_route) = on_generate_route {
@@ -2122,8 +2122,7 @@ mod tests {
             &settings,
             Rc::new(|_app, _context| SizedBox::shrink().into_widget()),
         );
-        Navigator::of(&mut app, context, false)
-            .push(&mut app, route.into_map(AnyPageRoute::as_route));
+        Navigator::of(&mut app, context, false).push(&mut app, route.into_erased());
         settle(&mut app);
 
         assert!(
@@ -2255,8 +2254,7 @@ mod tests {
             &settings,
             Rc::new(|_app, _context| SizedBox::shrink().into_widget()),
         );
-        Navigator::of(&mut app, context, false)
-            .push(&mut app, route.into_map(AnyPageRoute::as_route));
+        Navigator::of(&mut app, context, false).push(&mut app, route.into_erased());
         settle(&mut app);
         assert_eq!(framework_handles_backs(&view).last(), Some(&true));
 
@@ -2308,8 +2306,7 @@ mod tests {
             &settings,
             Rc::new(|_app, _context| SizedBox::shrink().into_widget()),
         );
-        Navigator::of(&mut app, second, false)
-            .push(&mut app, route.into_map(AnyPageRoute::as_route));
+        Navigator::of(&mut app, second, false).push(&mut app, route.into_erased());
         settle(&mut app);
         assert_eq!(framework_handles_backs(&views[0]).last(), Some(&false));
         assert_eq!(framework_handles_backs(&views[1]).last(), Some(&true));
@@ -2412,7 +2409,7 @@ mod tests {
                 .into_widget(),
         );
         let mut app = cell.borrow_mut();
-        let root_scope = FocusManager::instance(&mut app).root_scope(&app);
+        let root_scope = FocusManager::instance(&mut app).root_scope(&app).handle();
         let node: AnyFocusNode = FocusNodeLeaf::as_node(root_scope)
             .descendants(&mut app)
             .into_iter()

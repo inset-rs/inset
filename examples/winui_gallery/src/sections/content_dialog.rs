@@ -51,40 +51,40 @@ impl State for ContentDialogDemoState {
     waft_widgets::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
-        let save = ContentDialog::new(app)
-            .title(app, Text::new("Save your work?"))
-            .content(
-                app,
-                Text::new("Your changes are lost unless you save them before closing."),
-            )
-            .primary_button_text(app, "Save")
-            .secondary_button_text(app, "Don't save")
-            .close_button_text(app, "Cancel")
-            .default_button(app, ContentDialogButton::Primary);
+        let save = ContentDialog::new(app);
+        save.title(app, Text::new("Save your work?"));
+        save.content(
+            app,
+            Text::new("Your changes are lost unless you save them before closing."),
+        );
+        save.primary_button_text(app, "Save");
+        save.secondary_button_text(app, "Don't save");
+        save.close_button_text(app, "Cancel");
+        save.default_button(app, ContentDialogButton::Primary);
         let name = TextEditingController::new(app);
         let closing_name = name.clone();
-        let create = ContentDialog::new(app)
-            .title(app, Text::new("New collection"))
-            .content(
-                app,
-                TextBox::new(name.erase())
-                    .header(Text::new("Name"))
-                    .placeholder_text("Photos"),
-            )
-            .primary_button_text(app, "Create")
-            .close_button_text(app, "Cancel")
-            .default_button(app, ContentDialogButton::Primary)
-            .closing(app, move |app, args| {
-                args.set_cancel(
-                    args.result() == ContentDialogResult::Primary
-                        && closing_name.text_value(app).is_empty(),
-                );
-                if args.cancel() {
-                    self.set_state(app, |state| {
-                        state.event = "A collection needs a name".into()
-                    });
-                }
-            });
+        let create = ContentDialog::new(app);
+        create.title(app, Text::new("New collection"));
+        create.content(
+            app,
+            TextBox::new(name.erase())
+                .header(Text::new("Name"))
+                .placeholder_text("Photos"),
+        );
+        create.primary_button_text(app, "Create");
+        create.close_button_text(app, "Cancel");
+        create.default_button(app, ContentDialogButton::Primary);
+        create.closing(app, move |app, args| {
+            args.set_cancel(
+                args.result() == ContentDialogResult::Primary
+                    && closing_name.text_value(app).is_empty(),
+            );
+            if args.cancel() {
+                self.set_state(app, |state| {
+                    state.event = "A collection needs a name".into()
+                });
+            }
+        });
         for dialog in [save.clone(), create.clone()] {
             dialog.closed(app, move |app, args| {
                 self.set_state(app, |state| {
@@ -106,7 +106,7 @@ impl State for ContentDialogDemoState {
             dialog.dispose(app);
         }
         if let Some(name) = name {
-            app.get_mut(&name).dispose();
+            name.dispose(app);
         }
     }
 

@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use indexmap::IndexMap;
 use waft_embedder::{Matrix4, Offset, PointerDeviceKind};
-use waft_foundation::{App, Handle, Listener};
+use waft_foundation::{App, Handle, Listener, OptionRetained};
 use waft_scheduler::SchedulerBinding;
 
 use crate::arena::GestureDisposition;
@@ -1340,7 +1340,7 @@ macro_rules! drag_gesture_recognizer_leaf {
 
             /// The team that this recognizer belongs to, if any.
             pub fn team(self: Handle<Self>, app: &App) -> Option<Handle<GestureArenaTeam>> {
-                app.get(self).one_sequence.team.as_deref().copied()
+                app.get(self).one_sequence.team.handle()
             }
 
             /// The [`team`](Self::team) can only be set once.
@@ -2042,7 +2042,7 @@ mod tests {
         assert!(did_end_pan.get());
         assert!(!did_tap.get());
 
-        DragGestureRecognizer::dispose(*pan, &mut app);
+        DragGestureRecognizer::dispose(pan.handle(), &mut app);
         tap.dispose(&mut app);
     }
 
@@ -2084,8 +2084,8 @@ mod tests {
         assert_eq!(position_at_on_start.get(), Some(Offset::new(30.0, 0.0)));
         assert_eq!(update_offset.get(), None);
 
-        DragGestureRecognizer::dispose(*drag, &mut app);
-        DragGestureRecognizer::dispose(*competing_drag, &mut app);
+        DragGestureRecognizer::dispose(drag.handle(), &mut app);
+        DragGestureRecognizer::dispose(competing_drag.handle(), &mut app);
     }
 
     #[test]
@@ -2146,7 +2146,7 @@ mod tests {
         assert!(updated_delta.get().is_none());
         assert!(did_end_drag.get());
 
-        DragGestureRecognizer::dispose(*drag, &mut app);
+        DragGestureRecognizer::dispose(drag.handle(), &mut app);
     }
 
     #[test]
@@ -2192,8 +2192,8 @@ mod tests {
         // The arena rejects the losers before it accepts the winner.
         assert_eq!(*log.borrow(), vec!["horizontal cancel", "vertical start"]);
 
-        DragGestureRecognizer::dispose(*vertical, &mut app);
-        DragGestureRecognizer::dispose(*horizontal, &mut app);
+        DragGestureRecognizer::dispose(vertical.handle(), &mut app);
+        DragGestureRecognizer::dispose(horizontal.handle(), &mut app);
     }
 
     #[test]
@@ -2238,7 +2238,7 @@ mod tests {
         assert!(velocity.get().pixels_per_second.dy().abs() < 1e-9);
         assert_eq!(primary_velocity.get(), Some(dx));
 
-        DragGestureRecognizer::dispose(*drag, &mut app);
+        DragGestureRecognizer::dispose(drag.handle(), &mut app);
     }
 
     fn drag_callbacks_on_a_drag_that_never_moves(
@@ -2278,7 +2278,7 @@ mod tests {
         route(&mut app, PointerEvent::Down(down));
         let up = pointer.up(Duration::ZERO);
         route(&mut app, PointerEvent::Up(up));
-        DragGestureRecognizer::dispose(*vertical_drag, &mut app);
+        DragGestureRecognizer::dispose(vertical_drag.handle(), &mut app);
         log.borrow().clone()
     }
 
@@ -2356,8 +2356,8 @@ mod tests {
         assert!(updated_scroll_delta.get().is_none());
         assert!(did_end_pan.get());
 
-        DragGestureRecognizer::dispose(*pan, &mut app);
-        DragGestureRecognizer::dispose(*competing_pan, &mut app);
+        DragGestureRecognizer::dispose(pan.handle(), &mut app);
+        DragGestureRecognizer::dispose(competing_pan.handle(), &mut app);
     }
 
     #[test]
@@ -2371,13 +2371,17 @@ mod tests {
             ..PointerDownEvent::default()
         };
         assert!(!DragGestureRecognizer::is_pointer_allowed(
-            *drag, &app, &down
+            drag.handle(),
+            &app,
+            &down
         ));
         drag.set_on_start(&mut app, Some(Rc::new(|_app, _details| {})));
         assert!(DragGestureRecognizer::is_pointer_allowed(
-            *drag, &app, &down
+            drag.handle(),
+            &app,
+            &down
         ));
-        DragGestureRecognizer::dispose(*drag, &mut app);
+        DragGestureRecognizer::dispose(drag.handle(), &mut app);
     }
 
     #[test]
@@ -2390,8 +2394,8 @@ mod tests {
         assert_eq!(vertical.debug_description(), "vertical drag");
         assert_eq!(horizontal.debug_description(), "horizontal drag");
         assert_eq!(pan.debug_description(), "pan");
-        DragGestureRecognizer::dispose(*vertical, &mut app);
-        DragGestureRecognizer::dispose(*horizontal, &mut app);
-        DragGestureRecognizer::dispose(*pan, &mut app);
+        DragGestureRecognizer::dispose(vertical.handle(), &mut app);
+        DragGestureRecognizer::dispose(horizontal.handle(), &mut app);
+        DragGestureRecognizer::dispose(pan.handle(), &mut app);
     }
 }

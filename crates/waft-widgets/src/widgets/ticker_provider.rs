@@ -310,8 +310,8 @@ impl State for TickerModeState {
     fn dispose(self: Handle<Self>, app: &mut App) {
         let effective_mode = self.effective_mode(app);
         let effective_values = self.effective_values(app);
-        app.get_mut(&effective_mode).dispose();
-        app.get_mut(&effective_values).dispose();
+        effective_mode.dispose(app);
+        effective_values.dispose(app);
     }
 
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
@@ -852,7 +852,7 @@ mod tests {
     }
 
     fn new_controller(app: &mut App, vsync: impl TickerProvider) -> Ref<AnimationController> {
-        AnimationController::create(
+        AnimationController::new(
             app,
             None,
             Some(Duration::from_millis(100)),

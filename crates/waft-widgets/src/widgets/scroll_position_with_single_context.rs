@@ -500,7 +500,7 @@ impl ScrollPositionWithSingleContext {
             scroll_position,
             single_context: ScrollPositionWithSingleContextData::new(),
         });
-        ScrollPositionWithSingleContext::init(*this, app, initial_pixels, old_position);
+        ScrollPositionWithSingleContext::init(this.handle(), app, initial_pixels, old_position);
         this
     }
 
@@ -929,7 +929,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let harness = mount_scroll_harness(&mut app);
         let kept = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
-        let position = *kept;
+        let position = kept.handle();
         assert!(!position.have_dimensions(&app));
         assert_eq!(ViewportOffset::pixels(position, &app), 0.0);
 
@@ -956,7 +956,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let harness = mount_scroll_harness(&mut app);
         let kept = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
-        let position = *kept;
+        let position = kept.handle();
         lay_out(&mut app, position);
         harness.notifications.borrow_mut().clear();
 
@@ -986,7 +986,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let harness = mount_scroll_harness(&mut app);
         let kept = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
-        let position = *kept;
+        let position = kept.handle();
         lay_out(&mut app, position);
 
         ViewportOffset::animate_to(
@@ -1016,7 +1016,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let harness = mount_scroll_harness(&mut app);
         let kept = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
-        let position = *kept;
+        let position = kept.handle();
         lay_out(&mut app, position);
 
         let done = ViewportOffset::animate_to(
@@ -1060,7 +1060,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let harness = mount_scroll_harness(&mut app);
         let kept = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
-        let position = *kept;
+        let position = kept.handle();
         lay_out(&mut app, position);
 
         let done = ViewportOffset::animate_to(
@@ -1096,7 +1096,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let harness = mount_scroll_harness(&mut app);
         let kept = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
-        let position = *kept;
+        let position = kept.handle();
         lay_out(&mut app, position);
 
         let done = ViewportOffset::animate_to(
@@ -1127,7 +1127,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let harness = mount_scroll_harness(&mut app);
         let kept = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
-        let position = *kept;
+        let position = kept.handle();
         lay_out(&mut app, position);
         harness.notifications.borrow_mut().clear();
 
@@ -1150,7 +1150,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let harness = mount_scroll_harness(&mut app);
         let kept = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
-        let position = *kept;
+        let position = kept.handle();
         lay_out(&mut app, position);
         harness.notifications.borrow_mut().clear();
 
@@ -1194,7 +1194,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let harness = mount_scroll_harness(&mut app);
         let kept = position(&mut app, &harness, Rc::new(BouncingScrollPhysics::new()));
-        let position = *kept;
+        let position = kept.handle();
         lay_out(&mut app, position);
 
         let drag = ScrollPosition::drag(
@@ -1232,7 +1232,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let harness = mount_scroll_harness(&mut app);
         let kept_old = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
-        let old = *kept_old;
+        let old = kept_old.handle();
         lay_out(&mut app, old);
         ViewportOffset::jump_to(old, &mut app, 75.0);
 
@@ -1245,7 +1245,7 @@ mod tests {
             Some(old.as_scroll_position()),
             None,
         );
-        let new = *kept_new;
+        let new = kept_new.handle();
 
         assert_eq!(ViewportOffset::pixels(new, &app), 75.0);
         assert_eq!(new.max_scroll_extent(&app), 400.0);
@@ -1259,7 +1259,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let harness = mount_scroll_harness(&mut app);
         let kept = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
-        let position = *kept;
+        let position = kept.handle();
         lay_out(&mut app, position);
         harness.notifications.borrow_mut().clear();
 
@@ -1281,7 +1281,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let harness = mount_scroll_harness(&mut app);
         let kept = position(&mut app, &harness, Rc::new(ClampingScrollPhysics::new()));
-        let position = *kept;
+        let position = kept.handle();
         lay_out(&mut app, position);
 
         let description = position.describe(&app);

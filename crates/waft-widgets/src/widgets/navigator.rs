@@ -12,8 +12,8 @@ use std::time::Duration;
 
 use waft_embedder::{Clip, RestorationData, RestorationMap};
 use waft_foundation::{
-    App, Completer, CompleterFuture, Handle, HandleId, ListenableObject, Listener, OptionRetained,
-    Retained, ValueNotifier,
+    App, ChangeNotifierData, Completer, CompleterFuture, Handle, HandleId, ListenableObject,
+    Listener, OptionRetained, Retained, ValueNotifier, WeakListener,
 };
 use waft_gestures::GestureBinding;
 use waft_rendering::RenderAbsorbPointer;
@@ -830,7 +830,7 @@ pub trait RouteBase: Route {
     fn dispose(self: Handle<Self>, app: &mut App) {
         self.route_data_mut(app).navigator = None;
         let notifier = self.route_data(app).restoration_scope_id.handle();
-        app.get_mut(notifier).dispose();
+        notifier.dispose(app);
         let dispose_completer = self.route_data(app).dispose_completer.clone();
         dispose_completer.complete(app, None);
     }
@@ -966,9 +966,7 @@ impl AnyRoute {
 
     /// A [`RouteRef`] while something still keeps the route; see [`Handle::upgrade`].
     pub fn upgrade(self, app: &App) -> Option<RouteRef> {
-        self.id
-            .upgrade(app)
-            .map(|retained| retained.into_map(|_| self))
+        Retained::upgrade(app, self)
     }
 
     /// Dart's `route as T`: the typed handle when this route is a `T`, else `None`.
@@ -1448,6 +1446,14 @@ impl From<AnyNavigatorObserver> for HandleId {
 
 /// A field Dart types as the erased object, kept: AnyNavigatorObserver with its count.
 pub type NavigatorObserverRef = Retained<AnyNavigatorObserver>;
+
+impl AnyNavigatorObserver {
+    /// A [`NavigatorObserverRef`] while something still keeps the object; see
+    /// [`Handle::upgrade`](waft_foundation::Handle::upgrade).
+    pub fn upgrade(self, app: &App) -> Option<NavigatorObserverRef> {
+        Retained::upgrade(app, self)
+    }
+}
 
 /// A kept object erases to a [`NavigatorObserverRef`] with [`Retained::erase`]: Dart's upcast.
 impl<T: NavigatorObserver> From<Handle<T>> for AnyNavigatorObserver {
@@ -3016,20 +3022,18 @@ impl RouteEntry {
             .insert(kept);
         let remaining = Rc::new(std::cell::Cell::new(mounted_entries.len()));
         for overlay_entry in mounted_entries {
-            let slot: Rc<std::cell::RefCell<Option<Listener>>> =
-                Rc::new(std::cell::RefCell::new(None));
+            // Dart's `late VoidCallback listener`: the closure names itself weakly, so it does
+            // not keep itself once the entry lets it go.
+            let itself: Rc<std::cell::OnceCell<WeakListener>> = Rc::default();
             let listener = {
-                let slot = Rc::clone(&slot);
+                let itself = Rc::clone(&itself);
                 let remaining = Rc::clone(&remaining);
                 Listener::new(move |app| {
                     debug_assert!(remaining.get() > 0);
                     debug_assert!(!overlay_entry.mounted(app));
                     remaining.set(remaining.get() - 1);
-                    // Taken, not cloned: the slot holding this listener would otherwise keep
-                    // it, and the listener the slot, after the entry lets it go.
-                    let registered = slot.borrow_mut().take();
-                    if let Some(registered) = registered {
-                        overlay_entry.remove_listener(app, &registered);
+                    if let Some(listener) = itself.get().and_then(WeakListener::upgrade) {
+                        overlay_entry.remove_listener(app, &listener);
                     }
                     if remaining.get() == 0 {
                         app.schedule_microtask(Listener::new(move |app| {
@@ -3047,7 +3051,7 @@ impl RouteEntry {
                     }
                 })
             };
-            *slot.borrow_mut() = Some(listener.clone());
+            let _ = itself.set(listener.downgrade());
             overlay_entry.add_listener(app, listener);
         }
     }
@@ -3222,19 +3226,19 @@ impl NavigatorObservation {
             NavigatorObservation::Push {
                 primary_route,
                 secondary_route,
-            } => observer.did_push(app, **primary_route, secondary_route.handle()),
+            } => observer.did_push(app, primary_route.handle(), secondary_route.handle()),
             NavigatorObservation::Pop {
                 primary_route,
                 secondary_route,
-            } => observer.did_pop(app, **primary_route, secondary_route.handle()),
+            } => observer.did_pop(app, primary_route.handle(), secondary_route.handle()),
             NavigatorObservation::Remove {
                 primary_route,
                 secondary_route,
-            } => observer.did_remove(app, **primary_route, secondary_route.handle()),
+            } => observer.did_remove(app, primary_route.handle(), secondary_route.handle()),
             NavigatorObservation::Replace {
                 primary_route,
                 secondary_route,
-            } => observer.did_replace(app, Some(**primary_route), secondary_route.handle()),
+            } => observer.did_replace(app, Some(primary_route.handle()), secondary_route.handle()),
         }
     }
 }
@@ -3514,7 +3518,7 @@ impl NavigatorState {
         let history = self.history(app);
         while !history.is_empty(app) {
             let entry = history.remove_last(app);
-            NavigatorState::dispose_route_entry(app, *entry, false);
+            NavigatorState::dispose_route_entry(app, entry.handle(), false);
         }
     }
 
@@ -3809,7 +3813,7 @@ impl NavigatorState {
                     let new_entry =
                         RouteEntry::new(app, route, RouteLifecycle::Staging, true, None);
                     needs_explicit_decision = true;
-                    new_history.push(*new_entry);
+                    new_history.push(new_entry.handle());
                     created.push(new_entry);
                 }
                 Some(index) => {
@@ -4173,7 +4177,7 @@ impl NavigatorState {
 
         // Lastly, removes the overlay entries of all marked entries and disposes them.
         for entry in to_be_disposed {
-            NavigatorState::dispose_route_entry(app, *entry, true);
+            NavigatorState::dispose_route_entry(app, entry.handle(), true);
         }
         if rearrange_overlay && let Some(overlay) = self.overlay(app) {
             let entries = self.all_route_overlay_entries(app);
@@ -4195,12 +4199,12 @@ impl NavigatorState {
         }
         while let Some(observation) = app.get_mut(self).observed_route_additions.pop_back() {
             for observer in app.get(self).effective_observers.clone() {
-                observation.notify(app, *observer);
+                observation.notify(app, observer.handle());
             }
         }
         while let Some(observation) = app.get_mut(self).observed_route_deletions.pop_front() {
             for observer in app.get(self).effective_observers.clone() {
-                observation.notify(app, *observer);
+                observation.notify(app, observer.handle());
             }
         }
     }
@@ -5361,13 +5365,13 @@ impl State for NavigatorState {
         let serializable = self.serializable_history(app);
         RestorableProperty::dispose(serializable, app);
         let notifier = self.user_gesture_in_progress_notifier(app);
-        app.get_mut(notifier).dispose();
+        notifier.dispose(app);
         let history = self.history(app);
         history.remove_listener(
             app,
             &Listener::handle_method(self, NavigatorState::handle_history_changed),
         );
-        app.get_mut(history).change_notifier.dispose();
+        ChangeNotifierData::dispose(app, history);
         TickerProviderStateMixin::dispose(self, app);
         self.dispose_restoration(app);
         // A route that is being disposed can call `finalize_route`, which reads `debug_locked`.
@@ -5401,10 +5405,9 @@ impl State for NavigatorState {
             .expect("init_state has run")
             .erase();
         let policy = FocusTraversalGroup::maybe_of(app, context).map(|policy| {
-            HandleId::from(policy)
+            policy
                 .upgrade(app)
                 .expect("a group's policy is kept by its widget")
-                .into_map(|_| policy)
         });
 
         let overlay = Overlay::new()
@@ -6665,7 +6668,7 @@ mod tests {
         );
 
         let mut app = cell.borrow_mut();
-        navigator_state.remove_route(&mut app, *route_a, Some(Rc::new("B")));
+        navigator_state.remove_route(&mut app, route_a.handle(), Some(Rc::new("B")));
         settle(&mut app, at);
         assert_eq!(
             awaited.get(),

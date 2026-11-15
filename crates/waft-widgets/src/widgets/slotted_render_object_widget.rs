@@ -88,7 +88,7 @@ where
     }
 
     fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
-        SlottedRenderObjectElement::<W>::create(app, this)
+        SlottedRenderObjectElement::<W>::new(app, this).as_element()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -290,7 +290,7 @@ where
     W::RenderObject: SlottedContainerRenderObjectMixin<W::Slot>,
 {
     /// Creates an element that uses the given widget as its configuration.
-    pub fn create(app: &mut App, widget: WidgetRef) -> AnyElement {
+    pub fn new(app: &mut App, widget: WidgetRef) -> Handle<Self> {
         debug_assert!(downcast_widget::<W>(&*widget).is_some());
         app.create(SlottedRenderObjectElement::<W> {
             element: ElementData::new(widget),
@@ -301,7 +301,6 @@ where
             debug_previous_slots: None,
         })
         .into_tree_node(app)
-        .as_element()
     }
 
     /// The element slot of the slot value `slot`, the same object every time.

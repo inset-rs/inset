@@ -1895,7 +1895,7 @@ impl State for SelectableAnimatedBuilderState {
     waft_widgets::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
-        let controller = AnimationController::create(
+        let controller = AnimationController::new(
             app,
             None,
             None,

@@ -1307,7 +1307,7 @@ impl<T: Clone + PartialEq + 'static> State for CheckedPopupMenuItemState<T> {
     waft_widgets::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
-        let controller = waft_animation::AnimationController::create(
+        let controller = waft_animation::AnimationController::new(
             app,
             None,
             Some(Self::FADE_DURATION),
@@ -1461,7 +1461,7 @@ impl<T: Clone + PartialEq + 'static> PopupMenuState<T> {
         for i in 0..count {
             let start = (i as f64 + 1.0) * unit;
             let end = (start + 1.5 * unit).clamp(0.0, 1.0);
-            let opacity = CurvedAnimation::create(
+            let opacity = CurvedAnimation::new(
                 app,
                 animation.clone(),
                 Rc::new(Interval::new(start, end, Curves::linear())),
@@ -2050,7 +2050,7 @@ impl<T: Clone + PartialEq + 'static> TransitionRoute for PopupMenuRoute<T> {
                         Curves::linear(),
                     ))
                 });
-            let animation = CurvedAnimation::create(app, parent, curve, Some(reverse_curve));
+            let animation = CurvedAnimation::new(app, parent, curve, Some(reverse_curve));
             app.get_mut(self).animation = Some(animation.clone());
             return animation.into_erased();
         }

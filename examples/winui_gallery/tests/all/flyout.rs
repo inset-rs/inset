@@ -29,8 +29,8 @@ fn themed_fixture(mode: FlyoutShowMode, theme: Theme) -> (Fixture, Probe) {
     let shared = probe.clone();
     let fixture = Fixture::with_root([500, 400], move |app| {
         winui_gallery::install_fonts(app);
-        let flyout = Flyout::new(app, Button::text("Popup action", Listener::new(|_| {})))
-            .show_mode(app, mode);
+        let flyout = Flyout::new(app, Button::text("Popup action", Listener::new(|_| {})));
+        flyout.show_mode(app, mode);
         *shared.flyout.borrow_mut() = Some(flyout.clone());
         let events = shared.events.clone();
         app.get_mut(&flyout).opening =
@@ -162,7 +162,7 @@ fn nested_presenter_is_inside_parent_but_parent_is_outside_child() {
             Button::text("Nested action", Listener::new(|_| {})),
         );
         let nested = child.clone();
-        parent.clone().content(
+        parent.content(
             &mut app,
             FlyoutTarget::new(Builder::new(move |_, context| {
                 let nested = nested.clone();
@@ -303,7 +303,7 @@ fn standard_outside_dismissal_closes_only_the_topmost_flyout() {
         let mut app = f.cell.borrow_mut();
         let child = Flyout::new(&mut app, Text::new("Nested content"));
         let nested = child.clone();
-        parent.clone().content(
+        parent.content(
             &mut app,
             FlyoutTarget::new(Builder::new(move |_, context| {
                 let nested = nested.clone();

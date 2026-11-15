@@ -204,7 +204,7 @@ impl InkSplash {
         });
         let handle = this.handle();
         let vsync = controller.vsync(app);
-        let radius_controller = AnimationController::create(
+        let radius_controller = AnimationController::new(
             app,
             None,
             Some(K_UNCONFIRMED_SPLASH_DURATION),
@@ -218,7 +218,7 @@ impl InkSplash {
         radius_controller.forward(app, None);
         let radius_tween = Tween::new(app, Some(K_SPLASH_INITIAL_SIZE), Some(target_radius));
         let radius = radius_controller.drive(app, radius_tween);
-        let alpha_controller = AnimationController::create(
+        let alpha_controller = AnimationController::new(
             app,
             None,
             Some(K_SPLASH_FADE_DURATION),

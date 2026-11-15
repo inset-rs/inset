@@ -1428,7 +1428,7 @@ impl RootWidget {
             None => {
                 let mut created = None;
                 owner.lock_state(app, |app| {
-                    let element = RootElement::create(app, widget.clone());
+                    let element = RootElement::new(app, widget.clone());
                     element.as_element().assign_owner(app, owner);
                     created = Some(element);
                 });
@@ -1457,7 +1457,7 @@ impl Widget for RootWidget {
     }
 
     fn create_element(&self, app: &mut App, this: WidgetRef) -> AnyElement {
-        RootElement::create(app, this).as_element()
+        RootElement::new(app, this).as_element()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -1489,7 +1489,7 @@ pub struct RootElement {
 }
 
 impl RootElement {
-    fn create(app: &mut App, widget: WidgetRef) -> Handle<RootElement> {
+    fn new(app: &mut App, widget: WidgetRef) -> Handle<RootElement> {
         debug_assert!(downcast_widget::<RootWidget>(&*widget).is_some());
         app.create(RootElement {
             element: ElementData::new(widget),

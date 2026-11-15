@@ -25,6 +25,8 @@ pub use constants::*;
 pub use date_time::DateTime;
 pub use entity::*;
 pub use executor::Task;
+#[cfg(debug_assertions)]
+pub use handle_map::DebugObject;
 pub use key::*;
 pub use observer_list::*;
 pub use timers::Timer;
