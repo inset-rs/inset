@@ -122,7 +122,7 @@ impl TextButtonTheme {
     pub fn of(app: &mut App, context: BuildContext) -> TextButtonThemeData {
         match context.depend_on_inherited_widget_of_exact_type::<TextButtonTheme>(app) {
             Some(button_theme) => button_theme.data.clone(),
-            None => Theme::of(app, context).text_button_theme,
+            None => Theme::of(app, context).text_button_theme.clone(),
         }
     }
 }
@@ -461,7 +461,7 @@ mod tests {
             assert!(align_of_label(tester) == AlignmentGeometry::CENTER_LEFT);
             let is_below = |key: GlobalKey, ancestor: waft_widgets::AnyElement| {
                 let keyed = key
-                    .current_context(&mut tester.cell.borrow_mut())
+                    .current_context(&tester.cell.borrow_mut())
                     .expect("the keyed subtree is mounted");
                 tester.ancestors(keyed).contains(&ancestor)
             };

@@ -42,8 +42,26 @@ fn flatten_into(picture: &Picture, ops: &mut Vec<Op>) {
 
 pub use valo::{
     Backdrop, BlendMode, BlurStyle, ClipOp, FillRule, Image, MaskBlur, Paint, PaintStyle, Path,
-    PathBuilder, Shader, Stroke,
+    PathBuilder, PathOperation, Shader, Stroke,
 };
+
+/// Combines the two paths according to the manner specified by the given `operation`: dart:ui's
+/// `Path.combine`, Skia's `Op` on two paths of Dart's default non-zero fill type.
+///
+/// The resulting path will be constructed from non-overlapping contours. The curve order is
+/// reduced where possible so that cubics may be turned into quadratics, and quadratics maybe
+/// turned into lines.
+///
+/// Panics where Dart throws its `StateError`: Skia's `Op` gives no path for these two.
+pub fn path_combine(operation: PathOperation, path1: &Path, path2: &Path) -> Arc<Path> {
+    path1
+        .combine(FillRule::NonZero, operation, path2, FillRule::NonZero)
+        .unwrap_or_else(|_| {
+            panic!(
+                "Path.combine() failed.  This may be due an invalid path; in particular, check for NaN values."
+            )
+        })
+}
 
 /// The full valo API for hosts and for recording that needs a type the
 /// aliases do not cover (`Op`, `Context`, `Surface`).
@@ -341,6 +359,15 @@ pub enum ImageFilter {
         inner: Arc<ImageFilter>,
     },
 
+    /// The input moved by a matrix; Dart's `_MatrixImageFilter`, made by
+    /// [`ImageFilter::matrix`].
+    Matrix {
+        /// The matrix that moves the input.
+        data: crate::Matrix4,
+        /// The quality the moved input is sampled at.
+        filter_quality: FilterQuality,
+    },
+
     /// A [`FragmentShader`](crate::FragmentShader)'s program run over the input; Dart's
     /// `_FragmentShaderImageFilter`, made by [`ImageFilter::shader`].
     Shader {
@@ -373,6 +400,20 @@ impl ImageFilter {
                 bounds: Some(bounds),
             },
             other => other,
+        }
+    }
+
+    /// Creates an image filter that applies a matrix transformation.
+    ///
+    /// For example, applying a positive scale matrix (see `Matrix4.diagonal3`) when used with
+    /// `BackdropFilter` would magnify the background image.
+    ///
+    /// The `filter_quality` argument sets the quality level the moved input is sampled at;
+    /// Flutter's default is [`FilterQuality::Medium`].
+    pub const fn matrix(matrix4: crate::Matrix4, filter_quality: FilterQuality) -> ImageFilter {
+        ImageFilter::Matrix {
+            data: matrix4,
+            filter_quality,
         }
     }
 
@@ -475,6 +516,10 @@ impl ImageFilter {
                 format!("blur({sigma_x}, {sigma_y}, unspecified{bounds})")
             }
             ImageFilter::Color(filter) => filter.debug_short_description(),
+            ImageFilter::Matrix {
+                data,
+                filter_quality,
+            } => format!("matrix({:?}, {filter_quality})", data.to_flutter_array()),
             ImageFilter::Compose { outer, inner } => format!(
                 "{} -> {}",
                 inner.debug_short_description(),
@@ -488,7 +533,9 @@ impl ImageFilter {
 impl std::fmt::Display for ImageFilter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ImageFilter::Blur { .. } => write!(f, "ImageFilter.{}", self.debug_short_description()),
+            ImageFilter::Blur { .. } | ImageFilter::Matrix { .. } => {
+                write!(f, "ImageFilter.{}", self.debug_short_description())
+            }
             ImageFilter::Color(filter) => Display::fmt(filter, f),
             ImageFilter::Compose { .. } => write!(
                 f,
@@ -525,6 +572,10 @@ impl ImageFilter {
                 }
             }
             ImageFilter::Color(filter) => valo::ImageFilter::Color(filter.to_valo()),
+            ImageFilter::Matrix {
+                data,
+                filter_quality,
+            } => valo::ImageFilter::matrix(*data, filter_quality.to_valo()),
             ImageFilter::Compose { outer, inner } => {
                 valo::ImageFilter::compose(outer.to_valo(), inner.to_valo())
             }
@@ -535,8 +586,11 @@ impl ImageFilter {
 
 #[cfg(test)]
 mod tests {
-    use super::{ColorFilter, ImageFilter, valo};
-    use crate::{BlendMode, Color, Rect};
+    use super::{
+        ColorFilter, FillRule, FilterQuality, ImageFilter, PathBuilder, PathOperation,
+        path_combine, valo,
+    };
+    use crate::{BlendMode, Color, Matrix4, Rect};
 
     #[test]
     fn a_saturation_of_one_is_the_identity_matrix() {
@@ -552,6 +606,35 @@ mod tests {
         for (value, expected) in matrix.iter().zip(identity) {
             assert!((value - expected).abs() < 1e-12, "{matrix:?}");
         }
+    }
+
+    #[test]
+    fn a_matrix_filter_reaches_valo_with_its_sampling_and_prints_as_darts() {
+        let scale = Matrix4::scale(2.0, 2.0);
+        let filter = ImageFilter::matrix(scale, FilterQuality::Low);
+        assert_eq!(
+            filter.to_valo(),
+            valo::ImageFilter::matrix(scale, FilterQuality::Low.to_valo())
+        );
+        assert_eq!(
+            filter.to_string(),
+            "ImageFilter.matrix([2.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, \
+             0.0, 0.0, 0.0, 1.0], FilterQuality.low)"
+        );
+    }
+
+    #[test]
+    fn combining_two_paths_cuts_one_from_the_other() {
+        let mut host = PathBuilder::new();
+        host.rect(Rect::from_ltwh(0.0, 0.0, 100.0, 100.0).into());
+        let mut guest = PathBuilder::new();
+        guest.rect(Rect::from_ltwh(50.0, -10.0, 100.0, 60.0).into());
+        let notched = path_combine(PathOperation::Difference, &host.build(), &guest.build());
+        let contains = |x: f32, y: f32| notched.contains(valo::Point::new(x, y), FillRule::EvenOdd);
+        assert!(contains(25.0, 25.0));
+        assert!(!contains(75.0, 25.0), "the guest is cut out");
+        assert!(contains(75.0, 75.0));
+        assert!(!contains(125.0, 25.0), "nothing of the guest is added");
     }
 
     #[test]

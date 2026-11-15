@@ -948,9 +948,9 @@ mod tests {
         ))
         .key(key);
         build(&cell, button.into_widget());
-        let mut app = cell.borrow_mut();
+        let app = cell.borrow();
         let state = global_key
-            .current_state::<CupertinoButtonState>(&mut app)
+            .current_state::<CupertinoButtonState>(&app)
             .expect("the button mounted");
         drop(app);
         Mounted {
@@ -1086,7 +1086,7 @@ mod tests {
         build(&cell, button.into_widget());
         let mut app = cell.borrow_mut();
         let state = global_key
-            .current_state::<CupertinoButtonState>(&mut app)
+            .current_state::<CupertinoButtonState>(&app)
             .expect("the button mounted");
 
         send(&mut app, PointerChange::Down, 20.0, 20.0, Duration::ZERO);
@@ -1220,9 +1220,9 @@ mod tests {
         )
         .key(key);
         build(&cell, button.into_widget());
-        let mut app = cell.borrow_mut();
+        let app = cell.borrow();
         let root = global_key
-            .current_context(&mut app)
+            .current_context(&app)
             .expect("the button mounted")
             .find_render_object(&app)
             .expect("the button has a render object");

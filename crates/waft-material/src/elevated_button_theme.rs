@@ -166,7 +166,7 @@ impl ElevatedButtonTheme {
     pub fn of(app: &mut App, context: BuildContext) -> ElevatedButtonThemeData {
         match context.depend_on_inherited_widget_of_exact_type::<ElevatedButtonTheme>(app) {
             Some(button_theme) => button_theme.data.clone(),
-            None => Theme::of(app, context).elevated_button_theme,
+            None => Theme::of(app, context).elevated_button_theme.clone(),
         }
     }
 

@@ -11,8 +11,8 @@ use waft_winui_test_support::Fixture;
 
 /// The size of the render object of the widget with `key`.
 fn size_of(fixture: &Fixture, key: &GlobalKey) -> Size {
-    let mut app = fixture.cell.borrow_mut();
-    let context = key.current_context(&mut app).unwrap();
+    let app = fixture.cell.borrow();
+    let context = key.current_context(&app).unwrap();
     let object = context.find_render_object(&app).unwrap().as_box().unwrap();
     object.size(&app)
 }

@@ -432,7 +432,7 @@ mod tests {
         pump(&mut app, Duration::from_millis(16));
 
         let state = key
-            .current_state::<CupertinoScrollbarState>(&mut app)
+            .current_state::<CupertinoScrollbarState>(&app)
             .expect("the scrollbar is mounted");
         let painter = RawScrollbarState::scrollbar_painter(state, &app);
         assert_eq!(

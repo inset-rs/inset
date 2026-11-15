@@ -13,9 +13,9 @@ use std::sync::Arc;
 
 use indexmap::{IndexMap, IndexSet};
 use waft_embedder::{
-    BlendMode, Clip, Color, ImageFilter, Locale, Matrix4, Offset, Path, RRect, RSuperellipse, Rect,
-    SemanticsHitTestBehavior, SemanticsInputType, SemanticsRole, SemanticsValidationResult, Size,
-    TextBaseline, TextDirection,
+    BlendMode, Clip, Color, FilterQuality, ImageFilter, Locale, Matrix4, Offset, Path, RRect,
+    RSuperellipse, Rect, SemanticsHitTestBehavior, SemanticsInputType, SemanticsRole,
+    SemanticsValidationResult, Size, TextBaseline, TextDirection,
 };
 use waft_foundation::{App, Handle, ValueKey, VoidCallback};
 use waft_gestures::{
@@ -1843,7 +1843,6 @@ impl Debug for PhysicalShape {
 ///
 /// Dart's named constructors are the associated functions [`rotate`](Self::rotate),
 /// [`translate`](Self::translate), [`scale`](Self::scale), and [`flip`](Self::flip).
-/// Flutter's `filterQuality` waits on `RenderTransform.filterQuality`.
 #[derive(Debug)]
 pub struct Transform {
     pub key: Option<KeyRef>,
@@ -1893,6 +1892,12 @@ pub struct Transform {
     ///
     /// Defaults to true.
     pub transform_hit_tests: bool,
+    /// The filter quality with which to apply the transform as a bitmap operation.
+    ///
+    /// The transform will be applied by re-rendering the child if
+    /// [`filter_quality`](Self::filter_quality) is `None`, otherwise it controls the quality
+    /// of an `ImageFilter.matrix` applied to a bitmap rendering of the child.
+    pub filter_quality: Option<FilterQuality>,
     pub child: Option<WidgetRef>,
 }
 
@@ -1906,6 +1911,7 @@ impl Transform {
             origin: None,
             alignment: None,
             transform_hit_tests: true,
+            filter_quality: None,
             child: None,
         }
     }
@@ -2006,6 +2012,12 @@ impl Transform {
         self
     }
 
+    /// Dart `Transform(filterQuality:)`.
+    pub fn filter_quality(mut self, filter_quality: FilterQuality) -> Transform {
+        self.filter_quality = Some(filter_quality);
+        self
+    }
+
     /// Dart `Transform(child:)`.
     pub fn child<K>(mut self, child: impl IntoWidget<K>) -> Transform {
         self.child = Some(child.into_widget());
@@ -2065,6 +2077,7 @@ impl RenderObjectWidget for Transform {
             self.alignment,
             text_direction,
             self.transform_hit_tests,
+            self.filter_quality,
             None,
         )
         .as_object()
@@ -2082,6 +2095,7 @@ impl RenderObjectWidget for Transform {
         let text_direction = Directionality::maybe_of(app, context);
         render_object.set_text_direction(app, text_direction);
         render_object.set_transform_hit_tests(app, self.transform_hit_tests);
+        render_object.set_filter_quality(app, self.filter_quality);
     }
 }
 
@@ -10600,6 +10614,197 @@ mod tests {
             Transform::flip(true, false).alignment,
             Some(AlignmentGeometry::CENTER)
         );
+    }
+
+    /// An app whose one view is Flutter's test window, 800 x 600, mounted with `child` under it.
+    fn flutter_window_cell(child: WidgetRef) -> Rc<AppCell> {
+        let platform = waft_test::TestPlatform::new()
+            .on(waft_embedder::TargetPlatform::MacOS)
+            .with_view(Rc::new(waft_test::TestView::new(800.0, 600.0)));
+        let cell = AppCell::with_platform(Rc::new(platform));
+        crate::test_harness::binding_mount(&cell, child);
+        cell
+    }
+
+    /// Dart's `tester.pumpWidget(child)` after the first: `child` as the view's new root.
+    fn pump_root(app: &mut App, child: WidgetRef) {
+        let view = crate::test_harness::platform_view(app);
+        crate::binding::WidgetsBinding::instance(app)
+            .attach_root_widget(app, crate::view::View::new(view, child).into_widget());
+        crate::test_harness::binding_pump(app, std::time::Duration::from_millis(16));
+    }
+
+    /// Dart's `tester.layers.whereType<ImageFilterLayer>()`: the image filter layers in the
+    /// layer tree from the root, depth first.
+    fn image_filter_layers(app: &mut App) -> Vec<Handle<waft_rendering::ImageFilterLayer>> {
+        let root = crate::binding::WidgetsBinding::instance(app)
+            .root_element(app)
+            .and_then(|root| root.find_render_object(app))
+            .and_then(|view| view.layer(app))
+            .expect("the view's layer");
+        crate::test_harness::layer_tree(app, root)
+            .into_iter()
+            .filter_map(|layer| app.handle::<waft_rendering::ImageFilterLayer>(layer.id()))
+            .collect()
+    }
+
+    /// Dart's `extractMatrix(layer.imageFilter)`: the matrix of the one image filter layer, in
+    /// `Matrix4.storage` order.
+    fn the_filter_matrix(app: &mut App) -> [f32; 16] {
+        let layers = image_filter_layers(app);
+        assert_eq!(layers.len(), 1);
+        match layers[0].image_filter(app) {
+            Some(ImageFilter::Matrix { data, .. }) => data.to_flutter_array(),
+            other => panic!("a matrix filter: {other:?}"),
+        }
+    }
+
+    /// Dart's `moreOrLessEquals` on each entry, at the `f32` the matrix holds.
+    fn assert_matrix_near(actual: [f32; 16], expected: [f64; 16]) {
+        for (actual, expected) in actual.iter().zip(expected) {
+            assert!(
+                (f64::from(*actual) - expected).abs() <= 1e-4 * expected.abs().max(1.0),
+                "{actual:?} is not {expected:?}"
+            );
+        }
+    }
+
+    fn square(dimension: f64) -> SizedBox {
+        SizedBox::new().width(dimension).height(dimension)
+    }
+
+    #[test]
+    fn transform_translate_with_filter_quality_produces_filter_layer() {
+        let cell = flutter_window_cell(
+            Transform::translate(Offset::new(25.0, 25.0))
+                .filter_quality(FilterQuality::Low)
+                .child(square(100.0))
+                .into_widget(),
+        );
+        let mut app = cell.borrow_mut();
+        assert_matrix_near(
+            the_filter_matrix(&mut app),
+            [
+                1.0, 0.0, 0.0, 0.0, //
+                0.0, 1.0, 0.0, 0.0, //
+                0.0, 0.0, 1.0, 0.0, //
+                25.0, 25.0, 0.0, 1.0,
+            ],
+        );
+    }
+
+    #[test]
+    #[allow(
+        clippy::approx_constant,
+        reason = "Dart's case scales by 3.14159, not by pi"
+    )]
+    fn transform_scale_with_filter_quality_produces_filter_layer() {
+        let cell = flutter_window_cell(
+            Transform::scale(Some(3.14159), None, None)
+                .filter_quality(FilterQuality::Low)
+                .child(square(100.0))
+                .into_widget(),
+        );
+        let mut app = cell.borrow_mut();
+        assert_matrix_near(
+            the_filter_matrix(&mut app),
+            [
+                3.14159, 0.0, 0.0, 0.0, //
+                0.0, 3.14159, 0.0, 0.0, //
+                0.0, 0.0, 1.0, 0.0, //
+                -856.636, -642.477, 0.0, 1.0,
+            ],
+        );
+    }
+
+    /// The matrix both rotate cases expect: a quarter of a half turn about the window's center.
+    #[allow(
+        clippy::approx_constant,
+        reason = "Dart's expected entries, as it writes them"
+    )]
+    const ROTATED_ABOUT_THE_WINDOWS_CENTER: [f64; 16] = [
+        0.7071067811865476,
+        0.7071067811865475,
+        0.0,
+        0.0,
+        -0.7071067811865475,
+        0.7071067811865476,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        329.28932188134524,
+        -194.97474683058329,
+        0.0,
+        1.0,
+    ];
+
+    #[test]
+    fn transform_rotate_with_filter_quality_produces_filter_layer() {
+        let cell = flutter_window_cell(
+            Transform::rotate(std::f64::consts::FRAC_PI_4)
+                .filter_quality(FilterQuality::Low)
+                .child(square(100.0))
+                .into_widget(),
+        );
+        let mut app = cell.borrow_mut();
+        assert_matrix_near(
+            the_filter_matrix(&mut app),
+            ROTATED_ABOUT_THE_WINDOWS_CENTER,
+        );
+    }
+
+    #[test]
+    fn offset_transform_rotate_with_filter_quality_produces_filter_layer() {
+        let cell = flutter_window_cell(
+            square(400.0)
+                .child(
+                    Center::new().child(
+                        Transform::rotate(std::f64::consts::FRAC_PI_4)
+                            .filter_quality(FilterQuality::Low)
+                            .child(square(100.0)),
+                    ),
+                )
+                .into_widget(),
+        );
+        let mut app = cell.borrow_mut();
+        assert_matrix_near(
+            the_filter_matrix(&mut app),
+            ROTATED_ABOUT_THE_WINDOWS_CENTER,
+        );
+    }
+
+    #[test]
+    fn transform_layers_update_to_match_child_and_filter_quality() {
+        let rotated = || Transform::rotate(std::f64::consts::FRAC_PI_4);
+        let cell = flutter_window_cell(
+            rotated()
+                .filter_quality(FilterQuality::Low)
+                .child(square(100.0))
+                .into_widget(),
+        );
+        let mut app = cell.borrow_mut();
+        assert_eq!(image_filter_layers(&mut app).len(), 1);
+
+        pump_root(&mut app, rotated().child(square(100.0)).into_widget());
+        assert!(image_filter_layers(&mut app).is_empty());
+
+        pump_root(
+            &mut app,
+            rotated().filter_quality(FilterQuality::Low).into_widget(),
+        );
+        assert!(image_filter_layers(&mut app).is_empty());
+
+        pump_root(
+            &mut app,
+            rotated()
+                .filter_quality(FilterQuality::Low)
+                .child(square(100.0))
+                .into_widget(),
+        );
+        assert_eq!(image_filter_layers(&mut app).len(), 1);
     }
 
     #[test]

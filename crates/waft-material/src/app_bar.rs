@@ -946,6 +946,10 @@ impl StatefulWidget for AppBar {
         self.key.as_ref()
     }
 
+    fn as_preferred_size_widget(&self) -> Option<&dyn PreferredSizeWidget> {
+        Some(self)
+    }
+
     fn create_state(&self) -> AppBarState {
         AppBarState {
             state: StateData::new(),
@@ -3459,9 +3463,7 @@ fn app_bar_defaults_m2(app: &mut App, context: BuildContext) -> AppBarThemeData 
 mod tests {
     //! The behaviour cases of `test/app_bar_test.dart`, `test/app_bar_sliver_test.dart`, the
     //! component cases of `test/app_bar_theme_test.dart`, and the `SliverAppBar` stretch cases
-    //! of Flutter's former `test/material/sliver_app_bar_test.dart`. `TabBar` is not ported:
-    //! where a case's bottom is a text `TabBar`, a `PreferredSize` of its height
-    //! (`kTextTabBarHeight`, 48) stands in, as the cases read only that height.
+    //! of Flutter's former `test/material/sliver_app_bar_test.dart`.
 
     use std::cell::Cell;
 
@@ -3478,6 +3480,8 @@ mod tests {
     use super::*;
     use crate::drawer::Drawer;
     use crate::icons::Icons;
+    use crate::tab_controller::DefaultTabController;
+    use crate::tabs::{Tab, TabBar};
     use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
 
     /// `kTextTabBarHeight`: the height of the `TabBar` Dart's sliver cases put in `bottom`.
@@ -4488,7 +4492,7 @@ mod tests {
 
             let icon_theme_color = |key: &GlobalKey| {
                 let element = key
-                    .current_context(&mut tester.cell.borrow_mut())
+                    .current_context(&tester.cell.borrow_mut())
                     .expect("mounted");
                 let theme = tester.ancestor_of_type::<IconTheme>(element);
                 tester.widget(theme, |theme: &IconTheme| theme.data.color.clone())
@@ -5175,15 +5179,14 @@ mod tests {
         }
     }
 
-    /// The scroll view's controller and the key of the bottom that stands in for the
-    /// `TabBar`, which Dart's cases measure.
+    /// The scroll view's controller and the key of the `TabBar`, which Dart's cases measure.
     struct SliverAppBarAppHandles {
         controller: Handle<ScrollController>,
         tab_bar_key: GlobalKey,
     }
 
     /// Dart's `buildSliverAppBarApp`, with the scroll view's own controller for its primary
-    /// one and a 48 high bottom for its `TabBar`.
+    /// one.
     fn pump_sliver_app_bar_app(
         tester: &mut WidgetTester,
         arguments: SliverAppBarApp,
@@ -5198,16 +5201,17 @@ mod tests {
                 .pinned(arguments.pinned)
                 .toolbar_height(arguments.toolbar_height)
                 .snap(arguments.snap)
-                .bottom(PreferredSizeWidgetRef::new(PreferredSize::new(
-                    Size::from_height(K_TEXT_TAB_BAR_HEIGHT),
-                    SizedBox::new()
-                        .height(K_TEXT_TAB_BAR_HEIGHT)
-                        .key(bottom_key.into()),
-                )));
+                .bottom(PreferredSizeWidgetRef::new(
+                    TabBar::new(
+                        ["A", "B", "C"].map(|t| Tab::new().text(format!("TAB {t}")).into_widget()),
+                    )
+                    .key(bottom_key.into()),
+                ));
             sliver_app_bar.collapsed_height = arguments.collapsed_height;
             sliver_app_bar.expanded_height = arguments.expanded_height;
             Scaffold::new()
-                .body(
+                .body(DefaultTabController::new(
+                    3,
                     CustomScrollView::new()
                         .controller(controller.as_controller())
                         .slivers([
@@ -5220,7 +5224,7 @@ mod tests {
                                 )
                                 .into_widget(),
                         ]),
-                )
+                ))
                 .into_widget()
         });
         SliverAppBarAppHandles {
@@ -5769,11 +5773,96 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "waiting on the Valo release that rounds a line's height as skparagraph's InternalLineMetrics::height does (fixed in Valo, unreleased)"]
     fn material3_a_medium_sliver_app_bar_expands_its_title_below_the_toolbar() {
         // The 64 high toolbar and the title, which the headline small style makes 24 * 1.33 =
-        // 31.92 high and skparagraph rounds to 32 (`InternalLineMetrics::height`, Run.h).
+        // 31.92 high and the paragraph rounds to 32, as skparagraph's line height does.
         medium_or_large_defaults_case(SliverAppBar::medium, 112.0, |_tester, _title| 96.0);
+    }
+
+    /// app_bar_sliver_test's `SliverAppBar.medium with bottom widget` and `.large`'s twin.
+    fn medium_or_large_with_bottom_case(
+        sliver_app_bar: fn() -> SliverAppBar,
+        expanded_app_bar_height: f64,
+        title: &'static str,
+        collapse_to: f64,
+    ) {
+        with_main_thread_stack(|| {
+            // This is a regression test for https://github.com/flutter/flutter/issues/115091
+            const COLLAPSED_APP_BAR_HEIGHT: f64 = 64.0;
+            const BOTTOM_HEIGHT: f64 = 48.0;
+            let mut tester = tester();
+            let controller = ScrollController::default(&mut tester.cell.borrow_mut());
+            let tab_bar_key = GlobalKey::new();
+            let bottom_key = tab_bar_key.clone();
+            pump_app(&mut tester, m3, move |_app| {
+                DefaultTabController::new(
+                    3,
+                    Scaffold::new().body(
+                        CustomScrollView::new()
+                            .controller(controller.as_controller())
+                            .slivers([
+                                sliver_app_bar()
+                                    .leading(IconButton::new(
+                                        Some(Listener::new(|_app| {})),
+                                        Icon::new(Some(Icons::menu())),
+                                    ))
+                                    .title(Text::new(title))
+                                    .bottom(PreferredSizeWidgetRef::new(
+                                        TabBar::new(
+                                            ["Tab 1", "Tab 2", "Tab 3"]
+                                                .map(|tab| Tab::new().text(tab).into_widget()),
+                                        )
+                                        .key(bottom_key.into()),
+                                    ))
+                                    .into_widget(),
+                                SliverToBoxAdapter::new()
+                                    .child(
+                                        Container::new()
+                                            .height(1200.0)
+                                            .color(crate::colors::Colors::ORANGE.shade400()),
+                                    )
+                                    .into_widget(),
+                            ]),
+                    ),
+                )
+                .into_widget()
+            });
+
+            assert_eq!(tester.find_by_type::<SliverAppBar>().len(), 1);
+            assert_eq!(
+                app_bar_rect(&tester).height(),
+                expanded_app_bar_height + BOTTOM_HEIGHT
+            );
+
+            let expanded_title = text_rect(&tester, title);
+            let tab_offset = key_rect(&tester, &tab_bar_key).top_left();
+            // Valo's paragraph metrics are f32.
+            assert!(
+                (expanded_title.bottom_left().dy() - tab_offset.dy()).abs() < 1e-4,
+                "{expanded_title:?} {tab_offset:?}"
+            );
+
+            // Scroll CustomScrollView to collapse SliverAppBar.
+            controller.jump_to(&mut tester.cell.borrow_mut(), collapse_to);
+            tester.pump_and_settle();
+
+            assert_eq!(
+                app_bar_rect(&tester).height(),
+                COLLAPSED_APP_BAR_HEIGHT + BOTTOM_HEIGHT
+            );
+        });
+    }
+
+    // 'SliverAppBar.medium with bottom widget'.
+    #[test]
+    fn a_medium_sliver_app_bar_puts_its_expanded_title_on_its_tab_bar() {
+        medium_or_large_with_bottom_case(SliverAppBar::medium, 112.0, "Medium App Bar", 160.0);
+    }
+
+    // 'SliverAppBar.large with bottom widget'.
+    #[test]
+    fn a_large_sliver_app_bar_puts_its_expanded_title_on_its_tab_bar() {
+        medium_or_large_with_bottom_case(SliverAppBar::large, 152.0, "Large App Bar", 200.0);
     }
 
     #[test]

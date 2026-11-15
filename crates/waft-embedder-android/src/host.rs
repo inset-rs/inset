@@ -455,8 +455,10 @@ impl<C: EmbedderClient> Host<C> {
         }
     }
 
-    /// The appearance and the languages `view`'s configuration carries.
+    /// The appearance and the languages `view`'s configuration carries, and the user's settings
+    /// Flutter's view sends with them.
     fn sync_configuration(&mut self, view: &AndroidView) {
+        self.read_settings();
         let config = view.configuration();
         let brightness = match config.ui_mode_night() {
             UiModeNight::Yes => waft_embedder::Brightness::Dark,
@@ -484,6 +486,7 @@ impl<C: EmbedderClient> Host<C> {
     }
 
     /// The window of the view numbered `id` gained or lost the focus; one that gains it has the
+    /// user's settings read again, which the user may have changed in the system's settings, the
     /// clipboard looked at, which only the focused app may read, and the app's tasks, which the
     /// user may have swiped away meanwhile.
     fn on_focus(&mut self, id: ViewId, focused: bool) {
@@ -502,6 +505,7 @@ impl<C: EmbedderClient> Host<C> {
             });
         }
         if focused {
+            self.read_settings();
             self.look_at_clipboard();
             self.look_at_tasks();
             crate::media::app_in_front();
@@ -530,6 +534,17 @@ impl<C: EmbedderClient> Host<C> {
                 self.remove_view(view.id());
             }
         }
+    }
+
+    /// The user's settings that no configuration carries, read again: Android tells their changes
+    /// only to an observer Java code provides (`settings.rs`). dart:ui has no callback for them;
+    /// the framework reads them as it needs them.
+    fn read_settings(&mut self) {
+        self.platform
+            .briefly_show_password
+            .set(crate::settings::read_briefly_show_password(
+                &self.application,
+            ));
     }
 
     /// The app hears the clipboard changed, if it did since the host last looked: Android tells

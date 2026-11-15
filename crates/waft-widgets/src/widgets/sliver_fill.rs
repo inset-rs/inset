@@ -845,14 +845,14 @@ mod tests {
     }
 
     fn size_of(tester: &WidgetTester, key: &GlobalKey) -> Size {
-        let mut app = tester.cell.borrow_mut();
-        let context = key.current_context(&mut app).expect("a mounted key");
+        let app = tester.cell.borrow();
+        let context = key.current_context(&app).expect("a mounted key");
         render_box(&app, context).size(&app)
     }
 
     fn rect_of(tester: &WidgetTester, key: &GlobalKey) -> Rect {
-        let mut app = tester.cell.borrow_mut();
-        let context = key.current_context(&mut app).expect("a mounted key");
+        let app = tester.cell.borrow();
+        let context = key.current_context(&app).expect("a mounted key");
         let render_box = render_box(&app, context);
         let top_left = render_box.local_to_global(&app, Offset::ZERO, None);
         let size = render_box.size(&app);

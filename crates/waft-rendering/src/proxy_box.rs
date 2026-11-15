@@ -20,9 +20,9 @@ use std::sync::Arc;
 use waft_animation::AnyAnimation;
 use waft_embedder::Locale;
 use waft_embedder::{
-    BlendMode, Clip, Color, FillRule, ImageFilter, Matrix4, Offset, Paint, PaintStyle, Path,
-    PathBuilder, RRect, RSuperellipse, Rect, Size, Stroke, TextBaseline, rrect_radii_elliptical,
-    rsuperellipse_radii_elliptical, valo, valo::Point,
+    BlendMode, Clip, Color, FillRule, FilterQuality, ImageFilter, Matrix4, Offset, Paint,
+    PaintStyle, Path, PathBuilder, RRect, RSuperellipse, Rect, Size, Stroke, TextBaseline,
+    rrect_radii_elliptical, rsuperellipse_radii_elliptical, valo, valo::Point,
 };
 use waft_foundation::{App, Handle, Listenable, Listener};
 use waft_gestures::{
@@ -45,8 +45,8 @@ use crate::box_::{
 use crate::image_filter_config::{ImageFilterConfig, ImageFilterContext};
 use crate::layer::{
     AnnotatedRegionLayer, BackdropFilterLayer, BackdropKey, ClipPathLayer, ClipRRectLayer,
-    ClipRectLayer, ContainerLayer, FollowerLayer, LayerHandle, LayerLink, LeaderLayer,
-    OffsetLayerMixin, OpacityLayer, TransformLayer,
+    ClipRectLayer, ContainerLayer, FollowerLayer, ImageFilterLayer, LayerHandle, LayerLink,
+    LeaderLayer, OffsetLayerMixin, OpacityLayer, TransformLayer,
 };
 use crate::layout_helper::{ChildLayoutHelper, ChildLayouter};
 use crate::object::{
@@ -5955,10 +5955,12 @@ pub struct RenderTransform {
     text_direction: Option<TextDirection>,
     transform_hit_tests: bool,
     transform: Matrix4,
+    filter_quality: Option<FilterQuality>,
 }
 
 impl RenderTransform {
     /// Creates a render object that transforms its child.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         app: &mut App,
         transform: Matrix4,
@@ -5966,6 +5968,7 @@ impl RenderTransform {
         alignment: Option<AlignmentGeometry>,
         text_direction: Option<TextDirection>,
         transform_hit_tests: bool,
+        filter_quality: Option<FilterQuality>,
         child: Option<AnyRenderBox>,
     ) -> RenderHandle<RenderTransform> {
         let this = RenderHandle::new_box(
@@ -5979,6 +5982,7 @@ impl RenderTransform {
                 text_direction,
                 transform_hit_tests,
                 transform,
+                filter_quality,
             },
         );
         this.set_child(app, child);
@@ -6080,6 +6084,32 @@ impl RenderTransform {
             return;
         }
         self.get_mut(app).transform = value;
+        self.mark_needs_paint(app);
+    }
+
+    /// The filter quality with which to apply the transform as a bitmap operation.
+    ///
+    /// When it is set, the child is painted untransformed into a layer whose pixels an
+    /// `ImageFilter.matrix` of the transform then moves, at this quality; when it is `None`,
+    /// the child is painted through the transform itself.
+    pub fn filter_quality(self: RenderHandle<Self>, app: &App) -> Option<FilterQuality> {
+        self.get(app).filter_quality
+    }
+
+    /// Sets [`filter_quality`](Self::filter_quality).
+    pub fn set_filter_quality(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        value: Option<FilterQuality>,
+    ) {
+        if self.get(app).filter_quality == value {
+            return;
+        }
+        let did_need_compositing = self.always_needs_compositing(app);
+        self.get_mut(app).filter_quality = value;
+        if did_need_compositing != self.always_needs_compositing(app) {
+            self.mark_needs_compositing_bits_update(app);
+        }
         self.mark_needs_paint(app);
     }
 
@@ -6188,6 +6218,40 @@ impl RenderTransform {
         }
         result
     }
+
+    /// Dart's `paint` with a `filterQuality`: the child painted at `offset` into an
+    /// `ImageFilterLayer` whose `ImageFilter.matrix` applies `transform` about `offset`.
+    fn paint_through_matrix_filter(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        context: &mut PaintingContext,
+        offset: Offset,
+        transform: Matrix4,
+        filter_quality: FilterQuality,
+    ) {
+        let mut effective_transform = Matrix4::IDENTITY;
+        crate::object::translate(&mut effective_transform, offset.dx(), offset.dy());
+        crate::object::multiply(&mut effective_transform, &transform);
+        crate::object::translate(&mut effective_transform, -offset.dx(), -offset.dy());
+        let filter = ImageFilter::matrix(effective_transform, filter_quality);
+        let layer = match self.as_object().layer_as::<ImageFilterLayer>(app) {
+            Some(filter_layer) => filter_layer,
+            None => {
+                let layer = ImageFilterLayer::new(app);
+                self.as_object()
+                    .set_layer(app, Some(layer.as_container_layer()));
+                layer
+            }
+        };
+        layer.set_image_filter(app, filter);
+        context.push_layer(
+            app,
+            layer.as_container_layer(),
+            |app, context, offset| RenderProxyBoxMixin::paint(self, app, context, offset),
+            offset,
+            None,
+        );
+    }
 }
 
 impl RenderObjectWithChildMixin for RenderTransform {
@@ -6210,6 +6274,10 @@ impl RenderProxyBoxMixin for RenderTransform {}
 impl RenderObject for RenderTransform {
     crate::render_object_accessors!();
 
+    fn always_needs_compositing(self: RenderHandle<Self>, app: &App) -> bool {
+        self.child(app).is_some() && self.get(app).filter_quality.is_some()
+    }
+
     fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
         RenderProxyBoxMixin::perform_layout(self, app);
     }
@@ -6224,6 +6292,10 @@ impl RenderObject for RenderTransform {
             return;
         }
         let transform = self.effective_transform(app);
+        if let Some(filter_quality) = self.filter_quality(app) {
+            self.paint_through_matrix_filter(app, context, offset, transform, filter_quality);
+            return;
+        }
         let Some(child_offset) = get_as_translation(transform) else {
             // If the matrix is singular the children would be compressed to a line or
             // single point, instead short-circuit and paint nothing.
@@ -9988,6 +10060,7 @@ mod tests {
             None,
             None,
             true,
+            None,
             Some(child.as_box()),
         );
         let root = RenderRepaintBoundary::new(&mut app, Some(transform.as_box()));
@@ -10014,6 +10087,7 @@ mod tests {
             None,
             None,
             true,
+            None,
             Some(child.as_box()),
         );
         let root = RenderRepaintBoundary::new(&mut app, Some(transform.as_box()));
@@ -10043,6 +10117,7 @@ mod tests {
             None,
             None,
             true,
+            None,
             Some(child.as_box()),
         );
         transform.layout(
@@ -10075,6 +10150,7 @@ mod tests {
             Some(AlignmentGeometry::CENTER),
             None,
             true,
+            None,
             Some(child.as_box()),
         );
         transform.layout(
@@ -10106,6 +10182,7 @@ mod tests {
             None,
             None,
             true,
+            None,
             Some(child.as_box()),
         );
         let mut matrix = Matrix4::IDENTITY;
@@ -10764,6 +10841,72 @@ mod tests {
             })
             .expect("the rounded fill");
         assert!(shadow < fill, "the shadow is drawn under the fill");
+    }
+
+    /// A clipper whose path is a rounded rectangle over the whole box, of corner radius 4.
+    struct RoundedRectClipper;
+
+    impl CustomClipper<Arc<Path>> for RoundedRectClipper {
+        fn get_clip(&self, size: Size) -> Arc<Path> {
+            let rrect = RRect::from_rect_and_radius(
+                Rect::from_ltwh(0.0, 0.0, size.width(), size.height()),
+                waft_embedder::Radius::circular(4.0),
+            );
+            let mut path = PathBuilder::new();
+            path.rrect_radii_elliptical(rrect.outer_rect(), rrect_radii_elliptical(rrect));
+            path.build()
+        }
+
+        fn should_reclip(&self, _old_clipper: &dyn CustomClipper<Arc<Path>>) -> bool {
+            false
+        }
+
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+    }
+
+    /// A physical shape painted away from its layer's origin shifts its path as dart:ui's
+    /// `Path.shift` does, which keeps a rounded rectangle one, so the shadow is drawn in closed
+    /// form at the shifted place.
+    #[test]
+    fn a_shifted_rounded_physical_shape_keeps_its_closed_form_shadow() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let child = sized_box(&mut app, Size::new(10.0, 10.0));
+        let shape = RenderPhysicalShape::new(
+            &mut app,
+            Some(child.as_box()),
+            Rc::new(RoundedRectClipper),
+            Clip::None,
+            4.0,
+            BLUE,
+            Color::new(0xFF000000),
+        );
+        let padding = crate::shifted_box::RenderPadding::new(
+            &mut app,
+            waft_painting::EdgeInsetsGeometry::all(20.0),
+            None,
+            Some(shape.as_box()),
+        );
+        let root = RenderRepaintBoundary::new(&mut app, Some(padding.as_box()));
+        first_frame_in_view(&mut app, root.as_box(), 1.0);
+        let ops = picture_ops(&app, root.as_object());
+        let round_rect = ops
+            .iter()
+            .find_map(|op| match op {
+                Op::DrawShadow { round_rect, .. } => Some(*round_rect),
+                _ => None,
+            })
+            .expect("a shadow at elevation 4");
+        assert_eq!(
+            round_rect,
+            Some((
+                valo::Rect::from(Rect::from_ltwh(20.0, 20.0, 60.0, 60.0)),
+                4.0
+            )),
+            "the shifted rounded rect the shadow fills in closed form"
+        );
     }
 
     /// Lays `root` out and paints it under a [`RenderView`] of 100x100 logical pixels at

@@ -1100,7 +1100,7 @@ impl TextSelectionToolbarContainer {
 
 impl StatelessWidget for TextSelectionToolbarContainer {
     fn build(&self, app: &mut App, context: BuildContext) -> WidgetRef {
-        let color_scheme = Theme::of(app, context).color_scheme;
+        let color_scheme = Theme::of(app, context).color_scheme.clone();
         Material::new()
             // This value was eyeballed to match the native text selection menu on
             // a Pixel 6 emulator running Android API level 34.

@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use waft_embedder::{Canvas, Clip, Matrix4, Offset, Path, PathBuilder, RRect, Rect};
+use waft_embedder::{Canvas, Clip, Matrix4, Offset, Path, RRect, Rect};
 use waft_foundation::{App, Handle};
 use waft_painting::{ClipContext, inverse_transform_rect};
 
@@ -549,16 +549,16 @@ impl PaintingContext {
     }
 }
 
+/// dart:ui `Path.shift`: Skia's `makeTransform` by a translation, so a path built as a rounded
+/// rectangle or an oval stays one, and a shadow drawn from it keeps its closed form.
 pub(crate) fn shift_path(path: &Arc<Path>, offset: Offset) -> Arc<Path> {
     if offset == Offset::ZERO {
         return Arc::clone(path);
     }
-    let mut builder = PathBuilder::new();
-    builder.append(
-        path,
-        &Matrix4::translation(offset.dx() as f32, offset.dy() as f32),
-    );
-    builder.build()
+    path.transformed(&Matrix4::translation(
+        offset.dx() as f32,
+        offset.dy() as f32,
+    ))
 }
 
 impl ClipContext for PaintingContext {

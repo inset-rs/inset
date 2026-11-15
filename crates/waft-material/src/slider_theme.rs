@@ -110,7 +110,7 @@ impl SliderTheme {
     pub fn of(app: &mut App, context: BuildContext) -> SliderThemeData {
         match context.depend_on_inherited_widget_of_exact_type::<SliderTheme>(app) {
             Some(inherited_theme) => inherited_theme.data.clone(),
-            None => Theme::of(app, context).slider_theme,
+            None => Theme::of(app, context).slider_theme.clone(),
         }
     }
 }

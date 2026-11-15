@@ -25,7 +25,7 @@ use crate::theme::Theme;
 /// Dart's `_SwitchDefaultsM3(context)`: the [`SwitchThemeData`] whose fields are the values of
 /// that subclass's getters.
 pub(crate) fn switch_defaults_m3(app: &mut App, context: BuildContext) -> SwitchThemeData {
-    let colors = Theme::of(app, context).color_scheme;
+    let colors = Theme::of(app, context).color_scheme.clone();
 
     SwitchThemeData::new()
         .thumb_color(thumb_color(colors.clone()))
@@ -158,7 +158,7 @@ impl SwitchConfigM3 {
     /// Dart's `_SwitchConfigM3(context)`.
     pub(crate) fn new(app: &mut App, context: BuildContext) -> SwitchConfigM3 {
         SwitchConfigM3 {
-            colors: Theme::of(app, context).color_scheme,
+            colors: Theme::of(app, context).color_scheme.clone(),
         }
     }
 

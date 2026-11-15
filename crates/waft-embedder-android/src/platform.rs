@@ -50,6 +50,8 @@ pub struct AndroidPlatform {
     /// When the framework asked to be woken, shared with whatever thread asked.
     pub(crate) wakes: Arc<Wakes>,
     origin: Instant,
+    /// The system's "Show passwords", as the host last read it (`settings.rs`).
+    pub(crate) briefly_show_password: Cell<bool>,
     pub(crate) brightness: Cell<Brightness>,
     pub(crate) locales: RefCell<Vec<Locale>>,
     /// The screen the activity is on, as the app was last told it; `None` until the system first
@@ -118,6 +120,7 @@ impl AndroidPlatform {
                 waker: waker.clone(),
             }),
             origin: Instant::now(),
+            briefly_show_password: Cell::new(true),
             brightness: Cell::new(Brightness::Light),
             locales: RefCell::new(Vec::new()),
             screen: RefCell::new(None),
@@ -311,6 +314,10 @@ impl Platform for AndroidPlatform {
     /// The one screen the activity is on (`display.rs`).
     fn screens(&self) -> Option<&dyn Screens> {
         Some(self)
+    }
+
+    fn briefly_show_password(&self) -> bool {
+        self.briefly_show_password.get()
     }
 
     fn platform_brightness(&self) -> Brightness {

@@ -2301,7 +2301,7 @@ fn circular_progress_indicator_defaults_m2(
     context: BuildContext,
     _indeterminate: bool,
 ) -> ProgressIndicatorThemeData {
-    let colors = Theme::of(app, context).color_scheme;
+    let colors = Theme::of(app, context).color_scheme.clone();
 
     ProgressIndicatorThemeData::new()
         .color(colors.primary)
@@ -2315,7 +2315,7 @@ fn linear_progress_indicator_defaults_m2(
     app: &mut App,
     context: BuildContext,
 ) -> ProgressIndicatorThemeData {
-    let colors = Theme::of(app, context).color_scheme;
+    let colors = Theme::of(app, context).color_scheme.clone();
 
     ProgressIndicatorThemeData::new()
         .color(colors.primary)
@@ -2329,7 +2329,7 @@ fn circular_progress_indicator_defaults_m3_year2023(
     context: BuildContext,
     _indeterminate: bool,
 ) -> ProgressIndicatorThemeData {
-    let colors = Theme::of(app, context).color_scheme;
+    let colors = Theme::of(app, context).color_scheme.clone();
 
     ProgressIndicatorThemeData::new()
         .color(colors.primary)
@@ -2343,7 +2343,7 @@ fn linear_progress_indicator_defaults_m3_year2023(
     app: &mut App,
     context: BuildContext,
 ) -> ProgressIndicatorThemeData {
-    let colors = Theme::of(app, context).color_scheme;
+    let colors = Theme::of(app, context).color_scheme.clone();
 
     ProgressIndicatorThemeData::new()
         .color(colors.primary)

@@ -806,7 +806,7 @@ impl ScrollableState {
             PointerEvent::Scroll(_) if app.get(self).position.is_some() => {
                 if let Some(physics) = self.resolved_physics(app) {
                     let metrics = self.position(app).copy_with(app);
-                    if !physics.should_accept_user_offset(&metrics) {
+                    if !physics.should_accept_user_offset(&*metrics) {
                         return;
                     }
                 }

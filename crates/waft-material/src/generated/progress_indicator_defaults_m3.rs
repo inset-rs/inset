@@ -25,7 +25,7 @@ pub(crate) fn circular_progress_indicator_defaults_m3(
     context: BuildContext,
     indeterminate: bool,
 ) -> ProgressIndicatorThemeData {
-    let colors = Theme::of(app, context).color_scheme;
+    let colors = Theme::of(app, context).color_scheme.clone();
 
     ProgressIndicatorThemeData {
         color: Some(colors.primary),
@@ -48,7 +48,7 @@ pub(crate) fn linear_progress_indicator_defaults_m3(
     app: &mut App,
     context: BuildContext,
 ) -> ProgressIndicatorThemeData {
-    let colors = Theme::of(app, context).color_scheme;
+    let colors = Theme::of(app, context).color_scheme.clone();
 
     ProgressIndicatorThemeData::new()
         .color(colors.primary)

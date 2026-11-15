@@ -1245,7 +1245,7 @@ mod tests {
         );
         harness.pump(&mut app);
         let state = key
-            .current_state::<LocalizationsState>(&mut app)
+            .current_state::<LocalizationsState>(&app)
             .expect("the Localizations widget mounted");
         assert_eq!(state.locale(&app), None);
         assert!(seen.borrow().is_empty(), "the child is not built yet");

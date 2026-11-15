@@ -436,7 +436,7 @@ impl TooltipTheme {
     pub fn of(app: &mut App, context: BuildContext) -> TooltipThemeData {
         match context.depend_on_inherited_widget_of_exact_type::<TooltipTheme>(app) {
             Some(tooltip_theme) => tooltip_theme.data.clone(),
-            None => Theme::of(app, context).tooltip_theme,
+            None => Theme::of(app, context).tooltip_theme.clone(),
         }
     }
 }
@@ -888,7 +888,7 @@ mod tests {
             |app| overlay(app, tooltip),
         );
         let state = key
-            .current_state::<crate::tooltip::TooltipState>(&mut tester.cell.borrow_mut())
+            .current_state::<crate::tooltip::TooltipState>(&tester.cell.borrow_mut())
             .expect("mounted");
         state.ensure_tooltip_visible(&mut tester.cell.borrow_mut());
         tester.pump_and_settle();

@@ -2,6 +2,8 @@
 //!
 //! Dart's `static const TextTheme`s are functions: a [`TextStyle`] owns its font family string.
 
+use std::rc::Rc;
+
 use waft_embedder::{Brightness, FontWeight, TargetPlatform, TextBaseline, TextDecoration};
 use waft_painting::TextStyle;
 
@@ -87,6 +89,9 @@ pub enum ScriptCategory {
 ///
 ///  * <https://material.io/design/typography/>
 ///  * <https://m3.material.io/styles/typography>
+///
+/// Each text theme is shared, as Dart shares the one `TextTheme` object: a clone holds the
+/// same five, and `ThemeData::localize` keys its cache on the geometry theme's identity.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Typography {
     /// A Material Design text theme with dark glyphs.
@@ -98,7 +103,7 @@ pub struct Typography {
     ///
     /// The [`english_like`](Self::english_like), [`dense`](Self::dense), and
     /// [`tall`](Self::tall) text theme's provide locale-specific geometry.
-    pub black: TextTheme,
+    pub black: Rc<TextTheme>,
     /// A Material Design text theme with light glyphs.
     ///
     /// This [`TextTheme`] provides color but not geometry (font size, weight, etc).
@@ -108,7 +113,7 @@ pub struct Typography {
     ///
     /// The [`english_like`](Self::english_like), [`dense`](Self::dense), and
     /// [`tall`](Self::tall) text theme's provide locale-specific geometry.
-    pub white: TextTheme,
+    pub white: Rc<TextTheme>,
     /// Defines text geometry for `ScriptCategory::EnglishLike` scripts, such as
     /// English, French, Russian, etc.
     ///
@@ -119,7 +124,7 @@ pub struct Typography {
     ///
     /// To look up a localized [`TextTheme`], use the overall `Theme`, for
     /// example: `Theme::of(app, context).text_theme`.
-    pub english_like: TextTheme,
+    pub english_like: Rc<TextTheme>,
     /// Defines text geometry for dense scripts, such as Chinese, Japanese
     /// and Korean.
     ///
@@ -129,7 +134,7 @@ pub struct Typography {
     ///
     /// To look up a localized [`TextTheme`], use the overall `Theme`, for
     /// example: `Theme::of(app, context).text_theme`.
-    pub dense: TextTheme,
+    pub dense: Rc<TextTheme>,
     /// Defines text geometry for tall scripts, such as Farsi, Hindi, and Thai.
     ///
     /// This text theme is merged with either [`black`](Self::black) or
@@ -138,7 +143,7 @@ pub struct Typography {
     ///
     /// To look up a localized [`TextTheme`], use the overall `Theme`, for
     /// example: `Theme::of(app, context).text_theme`.
-    pub tall: TextTheme,
+    pub tall: Rc<TextTheme>,
 }
 
 impl Typography {
@@ -245,11 +250,11 @@ impl Typography {
     /// Dart's private `Typography._withPlatform`.
     fn with_platform(
         platform: Option<TargetPlatform>,
-        black: Option<TextTheme>,
-        white: Option<TextTheme>,
-        english_like: TextTheme,
-        dense: TextTheme,
-        tall: TextTheme,
+        black: Option<Rc<TextTheme>>,
+        white: Option<Rc<TextTheme>>,
+        english_like: Rc<TextTheme>,
+        dense: Rc<TextTheme>,
+        tall: Rc<TextTheme>,
     ) -> Typography {
         debug_assert!(platform.is_some() || (black.is_some() && white.is_some()));
         let (black_default, white_default): (TextThemeConstant, TextThemeConstant) = match platform
@@ -272,8 +277,8 @@ impl Typography {
         };
         // The defaults are picked as functions so that only the chosen text themes are built.
         Typography {
-            black: black.unwrap_or_else(black_default),
-            white: white.unwrap_or_else(white_default),
+            black: black.unwrap_or_else(|| Rc::new(black_default())),
+            white: white.unwrap_or_else(|| Rc::new(white_default())),
             english_like,
             dense,
             tall,
@@ -282,7 +287,7 @@ impl Typography {
 
     /// Returns one of [`english_like`](Self::english_like), [`dense`](Self::dense), or
     /// [`tall`](Self::tall).
-    pub fn geometry_theme_for(&self, category: ScriptCategory) -> &TextTheme {
+    pub fn geometry_theme_for(&self, category: ScriptCategory) -> &Rc<TextTheme> {
         match category {
             ScriptCategory::EnglishLike => &self.english_like,
             ScriptCategory::Dense => &self.dense,
@@ -300,32 +305,32 @@ impl Typography {
     }
 
     /// Dart `copyWith(black:)`.
-    pub fn black(mut self, black: TextTheme) -> Typography {
-        self.black = black;
+    pub fn black(mut self, black: impl Into<Rc<TextTheme>>) -> Typography {
+        self.black = black.into();
         self
     }
 
     /// Dart `copyWith(white:)`.
-    pub fn white(mut self, white: TextTheme) -> Typography {
-        self.white = white;
+    pub fn white(mut self, white: impl Into<Rc<TextTheme>>) -> Typography {
+        self.white = white.into();
         self
     }
 
     /// Dart `copyWith(englishLike:)`.
-    pub fn english_like(mut self, english_like: TextTheme) -> Typography {
-        self.english_like = english_like;
+    pub fn english_like(mut self, english_like: impl Into<Rc<TextTheme>>) -> Typography {
+        self.english_like = english_like.into();
         self
     }
 
     /// Dart `copyWith(dense:)`.
-    pub fn dense(mut self, dense: TextTheme) -> Typography {
-        self.dense = dense;
+    pub fn dense(mut self, dense: impl Into<Rc<TextTheme>>) -> Typography {
+        self.dense = dense.into();
         self
     }
 
     /// Dart `copyWith(tall:)`.
-    pub fn tall(mut self, tall: TextTheme) -> Typography {
-        self.tall = tall;
+    pub fn tall(mut self, tall: impl Into<Rc<TextTheme>>) -> Typography {
+        self.tall = tall.into();
         self
     }
 
@@ -337,11 +342,11 @@ impl Typography {
             return a.clone();
         }
         Typography {
-            black: TextTheme::lerp(Some(&a.black), Some(&b.black), t),
-            white: TextTheme::lerp(Some(&a.white), Some(&b.white), t),
-            english_like: TextTheme::lerp(Some(&a.english_like), Some(&b.english_like), t),
-            dense: TextTheme::lerp(Some(&a.dense), Some(&b.dense), t),
-            tall: TextTheme::lerp(Some(&a.tall), Some(&b.tall), t),
+            black: lerp_text_theme(&a.black, &b.black, t),
+            white: lerp_text_theme(&a.white, &b.white, t),
+            english_like: lerp_text_theme(&a.english_like, &b.english_like, t),
+            dense: lerp_text_theme(&a.dense, &b.dense, t),
+            tall: lerp_text_theme(&a.tall, &b.tall, t),
         }
     }
 
@@ -2342,16 +2347,24 @@ impl Typography {
     }
 }
 
+/// Dart's `TextTheme.lerp` on two shared text themes: `identical(a, b)` returns `a` itself.
+fn lerp_text_theme(a: &Rc<TextTheme>, b: &Rc<TextTheme>, t: f64) -> Rc<TextTheme> {
+    if Rc::ptr_eq(a, b) {
+        return Rc::clone(a);
+    }
+    Rc::new(TextTheme::lerp(Some(a), Some(b), t))
+}
+
 /// Dart's `Typography.material2014` and `Typography.material2018` arguments; the two
 /// factories differ only in their default geometry text themes.
 #[derive(Clone, Debug)]
 pub struct TypographyBuilder {
     platform: Option<TargetPlatform>,
-    black: Option<Box<TextTheme>>,
-    white: Option<Box<TextTheme>>,
-    english_like: Option<Box<TextTheme>>,
-    dense: Option<Box<TextTheme>>,
-    tall: Option<Box<TextTheme>>,
+    black: Option<Rc<TextTheme>>,
+    white: Option<Rc<TextTheme>>,
+    english_like: Option<Rc<TextTheme>>,
+    dense: Option<Rc<TextTheme>>,
+    tall: Option<Rc<TextTheme>>,
     english_like_default: TextThemeConstant,
     dense_default: TextThemeConstant,
     tall_default: TextThemeConstant,
@@ -2384,32 +2397,32 @@ impl TypographyBuilder {
     }
 
     /// Dart `black:`.
-    pub fn black(mut self, black: TextTheme) -> TypographyBuilder {
-        self.black = Some(Box::new(black));
+    pub fn black(mut self, black: impl Into<Rc<TextTheme>>) -> TypographyBuilder {
+        self.black = Some(black.into());
         self
     }
 
     /// Dart `white:`.
-    pub fn white(mut self, white: TextTheme) -> TypographyBuilder {
-        self.white = Some(Box::new(white));
+    pub fn white(mut self, white: impl Into<Rc<TextTheme>>) -> TypographyBuilder {
+        self.white = Some(white.into());
         self
     }
 
     /// Dart `englishLike:`.
-    pub fn english_like(mut self, english_like: TextTheme) -> TypographyBuilder {
-        self.english_like = Some(Box::new(english_like));
+    pub fn english_like(mut self, english_like: impl Into<Rc<TextTheme>>) -> TypographyBuilder {
+        self.english_like = Some(english_like.into());
         self
     }
 
     /// Dart `dense:`.
-    pub fn dense(mut self, dense: TextTheme) -> TypographyBuilder {
-        self.dense = Some(Box::new(dense));
+    pub fn dense(mut self, dense: impl Into<Rc<TextTheme>>) -> TypographyBuilder {
+        self.dense = Some(dense.into());
         self
     }
 
     /// Dart `tall:`.
-    pub fn tall(mut self, tall: TextTheme) -> TypographyBuilder {
-        self.tall = Some(Box::new(tall));
+    pub fn tall(mut self, tall: impl Into<Rc<TextTheme>>) -> TypographyBuilder {
+        self.tall = Some(tall.into());
         self
     }
 
@@ -2418,12 +2431,13 @@ impl TypographyBuilder {
         debug_assert!(self.platform.is_some() || (self.black.is_some() && self.white.is_some()));
         Typography::with_platform(
             self.platform,
-            self.black.map(|black| *black),
-            self.white.map(|white| *white),
+            self.black,
+            self.white,
             self.english_like
-                .map_or_else(self.english_like_default, |english_like| *english_like),
-            self.dense.map_or_else(self.dense_default, |dense| *dense),
-            self.tall.map_or_else(self.tall_default, |tall| *tall),
+                .unwrap_or_else(|| Rc::new((self.english_like_default)())),
+            self.dense
+                .unwrap_or_else(|| Rc::new((self.dense_default)())),
+            self.tall.unwrap_or_else(|| Rc::new((self.tall_default)())),
         )
     }
 }
@@ -2433,11 +2447,11 @@ impl TypographyBuilder {
 pub struct TypographyMaterial2021Builder {
     platform: Option<TargetPlatform>,
     color_scheme: ColorScheme,
-    black: Option<Box<TextTheme>>,
-    white: Option<Box<TextTheme>>,
-    english_like: Option<Box<TextTheme>>,
-    dense: Option<Box<TextTheme>>,
-    tall: Option<Box<TextTheme>>,
+    black: Option<Rc<TextTheme>>,
+    white: Option<Rc<TextTheme>>,
+    english_like: Option<Rc<TextTheme>>,
+    dense: Option<Rc<TextTheme>>,
+    tall: Option<Rc<TextTheme>>,
 }
 
 impl TypographyMaterial2021Builder {
@@ -2458,8 +2472,8 @@ impl TypographyMaterial2021Builder {
     #[deprecated(
         note = "Text colors are derived from colorScheme, so colors in this text theme are ignored. Use copyWith on the result to customize the black text theme. This feature was deprecated after material_ui v1.8.0."
     )]
-    pub fn black(mut self, black: TextTheme) -> TypographyMaterial2021Builder {
-        self.black = Some(Box::new(black));
+    pub fn black(mut self, black: impl Into<Rc<TextTheme>>) -> TypographyMaterial2021Builder {
+        self.black = Some(black.into());
         self
     }
 
@@ -2467,26 +2481,29 @@ impl TypographyMaterial2021Builder {
     #[deprecated(
         note = "Text colors are derived from colorScheme, so colors in this text theme are ignored. Use copyWith on the result to customize the white text theme. This feature was deprecated after material_ui v1.8.0."
     )]
-    pub fn white(mut self, white: TextTheme) -> TypographyMaterial2021Builder {
-        self.white = Some(Box::new(white));
+    pub fn white(mut self, white: impl Into<Rc<TextTheme>>) -> TypographyMaterial2021Builder {
+        self.white = Some(white.into());
         self
     }
 
     /// Dart `englishLike:`.
-    pub fn english_like(mut self, english_like: TextTheme) -> TypographyMaterial2021Builder {
-        self.english_like = Some(Box::new(english_like));
+    pub fn english_like(
+        mut self,
+        english_like: impl Into<Rc<TextTheme>>,
+    ) -> TypographyMaterial2021Builder {
+        self.english_like = Some(english_like.into());
         self
     }
 
     /// Dart `dense:`.
-    pub fn dense(mut self, dense: TextTheme) -> TypographyMaterial2021Builder {
-        self.dense = Some(Box::new(dense));
+    pub fn dense(mut self, dense: impl Into<Rc<TextTheme>>) -> TypographyMaterial2021Builder {
+        self.dense = Some(dense.into());
         self
     }
 
     /// Dart `tall:`.
-    pub fn tall(mut self, tall: TextTheme) -> TypographyMaterial2021Builder {
-        self.tall = Some(Box::new(tall));
+    pub fn tall(mut self, tall: impl Into<Rc<TextTheme>>) -> TypographyMaterial2021Builder {
+        self.tall = Some(tall.into());
         self
     }
 
@@ -2495,13 +2512,13 @@ impl TypographyMaterial2021Builder {
         debug_assert!(self.platform.is_some() || (self.black.is_some() && self.white.is_some()));
         let base = Typography::with_platform(
             self.platform,
-            self.black.map(|black| *black),
-            self.white.map(|white| *white),
+            self.black,
+            self.white,
             self.english_like
-                .map_or_else(Typography::english_like2021, |english_like| *english_like),
+                .unwrap_or_else(|| Rc::new(Typography::english_like2021())),
             self.dense
-                .map_or_else(Typography::dense2021, |dense| *dense),
-            self.tall.map_or_else(Typography::tall2021, |tall| *tall),
+                .unwrap_or_else(|| Rc::new(Typography::dense2021())),
+            self.tall.unwrap_or_else(|| Rc::new(Typography::tall2021())),
         );
 
         // Ensure they are all uniformly dark or light, with
@@ -2533,8 +2550,8 @@ impl TypographyMaterial2021Builder {
             .decoration_color(light)
             .into_text_theme();
         Typography {
-            black,
-            white,
+            black: Rc::new(black),
+            white: Rc::new(white),
             ..base
         }
     }
@@ -2908,13 +2925,13 @@ mod tests {
             .dense(dense.clone())
             .tall(tall.clone())
             .build();
-        assert_eq!(typography.english_like, english_like);
-        assert_eq!(typography.dense, dense);
-        assert_eq!(typography.tall, tall);
+        assert_eq!(*typography.english_like, english_like);
+        assert_eq!(*typography.dense, dense);
+        assert_eq!(*typography.tall, tall);
 
         let defaults = Typography::material2021().build();
-        assert_eq!(defaults.english_like, Typography::english_like2021());
-        assert_eq!(defaults.dense, Typography::dense2021());
-        assert_eq!(defaults.tall, Typography::tall2021());
+        assert_eq!(*defaults.english_like, Typography::english_like2021());
+        assert_eq!(*defaults.dense, Typography::dense2021());
+        assert_eq!(*defaults.tall, Typography::tall2021());
     }
 }

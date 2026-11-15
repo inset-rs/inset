@@ -1666,7 +1666,7 @@ mod tests {
                 true,
             );
             tester.pump_widget(widget);
-            assert!(key.current_context(&mut tester.cell.borrow_mut()).is_some());
+            assert!(key.current_context(&tester.cell.borrow_mut()).is_some());
         });
     }
 
@@ -4081,7 +4081,7 @@ mod tests {
     fn scheme_of(tester: &WidgetTester) -> ColorScheme {
         let element = icon_button_element(tester);
         let mut app = tester.cell.borrow_mut();
-        Theme::of(&mut app, element).color_scheme
+        Theme::of(&mut app, element).color_scheme.clone()
     }
 
     // 'M3E IconButton variants': 'standard variant has transparent background', 'filled

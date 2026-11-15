@@ -143,6 +143,12 @@ Host implementation. Flutter analogue: the engine's Android embedder under
   Reason: platform — a display listener is a Java interface, which `NativeActivity` gives the app no class to implement.
   Affect: the screen reads 0 on a phone as Flutter's does; a rate the panel changes on its own, with nothing else, is not heard until the next configuration change, and before API 30 the visible frame is the whole screen.
 
+## settings.rs / host.rs → the Android embedder's `FlutterView.sendUserSettingsToFlutter` (`brieflyShowPassword`)
+
+- Change: the system's "Show passwords" (`Settings.System.TEXT_SHOW_PASSWORD`) is read again where the configuration is read and as a window of the app takes the focus; Flutter's view reads it again whenever a `ContentObserver` on the setting fires.
+  Reason: platform — a `ContentObserver` is a Java class to extend, which `NativeActivity` gives the app no class to do in.
+  Affect: a change the user makes while the app keeps the focus, such as in a settings window beside it, reaches a password field when the app next takes the focus.
+
 ## picture.rs / composition/ → the Android embedder's `FlutterSurfaceView`, `PlatformViewsController` and its hybrid composition
 
 - Change: where Waft's device is Vulkan with `VK_ANDROID_external_memory_android_hardware_buffer`, the view's picture is drawn into `AHardwareBuffer`s of its own and shown as the content of a surface control made from the window, with the scene's composition layers beneath it as child surface controls, all in one `ASurfaceTransaction` a frame; on OpenGL ES the view draws through a swapchain on the window and the platform has no compositor, where Flutter's engine draws into the window's surface and shows platform views as Android views or overlay surfaces beside it.

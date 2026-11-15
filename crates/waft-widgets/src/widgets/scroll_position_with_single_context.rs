@@ -581,7 +581,7 @@ impl ScrollPositionWithSingleContext {
         ScrollPositionBase::apply_new_dimensions(this, app);
         let physics = this.physics(app);
         let metrics = this.copy_with(app);
-        let can_drag = physics.should_accept_user_offset(&metrics);
+        let can_drag = physics.should_accept_user_offset(&*metrics);
         this.context(app).set_can_drag(app, can_drag);
     }
 
@@ -625,7 +625,7 @@ impl ScrollPositionWithSingleContext {
         let physics = this.physics(app);
         let metrics = this.copy_with(app);
         let new_pixels = ViewportOffset::pixels(this, app)
-            - physics.apply_physics_to_user_offset(&metrics, delta);
+            - physics.apply_physics_to_user_offset(&*metrics, delta);
         ScrollPosition::set_pixels(this, app, new_pixels);
     }
 
@@ -644,7 +644,7 @@ impl ScrollPositionWithSingleContext {
         debug_assert!(ViewportOffset::has_pixels(this, app));
         let physics = this.physics(app);
         let metrics = this.copy_with(app);
-        match physics.create_ballistic_simulation(&metrics, velocity) {
+        match physics.create_ballistic_simulation(&*metrics, velocity) {
             Some(simulation) => {
                 let vsync = this.context(app).vsync();
                 let should_ignore_pointer = this.should_ignore_pointer(app);
@@ -674,7 +674,7 @@ impl ScrollPositionWithSingleContext {
         if near_equal(
             Some(to),
             Some(ViewportOffset::pixels(this, app)),
-            physics.tolerance_for(&metrics).distance,
+            physics.tolerance_for(&*metrics).distance,
         ) {
             // Skip the animation, go straight to the position as we are already close.
             ViewportOffset::jump_to(this, app, to);

@@ -722,6 +722,7 @@ impl State for MaterialWidgetState {
                 Theme::of(app, context)
                     .text_theme
                     .body_medium
+                    .clone()
                     .expect("every text theme has a body medium style")
             });
             contents = Some(
@@ -2575,7 +2576,7 @@ mod tests {
             let paint_count = Rc::new(Cell::new(0));
             {
                 let mut app = tester.cell.borrow_mut();
-                let context = sized_box_key.current_context(&mut app).expect("mounted");
+                let context = sized_box_key.current_context(&app).expect("mounted");
                 let controller = Material::of(&app, context);
                 let reference_box = context
                     .find_render_object(&app)
@@ -2788,7 +2789,7 @@ mod tests {
             let paint_count = Rc::new(Cell::new(0));
             {
                 let mut app = tester.cell.borrow_mut();
-                let context = list_child.current_context(&mut app).expect("mounted");
+                let context = list_child.current_context(&app).expect("mounted");
                 let controller = Material::of(&app, context);
                 let reference_box = context
                     .find_render_object(&app)

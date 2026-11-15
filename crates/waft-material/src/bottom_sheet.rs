@@ -739,7 +739,7 @@ impl Debug for DragHandle {
 
 impl StatelessWidget for DragHandle {
     fn build(&self, app: &mut App, context: BuildContext) -> WidgetRef {
-        let bottom_sheet_theme = Theme::of(app, context).bottom_sheet_theme;
+        let bottom_sheet_theme = Theme::of(app, context).bottom_sheet_theme.clone();
         let m3_defaults = bottom_sheet_defaults_m3(app, context);
         let handle_size = self
             .drag_handle_size
@@ -2632,7 +2632,7 @@ mod tests {
     }
 
     fn scaffold_state(tester: &WidgetTester, key: &GlobalKey) -> Handle<ScaffoldState> {
-        key.current_state::<ScaffoldState>(&mut tester.cell.borrow_mut())
+        key.current_state::<ScaffoldState>(&tester.cell.borrow_mut())
             .expect("the scaffold is mounted")
     }
 
@@ -3094,7 +3094,7 @@ mod tests {
             let notification_context = Saved::default();
             let saving = notification_context.clone();
             let context = scaffold_key
-                .current_context(&mut tester.cell.borrow_mut())
+                .current_context(&tester.cell.borrow_mut())
                 .expect("the scaffold is mounted");
             Modal::default().show(
                 &tester,
@@ -3143,7 +3143,7 @@ mod tests {
     }
 
     fn mounted(tester: &WidgetTester, key: &GlobalKey) -> bool {
-        key.current_context(&mut tester.cell.borrow_mut()).is_some()
+        key.current_context(&tester.cell.borrow_mut()).is_some()
     }
 
     fn pop(tester: &WidgetTester, context: BuildContext) {
@@ -3152,7 +3152,7 @@ mod tests {
 
     /// `MaterialApp(home: Scaffold(key:, body: Center(child: Text('body'))))`'s context.
     fn scaffold_context(tester: &WidgetTester, key: &GlobalKey) -> BuildContext {
-        key.current_context(&mut tester.cell.borrow_mut())
+        key.current_context(&tester.cell.borrow_mut())
             .expect("the scaffold is mounted")
     }
 
@@ -5419,7 +5419,7 @@ mod tests {
             let build_count = Rc::new(Cell::new(0));
             let count = Rc::clone(&build_count);
             let context = key
-                .current_context(&mut tester.cell.borrow_mut())
+                .current_context(&tester.cell.borrow_mut())
                 .expect("mounted");
             show_bottom_sheet(
                 &mut tester.cell.borrow_mut(),

@@ -41,6 +41,7 @@ pub use waft_rendering::{
 pub use widgets::animated_cross_fade::*;
 pub use widgets::animated_switcher::*;
 pub use widgets::debug::*;
+pub use widgets::dialog::*;
 pub use widgets::dismissible::*;
 pub use widgets::dual_transition_builder::*;
 pub use widgets::form::*;

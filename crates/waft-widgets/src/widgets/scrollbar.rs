@@ -2043,16 +2043,38 @@ impl RawScrollbarState {
         let scroll_controller = scroll_controller.expect("asserted above");
         assert!(
             scroll_controller.has_clients(app),
-            "The Scrollbar's ScrollController has no ScrollPosition attached. A Scrollbar \
-             cannot be painted without a ScrollPosition. The Scrollbar attempted to use the \
-             {controller_for_error}. This ScrollController should be associated with the \
-             ScrollView that the Scrollbar is being applied to."
+            "The Scrollbar's ScrollController has no ScrollPosition attached.\n\
+             A Scrollbar cannot be painted without a ScrollPosition. \n\
+             The Scrollbar attempted to use the {controller_for_error}. This ScrollController \
+             should be associated with the ScrollView that the Scrollbar is being applied to.\n\
+             {}",
+            if try_primary {
+                "If a ScrollController has not been provided, the PrimaryScrollController is \
+                 used by default on mobile platforms for ScrollViews with an Axis.vertical \
+                 scroll direction.\n\
+                 To use the PrimaryScrollController explicitly, set ScrollView.primary to true \
+                 on the Scrollable widget."
+            } else {
+                "When providing your own ScrollController, ensure both the Scrollbar and the \
+                 Scrollable widget use the same one."
+            }
         );
         assert!(
             scroll_controller.positions(app).len() == 1,
-            "The {controller_for_error} is attached to more than one ScrollPosition. The \
-             Scrollbar requires a single ScrollPosition in order to be painted. When {when}, \
-             the associated ScrollController must only have one ScrollPosition attached."
+            "The {controller_for_error} is attached to more than one ScrollPosition.\n\
+             The Scrollbar requires a single ScrollPosition in order to be painted.\n\
+             When {when}, the associated ScrollController must only have one ScrollPosition \
+             attached.\n\
+             {}",
+            if try_primary {
+                "If a ScrollController has not been provided, the PrimaryScrollController is \
+                 used by default on mobile platforms for ScrollViews with an Axis.vertical \
+                 scroll direction.\n\
+                 More than one ScrollView may have tried to use the PrimaryScrollController of \
+                 the current context. ScrollView.primary can override this behavior."
+            } else {
+                "The provided ScrollController cannot be shared by multiple ScrollView widgets."
+            }
         );
     }
 
@@ -2257,7 +2279,7 @@ impl RawScrollbarState {
         let metrics = position.copy_with(app);
         let physics_adjustment = position
             .physics(app)
-            .apply_boundary_conditions(&metrics, scroll_offset_global);
+            .apply_boundary_conditions(&*metrics, scroll_offset_global);
         let mut new_position = scroll_offset_global - physics_adjustment;
 
         // The physics may allow overscroll when actually *scrolling*, but dragging on the
@@ -2375,7 +2397,7 @@ impl RawScrollbarState {
             .expect("a press caches the controller")
             .position(app);
         let metrics = position.copy_with(app);
-        if !position.physics(app).should_accept_user_offset(&metrics) {
+        if !position.physics(app).should_accept_user_offset(&*metrics) {
             return;
         }
         let Some(direction) = this.get_scrollbar_direction(app) else {
@@ -2489,7 +2511,7 @@ impl RawScrollbarState {
 
         let position = controller.expect("a valid scroll position").position(app);
         let metrics = position.copy_with(app);
-        if !position.physics(app).should_accept_user_offset(&metrics) {
+        if !position.physics(app).should_accept_user_offset(&*metrics) {
             return;
         }
 
@@ -3041,7 +3063,7 @@ impl RawScrollbarState {
         match event {
             PointerEvent::Scroll(scroll) => {
                 let metrics = position.copy_with(app);
-                if !position.physics(app).should_accept_user_offset(&metrics) {
+                if !position.physics(app).should_accept_user_offset(&*metrics) {
                     return;
                 }
                 let delta = RawScrollbarState::pointer_signal_event_delta(this, app, scroll);
@@ -3952,7 +3974,7 @@ mod tests {
         let (key, controller) = mount(&cell);
         let mut app = cell.borrow_mut();
         let state = key
-            .current_state::<RawScrollbarState>(&mut app)
+            .current_state::<RawScrollbarState>(&app)
             .expect("the scrollbar is mounted");
         assert_eq!(
             state.get_scrollbar_direction(&app),

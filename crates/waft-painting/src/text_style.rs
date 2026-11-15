@@ -68,9 +68,14 @@ pub struct TextStyle {
     /// should be distributed over and under the text.
     pub leading_distribution: Option<TextLeadingDistribution>,
     /// The paint drawn as a foreground for the text.
-    pub foreground: Option<Paint>,
+    ///
+    /// Shared, as Dart shares the one `Paint` object: a clone of the style holds the same
+    /// paint, and `==` compares paints by identity, as Dart's `Paint` has no `==`.
+    pub foreground: Option<Rc<Paint>>,
     /// The paint drawn as a background for the text.
-    pub background: Option<Paint>,
+    ///
+    /// Shared and compared by identity, as [`foreground`](Self::foreground) is.
+    pub background: Option<Rc<Paint>>,
     /// The decorations to paint near the text (e.g., an underline).
     pub decoration: Option<TextDecoration>,
     /// The color in which to paint the text decorations.
@@ -236,19 +241,19 @@ impl TextStyle {
     }
 
     /// The paint drawn as a foreground for the text.
-    pub fn foreground(mut self, foreground: Paint) -> TextStyle {
+    pub fn foreground(mut self, foreground: impl Into<Rc<Paint>>) -> TextStyle {
         debug_assert!(self.color.is_none(), "{K_COLOR_FOREGROUND_WARNING}");
-        self.foreground = Some(foreground);
+        self.foreground = Some(foreground.into());
         self
     }
 
     /// The paint drawn as a background for the text.
-    pub fn background(mut self, background: Paint) -> TextStyle {
+    pub fn background(mut self, background: impl Into<Rc<Paint>>) -> TextStyle {
         debug_assert!(
             self.background_color.is_none(),
             "{K_COLOR_BACKGROUND_WARNING}"
         );
-        self.background = Some(background);
+        self.background = Some(background.into());
         self
     }
 
@@ -648,14 +653,18 @@ impl TextStyle {
         };
         style.foreground = if a.foreground.is_some() || b.foreground.is_some() {
             if t < 0.5 {
-                Some(a.foreground.clone().unwrap_or_else(|| Paint {
-                    color: a.color.as_ref().unwrap().color().into(),
-                    ..Paint::default()
+                Some(a.foreground.clone().unwrap_or_else(|| {
+                    Rc::new(Paint {
+                        color: a.color.as_ref().unwrap().color().into(),
+                        ..Paint::default()
+                    })
                 }))
             } else {
-                Some(b.foreground.clone().unwrap_or_else(|| Paint {
-                    color: b.color.as_ref().unwrap().color().into(),
-                    ..Paint::default()
+                Some(b.foreground.clone().unwrap_or_else(|| {
+                    Rc::new(Paint {
+                        color: b.color.as_ref().unwrap().color().into(),
+                        ..Paint::default()
+                    })
                 }))
             }
         } else {
@@ -663,14 +672,18 @@ impl TextStyle {
         };
         style.background = if a.background.is_some() || b.background.is_some() {
             if t < 0.5 {
-                Some(a.background.clone().unwrap_or_else(|| Paint {
-                    color: a.background_color.as_ref().unwrap().color().into(),
-                    ..Paint::default()
+                Some(a.background.clone().unwrap_or_else(|| {
+                    Rc::new(Paint {
+                        color: a.background_color.as_ref().unwrap().color().into(),
+                        ..Paint::default()
+                    })
                 }))
             } else {
-                Some(b.background.clone().unwrap_or_else(|| Paint {
-                    color: b.background_color.as_ref().unwrap().color().into(),
-                    ..Paint::default()
+                Some(b.background.clone().unwrap_or_else(|| {
+                    Rc::new(Paint {
+                        color: b.background_color.as_ref().unwrap().color().into(),
+                        ..Paint::default()
+                    })
                 }))
             }
         } else {
@@ -721,7 +734,7 @@ impl TextStyle {
     /// The style information for text runs, encoded for use by `dart:ui`, with the font
     /// size scaled by `text_scaler` (Dart's `getTextStyle(textScaler: scaler)`).
     pub fn get_text_style_with(&self, text_scaler: &TextScaler) -> UiTextStyle {
-        let background = self.background.clone().or_else(|| {
+        let background = self.background.as_deref().cloned().or_else(|| {
             self.background_color.as_ref().map(|color| Paint {
                 color: color.color().into(),
                 ..Paint::default()
@@ -746,7 +759,7 @@ impl TextStyle {
                 height => height,
             },
             leading_distribution: self.leading_distribution,
-            foreground: self.foreground.clone(),
+            foreground: self.foreground.as_deref().cloned(),
             background,
             shadows: self.shadows.clone(),
             font_features: self.font_features.clone(),
@@ -790,8 +803,8 @@ impl TextStyle {
             || self.text_baseline != other.text_baseline
             || self.height != other.height
             || self.leading_distribution != other.leading_distribution
-            || self.foreground != other.foreground
-            || self.background != other.background
+            || !identical_paints(&self.foreground, &other.foreground)
+            || !identical_paints(&self.background, &other.background)
             || self.shadows != other.shadows
             || self.font_features != other.font_features
             || self.font_variations != other.font_variations
@@ -810,6 +823,15 @@ impl TextStyle {
             return RenderComparison::Paint;
         }
         RenderComparison::Identical
+    }
+}
+
+/// Dart's `==` on two `Paint?`s: `Paint` has no `==`, so it is `identical`.
+fn identical_paints(a: &Option<Rc<Paint>>, b: &Option<Rc<Paint>>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => Rc::ptr_eq(a, b),
+        _ => false,
     }
 }
 
@@ -832,8 +854,8 @@ impl PartialEq for TextStyle {
             && self.text_baseline == other.text_baseline
             && self.height == other.height
             && self.leading_distribution == other.leading_distribution
-            && self.foreground == other.foreground
-            && self.background == other.background
+            && identical_paints(&self.foreground, &other.foreground)
+            && identical_paints(&self.background, &other.background)
             && self.shadows == other.shadows
             && self.font_features == other.font_features
             && self.font_variations == other.font_variations
@@ -1527,6 +1549,203 @@ mod tests {
             style.font_family.as_deref(),
             Some("packages/cool_fonts/Roboto")
         );
+    }
+
+    fn paint_of(color: Color) -> Paint {
+        Paint {
+            color: color.into(),
+            ..Paint::default()
+        }
+    }
+
+    fn same_paint(a: &Option<Rc<Paint>>, b: &Option<Rc<Paint>>) -> bool {
+        matches!((a, b), (Some(a), Some(b)) if Rc::ptr_eq(a, b))
+    }
+
+    // text_style_test.dart 'TextStyle foreground and color combos'.
+    #[test]
+    fn text_style_foreground_and_color_combos() {
+        let red = Color::from_argb(255, 255, 0, 0);
+        let blue = Color::from_argb(255, 0, 0, 255);
+        let red_text_style = TextStyle::new().color(red);
+        let blue_text_style = TextStyle::new().color(blue);
+        let red_paint_text_style = TextStyle::new().foreground(paint_of(red));
+        let blue_paint_text_style = TextStyle::new().foreground(paint_of(blue));
+
+        // merge/copyWith
+        let red_blue_both_foreground_merged = red_text_style.merge(Some(&blue_text_style));
+        assert_eq!(red_blue_both_foreground_merged.color, Some(blue.into()));
+        assert!(red_blue_both_foreground_merged.foreground.is_none());
+
+        let red_blue_both_paint_merged = red_paint_text_style.merge(Some(&blue_paint_text_style));
+        assert!(red_blue_both_paint_merged.color.is_none());
+        assert!(same_paint(
+            &red_blue_both_paint_merged.foreground,
+            &blue_paint_text_style.foreground
+        ));
+
+        let red_paint_blue_color_merged = red_paint_text_style.merge(Some(&blue_text_style));
+        assert!(red_paint_blue_color_merged.color.is_none());
+        assert!(same_paint(
+            &red_paint_blue_color_merged.foreground,
+            &red_paint_text_style.foreground
+        ));
+
+        let blue_color_red_paint_merged = blue_text_style.merge(Some(&red_paint_text_style));
+        assert!(blue_color_red_paint_merged.color.is_none());
+        assert!(same_paint(
+            &blue_color_red_paint_merged.foreground,
+            &red_paint_text_style.foreground
+        ));
+
+        // apply
+        let applied = red_paint_text_style.apply().color(blue).into_style();
+        assert!(applied.color.is_none());
+        assert_eq!(applied.foreground.expect("a foreground").color, red.into());
+        assert_eq!(
+            red_text_style.apply().color(blue).into_style().color,
+            Some(blue.into())
+        );
+
+        // lerp
+        let lerp = |a: &TextStyle, b: &TextStyle, t: f64| {
+            TextStyle::lerp(Some(a), Some(b), t).expect("a style")
+        };
+        assert_eq!(
+            lerp(&red_text_style, &blue_text_style, 0.25).color,
+            Color::lerp(Some(red), Some(blue), 0.25).map(AnyColor::from)
+        );
+        assert!(
+            lerp(&red_text_style, &blue_paint_text_style, 0.25)
+                .color
+                .is_none()
+        );
+        let foreground_color = |style: TextStyle| style.foreground.expect("a foreground").color;
+        assert_eq!(
+            foreground_color(lerp(&red_text_style, &blue_paint_text_style, 0.25)),
+            red.into()
+        );
+        assert_eq!(
+            foreground_color(lerp(&red_text_style, &blue_paint_text_style, 0.75)),
+            blue.into()
+        );
+
+        assert!(
+            lerp(&red_paint_text_style, &blue_paint_text_style, 0.25)
+                .color
+                .is_none()
+        );
+        assert_eq!(
+            foreground_color(lerp(&red_paint_text_style, &blue_paint_text_style, 0.25)),
+            red.into()
+        );
+        assert_eq!(
+            foreground_color(lerp(&red_paint_text_style, &blue_paint_text_style, 0.75)),
+            blue.into()
+        );
+    }
+
+    // text_style_test.dart 'TextStyle background and backgroundColor combos'.
+    #[test]
+    fn text_style_background_and_background_color_combos() {
+        let red = Color::from_argb(255, 255, 0, 0);
+        let blue = Color::from_argb(255, 0, 0, 255);
+        let red_text_style = TextStyle::new().background_color(red);
+        let blue_text_style = TextStyle::new().background_color(blue);
+        let red_paint_text_style = TextStyle::new().background(paint_of(red));
+        let blue_paint_text_style = TextStyle::new().background(paint_of(blue));
+
+        // merge/copyWith
+        let red_blue_both_foreground_merged = red_text_style.merge(Some(&blue_text_style));
+        assert_eq!(
+            red_blue_both_foreground_merged.background_color,
+            Some(blue.into())
+        );
+        assert!(red_blue_both_foreground_merged.foreground.is_none());
+
+        let red_blue_both_paint_merged = red_paint_text_style.merge(Some(&blue_paint_text_style));
+        assert!(red_blue_both_paint_merged.background_color.is_none());
+        assert!(same_paint(
+            &red_blue_both_paint_merged.background,
+            &blue_paint_text_style.background
+        ));
+
+        let red_paint_blue_color_merged = red_paint_text_style.merge(Some(&blue_text_style));
+        assert!(red_paint_blue_color_merged.background_color.is_none());
+        assert!(same_paint(
+            &red_paint_blue_color_merged.background,
+            &red_paint_text_style.background
+        ));
+
+        let blue_color_red_paint_merged = blue_text_style.merge(Some(&red_paint_text_style));
+        assert!(blue_color_red_paint_merged.background_color.is_none());
+        assert!(same_paint(
+            &blue_color_red_paint_merged.background,
+            &red_paint_text_style.background
+        ));
+
+        // apply
+        let applied = red_paint_text_style
+            .apply()
+            .background_color(blue)
+            .into_style();
+        assert!(applied.background_color.is_none());
+        assert_eq!(applied.background.expect("a background").color, red.into());
+        assert_eq!(
+            red_text_style
+                .apply()
+                .background_color(blue)
+                .into_style()
+                .background_color,
+            Some(blue.into())
+        );
+
+        // lerp
+        let lerp = |a: &TextStyle, b: &TextStyle, t: f64| {
+            TextStyle::lerp(Some(a), Some(b), t).expect("a style")
+        };
+        assert_eq!(
+            lerp(&red_text_style, &blue_text_style, 0.25).background_color,
+            Color::lerp(Some(red), Some(blue), 0.25).map(AnyColor::from)
+        );
+        assert!(
+            lerp(&red_text_style, &blue_paint_text_style, 0.25)
+                .background_color
+                .is_none()
+        );
+        let background_color = |style: TextStyle| style.background.expect("a background").color;
+        assert_eq!(
+            background_color(lerp(&red_text_style, &blue_paint_text_style, 0.25)),
+            red.into()
+        );
+        assert_eq!(
+            background_color(lerp(&red_text_style, &blue_paint_text_style, 0.75)),
+            blue.into()
+        );
+
+        assert!(
+            lerp(&red_paint_text_style, &blue_paint_text_style, 0.25)
+                .background_color
+                .is_none()
+        );
+        assert_eq!(
+            background_color(lerp(&red_paint_text_style, &blue_paint_text_style, 0.25)),
+            red.into()
+        );
+        assert_eq!(
+            background_color(lerp(&red_paint_text_style, &blue_paint_text_style, 0.75)),
+            blue.into()
+        );
+    }
+
+    #[test]
+    fn styles_with_equal_but_separate_paints_differ_as_dart_paints_have_no_equality() {
+        let red = Color::from_argb(255, 255, 0, 0);
+        let paint = Rc::new(paint_of(red));
+        let style = TextStyle::new().foreground(Rc::clone(&paint));
+        assert_eq!(style, TextStyle::new().foreground(paint));
+        assert_ne!(style, TextStyle::new().foreground(paint_of(red)));
+        assert_eq!(style, style.clone());
     }
 
     // text_style_test.dart 'TextStyle.lerp identical a,b'.

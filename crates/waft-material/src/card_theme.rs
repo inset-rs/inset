@@ -258,7 +258,7 @@ impl CardTheme {
     pub fn of(app: &mut App, context: BuildContext) -> CardThemeData {
         match context.depend_on_inherited_widget_of_exact_type::<CardTheme>(app) {
             Some(card_theme) => card_theme.data(),
-            None => Theme::of(app, context).card_theme,
+            None => Theme::of(app, context).card_theme.clone(),
         }
     }
 

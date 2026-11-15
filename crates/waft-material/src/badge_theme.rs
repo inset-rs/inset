@@ -209,7 +209,7 @@ impl BadgeTheme {
     pub fn of(app: &mut App, context: BuildContext) -> BadgeThemeData {
         match context.depend_on_inherited_widget_of_exact_type::<BadgeTheme>(app) {
             Some(badge_theme) => badge_theme.data.clone(),
-            None => Theme::of(app, context).badge_theme,
+            None => Theme::of(app, context).badge_theme.clone(),
         }
     }
 }

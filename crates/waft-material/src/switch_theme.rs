@@ -339,7 +339,7 @@ impl SwitchTheme {
     pub fn of(app: &mut App, context: BuildContext) -> SwitchThemeData {
         match context.depend_on_inherited_widget_of_exact_type::<SwitchTheme>(app) {
             Some(switch_theme) => switch_theme.data.clone(),
-            None => Theme::of(app, context).switch_theme,
+            None => Theme::of(app, context).switch_theme.clone(),
         }
     }
 }

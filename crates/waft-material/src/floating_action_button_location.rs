@@ -1603,7 +1603,7 @@ mod tests {
         let steps = Rc::new(RefCell::new(Vec::new()));
         let mut app = tester.cell.borrow_mut();
         let state = key
-            .current_state::<GeometryListenerState>(&mut app)
+            .current_state::<GeometryListenerState>(&app)
             .expect("the listener's state");
         let listenable = app.get(state).geometry_listenable.expect("dependencies");
         listenable.add_listener(

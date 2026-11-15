@@ -204,8 +204,8 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 - Start each dialog with the system's non-blocking call and answer through a future, so the host's loop keeps running.
 
 **Appearance and locale**
-- `Platform::platform_brightness`, `locales`, `set_application_locale`, `EmbedderClient::platform_brightness_changed`, `locales_changed`
-- Update what `Platform` answers before calling its change hook, and list the locales most preferred first.
+- `Platform::briefly_show_password`, `platform_brightness`, `locales`, `set_application_locale`, `EmbedderClient::platform_brightness_changed`, `locales_changed`
+- Update what `Platform` answers before calling its change hook, and list the locales most preferred first; answer `briefly_show_password` as the system's setting is now, which has no change hook.
 
 **Fonts and images**
 - `Platform::font_source`, `open_image_codec`, `import_pixels`, `import_video_frame`, `picture_to_image_sync`, `SnapshotDelegate`, `EmbedderClient::system_fonts_changed`

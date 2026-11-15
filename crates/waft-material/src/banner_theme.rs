@@ -220,7 +220,7 @@ impl MaterialBannerTheme {
         context
             .depend_on_inherited_widget_of_exact_type::<MaterialBannerTheme>(app)
             .and_then(|banner_theme| banner_theme.data.clone())
-            .unwrap_or_else(|| Theme::of(app, context).banner_theme)
+            .unwrap_or_else(|| Theme::of(app, context).banner_theme.clone())
     }
 }
 

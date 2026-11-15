@@ -511,14 +511,12 @@ fn custom_keyed_header_drag_keeps_live_subtree_and_accepts_independent_feedback(
         state.custom_header = Some(header_key.clone())
     });
     settle(&mut f);
-    let initial = header_key
-        .current_context(&mut f.cell.borrow_mut())
-        .unwrap();
+    let initial = header_key.current_context(&f.cell.borrow_mut()).unwrap();
     let start = f.find("Custom tab");
     pointer_reorder(&mut f, start, Offset::new(419.0, start.dy()));
     assert_eq!(f.cell.borrow().get(owner).items, vec![1, 2, 0]);
     assert_eq!(
-        header_key.current_context(&mut f.cell.borrow_mut()),
+        header_key.current_context(&f.cell.borrow_mut()),
         Some(initial)
     );
     owner.set_state(&mut f.cell.borrow_mut(), |state| {
@@ -543,7 +541,7 @@ fn custom_keyed_header_drag_keeps_live_subtree_and_accepts_independent_feedback(
     settle(&mut f);
     assert_eq!(f.cell.borrow().get(owner).items, vec![0, 1, 2]);
     assert_eq!(
-        header_key.current_context(&mut f.cell.borrow_mut()),
+        header_key.current_context(&f.cell.borrow_mut()),
         Some(initial)
     );
 }

@@ -21,6 +21,7 @@ pub mod debug;
 pub mod default_selection_style;
 pub mod default_text_editing_shortcuts;
 pub mod desktop_text_selection_toolbar_layout_delegate;
+pub mod dialog;
 pub mod dismissible;
 pub mod drag_target;
 pub mod draggable_scrollable_sheet;

@@ -24,7 +24,7 @@ pub(crate) fn bottom_sheet_defaults_m3(
     app: &mut App,
     context: BuildContext,
 ) -> BottomSheetThemeData {
-    let colors = Theme::of(app, context).color_scheme;
+    let colors = Theme::of(app, context).color_scheme.clone();
     BottomSheetThemeData::new()
         .elevation(1.0)
         .modal_elevation(1.0)

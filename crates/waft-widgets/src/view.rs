@@ -1177,7 +1177,7 @@ mod tests {
             "the tree is idle before the probe"
         );
         let render_object = key
-            .current_context(&mut app)
+            .current_context(&app)
             .expect("mounted")
             .find_render_object(&app)
             .expect("a render object");
@@ -1527,12 +1527,12 @@ mod tests {
         };
         mount_root(&cell, tree(true));
         let state = key
-            .current_state::<TickingState>(&mut cell.borrow_mut())
+            .current_state::<TickingState>(&cell.borrow_mut())
             .expect("mounted in the first view");
 
         mount_root(&cell, tree(false));
         assert_eq!(
-            key.current_state::<TickingState>(&mut cell.borrow_mut()),
+            key.current_state::<TickingState>(&cell.borrow_mut()),
             Some(state),
             "the same state, now in the second view"
         );
@@ -1571,7 +1571,7 @@ mod tests {
         );
         let mut app = cell.borrow_mut();
         let in_anchored = key
-            .current_context(&mut app)
+            .current_context(&app)
             .and_then(|context| context.find_render_object(&app))
             .expect("the anchored view's render object");
         // The frame after the warm-up frame presents each view again.
@@ -1616,7 +1616,7 @@ mod tests {
         );
         let mut app = cell.borrow_mut();
         let in_second = key
-            .current_context(&mut app)
+            .current_context(&app)
             .and_then(|context| context.find_render_object(&app))
             .expect("the second view's render object");
         platform.take_frame_requests();
@@ -1695,7 +1695,7 @@ mod tests {
         binding_pump_view(&mut app, FIRST, millis(16));
         assert!(
             !in_second
-                .current_context(&mut app)
+                .current_context(&app)
                 .expect("mounted")
                 .dirty(&app),
             "the first view's frame built the second view's dirty element"
@@ -1745,7 +1745,7 @@ mod tests {
         assert_eq!(presented(&platform), [2, 2]);
 
         in_second
-            .current_context(&mut app)
+            .current_context(&app)
             .and_then(|context| context.find_render_object(&app))
             .expect("the second view's render object")
             .mark_needs_paint(&mut app);
@@ -1787,7 +1787,7 @@ mod tests {
         mount_root(&cell, tree);
         let mut app = cell.borrow_mut();
         binding_pump_view(&mut app, FIRST, millis(16));
-        let state = key.current_state::<TickingState>(&mut app);
+        let state = key.current_state::<TickingState>(&app);
 
         // The first view is hidden from now on: the host gives the second view the frames it
         // asks for, and the first none. The second view's frame moves the widget, whose tick was
@@ -1803,7 +1803,7 @@ mod tests {
             }
         }
         assert_eq!(
-            key.current_state::<TickingState>(&mut app),
+            key.current_state::<TickingState>(&app),
             state,
             "the same state"
         );

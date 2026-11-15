@@ -673,7 +673,7 @@ mod tests {
             widget.into_widget()
         };
         build(cell, root);
-        key.current_state::<RestorableWidgetState>(&mut cell.borrow_mut())
+        key.current_state::<RestorableWidgetState>(&cell.borrow_mut())
             .expect("a _RestorableWidgetState")
     }
 

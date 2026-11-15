@@ -682,10 +682,10 @@ fn a_global_object_key_made_again_finds_the_same_element() {
     );
     harness.pump(&mut app);
     let found = GlobalKey::object(object.id())
-        .current_widget(&mut app)
+        .current_widget(&app)
         .expect("the keyed widget is mounted");
     assert!(downcast_widget::<Padding>(&*found).is_some());
-    assert!(GlobalKey::new().current_widget(&mut app).is_none());
+    assert!(GlobalKey::new().current_widget(&app).is_none());
 }
 
 /// A global key of each kind finds its element, and a key held as a widget's key is
@@ -711,11 +711,11 @@ fn every_global_key_kind_finds_its_element() {
             .into_widget(),
         );
         harness.pump(&mut app);
-        let widget = key.current_widget(&mut app).expect("mounted");
+        let widget = key.current_widget(&app).expect("mounted");
         assert!(downcast_widget::<Padding>(&*widget).is_some(), "{key:?}");
-        assert!(key.current_context(&mut app).is_some());
+        assert!(key.current_context(&app).is_some());
         assert!(
-            key.current_state::<NoState>(&mut app).is_none(),
+            key.current_state::<NoState>(&app).is_none(),
             "a render object widget has no state"
         );
         assert!(matches!(KeyRef::from(key.clone()), KeyRef::Global(_)));
@@ -729,10 +729,7 @@ fn every_global_key_kind_finds_its_element() {
             .into_widget(),
         );
         harness.pump(&mut app);
-        assert!(
-            key.current_widget(&mut app).is_none(),
-            "the key left the tree"
-        );
+        assert!(key.current_widget(&app).is_none(), "the key left the tree");
     }
     let value: KeyRef = waft_foundation::ValueKey::new(1).into();
     assert!(matches!(value, KeyRef::Local(_)));
@@ -757,7 +754,7 @@ fn global_keys_wrapping_equal_keys_find_the_same_element() {
     );
     harness.pump(&mut app);
     assert!(wrapped() == wrapped());
-    assert!(wrapped().current_widget(&mut app).is_some());
+    assert!(wrapped().current_widget(&app).is_some());
     let local: KeyRef = waft_foundation::ValueKey::new(7).into();
     assert!(local != KeyRef::from(wrapped()));
 }

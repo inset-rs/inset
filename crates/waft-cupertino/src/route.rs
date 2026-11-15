@@ -3438,9 +3438,7 @@ mod tests {
             }),
         );
         let mut app = cell.borrow_mut();
-        let first_context = first
-            .current_context(&mut app)
-            .expect("the page is mounted");
+        let first_context = first.current_context(&app).expect("the page is mounted");
         assert!(
             first_context
                 .find_ancestor_widget_of_exact_type::<CupertinoPageTransition>(&app)
@@ -3450,9 +3448,7 @@ mod tests {
         let pushed = builder_route(&mut app, keyed_page(&second), false).as_route();
         navigator_state(&key, &mut app).push(&mut app, pushed);
         let at = settle(&mut app, Duration::ZERO);
-        let second_context = second
-            .current_context(&mut app)
-            .expect("the page is mounted");
+        let second_context = second.current_context(&app).expect("the page is mounted");
         assert!(
             second_context
                 .find_ancestor_widget_of_exact_type::<CupertinoPageTransition>(&app)
@@ -3465,7 +3461,7 @@ mod tests {
         navigator_state(&key, &mut app).push(&mut app, dialog);
         settle(&mut app, at);
         let dialog_context = dialog_key
-            .current_context(&mut app)
+            .current_context(&app)
             .expect("the dialog is mounted");
         assert!(
             dialog_context
@@ -3567,7 +3563,7 @@ mod tests {
         pump(&mut app, at + Duration::from_secs(3));
 
         // Verify pages are updated.
-        assert!(new_page_key.current_context(&mut app).is_some());
+        assert!(new_page_key.current_context(&app).is_some());
         // Verify `userGestureInProgress` is set to false.
         let navigator = navigator_state(&navigator_key.borrow(), &mut app);
         assert!(!navigator.user_gesture_in_progress(&app));
@@ -3625,7 +3621,7 @@ mod tests {
         });
         settle(&mut app, at);
 
-        assert!(new_page_key.current_context(&mut app).is_some());
+        assert!(new_page_key.current_context(&app).is_some());
         assert_eq!(navigator_state(&navigator_key, &mut app), navigator);
         assert!(!navigator.user_gesture_in_progress(&app));
     }

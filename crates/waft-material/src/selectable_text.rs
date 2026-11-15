@@ -1696,9 +1696,7 @@ mod tests {
                 SelectableText::new("selectable text").text_scale_factor(1.9),
             );
             tester.pump_widget(root);
-            // SkParagraph rounds the 26.6 line to 27; Valo does not yet (fixed in Valo,
-            // unreleased), so the height is within half a pixel of Flutter's.
-            assert!((selectable_text_size(&tester).height() - 27.0).abs() <= 0.5);
+            assert_eq!(selectable_text_size(&tester).height(), 27.0);
         });
     }
 

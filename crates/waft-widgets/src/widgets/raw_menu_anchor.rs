@@ -114,7 +114,7 @@ pub type RawMenuAnchorOverlayBuilder =
 /// The `child` is an optional child supplied as the [`RawMenuAnchor::child`] attribute. The
 /// child is intended to be incorporated in the result of the function.
 pub type RawMenuAnchorChildBuilder =
-    Rc<dyn Fn(&mut App, BuildContext, Handle<MenuController>, Option<&WidgetRef>) -> WidgetRef>;
+    Rc<dyn Fn(&mut App, BuildContext, AnyMenuController, Option<&WidgetRef>) -> WidgetRef>;
 
 /// Signature for the callback used by [`RawMenuAnchor::on_open_requested`] to intercept
 /// requests to open a menu.
@@ -133,7 +133,7 @@ pub type RawMenuAnchorCloseRequestedCallback = Rc<dyn Fn(&mut App, VoidCallback)
 #[derive(Debug)]
 struct MenuControllerScope {
     is_open: bool,
-    controller: Handle<MenuController>,
+    controller: AnyMenuController,
     child: WidgetRef,
 }
 
@@ -372,7 +372,7 @@ pub struct RawMenuAnchor {
     pub consume_outside_taps: bool,
 
     /// A [`MenuController`] that allows opening and closing of the menu from other widgets.
-    pub controller: Handle<MenuController>,
+    pub controller: AnyMenuController,
 }
 
 impl RawMenuAnchor {
@@ -380,7 +380,7 @@ impl RawMenuAnchor {
     /// [`overlay_builder`](Self::overlay_builder); Dart's optional named arguments are the
     /// setters.
     pub fn new(
-        controller: Handle<MenuController>,
+        controller: AnyMenuController,
         overlay_builder: impl Fn(&mut App, BuildContext, RawMenuOverlayInfo) -> WidgetRef + 'static,
     ) -> RawMenuAnchor {
         RawMenuAnchor {
@@ -456,12 +456,7 @@ impl RawMenuAnchor {
     /// Dart `RawMenuAnchor(builder:)`.
     pub fn builder(
         mut self,
-        builder: impl Fn(
-            &mut App,
-            BuildContext,
-            Handle<MenuController>,
-            Option<&WidgetRef>,
-        ) -> WidgetRef
+        builder: impl Fn(&mut App, BuildContext, AnyMenuController, Option<&WidgetRef>) -> WidgetRef
         + 'static,
     ) -> RawMenuAnchor {
         self.builder = Some(Rc::new(builder));
@@ -536,7 +531,7 @@ struct RawMenuAnchorBaseVTable {
     type_name: fn() -> &'static str,
     parent: fn(&App, HandleId) -> Option<AnyRawMenuAnchorBase>,
     as_raw_menu_anchor_state: fn(HandleId) -> Option<Handle<RawMenuAnchorState>>,
-    menu_controller: fn(&App, HandleId) -> Handle<MenuController>,
+    menu_controller: fn(&App, HandleId) -> AnyMenuController,
     is_open: fn(&App, HandleId) -> bool,
     add_child: fn(&mut App, HandleId, AnyRawMenuAnchorBase),
     remove_child: fn(&mut App, HandleId, AnyRawMenuAnchorBase),
@@ -606,7 +601,7 @@ impl AnyRawMenuAnchorBase {
         (self.vtable.as_raw_menu_anchor_state)(self.id)
     }
 
-    fn menu_controller(self, app: &App) -> Handle<MenuController> {
+    fn menu_controller(self, app: &App) -> AnyMenuController {
         (self.vtable.menu_controller)(app, self.id)
     }
 
@@ -659,6 +654,9 @@ struct RawMenuAnchorBaseMixinData {
     parent: Option<AnyRawMenuAnchorBase>,
     scroll_position: Option<AnyScrollPosition>,
     view_size: Option<Size>,
+    // The `DismissMenuAction` Dart's `build` makes each time; one per state, made in
+    // `init_state` and freed in `dispose`, since no collector frees the one a build replaces.
+    dismiss_menu_action: Option<Handle<DismissMenuAction>>,
 }
 
 impl RawMenuAnchorBaseMixinData {
@@ -668,6 +666,7 @@ impl RawMenuAnchorBaseMixinData {
             parent: None,
             scroll_position: None,
             view_size: None,
+            dismiss_menu_action: None,
         }
     }
 }
@@ -706,7 +705,7 @@ trait RawMenuAnchorBaseMixin: State {
     }
 
     /// The [`MenuController`] that is used by this anchor.
-    fn menu_controller(self: Handle<Self>, app: &App) -> Handle<MenuController>;
+    fn menu_controller(self: Handle<Self>, app: &App) -> AnyMenuController;
 
     /// Whether this submenu's overlay is visible.
     fn is_open(self: Handle<Self>, app: &App) -> bool;
@@ -719,14 +718,17 @@ trait RawMenuAnchorBaseMixin: State {
     /// Dart's `initState` body.
     fn init_state(self: Handle<Self>, app: &mut App) {
         let anchor = self.as_raw_menu_anchor_base();
-        self.menu_controller(app).attach(app, anchor);
+        let controller = self.menu_controller(app);
+        controller.attach(app, anchor);
+        let dismiss_menu_action = DismissMenuAction::new(app, controller);
+        self.raw_menu_anchor_base_data_mut(app).dismiss_menu_action = Some(dismiss_menu_action);
     }
 
     /// Dart's `didChangeDependencies` body.
     fn did_change_dependencies(self: Handle<Self>, app: &mut App) {
         let context = self.context(app);
-        let new_parent = MenuController::maybe_of(app, context)
-            .and_then(|controller| app.get(controller).anchor);
+        let new_parent =
+            MenuController::maybe_of(app, context).and_then(|controller| controller.anchor(app));
         let parent = self.raw_menu_anchor_base_data(app).parent;
         if new_parent != parent {
             debug_assert!(
@@ -788,8 +790,12 @@ trait RawMenuAnchorBaseMixin: State {
         let data = self.raw_menu_anchor_base_data_mut(app);
         data.parent = None;
         data.anchor_children.clear();
+        let dismiss_menu_action = data.dismiss_menu_action.take();
         let anchor = self.as_raw_menu_anchor_base();
         self.menu_controller(app).detach(app, anchor);
+        if let Some(dismiss_menu_action) = dismiss_menu_action {
+            app.destroy(dismiss_menu_action);
+        }
     }
 
     /// Dart's `_addChild`.
@@ -931,9 +937,14 @@ trait RawMenuAnchorBaseMixin: State {
         let mut actions: HashMap<TypeId, AnyAction> = HashMap::new();
         // Check if open to allow DismissIntent to bubble when the menu is closed.
         if is_open {
+            let dismiss_menu_action = self
+                .raw_menu_anchor_base_data(app)
+                .dismiss_menu_action
+                .expect("made in init_state");
+            app.get_mut(dismiss_menu_action).controller = controller;
             actions.insert(
                 <DismissMenuAction as Action>::intent_type(),
-                Action::as_action(DismissMenuAction::new(app, controller)),
+                Action::as_action(dismiss_menu_action),
             );
         }
         MenuControllerScope {
@@ -1047,7 +1058,7 @@ impl RawMenuAnchorBaseMixin for RawMenuAnchorState {
         self.overlay_controller(app).is_showing(app)
     }
 
-    fn menu_controller(self: Handle<Self>, app: &App) -> Handle<MenuController> {
+    fn menu_controller(self: Handle<Self>, app: &App) -> AnyMenuController {
         self.widget(app).controller
     }
 
@@ -1273,15 +1284,12 @@ pub struct RawMenuAnchorGroup {
     pub child: WidgetRef,
 
     /// A [`MenuController`] that allows the closing of the menu from other widgets.
-    pub controller: Handle<MenuController>,
+    pub controller: AnyMenuController,
 }
 
 impl RawMenuAnchorGroup {
     /// Creates a [`RawMenuAnchorGroup`].
-    pub fn new<K>(
-        child: impl IntoWidget<K>,
-        controller: Handle<MenuController>,
-    ) -> RawMenuAnchorGroup {
+    pub fn new<K>(child: impl IntoWidget<K>, controller: AnyMenuController) -> RawMenuAnchorGroup {
         RawMenuAnchorGroup {
             key: None,
             child: child.into_widget(),
@@ -1344,7 +1352,7 @@ impl RawMenuAnchorBaseMixin for RawMenuAnchorGroupState {
             .any(|child| child.is_open(app))
     }
 
-    fn menu_controller(self: Handle<Self>, app: &App) -> Handle<MenuController> {
+    fn menu_controller(self: Handle<Self>, app: &App) -> AnyMenuController {
         self.widget(app).controller
     }
 
@@ -1376,7 +1384,7 @@ impl RawMenuAnchorBaseMixin for RawMenuAnchorGroupState {
 
     fn open(self: Handle<Self>, app: &mut App, _position: Option<Offset>) {
         debug_assert!(
-            app.get(self.menu_controller(app)).anchor == Some(self.as_raw_menu_anchor_base())
+            self.menu_controller(app).anchor(app) == Some(self.as_raw_menu_anchor_base())
         );
         // Menu nodes are always open, so this is a no-op.
     }
@@ -1434,38 +1442,66 @@ impl State for RawMenuAnchorGroupState {
 // ---------------------------------------------------------------------------------------------
 // MenuController
 
-/// A controller used to manage a menu created by a [`RawMenuAnchor`] or a
-/// [`RawMenuAnchorGroup`], or by a widget built on them, such as Material's `MenuAnchor`,
-/// `MenuBar` and `SubmenuButton`.
-///
-/// A [`MenuController`] is used to control and interrogate a menu after it has been created,
-/// with methods such as [`open`](Self::open) and [`close`](Self::close), and state accessors
-/// like [`is_open`](Self::is_open).
-///
-/// [`MenuController::maybe_of`] can be used to retrieve a controller from the [`BuildContext`]
-/// of a widget that is a descendant of a [`RawMenuAnchor`] or a [`RawMenuAnchorGroup`]. Doing
-/// so will not establish a dependency relationship.
-///
-/// A controller is an arena object: whoever calls [`new`](Self::new) owns it and destroys it
-/// once no anchor is given it any more.
-pub struct MenuController {
+/// The fields of Dart's `MenuController`, held under the field `menu_controller`
+/// ([`menu_controller_accessors!`](crate::menu_controller_accessors)).
+pub struct MenuControllerData {
     // The anchor that this controller controls.
     //
     // This is set automatically when this `MenuController` is attached to an anchor.
     anchor: Option<AnyRawMenuAnchorBase>,
 }
 
-impl MenuController {
-    /// Creates a [`MenuController`], attached to no anchor.
-    pub fn new(app: &mut App) -> Handle<MenuController> {
-        app.create(MenuController { anchor: None })
+impl MenuControllerData {
+    /// The bag of a controller attached to no anchor.
+    pub fn new() -> MenuControllerData {
+        MenuControllerData { anchor: None }
     }
+}
+
+impl Default for MenuControllerData {
+    fn default() -> MenuControllerData {
+        MenuControllerData::new()
+    }
+}
+
+/// The accessors [`MenuControllerLeaf`] asks for, for a struct whose bag is the field
+/// `menu_controller`.
+#[macro_export]
+macro_rules! menu_controller_accessors {
+    () => {
+        fn menu_controller_data(
+            self: ::waft_foundation::Handle<Self>,
+            app: &::waft_foundation::App,
+        ) -> &$crate::MenuControllerData {
+            &app.get(self).menu_controller
+        }
+
+        fn menu_controller_data_mut(
+            self: ::waft_foundation::Handle<Self>,
+            app: &mut ::waft_foundation::App,
+        ) -> &mut $crate::MenuControllerData {
+            &mut app.get_mut(self).menu_controller
+        }
+    };
+}
+
+/// The trait every menu-controller leaf implements: [`MenuController`], and a type an app
+/// writes where Dart extends `MenuController`.
+///
+/// The members a subclass overrides are the ones with a default body here; the shared bodies
+/// are associated functions on [`MenuController`], which an override calls where Dart writes
+/// `super.…`.
+pub trait MenuControllerLeaf: Sized + 'static {
+    /// Dart's `MenuController` fields, held under the field `menu_controller`
+    /// ([`menu_controller_accessors!`](crate::menu_controller_accessors)).
+    fn menu_controller_data(self: Handle<Self>, app: &App) -> &MenuControllerData;
+
+    /// See [`menu_controller_data`](Self::menu_controller_data).
+    fn menu_controller_data_mut(self: Handle<Self>, app: &mut App) -> &mut MenuControllerData;
 
     /// Whether or not the menu associated with this [`MenuController`] is open.
-    pub fn is_open(self: Handle<Self>, app: &App) -> bool {
-        app.get(self)
-            .anchor
-            .is_some_and(|anchor| anchor.is_open(app))
+    fn is_open(self: Handle<Self>, app: &App) -> bool {
+        MenuController::is_open(self.as_menu_controller(), app)
     }
 
     /// Opens the menu that this [`MenuController`] is associated with.
@@ -1475,12 +1511,8 @@ impl MenuController {
     ///
     /// If the menu's anchor point is scrolled by an ancestor, or the view changes size, then
     /// any open menu will automatically close.
-    pub fn open(self: Handle<Self>, app: &mut App, position: Option<Offset>) {
-        let anchor = app.get(self).anchor;
-        debug_assert!(anchor.is_some(), "_anchor != null");
-        anchor
-            .expect("a MenuController opened while attached to an anchor")
-            .handle_open_request(app, position);
+    fn open(self: Handle<Self>, app: &mut App, position: Option<Offset>) {
+        MenuController::open(self.as_menu_controller(), app, position);
     }
 
     /// Close the menu that this [`MenuController`] is associated with.
@@ -1490,31 +1522,87 @@ impl MenuController {
     ///
     /// If the menu's anchor point is scrolled by an ancestor, or the view changes size, then
     /// any open menu will automatically close.
-    pub fn close(self: Handle<Self>, app: &mut App) {
-        if let Some(anchor) = app.get(self).anchor {
-            anchor.handle_close_request(app);
-        }
+    fn close(self: Handle<Self>, app: &mut App) {
+        MenuController::close(self.as_menu_controller(), app);
     }
 
     /// Close the children of the menu associated with this [`MenuController`], without closing
     /// the menu itself.
-    pub fn close_children(self: Handle<Self>, app: &mut App) {
-        let anchor = app.get(self).anchor;
+    fn close_children(self: Handle<Self>, app: &mut App) {
+        MenuController::close_children(self.as_menu_controller(), app);
+    }
+
+    /// This controller as the erased [`AnyMenuController`]: what to pass where a Dart API takes
+    /// a `MenuController`.
+    fn as_menu_controller(self: Handle<Self>) -> AnyMenuController {
+        AnyMenuController {
+            id: self.id(),
+            vtable: const { &MenuControllerVTable::of::<Self>() },
+        }
+    }
+}
+
+/// A controller used to manage a menu created by a [`RawMenuAnchor`] or a
+/// [`RawMenuAnchorGroup`], or by a widget built on them, such as Material's `MenuAnchor`,
+/// `MenuBar` and `SubmenuButton`.
+///
+/// A [`MenuController`] is used to control and interrogate a menu after it has been created,
+/// with methods such as [`open`](MenuControllerLeaf::open) and
+/// [`close`](MenuControllerLeaf::close), and state accessors like
+/// [`is_open`](MenuControllerLeaf::is_open).
+///
+/// [`MenuController::maybe_of`] can be used to retrieve a controller from the [`BuildContext`]
+/// of a widget that is a descendant of a [`RawMenuAnchor`] or a [`RawMenuAnchorGroup`]. Doing
+/// so will not establish a dependency relationship.
+///
+/// A controller is an arena object: whoever calls [`new`](Self::new) owns it and destroys it
+/// once no anchor is given it any more. A type that overrides Dart's members is a second
+/// [`MenuControllerLeaf`].
+///
+/// The associated functions on this type are the shared bodies of Dart's `MenuController`; a
+/// leaf calls one where Dart writes `super.…`.
+pub struct MenuController {
+    menu_controller: MenuControllerData,
+}
+
+impl MenuController {
+    /// Creates a [`MenuController`], attached to no anchor.
+    pub fn new(app: &mut App) -> Handle<MenuController> {
+        app.create(MenuController {
+            menu_controller: MenuControllerData::new(),
+        })
+    }
+
+    /// See [`MenuControllerLeaf::is_open`].
+    pub fn is_open(controller: AnyMenuController, app: &App) -> bool {
+        controller
+            .anchor(app)
+            .is_some_and(|anchor| anchor.is_open(app))
+    }
+
+    /// See [`MenuControllerLeaf::open`].
+    pub fn open(controller: AnyMenuController, app: &mut App, position: Option<Offset>) {
+        let anchor = controller.anchor(app);
+        debug_assert!(anchor.is_some(), "_anchor != null");
+        anchor
+            .expect("a MenuController opened while attached to an anchor")
+            .handle_open_request(app, position);
+    }
+
+    /// See [`MenuControllerLeaf::close`].
+    pub fn close(controller: AnyMenuController, app: &mut App) {
+        if let Some(anchor) = controller.anchor(app) {
+            anchor.handle_close_request(app);
+        }
+    }
+
+    /// See [`MenuControllerLeaf::close_children`].
+    pub fn close_children(controller: AnyMenuController, app: &mut App) {
+        let anchor = controller.anchor(app);
         debug_assert!(anchor.is_some(), "_anchor != null");
         anchor
             .expect("a MenuController's children closed while attached to an anchor")
             .request_children_close(app);
-    }
-
-    fn attach(self: Handle<Self>, app: &mut App, anchor: AnyRawMenuAnchorBase) {
-        app.get_mut(self).anchor = Some(anchor);
-    }
-
-    fn detach(self: Handle<Self>, app: &mut App, anchor: AnyRawMenuAnchorBase) {
-        let this = app.get_mut(self);
-        if this.anchor == Some(anchor) {
-            this.anchor = None;
-        }
     }
 
     /// Returns the [`MenuController`] of the ancestor [`RawMenuAnchor`] nearest to the given
@@ -1522,15 +1610,15 @@ impl MenuController {
     ///
     /// This method will not establish a dependency relationship, so the calling widget will not
     /// rebuild when the menu opens and closes, nor when the [`MenuController`] changes.
-    pub fn maybe_of(app: &App, context: BuildContext) -> Option<Handle<MenuController>> {
+    pub fn maybe_of(app: &App, context: BuildContext) -> Option<AnyMenuController> {
         context
             .get_inherited_widget_of_exact_type::<MenuControllerScope>(app)
             .map(|scope| scope.controller)
     }
 
-    /// Returns the value of [`MenuController::is_open`] of the ancestor [`RawMenuAnchor`] or
-    /// [`RawMenuAnchorGroup`] nearest to the given `context`, if one exists. Otherwise, returns
-    /// `None`.
+    /// Returns the value of [`MenuControllerLeaf::is_open`] of the ancestor [`RawMenuAnchor`]
+    /// or [`RawMenuAnchorGroup`] nearest to the given `context`, if one exists. Otherwise,
+    /// returns `None`.
     ///
     /// This method will establish a dependency relationship, so the calling widget will rebuild
     /// when the menu opens and closes.
@@ -1541,9 +1629,114 @@ impl MenuController {
     }
 }
 
+impl MenuControllerLeaf for MenuController {
+    crate::menu_controller_accessors!();
+}
+
 impl Debug for MenuController {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "MenuController")
+    }
+}
+
+/// The vtable of an erased [`AnyMenuController`]: one `&'static` table per leaf type.
+struct MenuControllerVTable {
+    type_name: fn() -> &'static str,
+    data: fn(&App, HandleId) -> &MenuControllerData,
+    data_mut: fn(&mut App, HandleId) -> &mut MenuControllerData,
+    is_open: fn(&App, HandleId) -> bool,
+    open: fn(&mut App, HandleId, Option<Offset>),
+    close: fn(&mut App, HandleId),
+    close_children: fn(&mut App, HandleId),
+}
+
+impl MenuControllerVTable {
+    const fn of<C: MenuControllerLeaf>() -> MenuControllerVTable {
+        MenuControllerVTable {
+            type_name: std::any::type_name::<C>,
+            data: |app, id| C::menu_controller_data(resolve(id), app),
+            data_mut: |app, id| C::menu_controller_data_mut(resolve(id), app),
+            is_open: |app, id| C::is_open(resolve(id), app),
+            open: |app, id, position| C::open(resolve(id), app, position),
+            close: |app, id| C::close(resolve(id), app),
+            close_children: |app, id| C::close_children(resolve(id), app),
+        }
+    }
+}
+
+/// Erased [`MenuControllerLeaf`]: what a field or parameter Dart types as `MenuController`
+/// becomes.
+///
+/// Equality is Dart's `==` on an object reference.
+#[derive(Clone, Copy)]
+pub struct AnyMenuController {
+    id: HandleId,
+    vtable: &'static MenuControllerVTable,
+}
+
+impl AnyMenuController {
+    /// The controller's arena id, which is also its anchors' [`TapRegion::group_id`].
+    pub fn id(self) -> HandleId {
+        self.id
+    }
+
+    fn anchor(self, app: &App) -> Option<AnyRawMenuAnchorBase> {
+        (self.vtable.data)(app, self.id).anchor
+    }
+
+    /// See [`MenuControllerLeaf::is_open`].
+    pub fn is_open(self, app: &App) -> bool {
+        (self.vtable.is_open)(app, self.id)
+    }
+
+    /// See [`MenuControllerLeaf::open`].
+    pub fn open(self, app: &mut App, position: Option<Offset>) {
+        (self.vtable.open)(app, self.id, position);
+    }
+
+    /// See [`MenuControllerLeaf::close`].
+    pub fn close(self, app: &mut App) {
+        (self.vtable.close)(app, self.id);
+    }
+
+    /// See [`MenuControllerLeaf::close_children`].
+    pub fn close_children(self, app: &mut App) {
+        (self.vtable.close_children)(app, self.id);
+    }
+
+    /// Dart's `_attach`.
+    fn attach(self, app: &mut App, anchor: AnyRawMenuAnchorBase) {
+        (self.vtable.data_mut)(app, self.id).anchor = Some(anchor);
+    }
+
+    /// Dart's `_detach`.
+    fn detach(self, app: &mut App, anchor: AnyRawMenuAnchorBase) {
+        let data = (self.vtable.data_mut)(app, self.id);
+        if data.anchor == Some(anchor) {
+            data.anchor = None;
+        }
+    }
+}
+
+impl PartialEq for AnyMenuController {
+    fn eq(&self, other: &AnyMenuController) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for AnyMenuController {}
+
+impl Debug for AnyMenuController {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = (self.vtable.type_name)();
+        let short = name.rsplit("::").next().unwrap_or(name);
+        write!(f, "{short}({:?})", self.id)
+    }
+}
+
+impl From<AnyMenuController> for HandleId {
+    fn from(controller: AnyMenuController) -> HandleId {
+        controller.id
     }
 }
 
@@ -1560,12 +1753,12 @@ pub struct DismissMenuAction {
     action: ActionData,
 
     /// The [`MenuController`] that manages the menu which should be dismissed upon invocation.
-    pub controller: Handle<MenuController>,
+    pub controller: AnyMenuController,
 }
 
 impl DismissMenuAction {
     /// Creates a [`DismissMenuAction`].
-    pub fn new(app: &mut App, controller: Handle<MenuController>) -> Handle<DismissMenuAction> {
+    pub fn new(app: &mut App, controller: AnyMenuController) -> Handle<DismissMenuAction> {
         app.create(DismissMenuAction {
             action: ActionData::new(),
             controller,
@@ -1579,18 +1772,17 @@ impl Action for DismissMenuAction {
     crate::action_accessors!();
 
     fn invoke(self: Handle<Self>, app: &mut App, _intent: &DismissIntent) -> Option<Rc<dyn Any>> {
-        let controller = app.get(self).controller;
         let anchor = app
-            .get(controller)
-            .anchor
+            .get(self)
+            .controller
+            .anchor(app)
             .expect("a DismissMenuAction invoked while enabled has an anchor");
         anchor.root(app).handle_close_request(app);
         None
     }
 
     fn is_enabled(self: Handle<Self>, app: &mut App, _intent: &DismissIntent) -> bool {
-        let controller = app.get(self).controller;
-        app.get(controller).anchor.is_some()
+        app.get(self).controller.anchor(app).is_some()
     }
 }
 
@@ -1874,9 +2066,9 @@ mod tests {
 
         /// `tester.getRect(find.byKey(key))`.
         fn rect_of_key(&self, key: &GlobalKey) -> Rect {
-            let mut app = self.app();
+            let app = self.app();
             let context = key
-                .current_context(&mut app)
+                .current_context(&app)
                 .expect("the keyed widget is mounted");
             let object = context.find_render_object(&app).expect("laid out");
             global_rect(&app, object.as_box().expect("a box"))
@@ -2033,7 +2225,7 @@ mod tests {
     struct Menu {
         key: Option<KeyRef>,
         menu_panel: Option<WidgetRef>,
-        controller: Option<Handle<MenuController>>,
+        controller: Option<AnyMenuController>,
         child: Option<WidgetRef>,
         builder: Option<RawMenuAnchorChildBuilder>,
         focus_node: Option<AnyFocusNode>,
@@ -2061,7 +2253,7 @@ mod tests {
             self
         }
 
-        fn controller(mut self, controller: Handle<MenuController>) -> Menu {
+        fn controller(mut self, controller: AnyMenuController) -> Menu {
             self.controller = Some(controller);
             self
         }
@@ -2073,12 +2265,7 @@ mod tests {
 
         fn builder(
             mut self,
-            builder: impl Fn(
-                &mut App,
-                BuildContext,
-                Handle<MenuController>,
-                Option<&WidgetRef>,
-            ) -> WidgetRef
+            builder: impl Fn(&mut App, BuildContext, AnyMenuController, Option<&WidgetRef>) -> WidgetRef
             + 'static,
         ) -> Menu {
             self.builder = Some(Rc::new(builder));
@@ -2158,7 +2345,7 @@ mod tests {
 
     struct MenuState {
         state: StateData<Menu>,
-        controller: Option<Handle<MenuController>>,
+        controller: Option<AnyMenuController>,
     }
 
     impl State for MenuState {
@@ -2177,7 +2364,7 @@ mod tests {
                 None => match app.get(self).controller {
                     Some(controller) => controller,
                     None => {
-                        let controller = MenuController::new(app);
+                        let controller = MenuController::new(app).as_menu_controller();
                         app.get_mut(self).controller = Some(controller);
                         controller
                     }
@@ -2371,7 +2558,7 @@ mod tests {
     #[test]
     fn menu_controller_is_open_while_the_overlay_is_shown() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         tester.pump_widget(TestApp::new(
             Menu::new()
                 .controller(controller)
@@ -2395,8 +2582,8 @@ mod tests {
     #[test]
     fn menu_controller_open_and_close_toggle_overlay_visibility() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
-        let nested_controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
+        let nested_controller = MenuController::new(&mut tester.app()).as_menu_controller();
         tester.pump_widget(TestApp::new(
             Menu::new()
                 .controller(controller)
@@ -2469,7 +2656,7 @@ mod tests {
     #[test]
     fn close_children_closes_submenus_and_focus_stays_on_the_anchor_button() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         let focus_node = FocusNode::new(&mut tester.app()).as_node();
         tester.pump_widget(TestApp::new(
             Menu::new()
@@ -2511,7 +2698,7 @@ mod tests {
     #[test]
     fn only_one_child_anchor_is_open_at_a_time() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         tester.pump_widget(TestApp::new(
             RawMenuAnchor::new(controller, |_app, _context, _position| {
                 Column::new()
@@ -2585,7 +2772,7 @@ mod tests {
     #[test]
     fn a_group_is_open_while_a_descendant_menu_is_open() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         tester.pump_widget(TestApp::new(RawMenuAnchorGroup::new(
             Row::new().children([
                 Menu::new()
@@ -2631,8 +2818,8 @@ mod tests {
     #[test]
     fn opening_a_group_does_nothing() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
-        let nested_controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
+        let nested_controller = MenuController::new(&mut tester.app()).as_menu_controller();
         tester.pump_widget(TestApp::new(RawMenuAnchorGroup::new(
             Column::new().children([Menu::new()
                 .controller(nested_controller)
@@ -2660,10 +2847,10 @@ mod tests {
 
     /// Dart's `[Group] MenuController.close closes children` and `[Group]
     /// MenuController.closeChildren closes children`, which differ in the one call.
-    fn a_group_closes_its_children_with(close: fn(Handle<MenuController>, &mut App)) {
+    fn a_group_closes_its_children_with(close: fn(AnyMenuController, &mut App)) {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
-        let nested_controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
+        let nested_controller = MenuController::new(&mut tester.app()).as_menu_controller();
         tester.pump_widget(TestApp::new(RawMenuAnchorGroup::new(
             Column::new().children([Menu::new()
                 .controller(nested_controller)
@@ -2694,19 +2881,19 @@ mod tests {
 
     #[test]
     fn closing_a_group_closes_its_children() {
-        a_group_closes_its_children_with(MenuController::close);
+        a_group_closes_its_children_with(AnyMenuController::close);
     }
 
     #[test]
     fn closing_a_groups_children_closes_them() {
-        a_group_closes_its_children_with(MenuController::close_children);
+        a_group_closes_its_children_with(AnyMenuController::close_children);
     }
 
     #[test]
     fn submenus_call_on_close_before_their_parents() {
         let tester = Tester::new();
         let close_order = log();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         tester.pump_widget(TestApp::new(
             Menu::new()
                 .controller(controller)
@@ -2740,7 +2927,7 @@ mod tests {
     fn a_groups_submenus_call_on_close_before_their_parents() {
         let tester = Tester::new();
         let close_order = log();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         tester.pump_widget(TestApp::new(RawMenuAnchorGroup::new(
             Menu::new()
                 .on_close(push(&close_order, "a"))
@@ -2776,7 +2963,7 @@ mod tests {
     #[test]
     fn a_group_shows_one_open_child_anchor_at_a_time() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         tester.pump_widget(TestApp::new(RawMenuAnchorGroup::new(
             Row::new().children([
                 Menu::new()
@@ -2812,9 +2999,9 @@ mod tests {
     #[test]
     fn maybe_is_open_of_notifies_dependents_when_is_open_changes() {
         let tester = Tester::new();
-        let group_controller = MenuController::new(&mut tester.app());
-        let controller = MenuController::new(&mut tester.app());
-        let nested_controller = MenuController::new(&mut tester.app());
+        let group_controller = MenuController::new(&mut tester.app()).as_menu_controller();
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
+        let nested_controller = MenuController::new(&mut tester.app()).as_menu_controller();
         let panel_is_open: Rc<Cell<Option<bool>>> = Rc::default();
         let overlay_is_open: Rc<Cell<Option<bool>>> = Rc::default();
         let anchor_is_open: Rc<Cell<Option<bool>>> = Rc::default();
@@ -2898,12 +3085,12 @@ mod tests {
     #[test]
     fn menu_controllers_can_be_changed() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
-        let group_controller = MenuController::new(&mut tester.app());
-        let new_controller = MenuController::new(&mut tester.app());
-        let new_group_controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
+        let group_controller = MenuController::new(&mut tester.app()).as_menu_controller();
+        let new_controller = MenuController::new(&mut tester.app()).as_menu_controller();
+        let new_group_controller = MenuController::new(&mut tester.app()).as_menu_controller();
 
-        let tree = |group: Handle<MenuController>, menu: Handle<MenuController>| {
+        let tree = |group: AnyMenuController, menu: AnyMenuController| {
             TestApp::new(RawMenuAnchorGroup::new(
                 Menu::new()
                     .controller(menu)
@@ -2944,7 +3131,7 @@ mod tests {
     #[test]
     fn a_menu_controller_can_be_moved_to_a_different_menu() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         let tree = |key: Option<KeyRef>| {
             let mut menu = Menu::new()
                 .controller(controller)
@@ -2953,7 +3140,7 @@ mod tests {
             if let Some(key) = key {
                 menu = menu.key(key);
             }
-            let group_controller = MenuController::new(&mut tester.app());
+            let group_controller = MenuController::new(&mut tester.app()).as_menu_controller();
             TestApp::new(RawMenuAnchorGroup::new(menu, group_controller))
         };
         tester.pump_widget(tree(None));
@@ -2987,7 +3174,7 @@ mod tests {
     #[test]
     fn a_groups_menu_controller_can_be_moved_to_a_different_group() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         let tree = |key: Option<KeyRef>| {
             let mut group = RawMenuAnchorGroup::new(
                 Menu::new()
@@ -3031,19 +3218,19 @@ mod tests {
     #[test]
     fn maybe_of_does_not_notify_dependents_when_the_controller_changes() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         let anchor_key = GlobalKey::new();
-        let demo_controller_one = MenuController::new(&mut tester.app());
-        let demo_controller_two = MenuController::new(&mut tester.app());
+        let demo_controller_one = MenuController::new(&mut tester.app()).as_menu_controller();
+        let demo_controller_two = MenuController::new(&mut tester.app()).as_menu_controller();
 
-        let panel_controller: Rc<Cell<Option<Handle<MenuController>>>> = Rc::default();
-        let overlay_controller: Rc<Cell<Option<Handle<MenuController>>>> = Rc::default();
-        let anchor_controller: Rc<Cell<Option<Handle<MenuController>>>> = Rc::default();
+        let panel_controller: Rc<Cell<Option<AnyMenuController>>> = Rc::default();
+        let overlay_controller: Rc<Cell<Option<AnyMenuController>>> = Rc::default();
+        let anchor_controller: Rc<Cell<Option<AnyMenuController>>> = Rc::default();
         let panel_builds = counter();
         let anchor_builds = counter();
         let overlay_builds = counter();
 
-        let observer = |found: &Rc<Cell<Option<Handle<MenuController>>>>,
+        let observer = |found: &Rc<Cell<Option<AnyMenuController>>>,
                         builds: &Rc<Cell<u32>>,
                         text: &'static str| {
             let (found, builds) = (Rc::clone(found), Rc::clone(builds));
@@ -3053,7 +3240,7 @@ mod tests {
                 Text::new(text).into_widget()
             })
         };
-        let build_anchor = |group: Handle<MenuController>, overlay: Handle<MenuController>| {
+        let build_anchor = |group: AnyMenuController, overlay: AnyMenuController| {
             TestApp::new(RawMenuAnchorGroup::new(
                 Column::new().children([
                     // Panel context.
@@ -3090,7 +3277,7 @@ mod tests {
         {
             let mut app = tester.app();
             let context = anchor_key
-                .current_context(&mut app)
+                .current_context(&app)
                 .expect("the anchor is mounted");
             MenuController::maybe_of(&app, context)
                 .expect("the anchor's controller")
@@ -3115,7 +3302,7 @@ mod tests {
     #[test]
     fn a_detached_menu_controller_closes_without_panicking() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         controller.close(&mut tester.app());
         tester.pump();
     }
@@ -3123,7 +3310,7 @@ mod tests {
     #[test]
     fn a_detached_menu_controller_is_not_open() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         assert!(!controller.is_open(&tester.app()));
     }
 
@@ -3147,7 +3334,7 @@ mod tests {
     #[test]
     fn a_menu_controller_is_detached_when_its_anchor_is_given_another() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         tester.pump_widget(TestApp::new(
             Menu::new()
                 .controller(controller)
@@ -3171,7 +3358,7 @@ mod tests {
     #[test]
     fn a_menu_controller_is_detached_when_its_group_is_given_another() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         tester.pump_widget(TestApp::new(RawMenuAnchorGroup::new(
             SizedBox::shrink(),
             controller,
@@ -3180,7 +3367,7 @@ mod tests {
         // Should not panic because the controller is attached to the menu.
         controller.close_children(&mut tester.app());
 
-        let other = MenuController::new(&mut tester.app());
+        let other = MenuController::new(&mut tester.app()).as_menu_controller();
         tester.pump_widget(TestApp::new(RawMenuAnchorGroup::new(
             SizedBox::shrink(),
             other,
@@ -3193,7 +3380,7 @@ mod tests {
     #[test]
     fn a_menu_controller_is_detached_when_its_anchor_is_disposed() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         tester.pump_widget(TestApp::new(
             Menu::new()
                 .controller(controller)
@@ -3213,7 +3400,7 @@ mod tests {
     #[test]
     fn a_menu_controller_is_detached_when_its_group_is_disposed() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         tester.pump_widget(TestApp::new(RawMenuAnchorGroup::new(
             SizedBox::new(),
             controller,
@@ -3231,8 +3418,8 @@ mod tests {
     #[test]
     fn an_anchor_given_a_new_controller_after_its_old_one_was_destroyed_does_not_panic() {
         let tester = Tester::new();
-        let old = MenuController::new(&mut tester.app());
-        let new = MenuController::new(&mut tester.app());
+        let old = MenuController::new(&mut tester.app()).as_menu_controller();
+        let new = MenuController::new(&mut tester.app()).as_menu_controller();
         let anchor = |controller| {
             TestApp::new(
                 Menu::new()
@@ -3255,8 +3442,8 @@ mod tests {
     #[test]
     fn a_group_given_a_new_controller_after_its_old_one_was_destroyed_does_not_panic() {
         let tester = Tester::new();
-        let old = MenuController::new(&mut tester.app());
-        let new = MenuController::new(&mut tester.app());
+        let old = MenuController::new(&mut tester.app()).as_menu_controller();
+        let new = MenuController::new(&mut tester.app()).as_menu_controller();
         tester.pump_widget(TestApp::new(RawMenuAnchorGroup::new(
             SizedBox::shrink(),
             old,
@@ -3274,7 +3461,7 @@ mod tests {
     #[test]
     fn the_anchor_rect_carries_the_anchors_transform() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         let builder_position: Rc<Cell<Option<RawMenuOverlayInfo>>> = Rc::default();
         let sink = Rc::clone(&builder_position);
         tester.pump_widget(TestApp::new(
@@ -3304,10 +3491,10 @@ mod tests {
     #[test]
     fn escape_closes_menus() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         let a_focus_node = FocusNode::new(&mut tester.app()).as_node();
         let baa_focus_node = FocusNode::new(&mut tester.app()).as_node();
-        let menu_controller = MenuController::new(&mut tester.app());
+        let menu_controller = MenuController::new(&mut tester.app()).as_menu_controller();
         tester.pump_widget(TestApp::new(RawMenuAnchorGroup::new(
             Row::new().children([
                 Button::tag("a").focus_node(a_focus_node).into_widget(),
@@ -3363,7 +3550,7 @@ mod tests {
     #[test]
     fn a_closed_anchor_lets_intents_through() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         let a_focus_node = FocusNode::new(&mut tester.app()).as_node();
         let invoked = log();
         let actions = {
@@ -3458,7 +3645,7 @@ mod tests {
     #[test]
     fn dismiss_menu_action_closes_menus() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         let focus_node = FocusNode::new(&mut tester.app()).as_node();
         tester.pump_widget(TestApp::new(
             Menu::new()
@@ -3511,7 +3698,7 @@ mod tests {
     #[test]
     fn a_group_lays_its_child_out_as_its_own() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         let key = GlobalKey::new();
         tester.pump_widget(TestApp {
             child: RawMenuAnchorGroup::new(
@@ -3546,7 +3733,7 @@ mod tests {
     #[test]
     fn the_overlay_builder_is_passed_the_anchor_rect() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         let overlay_position: Rc<Cell<Option<RawMenuOverlayInfo>>> = Rc::default();
         let sink = Rc::clone(&overlay_position);
         tester.pump_widget(TestApp::new(
@@ -3569,7 +3756,7 @@ mod tests {
     #[test]
     fn overlay_contents_can_be_positioned() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         let key = GlobalKey::new();
         let content_key = key.clone();
         tester.pump_widget(TestApp::new(
@@ -3600,7 +3787,7 @@ mod tests {
     #[test]
     fn the_tap_region_group_id_is_passed_to_the_overlay() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         let inside_tap: Rc<Cell<Option<bool>>> = Rc::default();
         let builder_tap = Rc::clone(&inside_tap);
         tester.pump_widget(TestApp::new(
@@ -3647,7 +3834,7 @@ mod tests {
     /// Dart's two `Menus close and ... consume tap when consumesOutsideTap is ...` cases.
     fn outside_taps_close_menus(consume_outside_taps: bool) {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         let selected = log();
         let opened = log();
         let closed = log();
@@ -3741,7 +3928,7 @@ mod tests {
     #[test]
     fn on_open_is_called_when_the_menu_opens() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         let opened = Rc::new(Cell::new(false));
         let sink = Rc::clone(&opened);
         tester.pump_widget(TestApp::new(
@@ -3772,7 +3959,7 @@ mod tests {
     #[test]
     fn on_close_is_called_when_the_menu_closes() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         let closed = Rc::new(Cell::new(true));
         let (on_open, on_close) = (Rc::clone(&closed), Rc::clone(&closed));
         tester.pump_widget(TestApp::new(
@@ -3808,7 +3995,7 @@ mod tests {
     #[test]
     fn a_menu_closes_when_the_view_changes_size() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         let opened = Rc::new(Cell::new(false));
         let closed = Rc::new(Cell::new(false));
         let on_open = {
@@ -3903,7 +4090,7 @@ mod tests {
     fn the_ancestor_scroll_listener_is_removed_on_dispose() {
         let tester = Tester::new();
         let scroll_controller = scroll_controller(&mut tester.app());
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         tester.pump_widget(Directionality::new(
             TextDirection::Ltr,
             SingleChildScrollView::new()
@@ -4003,7 +4190,7 @@ mod tests {
     /// submenu's theater is the inner overlay's, after asserting that they share one.
     fn menu_is_shown_in_the_inner_overlay(root_uses_root: bool, nested_uses_root: bool) -> bool {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         let overlay_key = GlobalKey::new();
         let overlay_entry = OverlayEntry::new(
             &mut tester.app(),
@@ -4056,7 +4243,7 @@ mod tests {
         assert_eq!(theaters, 2);
 
         let inner_theater = overlay_key
-            .current_context(&mut app)
+            .current_context(&app)
             .and_then(|context| context.find_render_object(&app))
             .and_then(|object| object.downcast::<RenderTheater>(&app))
             .expect("the inner overlay's theater");
@@ -4084,7 +4271,7 @@ mod tests {
     #[test]
     fn parent_updates_are_not_triggered_during_builds() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         let tree = || {
             TestApp::new(RawMenuAnchorGroup::new(
                 Menu::new()
@@ -4108,7 +4295,7 @@ mod tests {
     #[test]
     fn the_anchor_rect_follows_the_anchor_when_it_moves() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         let overlay_position: Rc<Cell<Option<RawMenuOverlayInfo>>> = Rc::default();
         let set_state: Rc<RefCell<Option<StateSetter>>> = Rc::default();
         let show_additional_widget = Rc::new(Cell::new(true));
@@ -4163,7 +4350,7 @@ mod tests {
     #[test]
     fn an_anchor_of_zero_area_does_not_panic() {
         let tester = Tester::with_size(0.0, 0.0);
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         tester.pump_widget(Directionality::new(
             TextDirection::Ltr,
             Center::new().child(RawMenuAnchor::new(controller, |_app, _context, _info| {
@@ -4177,7 +4364,7 @@ mod tests {
     #[test]
     fn a_group_of_zero_area_does_not_panic() {
         let tester = Tester::with_size(0.0, 0.0);
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         tester.pump_widget(Directionality::new(
             TextDirection::Ltr,
             Center::new().child(RawMenuAnchorGroup::new(Text::new("X"), controller)),
@@ -4186,12 +4373,67 @@ mod tests {
         controller.open(&mut tester.app(), None);
     }
 
+    /// Dart's `CustomMenuController extends MenuController`, which counts its opens and closes.
+    struct CustomMenuController {
+        menu_controller: MenuControllerData,
+        open_call_count: u32,
+        close_call_count: u32,
+    }
+
+    impl MenuControllerLeaf for CustomMenuController {
+        crate::menu_controller_accessors!();
+
+        fn open(self: Handle<Self>, app: &mut App, position: Option<Offset>) {
+            app.get_mut(self).open_call_count += 1;
+            MenuController::open(self.as_menu_controller(), app, position);
+        }
+
+        fn close(self: Handle<Self>, app: &mut App) {
+            app.get_mut(self).close_call_count += 1;
+            MenuController::close(self.as_menu_controller(), app);
+        }
+    }
+
+    #[test]
+    fn an_app_can_override_the_open_and_close_of_its_menu_controller() {
+        let tester = Tester::new();
+        let custom_controller = tester.app().create(CustomMenuController {
+            menu_controller: MenuControllerData::new(),
+            open_call_count: 0,
+            close_call_count: 0,
+        });
+        tester.pump_widget(TestApp::new(
+            Menu::new()
+                .controller(custom_controller.as_menu_controller())
+                .menu_panel(panel(texts(&["a"])))
+                .child(AnchorButton::new("anchor")),
+        ));
+
+        custom_controller
+            .as_menu_controller()
+            .open(&mut tester.app(), None);
+        tester.pump();
+
+        assert!(custom_controller.is_open(&tester.app()));
+        assert_eq!(tester.app().get(custom_controller).open_call_count, 1);
+        assert_eq!(tester.count_text("a"), 1);
+
+        custom_controller
+            .as_menu_controller()
+            .close(&mut tester.app());
+        tester.pump();
+
+        assert!(!custom_controller.is_open(&tester.app()));
+        assert_eq!(tester.app().get(custom_controller).close_call_count, 1);
+        assert_eq!(tester.count_text("a"), 0);
+    }
+
     // ---- onOpenRequested ----
 
     #[test]
     fn on_open_requested_is_triggered_by_open() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         let on_open_called = counter();
         let on_open_requested_called = counter();
         let requested = Rc::clone(&on_open_requested_called);
@@ -4219,7 +4461,7 @@ mod tests {
     #[test]
     fn on_open_requested_is_passed_the_position() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         let menu_position: Rc<Cell<Option<Offset>>> = Rc::default();
         let sink = Rc::clone(&menu_position);
         tester.pump_widget(TestApp::new(
@@ -4251,7 +4493,7 @@ mod tests {
     #[test]
     fn show_overlay_triggers_on_open() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         let on_open_called = counter();
         let on_open_requested_called = counter();
         let show_menu_overlay: Rc<RefCell<Option<VoidCallback>>> = Rc::default();
@@ -4305,7 +4547,7 @@ mod tests {
     #[test]
     fn show_overlay_shows_the_menu_at_the_position() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         let key = GlobalKey::new();
         let content_key = key.clone();
         tester.pump_widget(TestApp::new(
@@ -4328,12 +4570,12 @@ mod tests {
                 .child(AnchorButton::new("anchor")),
         ));
 
-        assert!(key.current_context(&mut tester.app()).is_none());
+        assert!(key.current_context(&tester.app()).is_none());
 
         controller.open(&mut tester.app(), None);
         tester.pump();
 
-        assert!(key.current_context(&mut tester.app()).is_none());
+        assert!(key.current_context(&tester.app()).is_none());
 
         tester.pump_for(Duration::from_millis(101));
 
@@ -4349,7 +4591,7 @@ mod tests {
     #[test]
     fn show_overlay_does_nothing_after_the_menu_is_disposed() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         let show_menu_overlay: Rc<RefCell<Option<VoidCallback>>> = Rc::default();
         let on_open_called = counter();
         let sink = Rc::clone(&show_menu_overlay);
@@ -4390,7 +4632,7 @@ mod tests {
     #[test]
     fn on_close_requested_is_triggered_by_close() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         let on_close_requested_called = counter();
         let requested = Rc::clone(&on_close_requested_called);
         tester.pump_widget(TestApp::new(
@@ -4427,7 +4669,7 @@ mod tests {
     #[test]
     fn hide_overlay_triggers_on_close() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         let on_close_called = counter();
         tester.pump_widget(TestApp::new(
             Menu::new()
@@ -4458,7 +4700,7 @@ mod tests {
     #[test]
     fn hide_overlay_hides_the_menu_overlay() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         tester.pump_widget(TestApp::new(
             Menu::new()
                 .controller(controller)
@@ -4492,7 +4734,7 @@ mod tests {
     #[test]
     fn hide_overlay_does_nothing_after_the_menu_is_disposed() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         let hide_menu_overlay: Rc<RefCell<Option<VoidCallback>>> = Rc::default();
         let on_close_called = counter();
         let sink = Rc::clone(&hide_menu_overlay);
@@ -4539,7 +4781,7 @@ mod tests {
     #[test]
     fn on_close_requested_is_called_on_parents_before_descendants() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         let close_order = log();
         let request = |tag: &'static str| {
             let close_order = Rc::clone(&close_order);
@@ -4589,7 +4831,7 @@ mod tests {
     #[test]
     fn a_delayed_on_close_is_called_on_descendants_before_parents() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         let close_order = log();
         tester.pump_widget(TestApp::new(
             Menu::new()
@@ -4669,7 +4911,7 @@ mod tests {
     #[test]
     fn dismiss_menu_action_triggers_on_close_requested() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         let focus_node = FocusNode::new(&mut tester.app()).as_node();
         let close_requests = log();
         let request = |tag: &'static str| {
@@ -4776,7 +5018,7 @@ mod tests {
     #[test]
     fn a_view_size_change_triggers_on_close_requested_on_an_open_menu() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         let on_close_requested_called = counter();
         let requests = Rc::clone(&on_close_requested_called);
         let on_close_requested: RawMenuAnchorCloseRequestedCallback =
@@ -4921,7 +5163,7 @@ mod tests {
     #[test]
     fn focus_traversal_shortcuts_are_not_bound_to_actions() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         let anchor_focus_node = labelled_focus_node(&mut tester.app(), "anchor");
         let b_focus_node = labelled_focus_node(&mut tester.app(), "b");
         let invoked = log();
@@ -5040,7 +5282,7 @@ mod tests {
     #[test]
     fn tab_traversal_is_not_handled() {
         let tester = Tester::new();
-        let controller = MenuController::new(&mut tester.app());
+        let controller = MenuController::new(&mut tester.app()).as_menu_controller();
         let b_focus_node = labelled_focus_node(&mut tester.app(), "b");
         let bb_focus_node = labelled_focus_node(&mut tester.app(), "b.b");
         let invoked = log();

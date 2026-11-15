@@ -590,7 +590,7 @@ mod tests {
 
         pump(&mut app, Duration::from_millis(500));
         let state = global_key
-            .current_state::<CupertinoActivityIndicatorState>(&mut app)
+            .current_state::<CupertinoActivityIndicatorState>(&app)
             .expect("the indicator mounted");
         assert_eq!(
             state.controller(&app).value(&app),
@@ -616,7 +616,7 @@ mod tests {
         );
         let mut app = cell.borrow_mut();
         let state = global_key
-            .current_state::<CupertinoActivityIndicatorState>(&mut app)
+            .current_state::<CupertinoActivityIndicatorState>(&app)
             .expect("the indicator mounted");
         let controller = state.controller(&app);
         assert!(!controller.is_animating(&mut app));

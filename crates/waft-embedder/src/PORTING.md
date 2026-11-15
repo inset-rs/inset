@@ -11,9 +11,13 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
 
 ## painting.rs → dart:ui `Canvas` / `Paint` / `Paragraph` / `TextStyle`
 
-- Change: `ImageFilter` is an enum over what this host can replay — a blur, a colour filter, a fragment shader and a composition of two.
+- Change: `ImageFilter` is an enum over what this host can replay — a blur, a colour filter, a matrix, a fragment shader and a composition of two.
   Reason: platform — valo's display list has no other image filter.
-  Affect: the tile-mode blur and the dilate, erode and matrix filters cannot be built at all.
+  Affect: the tile-mode blur and the dilate and erode filters cannot be built at all.
+
+- Change: `path_combine` (dart:ui's `Path.combine`) gives a path whose contours are wound for the even-odd rule, and the path does not carry that rule, where Dart's combined path carries `PathFillType.evenOdd`.
+  Reason: platform — valo `Path` carries no fill type; its draws, clips and hit tests take the rule from their caller.
+  Affect: a caller that fills, clips or hit-tests the result with the non-zero rule, as the framework does, fills a hole that Skia wound the same way as the outline around it; a stroked result draws as in Flutter.
 
 - Change: `ImageFilter::shader` copies the shader's uniforms and images when it is called, where Dart's filter copies them when the engine first converts it, at the first scene or paint that uses it.
   Reason: language — the filter is a value a scene keeps, and a value cannot keep reading a shader the app goes on changing.
@@ -299,7 +303,6 @@ Ported against Flutter `9c427b5d7b`.
 
 ## Deferred
 
-- paragraph.rs: `LineMetrics::height` is the line's ascent plus descent, unrounded; dart:ui's is skparagraph's line height rounded to the nearest integer (`InternalLineMetrics::height()`, then `littleRound` in TextLine.cpp). Trigger: the Valo release that rounds line heights (fixed in Valo, unreleased): take Valo's line height then.
 - A backdrop filter over a composition layer, which shows the layer unfiltered. Trigger: an app that needs glass over a video.
 - `SceneBuilder`'s shader-mask and colour-filter pushes. Trigger: the framework layers that call them.
 - Decoding at any size but the file's own, which in Dart is `instantiateImageCodec`'s target width and height and the `getTargetSize` callback of `instantiateImageCodecWithSize`. Trigger: `ResizeImage`, which is what the image widget's `cacheWidth` and `cacheHeight` become.
@@ -308,7 +311,7 @@ Ported against Flutter `9c427b5d7b`.
 - Making an image from pixels that were never encoded (`ImageDescriptor.raw`, `decodeImageFromPixels`). Trigger: a caller holding pixels rather than a file.
 - How far along a decode is, which Dart's codec reports as it reads the file. Trigger: a provider that reports progress.
 - `StrutStyle`, `TextStyle.locale` / `ParagraphStyle.locale`. Trigger: strut, locale-specific glyphs; valo has neither.
-- `ImageFilter.blur(tileMode:)` and the `dilate` / `erode` / `matrix` filters. Trigger: valo growing those ops.
+- `ImageFilter.blur(tileMode:)` and the `dilate` / `erode` filters. Trigger: valo growing those ops.
 - `FragmentProgram._reinitializeShader`, which reloads a program and its slots. Trigger: hot reload.
 - `Picture.toImageSync(targetFormat:)`. Trigger: valo images of another format.
 - `PlatformDispatcher.locale`, the first of `locales`. Trigger: a caller of the single-locale getter.

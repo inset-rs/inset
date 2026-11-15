@@ -307,7 +307,7 @@ mod tests {
 
     fn colored_box_color(tester: &WidgetTester, key: &GlobalKey) -> u32 {
         let widget = key
-            .current_widget(&mut tester.cell.borrow_mut())
+            .current_widget(&tester.cell.borrow_mut())
             .expect("mounted");
         downcast_widget::<ColoredBox>(&*widget)
             .expect("a ColoredBox")

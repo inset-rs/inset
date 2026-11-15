@@ -11,7 +11,8 @@ use waft_animation::{
     AnyAnimation, ColorTween, Curve, CurvedAnimation, Curves, Tween, TweenLerp,
 };
 use waft_embedder::{
-    Clip, Color, Matrix4, Offset, Rect, TextAlign, TextHeightBehavior, compose, decompose,
+    Clip, Color, FilterQuality, Matrix4, Offset, Rect, TextAlign, TextHeightBehavior, compose,
+    decompose,
 };
 use waft_foundation::{App, Handle, Listener};
 use waft_painting::{
@@ -578,6 +579,14 @@ pub trait ImplicitlyAnimatedWidget: StatefulWidget {
 pub trait TweenValue: 'static {
     /// Dart's `==` between a widget's target value and a tween endpoint.
     fn same(&self, other: &Self) -> bool;
+}
+
+/// A value shared the way Dart shares the one object (material's `ThemeData`): `==` is
+/// the value's own.
+impl<T: TweenValue> TweenValue for Rc<T> {
+    fn same(&self, other: &Rc<T>) -> bool {
+        T::same(self, other)
+    }
 }
 
 impl TweenValue for f64 {
@@ -2566,6 +2575,13 @@ pub struct AnimatedScale {
     /// For example, to set the origin of the scale to bottom middle, you can use
     /// an alignment of (0.0, 1.0).
     pub alignment: Alignment,
+
+    /// The filter quality with which to apply the transform as a bitmap operation.
+    ///
+    /// The transform will be applied by re-rendering the child if
+    /// [`filter_quality`](Self::filter_quality) is `None`, otherwise it controls the quality
+    /// of an `ImageFilter.matrix` applied to a bitmap rendering of the child.
+    pub filter_quality: Option<FilterQuality>,
 }
 
 impl AnimatedScale {
@@ -2576,6 +2592,7 @@ impl AnimatedScale {
             child: None,
             scale,
             alignment: Alignment::CENTER,
+            filter_quality: None,
         }
     }
 
@@ -2588,6 +2605,12 @@ impl AnimatedScale {
     /// Dart `AnimatedScale(alignment:)`.
     pub fn alignment(mut self, alignment: Alignment) -> AnimatedScale {
         self.alignment = alignment;
+        self
+    }
+
+    /// Dart `AnimatedScale(filterQuality:)`.
+    pub fn filter_quality(mut self, filter_quality: FilterQuality) -> AnimatedScale {
+        self.filter_quality = Some(filter_quality);
         self
     }
 
@@ -2689,8 +2712,13 @@ impl State for AnimatedScaleState {
             .scale_animation
             .expect("did_update_tweens drove the animation");
         let widget = self.widget(app);
-        let (alignment, child) = (widget.alignment, widget.child.clone());
+        let (alignment, filter_quality, child) = (
+            widget.alignment,
+            widget.filter_quality,
+            widget.child.clone(),
+        );
         let mut transition = ScaleTransition::new(scale).alignment(alignment);
+        transition.filter_quality = filter_quality;
         if let Some(child) = child {
             transition = transition.child(child);
         }
@@ -2725,6 +2753,13 @@ pub struct AnimatedRotation {
     /// For example, to set the origin of the rotation to bottom middle, you can use
     /// an alignment of (0.0, 1.0).
     pub alignment: Alignment,
+
+    /// The filter quality with which to apply the transform as a bitmap operation.
+    ///
+    /// The transform will be applied by re-rendering the child if
+    /// [`filter_quality`](Self::filter_quality) is `None`, otherwise it controls the quality
+    /// of an `ImageFilter.matrix` applied to a bitmap rendering of the child.
+    pub filter_quality: Option<FilterQuality>,
 }
 
 impl AnimatedRotation {
@@ -2735,6 +2770,7 @@ impl AnimatedRotation {
             child: None,
             turns,
             alignment: Alignment::CENTER,
+            filter_quality: None,
         }
     }
 
@@ -2747,6 +2783,12 @@ impl AnimatedRotation {
     /// Dart `AnimatedRotation(alignment:)`.
     pub fn alignment(mut self, alignment: Alignment) -> AnimatedRotation {
         self.alignment = alignment;
+        self
+    }
+
+    /// Dart `AnimatedRotation(filterQuality:)`.
+    pub fn filter_quality(mut self, filter_quality: FilterQuality) -> AnimatedRotation {
+        self.filter_quality = Some(filter_quality);
         self
     }
 
@@ -2848,8 +2890,13 @@ impl State for AnimatedRotationState {
             .turns_animation
             .expect("did_update_tweens drove the animation");
         let widget = self.widget(app);
-        let (alignment, child) = (widget.alignment, widget.child.clone());
+        let (alignment, filter_quality, child) = (
+            widget.alignment,
+            widget.filter_quality,
+            widget.child.clone(),
+        );
         let mut transition = RotationTransition::new(turns).alignment(alignment);
+        transition.filter_quality = filter_quality;
         if let Some(child) = child {
             transition = transition.child(child);
         }
@@ -4121,7 +4168,7 @@ mod tests {
         binding_pump(&mut app, Duration::from_millis(50));
 
         let state = key
-            .current_state::<AnimatedOpacityState>(&mut app)
+            .current_state::<AnimatedOpacityState>(&app)
             .expect("the widget is mounted");
         assert!(
             state.controller(&app).is_dismissed(&app),
@@ -4176,7 +4223,7 @@ mod tests {
         binding_mount(&cell, opacity_tree(&key, 0.5));
         let mut app = cell.borrow_mut();
         let state = key
-            .current_state::<AnimatedOpacityState>(&mut app)
+            .current_state::<AnimatedOpacityState>(&app)
             .expect("the widget is mounted");
         let tween = app
             .get(state)
