@@ -37,6 +37,12 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — `BorderSide` and `TextStyle` are values here and cannot be subclassed.
   Affect: only the fields that resolve a widget-state value hold these types; a side or style that reaches any other field has dropped its payload and no longer resolves or compares as its subclass.
 
+## borders.rs, decoration.rs → borders.dart, decoration.dart (`ShapeBorderRef`, `OutlinedBorderRef`, `DecorationRef`)
+
+- Change: a field or parameter Dart types `ShapeBorder`, `OutlinedBorder` or `Decoration` holds a `ShapeBorderRef`, `OutlinedBorderRef` or `DecorationRef`, which share one value between clones and are equal when they share it or when `eq_shape` / `eq_decoration` says so; a shared border becomes an `OutlinedBorderRef` through `ShapeBorder::into_outlined_border`, which every `OutlinedBorder` answers with `Some(self)`.
+  Reason: language — a Rust trait object has no identity of its own, a trait method on `&self` cannot hand out the shared value it is called on, and one trait object cannot be cast to another (Dart's `as OutlinedBorder`).
+  Affect: an `OutlinedBorder` implemented outside Waft that does not override `into_outlined_border` is not seen as outlined where a shared border is read as one: `OutlinedBorderRef::lerp` panics on it, as Dart's `as OutlinedBorder` does on a result of another kind, and `RawMaterialButton` does not resolve it by state; an implementation method Dart writes as `return this` (a `lerpFrom` or `copyWith` that changes nothing) returns a new value, unequal to the old one under identity equality.
+
 ## colors.rs → colors.dart (+ the `Color` subclass mechanism)
 
 - Change: Flutter's `Color` subclasses (`CupertinoDynamicColor`, `WidgetStateColor`, `ColorSwatch`) are `ColorExtension` payloads that `AnyColor` carries beside the plain `Color`; `AnyColor` derefs to `Color` and `extension::<T>()` is Dart's `is T`.

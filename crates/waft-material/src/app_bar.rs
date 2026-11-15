@@ -17,7 +17,7 @@ use waft_embedder::{
 use waft_foundation::{App, AsyncCallback, Handle};
 use waft_painting::{
     Alignment, AlignmentDirectional, AlignmentGeometry, AnyColor, EdgeInsets, EdgeInsetsGeometry,
-    ShapeBorder, TextOverflow, TextStyle,
+    ShapeBorderRef, TextOverflow, TextStyle,
 };
 use waft_rendering::{
     AnyRenderBox, AnyRenderObject, BaselineOffset, BoxConstraints, BoxHitTestResult, BoxParentData,
@@ -44,13 +44,13 @@ use waft_widgets::{
 };
 
 use crate::action_buttons::{BackButton, CloseButton, DrawerButton, EndDrawerButton};
-use crate::app_bar_theme::{AppBarTheme, AppBarThemeData};
+use crate::app_bar_theme::{AppBarTheme, AppBarThemeData, AppBarThemeDataGetters};
 use crate::button_style::ButtonStyle;
 use crate::constants::K_TOOLBAR_HEIGHT;
 use crate::debug::debug_check_has_material_localizations;
 use crate::flexible_space_bar::{FlexibleSpaceBar, FlexibleSpaceBarSettings};
 use crate::generated::app_bar_defaults_m3::{
-    LargeScrollUnderFlexibleConfig, MediumScrollUnderFlexibleConfig, app_bar_defaults_m3,
+    AppBarDefaultsM3, LargeScrollUnderFlexibleConfig, MediumScrollUnderFlexibleConfig,
 };
 use crate::icon_button::IconButton;
 use crate::icon_button_theme::{IconButtonTheme, IconButtonThemeData};
@@ -58,6 +58,7 @@ use crate::material::{Material, MaterialType};
 use crate::scaffold::Scaffold;
 use crate::theme::Theme;
 use crate::theme_data::ThemeData;
+use crate::theme_data_getters::DefaultsContext;
 
 /// Dart's `_FlexibleConfigBuilder`.
 type FlexibleConfigBuilder = fn(&mut App, BuildContext) -> Box<dyn ScrollUnderFlexibleConfig>;
@@ -372,7 +373,7 @@ pub struct AppBar {
     ///
     /// A shadow is only displayed if the [`elevation`](Self::elevation) is greater than
     /// zero.
-    pub shape: Option<Box<dyn ShapeBorder>>,
+    pub shape: Option<ShapeBorderRef>,
 
     /// The fill color to use for an app bar's [`Material`].
     ///
@@ -726,7 +727,7 @@ impl AppBar {
     }
 
     /// Dart `AppBar(shape:)`.
-    pub fn shape(mut self, shape: impl Into<Box<dyn ShapeBorder>>) -> AppBar {
+    pub fn shape(mut self, shape: impl Into<ShapeBorderRef>) -> AppBar {
         self.shape = Some(shape.into());
         self
     }
@@ -1101,11 +1102,7 @@ impl State for AppBarState {
         let theme = Theme::of(app, context);
         let icon_button_theme = IconButtonTheme::of(app, context);
         let app_bar_theme = AppBarTheme::of(app, context);
-        let defaults = if theme.use_material3 {
-            app_bar_defaults_m3(app, context)
-        } else {
-            app_bar_defaults_m2(app, context)
-        };
+        let defaults = app_bar_defaults(app, context);
         let scaffold = Scaffold::maybe_of(app, context);
         let parent_route = AnyModalRoute::of(app, context);
 
@@ -1121,7 +1118,9 @@ impl State for AppBarState {
         let has_end_drawer = scaffold.is_some_and(|scaffold| scaffold.has_end_drawer(app));
         let use_close_button = parent_route.is_some_and(|route| route.fullscreen_dialog(app));
 
-        let widget = self.widget(app);
+        let widget_ref = context.widget(app).clone();
+        let widget = waft_widgets::downcast_widget::<AppBar>(&*widget_ref)
+            .expect("an AppBarState builds its AppBar");
         let toolbar_height = widget
             .toolbar_height
             .or(app_bar_theme.toolbar_height)
@@ -1132,7 +1131,7 @@ impl State for AppBarState {
             widget.background_color.as_ref(),
             app_bar_theme.background_color,
             defaults
-                .background_color
+                .background_color(app)
                 .expect("the defaults give a background color"),
         );
 
@@ -1152,20 +1151,20 @@ impl State for AppBarState {
         let foreground_color = widget
             .foreground_color
             .or(app_bar_theme.foreground_color)
-            .or(defaults.foreground_color)
+            .or_else(|| defaults.foreground_color(app))
             .expect("the defaults give a foreground color");
 
         let elevation = widget
             .elevation
             .or(app_bar_theme.elevation)
-            .or(defaults.elevation)
+            .or_else(|| defaults.elevation(app))
             .expect("the defaults give an elevation");
 
         let effective_elevation = if states.contains(&WidgetState::ScrolledUnder) {
             widget
                 .scrolled_under_elevation
                 .or(app_bar_theme.scrolled_under_elevation)
-                .or(defaults.scrolled_under_elevation)
+                .or_else(|| defaults.scrolled_under_elevation(app))
                 .unwrap_or(elevation)
         } else {
             elevation
@@ -1177,7 +1176,7 @@ impl State for AppBarState {
             .or_else(|| app_bar_theme.icon_theme.clone())
             .unwrap_or_else(|| {
                 defaults
-                    .icon_theme
+                    .icon_theme(app)
                     .as_ref()
                     .expect("the defaults give an icon theme")
                     .copy_with()
@@ -1193,7 +1192,7 @@ impl State for AppBarState {
             .or_else(|| app_bar_theme.icon_theme.clone())
             .or_else(|| {
                 defaults
-                    .actions_icon_theme
+                    .actions_icon_theme(app)
                     .as_ref()
                     .map(|actions_icon_theme| match action_foreground_color {
                         Some(color) => actions_icon_theme.copy_with().color(color),
@@ -1205,7 +1204,7 @@ impl State for AppBarState {
         let actions_padding = widget
             .actions_padding
             .or(app_bar_theme.actions_padding)
-            .or(defaults.actions_padding)
+            .or_else(|| defaults.actions_padding(app))
             .expect("the defaults give an actions padding");
 
         let mut toolbar_text_style = widget
@@ -1214,7 +1213,7 @@ impl State for AppBarState {
             .or_else(|| app_bar_theme.toolbar_text_style.clone())
             .or_else(|| {
                 defaults
-                    .toolbar_text_style
+                    .toolbar_text_style(app)
                     .as_ref()
                     .map(|style| style.copy_with().color(foreground_color))
             });
@@ -1225,7 +1224,7 @@ impl State for AppBarState {
             .or_else(|| app_bar_theme.title_text_style.clone())
             .or_else(|| {
                 defaults
-                    .title_text_style
+                    .title_text_style(app)
                     .as_ref()
                     .map(|style| style.copy_with().color(foreground_color))
             });
@@ -1272,7 +1271,6 @@ impl State for AppBarState {
                 });
             }
         }
-        let widget = self.widget(app);
         let leading_width = widget
             .leading_width
             .or(app_bar_theme.leading_width)
@@ -1285,7 +1283,7 @@ impl State for AppBarState {
                 // from [overallIconTheme]. If [iconButtonTheme] only has null values, the default
                 // [overallIconTheme] will be applied below by [IconTheme.merge]
                 let effective_icon_button_theme =
-                    if Some(&overall_icon_theme) == defaults.icon_theme.as_ref() {
+                    if Some(&overall_icon_theme) == defaults.icon_theme(app).as_ref() {
                         icon_button_theme.clone()
                     } else {
                         // The [IconButton.styleFrom] method is used to generate a correct
@@ -1383,7 +1381,7 @@ impl State for AppBarState {
         // Allow the trailing actions to have their own theme if necessary.
         let actions = actions.map(|actions| {
             let effective_actions_icon_button_theme =
-                if Some(&actions_icon_theme) == defaults.actions_icon_theme.as_ref() {
+                if Some(&actions_icon_theme) == defaults.actions_icon_theme(app).as_ref() {
                     icon_button_theme.clone()
                 } else {
                     icon_button_theme_for(&icon_button_theme, &actions_icon_theme)
@@ -1481,7 +1479,7 @@ impl State for AppBarState {
         let overlay_style = widget
             .system_overlay_style
             .or(app_bar_theme.system_overlay_style)
-            .or(defaults.system_overlay_style)
+            .or_else(|| defaults.system_overlay_style(app))
             .unwrap_or_else(|| {
                 AppBarState::system_overlay_style_for_brightness(
                     ThemeData::estimate_brightness_for_color(effective_background_color),
@@ -1507,7 +1505,7 @@ impl State for AppBarState {
         if let Some(shadow_color) = widget
             .shadow_color
             .or(app_bar_theme.shadow_color)
-            .or(defaults.shadow_color)
+            .or_else(|| defaults.shadow_color(app))
         {
             material = material.shadow_color(shadow_color);
         }
@@ -1529,7 +1527,7 @@ impl State for AppBarState {
             .shape
             .clone()
             .or_else(|| app_bar_theme.shape.clone())
-            .or_else(|| defaults.shape.clone())
+            .or_else(|| defaults.shape(app))
         {
             material = material.shape(shape);
         }
@@ -1675,7 +1673,7 @@ struct SliverAppBarDelegate {
     top_padding: f64,
     floating: bool,
     pinned: bool,
-    shape: Option<Box<dyn ShapeBorder>>,
+    shape: Option<ShapeBorderRef>,
     toolbar_height: Option<f64>,
     leading_width: Option<f64>,
     toolbar_text_style: Option<TextStyle>,
@@ -2074,7 +2072,7 @@ pub struct SliverAppBar {
     /// See [`AppBar::shape`].
     ///
     /// This property is used to configure an [`AppBar`].
-    pub shape: Option<Box<dyn ShapeBorder>>,
+    pub shape: Option<ShapeBorderRef>,
 
     /// If [`snap`](Self::snap) and [`floating`](Self::floating) are true then the floating app
     /// bar will "snap" into view.
@@ -2414,7 +2412,7 @@ impl SliverAppBar {
     }
 
     /// Dart `SliverAppBar(shape:)`.
-    pub fn shape(mut self, shape: impl Into<Box<dyn ShapeBorder>>) -> SliverAppBar {
+    pub fn shape(mut self, shape: impl Into<ShapeBorderRef>) -> SliverAppBar {
         self.shape = Some(shape.into());
         self
     }
@@ -3024,7 +3022,7 @@ impl StatelessWidget for ScrollUnderFlexibleSpace {
                             match self.foreground_color.or(app_bar_theme.foreground_color) {
                                 Some(foreground_color) => foreground_color,
                                 None => app_bar_defaults(app, context)
-                                    .foreground_color
+                                    .foreground_color(app)
                                     .expect("the defaults give a foreground color"),
                             };
                         config
@@ -3414,49 +3412,89 @@ pub(crate) trait ScrollUnderFlexibleConfig {
 }
 
 /// Dart's `theme.useMaterial3 ? _AppBarDefaultsM3(context) : _AppBarDefaultsM2(context)`.
-fn app_bar_defaults(app: &mut App, context: BuildContext) -> AppBarThemeData {
+fn app_bar_defaults(app: &mut App, context: BuildContext) -> Box<dyn AppBarThemeDataGetters> {
     if Theme::of(app, context).use_material3 {
-        app_bar_defaults_m3(app, context)
+        Box::new(AppBarDefaultsM3::new(context))
     } else {
-        app_bar_defaults_m2(app, context)
+        Box::new(AppBarDefaultsM2::new(context))
     }
 }
 
 /// Hand coded defaults based on Material Design 2.
 ///
-/// Dart's `_AppBarDefaultsM2(context)`: the [`AppBarThemeData`] whose fields are the
-/// constructor's arguments and the values of that subclass's getters.
-fn app_bar_defaults_m2(app: &mut App, context: BuildContext) -> AppBarThemeData {
-    let theme = Theme::of(app, context);
-    let colors = &theme.color_scheme;
-    let dark = colors.brightness == waft_embedder::Brightness::Dark;
-    AppBarThemeData::new()
-        .elevation(4.0)
-        .shadow_color(Color::new(0xFF000000))
-        .title_spacing(NavigationToolbar::K_MIDDLE_SPACING)
-        .toolbar_height(K_TOOLBAR_HEIGHT)
-        .background_color(if dark { colors.surface } else { colors.primary })
-        .foreground_color(if dark {
+/// Dart's `_AppBarDefaultsM2`.
+struct AppBarDefaultsM2 {
+    /// Dart's `super(..)` arguments.
+    app_bar_theme_data: AppBarThemeData,
+    context: DefaultsContext,
+}
+
+impl AppBarDefaultsM2 {
+    fn new(context: BuildContext) -> AppBarDefaultsM2 {
+        AppBarDefaultsM2 {
+            app_bar_theme_data: AppBarThemeData::new()
+                .elevation(4.0)
+                .shadow_color(Color::new(0xFF000000))
+                .title_spacing(NavigationToolbar::K_MIDDLE_SPACING)
+                .toolbar_height(K_TOOLBAR_HEIGHT),
+            context: DefaultsContext::new(context),
+        }
+    }
+}
+
+impl AppBarThemeDataGetters for AppBarDefaultsM2 {
+    fn app_bar_theme_data(&self) -> &AppBarThemeData {
+        &self.app_bar_theme_data
+    }
+
+    fn background_color(&self, app: &mut App) -> Option<Color> {
+        let theme = self.context.theme(app);
+        let colors = &theme.color_scheme;
+        let dark = colors.brightness == waft_embedder::Brightness::Dark;
+        Some(if dark { colors.surface } else { colors.primary })
+    }
+
+    fn foreground_color(&self, app: &mut App) -> Option<Color> {
+        let theme = self.context.theme(app);
+        let colors = &theme.color_scheme;
+        let dark = colors.brightness == waft_embedder::Brightness::Dark;
+        Some(if dark {
             colors.on_surface
         } else {
             colors.on_primary
         })
-        .icon_theme(theme.icon_theme.clone())
-        .toolbar_text_style(
+    }
+
+    fn icon_theme(&self, app: &mut App) -> Option<IconThemeData> {
+        let theme = self.context.theme(app);
+        Some(theme.icon_theme.clone())
+    }
+
+    fn toolbar_text_style(&self, app: &mut App) -> Option<TextStyle> {
+        let theme = self.context.theme(app);
+        Some(
             theme
                 .text_theme
                 .body_medium
                 .clone()
                 .expect("a theme's text theme has a body medium style"),
         )
-        .title_text_style(
+    }
+
+    fn title_text_style(&self, app: &mut App) -> Option<TextStyle> {
+        let theme = self.context.theme(app);
+        Some(
             theme
                 .text_theme
                 .title_large
                 .clone()
                 .expect("a theme's text theme has a title large style"),
         )
-        .actions_padding(EdgeInsets::ZERO.into())
+    }
+
+    fn actions_padding(&self, _app: &mut App) -> Option<EdgeInsetsGeometry> {
+        Some(EdgeInsets::ZERO.into())
+    }
 }
 
 #[cfg(test)]
@@ -3466,6 +3504,7 @@ mod tests {
     //! of Flutter's former `test/material/sliver_app_bar_test.dart`.
 
     use std::cell::Cell;
+    use waft_painting::ShapeBorder;
 
     use waft_embedder::{Brightness, Radius, Rect};
     use waft_foundation::{Listener, Task};
@@ -4680,7 +4719,7 @@ mod tests {
                     .shape(rounded_rectangle_border())
                     .into_widget()
             });
-            let expected: Box<dyn ShapeBorder> = Box::new(rounded_rectangle_border());
+            let expected: ShapeBorderRef = ShapeBorderRef::new(rounded_rectangle_border());
             let app_bar = tester.find_by_type::<AppBar>()[0];
             assert!(
                 tester.widget(app_bar, |app_bar: &AppBar| app_bar.shape.as_deref()

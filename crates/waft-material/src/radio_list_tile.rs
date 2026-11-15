@@ -10,7 +10,7 @@ use std::fmt::{self, Debug};
 use waft_embedder::Color;
 use waft_foundation::{App, Handle, ValueChanged};
 use waft_gestures::GestureTapCallback;
-use waft_painting::{AnyBorderSide, EdgeInsetsGeometry, ShapeBorder};
+use waft_painting::{AnyBorderSide, EdgeInsetsGeometry, ShapeBorderRef};
 use waft_services::MouseCursorRef;
 use waft_widgets::{
     AnyFocusNode, AnyRadioClient, AnyRadioGroupRegistry, BuildContext, ExcludeFocus, FocusNode,
@@ -232,7 +232,7 @@ pub struct RadioListTile<T: Clone + PartialEq + 'static> {
     pub content_padding: Option<EdgeInsetsGeometry>,
     /// If specified, [`shape`](Self::shape) defines the shape of the [`RadioListTile`]'s
     /// `InkWell` border.
-    pub shape: Option<Box<dyn ShapeBorder>>,
+    pub shape: Option<ShapeBorderRef>,
     /// If specified, defines the background color for `RadioListTile` when
     /// [`RadioListTile::selected`] is false.
     pub tile_color: Option<Color>,
@@ -470,7 +470,7 @@ impl<T: Clone + PartialEq + 'static> RadioListTile<T> {
         dense: bool => "dense",
         control_affinity: ListTileControlAffinity => "controlAffinity",
         content_padding: EdgeInsetsGeometry => "contentPadding",
-        shape: Box<dyn ShapeBorder> => "shape",
+        shape: ShapeBorderRef => "shape",
         tile_color: Color => "tileColor",
         selected_tile_color: Color => "selectedTileColor",
         visual_density: VisualDensity => "visualDensity",
@@ -1243,10 +1243,10 @@ mod tests {
                 RadioListTile::new(true)
                     .group_value(true)
                     .title(Text::new("Title"))
-                    .shape(Box::new(right_rounded_border()) as Box<dyn ShapeBorder>)
+                    .shape(ShapeBorderRef::new(right_rounded_border()))
                     .into_widget()
             });
-            let shape: Box<dyn ShapeBorder> = Box::new(right_rounded_border());
+            let shape: ShapeBorderRef = ShapeBorderRef::new(right_rounded_border());
             assert!(ink_well_custom_border(&tester).as_deref() == Some(&*shape));
         });
     }

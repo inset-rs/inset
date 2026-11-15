@@ -15,7 +15,7 @@ use std::time::Duration;
 use waft_embedder::{Clip, Color, Radius, Size, clamp_double, lerp_double};
 use waft_foundation::{App, K_IS_WEB, Listener};
 use waft_painting::{
-    AlignmentGeometry, BorderRadius, BorderSide, EdgeInsetsGeometry, OutlinedBorder,
+    AlignmentGeometry, BorderRadius, BorderSide, EdgeInsetsGeometry, OutlinedBorderRef,
     RoundedRectangleBorder, TextStyle,
 };
 use waft_services::{MouseCursorRef, SystemMouseCursors};
@@ -25,16 +25,15 @@ use waft_widgets::{
     WidgetStatePropertyRef, WidgetStates,
 };
 
+use crate::button_style::ButtonStyleGetters;
 use crate::button_style::{ButtonLayerBuilder, ButtonShapeVariant, ButtonSizeVariant, ButtonStyle};
 use crate::button_style_button::{
     ButtonStyleButton, ButtonStyleButtonData, ButtonStyleState, IconAlignment,
 };
 use crate::constants::K_THEME_CHANGE_DURATION;
 use crate::elevated_button_theme::ElevatedButtonTheme;
-use crate::generated::elevated_button_defaults_m3::elevated_button_defaults_m3;
-use crate::generated::elevated_button_defaults_m3e::{
-    elevated_button_defaults_m3e, icon_label_space,
-};
+use crate::generated::elevated_button_defaults_m3::ElevatedButtonDefaultsM3;
+use crate::generated::elevated_button_defaults_m3e::{ElevatedButtonDefaultsM3E, icon_label_space};
 use crate::ink_ripple::InkRipple;
 use crate::ink_well::InteractiveInkFeatureFactoryRef;
 use crate::material_state::MaterialStatePropertyAll;
@@ -392,7 +391,11 @@ impl ButtonStyleButton for ElevatedButton {
     /// For the [`ElevatedButton::icon`] factory, the padding is the same, and the
     /// gap between the icon and the label is 4, 8, 8, 12, or 16 based on
     /// [`ButtonStyle::size_variant`].
-    fn default_style_of(&self, app: &mut App, context: BuildContext) -> ButtonStyle {
+    fn default_style_of(
+        &self,
+        app: &mut App,
+        context: BuildContext,
+    ) -> Box<dyn ButtonStyleGetters> {
         let theme = Theme::of(app, context);
         let color_scheme = &theme.color_scheme;
         let elevated_button_theme = ElevatedButtonTheme::of(app, context);
@@ -412,16 +415,15 @@ impl ButtonStyleButton for ElevatedButton {
         });
         let use_expressive =
             theme.use_material3 && effective_variant == StyleVariant::Material3Expressive;
-        let button_style = if theme.use_material3 {
+        let button_style: Box<dyn ButtonStyleGetters> = if theme.use_material3 {
             match effective_variant {
-                StyleVariant::Material3 => elevated_button_defaults_m3(app, context),
-                StyleVariant::Material3Expressive => elevated_button_defaults_m3e(
-                    app,
+                StyleVariant::Material3 => Box::new(ElevatedButtonDefaultsM3::new(context)),
+                StyleVariant::Material3Expressive => Box::new(ElevatedButtonDefaultsM3E::new(
                     context,
                     self.button_style_button.is_selected.is_some(),
                     effective_size,
                     effective_shape,
-                ),
+                )),
             }
         } else {
             let mut style_from = ElevatedButton::style_from()
@@ -434,7 +436,7 @@ impl ButtonStyleButton for ElevatedButton {
             if let Some(text_style) = theme.text_theme.label_large.clone() {
                 style_from = style_from.text_style(text_style);
             }
-            style_from
+            let style_from = style_from
                 .padding(scaled_padding(app, context))
                 .minimum_size(Size::new(64.0, 36.0))
                 .maximum_size(Size::INFINITE)
@@ -454,7 +456,8 @@ impl ButtonStyleButton for ElevatedButton {
                 .enable_feedback(true)
                 .alignment(AlignmentGeometry::CENTER)
                 .splash_factory(InkRipple::splash_factory())
-                .build()
+                .build();
+            Box::new(style_from)
         };
 
         // The Material 3 Expressive defaults use the same padding with or without
@@ -466,8 +469,7 @@ impl ButtonStyleButton for ElevatedButton {
         // Only apply padding when the ElevatedButton has an Icon.
         if self.add_padding {
             let default_font_size = button_style
-                .text_style
-                .as_ref()
+                .text_style(app)
                 .and_then(|text_style| text_style.resolve(&WidgetStates::new()))
                 .and_then(|text_style| text_style.font_size)
                 .unwrap_or(14.0);
@@ -489,9 +491,11 @@ impl ButtonStyleButton for ElevatedButton {
                     effective_text_scale,
                 )
             };
-            return button_style
-                .copy_with()
-                .padding(Rc::new(MaterialStatePropertyAll::new(Some(scaled_padding))));
+            return Box::new(
+                button_style
+                    .copy_with(app)
+                    .padding(Rc::new(MaterialStatePropertyAll::new(Some(scaled_padding)))),
+            );
         }
 
         button_style
@@ -544,7 +548,7 @@ pub struct ElevatedButtonStyleFromBuilder {
     fixed_size: Option<Size>,
     maximum_size: Option<Size>,
     side: Option<BorderSide>,
-    shape: Option<Box<dyn OutlinedBorder>>,
+    shape: Option<OutlinedBorderRef>,
     enabled_mouse_cursor: Option<MouseCursorRef>,
     disabled_mouse_cursor: Option<MouseCursorRef>,
     visual_density: Option<VisualDensity>,
@@ -607,10 +611,7 @@ impl ElevatedButtonStyleFromBuilder {
     );
 
     /// Dart `ElevatedButton.styleFrom(shape:)`.
-    pub fn shape(
-        mut self,
-        shape: impl Into<Box<dyn OutlinedBorder>>,
-    ) -> ElevatedButtonStyleFromBuilder {
+    pub fn shape(mut self, shape: impl Into<OutlinedBorderRef>) -> ElevatedButtonStyleFromBuilder {
         self.shape = Some(shape.into());
         self
     }
@@ -1159,7 +1160,7 @@ mod tests {
             let style = Rc::clone(&style);
             let button = Rc::clone(&button);
             move |app, context| {
-                *style.borrow_mut() = Some(button.default_style_of(app, context));
+                *style.borrow_mut() = Some(button.default_style_of(app, context).copy_with(app));
                 SizedBox::shrink().into_widget()
             }
         });

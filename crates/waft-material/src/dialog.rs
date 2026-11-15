@@ -15,7 +15,7 @@ use waft_embedder::{TargetPlatform, TextAlign, lerp_double};
 use waft_foundation::{App, CompleterFuture, Handle};
 use waft_painting::{
     AlignmentGeometry, EdgeInsets, EdgeInsetsGeometry, K_DEFAULT_FONT_SIZE, RoundedRectangleBorder,
-    ShapeBorder, TextStyle, VerticalDirection,
+    ShapeBorderRef, TextStyle, VerticalDirection,
 };
 use waft_rendering::{BoxConstraints, CrossAxisAlignment, MainAxisAlignment, MainAxisSize};
 use waft_widgets::{
@@ -33,13 +33,15 @@ use waft_widgets::{
 
 use crate::colors::Colors;
 use crate::debug::debug_check_has_material_localizations;
+use crate::dialog_theme::DialogThemeDataGetters;
 use crate::dialog_theme::{DialogTheme, DialogThemeData};
-use crate::generated::dialog_defaults_m3::dialog_defaults_m3;
-use crate::generated::dialog_fullscreen_defaults_m3::dialog_fullscreen_defaults_m3;
+use crate::generated::dialog_defaults_m3::DialogDefaultsM3;
+use crate::generated::dialog_fullscreen_defaults_m3::DialogFullscreenDefaultsM3;
 use crate::ink_well::InkWell;
 use crate::material::{Material, MaterialType};
 use crate::material_localizations::MaterialLocalizations;
 use crate::theme::Theme;
+use crate::theme_data_getters::DefaultsContext;
 
 const DEFAULT_INSET_PADDING: EdgeInsets = EdgeInsets::symmetric(24.0, 40.0);
 
@@ -147,7 +149,7 @@ pub struct Dialog {
     /// Defines the dialog's `Material::shape`.
     ///
     /// The default shape is a [`RoundedRectangleBorder`] with a radius of 4.0
-    pub shape: Option<Box<dyn ShapeBorder>>,
+    pub shape: Option<ShapeBorderRef>,
 
     /// How to align the [`Dialog`].
     ///
@@ -281,7 +283,7 @@ impl Dialog {
     }
 
     /// Dart `Dialog(shape:)`.
-    pub fn shape(mut self, shape: impl Into<Box<dyn ShapeBorder>>) -> Dialog {
+    pub fn shape(mut self, shape: impl Into<ShapeBorderRef>) -> Dialog {
         self.shape = Some(shape.into());
         self
     }
@@ -349,14 +351,14 @@ impl StatelessWidget for Dialog {
                 .inset_padding
                 .or(dialog_theme.inset_padding)
                 .unwrap_or(DEFAULT_INSET_PADDING);
-        let defaults = if theme.use_material3 {
+        let defaults: Box<dyn DialogThemeDataGetters> = if theme.use_material3 {
             if self.fullscreen {
-                dialog_fullscreen_defaults_m3(app, context)
+                Box::new(DialogFullscreenDefaultsM3::new(context))
             } else {
-                dialog_defaults_m3(app, context)
+                Box::new(DialogDefaultsM3::new(context))
             }
         } else {
-            dialog_defaults_m2(app, context)
+            Box::new(DialogDefaultsM2::new(context))
         };
 
         let box_constraints = self
@@ -373,7 +375,7 @@ impl StatelessWidget for Dialog {
             material.color = self
                 .background_color
                 .or(dialog_theme.background_color)
-                .or(defaults.background_color);
+                .or_else(|| defaults.background_color(app));
             material.child = self
                 .child
                 .clone()
@@ -384,41 +386,41 @@ impl StatelessWidget for Dialog {
                 .elevation(
                     self.elevation
                         .or(dialog_theme.elevation)
-                        .or(defaults.elevation)
+                        .or_else(|| defaults.elevation(app))
                         .expect("the defaults give an elevation"),
                 )
                 .shape(
                     self.shape
                         .clone()
                         .or(dialog_theme.shape.clone())
-                        .or(defaults.shape.clone())
+                        .or_else(|| defaults.shape(app))
                         .expect("the defaults give a shape"),
                 )
                 .r#type(MaterialType::Card)
                 .clip_behavior(
                     self.clip_behavior
                         .or(dialog_theme.clip_behavior)
-                        .or(defaults.clip_behavior)
+                        .or_else(|| defaults.clip_behavior(app))
                         .expect("the defaults give a clip behavior"),
                 );
             material.color = self
                 .background_color
                 .or(dialog_theme.background_color)
-                .or(defaults.background_color);
+                .or_else(|| defaults.background_color(app));
             material.shadow_color = self
                 .shadow_color
                 .or(dialog_theme.shadow_color)
-                .or(defaults.shadow_color);
+                .or_else(|| defaults.shadow_color(app));
             material.surface_tint_color = self
                 .surface_tint_color
                 .or(dialog_theme.surface_tint_color)
-                .or(defaults.surface_tint_color);
+                .or_else(|| defaults.surface_tint_color(app));
             material.child = self.child.clone();
             let aligned = Align::new()
                 .alignment(
                     self.alignment
                         .or(dialog_theme.alignment)
-                        .or(defaults.alignment)
+                        .or_else(|| defaults.alignment(app))
                         .expect("the defaults give an alignment"),
                 )
                 .child(ConstrainedBox::new(box_constraints).child(material))
@@ -664,7 +666,7 @@ pub struct AlertDialog {
     pub clip_behavior: Option<Clip>,
 
     /// See [`Dialog::shape`].
-    pub shape: Option<Box<dyn ShapeBorder>>,
+    pub shape: Option<ShapeBorderRef>,
 
     /// See [`Dialog::alignment`].
     pub alignment: Option<AlignmentGeometry>,
@@ -913,7 +915,7 @@ impl AlertDialog {
     }
 
     /// Dart `AlertDialog(shape:)`.
-    pub fn shape(mut self, shape: impl Into<Box<dyn ShapeBorder>>) -> AlertDialog {
+    pub fn shape(mut self, shape: impl Into<ShapeBorderRef>) -> AlertDialog {
         self.shape = Some(shape.into());
         self
     }
@@ -982,10 +984,10 @@ impl AlertDialog {
         let theme = Theme::of(app, context);
 
         let dialog_theme = DialogTheme::of(app, context);
-        let defaults = if theme.use_material3 {
-            dialog_defaults_m3(app, context)
+        let defaults: Box<dyn DialogThemeDataGetters> = if theme.use_material3 {
+            Box::new(DialogDefaultsM3::new(context))
         } else {
-            dialog_defaults_m2(app, context)
+            Box::new(DialogDefaultsM2::new(context))
         };
 
         let target_platform = app.platform().target_platform();
@@ -1035,7 +1037,7 @@ impl AlertDialog {
             if let Some(color) = self
                 .icon_color
                 .or(dialog_theme.icon_color)
-                .or(defaults.icon_color)
+                .or_else(|| defaults.icon_color(app))
             {
                 icon_theme = icon_theme.color(color);
             }
@@ -1084,7 +1086,7 @@ impl AlertDialog {
                         self.title_text_style
                             .clone()
                             .or(dialog_theme.title_text_style.clone())
-                            .or(defaults.title_text_style.clone())
+                            .or_else(|| defaults.title_text_style(app))
                             .expect("the defaults give a title text style"),
                         Semantics::new()
                             // For iOS platform, the focus always lands on the title.
@@ -1132,7 +1134,7 @@ impl AlertDialog {
                     self.content_text_style
                         .clone()
                         .or(dialog_theme.content_text_style.clone())
-                        .or(defaults.content_text_style.clone())
+                        .or_else(|| defaults.content_text_style(app))
                         .expect("the defaults give a content text style"),
                     Semantics::new()
                         .container(true)
@@ -1153,7 +1155,7 @@ impl AlertDialog {
                 .or(dialog_theme.actions_padding)
                 .unwrap_or_else(|| {
                     let default_padding = defaults
-                        .actions_padding
+                        .actions_padding(app)
                         .expect("the defaults give an actions padding");
                     if theme.use_material3 {
                         default_padding
@@ -1491,7 +1493,7 @@ pub struct SimpleDialog {
     pub clip_behavior: Option<Clip>,
 
     /// See [`Dialog::shape`].
-    pub shape: Option<Box<dyn ShapeBorder>>,
+    pub shape: Option<ShapeBorderRef>,
 
     /// See [`Dialog::alignment`].
     pub alignment: Option<AlignmentGeometry>,
@@ -1611,7 +1613,7 @@ impl SimpleDialog {
     }
 
     /// Dart `SimpleDialog(shape:)`.
-    pub fn shape(mut self, shape: impl Into<Box<dyn ShapeBorder>>) -> SimpleDialog {
+    pub fn shape(mut self, shape: impl Into<ShapeBorderRef>) -> SimpleDialog {
         self.shape = Some(shape.into());
         self
     }
@@ -1645,10 +1647,10 @@ impl StatelessWidget for SimpleDialog {
         let theme = Theme::of(app, context);
 
         let dialog_theme = DialogTheme::of(app, context);
-        let defaults = if theme.use_material3 {
-            dialog_defaults_m3(app, context)
+        let defaults: Box<dyn DialogThemeDataGetters> = if theme.use_material3 {
+            Box::new(DialogDefaultsM3::new(context))
         } else {
-            dialog_defaults_m2(app, context)
+            Box::new(DialogDefaultsM2::new(context))
         };
 
         let target_platform = app.platform().target_platform();
@@ -1739,7 +1741,7 @@ impl StatelessWidget for SimpleDialog {
                             self.content_text_style
                                 .clone()
                                 .or(dialog_theme.content_text_style.clone())
-                                .or(defaults.content_text_style.clone())
+                                .or_else(|| defaults.content_text_style(app))
                                 .expect("the defaults give a content text style"),
                             ListBody::new().children(children.clone()),
                         )),
@@ -2559,28 +2561,68 @@ fn scale_padding(text_scale_factor: f64) -> f64 {
         .expect("both ends are given")
 }
 
-/// Dart's `_DialogDefaultsM2(context)`: hand coded defaults based on Material Design 2.
-fn dialog_defaults_m2(app: &mut App, context: BuildContext) -> DialogThemeData {
-    let theme = Theme::of(app, context);
-    let mut defaults = DialogThemeData::new()
-        .alignment(AlignmentGeometry::CENTER)
-        .elevation(24.0)
-        .shape(RoundedRectangleBorder::new(
-            waft_painting::BorderSide::NONE,
-            waft_painting::BorderRadiusGeometry::all(waft_embedder::Radius::circular(4.0)),
-        ))
-        .clip_behavior(Clip::None)
-        .background_color(if theme.brightness() == Brightness::Dark {
-            Colors::GREY.shade800()
-        } else {
-            Colors::WHITE
-        })
-        .shadow_color(theme.shadow_color)
-        .actions_padding(EdgeInsetsGeometry::ZERO);
-    defaults.icon_color = theme.icon_theme.color.as_ref().map(|color| color.color());
-    defaults.title_text_style = theme.text_theme.title_large.clone();
-    defaults.content_text_style = theme.text_theme.title_medium.clone();
-    defaults
+/// Dart's `_DialogDefaultsM2`: hand coded defaults based on Material Design 2.
+struct DialogDefaultsM2 {
+    /// Dart's `super(..)` arguments.
+    dialog_theme_data: DialogThemeData,
+    context: DefaultsContext,
+}
+
+impl DialogDefaultsM2 {
+    fn new(context: BuildContext) -> DialogDefaultsM2 {
+        DialogDefaultsM2 {
+            dialog_theme_data: DialogThemeData::new()
+                .alignment(AlignmentGeometry::CENTER)
+                .elevation(24.0)
+                .shape(RoundedRectangleBorder::new(
+                    waft_painting::BorderSide::NONE,
+                    waft_painting::BorderRadiusGeometry::all(waft_embedder::Radius::circular(4.0)),
+                ))
+                .clip_behavior(Clip::None),
+            context: DefaultsContext::new(context),
+        }
+    }
+}
+
+impl DialogThemeDataGetters for DialogDefaultsM2 {
+    fn dialog_theme_data(&self) -> &DialogThemeData {
+        &self.dialog_theme_data
+    }
+
+    fn icon_color(&self, app: &mut App) -> Option<Color> {
+        self.context
+            .theme(app)
+            .icon_theme
+            .color
+            .as_ref()
+            .map(|color| color.color())
+    }
+
+    fn background_color(&self, app: &mut App) -> Option<Color> {
+        Some(
+            if self.context.theme(app).brightness() == Brightness::Dark {
+                Colors::GREY.shade800()
+            } else {
+                Colors::WHITE
+            },
+        )
+    }
+
+    fn shadow_color(&self, app: &mut App) -> Option<Color> {
+        Some(self.context.theme(app).shadow_color)
+    }
+
+    fn title_text_style(&self, app: &mut App) -> Option<TextStyle> {
+        self.context.text_theme(app).title_large.clone()
+    }
+
+    fn content_text_style(&self, app: &mut App) -> Option<TextStyle> {
+        self.context.text_theme(app).title_medium.clone()
+    }
+
+    fn actions_padding(&self, _app: &mut App) -> Option<EdgeInsetsGeometry> {
+        Some(EdgeInsetsGeometry::ZERO)
+    }
 }
 
 #[cfg(test)]
@@ -2590,6 +2632,7 @@ pub(crate) mod tests {
     //! `DisplayFeatureSubScreen`.
 
     use std::cell::Cell;
+    use waft_painting::ShapeBorder;
 
     use waft_embedder::{Offset, Radius, Rect, Size};
     use waft_painting::{Border, BorderRadiusGeometry, BorderSide};
@@ -2611,13 +2654,13 @@ pub(crate) mod tests {
     }
 
     /// Dart's `_defaultM2DialogShape`.
-    fn default_m2_dialog_shape() -> Box<dyn ShapeBorder> {
-        Box::new(rounded(4.0))
+    fn default_m2_dialog_shape() -> ShapeBorderRef {
+        ShapeBorderRef::new(rounded(4.0))
     }
 
     /// Dart's `_defaultM3DialogShape`.
-    fn default_m3_dialog_shape() -> Box<dyn ShapeBorder> {
-        Box::new(rounded(28.0))
+    fn default_m3_dialog_shape() -> ShapeBorderRef {
+        ShapeBorderRef::new(rounded(28.0))
     }
 
     /// Dart's `material3Theme`.

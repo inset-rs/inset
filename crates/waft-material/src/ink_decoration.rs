@@ -8,7 +8,7 @@ use std::rc::Rc;
 use waft_embedder::{Canvas, Color, Matrix4, Offset};
 use waft_foundation::{App, Handle, Listener};
 use waft_painting::{
-    BoxDecoration, BoxPainter, Decoration, EdgeInsets, EdgeInsetsGeometry, ImageConfiguration,
+    BoxDecoration, BoxPainter, DecorationRef, EdgeInsets, EdgeInsetsGeometry, ImageConfiguration,
     get_as_translation,
 };
 use waft_rendering::{AnyRenderBox, BoxConstraints};
@@ -76,7 +76,7 @@ pub struct Ink {
     ///
     /// A shorthand for specifying just an image is also available using the
     /// `Ink.image` constructor.
-    pub decoration: Option<Box<dyn Decoration>>,
+    pub decoration: Option<DecorationRef>,
 
     /// A width to apply to the [`decoration`](Self::decoration) and the
     /// [`child`](Self::child). The width includes any [`padding`](Self::padding).
@@ -145,9 +145,10 @@ impl Ink {
     }
 
     /// Dart `Ink(decoration:)`.
-    pub fn decoration(mut self, decoration: impl Decoration + 'static) -> Ink {
+    pub fn decoration(mut self, decoration: impl Into<DecorationRef>) -> Ink {
+        let decoration = decoration.into();
         debug_assert!(decoration.debug_assert_is_valid());
-        self.decoration = Some(Box::new(decoration));
+        self.decoration = Some(decoration);
         self.debug_assert_color_or_decoration();
         self
     }
@@ -179,10 +180,10 @@ impl Ink {
     }
 
     /// Dart's `decoration` field, as its constructor fills it.
-    pub fn effective_decoration(&self) -> Option<Box<dyn Decoration>> {
+    pub fn effective_decoration(&self) -> Option<DecorationRef> {
         match (&self.decoration, self.color) {
-            (Some(decoration), _) => Some(decoration.clone_box()),
-            (None, Some(color)) => Some(Box::new(BoxDecoration::new().color(color))),
+            (Some(decoration), _) => Some(decoration.clone()),
+            (None, Some(color)) => Some(DecorationRef::new(BoxDecoration::new().color(color))),
             (None, None) => None,
         }
     }
@@ -328,7 +329,7 @@ impl State for InkState {
 pub struct InkDecoration {
     ink_feature: InkFeatureData,
     painter: Option<Box<dyn BoxPainter>>,
-    decoration: Option<Box<dyn Decoration>>,
+    decoration: Option<DecorationRef>,
     is_visible: bool,
     configuration: ImageConfiguration,
 }
@@ -339,7 +340,7 @@ impl InkDecoration {
     /// Dart's default `is_visible` is true.
     pub fn new(
         app: &mut App,
-        decoration: Option<Box<dyn Decoration>>,
+        decoration: Option<DecorationRef>,
         is_visible: bool,
         configuration: ImageConfiguration,
         controller: AnyMaterialInkController,
@@ -364,17 +365,13 @@ impl InkDecoration {
     ///
     /// The decoration is painted at the position and size of the `reference_box`,
     /// on the [`Material`] that owns the `controller`.
-    pub fn decoration(self: Handle<Self>, app: &App) -> Option<&dyn Decoration> {
-        app.get(self).decoration.as_deref()
+    pub fn decoration(self: Handle<Self>, app: &App) -> Option<&DecorationRef> {
+        app.get(self).decoration.as_ref()
     }
 
     /// Sets [`decoration`](Self::decoration).
-    pub fn set_decoration(self: Handle<Self>, app: &mut App, value: Option<Box<dyn Decoration>>) {
-        let unchanged = match (&value, &app.get(self).decoration) {
-            (Some(value), Some(decoration)) => value.eq_decoration(&**decoration),
-            (value, decoration) => value.is_none() && decoration.is_none(),
-        };
-        if unchanged {
+    pub fn set_decoration(self: Handle<Self>, app: &mut App, value: Option<DecorationRef>) {
+        if value == app.get(self).decoration {
             return;
         }
         let controller = InkFeature::controller(self, app);

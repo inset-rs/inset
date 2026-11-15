@@ -32,7 +32,7 @@ use waft_gestures::{
 };
 use waft_painting::{
     Alignment, AlignmentGeometry, BorderRadius, BorderRadiusGeometry, BoxFit, BoxPainter, BoxShape,
-    ClipContext, Decoration, ImageConfiguration, ShapeBorder, TextDirection, apply_box_fit,
+    ClipContext, DecorationRef, ImageConfiguration, ShapeBorderRef, TextDirection, apply_box_fit,
     debug_disable_shadows, draw_rrect, get_as_translation,
 };
 use waft_services::{MouseCursor, MouseCursorRef, MouseTrackerAnnotation};
@@ -1981,7 +1981,7 @@ pub struct RenderDecoratedBox {
     render_box: RenderBoxData,
     child: RenderObjectWithChildData<AnyRenderBox>,
     painter: Option<Box<dyn BoxPainter>>,
-    decoration: Box<dyn Decoration>,
+    decoration: DecorationRef,
     position: DecorationPosition,
     configuration: ImageConfiguration,
 }
@@ -1992,7 +1992,7 @@ impl RenderDecoratedBox {
     /// The `configuration` is normally obtained from `createLocalImageConfiguration`.
     pub fn new(
         app: &mut App,
-        decoration: Box<dyn Decoration>,
+        decoration: DecorationRef,
         position: DecorationPosition,
         configuration: ImageConfiguration,
         child: Option<AnyRenderBox>,
@@ -2014,13 +2014,13 @@ impl RenderDecoratedBox {
     }
 
     /// What decoration to paint.
-    pub fn decoration(self: RenderHandle<Self>, app: &App) -> &dyn Decoration {
-        &*self.get(app).decoration
+    pub fn decoration(self: RenderHandle<Self>, app: &App) -> &DecorationRef {
+        &self.get(app).decoration
     }
 
     /// Sets [`decoration`](Self::decoration).
-    pub fn set_decoration(self: RenderHandle<Self>, app: &mut App, value: Box<dyn Decoration>) {
-        if value.eq_decoration(&*self.get(app).decoration) {
+    pub fn set_decoration(self: RenderHandle<Self>, app: &mut App, value: DecorationRef) {
+        if value == self.get(app).decoration {
             return;
         }
         let this = self.get_mut(app);
@@ -3889,7 +3889,7 @@ impl<T> RenderCustomClipData<T> {
 /// A [`CustomClipper`] that clips to the outer path of a `ShapeBorder`.
 pub struct ShapeBorderClipper {
     /// The shape border whose outer path defines the clip.
-    pub shape: Box<dyn ShapeBorder>,
+    pub shape: ShapeBorderRef,
     /// The text direction to use for getting the outer path for `shape`.
     ///
     /// `ShapeBorder`s can depend on the text direction (e.g having a "dent" on the left hand
@@ -3904,7 +3904,7 @@ impl ShapeBorderClipper {
     /// direction dependency (for example if it is expressed in terms of "start" and "end"
     /// instead of "left" and "right"). It may be `None` if the border will not need the text
     /// direction to paint itself.
-    pub fn new(shape: Box<dyn ShapeBorder>, text_direction: Option<TextDirection>) -> Self {
+    pub fn new(shape: ShapeBorderRef, text_direction: Option<TextDirection>) -> Self {
         ShapeBorderClipper {
             shape,
             text_direction,
@@ -3922,8 +3922,7 @@ impl CustomClipper<Path> for ShapeBorderClipper {
         let Some(old_clipper) = old_clipper.as_any().downcast_ref::<ShapeBorderClipper>() else {
             return true;
         };
-        !old_clipper.shape.eq_shape(&*self.shape)
-            || old_clipper.text_direction != self.text_direction
+        old_clipper.shape != self.shape || old_clipper.text_direction != self.text_direction
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -9700,7 +9699,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let inner = RenderDecoratedBox::new(
             &mut app,
-            Box::new(BoxDecoration::new()),
+            DecorationRef::new(BoxDecoration::new()),
             DecorationPosition::Background,
             ImageConfiguration::EMPTY,
             None,
@@ -9834,7 +9833,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let decorated = RenderDecoratedBox::new(
             &mut app,
-            Box::new(BoxDecoration::new().color(Color::from_argb(255, 255, 0, 0))),
+            DecorationRef::new(BoxDecoration::new().color(Color::from_argb(255, 255, 0, 0))),
             DecorationPosition::Background,
             ImageConfiguration::EMPTY,
             None,
@@ -10782,17 +10781,18 @@ mod tests {
 
     #[test]
     fn a_shape_border_clipper_clips_to_the_shape_and_reclips_when_it_changes() {
-        let square: Box<dyn ShapeBorder> = Box::new(waft_painting::RoundedRectangleBorder::new(
-            waft_painting::BorderSide::NONE,
-            waft_painting::BorderRadiusGeometry::circular(10.0),
-        ));
+        let square: ShapeBorderRef =
+            ShapeBorderRef::new(waft_painting::RoundedRectangleBorder::new(
+                waft_painting::BorderSide::NONE,
+                waft_painting::BorderRadiusGeometry::circular(10.0),
+            ));
         let cell = AppCell::new();
         let app = cell.borrow();
-        let clipper = ShapeBorderClipper::new(square.clone_box(), Some(TextDirection::Ltr));
+        let clipper = ShapeBorderClipper::new(square.clone(), Some(TextDirection::Ltr));
         let clip = clipper.get_clip(&app, Size::new(40.0, 40.0));
         assert!(clip.contains(Offset::new(20.0, 20.0)));
         assert!(!clip.contains(Offset::new(0.5, 0.5)), "a rounded corner");
-        let same = ShapeBorderClipper::new(square.clone_box(), Some(TextDirection::Ltr));
+        let same = ShapeBorderClipper::new(square.clone(), Some(TextDirection::Ltr));
         assert!(!clipper.should_reclip(&app, &same));
         let other = ShapeBorderClipper::new(square, Some(TextDirection::Rtl));
         assert!(clipper.should_reclip(&app, &other));
@@ -11141,7 +11141,7 @@ mod tests {
 
     fn circle_clipper() -> Rc<dyn CustomClipper<Path>> {
         Rc::new(ShapeBorderClipper::new(
-            Box::new(waft_painting::CircleBorder::new(
+            ShapeBorderRef::new(waft_painting::CircleBorder::new(
                 waft_painting::BorderSide::NONE,
                 0.0,
             )),
@@ -11179,7 +11179,7 @@ mod tests {
         shape.set_clipper(
             &mut app,
             Some(Rc::new(ShapeBorderClipper::new(
-                Box::new(waft_painting::StadiumBorder::default()),
+                ShapeBorderRef::new(waft_painting::StadiumBorder::default()),
                 None,
             ))),
         );

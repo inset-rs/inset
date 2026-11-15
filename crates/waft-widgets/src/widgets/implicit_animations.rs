@@ -17,7 +17,7 @@ use waft_embedder::{
 use waft_foundation::{App, Handle, Listener};
 use waft_painting::{
     Alignment, AlignmentGeometry, AnyColor, Border, BorderRadius, BoxDecoration, BoxShape,
-    Decoration, EdgeInsets, EdgeInsetsGeometry, ShapeBorder, TextOverflow, TextStyle,
+    DecorationRef, EdgeInsets, EdgeInsetsGeometry, ShapeBorderRef, TextOverflow, TextStyle,
     TextWidthBasis,
 };
 use waft_rendering::{AlignmentGeometryTween, BoxConstraints, Constraints};
@@ -89,63 +89,51 @@ impl Animatable<BoxConstraints> for BoxConstraintsTween {
 /// An interpolation between two [`Decoration`]s.
 ///
 /// This class specializes the interpolation of `Tween<Decoration>` to use
-/// `<dyn Decoration>::lerp`.
+/// [`DecorationRef::lerp`].
 ///
 /// See `Tween` for a discussion on how to use interpolation objects.
 ///
 /// Unlike the tweens in `waft_animation`, this one is a value rather than an arena object:
-/// the orphan rule leaves no local type in `impl Animatable<Box<dyn Decoration>> for
+/// the orphan rule leaves no local type in `impl Animatable<DecorationRef> for
 /// Handle<DecorationTween>`. A driven animation therefore holds a clone, and writing
 /// [`begin`](Self::begin) or [`end`](Self::end) afterwards does not reach it.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct DecorationTween {
     /// The value this variable has at the beginning of the animation.
-    pub begin: Option<Box<dyn Decoration>>,
+    pub begin: Option<DecorationRef>,
 
     /// The value this variable has at the end of the animation.
-    pub end: Option<Box<dyn Decoration>>,
+    pub end: Option<DecorationRef>,
 }
 
 impl DecorationTween {
     /// Creates a decoration tween.
-    pub fn new(
-        begin: Option<Box<dyn Decoration>>,
-        end: Option<Box<dyn Decoration>>,
-    ) -> DecorationTween {
+    pub fn new(begin: Option<DecorationRef>, end: Option<DecorationRef>) -> DecorationTween {
         DecorationTween { begin, end }
     }
 
     /// Returns the value this variable has at the given animation clock value.
-    pub fn lerp(&self, t: f64) -> Box<dyn Decoration> {
-        <dyn Decoration>::lerp(self.begin.as_deref(), self.end.as_deref(), t)
+    pub fn lerp(&self, t: f64) -> DecorationRef {
+        DecorationRef::lerp(self.begin.as_ref(), self.end.as_ref(), t)
             .expect("DecorationTween.begin or end must be set before use")
     }
 }
 
-impl Clone for DecorationTween {
-    fn clone(&self) -> DecorationTween {
-        DecorationTween {
-            begin: self.begin.as_ref().map(|begin| begin.clone_box()),
-            end: self.end.as_ref().map(|end| end.clone_box()),
-        }
-    }
-}
-
-impl Animatable<Box<dyn Decoration>> for DecorationTween {
-    fn transform(&self, _app: &App, t: f64) -> Box<dyn Decoration> {
+impl Animatable<DecorationRef> for DecorationTween {
+    fn transform(&self, _app: &App, t: f64) -> DecorationRef {
         if t == 0.0 {
             return self
                 .begin
                 .as_ref()
                 .expect("Tween.begin must be set before use")
-                .clone_box();
+                .clone();
         }
         if t == 1.0 {
             return self
                 .end
                 .as_ref()
                 .expect("Tween.end must be set before use")
-                .clone_box();
+                .clone();
         }
         self.lerp(t)
     }
@@ -573,9 +561,6 @@ pub trait ImplicitlyAnimatedWidget: StatefulWidget {
 /// The `T` of Dart's `Tween<T>` in a slot [`ImplicitlyAnimatedWidgetState::for_each_tween`]
 /// visits: Dart's `T extends Object`, with the `==` that decides whether a target value
 /// changed.
-///
-/// `Clone` is not a supertrait: `Box<dyn Decoration>` is a tween value and is duplicated
-/// through `Decoration::clone_box`.
 pub trait TweenValue: 'static {
     /// Dart's `==` between a widget's target value and a tween endpoint.
     fn same(&self, other: &Self) -> bool;
@@ -655,19 +640,16 @@ impl TweenValue for Option<Color> {
     }
 }
 
-impl TweenValue for Box<dyn Decoration> {
-    fn same(&self, other: &Box<dyn Decoration>) -> bool {
-        self.eq_decoration(&**other)
+impl TweenValue for DecorationRef {
+    fn same(&self, other: &DecorationRef) -> bool {
+        self == other
     }
 }
 
 /// Dart's `Tween<ShapeBorder?>`, which material's `ShapeBorderTween` is.
-impl TweenValue for Option<Box<dyn ShapeBorder>> {
-    fn same(&self, other: &Option<Box<dyn ShapeBorder>>) -> bool {
-        match (self, other) {
-            (Some(this), Some(other)) => this.eq_shape(&**other),
-            (this, other) => this.is_none() && other.is_none(),
-        }
+impl TweenValue for Option<ShapeBorderRef> {
+    fn same(&self, other: &Option<ShapeBorderRef>) -> bool {
+        self == other
     }
 }
 
@@ -813,21 +795,21 @@ tween_slot_for_nullable_value!(BorderTween, Border);
 tween_slot_for_nullable_value!(AlignmentGeometryTween, AlignmentGeometry);
 
 impl TweenSlot for DecorationTween {
-    type Value = Box<dyn Decoration>;
+    type Value = DecorationRef;
 
-    fn begin(&self, _app: &App) -> Option<Box<dyn Decoration>> {
-        self.begin.as_ref().map(|begin| begin.clone_box())
+    fn begin(&self, _app: &App) -> Option<DecorationRef> {
+        self.begin.clone()
     }
 
-    fn set_begin(&mut self, _app: &mut App, begin: Option<Box<dyn Decoration>>) {
+    fn set_begin(&mut self, _app: &mut App, begin: Option<DecorationRef>) {
         self.begin = begin;
     }
 
-    fn end(&self, _app: &App) -> Option<Box<dyn Decoration>> {
-        self.end.as_ref().map(|end| end.clone_box())
+    fn end(&self, _app: &App) -> Option<DecorationRef> {
+        self.end.clone()
     }
 
-    fn set_end(&mut self, _app: &mut App, end: Option<Box<dyn Decoration>>) {
+    fn set_end(&mut self, _app: &mut App, end: Option<DecorationRef>) {
         self.end = end;
     }
 }
@@ -1274,10 +1256,10 @@ pub struct AnimatedContainer {
     ///
     /// A shorthand for specifying just a solid color is available in
     /// [`color`](Self::color).
-    pub decoration: Option<Box<dyn Decoration>>,
+    pub decoration: Option<DecorationRef>,
 
     /// The decoration to paint in front of the child.
-    pub foreground_decoration: Option<Box<dyn Decoration>>,
+    pub foreground_decoration: Option<DecorationRef>,
 
     /// Additional constraints to apply to the child.
     ///
@@ -1362,25 +1344,26 @@ impl AnimatedContainer {
         let color = color.into();
         debug_assert!(self.decoration.is_none(), "{CANNOT_PROVIDE_BOTH}");
         self.color = Some(color.clone());
-        self.decoration = Some(Box::new(BoxDecoration::new().color(color)));
+        self.decoration = Some(DecorationRef::new(BoxDecoration::new().color(color)));
         self
     }
 
     /// Dart `AnimatedContainer(decoration:)`; cannot be combined with
     /// [`color`](Self::color).
-    pub fn decoration(mut self, decoration: impl Decoration + 'static) -> AnimatedContainer {
+    pub fn decoration(mut self, decoration: impl Into<DecorationRef>) -> AnimatedContainer {
         debug_assert!(self.color.is_none(), "{CANNOT_PROVIDE_BOTH}");
+        let decoration = decoration.into();
         debug_assert!(decoration.debug_assert_is_valid());
-        self.decoration = Some(Box::new(decoration));
+        self.decoration = Some(decoration);
         self
     }
 
     /// Dart `AnimatedContainer(foregroundDecoration:)`.
     pub fn foreground_decoration(
         mut self,
-        foreground_decoration: impl Decoration + 'static,
+        foreground_decoration: impl Into<DecorationRef>,
     ) -> AnimatedContainer {
-        self.foreground_decoration = Some(Box::new(foreground_decoration));
+        self.foreground_decoration = Some(foreground_decoration.into());
         self
     }
 
@@ -1539,15 +1522,15 @@ impl ImplicitlyAnimatedWidgetState for AnimatedContainerState {
             EdgeInsetsGeometryTween::new(Some(*value), None)
         });
         let tween = app.get(self).decoration.clone();
-        let target = clone_decoration(self.widget(app).decoration.as_deref());
+        let target = self.widget(app).decoration.clone();
         app.get_mut(self).decoration = visitor.visit(app, tween, target, |_app, value| {
-            DecorationTween::new(Some(value.clone_box()), None)
+            DecorationTween::new(Some(value.clone()), None)
         });
         let tween = app.get(self).foreground_decoration.clone();
-        let target = clone_decoration(self.widget(app).foreground_decoration.as_deref());
+        let target = self.widget(app).foreground_decoration.clone();
         app.get_mut(self).foreground_decoration =
             visitor.visit(app, tween, target, |_app, value| {
-                DecorationTween::new(Some(value.clone_box()), None)
+                DecorationTween::new(Some(value.clone()), None)
             });
         let tween = app.get(self).constraints.clone();
         let target = self.widget(app).constraints;
@@ -1631,25 +1614,16 @@ impl State for AnimatedContainerState {
         if let Some(child) = child {
             container = container.child(child);
         }
-        // An evaluated decoration is a `Box<dyn Decoration>`, which the setter's
-        // `impl Decoration` argument cannot take; `DecoratedBoxTransition` writes the
-        // field for the same reason. The setter's assert runs here instead.
-        container.decoration = decoration.map(|tween| tween.evaluate(app, animation));
-        container.foreground_decoration =
-            foreground_decoration.map(|tween| tween.evaluate(app, animation));
-        debug_assert!(
-            container
-                .decoration
-                .as_ref()
-                .is_none_or(|decoration| decoration.debug_assert_is_valid())
-        );
+        if let Some(decoration) = decoration.map(|tween| tween.evaluate(app, animation)) {
+            container = container.decoration(decoration);
+        }
+        if let Some(foreground_decoration) =
+            foreground_decoration.map(|tween| tween.evaluate(app, animation))
+        {
+            container = container.foreground_decoration(foreground_decoration);
+        }
         container.into_widget()
     }
-}
-
-/// The target a decoration slot hands the visitor; Dart passes `widget.decoration` itself.
-fn clone_decoration(decoration: Option<&dyn Decoration>) -> Option<Box<dyn Decoration>> {
-    decoration.map(|decoration| decoration.clone_box())
 }
 
 /// Animated version of [`Padding`] which automatically transitions the
@@ -3957,6 +3931,7 @@ fn offset_tween(app: &mut App, value: &Offset) -> Handle<Tween<Offset>> {
 mod tests {
     use std::cell::{Cell, RefCell};
     use waft_foundation::AppCell;
+    use waft_painting::Decoration;
 
     use waft_embedder::{Size, TextDirection};
     use waft_rendering::{RenderAnimatedOpacity, RenderAnimatedOpacityMixin};
@@ -4318,6 +4293,79 @@ mod tests {
 
         binding_pump(&mut app, Duration::from_millis(200));
         assert_eq!(ends.get(), 1, "on_end fires once per animation");
+    }
+
+    /// A decoration with Dart's default `==`, identity, as a user's own decoration has.
+    #[derive(Debug)]
+    struct IdentityDecoration;
+
+    impl Decoration for IdentityDecoration {
+        fn create_box_painter(
+            &self,
+            _on_changed: Option<waft_foundation::VoidCallback>,
+        ) -> Box<dyn waft_painting::BoxPainter> {
+            Box::new(PaintsNothing)
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    struct PaintsNothing;
+
+    impl waft_painting::BoxPainter for PaintsNothing {
+        fn paint(
+            &mut self,
+            _canvas: &mut waft_embedder::Canvas,
+            _offset: Offset,
+            _configuration: &waft_painting::ImageConfiguration,
+        ) {
+        }
+
+        fn on_changed(&self) -> Option<&dyn Fn(&mut App)> {
+            None
+        }
+    }
+
+    // ---- not in animated_container_test.dart: a decoration compared by identity ----
+
+    #[test]
+    fn an_animated_container_given_its_own_decoration_again_does_not_animate() {
+        let decorated = |key: &GlobalKey, decoration: &DecorationRef| {
+            AnimatedContainer::new(DURATION)
+                .key(key.clone().into())
+                .decoration(decoration.clone())
+                .into_widget()
+        };
+        let cell = binding_cell();
+        let key = GlobalKey::new();
+        let decoration = DecorationRef::new(IdentityDecoration);
+        binding_mount(&cell, decorated(&key, &decoration));
+        let mut app = cell.borrow_mut();
+        let controller = |app: &App| {
+            key.current_state::<AnimatedContainerState>(app)
+                .expect("the widget is mounted")
+                .controller(app)
+        };
+
+        rebuild(&mut app, decorated(&key, &decoration), Duration::ZERO);
+        assert!(
+            controller(&app).is_dismissed(&app),
+            "the same decoration is no new target"
+        );
+
+        let another = DecorationRef::new(IdentityDecoration);
+        rebuild(
+            &mut app,
+            decorated(&key, &another),
+            Duration::from_millis(10),
+        );
+        let controller = controller(&app);
+        assert!(
+            controller.is_animating(&mut app),
+            "another decoration of the same type is, as Dart's identity `==` makes it"
+        );
     }
 
     /// The global offset of the widget the key is on.
@@ -4697,16 +4745,21 @@ mod tests {
     #[test]
     fn a_shape_border_value_is_the_same_by_its_equality() {
         use waft_painting::{BorderSide, CircleBorder, RoundedRectangleBorder};
-        let rounded = |radius: f64| -> Option<Box<dyn ShapeBorder>> {
-            Some(Box::new(RoundedRectangleBorder::new(
+        let rounded = |radius: f64| -> Option<ShapeBorderRef> {
+            Some(ShapeBorderRef::new(RoundedRectangleBorder::new(
                 BorderSide::NONE,
                 BorderRadius::circular(radius).into(),
             )))
         };
         assert!(rounded(2.0).same(&rounded(2.0)));
         assert!(!rounded(2.0).same(&rounded(4.0)));
-        assert!(!rounded(2.0).same(&Some(Box::new(CircleBorder::new(BorderSide::NONE, 0.0)))));
+        assert!(
+            !rounded(2.0).same(&Some(ShapeBorderRef::new(CircleBorder::new(
+                BorderSide::NONE,
+                0.0
+            ))))
+        );
         assert!(!rounded(2.0).same(&None));
-        assert!(None::<Box<dyn ShapeBorder>>.same(&None));
+        assert!(None::<ShapeBorderRef>.same(&None));
     }
 }

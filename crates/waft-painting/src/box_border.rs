@@ -8,7 +8,7 @@ use waft_embedder::{Color, Offset, RRect, Radius, Rect};
 
 use crate::basic_types::TextDirection;
 use crate::border_radius::BorderRadius;
-use crate::borders::{BorderSide, BorderStyle, ShapeBorder, paint_border};
+use crate::borders::{BorderSide, BorderStyle, ShapeBorder, ShapeBorderRef, paint_border};
 use crate::draw::{draw_drrect, draw_rrect};
 use crate::edge_insets::{EdgeInsets, EdgeInsetsDirectional, EdgeInsetsGeometry};
 
@@ -503,39 +503,39 @@ impl ShapeBorder for Border {
         .into()
     }
 
-    fn add(&self, other: &dyn ShapeBorder, _reversed: bool) -> Option<Box<dyn ShapeBorder>> {
+    fn add(&self, other: &ShapeBorderRef, _reversed: bool) -> Option<ShapeBorderRef> {
         other.as_any().downcast_ref::<Border>().and_then(|other| {
             if BorderSide::can_merge(self.top, other.top)
                 && BorderSide::can_merge(self.right, other.right)
                 && BorderSide::can_merge(self.bottom, other.bottom)
                 && BorderSide::can_merge(self.left, other.left)
             {
-                Some(Box::new(Border::merge(*self, *other)) as Box<dyn ShapeBorder>)
+                Some(ShapeBorderRef::new(Border::merge(*self, *other)))
             } else {
                 None
             }
         })
     }
 
-    fn scale(&self, t: f64) -> Box<dyn ShapeBorder> {
-        Box::new(Border::scale(*self, t))
+    fn scale(&self, t: f64) -> ShapeBorderRef {
+        ShapeBorderRef::new(Border::scale(*self, t))
     }
 
-    fn lerp_from(&self, a: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
+    fn lerp_from(&self, a: Option<&dyn ShapeBorder>, t: f64) -> Option<ShapeBorderRef> {
         if let Some(a) = a.and_then(|a| a.as_any().downcast_ref::<Border>()) {
-            Border::lerp(Some(*a), Some(*self), t).map(|border| Box::new(border) as _)
+            Border::lerp(Some(*a), Some(*self), t).map(|border| ShapeBorderRef::new(border) as _)
         } else if a.is_none() {
-            Some(Box::new(Border::scale(*self, t)))
+            Some(ShapeBorderRef::new(Border::scale(*self, t)))
         } else {
             None
         }
     }
 
-    fn lerp_to(&self, b: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
+    fn lerp_to(&self, b: Option<&dyn ShapeBorder>, t: f64) -> Option<ShapeBorderRef> {
         if let Some(b) = b.and_then(|b| b.as_any().downcast_ref::<Border>()) {
-            Border::lerp(Some(*self), Some(*b), t).map(|border| Box::new(border) as _)
+            Border::lerp(Some(*self), Some(*b), t).map(|border| ShapeBorderRef::new(border) as _)
         } else if b.is_none() {
-            Some(Box::new(Border::scale(*self, 1.0 - t)))
+            Some(ShapeBorderRef::new(Border::scale(*self, 1.0 - t)))
         } else {
             None
         }
@@ -581,10 +581,6 @@ impl ShapeBorder for Border {
             BoxShape::Rectangle,
             None,
         );
-    }
-
-    fn clone_box(&self) -> Box<dyn ShapeBorder> {
-        Box::new(*self)
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -883,14 +879,17 @@ impl ShapeBorder for BorderDirectional {
         .into()
     }
 
-    fn add(&self, other: &dyn ShapeBorder, _reversed: bool) -> Option<Box<dyn ShapeBorder>> {
+    fn add(&self, other: &ShapeBorderRef, _reversed: bool) -> Option<ShapeBorderRef> {
         if let Some(typed_other) = other.as_any().downcast_ref::<BorderDirectional>() {
             if BorderSide::can_merge(self.top, typed_other.top)
                 && BorderSide::can_merge(self.start, typed_other.start)
                 && BorderSide::can_merge(self.end, typed_other.end)
                 && BorderSide::can_merge(self.bottom, typed_other.bottom)
             {
-                return Some(Box::new(BorderDirectional::merge(*self, *typed_other)) as _);
+                return Some(ShapeBorderRef::new(BorderDirectional::merge(
+                    *self,
+                    *typed_other,
+                )));
             }
             return None;
         }
@@ -906,7 +905,7 @@ impl ShapeBorder for BorderDirectional {
                 }
                 debug_assert_eq!(typed_other.left, BorderSide::NONE);
                 debug_assert_eq!(typed_other.right, BorderSide::NONE);
-                return Some(Box::new(BorderDirectional {
+                return Some(ShapeBorderRef::new(BorderDirectional {
                     top: BorderSide::merge(typed_other.top, self.top),
                     start: self.start,
                     end: self.end,
@@ -915,7 +914,7 @@ impl ShapeBorder for BorderDirectional {
             }
             debug_assert_eq!(self.start, BorderSide::NONE);
             debug_assert_eq!(self.end, BorderSide::NONE);
-            return Some(Box::new(Border {
+            return Some(ShapeBorderRef::new(Border {
                 top: BorderSide::merge(typed_other.top, self.top),
                 right: typed_other.right,
                 bottom: BorderSide::merge(typed_other.bottom, self.bottom),
@@ -925,25 +924,30 @@ impl ShapeBorder for BorderDirectional {
         None
     }
 
-    fn scale(&self, t: f64) -> Box<dyn ShapeBorder> {
-        Box::new(BorderDirectional::scale(*self, t))
+    fn scale(&self, t: f64) -> ShapeBorderRef {
+        ShapeBorderRef::new(BorderDirectional::scale(*self, t))
     }
 
-    fn lerp_from(&self, a: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
+    fn lerp_from(&self, a: Option<&dyn ShapeBorder>, t: f64) -> Option<ShapeBorderRef> {
         if let Some(a) = a.and_then(|a| a.as_any().downcast_ref::<BorderDirectional>()) {
-            BorderDirectional::lerp(Some(*a), Some(*self), t).map(|border| Box::new(border) as _)
+            BorderDirectional::lerp(Some(*a), Some(*self), t)
+                .map(|border| ShapeBorderRef::new(border) as _)
         } else if a.is_none() {
-            Some(Box::new(BorderDirectional::scale(*self, t)))
+            Some(ShapeBorderRef::new(BorderDirectional::scale(*self, t)))
         } else {
             None
         }
     }
 
-    fn lerp_to(&self, b: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
+    fn lerp_to(&self, b: Option<&dyn ShapeBorder>, t: f64) -> Option<ShapeBorderRef> {
         if let Some(b) = b.and_then(|b| b.as_any().downcast_ref::<BorderDirectional>()) {
-            BorderDirectional::lerp(Some(*self), Some(*b), t).map(|border| Box::new(border) as _)
+            BorderDirectional::lerp(Some(*self), Some(*b), t)
+                .map(|border| ShapeBorderRef::new(border) as _)
         } else if b.is_none() {
-            Some(Box::new(BorderDirectional::scale(*self, 1.0 - t)))
+            Some(ShapeBorderRef::new(BorderDirectional::scale(
+                *self,
+                1.0 - t,
+            )))
         } else {
             None
         }
@@ -989,10 +993,6 @@ impl ShapeBorder for BorderDirectional {
             BoxShape::Rectangle,
             None,
         );
-    }
-
-    fn clone_box(&self) -> Box<dyn ShapeBorder> {
-        Box::new(*self)
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -1207,8 +1207,8 @@ mod tests {
         )
     }
 
-    fn plus(a: &dyn ShapeBorder, b: &dyn ShapeBorder) -> Box<dyn ShapeBorder> {
-        a.plus(b)
+    fn plus(a: &(impl ShapeBorder + Copy), b: &(impl ShapeBorder + Copy)) -> ShapeBorderRef {
+        ShapeBorderRef::new(*a).plus(&ShapeBorderRef::new(*b))
     }
 
     fn expect_border(got: Option<Box<dyn BoxBorder>>, expected: Border) {
@@ -1241,8 +1241,8 @@ mod tests {
             EdgeInsetsGeometry::ZERO
         }
 
-        fn scale(&self, _t: f64) -> Box<dyn ShapeBorder> {
-            Box::new(*self)
+        fn scale(&self, _t: f64) -> ShapeBorderRef {
+            ShapeBorderRef::new(*self)
         }
 
         fn get_outer_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Path {
@@ -1254,10 +1254,6 @@ mod tests {
         }
 
         fn paint(&self, _canvas: &mut Canvas, _rect: Rect, _text_direction: Option<TextDirection>) {
-        }
-
-        fn clone_box(&self) -> Box<dyn ShapeBorder> {
-            Box::new(*self)
         }
 
         fn as_any(&self) -> &dyn Any {

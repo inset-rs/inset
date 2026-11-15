@@ -14,7 +14,7 @@ use waft_embedder::{
 };
 use waft_painting::{
     BorderRadius, BorderSide, BorderStyle, BoxBorder, BoxShape, EdgeInsetsGeometry, ShapeBorder,
-    TextDirection, draw_rrect,
+    ShapeBorderRef, TextDirection, draw_rrect,
 };
 use waft_widgets::{MaybeWidgetStateProperty, WidgetStateProperty};
 
@@ -183,8 +183,8 @@ impl ShapeBorder for NoInputBorder {
         EdgeInsetsGeometry::ZERO
     }
 
-    fn scale(&self, _t: f64) -> Box<dyn ShapeBorder> {
-        Box::new(NoInputBorder)
+    fn scale(&self, _t: f64) -> ShapeBorderRef {
+        ShapeBorderRef::new(NoInputBorder)
     }
 
     fn get_outer_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Path {
@@ -211,10 +211,6 @@ impl ShapeBorder for NoInputBorder {
 
     fn paint(&self, canvas: &mut Canvas, rect: Rect, text_direction: Option<TextDirection>) {
         InputBorder::paint(self, canvas, rect, None, 0.0, 0.0, text_direction);
-    }
-
-    fn clone_box(&self) -> Box<dyn ShapeBorder> {
-        Box::new(NoInputBorder)
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -356,13 +352,13 @@ impl ShapeBorder for UnderlineInputBorder {
         EdgeInsetsGeometry::only(0.0, 0.0, 0.0, self.border_side.width)
     }
 
-    fn scale(&self, t: f64) -> Box<dyn ShapeBorder> {
-        Box::new(UnderlineInputBorder::scale(self, t))
+    fn scale(&self, t: f64) -> ShapeBorderRef {
+        ShapeBorderRef::new(UnderlineInputBorder::scale(self, t))
     }
 
-    fn lerp_from(&self, a: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
+    fn lerp_from(&self, a: Option<&dyn ShapeBorder>, t: f64) -> Option<ShapeBorderRef> {
         if let Some(a) = a.and_then(|a| a.as_any().downcast_ref::<UnderlineInputBorder>()) {
-            return Some(Box::new(UnderlineInputBorder {
+            return Some(ShapeBorderRef::new(UnderlineInputBorder {
                 border_side: BorderSide::lerp(a.border_side, self.border_side, t),
                 border_radius: BorderRadius::lerp(
                     Some(a.border_radius),
@@ -379,9 +375,9 @@ impl ShapeBorder for UnderlineInputBorder {
         }
     }
 
-    fn lerp_to(&self, b: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
+    fn lerp_to(&self, b: Option<&dyn ShapeBorder>, t: f64) -> Option<ShapeBorderRef> {
         if let Some(b) = b.and_then(|b| b.as_any().downcast_ref::<UnderlineInputBorder>()) {
-            return Some(Box::new(UnderlineInputBorder {
+            return Some(ShapeBorderRef::new(UnderlineInputBorder {
                 border_side: BorderSide::lerp(self.border_side, b.border_side, t),
                 border_radius: BorderRadius::lerp(
                     Some(self.border_radius),
@@ -431,10 +427,6 @@ impl ShapeBorder for UnderlineInputBorder {
 
     fn paint(&self, canvas: &mut Canvas, rect: Rect, text_direction: Option<TextDirection>) {
         InputBorder::paint(self, canvas, rect, None, 0.0, 0.0, text_direction);
-    }
-
-    fn clone_box(&self) -> Box<dyn ShapeBorder> {
-        Box::new(*self)
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -776,13 +768,13 @@ impl ShapeBorder for OutlineInputBorder {
         EdgeInsetsGeometry::all(self.border_side.stroke_inset())
     }
 
-    fn scale(&self, t: f64) -> Box<dyn ShapeBorder> {
-        Box::new(OutlineInputBorder::scale(self, t))
+    fn scale(&self, t: f64) -> ShapeBorderRef {
+        ShapeBorderRef::new(OutlineInputBorder::scale(self, t))
     }
 
-    fn lerp_from(&self, a: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
+    fn lerp_from(&self, a: Option<&dyn ShapeBorder>, t: f64) -> Option<ShapeBorderRef> {
         if let Some(outline) = a.and_then(|a| a.as_any().downcast_ref::<OutlineInputBorder>()) {
-            return Some(Box::new(
+            return Some(ShapeBorderRef::new(
                 OutlineInputBorder::new()
                     .border_radius(
                         BorderRadius::lerp(
@@ -803,9 +795,9 @@ impl ShapeBorder for OutlineInputBorder {
         }
     }
 
-    fn lerp_to(&self, b: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
+    fn lerp_to(&self, b: Option<&dyn ShapeBorder>, t: f64) -> Option<ShapeBorderRef> {
         if let Some(outline) = b.and_then(|b| b.as_any().downcast_ref::<OutlineInputBorder>()) {
-            return Some(Box::new(
+            return Some(ShapeBorderRef::new(
                 OutlineInputBorder::new()
                     .border_radius(
                         BorderRadius::lerp(
@@ -859,10 +851,6 @@ impl ShapeBorder for OutlineInputBorder {
 
     fn paint(&self, canvas: &mut Canvas, rect: Rect, text_direction: Option<TextDirection>) {
         InputBorder::paint(self, canvas, rect, None, 0.0, 0.0, text_direction);
-    }
-
-    fn clone_box(&self) -> Box<dyn ShapeBorder> {
-        Box::new(*self)
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -964,6 +952,7 @@ impl Debug for OutlineInputBorder {
 ///    draws a horizontal line at the bottom of the input decorator's container.
 ///  * `RoundedSuperellipseBorder`, which can be used with this border for iOS-style shapes.
 ///  * `InputDecoration`, which is used to configure an `InputDecorator`.
+#[derive(Clone)]
 pub struct ShapedInputBorder {
     /// Defines the border line's color and weight.
     pub border_side: BorderSide,
@@ -976,7 +965,7 @@ pub struct ShapedInputBorder {
     pub gap_padding: f64,
 
     /// The shape of the border.
-    pub shape: Box<dyn ShapeBorder>,
+    pub shape: ShapeBorderRef,
 }
 
 impl ShapedInputBorder {
@@ -1001,7 +990,7 @@ impl ShapedInputBorder {
     ///    [`BorderSide::NONE`]. If left as `FloatingLabelBehavior.auto`, the label
     ///    will extend beyond the container as if the border were still being
     ///    drawn.
-    pub fn new(shape: impl Into<Box<dyn ShapeBorder>>) -> ShapedInputBorder {
+    pub fn new(shape: impl Into<ShapeBorderRef>) -> ShapedInputBorder {
         ShapedInputBorder {
             border_side: BorderSide::default(),
             gap_padding: 4.0,
@@ -1026,10 +1015,10 @@ impl ShapedInputBorder {
     pub fn copy_with(
         &self,
         border_side: Option<BorderSide>,
-        shape: Option<Box<dyn ShapeBorder>>,
+        shape: Option<ShapeBorderRef>,
         gap_padding: Option<f64>,
     ) -> ShapedInputBorder {
-        ShapedInputBorder::new(shape.unwrap_or_else(|| self.shape.clone_box()))
+        ShapedInputBorder::new(shape.unwrap_or_else(|| self.shape.clone()))
             .border_side(border_side.unwrap_or(self.border_side))
             .gap_padding(gap_padding.unwrap_or(self.gap_padding))
     }
@@ -1074,20 +1063,10 @@ impl ShapedInputBorder {
     }
 }
 
-impl Clone for ShapedInputBorder {
-    fn clone(&self) -> ShapedInputBorder {
-        ShapedInputBorder {
-            border_side: self.border_side,
-            gap_padding: self.gap_padding,
-            shape: self.shape.clone_box(),
-        }
-    }
-}
-
 impl PartialEq for ShapedInputBorder {
     fn eq(&self, other: &ShapedInputBorder) -> bool {
         other.border_side == self.border_side
-            && other.shape.eq_shape(&*self.shape)
+            && other.shape == self.shape
             && other.gap_padding == self.gap_padding
     }
 }
@@ -1097,15 +1076,15 @@ impl ShapeBorder for ShapedInputBorder {
         EdgeInsetsGeometry::all(self.border_side.width)
     }
 
-    fn scale(&self, t: f64) -> Box<dyn ShapeBorder> {
-        Box::new(ShapedInputBorder::scale(self, t))
+    fn scale(&self, t: f64) -> ShapeBorderRef {
+        ShapeBorderRef::new(ShapedInputBorder::scale(self, t))
     }
 
-    fn lerp_from(&self, a: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
+    fn lerp_from(&self, a: Option<&dyn ShapeBorder>, t: f64) -> Option<ShapeBorderRef> {
         if let Some(a) = a.and_then(|a| a.as_any().downcast_ref::<ShapedInputBorder>()) {
-            return Some(Box::new(
+            return Some(ShapeBorderRef::new(
                 ShapedInputBorder::new(
-                    <dyn ShapeBorder>::lerp(Some(&*a.shape), Some(&*self.shape), t)
+                    ShapeBorderRef::lerp(Some(&a.shape), Some(&self.shape), t)
                         .expect("two shapes lerp to a shape"),
                 )
                 .border_side(BorderSide::lerp(a.border_side, self.border_side, t))
@@ -1119,11 +1098,11 @@ impl ShapeBorder for ShapedInputBorder {
         }
     }
 
-    fn lerp_to(&self, b: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
+    fn lerp_to(&self, b: Option<&dyn ShapeBorder>, t: f64) -> Option<ShapeBorderRef> {
         if let Some(b) = b.and_then(|b| b.as_any().downcast_ref::<ShapedInputBorder>()) {
-            return Some(Box::new(
+            return Some(ShapeBorderRef::new(
                 ShapedInputBorder::new(
-                    <dyn ShapeBorder>::lerp(Some(&*self.shape), Some(&*b.shape), t)
+                    ShapeBorderRef::lerp(Some(&self.shape), Some(&b.shape), t)
                         .expect("two shapes lerp to a shape"),
                 )
                 .border_side(BorderSide::lerp(self.border_side, b.border_side, t))
@@ -1169,10 +1148,6 @@ impl ShapeBorder for ShapedInputBorder {
 
     fn paint(&self, canvas: &mut Canvas, rect: Rect, text_direction: Option<TextDirection>) {
         InputBorder::paint(self, canvas, rect, None, 0.0, 0.0, text_direction);
-    }
-
-    fn clone_box(&self) -> Box<dyn ShapeBorder> {
-        Box::new(self.clone())
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -1368,7 +1343,7 @@ mod tests {
 
         let copy2 = input_border.copy_with(
             Some(blue(1.0)),
-            Some(Box::new(StadiumBorder::new(BorderSide::NONE))),
+            Some(ShapeBorderRef::new(StadiumBorder::new(BorderSide::NONE))),
             Some(8.0),
         );
         assert_eq!(copy2.border_side, blue(1.0));
@@ -1393,8 +1368,12 @@ mod tests {
             .border_side(width(3.0))
             .gap_padding(6.0);
 
-        let lerped = <dyn ShapeBorder>::lerp(Some(&input_border1), Some(&input_border2), 0.5)
-            .expect("two shaped input borders lerp");
+        let lerped = ShapeBorderRef::lerp(
+            Some(&ShapeBorderRef::new(input_border1)),
+            Some(&ShapeBorderRef::new(input_border2)),
+            0.5,
+        )
+        .expect("two shaped input borders lerp");
         let lerped = lerped
             .as_any()
             .downcast_ref::<ShapedInputBorder>()

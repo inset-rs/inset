@@ -1,8 +1,9 @@
 //! Flutter counterpart: `painting/basic_types.dart`.
 
 pub use waft_embedder::{
-    BlendMode, BlurStyle, Canvas, ClipOp, FillRule, Image, MaskBlur, Paint, PaintStyle, PaintingStyle,
-    Paragraph, ParagraphBuilder, ParagraphStyle, Path, PathBuilder, PathFillType, Picture, Stroke,
+    BlendMode, BlurStyle, Canvas, ClipOp, FillRule, Image, MaskBlur, Paint, PaintStyle,
+    PaintingStyle, Paragraph, ParagraphBuilder, ParagraphStyle, Path, PathBuilder, PathFillType,
+    Picture, Stroke,
 };
 pub use waft_embedder::{
     Clip, Color, ColorSpace, FontFeature, FontStyle, FontVariation, FontWeight, Matrix4, Shadow,

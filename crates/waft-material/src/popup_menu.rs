@@ -22,7 +22,7 @@ use waft_embedder::{
 use waft_foundation::{App, CompleterFuture, Handle, Listener, ValueChanged};
 use waft_painting::{
     AlignmentGeometry, BorderRadius, BorderRadiusGeometry, EdgeInsets, EdgeInsetsGeometry,
-    ShapeBorder, TextStyle,
+    ShapeBorderRef, TextStyle,
 };
 use waft_rendering::{
     AnyRenderBox, AnyRenderObject, BoxConstraints, BoxHitTestResult, BoxParentData,
@@ -51,7 +51,7 @@ use crate::button_style::ButtonStyle;
 use crate::constants::{K_MIN_INTERACTIVE_DIMENSION, K_THEME_CHANGE_DURATION};
 use crate::debug::debug_check_has_material_localizations;
 use crate::divider::Divider;
-use crate::generated::popup_menu_defaults_m3::{MENU_ITEM_PADDING, popup_menu_defaults_m3};
+use crate::generated::popup_menu_defaults_m3::{MENU_ITEM_PADDING, PopupMenuDefaultsM3};
 use crate::icon_button::IconButton;
 use crate::icons::Icons;
 use crate::ink_well::InkWell;
@@ -59,9 +59,12 @@ use crate::list_tile::ListTile;
 use crate::list_tile_theme::ListTileTheme;
 use crate::material::{Material, MaterialType};
 use crate::material_localizations::MaterialLocalizations;
-use crate::popup_menu_theme::{PopupMenuPosition, PopupMenuTheme, PopupMenuThemeData};
+use crate::popup_menu_theme::{
+    PopupMenuPosition, PopupMenuTheme, PopupMenuThemeData, PopupMenuThemeDataGetters,
+};
 use crate::theme::Theme;
 use crate::theme_data::MaterialTapTargetSize;
+use crate::theme_data_getters::DefaultsContext;
 use crate::tooltip::Tooltip;
 
 const K_MENU_DURATION: Duration = Duration::from_millis(300);
@@ -911,12 +914,15 @@ impl<T: Clone + PartialEq + 'static> PopupMenuItemState<T> {
     ) -> WidgetRef {
         let theme = Theme::of(app, context);
         let popup_menu_theme = PopupMenuTheme::of(app, context);
-        let defaults = if theme.use_material3 {
-            popup_menu_defaults_m3(app, context)
+        let defaults: Box<dyn PopupMenuThemeDataGetters> = if theme.use_material3 {
+            Box::new(PopupMenuDefaultsM3::new(context))
         } else {
-            popup_menu_defaults_m2(app, context)
+            Box::new(PopupMenuDefaultsM2::new(context))
         };
-        let widget = this.widget(app).popup_menu_item_data();
+        let widget_ref = context.widget(app).clone();
+        let widget = waft_widgets::downcast_widget::<S::Widget>(&*widget_ref)
+            .expect("a popup menu item's state builds its item")
+            .popup_menu_item_data();
         let enabled = widget.enabled;
         let mut states = WidgetStates::new();
         if !enabled {
@@ -940,7 +946,7 @@ impl<T: Clone + PartialEq + 'static> PopupMenuItemState<T> {
                 })
                 .unwrap_or_else(|| {
                     defaults
-                        .label_text_style
+                        .label_text_style(app)
                         .as_ref()
                         .expect("the defaults have a labelTextStyle")
                         .resolve(&states)
@@ -951,7 +957,7 @@ impl<T: Clone + PartialEq + 'static> PopupMenuItemState<T> {
                 .text_style
                 .clone()
                 .or_else(|| popup_menu_theme.text_style.clone())
-                .or_else(|| defaults.text_style.clone())
+                .or_else(|| defaults.text_style(app))
                 .expect("the defaults have a textStyle")
         };
 
@@ -1243,12 +1249,14 @@ impl<T: Clone + PartialEq + 'static> PopupMenuItemStateLeaf for CheckedPopupMenu
     fn build_child(self: Handle<Self>, app: &mut App, context: BuildContext) -> Option<WidgetRef> {
         let theme = Theme::of(app, context);
         let popup_menu_theme = PopupMenuTheme::of(app, context);
-        let defaults = if theme.use_material3 {
-            popup_menu_defaults_m3(app, context)
+        let defaults: Box<dyn PopupMenuThemeDataGetters> = if theme.use_material3 {
+            Box::new(PopupMenuDefaultsM3::new(context))
         } else {
-            popup_menu_defaults_m2(app, context)
+            Box::new(PopupMenuDefaultsM2::new(context))
         };
-        let widget = self.widget(app);
+        let widget_ref = context.widget(app).clone();
+        let widget = waft_widgets::downcast_widget::<<Self as State>::Widget>(&*widget_ref)
+            .expect("a checked popup menu item's state builds its item");
         let mut states = WidgetStates::new();
         if widget.checked {
             states.insert(WidgetState::Selected);
@@ -1258,7 +1266,7 @@ impl<T: Clone + PartialEq + 'static> PopupMenuItemStateLeaf for CheckedPopupMenu
             .label_text_style
             .clone()
             .or(popup_menu_theme.label_text_style)
-            .or(defaults.label_text_style);
+            .or_else(|| defaults.label_text_style(app));
         let enabled = widget.popup_menu_item.enabled;
         let title = widget.popup_menu_item.child.clone();
         let controller = self.controller(app);
@@ -1348,13 +1356,34 @@ fn effective_mouse_cursor(
 
 /// Hand coded defaults based on Material Design 2.
 ///
-/// Dart's `_PopupMenuDefaultsM2(context)`.
-fn popup_menu_defaults_m2(app: &mut App, context: BuildContext) -> PopupMenuThemeData {
-    let mut defaults = PopupMenuThemeData::new()
-        .elevation(8.0)
-        .menu_padding(EdgeInsetsGeometry::symmetric(8.0, 0.0));
-    defaults.text_style = Theme::of(app, context).text_theme.title_medium.clone();
-    defaults
+/// Dart's `_PopupMenuDefaultsM2`.
+struct PopupMenuDefaultsM2 {
+    /// Dart's `super(..)` arguments.
+    popup_menu_theme_data: PopupMenuThemeData,
+    context: DefaultsContext,
+}
+
+impl PopupMenuDefaultsM2 {
+    fn new(context: BuildContext) -> PopupMenuDefaultsM2 {
+        PopupMenuDefaultsM2 {
+            popup_menu_theme_data: PopupMenuThemeData::new().elevation(8.0),
+            context: DefaultsContext::new(context),
+        }
+    }
+}
+
+impl PopupMenuThemeDataGetters for PopupMenuDefaultsM2 {
+    fn popup_menu_theme_data(&self) -> &PopupMenuThemeData {
+        &self.popup_menu_theme_data
+    }
+
+    fn text_style(&self, app: &mut App) -> Option<TextStyle> {
+        self.context.text_theme(app).title_medium.clone()
+    }
+
+    fn menu_padding(&self, _app: &mut App) -> Option<EdgeInsetsGeometry> {
+        Some(EdgeInsetsGeometry::symmetric(8.0, 0.0))
+    }
 }
 
 /// Dart's `_PopupMenuDefaultsM2.menuItemPadding`.
@@ -1470,10 +1499,10 @@ impl<T: Clone + PartialEq + 'static> State for PopupMenuState<T> {
         let mut children = Vec::new();
         let theme = Theme::of(app, context);
         let popup_menu_theme = PopupMenuTheme::of(app, context);
-        let defaults = if theme.use_material3 {
-            popup_menu_defaults_m3(app, context)
+        let defaults: Box<dyn PopupMenuThemeDataGetters> = if theme.use_material3 {
+            Box::new(PopupMenuDefaultsM3::new(context))
         } else {
-            popup_menu_defaults_m2(app, context)
+            Box::new(PopupMenuDefaultsM2::new(context))
         };
 
         for i in 0..count {
@@ -1517,13 +1546,25 @@ impl<T: Clone + PartialEq + 'static> State for PopupMenuState<T> {
         );
 
         let widget = self.widget(app);
+        let (semantic_label, constraints, clip_behavior) = (
+            widget.semantic_label.clone(),
+            widget.constraints,
+            widget.clip_behavior,
+        );
         let menu_route = app.get(route);
+        let (menu_padding, route_shape, route_color, route_elevation) = (
+            menu_route.menu_padding,
+            menu_route.shape.clone(),
+            menu_route.color,
+            menu_route.elevation,
+        );
+        let (route_shadow_color, route_surface_tint_color) =
+            (menu_route.shadow_color, menu_route.surface_tint_color);
         let mut scroll_view =
             SingleChildScrollView::new().child(ListBody::new().children(children));
-        if let Some(padding) = menu_route
-            .menu_padding
+        if let Some(padding) = menu_padding
             .or(popup_menu_theme.menu_padding)
-            .or(defaults.menu_padding)
+            .or_else(|| defaults.menu_padding(app))
         {
             scroll_view = scroll_view.padding(padding);
         }
@@ -1532,11 +1573,11 @@ impl<T: Clone + PartialEq + 'static> State for PopupMenuState<T> {
             .scopes_route(true)
             .names_route(true)
             .explicit_child_nodes(true);
-        if let Some(semantic_label) = widget.semantic_label.clone() {
+        if let Some(semantic_label) = semantic_label {
             semantics = semantics.label(semantic_label);
         }
         let child = ConstrainedBox::new(
-            widget.constraints.unwrap_or(
+            constraints.unwrap_or(
                 BoxConstraints::new()
                     .min_width(K_MENU_MIN_WIDTH)
                     .max_width(K_MENU_MAX_WIDTH),
@@ -1549,29 +1590,22 @@ impl<T: Clone + PartialEq + 'static> State for PopupMenuState<T> {
         )
         .into_widget();
 
-        let shape = menu_route
-            .shape
-            .clone()
+        let shape = route_shape
             .or(popup_menu_theme.shape)
-            .or(defaults.shape);
-        let color = menu_route
-            .color
+            .or_else(|| defaults.shape(app));
+        let color = route_color
             .or(popup_menu_theme.color)
-            .or(defaults.color);
-        let clip_behavior = widget.clip_behavior;
-        let elevation = menu_route
-            .elevation
+            .or_else(|| defaults.color(app));
+        let elevation = route_elevation
             .or(popup_menu_theme.elevation)
-            .or(defaults.elevation)
+            .or_else(|| defaults.elevation(app))
             .expect("the defaults have an elevation");
-        let shadow_color = menu_route
-            .shadow_color
+        let shadow_color = route_shadow_color
             .or(popup_menu_theme.shadow_color)
-            .or(defaults.shadow_color);
-        let surface_tint_color = menu_route
-            .surface_tint_color
+            .or_else(|| defaults.shadow_color(app));
+        let surface_tint_color = route_surface_tint_color
             .or(popup_menu_theme.surface_tint_color)
-            .or(defaults.surface_tint_color);
+            .or_else(|| defaults.surface_tint_color(app));
         let opacity = opacity.animate(app, animation);
 
         AnimatedBuilder::new(Rc::new(animation), move |app, _context, child| {
@@ -1756,7 +1790,7 @@ struct PopupMenuRoute<T: Clone + PartialEq + 'static> {
     surface_tint_color: Option<Color>,
     shadow_color: Option<Color>,
     semantic_label: Option<String>,
-    shape: Option<Box<dyn ShapeBorder>>,
+    shape: Option<ShapeBorderRef>,
     menu_padding: Option<EdgeInsetsGeometry>,
     color: Option<Color>,
     captured_themes: Rc<CapturedThemes>,
@@ -1779,7 +1813,7 @@ struct PopupMenuRouteArguments<T: 'static> {
     shadow_color: Option<Color>,
     barrier_label: String,
     semantic_label: Option<String>,
-    shape: Option<Box<dyn ShapeBorder>>,
+    shape: Option<ShapeBorderRef>,
     menu_padding: Option<EdgeInsetsGeometry>,
     color: Option<Color>,
     captured_themes: CapturedThemes,
@@ -2189,7 +2223,7 @@ pub fn show_menu<T: Clone + PartialEq + 'static>(
     shadow_color: Option<Color>,
     surface_tint_color: Option<Color>,
     semantic_label: Option<String>,
-    shape: Option<Box<dyn ShapeBorder>>,
+    shape: Option<ShapeBorderRef>,
     menu_padding: Option<EdgeInsetsGeometry>,
     color: Option<Color>,
     use_root_navigator: bool,
@@ -2410,7 +2444,7 @@ pub struct PopupMenuButton<T: 'static> {
     /// [`PopupMenuThemeData::shape`] is also `None`, then the default shape for
     /// [`MaterialType::Card`] is used. This default shape is a rectangle with rounded edges of
     /// `BorderRadius::circular(2.0)`.
-    pub shape: Option<Box<dyn ShapeBorder>>,
+    pub shape: Option<ShapeBorderRef>,
 
     /// If provided, the background color used for the menu.
     ///
@@ -2638,7 +2672,7 @@ impl<T: Clone + PartialEq + 'static> PopupMenuButton<T> {
     }
 
     /// Dart `PopupMenuButton(shape:)`.
-    pub fn shape(mut self, shape: impl Into<Box<dyn ShapeBorder>>) -> PopupMenuButton<T> {
+    pub fn shape(mut self, shape: impl Into<ShapeBorderRef>) -> PopupMenuButton<T> {
         self.shape = Some(shape.into());
         self
     }

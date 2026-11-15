@@ -10,7 +10,9 @@ use std::time::Duration;
 
 use waft_embedder::{Color, Size, lerp_double};
 use waft_foundation::App;
-use waft_painting::{AlignmentGeometry, BorderSide, EdgeInsetsGeometry, OutlinedBorder, TextStyle};
+use waft_painting::{
+    AlignmentGeometry, BorderSide, EdgeInsetsGeometry, OutlinedBorderRef, TextStyle,
+};
 use waft_services::MouseCursorRef;
 use waft_widgets::{
     BuildContext, WidgetRef, WidgetStateBorderSide, WidgetStateProperty, WidgetStatePropertyRef,
@@ -383,7 +385,7 @@ pub struct ButtonStyle {
     ///
     /// This shape is combined with [`side`](Self::side) to create a shape decorated
     /// with an outline.
-    pub shape: Option<WidgetStatePropertyRef<Option<Box<dyn OutlinedBorder>>>>,
+    pub shape: Option<WidgetStatePropertyRef<Option<OutlinedBorderRef>>>,
 
     /// The cursor for a mouse pointer when it enters or is hovering over
     /// this button's `InkWell`.
@@ -515,6 +517,42 @@ pub struct ButtonStyle {
     pub shape_variant: Option<ButtonShapeVariant>,
 }
 
+crate::theme_data_getters::theme_data_getters! {
+    /// Dart's getters of `ButtonStyle`: the theme data answers with its fields, and a defaults
+    /// subclass (Dart's `_...Defaults...(context)`) computes the ones it overrides when they
+    /// are read.
+    pub trait ButtonStyleGetters for ButtonStyle, fields: button_style {
+        text_style: Option<WidgetStatePropertyRef<Option<TextStyle>>>,
+        background_color: Option<WidgetStatePropertyRef<Option<Color>>>,
+        foreground_color: Option<WidgetStatePropertyRef<Option<Color>>>,
+        overlay_color: Option<WidgetStatePropertyRef<Option<Color>>>,
+        shadow_color: Option<WidgetStatePropertyRef<Option<Color>>>,
+        surface_tint_color: Option<WidgetStatePropertyRef<Option<Color>>>,
+        elevation: Option<WidgetStatePropertyRef<Option<f64>>>,
+        padding: Option<WidgetStatePropertyRef<Option<EdgeInsetsGeometry>>>,
+        minimum_size: Option<WidgetStatePropertyRef<Option<Size>>>,
+        fixed_size: Option<WidgetStatePropertyRef<Option<Size>>>,
+        maximum_size: Option<WidgetStatePropertyRef<Option<Size>>>,
+        icon_color: Option<WidgetStatePropertyRef<Option<Color>>>,
+        icon_size: Option<WidgetStatePropertyRef<Option<f64>>>,
+        icon_alignment: Option<IconAlignment>,
+        side: Option<WidgetStatePropertyRef<Option<BorderSide>>>,
+        shape: Option<WidgetStatePropertyRef<Option<OutlinedBorderRef>>>,
+        mouse_cursor: Option<WidgetStatePropertyRef<Option<MouseCursorRef>>>,
+        visual_density: Option<VisualDensity>,
+        tap_target_size: Option<MaterialTapTargetSize>,
+        animation_duration: Option<Duration>,
+        enable_feedback: Option<bool>,
+        alignment: Option<AlignmentGeometry>,
+        splash_factory: Option<InteractiveInkFeatureFactoryRef>,
+        background_builder: Option<ButtonLayerBuilder>,
+        foreground_builder: Option<ButtonLayerBuilder>,
+        size_variant: Option<ButtonSizeVariant>,
+        icon_button_width: Option<IconButtonWidthVariant>,
+        shape_variant: Option<ButtonShapeVariant>,
+    }
+}
+
 /// The fluent setters of Dart's named `ButtonStyle` arguments, which `copyWith` shares.
 macro_rules! button_style_setters {
     ($($field:ident: $ty:ty => $dart:literal),* $(,)?) => {
@@ -550,7 +588,7 @@ impl ButtonStyle {
         icon_size: WidgetStatePropertyRef<Option<f64>> => "iconSize",
         icon_alignment: IconAlignment => "iconAlignment",
         side: WidgetStatePropertyRef<Option<BorderSide>> => "side",
-        shape: WidgetStatePropertyRef<Option<Box<dyn OutlinedBorder>>> => "shape",
+        shape: WidgetStatePropertyRef<Option<OutlinedBorderRef>> => "shape",
         mouse_cursor: WidgetStatePropertyRef<Option<MouseCursorRef>> => "mouseCursor",
         visual_density: VisualDensity => "visualDensity",
         tap_target_size: MaterialTapTargetSize => "tapTargetSize",
@@ -747,7 +785,7 @@ impl ButtonStyle {
                 a.and_then(|a| a.shape.clone()),
                 b.and_then(|b| b.shape.clone()),
                 t,
-                |a, b, t| <dyn OutlinedBorder>::lerp(a.as_deref(), b.as_deref(), t),
+                |a, b, t| OutlinedBorderRef::lerp(a.as_ref(), b.as_ref(), t),
             ),
             mouse_cursor: if t < 0.5 {
                 a.and_then(|a| a.mouse_cursor.clone())
@@ -974,10 +1012,9 @@ mod tests {
         let icon_color = all(Color::new(0xfffffff6));
         let icon_size = all(48.0);
         let side = all(BorderSide::default());
-        let shape: WidgetStatePropertyRef<Option<Box<dyn OutlinedBorder>>> =
-            Rc::new(WidgetStatePropertyAll::new(Some(
-                Box::new(StadiumBorder::default()) as Box<dyn OutlinedBorder>,
-            )));
+        let shape: WidgetStatePropertyRef<Option<OutlinedBorderRef>> = Rc::new(
+            WidgetStatePropertyAll::new(Some(OutlinedBorderRef::new(StadiumBorder::default()))),
+        );
         let mouse_cursor = all::<MouseCursorRef>(SystemMouseCursors::FORBIDDEN.into());
         let visual_density = VisualDensity::COMPACT;
         let tap_target_size = MaterialTapTargetSize::ShrinkWrap;
@@ -1147,7 +1184,7 @@ mod tests {
         let a = ButtonStyle::new()
             .elevation(all(2.0))
             .shape(Rc::new(WidgetStatePropertyAll::new(Some(
-                Box::new(StadiumBorder::default()) as Box<dyn OutlinedBorder>,
+                OutlinedBorderRef::new(StadiumBorder::default()),
             ))));
         let b = ButtonStyle::new().elevation(<dyn WidgetStateProperty<Option<f64>>>::resolve_with(
             |states| states.contains(&WidgetState::Pressed).then_some(6.0),
@@ -1194,10 +1231,9 @@ mod tests {
         let maximum_size = all(Size::new(100.0, 200.0));
         let icon_color = all(Color::new(0xfffffff6));
         let icon_size = all(48.1);
-        let shape: WidgetStatePropertyRef<Option<Box<dyn OutlinedBorder>>> =
-            Rc::new(WidgetStatePropertyAll::new(Some(
-                Box::new(StadiumBorder::default()) as Box<dyn OutlinedBorder>,
-            )));
+        let shape: WidgetStatePropertyRef<Option<OutlinedBorderRef>> = Rc::new(
+            WidgetStatePropertyAll::new(Some(OutlinedBorderRef::new(StadiumBorder::default()))),
+        );
         let mouse_cursor = all::<MouseCursorRef>(SystemMouseCursors::FORBIDDEN.into());
         let style = ButtonStyle::new()
             .text_style(text_style.clone())

@@ -8,7 +8,9 @@ use std::fmt::{self, Debug};
 
 use waft_embedder::{Brightness, Clip, Color, Size};
 use waft_foundation::{App, Handle, Listener, ValueChanged};
-use waft_painting::{Alignment, AlignmentGeometry, EdgeInsets, EdgeInsetsGeometry};
+use waft_painting::{
+    Alignment, AlignmentGeometry, EdgeInsets, EdgeInsetsGeometry, OutlinedBorderRef,
+};
 use waft_rendering::BoxConstraints;
 use waft_services::{MouseCursorRef, SystemMouseCursors};
 use waft_widgets::{
@@ -17,6 +19,7 @@ use waft_widgets::{
     WidgetRef, WidgetState, WidgetStateMouseCursor, WidgetStateProperty, WidgetStatePropertyRef,
 };
 
+use crate::button_style::ButtonStyleGetters;
 use crate::button_style::{
     ButtonShapeVariant, ButtonSizeVariant, ButtonStyle, IconButtonWidthVariant,
 };
@@ -25,14 +28,14 @@ use crate::constants::{
     K_DEFAULT_ICON_DARK_COLOR, K_DEFAULT_ICON_LIGHT_COLOR, K_MIN_INTERACTIVE_DIMENSION,
 };
 use crate::debug::debug_check_has_material;
-use crate::generated::filled_icon_button_defaults_m3::filled_icon_button_defaults_m3;
-use crate::generated::filled_icon_button_defaults_m3e::filled_icon_button_defaults_m3e;
-use crate::generated::filled_tonal_icon_button_defaults_m3::filled_tonal_icon_button_defaults_m3;
-use crate::generated::filled_tonal_icon_button_defaults_m3e::filled_tonal_icon_button_defaults_m3e;
-use crate::generated::icon_button_defaults_m3::icon_button_defaults_m3;
-use crate::generated::icon_button_defaults_m3e::icon_button_defaults_m3e;
-use crate::generated::outlined_icon_button_defaults_m3::outlined_icon_button_defaults_m3;
-use crate::generated::outlined_icon_button_defaults_m3e::outlined_icon_button_defaults_m3e;
+use crate::generated::filled_icon_button_defaults_m3::FilledIconButtonDefaultsM3;
+use crate::generated::filled_icon_button_defaults_m3e::FilledIconButtonDefaultsM3E;
+use crate::generated::filled_tonal_icon_button_defaults_m3::FilledTonalIconButtonDefaultsM3;
+use crate::generated::filled_tonal_icon_button_defaults_m3e::FilledTonalIconButtonDefaultsM3E;
+use crate::generated::icon_button_defaults_m3::IconButtonDefaultsM3;
+use crate::generated::icon_button_defaults_m3e::IconButtonDefaultsM3E;
+use crate::generated::outlined_icon_button_defaults_m3::OutlinedIconButtonDefaultsM3;
+use crate::generated::outlined_icon_button_defaults_m3e::OutlinedIconButtonDefaultsM3E;
 use crate::icon_button_theme::IconButtonTheme;
 use crate::ink_well::{InkResponse, InteractiveInkFeatureFactoryRef};
 use crate::material::Material;
@@ -852,7 +855,7 @@ pub struct IconButtonStyleFromBuilder {
     maximum_size: Option<Size>,
     icon_size: Option<f64>,
     side: Option<waft_painting::BorderSide>,
-    shape: Option<Box<dyn waft_painting::OutlinedBorder>>,
+    shape: Option<OutlinedBorderRef>,
     padding: Option<EdgeInsetsGeometry>,
     enabled_mouse_cursor: Option<MouseCursorRef>,
     disabled_mouse_cursor: Option<MouseCursorRef>,
@@ -913,10 +916,7 @@ impl IconButtonStyleFromBuilder {
     );
 
     /// Dart `IconButton.styleFrom(shape:)`.
-    pub fn shape(
-        mut self,
-        shape: impl Into<Box<dyn waft_painting::OutlinedBorder>>,
-    ) -> IconButtonStyleFromBuilder {
+    pub fn shape(mut self, shape: impl Into<OutlinedBorderRef>) -> IconButtonStyleFromBuilder {
         self.shape = Some(shape.into());
         self
     }
@@ -1264,7 +1264,11 @@ impl ButtonStyleButton for IconButtonM3 {
     /// * `size_variant` - ButtonSizeVariant.small
     /// * `icon_button_width` - IconButtonWidthVariant.standard
     /// * `shape_variant` - ButtonShapeVariant.round
-    fn default_style_of(&self, app: &mut App, context: BuildContext) -> ButtonStyle {
+    fn default_style_of(
+        &self,
+        app: &mut App,
+        context: BuildContext,
+    ) -> Box<dyn ButtonStyleGetters> {
         let icon_button_theme_style = IconButtonTheme::of(app, context).style;
         let style = self.button_style_button.style.as_ref();
         let effective_size = style
@@ -1289,49 +1293,47 @@ impl ButtonStyleButton for IconButtonM3 {
         match self.style_variant {
             StyleVariant::Material3 => match self.icon_button_variant {
                 IconButtonVariant::Filled => {
-                    filled_icon_button_defaults_m3(app, context, toggleable)
+                    Box::new(FilledIconButtonDefaultsM3::new(context, toggleable))
                 }
                 IconButtonVariant::FilledTonal => {
-                    filled_tonal_icon_button_defaults_m3(app, context, toggleable)
+                    Box::new(FilledTonalIconButtonDefaultsM3::new(context, toggleable))
                 }
                 IconButtonVariant::Outlined => {
-                    outlined_icon_button_defaults_m3(app, context, toggleable)
+                    Box::new(OutlinedIconButtonDefaultsM3::new(context, toggleable))
                 }
-                IconButtonVariant::Standard => icon_button_defaults_m3(app, context, toggleable),
+                IconButtonVariant::Standard => {
+                    Box::new(IconButtonDefaultsM3::new(context, toggleable))
+                }
             },
             StyleVariant::Material3Expressive => match self.icon_button_variant {
-                IconButtonVariant::Filled => filled_icon_button_defaults_m3e(
-                    app,
+                IconButtonVariant::Filled => Box::new(FilledIconButtonDefaultsM3E::new(
                     context,
                     toggleable,
                     effective_size,
                     effective_width,
                     effective_shape,
-                ),
-                IconButtonVariant::FilledTonal => filled_tonal_icon_button_defaults_m3e(
-                    app,
+                )),
+                IconButtonVariant::FilledTonal => Box::new(FilledTonalIconButtonDefaultsM3E::new(
                     context,
                     toggleable,
                     effective_size,
                     effective_width,
                     effective_shape,
-                ),
-                IconButtonVariant::Outlined => outlined_icon_button_defaults_m3e(
-                    app,
+                )),
+                IconButtonVariant::Outlined => Box::new(OutlinedIconButtonDefaultsM3E::new(
                     context,
                     toggleable,
                     effective_size,
                     effective_width,
                     effective_shape,
-                ),
-                IconButtonVariant::Standard => icon_button_defaults_m3e(
-                    app,
+                )),
+                IconButtonVariant::Standard => Box::new(IconButtonDefaultsM3E::new(
                     context,
                     toggleable,
                     effective_size,
                     effective_width,
                     effective_shape,
-                ),
+                )),
             },
         }
     }
@@ -1395,7 +1397,7 @@ mod tests {
     use waft_embedder::{Offset, Radius, TargetPlatform, TextDirection};
     use waft_foundation::Listenable;
     use waft_painting::{
-        BorderRadius, BorderSide, OutlinedBorder, RoundedRectangleBorder, ShapeBorder,
+        BorderRadius, BorderSide, OutlinedBorderRef, RoundedRectangleBorder, ShapeBorder,
         StadiumBorder,
     };
     use waft_services::{LogicalKeyboardKey, PhysicalKeyboardKey};
@@ -4054,14 +4056,13 @@ mod tests {
         with_main_thread_stack(|| {
             let mut tester = tester();
             let controller = MaterialStatesController::new(&mut tester.cell.borrow_mut(), None);
-            let shape = <dyn WidgetStateProperty<Option<Box<dyn OutlinedBorder>>>>::resolve_with(
-                |states| {
+            let shape =
+                <dyn WidgetStateProperty<Option<OutlinedBorderRef>>>::resolve_with(|states| {
                     if states.contains(&WidgetState::Pressed) {
-                        return Some(Box::new(rounded(4.0)) as Box<dyn OutlinedBorder>);
+                        return Some(OutlinedBorderRef::new(rounded(4.0)));
                     }
-                    Some(Box::new(stadium()))
-                },
-            );
+                    Some(OutlinedBorderRef::new(stadium()))
+                });
             let widget = m3e_app(
                 &tester,
                 None,

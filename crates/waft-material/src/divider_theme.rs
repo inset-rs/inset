@@ -52,6 +52,20 @@ pub struct DividerThemeData {
     pub radius: Option<BorderRadiusGeometry>,
 }
 
+crate::theme_data_getters::theme_data_getters! {
+    /// Dart's getters of `DividerThemeData`: the theme data answers with its fields, and a defaults
+    /// subclass (Dart's `_...Defaults...(context)`) computes the ones it overrides when they
+    /// are read.
+    pub trait DividerThemeDataGetters for DividerThemeData, fields: divider_theme_data {
+        color: Option<Color>,
+        space: Option<f64>,
+        thickness: Option<f64>,
+        indent: Option<f64>,
+        end_indent: Option<f64>,
+        radius: Option<BorderRadiusGeometry>,
+    }
+}
+
 impl DividerThemeData {
     /// Creates a theme that can be used for `ThemeData::divider_theme`. Dart's optional
     /// named arguments are the fluent setters.

@@ -12,7 +12,7 @@ use waft_embedder::{Brightness, Clip, Color, Radius, TextDirection};
 use waft_foundation::{App, Handle, Listenable, Listener, UniqueKey, VoidCallback};
 use waft_painting::{
     AlignmentGeometry, AnyColor, BorderRadiusGeometry, BorderSide, EdgeInsets, EdgeInsetsGeometry,
-    PaintingBinding, RoundedRectangleBorder, ShapeBorder, TextPainter, TextSpan,
+    PaintingBinding, RoundedRectangleBorder, ShapeBorderRef, TextPainter, TextSpan, TextStyle,
 };
 use waft_rendering::{HitTestBehavior, MainAxisAlignment};
 use waft_scheduler::TickerProvider;
@@ -26,13 +26,15 @@ use waft_widgets::{
 
 use crate::color_scheme::ColorScheme;
 use crate::colors::Colors;
-use crate::generated::snackbar_defaults_m3::snackbar_defaults_m3;
+use crate::generated::snackbar_defaults_m3::SnackbarDefaultsM3;
 use crate::icon_button::IconButton;
 use crate::icons::Icons;
 use crate::material::Material;
 use crate::material_localizations::MaterialLocalizations;
 use crate::scaffold::ScaffoldMessenger;
-use crate::snack_bar_theme::{SnackBarBehavior, SnackBarTheme, SnackBarThemeData};
+use crate::snack_bar_theme::{
+    SnackBarBehavior, SnackBarTheme, SnackBarThemeData, SnackBarThemeDataGetters,
+};
 use crate::text_button::TextButton;
 use crate::text_button_theme::{TextButtonTheme, TextButtonThemeData};
 use crate::theme::Theme;
@@ -267,15 +269,15 @@ impl State for SnackBarActionState {
     waft_widgets::state_accessors!();
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
-        let defaults = if Theme::of(app, context).use_material3 {
-            snackbar_defaults_m3(app, context)
+        let defaults: Box<dyn SnackBarThemeDataGetters> = if Theme::of(app, context).use_material3 {
+            Box::new(SnackbarDefaultsM3::new(context))
         } else {
-            snackbar_defaults_m2(app, context)
+            Box::new(SnackbarDefaultsM2::new(app, context))
         };
         let snack_bar_theme = SnackBarTheme::of(app, context);
-        let widget = self.widget(app);
+        let widget = self.widget(app).clone();
 
-        let resolve_foreground_color = || -> AnyColor {
+        let resolve_foreground_color = |app: &mut App| -> AnyColor {
             if let Some(text_color) = &widget.text_color {
                 if is_widget_state_color(text_color) {
                     return text_color.clone();
@@ -284,22 +286,22 @@ impl State for SnackBarActionState {
                 if is_widget_state_color(action_text_color) {
                     return action_text_color.clone();
                 }
-            } else if let Some(action_text_color) = &defaults.action_text_color
-                && is_widget_state_color(action_text_color)
+            } else if let Some(action_text_color) = defaults.action_text_color(app)
+                && is_widget_state_color(&action_text_color)
             {
-                return action_text_color.clone();
+                return action_text_color;
             }
 
             let disabled_text_color = widget
                 .disabled_text_color
                 .or(snack_bar_theme.disabled_action_text_color)
-                .or(defaults.disabled_action_text_color);
+                .or_else(|| defaults.disabled_action_text_color(app));
             let text_color = widget
                 .text_color
-                .as_ref()
-                .or(snack_bar_theme.action_text_color.as_ref())
-                .or(defaults.action_text_color.as_ref())
-                .map(AnyColor::color);
+                .clone()
+                .or_else(|| snack_bar_theme.action_text_color.clone())
+                .or_else(|| defaults.action_text_color(app))
+                .map(|color| color.color());
             WidgetStateColor::resolve_with(move |states| {
                 if states.contains(&WidgetState::Disabled) {
                     return disabled_text_color
@@ -340,11 +342,11 @@ impl State for SnackBarActionState {
         };
 
         let style = TextButton::style_from()
-            .overlay_color(resolve_foreground_color().color())
+            .overlay_color(resolve_foreground_color(app).color())
             .build()
             .copy_with();
         let style = crate::button_style::ButtonStyle {
-            foreground_color: Some(widget_state_color_property(resolve_foreground_color())),
+            foreground_color: Some(widget_state_color_property(resolve_foreground_color(app))),
             background_color: Some(widget_state_color_property(resolve_background_color())),
             ..style
         };
@@ -502,7 +504,7 @@ pub struct SnackBar {
     /// overriding shape is specified, so the [`SnackBar`] is rectangular. For
     /// [`SnackBarBehavior::Floating`], it uses a [`RoundedRectangleBorder`] with a
     /// circular corner radius of 4.0.
-    pub shape: Option<Box<dyn ShapeBorder>>,
+    pub shape: Option<ShapeBorderRef>,
 
     /// Defines how the snack bar area, including margin, will behave during hit testing.
     ///
@@ -690,7 +692,7 @@ impl SnackBar {
     }
 
     /// Dart `SnackBar(shape:)`.
-    pub fn shape(mut self, shape: impl Into<Box<dyn ShapeBorder>>) -> SnackBar {
+    pub fn shape(mut self, shape: impl Into<ShapeBorderRef>) -> SnackBar {
         self.shape = Some(shape.into());
         self
     }
@@ -994,10 +996,10 @@ impl State for SnackBarState {
         } else {
             color_scheme.secondary
         };
-        let defaults = if theme.use_material3 {
-            snackbar_defaults_m3(app, context)
+        let defaults: Box<dyn SnackBarThemeDataGetters> = if theme.use_material3 {
+            Box::new(SnackbarDefaultsM3::new(context))
         } else {
-            snackbar_defaults_m2(app, context)
+            Box::new(SnackbarDefaultsM2::new(app, context))
         };
 
         // SnackBar uses a theme that is the opposite brightness from
@@ -1019,7 +1021,7 @@ impl State for SnackBarState {
                     .color_scheme(inverted_color_scheme(
                         &color_scheme,
                         button_color,
-                        defaults.background_color,
+                        defaults.background_color(app),
                         brightness,
                     ))
                     .build(),
@@ -1030,11 +1032,11 @@ impl State for SnackBarState {
         let content_text_style = snack_bar_theme
             .content_text_style
             .clone()
-            .or(defaults.content_text_style.clone());
+            .or_else(|| defaults.content_text_style(app));
         let snack_bar_behavior = widget
             .behavior
             .or(snack_bar_theme.behavior)
-            .or(defaults.behavior)
+            .or_else(|| defaults.behavior(app))
             .expect("the defaults have a behavior");
         let width = widget.width.or(snack_bar_theme.width);
         if cfg!(debug_assertions) {
@@ -1064,7 +1066,7 @@ impl State for SnackBarState {
         let show_close_icon = widget
             .show_close_icon
             .or(snack_bar_theme.show_close_icon)
-            .or(defaults.show_close_icon)
+            .or_else(|| defaults.show_close_icon(app))
             .expect("the defaults have a show close icon");
 
         let is_floating_snack_bar = snack_bar_behavior == SnackBarBehavior::Floating;
@@ -1092,7 +1094,7 @@ impl State for SnackBarState {
                 .close_icon_color
                 .clone()
                 .or(snack_bar_theme.close_icon_color.clone())
-                .or(defaults.close_icon_color.clone());
+                .or_else(|| defaults.close_icon_color(app));
             let tooltip = <dyn MaterialLocalizations>::of(app, context).close_button_tooltip();
             let mut icon_button = IconButton::new(
                 Some(Listener::new(move |app| {
@@ -1150,7 +1152,7 @@ impl State for SnackBarState {
             .margin
             .map(|margin| margin.resolve(Some(TextDirection::Ltr)))
             .or(snack_bar_theme.inset_padding)
-            .or(defaults.inset_padding)
+            .or_else(|| defaults.inset_padding(app))
             .expect("the defaults have an inset padding");
 
         let snack_bar_width = widget
@@ -1159,7 +1161,7 @@ impl State for SnackBarState {
         let action_overflow_threshold = widget
             .action_overflow_threshold
             .or(snack_bar_theme.action_overflow_threshold)
-            .or(defaults.action_overflow_threshold)
+            .or_else(|| defaults.action_overflow_threshold(app))
             .expect("the defaults have an action overflow threshold");
 
         let will_overflow_action =
@@ -1238,23 +1240,24 @@ impl State for SnackBarState {
         let elevation = widget
             .elevation
             .or(snack_bar_theme.elevation)
-            .or(defaults.elevation)
+            .or_else(|| defaults.elevation(app))
             .expect("the defaults have an elevation");
         let background_color = widget
             .background_color
             .or(snack_bar_theme.background_color)
-            .or(defaults.background_color)
+            .or_else(|| defaults.background_color(app))
             .expect("the defaults have a background color");
-        let shape =
-            widget
-                .shape
-                .clone()
-                .or(snack_bar_theme.shape.clone())
-                .or(if is_floating_snack_bar {
-                    defaults.shape.clone()
+        let shape = widget
+            .shape
+            .clone()
+            .or(snack_bar_theme.shape.clone())
+            .or_else(|| {
+                if is_floating_snack_bar {
+                    defaults.shape(app)
                 } else {
                     None
-                });
+                }
+            });
         let dismiss_direction = widget
             .dismiss_direction
             .or(snack_bar_theme.dismiss_direction)
@@ -1417,46 +1420,98 @@ fn inverted_color_scheme(
 
 /// Hand coded defaults based on Material Design 2; Dart's `_SnackbarDefaultsM2(context)`.
 #[allow(deprecated)]
-fn snackbar_defaults_m2(app: &mut App, context: BuildContext) -> SnackBarThemeData {
-    let theme = Theme::of(app, context);
-    let colors = &theme.color_scheme;
-    let is_light = theme.brightness() == Brightness::Light;
-    let mut defaults = SnackBarThemeData::new()
-        .elevation(6.0)
-        .background_color(if is_light {
+/// Dart's `_SnackbarDefaultsM2`.
+struct SnackbarDefaultsM2 {
+    /// Dart's `super(..)` arguments.
+    snack_bar_theme_data: SnackBarThemeData,
+    /// Dart's `_theme`, which the constructor reads.
+    theme: Rc<ThemeData>,
+}
+
+impl SnackbarDefaultsM2 {
+    fn new(app: &mut App, context: BuildContext) -> SnackbarDefaultsM2 {
+        SnackbarDefaultsM2 {
+            snack_bar_theme_data: SnackBarThemeData::new().elevation(6.0),
+            theme: Theme::of(app, context),
+        }
+    }
+
+    /// Dart's `_colors`.
+    fn colors(&self) -> &ColorScheme {
+        &self.theme.color_scheme
+    }
+
+    fn is_light(&self) -> bool {
+        self.theme.brightness() == Brightness::Light
+    }
+}
+
+#[allow(deprecated)]
+impl SnackBarThemeDataGetters for SnackbarDefaultsM2 {
+    fn snack_bar_theme_data(&self) -> &SnackBarThemeData {
+        &self.snack_bar_theme_data
+    }
+
+    fn background_color(&self, _app: &mut App) -> Option<Color> {
+        let colors = self.colors();
+        Some(if self.is_light() {
             Color::alpha_blend(colors.on_surface.with_opacity(0.80), colors.surface)
         } else {
             colors.on_surface
-        });
-    let content_text_style = ThemeData::builder()
-        .use_material3(theme.use_material3)
-        .brightness(if is_light {
-            Brightness::Dark
-        } else {
-            Brightness::Light
         })
-        .build(app)
-        .text_theme
-        .title_medium;
-    if let Some(content_text_style) = content_text_style {
-        defaults = defaults.content_text_style(content_text_style);
     }
-    defaults
-        .behavior(SnackBarBehavior::Fixed)
-        .action_text_color(colors.secondary)
-        .disabled_action_text_color(colors.on_surface.with_opacity(if is_light {
-            0.38
-        } else {
-            0.3
-        }))
-        .shape(RoundedRectangleBorder::new(
+
+    fn content_text_style(&self, app: &mut App) -> Option<TextStyle> {
+        ThemeData::builder()
+            .use_material3(self.theme.use_material3)
+            .brightness(if self.is_light() {
+                Brightness::Dark
+            } else {
+                Brightness::Light
+            })
+            .build(app)
+            .text_theme
+            .title_medium
+    }
+
+    fn behavior(&self, _app: &mut App) -> Option<SnackBarBehavior> {
+        Some(SnackBarBehavior::Fixed)
+    }
+
+    fn action_text_color(&self, _app: &mut App) -> Option<AnyColor> {
+        Some(self.colors().secondary.into())
+    }
+
+    fn disabled_action_text_color(&self, _app: &mut App) -> Option<Color> {
+        Some(
+            self.colors()
+                .on_surface
+                .with_opacity(if self.is_light() { 0.38 } else { 0.3 }),
+        )
+    }
+
+    fn shape(&self, _app: &mut App) -> Option<ShapeBorderRef> {
+        Some(ShapeBorderRef::new(RoundedRectangleBorder::new(
             BorderSide::NONE,
             BorderRadiusGeometry::all(Radius::circular(4.0)),
-        ))
-        .inset_padding(EdgeInsets::from_ltrb(15.0, 5.0, 15.0, 10.0))
-        .show_close_icon(false)
-        .close_icon_color(colors.on_surface)
-        .action_overflow_threshold(0.25)
+        )))
+    }
+
+    fn inset_padding(&self, _app: &mut App) -> Option<EdgeInsets> {
+        Some(EdgeInsets::from_ltrb(15.0, 5.0, 15.0, 10.0))
+    }
+
+    fn show_close_icon(&self, _app: &mut App) -> Option<bool> {
+        Some(false)
+    }
+
+    fn close_icon_color(&self, _app: &mut App) -> Option<AnyColor> {
+        Some(self.colors().on_surface.into())
+    }
+
+    fn action_overflow_threshold(&self, _app: &mut App) -> Option<f64> {
+        Some(0.25)
+    }
 }
 
 #[cfg(test)]

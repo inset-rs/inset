@@ -2,7 +2,7 @@
 
 use waft_embedder::{Color, Size, lerp_double};
 use waft_foundation::App;
-use waft_painting::{ShapeBorder, TextStyle};
+use waft_painting::{ShapeBorderRef, TextStyle};
 use waft_widgets::{
     BuildContext, IconThemeData, InheritedTheme, InheritedWidget, IntoWidget, KeyRef, WidgetRef,
     WidgetStateProperty, WidgetStatePropertyRef,
@@ -52,7 +52,7 @@ pub struct NavigationDrawerThemeData {
     pub indicator_color: Option<Color>,
 
     /// Overrides the default shape of the `NavigationDrawer`'s selection indicator.
-    pub indicator_shape: Option<Box<dyn ShapeBorder>>,
+    pub indicator_shape: Option<ShapeBorderRef>,
 
     /// Overrides the default size of the `NavigationDrawer`'s selection indicator.
     pub indicator_size: Option<Size>,
@@ -69,6 +69,24 @@ pub struct NavigationDrawerThemeData {
     /// You can use this to specify a different icon theme when the icon is
     /// selected.
     pub icon_theme: Option<WidgetStatePropertyRef<Option<IconThemeData>>>,
+}
+
+crate::theme_data_getters::theme_data_getters! {
+    /// Dart's getters of `NavigationDrawerThemeData`: the theme data answers with its fields, and a defaults
+    /// subclass (Dart's `_...Defaults...(context)`) computes the ones it overrides when they
+    /// are read.
+    pub trait NavigationDrawerThemeDataGetters for NavigationDrawerThemeData, fields: navigation_drawer_theme_data {
+        tile_height: Option<f64>,
+        background_color: Option<Color>,
+        elevation: Option<f64>,
+        shadow_color: Option<Color>,
+        surface_tint_color: Option<Color>,
+        indicator_color: Option<Color>,
+        indicator_shape: Option<ShapeBorderRef>,
+        indicator_size: Option<Size>,
+        label_text_style: Option<WidgetStatePropertyRef<Option<TextStyle>>>,
+        icon_theme: Option<WidgetStatePropertyRef<Option<IconThemeData>>>,
+    }
 }
 
 impl NavigationDrawerThemeData {
@@ -117,7 +135,7 @@ impl NavigationDrawerThemeData {
     /// Dart `NavigationDrawerThemeData(indicatorShape:)`.
     pub fn indicator_shape(
         mut self,
-        indicator_shape: impl Into<Box<dyn ShapeBorder>>,
+        indicator_shape: impl Into<ShapeBorderRef>,
     ) -> NavigationDrawerThemeData {
         self.indicator_shape = Some(indicator_shape.into());
         self
@@ -198,9 +216,9 @@ impl NavigationDrawerThemeData {
                 b.and_then(|b| b.indicator_color),
                 t,
             ),
-            indicator_shape: <dyn ShapeBorder>::lerp(
-                a.and_then(|a| a.indicator_shape.as_deref()),
-                b.and_then(|b| b.indicator_shape.as_deref()),
+            indicator_shape: ShapeBorderRef::lerp(
+                a.and_then(|a| a.indicator_shape.as_ref()),
+                b.and_then(|b| b.indicator_shape.as_ref()),
                 t,
             ),
             // Dart lerps `a`'s size with itself.

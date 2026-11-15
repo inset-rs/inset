@@ -15,7 +15,8 @@ use waft_embedder::{
 use waft_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, K_IS_WEB, ValueChanged};
 use waft_painting::{
     AlignmentGeometry, AnyBorderSide, AnyColor, BorderRadiusGeometry, BorderSide, Gradient,
-    HSLColor, LinearGradient, OutlinedBorder, RoundedRectangleBorder, ShapeBorder,
+    HSLColor, LinearGradient, OutlinedBorder, OutlinedBorderRef, RoundedRectangleBorder,
+    ShapeBorder,
 };
 use waft_scheduler::{Ticker, TickerCallback, TickerProviderObject};
 use waft_services::{MouseCursorRef, SystemMouseCursors};
@@ -233,7 +234,7 @@ pub struct CupertinoCheckbox {
     ///
     /// If this property is null then the shape defaults to a [`RoundedRectangleBorder`] with a
     /// circular corner radius of 4.0.
-    pub shape: Option<Box<dyn OutlinedBorder>>,
+    pub shape: Option<OutlinedBorderRef>,
     /// The tap target and layout size of the checkbox.
     ///
     /// If this property is null, the tap target size defaults to a square of
@@ -353,8 +354,8 @@ impl CupertinoCheckbox {
     }
 
     /// Dart `CupertinoCheckbox(shape:)`.
-    pub fn shape(mut self, shape: impl OutlinedBorder) -> CupertinoCheckbox {
-        self.shape = Some(Box::new(shape));
+    pub fn shape(mut self, shape: impl Into<OutlinedBorderRef>) -> CupertinoCheckbox {
+        self.shape = Some(shape.into());
         self
     }
 
@@ -681,7 +682,7 @@ impl State for CupertinoCheckboxState {
         let check_color = self.default_check_color(app, context, &current_states);
         let brightness = CupertinoTheme::of(app, context).brightness();
         let shape = widget.shape.clone().unwrap_or_else(|| {
-            Box::new(RoundedRectangleBorder::new(
+            OutlinedBorderRef::new(RoundedRectangleBorder::new(
                 BorderSide::NONE,
                 BorderRadiusGeometry::all(Radius::circular(4.0)),
             ))
@@ -732,7 +733,7 @@ struct CheckboxPainter {
     check_color: Option<Color>,
     value: Option<bool>,
     previous_value: Option<bool>,
-    shape: Option<Box<dyn OutlinedBorder>>,
+    shape: Option<OutlinedBorderRef>,
     side: Option<BorderSide>,
     brightness: Option<Brightness>,
 }
@@ -795,7 +796,7 @@ impl CheckboxPainter {
         app.get(self).shape.as_deref().expect("set before painting")
     }
 
-    fn set_shape(self: Handle<Self>, app: &mut App, value: Box<dyn OutlinedBorder>) {
+    fn set_shape(self: Handle<Self>, app: &mut App, value: OutlinedBorderRef) {
         if let Some(shape) = &app.get(self).shape {
             let (old, new): (&dyn ShapeBorder, &dyn ShapeBorder) = (&**shape, &*value);
             if old == new {

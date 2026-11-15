@@ -9,8 +9,8 @@ use waft_embedder::{
 };
 use waft_foundation::{App, VoidCallback};
 use waft_painting::{
-    BorderRadius, BorderSide, BorderStyle, BoxPainter, Decoration, EdgeInsetsGeometry,
-    ImageConfiguration, TextDirection, draw_line, draw_rrect,
+    BorderRadius, BorderSide, BorderStyle, BoxPainter, Decoration, DecorationRef,
+    EdgeInsetsGeometry, ImageConfiguration, TextDirection, draw_line, draw_rrect,
 };
 
 use crate::colors::Colors;
@@ -96,9 +96,9 @@ impl UnderlineTabIndicator {
 }
 
 impl Decoration for UnderlineTabIndicator {
-    fn lerp_from(&self, a: Option<&dyn Decoration>, t: f64) -> Option<Box<dyn Decoration>> {
+    fn lerp_from(&self, a: Option<&dyn Decoration>, t: f64) -> Option<DecorationRef> {
         if let Some(a) = a.and_then(|a| a.as_any().downcast_ref::<UnderlineTabIndicator>()) {
-            return Some(Box::new(
+            return Some(DecorationRef::new(
                 UnderlineTabIndicator::new()
                     .border_side(BorderSide::lerp(a.border_side, self.border_side, t))
                     .insets(
@@ -110,9 +110,9 @@ impl Decoration for UnderlineTabIndicator {
         None
     }
 
-    fn lerp_to(&self, b: Option<&dyn Decoration>, t: f64) -> Option<Box<dyn Decoration>> {
+    fn lerp_to(&self, b: Option<&dyn Decoration>, t: f64) -> Option<DecorationRef> {
         if let Some(b) = b.and_then(|b| b.as_any().downcast_ref::<UnderlineTabIndicator>()) {
-            return Some(Box::new(
+            return Some(DecorationRef::new(
                 UnderlineTabIndicator::new()
                     .border_side(BorderSide::lerp(self.border_side, b.border_side, t))
                     .insets(
@@ -142,10 +142,6 @@ impl Decoration for UnderlineTabIndicator {
         }
         path.rect(indicator.into());
         path.build().into()
-    }
-
-    fn clone_box(&self) -> Box<dyn Decoration> {
-        Box::new(self.clone())
     }
 
     fn as_any(&self) -> &dyn Any {

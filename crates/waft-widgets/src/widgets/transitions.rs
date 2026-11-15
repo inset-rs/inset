@@ -11,7 +11,7 @@ use std::rc::Rc;
 use waft_animation::{Animatable, AnyAnimation};
 use waft_embedder::{FilterQuality, Matrix4, Offset, Rect, Size, TextAlign, TextDirection};
 use waft_foundation::{App, Handle, Listenable, Listener, RetainedHandleId};
-use waft_painting::{Alignment, AlignmentGeometry, Axis, Decoration, TextOverflow, TextStyle};
+use waft_painting::{Alignment, AlignmentGeometry, Axis, DecorationRef, TextOverflow, TextStyle};
 use waft_rendering::{
     AnyRenderObject, DecorationPosition, RelativeRect, RenderAnimatedOpacity,
     RenderAnimatedOpacityMixin, RenderBox, RenderHandle,
@@ -1314,7 +1314,7 @@ pub struct DecoratedBoxTransition {
     ///
     /// Can be created using a `DecorationTween` interpolating typically between
     /// two `BoxDecoration`.
-    pub decoration: AnyAnimation<Box<dyn Decoration>>,
+    pub decoration: AnyAnimation<DecorationRef>,
 
     /// Whether to paint the box decoration behind or in front of the child.
     pub position: DecorationPosition,
@@ -1331,7 +1331,7 @@ impl DecoratedBoxTransition {
     ///
     ///  * [`DecoratedBox::new`]
     pub fn new<K>(
-        decoration: AnyAnimation<Box<dyn Decoration>>,
+        decoration: AnyAnimation<DecorationRef>,
         child: impl IntoWidget<K>,
     ) -> DecoratedBoxTransition {
         DecoratedBoxTransition {
@@ -1365,13 +1365,10 @@ impl AnimatedWidget for DecoratedBoxTransition {
     }
 
     fn build(&self, app: &mut App, _context: BuildContext) -> WidgetRef {
-        DecoratedBox {
-            key: None,
-            decoration: self.decoration.value(app),
-            position: self.position,
-            child: Some(self.child.clone()),
-        }
-        .into_widget()
+        DecoratedBox::new(self.decoration.value(app))
+            .position(self.position)
+            .child(self.child.clone())
+            .into_widget()
     }
 }
 
@@ -2140,29 +2137,23 @@ mod tests {
         controller.dispose(&mut app);
     }
 
-    /// A decoration that fades black in; `CallbackAnimatable`'s derived `Clone` asks for
-    /// `Box<dyn Decoration>: Clone`, which no trait object can be.
-    #[derive(Clone)]
-    struct FadingBlack;
-
-    impl Animatable<Box<dyn Decoration>> for FadingBlack {
-        fn transform(&self, _app: &App, t: f64) -> Box<dyn Decoration> {
-            Box::new(BoxDecoration::new().color(Color::from_argb(
-                (t * 255.0).round() as i32,
-                0,
-                0,
-                0,
-            )))
-        }
-    }
-
     // transitions_test.dart 'DecoratedBoxTransition test'
     #[test]
     fn a_decorated_box_transition_hands_the_animated_decoration_to_its_render_object() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let controller = new_controller(&mut app);
-        let decoration = controller.drive(&mut app, FadingBlack);
+        let decoration = controller.drive(
+            &mut app,
+            CallbackAnimatable::from_callback(|t| {
+                DecorationRef::new(BoxDecoration::new().color(Color::from_argb(
+                    (t * 255.0).round() as i32,
+                    0,
+                    0,
+                    0,
+                )))
+            }),
+        );
         let widget = DecoratedBoxTransition::new(decoration, ten_by_ten())
             .position(DecorationPosition::Foreground)
             .into_widget();
@@ -2173,7 +2164,9 @@ mod tests {
         let decorated: RenderHandle<waft_rendering::RenderDecoratedBox> =
             under_root(&harness, &app);
         assert_eq!(decorated.position(&app), DecorationPosition::Foreground);
-        let painted = (decorated.decoration(&app) as &dyn std::any::Any)
+        let painted = decorated
+            .decoration(&app)
+            .as_any()
             .downcast_ref::<BoxDecoration>()
             .expect("a BoxDecoration");
         assert_eq!(

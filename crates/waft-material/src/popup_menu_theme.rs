@@ -2,7 +2,7 @@
 
 use waft_embedder::{Color, lerp_double};
 use waft_foundation::App;
-use waft_painting::{EdgeInsetsGeometry, ShapeBorder, TextStyle};
+use waft_painting::{EdgeInsetsGeometry, ShapeBorderRef, TextStyle};
 use waft_services::MouseCursorRef;
 use waft_widgets::{
     BuildContext, InheritedTheme, InheritedWidget, IntoWidget, KeyRef, WidgetRef,
@@ -46,7 +46,7 @@ pub struct PopupMenuThemeData {
     pub color: Option<Color>,
 
     /// The shape of the popup menu.
-    pub shape: Option<Box<dyn ShapeBorder>>,
+    pub shape: Option<ShapeBorderRef>,
 
     /// If specified, the padding of the popup menu.
     ///
@@ -94,6 +94,27 @@ pub struct PopupMenuThemeData {
     pub icon_size: Option<f64>,
 }
 
+crate::theme_data_getters::theme_data_getters! {
+    /// Dart's getters of `PopupMenuThemeData`: the theme data answers with its fields, and a defaults
+    /// subclass (Dart's `_...Defaults...(context)`) computes the ones it overrides when they
+    /// are read.
+    pub trait PopupMenuThemeDataGetters for PopupMenuThemeData, fields: popup_menu_theme_data {
+        color: Option<Color>,
+        shape: Option<ShapeBorderRef>,
+        menu_padding: Option<EdgeInsetsGeometry>,
+        elevation: Option<f64>,
+        shadow_color: Option<Color>,
+        surface_tint_color: Option<Color>,
+        text_style: Option<TextStyle>,
+        label_text_style: Option<WidgetStatePropertyRef<Option<TextStyle>>>,
+        enable_feedback: Option<bool>,
+        mouse_cursor: Option<WidgetStatePropertyRef<Option<MouseCursorRef>>>,
+        position: Option<PopupMenuPosition>,
+        icon_color: Option<Color>,
+        icon_size: Option<f64>,
+    }
+}
+
 impl PopupMenuThemeData {
     /// Creates the set of properties used to configure [`PopupMenuTheme`].
     pub fn new() -> PopupMenuThemeData {
@@ -107,7 +128,7 @@ impl PopupMenuThemeData {
     }
 
     /// Dart `PopupMenuThemeData(shape:)`.
-    pub fn shape(mut self, shape: impl Into<Box<dyn ShapeBorder>>) -> PopupMenuThemeData {
+    pub fn shape(mut self, shape: impl Into<ShapeBorderRef>) -> PopupMenuThemeData {
         self.shape = Some(shape.into());
         self
     }
@@ -210,9 +231,9 @@ impl PopupMenuThemeData {
         }
         Some(PopupMenuThemeData {
             color: Color::lerp(a.and_then(|a| a.color), b.and_then(|b| b.color), t),
-            shape: <dyn ShapeBorder>::lerp(
-                a.and_then(|a| a.shape.as_deref()),
-                b.and_then(|b| b.shape.as_deref()),
+            shape: ShapeBorderRef::lerp(
+                a.and_then(|a| a.shape.as_ref()),
+                b.and_then(|b| b.shape.as_ref()),
                 t,
             ),
             menu_padding: EdgeInsetsGeometry::lerp(
@@ -659,7 +680,7 @@ mod tests {
                 assert_eq!(button.color, Some(theme.color_scheme.surface_container()));
                 assert_eq!(button.shadow_color, Some(theme.color_scheme.shadow()));
                 assert_eq!(button.surface_tint_color, Some(Colors::TRANSPARENT));
-                let shape: Box<dyn ShapeBorder> = Box::new(RoundedRectangleBorder::new(
+                let shape: ShapeBorderRef = ShapeBorderRef::new(RoundedRectangleBorder::new(
                     BorderSide::NONE,
                     BorderRadiusGeometry::all(Radius::circular(4.0)),
                 ));
@@ -890,7 +911,7 @@ mod tests {
             let button = menu_material(&tester);
             tester.widget(button, |button: &Material| {
                 assert_eq!(button.color, Some(color));
-                let shape: Box<dyn ShapeBorder> = Box::new(shape);
+                let shape: ShapeBorderRef = ShapeBorderRef::new(shape);
                 assert_eq!(button.shape, Some(shape));
                 assert_eq!(button.elevation, elevation);
                 assert_eq!(button.shadow_color, Some(shadow_color));
@@ -1105,7 +1126,7 @@ mod tests {
             let button = menu_material(&tester);
             tester.widget(button, |button: &Material| {
                 assert_eq!(button.color, Some(color));
-                let shape: Box<dyn ShapeBorder> = Box::new(shape);
+                let shape: ShapeBorderRef = ShapeBorderRef::new(shape);
                 assert_eq!(button.shape, Some(shape));
                 assert_eq!(button.elevation, elevation);
                 assert_eq!(button.shadow_color, Some(shadow_color));

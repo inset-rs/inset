@@ -2,6 +2,7 @@
 
 use std::any::Any;
 use std::fmt::{Debug, Formatter, Result as FmtResult};
+use std::rc::Rc;
 
 use waft_embedder::{
     Canvas, Offset, Paint, Path, PathBuilder, RSuperellipse, Radius, Rect, lerp_double,
@@ -11,7 +12,8 @@ use waft_embedder::{
 use crate::basic_types::TextDirection;
 use crate::border_radius::{BorderRadius, BorderRadiusGeometry};
 use crate::borders::{
-    BorderSide, BorderStyle, OutlinedBorder, ShapeBorder, outlined_border_dimensions,
+    BorderSide, BorderStyle, OutlinedBorder, OutlinedBorderRef, ShapeBorder, ShapeBorderRef,
+    outlined_border_dimensions,
 };
 use crate::circle_border::rrect_path;
 use crate::draw::{draw_drrect, draw_rrect, draw_rsuperellipse};
@@ -71,19 +73,19 @@ impl ShapeBorder for RoundedRectangleBorder {
         outlined_border_dimensions(self.side)
     }
 
-    fn scale(&self, t: f64) -> Box<dyn ShapeBorder> {
-        Box::new(RoundedRectangleBorder::scale(self, t))
+    fn scale(&self, t: f64) -> ShapeBorderRef {
+        ShapeBorderRef::new(RoundedRectangleBorder::scale(self, t))
     }
 
-    fn lerp_from(&self, a: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
+    fn lerp_from(&self, a: Option<&dyn ShapeBorder>, t: f64) -> Option<ShapeBorderRef> {
         if let Some(a) = a.and_then(|a| a.as_any().downcast_ref::<RoundedRectangleBorder>()) {
-            Some(Box::new(RoundedRectangleBorder::new(
+            Some(ShapeBorderRef::new(RoundedRectangleBorder::new(
                 BorderSide::lerp(a.side, self.side, t),
                 BorderRadiusGeometry::lerp(Some(a.border_radius), Some(self.border_radius), t)
                     .unwrap(),
             )))
         } else if let Some(a) = a.and_then(as_circle_border) {
-            Some(Box::new(RoundedRectangleToCircleBorder {
+            Some(ShapeBorderRef::new(RoundedRectangleToCircleBorder {
                 side: BorderSide::lerp(a.side, self.side, t),
                 border_radius: self.border_radius,
                 circularity: 1.0 - t,
@@ -96,15 +98,15 @@ impl ShapeBorder for RoundedRectangleBorder {
         }
     }
 
-    fn lerp_to(&self, b: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
+    fn lerp_to(&self, b: Option<&dyn ShapeBorder>, t: f64) -> Option<ShapeBorderRef> {
         if let Some(b) = b.and_then(|b| b.as_any().downcast_ref::<RoundedRectangleBorder>()) {
-            Some(Box::new(RoundedRectangleBorder::new(
+            Some(ShapeBorderRef::new(RoundedRectangleBorder::new(
                 BorderSide::lerp(self.side, b.side, t),
                 BorderRadiusGeometry::lerp(Some(self.border_radius), Some(b.border_radius), t)
                     .unwrap(),
             )))
         } else if let Some(b) = b.and_then(as_circle_border) {
-            Some(Box::new(RoundedRectangleToCircleBorder {
+            Some(ShapeBorderRef::new(RoundedRectangleToCircleBorder {
                 side: BorderSide::lerp(self.side, b.side, t),
                 border_radius: self.border_radius,
                 circularity: t,
@@ -185,15 +187,15 @@ impl ShapeBorder for RoundedRectangleBorder {
         }
     }
 
-    fn clone_box(&self) -> Box<dyn ShapeBorder> {
-        Box::new(*self)
-    }
-
     fn as_any(&self) -> &dyn Any {
         self
     }
 
     fn as_outlined_border(&self) -> Option<&dyn OutlinedBorder> {
+        Some(self)
+    }
+
+    fn into_outlined_border(self: Rc<Self>) -> Option<Rc<dyn OutlinedBorder>> {
         Some(self)
     }
 
@@ -210,12 +212,8 @@ impl OutlinedBorder for RoundedRectangleBorder {
         self.side
     }
 
-    fn copy_with(&self, side: Option<BorderSide>) -> Box<dyn OutlinedBorder> {
-        Box::new(RoundedRectangleBorder::copy_with(self, side, None))
-    }
-
-    fn clone_outlined(&self) -> Box<dyn OutlinedBorder> {
-        Box::new(*self)
+    fn copy_with(&self, side: Option<BorderSide>) -> OutlinedBorderRef {
+        OutlinedBorderRef::new(RoundedRectangleBorder::copy_with(self, side, None))
     }
 }
 
@@ -283,18 +281,18 @@ impl ShapeBorder for RoundedSuperellipseBorder {
         outlined_border_dimensions(self.side)
     }
 
-    fn scale(&self, t: f64) -> Box<dyn ShapeBorder> {
-        Box::new(RoundedSuperellipseBorder::scale(self, t))
+    fn scale(&self, t: f64) -> ShapeBorderRef {
+        ShapeBorderRef::new(RoundedSuperellipseBorder::scale(self, t))
     }
 
-    fn lerp_from(&self, a: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
+    fn lerp_from(&self, a: Option<&dyn ShapeBorder>, t: f64) -> Option<ShapeBorderRef> {
         if let Some(a) = a.and_then(|a| a.as_any().downcast_ref::<RoundedSuperellipseBorder>()) {
-            Some(Box::new(RoundedSuperellipseBorder::new(
+            Some(ShapeBorderRef::new(RoundedSuperellipseBorder::new(
                 BorderSide::lerp(a.side, self.side, t),
                 BorderRadiusGeometry::lerp(Some(a.border_radius), Some(self.border_radius), t),
             )))
         } else if let Some(a) = a.and_then(as_circle_border) {
-            Some(Box::new(RoundedSuperellipseToCircleBorder {
+            Some(ShapeBorderRef::new(RoundedSuperellipseToCircleBorder {
                 side: BorderSide::lerp(a.side, self.side, t),
                 border_radius: self.border_radius,
                 circularity: 1.0 - t,
@@ -307,14 +305,14 @@ impl ShapeBorder for RoundedSuperellipseBorder {
         }
     }
 
-    fn lerp_to(&self, b: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
+    fn lerp_to(&self, b: Option<&dyn ShapeBorder>, t: f64) -> Option<ShapeBorderRef> {
         if let Some(b) = b.and_then(|b| b.as_any().downcast_ref::<RoundedSuperellipseBorder>()) {
-            Some(Box::new(RoundedSuperellipseBorder::new(
+            Some(ShapeBorderRef::new(RoundedSuperellipseBorder::new(
                 BorderSide::lerp(self.side, b.side, t),
                 BorderRadiusGeometry::lerp(Some(self.border_radius), Some(b.border_radius), t),
             )))
         } else if let Some(b) = b.and_then(as_circle_border) {
-            Some(Box::new(RoundedSuperellipseToCircleBorder {
+            Some(ShapeBorderRef::new(RoundedSuperellipseToCircleBorder {
                 side: BorderSide::lerp(self.side, b.side, t),
                 border_radius: self.border_radius,
                 circularity: t,
@@ -410,15 +408,15 @@ impl ShapeBorder for RoundedSuperellipseBorder {
         }
     }
 
-    fn clone_box(&self) -> Box<dyn ShapeBorder> {
-        Box::new(*self)
-    }
-
     fn as_any(&self) -> &dyn Any {
         self
     }
 
     fn as_outlined_border(&self) -> Option<&dyn OutlinedBorder> {
+        Some(self)
+    }
+
+    fn into_outlined_border(self: Rc<Self>) -> Option<Rc<dyn OutlinedBorder>> {
         Some(self)
     }
 
@@ -435,12 +433,8 @@ impl OutlinedBorder for RoundedSuperellipseBorder {
         self.side
     }
 
-    fn copy_with(&self, side: Option<BorderSide>) -> Box<dyn OutlinedBorder> {
-        Box::new(RoundedSuperellipseBorder::copy_with(self, side, None))
-    }
-
-    fn clone_outlined(&self) -> Box<dyn OutlinedBorder> {
-        Box::new(*self)
+    fn copy_with(&self, side: Option<BorderSide>) -> OutlinedBorderRef {
+        OutlinedBorderRef::new(RoundedSuperellipseBorder::copy_with(self, side, None))
     }
 }
 
@@ -576,8 +570,8 @@ impl ShapeBorder for RoundedRectangleToCircleBorder {
         outlined_border_dimensions(self.side)
     }
 
-    fn scale(&self, t: f64) -> Box<dyn ShapeBorder> {
-        Box::new(self.copy_with(
+    fn scale(&self, t: f64) -> ShapeBorderRef {
+        ShapeBorderRef::new(self.copy_with(
             Some(self.side.scale(t)),
             Some(self.border_radius * t),
             Some(t),
@@ -585,16 +579,16 @@ impl ShapeBorder for RoundedRectangleToCircleBorder {
         ))
     }
 
-    fn lerp_from(&self, a: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
+    fn lerp_from(&self, a: Option<&dyn ShapeBorder>, t: f64) -> Option<ShapeBorderRef> {
         if let Some(a) = a.and_then(|a| a.as_any().downcast_ref::<RoundedRectangleBorder>()) {
-            Some(Box::new(self.copy_with(
+            Some(ShapeBorderRef::new(self.copy_with(
                 Some(BorderSide::lerp(a.side, self.side, t)),
                 BorderRadiusGeometry::lerp(Some(a.border_radius), Some(self.border_radius), t),
                 Some(self.circularity * t),
                 None,
             )))
         } else if let Some(a) = a.and_then(as_circle_border) {
-            Some(Box::new(self.copy_with(
+            Some(ShapeBorderRef::new(self.copy_with(
                 Some(BorderSide::lerp(a.side, self.side, t)),
                 Some(self.border_radius),
                 Some(self.circularity + (1.0 - self.circularity) * (1.0 - t)),
@@ -603,7 +597,7 @@ impl ShapeBorder for RoundedRectangleToCircleBorder {
         } else if let Some(a) =
             a.and_then(|a| a.as_any().downcast_ref::<RoundedRectangleToCircleBorder>())
         {
-            Some(Box::new(self.copy_with(
+            Some(ShapeBorderRef::new(self.copy_with(
                 Some(BorderSide::lerp(a.side, self.side, t)),
                 BorderRadiusGeometry::lerp(Some(a.border_radius), Some(self.border_radius), t),
                 lerp_double(Some(a.circularity), Some(self.circularity), t),
@@ -616,16 +610,16 @@ impl ShapeBorder for RoundedRectangleToCircleBorder {
         }
     }
 
-    fn lerp_to(&self, b: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
+    fn lerp_to(&self, b: Option<&dyn ShapeBorder>, t: f64) -> Option<ShapeBorderRef> {
         if let Some(b) = b.and_then(|b| b.as_any().downcast_ref::<RoundedRectangleBorder>()) {
-            Some(Box::new(self.copy_with(
+            Some(ShapeBorderRef::new(self.copy_with(
                 Some(BorderSide::lerp(self.side, b.side, t)),
                 BorderRadiusGeometry::lerp(Some(self.border_radius), Some(b.border_radius), t),
                 Some(self.circularity * (1.0 - t)),
                 None,
             )))
         } else if let Some(b) = b.and_then(as_circle_border) {
-            Some(Box::new(self.copy_with(
+            Some(ShapeBorderRef::new(self.copy_with(
                 Some(BorderSide::lerp(self.side, b.side, t)),
                 Some(self.border_radius),
                 Some(self.circularity + (1.0 - self.circularity) * t),
@@ -634,7 +628,7 @@ impl ShapeBorder for RoundedRectangleToCircleBorder {
         } else if let Some(b) =
             b.and_then(|b| b.as_any().downcast_ref::<RoundedRectangleToCircleBorder>())
         {
-            Some(Box::new(self.copy_with(
+            Some(ShapeBorderRef::new(self.copy_with(
                 Some(BorderSide::lerp(self.side, b.side, t)),
                 BorderRadiusGeometry::lerp(Some(self.border_radius), Some(b.border_radius), t),
                 lerp_double(Some(self.circularity), Some(b.circularity), t),
@@ -752,15 +746,15 @@ impl ShapeBorder for RoundedRectangleToCircleBorder {
         }
     }
 
-    fn clone_box(&self) -> Box<dyn ShapeBorder> {
-        Box::new(*self)
-    }
-
     fn as_any(&self) -> &dyn Any {
         self
     }
 
     fn as_outlined_border(&self) -> Option<&dyn OutlinedBorder> {
+        Some(self)
+    }
+
+    fn into_outlined_border(self: Rc<Self>) -> Option<Rc<dyn OutlinedBorder>> {
         Some(self)
     }
 
@@ -781,14 +775,10 @@ impl OutlinedBorder for RoundedRectangleToCircleBorder {
         self.side
     }
 
-    fn copy_with(&self, side: Option<BorderSide>) -> Box<dyn OutlinedBorder> {
-        Box::new(RoundedRectangleToCircleBorder::copy_with(
+    fn copy_with(&self, side: Option<BorderSide>) -> OutlinedBorderRef {
+        OutlinedBorderRef::new(RoundedRectangleToCircleBorder::copy_with(
             self, side, None, None, None,
         ))
-    }
-
-    fn clone_outlined(&self) -> Box<dyn OutlinedBorder> {
-        Box::new(*self)
     }
 }
 
@@ -867,8 +857,8 @@ impl ShapeBorder for RoundedSuperellipseToCircleBorder {
         outlined_border_dimensions(self.side)
     }
 
-    fn scale(&self, t: f64) -> Box<dyn ShapeBorder> {
-        Box::new(self.copy_with(
+    fn scale(&self, t: f64) -> ShapeBorderRef {
+        ShapeBorderRef::new(self.copy_with(
             Some(self.side.scale(t)),
             Some(self.border_radius * t),
             Some(t),
@@ -876,16 +866,16 @@ impl ShapeBorder for RoundedSuperellipseToCircleBorder {
         ))
     }
 
-    fn lerp_from(&self, a: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
+    fn lerp_from(&self, a: Option<&dyn ShapeBorder>, t: f64) -> Option<ShapeBorderRef> {
         if let Some(a) = a.and_then(|a| a.as_any().downcast_ref::<RoundedSuperellipseBorder>()) {
-            Some(Box::new(self.copy_with(
+            Some(ShapeBorderRef::new(self.copy_with(
                 Some(BorderSide::lerp(a.side, self.side, t)),
                 BorderRadiusGeometry::lerp(Some(a.border_radius), Some(self.border_radius), t),
                 Some(self.circularity * t),
                 None,
             )))
         } else if let Some(a) = a.and_then(as_circle_border) {
-            Some(Box::new(self.copy_with(
+            Some(ShapeBorderRef::new(self.copy_with(
                 Some(BorderSide::lerp(a.side, self.side, t)),
                 Some(self.border_radius),
                 Some(self.circularity + (1.0 - self.circularity) * (1.0 - t)),
@@ -895,7 +885,7 @@ impl ShapeBorder for RoundedSuperellipseToCircleBorder {
             a.as_any()
                 .downcast_ref::<RoundedSuperellipseToCircleBorder>()
         }) {
-            Some(Box::new(self.copy_with(
+            Some(ShapeBorderRef::new(self.copy_with(
                 Some(BorderSide::lerp(a.side, self.side, t)),
                 BorderRadiusGeometry::lerp(Some(a.border_radius), Some(self.border_radius), t),
                 lerp_double(Some(a.circularity), Some(self.circularity), t),
@@ -908,16 +898,16 @@ impl ShapeBorder for RoundedSuperellipseToCircleBorder {
         }
     }
 
-    fn lerp_to(&self, b: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
+    fn lerp_to(&self, b: Option<&dyn ShapeBorder>, t: f64) -> Option<ShapeBorderRef> {
         if let Some(b) = b.and_then(|b| b.as_any().downcast_ref::<RoundedSuperellipseBorder>()) {
-            Some(Box::new(self.copy_with(
+            Some(ShapeBorderRef::new(self.copy_with(
                 Some(BorderSide::lerp(self.side, b.side, t)),
                 BorderRadiusGeometry::lerp(Some(self.border_radius), Some(b.border_radius), t),
                 Some(self.circularity * (1.0 - t)),
                 None,
             )))
         } else if let Some(b) = b.and_then(as_circle_border) {
-            Some(Box::new(self.copy_with(
+            Some(ShapeBorderRef::new(self.copy_with(
                 Some(BorderSide::lerp(self.side, b.side, t)),
                 Some(self.border_radius),
                 Some(self.circularity + (1.0 - self.circularity) * t),
@@ -927,7 +917,7 @@ impl ShapeBorder for RoundedSuperellipseToCircleBorder {
             b.as_any()
                 .downcast_ref::<RoundedSuperellipseToCircleBorder>()
         }) {
-            Some(Box::new(self.copy_with(
+            Some(ShapeBorderRef::new(self.copy_with(
                 Some(BorderSide::lerp(self.side, b.side, t)),
                 BorderRadiusGeometry::lerp(Some(self.border_radius), Some(b.border_radius), t),
                 lerp_double(Some(self.circularity), Some(b.circularity), t),
@@ -1045,15 +1035,15 @@ impl ShapeBorder for RoundedSuperellipseToCircleBorder {
         }
     }
 
-    fn clone_box(&self) -> Box<dyn ShapeBorder> {
-        Box::new(*self)
-    }
-
     fn as_any(&self) -> &dyn Any {
         self
     }
 
     fn as_outlined_border(&self) -> Option<&dyn OutlinedBorder> {
+        Some(self)
+    }
+
+    fn into_outlined_border(self: Rc<Self>) -> Option<Rc<dyn OutlinedBorder>> {
         Some(self)
     }
 
@@ -1074,14 +1064,10 @@ impl OutlinedBorder for RoundedSuperellipseToCircleBorder {
         self.side
     }
 
-    fn copy_with(&self, side: Option<BorderSide>) -> Box<dyn OutlinedBorder> {
-        Box::new(RoundedSuperellipseToCircleBorder::copy_with(
+    fn copy_with(&self, side: Option<BorderSide>) -> OutlinedBorderRef {
+        OutlinedBorderRef::new(RoundedSuperellipseToCircleBorder::copy_with(
             self, side, None, None, None,
         ))
-    }
-
-    fn clone_outlined(&self) -> Box<dyn OutlinedBorder> {
-        Box::new(*self)
     }
 }
 
@@ -1165,20 +1151,20 @@ mod tests {
         assert_eq!(c10.dimensions(), EdgeInsetsGeometry::all(10.0));
         assert_eq!(c10.scale(2.0), c20);
         assert_eq!(c20.scale(0.5), c10);
-        let as10: &dyn ShapeBorder = &c10;
-        let as20: &dyn ShapeBorder = &c20;
+        let as10 = ShapeBorderRef::new(c10);
+        let as20 = ShapeBorderRef::new(c20);
         assert!(
-            <dyn ShapeBorder>::lerp(Some(as10), Some(as20), 0.0)
+            ShapeBorderRef::lerp(Some(&as10), Some(&as20), 0.0)
                 .unwrap()
                 .eq_shape(&c10)
         );
         assert!(
-            <dyn ShapeBorder>::lerp(Some(as10), Some(as20), 0.5)
+            ShapeBorderRef::lerp(Some(&as10), Some(&as20), 0.5)
                 .unwrap()
                 .eq_shape(&c15)
         );
         assert!(
-            <dyn ShapeBorder>::lerp(Some(as10), Some(as20), 1.0)
+            ShapeBorderRef::lerp(Some(&as10), Some(&as20), 1.0)
                 .unwrap()
                 .eq_shape(&c20)
         );
@@ -1204,13 +1190,21 @@ mod tests {
         assert!(!contains(&c_path, 30.0, 10.0));
         assert!(!contains(&c_path, 99.0, 19.0));
 
-        let at_01 = <dyn ShapeBorder>::lerp(Some(&r), Some(&c), 0.1)
-            .unwrap()
-            .get_outer_path(rect, None);
+        let at_01 = ShapeBorderRef::lerp(
+            Some(&ShapeBorderRef::new(r)),
+            Some(&ShapeBorderRef::new(c)),
+            0.1,
+        )
+        .unwrap()
+        .get_outer_path(rect, None);
         assert!(contains(&at_01, 30.0, 10.0));
-        let at_09 = <dyn ShapeBorder>::lerp(Some(&r), Some(&c), 0.9)
-            .unwrap()
-            .get_outer_path(rect, None);
+        let at_09 = ShapeBorderRef::lerp(
+            Some(&ShapeBorderRef::new(r)),
+            Some(&ShapeBorderRef::new(c)),
+            0.9,
+        )
+        .unwrap()
+        .get_outer_path(rect, None);
         assert!(contains(&at_09, 50.0, 10.0));
         assert!(!contains(&at_09, 30.0, 10.0));
     }
@@ -1237,20 +1231,20 @@ mod tests {
         assert_eq!(c10.dimensions(), EdgeInsetsGeometry::all(10.0));
         assert_eq!(c10.scale(2.0), c20);
         assert_eq!(c20.scale(0.5), c10);
-        let as10: &dyn ShapeBorder = &c10;
-        let as20: &dyn ShapeBorder = &c20;
+        let as10 = ShapeBorderRef::new(c10);
+        let as20 = ShapeBorderRef::new(c20);
         assert!(
-            <dyn ShapeBorder>::lerp(Some(as10), Some(as20), 0.0)
+            ShapeBorderRef::lerp(Some(&as10), Some(&as20), 0.0)
                 .unwrap()
                 .eq_shape(&c10)
         );
         assert!(
-            <dyn ShapeBorder>::lerp(Some(as10), Some(as20), 0.5)
+            ShapeBorderRef::lerp(Some(&as10), Some(&as20), 0.5)
                 .unwrap()
                 .eq_shape(&c15)
         );
         assert!(
-            <dyn ShapeBorder>::lerp(Some(as10), Some(as20), 1.0)
+            ShapeBorderRef::lerp(Some(&as10), Some(&as20), 1.0)
                 .unwrap()
                 .eq_shape(&c20)
         );

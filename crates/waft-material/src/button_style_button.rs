@@ -42,7 +42,7 @@
 //! impl ButtonStyleButton for ElevatedButton {
 //!     crate::button_style_button_accessors!();
 //!
-//!     fn default_style_of(&self, app: &mut App, context: BuildContext) -> ButtonStyle { … }
+//!     fn default_style_of(&self, app: &mut App, context: BuildContext) -> Box<dyn ButtonStyleGetters> { … }
 //!     fn theme_style_of(&self, app: &mut App, context: BuildContext) -> Option<ButtonStyle> { … }
 //! }
 //!
@@ -80,7 +80,7 @@ use waft_animation::{
 };
 use waft_embedder::{Clip, Color, Offset, Size, TextBaseline};
 use waft_foundation::{App, Handle, Listenable, Listener, ValueChanged};
-use waft_painting::{Alignment, EdgeInsets, EdgeInsetsGeometry, ShapeBorder, force_to_point};
+use waft_painting::{Alignment, EdgeInsets, EdgeInsetsGeometry, ShapeBorderRef, force_to_point};
 use waft_rendering::{
     AnyRenderBox, AnyRenderObject, BoxConstraints, BoxHitTestResult, BoxParentData,
     ChildLayoutHelper, ChildLayouter, PaintingContext, RenderBox, RenderBoxBase, RenderBoxData,
@@ -98,6 +98,7 @@ use waft_widgets::{
 };
 
 use crate::button_style::ButtonStyle;
+use crate::button_style::ButtonStyleGetters;
 use crate::colors::Colors;
 use crate::constants::K_MIN_INTERACTIVE_DIMENSION;
 use crate::ink_well::InkWell;
@@ -446,7 +447,8 @@ pub trait ButtonStyleButton: 'static {
     ///
     /// * [`theme_style_of`](Self::theme_style_of), returns the ButtonStyle of this button's
     ///   component theme.
-    fn default_style_of(&self, app: &mut App, context: BuildContext) -> ButtonStyle;
+    fn default_style_of(&self, app: &mut App, context: BuildContext)
+    -> Box<dyn ButtonStyleGetters>;
 
     /// Returns the ButtonStyle that belongs to the button's component theme.
     ///
@@ -730,69 +732,63 @@ where
         let widget =
             downcast_widget::<W>(&*widget_ref).expect("a ButtonStyleState builds its button");
         let button = widget.button_style_button_data();
-        let styles = Rc::new(ButtonStyleLayers {
+        let styles = ButtonStyleLayers {
             widget_style: button.style.clone(),
             theme_style: widget.theme_style_of(app, context),
             default_style: widget.default_style_of(app, context),
-        });
+        };
         let states = app.get(self.states_controller(app)).value().clone();
 
-        let resolved_elevation = styles.resolve(&states, |style| &style.elevation);
-        let resolved_text_style = styles.resolve(&states, |style| &style.text_style);
+        let resolved_elevation = styles.resolve(app, &states, |style, app| style.elevation(app));
+        let resolved_text_style = styles.resolve(app, &states, |style, app| style.text_style(app));
         let mut resolved_background_color =
-            styles.resolve(&states, |style| &style.background_color);
-        let resolved_foreground_color = styles.resolve(&states, |style| &style.foreground_color);
-        let resolved_shadow_color = styles.resolve(&states, |style| &style.shadow_color);
+            styles.resolve(app, &states, |style, app| style.background_color(app));
+        let resolved_foreground_color =
+            styles.resolve(app, &states, |style, app| style.foreground_color(app));
+        let resolved_shadow_color =
+            styles.resolve(app, &states, |style, app| style.shadow_color(app));
         let resolved_surface_tint_color =
-            styles.resolve(&states, |style| &style.surface_tint_color);
-        let resolved_padding = styles.resolve(&states, |style| &style.padding);
-        let resolved_minimum_size = styles.resolve(&states, |style| &style.minimum_size);
-        let resolved_fixed_size = styles.resolve(&states, |style| &style.fixed_size);
-        let resolved_maximum_size = styles.resolve(&states, |style| &style.maximum_size);
-        let resolved_icon_color = styles.effective_icon_color(&states);
-        let resolved_icon_size = styles.resolve(&states, |style| &style.icon_size);
-        let resolved_side = styles.resolve(&states, |style| &style.side);
-        let resolved_shape = styles.resolve(&states, |style| &style.shape);
+            styles.resolve(app, &states, |style, app| style.surface_tint_color(app));
+        let resolved_padding = styles.resolve(app, &states, |style, app| style.padding(app));
+        let resolved_minimum_size =
+            styles.resolve(app, &states, |style, app| style.minimum_size(app));
+        let resolved_fixed_size = styles.resolve(app, &states, |style, app| style.fixed_size(app));
+        let resolved_maximum_size =
+            styles.resolve(app, &states, |style, app| style.maximum_size(app));
+        let resolved_icon_color = styles.effective_icon_color(app, &states);
+        let resolved_icon_size = styles.resolve(app, &states, |style, app| style.icon_size(app));
+        let resolved_side = styles.resolve(app, &states, |style, app| style.side(app));
+        let resolved_shape = styles.resolve(app, &states, |style, app| style.shape(app));
 
-        let mouse_cursor = mouse_cursor({
-            let styles = Rc::clone(&styles);
-            move |states| {
-                styles.effective_value(|style| {
-                    style
-                        .mouse_cursor
-                        .as_ref()
-                        .and_then(|cursor| cursor.resolve(states))
-                })
-            }
+        let mouse_cursors = styles.properties(app, |style, app| style.mouse_cursor(app));
+        let mouse_cursor = mouse_cursor(move |states| {
+            ButtonStyleLayers::effective_resolved_value(&mouse_cursors, states)
         });
 
-        let overlay_color = <dyn WidgetStateProperty<Option<Color>>>::resolve_with({
-            let styles = Rc::clone(&styles);
-            move |states| {
-                styles.effective_value(|style| {
-                    style
-                        .overlay_color
-                        .as_ref()
-                        .and_then(|color| color.resolve(states))
-                })
-            }
+        let overlay_colors = styles.properties(app, |style, app| style.overlay_color(app));
+        let overlay_color = <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states| {
+            ButtonStyleLayers::effective_resolved_value(&overlay_colors, states)
         });
 
-        let resolved_visual_density = styles.effective_value(|style| style.visual_density);
-        let resolved_tap_target_size = styles.effective_value(|style| style.tap_target_size);
-        let resolved_animation_duration = styles.effective_value(|style| style.animation_duration);
+        let resolved_visual_density =
+            styles.effective_value(app, |style, app| style.visual_density(app));
+        let resolved_tap_target_size =
+            styles.effective_value(app, |style, app| style.tap_target_size(app));
+        let resolved_animation_duration =
+            styles.effective_value(app, |style, app| style.animation_duration(app));
         let resolved_enable_feedback = styles
-            .effective_value(|style| style.enable_feedback)
+            .effective_value(app, |style, app| style.enable_feedback(app))
             .unwrap_or(true);
-        let resolved_alignment = styles.effective_value(|style| style.alignment);
+        let resolved_alignment = styles.effective_value(app, |style, app| style.alignment(app));
         let resolved_visual_density =
             resolved_visual_density.expect("the default style has a visual density");
         let density_adjustment = resolved_visual_density.base_size_adjustment();
-        let resolved_splash_factory = styles.effective_value(|style| style.splash_factory.clone());
+        let resolved_splash_factory =
+            styles.effective_value(app, |style, app| style.splash_factory(app));
         let resolved_background_builder =
-            styles.effective_value(|style| style.background_builder.clone());
+            styles.effective_value(app, |style, app| style.background_builder(app));
         let resolved_foreground_builder =
-            styles.effective_value(|style| style.foreground_builder.clone());
+            styles.effective_value(app, |style, app| style.foreground_builder(app));
 
         let effective_clip_behavior = button.clip_behavior.unwrap_or(
             if resolved_background_builder.is_some() || resolved_foreground_builder.is_some() {
@@ -916,7 +912,7 @@ where
         if let Some(resolved_icon_size) = resolved_icon_size {
             icon_theme_data = icon_theme_data.size(resolved_icon_size);
         }
-        let custom_border: Box<dyn ShapeBorder> = resolved_shape.copy_with(resolved_side);
+        let custom_border: ShapeBorderRef = resolved_shape.copy_with(resolved_side).into();
         let mut ink_well = InkWell::new()
             .mouse_cursor(MouseCursorRef::from(mouse_cursor))
             .enable_feedback(resolved_enable_feedback)
@@ -964,7 +960,7 @@ where
                 MaterialTapTargetSize::ShrinkWrap => Size::ZERO,
             };
 
-        let shape: Box<dyn ShapeBorder> = resolved_shape.copy_with(resolved_side);
+        let shape: ShapeBorderRef = resolved_shape.copy_with(resolved_side).into();
         let mut material = Material::new()
             .elevation(resolved_elevation.expect("the default style has an elevation"))
             .shape(shape)
@@ -1014,56 +1010,89 @@ where
 struct ButtonStyleLayers {
     widget_style: Option<ButtonStyle>,
     theme_style: Option<ButtonStyle>,
-    default_style: ButtonStyle,
+    default_style: Box<dyn ButtonStyleGetters>,
 }
 
 impl ButtonStyleLayers {
-    fn effective_value<T>(&self, get_property: impl Fn(&ButtonStyle) -> Option<T>) -> Option<T> {
-        let widget_value = self.widget_style.as_ref().and_then(&get_property);
-        let theme_value = self.theme_style.as_ref().and_then(&get_property);
-        let default_value = get_property(&self.default_style);
+    /// The widget's, the theme's and the default style's value of one property, which Dart's
+    /// `effectiveValue` reads from all three.
+    fn properties<T>(
+        &self,
+        app: &mut App,
+        get_property: impl Fn(&dyn ButtonStyleGetters, &mut App) -> Option<T>,
+    ) -> [Option<T>; 3] {
+        let widget_value = self
+            .widget_style
+            .as_ref()
+            .and_then(|style| get_property(style, app));
+        let theme_value = self
+            .theme_style
+            .as_ref()
+            .and_then(|style| get_property(style, app));
+        let default_value = get_property(&*self.default_style, app);
+        [widget_value, theme_value, default_value]
+    }
+
+    fn effective_value<T>(
+        &self,
+        app: &mut App,
+        get_property: impl Fn(&dyn ButtonStyleGetters, &mut App) -> Option<T>,
+    ) -> Option<T> {
+        let [widget_value, theme_value, default_value] = self.properties(app, get_property);
         widget_value.or(theme_value).or(default_value)
     }
 
     fn resolve<T: 'static>(
         &self,
+        app: &mut App,
         states: &WidgetStates,
-        get_property: impl Fn(&ButtonStyle) -> &Option<WidgetStatePropertyRef<Option<T>>>,
+        get_property: impl Fn(
+            &dyn ButtonStyleGetters,
+            &mut App,
+        ) -> Option<WidgetStatePropertyRef<Option<T>>>,
     ) -> Option<T> {
-        self.effective_value(|style| {
-            get_property(style)
-                .as_ref()
-                .and_then(|property| property.resolve(states))
-        })
+        let properties = self.properties(app, get_property);
+        ButtonStyleLayers::effective_resolved_value(&properties, states)
     }
 
-    fn effective_icon_color(&self, states: &WidgetStates) -> Option<Color> {
-        let resolve = |property: &Option<WidgetStatePropertyRef<Option<Color>>>| {
-            property
-                .as_ref()
-                .and_then(|property| property.resolve(states))
+    /// Dart's `effectiveValue((style) => style?.property?.resolve(states))` over the three
+    /// styles' properties, read when the button was built: the property a button resolves later,
+    /// without the `App`, is a `WidgetStateProperty` it built with them.
+    fn effective_resolved_value<T: 'static>(
+        properties: &[Option<WidgetStatePropertyRef<Option<T>>>; 3],
+        states: &WidgetStates,
+    ) -> Option<T> {
+        properties
+            .iter()
+            .flatten()
+            .find_map(|property| property.resolve(states))
+    }
+
+    fn effective_icon_color(&self, app: &mut App, states: &WidgetStates) -> Option<Color> {
+        let resolve = |property: Option<WidgetStatePropertyRef<Option<Color>>>| {
+            property.and_then(|property| property.resolve(states))
         };
         self.widget_style
             .as_ref()
-            .and_then(|style| resolve(&style.icon_color))
+            .and_then(|style| resolve(style.icon_color.clone()))
             .or_else(|| {
                 self.theme_style
                     .as_ref()
-                    .and_then(|style| resolve(&style.icon_color))
+                    .and_then(|style| resolve(style.icon_color.clone()))
             })
             .or_else(|| {
                 self.widget_style
                     .as_ref()
-                    .and_then(|style| resolve(&style.foreground_color))
+                    .and_then(|style| resolve(style.foreground_color.clone()))
             })
             .or_else(|| {
                 self.theme_style
                     .as_ref()
-                    .and_then(|style| resolve(&style.foreground_color))
+                    .and_then(|style| resolve(style.foreground_color.clone()))
             })
-            .or_else(|| resolve(&self.default_style.icon_color))
+            .or_else(|| resolve(self.default_style.icon_color(app)))
             // Fallback to foregroundColor if iconColor is null.
-            .or_else(|| resolve(&self.default_style.foreground_color))
+            .or_else(|| resolve(self.default_style.foreground_color(app)))
     }
 }
 
@@ -1322,6 +1351,7 @@ impl RenderBox for RenderInputPadding {
 #[cfg(test)]
 mod tests {
     use std::cell::{Cell, RefCell};
+    use waft_painting::OutlinedBorderRef;
 
     use waft_embedder::{Radius, Rect, TargetPlatform, TextDirection};
     use waft_painting::{AlignmentGeometry, BorderRadius, BoxDecoration, RoundedRectangleBorder};
@@ -1374,74 +1404,79 @@ mod tests {
         crate::button_style_button_accessors!();
 
         // `ElevatedButton.defaultStyleOf`'s Material 2 branch, through `styleFrom`.
-        fn default_style_of(&self, app: &mut App, context: BuildContext) -> ButtonStyle {
+        fn default_style_of(
+            &self,
+            app: &mut App,
+            context: BuildContext,
+        ) -> Box<dyn ButtonStyleGetters> {
             let theme = Theme::of(app, context);
             let color_scheme = &theme.color_scheme;
             let on_primary = color_scheme.on_primary;
-            ButtonStyle::new()
-                .text_style(Rc::new(WidgetStatePropertyAll::new(
-                    theme.text_theme.label_large.clone(),
-                )))
-                .background_color(
-                    <dyn ButtonStyleButton>::default_color(
-                        Some(color_scheme.primary),
-                        Some(color_scheme.on_surface.with_opacity(0.12)),
+            Box::new(
+                ButtonStyle::new()
+                    .text_style(Rc::new(WidgetStatePropertyAll::new(
+                        theme.text_theme.label_large.clone(),
+                    )))
+                    .background_color(
+                        <dyn ButtonStyleButton>::default_color(
+                            Some(color_scheme.primary),
+                            Some(color_scheme.on_surface.with_opacity(0.12)),
+                        )
+                        .expect("both colors"),
                     )
-                    .expect("both colors"),
-                )
-                .foreground_color(
-                    <dyn ButtonStyleButton>::default_color(
-                        Some(on_primary),
-                        Some(color_scheme.on_surface.with_opacity(0.38)),
+                    .foreground_color(
+                        <dyn ButtonStyleButton>::default_color(
+                            Some(on_primary),
+                            Some(color_scheme.on_surface.with_opacity(0.38)),
+                        )
+                        .expect("both colors"),
                     )
-                    .expect("both colors"),
-                )
-                .overlay_color(<dyn WidgetStateProperty<Option<Color>>>::from_map(vec![
-                    (
-                        WidgetState::Pressed.into(),
-                        Some(on_primary.with_opacity(0.1)),
-                    ),
-                    (
-                        WidgetState::Hovered.into(),
-                        Some(on_primary.with_opacity(0.08)),
-                    ),
-                    (
-                        WidgetState::Focused.into(),
-                        Some(on_primary.with_opacity(0.1)),
-                    ),
-                    (WidgetState::any(), None),
-                ]))
-                .shadow_color(all(theme.shadow_color))
-                .elevation(<dyn WidgetStateProperty<Option<f64>>>::from_map(vec![
-                    (WidgetState::Disabled.into(), Some(0.0)),
-                    (WidgetState::Pressed.into(), Some(2.0 + 6.0)),
-                    (WidgetState::Hovered.into(), Some(2.0 + 2.0)),
-                    (WidgetState::Focused.into(), Some(2.0 + 2.0)),
-                    (WidgetState::any(), Some(2.0)),
-                ]))
-                .padding(all(EdgeInsetsGeometry::symmetric(0.0, 16.0)))
-                .minimum_size(all(Size::new(64.0, 36.0)))
-                .maximum_size(all(Size::INFINITE))
-                .shape(all(Box::new(RoundedRectangleBorder::new(
-                    waft_painting::BorderSide::NONE,
-                    BorderRadius::all(Radius::circular(4.0)).into(),
-                ))
-                    as Box<dyn waft_painting::OutlinedBorder>))
-                .mouse_cursor(<dyn WidgetStateProperty<Option<MouseCursorRef>>>::from_map(
-                    vec![
+                    .overlay_color(<dyn WidgetStateProperty<Option<Color>>>::from_map(vec![
                         (
-                            WidgetState::Disabled.into(),
-                            Some(SystemMouseCursors::BASIC.into()),
+                            WidgetState::Pressed.into(),
+                            Some(on_primary.with_opacity(0.1)),
                         ),
-                        (WidgetState::any(), Some(SystemMouseCursors::BASIC.into())),
-                    ],
-                ))
-                .visual_density(theme.visual_density)
-                .tap_target_size(theme.material_tap_target_size)
-                .animation_duration(K_THEME_CHANGE_DURATION)
-                .enable_feedback(true)
-                .alignment(AlignmentGeometry::CENTER)
-                .splash_factory(InkRipple::splash_factory())
+                        (
+                            WidgetState::Hovered.into(),
+                            Some(on_primary.with_opacity(0.08)),
+                        ),
+                        (
+                            WidgetState::Focused.into(),
+                            Some(on_primary.with_opacity(0.1)),
+                        ),
+                        (WidgetState::any(), None),
+                    ]))
+                    .shadow_color(all(theme.shadow_color))
+                    .elevation(<dyn WidgetStateProperty<Option<f64>>>::from_map(vec![
+                        (WidgetState::Disabled.into(), Some(0.0)),
+                        (WidgetState::Pressed.into(), Some(2.0 + 6.0)),
+                        (WidgetState::Hovered.into(), Some(2.0 + 2.0)),
+                        (WidgetState::Focused.into(), Some(2.0 + 2.0)),
+                        (WidgetState::any(), Some(2.0)),
+                    ]))
+                    .padding(all(EdgeInsetsGeometry::symmetric(0.0, 16.0)))
+                    .minimum_size(all(Size::new(64.0, 36.0)))
+                    .maximum_size(all(Size::INFINITE))
+                    .shape(all(OutlinedBorderRef::new(RoundedRectangleBorder::new(
+                        waft_painting::BorderSide::NONE,
+                        BorderRadius::all(Radius::circular(4.0)).into(),
+                    ))))
+                    .mouse_cursor(<dyn WidgetStateProperty<Option<MouseCursorRef>>>::from_map(
+                        vec![
+                            (
+                                WidgetState::Disabled.into(),
+                                Some(SystemMouseCursors::BASIC.into()),
+                            ),
+                            (WidgetState::any(), Some(SystemMouseCursors::BASIC.into())),
+                        ],
+                    ))
+                    .visual_density(theme.visual_density)
+                    .tap_target_size(theme.material_tap_target_size)
+                    .animation_duration(K_THEME_CHANGE_DURATION)
+                    .enable_feedback(true)
+                    .alignment(AlignmentGeometry::CENTER)
+                    .splash_factory(InkRipple::splash_factory()),
+            )
         }
 
         fn theme_style_of(&self, _app: &mut App, _context: BuildContext) -> Option<ButtonStyle> {

@@ -28,7 +28,7 @@ use waft_foundation::{
 use waft_gestures::{PointerDownEvent, PointerExitEvent, PointerHoverEvent};
 use waft_painting::{
     Alignment, AlignmentGeometry, Axis, EdgeInsets, EdgeInsetsGeometry, InlineSpanRef,
-    OutlinedBorder, ShapeBorder, TextSpan,
+    OutlinedBorderRef, ShapeBorderRef, TextSpan,
 };
 use waft_rendering::{
     BoxConstraints, CrossAxisAlignment, HitTestBehavior, LayerLink, MainAxisAlignment,
@@ -61,18 +61,16 @@ use waft_widgets::{
     downcast_widget,
 };
 
-use crate::button_style::ButtonStyle;
+use crate::button_style::{ButtonStyle, ButtonStyleGetters};
 use crate::checkbox::Checkbox;
-use crate::generated::menu_defaults_m3::{
-    menu_bar_defaults_m3, menu_button_defaults_m3, menu_defaults_m3,
-};
+use crate::generated::menu_defaults_m3::{MenuBarDefaultsM3, MenuButtonDefaultsM3, MenuDefaultsM3};
 use crate::icons::Icons;
 use crate::ink_well::InteractiveInkFeatureFactoryRef;
 use crate::material::{Material, MaterialType};
 use crate::material_localizations::MaterialLocalizations;
 use crate::menu_bar_theme::MenuBarTheme;
 use crate::menu_button_theme::MenuButtonTheme;
-use crate::menu_style::MenuStyle;
+use crate::menu_style::{MenuStyle, MenuStyleGetters};
 use crate::menu_theme::MenuTheme;
 use crate::motion::Easing;
 use crate::radio::Radio;
@@ -1867,8 +1865,13 @@ impl MenuItemButton {
     /// foreground color. The button's `InkWell` adds the style's overlay color when the button
     /// is focused, hovered or pressed. The button's background color becomes its `Material`
     /// color and is transparent by default.
-    pub fn default_style_of(&self, app: &mut App, context: BuildContext) -> ButtonStyle {
-        menu_button_defaults_m3(app, context)
+    pub fn default_style_of(
+        &self,
+        app: &mut App,
+        context: BuildContext,
+    ) -> Box<dyn ButtonStyleGetters> {
+        let _ = app;
+        Box::new(MenuButtonDefaultsM3::new(context))
     }
 
     /// Returns the [`MenuButtonThemeData::style`](crate::MenuButtonThemeData::style) of the
@@ -1974,7 +1977,7 @@ pub struct MenuButtonStyleFromBuilder {
     enabled_mouse_cursor: Option<MouseCursorRef>,
     disabled_mouse_cursor: Option<MouseCursorRef>,
     side: Option<waft_painting::BorderSide>,
-    shape: Option<Box<dyn OutlinedBorder>>,
+    shape: Option<OutlinedBorderRef>,
     visual_density: Option<VisualDensity>,
     tap_target_size: Option<MaterialTapTargetSize>,
     animation_duration: Option<Duration>,
@@ -2026,10 +2029,7 @@ impl MenuButtonStyleFromBuilder {
     );
 
     /// Dart `MenuItemButton.styleFrom(shape:)`.
-    pub fn shape(
-        mut self,
-        shape: impl Into<Box<dyn OutlinedBorder>>,
-    ) -> MenuButtonStyleFromBuilder {
+    pub fn shape(mut self, shape: impl Into<OutlinedBorderRef>) -> MenuButtonStyleFromBuilder {
         self.shape = Some(shape.into());
         self
     }
@@ -2232,8 +2232,12 @@ impl State for MenuItemButtonState {
         let widget = downcast_widget::<MenuItemButton>(&*widget_ref)
             .expect("a MenuItemButtonState builds its MenuItemButton");
         let mut merged_style = match widget.theme_style_of(app, context) {
-            Some(theme_style) => theme_style.merge(Some(&widget.default_style_of(app, context))),
-            None => widget.default_style_of(app, context),
+            Some(theme_style) => {
+                theme_style.merge(Some(&widget.default_style_of(app, context).copy_with(app)))
+            }
+            // Dart passes the defaults object on as the text button's style, whose getters the
+            // button reads all of when it builds.
+            None => widget.default_style_of(app, context).copy_with(app),
         };
         if let Some(style) = &widget.style {
             merged_style = style.merge(Some(&merged_style));
@@ -3200,8 +3204,13 @@ impl SubmenuButton {
     /// foreground color. The button's `InkWell` adds the style's overlay color when the button
     /// is focused, hovered or pressed. The button's background color becomes its `Material`
     /// color and is transparent by default.
-    pub fn default_style_of(&self, app: &mut App, context: BuildContext) -> ButtonStyle {
-        menu_button_defaults_m3(app, context)
+    pub fn default_style_of(
+        &self,
+        app: &mut App,
+        context: BuildContext,
+    ) -> Box<dyn ButtonStyleGetters> {
+        let _ = app;
+        Box::new(MenuButtonDefaultsM3::new(context))
     }
 
     /// Returns the [`MenuButtonThemeData::style`](crate::MenuButtonThemeData::style) of the
@@ -3365,8 +3374,12 @@ impl SubmenuButtonState {
         let widget = downcast_widget::<SubmenuButton>(&*widget_ref)
             .expect("a SubmenuButtonState builds its SubmenuButton");
         let mut merged_style = match widget.theme_style_of(app, context) {
-            Some(theme_style) => theme_style.merge(Some(&widget.default_style_of(app, context))),
-            None => widget.default_style_of(app, context),
+            Some(theme_style) => {
+                theme_style.merge(Some(&widget.default_style_of(app, context).copy_with(app)))
+            }
+            // Dart passes the defaults object on as the text button's style, whose getters the
+            // button reads all of when it builds.
+            None => widget.default_style_of(app, context).copy_with(app),
         };
         if let Some(style) = &widget.style {
             merged_style = style.merge(Some(&merged_style));
@@ -3555,8 +3568,8 @@ impl SubmenuButtonState {
                 .and_then(|style| style.padding)
             {
                 Some(insets) => insets,
-                None => menu_defaults_m3(app, context)
-                    .padding
+                None => MenuDefaultsM3::new(context)
+                    .padding(app)
                     .expect("the menu defaults have a padding"),
             },
         };
@@ -5413,20 +5426,25 @@ impl SingleChildLayoutDelegate for MenuLayout {
 /// The first value a menu style gives, in the order Dart's `effectiveValue` asks the
 /// widget's, the theme's and the default style.
 fn effective_value<T>(
-    styles: [Option<&MenuStyle>; 3],
-    get_property: impl Fn(&MenuStyle) -> Option<T>,
+    app: &mut App,
+    styles: [Option<&dyn MenuStyleGetters>; 3],
+    get_property: impl Fn(&dyn MenuStyleGetters, &mut App) -> Option<T>,
 ) -> Option<T> {
-    styles.into_iter().flatten().find_map(get_property)
+    styles
+        .into_iter()
+        .flatten()
+        .find_map(|style| get_property(style, app))
 }
 
 /// Dart's `resolve`: the first style property that resolves to a value with no state.
 fn resolve<T: 'static>(
-    styles: [Option<&MenuStyle>; 3],
-    get_property: impl Fn(&MenuStyle) -> Option<&WidgetStatePropertyRef<Option<T>>>,
+    app: &mut App,
+    styles: [Option<&dyn MenuStyleGetters>; 3],
+    get_property: impl Fn(&dyn MenuStyleGetters, &mut App) -> Option<WidgetStatePropertyRef<Option<T>>>,
 ) -> Option<T> {
     let states = WidgetStates::new();
-    effective_value(styles, |style| {
-        get_property(style).and_then(|property| property.resolve(&states))
+    effective_value(app, styles, |style, app| {
+        get_property(style, app).and_then(|property| property.resolve(&states))
     })
 }
 
@@ -5517,35 +5535,40 @@ impl State for MenuPanelState {
         let (theme_style, default_style) = match self.widget(app).orientation {
             Axis::Horizontal => (
                 MenuBarTheme::of(app, context).style.clone(),
-                menu_bar_defaults_m3(app, context),
+                Box::new(MenuBarDefaultsM3::new(context)) as Box<dyn MenuStyleGetters>,
             ),
             Axis::Vertical => (
                 MenuTheme::of(app, context).style,
-                menu_defaults_m3(app, context),
+                Box::new(MenuDefaultsM3::new(context)) as Box<dyn MenuStyleGetters>,
             ),
         };
         let widget_style = self.widget(app).menu_style.clone();
-        let styles = [
-            widget_style.as_ref(),
-            theme_style.as_ref(),
-            Some(&default_style),
+        let styles: [Option<&dyn MenuStyleGetters>; 3] = [
+            widget_style
+                .as_ref()
+                .map(|style| style as &dyn MenuStyleGetters),
+            theme_style
+                .as_ref()
+                .map(|style| style as &dyn MenuStyleGetters),
+            Some(&*default_style),
         ];
 
-        let background_color = resolve(styles, |style| style.background_color.as_ref());
-        let shadow_color = resolve(styles, |style| style.shadow_color.as_ref());
-        let surface_tint_color = resolve(styles, |style| style.surface_tint_color.as_ref());
-        let elevation = resolve(styles, |style| style.elevation.as_ref()).unwrap_or(0.0);
-        let minimum_size = resolve(styles, |style| style.minimum_size.as_ref());
-        let fixed_size = resolve(styles, |style| style.fixed_size.as_ref());
-        let maximum_size = resolve(styles, |style| style.maximum_size.as_ref());
-        let side = resolve(styles, |style| style.side.as_ref());
-        let shape: Box<dyn ShapeBorder> = resolve(styles, |style| style.shape.as_ref())
+        let background_color = resolve(app, styles, |style, app| style.background_color(app));
+        let shadow_color = resolve(app, styles, |style, app| style.shadow_color(app));
+        let surface_tint_color = resolve(app, styles, |style, app| style.surface_tint_color(app));
+        let elevation = resolve(app, styles, |style, app| style.elevation(app)).unwrap_or(0.0);
+        let minimum_size = resolve(app, styles, |style, app| style.minimum_size(app));
+        let fixed_size = resolve(app, styles, |style, app| style.fixed_size(app));
+        let maximum_size = resolve(app, styles, |style, app| style.maximum_size(app));
+        let side = resolve(app, styles, |style, app| style.side(app));
+        let shape: ShapeBorderRef = resolve(app, styles, |style, app| style.shape(app))
             .expect("the default menu style has a shape")
-            .copy_with(side);
-        let visual_density = effective_value(styles, |style| style.visual_density)
+            .copy_with(side)
+            .into();
+        let visual_density = effective_value(app, styles, |style, app| style.visual_density(app))
             .unwrap_or(VisualDensity::STANDARD);
-        let padding =
-            resolve(styles, |style| style.padding.as_ref()).unwrap_or(EdgeInsetsGeometry::ZERO);
+        let padding = resolve(app, styles, |style, app| style.padding(app))
+            .unwrap_or(EdgeInsetsGeometry::ZERO);
         let density_adjustment = visual_density.base_size_adjustment();
         // Scrollbar uses the `MediaQuery.padding` as its painter padding by
         // default. Menu overlays are already positioned within the safe area, so
@@ -5746,50 +5769,50 @@ impl StatelessWidget for Submenu {
             match anchor.parent(app).map(AnyMenuAnchorState::orientation) {
                 Some(Axis::Horizontal) | None => (
                     MenuBarTheme::of(app, context).style.clone(),
-                    menu_bar_defaults_m3(app, context),
+                    Box::new(MenuBarDefaultsM3::new(context)) as Box<dyn MenuStyleGetters>,
                 ),
                 Some(Axis::Vertical) => (
                     MenuTheme::of(app, context).style,
-                    menu_defaults_m3(app, context),
+                    Box::new(MenuDefaultsM3::new(context)) as Box<dyn MenuStyleGetters>,
                 ),
             };
-        let styles = [
-            self.menu_style.as_ref(),
-            theme_style.as_ref(),
-            Some(&default_style),
+        let styles: [Option<&dyn MenuStyleGetters>; 3] = [
+            self.menu_style
+                .as_ref()
+                .map(|style| style as &dyn MenuStyleGetters),
+            theme_style
+                .as_ref()
+                .map(|style| style as &dyn MenuStyleGetters),
+            Some(&*default_style),
         ];
 
-        let cursor_styles = [
-            self.menu_style.clone(),
-            theme_style.clone(),
-            Some(default_style.clone()),
+        // The mouse cursor resolves without the `App`, so it reads each style's property now.
+        let cursor_properties = [
+            self.menu_style
+                .as_ref()
+                .and_then(|style| style.mouse_cursor.clone()),
+            theme_style
+                .as_ref()
+                .and_then(|style| style.mouse_cursor.clone()),
+            default_style.mouse_cursor(app),
         ];
         let mouse_cursor = WidgetStateMouseCursor::resolve_with(
             move |states| {
-                effective_value(
-                    [
-                        cursor_styles[0].as_ref(),
-                        cursor_styles[1].as_ref(),
-                        cursor_styles[2].as_ref(),
-                    ],
-                    |style| {
-                        style
-                            .mouse_cursor
-                            .as_ref()
-                            .and_then(|mouse_cursor| mouse_cursor.resolve(states))
-                    },
-                )
-                .unwrap_or_else(<dyn MouseCursor>::uncontrolled)
+                cursor_properties
+                    .iter()
+                    .flatten()
+                    .find_map(|mouse_cursor| mouse_cursor.resolve(states))
+                    .unwrap_or_else(<dyn MouseCursor>::uncontrolled)
             },
             Some("Menu_MouseCursor"),
         );
 
-        let visual_density = effective_value(styles, |style| style.visual_density)
+        let visual_density = effective_value(app, styles, |style, app| style.visual_density(app))
             .unwrap_or_else(|| Theme::of(app, context).visual_density);
-        let alignment = effective_value(styles, |style| style.alignment)
+        let alignment = effective_value(app, styles, |style, app| style.alignment(app))
             .expect("the default menu style has an alignment");
-        let padding =
-            resolve(styles, |style| style.padding.as_ref()).unwrap_or(EdgeInsetsGeometry::ZERO);
+        let padding = resolve(app, styles, |style, app| style.padding(app))
+            .unwrap_or(EdgeInsetsGeometry::ZERO);
         let density_adjustment = visual_density.base_size_adjustment();
         // Per the Material Design team: don't allow the VisualDensity
         // adjustment to reduce the width of the left/right padding. If we
@@ -6397,6 +6420,7 @@ mod tests {
 
     mod functions {
         use std::cell::Cell;
+        use waft_painting::ShapeBorder;
 
         use waft_widgets::{Center, Column};
 

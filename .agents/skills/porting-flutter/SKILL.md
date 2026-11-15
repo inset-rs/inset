@@ -26,6 +26,7 @@ A pattern earns a file under `patterns/` on its second instance. Until then, the
 - Callback identity: [patterns/callback-identity.md](patterns/callback-identity.md)
 - Futures: [patterns/futures.md](patterns/futures.md)
 - Value tweens: [patterns/value-tweens.md](patterns/value-tweens.md)
+- Lazy defaults: [patterns/lazy-defaults.md](patterns/lazy-defaults.md)
 
 ## Rust traps
 

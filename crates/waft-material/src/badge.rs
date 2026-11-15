@@ -19,7 +19,8 @@ use waft_widgets::{
 };
 
 use crate::badge_theme::BadgeTheme;
-use crate::generated::badge_defaults_m3::badge_defaults_m3;
+use crate::badge_theme::BadgeThemeDataGetters;
+use crate::generated::badge_defaults_m3::BadgeDefaultsM3;
 
 /// A Material Design "badge".
 ///
@@ -295,12 +296,12 @@ impl StatelessWidget for Badge {
         }
 
         let badge_theme = BadgeTheme::of(app, context);
-        let defaults = badge_defaults_m3(app, context);
+        let defaults = BadgeDefaultsM3::new(context);
         let effective_decoration = ShapeDecoration::new(StadiumBorder::new(BorderSide::NONE))
             .color(
                 self.background_color
                     .or(badge_theme.background_color)
-                    .or(defaults.background_color)
+                    .or_else(|| defaults.background_color(app))
                     .expect("the defaults give a background color"),
             );
         let effective_width_offset;
@@ -311,14 +312,14 @@ impl StatelessWidget for Badge {
             let min_size = self
                 .large_size
                 .or(badge_theme.large_size)
-                .or(defaults.large_size)
+                .or_else(|| defaults.large_size(app))
                 .expect("the defaults give a large size");
             effective_width_offset = min_size;
             let text_style = self
                 .text_style
                 .clone()
                 .or(badge_theme.text_style.clone())
-                .or(defaults.text_style.clone())
+                .or_else(|| defaults.text_style(app))
                 .expect("the defaults give a text style");
             let mut container = Container::new()
                 .clip_behavior(Clip::AntiAlias)
@@ -326,7 +327,7 @@ impl StatelessWidget for Badge {
                 .padding(
                     self.padding
                         .or(badge_theme.padding)
-                        .or(defaults.padding)
+                        .or_else(|| defaults.padding(app))
                         .expect("the defaults give a padding"),
                 )
                 .alignment(AlignmentGeometry::CENTER);
@@ -335,7 +336,7 @@ impl StatelessWidget for Badge {
                 text_style.copy_with().color(
                     self.text_color
                         .or(badge_theme.text_color)
-                        .or(defaults.text_color)
+                        .or_else(|| defaults.text_color(app))
                         .expect("the defaults give a text color"),
                 ),
                 IntrinsicHorizontalStadium {
@@ -348,7 +349,7 @@ impl StatelessWidget for Badge {
             let effective_small_size = self
                 .small_size
                 .or(badge_theme.small_size)
-                .or(defaults.small_size)
+                .or_else(|| defaults.small_size(app))
                 .expect("the defaults give a small size");
             effective_width_offset = effective_small_size;
             badge = Container::new()
@@ -366,7 +367,7 @@ impl StatelessWidget for Badge {
         let effective_alignment = self
             .alignment
             .or(badge_theme.alignment)
-            .or(defaults.alignment)
+            .or_else(|| defaults.alignment(app))
             .expect("the defaults give an alignment");
         let text_direction = Directionality::of(app, context);
         let default_offset = if text_direction == TextDirection::Ltr {

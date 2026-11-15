@@ -540,6 +540,50 @@ pub struct SliderThemeData {
     pub year2023: Option<bool>,
 }
 
+crate::theme_data_getters::theme_data_getters! {
+    /// Dart's getters of `SliderThemeData`: the theme data answers with its fields, and a defaults
+    /// subclass (Dart's `_...Defaults...(context)`) computes the ones it overrides when they
+    /// are read.
+    pub trait SliderThemeDataGetters for SliderThemeData, fields: slider_theme_data {
+        track_height: Option<f64>,
+        active_track_color: Option<Color>,
+        inactive_track_color: Option<Color>,
+        secondary_active_track_color: Option<Color>,
+        disabled_active_track_color: Option<Color>,
+        disabled_secondary_active_track_color: Option<Color>,
+        disabled_inactive_track_color: Option<Color>,
+        active_tick_mark_color: Option<Color>,
+        inactive_tick_mark_color: Option<Color>,
+        disabled_active_tick_mark_color: Option<Color>,
+        disabled_inactive_tick_mark_color: Option<Color>,
+        thumb_color: Option<Color>,
+        overlapping_shape_stroke_color: Option<Color>,
+        disabled_thumb_color: Option<Color>,
+        overlay_color: Option<AnyColor>,
+        value_indicator_color: Option<Color>,
+        value_indicator_stroke_color: Option<Color>,
+        overlay_shape: Option<SliderComponentShapeRef>,
+        tick_mark_shape: Option<SliderTickMarkShapeRef>,
+        thumb_shape: Option<SliderComponentShapeRef>,
+        track_shape: Option<SliderTrackShapeRef>,
+        value_indicator_shape: Option<SliderComponentShapeRef>,
+        range_tick_mark_shape: Option<RangeSliderTickMarkShapeRef>,
+        range_thumb_shape: Option<RangeSliderThumbShapeRef>,
+        range_track_shape: Option<RangeSliderTrackShapeRef>,
+        range_value_indicator_shape: Option<RangeSliderValueIndicatorShapeRef>,
+        show_value_indicator: Option<ShowValueIndicator>,
+        value_indicator_text_style: Option<TextStyle>,
+        min_thumb_separation: Option<f64>,
+        thumb_selector: Option<RangeThumbSelector>,
+        mouse_cursor: Option<WidgetStatePropertyRef<Option<MouseCursorRef>>>,
+        allowed_interaction: Option<SliderInteraction>,
+        padding: Option<EdgeInsetsGeometry>,
+        thumb_size: Option<WidgetStatePropertyRef<Option<Size>>>,
+        track_gap: Option<f64>,
+        year2023: Option<bool>,
+    }
+}
+
 macro_rules! slider_theme_setters {
     ($($field:ident: $ty:ty => $dart:literal),* $(,)?) => {
         $(

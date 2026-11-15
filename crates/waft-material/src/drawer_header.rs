@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use waft_animation::{Curve, Curves};
 use waft_foundation::App;
-use waft_painting::{Border, BoxDecoration, Decoration, EdgeInsets, EdgeInsetsGeometry};
+use waft_painting::{Border, BoxDecoration, DecorationRef, EdgeInsets, EdgeInsetsGeometry};
 use waft_widgets::{
     AnimatedContainer, BuildContext, Container, DefaultTextStyle, IntoWidget, KeyRef, MediaQuery,
     Semantics, StatelessWidget, WidgetRef, debug_check_has_media_query,
@@ -42,7 +42,7 @@ pub struct DrawerHeader {
     ///
     /// If this is changed, it will be animated according to [`duration`](Self::duration) and
     /// [`curve`](Self::curve).
-    pub decoration: Option<Box<dyn Decoration>>,
+    pub decoration: Option<DecorationRef>,
 
     /// The padding by which to inset [`child`](Self::child).
     ///
@@ -94,8 +94,8 @@ impl DrawerHeader {
     }
 
     /// Dart `DrawerHeader(decoration:)`.
-    pub fn decoration(mut self, decoration: impl Decoration + 'static) -> DrawerHeader {
-        self.decoration = Some(Box::new(decoration));
+    pub fn decoration(mut self, decoration: impl Into<DecorationRef>) -> DrawerHeader {
+        self.decoration = Some(decoration.into());
         self
     }
 
@@ -155,10 +155,7 @@ impl StatelessWidget for DrawerHeader {
                     ))),
             )
             .curve(Rc::clone(&self.curve));
-        animated_container.decoration = self
-            .decoration
-            .as_ref()
-            .map(|decoration| decoration.clone_box());
+        animated_container.decoration = self.decoration.clone();
         if let Some(child) = &self.child {
             animated_container = animated_container.child(DefaultTextStyle::new(
                 theme

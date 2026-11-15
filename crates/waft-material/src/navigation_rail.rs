@@ -12,7 +12,7 @@ use waft_embedder::SemanticsRole;
 use waft_embedder::{Color, Offset, Radius, Rect, lerp_double};
 use waft_foundation::{App, Handle, HandleId, K_IS_WEB, Listener, ValueChanged};
 use waft_painting::{
-    Alignment, AlignmentGeometry, BorderRadius, BoxShape, EdgeInsetsGeometry, ShapeBorder,
+    Alignment, AlignmentGeometry, BorderRadius, BoxShape, EdgeInsetsGeometry, ShapeBorderRef,
     TextDirection, TextStyle,
 };
 use waft_rendering::{BoxConstraints, MainAxisAlignment, MainAxisSize};
@@ -25,13 +25,16 @@ use waft_widgets::{
     TickerProviderStateMixinData, Visibility, WidgetRef,
 };
 
-use crate::generated::navigation_rail_defaults_m3::navigation_rail_defaults_m3;
+use crate::generated::navigation_rail_defaults_m3::NavigationRailDefaultsM3;
 use crate::ink_well::InkResponse;
 use crate::material::{Material, MaterialType, RectCallback};
 use crate::material_localizations::MaterialLocalizations;
 use crate::navigation_bar::NavigationIndicator;
-use crate::navigation_rail_theme::{NavigationRailTheme, NavigationRailThemeData};
+use crate::navigation_rail_theme::{
+    NavigationRailTheme, NavigationRailThemeData, NavigationRailThemeDataGetters,
+};
 use crate::theme::{K_THEME_ANIMATION_DURATION, Theme};
+use crate::theme_data_getters::DefaultsContext;
 
 const K_CIRCULAR_INDICATOR_DIAMETER: f64 = 56.0;
 const K_INDICATOR_HEIGHT: f64 = 32.0;
@@ -279,7 +282,7 @@ pub struct NavigationRail {
     ///
     /// If this is null, `NavigationRailThemeData::indicator_shape` is used. If
     /// that is null, defaults to `StadiumBorder`.
-    pub indicator_shape: Option<Box<dyn ShapeBorder>>,
+    pub indicator_shape: Option<ShapeBorderRef>,
 
     /// Pin the [`leading`](Self::leading) widget to the top.
     ///
@@ -507,10 +510,7 @@ impl NavigationRail {
     }
 
     /// Dart `NavigationRail(indicatorShape:)`.
-    pub fn indicator_shape(
-        mut self,
-        indicator_shape: impl Into<Box<dyn ShapeBorder>>,
-    ) -> NavigationRail {
+    pub fn indicator_shape(mut self, indicator_shape: impl Into<ShapeBorderRef>) -> NavigationRail {
         self.indicator_shape = Some(indicator_shape.into());
         self
     }
@@ -687,82 +687,85 @@ impl State for NavigationRailState {
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
         let navigation_rail_theme = NavigationRailTheme::of(app, context);
-        let defaults = if Theme::of(app, context).use_material3 {
-            navigation_rail_defaults_m3(app, context)
-        } else {
-            navigation_rail_defaults_m2(app, context)
-        };
+        let defaults: Box<dyn NavigationRailThemeDataGetters> =
+            if Theme::of(app, context).use_material3 {
+                Box::new(NavigationRailDefaultsM3::new(context))
+            } else {
+                Box::new(NavigationRailDefaultsM2::new(app, context))
+            };
         let localizations = <dyn MaterialLocalizations>::of(app, context);
 
-        let widget = self.widget(app);
+        let widget_ref = context.widget(app).clone();
+        let widget = waft_widgets::downcast_widget::<NavigationRail>(&*widget_ref)
+            .expect("a NavigationRailState builds its NavigationRail");
         let background_color = widget
             .background_color
             .or(navigation_rail_theme.background_color)
-            .or(defaults.background_color)
+            .or_else(|| defaults.background_color(app))
             .expect("the defaults give a background color");
         let elevation = widget
             .elevation
             .or(navigation_rail_theme.elevation)
-            .or(defaults.elevation)
+            .or_else(|| defaults.elevation(app))
             .expect("the defaults give an elevation");
         let min_width = widget
             .min_width
             .or(navigation_rail_theme.min_width)
-            .or(defaults.min_width)
+            .or_else(|| defaults.min_width(app))
             .expect("the defaults give a min width");
         let min_extended_width = widget
             .min_extended_width
             .or(navigation_rail_theme.min_extended_width)
-            .or(defaults.min_extended_width)
+            .or_else(|| defaults.min_extended_width(app))
             .expect("the defaults give a min extended width");
         let unselected_label_text_style = widget
             .unselected_label_text_style
             .clone()
             .or(navigation_rail_theme.unselected_label_text_style.clone())
-            .or(defaults.unselected_label_text_style.clone())
+            .or_else(|| defaults.unselected_label_text_style(app))
             .expect("the defaults give an unselected label text style");
         let selected_label_text_style = widget
             .selected_label_text_style
             .clone()
             .or(navigation_rail_theme.selected_label_text_style.clone())
-            .or(defaults.selected_label_text_style.clone())
+            .or_else(|| defaults.selected_label_text_style(app))
             .expect("the defaults give a selected label text style");
         let unselected_icon_theme = widget
             .unselected_icon_theme
             .clone()
             .or(navigation_rail_theme.unselected_icon_theme.clone())
-            .or(defaults.unselected_icon_theme.clone())
+            .or_else(|| defaults.unselected_icon_theme(app))
             .expect("the defaults give an unselected icon theme");
         let selected_icon_theme = widget
             .selected_icon_theme
             .clone()
             .or(navigation_rail_theme.selected_icon_theme.clone())
-            .or(defaults.selected_icon_theme.clone())
+            .or_else(|| defaults.selected_icon_theme(app))
             .expect("the defaults give a selected icon theme");
         let group_alignment = widget
             .group_alignment
             .or(navigation_rail_theme.group_alignment)
-            .or(defaults.group_alignment)
+            .or_else(|| defaults.group_alignment(app))
             .expect("the defaults give a group alignment");
         let label_type = widget
             .label_type
             .or(navigation_rail_theme.label_type)
-            .or(defaults.label_type)
+            .or_else(|| defaults.label_type(app))
             .expect("the defaults give a label type");
         let use_indicator = widget
             .use_indicator
             .or(navigation_rail_theme.use_indicator)
-            .or(defaults.use_indicator)
+            .or_else(|| defaults.use_indicator(app))
             .expect("the defaults give use_indicator");
         let indicator_color = widget
             .indicator_color
             .or(navigation_rail_theme.indicator_color)
-            .or(defaults.indicator_color);
+            .or_else(|| defaults.indicator_color(app));
         let indicator_shape = widget
             .indicator_shape
             .clone()
             .or(navigation_rail_theme.indicator_shape.clone())
-            .or(defaults.indicator_shape.clone());
+            .or_else(|| defaults.indicator_shape(app));
 
         // For backwards compatibility, in M2 the opacity of the unselected icons needs
         // to be set to the default if it isn't in the given theme. This can be removed
@@ -770,11 +773,12 @@ impl State for NavigationRailState {
         let effective_unselected_icon_theme = if Theme::of(app, context).use_material3 {
             unselected_icon_theme
         } else {
-            let opacity = unselected_icon_theme.opacity.or(defaults
-                .unselected_icon_theme
-                .as_ref()
-                .expect("the M2 defaults give an unselected icon theme")
-                .opacity);
+            let opacity = unselected_icon_theme.opacity.or_else(|| {
+                defaults
+                    .unselected_icon_theme(app)
+                    .expect("the M2 defaults give an unselected icon theme")
+                    .opacity
+            });
             match opacity {
                 Some(opacity) => unselected_icon_theme.copy_with().opacity(opacity),
                 None => unselected_icon_theme.copy_with(),
@@ -1042,7 +1046,7 @@ struct RailDestination {
     padding: Option<EdgeInsetsGeometry>,
     use_indicator: bool,
     indicator_color: Option<Color>,
-    indicator_shape: Option<Box<dyn ShapeBorder>>,
+    indicator_shape: Option<ShapeBorderRef>,
     disabled: bool,
 }
 
@@ -1196,8 +1200,8 @@ impl State for RailDestinationState {
         let theme = Theme::of(app, context);
         let text_direction = Directionality::of(app, context);
         let material3 = theme.use_material3;
-        let m2_min_width = navigation_rail_defaults_m2(app, context)
-            .min_width
+        let m2_min_width = NavigationRailDefaultsM2::new(app, context)
+            .min_width(app)
             .expect("the M2 defaults give a min width");
         let position_animation_value = self.position_animation_value(app);
         let extended_transition_value = self.widget(app).extended_transition_animation.value(app);
@@ -1557,7 +1561,7 @@ impl State for RailDestinationState {
 struct IndicatorInkWell {
     child: WidgetRef,
     on_tap: Option<Listener>,
-    custom_border: Option<Box<dyn ShapeBorder>>,
+    custom_border: Option<ShapeBorderRef>,
     border_radius: BorderRadius,
     splash_color: Color,
     hover_color: Color,
@@ -1636,7 +1640,7 @@ struct AddIndicator {
     add_indicator: bool,
     is_circular: bool,
     indicator_color: Option<Color>,
-    indicator_shape: Option<Box<dyn ShapeBorder>>,
+    indicator_shape: Option<ShapeBorderRef>,
     indicator_animation: AnyAnimation<f64>,
     child: WidgetRef,
 }
@@ -1747,7 +1751,7 @@ pub struct NavigationRailDestination {
     pub indicator_color: Option<Color>,
 
     /// The shape of the selection indicator.
-    pub indicator_shape: Option<Box<dyn ShapeBorder>>,
+    pub indicator_shape: Option<ShapeBorderRef>,
 
     /// The label for the destination.
     ///
@@ -1804,7 +1808,7 @@ impl NavigationRailDestination {
     /// Dart `NavigationRailDestination(indicatorShape:)`.
     pub fn indicator_shape(
         mut self,
-        indicator_shape: impl Into<Box<dyn ShapeBorder>>,
+        indicator_shape: impl Into<ShapeBorderRef>,
     ) -> NavigationRailDestination {
         self.indicator_shape = Some(indicator_shape.into());
         self
@@ -1853,20 +1857,44 @@ const VERTICAL_ICON_LABEL_SPACING_M3: f64 = 4.0;
 const VERTICAL_DESTINATION_SPACING_M3: f64 = 12.0;
 const HORIZONTAL_DESTINATION_SPACING_M3: f64 = 12.0;
 
-/// Hand coded defaults based on Material Design 2: Dart's `_NavigationRailDefaultsM2(context)`.
+/// Dart's `_NavigationRailDefaultsM2`.
+struct NavigationRailDefaultsM2 {
+    /// Dart's `super(..)` arguments.
+    navigation_rail_theme_data: NavigationRailThemeData,
+    context: DefaultsContext,
+}
+
+impl NavigationRailDefaultsM2 {
+    fn new(app: &mut App, context: BuildContext) -> NavigationRailDefaultsM2 {
+        NavigationRailDefaultsM2 {
+            navigation_rail_theme_data: NavigationRailThemeData::new()
+                .elevation(0.0)
+                .group_alignment(-1.0)
+                .label_type(NavigationRailLabelType::None)
+                .use_indicator(false)
+                .min_width(72.0)
+                .min_extended_width(256.0),
+            context: DefaultsContext::with_theme(app, context),
+        }
+    }
+}
+
 #[expect(deprecated, reason = "Dart calls the deprecated `Color.withOpacity`")]
-fn navigation_rail_defaults_m2(app: &mut App, context: BuildContext) -> NavigationRailThemeData {
-    let theme = Theme::of(app, context);
-    let colors = &theme.color_scheme;
-    NavigationRailThemeData::new()
-        .elevation(0.0)
-        .group_alignment(-1.0)
-        .label_type(NavigationRailLabelType::None)
-        .use_indicator(false)
-        .min_width(72.0)
-        .min_extended_width(256.0)
-        .background_color(colors.surface)
-        .unselected_label_text_style(
+impl NavigationRailThemeDataGetters for NavigationRailDefaultsM2 {
+    fn navigation_rail_theme_data(&self) -> &NavigationRailThemeData {
+        &self.navigation_rail_theme_data
+    }
+
+    fn background_color(&self, app: &mut App) -> Option<Color> {
+        let theme = self.context.theme(app);
+        let colors = &theme.color_scheme;
+        Some(colors.surface)
+    }
+
+    fn unselected_label_text_style(&self, app: &mut App) -> Option<TextStyle> {
+        let theme = self.context.theme(app);
+        let colors = &theme.color_scheme;
+        Some(
             theme
                 .text_theme
                 .body_large
@@ -1875,7 +1903,12 @@ fn navigation_rail_defaults_m2(app: &mut App, context: BuildContext) -> Navigati
                 .copy_with()
                 .color(colors.on_surface.with_opacity(0.64)),
         )
-        .selected_label_text_style(
+    }
+
+    fn selected_label_text_style(&self, app: &mut App) -> Option<TextStyle> {
+        let theme = self.context.theme(app);
+        let colors = &theme.color_scheme;
+        Some(
             theme
                 .text_theme
                 .body_large
@@ -1884,18 +1917,29 @@ fn navigation_rail_defaults_m2(app: &mut App, context: BuildContext) -> Navigati
                 .copy_with()
                 .color(colors.primary),
         )
-        .unselected_icon_theme(
+    }
+
+    fn unselected_icon_theme(&self, app: &mut App) -> Option<IconThemeData> {
+        let theme = self.context.theme(app);
+        let colors = &theme.color_scheme;
+        Some(
             IconThemeData::new()
                 .size(24.0)
                 .color(colors.on_surface)
                 .opacity(0.64),
         )
-        .selected_icon_theme(
+    }
+
+    fn selected_icon_theme(&self, app: &mut App) -> Option<IconThemeData> {
+        let theme = self.context.theme(app);
+        let colors = &theme.color_scheme;
+        Some(
             IconThemeData::new()
                 .size(24.0)
                 .color(colors.primary)
                 .opacity(1.0),
         )
+    }
 }
 
 #[cfg(test)]
@@ -1904,6 +1948,7 @@ mod tests {
     //! are squares of the font size (`install_platform_fonts`).
 
     use std::time::Duration;
+    use waft_painting::ShapeBorder;
 
     use waft_embedder::{FontWeight, Size};
     use waft_rendering::{AnyRenderBox, RenderParagraph};

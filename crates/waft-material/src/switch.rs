@@ -46,11 +46,12 @@ use crate::constants::{
     K_RADIAL_REACTION_RADIUS,
 };
 use crate::debug::debug_check_has_material;
-use crate::generated::switch_defaults_m3::{SwitchConfigM3, switch_defaults_m3};
+use crate::generated::switch_defaults_m3::{SwitchConfigM3, SwitchDefaultsM3};
 use crate::shadows::k_elevation_to_shadow;
-use crate::switch_theme::{SwitchTheme, SwitchThemeData};
+use crate::switch_theme::{SwitchTheme, SwitchThemeData, SwitchThemeDataGetters};
 use crate::theme::Theme;
 use crate::theme_data::{Adaptation, MaterialTapTargetSize, ThemeData};
+use crate::theme_data_getters::DefaultsContext;
 
 /// Dart's deprecated `Color.withOpacity`, deprecated here too: its rounding to an 8-bit alpha
 /// is part of the behaviour being ported.
@@ -581,7 +582,7 @@ impl Switch {
         let effective_padding = self
             .padding
             .or(switch_theme.padding)
-            .or(defaults.padding)
+            .or_else(|| defaults.padding(app))
             .expect("the defaults give a padding");
         match effective_material_tap_target_size {
             MaterialTapTargetSize::Padded => Size::new(
@@ -610,11 +611,15 @@ fn switch_config(
 }
 
 /// Dart's `theme.useMaterial3 ? _SwitchDefaultsM3(context) : _SwitchDefaultsM2(context)`.
-fn switch_defaults(app: &mut App, context: BuildContext, use_material3: bool) -> SwitchThemeData {
+fn switch_defaults(
+    app: &mut App,
+    context: BuildContext,
+    use_material3: bool,
+) -> Box<dyn SwitchThemeDataGetters> {
     if use_material3 {
-        switch_defaults_m3(app, context)
+        Box::new(SwitchDefaultsM3::new(context))
     } else {
-        switch_defaults_m2(app, context)
+        Box::new(SwitchDefaultsM2::new(app, context))
     }
 }
 
@@ -1005,7 +1010,7 @@ impl State for MaterialSwitchState {
         let widget = self.widget(app).clone();
 
         let switch_config: Box<dyn SwitchConfig>;
-        let defaults: SwitchThemeData;
+        let defaults: Box<dyn SwitchThemeDataGetters>;
         let mut apply_cupertino_theme = false;
         let mut disabled_opacity = 1.0;
         match widget.switch_type {
@@ -1039,7 +1044,7 @@ impl State for MaterialSwitchState {
                             .unwrap_or(false);
                         disabled_opacity = 0.5;
                         switch_config = Box::new(SwitchConfigCupertino::new(app, context));
-                        defaults = switch_defaults_cupertino(app, context);
+                        defaults = Box::new(SwitchDefaultsCupertino::new(context));
                         let reaction_controller = self.reaction_controller(app);
                         app.get_mut(reaction_controller).duration =
                             Some(Duration::from_millis(200));
@@ -1066,13 +1071,13 @@ impl State for MaterialSwitchState {
             .or_else(|| widget_thumb_color.resolve(&active_states))
             .or_else(|| resolve(&switch_theme.thumb_color, &active_states));
         let effective_active_thumb_color = active_thumb_color
-            .or_else(|| resolve(&defaults.thumb_color, &active_states))
+            .or_else(|| resolve(&defaults.thumb_color(app), &active_states))
             .expect("the defaults give a thumb color");
         let inactive_thumb_color = resolve(&widget.thumb_color, &inactive_states)
             .or_else(|| widget_thumb_color.resolve(&inactive_states))
             .or_else(|| resolve(&switch_theme.thumb_color, &inactive_states));
         let effective_inactive_thumb_color = inactive_thumb_color
-            .or_else(|| resolve(&defaults.thumb_color, &inactive_states))
+            .or_else(|| resolve(&defaults.thumb_color(app), &inactive_states))
             .expect("the defaults give a thumb color");
         let effective_active_track_color = resolve(&widget.track_color, &active_states)
             .or_else(|| widget_track_color.resolve(&active_states))
@@ -1088,14 +1093,14 @@ impl State for MaterialSwitchState {
                     .resolve(&active_states)
                     .map(|color| color.with_alpha(0x80))
             })
-            .or_else(|| resolve(&defaults.track_color, &active_states))
+            .or_else(|| resolve(&defaults.track_color(app), &active_states))
             .expect("the defaults give a track color");
         let effective_active_track_outline_color =
             resolve(&widget.track_outline_color, &active_states)
                 .or_else(|| resolve(&switch_theme.track_outline_color, &active_states))
                 .or_else(|| {
                     defaults
-                        .track_outline_color
+                        .track_outline_color(app)
                         .as_ref()
                         .expect("the defaults give a track outline color")
                         .resolve(&active_states)
@@ -1103,21 +1108,21 @@ impl State for MaterialSwitchState {
         let effective_active_track_outline_width =
             resolve(&widget.track_outline_width, &active_states)
                 .or_else(|| resolve(&switch_theme.track_outline_width, &active_states))
-                .or_else(|| resolve(&defaults.track_outline_width, &active_states));
+                .or_else(|| resolve(&defaults.track_outline_width(app), &active_states));
 
         let effective_inactive_track_color = resolve(&widget.track_color, &inactive_states)
             .or_else(|| widget_track_color.resolve(&inactive_states))
             .or_else(|| resolve(&switch_theme.track_color, &inactive_states))
-            .or_else(|| resolve(&defaults.track_color, &inactive_states))
+            .or_else(|| resolve(&defaults.track_color(app), &inactive_states))
             .expect("the defaults give a track color");
         let effective_inactive_track_outline_color =
             resolve(&widget.track_outline_color, &inactive_states)
                 .or_else(|| resolve(&switch_theme.track_outline_color, &inactive_states))
-                .or_else(|| resolve(&defaults.track_outline_color, &inactive_states));
+                .or_else(|| resolve(&defaults.track_outline_color(app), &inactive_states));
         let effective_inactive_track_outline_width =
             resolve(&widget.track_outline_width, &inactive_states)
                 .or_else(|| resolve(&switch_theme.track_outline_width, &inactive_states))
-                .or_else(|| resolve(&defaults.track_outline_width, &inactive_states));
+                .or_else(|| resolve(&defaults.track_outline_width(app), &inactive_states));
 
         let effective_active_icon = resolve(&widget.thumb_icon, &active_states)
             .or_else(|| resolve(&switch_theme.thumb_icon, &active_states));
@@ -1148,7 +1153,7 @@ impl State for MaterialSwitchState {
                         .to_color()
                 })
             })
-            .or_else(|| resolve(&defaults.overlay_color, &focused_states))
+            .or_else(|| resolve(&defaults.overlay_color(app), &focused_states))
             .expect("the defaults give a focus overlay color");
 
         let mut hovered_states = self.states(app);
@@ -1156,7 +1161,7 @@ impl State for MaterialSwitchState {
         let effective_hover_overlay_color = resolve(&widget.overlay_color, &hovered_states)
             .or(widget.hover_color)
             .or_else(|| resolve(&switch_theme.overlay_color, &hovered_states))
-            .or_else(|| resolve(&defaults.overlay_color, &hovered_states))
+            .or_else(|| resolve(&defaults.overlay_color(app), &hovered_states))
             .expect("the defaults give a hover overlay color");
 
         let mut active_pressed_states = active_states;
@@ -1165,7 +1170,7 @@ impl State for MaterialSwitchState {
             resolve(&widget.thumb_color, &active_pressed_states)
                 .or_else(|| widget_thumb_color.resolve(&active_pressed_states))
                 .or_else(|| resolve(&switch_theme.thumb_color, &active_pressed_states))
-                .or_else(|| resolve(&defaults.thumb_color, &active_pressed_states))
+                .or_else(|| resolve(&defaults.thumb_color(app), &active_pressed_states))
                 .expect("the defaults give a thumb color");
         let effective_active_pressed_overlay_color =
             resolve(&widget.overlay_color, &active_pressed_states)
@@ -1173,7 +1178,7 @@ impl State for MaterialSwitchState {
                 .or_else(|| {
                     active_thumb_color.map(|color| color.with_alpha(K_RADIAL_REACTION_ALPHA))
                 })
-                .or_else(|| resolve(&defaults.overlay_color, &active_pressed_states))
+                .or_else(|| resolve(&defaults.overlay_color(app), &active_pressed_states))
                 .expect("the defaults give a pressed overlay color");
 
         let mut inactive_pressed_states = inactive_states;
@@ -1182,7 +1187,7 @@ impl State for MaterialSwitchState {
             resolve(&widget.thumb_color, &inactive_pressed_states)
                 .or_else(|| widget_thumb_color.resolve(&inactive_pressed_states))
                 .or_else(|| resolve(&switch_theme.thumb_color, &inactive_pressed_states))
-                .or_else(|| resolve(&defaults.thumb_color, &inactive_pressed_states))
+                .or_else(|| resolve(&defaults.thumb_color(app), &inactive_pressed_states))
                 .expect("the defaults give a thumb color");
         let effective_inactive_pressed_overlay_color =
             resolve(&widget.overlay_color, &inactive_pressed_states)
@@ -1190,13 +1195,13 @@ impl State for MaterialSwitchState {
                 .or_else(|| {
                     inactive_thumb_color.map(|color| color.with_alpha(K_RADIAL_REACTION_ALPHA))
                 })
-                .or_else(|| resolve(&defaults.overlay_color, &inactive_pressed_states))
+                .or_else(|| resolve(&defaults.overlay_color(app), &inactive_pressed_states))
                 .expect("the defaults give a pressed overlay color");
 
         let effective_mouse_cursor = {
             let mouse_cursor = widget.mouse_cursor.clone();
             let theme_mouse_cursor = switch_theme.mouse_cursor.clone();
-            let default_mouse_cursor = defaults.mouse_cursor.clone();
+            let default_mouse_cursor = defaults.mouse_cursor(app);
             <dyn WidgetStateProperty<MouseCursorRef>>::resolve_with(move |states: &WidgetStates| {
                 <dyn WidgetStateProperty<MouseCursorRef>>::resolve_as(&mouse_cursor, states)
                     .or_else(|| resolve(&theme_mouse_cursor, states))
@@ -1220,7 +1225,7 @@ impl State for MaterialSwitchState {
         let effective_splash_radius = widget
             .splash_radius
             .or(switch_theme.splash_radius)
-            .or(defaults.splash_radius)
+            .or_else(|| defaults.splash_radius(app))
             .expect("the defaults give a splash radius");
 
         let configuration = create_local_image_configuration(app, context, None);
@@ -2254,16 +2259,32 @@ pub(crate) trait SwitchConfig {
     fn switch_min_size(&self) -> Size;
 }
 
-/// Hand coded defaults for iOS/macOS Switch: Dart's `_SwitchDefaultsCupertino(context)`, the
-/// [`SwitchThemeData`] whose fields are the values of that subclass's getters.
-fn switch_defaults_cupertino(app: &mut App, context: BuildContext) -> SwitchThemeData {
-    let system_green =
-        CupertinoDynamicColor::resolve(&CupertinoColors::SYSTEM_GREEN, app, context).color();
-    let secondary_system_fill =
-        CupertinoDynamicColor::resolve(&CupertinoColors::SECONDARY_SYSTEM_FILL, app, context)
-            .color();
-    SwitchThemeData::new()
-        .mouse_cursor(<dyn WidgetStateProperty<_>>::resolve_with(
+/// Hand coded defaults for iOS/macOS Switch: Dart's `_SwitchDefaultsCupertino`.
+struct SwitchDefaultsCupertino {
+    /// Dart's `super(..)` arguments.
+    switch_theme_data: SwitchThemeData,
+    context: DefaultsContext,
+}
+
+impl SwitchDefaultsCupertino {
+    fn new(context: BuildContext) -> SwitchDefaultsCupertino {
+        SwitchDefaultsCupertino {
+            switch_theme_data: SwitchThemeData::new(),
+            context: DefaultsContext::new(context),
+        }
+    }
+}
+
+impl SwitchThemeDataGetters for SwitchDefaultsCupertino {
+    fn switch_theme_data(&self) -> &SwitchThemeData {
+        &self.switch_theme_data
+    }
+
+    fn mouse_cursor(
+        &self,
+        _app: &mut App,
+    ) -> Option<WidgetStatePropertyRef<Option<MouseCursorRef>>> {
+        Some(<dyn WidgetStateProperty<_>>::resolve_with(
             |states: &WidgetStates| -> Option<MouseCursorRef> {
                 if states.contains(&WidgetState::Disabled) {
                     return Some(SystemMouseCursors::BASIC.into());
@@ -2275,10 +2296,28 @@ fn switch_defaults_cupertino(app: &mut App, context: BuildContext) -> SwitchThem
                 })
             },
         ))
-        .thumb_color(<dyn WidgetStateProperty<Option<Color>>>::all(Some(
+    }
+
+    fn thumb_color(&self, _app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        Some(<dyn WidgetStateProperty<Option<Color>>>::all(Some(
             Colors::WHITE,
         )))
-        .track_color(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
+    }
+
+    fn track_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        let system_green = CupertinoDynamicColor::resolve(
+            &CupertinoColors::SYSTEM_GREEN,
+            app,
+            self.context.context(),
+        )
+        .color();
+        let secondary_system_fill = CupertinoDynamicColor::resolve(
+            &CupertinoColors::SECONDARY_SYSTEM_FILL,
+            app,
+            self.context.context(),
+        )
+        .color();
+        Some(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
             move |states: &WidgetStates| {
                 if states.contains(&WidgetState::Selected) {
                     return Some(system_green);
@@ -2286,10 +2325,22 @@ fn switch_defaults_cupertino(app: &mut App, context: BuildContext) -> SwitchThem
                 Some(secondary_system_fill)
             },
         ))
-        .track_outline_color(<dyn WidgetStateProperty<Option<Color>>>::all(Some(
+    }
+
+    fn track_outline_color(&self, _app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        Some(<dyn WidgetStateProperty<Option<Color>>>::all(Some(
             Colors::TRANSPARENT,
         )))
-        .overlay_color(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
+    }
+
+    fn overlay_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        let system_green = CupertinoDynamicColor::resolve(
+            &CupertinoColors::SYSTEM_GREEN,
+            app,
+            self.context.context(),
+        )
+        .color();
+        Some(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
             move |states: &WidgetStates| {
                 if states.contains(&WidgetState::Focused) {
                     return Some(
@@ -2302,7 +2353,11 @@ fn switch_defaults_cupertino(app: &mut App, context: BuildContext) -> SwitchThem
                 Some(Colors::TRANSPARENT)
             },
         ))
-        .splash_radius(0.0)
+    }
+
+    fn splash_radius(&self, _app: &mut App) -> Option<f64> {
+        Some(0.0)
+    }
 }
 
 const K_CUPERTINO_FOCUS_TRACK_OUTLINE: f64 = 3.5;
@@ -2479,85 +2534,151 @@ impl SwitchConfig for SwitchConfigM2 {
     }
 }
 
-/// Dart's `_SwitchDefaultsM2(context)`: the [`SwitchThemeData`] whose fields are the values of
-/// that subclass's getters.
-fn switch_defaults_m2(app: &mut App, context: BuildContext) -> SwitchThemeData {
-    let theme = Theme::of(app, context);
-    let colors = theme.color_scheme.clone();
-    let is_dark = theme.brightness() == Brightness::Dark;
+/// Hand coded defaults based on Material Design 2: Dart's `_SwitchDefaultsM2`.
+struct SwitchDefaultsM2 {
+    /// Dart's `super(..)` arguments.
+    switch_theme_data: SwitchThemeData,
+    context: DefaultsContext,
+}
 
-    let thumb_color = {
-        let secondary = colors.secondary;
-        <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states: &WidgetStates| {
-            if states.contains(&WidgetState::Disabled) {
-                return Some(if is_dark {
-                    Colors::GREY.shade800()
-                } else {
+impl SwitchDefaultsM2 {
+    fn new(app: &mut App, context: BuildContext) -> SwitchDefaultsM2 {
+        SwitchDefaultsM2 {
+            switch_theme_data: SwitchThemeData::new(),
+            context: DefaultsContext::with_theme(app, context),
+        }
+    }
+}
+
+impl SwitchThemeDataGetters for SwitchDefaultsM2 {
+    fn switch_theme_data(&self) -> &SwitchThemeData {
+        &self.switch_theme_data
+    }
+
+    fn thumb_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        let theme = self.context.theme(app);
+        let colors = theme.color_scheme.clone();
+        let is_dark = theme.brightness() == Brightness::Dark;
+        let thumb_color = {
+            let secondary = colors.secondary;
+            <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states: &WidgetStates| {
+                if states.contains(&WidgetState::Disabled) {
+                    return Some(if is_dark {
+                        Colors::GREY.shade800()
+                    } else {
+                        Colors::GREY.shade400()
+                    });
+                }
+                if states.contains(&WidgetState::Selected) {
+                    return Some(secondary);
+                }
+                Some(if is_dark {
                     Colors::GREY.shade400()
-                });
-            }
-            if states.contains(&WidgetState::Selected) {
-                return Some(secondary);
-            }
-            Some(if is_dark {
-                Colors::GREY.shade400()
-            } else {
-                Colors::GREY.shade50()
-            })
-        })
-    };
-
-    let track_color = {
-        let secondary = colors.secondary;
-        const BLACK32: Color = Color::new(0x52000000); // Black with 32% opacity
-        <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states: &WidgetStates| {
-            if states.contains(&WidgetState::Disabled) {
-                return Some(if is_dark {
-                    Colors::WHITE10
                 } else {
-                    Colors::BLACK12
-                });
-            }
-            if states.contains(&WidgetState::Selected) {
-                let active_color = secondary;
-                return Some(active_color.with_alpha(0x80));
-            }
-            Some(if is_dark { Colors::WHITE30 } else { BLACK32 })
-        })
-    };
+                    Colors::GREY.shade50()
+                })
+            })
+        };
+        Some(thumb_color)
+    }
 
-    let overlay_color = {
-        let thumb_color = Rc::clone(&thumb_color);
-        let (hover_color, focus_color) = (theme.hover_color, theme.focus_color);
-        <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states: &WidgetStates| {
-            if states.contains(&WidgetState::Pressed) {
-                return thumb_color
-                    .resolve(states)
-                    .map(|color| color.with_alpha(K_RADIAL_REACTION_ALPHA));
-            }
-            if states.contains(&WidgetState::Hovered) {
-                return Some(hover_color);
-            }
-            if states.contains(&WidgetState::Focused) {
-                return Some(focus_color);
-            }
-            None
-        })
-    };
+    fn track_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        let theme = self.context.theme(app);
+        let colors = theme.color_scheme.clone();
+        let is_dark = theme.brightness() == Brightness::Dark;
+        let track_color = {
+            let secondary = colors.secondary;
+            const BLACK32: Color = Color::new(0x52000000); // Black with 32% opacity
+            <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states: &WidgetStates| {
+                if states.contains(&WidgetState::Disabled) {
+                    return Some(if is_dark {
+                        Colors::WHITE10
+                    } else {
+                        Colors::BLACK12
+                    });
+                }
+                if states.contains(&WidgetState::Selected) {
+                    let active_color = secondary;
+                    return Some(active_color.with_alpha(0x80));
+                }
+                Some(if is_dark { Colors::WHITE30 } else { BLACK32 })
+            })
+        };
+        Some(track_color)
+    }
 
-    SwitchThemeData::new()
-        .thumb_color(thumb_color)
-        .track_color(track_color)
-        .track_outline_color(<dyn WidgetStateProperty<Option<Color>>>::all(Some(
+    fn track_outline_color(&self, _app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        Some(<dyn WidgetStateProperty<Option<Color>>>::all(Some(
             Colors::TRANSPARENT,
         )))
-        .material_tap_target_size(theme.material_tap_target_size)
-        .mouse_cursor(<dyn WidgetStateProperty<_>>::resolve_with(
+    }
+
+    fn material_tap_target_size(&self, app: &mut App) -> Option<MaterialTapTargetSize> {
+        let theme = self.context.theme(app);
+        Some(theme.material_tap_target_size)
+    }
+
+    fn mouse_cursor(
+        &self,
+        _app: &mut App,
+    ) -> Option<WidgetStatePropertyRef<Option<MouseCursorRef>>> {
+        Some(<dyn WidgetStateProperty<_>>::resolve_with(
             |states: &WidgetStates| Some(WidgetStateMouseCursor::clickable().resolve(states)),
         ))
-        .overlay_color(overlay_color)
-        .splash_radius(K_RADIAL_REACTION_RADIUS)
-        .padding(EdgeInsetsGeometry::ZERO)
+    }
+
+    fn overlay_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        let theme = self.context.theme(app);
+        let colors = theme.color_scheme.clone();
+        let is_dark = theme.brightness() == Brightness::Dark;
+        let thumb_color = {
+            let secondary = colors.secondary;
+            <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states: &WidgetStates| {
+                if states.contains(&WidgetState::Disabled) {
+                    return Some(if is_dark {
+                        Colors::GREY.shade800()
+                    } else {
+                        Colors::GREY.shade400()
+                    });
+                }
+                if states.contains(&WidgetState::Selected) {
+                    return Some(secondary);
+                }
+                Some(if is_dark {
+                    Colors::GREY.shade400()
+                } else {
+                    Colors::GREY.shade50()
+                })
+            })
+        };
+        let overlay_color = {
+            let thumb_color = Rc::clone(&thumb_color);
+            let (hover_color, focus_color) = (theme.hover_color, theme.focus_color);
+            <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states: &WidgetStates| {
+                if states.contains(&WidgetState::Pressed) {
+                    return thumb_color
+                        .resolve(states)
+                        .map(|color| color.with_alpha(K_RADIAL_REACTION_ALPHA));
+                }
+                if states.contains(&WidgetState::Hovered) {
+                    return Some(hover_color);
+                }
+                if states.contains(&WidgetState::Focused) {
+                    return Some(focus_color);
+                }
+                None
+            })
+        };
+        Some(overlay_color)
+    }
+
+    fn splash_radius(&self, _app: &mut App) -> Option<f64> {
+        Some(K_RADIAL_REACTION_RADIUS)
+    }
+
+    fn padding(&self, _app: &mut App) -> Option<EdgeInsetsGeometry> {
+        Some(EdgeInsetsGeometry::ZERO)
+    }
 }
 
 #[cfg(test)]
@@ -2581,7 +2702,8 @@ pub(crate) mod tests {
     use waft_services::{LogicalKeyboardKey, PhysicalKeyboardKey};
     use waft_widgets::{
         Align, AnyElement, Center, Container, FocusHighlightStrategy, FocusNode, FocusNodeLeaf,
-        IconData, MouseRegion, StateSetter, StatefulBuilder, StatefulElement, UnfocusDisposition,
+        IconData, MediaQuery, MediaQueryData, MouseRegion, StateSetter, StatefulBuilder,
+        StatefulElement, UnfocusDisposition,
     };
 
     use super::*;
@@ -2773,6 +2895,54 @@ pub(crate) mod tests {
     fn in_material(direction: TextDirection, child: WidgetRef) -> WidgetRef {
         Directionality::new(direction, Material::new().child(Center::new().child(child)))
             .into_widget()
+    }
+
+    /// Not a Dart case: Dart's `_SwitchDefaultsCupertino` resolves the dynamic Cupertino
+    /// colours only in the getters the switch reaches, so an adaptive switch on iOS given its
+    /// own track and overlay colours does not depend on the high contrast those colours read
+    /// from the ambient `MediaQuery`. (Every switch depends on the `CupertinoTheme` through
+    /// `Theme.of`, as in Dart.)
+    #[test]
+    fn an_adaptive_switch_given_its_colors_does_not_depend_on_high_contrast() {
+        with_main_thread_stack(|| {
+            let built_child = |tester: &WidgetTester| -> WidgetRef {
+                let element = *tester.find_by_type::<Switch>().first().expect("a switch");
+                let app = tester.cell.borrow();
+                let material_switch = element.children(&app)[0];
+                material_switch.children(&app)[0].widget(&app).clone()
+            };
+            let pump = |tester: &mut WidgetTester, high_contrast: bool, switch: &WidgetRef| {
+                let home = in_material(
+                    TextDirection::Ltr,
+                    MediaQuery::new(
+                        MediaQueryData::new().high_contrast(high_contrast),
+                        switch.clone(),
+                    )
+                    .into_widget(),
+                );
+                pump_app(tester, m3, move |_app| home);
+            };
+            let mut tester = tester_on(TargetPlatform::IOS);
+            let switch = Switch::adaptive(true, ignore())
+                .track_color(<dyn WidgetStateProperty<Option<Color>>>::all(Some(
+                    Colors::RED.primary(),
+                )))
+                .overlay_color(<dyn WidgetStateProperty<Option<Color>>>::all(Some(
+                    Colors::BLUE.primary(),
+                )))
+                .into_widget();
+            pump(&mut tester, false, &switch);
+            let built = built_child(&tester);
+            pump(&mut tester, true, &switch);
+            assert!(waft_widgets::same_widget(&built, &built_child(&tester)));
+
+            // Without colours of its own, the switch resolves the Cupertino defaults.
+            let switch = Switch::adaptive(true, ignore()).into_widget();
+            pump(&mut tester, false, &switch);
+            let built = built_child(&tester);
+            pump(&mut tester, true, &switch);
+            assert!(!waft_widgets::same_widget(&built, &built_child(&tester)));
+        });
     }
 
     /// An `onChanged` that ignores its value: Dart's `(_) {}`.

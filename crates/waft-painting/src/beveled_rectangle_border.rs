@@ -2,6 +2,7 @@
 
 use std::any::Any;
 use std::fmt::{Debug, Formatter, Result as FmtResult};
+use std::rc::Rc;
 
 use waft_embedder::{Canvas, Path, PathBuilder, RRect};
 use waft_embedder::{Matrix4, Offset, Rect};
@@ -9,7 +10,8 @@ use waft_embedder::{Matrix4, Offset, Rect};
 use crate::basic_types::TextDirection;
 use crate::border_radius::{BorderRadius, BorderRadiusGeometry};
 use crate::borders::{
-    BorderSide, BorderStyle, OutlinedBorder, ShapeBorder, outlined_border_dimensions,
+    BorderSide, BorderStyle, OutlinedBorder, OutlinedBorderRef, ShapeBorder, ShapeBorderRef,
+    outlined_border_dimensions,
 };
 use crate::edge_insets::EdgeInsetsGeometry;
 
@@ -120,13 +122,13 @@ impl ShapeBorder for BeveledRectangleBorder {
         outlined_border_dimensions(self.side)
     }
 
-    fn scale(&self, t: f64) -> Box<dyn ShapeBorder> {
-        Box::new(BeveledRectangleBorder::scale(self, t))
+    fn scale(&self, t: f64) -> ShapeBorderRef {
+        ShapeBorderRef::new(BeveledRectangleBorder::scale(self, t))
     }
 
-    fn lerp_from(&self, a: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
+    fn lerp_from(&self, a: Option<&dyn ShapeBorder>, t: f64) -> Option<ShapeBorderRef> {
         if let Some(a) = a.and_then(|a| a.as_any().downcast_ref::<BeveledRectangleBorder>()) {
-            Some(Box::new(BeveledRectangleBorder::new(
+            Some(ShapeBorderRef::new(BeveledRectangleBorder::new(
                 BorderSide::lerp(a.side, self.side, t),
                 BorderRadiusGeometry::lerp(Some(a.border_radius), Some(self.border_radius), t)
                     .unwrap(),
@@ -138,9 +140,9 @@ impl ShapeBorder for BeveledRectangleBorder {
         }
     }
 
-    fn lerp_to(&self, b: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
+    fn lerp_to(&self, b: Option<&dyn ShapeBorder>, t: f64) -> Option<ShapeBorderRef> {
         if let Some(b) = b.and_then(|b| b.as_any().downcast_ref::<BeveledRectangleBorder>()) {
-            Some(Box::new(BeveledRectangleBorder::new(
+            Some(ShapeBorderRef::new(BeveledRectangleBorder::new(
                 BorderSide::lerp(self.side, b.side, t),
                 BorderRadiusGeometry::lerp(Some(self.border_radius), Some(b.border_radius), t)
                     .unwrap(),
@@ -186,15 +188,15 @@ impl ShapeBorder for BeveledRectangleBorder {
         }
     }
 
-    fn clone_box(&self) -> Box<dyn ShapeBorder> {
-        Box::new(*self)
-    }
-
     fn as_any(&self) -> &dyn Any {
         self
     }
 
     fn as_outlined_border(&self) -> Option<&dyn OutlinedBorder> {
+        Some(self)
+    }
+
+    fn into_outlined_border(self: Rc<Self>) -> Option<Rc<dyn OutlinedBorder>> {
         Some(self)
     }
 
@@ -211,12 +213,8 @@ impl OutlinedBorder for BeveledRectangleBorder {
         self.side
     }
 
-    fn copy_with(&self, side: Option<BorderSide>) -> Box<dyn OutlinedBorder> {
-        Box::new(BeveledRectangleBorder::copy_with(self, side, None))
-    }
-
-    fn clone_outlined(&self) -> Box<dyn OutlinedBorder> {
-        Box::new(*self)
+    fn copy_with(&self, side: Option<BorderSide>) -> OutlinedBorderRef {
+        OutlinedBorderRef::new(BeveledRectangleBorder::copy_with(self, side, None))
     }
 }
 
@@ -296,19 +294,31 @@ mod tests {
         assert_eq!(c10.scale(2.0), c20);
         assert_eq!(c20.scale(0.5), c10);
         assert!(
-            <dyn ShapeBorder>::lerp(Some(&c10), Some(&c20), 0.0)
-                .unwrap()
-                .eq_shape(&c10)
+            ShapeBorderRef::lerp(
+                Some(&ShapeBorderRef::new(c10)),
+                Some(&ShapeBorderRef::new(c20)),
+                0.0
+            )
+            .unwrap()
+            .eq_shape(&c10)
         );
         assert!(
-            <dyn ShapeBorder>::lerp(Some(&c10), Some(&c20), 0.5)
-                .unwrap()
-                .eq_shape(&c15)
+            ShapeBorderRef::lerp(
+                Some(&ShapeBorderRef::new(c10)),
+                Some(&ShapeBorderRef::new(c20)),
+                0.5
+            )
+            .unwrap()
+            .eq_shape(&c15)
         );
         assert!(
-            <dyn ShapeBorder>::lerp(Some(&c10), Some(&c20), 1.0)
-                .unwrap()
-                .eq_shape(&c20)
+            ShapeBorderRef::lerp(
+                Some(&ShapeBorderRef::new(c10)),
+                Some(&ShapeBorderRef::new(c20)),
+                1.0
+            )
+            .unwrap()
+            .eq_shape(&c20)
         );
     }
 

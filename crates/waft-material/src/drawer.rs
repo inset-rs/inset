@@ -10,7 +10,7 @@ use waft_animation::{
 use waft_embedder::{Clip, Color, TargetPlatform, TextDirection};
 use waft_foundation::{App, Handle, Listener};
 use waft_gestures::{DragDownDetails, DragEndDetails, DragStartBehavior, DragUpdateDetails};
-use waft_painting::{AlignmentGeometry, ShapeBorder};
+use waft_painting::{AlignmentGeometry, ShapeBorderRef};
 use waft_rendering::{BoxConstraints, HitTestBehavior};
 use waft_scheduler::{Ticker, TickerCallback, TickerProviderObject};
 use waft_widgets::{
@@ -23,8 +23,8 @@ use waft_widgets::{
 
 use crate::colors::Colors;
 use crate::debug::debug_check_has_material_localizations;
-use crate::drawer_theme::{DrawerTheme, DrawerThemeData};
-use crate::generated::drawer_defaults_m3::drawer_defaults_m3;
+use crate::drawer_theme::{DrawerTheme, DrawerThemeData, DrawerThemeDataGetters};
+use crate::generated::drawer_defaults_m3::DrawerDefaultsM3;
 use crate::list_tile::ListTileStyle;
 use crate::list_tile_theme::ListTileTheme;
 use crate::material::Material;
@@ -156,7 +156,7 @@ pub struct Drawer {
     ///
     /// If this is null, then [`DrawerThemeData::shape`] is used. If that
     /// is also null, then it falls back to `Material`'s default.
-    pub shape: Option<Box<dyn ShapeBorder>>,
+    pub shape: Option<ShapeBorderRef>,
 
     /// The width of the drawer.
     ///
@@ -226,7 +226,7 @@ impl Drawer {
     }
 
     /// Dart `Drawer(shape:)`.
-    pub fn shape(mut self, shape: impl Into<Box<dyn ShapeBorder>>) -> Drawer {
+    pub fn shape(mut self, shape: impl Into<ShapeBorderRef>) -> Drawer {
         self.shape = Some(shape.into());
         self
     }
@@ -279,25 +279,25 @@ impl StatelessWidget for Drawer {
         let is_drawer_start = DrawerController::maybe_of(app, context)
             .map(|controller| controller.alignment)
             != Some(DrawerAlignment::End);
-        let defaults = if use_material3 {
-            drawer_defaults_m3(app, context)
+        let defaults: Box<dyn DrawerThemeDataGetters> = if use_material3 {
+            Box::new(DrawerDefaultsM3::new(context))
         } else {
-            drawer_defaults_m2(app, context)
+            Box::new(DrawerDefaultsM2::new(context))
         };
-        let effective_shape: Option<Box<dyn ShapeBorder>> = self.shape.clone().or_else(|| {
+        let effective_shape: Option<ShapeBorderRef> = self.shape.clone().or_else(|| {
             if is_drawer_start {
-                drawer_theme.shape.clone().or(defaults.shape.clone())
+                drawer_theme.shape.clone().or_else(|| defaults.shape(app))
             } else {
                 drawer_theme
                     .end_shape
                     .clone()
-                    .or(defaults.end_shape.clone())
+                    .or_else(|| defaults.end_shape(app))
             }
         });
         let clip_behavior = if effective_shape.is_some() {
             self.clip_behavior
                 .or(drawer_theme.clip_behavior)
-                .or(defaults.clip_behavior)
+                .or_else(|| defaults.clip_behavior(app))
                 .expect("the defaults give a clip behavior")
         } else {
             Clip::None
@@ -306,22 +306,22 @@ impl StatelessWidget for Drawer {
             .elevation(
                 self.elevation
                     .or(drawer_theme.elevation)
-                    .or(defaults.elevation)
+                    .or_else(|| defaults.elevation(app))
                     .expect("the defaults give an elevation"),
             )
             .clip_behavior(clip_behavior);
         material.color = self
             .background_color
             .or(drawer_theme.background_color)
-            .or(defaults.background_color);
+            .or_else(|| defaults.background_color(app));
         material.shadow_color = self
             .shadow_color
             .or(drawer_theme.shadow_color)
-            .or(defaults.shadow_color);
+            .or_else(|| defaults.shadow_color(app));
         material.surface_tint_color = self
             .surface_tint_color
             .or(drawer_theme.surface_tint_color)
-            .or(defaults.surface_tint_color);
+            .or_else(|| defaults.surface_tint_color(app));
         material.shape = effective_shape;
         material.child = self.child.clone();
         let mut semantics = Semantics::new()
@@ -1070,13 +1070,32 @@ impl State for DrawerControllerState {
     }
 }
 
-/// Dart's `_DrawerDefaultsM2(context)`: the [`DrawerThemeData`] whose fields are the
-/// constructor's arguments and the value of that subclass's getter.
-fn drawer_defaults_m2(app: &mut App, context: BuildContext) -> DrawerThemeData {
-    DrawerThemeData::new()
-        .elevation(16.0)
-        .clip_behavior(Clip::HardEdge)
-        .shadow_color(Theme::of(app, context).shadow_color)
+/// Dart's `_DrawerDefaultsM2`.
+struct DrawerDefaultsM2 {
+    /// Dart's `super(..)` arguments.
+    drawer_theme_data: DrawerThemeData,
+    context: BuildContext,
+}
+
+impl DrawerDefaultsM2 {
+    fn new(context: BuildContext) -> DrawerDefaultsM2 {
+        DrawerDefaultsM2 {
+            drawer_theme_data: DrawerThemeData::new()
+                .elevation(16.0)
+                .clip_behavior(Clip::HardEdge),
+            context,
+        }
+    }
+}
+
+impl DrawerThemeDataGetters for DrawerDefaultsM2 {
+    fn drawer_theme_data(&self) -> &DrawerThemeData {
+        &self.drawer_theme_data
+    }
+
+    fn shadow_color(&self, app: &mut App) -> Option<Color> {
+        Some(Theme::of(app, self.context).shadow_color)
+    }
 }
 
 #[cfg(test)]
@@ -1085,6 +1104,7 @@ mod tests {
     //! scaffold_test.dart's drawer cases are in `scaffold.rs`.
 
     use std::cell::{Cell, RefCell};
+    use waft_painting::ShapeBorder;
 
     use waft_embedder::{Offset, Radius, Rect, Size};
     use waft_painting::{BorderRadius, BorderRadiusGeometry, BorderSide, RoundedRectangleBorder};
@@ -1174,7 +1194,7 @@ mod tests {
         tester.widget(drawer_material(tester), read)
     }
 
-    fn material_shape(tester: &WidgetTester) -> Option<Box<dyn ShapeBorder>> {
+    fn material_shape(tester: &WidgetTester) -> Option<ShapeBorderRef> {
         material(tester, |material| material.shape.clone())
     }
 
@@ -2317,6 +2337,81 @@ mod tests {
         with_main_thread_stack(|| assert_eq!(escape_key(Some(false)), 1));
     }
 
+    /// The widget the one `Drawer`'s element built: a new one each time the drawer builds.
+    fn drawer_built_child(tester: &WidgetTester) -> WidgetRef {
+        let drawer = *tester.find_by_type::<Drawer>().first().expect("a drawer");
+        let app = tester.cell.borrow();
+        drawer.children(&app)[0].widget(&app).clone()
+    }
+
+    /// Not a Dart case: Dart's `_DrawerDefaultsM3.shape` reads `Directionality.of` only when
+    /// the drawer reaches it, so a drawer with its own shape does not depend on the text
+    /// direction.
+    #[test]
+    fn a_material3_drawer_with_its_own_shape_does_not_depend_on_the_text_direction() {
+        with_main_thread_stack(|| {
+            let mut tester = tester();
+            let drawer = Drawer::new()
+                .shape(RoundedRectangleBorder::new(
+                    BorderSide::NONE,
+                    BorderRadiusGeometry::circular(4.0),
+                ))
+                .into_widget();
+            let home = |text_direction: TextDirection| {
+                let drawer = drawer.clone();
+                move |_app: &mut App| Directionality::new(text_direction, drawer).into_widget()
+            };
+            pump_app(&mut tester, m3, home(TextDirection::Ltr));
+            let built = drawer_built_child(&tester);
+            pump_app(&mut tester, m3, home(TextDirection::Rtl));
+            assert!(waft_widgets::same_widget(
+                &built,
+                &drawer_built_child(&tester)
+            ));
+
+            // Without a shape of its own, the drawer reads the direction for its default.
+            let drawer = Drawer::new().into_widget();
+            let home = |text_direction: TextDirection| {
+                let drawer = drawer.clone();
+                move |_app: &mut App| Directionality::new(text_direction, drawer).into_widget()
+            };
+            pump_app(&mut tester, m3, home(TextDirection::Ltr));
+            let built = drawer_built_child(&tester);
+            pump_app(&mut tester, m3, home(TextDirection::Rtl));
+            assert!(!waft_widgets::same_widget(
+                &built,
+                &drawer_built_child(&tester)
+            ));
+        });
+    }
+
+    /// Not a Dart case: each getter of Dart's `_DrawerDefaultsM3` computes only its own value,
+    /// so reading the elevation and the colours reads no `Directionality`, which this context
+    /// does not have.
+    #[test]
+    fn the_material3_drawer_defaults_compute_only_the_value_asked_for() {
+        with_main_thread_stack(|| {
+            let mut tester = tester();
+            // The elevation and the shadow colour the builder read.
+            type Read = Option<(Option<f64>, Option<Color>)>;
+            let read: Rc<RefCell<Read>> = Rc::default();
+            let read_in_builder = Rc::clone(&read);
+            tester.pump_widget(
+                Builder::new(move |app, context| {
+                    let defaults = DrawerDefaultsM3::new(context);
+                    *read_in_builder.borrow_mut() =
+                        Some((defaults.elevation(app), defaults.shadow_color(app)));
+                    SizedBox::new().into_widget()
+                })
+                .into_widget(),
+            );
+            assert_eq!(
+                read.borrow_mut().take(),
+                Some((Some(1.0), Some(Colors::TRANSPARENT)))
+            );
+        });
+    }
+
     // Regression test for https://github.com/flutter/flutter/issues/6537
     #[test]
     fn drawer_and_drawer_header_do_not_crash_at_zero_area() {
@@ -2468,7 +2563,7 @@ mod tests {
         elevation: f64,
         shadow_color: Option<Color>,
         surface_tint_color: Option<Color>,
-        shape: Option<Box<dyn ShapeBorder>>,
+        shape: Option<ShapeBorderRef>,
         scrim_color: Color,
         width: f64,
         clip_behavior: Clip,

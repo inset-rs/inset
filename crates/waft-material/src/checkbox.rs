@@ -15,7 +15,7 @@ use waft_embedder::{
 };
 use waft_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, ValueChanged};
 use waft_painting::{
-    AnyBorderSide, BorderRadiusGeometry, BorderSide, EdgeInsets, OutlinedBorder,
+    AnyBorderSide, BorderRadiusGeometry, BorderSide, EdgeInsets, OutlinedBorder, OutlinedBorderRef,
     RoundedRectangleBorder, ShapeBorder,
 };
 use waft_scheduler::{Ticker, TickerCallback, TickerProviderObject};
@@ -28,16 +28,17 @@ use waft_widgets::{
     WidgetStatePropertyRef, WidgetStates,
 };
 
-use crate::checkbox_theme::{CheckboxTheme, CheckboxThemeData};
+use crate::checkbox_theme::{CheckboxTheme, CheckboxThemeData, CheckboxThemeDataGetters};
 use crate::colors::Colors;
 use crate::constants::{
     K_MIN_INTERACTIVE_DIMENSION, K_RADIAL_REACTION_ALPHA, K_RADIAL_REACTION_DURATION,
     K_RADIAL_REACTION_RADIUS,
 };
 use crate::debug::debug_check_has_material;
-use crate::generated::checkbox_defaults_m3::checkbox_defaults_m3;
+use crate::generated::checkbox_defaults_m3::CheckboxDefaultsM3;
 use crate::theme::Theme;
 use crate::theme_data::{MaterialTapTargetSize, VisualDensity};
+use crate::theme_data_getters::DefaultsContext;
 
 /// Dart's `_CheckboxType`.
 #[derive(Clone, Copy, Debug)]
@@ -220,7 +221,7 @@ pub struct Checkbox {
     /// If this property is null then the ambient [`CheckboxThemeData::shape`]
     /// is used. If that's null then the shape will be a [`RoundedRectangleBorder`]
     /// with a circular corner radius of 1.0 in Material 2, and 2.0 in Material 3.
-    pub shape: Option<Box<dyn OutlinedBorder>>,
+    pub shape: Option<OutlinedBorderRef>,
     /// The color and width of the checkbox's border.
     ///
     /// This property can be a [`WidgetStateBorderSide`] that can
@@ -451,7 +452,7 @@ impl Checkbox {
     }
 
     /// Dart `Checkbox(shape:)`.
-    pub fn shape(mut self, shape: impl Into<Box<dyn OutlinedBorder>>) -> Checkbox {
+    pub fn shape(mut self, shape: impl Into<OutlinedBorderRef>) -> Checkbox {
         self.shape = Some(shape.into());
         self
     }
@@ -700,20 +701,20 @@ impl State for CheckboxState {
 
         debug_assert!(debug_check_has_material(app, context));
         let checkbox_theme = CheckboxTheme::of(app, context);
-        let defaults = if Theme::of(app, context).use_material3 {
-            checkbox_defaults_m3(app, context)
+        let defaults: Box<dyn CheckboxThemeDataGetters> = if Theme::of(app, context).use_material3 {
+            Box::new(CheckboxDefaultsM3::new(app, context))
         } else {
-            checkbox_defaults_m2(app, context)
+            Box::new(CheckboxDefaultsM2::new(app, context))
         };
         let effective_material_tap_target_size = widget
             .material_tap_target_size
             .or(checkbox_theme.material_tap_target_size)
-            .or(defaults.material_tap_target_size)
+            .or_else(|| defaults.material_tap_target_size(app))
             .expect("the defaults give a tap target size");
         let effective_visual_density = widget
             .visual_density
             .or(checkbox_theme.visual_density)
-            .or(defaults.visual_density)
+            .or_else(|| defaults.visual_density(app))
             .expect("the defaults give a visual density");
         let mut size = match effective_material_tap_target_size {
             MaterialTapTargetSize::Padded => {
@@ -747,20 +748,22 @@ impl State for CheckboxState {
                 .or_else(|| resolve(&checkbox_theme.fill_color, states))
         };
         let active_color = resolve_fill_color(&active_states);
-        let effective_active_color = active_color
-            .unwrap_or_else(|| resolve(&defaults.fill_color, &active_states).expect("default"));
+        let effective_active_color = active_color.unwrap_or_else(|| {
+            resolve(&defaults.fill_color(app), &active_states).expect("default")
+        });
         let inactive_color = resolve_fill_color(&inactive_states);
-        let effective_inactive_color = inactive_color
-            .unwrap_or_else(|| resolve(&defaults.fill_color, &inactive_states).expect("default"));
+        let effective_inactive_color = inactive_color.unwrap_or_else(|| {
+            resolve(&defaults.fill_color(app), &inactive_states).expect("default")
+        });
 
-        let effective_side = |states: &WidgetStates| {
+        let effective_side = |app: &mut App, states: &WidgetStates| {
             Self::resolve_side(&widget.side, states)
                 .or_else(|| Self::resolve_side(&checkbox_theme.side, states))
-                .or_else(|| Self::resolve_side(&defaults.side, states))
+                .or_else(|| Self::resolve_side(&defaults.side(app), states))
                 .expect("the defaults give a side")
         };
-        let active_side = effective_side(&active_states);
-        let inactive_side = effective_side(&inactive_states);
+        let active_side = effective_side(app, &active_states);
+        let inactive_side = effective_side(app, &inactive_states);
 
         let mut focused_states = self.states(app);
         focused_states.insert(WidgetState::Focused);
@@ -770,7 +773,9 @@ impl State for CheckboxState {
         let mut effective_focus_overlay_color = resolve(&widget.overlay_color, &focused_states)
             .or(widget.focus_color)
             .or_else(|| resolve(&checkbox_theme.overlay_color, &focused_states))
-            .unwrap_or_else(|| resolve(&defaults.overlay_color, &focused_states).expect("default"));
+            .unwrap_or_else(|| {
+                resolve(&defaults.overlay_color(app), &focused_states).expect("default")
+            });
 
         let mut hovered_states = self.states(app);
         hovered_states.insert(WidgetState::Hovered);
@@ -780,23 +785,28 @@ impl State for CheckboxState {
         let mut effective_hover_overlay_color = resolve(&widget.overlay_color, &hovered_states)
             .or(widget.hover_color)
             .or_else(|| resolve(&checkbox_theme.overlay_color, &hovered_states))
-            .unwrap_or_else(|| resolve(&defaults.overlay_color, &hovered_states).expect("default"));
+            .unwrap_or_else(|| {
+                resolve(&defaults.overlay_color(app), &hovered_states).expect("default")
+            });
 
-        let resolve_pressed_overlay_color = |states: &WidgetStates, fill_color: Option<Color>| {
-            resolve(&widget.overlay_color, states)
-                .or_else(|| resolve(&checkbox_theme.overlay_color, states))
-                .or_else(|| fill_color.map(|color| color.with_alpha(K_RADIAL_REACTION_ALPHA)))
-                .unwrap_or_else(|| resolve(&defaults.overlay_color, states).expect("default"))
-        };
+        let resolve_pressed_overlay_color =
+            |app: &mut App, states: &WidgetStates, fill_color: Option<Color>| {
+                resolve(&widget.overlay_color, states)
+                    .or_else(|| resolve(&checkbox_theme.overlay_color, states))
+                    .or_else(|| fill_color.map(|color| color.with_alpha(K_RADIAL_REACTION_ALPHA)))
+                    .unwrap_or_else(|| {
+                        resolve(&defaults.overlay_color(app), states).expect("default")
+                    })
+            };
         let mut active_pressed_states = active_states;
         active_pressed_states.insert(WidgetState::Pressed);
         let effective_active_pressed_overlay_color =
-            resolve_pressed_overlay_color(&active_pressed_states, active_color);
+            resolve_pressed_overlay_color(app, &active_pressed_states, active_color);
 
         let mut inactive_pressed_states = inactive_states;
         inactive_pressed_states.insert(WidgetState::Pressed);
         let effective_inactive_pressed_overlay_color =
-            resolve_pressed_overlay_color(&inactive_pressed_states, inactive_color);
+            resolve_pressed_overlay_color(app, &inactive_pressed_states, inactive_color);
 
         if self.down_position(app).is_some() {
             let pressed_overlay_color = if self.states(app).contains(&WidgetState::Selected) {
@@ -815,12 +825,14 @@ impl State for CheckboxState {
         let effective_check_color = widget
             .check_color
             .or_else(|| resolve(&checkbox_theme.check_color, &check_states))
-            .unwrap_or_else(|| resolve(&defaults.check_color, &check_states).expect("default"));
+            .unwrap_or_else(|| {
+                resolve(&defaults.check_color(app), &check_states).expect("default")
+            });
 
         let effective_splash_radius = widget
             .splash_radius
             .or(checkbox_theme.splash_radius)
-            .or(defaults.splash_radius)
+            .or_else(|| defaults.splash_radius(app))
             .expect("the defaults give a splash radius");
 
         let mark_insets = widget
@@ -832,7 +844,7 @@ impl State for CheckboxState {
             .shape
             .clone()
             .or_else(|| checkbox_theme.shape.clone())
-            .or_else(|| defaults.shape.clone())
+            .or_else(|| defaults.shape(app))
             .expect("the defaults give a shape");
 
         let states = self.states(app);
@@ -900,7 +912,7 @@ struct CheckboxPainter {
     check_color: Option<Color>,
     value: Option<bool>,
     previous_value: Option<bool>,
-    shape: Option<Box<dyn OutlinedBorder>>,
+    shape: Option<OutlinedBorderRef>,
     mark_insets: EdgeInsets,
     active_side: Option<BorderSide>,
     inactive_side: Option<BorderSide>,
@@ -961,7 +973,7 @@ impl CheckboxPainter {
         app.get(self).shape.as_deref().expect("set before painting")
     }
 
-    fn set_shape(self: Handle<Self>, app: &mut App, value: Box<dyn OutlinedBorder>) {
+    fn set_shape(self: Handle<Self>, app: &mut App, value: OutlinedBorderRef) {
         if let Some(shape) = &app.get(self).shape {
             let (old, new): (&dyn ShapeBorder, &dyn ShapeBorder) = (&**shape, &*value);
             if old == new {
@@ -1280,18 +1292,46 @@ impl ToggleablePainter for CheckboxPainter {
     }
 }
 
-/// Dart's `_CheckboxDefaultsM2(context)`: hand coded defaults based on Material Design 2, as
-/// the [`CheckboxThemeData`] whose fields are the values of that subclass's getters.
-fn checkbox_defaults_m2(app: &mut App, context: BuildContext) -> CheckboxThemeData {
-    let theme = Theme::of(app, context);
-    let disabled_color = theme.disabled_color;
-    let unselected_widget_color = theme.unselected_widget_color;
-    let secondary = theme.color_scheme.secondary;
-    let hover_color = theme.hover_color;
-    let focus_color = theme.focus_color;
+/// Hand coded defaults based on Material Design 2: Dart's `_CheckboxDefaultsM2`.
+struct CheckboxDefaultsM2 {
+    /// Dart's `super(..)` arguments.
+    checkbox_theme_data: CheckboxThemeData,
+    context: DefaultsContext,
+}
 
-    let side = WidgetStateBorderSide::resolve_with(move |states: &WidgetStates| {
-        if states.contains(&WidgetState::Disabled) {
+impl CheckboxDefaultsM2 {
+    fn new(app: &mut App, context: BuildContext) -> CheckboxDefaultsM2 {
+        CheckboxDefaultsM2 {
+            checkbox_theme_data: CheckboxThemeData::new(),
+            context: DefaultsContext::with_theme(app, context),
+        }
+    }
+}
+
+impl CheckboxThemeDataGetters for CheckboxDefaultsM2 {
+    fn checkbox_theme_data(&self) -> &CheckboxThemeData {
+        &self.checkbox_theme_data
+    }
+
+    fn side(&self, app: &mut App) -> Option<AnyBorderSide> {
+        let theme = self.context.theme(app);
+        let disabled_color = theme.disabled_color;
+        let unselected_widget_color = theme.unselected_widget_color;
+        let side = WidgetStateBorderSide::resolve_with(move |states: &WidgetStates| {
+            if states.contains(&WidgetState::Disabled) {
+                if states.contains(&WidgetState::Selected) {
+                    return Some(BorderSide {
+                        width: 2.0,
+                        color: Colors::TRANSPARENT,
+                        ..BorderSide::default()
+                    });
+                }
+                return Some(BorderSide {
+                    width: 2.0,
+                    color: disabled_color,
+                    ..BorderSide::default()
+                });
+            }
             if states.contains(&WidgetState::Selected) {
                 return Some(BorderSide {
                     width: 2.0,
@@ -1299,71 +1339,84 @@ fn checkbox_defaults_m2(app: &mut App, context: BuildContext) -> CheckboxThemeDa
                     ..BorderSide::default()
                 });
             }
-            return Some(BorderSide {
+            Some(BorderSide {
                 width: 2.0,
-                color: disabled_color,
+                color: unselected_widget_color,
                 ..BorderSide::default()
-            });
-        }
-        if states.contains(&WidgetState::Selected) {
-            return Some(BorderSide {
-                width: 2.0,
-                color: Colors::TRANSPARENT,
-                ..BorderSide::default()
-            });
-        }
-        Some(BorderSide {
-            width: 2.0,
-            color: unselected_widget_color,
-            ..BorderSide::default()
-        })
-    });
+            })
+        });
+        Some(side.into_any())
+    }
 
-    // Dart's `fillColor` getter, which the `overlayColor` getter also reads.
-    let fill_color = move |states: &WidgetStates| {
-        if states.contains(&WidgetState::Disabled) {
-            if states.contains(&WidgetState::Selected) {
-                return disabled_color;
-            }
-            return Colors::TRANSPARENT;
-        }
-        if states.contains(&WidgetState::Selected) {
-            return secondary;
-        }
-        Colors::TRANSPARENT
-    };
-
-    let overlay_color = move |states: &WidgetStates| {
-        if states.contains(&WidgetState::Pressed) {
-            return fill_color(states).with_alpha(K_RADIAL_REACTION_ALPHA);
-        }
-        if states.contains(&WidgetState::Hovered) {
-            return hover_color;
-        }
-        if states.contains(&WidgetState::Focused) {
-            return focus_color;
-        }
-        Colors::TRANSPARENT
-    };
-
-    CheckboxThemeData::new()
-        .side(side)
-        .fill_color(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
-            move |states| Some(fill_color(states)),
+    fn fill_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        let theme = self.context.theme(app);
+        let disabled_color = theme.disabled_color;
+        let secondary = theme.color_scheme.secondary;
+        Some(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
+            move |states| {
+                if states.contains(&WidgetState::Disabled) {
+                    if states.contains(&WidgetState::Selected) {
+                        return Some(disabled_color);
+                    }
+                    return Some(Colors::TRANSPARENT);
+                }
+                if states.contains(&WidgetState::Selected) {
+                    return Some(secondary);
+                }
+                Some(Colors::TRANSPARENT)
+            },
         ))
-        .check_color(<dyn WidgetStateProperty<Option<Color>>>::all(Some(
+    }
+
+    fn check_color(&self, _app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        Some(<dyn WidgetStateProperty<Option<Color>>>::all(Some(
             Color::new(0xFFFFFFFF),
         )))
-        .overlay_color(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
-            move |states| Some(overlay_color(states)),
+    }
+
+    fn overlay_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        let fill_color = self.fill_color(app).expect("the fill color is given");
+        let theme = self.context.theme(app);
+        let hover_color = theme.hover_color;
+        let focus_color = theme.focus_color;
+        Some(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
+            move |states| {
+                if states.contains(&WidgetState::Pressed) {
+                    return fill_color
+                        .resolve(states)
+                        .map(|color| color.with_alpha(K_RADIAL_REACTION_ALPHA));
+                }
+                if states.contains(&WidgetState::Hovered) {
+                    return Some(hover_color);
+                }
+                if states.contains(&WidgetState::Focused) {
+                    return Some(focus_color);
+                }
+                Some(Colors::TRANSPARENT)
+            },
         ))
-        .splash_radius(K_RADIAL_REACTION_RADIUS)
-        .material_tap_target_size(theme.material_tap_target_size)
-        .visual_density(theme.visual_density)
-        .shape(RoundedRectangleBorder::new(
+    }
+
+    fn splash_radius(&self, _app: &mut App) -> Option<f64> {
+        Some(K_RADIAL_REACTION_RADIUS)
+    }
+
+    fn material_tap_target_size(&self, app: &mut App) -> Option<MaterialTapTargetSize> {
+        let theme = self.context.theme(app);
+        Some(theme.material_tap_target_size)
+    }
+
+    fn visual_density(&self, app: &mut App) -> Option<VisualDensity> {
+        let theme = self.context.theme(app);
+        Some(theme.visual_density)
+    }
+
+    fn shape(&self, _app: &mut App) -> Option<OutlinedBorderRef> {
+        Some(OutlinedBorderRef::new(RoundedRectangleBorder::new(
             BorderSide::NONE,
             BorderRadiusGeometry::all(Radius::circular(1.0)),
-        ))
+        )))
+    }
 }
 
 #[cfg(test)]

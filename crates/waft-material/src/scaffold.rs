@@ -27,7 +27,7 @@ use waft_foundation::{
 use waft_gestures::{DragEndDetails, DragStartDetails, GestureBinding, HitTestResult};
 use waft_painting::{
     AlignmentDirectional, AlignmentGeometry, Border, BoxDecoration, EdgeInsets, EdgeInsetsGeometry,
-    ShapeBorder,
+    ShapeBorderRef,
 };
 use waft_rendering::{
     AnyBoxConstraints, BoxConstraints, BoxConstraintsExtension, BoxHitTestEntry, ChildLayoutId,
@@ -3819,7 +3819,7 @@ impl ScaffoldState {
         builder: WidgetBuilder,
         background_color: Option<Color>,
         elevation: Option<f64>,
-        shape: Option<Box<dyn ShapeBorder>>,
+        shape: Option<ShapeBorderRef>,
         clip_behavior: Option<Clip>,
         constraints: Option<BoxConstraints>,
         enable_drag: Option<bool>,
@@ -4154,7 +4154,7 @@ impl ScaffoldState {
 struct BottomSheetOptions {
     background_color: Option<Color>,
     elevation: Option<f64>,
-    shape: Option<Box<dyn ShapeBorder>>,
+    shape: Option<ShapeBorderRef>,
     clip_behavior: Option<Clip>,
     constraints: Option<BoxConstraints>,
     enable_drag: Option<bool>,
@@ -4904,7 +4904,7 @@ struct StandardBottomSheet {
     is_persistent: bool,
     background_color: Option<Color>,
     elevation: Option<f64>,
-    shape: Option<Box<dyn ShapeBorder>>,
+    shape: Option<ShapeBorderRef>,
     clip_behavior: Option<Clip>,
     constraints: Option<BoxConstraints>,
 }

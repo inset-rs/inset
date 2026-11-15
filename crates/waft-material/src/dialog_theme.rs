@@ -2,7 +2,7 @@
 
 use waft_embedder::{Clip, Color, lerp_double};
 use waft_foundation::App;
-use waft_painting::{AlignmentGeometry, EdgeInsets, EdgeInsetsGeometry, ShapeBorder, TextStyle};
+use waft_painting::{AlignmentGeometry, EdgeInsets, EdgeInsetsGeometry, ShapeBorderRef, TextStyle};
 use waft_rendering::BoxConstraints;
 use waft_widgets::{
     BuildContext, InheritedTheme, InheritedWidget, IntoWidget, KeyRef, SizedBox, WidgetRef,
@@ -40,7 +40,7 @@ pub struct DialogTheme {
     elevation: Option<f64>,
     shadow_color: Option<Color>,
     surface_tint_color: Option<Color>,
-    shape: Option<Box<dyn ShapeBorder>>,
+    shape: Option<ShapeBorderRef>,
     alignment: Option<AlignmentGeometry>,
     title_text_style: Option<TextStyle>,
     content_text_style: Option<TextStyle>,
@@ -123,7 +123,7 @@ impl DialogTheme {
     }
 
     /// Dart `DialogTheme(shape:)`.
-    pub fn with_shape(mut self, shape: impl Into<Box<dyn ShapeBorder>>) -> DialogTheme {
+    pub fn with_shape(mut self, shape: impl Into<ShapeBorderRef>) -> DialogTheme {
         debug_assert!(self.data.is_none());
         self.shape = Some(shape.into());
         self
@@ -235,10 +235,10 @@ impl DialogTheme {
     ///
     /// This property is obsolete and will be deprecated in a future release:
     /// please use the [`DialogThemeData::shape`] property in [`data`](Self::data) instead.
-    pub fn shape(&self) -> Option<&dyn ShapeBorder> {
+    pub fn shape(&self) -> Option<&ShapeBorderRef> {
         match &self.data {
-            Some(data) => data.shape.as_deref(),
-            None => self.shape.as_deref(),
+            Some(data) => data.shape.as_ref(),
+            None => self.shape.as_ref(),
         }
     }
 
@@ -382,7 +382,7 @@ impl DialogTheme {
             elevation: self.elevation(),
             shadow_color: self.shadow_color(),
             surface_tint_color: self.surface_tint_color(),
-            shape: self.shape().map(|shape| shape.clone_box()),
+            shape: self.shape().cloned(),
             alignment: self.alignment(),
             title_text_style: self.title_text_style().cloned(),
             content_text_style: self.content_text_style().cloned(),
@@ -430,7 +430,7 @@ impl DialogTheme {
                 b.and_then(|b| b.surface_tint_color()),
                 t,
             ),
-            shape: <dyn ShapeBorder>::lerp(a.and_then(|a| a.shape()), b.and_then(|b| b.shape()), t),
+            shape: ShapeBorderRef::lerp(a.and_then(|a| a.shape()), b.and_then(|b| b.shape()), t),
             alignment: AlignmentGeometry::lerp(
                 a.and_then(|a| a.alignment()),
                 b.and_then(|b| b.alignment()),
@@ -561,7 +561,7 @@ pub struct DialogThemeData {
     pub surface_tint_color: Option<Color>,
 
     /// Overrides the default value for `Dialog::shape`.
-    pub shape: Option<Box<dyn ShapeBorder>>,
+    pub shape: Option<ShapeBorderRef>,
 
     /// Overrides the default value for `Dialog::alignment`.
     pub alignment: Option<AlignmentGeometry>,
@@ -595,6 +595,28 @@ pub struct DialogThemeData {
     pub constraints: Option<BoxConstraints>,
 }
 
+crate::theme_data_getters::theme_data_getters! {
+    /// Dart's getters of `DialogThemeData`: the theme data answers with its fields, and a defaults
+    /// subclass (Dart's `_...Defaults...(context)`) computes the ones it overrides when they
+    /// are read.
+    pub trait DialogThemeDataGetters for DialogThemeData, fields: dialog_theme_data {
+        background_color: Option<Color>,
+        elevation: Option<f64>,
+        shadow_color: Option<Color>,
+        surface_tint_color: Option<Color>,
+        shape: Option<ShapeBorderRef>,
+        alignment: Option<AlignmentGeometry>,
+        title_text_style: Option<TextStyle>,
+        content_text_style: Option<TextStyle>,
+        actions_padding: Option<EdgeInsetsGeometry>,
+        icon_color: Option<Color>,
+        barrier_color: Option<Color>,
+        inset_padding: Option<EdgeInsets>,
+        clip_behavior: Option<Clip>,
+        constraints: Option<BoxConstraints>,
+    }
+}
+
 impl DialogThemeData {
     /// Creates a dialog theme that can be used for `ThemeData::dialog_theme`.
     pub fn new() -> DialogThemeData {
@@ -626,7 +648,7 @@ impl DialogThemeData {
     }
 
     /// Dart `DialogThemeData(shape:)`.
-    pub fn shape(mut self, shape: impl Into<Box<dyn ShapeBorder>>) -> DialogThemeData {
+    pub fn shape(mut self, shape: impl Into<ShapeBorderRef>) -> DialogThemeData {
         self.shape = Some(shape.into());
         self
     }
@@ -724,9 +746,9 @@ impl DialogThemeData {
                 b.and_then(|b| b.surface_tint_color),
                 t,
             ),
-            shape: <dyn ShapeBorder>::lerp(
-                a.and_then(|a| a.shape.as_deref()),
-                b.and_then(|b| b.shape.as_deref()),
+            shape: ShapeBorderRef::lerp(
+                a.and_then(|a| a.shape.as_ref()),
+                b.and_then(|b| b.shape.as_ref()),
                 t,
             ),
             alignment: AlignmentGeometry::lerp(
@@ -784,6 +806,7 @@ mod tests {
     //! diagnostics, `hashCode` for `Hash`, and the goldens are not ported.
 
     use std::rc::Rc;
+    use waft_painting::ShapeBorder;
 
     use waft_embedder::{Offset, Radius, Rect};
     use waft_painting::{

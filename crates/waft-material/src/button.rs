@@ -10,8 +10,8 @@ use std::time::Duration;
 use waft_embedder::{Clip, Color, Offset, Size, TextBaseline};
 use waft_foundation::{App, Handle, Listener, ValueChanged};
 use waft_painting::{
-    Alignment, EdgeInsets, EdgeInsetsGeometry, OutlinedBorder, RoundedRectangleBorder, ShapeBorder,
-    TextStyle, force_to_point,
+    Alignment, EdgeInsets, EdgeInsetsGeometry, OutlinedBorderRef, RoundedRectangleBorder,
+    ShapeBorderRef, TextStyle, force_to_point,
 };
 use waft_rendering::{
     AnyRenderBox, AnyRenderObject, BoxConstraints, BoxHitTestResult, BoxParentData,
@@ -243,7 +243,7 @@ pub struct RawMaterialButton {
     /// * [`WidgetState::Hovered`].
     /// * [`WidgetState::Focused`].
     /// * [`WidgetState::Disabled`].
-    pub shape: Box<dyn ShapeBorder>,
+    pub shape: ShapeBorderRef,
 
     /// Defines the duration of animated changes for [`shape`](Self::shape) and
     /// [`elevation`](Self::elevation).
@@ -318,7 +318,7 @@ impl RawMaterialButton {
             padding: EdgeInsetsGeometry::ZERO,
             visual_density: VisualDensity::STANDARD,
             constraints: BoxConstraints::new().min_width(88.0).min_height(36.0),
-            shape: Box::new(RoundedRectangleBorder::default()),
+            shape: ShapeBorderRef::new(RoundedRectangleBorder::default()),
             animation_duration: K_THEME_CHANGE_DURATION,
             clip_behavior: Clip::None,
             focus_node: None,
@@ -446,7 +446,7 @@ impl RawMaterialButton {
     }
 
     /// Dart `RawMaterialButton(shape:)`.
-    pub fn shape(mut self, shape: impl Into<Box<dyn ShapeBorder>>) -> RawMaterialButton {
+    pub fn shape(mut self, shape: impl Into<ShapeBorderRef>) -> RawMaterialButton {
         self.shape = shape.into();
         self
     }
@@ -562,15 +562,13 @@ impl RawMaterialButtonState {
 /// Dart's `WidgetStateProperty.resolveAs<ShapeBorder?>(shape, states)`: the border a
 /// [`WidgetStateOutlinedBorder`](waft_widgets::WidgetStateOutlinedBorder) resolves to, and any
 /// other border itself.
-fn resolve_shape(shape: &dyn ShapeBorder, states: &WidgetStates) -> Option<Box<dyn ShapeBorder>> {
-    let Some(outlined) = shape.as_outlined_border() else {
-        return Some(shape.clone_box());
+fn resolve_shape(shape: &ShapeBorderRef, states: &WidgetStates) -> Option<ShapeBorderRef> {
+    let Some(outlined) = shape.as_outlined_border_ref() else {
+        return Some(shape.clone());
     };
-    let resolved = <dyn WidgetStateProperty<Option<Box<dyn OutlinedBorder>>>>::resolve_as(
-        &Some(outlined.clone_outlined()),
-        states,
-    );
-    resolved.map(|border| border as Box<dyn ShapeBorder>)
+    let resolved =
+        <dyn WidgetStateProperty<Option<OutlinedBorderRef>>>::resolve_as(&Some(outlined), states);
+    resolved.map(ShapeBorderRef::from)
 }
 
 impl MaterialStateMixin for RawMaterialButtonState {
@@ -616,7 +614,7 @@ impl State for RawMaterialButtonState {
                 .and_then(|text_style| text_style.color.clone()),
             states,
         );
-        let effective_shape = resolve_shape(&*widget.shape, states);
+        let effective_shape = resolve_shape(&widget.shape, states);
         let density_adjustment = widget.visual_density.base_size_adjustment();
         let effective_constraints = widget
             .visual_density
@@ -1702,18 +1700,20 @@ mod tests {
                 } else {
                     enabled
                 };
-                Some(Box::new(border) as Box<dyn OutlinedBorder>)
+                Some(OutlinedBorderRef::new(border))
             }
         });
 
-        let resolved = |shape: &dyn ShapeBorder, states: &[WidgetState]| {
+        let resolved = |shape: &ShapeBorderRef, states: &[WidgetState]| {
             resolve_shape(shape, &states.iter().copied().collect()).expect("a border")
         };
 
+        let property = ShapeBorderRef::new(property);
         assert!(resolved(&property, &[]).eq_shape(&enabled));
         assert!(resolved(&property, &[WidgetState::Disabled]).eq_shape(&disabled));
         // A border that is not a property is its own value.
-        assert!(resolved(&disabled, &[]).eq_shape(&disabled));
+        let disabled = ShapeBorderRef::new(disabled);
+        assert_eq!(resolved(&disabled, &[]), disabled);
     }
 
     #[test]

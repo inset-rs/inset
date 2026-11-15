@@ -21,9 +21,9 @@ use waft_foundation::{
 };
 use waft_gestures::DragStartBehavior;
 use waft_painting::{
-    AlignmentGeometry, AnyColor, Axis, BorderRadius, BorderStyle, BoxPainter, BoxShape, Decoration,
-    EdgeInsetsDirectional, EdgeInsetsGeometry, ImageConfiguration, TextOverflow, TextScaler,
-    TextStyle, VerticalDirection, draw_line,
+    AlignmentGeometry, AnyColor, Axis, BorderRadius, BorderStyle, BoxPainter, BoxShape,
+    DecorationRef, EdgeInsetsDirectional, EdgeInsetsGeometry, ImageConfiguration, TextOverflow,
+    TextScaler, TextStyle, VerticalDirection, draw_line,
 };
 use waft_rendering::{
     AnyRenderBox, AnyRenderObject, BoxConstraints, BoxHitTestResult, ContainerBoxParentData,
@@ -50,7 +50,6 @@ use waft_widgets::{
     WidgetStatePropertyRef, WidgetStates,
 };
 
-use crate::color_scheme::ColorScheme;
 use crate::colors::Colors;
 use crate::constants::{
     K_DEFAULT_ICON_DARK_COLOR, K_DEFAULT_ICON_LIGHT_COLOR, K_TAB_LABEL_PADDING,
@@ -60,12 +59,13 @@ use crate::debug::{debug_check_has_material, debug_check_has_material_localizati
 use crate::ink_well::{InkWell, InteractiveInkFeatureFactoryRef};
 use crate::material::{Material, MaterialType};
 use crate::material_localizations::MaterialLocalizations;
-use crate::tab_bar_theme::{TabBarTheme, TabBarThemeData};
+use crate::tab_bar_theme::{TabBarTheme, TabBarThemeData, TabBarThemeDataGetters};
 use crate::tab_controller::{DefaultTabController, TabController};
 use crate::tab_indicator::UnderlineTabIndicator;
 use crate::theme::Theme;
 
 use crate::generated::tabs_defaults_m3::{TabsPrimaryDefaultsM3, TabsSecondaryDefaultsM3};
+use crate::theme_data_getters::DefaultsContext;
 
 const K_TAB_HEIGHT: f64 = 46.0;
 const K_TEXT_AND_ICON_TAB_HEIGHT: f64 = 72.0;
@@ -333,7 +333,6 @@ fn preferred_size_of(tab: &WidgetRef) -> Option<Size> {
 }
 
 /// Dart's `_TabStyle`.
-#[derive(Debug)]
 struct TabStyle {
     animation: AnyAnimation<f64>,
     is_selected: bool,
@@ -346,8 +345,22 @@ struct TabStyle {
     unselected_label_color: Option<Color>,
     label_style: Option<TextStyle>,
     unselected_label_style: Option<TextStyle>,
-    defaults: TabBarThemeData,
+    defaults: Rc<dyn TabBarThemeDataGetters>,
     child: WidgetRef,
+}
+
+impl fmt::Debug for TabStyle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TabStyle")
+            .field("animation", &self.animation)
+            .field("is_selected", &self.is_selected)
+            .field("label_color", &self.label_color)
+            .field("unselected_label_color", &self.unselected_label_color)
+            .field("label_style", &self.label_style)
+            .field("unselected_label_style", &self.unselected_label_style)
+            .field("child", &self.child)
+            .finish_non_exhaustive()
+    }
 }
 
 impl TabStyle {
@@ -382,7 +395,7 @@ impl TabStyle {
                     .as_ref()
                     .and_then(|style| style.color.clone())
             })
-            .or_else(|| self.defaults.label_color.clone())
+            .or_else(|| self.defaults.label_color(app))
             .expect("the tab defaults have a label color");
 
         let unselected_color: Color;
@@ -413,7 +426,7 @@ impl TabStyle {
                 .unwrap_or_else(|| {
                     if theme_data.use_material3 {
                         self.defaults
-                            .unselected_label_color
+                            .unselected_label_color(app)
                             .expect("the Material 3 tab defaults have an unselected color")
                     } else {
                         selected_color.with_alpha(0xB2) // 70% alpha
@@ -452,8 +465,7 @@ impl AnimatedWidget for TabStyle {
         // the same value of inherit. Force that to be inherit=true here.
         let selected_style = self
             .defaults
-            .label_style
-            .as_ref()
+            .label_style(app)
             .expect("the tab defaults have a label style")
             .merge(
                 self.label_style
@@ -464,8 +476,7 @@ impl AnimatedWidget for TabStyle {
             .inherit(true);
         let unselected_style = self
             .defaults
-            .unselected_label_style
-            .as_ref()
+            .unselected_label_style(app)
             .expect("the tab defaults have an unselected label style")
             .merge(
                 self.unselected_label_style
@@ -890,7 +901,7 @@ impl ChangeNotifier for IndicatorPainterNotifier {
 /// mutates is in cells.
 struct IndicatorPainter {
     controller: Handle<TabController>,
-    indicator: Box<dyn Decoration>,
+    indicator: DecorationRef,
     indicator_size: TabBarIndicatorSize,
     minimum_indicator_width: Option<f64>,
     indicator_padding: EdgeInsetsGeometry,
@@ -920,7 +931,7 @@ struct IndicatorPainter {
 /// Dart's `_IndicatorPainter` constructor arguments.
 struct IndicatorPainterArguments {
     controller: Handle<TabController>,
-    indicator: Box<dyn Decoration>,
+    indicator: DecorationRef,
     indicator_size: TabBarIndicatorSize,
     minimum_indicator_width: Option<f64>,
     tab_keys: Rc<RefCell<Vec<GlobalKey>>>,
@@ -1281,7 +1292,7 @@ impl CustomPainter for IndicatorPainter {
         };
         self.needs_paint.get()
             || self.controller != old.controller
-            || !self.indicator.eq_decoration(&*old.indicator)
+            || self.indicator != old.indicator
             || self.minimum_indicator_width != old.minimum_indicator_width
             || self.tab_keys.borrow().len() != old.tab_keys.borrow().len()
             || *self.current_tab_offsets.borrow() != *old.current_tab_offsets.borrow()
@@ -1768,7 +1779,7 @@ pub struct TabBar {
     ///
     ///  * [`splash_border_radius`](Self::splash_border_radius), which defines the clipping
     ///    radius of the splash and is generally used with `BoxDecoration::border_radius`.
-    pub indicator: Option<Box<dyn Decoration>>,
+    pub indicator: Option<DecorationRef>,
 
     /// Whether this tab bar should automatically adjust the
     /// [`indicator_color`](Self::indicator_color).
@@ -2207,8 +2218,8 @@ impl TabBar {
     }
 
     /// Dart `TabBar(indicator:)`.
-    pub fn indicator(mut self, indicator: impl Decoration) -> TabBar {
-        self.indicator = Some(Box::new(indicator));
+    pub fn indicator(mut self, indicator: impl Into<DecorationRef>) -> TabBar {
+        self.indicator = Some(indicator.into());
         self
     }
 
@@ -2423,18 +2434,18 @@ pub struct TabBarState {
 }
 
 impl TabBarState {
-    fn defaults(self: Handle<Self>, app: &mut App) -> TabBarThemeData {
+    fn defaults(self: Handle<Self>, app: &mut App) -> Rc<dyn TabBarThemeDataGetters> {
         let context = self.context(app);
         let widget = self.widget(app);
         let (is_primary, is_scrollable) = (widget.is_primary, widget.is_scrollable);
         if Theme::of(app, context).use_material3 {
             if is_primary {
-                TabsPrimaryDefaultsM3::new(app, context, is_scrollable)
+                Rc::new(TabsPrimaryDefaultsM3::new(context, is_scrollable))
             } else {
-                TabsSecondaryDefaultsM3::new(app, context, is_scrollable)
+                Rc::new(TabsSecondaryDefaultsM3::new(context, is_scrollable))
             }
         } else {
-            TabsDefaultsM2::new(app, context, is_scrollable)
+            Rc::new(TabsDefaultsM2::new(context, is_scrollable))
         }
     }
 
@@ -2464,16 +2475,16 @@ impl TabBarState {
         self: Handle<Self>,
         app: &mut App,
         indicator_size: TabBarIndicatorSize,
-    ) -> Box<dyn Decoration> {
+    ) -> DecorationRef {
         let context = self.context(app);
         let theme = Theme::of(app, context);
         let tab_bar_theme = TabBarTheme::of(app, context);
 
         if let Some(indicator) = &self.widget(app).indicator {
-            return indicator.clone_box();
+            return indicator.clone();
         }
         if let Some(indicator) = &tab_bar_theme.indicator {
-            return indicator.clone_box();
+            return indicator.clone();
         }
         let widget = self.widget(app);
         if cfg!(debug_assertions) && widget.indicator_weight <= 0.0 {
@@ -2495,7 +2506,7 @@ impl TabBarState {
         );
         let mut color = indicator_color
             .or(tab_bar_theme.indicator_color)
-            .or_else(|| self.defaults(app).indicator_color)
+            .or_else(|| self.defaults(app).indicator_color(app))
             .expect("the tab defaults have an indicator color");
         // ThemeData tries to avoid this by having indicatorColor avoid being the
         // primaryColor. However, it's possible that the tab bar is on a
@@ -2556,7 +2567,7 @@ impl TabBarState {
             ),
         );
         indicator.border_radius = effective_border_radius;
-        Box::new(indicator)
+        DecorationRef::new(indicator)
     }
 
     // If the TabBar is rebuilt with a new tab controller, the caller should
@@ -2652,7 +2663,7 @@ impl TabBarState {
             Some(indicator_size) => indicator_size,
             None => self
                 .defaults(app)
-                .indicator_size
+                .indicator_size(app)
                 .expect("the tab defaults have an indicator size"),
         };
         let widget = self.widget(app);
@@ -2675,6 +2686,14 @@ impl TabBarState {
             let indicator = self.get_indicator(app, indicator_size);
             let defaults = self.defaults(app);
             let widget = self.widget(app);
+            let (divider_color, divider_height) = (widget.divider_color, widget.divider_height);
+            let divider_color = divider_color
+                .or(tab_bar_theme.divider_color)
+                .or_else(|| defaults.divider_color(app));
+            let divider_height = divider_height
+                .or(tab_bar_theme.divider_height)
+                .or_else(|| defaults.divider_height(app));
+            let widget = self.widget(app);
             let arguments = IndicatorPainterArguments {
                 controller: app.get(self).controller.expect("checked valid"),
                 indicator,
@@ -2686,14 +2705,8 @@ impl TabBarState {
                 // Passing old painter so that the constructor can copy some values from it.
                 old: old_painter.clone(),
                 label_paddings: Rc::clone(&app.get(self).label_paddings),
-                divider_color: widget
-                    .divider_color
-                    .or(tab_bar_theme.divider_color)
-                    .or(defaults.divider_color),
-                divider_height: widget
-                    .divider_height
-                    .or(tab_bar_theme.divider_height)
-                    .or(defaults.divider_height),
+                divider_color,
+                divider_height,
                 show_divider: theme.use_material3 && !widget.is_scrollable,
                 device_pixel_ratio: None,
                 indicator_animation: widget
@@ -2899,7 +2912,7 @@ impl TabBarState {
         child: WidgetRef,
         is_selected: bool,
         animation: AnyAnimation<f64>,
-        defaults: &TabBarThemeData,
+        defaults: &Rc<dyn TabBarThemeDataGetters>,
     ) -> WidgetRef {
         let widget = self.widget(app);
         TabStyle {
@@ -2910,7 +2923,7 @@ impl TabBarState {
             unselected_label_color: widget.unselected_label_color,
             label_style: widget.label_style.clone(),
             unselected_label_style: widget.unselected_label_style.clone(),
-            defaults: defaults.clone(),
+            defaults: Rc::clone(defaults),
             child,
         }
         .into_widget()
@@ -3010,7 +3023,7 @@ impl State for TabBarState {
             || widget.indicator_weight != old_widget.indicator_weight
             || widget.indicator_size != old_widget.indicator_size
             || widget.indicator_padding != old_widget.indicator_padding
-            || !same_decoration(widget.indicator.as_deref(), old_widget.indicator.as_deref())
+            || widget.indicator != old_widget.indicator
             || widget.divider_color != old_widget.divider_color
             || widget.divider_height != old_widget.divider_height
             || widget.indicator_animation != old_widget.indicator_animation
@@ -3064,7 +3077,7 @@ impl State for TabBarState {
             .widget(app)
             .tab_alignment
             .or(tab_bar_theme.tab_alignment)
-            .or(defaults.tab_alignment)
+            .or_else(|| defaults.tab_alignment(app))
             .expect("the tab defaults have a tab alignment");
         debug_assert!(self.debug_tab_alignment_is_valid(app, effective_tab_alignment));
 
@@ -3196,7 +3209,9 @@ impl State for TabBarState {
                 WidgetStates::new()
             };
 
-            let widget = self.widget(app);
+            let widget_ref = context.widget(app).clone();
+            let widget = waft_widgets::downcast_widget::<TabBar>(&*widget_ref)
+                .expect("a TabBarState builds its TabBar");
             let effective_mouse_cursor: MouseCursorRef = widget
                 .mouse_cursor
                 .as_ref()
@@ -3215,7 +3230,7 @@ impl State for TabBarState {
                 .unwrap_or_else(|| WidgetStateMouseCursor::clickable().resolve(&selected_state));
 
             let default_overlay_states = selected_state.clone();
-            let default_overlay_color = defaults.overlay_color.clone();
+            let default_overlay_color = defaults.overlay_color(app);
             let default_overlay: WidgetStatePropertyRef<Option<Color>> =
                 <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states| {
                     let mut effective_states = default_overlay_states.clone();
@@ -3251,14 +3266,14 @@ impl State for TabBarState {
                 .splash_factory
                 .clone()
                 .or_else(|| tab_bar_theme.splash_factory.clone())
-                .or_else(|| defaults.splash_factory.clone())
+                .or_else(|| defaults.splash_factory(app))
             {
                 ink_well = ink_well.splash_factory(splash_factory);
             }
             if let Some(border_radius) = widget
                 .splash_border_radius
                 .or(tab_bar_theme.splash_border_radius)
-                .or(defaults.splash_border_radius)
+                .or_else(|| defaults.splash_border_radius(app))
             {
                 ink_well = ink_well.border_radius(border_radius);
             }
@@ -3303,7 +3318,7 @@ impl State for TabBarState {
             unselected_label_color: widget.unselected_label_color,
             label_style: widget.label_style.clone(),
             unselected_label_style: widget.unselected_label_style.clone(),
-            defaults: defaults.clone(),
+            defaults: Rc::clone(&defaults),
             child: TabLabelBar::new(
                 wrapped_tabs,
                 on_perform_layout,
@@ -3372,15 +3387,14 @@ impl State for TabBarState {
                 };
 
                 let widget = self.widget(app);
-                let divider_color = widget
-                    .divider_color
+                let (divider_color, divider_height) = (widget.divider_color, widget.divider_height);
+                let divider_color = divider_color
                     .or(tab_bar_theme.divider_color)
-                    .or(defaults.divider_color)
+                    .or_else(|| defaults.divider_color(app))
                     .expect("the Material 3 tab defaults have a divider color");
-                let divider_height = widget
-                    .divider_height
+                let divider_height = divider_height
                     .or(tab_bar_theme.divider_height)
-                    .or(defaults.divider_height)
+                    .or_else(|| defaults.divider_height(app))
                     .expect("the Material 3 tab defaults have a divider height");
 
                 let mut align = Align::new()
@@ -3418,15 +3432,6 @@ impl State for TabBarState {
             .r#type(MaterialType::Transparency)
             .child(MediaQuery::new(media_query_data, tab_bar).into_widget())
             .into_widget()
-    }
-}
-
-/// Dart's `a != b` on two `Decoration?`s.
-fn same_decoration(a: Option<&dyn Decoration>, b: Option<&dyn Decoration>) -> bool {
-    match (a, b) {
-        (None, None) => true,
-        (Some(a), Some(b)) => a.eq_decoration(b),
-        _ => false,
     }
 }
 
@@ -4335,56 +4340,87 @@ impl State for TabPageSelectorState {
     }
 }
 
-/// Dart's `_TabsDefaultsM2`, hand coded defaults based on Material Design 2: the
-/// [`TabBarThemeData`] its getters answer, read once from the theme, and its static members.
-pub(crate) enum TabsDefaultsM2 {}
+/// Dart's `_TabsDefaultsM2`: hand coded defaults based on Material Design 2.
+pub(crate) struct TabsDefaultsM2 {
+    /// Dart's `super(..)` arguments.
+    tab_bar_theme_data: TabBarThemeData,
+    context: DefaultsContext,
+    is_scrollable: bool,
+}
 
 impl TabsDefaultsM2 {
-    /// Dart's `_TabsDefaultsM2(context, isScrollable)`.
-    #[expect(
-        clippy::new_ret_no_self,
-        reason = "Dart's constructor of a TabBarThemeData subclass, here the data it answers"
-    )]
-    pub(crate) fn new(
-        app: &mut App,
-        context: BuildContext,
-        is_scrollable: bool,
-    ) -> TabBarThemeData {
-        let theme = Theme::of(app, context);
-        let colors: &ColorScheme = &theme.color_scheme;
-        let is_dark = Theme::brightness_of(app, context) == Brightness::Dark;
+    pub(crate) fn new(context: BuildContext, is_scrollable: bool) -> TabsDefaultsM2 {
+        TabsDefaultsM2 {
+            tab_bar_theme_data: TabBarThemeData::new().indicator_size(TabBarIndicatorSize::Tab),
+            context: DefaultsContext::new(context),
+            is_scrollable,
+        }
+    }
+
+    pub(crate) const ICON_MARGIN: EdgeInsetsGeometry =
+        EdgeInsetsGeometry::only(0.0, 0.0, 0.0, 10.0);
+}
+
+impl TabBarThemeDataGetters for TabsDefaultsM2 {
+    fn tab_bar_theme_data(&self) -> &TabBarThemeData {
+        &self.tab_bar_theme_data
+    }
+
+    fn indicator_color(&self, app: &mut App) -> Option<Color> {
+        let theme = self.context.theme(app);
+        let colors = &theme.color_scheme;
+        let is_dark = Theme::brightness_of(app, self.context.context()) == Brightness::Dark;
         let primary_color = if is_dark {
             Colors::GREY.shade900()
         } else {
             Colors::BLUE.primary()
         };
-        let body_large = theme.primary_text_theme.body_large.clone();
-        let mut defaults = TabBarThemeData::new()
-            .indicator_size(TabBarIndicatorSize::Tab)
-            .indicator_color(if colors.secondary == primary_color {
-                Colors::WHITE
-            } else {
-                colors.secondary
-            })
-            .label_color(
-                body_large
-                    .as_ref()
-                    .and_then(|style| style.color.clone())
-                    .expect("the primary text theme's body large has a color"),
-            )
-            .splash_factory(theme.splash_factory.clone())
-            .tab_alignment(if is_scrollable {
-                TabAlignment::Start
-            } else {
-                TabAlignment::Fill
-            });
-        defaults.label_style = body_large.clone();
-        defaults.unselected_label_style = body_large;
-        defaults
+        Some(if colors.secondary == primary_color {
+            Colors::WHITE
+        } else {
+            colors.secondary
+        })
     }
 
-    pub(crate) const ICON_MARGIN: EdgeInsetsGeometry =
-        EdgeInsetsGeometry::only(0.0, 0.0, 0.0, 10.0);
+    fn label_color(&self, app: &mut App) -> Option<AnyColor> {
+        let theme = self.context.theme(app);
+        let body_large = theme.primary_text_theme.body_large.clone();
+        Some(
+            body_large
+                .as_ref()
+                .and_then(|style| style.color.clone())
+                .expect("the primary text theme's body large has a color"),
+        )
+    }
+
+    fn splash_factory(&self, app: &mut App) -> Option<InteractiveInkFeatureFactoryRef> {
+        let theme = self.context.theme(app);
+        Some(theme.splash_factory.clone())
+    }
+
+    fn tab_alignment(&self, _app: &mut App) -> Option<TabAlignment> {
+        Some(if self.is_scrollable {
+            TabAlignment::Start
+        } else {
+            TabAlignment::Fill
+        })
+    }
+
+    fn label_style(&self, app: &mut App) -> Option<TextStyle> {
+        self.context
+            .theme(app)
+            .primary_text_theme
+            .body_large
+            .clone()
+    }
+
+    fn unselected_label_style(&self, app: &mut App) -> Option<TextStyle> {
+        self.context
+            .theme(app)
+            .primary_text_theme
+            .body_large
+            .clone()
+    }
 }
 
 #[cfg(test)]
@@ -4463,7 +4499,7 @@ pub(crate) mod tests {
         pub(crate) text_direction: TextDirection,
         pub(crate) tab_alignment: Option<TabAlignment>,
         pub(crate) tab_bar_theme: Option<TabBarThemeData>,
-        pub(crate) indicator: Option<Box<dyn Decoration>>,
+        pub(crate) indicator: Option<DecorationRef>,
         pub(crate) use_material3: Option<bool>,
     }
 
@@ -13016,6 +13052,7 @@ pub(crate) mod tests {
         //! tabs_test.dart cases, part e: the 'Material 2' group to the end of the file.
 
         use std::cell::{Cell, RefCell};
+        use waft_painting::Decoration;
 
         use waft_embedder::{RRect, Radius, TargetPlatform};
         use waft_painting::EdgeInsets;
@@ -13585,10 +13622,6 @@ pub(crate) mod tests {
                     .borrow_mut()
                     .push(Rc::clone(&last_configuration));
                 Box::new(TestIndicatorBoxPainter { last_configuration })
-            }
-
-            fn clone_box(&self) -> Box<dyn Decoration> {
-                Box::new(self.clone())
             }
 
             fn as_any(&self) -> &dyn Any {
@@ -14815,10 +14848,6 @@ pub(crate) mod tests {
                     pending: Rc::clone(&self.pending),
                     image_painted: false,
                 })
-            }
-
-            fn clone_box(&self) -> Box<dyn Decoration> {
-                Box::new(self.clone())
             }
 
             fn as_any(&self) -> &dyn Any {

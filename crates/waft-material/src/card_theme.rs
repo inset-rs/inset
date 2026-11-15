@@ -2,7 +2,7 @@
 
 use waft_embedder::{Clip, Color, lerp_double};
 use waft_foundation::App;
-use waft_painting::{EdgeInsetsGeometry, ShapeBorder};
+use waft_painting::{EdgeInsetsGeometry, ShapeBorderRef};
 use waft_widgets::{BuildContext, InheritedWidget, IntoWidget, KeyRef, SizedBox, WidgetRef};
 
 use crate::theme::Theme;
@@ -39,7 +39,7 @@ pub struct CardTheme {
     shadow_color: Option<Color>,
     elevation: Option<f64>,
     margin: Option<EdgeInsetsGeometry>,
-    shape: Option<Box<dyn ShapeBorder>>,
+    shape: Option<ShapeBorderRef>,
     child: WidgetRef,
 }
 
@@ -125,7 +125,7 @@ impl CardTheme {
     }
 
     /// Dart `CardTheme(shape:)`.
-    pub fn with_shape(mut self, shape: impl Into<Box<dyn ShapeBorder>>) -> CardTheme {
+    pub fn with_shape(mut self, shape: impl Into<ShapeBorderRef>) -> CardTheme {
         debug_assert!(self.data.is_none());
         self.shape = Some(shape.into());
         self
@@ -202,10 +202,10 @@ impl CardTheme {
     ///
     /// This property is obsolete and will be deprecated in a future release:
     /// please use the [`CardThemeData::shape`] property in [`data`](Self::data) instead.
-    pub fn shape(&self) -> Option<&dyn ShapeBorder> {
+    pub fn shape(&self) -> Option<&ShapeBorderRef> {
         match &self.data {
-            Some(data) => data.shape.as_deref(),
-            None => self.shape.as_deref(),
+            Some(data) => data.shape.as_ref(),
+            None => self.shape.as_ref(),
         }
     }
 
@@ -241,7 +241,7 @@ impl CardTheme {
             shadow_color: self.shadow_color(),
             elevation: self.elevation(),
             margin: self.margin(),
-            shape: self.shape().map(|shape| shape.clone_box()),
+            shape: self.shape().cloned(),
             child: SizedBox::new().into_widget(),
         }
     }
@@ -303,7 +303,7 @@ impl CardTheme {
                 b.and_then(|b| b.margin()),
                 t,
             ),
-            shape: <dyn ShapeBorder>::lerp(a.and_then(|a| a.shape()), b.and_then(|b| b.shape()), t),
+            shape: ShapeBorderRef::lerp(a.and_then(|a| a.shape()), b.and_then(|b| b.shape()), t),
             child: SizedBox::new().into_widget(),
         }
     }
@@ -378,7 +378,22 @@ pub struct CardThemeData {
     pub margin: Option<EdgeInsetsGeometry>,
 
     /// Overrides the default value for `Card::shape`.
-    pub shape: Option<Box<dyn ShapeBorder>>,
+    pub shape: Option<ShapeBorderRef>,
+}
+
+crate::theme_data_getters::theme_data_getters! {
+    /// Dart's getters of `CardThemeData`: the theme data answers with its fields, and a defaults
+    /// subclass (Dart's `_...Defaults...(context)`) computes the ones it overrides when they
+    /// are read.
+    pub trait CardThemeDataGetters for CardThemeData, fields: card_theme_data {
+        clip_behavior: Option<Clip>,
+        color: Option<Color>,
+        shadow_color: Option<Color>,
+        surface_tint_color: Option<Color>,
+        elevation: Option<f64>,
+        margin: Option<EdgeInsetsGeometry>,
+        shape: Option<ShapeBorderRef>,
+    }
 }
 
 impl CardThemeData {
@@ -428,7 +443,7 @@ impl CardThemeData {
     }
 
     /// Dart `CardThemeData(shape:)`.
-    pub fn shape(mut self, shape: impl Into<Box<dyn ShapeBorder>>) -> CardThemeData {
+    pub fn shape(mut self, shape: impl Into<ShapeBorderRef>) -> CardThemeData {
         self.shape = Some(shape.into());
         self
     }
@@ -470,9 +485,9 @@ impl CardThemeData {
             ),
             elevation: lerp_double(a.and_then(|a| a.elevation), b.and_then(|b| b.elevation), t),
             margin: EdgeInsetsGeometry::lerp(a.and_then(|a| a.margin), b.and_then(|b| b.margin), t),
-            shape: <dyn ShapeBorder>::lerp(
-                a.and_then(|a| a.shape.as_deref()),
-                b.and_then(|b| b.shape.as_deref()),
+            shape: ShapeBorderRef::lerp(
+                a.and_then(|a| a.shape.as_ref()),
+                b.and_then(|b| b.shape.as_ref()),
                 t,
             ),
         }

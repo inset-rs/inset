@@ -8,7 +8,7 @@ use std::time::Duration;
 use waft_animation::{AnimationBehavior, AnimationController, AnyAnimation};
 use waft_embedder::Color;
 use waft_foundation::{App, Handle, Listener, ValueChanged};
-use waft_painting::{AlignmentGeometry, EdgeInsetsGeometry, ShapeBorder, TextStyle};
+use waft_painting::{AlignmentGeometry, EdgeInsetsGeometry, ShapeBorderRef, TextStyle};
 use waft_scheduler::{Ticker, TickerCallback, TickerProviderObject};
 use waft_widgets::{
     BuildContext, Column, DefaultTextStyle, Expanded, IconTheme, IconThemeData, InheritedWidget,
@@ -20,13 +20,13 @@ use waft_widgets::{
 
 use crate::colors::Colors;
 use crate::drawer::Drawer;
-use crate::generated::navigation_drawer_defaults_m3::navigation_drawer_defaults_m3;
+use crate::generated::navigation_drawer_defaults_m3::NavigationDrawerDefaultsM3;
 use crate::ink_decoration::Ink;
 use crate::ink_well::InkWell;
 use crate::material::{Material, MaterialType};
 use crate::material_localizations::MaterialLocalizations;
 use crate::navigation_bar::NavigationIndicator;
-use crate::navigation_drawer_theme::NavigationDrawerTheme;
+use crate::navigation_drawer_theme::{NavigationDrawerTheme, NavigationDrawerThemeDataGetters};
 
 /// Material Design Navigation Drawer component.
 ///
@@ -99,7 +99,7 @@ pub struct NavigationDrawer {
     ///
     /// If this is null, `NavigationDrawerThemeData::indicator_shape` is used.
     /// If that is also null, defaults to `StadiumBorder`.
-    pub indicator_shape: Option<Box<dyn ShapeBorder>>,
+    pub indicator_shape: Option<ShapeBorderRef>,
 
     /// Defines the appearance of the items within the navigation drawer.
     ///
@@ -213,7 +213,7 @@ impl NavigationDrawer {
     /// Dart `NavigationDrawer(indicatorShape:)`.
     pub fn indicator_shape(
         mut self,
-        indicator_shape: impl Into<Box<dyn ShapeBorder>>,
+        indicator_shape: impl Into<ShapeBorderRef>,
     ) -> NavigationDrawer {
         self.indicator_shape = Some(indicator_shape.into());
         self
@@ -462,7 +462,7 @@ impl StatelessWidget for NavigationDrawerDestination {
         let disabled_state = WidgetStates::from([WidgetState::Disabled]);
 
         let navigation_drawer_theme = NavigationDrawerTheme::of(app, context);
-        let defaults = navigation_drawer_defaults_m3(app, context);
+        let defaults = Rc::new(NavigationDrawerDefaultsM3::new(context));
 
         let animation = NavigationDrawerDestinationInfo::of(app, context).selected_animation;
 
@@ -471,7 +471,7 @@ impl StatelessWidget for NavigationDrawerDestination {
         let selected_icon = self.selected_icon.clone();
         let label = self.label.clone();
         let (icon_theme, label_theme) = (navigation_drawer_theme.clone(), navigation_drawer_theme);
-        let (icon_defaults, label_defaults) = (defaults.clone(), defaults);
+        let (icon_defaults, label_defaults) = (Rc::clone(&defaults), defaults);
         let (icon_selected, icon_unselected, icon_disabled) = (
             selected_state.clone(),
             unselected_state.clone(),
@@ -479,15 +479,14 @@ impl StatelessWidget for NavigationDrawerDestination {
         );
         NavigationDestinationBuilder {
             build_icon: Rc::new(move |app, _context| {
-                let resolve = |states: &WidgetStates| -> IconThemeData {
+                let resolve = |app: &mut App, states: &WidgetStates| -> IconThemeData {
                     icon_theme
                         .icon_theme
                         .as_ref()
                         .and_then(|icon_theme| icon_theme.resolve(states))
                         .unwrap_or_else(|| {
                             icon_defaults
-                                .icon_theme
-                                .as_ref()
+                                .icon_theme(app)
                                 .expect("the defaults give an icon theme")
                                 .resolve(states)
                                 .expect("the defaults resolve every state")
@@ -495,20 +494,26 @@ impl StatelessWidget for NavigationDrawerDestination {
                 };
                 let selected_icon_widget = IconTheme::merge(
                     None,
-                    resolve(if enabled {
-                        &icon_selected
-                    } else {
-                        &icon_disabled
-                    }),
+                    resolve(
+                        app,
+                        if enabled {
+                            &icon_selected
+                        } else {
+                            &icon_disabled
+                        },
+                    ),
                     selected_icon.clone().unwrap_or_else(|| icon.clone()),
                 );
                 let unselected_icon_widget = IconTheme::merge(
                     None,
-                    resolve(if enabled {
-                        &icon_unselected
-                    } else {
-                        &icon_disabled
-                    }),
+                    resolve(
+                        app,
+                        if enabled {
+                            &icon_unselected
+                        } else {
+                            &icon_disabled
+                        },
+                    ),
                     icon.clone(),
                 );
 
@@ -519,29 +524,34 @@ impl StatelessWidget for NavigationDrawerDestination {
                 }
             }),
             build_label: Rc::new(move |app, _context| {
-                let resolve = |states: &WidgetStates| -> Option<TextStyle> {
+                let resolve = |app: &mut App, states: &WidgetStates| -> Option<TextStyle> {
                     label_theme
                         .label_text_style
                         .as_ref()
                         .and_then(|label_text_style| label_text_style.resolve(states))
                         .or_else(|| {
                             label_defaults
-                                .label_text_style
-                                .as_ref()
+                                .label_text_style(app)
                                 .expect("the defaults give a label text style")
                                 .resolve(states)
                         })
                 };
-                let effective_selected_label_text_style = resolve(if enabled {
-                    &selected_state
-                } else {
-                    &disabled_state
-                });
-                let effective_unselected_label_text_style = resolve(if enabled {
-                    &unselected_state
-                } else {
-                    &disabled_state
-                });
+                let effective_selected_label_text_style = resolve(
+                    app,
+                    if enabled {
+                        &selected_state
+                    } else {
+                        &disabled_state
+                    },
+                );
+                let effective_unselected_label_text_style = resolve(
+                    app,
+                    if enabled {
+                        &unselected_state
+                    } else {
+                        &disabled_state
+                    },
+                );
 
                 DefaultTextStyle::new(
                     if animation.is_forward_or_completed(app) {
@@ -621,35 +631,36 @@ impl StatelessWidget for NavigationDestinationBuilder {
     fn build(&self, app: &mut App, context: BuildContext) -> WidgetRef {
         let info = NavigationDrawerDestinationInfo::of(app, context);
         let navigation_drawer_theme = NavigationDrawerTheme::of(app, context);
-        let defaults = navigation_drawer_defaults_m3(app, context);
+        let defaults = NavigationDrawerDefaultsM3::new(context);
 
-        let indicator_shape = || {
+        let indicator_shape = |app: &mut App| {
             info.indicator_shape
                 .clone()
                 .or_else(|| navigation_drawer_theme.indicator_shape.clone())
-                .or_else(|| defaults.indicator_shape.clone())
+                .or_else(|| defaults.indicator_shape(app))
                 .expect("the defaults give an indicator shape")
         };
         let indicator_size = navigation_drawer_theme
             .indicator_size
-            .or(defaults.indicator_size)
+            .or_else(|| defaults.indicator_size(app))
             .expect("the defaults give an indicator size");
         let mut ink_well = InkWell::new()
             .highlight_color(Colors::TRANSPARENT)
-            .custom_border(indicator_shape());
+            .custom_border(indicator_shape(app));
         if self.enabled {
             ink_well = ink_well.on_tap(info.on_tap.clone());
         }
+        let indicator_color = info
+            .indicator_color
+            .or(navigation_drawer_theme.indicator_color)
+            .or_else(|| defaults.indicator_color(app))
+            .expect("the defaults give an indicator color");
+        let indicator_shape = indicator_shape(app);
         let ink_well = ink_well.child(
             Stack::new().alignment(AlignmentGeometry::CENTER).children([
                 NavigationIndicator::new(info.selected_animation)
-                    .color(
-                        info.indicator_color
-                            .or(navigation_drawer_theme.indicator_color)
-                            .or(defaults.indicator_color)
-                            .expect("the defaults give an indicator color"),
-                    )
-                    .shape(indicator_shape())
+                    .color(indicator_color)
+                    .shape(indicator_shape)
                     .width(indicator_size.width())
                     .height(indicator_size.height())
                     .into_widget(),
@@ -665,7 +676,9 @@ impl StatelessWidget for NavigationDestinationBuilder {
         );
 
         let mut tile = SizedBox::new().child(ink_well);
-        tile.height = navigation_drawer_theme.tile_height.or(defaults.tile_height);
+        tile.height = navigation_drawer_theme
+            .tile_height
+            .or_else(|| defaults.tile_height(app));
         let destination = Padding::new(info.tile_padding)
             .child(NavigationDestinationSemantics {
                 child: tile.into_widget(),
@@ -837,7 +850,7 @@ struct NavigationDrawerDestinationInfo {
     /// The shape of the indicator.
     ///
     /// This is used by destinations to override the indicator shape.
-    indicator_shape: Option<Box<dyn ShapeBorder>>,
+    indicator_shape: Option<ShapeBorderRef>,
 
     /// The callback that should be called when this destination is tapped.
     ///
@@ -1090,6 +1103,7 @@ mod tests {
     //! `test/navigation_drawer_theme_test.dart`.
 
     use std::cell::{Cell, RefCell};
+    use waft_painting::ShapeBorder;
 
     use waft_embedder::{Offset, Radius, Rect, Size, TargetPlatform};
     use waft_painting::{
@@ -1201,7 +1215,7 @@ mod tests {
     }
 
     /// Dart's `_getInkWell(tester)?.customBorder`: the first `InkWell` in the drawer.
-    fn ink_well_custom_border(tester: &WidgetTester) -> Option<Box<dyn ShapeBorder>> {
+    fn ink_well_custom_border(tester: &WidgetTester) -> Option<ShapeBorderRef> {
         let ink_well = *tester
             .descendants_of_type::<InkWell>(navigation_drawer(tester))
             .first()
@@ -1213,7 +1227,7 @@ mod tests {
 
     /// Dart's `_getIndicatorDecoration(tester)`: the `ShapeDecoration` of the first `Ink`
     /// under a `NavigationIndicator`, as its color and shape.
-    fn indicator_decoration(tester: &WidgetTester) -> (Option<Color>, Box<dyn ShapeBorder>) {
+    fn indicator_decoration(tester: &WidgetTester) -> (Option<Color>, ShapeBorderRef) {
         let ink = tester
             .find_by_type::<NavigationIndicator>()
             .into_iter()

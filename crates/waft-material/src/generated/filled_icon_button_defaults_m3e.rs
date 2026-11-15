@@ -1,5 +1,5 @@
-//! Flutter counterpart: material_ui's `generated/filled_icon_button_defaults_m3e.g.dart`, a Dart `part`
-//! of `icon_button.dart`: `IconButton`'s Material 3 Expressive build reads it.
+//! Flutter counterpart: material_ui's `generated/filled_icon_button_defaults_m3e.g.dart`, a part of
+//! `icon_button.dart`.
 
 // Do not edit by hand. The code is generated from data in the Material
 // Design token database by the script:
@@ -10,7 +10,7 @@ use std::rc::Rc;
 use waft_embedder::{Color, Radius, Size};
 use waft_foundation::App;
 use waft_painting::{
-    AlignmentGeometry, BorderRadius, BorderSide, EdgeInsetsGeometry, OutlinedBorder,
+    AlignmentGeometry, BorderRadius, BorderSide, EdgeInsetsGeometry, OutlinedBorderRef,
     RoundedRectangleBorder, StadiumBorder,
 };
 use waft_services::MouseCursorRef;
@@ -19,39 +19,76 @@ use waft_widgets::{
 };
 
 use crate::button_style::{
-    ButtonShapeVariant, ButtonSizeVariant, ButtonStyle, IconButtonWidthVariant,
+    ButtonShapeVariant, ButtonSizeVariant, ButtonStyle, ButtonStyleGetters, IconButtonWidthVariant,
 };
 use crate::colors::Colors;
 use crate::constants::K_THEME_CHANGE_DURATION;
-use crate::theme::Theme;
+use crate::ink_well::InteractiveInkFeatureFactoryRef;
 use crate::theme_data::{MaterialTapTargetSize, VisualDensity};
+use crate::theme_data_getters::DefaultsContext;
+use waft_widgets::WidgetStatePropertyRef;
 
-/// Dart's `_FilledIconButtonDefaultsM3E(context, toggleable, sizeVariant, iconButtonWidth,
-/// shapeVariant)`: the [`ButtonStyle`] whose fields are the values of that subclass's
-/// getters.
-pub(crate) fn filled_icon_button_defaults_m3e(
-    app: &mut App,
-    context: BuildContext,
+/// Dart's `_FilledIconButtonDefaultsM3E`.
+pub(crate) struct FilledIconButtonDefaultsM3E {
+    /// Dart's `super(..)` arguments.
+    button_style: ButtonStyle,
+    context: DefaultsContext,
     toggleable: bool,
     size_variant: Option<ButtonSizeVariant>,
     icon_button_width: Option<IconButtonWidthVariant>,
     shape_variant: Option<ButtonShapeVariant>,
-) -> ButtonStyle {
-    let theme = Theme::of(app, context);
-    let colors = theme.color_scheme.clone();
-    let size_variant = size_variant.unwrap_or(ButtonSizeVariant::Small);
-    let icon_button_width = icon_button_width.unwrap_or(IconButtonWidthVariant::Standard);
-    let shape_variant = shape_variant.unwrap_or(ButtonShapeVariant::Round);
-    let adaptive_clickable = WidgetStateMouseCursor::adaptive_clickable();
+}
 
-    ButtonStyle::new()
-        .animation_duration(K_THEME_CHANGE_DURATION)
-        .enable_feedback(true)
-        .alignment(AlignmentGeometry::CENTER)
-        .size_variant(size_variant)
-        .icon_button_width(icon_button_width)
-        .shape_variant(shape_variant)
-        .background_color({
+impl FilledIconButtonDefaultsM3E {
+    pub(crate) fn new(
+        context: BuildContext,
+        toggleable: bool,
+        size_variant: Option<ButtonSizeVariant>,
+        icon_button_width: Option<IconButtonWidthVariant>,
+        shape_variant: Option<ButtonShapeVariant>,
+    ) -> FilledIconButtonDefaultsM3E {
+        FilledIconButtonDefaultsM3E {
+            button_style: ButtonStyle::new()
+                .animation_duration(K_THEME_CHANGE_DURATION)
+                .enable_feedback(true)
+                .alignment(AlignmentGeometry::CENTER),
+            context: DefaultsContext::new(context),
+            toggleable,
+            size_variant,
+            icon_button_width,
+            shape_variant,
+        }
+    }
+}
+
+impl ButtonStyleGetters for FilledIconButtonDefaultsM3E {
+    fn button_style(&self) -> &ButtonStyle {
+        &self.button_style
+    }
+
+    fn size_variant(&self, _app: &mut App) -> Option<ButtonSizeVariant> {
+        let size_variant = self.size_variant;
+        let size_variant = size_variant.unwrap_or(ButtonSizeVariant::Small);
+        Some(size_variant)
+    }
+
+    fn icon_button_width(&self, _app: &mut App) -> Option<IconButtonWidthVariant> {
+        let icon_button_width = self.icon_button_width;
+        let icon_button_width = icon_button_width.unwrap_or(IconButtonWidthVariant::Standard);
+        Some(icon_button_width)
+    }
+
+    fn shape_variant(&self, _app: &mut App) -> Option<ButtonShapeVariant> {
+        let shape_variant = self.shape_variant;
+        let shape_variant = shape_variant.unwrap_or(ButtonShapeVariant::Round);
+        Some(shape_variant)
+    }
+
+    fn background_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        let toggleable = self.toggleable;
+        let theme = self.context.theme(app);
+        let colors = theme.color_scheme.clone();
+        Some({
             let colors = colors.clone();
             <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states| {
                 if states.contains(&WidgetState::Disabled) {
@@ -70,7 +107,13 @@ pub(crate) fn filled_icon_button_defaults_m3e(
                 Some(colors.primary)
             })
         })
-        .foreground_color({
+    }
+
+    fn foreground_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        let toggleable = self.toggleable;
+        let theme = self.context.theme(app);
+        let colors = theme.color_scheme.clone();
+        Some({
             let colors = colors.clone();
             <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states| {
                 if states.contains(&WidgetState::Disabled) {
@@ -89,7 +132,13 @@ pub(crate) fn filled_icon_button_defaults_m3e(
                 Some(colors.on_primary)
             })
         })
-        .overlay_color(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
+    }
+
+    fn overlay_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        let toggleable = self.toggleable;
+        let theme = self.context.theme(app);
+        let colors = theme.color_scheme.clone();
+        Some(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
             move |states| {
                 if toggleable && states.contains(&WidgetState::Selected) {
                     if states.contains(&WidgetState::Pressed) {
@@ -173,14 +222,33 @@ pub(crate) fn filled_icon_button_defaults_m3e(
                 Some(Colors::TRANSPARENT)
             },
         ))
-        .elevation(Rc::new(WidgetStatePropertyAll::new(Some(0.0))))
-        .shadow_color(Rc::new(WidgetStatePropertyAll::new(Some(
+    }
+
+    fn elevation(&self, _app: &mut App) -> Option<WidgetStatePropertyRef<Option<f64>>> {
+        Some(Rc::new(WidgetStatePropertyAll::new(Some(0.0))))
+    }
+
+    fn shadow_color(&self, _app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        Some(Rc::new(WidgetStatePropertyAll::new(Some(
             Colors::TRANSPARENT,
         ))))
-        .surface_tint_color(Rc::new(WidgetStatePropertyAll::new(Some(
+    }
+
+    fn surface_tint_color(&self, _app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        Some(Rc::new(WidgetStatePropertyAll::new(Some(
             Colors::TRANSPARENT,
         ))))
-        .padding(Rc::new(WidgetStatePropertyAll::new(Some(
+    }
+
+    fn padding(
+        &self,
+        _app: &mut App,
+    ) -> Option<WidgetStatePropertyRef<Option<EdgeInsetsGeometry>>> {
+        let size_variant = self.size_variant;
+        let icon_button_width = self.icon_button_width;
+        let size_variant = size_variant.unwrap_or(ButtonSizeVariant::Small);
+        let icon_button_width = icon_button_width.unwrap_or(IconButtonWidthVariant::Standard);
+        Some(Rc::new(WidgetStatePropertyAll::new(Some(
             match size_variant {
                 ButtonSizeVariant::XSmall => match icon_button_width {
                     IconButtonWidthVariant::Narrow => {
@@ -239,7 +307,14 @@ pub(crate) fn filled_icon_button_defaults_m3e(
                 },
             },
         ))))
-        .minimum_size(Rc::new(WidgetStatePropertyAll::new(Some(
+    }
+
+    fn minimum_size(&self, _app: &mut App) -> Option<WidgetStatePropertyRef<Option<Size>>> {
+        let size_variant = self.size_variant;
+        let icon_button_width = self.icon_button_width;
+        let size_variant = size_variant.unwrap_or(ButtonSizeVariant::Small);
+        let icon_button_width = icon_button_width.unwrap_or(IconButtonWidthVariant::Standard);
+        Some(Rc::new(WidgetStatePropertyAll::new(Some(
             match size_variant {
                 ButtonSizeVariant::XSmall => match icon_button_width {
                     IconButtonWidthVariant::Narrow => Size::new(28.0, 32.0),
@@ -268,8 +343,16 @@ pub(crate) fn filled_icon_button_defaults_m3e(
                 },
             },
         ))))
-        .maximum_size(Rc::new(WidgetStatePropertyAll::new(Some(Size::INFINITE))))
-        .icon_size(Rc::new(WidgetStatePropertyAll::new(Some(
+    }
+
+    fn maximum_size(&self, _app: &mut App) -> Option<WidgetStatePropertyRef<Option<Size>>> {
+        Some(Rc::new(WidgetStatePropertyAll::new(Some(Size::INFINITE))))
+    }
+
+    fn icon_size(&self, _app: &mut App) -> Option<WidgetStatePropertyRef<Option<f64>>> {
+        let size_variant = self.size_variant;
+        let size_variant = size_variant.unwrap_or(ButtonSizeVariant::Small);
+        Some(Rc::new(WidgetStatePropertyAll::new(Some(
             match size_variant {
                 ButtonSizeVariant::XSmall => 20.0,
                 ButtonSizeVariant::Small => 24.0,
@@ -278,75 +361,99 @@ pub(crate) fn filled_icon_button_defaults_m3e(
                 ButtonSizeVariant::XLarge => 40.0,
             },
         ))))
-        .shape(
-            <dyn WidgetStateProperty<Option<Box<dyn OutlinedBorder>>>>::resolve_with(
-                move |states| {
-                    if states.contains(&WidgetState::Pressed) {
-                        return Some(match size_variant {
-                            ButtonSizeVariant::XSmall => rounded_rectangle(8.0),
-                            ButtonSizeVariant::Small => rounded_rectangle(8.0),
-                            ButtonSizeVariant::Medium => rounded_rectangle(12.0),
-                            ButtonSizeVariant::Large => rounded_rectangle(16.0),
-                            ButtonSizeVariant::XLarge => rounded_rectangle(16.0),
-                        });
-                    }
-                    if toggleable && states.contains(&WidgetState::Selected) {
-                        return Some(match shape_variant {
-                            ButtonShapeVariant::Round => match size_variant {
-                                ButtonSizeVariant::XSmall => rounded_rectangle(12.0),
-                                ButtonSizeVariant::Small => rounded_rectangle(12.0),
-                                ButtonSizeVariant::Medium => rounded_rectangle(16.0),
-                                ButtonSizeVariant::Large => rounded_rectangle(28.0),
-                                ButtonSizeVariant::XLarge => rounded_rectangle(28.0),
-                            },
-                            ButtonShapeVariant::Square => match size_variant {
-                                ButtonSizeVariant::XSmall => stadium(),
-                                ButtonSizeVariant::Small => stadium(),
-                                ButtonSizeVariant::Medium => stadium(),
-                                ButtonSizeVariant::Large => stadium(),
-                                ButtonSizeVariant::XLarge => stadium(),
-                            },
-                        });
-                    }
-                    Some(match shape_variant {
+    }
+
+    fn shape(&self, _app: &mut App) -> Option<WidgetStatePropertyRef<Option<OutlinedBorderRef>>> {
+        let toggleable = self.toggleable;
+        let size_variant = self.size_variant;
+        let shape_variant = self.shape_variant;
+        let size_variant = size_variant.unwrap_or(ButtonSizeVariant::Small);
+        let shape_variant = shape_variant.unwrap_or(ButtonShapeVariant::Round);
+        Some(
+            <dyn WidgetStateProperty<Option<OutlinedBorderRef>>>::resolve_with(move |states| {
+                if states.contains(&WidgetState::Pressed) {
+                    return Some(match size_variant {
+                        ButtonSizeVariant::XSmall => rounded_rectangle(8.0),
+                        ButtonSizeVariant::Small => rounded_rectangle(8.0),
+                        ButtonSizeVariant::Medium => rounded_rectangle(12.0),
+                        ButtonSizeVariant::Large => rounded_rectangle(16.0),
+                        ButtonSizeVariant::XLarge => rounded_rectangle(16.0),
+                    });
+                }
+                if toggleable && states.contains(&WidgetState::Selected) {
+                    return Some(match shape_variant {
                         ButtonShapeVariant::Round => match size_variant {
-                            ButtonSizeVariant::XSmall => stadium(),
-                            ButtonSizeVariant::Small => stadium(),
-                            ButtonSizeVariant::Medium => stadium(),
-                            ButtonSizeVariant::Large => stadium(),
-                            ButtonSizeVariant::XLarge => stadium(),
-                        },
-                        ButtonShapeVariant::Square => match size_variant {
                             ButtonSizeVariant::XSmall => rounded_rectangle(12.0),
                             ButtonSizeVariant::Small => rounded_rectangle(12.0),
                             ButtonSizeVariant::Medium => rounded_rectangle(16.0),
                             ButtonSizeVariant::Large => rounded_rectangle(28.0),
                             ButtonSizeVariant::XLarge => rounded_rectangle(28.0),
                         },
-                    })
-                },
-            ),
+                        ButtonShapeVariant::Square => match size_variant {
+                            ButtonSizeVariant::XSmall => stadium(),
+                            ButtonSizeVariant::Small => stadium(),
+                            ButtonSizeVariant::Medium => stadium(),
+                            ButtonSizeVariant::Large => stadium(),
+                            ButtonSizeVariant::XLarge => stadium(),
+                        },
+                    });
+                }
+                Some(match shape_variant {
+                    ButtonShapeVariant::Round => match size_variant {
+                        ButtonSizeVariant::XSmall => stadium(),
+                        ButtonSizeVariant::Small => stadium(),
+                        ButtonSizeVariant::Medium => stadium(),
+                        ButtonSizeVariant::Large => stadium(),
+                        ButtonSizeVariant::XLarge => stadium(),
+                    },
+                    ButtonShapeVariant::Square => match size_variant {
+                        ButtonSizeVariant::XSmall => rounded_rectangle(12.0),
+                        ButtonSizeVariant::Small => rounded_rectangle(12.0),
+                        ButtonSizeVariant::Medium => rounded_rectangle(16.0),
+                        ButtonSizeVariant::Large => rounded_rectangle(28.0),
+                        ButtonSizeVariant::XLarge => rounded_rectangle(28.0),
+                    },
+                })
+            }),
         )
-        // `side` is null.
-        .mouse_cursor(
+    }
+
+    // `side` is null.
+    fn mouse_cursor(
+        &self,
+        _app: &mut App,
+    ) -> Option<WidgetStatePropertyRef<Option<MouseCursorRef>>> {
+        let adaptive_clickable = WidgetStateMouseCursor::adaptive_clickable();
+        Some(
             <dyn WidgetStateProperty<Option<MouseCursorRef>>>::resolve_with(move |states| {
                 Some(adaptive_clickable.resolve(states))
             }),
         )
-        .visual_density(VisualDensity::STANDARD)
-        .tap_target_size(MaterialTapTargetSize::Padded)
-        .splash_factory(theme.splash_factory.clone())
+    }
+
+    fn visual_density(&self, _app: &mut App) -> Option<VisualDensity> {
+        Some(VisualDensity::STANDARD)
+    }
+
+    fn tap_target_size(&self, _app: &mut App) -> Option<MaterialTapTargetSize> {
+        Some(MaterialTapTargetSize::Padded)
+    }
+
+    fn splash_factory(&self, app: &mut App) -> Option<InteractiveInkFeatureFactoryRef> {
+        let theme = self.context.theme(app);
+        Some(theme.splash_factory.clone())
+    }
 }
 
 /// Dart's `const RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(radius)))`.
-fn rounded_rectangle(radius: f64) -> Box<dyn OutlinedBorder> {
-    Box::new(RoundedRectangleBorder::new(
+fn rounded_rectangle(radius: f64) -> OutlinedBorderRef {
+    OutlinedBorderRef::new(RoundedRectangleBorder::new(
         BorderSide::NONE,
         BorderRadius::all(Radius::circular(radius)).into(),
     ))
 }
 
 /// Dart's `const StadiumBorder()`.
-fn stadium() -> Box<dyn OutlinedBorder> {
-    Box::new(StadiumBorder::default())
+fn stadium() -> OutlinedBorderRef {
+    OutlinedBorderRef::new(StadiumBorder::default())
 }

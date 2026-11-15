@@ -3,7 +3,7 @@
 use waft_animation::AnimationStyle;
 use waft_embedder::{Clip, Color};
 use waft_foundation::App;
-use waft_painting::{AlignmentGeometry, EdgeInsetsGeometry, ShapeBorder};
+use waft_painting::{AlignmentGeometry, EdgeInsetsGeometry, ShapeBorderRef};
 use waft_widgets::{BuildContext, InheritedTheme, InheritedWidget, IntoWidget, KeyRef, WidgetRef};
 
 use crate::theme::Theme;
@@ -63,16 +63,37 @@ pub struct ExpansionTileThemeData {
     pub collapsed_text_color: Option<Color>,
 
     /// Overrides the default value of `ExpansionTile::shape`.
-    pub shape: Option<Box<dyn ShapeBorder>>,
+    pub shape: Option<ShapeBorderRef>,
 
     /// Overrides the default value of `ExpansionTile::collapsed_shape`.
-    pub collapsed_shape: Option<Box<dyn ShapeBorder>>,
+    pub collapsed_shape: Option<ShapeBorderRef>,
 
     /// Overrides the default value of `ExpansionTile::clip_behavior`.
     pub clip_behavior: Option<Clip>,
 
     /// Overrides the default value of `ExpansionTile::expansion_animation_style`.
     pub expansion_animation_style: Option<AnimationStyle>,
+}
+
+crate::theme_data_getters::theme_data_getters! {
+    /// Dart's getters of `ExpansionTileThemeData`: the theme data answers with its fields, and a defaults
+    /// subclass (Dart's `_...Defaults...(context)`) computes the ones it overrides when they
+    /// are read.
+    pub trait ExpansionTileThemeDataGetters for ExpansionTileThemeData, fields: expansion_tile_theme_data {
+        background_color: Option<Color>,
+        collapsed_background_color: Option<Color>,
+        tile_padding: Option<EdgeInsetsGeometry>,
+        expanded_alignment: Option<AlignmentGeometry>,
+        children_padding: Option<EdgeInsetsGeometry>,
+        icon_color: Option<Color>,
+        collapsed_icon_color: Option<Color>,
+        text_color: Option<Color>,
+        collapsed_text_color: Option<Color>,
+        shape: Option<ShapeBorderRef>,
+        collapsed_shape: Option<ShapeBorderRef>,
+        clip_behavior: Option<Clip>,
+        expansion_animation_style: Option<AnimationStyle>,
+    }
 }
 
 impl ExpansionTileThemeData {
@@ -149,7 +170,7 @@ impl ExpansionTileThemeData {
     }
 
     /// Dart `ExpansionTileThemeData(shape:)`.
-    pub fn shape(mut self, shape: impl Into<Box<dyn ShapeBorder>>) -> ExpansionTileThemeData {
+    pub fn shape(mut self, shape: impl Into<ShapeBorderRef>) -> ExpansionTileThemeData {
         self.shape = Some(shape.into());
         self
     }
@@ -157,7 +178,7 @@ impl ExpansionTileThemeData {
     /// Dart `ExpansionTileThemeData(collapsedShape:)`.
     pub fn collapsed_shape(
         mut self,
-        collapsed_shape: impl Into<Box<dyn ShapeBorder>>,
+        collapsed_shape: impl Into<ShapeBorderRef>,
     ) -> ExpansionTileThemeData {
         self.collapsed_shape = Some(collapsed_shape.into());
         self
@@ -244,14 +265,14 @@ impl ExpansionTileThemeData {
                 b.and_then(|b| b.collapsed_text_color),
                 t,
             ),
-            shape: <dyn ShapeBorder>::lerp(
-                a.and_then(|a| a.shape.as_deref()),
-                b.and_then(|b| b.shape.as_deref()),
+            shape: ShapeBorderRef::lerp(
+                a.and_then(|a| a.shape.as_ref()),
+                b.and_then(|b| b.shape.as_ref()),
                 t,
             ),
-            collapsed_shape: <dyn ShapeBorder>::lerp(
-                a.and_then(|a| a.collapsed_shape.as_deref()),
-                b.and_then(|b| b.collapsed_shape.as_deref()),
+            collapsed_shape: ShapeBorderRef::lerp(
+                a.and_then(|a| a.collapsed_shape.as_ref()),
+                b.and_then(|b| b.collapsed_shape.as_ref()),
                 t,
             ),
             clip_behavior: pick(a, b, t, |theme| theme.clip_behavior),
@@ -497,8 +518,8 @@ mod tests {
         );
     }
 
-    fn boxed(shape: Border) -> Option<Box<dyn ShapeBorder>> {
-        Some(Box::new(shape))
+    fn boxed(shape: Border) -> Option<ShapeBorderRef> {
+        Some(ShapeBorderRef::new(shape))
     }
 
     /// "ExpansionTileTheme - collapsed".

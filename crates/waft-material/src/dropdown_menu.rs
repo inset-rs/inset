@@ -45,7 +45,9 @@ use waft_widgets::{
 };
 
 use crate::button_style::ButtonStyle;
-use crate::dropdown_menu_theme::{DropdownMenuTheme, DropdownMenuThemeData};
+use crate::dropdown_menu_theme::{
+    DropdownMenuTheme, DropdownMenuThemeData, DropdownMenuThemeDataGetters,
+};
 use crate::icon_button::IconButton;
 use crate::icons::Icons;
 use crate::input_border::OutlineInputBorder;
@@ -57,6 +59,7 @@ use crate::menu_style::MenuStyle;
 use crate::text_field::TextField;
 use crate::theme::Theme;
 use crate::theme_data::VisualDensity;
+use crate::theme_data_getters::DefaultsContext;
 
 /// A callback function that returns the list of the items that matches the current applied
 /// filter.
@@ -1414,22 +1417,25 @@ impl<T: Clone + PartialEq + 'static> DropdownMenuState<T> {
 
                 let focused_foreground_color = resolve_focused_color(Some(
                     effective_foreground_color
+                        .clone()
+                        .or_else(|| default_style.foreground_color(app))
                         .as_ref()
-                        .or(default_style.foreground_color.as_ref())
                         .expect("the default style has a foreground color"),
                 ))
                 .expect("a focused foreground color");
                 let focused_icon_color = resolve_focused_color(Some(
                     effective_icon_color
+                        .clone()
+                        .or_else(|| default_style.icon_color(app))
                         .as_ref()
-                        .or(default_style.icon_color.as_ref())
                         .expect("the default style has an icon color"),
                 ))
                 .expect("a focused icon color");
                 let focused_overlay_color = resolve_focused_color(Some(
                     effective_overlay_color
+                        .clone()
+                        .or_else(|| default_style.overlay_color(app))
                         .as_ref()
-                        .or(default_style.overlay_color.as_ref())
                         .expect("the default style has an overlay color"),
                 ))
                 .expect("a focused overlay color");
@@ -2145,7 +2151,7 @@ impl<T: Clone + PartialEq + 'static> State for DropdownMenuState<T> {
             app.get_mut(self).initial_menu = Some(initial_menu);
         }
         let theme = DropdownMenuTheme::of(app, context);
-        let defaults = dropdown_menu_defaults_m3(app, context);
+        let defaults = DropdownMenuDefaultsM3::new(app, context);
         let widget = self.widget(app).clone();
 
         if app.get(self).enable_filter {
@@ -2203,8 +2209,10 @@ impl<T: Clone + PartialEq + 'static> State for DropdownMenuState<T> {
             .text_style
             .clone()
             .or_else(|| theme.text_style.clone())
-            .or_else(|| defaults.text_style.clone());
-        let disabled_color = theme.disabled_color.or(defaults.disabled_color);
+            .or_else(|| defaults.text_style(app));
+        let disabled_color = theme
+            .disabled_color
+            .or_else(|| defaults.disabled_color(app));
         let effective_text_style = if widget.enabled {
             base_text_style
         } else {
@@ -2229,8 +2237,7 @@ impl<T: Clone + PartialEq + 'static> State for DropdownMenuState<T> {
             .or_else(|| theme.menu_style.clone())
             .unwrap_or_else(|| {
                 defaults
-                    .menu_style
-                    .clone()
+                    .menu_style(app)
                     .expect("the defaults have a menu style")
             });
 
@@ -2272,8 +2279,7 @@ impl<T: Clone + PartialEq + 'static> State for DropdownMenuState<T> {
             .or_else(|| theme.input_decoration_theme.clone())
             .unwrap_or_else(|| {
                 defaults
-                    .input_decoration_theme
-                    .clone()
+                    .input_decoration_theme(app)
                     .expect("the defaults have an input decoration theme")
             });
 
@@ -2759,12 +2765,37 @@ impl RenderBox for RenderDropdownMenuBody {
 
 /// Dart's `_DropdownMenuDefaultsM3`: hand coded defaults. These will be updated once we have
 /// tokens/spec.
-#[expect(deprecated, reason = "Dart calls the deprecated `withOpacity`")]
-fn dropdown_menu_defaults_m3(app: &mut App, context: BuildContext) -> DropdownMenuThemeData {
-    let theme = Theme::of(app, context);
-    let mut defaults = DropdownMenuThemeData::new()
-        .disabled_color(theme.color_scheme.on_surface.with_opacity(0.38))
-        .menu_style(
+struct DropdownMenuDefaultsM3 {
+    /// Dart's `super(..)` arguments.
+    dropdown_menu_theme_data: DropdownMenuThemeData,
+    context: DefaultsContext,
+}
+
+impl DropdownMenuDefaultsM3 {
+    #[expect(deprecated, reason = "Dart calls the deprecated `withOpacity`")]
+    fn new(app: &mut App, context: BuildContext) -> DropdownMenuDefaultsM3 {
+        let disabled_color = Theme::of(app, context)
+            .color_scheme
+            .on_surface
+            .with_opacity(0.38);
+        DropdownMenuDefaultsM3 {
+            dropdown_menu_theme_data: DropdownMenuThemeData::new().disabled_color(disabled_color),
+            context: DefaultsContext::new(context),
+        }
+    }
+}
+
+impl DropdownMenuThemeDataGetters for DropdownMenuDefaultsM3 {
+    fn dropdown_menu_theme_data(&self) -> &DropdownMenuThemeData {
+        &self.dropdown_menu_theme_data
+    }
+
+    fn text_style(&self, app: &mut App) -> Option<TextStyle> {
+        self.context.text_theme(app).body_large.clone()
+    }
+
+    fn menu_style(&self, _app: &mut App) -> Option<MenuStyle> {
+        Some(
             MenuStyle::new()
                 .minimum_size(Rc::new(WidgetStatePropertyAll::new(Some(Size::new(
                     K_MINIMUM_WIDTH,
@@ -2773,9 +2804,11 @@ fn dropdown_menu_defaults_m3(app: &mut App, context: BuildContext) -> DropdownMe
                 .maximum_size(Rc::new(WidgetStatePropertyAll::new(Some(Size::INFINITE))))
                 .visual_density(VisualDensity::STANDARD),
         )
-        .input_decoration_theme(InputDecorationThemeData::new().border(OutlineInputBorder::new()));
-    defaults.text_style = theme.text_theme.body_large.clone();
-    defaults
+    }
+
+    fn input_decoration_theme(&self, _app: &mut App) -> Option<InputDecorationThemeData> {
+        Some(InputDecorationThemeData::new().border(OutlineInputBorder::new()))
+    }
 }
 
 #[cfg(test)]

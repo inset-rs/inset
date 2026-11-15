@@ -8,7 +8,7 @@ use std::fmt::{self, Debug};
 use waft_embedder::{Color, Radius};
 use waft_foundation::App;
 use waft_painting::{
-    BorderRadiusGeometry, BorderSide, EdgeInsetsGeometry, RoundedRectangleBorder, ShapeBorder,
+    BorderRadiusGeometry, BorderSide, EdgeInsetsGeometry, RoundedRectangleBorder, ShapeBorderRef,
 };
 use waft_rendering::BoxConstraints;
 use waft_widgets::{BuildContext, InheritedTheme, InheritedWidget, IntoWidget, KeyRef, WidgetRef};
@@ -129,7 +129,7 @@ impl ButtonTheme {
     }
 
     /// Dart `ButtonTheme(shape:)`.
-    pub fn shape(mut self, shape: impl Into<Box<dyn ShapeBorder>>) -> ButtonTheme {
+    pub fn shape(mut self, shape: impl Into<ShapeBorderRef>) -> ButtonTheme {
         self.data = self.data.with_shape(shape);
         self
     }
@@ -297,7 +297,7 @@ pub struct ButtonThemeData {
 
     padding: Option<EdgeInsetsGeometry>,
 
-    shape: Option<Box<dyn ShapeBorder>>,
+    shape: Option<ShapeBorderRef>,
 
     /// If true, then a `DropdownButton` menu's width will match the button's width.
     ///
@@ -415,7 +415,7 @@ impl ButtonThemeData {
     }
 
     /// Dart `ButtonThemeData(shape:)`.
-    pub fn with_shape(mut self, shape: impl Into<Box<dyn ShapeBorder>>) -> ButtonThemeData {
+    pub fn with_shape(mut self, shape: impl Into<ShapeBorderRef>) -> ButtonThemeData {
         self.shape = Some(shape.into());
         self
     }
@@ -514,17 +514,17 @@ impl ButtonThemeData {
     /// Defaults to a rounded rectangle with circular corner radii of 4.0 if
     /// [`text_theme`](Self::text_theme) is [`ButtonTextTheme::Primary`], a rounded rectangle
     /// with circular corner radii of 2.0 otherwise.
-    pub fn shape(&self) -> Box<dyn ShapeBorder> {
+    pub fn shape(&self) -> ShapeBorderRef {
         match &self.shape {
             Some(shape) => shape.clone(),
             None => match self.text_theme {
                 ButtonTextTheme::Normal | ButtonTextTheme::Accent => {
-                    Box::new(RoundedRectangleBorder::new(
+                    ShapeBorderRef::new(RoundedRectangleBorder::new(
                         BorderSide::NONE,
                         BorderRadiusGeometry::all(Radius::circular(2.0)),
                     ))
                 }
-                ButtonTextTheme::Primary => Box::new(RoundedRectangleBorder::new(
+                ButtonTextTheme::Primary => ShapeBorderRef::new(RoundedRectangleBorder::new(
                     BorderSide::NONE,
                     BorderRadiusGeometry::all(Radius::circular(4.0)),
                 )),
@@ -627,15 +627,15 @@ mod tests {
 
     use super::*;
 
-    fn rounded(radius: f64) -> Box<dyn ShapeBorder> {
-        Box::new(RoundedRectangleBorder::new(
+    fn rounded(radius: f64) -> ShapeBorderRef {
+        ShapeBorderRef::new(RoundedRectangleBorder::new(
             BorderSide::NONE,
             BorderRadiusGeometry::all(Radius::circular(radius)),
         ))
     }
 
-    fn rounded_rectangle_border() -> Box<dyn ShapeBorder> {
-        Box::new(RoundedRectangleBorder::new(
+    fn rounded_rectangle_border() -> ShapeBorderRef {
+        ShapeBorderRef::new(RoundedRectangleBorder::new(
             BorderSide::NONE,
             BorderRadiusGeometry::ZERO,
         ))
@@ -709,7 +709,7 @@ mod tests {
             BoxConstraints::new().min_width(100.0).min_height(200.0)
         );
         assert_eq!(theme.padding(), EdgeInsetsGeometry::ZERO);
-        let stadium: Box<dyn ShapeBorder> = Box::new(StadiumBorder::new(BorderSide::NONE));
+        let stadium: ShapeBorderRef = ShapeBorderRef::new(StadiumBorder::new(BorderSide::NONE));
         assert_eq!(Some(theme.shape()), Some(stadium));
         assert!(theme.aligned_dropdown);
         assert_eq!(theme.color_scheme, Some(ColorScheme::dark()));

@@ -2,12 +2,16 @@
 
 use std::any::Any;
 use std::fmt::{Debug, Formatter, Result as FmtResult};
+use std::rc::Rc;
 
 use waft_embedder::{Canvas, Paint, Path};
 use waft_embedder::{Offset, Rect, clamp_double, lerp_double};
 
 use crate::basic_types::TextDirection;
-use crate::borders::{BorderSide, OutlinedBorder, ShapeBorder, outlined_border_dimensions};
+use crate::borders::{
+    BorderSide, OutlinedBorder, OutlinedBorderRef, ShapeBorder, ShapeBorderRef,
+    outlined_border_dimensions,
+};
 use crate::circle_border::CircleBorder;
 use crate::edge_insets::EdgeInsetsGeometry;
 
@@ -77,13 +81,13 @@ impl ShapeBorder for OvalBorder {
         outlined_border_dimensions(self.side)
     }
 
-    fn scale(&self, t: f64) -> Box<dyn ShapeBorder> {
-        Box::new(OvalBorder::scale(self, t))
+    fn scale(&self, t: f64) -> ShapeBorderRef {
+        ShapeBorderRef::new(OvalBorder::scale(self, t))
     }
 
-    fn lerp_from(&self, a: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
+    fn lerp_from(&self, a: Option<&dyn ShapeBorder>, t: f64) -> Option<ShapeBorderRef> {
         if let Some(a) = a.and_then(|a| a.as_any().downcast_ref::<OvalBorder>()) {
-            Some(Box::new(OvalBorder::new(
+            Some(ShapeBorderRef::new(OvalBorder::new(
                 BorderSide::lerp(a.side, self.side, t),
                 clamp_double(
                     lerp_double(Some(a.eccentricity), Some(self.eccentricity), t).unwrap(),
@@ -98,9 +102,9 @@ impl ShapeBorder for OvalBorder {
         }
     }
 
-    fn lerp_to(&self, b: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
+    fn lerp_to(&self, b: Option<&dyn ShapeBorder>, t: f64) -> Option<ShapeBorderRef> {
         if let Some(b) = b.and_then(|b| b.as_any().downcast_ref::<OvalBorder>()) {
-            Some(Box::new(OvalBorder::new(
+            Some(ShapeBorderRef::new(OvalBorder::new(
                 BorderSide::lerp(self.side, b.side, t),
                 clamp_double(
                     lerp_double(Some(self.eccentricity), Some(b.eccentricity), t).unwrap(),
@@ -151,15 +155,15 @@ impl ShapeBorder for OvalBorder {
         self.as_circle().paint(canvas, rect, text_direction);
     }
 
-    fn clone_box(&self) -> Box<dyn ShapeBorder> {
-        Box::new(*self)
-    }
-
     fn as_any(&self) -> &dyn Any {
         self
     }
 
     fn as_outlined_border(&self) -> Option<&dyn OutlinedBorder> {
+        Some(self)
+    }
+
+    fn into_outlined_border(self: Rc<Self>) -> Option<Rc<dyn OutlinedBorder>> {
         Some(self)
     }
 
@@ -176,12 +180,8 @@ impl OutlinedBorder for OvalBorder {
         self.side
     }
 
-    fn copy_with(&self, side: Option<BorderSide>) -> Box<dyn OutlinedBorder> {
-        Box::new(OvalBorder::copy_with(self, side, None))
-    }
-
-    fn clone_outlined(&self) -> Box<dyn OutlinedBorder> {
-        Box::new(*self)
+    fn copy_with(&self, side: Option<BorderSide>) -> OutlinedBorderRef {
+        OutlinedBorderRef::new(OvalBorder::copy_with(self, side, None))
     }
 }
 
@@ -246,20 +246,20 @@ mod tests {
         assert_eq!(c10.dimensions(), EdgeInsetsGeometry::all(10.0));
         assert_eq!(c10.scale(2.0), c20);
         assert_eq!(c20.scale(0.5), c10);
-        let as10: &dyn ShapeBorder = &c10;
-        let as20: &dyn ShapeBorder = &c20;
+        let as10 = ShapeBorderRef::new(c10);
+        let as20 = ShapeBorderRef::new(c20);
         assert!(
-            <dyn ShapeBorder>::lerp(Some(as10), Some(as20), 0.0)
+            ShapeBorderRef::lerp(Some(&as10), Some(&as20), 0.0)
                 .unwrap()
                 .eq_shape(&c10)
         );
         assert!(
-            <dyn ShapeBorder>::lerp(Some(as10), Some(as20), 0.5)
+            ShapeBorderRef::lerp(Some(&as10), Some(&as20), 0.5)
                 .unwrap()
                 .eq_shape(&c15)
         );
         assert!(
-            <dyn ShapeBorder>::lerp(Some(as10), Some(as20), 1.0)
+            ShapeBorderRef::lerp(Some(&as10), Some(&as20), 1.0)
                 .unwrap()
                 .eq_shape(&c20)
         );

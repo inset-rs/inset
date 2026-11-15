@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use waft_embedder::{Offset, Path, PathBuilder, PathOperation, Rect, path_combine};
 
-use crate::borders::ShapeBorder;
+use crate::borders::ShapeBorderRef;
 
 /// A shape with a notch in its outline.
 ///
@@ -194,14 +194,14 @@ fn arc_to_point_counter_clockwise(path: &mut PathBuilder, start: Offset, end: Of
 /// uses the [`NotchedShape`] (typically a `BottomAppBar`). The [`guest`](Self::guest) is
 /// subtracted from the host to create the notch (typically to make room
 /// for a `FloatingActionButton`).
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct AutomaticNotchedShape {
     /// The shape of the widget that uses the [`NotchedShape`] (typically a
     /// `BottomAppBar`).
     ///
     /// This shape cannot depend on the `TextDirection`, as no text direction
     /// is available to [`NotchedShape`]s.
-    pub host: Box<dyn ShapeBorder>,
+    pub host: ShapeBorderRef,
     /// The shape to subtract from the [`host`](Self::host) to make the notch.
     ///
     /// This shape cannot depend on the `TextDirection`, as no text direction
@@ -209,7 +209,7 @@ pub struct AutomaticNotchedShape {
     ///
     /// If this is null, [`get_outer_path`](NotchedShape::get_outer_path) ignores the guest
     /// rectangle.
-    pub guest: Option<Box<dyn ShapeBorder>>,
+    pub guest: Option<ShapeBorderRef>,
 }
 
 impl AutomaticNotchedShape {
@@ -217,26 +217,17 @@ impl AutomaticNotchedShape {
     ///
     /// The [`guest`](Self::guest) may be null, in which case no notch is created even
     /// if a guest rectangle is provided to [`get_outer_path`](NotchedShape::get_outer_path).
-    pub fn new(host: impl ShapeBorder + 'static) -> AutomaticNotchedShape {
+    pub fn new(host: impl Into<ShapeBorderRef>) -> AutomaticNotchedShape {
         AutomaticNotchedShape {
-            host: Box::new(host),
+            host: host.into(),
             guest: None,
         }
     }
 
     /// Dart `AutomaticNotchedShape(host, guest)`.
-    pub fn guest(mut self, guest: impl ShapeBorder + 'static) -> AutomaticNotchedShape {
-        self.guest = Some(Box::new(guest));
+    pub fn guest(mut self, guest: impl Into<ShapeBorderRef>) -> AutomaticNotchedShape {
+        self.guest = Some(guest.into());
         self
-    }
-}
-
-impl Clone for AutomaticNotchedShape {
-    fn clone(&self) -> AutomaticNotchedShape {
-        AutomaticNotchedShape {
-            host: self.host.clone_box(),
-            guest: self.guest.as_ref().map(|guest| guest.clone_box()),
-        }
     }
 }
 

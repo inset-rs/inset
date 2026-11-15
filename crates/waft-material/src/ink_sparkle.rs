@@ -19,7 +19,7 @@ use waft_embedder::{
     TextDirection, UniformFloatSlot, UniformVec2Slot, UniformVec4Slot,
 };
 use waft_foundation::{App, Handle, HandleId, Listener};
-use waft_painting::{BorderRadius, ShapeBorder, get_as_translation};
+use waft_painting::{BorderRadius, ShapeBorder, ShapeBorderRef, get_as_translation};
 use waft_rendering::AnyRenderBox;
 
 use crate::ink_well::{
@@ -151,7 +151,7 @@ impl InkSparkle {
         contained_ink_well: bool,
         rect_callback: Option<RectCallback>,
         border_radius: Option<BorderRadius>,
-        custom_border: Option<Box<dyn ShapeBorder>>,
+        custom_border: Option<ShapeBorderRef>,
         radius: Option<f64>,
         on_removed: Option<Listener>,
         turbulence_seed: Option<f64>,
@@ -657,7 +657,7 @@ impl InteractiveInkFeatureFactory for InkSparkleFactory {
         contained_ink_well: bool,
         rect_callback: Option<RectCallback>,
         border_radius: Option<BorderRadius>,
-        custom_border: Option<Box<dyn ShapeBorder>>,
+        custom_border: Option<ShapeBorderRef>,
         radius: Option<f64>,
         on_removed: Option<Listener>,
     ) -> AnyInteractiveInkFeature {

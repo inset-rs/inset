@@ -8,7 +8,7 @@ use std::rc::Rc;
 use waft_embedder::{Clip, Color, Offset, Size, TextBaseline};
 use waft_foundation::{App, Listener};
 use waft_painting::{
-    AlignmentGeometry, CircleBorder, EdgeInsetsDirectional, EdgeInsetsGeometry, ShapeBorder,
+    AlignmentGeometry, CircleBorder, EdgeInsetsDirectional, EdgeInsetsGeometry, ShapeBorderRef,
     StadiumBorder, TextDirection, TextStyle,
 };
 use waft_rendering::{
@@ -27,11 +27,12 @@ use waft_widgets::{
 
 use crate::button::RawMaterialButton;
 use crate::floating_action_button_theme::{
-    FloatingActionButtonTheme, FloatingActionButtonThemeData,
+    FloatingActionButtonTheme, FloatingActionButtonThemeData, FloatingActionButtonThemeDataGetters,
 };
-use crate::generated::fab_defaults_m3::fab_defaults_m3;
+use crate::generated::fab_defaults_m3::FabDefaultsM3;
 use crate::theme::Theme;
 use crate::theme_data::MaterialTapTargetSize;
+use crate::theme_data_getters::DefaultsContext;
 use crate::tooltip::Tooltip;
 
 /// Dart's `_DefaultHeroTag`.
@@ -260,7 +261,7 @@ pub struct FloatingActionButton {
     /// The button's highlight and splash are clipped to this shape. If the
     /// button has an elevation, then its drop shadow is defined by this
     /// shape as well.
-    pub shape: Option<Box<dyn ShapeBorder>>,
+    pub shape: Option<ShapeBorderRef>,
 
     /// The content will be clipped (or not) according to this option.
     ///
@@ -556,7 +557,7 @@ impl FloatingActionButton {
     }
 
     /// Dart `FloatingActionButton(shape:)`.
-    pub fn shape(mut self, shape: impl Into<Box<dyn ShapeBorder>>) -> FloatingActionButton {
+    pub fn shape(mut self, shape: impl Into<ShapeBorderRef>) -> FloatingActionButton {
         self.shape = Some(shape.into());
         self
     }
@@ -651,12 +652,25 @@ impl FloatingActionButton {
 
     /// The defaults of the theme in `context`: Material 3's, or Material 2's when
     /// `ThemeData::use_material3` is false.
-    fn defaults(&self, app: &mut App, context: BuildContext) -> FloatingActionButtonThemeData {
+    fn defaults(
+        &self,
+        app: &mut App,
+        context: BuildContext,
+    ) -> Box<dyn FloatingActionButtonThemeDataGetters> {
         let has_child = self.child.is_some();
         if Theme::of(app, context).use_material3 {
-            fab_defaults_m3(app, context, self.floating_action_button_type, has_child)
+            Box::new(FabDefaultsM3::new(
+                context,
+                self.floating_action_button_type,
+                has_child,
+            ))
         } else {
-            fab_defaults_m2(app, context, self.floating_action_button_type, has_child)
+            Box::new(FabDefaultsM2::new(
+                app,
+                context,
+                self.floating_action_button_type,
+                has_child,
+            ))
         }
     }
 
@@ -694,52 +708,52 @@ impl StatelessWidget for FloatingActionButton {
         let foreground_color = self
             .foreground_color
             .or(floating_action_button_theme.foreground_color)
-            .or(defaults.foreground_color)
+            .or_else(|| defaults.foreground_color(app))
             .expect("the defaults give a foreground color");
         let background_color = self
             .background_color
             .or(floating_action_button_theme.background_color)
-            .or(defaults.background_color)
+            .or_else(|| defaults.background_color(app))
             .expect("the defaults give a background color");
         let focus_color = self
             .focus_color
             .or(floating_action_button_theme.focus_color)
-            .or(defaults.focus_color)
+            .or_else(|| defaults.focus_color(app))
             .expect("the defaults give a focus color");
         let hover_color = self
             .hover_color
             .or(floating_action_button_theme.hover_color)
-            .or(defaults.hover_color)
+            .or_else(|| defaults.hover_color(app))
             .expect("the defaults give a hover color");
         let splash_color = self
             .splash_color
             .or(floating_action_button_theme.splash_color)
-            .or(defaults.splash_color)
+            .or_else(|| defaults.splash_color(app))
             .expect("the defaults give a splash color");
         let elevation = self
             .elevation
             .or(floating_action_button_theme.elevation)
-            .or(defaults.elevation)
+            .or_else(|| defaults.elevation(app))
             .expect("the defaults give an elevation");
         let focus_elevation = self
             .focus_elevation
             .or(floating_action_button_theme.focus_elevation)
-            .or(defaults.focus_elevation)
+            .or_else(|| defaults.focus_elevation(app))
             .expect("the defaults give a focus elevation");
         let hover_elevation = self
             .hover_elevation
             .or(floating_action_button_theme.hover_elevation)
-            .or(defaults.hover_elevation)
+            .or_else(|| defaults.hover_elevation(app))
             .expect("the defaults give a hover elevation");
         let disabled_elevation = self
             .disabled_elevation
             .or(floating_action_button_theme.disabled_elevation)
-            .or(defaults.disabled_elevation)
+            .or_else(|| defaults.disabled_elevation(app))
             .unwrap_or(elevation);
         let highlight_elevation = self
             .highlight_elevation
             .or(floating_action_button_theme.highlight_elevation)
-            .or(defaults.highlight_elevation)
+            .or_else(|| defaults.highlight_elevation(app))
             .expect("the defaults give a highlight elevation");
         let material_tap_target_size = self
             .material_tap_target_size
@@ -747,17 +761,17 @@ impl StatelessWidget for FloatingActionButton {
         let enable_feedback = self
             .enable_feedback
             .or(floating_action_button_theme.enable_feedback)
-            .or(defaults.enable_feedback)
+            .or_else(|| defaults.enable_feedback(app))
             .expect("the defaults give enable feedback");
         let icon_size = floating_action_button_theme
             .icon_size
-            .or(defaults.icon_size)
+            .or_else(|| defaults.icon_size(app))
             .expect("the defaults give an icon size");
         let extended_text_style = self
             .extended_text_style
             .clone()
             .or_else(|| floating_action_button_theme.extended_text_style.clone())
-            .or_else(|| defaults.extended_text_style.clone())
+            .or_else(|| defaults.extended_text_style(app))
             .expect("the defaults give an extended text style")
             .copy_with()
             .color(foreground_color);
@@ -765,7 +779,7 @@ impl StatelessWidget for FloatingActionButton {
             .shape
             .clone()
             .or_else(|| floating_action_button_theme.shape.clone())
-            .or_else(|| defaults.shape.clone())
+            .or_else(|| defaults.shape(app))
             .expect("the defaults give a shape");
 
         let size_constraints;
@@ -776,25 +790,25 @@ impl StatelessWidget for FloatingActionButton {
             FloatingActionButtonType::Regular => {
                 size_constraints = floating_action_button_theme
                     .size_constraints
-                    .or(defaults.size_constraints)
+                    .or_else(|| defaults.size_constraints(app))
                     .expect("the defaults give size constraints");
             }
             FloatingActionButtonType::Small => {
                 size_constraints = floating_action_button_theme
                     .small_size_constraints
-                    .or(defaults.small_size_constraints)
+                    .or_else(|| defaults.small_size_constraints(app))
                     .expect("the defaults give small size constraints");
             }
             FloatingActionButtonType::Large => {
                 size_constraints = floating_action_button_theme
                     .large_size_constraints
-                    .or(defaults.large_size_constraints)
+                    .or_else(|| defaults.large_size_constraints(app))
                     .expect("the defaults give large size constraints");
             }
             FloatingActionButtonType::Extended => {
                 size_constraints = floating_action_button_theme
                     .extended_size_constraints
-                    .or(defaults.extended_size_constraints)
+                    .or_else(|| defaults.extended_size_constraints(app))
                     .expect("the defaults give extended size constraints");
                 let icon_label_spacing = self
                     .extended_icon_label_spacing
@@ -803,7 +817,7 @@ impl StatelessWidget for FloatingActionButton {
                 let padding = self
                     .extended_padding
                     .or(floating_action_button_theme.extended_padding)
-                    .or(defaults.extended_padding)
+                    .or_else(|| defaults.extended_padding(app))
                     .expect("the defaults give an extended padding");
                 resolved_child = Some(
                     ChildOverflowBox {
@@ -1156,51 +1170,107 @@ impl RenderBox for RenderChildOverflowBox {
 
 /// Hand coded defaults based on Material Design 2.
 ///
-/// Dart's `_FABDefaultsM2(context, type, hasChild)`: the [`FloatingActionButtonThemeData`]
-/// whose fields are the constructor's arguments and the values of that subclass's getters.
-fn fab_defaults_m2(
-    app: &mut App,
-    context: BuildContext,
+/// Dart's `_FABDefaultsM2`.
+struct FabDefaultsM2 {
+    /// Dart's `super(..)` arguments.
+    floating_action_button_theme_data: FloatingActionButtonThemeData,
+    context: DefaultsContext,
     r#type: FloatingActionButtonType,
     has_child: bool,
-) -> FloatingActionButtonThemeData {
-    let theme = Theme::of(app, context);
-    let colors = &theme.color_scheme;
-    let is_extended = r#type == FloatingActionButtonType::Extended;
-    let is_large = r#type == FloatingActionButtonType::Large;
+}
 
-    FloatingActionButtonThemeData::new()
-        .elevation(6.0)
-        .focus_elevation(6.0)
-        .hover_elevation(8.0)
-        .highlight_elevation(12.0)
-        .enable_feedback(true)
-        .size_constraints(BoxConstraints::tight_for(Some(56.0), Some(56.0)))
-        .small_size_constraints(BoxConstraints::tight_for(Some(40.0), Some(40.0)))
-        .large_size_constraints(BoxConstraints::tight_for(Some(96.0), Some(96.0)))
-        .extended_size_constraints(BoxConstraints::tight_for(None, Some(48.0)))
-        .extended_icon_label_spacing(8.0)
-        .foreground_color(colors.on_secondary)
-        .background_color(colors.secondary)
-        .focus_color(theme.focus_color)
-        .hover_color(theme.hover_color)
-        .splash_color(theme.splash_color)
-        .shape(if is_extended {
-            Box::new(StadiumBorder::default()) as Box<dyn ShapeBorder>
+impl FabDefaultsM2 {
+    fn new(
+        app: &mut App,
+        context: BuildContext,
+        r#type: FloatingActionButtonType,
+        has_child: bool,
+    ) -> FabDefaultsM2 {
+        FabDefaultsM2 {
+            floating_action_button_theme_data: FloatingActionButtonThemeData::new()
+                .elevation(6.0)
+                .focus_elevation(6.0)
+                .hover_elevation(8.0)
+                .highlight_elevation(12.0)
+                .enable_feedback(true)
+                .size_constraints(BoxConstraints::tight_for(Some(56.0), Some(56.0)))
+                .small_size_constraints(BoxConstraints::tight_for(Some(40.0), Some(40.0)))
+                .large_size_constraints(BoxConstraints::tight_for(Some(96.0), Some(96.0)))
+                .extended_size_constraints(BoxConstraints::tight_for(None, Some(48.0)))
+                .extended_icon_label_spacing(8.0),
+            context: DefaultsContext::with_theme(app, context),
+            r#type,
+            has_child,
+        }
+    }
+}
+
+impl FloatingActionButtonThemeDataGetters for FabDefaultsM2 {
+    fn floating_action_button_theme_data(&self) -> &FloatingActionButtonThemeData {
+        &self.floating_action_button_theme_data
+    }
+
+    fn foreground_color(&self, app: &mut App) -> Option<Color> {
+        let theme = self.context.theme(app);
+        let colors = &theme.color_scheme;
+        Some(colors.on_secondary)
+    }
+
+    fn background_color(&self, app: &mut App) -> Option<Color> {
+        let theme = self.context.theme(app);
+        let colors = &theme.color_scheme;
+        Some(colors.secondary)
+    }
+
+    fn focus_color(&self, app: &mut App) -> Option<Color> {
+        let theme = self.context.theme(app);
+        Some(theme.focus_color)
+    }
+
+    fn hover_color(&self, app: &mut App) -> Option<Color> {
+        let theme = self.context.theme(app);
+        Some(theme.hover_color)
+    }
+
+    fn splash_color(&self, app: &mut App) -> Option<Color> {
+        let theme = self.context.theme(app);
+        Some(theme.splash_color)
+    }
+
+    fn shape(&self, _app: &mut App) -> Option<ShapeBorderRef> {
+        let is_extended = self.r#type == FloatingActionButtonType::Extended;
+        Some(if is_extended {
+            ShapeBorderRef::new(StadiumBorder::default())
         } else {
-            Box::new(CircleBorder::default())
+            ShapeBorderRef::new(CircleBorder::default())
         })
-        .icon_size(if is_large { 36.0 } else { 24.0 })
-        .extended_padding(
+    }
+
+    fn icon_size(&self, _app: &mut App) -> Option<f64> {
+        let is_large = self.r#type == FloatingActionButtonType::Large;
+        Some(if is_large { 36.0 } else { 24.0 })
+    }
+
+    fn extended_padding(&self, _app: &mut App) -> Option<EdgeInsetsGeometry> {
+        let is_extended = self.r#type == FloatingActionButtonType::Extended;
+        Some(
             EdgeInsetsDirectional::only(
-                if has_child && is_extended { 16.0 } else { 20.0 },
+                if self.has_child && is_extended {
+                    16.0
+                } else {
+                    20.0
+                },
                 0.0,
                 20.0,
                 0.0,
             )
             .into(),
         )
-        .extended_text_style(
+    }
+
+    fn extended_text_style(&self, app: &mut App) -> Option<TextStyle> {
+        let theme = self.context.theme(app);
+        Some(
             theme
                 .text_theme
                 .label_large
@@ -1209,6 +1279,7 @@ fn fab_defaults_m2(
                 .copy_with()
                 .letter_spacing(1.2),
         )
+    }
 }
 
 #[cfg(test)]
@@ -1218,6 +1289,7 @@ mod tests {
 
     use std::cell::{Cell, RefCell};
     use std::time::Duration;
+    use waft_painting::ShapeBorder;
 
     use waft_embedder::{Rect, TargetPlatform};
     use waft_painting::{BeveledRectangleBorder, BorderRadius, RoundedRectangleBorder};
@@ -2432,7 +2504,7 @@ mod tests {
         elevation: f64,
         disabled_elevation: f64,
         highlight_elevation: f64,
-        shape: Box<dyn ShapeBorder>,
+        shape: ShapeBorderRef,
     }
 
     impl Resolved {
@@ -2444,7 +2516,7 @@ mod tests {
                 elevation: 7.0,
                 disabled_elevation: 1.0,
                 highlight_elevation: 13.0,
-                shape: Box::new(StadiumBorder::default()),
+                shape: ShapeBorderRef::new(StadiumBorder::default()),
             }
         }
 

@@ -296,20 +296,20 @@ pub trait ShapeBorder: Any + Debug {
     ///
     /// The `reversed` argument is true if this object was the right operand of
     /// `plus`, and false if it was the left operand.
-    fn add(&self, other: &dyn ShapeBorder, reversed: bool) -> Option<Box<dyn ShapeBorder>> {
+    fn add(&self, other: &ShapeBorderRef, reversed: bool) -> Option<ShapeBorderRef> {
         let _ = (other, reversed);
         None
     }
 
     /// Creates a copy of this border, scaled by the factor `t`.
-    fn scale(&self, t: f64) -> Box<dyn ShapeBorder>;
+    fn scale(&self, t: f64) -> ShapeBorderRef;
 
     /// Linearly interpolates from another [`ShapeBorder`] (possibly of another
     /// class) to `this`.
     ///
     /// Return None if this class cannot interpolate from `a`. If `a` is None,
     /// this must not return None.
-    fn lerp_from(&self, a: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
+    fn lerp_from(&self, a: Option<&dyn ShapeBorder>, t: f64) -> Option<ShapeBorderRef> {
         if a.is_none() {
             Some(self.scale(t))
         } else {
@@ -322,7 +322,7 @@ pub trait ShapeBorder: Any + Debug {
     ///
     /// Return None if this class cannot interpolate to `b`. If `b` is None,
     /// this must not return None.
-    fn lerp_to(&self, b: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
+    fn lerp_to(&self, b: Option<&dyn ShapeBorder>, t: f64) -> Option<ShapeBorderRef> {
         if b.is_none() {
             Some(self.scale(1.0 - t))
         } else {
@@ -377,14 +377,18 @@ pub trait ShapeBorder: Any + Debug {
     /// Paints the border within the given [`Rect`] on the given [`Canvas`].
     fn paint(&self, canvas: &mut Canvas, rect: Rect, text_direction: Option<TextDirection>);
 
-    /// A heap clone, so `plus` and lerp can duplicate like Dart.
-    fn clone_box(&self) -> Box<dyn ShapeBorder>;
-
     /// Downcast support for `is` / `as` in Dart.
     fn as_any(&self) -> &dyn Any;
 
-    /// [`OutlinedBorder`] downcast for [`dyn OutlinedBorder::lerp`].
+    /// [`OutlinedBorder`] downcast for Dart's `is OutlinedBorder`.
     fn as_outlined_border(&self) -> Option<&dyn OutlinedBorder> {
+        None
+    }
+
+    /// [`OutlinedBorder`] downcast of the shared border, for Dart's `as OutlinedBorder`
+    /// ([`ShapeBorderRef::as_outlined_border_ref`]). An [`OutlinedBorder`] answers `Some(self)`,
+    /// as it answers [`as_outlined_border`](Self::as_outlined_border).
+    fn into_outlined_border(self: Rc<Self>) -> Option<Rc<dyn OutlinedBorder>> {
         None
     }
 
@@ -396,17 +400,32 @@ pub trait ShapeBorder: Any + Debug {
     /// Field equality. Dart's default `==` is identity; subclasses that override
     /// `==` implement this.
     fn eq_shape(&self, other: &dyn ShapeBorder) -> bool {
-        std::ptr::eq(self.as_any(), other.as_any())
+        std::ptr::addr_eq(self.as_any(), other.as_any())
     }
 }
 
-impl<T: ShapeBorder + 'static> From<T> for Box<dyn ShapeBorder> {
-    fn from(border: T) -> Box<dyn ShapeBorder> {
-        Box::new(border)
-    }
-}
+/// A [`ShapeBorder`] held by value: what a Dart field or parameter typed `ShapeBorder`
+/// becomes.
+///
+/// Clones share one border, as Dart's references do, so a border handed on keeps its identity:
+/// a widget given the same border again sees an unchanged one. Two refs are equal when they
+/// share a border or when [`eq_shape`](ShapeBorder::eq_shape) says so, Dart's `==`.
+#[derive(Clone)]
+pub struct ShapeBorderRef(Rc<dyn ShapeBorder>);
 
-impl dyn ShapeBorder {
+impl ShapeBorderRef {
+    /// Erases a [`ShapeBorder`].
+    pub fn new(border: impl ShapeBorder) -> ShapeBorderRef {
+        ShapeBorderRef(Rc::new(border))
+    }
+
+    /// The border as an [`OutlinedBorderRef`], sharing it, when it is an [`OutlinedBorder`].
+    pub fn as_outlined_border_ref(&self) -> Option<OutlinedBorderRef> {
+        Rc::clone(&self.0)
+            .into_outlined_border()
+            .map(OutlinedBorderRef)
+    }
+
     /// Creates a new border consisting of the two borders on either side of the
     /// operator.
     ///
@@ -415,45 +434,70 @@ impl dyn ShapeBorder {
     /// those two borders (see [`ShapeBorder::add`]). Otherwise, an object is
     /// returned that merely paints the two borders sequentially, with the left
     /// hand operand on the inside and the right hand operand on the outside.
-    pub fn plus(&self, other: &dyn ShapeBorder) -> Box<dyn ShapeBorder> {
+    pub fn plus(&self, other: &ShapeBorderRef) -> ShapeBorderRef {
         self.add(other, false)
             .or_else(|| other.add(self, true))
             .unwrap_or_else(|| {
-                Box::new(CompoundBorder::new(vec![
-                    other.clone_box(),
-                    self.clone_box(),
-                ]))
+                ShapeBorderRef::new(CompoundBorder::new(vec![other.clone(), self.clone()]))
             })
     }
 
     /// Linearly interpolates between two [`ShapeBorder`]s.
     pub fn lerp(
-        a: Option<&dyn ShapeBorder>,
-        b: Option<&dyn ShapeBorder>,
+        a: Option<&ShapeBorderRef>,
+        b: Option<&ShapeBorderRef>,
         t: f64,
-    ) -> Option<Box<dyn ShapeBorder>> {
+    ) -> Option<ShapeBorderRef> {
         match (a, b) {
             (None, None) => return None,
-            (Some(a), Some(b)) if std::ptr::eq(a, b) => return Some(a.clone_box()),
+            (Some(a), Some(b)) if Rc::ptr_eq(&a.0, &b.0) => return Some(a.clone()),
             _ => {}
         }
-        b.and_then(|b| b.lerp_from(a, t))
-            .or_else(|| a.and_then(|a| a.lerp_to(b, t)))
-            .or_else(|| b.and_then(|b| b.lerp_to(a, 1.0 - t)))
-            .or_else(|| a.and_then(|a| a.lerp_from(b, 1.0 - t)))
-            .or_else(|| {
-                if t < 0.5 {
-                    a.map(ShapeBorder::clone_box)
-                } else {
-                    b.map(ShapeBorder::clone_box)
-                }
-            })
+        let (a_border, b_border) = (a.map(|a| &*a.0), b.map(|b| &*b.0));
+        b_border
+            .and_then(|b| b.lerp_from(a_border, t))
+            .or_else(|| a_border.and_then(|a| a.lerp_to(b_border, t)))
+            .or_else(|| b_border.and_then(|b| b.lerp_to(a_border, 1.0 - t)))
+            .or_else(|| a_border.and_then(|a| a.lerp_from(b_border, 1.0 - t)))
+            .or_else(|| if t < 0.5 { a.cloned() } else { b.cloned() })
     }
 }
 
-impl Clone for Box<dyn ShapeBorder> {
-    fn clone(&self) -> Self {
-        self.clone_box()
+impl<T: ShapeBorder> From<T> for ShapeBorderRef {
+    fn from(border: T) -> ShapeBorderRef {
+        ShapeBorderRef::new(border)
+    }
+}
+
+impl From<Box<dyn ShapeBorder>> for ShapeBorderRef {
+    fn from(border: Box<dyn ShapeBorder>) -> ShapeBorderRef {
+        ShapeBorderRef(Rc::from(border))
+    }
+}
+
+impl From<OutlinedBorderRef> for ShapeBorderRef {
+    fn from(border: OutlinedBorderRef) -> ShapeBorderRef {
+        ShapeBorderRef(border.0)
+    }
+}
+
+impl std::ops::Deref for ShapeBorderRef {
+    type Target = dyn ShapeBorder;
+
+    fn deref(&self) -> &dyn ShapeBorder {
+        &*self.0
+    }
+}
+
+impl PartialEq for ShapeBorderRef {
+    fn eq(&self, other: &ShapeBorderRef) -> bool {
+        Rc::ptr_eq(&self.0, &other.0) || self.0.eq_shape(&*other.0)
+    }
+}
+
+impl Debug for ShapeBorderRef {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        Debug::fmt(&*self.0, f)
     }
 }
 
@@ -471,48 +515,69 @@ pub trait OutlinedBorder: ShapeBorder {
 
     /// Returns a copy of this [`OutlinedBorder`] that draws its outline with the
     /// specified [`side`](Self::side), if `side` is Some.
-    fn copy_with(&self, side: Option<BorderSide>) -> Box<dyn OutlinedBorder>;
-
-    /// A heap clone typed as [`OutlinedBorder`].
-    fn clone_outlined(&self) -> Box<dyn OutlinedBorder>;
+    fn copy_with(&self, side: Option<BorderSide>) -> OutlinedBorderRef;
 }
 
-impl dyn OutlinedBorder {
+/// An [`OutlinedBorder`] held by value: what a Dart field or parameter typed `OutlinedBorder`
+/// becomes; [`ShapeBorderRef`]'s sharing and equality, for the narrower type.
+#[derive(Clone)]
+pub struct OutlinedBorderRef(Rc<dyn OutlinedBorder>);
+
+impl OutlinedBorderRef {
+    /// Erases an [`OutlinedBorder`].
+    pub fn new(border: impl OutlinedBorder) -> OutlinedBorderRef {
+        OutlinedBorderRef(Rc::new(border))
+    }
+
     /// Linearly interpolates between two [`OutlinedBorder`]s.
     pub fn lerp(
-        a: Option<&dyn OutlinedBorder>,
-        b: Option<&dyn OutlinedBorder>,
+        a: Option<&OutlinedBorderRef>,
+        b: Option<&OutlinedBorderRef>,
         t: f64,
-    ) -> Option<Box<dyn OutlinedBorder>> {
-        match (a, b) {
-            (None, None) => return None,
-            (Some(a), Some(b)) if std::ptr::eq(a, b) => return Some(a.clone_outlined()),
-            _ => {}
+    ) -> Option<OutlinedBorderRef> {
+        if let (Some(a), Some(b)) = (a, b)
+            && Rc::ptr_eq(&a.0, &b.0)
+        {
+            return Some(a.clone());
         }
-        let result = <dyn ShapeBorder>::lerp(
-            a.map(|border| border as &dyn ShapeBorder),
-            b.map(|border| border as &dyn ShapeBorder),
+        let result = ShapeBorderRef::lerp(
+            a.cloned().map(ShapeBorderRef::from).as_ref(),
+            b.cloned().map(ShapeBorderRef::from).as_ref(),
             t,
         )?;
-        if let Some(outlined) = result.as_outlined_border() {
-            Some(outlined.clone_outlined())
-        } else if t < 0.5 {
-            a.map(OutlinedBorder::clone_outlined)
-        } else {
-            b.map(OutlinedBorder::clone_outlined)
-        }
+        // Dart's `result as OutlinedBorder?`: a lerp of two outlined borders that gives another
+        // kind of border is a type error.
+        Some(
+            result
+                .as_outlined_border_ref()
+                .expect("the lerp of two outlined borders is an OutlinedBorder"),
+        )
     }
 }
 
-impl<T: OutlinedBorder + 'static> From<T> for Box<dyn OutlinedBorder> {
-    fn from(border: T) -> Box<dyn OutlinedBorder> {
-        Box::new(border)
+impl<T: OutlinedBorder> From<T> for OutlinedBorderRef {
+    fn from(border: T) -> OutlinedBorderRef {
+        OutlinedBorderRef::new(border)
     }
 }
 
-impl Clone for Box<dyn OutlinedBorder> {
-    fn clone(&self) -> Self {
-        self.clone_outlined()
+impl std::ops::Deref for OutlinedBorderRef {
+    type Target = dyn OutlinedBorder;
+
+    fn deref(&self) -> &dyn OutlinedBorder {
+        &*self.0
+    }
+}
+
+impl PartialEq for OutlinedBorderRef {
+    fn eq(&self, other: &OutlinedBorderRef) -> bool {
+        Rc::ptr_eq(&self.0, &other.0) || self.0.eq_shape(&*other.0)
+    }
+}
+
+impl Debug for OutlinedBorderRef {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        Debug::fmt(&*self.0, f)
     }
 }
 
@@ -532,11 +597,11 @@ pub fn outlined_border_dimensions(side: BorderSide) -> EdgeInsetsGeometry {
 ///
 /// The borders are listed from the outside to the inside.
 struct CompoundBorder {
-    borders: Vec<Box<dyn ShapeBorder>>,
+    borders: Vec<ShapeBorderRef>,
 }
 
 impl CompoundBorder {
-    fn new(borders: Vec<Box<dyn ShapeBorder>>) -> CompoundBorder {
+    fn new(borders: Vec<ShapeBorderRef>) -> CompoundBorder {
         debug_assert!(borders.len() >= 2);
         debug_assert!(
             borders
@@ -559,8 +624,8 @@ impl CompoundBorder {
         let mut results = Vec::new();
         let length = a_list.len().max(b_list.len());
         for index in 0..length {
-            let local_a = a_list.get(index).and_then(|slot| slot.as_deref());
-            let local_b = b_list.get(index).and_then(|slot| slot.as_deref());
+            let local_a = a_list.get(index).copied().flatten();
+            let local_b = b_list.get(index).copied().flatten();
             if let (Some(local_a), Some(local_b)) = (local_a, local_b)
                 && let Some(local_result) = local_a
                     .lerp_to(Some(local_b), t)
@@ -580,14 +645,10 @@ impl CompoundBorder {
     }
 }
 
-fn compound_or_single(border: Option<&dyn ShapeBorder>) -> Vec<Option<Box<dyn ShapeBorder>>> {
+fn compound_or_single(border: Option<&dyn ShapeBorder>) -> Vec<Option<&dyn ShapeBorder>> {
     match border.and_then(|border| border.as_any().downcast_ref::<CompoundBorder>()) {
-        Some(compound) => compound
-            .borders
-            .iter()
-            .map(|b| Some(b.clone_box()))
-            .collect(),
-        None => vec![border.map(ShapeBorder::clone_box)],
+        Some(compound) => compound.borders.iter().map(|b| Some(&**b)).collect(),
+        None => vec![border],
     }
 }
 
@@ -600,51 +661,50 @@ impl ShapeBorder for CompoundBorder {
             })
     }
 
-    fn add(&self, other: &dyn ShapeBorder, reversed: bool) -> Option<Box<dyn ShapeBorder>> {
+    fn add(&self, other: &ShapeBorderRef, reversed: bool) -> Option<ShapeBorderRef> {
         if other.as_any().downcast_ref::<CompoundBorder>().is_none() {
             let ours = if reversed {
-                &*self.borders[self.borders.len() - 1]
+                &self.borders[self.borders.len() - 1]
             } else {
-                &*self.borders[0]
+                &self.borders[0]
             };
             let merged = ours
                 .add(other, reversed)
                 .or_else(|| other.add(ours, !reversed));
             if let Some(merged) = merged {
-                let mut result: Vec<Box<dyn ShapeBorder>> =
-                    self.borders.iter().map(|b| b.clone_box()).collect();
+                let mut result = self.borders.clone();
                 let index = if reversed { result.len() - 1 } else { 0 };
                 result[index] = merged;
-                return Some(Box::new(CompoundBorder::new(result)));
+                return Some(ShapeBorderRef::new(CompoundBorder::new(result)));
             }
         }
         let mut merged_borders = Vec::new();
         if reversed {
-            merged_borders.extend(self.borders.iter().map(|b| b.clone_box()));
+            merged_borders.extend(self.borders.iter().cloned());
         }
         if let Some(other_compound) = other.as_any().downcast_ref::<CompoundBorder>() {
-            merged_borders.extend(other_compound.borders.iter().map(|b| b.clone_box()));
+            merged_borders.extend(other_compound.borders.iter().cloned());
         } else {
-            merged_borders.push(other.clone_box());
+            merged_borders.push(other.clone());
         }
         if !reversed {
-            merged_borders.extend(self.borders.iter().map(|b| b.clone_box()));
+            merged_borders.extend(self.borders.iter().cloned());
         }
-        Some(Box::new(CompoundBorder::new(merged_borders)))
+        Some(ShapeBorderRef::new(CompoundBorder::new(merged_borders)))
     }
 
-    fn scale(&self, t: f64) -> Box<dyn ShapeBorder> {
-        Box::new(CompoundBorder::new(
+    fn scale(&self, t: f64) -> ShapeBorderRef {
+        ShapeBorderRef::new(CompoundBorder::new(
             self.borders.iter().map(|border| border.scale(t)).collect(),
         ))
     }
 
-    fn lerp_from(&self, a: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
-        Some(Box::new(CompoundBorder::lerp(a, Some(self), t)))
+    fn lerp_from(&self, a: Option<&dyn ShapeBorder>, t: f64) -> Option<ShapeBorderRef> {
+        Some(ShapeBorderRef::new(CompoundBorder::lerp(a, Some(self), t)))
     }
 
-    fn lerp_to(&self, b: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
-        Some(Box::new(CompoundBorder::lerp(Some(self), b, t)))
+    fn lerp_to(&self, b: Option<&dyn ShapeBorder>, t: f64) -> Option<ShapeBorderRef> {
+        Some(ShapeBorderRef::new(CompoundBorder::lerp(Some(self), b, t)))
     }
 
     fn get_inner_path(&self, mut rect: Rect, text_direction: Option<TextDirection>) -> Path {
@@ -694,12 +754,6 @@ impl ShapeBorder for CompoundBorder {
                 .resolve(text_direction)
                 .deflate_rect(rect);
         }
-    }
-
-    fn clone_box(&self) -> Box<dyn ShapeBorder> {
-        Box::new(CompoundBorder::new(
-            self.borders.iter().map(|b| b.clone_box()).collect(),
-        ))
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -1263,8 +1317,8 @@ mod tests {
             outlined_border_dimensions(self.side)
         }
 
-        fn scale(&self, t: f64) -> Box<dyn ShapeBorder> {
-            Box::new(LerpBorder::new(Some(t), self.side.scale(t)))
+        fn scale(&self, t: f64) -> ShapeBorderRef {
+            ShapeBorderRef::new(LerpBorder::new(Some(t), self.side.scale(t)))
         }
 
         fn get_outer_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Path {
@@ -1278,15 +1332,15 @@ mod tests {
         fn paint(&self, _canvas: &mut Canvas, _rect: Rect, _text_direction: Option<TextDirection>) {
         }
 
-        fn clone_box(&self) -> Box<dyn ShapeBorder> {
-            Box::new(*self)
-        }
-
         fn as_any(&self) -> &dyn Any {
             self
         }
 
         fn as_outlined_border(&self) -> Option<&dyn OutlinedBorder> {
+            Some(self)
+        }
+
+        fn into_outlined_border(self: Rc<Self>) -> Option<Rc<dyn OutlinedBorder>> {
             Some(self)
         }
 
@@ -1303,12 +1357,8 @@ mod tests {
             self.side
         }
 
-        fn copy_with(&self, side: Option<BorderSide>) -> Box<dyn OutlinedBorder> {
-            Box::new(LerpBorder::new(self.t, side.unwrap_or(self.side)))
-        }
-
-        fn clone_outlined(&self) -> Box<dyn OutlinedBorder> {
-            Box::new(*self)
+        fn copy_with(&self, side: Option<BorderSide>) -> OutlinedBorderRef {
+            OutlinedBorderRef::new(LerpBorder::new(self.t, side.unwrap_or(self.side)))
         }
     }
 
@@ -1320,9 +1370,12 @@ mod tests {
             outlined_border_dimensions(BorderSide::NONE)
         }
 
-        fn lerp_to(&self, b: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
+        fn lerp_to(&self, b: Option<&dyn ShapeBorder>, t: f64) -> Option<ShapeBorderRef> {
             if b.is_some_and(|b| b.as_any().downcast_ref::<LerpBorder>().is_some()) {
-                Some(Box::new(LerpBorder::new(Some(t), BorderSide::NONE)))
+                Some(ShapeBorderRef::new(LerpBorder::new(
+                    Some(t),
+                    BorderSide::NONE,
+                )))
             } else if b.is_none() {
                 Some(self.scale(1.0 - t))
             } else {
@@ -1330,8 +1383,8 @@ mod tests {
             }
         }
 
-        fn scale(&self, t: f64) -> Box<dyn ShapeBorder> {
-            Box::new(LerpBorder::new(Some(t), BorderSide::NONE.scale(t)))
+        fn scale(&self, t: f64) -> ShapeBorderRef {
+            ShapeBorderRef::new(LerpBorder::new(Some(t), BorderSide::NONE.scale(t)))
         }
 
         fn get_outer_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Path {
@@ -1345,15 +1398,15 @@ mod tests {
         fn paint(&self, _canvas: &mut Canvas, _rect: Rect, _text_direction: Option<TextDirection>) {
         }
 
-        fn clone_box(&self) -> Box<dyn ShapeBorder> {
-            Box::new(*self)
-        }
-
         fn as_any(&self) -> &dyn Any {
             self
         }
 
         fn as_outlined_border(&self) -> Option<&dyn OutlinedBorder> {
+            Some(self)
+        }
+
+        fn into_outlined_border(self: Rc<Self>) -> Option<Rc<dyn OutlinedBorder>> {
             Some(self)
         }
     }
@@ -1363,12 +1416,8 @@ mod tests {
             BorderSide::NONE
         }
 
-        fn copy_with(&self, _side: Option<BorderSide>) -> Box<dyn OutlinedBorder> {
-            Box::new(*self)
-        }
-
-        fn clone_outlined(&self) -> Box<dyn OutlinedBorder> {
-            Box::new(*self)
+        fn copy_with(&self, _side: Option<BorderSide>) -> OutlinedBorderRef {
+            OutlinedBorderRef::new(*self)
         }
     }
 
@@ -1380,9 +1429,12 @@ mod tests {
             outlined_border_dimensions(BorderSide::NONE)
         }
 
-        fn lerp_from(&self, a: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
+        fn lerp_from(&self, a: Option<&dyn ShapeBorder>, t: f64) -> Option<ShapeBorderRef> {
             if a.is_some_and(|a| a.as_any().downcast_ref::<LerpBorder>().is_some()) {
-                Some(Box::new(LerpBorder::new(Some(t), BorderSide::NONE)))
+                Some(ShapeBorderRef::new(LerpBorder::new(
+                    Some(t),
+                    BorderSide::NONE,
+                )))
             } else if a.is_none() {
                 Some(self.scale(t))
             } else {
@@ -1390,8 +1442,8 @@ mod tests {
             }
         }
 
-        fn scale(&self, t: f64) -> Box<dyn ShapeBorder> {
-            Box::new(LerpBorder::new(Some(t), BorderSide::NONE.scale(t)))
+        fn scale(&self, t: f64) -> ShapeBorderRef {
+            ShapeBorderRef::new(LerpBorder::new(Some(t), BorderSide::NONE.scale(t)))
         }
 
         fn get_outer_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Path {
@@ -1405,15 +1457,15 @@ mod tests {
         fn paint(&self, _canvas: &mut Canvas, _rect: Rect, _text_direction: Option<TextDirection>) {
         }
 
-        fn clone_box(&self) -> Box<dyn ShapeBorder> {
-            Box::new(*self)
-        }
-
         fn as_any(&self) -> &dyn Any {
             self
         }
 
         fn as_outlined_border(&self) -> Option<&dyn OutlinedBorder> {
+            Some(self)
+        }
+
+        fn into_outlined_border(self: Rc<Self>) -> Option<Rc<dyn OutlinedBorder>> {
             Some(self)
         }
     }
@@ -1423,12 +1475,8 @@ mod tests {
             BorderSide::NONE
         }
 
-        fn copy_with(&self, _side: Option<BorderSide>) -> Box<dyn OutlinedBorder> {
-            Box::new(*self)
-        }
-
-        fn clone_outlined(&self) -> Box<dyn OutlinedBorder> {
-            Box::new(*self)
+        fn copy_with(&self, _side: Option<BorderSide>) -> OutlinedBorderRef {
+            OutlinedBorderRef::new(*self)
         }
     }
 
@@ -1451,8 +1499,8 @@ mod tests {
             EdgeInsetsGeometry::all(self.width)
         }
 
-        fn scale(&self, t: f64) -> Box<dyn ShapeBorder> {
-            Box::new(NamedWidthBorder {
+        fn scale(&self, t: f64) -> ShapeBorderRef {
+            ShapeBorderRef::new(NamedWidthBorder {
                 name: self.name,
                 width: (self.width * t).max(0.0),
             })
@@ -1469,10 +1517,6 @@ mod tests {
         fn paint(&self, _canvas: &mut Canvas, _rect: Rect, _text_direction: Option<TextDirection>) {
         }
 
-        fn clone_box(&self) -> Box<dyn ShapeBorder> {
-            Box::new(*self)
-        }
-
         fn as_any(&self) -> &dyn Any {
             self
         }
@@ -1486,46 +1530,73 @@ mod tests {
     }
 
     #[test]
+    fn a_shape_border_ref_equals_its_clones_and_compares_others_by_eq_shape() {
+        // `NamedWidthBorder` compares by its fields; `ShapeWithInterior` keeps Dart's identity.
+        let named = || {
+            ShapeBorderRef::new(NamedWidthBorder {
+                name: "green",
+                width: 1.0,
+            })
+        };
+        assert_eq!(named(), named());
+        let shared = ShapeBorderRef::new(ShapeWithInterior);
+        assert_eq!(shared.clone(), shared);
+        assert_ne!(ShapeBorderRef::new(ShapeWithInterior), shared);
+    }
+
+    #[test]
+    fn an_outlined_border_ref_shares_its_border_with_the_shape_border_ref_made_of_it() {
+        let outlined = OutlinedBorderRef::new(LerpBorder::new(None, BorderSide::NONE));
+        let shape = ShapeBorderRef::from(outlined.clone());
+        assert_eq!(shape.as_outlined_border_ref(), Some(outlined));
+        assert!(
+            ShapeBorderRef::new(ShapeWithInterior)
+                .as_outlined_border_ref()
+                .is_none()
+        );
+    }
+
+    #[test]
     fn shape_border_lerp_identical_a_b() {
-        assert!(<dyn ShapeBorder>::lerp(None, None, 0.0).is_none());
+        assert!(ShapeBorderRef::lerp(None, None, 0.0).is_none());
         let border = LerpBorder::new(None, BorderSide::NONE);
-        let as_shape: &dyn ShapeBorder = &border;
-        let lerped = <dyn ShapeBorder>::lerp(Some(as_shape), Some(as_shape), 0.5).unwrap();
-        assert!(lerped.eq_shape(as_shape));
+        let as_shape = ShapeBorderRef::new(border);
+        let lerped = ShapeBorderRef::lerp(Some(&as_shape), Some(&as_shape), 0.5).unwrap();
+        assert!(Rc::ptr_eq(&lerped.0, &as_shape.0), "Dart's `identical`");
     }
 
     #[test]
     fn outlined_border_lerp_identical_a_b() {
-        assert!(<dyn OutlinedBorder>::lerp(None, None, 0.0).is_none());
+        assert!(OutlinedBorderRef::lerp(None, None, 0.0).is_none());
         let border = LerpBorder::new(None, BorderSide::NONE);
-        let as_outlined: &dyn OutlinedBorder = &border;
-        let lerped = <dyn OutlinedBorder>::lerp(Some(as_outlined), Some(as_outlined), 0.5).unwrap();
-        assert!(lerped.eq_shape(as_outlined as &dyn ShapeBorder));
+        let as_outlined = OutlinedBorderRef::new(border);
+        let lerped = OutlinedBorderRef::lerp(Some(&as_outlined), Some(&as_outlined), 0.5).unwrap();
+        assert!(Rc::ptr_eq(&lerped.0, &as_outlined.0), "Dart's `identical`");
     }
 
     #[test]
     fn shape_border_lerp_tries_equivalent_reverse_interpolation() {
-        let a = LerpBorder::new(None, BorderSide::NONE);
-        let b = ReverseLerpToBorder;
-        let got = <dyn ShapeBorder>::lerp(Some(&a), Some(&b), 0.25).unwrap();
+        let a = ShapeBorderRef::new(LerpBorder::new(None, BorderSide::NONE));
+        let b = ShapeBorderRef::new(ReverseLerpToBorder);
+        let got = ShapeBorderRef::lerp(Some(&a), Some(&b), 0.25).unwrap();
         assert!(got.eq_shape(&LerpBorder::new(Some(0.75), BorderSide::NONE)));
 
-        let a = ReverseLerpFromBorder;
-        let b = LerpBorder::new(None, BorderSide::NONE);
-        let got = <dyn ShapeBorder>::lerp(Some(&a), Some(&b), 0.25).unwrap();
+        let a = ShapeBorderRef::new(ReverseLerpFromBorder);
+        let b = ShapeBorderRef::new(LerpBorder::new(None, BorderSide::NONE));
+        let got = ShapeBorderRef::lerp(Some(&a), Some(&b), 0.25).unwrap();
         assert!(got.eq_shape(&LerpBorder::new(Some(0.75), BorderSide::NONE)));
     }
 
     #[test]
     fn outlined_border_lerp_tries_equivalent_reverse_interpolation() {
-        let a = LerpBorder::new(None, BorderSide::NONE);
-        let b = ReverseLerpToBorder;
-        let got = <dyn OutlinedBorder>::lerp(Some(&a), Some(&b), 0.25).unwrap();
+        let a = OutlinedBorderRef::new(LerpBorder::new(None, BorderSide::NONE));
+        let b = OutlinedBorderRef::new(ReverseLerpToBorder);
+        let got = OutlinedBorderRef::lerp(Some(&a), Some(&b), 0.25).unwrap();
         assert!(got.eq_shape(&LerpBorder::new(Some(0.75), BorderSide::NONE)));
 
-        let a = ReverseLerpFromBorder;
-        let b = LerpBorder::new(None, BorderSide::NONE);
-        let got = <dyn OutlinedBorder>::lerp(Some(&a), Some(&b), 0.25).unwrap();
+        let a = OutlinedBorderRef::new(ReverseLerpFromBorder);
+        let b = OutlinedBorderRef::new(LerpBorder::new(None, BorderSide::NONE));
+        let got = OutlinedBorderRef::lerp(Some(&a), Some(&b), 0.25).unwrap();
         assert!(got.eq_shape(&LerpBorder::new(Some(0.75), BorderSide::NONE)));
     }
 
@@ -1539,7 +1610,8 @@ mod tests {
             name: "blue",
             width: 1.0,
         };
-        let compound = (&b1 as &dyn ShapeBorder).plus(&b2);
+        let (b1, b2) = (ShapeBorderRef::new(b1), ShapeBorderRef::new(b2));
+        let compound = b1.plus(&b2);
         assert_eq!(
             format!("{compound:?}"),
             "NamedWidthBorder(green, 1.0) + NamedWidthBorder(blue, 1.0)"
@@ -1552,13 +1624,13 @@ mod tests {
             "NamedWidthBorder(green, 3.0) + NamedWidthBorder(blue, 3.0)"
         );
 
-        let left = (&b1 as &dyn ShapeBorder).plus(&b2);
-        let right = (&b1 as &dyn ShapeBorder).plus(&b2);
+        let left = b1.plus(&b2);
+        let right = b1.plus(&b2);
         assert!(left.eq_shape(&*right));
 
-        let b2b2 = (&b2 as &dyn ShapeBorder).plus(&b2);
-        let inner = (&b1 as &dyn ShapeBorder).plus(&*b2b2);
-        let outer = (&b1 as &dyn ShapeBorder).plus(&b2).plus(&b2);
+        let b2b2 = b2.plus(&b2);
+        let inner = b1.plus(&b2b2);
+        let outer = b1.plus(&b2).plus(&b2);
         assert!(inner.eq_shape(&*outer));
         assert_eq!(inner.dimensions(), EdgeInsetsGeometry::all(3.0));
     }
@@ -1582,8 +1654,8 @@ mod tests {
             EdgeInsetsGeometry::ZERO
         }
 
-        fn scale(&self, _t: f64) -> Box<dyn ShapeBorder> {
-            Box::new(*self)
+        fn scale(&self, _t: f64) -> ShapeBorderRef {
+            ShapeBorderRef::new(*self)
         }
 
         fn get_outer_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Path {
@@ -1610,10 +1682,6 @@ mod tests {
         fn paint(&self, _canvas: &mut Canvas, _rect: Rect, _text_direction: Option<TextDirection>) {
         }
 
-        fn clone_box(&self) -> Box<dyn ShapeBorder> {
-            Box::new(*self)
-        }
-
         fn as_any(&self) -> &dyn Any {
             self
         }
@@ -1627,8 +1695,8 @@ mod tests {
             EdgeInsetsGeometry::ZERO
         }
 
-        fn scale(&self, _t: f64) -> Box<dyn ShapeBorder> {
-            Box::new(*self)
+        fn scale(&self, _t: f64) -> ShapeBorderRef {
+            ShapeBorderRef::new(*self)
         }
 
         fn get_outer_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Path {
@@ -1642,10 +1710,6 @@ mod tests {
         fn paint(&self, _canvas: &mut Canvas, _rect: Rect, _text_direction: Option<TextDirection>) {
         }
 
-        fn clone_box(&self) -> Box<dyn ShapeBorder> {
-            Box::new(*self)
-        }
-
         fn as_any(&self) -> &dyn Any {
             self
         }
@@ -1656,23 +1720,23 @@ mod tests {
         assert!(ShapeWithInterior.prefer_paint_interior());
         assert!(!ShapeWithoutInterior.prefer_paint_interior());
         assert!(
-            (&ShapeWithInterior as &dyn ShapeBorder)
-                .plus(&ShapeWithInterior)
+            ShapeBorderRef::new(ShapeWithInterior)
+                .plus(&ShapeBorderRef::new(ShapeWithInterior))
                 .prefer_paint_interior()
         );
         assert!(
-            !(&ShapeWithInterior as &dyn ShapeBorder)
-                .plus(&ShapeWithoutInterior)
+            !ShapeBorderRef::new(ShapeWithInterior)
+                .plus(&ShapeBorderRef::new(ShapeWithoutInterior))
                 .prefer_paint_interior()
         );
         assert!(
-            !(&ShapeWithoutInterior as &dyn ShapeBorder)
-                .plus(&ShapeWithInterior)
+            !ShapeBorderRef::new(ShapeWithoutInterior)
+                .plus(&ShapeBorderRef::new(ShapeWithInterior))
                 .prefer_paint_interior()
         );
         assert!(
-            !(&ShapeWithoutInterior as &dyn ShapeBorder)
-                .plus(&ShapeWithoutInterior)
+            !ShapeBorderRef::new(ShapeWithoutInterior)
+                .plus(&ShapeBorderRef::new(ShapeWithoutInterior))
                 .prefer_paint_interior()
         );
     }

@@ -2,7 +2,7 @@
 
 use waft_embedder::{Color, lerp_double};
 use waft_foundation::App;
-use waft_painting::{ShapeBorder, TextStyle};
+use waft_painting::{ShapeBorderRef, TextStyle};
 use waft_widgets::{
     BuildContext, IconThemeData, InheritedTheme, InheritedWidget, IntoWidget, KeyRef, WidgetRef,
 };
@@ -71,7 +71,7 @@ pub struct NavigationRailThemeData {
     pub indicator_color: Option<Color>,
 
     /// Overrides the default shape of the `NavigationRail`'s selection indicator.
-    pub indicator_shape: Option<Box<dyn ShapeBorder>>,
+    pub indicator_shape: Option<ShapeBorderRef>,
 
     /// Overrides the default value of `NavigationRail`'s minimum width when it
     /// is not extended.
@@ -80,6 +80,27 @@ pub struct NavigationRailThemeData {
     /// Overrides the default value of `NavigationRail`'s minimum width when it
     /// is extended.
     pub min_extended_width: Option<f64>,
+}
+
+crate::theme_data_getters::theme_data_getters! {
+    /// Dart's getters of `NavigationRailThemeData`: the theme data answers with its fields, and a defaults
+    /// subclass (Dart's `_...Defaults...(context)`) computes the ones it overrides when they
+    /// are read.
+    pub trait NavigationRailThemeDataGetters for NavigationRailThemeData, fields: navigation_rail_theme_data {
+        background_color: Option<Color>,
+        elevation: Option<f64>,
+        unselected_label_text_style: Option<TextStyle>,
+        selected_label_text_style: Option<TextStyle>,
+        unselected_icon_theme: Option<IconThemeData>,
+        selected_icon_theme: Option<IconThemeData>,
+        group_alignment: Option<f64>,
+        label_type: Option<NavigationRailLabelType>,
+        use_indicator: Option<bool>,
+        indicator_color: Option<Color>,
+        indicator_shape: Option<ShapeBorderRef>,
+        min_width: Option<f64>,
+        min_extended_width: Option<f64>,
+    }
 }
 
 impl NavigationRailThemeData {
@@ -164,7 +185,7 @@ impl NavigationRailThemeData {
     /// Dart `NavigationRailThemeData(indicatorShape:)`.
     pub fn indicator_shape(
         mut self,
-        indicator_shape: impl Into<Box<dyn ShapeBorder>>,
+        indicator_shape: impl Into<ShapeBorderRef>,
     ) -> NavigationRailThemeData {
         self.indicator_shape = Some(indicator_shape.into());
         self
@@ -253,9 +274,9 @@ impl NavigationRailThemeData {
                 b.and_then(|b| b.indicator_color),
                 t,
             ),
-            indicator_shape: <dyn ShapeBorder>::lerp(
-                a.and_then(|a| a.indicator_shape.as_deref()),
-                b.and_then(|b| b.indicator_shape.as_deref()),
+            indicator_shape: ShapeBorderRef::lerp(
+                a.and_then(|a| a.indicator_shape.as_ref()),
+                b.and_then(|b| b.indicator_shape.as_ref()),
                 t,
             ),
             min_width: lerp_double(a.and_then(|a| a.min_width), b.and_then(|b| b.min_width), t),
@@ -361,6 +382,7 @@ mod tests {
     //! Ported from `test/navigation_rail_theme_test.dart`.
 
     use waft_embedder::Size;
+    use waft_painting::ShapeBorder;
     use waft_painting::{
         Alignment, AlignmentGeometry, BorderSide, RoundedRectangleBorder, ShapeDecoration,
         StadiumBorder,

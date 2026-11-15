@@ -1,7 +1,7 @@
 //! Flutter counterpart: material_ui's `bottom_sheet_theme.dart`.
 
 use waft_embedder::{Clip, Color, Size, lerp_double};
-use waft_painting::{AnyColor, ShapeBorder};
+use waft_painting::{AnyColor, ShapeBorderRef};
 use waft_rendering::BoxConstraints;
 
 /// Defines default property values for `BottomSheet`'s `Material`.
@@ -61,7 +61,7 @@ pub struct BottomSheetThemeData {
     ///
     /// If null, no overriding shape is specified for `BottomSheet`, so the
     /// `BottomSheet` is rectangular.
-    pub shape: Option<Box<dyn ShapeBorder>>,
+    pub shape: Option<ShapeBorderRef>,
 
     /// Overrides the default value for `BottomSheet::show_drag_handle`.
     pub show_drag_handle: Option<bool>,
@@ -81,6 +81,27 @@ pub struct BottomSheetThemeData {
     ///
     /// If null, the bottom sheet's size will be unconstrained.
     pub constraints: Option<BoxConstraints>,
+}
+
+crate::theme_data_getters::theme_data_getters! {
+    /// Dart's getters of `BottomSheetThemeData`: the theme data answers with its fields, and a defaults
+    /// subclass (Dart's `_...Defaults...(context)`) computes the ones it overrides when they
+    /// are read.
+    pub trait BottomSheetThemeDataGetters for BottomSheetThemeData, fields: bottom_sheet_theme_data {
+        background_color: Option<Color>,
+        surface_tint_color: Option<Color>,
+        elevation: Option<f64>,
+        modal_background_color: Option<Color>,
+        modal_barrier_color: Option<Color>,
+        shadow_color: Option<Color>,
+        modal_elevation: Option<f64>,
+        shape: Option<ShapeBorderRef>,
+        show_drag_handle: Option<bool>,
+        drag_handle_color: Option<AnyColor>,
+        drag_handle_size: Option<Size>,
+        clip_behavior: Option<Clip>,
+        constraints: Option<BoxConstraints>,
+    }
 }
 
 impl BottomSheetThemeData {
@@ -133,7 +154,7 @@ impl BottomSheetThemeData {
     }
 
     /// Dart `BottomSheetThemeData(shape:)`.
-    pub fn shape(mut self, shape: impl Into<Box<dyn ShapeBorder>>) -> BottomSheetThemeData {
+    pub fn shape(mut self, shape: impl Into<ShapeBorderRef>) -> BottomSheetThemeData {
         self.shape = Some(shape.into());
         self
     }
@@ -227,9 +248,9 @@ impl BottomSheetThemeData {
                 b.and_then(|b| b.modal_elevation),
                 t,
             ),
-            shape: <dyn ShapeBorder>::lerp(
-                a.and_then(|a| a.shape.as_deref()),
-                b.and_then(|b| b.shape.as_deref()),
+            shape: ShapeBorderRef::lerp(
+                a.and_then(|a| a.shape.as_ref()),
+                b.and_then(|b| b.shape.as_ref()),
                 t,
             ),
             show_drag_handle: pick(a, b, t, |theme| theme.show_drag_handle),
@@ -270,6 +291,7 @@ fn pick<T>(
 
 #[cfg(test)]
 mod tests {
+    use waft_painting::ShapeBorder;
     use waft_painting::{BorderRadiusGeometry, BorderSide, RoundedRectangleBorder};
 
     use super::*;

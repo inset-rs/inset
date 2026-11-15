@@ -18,7 +18,9 @@ use waft_gestures::{
     DragEndDetails, DragGestureRecognizer, DragStartDetails, DragUpdateDetails,
     HorizontalDragGestureRecognizer, PointerDownEvent, RecognizerLeaf,
 };
-use waft_painting::{AlignmentGeometry, AnyColor, BoxPainter, Decoration, ImageConfiguration};
+use waft_painting::{
+    AlignmentGeometry, AnyColor, BoxPainter, Decoration, DecorationRef, ImageConfiguration,
+};
 use waft_physics::{Simulation, SpringDescription, SpringSimulation, Tolerance};
 use waft_rendering::{HitTestBehavior, ImageFilterConfig, StackFit};
 use waft_scheduler::{FrameCallback, SchedulerBinding};
@@ -1303,7 +1305,7 @@ pub struct CupertinoPageTransitionState {
     // When this page is becoming covered by another page.
     secondary_position_animation: Option<AnyAnimation<Offset>>,
     // Shadow of page which is coming in to cover another page.
-    primary_shadow_animation: Option<AnyAnimation<Box<dyn Decoration>>>,
+    primary_shadow_animation: Option<AnyAnimation<DecorationRef>>,
     // Curve of primary page which is coming in to cover another page.
     primary_position_curve: Option<Handle<CurvedAnimation>>,
     // Curve of secondary page which is becoming covered by another page.
@@ -2015,12 +2017,14 @@ impl CupertinoEdgeShadowDecoration {
     fn k_tween() -> DecorationTween {
         DecorationTween::new(
             // No decoration initially.
-            Some(Box::new(CupertinoEdgeShadowDecoration::new(None))),
+            Some(DecorationRef::new(CupertinoEdgeShadowDecoration::new(None))),
             // Eyeballed gradient used to mimic a drop shadow on the start side only.
-            Some(Box::new(CupertinoEdgeShadowDecoration::new(Some(vec![
-                Color::new(0x04000000),
-                CupertinoColors::TRANSPARENT.color(),
-            ])))),
+            Some(DecorationRef::new(CupertinoEdgeShadowDecoration::new(
+                Some(vec![
+                    Color::new(0x04000000),
+                    CupertinoColors::TRANSPARENT.color(),
+                ]),
+            ))),
         )
     }
 
@@ -2094,24 +2098,18 @@ impl CupertinoEdgeShadowDecoration {
 }
 
 impl Decoration for CupertinoEdgeShadowDecoration {
-    fn lerp_from(&self, a: Option<&dyn Decoration>, t: f64) -> Option<Box<dyn Decoration>> {
+    fn lerp_from(&self, a: Option<&dyn Decoration>, t: f64) -> Option<DecorationRef> {
         let a = a.and_then(|a| a.as_any().downcast_ref::<CupertinoEdgeShadowDecoration>());
-        CupertinoEdgeShadowDecoration::lerp(a, Some(self), t)
-            .map(|decoration| Box::new(decoration) as Box<dyn Decoration>)
+        CupertinoEdgeShadowDecoration::lerp(a, Some(self), t).map(DecorationRef::new)
     }
 
-    fn lerp_to(&self, b: Option<&dyn Decoration>, t: f64) -> Option<Box<dyn Decoration>> {
+    fn lerp_to(&self, b: Option<&dyn Decoration>, t: f64) -> Option<DecorationRef> {
         let b = b.and_then(|b| b.as_any().downcast_ref::<CupertinoEdgeShadowDecoration>());
-        CupertinoEdgeShadowDecoration::lerp(Some(self), b, t)
-            .map(|decoration| Box::new(decoration) as Box<dyn Decoration>)
+        CupertinoEdgeShadowDecoration::lerp(Some(self), b, t).map(DecorationRef::new)
     }
 
     fn create_box_painter(&self, on_changed: Option<VoidCallback>) -> Box<dyn BoxPainter> {
         Box::new(CupertinoEdgeShadowPainter::new(self.clone(), on_changed))
-    }
-
-    fn clone_box(&self) -> Box<dyn Decoration> {
-        Box::new(self.clone())
     }
 
     fn as_any(&self) -> &dyn Any {

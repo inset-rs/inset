@@ -18,7 +18,7 @@ use waft_gestures::{
     GestureTapCancelCallback, GestureTapDownCallback, GestureTapUpCallback, PointerEnterEvent,
     PointerExitEvent, TapDownDetails, TapUpDetails,
 };
-use waft_painting::{BorderRadius, BoxShape, ShapeBorder, get_as_translation};
+use waft_painting::{BorderRadius, BoxShape, ShapeBorder, ShapeBorderRef, get_as_translation};
 use waft_rendering::{AnyRenderBox, HitTestBehavior};
 use waft_services::MouseCursorRef;
 use waft_widgets::{
@@ -44,15 +44,12 @@ use crate::theme::Theme;
 /// carries beside its [`InkFeatureData`](crate::InkFeatureData).
 pub struct InteractiveInkFeatureData {
     color: Color,
-    custom_border: Option<Box<dyn ShapeBorder>>,
+    custom_border: Option<ShapeBorderRef>,
 }
 
 impl InteractiveInkFeatureData {
     /// Creates an InteractiveInkFeature's fields.
-    pub fn new(
-        color: Color,
-        custom_border: Option<Box<dyn ShapeBorder>>,
-    ) -> InteractiveInkFeatureData {
+    pub fn new(color: Color, custom_border: Option<ShapeBorderRef>) -> InteractiveInkFeatureData {
         InteractiveInkFeatureData {
             color,
             custom_border,
@@ -131,8 +128,8 @@ struct InteractiveInkFeatureVTable {
     cancel: fn(&mut App, HandleId),
     color: fn(&App, HandleId) -> Color,
     set_color: fn(&mut App, HandleId, Color),
-    custom_border: fn(&App, HandleId) -> Option<Box<dyn ShapeBorder>>,
-    set_custom_border: fn(&mut App, HandleId, Option<Box<dyn ShapeBorder>>),
+    custom_border: fn(&App, HandleId) -> Option<ShapeBorderRef>,
+    set_custom_border: fn(&mut App, HandleId, Option<ShapeBorderRef>),
 }
 
 /// The typed handle for an erased id. Free: nothing is looked up; `get` checks the slot.
@@ -230,12 +227,12 @@ impl AnyInteractiveInkFeature {
     }
 
     /// See [`InteractiveInkFeature::custom_border`].
-    pub fn custom_border(self, app: &App) -> Option<Box<dyn ShapeBorder>> {
+    pub fn custom_border(self, app: &App) -> Option<ShapeBorderRef> {
         (self.vtable.custom_border)(app, self.id)
     }
 
     /// See [`InteractiveInkFeature::set_custom_border`].
-    pub fn set_custom_border(self, app: &mut App, value: Option<Box<dyn ShapeBorder>>) {
+    pub fn set_custom_border(self, app: &mut App, value: Option<ShapeBorderRef>) {
         (self.vtable.set_custom_border)(app, self.id, value);
     }
 }
@@ -266,7 +263,7 @@ impl InteractiveInkFeature {
     pub fn custom_border<F: InteractiveInkFeatureLeaf>(
         this: Handle<F>,
         app: &App,
-    ) -> Option<Box<dyn ShapeBorder>> {
+    ) -> Option<ShapeBorderRef> {
         app.get(this)
             .interactive_ink_feature()
             .custom_border
@@ -277,16 +274,9 @@ impl InteractiveInkFeature {
     pub fn set_custom_border<F: InteractiveInkFeatureLeaf>(
         this: Handle<F>,
         app: &mut App,
-        value: Option<Box<dyn ShapeBorder>>,
+        value: Option<ShapeBorderRef>,
     ) {
-        let unchanged = match (
-            &value,
-            &app.get(this).interactive_ink_feature().custom_border,
-        ) {
-            (Some(value), Some(custom_border)) => value.eq_shape(&**custom_border),
-            (value, custom_border) => value.is_none() && custom_border.is_none(),
-        };
-        if unchanged {
+        if value == app.get(this).interactive_ink_feature().custom_border {
             return;
         }
         app.get_mut(this)
@@ -419,7 +409,7 @@ pub trait InteractiveInkFeatureFactory: fmt::Debug {
         contained_ink_well: bool,
         rect_callback: Option<RectCallback>,
         border_radius: Option<BorderRadius>,
-        custom_border: Option<Box<dyn ShapeBorder>>,
+        custom_border: Option<ShapeBorderRef>,
         radius: Option<f64>,
         on_removed: Option<Listener>,
     ) -> AnyInteractiveInkFeature;
@@ -735,7 +725,7 @@ pub struct InkResponse {
     /// The custom clip border.
     ///
     /// If this is null, the ink response will not clip its content.
-    pub custom_border: Option<Box<dyn ShapeBorder>>,
+    pub custom_border: Option<ShapeBorderRef>,
 
     /// The color of the ink response when the parent widget is focused. If this
     /// property is null then the focus color of the theme,
@@ -1034,7 +1024,7 @@ macro_rules! ink_response_shared_setters {
         }
 
         #[doc = concat!("Dart `", stringify!($name), "(customBorder:)`.")]
-        pub fn custom_border(mut self, custom_border: impl Into<Box<dyn ShapeBorder>>) -> $name {
+        pub fn custom_border(mut self, custom_border: impl Into<ShapeBorderRef>) -> $name {
             self.ink_response_mut().custom_border = Some(custom_border.into());
             self
         }
@@ -1943,11 +1933,7 @@ impl State for InkResponseState {
                 // Do not call updateFocusHighlights() here because it is called below
             }
         }
-        let custom_border_changed =
-            match (&self.widget(app).response.custom_border, &old.custom_border) {
-                (Some(border), Some(old_border)) => !border.eq_shape(&**old_border),
-                (border, old_border) => border.is_some() != old_border.is_some(),
-            };
+        let custom_border_changed = self.widget(app).response.custom_border != old.custom_border;
         if custom_border_changed {
             self.update_highlights_and_splashes(app);
         }

@@ -6,7 +6,7 @@
 use std::fmt::{self, Debug};
 
 use waft_embedder::{Color, Size, lerp_double};
-use waft_painting::{AlignmentGeometry, BorderSide, EdgeInsetsGeometry, OutlinedBorder};
+use waft_painting::{AlignmentGeometry, BorderSide, EdgeInsetsGeometry, OutlinedBorderRef};
 use waft_services::MouseCursorRef;
 use waft_widgets::{WidgetStateBorderSide, WidgetStateProperty, WidgetStatePropertyRef};
 
@@ -133,7 +133,7 @@ pub struct MenuStyle {
     ///
     /// This shape is combined with [`side`](Self::side) to create a shape decorated with an
     /// outline.
-    pub shape: Option<WidgetStatePropertyRef<Option<Box<dyn OutlinedBorder>>>>,
+    pub shape: Option<WidgetStatePropertyRef<Option<OutlinedBorderRef>>>,
 
     /// The cursor for a mouse pointer when it enters or is hovering over this
     /// menu's `InkWell`.
@@ -157,6 +157,27 @@ pub struct MenuStyle {
     /// either, then the menu will be pushed as far over as necessary to display
     /// as much of itself as possible, possibly overlapping the parent button.
     pub alignment: Option<AlignmentGeometry>,
+}
+
+crate::theme_data_getters::theme_data_getters! {
+    /// Dart's getters of `MenuStyle`: the theme data answers with its fields, and a defaults
+    /// subclass (Dart's `_...Defaults...(context)`) computes the ones it overrides when they
+    /// are read.
+    pub trait MenuStyleGetters for MenuStyle, fields: menu_style {
+        background_color: Option<WidgetStatePropertyRef<Option<Color>>>,
+        shadow_color: Option<WidgetStatePropertyRef<Option<Color>>>,
+        surface_tint_color: Option<WidgetStatePropertyRef<Option<Color>>>,
+        elevation: Option<WidgetStatePropertyRef<Option<f64>>>,
+        padding: Option<WidgetStatePropertyRef<Option<EdgeInsetsGeometry>>>,
+        minimum_size: Option<WidgetStatePropertyRef<Option<Size>>>,
+        fixed_size: Option<WidgetStatePropertyRef<Option<Size>>>,
+        maximum_size: Option<WidgetStatePropertyRef<Option<Size>>>,
+        side: Option<WidgetStatePropertyRef<Option<BorderSide>>>,
+        shape: Option<WidgetStatePropertyRef<Option<OutlinedBorderRef>>>,
+        mouse_cursor: Option<WidgetStatePropertyRef<Option<MouseCursorRef>>>,
+        visual_density: Option<VisualDensity>,
+        alignment: Option<AlignmentGeometry>,
+    }
 }
 
 /// The fluent setters of Dart's named `MenuStyle` arguments, which `copyWith` shares.
@@ -188,7 +209,7 @@ impl MenuStyle {
         fixed_size: WidgetStatePropertyRef<Option<Size>> => "fixedSize",
         maximum_size: WidgetStatePropertyRef<Option<Size>> => "maximumSize",
         side: WidgetStatePropertyRef<Option<BorderSide>> => "side",
-        shape: WidgetStatePropertyRef<Option<Box<dyn OutlinedBorder>>> => "shape",
+        shape: WidgetStatePropertyRef<Option<OutlinedBorderRef>> => "shape",
         mouse_cursor: WidgetStatePropertyRef<Option<MouseCursorRef>> => "mouseCursor",
         visual_density: VisualDensity => "visualDensity",
         alignment: AlignmentGeometry => "alignment",
@@ -311,7 +332,7 @@ impl MenuStyle {
                 a.and_then(|a| a.shape.clone()),
                 b.and_then(|b| b.shape.clone()),
                 t,
-                |a, b, t| <dyn OutlinedBorder>::lerp(a.as_deref(), b.as_deref(), t),
+                |a, b, t| OutlinedBorderRef::lerp(a.as_ref(), b.as_ref(), t),
             ),
             mouse_cursor: if t < 0.5 {
                 a.and_then(|a| a.mouse_cursor.clone())

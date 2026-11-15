@@ -2,7 +2,7 @@
 
 use waft_embedder::{Color, lerp_double};
 use waft_foundation::App;
-use waft_painting::{AnyColor, EdgeInsetsGeometry, ShapeBorder, TextStyle};
+use waft_painting::{AnyColor, EdgeInsetsGeometry, ShapeBorderRef, TextStyle};
 use waft_services::MouseCursorRef;
 use waft_widgets::{
     BuildContext, Builder, InheritedTheme, InheritedWidget, IntoWidget, KeyRef, WidgetRef,
@@ -43,7 +43,7 @@ pub struct ListTileThemeData {
     pub dense: Option<bool>,
 
     /// Overrides the default value of `ListTile::shape`.
-    pub shape: Option<Box<dyn ShapeBorder>>,
+    pub shape: Option<ShapeBorderRef>,
 
     /// Overrides the default value of `ListTile::style`.
     pub style: Option<ListTileStyle>,
@@ -110,6 +110,36 @@ pub struct ListTileThemeData {
     pub is_three_line: Option<bool>,
 }
 
+crate::theme_data_getters::theme_data_getters! {
+    /// Dart's getters of `ListTileThemeData`: the theme data answers with its fields, and a defaults
+    /// subclass (Dart's `_...Defaults...(context)`) computes the ones it overrides when they
+    /// are read.
+    pub trait ListTileThemeDataGetters for ListTileThemeData, fields: list_tile_theme_data {
+        dense: Option<bool>,
+        shape: Option<ShapeBorderRef>,
+        style: Option<ListTileStyle>,
+        selected_color: Option<Color>,
+        icon_color: Option<AnyColor>,
+        text_color: Option<AnyColor>,
+        title_text_style: Option<TextStyle>,
+        subtitle_text_style: Option<TextStyle>,
+        leading_and_trailing_text_style: Option<TextStyle>,
+        content_padding: Option<EdgeInsetsGeometry>,
+        tile_color: Option<Color>,
+        selected_tile_color: Option<Color>,
+        horizontal_title_gap: Option<f64>,
+        min_vertical_padding: Option<f64>,
+        min_leading_width: Option<f64>,
+        min_tile_height: Option<f64>,
+        enable_feedback: Option<bool>,
+        mouse_cursor: Option<WidgetStatePropertyRef<Option<MouseCursorRef>>>,
+        visual_density: Option<VisualDensity>,
+        title_alignment: Option<ListTileTitleAlignment>,
+        control_affinity: Option<ListTileControlAffinity>,
+        is_three_line: Option<bool>,
+    }
+}
+
 /// The setters of the arguments Dart's `ListTileThemeData` constructor and
 /// `ListTileTheme.merge` share, each writing its field of `$data`.
 macro_rules! list_tile_theme_data_setters {
@@ -133,7 +163,7 @@ macro_rules! every_list_tile_theme_data_setter {
             $dart,
             |$this| $data,
             dense: bool => "dense",
-            shape: Box<dyn ShapeBorder> => "shape",
+            shape: ShapeBorderRef => "shape",
             style: ListTileStyle => "style",
             selected_color: Color => "selectedColor",
             icon_color: AnyColor => "iconColor",
@@ -189,9 +219,9 @@ impl ListTileThemeData {
         }
         Some(ListTileThemeData {
             dense: pick(a, b, t, |theme| theme.dense),
-            shape: <dyn ShapeBorder>::lerp(
-                a.and_then(|a| a.shape.as_deref()),
-                b.and_then(|b| b.shape.as_deref()),
+            shape: ShapeBorderRef::lerp(
+                a.and_then(|a| a.shape.as_ref()),
+                b.and_then(|b| b.shape.as_ref()),
                 t,
             ),
             style: pick(a, b, t, |theme| theme.style),
@@ -333,7 +363,7 @@ pub struct ListTileTheme {
     /// Dart's `_data`: the configuration given to the constructor.
     pub data: Option<ListTileThemeData>,
     pub dense: Option<bool>,
-    pub shape: Option<Box<dyn ShapeBorder>>,
+    pub shape: Option<ShapeBorderRef>,
     pub style: Option<ListTileStyle>,
     pub selected_color: Option<Color>,
     pub icon_color: Option<AnyColor>,
@@ -434,7 +464,7 @@ impl ListTileTheme {
     }
 
     obsolete_list_tile_theme_setters!(
-        shape: Box<dyn ShapeBorder> => "shape",
+        shape: ShapeBorderRef => "shape",
         selected_color: Color => "selectedColor",
         icon_color: AnyColor => "iconColor",
         text_color: AnyColor => "textColor",
@@ -489,7 +519,7 @@ impl ListTileTheme {
     ///
     /// This property is obsolete: please use the [`data`](Self::data)
     /// [`ListTileThemeData::shape`] property instead.
-    pub fn effective_shape(&self) -> Option<Box<dyn ShapeBorder>> {
+    pub fn effective_shape(&self) -> Option<ShapeBorderRef> {
         match &self.data {
             Some(data) => data.shape.clone(),
             None => self.shape.clone(),
@@ -900,7 +930,7 @@ mod tests {
             assert_eq!(theme.dense, Some(true));
             assert_eq!(
                 theme.shape,
-                Some(Box::new(StadiumBorder::default()) as Box<dyn ShapeBorder>)
+                Some(ShapeBorderRef::new(StadiumBorder::default()))
             );
             assert_eq!(theme.style, Some(ListTileStyle::Drawer));
             assert_eq!(theme.selected_color, Some(Color::new(0x00000001)));
@@ -945,7 +975,7 @@ mod tests {
         enabled: Option<bool>,
         dense: bool,
         selected: bool,
-        shape: Option<Box<dyn ShapeBorder>>,
+        shape: Option<ShapeBorderRef>,
         selected_color: Option<Color>,
         icon_color: Option<Color>,
         text_color: Option<Color>,
@@ -1106,17 +1136,14 @@ mod tests {
             // A selected ListTile's InkWell gets the ListTileTheme's shape
             case.pump_frame(ThemedArgs {
                 selected: true,
-                shape: Some(Box::new(rounded_shape)),
+                shape: Some(ShapeBorderRef::new(rounded_shape)),
                 ..ThemedArgs::default()
             });
             let ink_well = case.tester.find_by_type::<InkWell>()[0];
             let custom_border = case.tester.widget(ink_well, |ink_well: &InkWell| {
                 ink_well.ink_response.custom_border.clone()
             });
-            assert_eq!(
-                custom_border,
-                Some(Box::new(rounded_shape) as Box<dyn ShapeBorder>)
-            );
+            assert_eq!(custom_border, Some(ShapeBorderRef::new(rounded_shape)));
 
             // Cursor updates when hovering disabled ListTile
             case.pump_frame(ThemedArgs {
@@ -1454,10 +1481,7 @@ mod tests {
                 ink_well.ink_response.custom_border.clone()
             });
             // Test shape.
-            assert_eq!(
-                ink_well_border,
-                Some(Box::new(shape_border) as Box<dyn ShapeBorder>)
-            );
+            assert_eq!(ink_well_border, Some(ShapeBorderRef::new(shape_border)));
         });
     }
 
@@ -1582,7 +1606,7 @@ mod tests {
         assert_eq!(copy.dense, Some(false));
         assert_eq!(
             copy.shape,
-            Some(Box::new(RoundedRectangleBorder::default()) as Box<dyn ShapeBorder>)
+            Some(ShapeBorderRef::new(RoundedRectangleBorder::default()))
         );
         assert_eq!(copy.style, Some(ListTileStyle::List));
         assert_eq!(copy.selected_color, Some(Color::new(0x00000009)));
@@ -1743,7 +1767,7 @@ mod tests {
             assert_eq!(theme.dense, Some(false));
             assert_eq!(
                 theme.shape,
-                Some(Box::new(RoundedRectangleBorder::default()) as Box<dyn ShapeBorder>)
+                Some(ShapeBorderRef::new(RoundedRectangleBorder::default()))
             );
             assert_eq!(theme.style, Some(ListTileStyle::List));
             assert_eq!(theme.selected_color, Some(Color::new(0x00000009)));

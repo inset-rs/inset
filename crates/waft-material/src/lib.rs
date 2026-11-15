@@ -137,6 +137,7 @@ mod text_selection_toolbar_text_button;
 mod text_theme;
 mod theme;
 mod theme_data;
+mod theme_data_getters;
 mod time;
 mod tooltip;
 mod tooltip_theme;

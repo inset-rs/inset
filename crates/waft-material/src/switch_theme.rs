@@ -91,6 +91,24 @@ pub struct SwitchThemeData {
     pub padding: Option<EdgeInsetsGeometry>,
 }
 
+crate::theme_data_getters::theme_data_getters! {
+    /// Dart's getters of `SwitchThemeData`: the theme data answers with its fields, and a defaults
+    /// subclass (Dart's `_...Defaults...(context)`) computes the ones it overrides when they
+    /// are read.
+    pub trait SwitchThemeDataGetters for SwitchThemeData, fields: switch_theme_data {
+        thumb_color: Option<WidgetStatePropertyRef<Option<Color>>>,
+        track_color: Option<WidgetStatePropertyRef<Option<Color>>>,
+        track_outline_color: Option<WidgetStatePropertyRef<Option<Color>>>,
+        track_outline_width: Option<WidgetStatePropertyRef<Option<f64>>>,
+        material_tap_target_size: Option<MaterialTapTargetSize>,
+        mouse_cursor: Option<WidgetStatePropertyRef<Option<MouseCursorRef>>>,
+        overlay_color: Option<WidgetStatePropertyRef<Option<Color>>>,
+        splash_radius: Option<f64>,
+        thumb_icon: Option<WidgetStatePropertyRef<Option<Rc<Icon>>>>,
+        padding: Option<EdgeInsetsGeometry>,
+    }
+}
+
 impl SwitchThemeData {
     /// Creates a theme that can be used for `ThemeData::switch_theme`; Dart's optional named
     /// arguments are the fluent setters.

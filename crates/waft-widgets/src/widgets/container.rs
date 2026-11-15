@@ -6,7 +6,7 @@ use std::any::Any;
 use std::rc::Rc;
 use waft_embedder::{Clip, Matrix4, Offset, Path, Size, TextDirection};
 use waft_foundation::App;
-use waft_painting::{AlignmentGeometry, AnyColor, Decoration, EdgeInsetsGeometry};
+use waft_painting::{AlignmentGeometry, AnyColor, DecorationRef, EdgeInsetsGeometry};
 use waft_rendering::{
     AnyRenderObject, BoxConstraints, Constraints, CustomClipper, DecorationPosition, RenderBox,
     RenderDecoratedBox, RenderHandle,
@@ -58,7 +58,7 @@ pub struct DecoratedBox {
     /// What decoration to paint.
     ///
     /// Commonly a `BoxDecoration`.
-    pub decoration: Box<dyn Decoration>,
+    pub decoration: DecorationRef,
     /// Whether to paint the box decoration behind or in front of the child.
     ///
     /// By default the decoration paints behind the child.
@@ -68,10 +68,10 @@ pub struct DecoratedBox {
 
 impl DecoratedBox {
     /// Creates a `DecoratedBox`; Dart's optional named arguments are the setters.
-    pub fn new(decoration: impl Decoration + 'static) -> DecoratedBox {
+    pub fn new(decoration: impl Into<DecorationRef>) -> DecoratedBox {
         DecoratedBox {
             key: None,
-            decoration: Box::new(decoration),
+            decoration: decoration.into(),
             position: DecorationPosition::Background,
             child: None,
         }
@@ -107,7 +107,7 @@ impl RenderObjectWidget for DecoratedBox {
         let configuration = create_local_image_configuration(app, context, None);
         RenderDecoratedBox::new(
             app,
-            self.decoration.clone_box(),
+            self.decoration.clone(),
             self.position,
             configuration,
             None,
@@ -121,7 +121,7 @@ impl RenderObjectWidget for DecoratedBox {
         context: BuildContext,
         render_object: RenderHandle<RenderDecoratedBox>,
     ) {
-        render_object.set_decoration(app, self.decoration.clone_box());
+        render_object.set_decoration(app, self.decoration.clone());
         let configuration = create_local_image_configuration(app, context, None);
         render_object.set_configuration(app, configuration);
         render_object.set_position(app, self.position);
@@ -273,9 +273,9 @@ pub struct Container {
     ///
     /// The [`child`](Self::child) is not clipped to the decoration. To clip a child to the
     /// shape of a particular `ShapeDecoration`, consider using a `ClipPath` widget.
-    pub decoration: Option<Box<dyn Decoration>>,
+    pub decoration: Option<DecorationRef>,
     /// The decoration to paint in front of the [`child`](Self::child).
-    pub foreground_decoration: Option<Box<dyn Decoration>>,
+    pub foreground_decoration: Option<DecorationRef>,
     /// Additional constraints to apply to the child.
     ///
     /// The [`width`](Self::width) and [`height`](Self::height) setters are combined with the
@@ -366,19 +366,20 @@ impl Container {
     }
 
     /// Dart `Container(decoration:)`; cannot be combined with [`color`](Self::color).
-    pub fn decoration(mut self, decoration: impl Decoration + 'static) -> Container {
+    pub fn decoration(mut self, decoration: impl Into<DecorationRef>) -> Container {
         debug_assert!(self.color.is_none(), "{CANNOT_PROVIDE_BOTH}");
+        let decoration = decoration.into();
         debug_assert!(decoration.debug_assert_is_valid());
-        self.decoration = Some(Box::new(decoration));
+        self.decoration = Some(decoration);
         self
     }
 
     /// Dart `Container(foregroundDecoration:)`.
     pub fn foreground_decoration(
         mut self,
-        foreground_decoration: impl Decoration + 'static,
+        foreground_decoration: impl Into<DecorationRef>,
     ) -> Container {
-        self.foreground_decoration = Some(Box::new(foreground_decoration));
+        self.foreground_decoration = Some(foreground_decoration.into());
         self
     }
 
@@ -492,11 +493,11 @@ impl Default for Container {
 /// Dart's `_DecorationClipper`: a clipper that uses `Decoration::get_clip_path` to clip.
 struct DecorationClipper {
     text_direction: TextDirection,
-    decoration: Box<dyn Decoration>,
+    decoration: DecorationRef,
 }
 
 impl DecorationClipper {
-    fn new(text_direction: Option<TextDirection>, decoration: Box<dyn Decoration>) -> Self {
+    fn new(text_direction: Option<TextDirection>, decoration: DecorationRef) -> Self {
         DecorationClipper {
             text_direction: text_direction.unwrap_or(TextDirection::Ltr),
             decoration,
@@ -514,7 +515,7 @@ impl CustomClipper<Path> for DecorationClipper {
         let Some(old_clipper) = old_clipper.as_any().downcast_ref::<DecorationClipper>() else {
             return true;
         };
-        !old_clipper.decoration.eq_decoration(&*self.decoration)
+        old_clipper.decoration != self.decoration
             || old_clipper.text_direction != self.text_direction
     }
 
@@ -587,7 +588,7 @@ impl StatelessWidget for Container {
                     key: None,
                     clipper: Some(Rc::new(DecorationClipper::new(
                         text_direction,
-                        decoration.clone_box(),
+                        decoration.clone(),
                     ))),
                     clip_behavior: self.clip_behavior,
                     child: current,
@@ -600,7 +601,7 @@ impl StatelessWidget for Container {
             current = Some(
                 DecoratedBox {
                     key: None,
-                    decoration: decoration.clone_box(),
+                    decoration: decoration.clone(),
                     position: DecorationPosition::Background,
                     child: current,
                 }
@@ -612,7 +613,7 @@ impl StatelessWidget for Container {
             current = Some(
                 DecoratedBox {
                     key: None,
-                    decoration: foreground_decoration.clone_box(),
+                    decoration: foreground_decoration.clone(),
                     position: DecorationPosition::Foreground,
                     child: current,
                 }
@@ -661,6 +662,7 @@ impl StatelessWidget for Container {
 mod tests {
     use waft_embedder::{Clip, Color, Offset, SceneBuilder, Size, TextDirection};
     use waft_foundation::AppCell;
+    use waft_painting::Decoration;
     use waft_painting::{Border, BorderSide, BorderStyle, BoxDecoration};
     use waft_rendering::{
         AnyRenderBox, BoxParentData, RenderAligningShiftedBox, RenderBox, RenderColoredBox,
@@ -705,7 +707,7 @@ mod tests {
         let decorated = |color: Color| {
             DecoratedBox {
                 key: None,
-                decoration: Box::new(BoxDecoration::new().color(color)),
+                decoration: DecorationRef::new(BoxDecoration::new().color(color)),
                 position: DecorationPosition::Background,
                 child: Some(SizedBox::new().width(10.0).height(10.0).into_widget()),
             }
