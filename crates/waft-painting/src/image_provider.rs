@@ -177,147 +177,6 @@ impl Debug for ImageConfiguration {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use waft_embedder::TargetPlatform;
-
-    use crate::basic_types::TextDirection;
-
-    #[derive(Debug)]
-    struct MemoryBundle {
-        bytes: Vec<u8>,
-    }
-
-    impl AssetBundle for MemoryBundle {
-        fn load(&self, _key: &str) -> AssetFuture {
-            Box::pin(std::future::ready(Ok(self.bytes.clone())))
-        }
-    }
-
-    #[test]
-    fn memory_keys_preserve_shared_and_static_identity_without_comparing_contents() {
-        let configuration = ImageConfiguration::EMPTY;
-        let bytes: Arc<[u8]> = Arc::from(&b"same"[..]);
-        let weak = Arc::downgrade(&bytes);
-        let key = MemoryImage::new(bytes.clone()).key(&configuration);
-        assert_eq!(key, MemoryImage::new(bytes.clone()).key(&configuration));
-        assert_ne!(
-            key,
-            MemoryImage::new(Arc::from(&b"same"[..])).key(&configuration)
-        );
-        drop(bytes);
-        assert!(weak.upgrade().is_some(), "the key owns the allocation");
-        drop(key);
-        assert!(weak.upgrade().is_none());
-        static BYTES: [u8; 4] = *b"same";
-        let whole = MemoryImage::from_static(&BYTES).key(&configuration);
-        assert_eq!(whole, MemoryImage::from_static(&BYTES).key(&configuration));
-        assert_ne!(
-            whole,
-            MemoryImage::from_static(&BYTES[..2]).key(&configuration)
-        );
-    }
-
-    #[test]
-    fn scales_use_numeric_equality_and_keys_preserve_reflexive_identity() {
-        let configuration = ImageConfiguration::EMPTY;
-        static BYTES: [u8; 1] = [42];
-        let key = |scale| {
-            MemoryImage::from_static(&BYTES)
-                .scale(scale)
-                .key(&configuration)
-        };
-        let hash = |key: &ImageCacheKey| {
-            let mut hasher = std::hash::DefaultHasher::new();
-            key.hash(&mut hasher);
-            hasher.finish()
-        };
-        assert_eq!(key(0.0), key(-0.0));
-        assert_eq!(hash(&key(0.0)), hash(&key(-0.0)));
-        assert_ne!(key(1.0), key(2.0));
-        assert_ne!(key(f64::NAN), key(f64::NAN));
-        let nan = key(f64::NAN);
-        assert_eq!(nan, nan.clone());
-    }
-
-    #[test]
-    fn asset_keys_include_bundle_identity_and_loading_uses_the_resolved_name() {
-        #[derive(Debug)]
-        struct RecordingBundle(Rc<std::cell::RefCell<Vec<String>>>);
-        impl AssetBundle for RecordingBundle {
-            fn load(&self, key: &str) -> AssetFuture {
-                self.0.borrow_mut().push(key.to_owned());
-                Box::pin(std::future::ready(Ok(vec![1])))
-            }
-        }
-        let requests = Rc::new(std::cell::RefCell::new(Vec::new()));
-        let bundle: Rc<dyn AssetBundle> = Rc::new(RecordingBundle(requests.clone()));
-        let configuration =
-            ImageConfiguration::new(Some(bundle.clone()), None, None, None, None, None);
-        let provider = AssetImage::new("original");
-        let key = provider.key(&configuration);
-        assert_eq!(key, provider.key(&configuration));
-        let another = ImageConfiguration::new(
-            Some(Rc::new(RecordingBundle(requests.clone()))),
-            None,
-            None,
-            None,
-            None,
-            None,
-        );
-        assert_ne!(key, provider.key(&another));
-        let cell = waft_foundation::AppCell::new();
-        let mut app = cell.borrow_mut();
-        let completer = AssetImage::new("changed").load_image(&mut app, &key);
-        assert_eq!(&*requests.borrow(), &["original"]);
-        completer.maybe_dispose(&mut app);
-        drop(app);
-        cell.checkpoint(); // The late asset load must not recreate playback after disposal.
-    }
-
-    #[test]
-    fn empty_and_copy_with() {
-        let empty = ImageConfiguration::EMPTY;
-        assert_eq!(empty, ImageConfiguration::default());
-        let sized = empty.copy_with(
-            None,
-            Some(2.0),
-            Some(Locale::new("ar")),
-            Some(TextDirection::Rtl),
-            Some(Size::new(10.0, 20.0)),
-            Some(TargetPlatform::IOS),
-        );
-        assert_eq!(sized.device_pixel_ratio, Some(2.0));
-        assert_eq!(sized.locale, Some(Locale::new("ar")));
-        assert_eq!(sized.text_direction, Some(TextDirection::Rtl));
-        assert_eq!(sized.size, Some(Size::new(10.0, 20.0)));
-        assert_eq!(sized.platform, Some(TargetPlatform::IOS));
-        assert!(sized.bundle.is_none());
-    }
-
-    #[test]
-    fn bundle_identity() {
-        let a: Rc<dyn AssetBundle> = Rc::new(MemoryBundle {
-            bytes: b"one".to_vec(),
-        });
-        let b: Rc<dyn AssetBundle> = Rc::new(MemoryBundle {
-            bytes: b"one".to_vec(),
-        });
-        let left = ImageConfiguration::new(Some(a.clone()), None, None, None, None, None);
-        let same = ImageConfiguration::new(Some(a), None, None, None, None, None);
-        let other = ImageConfiguration::new(Some(b), None, None, None, None, None);
-        assert_eq!(left, same);
-        assert_ne!(left, other);
-        let mut loading = left.bundle.as_ref().unwrap().load("k");
-        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
-        let std::task::Poll::Ready(Ok(bytes)) = loading.as_mut().poll(&mut context) else {
-            panic!("a bundle holding its bytes answers at once");
-        };
-        assert_eq!(bytes, b"one");
-    }
-}
-
 /// Something that can produce an image, and knows what identifies it. Flutter `ImageProvider`.
 ///
 /// A provider is asked twice: once for the key that names its image in the cache, and once — only
@@ -825,5 +684,146 @@ impl ImagePlayback {
             timer.cancel(app);
         }
         app.get_mut(self).current_frame_done = true;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use waft_embedder::TargetPlatform;
+
+    use crate::basic_types::TextDirection;
+
+    #[derive(Debug)]
+    struct MemoryBundle {
+        bytes: Vec<u8>,
+    }
+
+    impl AssetBundle for MemoryBundle {
+        fn load(&self, _key: &str) -> AssetFuture {
+            Box::pin(std::future::ready(Ok(self.bytes.clone())))
+        }
+    }
+
+    #[test]
+    fn memory_keys_preserve_shared_and_static_identity_without_comparing_contents() {
+        let configuration = ImageConfiguration::EMPTY;
+        let bytes: Arc<[u8]> = Arc::from(&b"same"[..]);
+        let weak = Arc::downgrade(&bytes);
+        let key = MemoryImage::new(bytes.clone()).key(&configuration);
+        assert_eq!(key, MemoryImage::new(bytes.clone()).key(&configuration));
+        assert_ne!(
+            key,
+            MemoryImage::new(Arc::from(&b"same"[..])).key(&configuration)
+        );
+        drop(bytes);
+        assert!(weak.upgrade().is_some(), "the key owns the allocation");
+        drop(key);
+        assert!(weak.upgrade().is_none());
+        static BYTES: [u8; 4] = *b"same";
+        let whole = MemoryImage::from_static(&BYTES).key(&configuration);
+        assert_eq!(whole, MemoryImage::from_static(&BYTES).key(&configuration));
+        assert_ne!(
+            whole,
+            MemoryImage::from_static(&BYTES[..2]).key(&configuration)
+        );
+    }
+
+    #[test]
+    fn scales_use_numeric_equality_and_keys_preserve_reflexive_identity() {
+        let configuration = ImageConfiguration::EMPTY;
+        static BYTES: [u8; 1] = [42];
+        let key = |scale| {
+            MemoryImage::from_static(&BYTES)
+                .scale(scale)
+                .key(&configuration)
+        };
+        let hash = |key: &ImageCacheKey| {
+            let mut hasher = std::hash::DefaultHasher::new();
+            key.hash(&mut hasher);
+            hasher.finish()
+        };
+        assert_eq!(key(0.0), key(-0.0));
+        assert_eq!(hash(&key(0.0)), hash(&key(-0.0)));
+        assert_ne!(key(1.0), key(2.0));
+        assert_ne!(key(f64::NAN), key(f64::NAN));
+        let nan = key(f64::NAN);
+        assert_eq!(nan, nan.clone());
+    }
+
+    #[test]
+    fn asset_keys_include_bundle_identity_and_loading_uses_the_resolved_name() {
+        #[derive(Debug)]
+        struct RecordingBundle(Rc<std::cell::RefCell<Vec<String>>>);
+        impl AssetBundle for RecordingBundle {
+            fn load(&self, key: &str) -> AssetFuture {
+                self.0.borrow_mut().push(key.to_owned());
+                Box::pin(std::future::ready(Ok(vec![1])))
+            }
+        }
+        let requests = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let bundle: Rc<dyn AssetBundle> = Rc::new(RecordingBundle(requests.clone()));
+        let configuration =
+            ImageConfiguration::new(Some(bundle.clone()), None, None, None, None, None);
+        let provider = AssetImage::new("original");
+        let key = provider.key(&configuration);
+        assert_eq!(key, provider.key(&configuration));
+        let another = ImageConfiguration::new(
+            Some(Rc::new(RecordingBundle(requests.clone()))),
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        assert_ne!(key, provider.key(&another));
+        let cell = waft_foundation::AppCell::new();
+        let mut app = cell.borrow_mut();
+        let completer = AssetImage::new("changed").load_image(&mut app, &key);
+        assert_eq!(&*requests.borrow(), &["original"]);
+        completer.maybe_dispose(&mut app);
+        drop(app);
+        cell.checkpoint(); // The late asset load must not recreate playback after disposal.
+    }
+
+    #[test]
+    fn empty_and_copy_with() {
+        let empty = ImageConfiguration::EMPTY;
+        assert_eq!(empty, ImageConfiguration::default());
+        let sized = empty.copy_with(
+            None,
+            Some(2.0),
+            Some(Locale::new("ar")),
+            Some(TextDirection::Rtl),
+            Some(Size::new(10.0, 20.0)),
+            Some(TargetPlatform::IOS),
+        );
+        assert_eq!(sized.device_pixel_ratio, Some(2.0));
+        assert_eq!(sized.locale, Some(Locale::new("ar")));
+        assert_eq!(sized.text_direction, Some(TextDirection::Rtl));
+        assert_eq!(sized.size, Some(Size::new(10.0, 20.0)));
+        assert_eq!(sized.platform, Some(TargetPlatform::IOS));
+        assert!(sized.bundle.is_none());
+    }
+
+    #[test]
+    fn bundle_identity() {
+        let a: Rc<dyn AssetBundle> = Rc::new(MemoryBundle {
+            bytes: b"one".to_vec(),
+        });
+        let b: Rc<dyn AssetBundle> = Rc::new(MemoryBundle {
+            bytes: b"one".to_vec(),
+        });
+        let left = ImageConfiguration::new(Some(a.clone()), None, None, None, None, None);
+        let same = ImageConfiguration::new(Some(a), None, None, None, None, None);
+        let other = ImageConfiguration::new(Some(b), None, None, None, None, None);
+        assert_eq!(left, same);
+        assert_ne!(left, other);
+        let mut loading = left.bundle.as_ref().unwrap().load("k");
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        let std::task::Poll::Ready(Ok(bytes)) = loading.as_mut().poll(&mut context) else {
+            panic!("a bundle holding its bytes answers at once");
+        };
+        assert_eq!(bytes, b"one");
     }
 }

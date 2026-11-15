@@ -1372,6 +1372,89 @@ fn process_id(adb: &Path, serial: &str, package: &str) -> Option<String> {
     None
 }
 
+/// Everything Android that `run -d` can name: the emulators the SDK knows, running or
+/// not, and the devices `adb` reaches that are not one of them.
+pub fn listed_devices() -> Result<Vec<crate::devices::Device>> {
+    let attached = devices()?;
+    let mut listed: Vec<crate::devices::Device> = emulators()?
+        .into_iter()
+        .map(|avd| {
+            let running = attached
+                .iter()
+                .any(|device| device.avd.as_deref() == Some(&avd));
+            crate::devices::Device {
+                name: avd.replace('_', " "),
+                id: avd,
+                platform: "android emulator",
+                state: if running {
+                    "running".into()
+                } else {
+                    String::new()
+                },
+            }
+        })
+        .collect();
+    listed.extend(
+        attached
+            .into_iter()
+            .filter(|device| device.avd.is_none())
+            .map(|device| crate::devices::Device {
+                id: device.serial,
+                name: device.model,
+                platform: "android device",
+                state: device.state,
+            }),
+    );
+    Ok(listed)
+}
+
+/// `android` is a device `adb` reaches, else the first emulator to boot; a name is an
+/// emulator's AVD, running or not, or a device's serial.
+pub fn target_for(wanted: &str) -> Result<Option<Target>> {
+    let running = devices()?;
+    let ready = |device: &Device| device.state == "device";
+    if wanted == "android" {
+        if let Some(device) = running.iter().find(|device| ready(device)) {
+            return Ok(Some(Target::AndroidDevice(device.clone())));
+        }
+        if let Some(avd) = emulators()?.into_iter().next() {
+            return Ok(Some(Target::AndroidEmulator(avd)));
+        }
+        // An attached device that cannot be used is the likeliest thing the person meant.
+        if let Some(device) = running.first() {
+            bail!("{}", not_ready(device));
+        }
+        return Ok(None);
+    }
+    if let Some(device) = running
+        .iter()
+        .find(|d| d.serial.eq_ignore_ascii_case(wanted) || d.avd.as_deref() == Some(wanted))
+    {
+        // Named rather than picked, so say why it cannot be used instead of building first
+        // and failing at the install.
+        if !ready(device) {
+            bail!("{}", not_ready(device));
+        }
+        return Ok(Some(Target::AndroidDevice(device.clone())));
+    }
+    Ok(emulators()?
+        .into_iter()
+        .find(|avd| avd.eq_ignore_ascii_case(wanted))
+        .map(Target::AndroidEmulator))
+}
+
+/// Why a device `adb` lists cannot be built for, and what to do about it.
+fn not_ready(device: &Device) -> String {
+    let what = match device.state.as_str() {
+        "unauthorized" => {
+            "has not allowed USB debugging from this computer yet: unlock it and accept the prompt"
+        }
+        "offline" => "is offline: unplug it and plug it in again, or turn USB debugging off and on",
+        other => return format!("{} is {other}", device.serial),
+    };
+    format!("{} {what}", device.model)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1748,87 +1831,4 @@ mod tests {
             "no model: the serial stands in"
         );
     }
-}
-
-/// Everything Android that `run -d` can name: the emulators the SDK knows, running or
-/// not, and the devices `adb` reaches that are not one of them.
-pub fn listed_devices() -> Result<Vec<crate::devices::Device>> {
-    let attached = devices()?;
-    let mut listed: Vec<crate::devices::Device> = emulators()?
-        .into_iter()
-        .map(|avd| {
-            let running = attached
-                .iter()
-                .any(|device| device.avd.as_deref() == Some(&avd));
-            crate::devices::Device {
-                name: avd.replace('_', " "),
-                id: avd,
-                platform: "android emulator",
-                state: if running {
-                    "running".into()
-                } else {
-                    String::new()
-                },
-            }
-        })
-        .collect();
-    listed.extend(
-        attached
-            .into_iter()
-            .filter(|device| device.avd.is_none())
-            .map(|device| crate::devices::Device {
-                id: device.serial,
-                name: device.model,
-                platform: "android device",
-                state: device.state,
-            }),
-    );
-    Ok(listed)
-}
-
-/// `android` is a device `adb` reaches, else the first emulator to boot; a name is an
-/// emulator's AVD, running or not, or a device's serial.
-pub fn target_for(wanted: &str) -> Result<Option<Target>> {
-    let running = devices()?;
-    let ready = |device: &Device| device.state == "device";
-    if wanted == "android" {
-        if let Some(device) = running.iter().find(|device| ready(device)) {
-            return Ok(Some(Target::AndroidDevice(device.clone())));
-        }
-        if let Some(avd) = emulators()?.into_iter().next() {
-            return Ok(Some(Target::AndroidEmulator(avd)));
-        }
-        // An attached device that cannot be used is the likeliest thing the person meant.
-        if let Some(device) = running.first() {
-            bail!("{}", not_ready(device));
-        }
-        return Ok(None);
-    }
-    if let Some(device) = running
-        .iter()
-        .find(|d| d.serial.eq_ignore_ascii_case(wanted) || d.avd.as_deref() == Some(wanted))
-    {
-        // Named rather than picked, so say why it cannot be used instead of building first
-        // and failing at the install.
-        if !ready(device) {
-            bail!("{}", not_ready(device));
-        }
-        return Ok(Some(Target::AndroidDevice(device.clone())));
-    }
-    Ok(emulators()?
-        .into_iter()
-        .find(|avd| avd.eq_ignore_ascii_case(wanted))
-        .map(Target::AndroidEmulator))
-}
-
-/// Why a device `adb` lists cannot be built for, and what to do about it.
-fn not_ready(device: &Device) -> String {
-    let what = match device.state.as_str() {
-        "unauthorized" => {
-            "has not allowed USB debugging from this computer yet: unlock it and accept the prompt"
-        }
-        "offline" => "is offline: unplug it and plug it in again, or turn USB debugging off and on",
-        other => return format!("{} is {other}", device.serial),
-    };
-    format!("{} {what}", device.model)
 }

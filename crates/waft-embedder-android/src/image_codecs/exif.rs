@@ -155,7 +155,7 @@ fn number_of(text: &str) -> Option<f64> {
         Some((numerator, denominator)) => {
             let denominator = denominator.trim().parse::<f64>().ok()?;
             let numerator = numerator.trim().parse::<f64>().ok()?;
-            (denominator != 0.0).then(|| numerator / denominator)
+            (denominator != 0.0).then_some(numerator / denominator)
         }
         None => text.parse::<f64>().ok().filter(|number| number.is_finite()),
     }

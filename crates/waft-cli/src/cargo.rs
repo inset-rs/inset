@@ -112,10 +112,10 @@ pub fn build(build: &Build) -> Result<PathBuf> {
     let stdout = child.stdout.take().expect("piped stdout");
     let mut found = None;
     for message in Message::parse_stream(BufReader::new(stdout)) {
-        if let Message::CompilerArtifact(artifact) = message? {
-            if let Some(path) = wanted_file(build, &artifact) {
-                found = Some(path);
-            }
+        if let Message::CompilerArtifact(artifact) = message?
+            && let Some(path) = wanted_file(build, &artifact)
+        {
+            found = Some(path);
         }
     }
     let status = child.wait()?;

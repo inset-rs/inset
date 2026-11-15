@@ -4,6 +4,7 @@
 //! kit's items through `crate::`, which only this file's imports answer.
 #![feature(arbitrary_self_types)]
 #[path = "../../../crates/waft-winui/src/controls/scroll_bar_viewport.rs"]
+#[expect(dead_code, reason = "the kit's flyouts call `axis`, which this test does not")]
 mod presentation;
 use presentation::ScrollBarViewport;
 use std::{cell::Cell, rc::Rc, time::Duration};
