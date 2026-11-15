@@ -19,6 +19,9 @@ pub type Canvas = DisplayListBuilder;
 /// draws.
 pub type Picture = DisplayList;
 
+/// Flutter `StrokeCap` — valo's `Cap`: how a stroke ends at an open contour, `Butt` by default.
+pub type StrokeCap = valo::Cap;
+
 /// The picture's operations in replay order with every embedded list's following its embedding
 /// op, for a test or a diagnostic that asks what a scene draws regardless of how its layers
 /// nested it.
@@ -39,12 +42,101 @@ fn flatten_into(picture: &Picture, ops: &mut Vec<Op>) {
 
 pub use valo::{
     Backdrop, BlendMode, BlurStyle, ClipOp, FillRule, Image, MaskBlur, Paint, PaintStyle, Path,
-    PathBuilder, Stroke,
+    PathBuilder, Shader, Stroke,
 };
 
 /// The full valo API for hosts and for recording that needs a type the
 /// aliases do not cover (`Op`, `Context`, `Surface`).
 pub use valo;
+
+/// Quality levels for image sampling in [`ImageFilter`] and [`Shader`] objects that sample
+/// images and for [`Canvas`] operations that render images.
+///
+/// When scaling up typically the quality is lowest at [`none`](Self::None), higher at
+/// [`low`](Self::Low) and [`medium`](Self::Medium), and for very large scale factors (over 10x)
+/// the highest at [`high`](Self::High).
+///
+/// When scaling down, [`medium`](Self::Medium) provides the best quality especially when scaling
+/// an image to less than half its size or for animating the scale factor between such
+/// reductions. Otherwise, [`low`](Self::Low) and [`high`](Self::High) provide similar effects for
+/// reductions of between 50% and 100% but the image may lose detail and have dropouts below 50%.
+///
+/// To get high quality when scaling images up and down, or when the scale is unknown,
+/// [`medium`](Self::Medium) is typically a good balanced choice.
+///
+/// See also:
+///
+///  * [`FragmentShader::set_image_sampler`](crate::FragmentShader::set_image_sampler).
+///  * [`ImageFilter::shader`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FilterQuality {
+    /// The fastest filtering method, albeit also the lowest quality.
+    ///
+    /// This value results in a "Nearest Neighbor" algorithm which just repeats or eliminates
+    /// pixels as an image is scaled up or down.
+    None,
+
+    /// Better quality than [`none`](Self::None), faster than [`medium`](Self::Medium).
+    ///
+    /// This value results in a "Bilinear" algorithm which smoothly interpolates between pixels in
+    /// an image.
+    Low,
+
+    /// The best all around filtering method that is only worse than [`high`](Self::High) at
+    /// extremely large scale factors.
+    ///
+    /// This value improves upon the "Bilinear" algorithm specified by [`low`](Self::Low) by
+    /// utilizing a Mipmap that pre-computes high quality lower resolutions of the image at half
+    /// (and quarter and eighth, etc.) sizes and then blends between those to prevent loss of
+    /// detail at small scale sizes.
+    Medium,
+
+    /// Best possible quality when scaling up images by scale factors larger than 5-10x.
+    ///
+    /// When images are scaled down, this can be worse than [`medium`](Self::Medium) for scales
+    /// smaller than 0.5x, or when animating the scale factor.
+    ///
+    /// This option is also the slowest.
+    ///
+    /// This value results in a standard "Bicubic" algorithm which uses a 3rd order equation to
+    /// smooth the abrupt transitions between pixels while preserving some of the sense of an edge
+    /// and avoiding sharp peaks in the result.
+    High,
+}
+
+impl FilterQuality {
+    /// How valo samples an image at this quality: the engine's `ImageFilter::SamplingFromIndex`
+    /// as Impeller's `ToSamplerDescriptor` turns it into a sampler, clamped at the edges as
+    /// `ReusableFragmentShader::SetImageSampler` clamps them. Impeller samples
+    /// [`High`](Self::High), the engine's cubic, as it samples [`Medium`](Self::Medium).
+    pub fn to_valo(self) -> valo::Sampling {
+        let (filter, mipmap) = match self {
+            FilterQuality::None => (valo::Filter::Nearest, valo::MipmapMode::None),
+            FilterQuality::Low => (valo::Filter::Linear, valo::MipmapMode::None),
+            FilterQuality::Medium | FilterQuality::High => {
+                (valo::Filter::Linear, valo::MipmapMode::Linear)
+            }
+        };
+        valo::Sampling {
+            filter,
+            mipmap,
+            tile_x: valo::TileMode::Clamp,
+            tile_y: valo::TileMode::Clamp,
+        }
+    }
+}
+
+impl std::fmt::Display for FilterQuality {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match self {
+            FilterQuality::None => "none",
+            FilterQuality::Low => "low",
+            FilterQuality::Medium => "medium",
+            FilterQuality::High => "high",
+        };
+        write!(f, "FilterQuality.{name}")
+    }
+}
 
 /// A description of a color filter to apply when drawing a shape or compositing
 /// a layer with a particular [`Paint`]. A color filter is a function that takes
@@ -248,6 +340,16 @@ pub enum ImageFilter {
         /// The filter that receives the original input.
         inner: Arc<ImageFilter>,
     },
+
+    /// A [`FragmentShader`](crate::FragmentShader)'s program run over the input; Dart's
+    /// `_FragmentShaderImageFilter`, made by [`ImageFilter::shader`].
+    Shader {
+        /// The shader's uniforms and images as they were when the filter was made, its first
+        /// image left for the input, which is sampled at `filter_quality`.
+        shader: valo::RuntimeShader,
+        /// The quality the input is sampled at.
+        filter_quality: FilterQuality,
+    },
 }
 
 impl ImageFilter {
@@ -279,11 +381,83 @@ impl ImageFilter {
     /// Creates a single [`ImageFilter`] that when applied, has the same effect as
     /// subsequently applying `inner` and `outer`, i.e.,
     /// `result = outer(inner(source))`.
+    #[cfg_attr(
+        target_arch = "wasm32",
+        expect(
+            clippy::arc_with_non_send_sync,
+            reason = "a shader filter's images are the web's GPU objects, which stay on their \
+                      thread there; a filter crosses threads with its picture elsewhere"
+        )
+    )]
     pub fn compose(outer: ImageFilter, inner: ImageFilter) -> ImageFilter {
         ImageFilter::Compose {
             outer: Arc::new(outer),
             inner: Arc::new(inner),
         }
+    }
+
+    /// Creates an image filter from a [`FragmentShader`](crate::FragmentShader).
+    ///
+    /// The fragment shader provided here has additional requirements to be used by the engine
+    /// for filtering. The first uniform value must be a `vec2`, this will be set by the engine to
+    /// the size of the bound texture. There must also be at least one image, the first of which
+    /// will be set by the engine to contain the filter input.
+    ///
+    /// The `filter_quality` argument sets the quality level used to sample the filter input;
+    /// Flutter's default is [`FilterQuality::None`].
+    ///
+    /// For example, the following is a valid fragment shader that can be used with this API.
+    /// Note that the uniform names are not required to have any particular value.
+    ///
+    /// ```wgsl
+    /// struct Uniforms { u_size: vec2<f32>, u_time: f32 }
+    /// @group(2) @binding(0) var<uniform> u: Uniforms;
+    /// @group(1) @binding(0) var u_texture_input: texture_2d<f32>;
+    /// @group(1) @binding(1) var u_texture_input_sampler: sampler;
+    ///
+    /// fn shade(position: vec2<f32>) -> vec4<f32> {
+    ///     let uv = position / u.u_size;
+    ///     return textureSampleLevel(u_texture_input, u_texture_input_sampler, uv, 0.0) * u.u_time;
+    /// }
+    /// ```
+    ///
+    /// The uniforms and images are those `shader` has now; setting them afterwards changes the
+    /// filter made next, not this one.
+    ///
+    /// # Panics
+    ///
+    /// Where the shader's first uniform is not a `vec2` or it has no image, as Dart throws a
+    /// `StateError`.
+    pub fn shader(shader: &crate::FragmentShader, filter_quality: FilterQuality) -> ImageFilter {
+        let invalid_floats = shader.float_count() < 2;
+        let invalid_sampler = !shader.validate_image_filter();
+        if invalid_floats || invalid_sampler {
+            let mut buffer = String::from(
+                "ImageFilter.shader requires that the first uniform is a vec2 and at least one \
+                 sampler uniform is present.\n",
+            );
+            if invalid_floats {
+                buffer.push_str("The shader has fewer than two float uniforms.\n");
+            }
+            if invalid_sampler {
+                buffer.push_str("The shader is missing a sampler uniform.\n");
+            }
+            panic!("{buffer}");
+        }
+        let shader = shader.as_image_filter(filter_quality.to_valo());
+        if let Err(error) = valo::ImageFilter::runtime(shader.clone()) {
+            panic!("ImageFilter.shader requires that the first uniform is a vec2: {error}");
+        }
+        ImageFilter::Shader {
+            shader,
+            filter_quality,
+        }
+    }
+
+    /// Whether [`ImageFilter::shader`] is supported on the current backend: always, as valo
+    /// runs every shader the way Impeller does.
+    pub const fn is_shader_filter_supported() -> bool {
+        true
     }
 
     /// Dart's `debugShortDescription`.
@@ -306,6 +480,7 @@ impl ImageFilter {
                 inner.debug_short_description(),
                 outer.debug_short_description()
             ),
+            ImageFilter::Shader { .. } => String::from("shader"),
         }
     }
 }
@@ -319,6 +494,14 @@ impl std::fmt::Display for ImageFilter {
                 f,
                 "ImageFilter.compose(source -> {} -> result)",
                 self.debug_short_description()
+            ),
+            ImageFilter::Shader {
+                shader,
+                filter_quality,
+            } => write!(
+                f,
+                "ImageFilter.shader(Shader#{}, {filter_quality})",
+                shader.effect.id()
             ),
         }
     }
@@ -345,6 +528,7 @@ impl ImageFilter {
             ImageFilter::Compose { outer, inner } => {
                 valo::ImageFilter::compose(outer.to_valo(), inner.to_valo())
             }
+            ImageFilter::Shader { shader, .. } => valo::ImageFilter::Runtime(shader.clone()),
         }
     }
 }

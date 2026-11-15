@@ -615,7 +615,7 @@ mod tests {
     use waft_foundation::{AppCell, ValueKey};
 
     use super::*;
-    use crate::framework::{Element, KeyRef};
+    use crate::framework::Element;
     use crate::test_harness::Harness;
     use crate::widgets::basic::SizedBox;
 
@@ -708,8 +708,7 @@ mod tests {
                 .keep_alive_handle
                 .is_some()
         );
-        let _ =
-            AutomaticKeepAlive::new(SizedBox::shrink()).key(Rc::new(ValueKey::new(1)) as KeyRef);
+        let _ = AutomaticKeepAlive::new(SizedBox::shrink()).key(ValueKey::new(1).into());
     }
 
     #[test]

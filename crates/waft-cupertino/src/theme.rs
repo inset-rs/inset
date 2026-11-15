@@ -1,14 +1,15 @@
 //! Flutter counterpart: `cupertino/theme.dart`.
-//!
-//! `InheritedTheme` (`wrap` / `captureAll`) waits in widgets; `InheritedCupertinoTheme` is a
-//! plain inherited widget with `wrap` as an inherent method until then.
+
+use std::any::{Any, TypeId};
+use std::fmt::Debug;
+use std::rc::Rc;
 
 use waft_embedder::{Brightness, Color};
 use waft_foundation::App;
 use waft_painting::AnyColor;
 use waft_widgets::{
-    BuildContext, IconTheme, InheritedWidget, IntoWidget, KeyRef, MediaQuery, StatelessWidget,
-    WidgetRef,
+    BuildContext, IconTheme, InheritedTheme, InheritedWidget, IntoWidget, KeyRef, MediaQuery,
+    StatelessWidget, WidgetRef,
 };
 
 use crate::colors::{CupertinoColors, CupertinoDynamicColor};
@@ -167,9 +168,8 @@ pub struct InheritedCupertinoTheme {
     pub child: WidgetRef,
 }
 
-impl InheritedCupertinoTheme {
-    /// `InheritedTheme.wrap`: a new [`CupertinoTheme`] with this theme's data around `child`.
-    pub fn wrap(&self, child: WidgetRef) -> WidgetRef {
+impl InheritedTheme for InheritedCupertinoTheme {
+    fn wrap(&self, _app: &mut App, _context: BuildContext, child: WidgetRef) -> WidgetRef {
         CupertinoTheme {
             key: None,
             data: self.theme.data.clone(),
@@ -191,6 +191,10 @@ impl InheritedWidget for InheritedCupertinoTheme {
     fn update_should_notify(&self, old_widget: &InheritedCupertinoTheme) -> bool {
         self.theme.data != old_widget.theme.data
     }
+
+    fn as_inherited_theme(&self) -> Option<&dyn InheritedTheme> {
+        Some(self)
+    }
 }
 
 /// Styling specifications for a [`CupertinoTheme`].
@@ -208,7 +212,9 @@ impl InheritedWidget for InheritedCupertinoTheme {
 /// time specifications are the [`NoDefaultCupertinoThemeData`] this holds, and the getters add
 /// the defaults. Dart's named constructor arguments are the `with_*` setters
 /// (`CupertinoThemeData::new().with_brightness(Brightness::Dark)`), or
-/// [`raw`](Self::raw) over a [`NoDefaultCupertinoThemeData`] literal.
+/// [`raw`](Self::raw) over a [`NoDefaultCupertinoThemeData`] literal. A subclass's overridden
+/// members are the [`CupertinoThemeDataOverrides`] a theme data made with
+/// [`raw_with_overrides`](Self::raw_with_overrides) holds; a copy keeps them.
 ///
 /// See also:
 ///
@@ -219,6 +225,7 @@ impl InheritedWidget for InheritedCupertinoTheme {
 pub struct CupertinoThemeData {
     raw: NoDefaultCupertinoThemeData,
     defaults: CupertinoThemeDefaults,
+    overrides: Option<Rc<dyn CupertinoThemeDataOverrides>>,
 }
 
 impl Default for CupertinoThemeData {
@@ -243,11 +250,27 @@ impl CupertinoThemeData {
         CupertinoThemeData::raw_with_defaults(raw, K_DEFAULT_THEME)
     }
 
+    /// A subclass's `super.raw(..)`: [`raw`](Self::raw), with the members the subclass
+    /// overrides.
+    pub fn raw_with_overrides(
+        raw: NoDefaultCupertinoThemeData,
+        overrides: Rc<dyn CupertinoThemeDataOverrides>,
+    ) -> CupertinoThemeData {
+        CupertinoThemeData {
+            overrides: Some(overrides),
+            ..CupertinoThemeData::raw(raw)
+        }
+    }
+
     fn raw_with_defaults(
         raw: NoDefaultCupertinoThemeData,
         defaults: CupertinoThemeDefaults,
     ) -> CupertinoThemeData {
-        CupertinoThemeData { raw, defaults }
+        CupertinoThemeData {
+            raw,
+            defaults,
+            overrides: None,
+        }
     }
 
     /// Dart `CupertinoThemeData(brightness:)`.
@@ -321,7 +344,10 @@ impl CupertinoThemeData {
     ///  * [`CupertinoTheme::brightness_of`], a method used to retrieve the overall
     ///    [`Brightness`] from a [`BuildContext`], for Cupertino widgets.
     pub fn brightness(&self) -> Option<Brightness> {
-        self.raw.brightness.or(self.defaults.brightness)
+        match &self.overrides {
+            Some(overrides) => overrides.brightness(&self.raw),
+            None => self.raw.brightness,
+        }
     }
 
     /// A color used on interactive elements of the theme.
@@ -329,10 +355,14 @@ impl CupertinoThemeData {
     /// This color is generally used on text and icons in buttons and tappable elements.
     /// Defaults to [`CupertinoColors::ACTIVE_BLUE`].
     pub fn primary_color(&self) -> AnyColor {
-        self.raw
-            .primary_color
-            .clone()
-            .unwrap_or_else(|| self.defaults.primary_color.clone())
+        match &self.overrides {
+            Some(overrides) => overrides.primary_color(&self.raw),
+            None => self
+                .raw
+                .primary_color
+                .clone()
+                .unwrap_or_else(|| self.defaults.primary_color.clone()),
+        }
     }
 
     /// A color that must be easy to see when rendered on a
@@ -341,10 +371,14 @@ impl CupertinoThemeData {
     /// For example, this color is used for a `CupertinoButton`'s text and icons when the
     /// button's background is [`primary_color`](Self::primary_color).
     pub fn primary_contrasting_color(&self) -> AnyColor {
-        self.raw
-            .primary_contrasting_color
-            .clone()
-            .unwrap_or_else(|| self.defaults.primary_contrasting_color.clone())
+        match &self.overrides {
+            Some(overrides) => overrides.primary_contrasting_color(&self.raw),
+            None => self
+                .raw
+                .primary_contrasting_color
+                .clone()
+                .unwrap_or_else(|| self.defaults.primary_contrasting_color.clone()),
+        }
     }
 
     /// Text styles used by Cupertino widgets.
@@ -372,10 +406,14 @@ impl CupertinoThemeData {
     ///
     /// Defaults to [`CupertinoColors::SYSTEM_BACKGROUND`].
     pub fn scaffold_background_color(&self) -> AnyColor {
-        self.raw
-            .scaffold_background_color
-            .clone()
-            .unwrap_or_else(|| self.defaults.scaffold_background_color.clone())
+        match &self.overrides {
+            Some(overrides) => overrides.scaffold_background_color(&self.raw),
+            None => self
+                .raw
+                .scaffold_background_color
+                .clone()
+                .unwrap_or_else(|| self.defaults.scaffold_background_color.clone()),
+        }
     }
 
     /// The color of the selection handles on the text field.
@@ -423,6 +461,9 @@ impl CupertinoThemeData {
     /// Called by [`CupertinoTheme::of`] to resolve colors defined in the retrieved
     /// [`CupertinoThemeData`].
     pub fn resolve_from(&self, app: &mut App, context: BuildContext) -> CupertinoThemeData {
+        if let Some(overrides) = &self.overrides {
+            return overrides.resolve_from(self, app, context);
+        }
         let resolve_text_theme = self.raw.text_theme.is_none();
         CupertinoThemeData::raw_with_defaults(
             self.raw.resolve_from(app, context),
@@ -442,12 +483,21 @@ impl CupertinoThemeData {
     pub fn copy_with(&self) -> CupertinoThemeData {
         self.clone()
     }
+
+    /// Dart's `runtimeType`: the subclass whose members this theme data's overrides are.
+    fn runtime_type(&self) -> Option<TypeId> {
+        self.overrides
+            .as_ref()
+            .map(|overrides| overrides.as_any().type_id())
+    }
 }
 
-/// Dart's `==` compares the derived values, not the construction time specifications.
+/// Dart's `==` compares the subclass and the derived values, not the construction time
+/// specifications.
 impl PartialEq for CupertinoThemeData {
     fn eq(&self, other: &CupertinoThemeData) -> bool {
-        self.brightness() == other.brightness()
+        self.runtime_type() == other.runtime_type()
+            && self.brightness() == other.brightness()
             && self.primary_color() == other.primary_color()
             && self.primary_contrasting_color() == other.primary_contrasting_color()
             && self.text_theme() == other.text_theme()
@@ -456,6 +506,46 @@ impl PartialEq for CupertinoThemeData {
             && self.selection_handle_color() == other.selection_handle_color()
             && self.apply_theme_to_all() == other.apply_theme_to_all()
     }
+}
+
+/// What a subclass of Dart's `CupertinoThemeData` overrides, as Material's
+/// `MaterialBasedCupertinoThemeData` does: the `brightness`, `primaryColor`,
+/// `primaryContrastingColor` and `scaffoldBackgroundColor` getters, and `resolveFrom`.
+///
+/// Held by a [`CupertinoThemeData`] made with
+/// [`CupertinoThemeData::raw_with_overrides`]; its getters call these in place of their own
+/// bodies. The getters a subclass does not override (`textTheme` among them, which reads the
+/// overridden [`primary_color`](CupertinoThemeData::primary_color)), `noDefault` and `copyWith`
+/// stay the base's: [`CupertinoThemeData::copy_with`] keeps the overrides, and its `with_*`
+/// setters write the specifications the overrides read, as Dart's subclass `copyWith` copies
+/// its override theme.
+pub trait CupertinoThemeDataOverrides: Debug + 'static {
+    /// The subclass, for Dart's `runtimeType`, which `==` compares.
+    fn as_any(&self) -> &dyn Any;
+
+    /// Dart's `brightness` getter. `specified` is the construction time specifications,
+    /// Dart's `super`.
+    fn brightness(&self, specified: &NoDefaultCupertinoThemeData) -> Option<Brightness>;
+
+    /// Dart's `primaryColor` getter. `specified` is the construction time specifications,
+    /// Dart's `super`.
+    fn primary_color(&self, specified: &NoDefaultCupertinoThemeData) -> AnyColor;
+
+    /// Dart's `primaryContrastingColor` getter. `specified` is the construction time
+    /// specifications, Dart's `super`.
+    fn primary_contrasting_color(&self, specified: &NoDefaultCupertinoThemeData) -> AnyColor;
+
+    /// Dart's `scaffoldBackgroundColor` getter. `specified` is the construction time
+    /// specifications, Dart's `super`.
+    fn scaffold_background_color(&self, specified: &NoDefaultCupertinoThemeData) -> AnyColor;
+
+    /// Dart's `resolveFrom`, for `this`, the theme data holding these overrides.
+    fn resolve_from(
+        &self,
+        this: &CupertinoThemeData,
+        app: &mut App,
+        context: BuildContext,
+    ) -> CupertinoThemeData;
 }
 
 /// Styling specifications for a cupertino theme without default values for unspecified
@@ -515,7 +605,10 @@ impl NoDefaultCupertinoThemeData {
 
     /// Returns a new theme data with all its colors resolved against the given
     /// [`BuildContext`].
-    pub(crate) fn resolve_from(
+    ///
+    /// Called by [`CupertinoTheme::of`] to resolve colors defined in the retrieved
+    /// [`CupertinoThemeData`].
+    pub fn resolve_from(
         &self,
         app: &mut App,
         context: BuildContext,
@@ -564,7 +657,6 @@ impl NoDefaultCupertinoThemeData {
     }
 }
 
-/// Dart's `==` leaves `selectionHandleColor` out; kept as it is.
 impl PartialEq for NoDefaultCupertinoThemeData {
     fn eq(&self, other: &NoDefaultCupertinoThemeData) -> bool {
         self.brightness == other.brightness
@@ -573,6 +665,7 @@ impl PartialEq for NoDefaultCupertinoThemeData {
             && self.text_theme == other.text_theme
             && self.bar_background_color == other.bar_background_color
             && self.scaffold_background_color == other.scaffold_background_color
+            && self.selection_handle_color == other.selection_handle_color
             && self.apply_theme_to_all == other.apply_theme_to_all
     }
 }
@@ -657,7 +750,6 @@ impl CupertinoTextThemeDefaults {
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;
-    use std::rc::Rc;
 
     use waft_embedder::Color;
     use waft_widgets::{Builder, SizedBox};
@@ -788,5 +880,126 @@ mod tests {
         assert_eq!(copy.no_default().text_theme, None);
         assert_ne!(copy, data);
         assert_eq!(CupertinoThemeData::new(), CupertinoThemeData::default());
+    }
+
+    #[test]
+    fn no_default_theme_data_equality_compares_the_selection_handle_color() {
+        let red = NoDefaultCupertinoThemeData {
+            selection_handle_color: Some(CupertinoColors::SYSTEM_RED),
+            ..NoDefaultCupertinoThemeData::new()
+        };
+        let blue = NoDefaultCupertinoThemeData {
+            selection_handle_color: Some(CupertinoColors::SYSTEM_BLUE),
+            ..NoDefaultCupertinoThemeData::new()
+        };
+        let red_copy = red.copy_with();
+        assert_ne!(red, blue);
+        assert_eq!(red, red_copy);
+    }
+
+    /// A subclass whose primary color defaults to red, and whose other overridden getters
+    /// answer as the base's do.
+    #[derive(Debug)]
+    struct RedPrimaryCupertinoThemeData;
+
+    impl RedPrimaryCupertinoThemeData {
+        #[expect(
+            clippy::new_ret_no_self,
+            reason = "a subclass constructor; the value is the base type with the overrides set"
+        )]
+        fn new(raw: NoDefaultCupertinoThemeData) -> CupertinoThemeData {
+            CupertinoThemeData::raw_with_overrides(raw, Rc::new(RedPrimaryCupertinoThemeData))
+        }
+    }
+
+    impl CupertinoThemeDataOverrides for RedPrimaryCupertinoThemeData {
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn brightness(&self, specified: &NoDefaultCupertinoThemeData) -> Option<Brightness> {
+            specified.brightness
+        }
+
+        fn primary_color(&self, specified: &NoDefaultCupertinoThemeData) -> AnyColor {
+            specified
+                .primary_color
+                .clone()
+                .unwrap_or(CupertinoColors::SYSTEM_RED)
+        }
+
+        fn primary_contrasting_color(&self, specified: &NoDefaultCupertinoThemeData) -> AnyColor {
+            specified
+                .primary_contrasting_color
+                .clone()
+                .unwrap_or(CupertinoColors::WHITE)
+        }
+
+        fn scaffold_background_color(&self, specified: &NoDefaultCupertinoThemeData) -> AnyColor {
+            specified
+                .scaffold_background_color
+                .clone()
+                .unwrap_or(CupertinoColors::SYSTEM_BACKGROUND)
+        }
+
+        fn resolve_from(
+            &self,
+            this: &CupertinoThemeData,
+            app: &mut App,
+            context: BuildContext,
+        ) -> CupertinoThemeData {
+            RedPrimaryCupertinoThemeData::new(this.no_default().resolve_from(app, context))
+        }
+    }
+
+    #[test]
+    fn a_subclass_answers_its_overridden_getters_and_its_copies_keep_them() {
+        let data = RedPrimaryCupertinoThemeData::new(NoDefaultCupertinoThemeData::new());
+        assert_eq!(data.primary_color(), CupertinoColors::SYSTEM_RED);
+        assert_eq!(
+            data.text_theme().action_text_style().color,
+            Some(CupertinoColors::SYSTEM_RED)
+        );
+        assert_eq!(data.no_default(), NoDefaultCupertinoThemeData::new());
+
+        let copy = data
+            .copy_with()
+            .with_bar_background_color(CupertinoColors::BLACK);
+        assert_eq!(copy.primary_color(), CupertinoColors::SYSTEM_RED);
+        assert_eq!(copy.bar_background_color(), CupertinoColors::BLACK);
+        assert_eq!(
+            copy.copy_with()
+                .with_primary_color(CupertinoColors::SYSTEM_GREEN)
+                .primary_color(),
+            CupertinoColors::SYSTEM_GREEN
+        );
+    }
+
+    #[test]
+    fn of_resolves_a_subclass_through_its_resolve_from() {
+        let data = RedPrimaryCupertinoThemeData::new(NoDefaultCupertinoThemeData::new());
+        let dark = data.copy_with().with_brightness(Brightness::Dark);
+        let resolved = probe(themed(dark.clone()), CupertinoTheme::of);
+        assert_eq!(resolved.primary_color(), CupertinoColors::SYSTEM_RED);
+        // The subclass's `resolve_from` resolves only what was specified, not the defaults.
+        assert_eq!(
+            resolved.bar_background_color(),
+            CupertinoThemeData::new().bar_background_color()
+        );
+        assert_eq!(resolved, dark);
+    }
+
+    #[test]
+    fn theme_data_equality_compares_the_subclass() {
+        let specified = NoDefaultCupertinoThemeData {
+            primary_color: Some(CupertinoColors::SYSTEM_BLUE),
+            ..NoDefaultCupertinoThemeData::new()
+        };
+        let subclass = RedPrimaryCupertinoThemeData::new(specified.clone());
+        let base = CupertinoThemeData::raw(specified);
+        assert_eq!(subclass.primary_color(), base.primary_color());
+        assert_eq!(subclass.text_theme(), base.text_theme());
+        assert_ne!(subclass, base);
+        assert_eq!(subclass, subclass.copy_with());
     }
 }

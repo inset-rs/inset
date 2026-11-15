@@ -1,6 +1,4 @@
 //! Flutter counterpart: `cupertino/button.dart`.
-//!
-//! `Semantics(button: true)` waits with accessibility.
 
 use std::any::TypeId;
 use std::collections::HashMap;
@@ -27,7 +25,7 @@ use waft_widgets::{
     Action, ActivateIntent, Align, AnyAction, AnyFocusNode, BuildContext, CallbackAction,
     ConstrainedBox, DecoratedBox, DefaultTextStyle, FadeTransition, FocusableActionDetector,
     GestureRecognizerFactories, GestureRecognizerFactory, GestureRecognizerFactoryWithHandlers,
-    IconTheme, IntoWidget, KeyRef, MediaQuery, MouseRegion, Padding, RawGestureDetector,
+    IconTheme, IntoWidget, KeyRef, MediaQuery, MouseRegion, Padding, RawGestureDetector, Semantics,
     SingleTickerProviderStateMixin, SingleTickerProviderStateMixinData, State, StateData,
     StatefulWidget, WidgetRef, WidgetState, WidgetStateProperty, WidgetStatePropertyRef,
     WidgetStates,
@@ -855,19 +853,21 @@ impl State for CupertinoButtonState {
                 .behavior(HitTestBehavior::Opaque)
                 .gestures(gestures)
                 .child(
-                    ConstrainedBox::new(constraints).child(
-                        FadeTransition::new(opacity).child(
-                            DecoratedBox::new(shape_decoration).child(
-                                Padding::new(padding).child(
-                                    Align::new()
-                                        .alignment(widget.alignment)
-                                        .width_factor(1.0)
-                                        .height_factor(1.0)
-                                        .child(DefaultTextStyle::new(
-                                            text_style,
-                                            IconTheme::new(icon_theme, widget.child.clone())
-                                                .into_widget(),
-                                        )),
+                    Semantics::new().button(true).child(
+                        ConstrainedBox::new(constraints).child(
+                            FadeTransition::new(opacity).child(
+                                DecoratedBox::new(shape_decoration).child(
+                                    Padding::new(padding).child(
+                                        Align::new()
+                                            .alignment(widget.alignment)
+                                            .width_factor(1.0)
+                                            .height_factor(1.0)
+                                            .child(DefaultTextStyle::new(
+                                                text_style,
+                                                IconTheme::new(icon_theme, widget.child.clone())
+                                                    .into_widget(),
+                                            )),
+                                    ),
                                 ),
                             ),
                         ),
@@ -886,7 +886,6 @@ impl State for CupertinoButtonState {
         if let Some(on_focus_change) = widget.on_focus_change.clone() {
             detector = detector.on_focus_change(move |app, focused| on_focus_change(app, focused));
         }
-        // `Semantics(button: true)` waits with accessibility.
         MouseRegion::new()
             .cursor(effective_mouse_cursor)
             .child(detector)
@@ -942,7 +941,7 @@ mod tests {
             move |_app| presses.set(presses.get() + 1)
         });
         let global_key = GlobalKey::new();
-        let key: KeyRef = Rc::new(global_key.clone());
+        let key: KeyRef = global_key.clone().into();
         let button = configure(CupertinoButton::new(
             SizedBox::square(Some(40.0)).into_widget(),
             Some(on_pressed),
@@ -1080,7 +1079,7 @@ mod tests {
     fn a_disabled_button_ignores_the_pointer() {
         let cell = crate::test_support::test_cell();
         let global_key = GlobalKey::new();
-        let key: KeyRef = Rc::new(global_key.clone());
+        let key: KeyRef = global_key.clone().into();
         let button =
             CupertinoButton::new(SizedBox::square(Some(40.0)).into_widget(), None).key(key);
         assert!(!button.enabled());
@@ -1208,6 +1207,54 @@ mod tests {
         for at in [16, 150, 300, 600] {
             pump(&mut app, Duration::from_millis(at));
         }
+    }
+
+    #[test]
+    fn a_tinted_button_fills_with_the_primary_color_at_the_light_tinted_opacity() {
+        let cell = crate::test_support::test_cell();
+        let global_key = GlobalKey::new();
+        let key: KeyRef = global_key.clone().into();
+        let button = CupertinoButton::tinted(
+            SizedBox::square(Some(40.0)).into_widget(),
+            Some(Listener::new(|_app| {})),
+        )
+        .key(key);
+        build(&cell, button.into_widget());
+        let mut app = cell.borrow_mut();
+        let root = global_key
+            .current_context(&mut app)
+            .expect("the button mounted")
+            .find_render_object(&app)
+            .expect("the button has a render object");
+
+        let color = find_decorated_box(&app, root)
+            .expect("the button decorates its background")
+            .decoration(&app)
+            .as_any()
+            .downcast_ref::<ShapeDecoration>()
+            .expect("a shape decoration")
+            .color
+            .clone()
+            .expect("a tinted button has a fill");
+        let expected = CupertinoColors::ACTIVE_BLUE.with_values(Some(0.18), None, None, None, None);
+        assert_eq!(color.color(), expected);
+    }
+
+    /// The first `RenderDecoratedBox` from `node` down.
+    fn find_decorated_box(
+        app: &App,
+        node: waft_rendering::AnyRenderObject,
+    ) -> Option<waft_rendering::RenderHandle<waft_rendering::RenderDecoratedBox>> {
+        if let Some(found) = node.downcast::<waft_rendering::RenderDecoratedBox>(app) {
+            return Some(found);
+        }
+        let mut found = None;
+        node.visit_children(app, &mut |child| {
+            if found.is_none() {
+                found = find_decorated_box(app, child);
+            }
+        });
+        found
     }
 
     struct Counter {

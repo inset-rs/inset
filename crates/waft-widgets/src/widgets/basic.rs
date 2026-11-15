@@ -6,15 +6,18 @@
 //! one, so it is defined here next to `Builder`.
 
 use std::any::Any;
+use std::collections::HashSet;
 use std::fmt::{self, Debug};
 use std::rc::Rc;
 use std::sync::Arc;
 
+use indexmap::{IndexMap, IndexSet};
 use waft_embedder::{
-    BlendMode, Clip, ImageFilter, Matrix4, Offset, Path, RRect, RSuperellipse, Rect, Size,
+    BlendMode, Clip, Color, ImageFilter, Locale, Matrix4, Offset, Path, RRect, RSuperellipse, Rect,
+    SemanticsHitTestBehavior, SemanticsInputType, SemanticsRole, SemanticsValidationResult, Size,
     TextBaseline, TextDirection,
 };
-use waft_foundation::{App, Handle};
+use waft_foundation::{App, Handle, ValueKey, VoidCallback};
 use waft_gestures::{
     PointerCancelEventListener, PointerDownEventListener, PointerEnterEventListener,
     PointerExitEventListener, PointerHoverEventListener, PointerMoveEventListener,
@@ -22,35 +25,40 @@ use waft_gestures::{
     PointerPanZoomUpdateEventListener, PointerSignalEventListener, PointerUpEventListener,
 };
 use waft_painting::{
-    Alignment, AlignmentGeometry, AnyColor, Axis, AxisDirection, BorderRadiusGeometry, BoxFit,
-    EdgeInsetsGeometry, ShapeBorder, VerticalDirection, flip_axis_direction,
-    text_direction_to_axis_direction,
+    Alignment, AlignmentGeometry, AnyColor, Axis, AxisDirection, BorderRadius,
+    BorderRadiusGeometry, BoxFit, BoxShape, EdgeInsetsGeometry, ShapeBorder, VerticalDirection,
+    flip_axis_direction, text_direction_to_axis_direction,
 };
 use waft_rendering::{
-    AnyRenderObject, BackdropKey, BoxConstraints, BoxConstraintsTransform, ChildLayoutId,
-    CrossAxisAlignment, CustomClipper, CustomPainter, FlexFit, FlexParentData, HitTestBehavior,
-    ImageFilterConfig, LayerLink, MainAxisAlignment, MainAxisSize, MultiChildLayoutDelegate,
+    AccessibilityFocusBlockType, AnyRenderObject, AttributedString, BackdropKey, BoxConstraints,
+    BoxConstraintsTransform, ChildLayoutId, CrossAxisAlignment, CustomClipper, CustomPainter,
+    CustomSemanticsAction, FlexFit, FlexParentData, HitTestBehavior, ImageFilterConfig, LayerLink,
+    MainAxisAlignment, MainAxisSize, MoveCursorHandler, MultiChildLayoutDelegate,
     MultiChildLayoutParentData, OverflowBoxFit, RelativeRect, RenderAbsorbPointer,
-    RenderAligningShiftedBox, RenderAspectRatio, RenderBackdropFilter, RenderBaseline, RenderBox,
-    RenderClipOval, RenderClipPath, RenderClipRRect, RenderClipRSuperellipse, RenderClipRect,
-    RenderColoredBox, RenderConstrainedBox, RenderConstrainedOverflowBox,
-    RenderConstraintsTransformBox, RenderCustomClip, RenderCustomMultiChildLayoutBox,
-    RenderCustomPaint, RenderCustomSingleChildLayoutBox, RenderFittedBox, RenderFlex,
-    RenderFollowerLayer, RenderFractionalTranslation, RenderFractionallySizedOverflowBox,
-    RenderHandle, RenderIgnorePointer, RenderIndexedStack, RenderIntrinsicHeight,
-    RenderIntrinsicWidth, RenderLeaderLayer, RenderLimitedBox, RenderMetaData, RenderMouseRegion,
-    RenderOffstage, RenderOpacity, RenderPadding, RenderPointerListener, RenderPositionedBox,
-    RenderRepaintBoundary, RenderSizedOverflowBox, RenderSliver, RenderSliverPadding,
+    RenderAligningShiftedBox, RenderAspectRatio, RenderBackdropFilter, RenderBaseline,
+    RenderBlockSemantics, RenderBox, RenderClipOval, RenderClipPath, RenderClipRRect,
+    RenderClipRSuperellipse, RenderClipRect, RenderColoredBox, RenderConstrainedBox,
+    RenderConstrainedOverflowBox, RenderConstraintsTransformBox, RenderCustomClip,
+    RenderCustomMultiChildLayoutBox, RenderCustomPaint, RenderCustomSingleChildLayoutBox,
+    RenderExcludeSemantics, RenderFittedBox, RenderFlex, RenderFollowerLayer,
+    RenderFractionalTranslation, RenderFractionallySizedOverflowBox, RenderHandle,
+    RenderIgnorePointer, RenderIndexedSemantics, RenderIndexedStack, RenderIntrinsicHeight,
+    RenderIntrinsicWidth, RenderLeaderLayer, RenderLimitedBox, RenderListBody,
+    RenderMergeSemantics, RenderMetaData, RenderMouseRegion, RenderMouseRegionBase, RenderOffstage,
+    RenderOpacity, RenderPadding, RenderPhysicalModel, RenderPhysicalModelBase,
+    RenderPhysicalShape, RenderPointerListener, RenderPositionedBox, RenderRepaintBoundary,
+    RenderSemanticsAnnotations, RenderSizedOverflowBox, RenderSliver, RenderSliverPadding,
     RenderSliverToBoxAdapter, RenderStack, RenderStackBase, RenderTransform, RenderWrap,
-    ShapeBorderClipper, SingleChildLayoutDelegate, StackFit, StackParentData, WrapAlignment,
-    WrapCrossAlignment,
+    SemanticsAnnotationsMixin, SemanticsProperties, SemanticsSortKeyRef, SemanticsTag,
+    SetSelectionHandler, SetTextHandler, ShapeBorderClipper, SingleChildLayoutDelegate, StackFit,
+    StackParentData, WrapAlignment, WrapCrossAlignment,
 };
 use waft_services::{MouseCursor, MouseCursorRef};
 
 use crate::framework::{
     BuildContext, InheritedWidget, IntoWidget, KeyRef, MultiChildRenderObjectWidget,
-    ParentDataWidget, RenderObjectWidget, SingleChildRenderObjectWidget, StatelessWidget,
-    WidgetRef,
+    ParentDataWidget, RenderObjectWidget, SingleChildRenderObjectWidget, State, StateData,
+    StatefulWidget, StatelessWidget, WidgetRef,
 };
 use crate::widgets::focus_scope::ExcludeFocus;
 use crate::widgets::overlay::TheaterParentData;
@@ -1501,6 +1509,308 @@ impl IntoWidget<ClipPathShapeKind> for ClipPathShape {
     }
 }
 
+/// A widget representing a physical layer that clips its children to a shape.
+///
+/// Physical layers cast shadows based on an [`elevation`](Self::elevation) which is nominally
+/// in logical pixels, coming vertically out of the rendering surface.
+///
+/// For shapes that cannot be expressed as a rectangle with rounded corners use
+/// [`PhysicalShape`].
+///
+/// See also:
+///
+///  * `DecoratedBox`, which can apply more arbitrary shadow effects.
+///  * [`ClipRect`], which applies a clip to its child.
+pub struct PhysicalModel {
+    pub key: Option<KeyRef>,
+    /// The type of shape.
+    pub shape: BoxShape,
+    /// The content will be clipped (or not) according to this option.
+    ///
+    /// Defaults to [`Clip::None`].
+    pub clip_behavior: Clip,
+    /// The border radius of the rounded corners.
+    ///
+    /// Values are clamped so that horizontal and vertical radii sums do not
+    /// exceed width/height.
+    ///
+    /// This is ignored if the [`shape`](Self::shape) is not [`BoxShape::Rectangle`].
+    pub border_radius: Option<BorderRadius>,
+    /// The z-coordinate relative to the parent at which to place this physical
+    /// object.
+    ///
+    /// The value is non-negative.
+    pub elevation: f64,
+    /// The background color.
+    pub color: AnyColor,
+    /// The shadow color.
+    pub shadow_color: AnyColor,
+    /// The widget below this widget in the tree.
+    pub child: Option<WidgetRef>,
+}
+
+impl PhysicalModel {
+    /// Creates a physical model with a rounded-rectangular clip; Dart's optional named arguments
+    /// are the setters.
+    ///
+    /// Dart's defaults: `shape` [`BoxShape::Rectangle`], `clip_behavior` [`Clip::None`],
+    /// `elevation` 0, `shadow_color` opaque black.
+    pub fn new(color: impl Into<AnyColor>) -> PhysicalModel {
+        PhysicalModel {
+            key: None,
+            shape: BoxShape::Rectangle,
+            clip_behavior: Clip::None,
+            border_radius: None,
+            elevation: 0.0,
+            color: color.into(),
+            shadow_color: AnyColor::new(Color::new(0xFF000000)),
+            child: None,
+        }
+    }
+
+    /// Dart `PhysicalModel(key:)`.
+    pub fn key(mut self, key: KeyRef) -> PhysicalModel {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `PhysicalModel(shape:)`.
+    pub fn shape(mut self, shape: BoxShape) -> PhysicalModel {
+        self.shape = shape;
+        self
+    }
+
+    /// Dart `PhysicalModel(clipBehavior:)`.
+    pub fn clip_behavior(mut self, clip_behavior: Clip) -> PhysicalModel {
+        self.clip_behavior = clip_behavior;
+        self
+    }
+
+    /// Dart `PhysicalModel(borderRadius:)`.
+    pub fn border_radius(mut self, border_radius: BorderRadius) -> PhysicalModel {
+        self.border_radius = Some(border_radius);
+        self
+    }
+
+    /// Dart `PhysicalModel(elevation:)`.
+    pub fn elevation(mut self, elevation: f64) -> PhysicalModel {
+        debug_assert!(elevation >= 0.0);
+        self.elevation = elevation;
+        self
+    }
+
+    /// Dart `PhysicalModel(shadowColor:)`.
+    pub fn shadow_color(mut self, shadow_color: impl Into<AnyColor>) -> PhysicalModel {
+        self.shadow_color = shadow_color.into();
+        self
+    }
+
+    /// Dart `PhysicalModel(child:)`.
+    pub fn child<K>(mut self, child: impl IntoWidget<K>) -> PhysicalModel {
+        self.child = Some(child.into_widget());
+        self
+    }
+}
+
+impl RenderObjectWidget for PhysicalModel {
+    type RenderObject = RenderPhysicalModel;
+
+    fn key(&self) -> Option<&KeyRef> {
+        self.key.as_ref()
+    }
+
+    fn create_render_object(&self, app: &mut App, _context: BuildContext) -> AnyRenderObject {
+        RenderPhysicalModel::new(
+            app,
+            None,
+            self.shape,
+            self.clip_behavior,
+            self.border_radius,
+            self.elevation,
+            self.color.color(),
+            self.shadow_color.color(),
+        )
+        .as_object()
+    }
+
+    fn update_render_object(
+        &self,
+        app: &mut App,
+        _context: BuildContext,
+        render_object: RenderHandle<RenderPhysicalModel>,
+    ) {
+        render_object.set_shape(app, self.shape);
+        render_object.set_clip_behavior(app, self.clip_behavior);
+        render_object.set_border_radius(app, self.border_radius);
+        render_object.set_elevation(app, self.elevation);
+        render_object.set_color(app, self.color.color());
+        render_object.set_shadow_color(app, self.shadow_color.color());
+    }
+}
+
+impl SingleChildRenderObjectWidget for PhysicalModel {
+    fn child(&self) -> Option<&WidgetRef> {
+        self.child.as_ref()
+    }
+}
+
+impl Debug for PhysicalModel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PhysicalModel")
+            .field("key", &self.key)
+            .field("shape", &self.shape)
+            .field("border_radius", &self.border_radius)
+            .field("elevation", &self.elevation)
+            .field("color", &self.color)
+            .field("shadow_color", &self.shadow_color)
+            .field("child", &self.child)
+            .finish()
+    }
+}
+
+/// A widget representing a physical layer that clips its children to a path.
+///
+/// Physical layers cast shadows based on an [`elevation`](Self::elevation) which is nominally
+/// in logical pixels, coming vertically out of the rendering surface.
+///
+/// [`PhysicalModel`] does the same but only supports shapes that can be expressed
+/// as rectangles with rounded corners.
+///
+/// See also:
+///
+///  * `ShapeBorderClipper`, which converts a `ShapeBorder` to a [`CustomClipper`], as
+///    needed by this widget.
+pub struct PhysicalShape {
+    pub key: Option<KeyRef>,
+    /// Determines which clip to use.
+    ///
+    /// If the path in question is expressed as a `ShapeBorder` subclass,
+    /// consider using the `ShapeBorderClipper` delegate class to adapt the
+    /// shape for use with this widget.
+    pub clipper: Rc<dyn CustomClipper<Arc<Path>>>,
+    /// The content will be clipped (or not) according to this option.
+    ///
+    /// Defaults to [`Clip::None`].
+    pub clip_behavior: Clip,
+    /// The z-coordinate relative to the parent at which to place this physical
+    /// object.
+    ///
+    /// The value is non-negative.
+    pub elevation: f64,
+    /// The background color.
+    pub color: AnyColor,
+    /// When elevation is non zero the color to use for the shadow color.
+    pub shadow_color: AnyColor,
+    /// The widget below this widget in the tree.
+    pub child: Option<WidgetRef>,
+}
+
+impl PhysicalShape {
+    /// Creates a physical model with an arbitrary shape clip; Dart's optional named arguments
+    /// are the setters.
+    ///
+    /// Dart's defaults: `clip_behavior` [`Clip::None`], `elevation` 0, `shadow_color` opaque
+    /// black.
+    pub fn new(
+        clipper: Rc<dyn CustomClipper<Arc<Path>>>,
+        color: impl Into<AnyColor>,
+    ) -> PhysicalShape {
+        PhysicalShape {
+            key: None,
+            clipper,
+            clip_behavior: Clip::None,
+            elevation: 0.0,
+            color: color.into(),
+            shadow_color: AnyColor::new(Color::new(0xFF000000)),
+            child: None,
+        }
+    }
+
+    /// Dart `PhysicalShape(key:)`.
+    pub fn key(mut self, key: KeyRef) -> PhysicalShape {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `PhysicalShape(clipBehavior:)`.
+    pub fn clip_behavior(mut self, clip_behavior: Clip) -> PhysicalShape {
+        self.clip_behavior = clip_behavior;
+        self
+    }
+
+    /// Dart `PhysicalShape(elevation:)`.
+    pub fn elevation(mut self, elevation: f64) -> PhysicalShape {
+        debug_assert!(elevation >= 0.0);
+        self.elevation = elevation;
+        self
+    }
+
+    /// Dart `PhysicalShape(shadowColor:)`.
+    pub fn shadow_color(mut self, shadow_color: impl Into<AnyColor>) -> PhysicalShape {
+        self.shadow_color = shadow_color.into();
+        self
+    }
+
+    /// Dart `PhysicalShape(child:)`.
+    pub fn child<K>(mut self, child: impl IntoWidget<K>) -> PhysicalShape {
+        self.child = Some(child.into_widget());
+        self
+    }
+}
+
+impl RenderObjectWidget for PhysicalShape {
+    type RenderObject = RenderPhysicalShape;
+
+    fn key(&self) -> Option<&KeyRef> {
+        self.key.as_ref()
+    }
+
+    fn create_render_object(&self, app: &mut App, _context: BuildContext) -> AnyRenderObject {
+        RenderPhysicalShape::new(
+            app,
+            None,
+            Rc::clone(&self.clipper),
+            self.clip_behavior,
+            self.elevation,
+            self.color.color(),
+            self.shadow_color.color(),
+        )
+        .as_object()
+    }
+
+    fn update_render_object(
+        &self,
+        app: &mut App,
+        _context: BuildContext,
+        render_object: RenderHandle<RenderPhysicalShape>,
+    ) {
+        render_object.set_clipper(app, Some(Rc::clone(&self.clipper)));
+        render_object.set_clip_behavior(app, self.clip_behavior);
+        render_object.set_elevation(app, self.elevation);
+        render_object.set_color(app, self.color.color());
+        render_object.set_shadow_color(app, self.shadow_color.color());
+    }
+}
+
+impl SingleChildRenderObjectWidget for PhysicalShape {
+    fn child(&self) -> Option<&WidgetRef> {
+        self.child.as_ref()
+    }
+}
+
+impl Debug for PhysicalShape {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PhysicalShape")
+            .field("key", &self.key)
+            .field("clipper", &"...")
+            .field("elevation", &self.elevation)
+            .field("color", &self.color)
+            .field("shadow_color", &self.shadow_color)
+            .field("child", &self.child)
+            .finish()
+    }
+}
+
 // POSITIONING AND SIZING NODES
 
 /// A widget that applies a transformation before painting its child.
@@ -2479,7 +2789,8 @@ impl SingleChildRenderObjectWidget for CustomSingleChildLayout {
 /// identifiers.
 #[derive(Debug)]
 pub struct LayoutId {
-    pub key: Option<KeyRef>,
+    /// Dart's `key ?? ValueKey<Object>(id)`; the id is already a key here.
+    pub key: KeyRef,
     /// An object representing the identity of this child.
     ///
     /// The [`id`](Self::id) needs to be unique among the children that the
@@ -2492,7 +2803,7 @@ impl LayoutId {
     /// Marks a child with a layout identifier.
     pub fn new<K>(id: ChildLayoutId, child: impl IntoWidget<K>) -> LayoutId {
         LayoutId {
-            key: None,
+            key: KeyRef::Local(Rc::clone(&id)),
             id,
             child: child.into_widget(),
         }
@@ -2500,7 +2811,7 @@ impl LayoutId {
 
     /// Dart `LayoutId(key:)`.
     pub fn key(mut self, key: KeyRef) -> LayoutId {
-        self.key = Some(key);
+        self.key = key;
         self
     }
 }
@@ -2508,9 +2819,8 @@ impl LayoutId {
 impl ParentDataWidget for LayoutId {
     type ParentData = MultiChildLayoutParentData;
 
-    /// Dart's `key ?? ValueKey<Object>(id)`; the id is already a key here.
     fn key(&self) -> Option<&KeyRef> {
-        Some(self.key.as_ref().unwrap_or(&self.id))
+        Some(&self.key)
     }
 
     fn child(&self) -> &WidgetRef {
@@ -4851,8 +5161,13 @@ impl MouseRegion {
     }
 
     /// Copies the configuration onto the render object; Dart's constructor and the setters
-    /// share this list.
-    fn apply_configuration(&self, app: &mut App, render_object: RenderHandle<RenderMouseRegion>) {
+    /// share this list. Generic so a subclass's render object takes it as Dart's inherited
+    /// `updateRenderObject` does (`raw_tooltip.rs`'s `ExclusiveMouseRegion`).
+    pub(crate) fn apply_configuration<R: RenderMouseRegionBase>(
+        &self,
+        app: &mut App,
+        render_object: RenderHandle<R>,
+    ) {
         render_object.set_on_enter(app, self.on_enter.clone());
         render_object.set_on_hover(app, self.on_hover.clone());
         render_object.set_on_exit(app, self.on_exit.clone());
@@ -4983,8 +5298,8 @@ impl Debug for MouseRegion {
 ///  * `debugProfilePaintsEnabled`, a debugging flag to show render tree
 ///    repaints in Flutter DevTools' timeline view.
 ///
-/// Dart's `RepaintBoundary.wrap` and `wrapAll` wait on a key over `Object`
-/// (`child.key ?? childIndex`); their callers are the sliver child delegates.
+/// Dart's `RepaintBoundary.wrap` and `wrapAll` wait on their callers, the sliver child
+/// delegates; their key is formed as [`KeyedSubtree::wrap`]'s is.
 #[derive(Debug, Default)]
 pub struct RepaintBoundary {
     pub key: Option<KeyRef>,
@@ -5515,12 +5830,1005 @@ impl Debug for MetaData {
 
 // UTILITY NODES
 
+/// A widget that annotates the widget tree with a description of the meaning of
+/// the widgets.
+///
+/// Used by assistive technologies, search engines, and other semantic analysis
+/// software to determine the meaning of the application.
+///
+/// Its render object, a [`RenderSemanticsAnnotations`], is a proxy box: like any box it takes
+/// a hit only inside its size, so it bounds a child that takes hits outside itself.
+///
+/// Dart's sealed `_SemanticsBase` is these fields and `get_text_direction`; its other leaf,
+/// `SliverSemantics`, waits on `RenderSliverSemanticsAnnotations`.
+///
+/// See also:
+///
+///  * [`MergeSemantics`], which marks a subtree as being a single node for
+///    accessibility purposes.
+///  * [`ExcludeSemantics`], which excludes a subtree from the accessibility tree.
+///  * [`RenderSemanticsAnnotations`], the render object that implements this
+///    behavior.
+pub struct Semantics {
+    pub key: Option<KeyRef>,
+    pub child: Option<WidgetRef>,
+
+    /// Contains properties used by assistive technologies to make the application
+    /// more accessible.
+    pub properties: Rc<SemanticsProperties>,
+
+    /// If [`container`](Self::container) is true, this widget will introduce a new
+    /// node in the semantics tree. Otherwise, the semantics will be
+    /// merged with the semantics of any ancestors (if the ancestor allows that).
+    ///
+    /// Whether descendants of this widget can add their semantic information to the
+    /// `SemanticsNode` introduced by this configuration is controlled by
+    /// [`explicit_child_nodes`](Self::explicit_child_nodes).
+    pub container: bool,
+
+    /// Whether descendants of this widget are allowed to add semantic information
+    /// to the `SemanticsNode` annotated by this widget.
+    ///
+    /// When set to false descendants are allowed to annotate `SemanticsNode`s of
+    /// their parent with the semantic information they want to contribute to the
+    /// semantic tree.
+    /// When set to true the only way for descendants to contribute semantic
+    /// information to the semantic tree is to introduce new explicit
+    /// `SemanticsNode`s to the tree.
+    ///
+    /// If the semantics properties of this node include
+    /// [`SemanticsProperties::scopes_route`] set to true, then
+    /// [`explicit_child_nodes`](Self::explicit_child_nodes) must be true also.
+    ///
+    /// This setting is often used in combination with
+    /// `SemanticsConfiguration.isSemanticBoundary` to create semantic boundaries
+    /// that are either writable or not for children.
+    pub explicit_child_nodes: bool,
+
+    /// The [`Locale`] for the semantics subtree.
+    ///
+    /// If null, it inherits the locale from the ancestor semantics node.
+    pub locale_for_subtree: Option<Locale>,
+
+    /// Whether to replace all child semantics with this node.
+    ///
+    /// Defaults to false.
+    ///
+    /// When this flag is set to true, all child semantics nodes are ignored.
+    /// This can be used as a convenience for cases where a child is wrapped in
+    /// an [`ExcludeSemantics`] widget and then another [`Semantics`] widget.
+    pub exclude_semantics: bool,
+
+    /// Whether to block user interactions for the rendering subtree.
+    ///
+    /// Setting this to true will prevent users from interacting with the
+    /// rendering object configured by this widget and its subtree through
+    /// pointer-related `SemanticsAction`s in assistive technologies.
+    ///
+    /// The `SemanticsNode` created from this widget is still focusable by
+    /// assistive technologies. Only pointer-related `SemanticsAction`s, such as
+    /// `SemanticsAction::TAP` or its friends, are blocked.
+    ///
+    /// If this widget is merged into a parent semantics node, only the
+    /// `SemanticsAction`s from this widget and the widgets in the subtree are
+    /// blocked.
+    pub block_user_actions: bool,
+}
+
+impl Semantics {
+    /// Creates a semantic annotation.
+    ///
+    /// To create a [`Semantics`] widget with a whole [`SemanticsProperties`], use
+    /// [`from_properties`](Self::from_properties). Dart's named arguments are the setters; the
+    /// properties' own write into [`properties`](Self::properties).
+    pub fn new() -> Semantics {
+        Semantics::from_properties(Rc::new(SemanticsProperties::new()))
+    }
+
+    /// Creates a semantic annotation using [`SemanticsProperties`].
+    pub fn from_properties(properties: Rc<SemanticsProperties>) -> Semantics {
+        Semantics {
+            key: None,
+            child: None,
+            properties,
+            container: false,
+            explicit_child_nodes: false,
+            locale_for_subtree: None,
+            exclude_semantics: false,
+            block_user_actions: false,
+        }
+    }
+
+    /// Dart `Semantics(key:)`.
+    pub fn key(mut self, key: KeyRef) -> Semantics {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `Semantics(child:)`.
+    pub fn child<K>(mut self, child: impl IntoWidget<K>) -> Semantics {
+        self.child = Some(child.into_widget());
+        self
+    }
+
+    /// Dart `Semantics(container:)`.
+    pub fn container(mut self, container: bool) -> Semantics {
+        self.container = container;
+        self
+    }
+
+    /// Dart `Semantics(explicitChildNodes:)`.
+    pub fn explicit_child_nodes(mut self, explicit_child_nodes: bool) -> Semantics {
+        self.explicit_child_nodes = explicit_child_nodes;
+        self
+    }
+
+    /// Dart `Semantics(excludeSemantics:)`.
+    pub fn exclude_semantics(mut self, exclude_semantics: bool) -> Semantics {
+        self.exclude_semantics = exclude_semantics;
+        self
+    }
+
+    /// Dart `Semantics(blockUserActions:)`.
+    pub fn block_user_actions(mut self, block_user_actions: bool) -> Semantics {
+        self.block_user_actions = block_user_actions;
+        self
+    }
+
+    /// Writes one of Dart's `SemanticsProperties` arguments into [`properties`](Self::properties).
+    fn with_properties(
+        mut self,
+        update: impl FnOnce(SemanticsProperties) -> SemanticsProperties,
+    ) -> Semantics {
+        self.properties = Rc::new(update(Rc::unwrap_or_clone(self.properties)));
+        self
+    }
+
+    /// Dart `Semantics(enabled:)`.
+    pub fn enabled(self, enabled: bool) -> Semantics {
+        self.with_properties(|properties| properties.enabled(enabled))
+    }
+
+    /// Dart `Semantics(checked:)`.
+    pub fn checked(self, checked: bool) -> Semantics {
+        self.with_properties(|properties| properties.checked(checked))
+    }
+
+    /// Dart `Semantics(mixed:)`.
+    pub fn mixed(self, mixed: bool) -> Semantics {
+        self.with_properties(|properties| properties.mixed(mixed))
+    }
+
+    /// Dart `Semantics(selected:)`.
+    pub fn selected(self, selected: bool) -> Semantics {
+        self.with_properties(|properties| properties.selected(selected))
+    }
+
+    /// Dart `Semantics(toggled:)`.
+    pub fn toggled(self, toggled: bool) -> Semantics {
+        self.with_properties(|properties| properties.toggled(toggled))
+    }
+
+    /// Dart `Semantics(button:)`.
+    pub fn button(self, button: bool) -> Semantics {
+        self.with_properties(|properties| properties.button(button))
+    }
+
+    /// Dart `Semantics(slider:)`.
+    pub fn slider(self, slider: bool) -> Semantics {
+        self.with_properties(|properties| properties.slider(slider))
+    }
+
+    /// Dart `Semantics(keyboardKey:)`.
+    pub fn keyboard_key(self, keyboard_key: bool) -> Semantics {
+        self.with_properties(|properties| properties.keyboard_key(keyboard_key))
+    }
+
+    /// Dart `Semantics(link:)`.
+    pub fn link(self, link: bool) -> Semantics {
+        self.with_properties(|properties| properties.link(link))
+    }
+
+    /// Dart `Semantics(linkUrl:)`.
+    pub fn link_url(self, link_url: impl Into<String>) -> Semantics {
+        self.with_properties(|properties| properties.link_url(link_url))
+    }
+
+    /// Dart `Semantics(header:)`.
+    pub fn header(self, header: bool) -> Semantics {
+        self.with_properties(|properties| properties.header(header))
+    }
+
+    /// Dart `Semantics(headingLevel:)`.
+    pub fn heading_level(self, heading_level: i32) -> Semantics {
+        self.with_properties(|properties| properties.heading_level(heading_level))
+    }
+
+    /// Dart `Semantics(textField:)`.
+    pub fn text_field(self, text_field: bool) -> Semantics {
+        self.with_properties(|properties| properties.text_field(text_field))
+    }
+
+    /// Dart `Semantics(readOnly:)`.
+    pub fn read_only(self, read_only: bool) -> Semantics {
+        self.with_properties(|properties| properties.read_only(read_only))
+    }
+
+    /// Dart `Semantics(focusable:)`.
+    pub fn focusable(self, focusable: bool) -> Semantics {
+        self.with_properties(|properties| properties.focusable(focusable))
+    }
+
+    /// Dart `Semantics(focused:)`.
+    pub fn focused(self, focused: bool) -> Semantics {
+        self.with_properties(|properties| properties.focused(focused))
+    }
+
+    /// Dart `Semantics(accessibilityFocusBlockType:)`.
+    pub fn accessibility_focus_block_type(
+        self,
+        accessibility_focus_block_type: AccessibilityFocusBlockType,
+    ) -> Semantics {
+        self.with_properties(|properties| {
+            properties.accessibility_focus_block_type(accessibility_focus_block_type)
+        })
+    }
+
+    /// Dart `Semantics(inMutuallyExclusiveGroup:)`.
+    pub fn in_mutually_exclusive_group(self, in_mutually_exclusive_group: bool) -> Semantics {
+        self.with_properties(|properties| {
+            properties.in_mutually_exclusive_group(in_mutually_exclusive_group)
+        })
+    }
+
+    /// Dart `Semantics(obscured:)`.
+    pub fn obscured(self, obscured: bool) -> Semantics {
+        self.with_properties(|properties| properties.obscured(obscured))
+    }
+
+    /// Dart `Semantics(multiline:)`.
+    pub fn multiline(self, multiline: bool) -> Semantics {
+        self.with_properties(|properties| properties.multiline(multiline))
+    }
+
+    /// Dart `Semantics(scopesRoute:)`.
+    pub fn scopes_route(self, scopes_route: bool) -> Semantics {
+        self.with_properties(|properties| properties.scopes_route(scopes_route))
+    }
+
+    /// Dart `Semantics(namesRoute:)`.
+    pub fn names_route(self, names_route: bool) -> Semantics {
+        self.with_properties(|properties| properties.names_route(names_route))
+    }
+
+    /// Dart `Semantics(hidden:)`.
+    pub fn hidden(self, hidden: bool) -> Semantics {
+        self.with_properties(|properties| properties.hidden(hidden))
+    }
+
+    /// Dart `Semantics(image:)`.
+    pub fn image(self, image: bool) -> Semantics {
+        self.with_properties(|properties| properties.image(image))
+    }
+
+    /// Dart `Semantics(liveRegion:)`.
+    pub fn live_region(self, live_region: bool) -> Semantics {
+        self.with_properties(|properties| properties.live_region(live_region))
+    }
+
+    /// Dart `Semantics(expanded:)`.
+    pub fn expanded(self, expanded: bool) -> Semantics {
+        self.with_properties(|properties| properties.expanded(expanded))
+    }
+
+    /// Dart `Semantics(isRequired:)`.
+    pub fn is_required(self, is_required: bool) -> Semantics {
+        self.with_properties(|properties| properties.is_required(is_required))
+    }
+
+    /// Dart `Semantics(maxValueLength:)`.
+    pub fn max_value_length(self, max_value_length: i32) -> Semantics {
+        self.with_properties(|properties| properties.max_value_length(max_value_length))
+    }
+
+    /// Dart `Semantics(currentValueLength:)`.
+    pub fn current_value_length(self, current_value_length: i32) -> Semantics {
+        self.with_properties(|properties| properties.current_value_length(current_value_length))
+    }
+
+    /// Dart `Semantics(identifier:)`.
+    pub fn identifier(self, identifier: impl Into<String>) -> Semantics {
+        self.with_properties(|properties| properties.identifier(identifier))
+    }
+
+    /// Dart `Semantics(traversalParentIdentifier:)`.
+    pub fn traversal_parent_identifier(
+        self,
+        traversal_parent_identifier: Rc<dyn Any>,
+    ) -> Semantics {
+        self.with_properties(|properties| {
+            properties.traversal_parent_identifier(traversal_parent_identifier)
+        })
+    }
+
+    /// Dart `Semantics(traversalChildIdentifier:)`.
+    pub fn traversal_child_identifier(self, traversal_child_identifier: Rc<dyn Any>) -> Semantics {
+        self.with_properties(|properties| {
+            properties.traversal_child_identifier(traversal_child_identifier)
+        })
+    }
+
+    /// Dart `Semantics(label:)`.
+    pub fn label(self, label: impl Into<String>) -> Semantics {
+        self.with_properties(|properties| properties.label(label))
+    }
+
+    /// Dart `Semantics(attributedLabel:)`.
+    pub fn attributed_label(self, attributed_label: AttributedString) -> Semantics {
+        self.with_properties(|properties| properties.attributed_label(attributed_label))
+    }
+
+    /// Dart `Semantics(value:)`.
+    pub fn value(self, value: impl Into<String>) -> Semantics {
+        self.with_properties(|properties| properties.value(value))
+    }
+
+    /// Dart `Semantics(attributedValue:)`.
+    pub fn attributed_value(self, attributed_value: AttributedString) -> Semantics {
+        self.with_properties(|properties| properties.attributed_value(attributed_value))
+    }
+
+    /// Dart `Semantics(increasedValue:)`.
+    pub fn increased_value(self, increased_value: impl Into<String>) -> Semantics {
+        self.with_properties(|properties| properties.increased_value(increased_value))
+    }
+
+    /// Dart `Semantics(attributedIncreasedValue:)`.
+    pub fn attributed_increased_value(
+        self,
+        attributed_increased_value: AttributedString,
+    ) -> Semantics {
+        self.with_properties(|properties| {
+            properties.attributed_increased_value(attributed_increased_value)
+        })
+    }
+
+    /// Dart `Semantics(decreasedValue:)`.
+    pub fn decreased_value(self, decreased_value: impl Into<String>) -> Semantics {
+        self.with_properties(|properties| properties.decreased_value(decreased_value))
+    }
+
+    /// Dart `Semantics(attributedDecreasedValue:)`.
+    pub fn attributed_decreased_value(
+        self,
+        attributed_decreased_value: AttributedString,
+    ) -> Semantics {
+        self.with_properties(|properties| {
+            properties.attributed_decreased_value(attributed_decreased_value)
+        })
+    }
+
+    /// Dart `Semantics(hint:)`.
+    pub fn hint(self, hint: impl Into<String>) -> Semantics {
+        self.with_properties(|properties| properties.hint(hint))
+    }
+
+    /// Dart `Semantics(attributedHint:)`.
+    pub fn attributed_hint(self, attributed_hint: AttributedString) -> Semantics {
+        self.with_properties(|properties| properties.attributed_hint(attributed_hint))
+    }
+
+    /// Dart `Semantics(tooltip:)`.
+    pub fn tooltip(self, tooltip: impl Into<String>) -> Semantics {
+        self.with_properties(|properties| properties.tooltip(tooltip))
+    }
+
+    /// Dart `Semantics(onTapHint:)`: with the other hint, the properties' `hintOverrides`.
+    pub fn on_tap_hint(self, on_tap_hint: impl Into<String>) -> Semantics {
+        self.with_properties(|properties| {
+            let hint_overrides = properties.hint_overrides.clone().unwrap_or_default();
+            properties.hint_overrides(hint_overrides.on_tap_hint(on_tap_hint))
+        })
+    }
+
+    /// Dart `Semantics(onLongPressHint:)`: with the other hint, the properties' `hintOverrides`.
+    pub fn on_long_press_hint(self, on_long_press_hint: impl Into<String>) -> Semantics {
+        self.with_properties(|properties| {
+            let hint_overrides = properties.hint_overrides.clone().unwrap_or_default();
+            properties.hint_overrides(hint_overrides.on_long_press_hint(on_long_press_hint))
+        })
+    }
+
+    /// Dart `Semantics(textDirection:)`.
+    pub fn text_direction(self, text_direction: TextDirection) -> Semantics {
+        self.with_properties(|properties| properties.text_direction(text_direction))
+    }
+
+    /// Dart `Semantics(sortKey:)`.
+    pub fn sort_key(self, sort_key: SemanticsSortKeyRef) -> Semantics {
+        self.with_properties(|properties| properties.sort_key(sort_key))
+    }
+
+    /// Dart `Semantics(tagForChildren:)`.
+    pub fn tag_for_children(self, tag_for_children: Rc<SemanticsTag>) -> Semantics {
+        self.with_properties(|properties| properties.tag_for_children(tag_for_children))
+    }
+
+    /// Dart `Semantics(onTap:)`.
+    pub fn on_tap(self, on_tap: VoidCallback) -> Semantics {
+        self.with_properties(|properties| properties.on_tap(on_tap))
+    }
+
+    /// Dart `Semantics(onLongPress:)`.
+    pub fn on_long_press(self, on_long_press: VoidCallback) -> Semantics {
+        self.with_properties(|properties| properties.on_long_press(on_long_press))
+    }
+
+    /// Dart `Semantics(onScrollLeft:)`.
+    pub fn on_scroll_left(self, on_scroll_left: VoidCallback) -> Semantics {
+        self.with_properties(|properties| properties.on_scroll_left(on_scroll_left))
+    }
+
+    /// Dart `Semantics(onScrollRight:)`.
+    pub fn on_scroll_right(self, on_scroll_right: VoidCallback) -> Semantics {
+        self.with_properties(|properties| properties.on_scroll_right(on_scroll_right))
+    }
+
+    /// Dart `Semantics(onScrollUp:)`.
+    pub fn on_scroll_up(self, on_scroll_up: VoidCallback) -> Semantics {
+        self.with_properties(|properties| properties.on_scroll_up(on_scroll_up))
+    }
+
+    /// Dart `Semantics(onScrollDown:)`.
+    pub fn on_scroll_down(self, on_scroll_down: VoidCallback) -> Semantics {
+        self.with_properties(|properties| properties.on_scroll_down(on_scroll_down))
+    }
+
+    /// Dart `Semantics(onIncrease:)`.
+    pub fn on_increase(self, on_increase: VoidCallback) -> Semantics {
+        self.with_properties(|properties| properties.on_increase(on_increase))
+    }
+
+    /// Dart `Semantics(onDecrease:)`.
+    pub fn on_decrease(self, on_decrease: VoidCallback) -> Semantics {
+        self.with_properties(|properties| properties.on_decrease(on_decrease))
+    }
+
+    /// Dart `Semantics(onCopy:)`.
+    pub fn on_copy(self, on_copy: VoidCallback) -> Semantics {
+        self.with_properties(|properties| properties.on_copy(on_copy))
+    }
+
+    /// Dart `Semantics(onCut:)`.
+    pub fn on_cut(self, on_cut: VoidCallback) -> Semantics {
+        self.with_properties(|properties| properties.on_cut(on_cut))
+    }
+
+    /// Dart `Semantics(onPaste:)`.
+    pub fn on_paste(self, on_paste: VoidCallback) -> Semantics {
+        self.with_properties(|properties| properties.on_paste(on_paste))
+    }
+
+    /// Dart `Semantics(onDismiss:)`.
+    pub fn on_dismiss(self, on_dismiss: VoidCallback) -> Semantics {
+        self.with_properties(|properties| properties.on_dismiss(on_dismiss))
+    }
+
+    /// Dart `Semantics(onMoveCursorForwardByCharacter:)`.
+    pub fn on_move_cursor_forward_by_character(
+        self,
+        on_move_cursor_forward_by_character: MoveCursorHandler,
+    ) -> Semantics {
+        self.with_properties(|properties| {
+            properties.on_move_cursor_forward_by_character(on_move_cursor_forward_by_character)
+        })
+    }
+
+    /// Dart `Semantics(onMoveCursorBackwardByCharacter:)`.
+    pub fn on_move_cursor_backward_by_character(
+        self,
+        on_move_cursor_backward_by_character: MoveCursorHandler,
+    ) -> Semantics {
+        self.with_properties(|properties| {
+            properties.on_move_cursor_backward_by_character(on_move_cursor_backward_by_character)
+        })
+    }
+
+    /// Dart `Semantics(onSetSelection:)`.
+    pub fn on_set_selection(self, on_set_selection: SetSelectionHandler) -> Semantics {
+        self.with_properties(|properties| properties.on_set_selection(on_set_selection))
+    }
+
+    /// Dart `Semantics(onSetText:)`.
+    pub fn on_set_text(self, on_set_text: SetTextHandler) -> Semantics {
+        self.with_properties(|properties| properties.on_set_text(on_set_text))
+    }
+
+    /// Dart `Semantics(onDidGainAccessibilityFocus:)`.
+    pub fn on_did_gain_accessibility_focus(
+        self,
+        on_did_gain_accessibility_focus: VoidCallback,
+    ) -> Semantics {
+        self.with_properties(|properties| {
+            properties.on_did_gain_accessibility_focus(on_did_gain_accessibility_focus)
+        })
+    }
+
+    /// Dart `Semantics(onDidLoseAccessibilityFocus:)`.
+    pub fn on_did_lose_accessibility_focus(
+        self,
+        on_did_lose_accessibility_focus: VoidCallback,
+    ) -> Semantics {
+        self.with_properties(|properties| {
+            properties.on_did_lose_accessibility_focus(on_did_lose_accessibility_focus)
+        })
+    }
+
+    /// Dart `Semantics(onFocus:)`.
+    pub fn on_focus(self, on_focus: VoidCallback) -> Semantics {
+        self.with_properties(|properties| properties.on_focus(on_focus))
+    }
+
+    /// Dart `Semantics(onExpand:)`.
+    pub fn on_expand(self, on_expand: VoidCallback) -> Semantics {
+        self.with_properties(|properties| properties.on_expand(on_expand))
+    }
+
+    /// Dart `Semantics(onCollapse:)`.
+    pub fn on_collapse(self, on_collapse: VoidCallback) -> Semantics {
+        self.with_properties(|properties| properties.on_collapse(on_collapse))
+    }
+
+    /// Dart `Semantics(customSemanticsActions:)`.
+    pub fn custom_semantics_actions(
+        self,
+        custom_semantics_actions: IndexMap<CustomSemanticsAction, VoidCallback>,
+    ) -> Semantics {
+        self.with_properties(|properties| {
+            properties.custom_semantics_actions(custom_semantics_actions)
+        })
+    }
+
+    /// Dart `Semantics(role:)`.
+    pub fn role(self, role: SemanticsRole) -> Semantics {
+        self.with_properties(|properties| properties.role(role))
+    }
+
+    /// Dart `Semantics(controlsNodes:)`.
+    pub fn controls_nodes(self, controls_nodes: IndexSet<String>) -> Semantics {
+        self.with_properties(|properties| properties.controls_nodes(controls_nodes))
+    }
+
+    /// Dart `Semantics(validationResult:)`.
+    pub fn validation_result(self, validation_result: SemanticsValidationResult) -> Semantics {
+        self.with_properties(|properties| properties.validation_result(validation_result))
+    }
+
+    /// Dart `Semantics(hitTestBehavior:)`.
+    pub fn hit_test_behavior(self, hit_test_behavior: SemanticsHitTestBehavior) -> Semantics {
+        self.with_properties(|properties| properties.hit_test_behavior(hit_test_behavior))
+    }
+
+    /// Dart `Semantics(inputType:)`.
+    pub fn input_type(self, input_type: SemanticsInputType) -> Semantics {
+        self.with_properties(|properties| properties.input_type(input_type))
+    }
+
+    /// Dart `Semantics(localeForSubtree:)`.
+    pub fn locale_for_subtree(mut self, locale_for_subtree: Locale) -> Semantics {
+        self.locale_for_subtree = Some(locale_for_subtree);
+        self
+    }
+
+    /// Dart `Semantics(minValue:)`.
+    pub fn min_value(self, min_value: impl Into<String>) -> Semantics {
+        self.with_properties(|properties| properties.min_value(min_value))
+    }
+
+    /// Dart `Semantics(maxValue:)`.
+    pub fn max_value(self, max_value: impl Into<String>) -> Semantics {
+        self.with_properties(|properties| properties.max_value(max_value))
+    }
+
+    /// Dart's `_SemanticsBase._getTextDirection`.
+    fn get_text_direction(&self, app: &mut App, context: BuildContext) -> Option<TextDirection> {
+        if self.properties.text_direction.is_some() {
+            return self.properties.text_direction;
+        }
+
+        let properties = &self.properties;
+        let contains_text = properties.label.is_some()
+            || properties.attributed_label.is_some()
+            || properties.value.is_some()
+            || properties.attributed_value.is_some()
+            || properties.increased_value.is_some()
+            || properties.attributed_increased_value.is_some()
+            || properties.decreased_value.is_some()
+            || properties.attributed_decreased_value.is_some()
+            || properties.hint.is_some()
+            || properties.attributed_hint.is_some()
+            || properties.tooltip.is_some();
+
+        if !contains_text {
+            return None;
+        }
+
+        Directionality::maybe_of(app, context)
+    }
+}
+
+impl Default for Semantics {
+    fn default() -> Semantics {
+        Semantics::new()
+    }
+}
+
+impl RenderObjectWidget for Semantics {
+    type RenderObject = RenderSemanticsAnnotations;
+
+    fn key(&self) -> Option<&KeyRef> {
+        self.key.as_ref()
+    }
+
+    fn create_render_object(&self, app: &mut App, context: BuildContext) -> AnyRenderObject {
+        let text_direction = self.get_text_direction(app, context);
+        RenderSemanticsAnnotations::new(
+            app,
+            self.properties.clone(),
+            self.container,
+            self.explicit_child_nodes,
+            self.exclude_semantics,
+            self.block_user_actions,
+            self.locale_for_subtree.clone(),
+            text_direction,
+            None,
+        )
+        .as_object()
+    }
+
+    fn update_render_object(
+        &self,
+        app: &mut App,
+        context: BuildContext,
+        render_object: RenderHandle<RenderSemanticsAnnotations>,
+    ) {
+        render_object.set_container(app, self.container);
+        render_object.set_explicit_child_nodes(app, self.explicit_child_nodes);
+        render_object.set_exclude_semantics(app, self.exclude_semantics);
+        render_object.set_block_user_actions(app, self.block_user_actions);
+        render_object.set_properties(app, self.properties.clone());
+        let text_direction = self.get_text_direction(app, context);
+        render_object.set_text_direction(app, text_direction);
+        render_object.set_locale_for_subtree(app, self.locale_for_subtree.clone());
+    }
+
+    fn debug_check_constructor(&self) {
+        self.properties.debug_check_constructor();
+    }
+}
+
+impl SingleChildRenderObjectWidget for Semantics {
+    fn child(&self) -> Option<&WidgetRef> {
+        self.child.as_ref()
+    }
+}
+
+impl Debug for Semantics {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Semantics")
+            .field("container", &self.container)
+            .field("properties", &self.properties)
+            .finish_non_exhaustive()
+    }
+}
+
+/// A widget that merges the semantics of its descendants.
+///
+/// Causes all the semantics of the subtree rooted at this node to be
+/// merged into one node in the semantics tree. For example, if you
+/// have a widget with a Text node next to a checkbox widget, this
+/// could be used to merge the label from the Text node with the
+/// "checked" semantic state of the checkbox into a single node that
+/// had both the label and the checked state. Otherwise, the label
+/// would be presented as a separate feature than the checkbox, and
+/// the user would not be able to be sure that they were related.
+///
+/// Be aware that if two nodes in the subtree have conflicting
+/// semantics, the result may be nonsensical. For example, a subtree
+/// with a checked checkbox and an unchecked checkbox will be
+/// presented as checked. All the labels will be merged into a single
+/// string (with newlines separating each label from the other). If
+/// multiple nodes in the merged subtree can handle semantic gestures,
+/// the first one in tree order will be the one to receive the
+/// callbacks.
+#[derive(Debug, Default)]
+pub struct MergeSemantics {
+    pub key: Option<KeyRef>,
+    pub child: Option<WidgetRef>,
+}
+
+impl MergeSemantics {
+    /// Creates a widget that merges the semantics of its descendants; Dart's named arguments
+    /// are the setters.
+    pub fn new() -> MergeSemantics {
+        MergeSemantics::default()
+    }
+
+    /// Dart `MergeSemantics(key:)`.
+    pub fn key(mut self, key: KeyRef) -> MergeSemantics {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `MergeSemantics(child:)`.
+    pub fn child<K>(mut self, child: impl IntoWidget<K>) -> MergeSemantics {
+        self.child = Some(child.into_widget());
+        self
+    }
+}
+
+impl RenderObjectWidget for MergeSemantics {
+    type RenderObject = RenderMergeSemantics;
+
+    fn key(&self) -> Option<&KeyRef> {
+        self.key.as_ref()
+    }
+
+    fn create_render_object(&self, app: &mut App, _context: BuildContext) -> AnyRenderObject {
+        RenderMergeSemantics::new(app, None).as_object()
+    }
+}
+
+impl SingleChildRenderObjectWidget for MergeSemantics {
+    fn child(&self) -> Option<&WidgetRef> {
+        self.child.as_ref()
+    }
+}
+
+/// A widget that drops the semantics of all widget that were painted before it
+/// in the same semantic container.
+///
+/// This is useful to hide widgets from accessibility tools that are painted
+/// behind a certain widget, e.g. an alert should usually disallow interaction
+/// with any widget located "behind" the alert (even when they are still
+/// partially visible). Similarly, an open `Drawer` blocks interactions with
+/// any widget outside the drawer.
+///
+/// See also:
+///
+///  * [`ExcludeSemantics`] which drops all semantics of its descendants.
+#[derive(Debug)]
+pub struct BlockSemantics {
+    pub key: Option<KeyRef>,
+
+    /// Whether this widget is blocking semantics of all widget that were painted
+    /// before it in the same semantic container.
+    pub blocking: bool,
+    pub child: Option<WidgetRef>,
+}
+
+impl BlockSemantics {
+    /// Creates a widget that excludes the semantics of all widgets painted before
+    /// it in the same semantic container; Dart's named arguments are the setters.
+    pub fn new() -> BlockSemantics {
+        BlockSemantics::default()
+    }
+
+    /// Dart `BlockSemantics(key:)`.
+    pub fn key(mut self, key: KeyRef) -> BlockSemantics {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `BlockSemantics(blocking:)`.
+    pub fn blocking(mut self, blocking: bool) -> BlockSemantics {
+        self.blocking = blocking;
+        self
+    }
+
+    /// Dart `BlockSemantics(child:)`.
+    pub fn child<K>(mut self, child: impl IntoWidget<K>) -> BlockSemantics {
+        self.child = Some(child.into_widget());
+        self
+    }
+}
+
+impl Default for BlockSemantics {
+    fn default() -> BlockSemantics {
+        BlockSemantics {
+            key: None,
+            blocking: true,
+            child: None,
+        }
+    }
+}
+
+impl RenderObjectWidget for BlockSemantics {
+    type RenderObject = RenderBlockSemantics;
+
+    fn key(&self) -> Option<&KeyRef> {
+        self.key.as_ref()
+    }
+
+    fn create_render_object(&self, app: &mut App, _context: BuildContext) -> AnyRenderObject {
+        RenderBlockSemantics::new(app, self.blocking, None).as_object()
+    }
+
+    fn update_render_object(
+        &self,
+        app: &mut App,
+        _context: BuildContext,
+        render_object: RenderHandle<RenderBlockSemantics>,
+    ) {
+        render_object.set_blocking(app, self.blocking);
+    }
+}
+
+impl SingleChildRenderObjectWidget for BlockSemantics {
+    fn child(&self) -> Option<&WidgetRef> {
+        self.child.as_ref()
+    }
+}
+
+/// A widget that drops all the semantics of its descendants.
+///
+/// When [`excluding`](Self::excluding) is true, this widget (and its subtree) is excluded from
+/// the semantics tree.
+///
+/// This can be used to hide descendant widgets that would otherwise be
+/// reported but that would only be confusing. For example, the
+/// material library's `Chip` widget hides the avatar since it is
+/// redundant with the chip label.
+///
+/// See also:
+///
+///  * [`BlockSemantics`] which drops semantics of widgets earlier in the tree.
+#[derive(Debug)]
+pub struct ExcludeSemantics {
+    pub key: Option<KeyRef>,
+
+    /// Whether this widget is excluded in the semantics tree.
+    pub excluding: bool,
+    pub child: Option<WidgetRef>,
+}
+
+impl ExcludeSemantics {
+    /// Creates a widget that drops all the semantics of its descendants; Dart's named arguments
+    /// are the setters.
+    pub fn new() -> ExcludeSemantics {
+        ExcludeSemantics::default()
+    }
+
+    /// Dart `ExcludeSemantics(key:)`.
+    pub fn key(mut self, key: KeyRef) -> ExcludeSemantics {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `ExcludeSemantics(excluding:)`.
+    pub fn excluding(mut self, excluding: bool) -> ExcludeSemantics {
+        self.excluding = excluding;
+        self
+    }
+
+    /// Dart `ExcludeSemantics(child:)`.
+    pub fn child<K>(mut self, child: impl IntoWidget<K>) -> ExcludeSemantics {
+        self.child = Some(child.into_widget());
+        self
+    }
+}
+
+impl Default for ExcludeSemantics {
+    fn default() -> ExcludeSemantics {
+        ExcludeSemantics {
+            key: None,
+            excluding: true,
+            child: None,
+        }
+    }
+}
+
+impl RenderObjectWidget for ExcludeSemantics {
+    type RenderObject = RenderExcludeSemantics;
+
+    fn key(&self) -> Option<&KeyRef> {
+        self.key.as_ref()
+    }
+
+    fn create_render_object(&self, app: &mut App, _context: BuildContext) -> AnyRenderObject {
+        RenderExcludeSemantics::new(app, self.excluding, None).as_object()
+    }
+
+    fn update_render_object(
+        &self,
+        app: &mut App,
+        _context: BuildContext,
+        render_object: RenderHandle<RenderExcludeSemantics>,
+    ) {
+        render_object.set_excluding(app, self.excluding);
+    }
+}
+
+impl SingleChildRenderObjectWidget for ExcludeSemantics {
+    fn child(&self) -> Option<&WidgetRef> {
+        self.child.as_ref()
+    }
+}
+
+/// A widget that annotates the child semantics with an index.
+///
+/// Semantic indexes are used by TalkBack/Voiceover to make announcements about
+/// the current scroll state. Certain widgets like the `ListView` will
+/// automatically provide a child index for building semantics. A user may wish
+/// to manually provide semantic indexes if not all child of the scrollable
+/// contribute semantics.
+///
+/// See also:
+///
+///  * `CustomScrollView`, for an explanation of index semantics.
+#[derive(Debug)]
+pub struct IndexedSemantics {
+    pub key: Option<KeyRef>,
+
+    /// The index used to annotate the first child semantics node.
+    pub index: i32,
+    pub child: Option<WidgetRef>,
+}
+
+impl IndexedSemantics {
+    /// Creates a widget that annotated the first child semantics node with an index; Dart's
+    /// named arguments are the setters.
+    pub fn new(index: i32) -> IndexedSemantics {
+        IndexedSemantics {
+            key: None,
+            index,
+            child: None,
+        }
+    }
+
+    /// Dart `IndexedSemantics(key:)`.
+    pub fn key(mut self, key: KeyRef) -> IndexedSemantics {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `IndexedSemantics(child:)`.
+    pub fn child<K>(mut self, child: impl IntoWidget<K>) -> IndexedSemantics {
+        self.child = Some(child.into_widget());
+        self
+    }
+}
+
+impl RenderObjectWidget for IndexedSemantics {
+    type RenderObject = RenderIndexedSemantics;
+
+    fn key(&self) -> Option<&KeyRef> {
+        self.key.as_ref()
+    }
+
+    fn create_render_object(&self, app: &mut App, _context: BuildContext) -> AnyRenderObject {
+        RenderIndexedSemantics::new(app, self.index, None).as_object()
+    }
+
+    fn update_render_object(
+        &self,
+        app: &mut App,
+        _context: BuildContext,
+        render_object: RenderHandle<RenderIndexedSemantics>,
+    ) {
+        render_object.set_index(app, self.index);
+    }
+}
+
+impl SingleChildRenderObjectWidget for IndexedSemantics {
+    fn child(&self) -> Option<&WidgetRef> {
+        self.child.as_ref()
+    }
+}
+
 /// A widget that builds its child.
 ///
 /// Useful for attaching a key to an existing widget.
-///
-/// Dart's `KeyedSubtree.wrap` and `ensureUniqueKeysForList` wait on a key over `Object`
-/// (`child.key ?? childIndex`); see `PORTING.md`.
 #[derive(Debug)]
 pub struct KeyedSubtree {
     pub key: Option<KeyRef>,
@@ -5540,10 +6848,45 @@ impl KeyedSubtree {
         }
     }
 
+    /// Creates a [`KeyedSubtree`] for child with a key that's based on the child's existing
+    /// key or `child_index`.
+    ///
+    /// Dart's `ValueKey<Object>(child.key ?? childIndex)` is one key type for both: it never
+    /// equals a `ValueKey` of another type, such as a caller's own `ValueKey<int>`.
+    pub fn wrap(child: WidgetRef, child_index: i64) -> KeyedSubtree {
+        let value = match child.key() {
+            Some(key) => WrapKeyValue::Key(key.clone()),
+            None => WrapKeyValue::Index(child_index),
+        };
+        KeyedSubtree {
+            key: Some(ValueKey::new(value).into()),
+            child,
+        }
+    }
+
     /// Dart `KeyedSubtree(key:)`.
     pub fn key(mut self, key: KeyRef) -> KeyedSubtree {
         self.key = Some(key);
         self
+    }
+
+    /// Wrap each item in a KeyedSubtree whose key is based on the item's existing key or
+    /// the sum of its list index and `base_index`.
+    ///
+    /// Dart's `baseIndex` defaults to 0.
+    pub fn ensure_unique_keys_for_list(items: Vec<WidgetRef>, base_index: i64) -> Vec<WidgetRef> {
+        if items.is_empty() {
+            return items;
+        }
+
+        let items_with_unique_keys: Vec<WidgetRef> = items
+            .into_iter()
+            .zip(0..)
+            .map(|(item, i)| KeyedSubtree::wrap(item, base_index + i).into_widget())
+            .collect();
+
+        debug_assert!(!debug_items_have_duplicate_keys(&items_with_unique_keys));
+        items_with_unique_keys
     }
 }
 
@@ -5555,6 +6898,42 @@ impl StatelessWidget for KeyedSubtree {
     fn build(&self, _app: &mut App, _context: BuildContext) -> WidgetRef {
         self.child.clone()
     }
+}
+
+/// The value of [`KeyedSubtree::wrap`]'s key: Dart's `Object` holding `child.key ?? childIndex`.
+#[derive(Clone, PartialEq, Eq, Hash)]
+enum WrapKeyValue {
+    Key(KeyRef),
+    Index(i64),
+}
+
+impl Debug for WrapKeyValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            WrapKeyValue::Key(key) => key.fmt(f),
+            WrapKeyValue::Index(index) => index.fmt(f),
+        }
+    }
+}
+
+/// Dart's `_firstNonUniqueKey` from `widgets/debug.dart`.
+fn first_non_unique_key(widgets: &[WidgetRef]) -> Option<&KeyRef> {
+    let mut key_set = HashSet::new();
+    widgets
+        .iter()
+        .filter_map(|widget| widget.key())
+        .find(|&key| !key_set.insert(key))
+}
+
+/// Asserts if the given list of items contains any duplicate non-null keys.
+///
+/// Call it as `debug_assert!(!debug_items_have_duplicate_keys(&items))`. Always returns
+/// false. Dart's from `widgets/debug.dart`.
+fn debug_items_have_duplicate_keys(items: &[WidgetRef]) -> bool {
+    if let Some(non_unique_key) = first_non_unique_key(items) {
+        panic!("Duplicate key found: {non_unique_key:?}.");
+    }
+    false
 }
 
 /// Signature for a function that creates a widget, e.g. [`StatelessWidget::build`]
@@ -5637,6 +7016,108 @@ impl Debug for Builder {
         f.debug_struct("Builder")
             .field("key", &self.key)
             .finish_non_exhaustive()
+    }
+}
+
+/// The signature of the `set_state` a [`StatefulBuilder`] hands its builder; Dart's
+/// `StateSetter`.
+///
+/// The callback runs before the state is marked for a rebuild, as Dart's `setState(fn)` runs
+/// `fn` first.
+pub type StateSetter = Rc<dyn Fn(&mut App, &mut dyn FnMut(&mut App))>;
+
+/// Signature for the builder callback used by [`StatefulBuilder`].
+///
+/// Call `set_state` to schedule the [`StatefulBuilder`] to rebuild.
+pub type StatefulWidgetBuilder = Rc<dyn Fn(&mut App, BuildContext, StateSetter) -> WidgetRef>;
+
+/// A platonic widget that both has state and calls a closure to obtain its child widget.
+///
+/// The [`StateSetter`] function passed to the [`builder`](Self::builder) is used to invoke a
+/// rebuild instead of a typical [`State`]'s `set_state`.
+///
+/// Since the [`builder`](Self::builder) is re-invoked when the [`StateSetter`] is called, any
+/// variables that represents state should be kept outside the [`builder`](Self::builder)
+/// function.
+///
+/// See also:
+///
+///  * [`Builder`], the platonic stateless widget.
+pub struct StatefulBuilder {
+    pub key: Option<KeyRef>,
+    /// Called to obtain the child widget.
+    ///
+    /// This function is called whenever this widget is included in its parent's
+    /// build and the old widget (if any) that it synchronizes with has a distinct
+    /// object identity. Typically the parent's build method will construct
+    /// a new tree of widgets and so a new Builder child will not be identical
+    /// to the corresponding old one.
+    pub builder: StatefulWidgetBuilder,
+}
+
+impl StatefulBuilder {
+    /// Creates a widget that both has state and delegates its build to a callback; Dart's
+    /// optional named arguments are the setters.
+    pub fn new(
+        builder: impl Fn(&mut App, BuildContext, StateSetter) -> WidgetRef + 'static,
+    ) -> StatefulBuilder {
+        StatefulBuilder {
+            key: None,
+            builder: Rc::new(builder),
+        }
+    }
+
+    /// Dart `StatefulBuilder(key:)`.
+    pub fn key(mut self, key: KeyRef) -> StatefulBuilder {
+        self.key = Some(key);
+        self
+    }
+}
+
+impl Debug for StatefulBuilder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StatefulBuilder")
+            .field("key", &self.key)
+            .finish_non_exhaustive()
+    }
+}
+
+impl StatefulWidget for StatefulBuilder {
+    type State = StatefulBuilderState;
+
+    fn key(&self) -> Option<&KeyRef> {
+        self.key.as_ref()
+    }
+
+    fn create_state(&self) -> StatefulBuilderState {
+        StatefulBuilderState {
+            state: StateData::new(),
+        }
+    }
+}
+
+/// Dart's `_StatefulBuilderState`.
+pub struct StatefulBuilderState {
+    state: StateData<StatefulBuilder>,
+}
+
+impl State for StatefulBuilderState {
+    type Widget = StatefulBuilder;
+    crate::state_accessors!();
+
+    fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
+        let builder = Rc::clone(&self.widget(app).builder);
+        let set_state: StateSetter = Rc::new(move |app: &mut App, f: &mut dyn FnMut(&mut App)| {
+            // `setState`'s lifecycle asserts run before the callback, as Dart's do.
+            debug_assert!(
+                self.mounted(app),
+                "setState() called after dispose(): this error happens if you call setState() \
+                 on a State object for a widget that no longer appears in the widget tree."
+            );
+            f(app);
+            self.set_state(app, |_| {});
+        });
+        builder(app, context, set_state)
     }
 }
 
@@ -6323,6 +7804,269 @@ impl FlexConfiguration {
         render_object.set_text_baseline(app, self.text_baseline);
         render_object.set_clip_behavior(app, self.clip_behavior);
         render_object.set_spacing(app, self.spacing);
+    }
+}
+
+/// A widget that positions its child within a [`Stack`] by text direction.
+///
+/// Much like [`Positioned`], this widget controls where a child of a [`Stack`]
+/// is positioned. Unlike [`Positioned`], this widget positions its child by
+/// distances from the start and end edges, which depend on the ambient
+/// [`Directionality`].
+///
+/// See also:
+///
+///  * [`Positioned::directional`], which also provides a directional
+///    alternative to [`Positioned`], but takes an explicit [`TextDirection`].
+#[derive(Debug)]
+pub struct PositionedDirectional {
+    pub key: Option<KeyRef>,
+    /// The distance that the child's leading edge is inset from the leading edge
+    /// of the stack.
+    ///
+    /// Only two out of the three horizontal values ([`start`](Self::start),
+    /// [`end`](Self::end), [`width`](Self::width)) can be set. The third must be `None`.
+    pub start: Option<f64>,
+    /// The distance that the child's top edge is inset from the top of the stack.
+    ///
+    /// Only two out of the three vertical values ([`top`](Self::top),
+    /// [`bottom`](Self::bottom), [`height`](Self::height)) can be set. The third must be
+    /// `None`.
+    pub top: Option<f64>,
+    /// The distance that the child's trailing edge is inset from the trailing
+    /// edge of the stack.
+    ///
+    /// Only two out of the three horizontal values ([`start`](Self::start),
+    /// [`end`](Self::end), [`width`](Self::width)) can be set. The third must be `None`.
+    pub end: Option<f64>,
+    /// The distance that the child's bottom edge is inset from the bottom of the stack.
+    ///
+    /// Only two out of the three vertical values ([`top`](Self::top),
+    /// [`bottom`](Self::bottom), [`height`](Self::height)) can be set. The third must be
+    /// `None`.
+    pub bottom: Option<f64>,
+    /// The child's width.
+    ///
+    /// Only two out of the three horizontal values ([`start`](Self::start),
+    /// [`end`](Self::end), [`width`](Self::width)) can be set. The third must be `None`.
+    pub width: Option<f64>,
+    /// The child's height.
+    ///
+    /// Only two out of the three vertical values ([`top`](Self::top),
+    /// [`bottom`](Self::bottom), [`height`](Self::height)) can be set. The third must be
+    /// `None`.
+    pub height: Option<f64>,
+    /// The widget below this widget in the tree.
+    pub child: WidgetRef,
+}
+
+impl PositionedDirectional {
+    /// Creates a widget that controls where a child of a [`Stack`] is positioned; Dart's
+    /// optional named arguments are the setters.
+    pub fn new<K>(child: impl IntoWidget<K>) -> PositionedDirectional {
+        PositionedDirectional {
+            key: None,
+            start: None,
+            top: None,
+            end: None,
+            bottom: None,
+            width: None,
+            height: None,
+            child: child.into_widget(),
+        }
+    }
+
+    /// Dart `PositionedDirectional(key:)`.
+    pub fn key(mut self, key: KeyRef) -> PositionedDirectional {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `PositionedDirectional(start:)`.
+    pub fn start(mut self, start: f64) -> PositionedDirectional {
+        self.start = Some(start);
+        self
+    }
+
+    /// Dart `PositionedDirectional(top:)`.
+    pub fn top(mut self, top: f64) -> PositionedDirectional {
+        self.top = Some(top);
+        self
+    }
+
+    /// Dart `PositionedDirectional(end:)`.
+    pub fn end(mut self, end: f64) -> PositionedDirectional {
+        self.end = Some(end);
+        self
+    }
+
+    /// Dart `PositionedDirectional(bottom:)`.
+    pub fn bottom(mut self, bottom: f64) -> PositionedDirectional {
+        self.bottom = Some(bottom);
+        self
+    }
+
+    /// Dart `PositionedDirectional(width:)`.
+    pub fn width(mut self, width: f64) -> PositionedDirectional {
+        self.width = Some(width);
+        self
+    }
+
+    /// Dart `PositionedDirectional(height:)`.
+    pub fn height(mut self, height: f64) -> PositionedDirectional {
+        self.height = Some(height);
+        self
+    }
+}
+
+impl StatelessWidget for PositionedDirectional {
+    fn key(&self) -> Option<&KeyRef> {
+        self.key.as_ref()
+    }
+
+    fn build(&self, app: &mut App, context: BuildContext) -> WidgetRef {
+        let mut positioned = Positioned::directional(
+            Directionality::of(app, context),
+            self.start,
+            self.end,
+            self.child.clone(),
+        );
+        // Through the setters, which run `Positioned`'s two-of-three asserts.
+        if let Some(top) = self.top {
+            positioned = positioned.top(top);
+        }
+        if let Some(bottom) = self.bottom {
+            positioned = positioned.bottom(bottom);
+        }
+        if let Some(width) = self.width {
+            positioned = positioned.width(width);
+        }
+        if let Some(height) = self.height {
+            positioned = positioned.height(height);
+        }
+        positioned.into_widget()
+    }
+}
+
+/// A widget that arranges its children sequentially along a given axis, forcing
+/// them to the dimension of the parent in the other axis.
+///
+/// This widget is rarely used directly. Instead, consider using `ListView`,
+/// which combines a similar layout algorithm with scrolling behavior, or
+/// [`Column`], which gives you more flexible control over the layout of a
+/// vertical set of boxes.
+///
+/// See also:
+///
+///  * `RenderListBody`, which implements this layout algorithm and the
+///    documentation for which describes some of its subtleties.
+///  * `SingleChildScrollView`, which is sometimes used with [`ListBody`] to
+///    make the contents scrollable.
+///  * [`Column`] and [`Row`], which implement a more elaborate version of
+///    this layout algorithm (at the cost of being slightly less efficient).
+///  * `ListView`, which implements an efficient scrolling version of this
+///    layout algorithm.
+#[derive(Debug)]
+pub struct ListBody {
+    pub key: Option<KeyRef>,
+    /// The direction to use as the main axis.
+    pub main_axis: Axis,
+    /// Whether the list body positions children in the reading direction.
+    ///
+    /// For example, if the reading direction is left-to-right and
+    /// [`main_axis`](Self::main_axis) is [`Axis::Horizontal`], then the list body positions
+    /// children from left to right when [`reverse`](Self::reverse) is false and from right to
+    /// left when [`reverse`](Self::reverse) is true.
+    ///
+    /// Similarly, if [`main_axis`](Self::main_axis) is [`Axis::Vertical`], then the list body
+    /// positions from top to bottom when [`reverse`](Self::reverse) is false and from bottom
+    /// to top when [`reverse`](Self::reverse) is true.
+    ///
+    /// Defaults to false.
+    pub reverse: bool,
+    pub children: Vec<WidgetRef>,
+}
+
+impl ListBody {
+    /// Creates a layout widget that arranges its children sequentially along a given axis;
+    /// Dart's optional named arguments are the setters.
+    ///
+    /// By default, the [`main_axis`](Self::main_axis) is [`Axis::Vertical`].
+    pub fn new() -> ListBody {
+        ListBody {
+            key: None,
+            main_axis: Axis::Vertical,
+            reverse: false,
+            children: Vec::new(),
+        }
+    }
+
+    /// Dart `ListBody(key:)`.
+    pub fn key(mut self, key: KeyRef) -> ListBody {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `ListBody(mainAxis:)`.
+    pub fn main_axis(mut self, main_axis: Axis) -> ListBody {
+        self.main_axis = main_axis;
+        self
+    }
+
+    /// Dart `ListBody(reverse:)`.
+    pub fn reverse(mut self, reverse: bool) -> ListBody {
+        self.reverse = reverse;
+        self
+    }
+
+    /// Dart `ListBody(children:)`.
+    pub fn children(mut self, children: Vec<WidgetRef>) -> ListBody {
+        self.children = children;
+        self
+    }
+
+    fn get_direction(&self, app: &mut App, context: BuildContext) -> AxisDirection {
+        get_axis_direction_from_axis_reverse_and_directionality(
+            app,
+            context,
+            self.main_axis,
+            self.reverse,
+        )
+    }
+}
+
+impl Default for ListBody {
+    fn default() -> ListBody {
+        ListBody::new()
+    }
+}
+
+impl RenderObjectWidget for ListBody {
+    type RenderObject = RenderListBody;
+
+    fn key(&self) -> Option<&KeyRef> {
+        self.key.as_ref()
+    }
+
+    fn create_render_object(&self, app: &mut App, context: BuildContext) -> AnyRenderObject {
+        let axis_direction = self.get_direction(app, context);
+        RenderListBody::new(app, axis_direction).as_object()
+    }
+
+    fn update_render_object(
+        &self,
+        app: &mut App,
+        context: BuildContext,
+        render_object: RenderHandle<RenderListBody>,
+    ) {
+        let axis_direction = self.get_direction(app, context);
+        render_object.set_axis_direction(app, axis_direction);
+    }
+}
+
+impl MultiChildRenderObjectWidget for ListBody {
+    fn children(&self) -> &[WidgetRef] {
+        &self.children
     }
 }
 
@@ -8286,7 +10030,7 @@ mod tests {
     fn tile_state(harness: &Harness, app: &App, key: &GlobalKey) -> Option<Handle<TileState>> {
         harness
             .owner
-            .global_key_element(app, key.identity())
+            .global_key_element(app, key)
             .and_then(|element| element.state_handle::<TileState>(app))
     }
 
@@ -8300,7 +10044,7 @@ mod tests {
     impl Tile {
         fn keyed(key: &GlobalKey, width: f64) -> WidgetRef {
             Tile {
-                key: Some(Rc::new(key.clone())),
+                key: Some(key.clone().into()),
                 width,
             }
             .into_widget()
@@ -8520,7 +10264,7 @@ mod tests {
             let by_key = |key: &GlobalKey| {
                 let index = [&first, &second, &third]
                     .iter()
-                    .position(|candidate| candidate.identity() == key.identity())
+                    .position(|candidate| *candidate == key)
                     .expect("one of the three keys");
                 Tile::keyed(key, widths[index])
             };
@@ -9070,12 +10814,12 @@ mod tests {
         assert_eq!(offstage.size(&app), Size::ZERO, "no room in the parent");
         let child = offstage.child(&app).expect("laid out as if in the tree");
         assert_eq!(child.size(&app), Size::new(10.0, 10.0));
-        assert!(!offstage.paints_child(&app, child));
+        assert!(!offstage.as_object().paints_child(&app, child.as_object()));
 
         harness.set_child(&mut app, staged(false));
         harness.pump(&mut app);
         assert_eq!(offstage.size(&app), Size::new(10.0, 10.0));
-        assert!(offstage.paints_child(&app, child));
+        assert!(offstage.as_object().paints_child(&app, child.as_object()));
     }
 
     /// Counts its paint calls and records the size it was handed.
@@ -9688,5 +11432,700 @@ mod tests {
             .downcast_ref::<ShapeBorderClipper>()
             .expect("a ShapeBorderClipper");
         assert_eq!(clipper.text_direction, Some(TextDirection::Rtl));
+    }
+
+    const DEBUG_BLACK: Color = Color::new(0xFF000000);
+
+    /// `physical_model_test.dart`: "PhysicalModel updates clipBehavior in updateRenderObject".
+    #[test]
+    fn a_physical_model_updates_its_clip_behavior() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let harness = Harness::mount(&mut app, PhysicalModel::new(DEBUG_BLACK).into_widget());
+        harness.pump(&mut app);
+        let render = render_object_under_root::<RenderPhysicalModel>(&harness, &app);
+        assert_eq!(render.clip_behavior(&app), Clip::None);
+
+        harness.set_child(
+            &mut app,
+            PhysicalModel::new(DEBUG_BLACK)
+                .clip_behavior(Clip::AntiAlias)
+                .into_widget(),
+        );
+        harness.pump(&mut app);
+        assert_eq!(render.clip_behavior(&app), Clip::AntiAlias);
+    }
+
+    fn circle_clipper() -> Rc<dyn CustomClipper<Arc<Path>>> {
+        Rc::new(ShapeBorderClipper::new(
+            Box::new(waft_painting::CircleBorder::new(
+                waft_painting::BorderSide::NONE,
+                0.0,
+            )),
+            None,
+        ))
+    }
+
+    /// `physical_model_test.dart`: "PhysicalShape updates clipBehavior in updateRenderObject".
+    #[test]
+    fn a_physical_shape_updates_its_clip_behavior() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let harness = Harness::mount(
+            &mut app,
+            PhysicalShape::new(circle_clipper(), DEBUG_BLACK).into_widget(),
+        );
+        harness.pump(&mut app);
+        let render = render_object_under_root::<RenderPhysicalShape>(&harness, &app);
+        assert_eq!(render.clip_behavior(&app), Clip::None);
+
+        harness.set_child(
+            &mut app,
+            PhysicalShape::new(circle_clipper(), DEBUG_BLACK)
+                .clip_behavior(Clip::AntiAlias)
+                .into_widget(),
+        );
+        harness.pump(&mut app);
+        assert_eq!(render.clip_behavior(&app), Clip::AntiAlias);
+    }
+
+    /// `physical_model_test.dart`: "PhysicalModel does not crash at zero area", with a centred
+    /// childless model, which sizes to nothing.
+    #[test]
+    fn a_childless_physical_model_and_shape_take_no_space() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let harness = Harness::mount(
+            &mut app,
+            Directionality::new(
+                TextDirection::Ltr,
+                Center::new().child(PhysicalModel::new(Color::new(0xAABBCC00))),
+            )
+            .into_widget(),
+        );
+        harness.pump(&mut app);
+        let center = render_object_under_root::<RenderPositionedBox>(&harness, &app);
+        let model = center.child(&app).expect("the model");
+        assert_eq!(model.size(&app), Size::ZERO);
+
+        harness.set_child(
+            &mut app,
+            Directionality::new(
+                TextDirection::Ltr,
+                Center::new().child(PhysicalShape::new(circle_clipper(), Color::new(0xAABBCC00))),
+            )
+            .into_widget(),
+        );
+        harness.pump(&mut app);
+        let center = render_object_under_root::<RenderPositionedBox>(&harness, &app);
+        let shape = center.child(&app).expect("the shape");
+        assert_eq!(shape.size(&app), Size::ZERO);
+    }
+
+    /// An app on a platform whose one view has no area, Dart's
+    /// `tester.view.physicalSize = Size.zero`, mounted with `child` under that view.
+    pub(crate) fn zero_area_cell(child: WidgetRef) -> Rc<AppCell> {
+        let platform = waft_test::TestPlatform::new()
+            .on(waft_embedder::TargetPlatform::MacOS)
+            .with_view(Rc::new(waft_test::TestView::new(0.0, 0.0)));
+        let cell = AppCell::with_platform(Rc::new(platform));
+        crate::test_harness::binding_mount(&cell, child);
+        cell
+    }
+
+    fn keyed_size(app: &mut App, key: &GlobalKey) -> Size {
+        key.current_context(app)
+            .expect("mounted")
+            .find_render_object(app)
+            .expect("a render object")
+            .as_box()
+            .expect("a box")
+            .size(app)
+    }
+
+    /// `physical_model_test.dart`: "PhysicalModel does not crash at zero area" and
+    /// "PhysicalShape does not crash at zero area", in a view of no area.
+    #[test]
+    fn a_physical_model_and_shape_in_a_view_of_no_area_take_no_space() {
+        let key = GlobalKey::new();
+        let cell = zero_area_cell(
+            Directionality::new(
+                TextDirection::Ltr,
+                Center::new()
+                    .child(PhysicalModel::new(Color::new(0xAABBCC00)).key(key.clone().into())),
+            )
+            .into_widget(),
+        );
+        assert_eq!(keyed_size(&mut cell.borrow_mut(), &key), Size::ZERO);
+
+        let key = GlobalKey::new();
+        let cell = zero_area_cell(
+            Directionality::new(
+                TextDirection::Ltr,
+                Center::new().child(
+                    PhysicalShape::new(circle_clipper(), Color::new(0xAABBCC00))
+                        .key(key.clone().into()),
+                ),
+            )
+            .into_widget(),
+        );
+        assert_eq!(keyed_size(&mut cell.borrow_mut(), &key), Size::ZERO);
+    }
+
+    fn list_children(width: f64, height: f64) -> Vec<WidgetRef> {
+        (0..4).map(|_| sized(width, height)).collect()
+    }
+
+    /// The rectangles of a list body's children, in child order, in the list body's space.
+    fn list_body_rects(app: &App, list_body: AnyRenderBox) -> Vec<Rect> {
+        let list_body = list_body
+            .as_object()
+            .downcast::<RenderListBody>(app)
+            .expect("a list body");
+        let mut rects = Vec::new();
+        let mut child = list_body.first_child(app);
+        while let Some(current) = child {
+            let offset = current
+                .as_object()
+                .parent_data_of::<waft_rendering::ListBodyParentData>(app)
+                .offset();
+            rects.push(offset & current.size(app));
+            child = list_body.child_after(app, current);
+        }
+        rects
+    }
+
+    /// `list_body_test.dart`: "ListBody down" and "ListBody up", in a 300x200 view with
+    /// children 40 high.
+    #[test]
+    fn a_vertical_list_body_stacks_its_children_down_or_reversed_up() {
+        for (reverse, tops) in [
+            (false, [0.0, 40.0, 80.0, 120.0]),
+            (true, [120.0, 80.0, 40.0, 0.0]),
+        ] {
+            let cell = AppCell::new();
+            let mut app = cell.borrow_mut();
+            let harness = Harness::mount(
+                &mut app,
+                Directionality::new(
+                    TextDirection::Ltr,
+                    Column::new().children(vec![
+                        ListBody::new()
+                            .reverse(reverse)
+                            .children(list_children(200.0, 40.0))
+                            .into_widget(),
+                    ]),
+                )
+                .into_widget(),
+            );
+            harness.pump(&mut app);
+            let flex = render_object_under_root::<waft_rendering::RenderFlex>(&harness, &app);
+            let list_body = flex.first_child(&app).expect("the list body");
+            let expected: Vec<Rect> = tops
+                .iter()
+                .map(|top| Rect::from_ltwh(0.0, *top, VIEW_WIDTH, 40.0))
+                .collect();
+            assert_eq!(
+                list_body_rects(&app, list_body),
+                expected,
+                "reverse {reverse}"
+            );
+        }
+    }
+
+    /// `list_body_test.dart`: "ListBody right" and "ListBody left", children 60 wide.
+    #[test]
+    fn a_horizontal_list_body_follows_the_ambient_text_direction() {
+        for (text_direction, lefts) in [
+            (TextDirection::Ltr, [0.0, 60.0, 120.0, 180.0]),
+            (TextDirection::Rtl, [180.0, 120.0, 60.0, 0.0]),
+        ] {
+            let cell = AppCell::new();
+            let mut app = cell.borrow_mut();
+            let harness = Harness::mount(
+                &mut app,
+                Directionality::new(
+                    TextDirection::Ltr,
+                    Row::new().children(vec![
+                        Directionality::new(
+                            text_direction,
+                            ListBody::new()
+                                .main_axis(Axis::Horizontal)
+                                .children(list_children(60.0, 150.0)),
+                        )
+                        .into_widget(),
+                    ]),
+                )
+                .into_widget(),
+            );
+            harness.pump(&mut app);
+            let flex = render_object_under_root::<waft_rendering::RenderFlex>(&harness, &app);
+            let list_body = flex.first_child(&app).expect("the list body");
+            let expected: Vec<Rect> = lefts
+                .iter()
+                .map(|left| Rect::from_ltwh(*left, 0.0, 60.0, VIEW_HEIGHT))
+                .collect();
+            assert_eq!(
+                list_body_rects(&app, list_body),
+                expected,
+                "{text_direction:?}"
+            );
+        }
+    }
+
+    /// `list_body_test.dart`: "Limited space along main axis error".
+    #[test]
+    #[should_panic(expected = "RenderListBody must have unlimited space along its main axis.")]
+    fn a_list_body_with_a_bounded_main_axis_panics() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let harness = Harness::mount(
+            &mut app,
+            SizedBox::square(Some(100.0))
+                .child(Directionality::new(
+                    TextDirection::Rtl,
+                    ListBody::new()
+                        .main_axis(Axis::Horizontal)
+                        .children(list_children(200.0, 150.0)),
+                ))
+                .into_widget(),
+        );
+        harness.pump(&mut app);
+    }
+
+    /// `list_body_test.dart`: "Nested ListBody unbounded cross axis error".
+    #[test]
+    #[should_panic(expected = "RenderListBody must have a bounded constraint for its cross axis.")]
+    fn a_list_body_nested_across_another_with_an_unbounded_cross_axis_panics() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let inner = Column::new().children(vec![
+            Directionality::new(
+                TextDirection::Ltr,
+                ListBody::new().children(list_children(200.0, 150.0)),
+            )
+            .into_widget(),
+        ]);
+        let harness = Harness::mount(
+            &mut app,
+            Directionality::new(
+                TextDirection::Ltr,
+                Row::new().children(vec![
+                    Directionality::new(
+                        TextDirection::Ltr,
+                        ListBody::new()
+                            .main_axis(Axis::Horizontal)
+                            .children(vec![inner.into_widget()]),
+                    )
+                    .into_widget(),
+                ]),
+            )
+            .into_widget(),
+        );
+        harness.pump(&mut app);
+    }
+
+    const VIEW_WIDTH: f64 = crate::test_harness::VIEW_WIDTH;
+    const VIEW_HEIGHT: f64 = crate::test_harness::VIEW_HEIGHT;
+
+    /// A `PositionedDirectional` places its start edge on the right under a right-to-left
+    /// directionality; `positioned_test.dart` checks the same through `Positioned.directional`.
+    #[test]
+    fn positioned_directional_resolves_start_and_end_against_the_directionality() {
+        for (text_direction, left) in [(TextDirection::Ltr, 10.0), (TextDirection::Rtl, 270.0)] {
+            let cell = AppCell::new();
+            let mut app = cell.borrow_mut();
+            let harness = Harness::mount(
+                &mut app,
+                Directionality::new(
+                    text_direction,
+                    Stack::new().children(vec![
+                        PositionedDirectional::new(sized(20.0, 20.0))
+                            .start(10.0)
+                            .top(5.0)
+                            .into_widget(),
+                    ]),
+                )
+                .into_widget(),
+            );
+            harness.pump(&mut app);
+            let stack = render_object_under_root::<RenderStack>(&harness, &app);
+            let child = stack.first_child(&app).expect("the positioned child");
+            let offset = child
+                .as_object()
+                .parent_data_of::<StackParentData>(&app)
+                .offset();
+            assert_eq!(offset, Offset::new(left, 5.0), "{text_direction:?}");
+        }
+    }
+
+    /// `PositionedDirectional` builds a `Positioned`, whose constructor asserts that at most
+    /// two of start, end and width are set.
+    #[test]
+    #[should_panic]
+    fn positioned_directional_with_start_end_and_width_panics() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let harness = Harness::mount(
+            &mut app,
+            Directionality::new(
+                TextDirection::Ltr,
+                Stack::new().children(vec![
+                    PositionedDirectional::new(sized(20.0, 20.0))
+                        .start(10.0)
+                        .end(10.0)
+                        .width(20.0)
+                        .into_widget(),
+                ]),
+            )
+            .into_widget(),
+        );
+        harness.pump(&mut app);
+    }
+
+    /// A `StatefulBuilder`'s `set_state` runs its callback and rebuilds the builder.
+    #[test]
+    fn a_stateful_builder_rebuilds_when_its_setter_is_called() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let builds = Rc::new(Cell::new(0));
+        let setter: Rc<std::cell::RefCell<Option<StateSetter>>> = Rc::default();
+        let width = Rc::new(Cell::new(10.0));
+        let harness = Harness::mount(
+            &mut app,
+            Center::new()
+                .child(StatefulBuilder::new({
+                    let (builds, setter, width) =
+                        (Rc::clone(&builds), Rc::clone(&setter), Rc::clone(&width));
+                    move |_app, _context, set_state| {
+                        builds.set(builds.get() + 1);
+                        *setter.borrow_mut() = Some(set_state);
+                        sized(width.get(), 10.0)
+                    }
+                }))
+                .into_widget(),
+        );
+        harness.pump(&mut app);
+        assert_eq!(builds.get(), 1);
+
+        let set_state = setter.borrow().clone().expect("the builder ran");
+        set_state(&mut app, &mut |_app| width.set(30.0));
+        harness.pump(&mut app);
+        assert_eq!(builds.get(), 2);
+        let center = render_object_under_root::<RenderPositionedBox>(&harness, &app);
+        assert_eq!(
+            center.child(&app).expect("the box").size(&app),
+            Size::new(30.0, 10.0)
+        );
+    }
+
+    fn keyed_sized(key: impl Into<KeyRef>) -> WidgetRef {
+        SizedBox {
+            key: Some(key.into()),
+            ..Default::default()
+        }
+        .into_widget()
+    }
+
+    #[test]
+    fn a_wrapped_index_key_never_equals_a_callers_own_int_key() {
+        let wrapped = KeyedSubtree::wrap(sized(1.0, 1.0), 3);
+        let callers: KeyRef = ValueKey::new(3_i64).into();
+        assert!(wrapped.key.as_ref() != Some(&callers));
+        assert!(wrapped.key == KeyedSubtree::wrap(sized(2.0, 2.0), 3).key);
+        assert!(wrapped.key != KeyedSubtree::wrap(sized(1.0, 1.0), 4).key);
+    }
+
+    #[test]
+    fn a_wrapped_child_key_never_equals_a_wrapped_index_key() {
+        let child_key: KeyRef = ValueKey::new(3_i64).into();
+        let by_child_key = KeyedSubtree::wrap(keyed_sized(child_key.clone()), 0);
+        assert!(by_child_key.key != KeyedSubtree::wrap(sized(1.0, 1.0), 3).key);
+        assert!(by_child_key.key != Some(child_key.clone()));
+        assert!(by_child_key.key == KeyedSubtree::wrap(keyed_sized(child_key), 7).key);
+    }
+
+    #[test]
+    fn ensure_unique_keys_for_list_keys_each_item_by_its_key_or_its_index_plus_the_base() {
+        assert!(KeyedSubtree::ensure_unique_keys_for_list(Vec::new(), 5).is_empty());
+
+        let child_key: KeyRef = ValueKey::new("a".to_string()).into();
+        let items = vec![
+            sized(1.0, 1.0),
+            keyed_sized(child_key.clone()),
+            sized(2.0, 2.0),
+        ];
+        let wrapped = KeyedSubtree::ensure_unique_keys_for_list(items, 5);
+        let keys: Vec<Option<KeyRef>> = wrapped.iter().map(|item| item.key().cloned()).collect();
+        assert!(keys[0] == KeyedSubtree::wrap(sized(1.0, 1.0), 5).key);
+        assert!(keys[1] == KeyedSubtree::wrap(keyed_sized(child_key), 0).key);
+        assert!(keys[2] == KeyedSubtree::wrap(sized(1.0, 1.0), 7).key);
+        assert!(downcast_widget::<KeyedSubtree>(&*wrapped[0]).is_some());
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "Duplicate key found")]
+    fn ensure_unique_keys_for_list_asserts_on_duplicate_keys() {
+        let key = || ValueKey::new("a".to_string());
+        KeyedSubtree::ensure_unique_keys_for_list(vec![keyed_sized(key()), keyed_sized(key())], 0);
+    }
+
+    fn semantics_under_root(
+        harness: &Harness,
+        app: &App,
+    ) -> RenderHandle<RenderSemanticsAnnotations> {
+        render_object_under_root::<RenderSemanticsAnnotations>(harness, app)
+    }
+
+    // semantics_test.dart: 'Semantics and Directionality - RTL'
+    #[test]
+    fn a_semantics_label_takes_the_ambient_rtl_direction() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let harness = Harness::mount(
+            &mut app,
+            Directionality::new(
+                TextDirection::Rtl,
+                Semantics::new().label("test1").child(sized(10.0, 10.0)),
+            )
+            .into_widget(),
+        );
+        harness.pump(&mut app);
+        let semantics = semantics_under_root(&harness, &app);
+        assert_eq!(
+            semantics.attributed_label(&app),
+            Some(AttributedString::new("test1"))
+        );
+        assert_eq!(semantics.text_direction(&app), Some(TextDirection::Rtl));
+    }
+
+    // semantics_test.dart: 'Semantics and Directionality - LTR'
+    #[test]
+    fn a_semantics_label_takes_the_ambient_ltr_direction() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let harness = Harness::mount(
+            &mut app,
+            Directionality::new(
+                TextDirection::Ltr,
+                Semantics::new().label("test1").child(sized(10.0, 10.0)),
+            )
+            .into_widget(),
+        );
+        harness.pump(&mut app);
+        let semantics = semantics_under_root(&harness, &app);
+        assert_eq!(
+            semantics.attributed_label(&app),
+            Some(AttributedString::new("test1"))
+        );
+        assert_eq!(semantics.text_direction(&app), Some(TextDirection::Ltr));
+    }
+
+    // semantics_test.dart: 'Semantics and Directionality - cannot override RTL with LTR'
+    #[test]
+    fn a_semantics_text_direction_overrides_an_ambient_rtl() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let harness = Harness::mount(
+            &mut app,
+            Directionality::new(
+                TextDirection::Rtl,
+                Semantics::new()
+                    .label("test1")
+                    .text_direction(TextDirection::Ltr)
+                    .child(sized(10.0, 10.0)),
+            )
+            .into_widget(),
+        );
+        harness.pump(&mut app);
+        let semantics = semantics_under_root(&harness, &app);
+        assert_eq!(semantics.text_direction(&app), Some(TextDirection::Ltr));
+    }
+
+    // semantics_test.dart: 'Semantics and Directionality - cannot override LTR with RTL'
+    #[test]
+    fn a_semantics_text_direction_overrides_an_ambient_ltr() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let harness = Harness::mount(
+            &mut app,
+            Directionality::new(
+                TextDirection::Ltr,
+                Semantics::new()
+                    .label("test1")
+                    .text_direction(TextDirection::Rtl)
+                    .child(sized(10.0, 10.0)),
+            )
+            .into_widget(),
+        );
+        harness.pump(&mut app);
+        let semantics = semantics_under_root(&harness, &app);
+        assert_eq!(semantics.text_direction(&app), Some(TextDirection::Rtl));
+    }
+
+    #[test]
+    fn a_semantics_without_text_takes_no_text_direction() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let harness = Harness::mount(
+            &mut app,
+            Directionality::new(
+                TextDirection::Rtl,
+                Semantics::new().button(true).child(sized(10.0, 10.0)),
+            )
+            .into_widget(),
+        );
+        harness.pump(&mut app);
+        let semantics = semantics_under_root(&harness, &app);
+        assert_eq!(semantics.text_direction(&app), None);
+        assert_eq!(semantics.properties(&app).button, Some(true));
+    }
+
+    // semantics_test.dart: 'Semantics excludeSemantics ignores children', and the tap and
+    // long-press hints of 'onTapHint and onLongPressHint create custom actions', as stored.
+    #[test]
+    fn a_semantics_widget_hands_its_configuration_to_its_render_object() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let tapped = Rc::new(Cell::new(0));
+        let on_tap: VoidCallback = {
+            let tapped = tapped.clone();
+            Rc::new(move |_app: &mut App| tapped.set(tapped.get() + 1))
+        };
+        let harness = Harness::mount(
+            &mut app,
+            Semantics::new()
+                .container(true)
+                .exclude_semantics(true)
+                .label("label")
+                .on_tap_hint("scan")
+                .on_long_press_hint("fill")
+                .on_tap(on_tap)
+                .child(sized(10.0, 10.0))
+                .into_widget(),
+        );
+        harness.pump(&mut app);
+        let semantics = semantics_under_root(&harness, &app);
+        assert!(semantics.container(&app));
+        assert!(semantics.exclude_semantics(&app));
+        assert!(!semantics.explicit_child_nodes(&app));
+        assert!(!semantics.block_user_actions(&app));
+        let properties = semantics.properties(&app);
+        assert_eq!(
+            properties.hint_overrides,
+            Some(
+                waft_rendering::SemanticsHintOverrides::new()
+                    .on_tap_hint("scan")
+                    .on_long_press_hint("fill")
+            )
+        );
+        (properties.on_tap.clone().expect("the tap handler is kept"))(&mut app);
+        assert_eq!(tapped.get(), 1);
+
+        harness.set_child(
+            &mut app,
+            Semantics::new()
+                .block_user_actions(true)
+                .child(sized(10.0, 10.0))
+                .into_widget(),
+        );
+        harness.pump(&mut app);
+        assert!(!semantics.container(&app));
+        assert!(!semantics.exclude_semantics(&app));
+        assert!(semantics.block_user_actions(&app));
+        assert_eq!(semantics.attributed_label(&app), None);
+        assert!(semantics.properties(&app).on_tap.is_none());
+    }
+
+    #[test]
+    fn a_semantics_render_object_keeps_the_same_properties_object() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let properties = Rc::new(SemanticsProperties::new().label("shared"));
+        let harness = Harness::mount(
+            &mut app,
+            Semantics::from_properties(properties.clone())
+                .child(sized(10.0, 10.0))
+                .into_widget(),
+        );
+        harness.pump(&mut app);
+        let semantics = semantics_under_root(&harness, &app);
+        assert!(Rc::ptr_eq(&semantics.properties(&app), &properties));
+    }
+
+    #[test]
+    #[should_panic(expected = "Only one of hint or attributedHint should be provided")]
+    fn a_semantics_widget_checks_its_properties_when_handed_over() {
+        let _ = Semantics::new()
+            .hint("a")
+            .attributed_hint(AttributedString::new("a"))
+            .into_widget();
+    }
+
+    #[test]
+    fn the_merge_block_exclude_and_indexed_semantics_widgets_configure_their_render_objects() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let harness = Harness::mount(
+            &mut app,
+            BlockSemantics::new().child(sized(10.0, 10.0)).into_widget(),
+        );
+        harness.pump(&mut app);
+        let block = render_object_under_root::<RenderBlockSemantics>(&harness, &app);
+        assert!(block.blocking(&app), "Dart's default");
+        harness.set_child(
+            &mut app,
+            BlockSemantics::new()
+                .blocking(false)
+                .child(sized(10.0, 10.0))
+                .into_widget(),
+        );
+        harness.pump(&mut app);
+        assert!(!block.blocking(&app));
+
+        harness.set_child(
+            &mut app,
+            ExcludeSemantics::new()
+                .child(sized(10.0, 10.0))
+                .into_widget(),
+        );
+        harness.pump(&mut app);
+        let exclude = render_object_under_root::<RenderExcludeSemantics>(&harness, &app);
+        assert!(exclude.excluding(&app), "Dart's default");
+        harness.set_child(
+            &mut app,
+            ExcludeSemantics::new()
+                .excluding(false)
+                .child(sized(10.0, 10.0))
+                .into_widget(),
+        );
+        harness.pump(&mut app);
+        assert!(!exclude.excluding(&app));
+
+        harness.set_child(
+            &mut app,
+            IndexedSemantics::new(2)
+                .child(sized(10.0, 10.0))
+                .into_widget(),
+        );
+        harness.pump(&mut app);
+        let indexed = render_object_under_root::<RenderIndexedSemantics>(&harness, &app);
+        assert_eq!(indexed.index(&app), 2);
+        harness.set_child(
+            &mut app,
+            IndexedSemantics::new(5)
+                .child(sized(10.0, 10.0))
+                .into_widget(),
+        );
+        harness.pump(&mut app);
+        assert_eq!(indexed.index(&app), 5);
+
+        harness.set_child(
+            &mut app,
+            MergeSemantics::new().child(sized(10.0, 10.0)).into_widget(),
+        );
+        harness.pump(&mut app);
+        let _ = render_object_under_root::<RenderMergeSemantics>(&harness, &app);
     }
 }

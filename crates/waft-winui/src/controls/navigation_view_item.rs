@@ -219,7 +219,7 @@ pub(crate) struct NavigationViewItemPresenter {
     pub on_expansion_toggled: Listener,
 
     /// Stable source SelectionIndicator geometry for the parent transition.
-    pub indicator_key: Rc<GlobalKey>,
+    pub indicator_key: GlobalKey,
 
     /// Shared source clock, retained by the parent for the lifetime of this visual.
     pub indicator_controller: waft_foundation::Handle<waft_animation::AnimationController>,
@@ -541,7 +541,7 @@ impl NavigationViewItemPresenter {
                     .unwrap_or(if visible { 1.0 } else { 0.0 }),
                 indicator.into_widget(),
             );
-            let indicator = KeyedSubtree::new(indicator).key(self.indicator_key.clone());
+            let indicator = KeyedSubtree::new(indicator).key(self.indicator_key.clone().into());
             layers.push(
                 Positioned::fill(
                     IgnorePointer::new().child(

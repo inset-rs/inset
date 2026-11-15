@@ -284,7 +284,10 @@ impl AnimationController {
                 (AnimationDirection::Reverse, Some(reverse_duration)) => reverse_duration,
                 _ => controller.duration.unwrap(),
             };
-            simulation_duration = Some(direction_duration.mul_f64(remaining_fraction));
+            // Dart's `Duration operator *`: the product rounded to whole microseconds.
+            simulation_duration = Some(Duration::from_micros(
+                (direction_duration.as_micros() as f64 * remaining_fraction).round() as u64,
+            ));
         } else if target == controller.value {
             simulation_duration = Some(Duration::ZERO);
         }
@@ -1071,6 +1074,23 @@ mod tests {
             AnimationBehavior::Normal,
             TestVSync,
         )
+    }
+
+    // Dart's `Duration * double` rounds to whole microseconds, so what is left of a
+    // 200ms run from 1e-6 short of the end, 0.2µs, is zero, and the run ends at once; an
+    // unrounded product would leave 200ns to animate.
+    #[test]
+    fn a_controller_a_hair_short_of_its_target_completes_at_once() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let controller = controller_with_duration(&mut app, 200);
+        controller.set_value(&mut app, 1.0 - 1e-6);
+
+        controller.forward(&mut app, None);
+
+        assert_eq!(controller.value(&app), 1.0);
+        assert_eq!(controller.status(&app), AnimationStatus::Completed);
+        assert!(!controller.is_animating(&mut app));
     }
 
     // animation_controller_test.dart 'Can set value during status callback'

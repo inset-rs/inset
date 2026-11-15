@@ -19,6 +19,7 @@ use crate::debug::debug_disable_shadows;
 use crate::decoration::{BoxPainter, Decoration};
 use crate::draw::draw_rrect;
 use crate::edge_insets::{EdgeInsets, EdgeInsetsGeometry};
+use crate::gradient::Gradient;
 use crate::image_provider::ImageConfiguration;
 
 /// An immutable description of how to paint a box.
@@ -27,12 +28,11 @@ use crate::image_provider::ImageConfiguration;
 /// [`box_shadow`](Self::box_shadow).
 ///
 /// [`image`](https://api.flutter.dev/flutter/painting/BoxDecoration/image.html)
-/// and [`gradient`](https://api.flutter.dev/flutter/painting/BoxDecoration/gradient.html)
-/// are deferred (see PORTING.md).
+/// is deferred (see PORTING.md).
 pub struct BoxDecoration {
     /// The color to fill in the background of the box.
     ///
-    /// This is ignored if a gradient is present (gradient paint is deferred).
+    /// This is ignored if [`gradient`](Self::gradient) is non-null.
     pub color: Option<AnyColor>,
     /// A border to draw above the background [`color`](Self::color).
     pub border: Option<Box<dyn BoxBorder>>,
@@ -44,11 +44,18 @@ pub struct BoxDecoration {
     pub border_radius: Option<BorderRadiusGeometry>,
     /// A list of shadows cast by this box behind the box.
     pub box_shadow: Option<Vec<BoxShadow>>,
-    /// The blend mode applied to the [`color`](Self::color) background of the
-    /// box.
+    /// A gradient to use when filling the box.
+    ///
+    /// If this is specified, [`color`](Self::color) has no effect.
+    pub gradient: Option<Box<dyn Gradient>>,
+    /// The blend mode applied to the [`color`](Self::color) or
+    /// [`gradient`](Self::gradient) background of the box.
+    ///
+    /// If no [`color`](Self::color) or [`gradient`](Self::gradient) is provided then the blend
+    /// mode has no impact.
     pub background_blend_mode: Option<BlendMode>,
-    /// The shape to fill the background [`color`](Self::color) into and to cast
-    /// as the [`box_shadow`](Self::box_shadow).
+    /// The shape to fill the background [`color`](Self::color) and
+    /// [`gradient`](Self::gradient) into and to cast as the [`box_shadow`](Self::box_shadow).
     pub shape: BoxShape,
 }
 
@@ -67,6 +74,8 @@ impl BoxDecoration {
     ///   must be None if [`shape`](Self::shape) is [`BoxShape::Circle`].
     /// * If [`box_shadow`](Self::box_shadow) is None, this decoration does not
     ///   paint a shadow.
+    /// * If [`gradient`](Self::gradient) is None, this decoration does not paint
+    ///   gradients.
     /// * If [`background_blend_mode`](Self::background_blend_mode) is None,
     ///   this decoration paints with [`BlendMode::SrcOver`].
     pub fn new() -> BoxDecoration {
@@ -75,6 +84,7 @@ impl BoxDecoration {
             border: None,
             border_radius: None,
             box_shadow: None,
+            gradient: None,
             background_blend_mode: None,
             shape: BoxShape::Rectangle,
         }
@@ -109,9 +119,16 @@ impl BoxDecoration {
         self
     }
 
-    /// The blend mode applied to the [`color`](Self::color) background.
+    /// A gradient to use when filling the box.
+    pub fn gradient(mut self, gradient: impl Into<Box<dyn Gradient>>) -> BoxDecoration {
+        self.gradient = Some(gradient.into());
+        self
+    }
+
+    /// The blend mode applied to the [`color`](Self::color) or [`gradient`](Self::gradient)
+    /// background.
     ///
-    /// A [`color`](Self::color) must already be set.
+    /// A [`color`](Self::color) or [`gradient`](Self::gradient) must already be set.
     pub fn background_blend_mode(mut self, background_blend_mode: BlendMode) -> BoxDecoration {
         self.background_blend_mode = Some(background_blend_mode);
         self.debug_assert_blend();
@@ -129,6 +146,7 @@ impl BoxDecoration {
         border: Option<Box<dyn BoxBorder>>,
         border_radius: Option<BorderRadiusGeometry>,
         box_shadow: Option<Vec<BoxShadow>>,
+        gradient: Option<Box<dyn Gradient>>,
         background_blend_mode: Option<BlendMode>,
         shape: BoxShape,
     ) -> BoxDecoration {
@@ -137,6 +155,7 @@ impl BoxDecoration {
             border,
             border_radius,
             box_shadow,
+            gradient,
             background_blend_mode,
             shape,
         };
@@ -146,7 +165,7 @@ impl BoxDecoration {
 
     fn debug_assert_blend(&self) {
         debug_assert!(
-            self.background_blend_mode.is_none() || self.color.is_some(),
+            self.background_blend_mode.is_none() || self.color.is_some() || self.gradient.is_some(),
             "backgroundBlendMode applies to BoxDecoration's background color or \
              gradient, but no color or gradient was provided."
         );
@@ -165,6 +184,9 @@ impl BoxDecoration {
             <dyn BoxBorder>::lerp(None, self.border.as_deref(), factor),
             BorderRadiusGeometry::lerp(None, self.border_radius, factor),
             BoxShadow::lerp_list(None, self.box_shadow.as_deref(), factor),
+            self.gradient
+                .as_ref()
+                .map(|gradient| gradient.scale(factor)),
             self.background_blend_mode,
             self.shape,
         )
@@ -204,6 +226,7 @@ impl BoxDecoration {
             <dyn BoxBorder>::lerp(a.border.as_deref(), b.border.as_deref(), t),
             BorderRadiusGeometry::lerp(a.border_radius, b.border_radius, t),
             BoxShadow::lerp_list(a.box_shadow.as_deref(), b.box_shadow.as_deref(), t),
+            <dyn Gradient>::lerp(a.gradient.as_deref(), b.gradient.as_deref(), t),
             if t < 0.5 {
                 a.background_blend_mode
             } else {
@@ -227,6 +250,7 @@ impl Clone for BoxDecoration {
             border: self.border.as_ref().map(|b| b.clone_box_border()),
             border_radius: self.border_radius,
             box_shadow: self.box_shadow.clone(),
+            gradient: self.gradient.clone(),
             background_blend_mode: self.background_blend_mode,
             shape: self.shape,
         }
@@ -239,8 +263,17 @@ impl PartialEq for BoxDecoration {
             && borders_eq(self.border.as_deref(), other.border.as_deref())
             && self.border_radius == other.border_radius
             && self.box_shadow == other.box_shadow
+            && gradients_eq(self.gradient.as_deref(), other.gradient.as_deref())
             && self.background_blend_mode == other.background_blend_mode
             && self.shape == other.shape
+    }
+}
+
+fn gradients_eq(a: Option<&dyn Gradient>, b: Option<&dyn Gradient>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => a == b,
+        _ => false,
     }
 }
 
@@ -364,6 +397,7 @@ impl Debug for BoxDecoration {
             .field("border", &self.border)
             .field("border_radius", &self.border_radius)
             .field("box_shadow", &self.box_shadow)
+            .field("gradient", &self.gradient)
             .field("background_blend_mode", &self.background_blend_mode)
             .field("shape", &self.shape)
             .finish()
@@ -375,6 +409,7 @@ struct BoxDecorationPainter {
     decoration: BoxDecoration,
     on_changed: Option<VoidCallback>,
     cached_background_paint: Option<Paint>,
+    rect_for_cached_background_paint: Option<Rect>,
 }
 
 impl BoxDecorationPainter {
@@ -383,17 +418,33 @@ impl BoxDecorationPainter {
             decoration,
             on_changed,
             cached_background_paint: None,
+            rect_for_cached_background_paint: None,
         }
     }
 
-    fn get_background_paint(&mut self) -> &Paint {
-        if self.cached_background_paint.is_none() {
+    fn get_background_paint(
+        &mut self,
+        rect: Rect,
+        text_direction: Option<TextDirection>,
+    ) -> &Paint {
+        debug_assert!(
+            self.decoration.gradient.is_some() || self.rect_for_cached_background_paint.is_none()
+        );
+
+        if self.cached_background_paint.is_none()
+            || (self.decoration.gradient.is_some()
+                && self.rect_for_cached_background_paint != Some(rect))
+        {
             let mut paint = Paint::default();
             if let Some(blend_mode) = self.decoration.background_blend_mode {
                 paint.blend_mode = blend_mode;
             }
             if let Some(color) = &self.decoration.color {
                 paint.color = color.color().into();
+            }
+            if let Some(gradient) = &self.decoration.gradient {
+                paint.shader = Some(gradient.create_shader(rect, text_direction));
+                self.rect_for_cached_background_paint = Some(rect);
             }
             self.cached_background_paint = Some(paint);
         }
@@ -477,11 +528,13 @@ impl BoxDecorationPainter {
         rect: Rect,
         text_direction: Option<TextDirection>,
     ) {
-        if self.decoration.color.is_some() {
+        if self.decoration.color.is_some() || self.decoration.gradient.is_some() {
+            // When border is filled, the rect is reduced to avoid anti-aliasing
+            // rounding error leaking the background color around the clipped shape.
             let adjusted_rect = self.adjusted_rect_on_outlined_border(rect, text_direction);
             let shape = self.decoration.shape;
             let border_radius = self.decoration.border_radius;
-            let paint = self.get_background_paint().clone();
+            let paint = self.get_background_paint(rect, text_direction).clone();
             Self::paint_box(
                 canvas,
                 adjusted_rect,
@@ -597,9 +650,13 @@ mod tests {
     use waft_embedder::Color;
     use waft_embedder::{FillRule, Radius, lerp_double};
 
+    use waft_embedder::valo::{Op, Shader};
+
+    use crate::alignment::AlignmentGeometry;
     use crate::border_radius::{BorderRadius, BorderRadiusDirectional};
     use crate::borders::ShapeBorder;
     use crate::box_border::BoxBorder;
+    use crate::gradient::LinearGradient;
 
     #[derive(Clone, Copy, Debug, PartialEq)]
     struct TestBoxBorder {
@@ -803,6 +860,62 @@ mod tests {
         assert!(decoration.hit_test(size, Offset::new(40.0, 10.0), None));
         assert!(!decoration.hit_test(size, Offset::new(40.0, 0.0), None));
         assert!(!decoration.hit_test(size, Offset::new(10.0, 10.0), None));
+    }
+
+    #[test]
+    fn a_directional_linear_gradient_paints_the_box_resolved_right_to_left() {
+        let decoration = BoxDecoration::new().color(Color::new(0xFF000000)).gradient(
+            LinearGradient::new(vec![Color::new(0xFF000000), Color::new(0xFFFFFFFF)])
+                .begin(AlignmentGeometry::CENTER_START)
+                .end(AlignmentGeometry::BOTTOM_END),
+        );
+        let mut painter = decoration.create_box_painter(None);
+        let size = Size::new(1000.0, 1000.0);
+        let mut canvas = Canvas::new();
+        painter.paint(
+            &mut canvas,
+            Offset::ZERO,
+            &ImageConfiguration {
+                size: Some(size),
+                text_direction: Some(TextDirection::Rtl),
+                ..ImageConfiguration::EMPTY
+            },
+        );
+        let picture = canvas.build();
+        let [Op::DrawRect { rect, paint, .. }] = picture.ops() else {
+            panic!("one rect: {:?}", picture.ops());
+        };
+        assert_eq!(*rect, (Offset::ZERO & size).into());
+        let Some(Shader::Linear { start, end, .. }) = &paint.shader else {
+            panic!("a linear shader: {:?}", paint.shader);
+        };
+        assert_eq!(*start, Offset::new(1000.0, 500.0).into());
+        assert_eq!(*end, Offset::new(0.0, 1000.0).into());
+    }
+
+    #[test]
+    fn box_decorations_lerp_their_gradients() {
+        let gradient = || LinearGradient::new(vec![Color::new(0x00000000), Color::new(0xFFFFFFFF)]);
+        let with_gradient = |top: u32| {
+            BoxDecoration::new().gradient(LinearGradient::new(vec![
+                Color::new(0x00000000),
+                Color::new(top),
+            ]))
+        };
+        let lerp = |t| {
+            BoxDecoration::lerp(
+                Some(&BoxDecoration::new()),
+                Some(&BoxDecoration::new().gradient(gradient())),
+                t,
+            )
+            .unwrap()
+        };
+        assert_eq!(lerp(-1.0), with_gradient(0x00FFFFFF));
+        assert_eq!(lerp(0.0), BoxDecoration::new());
+        assert_eq!(lerp(0.2), with_gradient(0x33FFFFFF));
+        assert_eq!(lerp(1.0 / 3.0), with_gradient(0x55FFFFFF));
+        assert_eq!(lerp(1.0), BoxDecoration::new().gradient(gradient()));
+        assert_eq!(lerp(2.0), BoxDecoration::new().gradient(gradient()));
     }
 
     #[test]

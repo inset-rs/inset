@@ -16,7 +16,8 @@ use super::MainLoop;
 
 impl<C: EmbedderClient> MainLoop<C> {
     /// The system's requests of the application: files and links to open go to the client, a
-    /// reopen to the handler the app set, and a quit to the framework.
+    /// reopen to the handler the app set, a click on one of the app's notifications to the client
+    /// and on one it posted as another app to that app's handler, and a quit to the framework.
     pub(super) fn on_system_request(&mut self, request: SystemRequest) {
         match request {
             SystemRequest::Open { files, links } => self.client.open_requested(OpenRequest {
@@ -24,9 +25,17 @@ impl<C: EmbedderClient> MainLoop<C> {
                 links,
             }),
             SystemRequest::Reopen(reopen) => self.state.handlers().reopen(reopen),
-            SystemRequest::NotificationActivated(activation) => {
-                self.client.notification_activated(activation);
-            }
+            SystemRequest::NotificationActivated {
+                identity: None,
+                activation,
+            } => self.client.notification_activated(activation),
+            SystemRequest::NotificationActivated {
+                identity: Some(identity),
+                activation,
+            } => self
+                .state
+                .handlers()
+                .notification_activated(identity, activation),
             SystemRequest::Quit => self.on_quit_requested(),
         }
     }

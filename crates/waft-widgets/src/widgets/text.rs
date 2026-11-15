@@ -1,7 +1,6 @@
 //! Flutter counterpart: `widgets/text.dart`, plus the public `RichText` from `basic.dart`.
 //!
-//! [`DefaultTextStyle`] and [`DefaultTextHeightBehavior`] are plain inherited widgets: the
-//! `InheritedTheme` capture (`wrap`, `captureAll`) waits. [`Text`] builds only the
+//! [`Text`] builds only the
 //! [`RichText`] branch: selection (`SelectionContainer`, `_SelectableTextContainer`,
 //! `selectionColor`),
 //! `Locale`, `StrutStyle`, and `Semantics` wait, and so does [`RichText`]'s
@@ -17,7 +16,8 @@ use crate::framework::{
     RenderObjectWidget, StatelessWidget, WidgetRef,
 };
 use crate::view::View;
-use crate::widgets::basic::Directionality;
+use crate::widgets::basic::{Builder, Directionality, ExcludeSemantics, Semantics};
+use crate::widgets::inherited_theme::InheritedTheme;
 use crate::widgets::media_query::MediaQuery;
 use crate::widgets::widget_span::WidgetSpan;
 
@@ -113,6 +113,40 @@ impl DefaultTextStyle {
         DefaultTextStyle::new(TextStyle::new(), NullWidget)
     }
 
+    /// Creates a default text style that overrides the text styles in scope at this point in
+    /// the widget tree.
+    ///
+    /// The given `style` is merged with the `style` from the default text style for the
+    /// [`BuildContext`] where the widget is inserted, and any of the other arguments that are
+    /// not `None` replace the corresponding properties on that same default text style.
+    ///
+    /// This constructor cannot be used to override the `max_lines` property of the ancestor
+    /// with the value `None`, since `None` here is used to mean "defer to ancestor". To
+    /// replace a non-`None` `max_lines` from an ancestor with the `None` value (to remove the
+    /// restriction on number of lines), manually obtain the ambient [`DefaultTextStyle`]
+    /// using [`of`](Self::of), then create a new [`DefaultTextStyle`] using
+    /// [`new`](Self::new) directly.
+    ///
+    /// If a `text_height_behavior` is provided, the existing configuration will be replaced
+    /// completely. To retain part of the original `text_height_behavior`, manually obtain the
+    /// ambient [`DefaultTextStyle`] using [`of`](Self::of).
+    ///
+    /// Dart's optional named arguments are the setters of the [`DefaultTextStyleMerge`] this
+    /// returns.
+    pub fn merge<K>(child: impl IntoWidget<K>) -> DefaultTextStyleMerge {
+        DefaultTextStyleMerge {
+            key: None,
+            style: None,
+            text_align: None,
+            soft_wrap: None,
+            overflow: None,
+            max_lines: None,
+            text_width_basis: None,
+            text_height_behavior: None,
+            child: child.into_widget(),
+        }
+    }
+
     /// Dart `DefaultTextStyle(key:)`.
     pub fn key(mut self, key: KeyRef) -> DefaultTextStyle {
         self.key = Some(key);
@@ -177,6 +211,99 @@ impl DefaultTextStyle {
     }
 }
 
+/// Dart's `DefaultTextStyle.merge(..)` before its optional arguments are known: a `Builder`
+/// that merges them into the ambient [`DefaultTextStyle`].
+#[derive(Debug)]
+pub struct DefaultTextStyleMerge {
+    key: Option<KeyRef>,
+    style: Option<TextStyle>,
+    text_align: Option<TextAlign>,
+    soft_wrap: Option<bool>,
+    overflow: Option<TextOverflow>,
+    max_lines: Option<i32>,
+    text_width_basis: Option<TextWidthBasis>,
+    text_height_behavior: Option<TextHeightBehavior>,
+    child: WidgetRef,
+}
+
+impl DefaultTextStyleMerge {
+    /// Dart `DefaultTextStyle.merge(key:)`.
+    pub fn key(mut self, key: KeyRef) -> DefaultTextStyleMerge {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `DefaultTextStyle.merge(style:)`.
+    pub fn style(mut self, style: TextStyle) -> DefaultTextStyleMerge {
+        self.style = Some(style);
+        self
+    }
+
+    /// Dart `DefaultTextStyle.merge(textAlign:)`.
+    pub fn text_align(mut self, text_align: TextAlign) -> DefaultTextStyleMerge {
+        self.text_align = Some(text_align);
+        self
+    }
+
+    /// Dart `DefaultTextStyle.merge(softWrap:)`.
+    pub fn soft_wrap(mut self, soft_wrap: bool) -> DefaultTextStyleMerge {
+        self.soft_wrap = Some(soft_wrap);
+        self
+    }
+
+    /// Dart `DefaultTextStyle.merge(overflow:)`.
+    pub fn overflow(mut self, overflow: TextOverflow) -> DefaultTextStyleMerge {
+        self.overflow = Some(overflow);
+        self
+    }
+
+    /// Dart `DefaultTextStyle.merge(maxLines:)`. Must be greater than zero.
+    pub fn max_lines(mut self, max_lines: i32) -> DefaultTextStyleMerge {
+        debug_assert!(max_lines > 0);
+        self.max_lines = Some(max_lines);
+        self
+    }
+
+    /// Dart `DefaultTextStyle.merge(textWidthBasis:)`.
+    pub fn text_width_basis(mut self, text_width_basis: TextWidthBasis) -> DefaultTextStyleMerge {
+        self.text_width_basis = Some(text_width_basis);
+        self
+    }
+
+    /// Dart `DefaultTextStyle.merge(textHeightBehavior:)`.
+    pub fn text_height_behavior(
+        mut self,
+        text_height_behavior: TextHeightBehavior,
+    ) -> DefaultTextStyleMerge {
+        self.text_height_behavior = Some(text_height_behavior);
+        self
+    }
+}
+
+/// The kind tag of [`IntoWidget`] for a [`DefaultTextStyleMerge`].
+pub struct DefaultTextStyleMergeKind;
+
+impl IntoWidget<DefaultTextStyleMergeKind> for DefaultTextStyleMerge {
+    fn into_widget(self) -> WidgetRef {
+        Builder::new(move |app, context| {
+            let parent = DefaultTextStyle::of(app, context);
+            DefaultTextStyle {
+                key: self.key.clone(),
+                style: parent.style.merge(self.style.as_ref()),
+                text_align: self.text_align.or(parent.text_align),
+                soft_wrap: self.soft_wrap.unwrap_or(parent.soft_wrap),
+                overflow: self.overflow.unwrap_or(parent.overflow),
+                max_lines: self.max_lines.or(parent.max_lines),
+                text_width_basis: self.text_width_basis.unwrap_or(parent.text_width_basis),
+                text_height_behavior: self.text_height_behavior.or(parent.text_height_behavior),
+                child: self.child.clone(),
+            }
+            .into_widget()
+        })
+        .into_widget()
+    }
+}
+
 impl InheritedWidget for DefaultTextStyle {
     fn key(&self) -> Option<&KeyRef> {
         self.key.as_ref()
@@ -194,6 +321,27 @@ impl InheritedWidget for DefaultTextStyle {
             || self.max_lines != old_widget.max_lines
             || self.text_width_basis != old_widget.text_width_basis
             || self.text_height_behavior != old_widget.text_height_behavior
+    }
+
+    fn as_inherited_theme(&self) -> Option<&dyn InheritedTheme> {
+        Some(self)
+    }
+}
+
+impl InheritedTheme for DefaultTextStyle {
+    fn wrap(&self, _app: &mut App, _context: BuildContext, child: WidgetRef) -> WidgetRef {
+        DefaultTextStyle {
+            key: None,
+            style: self.style.clone(),
+            text_align: self.text_align,
+            soft_wrap: self.soft_wrap,
+            overflow: self.overflow,
+            max_lines: self.max_lines,
+            text_width_basis: self.text_width_basis,
+            text_height_behavior: self.text_height_behavior,
+            child,
+        }
+        .into_widget()
     }
 }
 
@@ -308,6 +456,16 @@ impl InheritedWidget for DefaultTextHeightBehavior {
     fn update_should_notify(&self, old_widget: &DefaultTextHeightBehavior) -> bool {
         self.text_height_behavior != old_widget.text_height_behavior
     }
+
+    fn as_inherited_theme(&self) -> Option<&dyn InheritedTheme> {
+        Some(self)
+    }
+}
+
+impl InheritedTheme for DefaultTextHeightBehavior {
+    fn wrap(&self, _app: &mut App, _context: BuildContext, child: WidgetRef) -> WidgetRef {
+        DefaultTextHeightBehavior::new(self.text_height_behavior, child).into_widget()
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -418,6 +576,22 @@ pub struct Text {
     /// value will take precedence. You can use a [`RichText`] widget directly to entirely
     /// override the [`DefaultTextStyle`].
     pub max_lines: Option<i32>,
+    /// An alternative semantics label for this text.
+    ///
+    /// If present, the semantics of this widget will contain this value instead
+    /// of the actual text. This will overwrite any of the semantics labels applied
+    /// directly to the [`TextSpan`]s.
+    ///
+    /// This is useful for replacing abbreviations or shorthands with the full
+    /// text value: `Text::new("$$").semantics_label("Double dollars")`.
+    pub semantics_label: Option<String>,
+    /// A unique identifier for the semantics node for this widget.
+    ///
+    /// This is useful for cases where the text widget needs to have a uniquely
+    /// identifiable ID that is recognized through the automation tools without
+    /// having a dependency on the actual content of the text that can possibly be
+    /// dynamic in nature.
+    pub semantics_identifier: Option<String>,
     /// Defines how to measure the width of the rendered text.
     pub text_width_basis: Option<TextWidthBasis>,
     /// Defines how to apply `TextStyle.height` over and under text.
@@ -462,6 +636,8 @@ impl Text {
             overflow: None,
             text_scaler: None,
             max_lines: None,
+            semantics_label: None,
+            semantics_identifier: None,
             text_width_basis: None,
             text_height_behavior: None,
         }
@@ -512,6 +688,18 @@ impl Text {
     /// Dart `Text(maxLines:)`.
     pub fn max_lines(mut self, max_lines: i32) -> Text {
         self.max_lines = Some(max_lines);
+        self
+    }
+
+    /// Dart `Text(semanticsLabel:)`.
+    pub fn semantics_label(mut self, semantics_label: impl Into<String>) -> Text {
+        self.semantics_label = Some(semantics_label.into());
+        self
+    }
+
+    /// Dart `Text(semanticsIdentifier:)`.
+    pub fn semantics_identifier(mut self, semantics_identifier: impl Into<String>) -> Text {
+        self.semantics_identifier = Some(semantics_identifier.into());
         self
     }
 
@@ -603,7 +791,27 @@ impl StatelessWidget for Text {
         if let Some(text_height_behavior) = text_height_behavior {
             rich_text = rich_text.text_height_behavior(text_height_behavior);
         }
-        rich_text.into_widget()
+        let mut result = rich_text.into_widget();
+        if self.semantics_label.is_some() || self.semantics_identifier.is_some() {
+            let mut semantics = Semantics::new();
+            if let Some(text_direction) = self.text_direction {
+                semantics = semantics.text_direction(text_direction);
+            }
+            if let Some(semantics_label) = &self.semantics_label {
+                semantics = semantics.label(semantics_label.clone());
+            }
+            if let Some(semantics_identifier) = &self.semantics_identifier {
+                semantics = semantics.identifier(semantics_identifier.clone());
+            }
+            result = semantics
+                .child(
+                    ExcludeSemantics::new()
+                        .excluding(self.semantics_label.is_some())
+                        .child(result),
+                )
+                .into_widget();
+        }
+        result
     }
 }
 
@@ -891,7 +1099,6 @@ impl MultiChildRenderObjectWidget for RichText {
 
 #[cfg(test)]
 mod tests {
-    use std::rc::Rc;
     use waft_foundation::AppCell;
 
     use waft_embedder::{Color, TextLeadingDistribution};
@@ -1184,7 +1391,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let keyed = |key: &str| {
             Text::new("Hello")
-                .key(Rc::new(ValueKey::new(key.to_owned())))
+                .key(ValueKey::new(key.to_owned()).into())
                 .into_widget()
         };
         let harness = mount(&mut app, keyed("a"));

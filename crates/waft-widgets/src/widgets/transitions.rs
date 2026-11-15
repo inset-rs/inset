@@ -4,13 +4,14 @@
 //! with `RenderTransform`'s, and [`FadeTransition`]'s `alwaysIncludeSemantics` with
 //! accessibility.
 
+use std::any::TypeId;
 use std::f64::consts::PI;
 use std::fmt::{self, Debug};
 use std::rc::Rc;
 
 use waft_animation::{Animatable, AnyAnimation};
 use waft_embedder::{Matrix4, Offset, Rect, Size, TextAlign, TextDirection};
-use waft_foundation::{App, Handle, Listenable, Listener};
+use waft_foundation::{App, Handle, Listenable, Listener, RetainedHandleId};
 use waft_painting::{Alignment, AlignmentGeometry, Axis, Decoration, TextOverflow, TextStyle};
 use waft_rendering::{
     AnyRenderObject, DecorationPosition, RelativeRect, RenderAnimatedOpacity,
@@ -19,7 +20,7 @@ use waft_rendering::{
 
 use crate::framework::{
     BuildContext, IntoWidget, KeyRef, RenderObjectWidget, SingleChildRenderObjectWidget, State,
-    StateData, Stateful, StatefulWidget, WidgetRef, downcast_widget,
+    StateData, Stateful, StatefulWidget, WidgetRef, downcast_widget, short_type_name,
 };
 use crate::widgets::basic::{Align, ClipRect, FractionalTranslation, Positioned, Transform};
 use crate::widgets::container::DecoratedBox;
@@ -116,9 +117,14 @@ impl<W: AnimatedWidget> StatefulWidget for Animated<W> {
         self.0.key()
     }
 
+    fn type_name(&self) -> &'static str {
+        short_type_name::<W>()
+    }
+
     fn create_state(&self) -> AnimatedState<W> {
         AnimatedState {
             state: StateData::new(),
+            listened: Vec::new(),
         }
     }
 }
@@ -132,6 +138,11 @@ impl<W: AnimatedWidget> Debug for Animated<W> {
 /// Dart's `_AnimatedState`.
 pub struct AnimatedState<W: AnimatedWidget> {
     state: StateData<Animated<W>>,
+    /// The listenable's arena objects, kept while this state listens to them: the widget's
+    /// owner may destroy the animation it handed down (a tile that drives a new one each
+    /// build) before this state removes its listener from the old one, which Dart's lingering
+    /// object allows.
+    listened: Vec<RetainedHandleId>,
 }
 
 impl<W: AnimatedWidget> State for AnimatedState<W> {
@@ -141,6 +152,8 @@ impl<W: AnimatedWidget> State for AnimatedState<W> {
     fn init_state(self: Handle<Self>, app: &mut App) {
         let listenable = self.widget(app).0.listenable();
         listenable.add_listener(app, Listener::handle_method(self, Self::handle_change));
+        let listened = listenable.retain(app);
+        app.get_mut(self).listened = listened;
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &Animated<W>) {
@@ -150,12 +163,15 @@ impl<W: AnimatedWidget> State for AnimatedState<W> {
             old_listenable
                 .remove_listener(app, &Listener::handle_method(self, Self::handle_change));
             listenable.add_listener(app, Listener::handle_method(self, Self::handle_change));
+            let listened = listenable.retain(app);
+            self.release_listened(app, listened);
         }
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
         let listenable = self.widget(app).0.listenable();
         listenable.remove_listener(app, &Listener::handle_method(self, Self::handle_change));
+        self.release_listened(app, Vec::new());
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -168,6 +184,15 @@ impl<W: AnimatedWidget> State for AnimatedState<W> {
 }
 
 impl<W: AnimatedWidget> AnimatedState<W> {
+    /// Gives back the objects of the listenable this state stopped listening to, keeping
+    /// `listened` in their place.
+    fn release_listened(self: Handle<Self>, app: &mut App, listened: Vec<RetainedHandleId>) {
+        let released = std::mem::replace(&mut app.get_mut(self).listened, listened);
+        for released in released {
+            app.release_id(released);
+        }
+    }
+
     fn handle_change(self: Handle<Self>, app: &mut App) {
         if !self.mounted(app) {
             return;
@@ -187,16 +212,122 @@ impl<W: AnimatedWidget> AnimatedState<W> {
 /// when the topmost route is popped off the stack.
 ///
 /// Typically used as the argument for `ModalRoute::delegated_transition`.
-pub type DelegatedTransitionBuilder = Rc<
-    dyn Fn(
-        &mut App,
-        BuildContext,
-        AnyAnimation<f64>,
-        AnyAnimation<f64>,
-        bool,
-        Option<&WidgetRef>,
-    ) -> Option<WidgetRef>,
->;
+///
+/// `ModalRoute` compares the builder a route offers with the one the route above offers, as
+/// Dart compares two function values: [`new`](Self::new) equals only its clones;
+/// [`function`](Self::function) equals any other built from the same function, as two
+/// tear-offs of one static method are identical (see the porting skill's callback-identity
+/// pattern).
+#[derive(Clone)]
+pub struct DelegatedTransitionBuilder {
+    builder: Rc<DelegatedTransitionBuilderFn>,
+    identity: DelegatedTransitionBuilderIdentity,
+}
+
+/// The function a [`DelegatedTransitionBuilder`] calls.
+type DelegatedTransitionBuilderFn = dyn Fn(
+    &mut App,
+    BuildContext,
+    AnyAnimation<f64>,
+    AnyAnimation<f64>,
+    bool,
+    Option<&WidgetRef>,
+) -> Option<WidgetRef>;
+
+/// Equality key: closures compare by allocation, functions by the `TypeId` of the function
+/// item.
+#[derive(Clone, Copy, PartialEq)]
+enum DelegatedTransitionBuilderIdentity {
+    Closure,
+    Function(TypeId),
+}
+
+impl DelegatedTransitionBuilder {
+    /// Wraps a closure; it equals only its clones.
+    pub fn new(
+        builder: impl Fn(
+            &mut App,
+            BuildContext,
+            AnyAnimation<f64>,
+            AnyAnimation<f64>,
+            bool,
+            Option<&WidgetRef>,
+        ) -> Option<WidgetRef>
+        + 'static,
+    ) -> DelegatedTransitionBuilder {
+        DelegatedTransitionBuilder {
+            builder: Rc::new(builder),
+            identity: DelegatedTransitionBuilderIdentity::Closure,
+        }
+    }
+
+    /// A function, comparable like a Dart tear-off of a static method.
+    ///
+    /// Pass the function by name. A fn pointer or capturing closure is rejected: it has no
+    /// canonical identity.
+    pub fn function<F>(builder: F) -> DelegatedTransitionBuilder
+    where
+        F: Fn(
+                &mut App,
+                BuildContext,
+                AnyAnimation<f64>,
+                AnyAnimation<f64>,
+                bool,
+                Option<&WidgetRef>,
+            ) -> Option<WidgetRef>
+            + 'static,
+    {
+        const {
+            assert!(
+                std::mem::size_of::<F>() == 0,
+                "pass the function by name: a fn pointer or capturing closure has no canonical \
+                 identity"
+            )
+        };
+        DelegatedTransitionBuilder {
+            builder: Rc::new(builder),
+            identity: DelegatedTransitionBuilderIdentity::Function(TypeId::of::<F>()),
+        }
+    }
+
+    /// Calls the builder.
+    pub fn call(
+        &self,
+        app: &mut App,
+        context: BuildContext,
+        animation: AnyAnimation<f64>,
+        secondary_animation: AnyAnimation<f64>,
+        allow_snapshotting: bool,
+        child: Option<&WidgetRef>,
+    ) -> Option<WidgetRef> {
+        (self.builder)(
+            app,
+            context,
+            animation,
+            secondary_animation,
+            allow_snapshotting,
+            child,
+        )
+    }
+}
+
+impl PartialEq for DelegatedTransitionBuilder {
+    fn eq(&self, other: &DelegatedTransitionBuilder) -> bool {
+        match (self.identity, other.identity) {
+            (
+                DelegatedTransitionBuilderIdentity::Closure,
+                DelegatedTransitionBuilderIdentity::Closure,
+            ) => Rc::ptr_eq(&self.builder, &other.builder),
+            (mine, theirs) => mine == theirs,
+        }
+    }
+}
+
+impl Debug for DelegatedTransitionBuilder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("DelegatedTransitionBuilder")
+    }
+}
 
 /// Animates the position of a widget relative to its normal position.
 ///

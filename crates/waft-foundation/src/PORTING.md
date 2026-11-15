@@ -92,12 +92,14 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — Rust has no catchable exception for ordinary control flow, so a panic skips the compaction Dart's `catch` always reaches.
   Affect: a panicking listener skips every listener after it; Flutter still calls them.
 
+- Change: a `Listenable` held as a value is an `Rc<dyn Listenable>`, and `Listenable::retain` keeps the arena objects it notifies from past their owners' `destroy` (a `Handle` or an animation its own entry, a `MergingListenable` its children's), for a listener to remove itself after the owner let go.
+  Reason: language — no collector: Dart's listener keeps the object it listens to alive by referencing it.
+  Affect: an `AnimatedWidget` whose owner destroys the animation it handed down (the expansion tile's per-build `icon_turns`) still removes its listener from it, and the object is freed once the widget moves off it; a listenable that is no arena object retains nothing.
+
 ## Deferred
 
 - date_time.rs: local time, `parse` / `tryParse`, `difference`. Trigger: a host with a time zone database; a signed duration.
-- The form a `Listenable` takes when held as a value (stored, re-pointed, compared). Trigger: `AnimatedBuilder` / `ValueListenableBuilder`.
 - `ChangeNotifier.maybeDispatchObjectCreation` / `memory_allocations`. Trigger: leak tracker / devtools.
 - Diagnostics / `FlutterError` structured trees; messages are `debug_assert!` strings meanwhile. Trigger: porting diagnostics.
-- `GlobalKey` / `ObjectKey`. Trigger: `widgets/framework.dart`.
 - `IterableFilter`. Trigger: the first iterable-filter call site.
 - Waking a task from another thread; it would need a `Send` poke into the host's event loop. Trigger: the first background executor or platform callback off the main thread.

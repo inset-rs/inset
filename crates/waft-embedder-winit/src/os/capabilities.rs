@@ -21,7 +21,6 @@ use winit::icon::Icon;
 use winit::monitor::MonitorHandle;
 use winit::window::{Window, WindowAttributes};
 
-use crate::LinuxSettings;
 use crate::clipboard::ClipboardChanges;
 use crate::file_dialogs::ParentWindows;
 use crate::gpu::Gpu;
@@ -33,6 +32,7 @@ use crate::screens::{monitor_number, monitor_screens};
 use crate::system_changes::SystemChange;
 use crate::system_requests::SystemRequest;
 use crate::vsync_waiter::LoopVsyncWaiter;
+use crate::{LinuxSettings, WindowsSettings};
 
 /// Everything the embedder asks of a system, as one bound: which system it is, what it lets the
 /// app do, and the concerns it answers.
@@ -62,6 +62,7 @@ pub(crate) trait OperatingSystem:
     + SystemChanges
     + ApplicationControl
     + ApplicationLifecycle
+    + ApplicationIdentity
     + StandardStreams
 {
     /// The platform the framework is told it runs on, where Flutter's `defaultTargetPlatform`
@@ -146,6 +147,15 @@ pub(crate) trait WindowChrome {
 
     /// Applies, once the window exists, what `config` asks for and no attribute carries.
     fn configure(_window: &dyn Window, _config: &WindowConfig) {}
+
+    /// Undoes, before `window` is destroyed, what `configure` gave it that the system keeps apart
+    /// from the window: a Windows window's AppUserModelID and relaunch properties.
+    fn before_close(_window: &dyn Window) {}
+
+    /// Brings `window` forward with `token`, the activation token a launch was given, which lets
+    /// it take the focus the desktop meant for that launch; nothing where the system has no such
+    /// token.
+    fn activate_with_token(_window: &dyn Window, _token: &str) {}
 
     /// The app's icon at the size of winit's window icon, the title bar's, which a window shows
     /// where its configuration names none: on Windows the one its executable carries. None where
@@ -474,6 +484,15 @@ pub(crate) trait SystemNotifications {
     fn notifications(_activations: NotificationActivations) -> Option<Rc<dyn Notifications>> {
         None
     }
+
+    /// The notifications of the app the system knows as `app_user_model_id`, which this process
+    /// posts as that app, their clicks sent to `activations`; Windows' alone.
+    fn notifications_of(
+        _app_user_model_id: &str,
+        _activations: NotificationActivations,
+    ) -> Option<Rc<dyn Notifications>> {
+        None
+    }
 }
 
 /// The system's file dialogs (`file_dialogs.rs`).
@@ -628,6 +647,13 @@ pub(crate) trait ApplicationLifecycle {
 }
 
 /// Where the app's standard output and error go.
+/// Who the app is to the system's shell, beyond its windows: Windows' AppUserModelID for the
+/// process.
+pub(crate) trait ApplicationIdentity {
+    /// Gives the process the shell's identity `settings` names, before any window shows.
+    fn set_identity(_settings: &WindowsSettings) {}
+}
+
 pub(crate) trait StandardStreams {
     /// Sends them to the console of the process that started the app, where the system starts a
     /// GUI program with none: Windows. Elsewhere they are where the app was started already.

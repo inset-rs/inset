@@ -182,7 +182,7 @@ impl State for MultiViewAppState {
             .filter_map(|view| {
                 let content = builder(app, &view)?;
                 showing.insert(view.id());
-                let key: KeyRef = Rc::new(ValueKey::new(view.id().0));
+                let key: KeyRef = ValueKey::new(view.id().0).into();
                 Some(View::new(view, content).key(key).into_widget())
             })
             .collect();
@@ -356,6 +356,23 @@ mod tests {
         assert!(added.presented() > 0);
     }
 
+    /// An observer that handles the close requests of `view`, as whoever shows another view of
+    /// the app's would.
+    struct ClaimsTheView {
+        view: ViewId,
+        asked: std::cell::Cell<u32>,
+    }
+
+    impl crate::WidgetsBindingObserver for ClaimsTheView {
+        fn did_request_view_close(&self, _app: &mut App, view: ViewId) -> bool {
+            if view != self.view {
+                return false;
+            }
+            self.asked.set(self.asked.get() + 1);
+            true
+        }
+    }
+
     #[test]
     fn a_view_its_builder_leaves_shows_nothing_and_its_close_request_is_not_the_apps() {
         let window = TestWindow::around(
@@ -374,9 +391,35 @@ mod tests {
             })
             .into_widget(),
         );
+        let owner = Rc::new(ClaimsTheView {
+            view: ViewId(1),
+            asked: std::cell::Cell::new(0),
+        });
+        {
+            let mut app = platform.cell.borrow_mut();
+            WidgetsBinding::instance(&mut app).add_observer(&mut app, owner.clone());
+        }
         assert_eq!(window.test_view().presented(), 0);
         request_view_close(&platform.cell, ViewId(1));
+        assert_eq!(owner.asked.get(), 1, "its owner decides");
         assert_eq!(window.closes(), 0, "nobody here closes it");
+    }
+
+    #[test]
+    fn a_close_request_nobody_handles_closes_the_view() {
+        let window = TestWindow::around(
+            TestView::new(300.0, 200.0).with_id(ViewId(1)),
+            WindowConfig::default(),
+        );
+        let platform = platform(&[Rc::clone(window.test_view()), view(2)]);
+        crate::binding::run_widget(
+            &mut platform.cell.borrow_mut(),
+            MultiViewApp::new(|_app, _view| Some(SizedBox::new().into_widget())).into_widget(),
+        );
+        assert_eq!(window.test_view().presented(), 0, "closed before its first frame");
+        request_view_close(&platform.cell, ViewId(1));
+        assert_eq!(window.closes(), 1);
+        assert_eq!(platform.quits.count(), 0, "not the last view");
     }
 
     #[test]

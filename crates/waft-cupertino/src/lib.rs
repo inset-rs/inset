@@ -1,4 +1,4 @@
-//! Flutter counterpart: `packages/flutter/lib/src/cupertino`.
+//! Flutter counterpart: `cupertino_ui` in flutter/packages, `packages/cupertino_ui/lib/src`.
 //!
 //! The iOS-style widgets: colors, theme, text theme, constants, the icons, and the button.
 #![feature(arbitrary_self_types)]
@@ -7,6 +7,7 @@ mod activity_indicator;
 mod adaptive_text_selection_toolbar;
 mod app;
 mod button;
+mod checkbox;
 mod colors;
 mod constants;
 mod debug;
@@ -24,12 +25,17 @@ mod interface_level;
 mod list_section;
 mod list_tile;
 mod localizations;
+mod magnifier;
 mod nav_bar;
 mod page_scaffold;
+mod radio;
+mod refresh;
 mod route;
 mod scrollbar;
 mod segmented_control;
 mod sheet;
+mod slider;
+mod spell_check_suggestions_toolbar;
 mod switch;
 #[cfg(test)]
 mod test_support;
@@ -39,11 +45,13 @@ mod text_selection_toolbar;
 mod text_selection_toolbar_button;
 mod text_theme;
 mod theme;
+mod thumb_painter;
 
 pub use activity_indicator::*;
 pub use adaptive_text_selection_toolbar::*;
 pub use app::*;
 pub use button::*;
+pub use checkbox::*;
 pub use colors::*;
 pub use constants::*;
 pub use debug::*;
@@ -61,12 +69,17 @@ pub use interface_level::*;
 pub use list_section::*;
 pub use list_tile::*;
 pub use localizations::*;
+pub use magnifier::*;
 pub use nav_bar::*;
 pub use page_scaffold::*;
+pub use radio::*;
+pub use refresh::*;
 pub use route::*;
 pub use scrollbar::*;
 pub use segmented_control::*;
 pub use sheet::*;
+pub use slider::*;
+pub use spell_check_suggestions_toolbar::*;
 pub use switch::*;
 pub use text_field::*;
 pub use text_selection::*;
@@ -74,3 +87,4 @@ pub use text_selection_toolbar::*;
 pub use text_selection_toolbar_button::*;
 pub use text_theme::*;
 pub use theme::*;
+pub use thumb_painter::*;

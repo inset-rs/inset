@@ -206,14 +206,37 @@ impl<T: ?Sized + NotificationTarget> Element for NotificationElement<T> {
 /// Useful if, for instance, you're trying to align multiple descendants.
 ///
 /// To listen for notifications in a subtree, use a [`NotificationListener`].
-#[derive(Debug, Default)]
-pub struct LayoutChangedNotification;
+///
+/// Dart's class is concrete and also the base of other notifications, such as every
+/// `ScrollNotification`; here it is the family a notification declares itself part of through
+/// [`Notification::as_layout_changed_notification`], and
+/// [`PlainLayoutChangedNotification`] is Dart's `const LayoutChangedNotification()`.
+pub trait LayoutChangedNotification: Notification {}
 
-impl Notification for LayoutChangedNotification {
+impl NotificationTarget for dyn LayoutChangedNotification {
+    fn cast(notification: &dyn Notification) -> Option<&dyn LayoutChangedNotification> {
+        notification.as_layout_changed_notification()
+    }
+}
+
+/// Dart's concrete `LayoutChangedNotification` base class: a layout change with nothing more
+/// to say.
+///
+/// This is what Dart writes as `const LayoutChangedNotification()`.
+#[derive(Debug, Default)]
+pub struct PlainLayoutChangedNotification;
+
+impl Notification for PlainLayoutChangedNotification {
     fn as_any(&self) -> &dyn Any {
         self
     }
+
+    fn as_layout_changed_notification(&self) -> Option<&dyn LayoutChangedNotification> {
+        Some(self)
+    }
 }
+
+impl LayoutChangedNotification for PlainLayoutChangedNotification {}
 
 #[cfg(test)]
 mod tests {

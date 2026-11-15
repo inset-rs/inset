@@ -22,8 +22,8 @@ use waft_embedder::{
     Brightness, Clipboard, Compositor, Dispatcher, FileDialogs, FontSource, HardwareBuffer,
     HardwareBufferAllocator, ImageCodec, ImageCodecFuture, ImageDecodeError, ImageFrame,
     ImageFrameFuture, ImageRepetition, Locale, Notifications, Offset, Opener, Platform, RequestId,
-    Screen, Screens, SystemChrome, SystemFontSource, TargetPlatform, ViewError, ViewRef,
-    WindowConfig,
+    Screen, Screens, SnapshotDelegate, SystemChrome, SystemFontSource, TargetPlatform, ViewError,
+    ViewRef, WindowConfig,
 };
 
 use crate::activity::Activity;
@@ -68,6 +68,8 @@ pub struct AndroidPlatform {
     image_loader: Option<valo_codec::ImageLoader>,
     /// The renderer's image store, on the device every view draws with.
     images: valo::ImageContext,
+    /// What draws the app's pictures into images there.
+    snapshots: SnapshotDelegate,
     /// Android's own image decoder and encoder, for the app's own use (`image_codecs/`).
     image_codecs: AndroidImageCodecs,
     chrome: AndroidChrome,
@@ -126,6 +128,7 @@ impl AndroidPlatform {
                 largest_side: gpu.device.limits().max_texture_dimension_2d,
             }),
             image_loader: crate::images::loader(images.clone()),
+            snapshots: SnapshotDelegate::new(images.clone()),
             images,
             image_codecs: AndroidImageCodecs::new(application.clone()),
             clipboard: AndroidClipboard::new(application.clone()),
@@ -354,6 +357,19 @@ impl Platform for AndroidPlatform {
 
     fn import_pixels(&self, pixels: valo::PixelBuffer) -> Option<waft_embedder::Image> {
         self.images.upload_pixels(pixels, false).ok()
+    }
+
+    /// The picture drawn on the device every view draws with.
+    fn picture_to_image_sync(
+        &self,
+        picture: &waft_embedder::Picture,
+        width: u32,
+        height: u32,
+    ) -> Option<waft_embedder::Image> {
+        Some(
+            self.snapshots
+                .make_raster_snapshot_sync(picture, width, height),
+        )
     }
 
     /// The frame's buffer, imported as any hardware buffer is.

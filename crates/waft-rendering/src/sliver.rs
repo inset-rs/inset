@@ -1895,24 +1895,13 @@ pub trait RenderSliverSingleBoxAdapter:
         constraints: SliverConstraints,
         geometry: SliverGeometry,
     ) {
-        let paint_offset = match apply_growth_direction_to_axis_direction(
-            constraints.axis_direction,
-            constraints.growth_direction,
-        ) {
-            AxisDirection::Up => Offset::new(
-                0.0,
-                geometry.paint_extent + constraints.scroll_offset - geometry.scroll_extent,
-            ),
-            AxisDirection::Left => Offset::new(
-                geometry.paint_extent + constraints.scroll_offset - geometry.scroll_extent,
-                0.0,
-            ),
-            AxisDirection::Right => Offset::new(-constraints.scroll_offset, 0.0),
-            AxisDirection::Down => Offset::new(0.0, -constraints.scroll_offset),
-        };
-        child
-            .parent_data_of_mut::<SliverPhysicalParentData>(app)
-            .paint_offset = paint_offset;
+        RenderSliverSingleBoxAdapterBase::set_child_parent_data(
+            self,
+            app,
+            child,
+            constraints,
+            geometry,
+        )
     }
 
     /// The body of Flutter's `hitTestChildren` override.
@@ -1979,6 +1968,45 @@ pub trait RenderSliverSingleBoxAdapter:
         context.paint_child(app, child.as_object(), offset + paint_offset);
     }
 }
+
+/// Flutter's `RenderSliverSingleBoxAdapter` bodies that an override calls through `super`.
+///
+/// Blanket-implemented for every single-box adapter. It holds Flutter's
+/// `RenderSliverSingleBoxAdapter.setChildParentData` body, and the default of
+/// [`RenderSliverSingleBoxAdapter::set_child_parent_data`] forwards here, so a leaf that
+/// overrides it can still call `super`; inlining the body back into the default breaks that.
+pub trait RenderSliverSingleBoxAdapterBase: RenderSliverSingleBoxAdapter {
+    /// Flutter's `RenderSliverSingleBoxAdapter.setChildParentData`; an override calls it where
+    /// Dart writes `super.setChildParentData(child, constraints, geometry)`.
+    fn set_child_parent_data(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        child: AnyRenderObject,
+        constraints: SliverConstraints,
+        geometry: SliverGeometry,
+    ) {
+        let paint_offset = match apply_growth_direction_to_axis_direction(
+            constraints.axis_direction,
+            constraints.growth_direction,
+        ) {
+            AxisDirection::Up => Offset::new(
+                0.0,
+                geometry.paint_extent + constraints.scroll_offset - geometry.scroll_extent,
+            ),
+            AxisDirection::Left => Offset::new(
+                geometry.paint_extent + constraints.scroll_offset - geometry.scroll_extent,
+                0.0,
+            ),
+            AxisDirection::Right => Offset::new(-constraints.scroll_offset, 0.0),
+            AxisDirection::Down => Offset::new(0.0, -constraints.scroll_offset),
+        };
+        child
+            .parent_data_of_mut::<SliverPhysicalParentData>(app)
+            .paint_offset = paint_offset;
+    }
+}
+
+impl<T: RenderSliverSingleBoxAdapter> RenderSliverSingleBoxAdapterBase for T {}
 
 /// A [`RenderSliver`] that contains a single [`crate::RenderBox`].
 ///
@@ -2092,7 +2120,13 @@ impl RenderObject for RenderSliverToBoxAdapter {
             )
             .build();
         self.set_geometry(app, geometry);
-        self.set_child_parent_data(app, child.as_object(), constraints, geometry);
+        RenderSliverSingleBoxAdapter::set_child_parent_data(
+            self,
+            app,
+            child.as_object(),
+            constraints,
+            geometry,
+        );
     }
 
     fn paint(

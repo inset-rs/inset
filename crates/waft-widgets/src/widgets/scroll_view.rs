@@ -1738,11 +1738,20 @@ mod tests {
         total
     }
 
+    /// Whether `object` is the `IndexedSemantics` a delegate wraps each child in, which takes its
+    /// child's size.
+    fn is_semantic_index(app: &App, object: AnyRenderObject) -> bool {
+        object
+            .downcast::<waft_rendering::RenderIndexedSemantics>(app)
+            .is_some()
+    }
+
     fn item_count(app: &App, harness: &Harness) -> usize {
         count_render_objects(app, harness.render_root(app).as_object(), &|app, object| {
-            object
-                .as_box()
-                .is_some_and(|render_box| render_box.size(app).height() == ITEM_EXTENT)
+            !is_semantic_index(app, object)
+                && object
+                    .as_box()
+                    .is_some_and(|render_box| render_box.size(app).height() == ITEM_EXTENT)
         })
     }
 
@@ -1812,9 +1821,10 @@ mod tests {
             .find_render_object(app)
             .expect("a mounted view has a render object");
         count_render_objects(app, root, &|app, object| {
-            object.as_box().is_some_and(|render_box| {
-                render_box.has_size(app) && render_box.size(app).height() == ITEM_EXTENT
-            })
+            !is_semantic_index(app, object)
+                && object.as_box().is_some_and(|render_box| {
+                    render_box.has_size(app) && render_box.size(app).height() == ITEM_EXTENT
+                })
         })
     }
 
@@ -1930,9 +1940,10 @@ mod tests {
             &app,
             harness.render_root(&app).as_object(),
             &|app, object| {
-                object
-                    .as_box()
-                    .is_some_and(|render_box| render_box.size(app) == Size::new(100.0, 100.0))
+                !is_semantic_index(app, object)
+                    && object
+                        .as_box()
+                        .is_some_and(|render_box| render_box.size(app) == Size::new(100.0, 100.0))
             },
         );
         assert_eq!(tiles, 15);

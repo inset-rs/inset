@@ -21,28 +21,29 @@ use waft_painting::{
     TextStyle,
 };
 use waft_rendering::{
-    AnyRenderBox, AnyRenderObject, BoxConstraints, BoxHitTestResult, BoxParentData, ContainerLayer,
-    MainAxisSize, OverScrollHeaderStretchConfiguration, PaintingContext, RelativeRect,
-    RenderAnimatedOpacity, RenderAnimatedOpacityMixin, RenderBox, RenderBoxData, RenderHandle,
-    RenderObject, RenderObjectData, RenderObjectWithChildData, RenderObjectWithChildMixin,
-    RenderShiftedBox, TransformLayer,
+    AnyBoxConstraints, AnyRenderBox, AnyRenderObject, BoxConstraints, BoxHitTestResult,
+    BoxParentData, ContainerLayer, MainAxisSize, OverScrollHeaderStretchConfiguration,
+    PaintingContext, RelativeRect, RenderAnimatedOpacity, RenderAnimatedOpacityMixin, RenderBox,
+    RenderBoxData, RenderHandle, RenderObject, RenderObjectData, RenderObjectWithChildData,
+    RenderObjectWithChildMixin, RenderShiftedBox, TransformLayer,
 };
 use waft_scheduler::{Ticker, TickerCallback, TickerProviderObject};
 use waft_widgets::{
     AbsorbPointer, Align, AnimatedBuilder, AnimatedOpacity, AnimatedWidget, AnnotatedRegion,
-    AnyModalRoute, BackdropFilter, BuildContext, Builder, ClipRect, Column, ConstrainedBox,
-    DecoratedBox, DefaultTextStyle, DefaultTextStyleTransition, Directionality, Expanded,
-    FadeTransition, Flexible, FocusableActionDetector, GestureDetector, GlobalKey, Hero,
+    AnyModalRoute, AnySize, BackdropFilter, BuildContext, Builder, ClipRect, Column,
+    ConstrainedBox, DecoratedBox, DefaultTextStyle, DefaultTextStyleTransition, Directionality,
+    Expanded, FadeTransition, Flexible, FocusableActionDetector, GestureDetector, GlobalKey, Hero,
     HeroFlightDirection, HeroTagRef, IconTheme, IconThemeData, IntoWidget, KeyRef, KeyedSubtree,
     LayoutBuilder, MediaQuery, NavigationToolbar, Navigator, NavigatorState, Opacity, Orientation,
     Padding, PositionedTransition, PreferredSizeWidget, PreferredSizeWidgetRef, RectTweenObject,
     RelativeRectTween, RenderObjectWidget, Row, SafeArea, ScaleTransition, ScrollNotification,
     ScrollNotificationCallback, ScrollNotificationObserver, ScrollNotificationObserverState,
-    ScrollUpdateNotification, Scrollable, ScrollableState, SingleChildRenderObjectWidget, SizedBox,
-    SliverPersistentHeader, SliverPersistentHeaderDelegate, Stack, StandardComponentType, State,
-    StateData, StatefulWidget, StatelessWidget, Text, TextStyleTween, TickerProviderStateMixin,
-    TickerProviderStateMixinData, Transform, ValueListenableBuilder, ViewportNotificationMixin,
-    Visibility, WidgetRef, downcast_widget,
+    ScrollUpdateNotification, Scrollable, ScrollableState, Semantics,
+    SingleChildRenderObjectWidget, SizedBox, SliverPersistentHeader,
+    SliverPersistentHeaderDelegate, Stack, StandardComponentType, State, StateData, StatefulWidget,
+    StatelessWidget, Text, TextStyleTween, TickerProviderStateMixin, TickerProviderStateMixinData,
+    Transform, ValueListenableBuilder, ViewportNotificationMixin, Visibility, WidgetRef,
+    downcast_widget,
 };
 
 use crate::button::CupertinoButton;
@@ -761,7 +762,7 @@ impl Default for CupertinoNavigationBar {
 }
 
 impl PreferredSizeWidget for CupertinoNavigationBar {
-    fn preferred_size(&self) -> Size {
+    fn preferred_size(&self) -> AnySize {
         let bottom_height = self
             .bottom
             .as_ref()
@@ -774,6 +775,7 @@ impl PreferredSizeWidget for CupertinoNavigationBar {
         };
 
         Size::from_height(K_NAV_BAR_PERSISTENT_HEIGHT + bottom_height + effective_large_height)
+            .into()
     }
 }
 
@@ -993,17 +995,19 @@ impl State for CupertinoNavigationBarState {
                         K_NAV_BAR_BOTTOM_PADDING,
                     ))
                     .child(
-                        DefaultTextStyle::new(
-                            CupertinoTheme::of(app, context)
-                                .text_theme()
-                                .nav_large_title_text_style(),
-                            LargeTitle {
-                                height: K_NAV_BAR_LARGE_TITLE_HEIGHT_EXTENSION,
-                                child: components.large_title.clone(),
-                            },
-                        )
-                        .max_lines(1)
-                        .overflow(TextOverflow::Ellipsis),
+                        Semantics::new().header(true).child(
+                            DefaultTextStyle::new(
+                                CupertinoTheme::of(app, context)
+                                    .text_theme()
+                                    .nav_large_title_text_style(),
+                                LargeTitle {
+                                    height: K_NAV_BAR_LARGE_TITLE_HEIGHT_EXTENSION,
+                                    child: components.large_title.clone(),
+                                },
+                            )
+                            .max_lines(1)
+                            .overflow(TextOverflow::Ellipsis),
+                        ),
                     ),
                 )
                 .into_widget(),
@@ -1066,7 +1070,7 @@ impl State for CupertinoNavigationBarState {
             Hero::new(
                 tag,
                 TransitionableNavigationBar {
-                    key: Rc::new(keys.nav_bar_box_key.clone()),
+                    key: keys.nav_bar_box_key.clone().into(),
                     components_keys: Rc::clone(&keys),
                     background_color: Some(effective_background_color.clone()),
                     back_button_text_style: text_theme.nav_action_text_style(),
@@ -2092,15 +2096,17 @@ impl SliverPersistentHeaderDelegate for LargeTitleNavigationBarSliverDelegate {
                                 K_NAV_BAR_TITLE_FADE_DURATION,
                             )
                             .child(
-                                DefaultTextStyle::new(
-                                    theme_text_theme.nav_large_title_text_style(),
-                                    LargeTitle {
-                                        height: self.large_title_height,
-                                        child: self.components.large_title.clone(),
-                                    },
-                                )
-                                .max_lines(1)
-                                .overflow(TextOverflow::Ellipsis),
+                                Semantics::new().header(true).child(
+                                    DefaultTextStyle::new(
+                                        theme_text_theme.nav_large_title_text_style(),
+                                        LargeTitle {
+                                            height: self.large_title_height,
+                                            child: self.components.large_title.clone(),
+                                        },
+                                    )
+                                    .max_lines(1)
+                                    .overflow(TextOverflow::Ellipsis),
+                                ),
                             ),
                         )
                         .top(false)
@@ -2178,7 +2184,7 @@ impl SliverPersistentHeaderDelegate for LargeTitleNavigationBarSliverDelegate {
             // `CupertinoSliverNavigationBar` like `CupertinoNavigationBar` because it needs to
             // wrap the top level `RenderBox` rather than a `RenderSliver`.
             TransitionableNavigationBar {
-                key: Rc::new(self.keys.nav_bar_box_key.clone()),
+                key: self.keys.nav_bar_box_key.clone().into(),
                 components_keys: Rc::clone(&self.keys),
                 background_color: Some(effective_background_color),
                 back_button_text_style: theme_text_theme.nav_action_text_style(),
@@ -2522,7 +2528,7 @@ impl StatelessWidget for PersistentNavigationBar {
                 CupertinoTheme::of(app, context)
                     .text_theme()
                     .nav_title_text_style(),
-                middle,
+                Semantics::new().header(true).child(middle),
             )
             .into_widget();
             // When the middle's visibility can change on the fly like with large title slivers,
@@ -2825,7 +2831,7 @@ impl NavigationBarStaticComponents {
                     .into_widget(),
                 ),
             )
-            .key(Rc::new(leading_key.clone()))
+            .key(leading_key.clone().into())
             .into_widget(),
         )
     }
@@ -2861,7 +2867,7 @@ impl NavigationBarStaticComponents {
                 )
                 .into_widget(),
             )
-            .key(Rc::new(back_chevron_key.clone()))
+            .key(back_chevron_key.clone().into())
             .into_widget(),
         )
     }
@@ -2901,7 +2907,7 @@ impl NavigationBarStaticComponents {
                 )
                 .into_widget(),
             )
-            .key(Rc::new(back_label_key.clone()))
+            .key(back_label_key.clone().into())
             .into_widget(),
         )
     }
@@ -2946,7 +2952,7 @@ impl NavigationBarStaticComponents {
                 )
                 .into_widget(),
             )
-            .key(Rc::new(middle_key.clone()))
+            .key(middle_key.clone().into())
             .into_widget(),
         )
     }
@@ -2978,7 +2984,7 @@ impl NavigationBarStaticComponents {
                     .into_widget(),
                 ),
             )
-            .key(Rc::new(trailing_key.clone()))
+            .key(trailing_key.clone().into())
             .into_widget(),
         )
     }
@@ -3022,7 +3028,7 @@ impl NavigationBarStaticComponents {
                 )
                 .into_widget(),
             )
-            .key(Rc::new(large_title_key.clone()))
+            .key(large_title_key.clone().into())
             .into_widget(),
         )
     }
@@ -3043,7 +3049,7 @@ impl NavigationBarStaticComponents {
             )
             .into_widget(),
         )
-        .key(Rc::new(nav_bar_bottom_key.clone()))
+        .key(nav_bar_bottom_key.clone().into())
         .into_widget()
     }
 }
@@ -3185,15 +3191,21 @@ impl StatelessWidget for CupertinoNavigationBarBackButton {
             );
         }
 
+        let localizations = <dyn CupertinoLocalizations>::of(app, context);
         let on_pressed = self.on_pressed.clone();
         CupertinoButton::new(
-            DefaultTextStyle::new(
-                action_text_style,
-                ConstrainedBox::new(
-                    BoxConstraints::new().min_width(K_NAV_BAR_BACK_BUTTON_TAP_WIDTH),
-                )
-                .child(Row::new().main_axis_size(MainAxisSize::Min).children(
-                    vec![
+            Semantics::new()
+                .container(true)
+                .exclude_semantics(true)
+                .label(localizations.back_button_label())
+                .button(true)
+                .child(DefaultTextStyle::new(
+                    action_text_style,
+                    ConstrainedBox::new(
+                        BoxConstraints::new().min_width(K_NAV_BAR_BACK_BUTTON_TAP_WIDTH),
+                    )
+                    .child(
+                        Row::new().main_axis_size(MainAxisSize::Min).children(vec![
                             Padding::new(EdgeInsetsGeometry::directional(8.0, 0.0, 0.0, 0.0))
                                 .into_widget(),
                             self.back_chevron
@@ -3209,10 +3221,10 @@ impl StatelessWidget for CupertinoNavigationBarBackButton {
                                 .into_widget()
                             }))
                             .into_widget(),
-                        ],
-                )),
-            )
-            .into_widget(),
+                        ]),
+                    ),
+                ))
+                .into_widget(),
             Some(Listener::new(move |app: &mut App| match &on_pressed {
                 Some(on_pressed) => on_pressed.call(app),
                 None => {
@@ -3415,7 +3427,7 @@ impl StatelessWidget for InactiveSearchableBottom {
             move |_app: &mut App, _context: BuildContext, child: Option<&WidgetRef>| {
                 let child = child.cloned();
                 LayoutBuilder::new(
-                    move |app: &mut App, _context, constraints: BoxConstraints| {
+                    move |app: &mut App, _context, constraints: AnyBoxConstraints| {
                         let value = AnimationController::value(animation_controller, app);
                         let mut leading = SizedBox::new().width(
                             constraints.max_width - (K_SEARCH_FIELD_CANCEL_BUTTON_WIDTH * value),
@@ -5001,7 +5013,7 @@ mod tests {
     /// the Cupertino localizations, and a text direction.
     fn mount_bar(cell: &AppCell, padding: EdgeInsets, bar: CupertinoNavigationBar) -> GlobalKey {
         let key = GlobalKey::new();
-        let bar = bar.key(Rc::new(key.clone()));
+        let bar = bar.key(key.clone().into());
         // A scaffold `Positioned`s the bar at the top, which leaves its height loose.
         let tree = MediaQuery::new(
             MediaQueryData::new().padding(padding),
@@ -5261,7 +5273,7 @@ mod tests {
 
         let cell = app_with_fonts();
         let key = GlobalKey::new();
-        let bar_key = Rc::new(key.clone());
+        let bar_key = key.clone();
         let inner = Rc::new(Cell::new(None));
         let probe = Rc::clone(&inner);
         let tree = MediaQuery::new(
@@ -5274,7 +5286,7 @@ mod tests {
                         move |_app: &mut App, context: BuildContext| {
                             probe.set(Some(context));
                             CupertinoNavigationBar::new()
-                                .key(bar_key.clone())
+                                .key(bar_key.clone().into())
                                 .background_color(BAR)
                                 .into_widget()
                         },

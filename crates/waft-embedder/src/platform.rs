@@ -632,6 +632,29 @@ pub trait Platform: Any {
         None
     }
 
+    /// Synchronously creates a handle to an image of `picture`: Flutter's `Picture.toImageSync`.
+    ///
+    /// The returned image will be `width` pixels wide and `height` pixels high. The picture is
+    /// rasterized within the 0 (left), 0 (top), `width` (right), `height` (bottom) bounds.
+    /// Content outside these bounds is clipped. The image lives on the renderer's device, and
+    /// anything drawn with it waits for it there.
+    ///
+    /// It is a call on the platform, where Dart's is on the picture, because only the host
+    /// holds a device to draw on. `None` when the host has no renderer to draw it with.
+    ///
+    /// # Panics
+    ///
+    /// Where `width` or `height` is zero: "Invalid image dimensions.".
+    fn picture_to_image_sync(
+        &self,
+        picture: &crate::Picture,
+        width: u32,
+        height: u32,
+    ) -> Option<crate::Image> {
+        let _ = (picture, width, height);
+        None
+    }
+
     /// An image of a video frame the app holds, its hardware buffer imported as a texture on the
     /// renderer's device with no copy ([`import_texture`](Self::import_texture)), holding the frame
     /// while the image lives: a still picture a media asset read, drawn as any image. Not

@@ -1,10 +1,11 @@
 //! Flutter counterpart: `widgets/toggleable.dart`.
 //!
 //! [`ToggleableStateMixin`] is a mixin with fields ([`ToggleableStateMixinData`]) on a state
-//! that is also a [`TickerProviderStateMixin`]. [`ToggleablePainter`] is a base class whose
+//! that is also a [`TickerProviderStateMixin`]; where Dart types a field or parameter as the
+//! mixin, it is the erased [`AnyToggleableState`]. [`ToggleablePainter`] is a base class whose
 //! fields are [`ToggleablePainterData`]; a painter is an arena `ChangeNotifier` and a
-//! `CustomPaint` reaches it through [`ToggleablePainterRef`]. The `Semantics(enabled:)` wrapper
-//! and the tap's `TapSemanticEvent` wait with accessibility.
+//! `CustomPaint` reaches it through [`ToggleablePainterRef`]. The tap's `TapSemanticEvent` and
+//! the detector's `excludeFromSemantics` wait with accessibility.
 
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
@@ -16,17 +17,17 @@ use waft_animation::{
     Animation, AnimationBehavior, AnimationController, AnyAnimation, CurvedAnimation, Curves,
 };
 use waft_embedder::{Canvas, Color, Offset, Paint, Size};
-use waft_foundation::{App, ChangeNotifier, Handle, Listenable, Listener, ValueChanged};
+use waft_foundation::{App, ChangeNotifier, Handle, HandleId, Listenable, Listener, ValueChanged};
 use waft_gestures::{TapDownDetails, TapUpDetails};
 use waft_rendering::CustomPainter;
 use waft_scheduler::TickerProviderObject;
 use waft_services::{MouseCursorRef, SystemMouseCursors};
 
-use crate::framework::{IntoWidget, WidgetRef};
+use crate::framework::{BuildContext, IntoWidget, State, WidgetRef};
 use crate::widgets::actions::{
     Action, ActivateIntent, AnyAction, CallbackAction, FocusableActionDetector,
 };
-use crate::widgets::basic::CustomPaint;
+use crate::widgets::basic::{CustomPaint, Semantics};
 use crate::widgets::focus_manager::AnyFocusNode;
 use crate::widgets::gesture_detector::GestureDetector;
 use crate::widgets::ticker_provider::TickerProviderStateMixin;
@@ -90,6 +91,15 @@ pub trait ToggleableStateMixin: TickerProviderStateMixin + TickerProviderObject 
 
     /// See [`toggleable_data`](Self::toggleable_data).
     fn toggleable_data_mut(self: Handle<Self>, app: &mut App) -> &mut ToggleableStateMixinData;
+
+    /// This state as the erased [`AnyToggleableState`] — what to pass where a Dart API takes a
+    /// `ToggleableStateMixin`.
+    fn as_toggleable_state(self: Handle<Self>) -> AnyToggleableState {
+        AnyToggleableState {
+            id: self.id(),
+            vtable: const { &ToggleableStateVTable::of::<Self>() },
+        }
+    }
 
     /// Used by subclasses to manipulate the visual value of the control.
     ///
@@ -487,22 +497,24 @@ pub trait ToggleableStateMixin: TickerProviderStateMixin + TickerProviderObject 
             Some(mouse_cursor) => mouse_cursor.resolve(&self.states(app)),
             None => SystemMouseCursors::BASIC.into(),
         };
-        let mut detector = FocusableActionDetector::new(self.tap_detector(app).child(child))
-            .actions(self.toggleable_data(app).action_map.clone())
-            .autofocus(autofocus)
-            .enabled(is_interactive)
-            .on_show_focus_highlight(move |app, focused| {
-                self.handle_focus_highlight_changed(app, focused)
-            })
-            .on_show_hover_highlight(move |app, hovering| self.handle_hover_changed(app, hovering))
-            .mouse_cursor(effective_mouse_cursor);
+        let mut detector = FocusableActionDetector::new(
+            self.tap_detector(app)
+                .child(Semantics::new().enabled(is_interactive).child(child)),
+        )
+        .actions(self.toggleable_data(app).action_map.clone())
+        .autofocus(autofocus)
+        .enabled(is_interactive)
+        .on_show_focus_highlight(move |app, focused| {
+            self.handle_focus_highlight_changed(app, focused)
+        })
+        .on_show_hover_highlight(move |app, hovering| self.handle_hover_changed(app, hovering))
+        .mouse_cursor(effective_mouse_cursor);
         if let Some(focus_node) = focus_node {
             detector = detector.focus_node(focus_node);
         }
         if let Some(on_focus_change) = on_focus_change {
             detector = detector.on_focus_change(move |app, focused| on_focus_change(app, focused));
         }
-        // `Semantics(enabled: isInteractive)` around the child waits with accessibility.
         detector.into_widget()
     }
 }
@@ -595,6 +607,250 @@ trait ToggleableStateMixinPrivate: ToggleableStateMixin {
 }
 
 impl<S: ToggleableStateMixin> ToggleableStateMixinPrivate for S {}
+
+/// The vtable of an erased [`AnyToggleableState`]: one `&'static` table per leaf type.
+struct ToggleableStateVTable {
+    type_name: fn() -> &'static str,
+    context: fn(&App, HandleId) -> BuildContext,
+    mounted: fn(&App, HandleId) -> bool,
+    position_controller: fn(&App, HandleId) -> Handle<AnimationController>,
+    position: fn(&App, HandleId) -> Handle<CurvedAnimation>,
+    reaction_controller: fn(&App, HandleId) -> Handle<AnimationController>,
+    reaction: fn(&App, HandleId) -> Handle<CurvedAnimation>,
+    reaction_hover_fade: fn(&App, HandleId) -> Handle<CurvedAnimation>,
+    reaction_focus_fade: fn(&App, HandleId) -> Handle<CurvedAnimation>,
+    reaction_animation_duration: fn(&App, HandleId) -> Option<Duration>,
+    is_interactive: fn(&App, HandleId) -> bool,
+    on_changed: fn(&App, HandleId) -> Option<ValueChanged<Option<bool>>>,
+    value: fn(&App, HandleId) -> Option<bool>,
+    tristate: fn(&App, HandleId) -> bool,
+    animate_to_value: fn(&mut App, HandleId),
+    down_position: fn(&App, HandleId) -> Option<Offset>,
+    states: fn(&App, HandleId) -> WidgetStates,
+    #[allow(clippy::type_complexity)]
+    build_toggleable_with_child: fn(
+        &mut App,
+        HandleId,
+        Option<AnyFocusNode>,
+        Option<ValueChanged<bool>>,
+        bool,
+        Option<WidgetStatePropertyRef<MouseCursorRef>>,
+        WidgetRef,
+    ) -> WidgetRef,
+}
+
+/// The typed handle for an erased id. Free: nothing is looked up; `get` checks the slot.
+fn resolve<S: 'static>(id: HandleId) -> Handle<S> {
+    Handle::from_id(id)
+}
+
+impl ToggleableStateVTable {
+    const fn of<S: ToggleableStateMixin>() -> ToggleableStateVTable {
+        ToggleableStateVTable {
+            type_name: std::any::type_name::<S>,
+            context: |app, id| <S as State>::context(resolve(id), app),
+            mounted: |app, id| <S as State>::mounted(resolve(id), app),
+            position_controller: |app, id| {
+                <S as ToggleableStateMixin>::position_controller(resolve(id), app)
+            },
+            position: |app, id| <S as ToggleableStateMixin>::position(resolve(id), app),
+            reaction_controller: |app, id| {
+                <S as ToggleableStateMixin>::reaction_controller(resolve(id), app)
+            },
+            reaction: |app, id| <S as ToggleableStateMixin>::reaction(resolve(id), app),
+            reaction_hover_fade: |app, id| {
+                <S as ToggleableStateMixin>::reaction_hover_fade(resolve(id), app)
+            },
+            reaction_focus_fade: |app, id| {
+                <S as ToggleableStateMixin>::reaction_focus_fade(resolve(id), app)
+            },
+            reaction_animation_duration: |app, id| {
+                <S as ToggleableStateMixin>::reaction_animation_duration(resolve(id), app)
+            },
+            is_interactive: |app, id| <S as ToggleableStateMixin>::is_interactive(resolve(id), app),
+            on_changed: |app, id| <S as ToggleableStateMixin>::on_changed(resolve(id), app),
+            value: |app, id| <S as ToggleableStateMixin>::value(resolve(id), app),
+            tristate: |app, id| <S as ToggleableStateMixin>::tristate(resolve(id), app),
+            animate_to_value: |app, id| {
+                <S as ToggleableStateMixin>::animate_to_value(resolve(id), app)
+            },
+            down_position: |app, id| <S as ToggleableStateMixin>::down_position(resolve(id), app),
+            states: |app, id| <S as ToggleableStateMixin>::states(resolve(id), app),
+            build_toggleable_with_child: |app,
+                                          id,
+                                          focus_node,
+                                          on_focus_change,
+                                          autofocus,
+                                          mouse_cursor,
+                                          child| {
+                <S as ToggleableStateMixin>::build_toggleable_with_child(
+                    resolve(id),
+                    app,
+                    focus_node,
+                    on_focus_change,
+                    autofocus,
+                    mouse_cursor,
+                    child,
+                )
+            },
+        }
+    }
+}
+
+/// Erased [`ToggleableStateMixin`]: one identity and a static vtable.
+///
+/// This is what a field or parameter Dart types as `ToggleableStateMixin` becomes, such as the
+/// state a `RawRadio` hands its [`RadioBuilder`](crate::RadioBuilder). Equality is Dart's `==` on
+/// an object reference.
+#[derive(Clone, Copy)]
+pub struct AnyToggleableState {
+    id: HandleId,
+    vtable: &'static ToggleableStateVTable,
+}
+
+impl PartialEq for AnyToggleableState {
+    fn eq(&self, other: &AnyToggleableState) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for AnyToggleableState {}
+
+impl Debug for AnyToggleableState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}({:?})", (self.vtable.type_name)(), self.id)
+    }
+}
+
+impl AnyToggleableState {
+    /// The arena id behind this handle.
+    pub fn id(self) -> HandleId {
+        self.id
+    }
+
+    /// See [`State::context`].
+    pub fn context(self, app: &App) -> BuildContext {
+        (self.vtable.context)(app, self.id)
+    }
+
+    /// See [`State::mounted`].
+    pub fn mounted(self, app: &App) -> bool {
+        (self.vtable.mounted)(app, self.id)
+    }
+
+    /// See [`ToggleableStateMixin::position_controller`].
+    pub fn position_controller(self, app: &App) -> Handle<AnimationController> {
+        (self.vtable.position_controller)(app, self.id)
+    }
+
+    /// See [`ToggleableStateMixin::position`].
+    pub fn position(self, app: &App) -> Handle<CurvedAnimation> {
+        (self.vtable.position)(app, self.id)
+    }
+
+    /// See [`ToggleableStateMixin::reaction_controller`].
+    pub fn reaction_controller(self, app: &App) -> Handle<AnimationController> {
+        (self.vtable.reaction_controller)(app, self.id)
+    }
+
+    /// See [`ToggleableStateMixin::reaction`].
+    pub fn reaction(self, app: &App) -> Handle<CurvedAnimation> {
+        (self.vtable.reaction)(app, self.id)
+    }
+
+    /// See [`ToggleableStateMixin::reaction_hover_fade`].
+    pub fn reaction_hover_fade(self, app: &App) -> Handle<CurvedAnimation> {
+        (self.vtable.reaction_hover_fade)(app, self.id)
+    }
+
+    /// See [`ToggleableStateMixin::reaction_focus_fade`].
+    pub fn reaction_focus_fade(self, app: &App) -> Handle<CurvedAnimation> {
+        (self.vtable.reaction_focus_fade)(app, self.id)
+    }
+
+    /// See [`ToggleableStateMixin::reaction_animation_duration`].
+    pub fn reaction_animation_duration(self, app: &App) -> Option<Duration> {
+        (self.vtable.reaction_animation_duration)(app, self.id)
+    }
+
+    /// See [`ToggleableStateMixin::is_interactive`].
+    pub fn is_interactive(self, app: &App) -> bool {
+        (self.vtable.is_interactive)(app, self.id)
+    }
+
+    /// See [`ToggleableStateMixin::on_changed`].
+    pub fn on_changed(self, app: &App) -> Option<ValueChanged<Option<bool>>> {
+        (self.vtable.on_changed)(app, self.id)
+    }
+
+    /// See [`ToggleableStateMixin::value`].
+    pub fn value(self, app: &App) -> Option<bool> {
+        (self.vtable.value)(app, self.id)
+    }
+
+    /// See [`ToggleableStateMixin::tristate`].
+    pub fn tristate(self, app: &App) -> bool {
+        (self.vtable.tristate)(app, self.id)
+    }
+
+    /// See [`ToggleableStateMixin::animate_to_value`].
+    pub fn animate_to_value(self, app: &mut App) {
+        (self.vtable.animate_to_value)(app, self.id);
+    }
+
+    /// See [`ToggleableStateMixin::down_position`].
+    pub fn down_position(self, app: &App) -> Option<Offset> {
+        (self.vtable.down_position)(app, self.id)
+    }
+
+    /// See [`ToggleableStateMixin::states`].
+    pub fn states(self, app: &App) -> WidgetStates {
+        (self.vtable.states)(app, self.id)
+    }
+
+    /// See [`ToggleableStateMixin::build_toggleable`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn build_toggleable(
+        self,
+        app: &mut App,
+        focus_node: Option<AnyFocusNode>,
+        on_focus_change: Option<ValueChanged<bool>>,
+        autofocus: bool,
+        mouse_cursor: Option<WidgetStatePropertyRef<MouseCursorRef>>,
+        size: Size,
+        painter: impl CustomPainter,
+    ) -> WidgetRef {
+        self.build_toggleable_with_child(
+            app,
+            focus_node,
+            on_focus_change,
+            autofocus,
+            mouse_cursor,
+            CustomPaint::new().size(size).painter(painter).into_widget(),
+        )
+    }
+
+    /// See [`ToggleableStateMixin::build_toggleable_with_child`].
+    pub fn build_toggleable_with_child(
+        self,
+        app: &mut App,
+        focus_node: Option<AnyFocusNode>,
+        on_focus_change: Option<ValueChanged<bool>>,
+        autofocus: bool,
+        mouse_cursor: Option<WidgetStatePropertyRef<MouseCursorRef>>,
+        child: WidgetRef,
+    ) -> WidgetRef {
+        (self.vtable.build_toggleable_with_child)(
+            app,
+            self.id,
+            focus_node,
+            on_focus_change,
+            autofocus,
+            mouse_cursor,
+            child,
+        )
+    }
+}
 
 /// The fields of Dart's `ToggleablePainter`, which a painter holds under the field
 /// `toggleable_painter`. Dart's `late` getters read them with a `!`; here

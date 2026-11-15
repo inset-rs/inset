@@ -1133,8 +1133,9 @@ pub trait CompoundAnimation<T: Clone + PartialEq + 'static>:
 /// [`AnimationLazyListenerMixin`] supertrait: a provided method of the same
 /// name here would make every `did_start_listening` call ambiguous. Each
 /// implementor's [`AnimationLazyListenerMixin::did_start_listening`] delegates
-/// here, exactly as it would to a trait default.
-fn compound_did_start_listening<S, T>(this: Handle<S>, app: &mut App)
+/// here, exactly as it would to a trait default; public because Dart's
+/// `CompoundAnimation` is subclassed outside the animation library.
+pub fn compound_did_start_listening<S, T>(this: Handle<S>, app: &mut App)
 where
     S: CompoundAnimation<T>,
     T: Clone + PartialEq + 'static,
@@ -1168,7 +1169,7 @@ where
 /// sub-animations. Free for the reason on
 /// [`compound_did_start_listening`]; the tear-offs it rebuilds are the same
 /// fn items registered there, so they match.
-fn compound_did_stop_listening<S, T>(this: Handle<S>, app: &mut App)
+pub fn compound_did_stop_listening<S, T>(this: Handle<S>, app: &mut App)
 where
     S: CompoundAnimation<T>,
     T: Clone + PartialEq + 'static,

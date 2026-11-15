@@ -85,6 +85,8 @@ pub enum Effect {
         blend_mode: BlendMode,
         backdrop_id: Option<u64>,
     },
+    /// `ImageFilterLayer`: the children moved by `offset` and composited as one through `filter`.
+    ImageFilter { filter: ImageFilter, offset: Offset },
 }
 
 /// flow's `DisplayListLayer`: a picture the framework recorded, drawn at `offset`.

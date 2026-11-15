@@ -789,7 +789,7 @@ impl State for SplitViewState {
         );
         let resources = ThemeResources::of(app, context);
         let body = LayoutBuilder::new(move |app, _, constraints| {
-            self.build_template(app, constraints, resources.clone())
+            self.build_template(app, constraints.constraints(), resources.clone())
         });
         let body = SizeObserver::new(
             body.into_widget(),

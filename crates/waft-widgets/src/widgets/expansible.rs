@@ -9,7 +9,7 @@ use waft_animation::{
     CurvedAnimation, Curves, Tween,
 };
 use waft_foundation::{
-    App, ChangeNotifier, ChangeNotifierData, Handle, ListenableObject, Listener,
+    App, ChangeNotifier, ChangeNotifierData, Handle, ListenableObject, Listener, RetainedHandle,
 };
 use waft_rendering::MainAxisSize;
 use waft_scheduler::{Ticker, TickerCallback, TickerProviderObject};
@@ -451,6 +451,7 @@ impl StatefulWidget for Expansible {
             animation_controller: None,
             height_factor_tween: None,
             height_factor: None,
+            listened_controller: None,
         }
     }
 }
@@ -463,6 +464,10 @@ pub struct ExpansibleState {
     animation_controller: Option<Handle<AnimationController>>,
     height_factor_tween: Option<Handle<Tween<f64>>>,
     height_factor: Option<Handle<CurvedAnimation>>,
+    /// The widget's controller, kept while this state listens to it: Dart's `didUpdateWidget`
+    /// still reads the old controller after its owner disposed it, as the widget above does
+    /// when it swaps its own controller for one it is given.
+    listened_controller: Option<RetainedHandle<Handle<ExpansibleController>>>,
 }
 
 impl ExpansibleState {
@@ -594,6 +599,8 @@ impl State for ExpansibleState {
         state.height_factor_tween = Some(height_factor_tween);
         state.height_factor = Some(height_factor);
         controller.add_listener(app, Listener::handle_method(self, Self::toggle_expansion));
+        let listened_controller = app.retain(controller);
+        app.get_mut(self).listened_controller = Some(listened_controller);
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &Expansible) {
@@ -616,12 +623,20 @@ impl State for ExpansibleState {
         }
         let controller = self.widget(app).controller;
         if controller != old_widget.controller {
+            let listened_controller = app.retain(controller);
+            let old_listened_controller = app
+                .get_mut(self)
+                .listened_controller
+                .replace(listened_controller);
             old_widget
                 .controller
                 .remove_listener(app, &Listener::handle_method(self, Self::toggle_expansion));
             controller.add_listener(app, Listener::handle_method(self, Self::toggle_expansion));
             if old_widget.controller.is_expanded(app) != controller.is_expanded(app) {
                 self.toggle_expansion(app);
+            }
+            if let Some(old_listened_controller) = old_listened_controller {
+                app.release(old_listened_controller);
             }
         }
     }
@@ -633,6 +648,9 @@ impl State for ExpansibleState {
     fn dispose(self: Handle<Self>, app: &mut App) {
         let controller = self.widget(app).controller;
         controller.remove_listener(app, &Listener::handle_method(self, Self::toggle_expansion));
+        if let Some(listened_controller) = app.get_mut(self).listened_controller.take() {
+            app.release(listened_controller);
+        }
         let animation_controller = self.animation_controller(app);
         animation_controller.dispose(app);
         let height_factor = self.height_factor(app);

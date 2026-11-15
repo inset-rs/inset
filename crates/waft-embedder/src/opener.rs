@@ -83,7 +83,7 @@ impl OpenRequest {
 /// `path` as a `file:` URI, which [`file_uri_path`] reads back: made absolute against the working
 /// folder, its separators `/`, and every byte a URI's path may not hold as is percent-encoded. A Windows drive keeps its colon,
 /// and a Windows share is the URL's host.
-pub(crate) fn file_uri(path: &Path) -> String {
+pub fn file_uri(path: &Path) -> String {
     let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
     let written = uri_path_of(&path);
     let encoded = percent_encoded(&written);

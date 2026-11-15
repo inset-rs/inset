@@ -549,7 +549,7 @@ impl PaintingContext {
     }
 }
 
-fn shift_path(path: &Arc<Path>, offset: Offset) -> Arc<Path> {
+pub(crate) fn shift_path(path: &Arc<Path>, offset: Offset) -> Arc<Path> {
     if offset == Offset::ZERO {
         return Arc::clone(path);
     }

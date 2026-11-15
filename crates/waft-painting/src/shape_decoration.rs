@@ -18,29 +18,37 @@ use crate::colors::AnyColor;
 use crate::debug::debug_disable_shadows;
 use crate::decoration::{BoxPainter, Decoration};
 use crate::edge_insets::EdgeInsetsGeometry;
+use crate::gradient::Gradient;
 use crate::image_provider::ImageConfiguration;
 use crate::rounded_rectangle_border::RoundedRectangleBorder;
 
 /// An immutable description of how to paint an arbitrary shape.
 ///
 /// [`ShapeDecoration`] draws a [`ShapeBorder`], optionally filling it with a
-/// [`color`](Self::color) and optionally casting a shadow.
+/// [`color`](Self::color) or a [`gradient`](Self::gradient) and optionally casting a shadow.
 ///
 /// [`image`](https://api.flutter.dev/flutter/painting/ShapeDecoration/image.html)
-/// and [`gradient`](https://api.flutter.dev/flutter/painting/ShapeDecoration/gradient.html)
-/// are deferred (see PORTING.md).
+/// is deferred (see PORTING.md).
 pub struct ShapeDecoration {
     /// The color to fill in the background of the shape.
     ///
     /// The color is under the image (image paint is deferred).
+    ///
+    /// If a [`gradient`](Self::gradient) is specified, [`color`](Self::color) must be None.
     pub color: Option<AnyColor>,
+    /// A gradient to use when filling the shape.
+    ///
+    /// The gradient is under the image (image paint is deferred).
+    ///
+    /// If a [`color`](Self::color) is specified, [`gradient`](Self::gradient) must be None.
+    pub gradient: Option<Box<dyn Gradient>>,
     /// A list of shadows cast by the [`shape`](Self::shape).
     pub shadows: Option<Vec<BoxShadow>>,
-    /// The shape to fill the [`color`](Self::color) into and to cast as the
-    /// [`shadows`](Self::shadows).
+    /// The shape to fill the [`color`](Self::color) and [`gradient`](Self::gradient) into and
+    /// to cast as the [`shadows`](Self::shadows).
     ///
-    /// Shapes can be stacked (using `plus`). The color
-    /// is drawn into the inner-most shape specified.
+    /// Shapes can be stacked (using `plus`). The color and gradient
+    /// are drawn into the inner-most shape specified.
     ///
     /// The [`shape`](Self::shape) property specifies the outline (border) of the
     /// decoration.
@@ -55,11 +63,17 @@ impl ShapeDecoration {
     ///
     /// * If [`color`](Self::color) is None, this decoration does not paint a
     ///   background color.
+    /// * If [`gradient`](Self::gradient) is None, this decoration does not paint
+    ///   gradients.
     /// * If [`shadows`](Self::shadows) is None, this decoration does not paint a
     ///   shadow.
+    ///
+    /// The [`color`](Self::color) and [`gradient`](Self::gradient) properties are mutually
+    /// exclusive, one (or both) of them must be None.
     pub fn new(shape: impl Into<Box<dyn ShapeBorder>>) -> ShapeDecoration {
         ShapeDecoration {
             color: None,
+            gradient: None,
             shadows: None,
             shape: shape.into(),
         }
@@ -68,7 +82,21 @@ impl ShapeDecoration {
     /// The color to fill in the background of the shape.
     pub fn color(mut self, color: impl Into<AnyColor>) -> ShapeDecoration {
         self.color = Some(color.into());
+        self.debug_assert_color_or_gradient();
         self
+    }
+
+    /// A gradient to use when filling the shape.
+    pub fn gradient(mut self, gradient: impl Into<Box<dyn Gradient>>) -> ShapeDecoration {
+        self.gradient = Some(gradient.into());
+        self.debug_assert_color_or_gradient();
+        self
+    }
+
+    /// Dart's constructor `assert(!(color != null && gradient != null))`; it can only fail on
+    /// the second of the two setters, so it holds whichever order they come in.
+    fn debug_assert_color_or_gradient(&self) {
+        debug_assert!(!(self.color.is_some() && self.gradient.is_some()));
     }
 
     /// A list of shadows cast by the [`shape`](Self::shape).
@@ -121,23 +149,28 @@ impl ShapeDecoration {
                 }
             }
         };
-        ShapeDecoration {
-            color: source.color.clone(),
-            shadows: source.box_shadow.clone(),
+        ShapeDecoration::from_fields(
+            source.color.clone(),
+            source.gradient.clone(),
+            source.box_shadow.clone(),
             shape,
-        }
+        )
     }
 
     fn from_fields(
         color: Option<AnyColor>,
+        gradient: Option<Box<dyn Gradient>>,
         shadows: Option<Vec<BoxShadow>>,
         shape: Box<dyn ShapeBorder>,
     ) -> ShapeDecoration {
-        ShapeDecoration {
+        let decoration = ShapeDecoration {
             color,
+            gradient,
             shadows,
             shape,
-        }
+        };
+        decoration.debug_assert_color_or_gradient();
+        decoration
     }
 
     /// Creates a copy of this object. Chain setters to replace fields
@@ -174,13 +207,39 @@ impl ShapeDecoration {
                 return Some(b.clone());
             }
         }
+        // A ShapeDecoration's color and gradient are mutually exclusive (see the
+        // assert in the constructor). When interpolating between a decoration that
+        // uses a color and one that uses a gradient, represent the color as a
+        // uniform-color gradient (built from the other side's gradient) so the two
+        // can be interpolated smoothly as gradients, rather than producing both a
+        // color and a gradient at the same time.
+        // See https://github.com/flutter/flutter/issues/93953
+        let mut a_gradient = a.and_then(|a| a.gradient.clone());
+        let mut b_gradient = b.and_then(|b| b.gradient.clone());
+        if let (None, Some(b_gradient), Some(a_color)) =
+            (&a_gradient, &b_gradient, a.and_then(|a| a.color.as_ref()))
+        {
+            a_gradient = Some(b_gradient.from_color(a_color.color()));
+        } else if let (None, Some(a_gradient), Some(b_color)) =
+            (&b_gradient, &a_gradient, b.and_then(|b| b.color.as_ref()))
+        {
+            b_gradient = Some(a_gradient.from_color(b_color.color()));
+        }
+        let gradient = <dyn Gradient>::lerp(a_gradient.as_deref(), b_gradient.as_deref(), t);
         Some(ShapeDecoration::from_fields(
-            AnyColor::lerp(
-                a.and_then(|a| a.color.as_ref()),
-                b.and_then(|b| b.color.as_ref()),
-                t,
-            )
-            .map(AnyColor::from),
+            // color and gradient are mutually exclusive, so only fall back to a color
+            // when the interpolation did not produce a gradient.
+            if gradient.is_none() {
+                AnyColor::lerp(
+                    a.and_then(|a| a.color.as_ref()),
+                    b.and_then(|b| b.color.as_ref()),
+                    t,
+                )
+                .map(AnyColor::from)
+            } else {
+                None
+            },
+            gradient,
             BoxShadow::lerp_list(
                 a.and_then(|a| a.shadows.as_deref()),
                 b.and_then(|b| b.shadows.as_deref()),
@@ -196,6 +255,7 @@ impl Clone for ShapeDecoration {
     fn clone(&self) -> ShapeDecoration {
         ShapeDecoration {
             color: self.color.clone(),
+            gradient: self.gradient.clone(),
             shadows: self.shadows.clone(),
             shape: self.shape.clone_box(),
         }
@@ -205,6 +265,11 @@ impl Clone for ShapeDecoration {
 impl PartialEq for ShapeDecoration {
     fn eq(&self, other: &ShapeDecoration) -> bool {
         self.color == other.color
+            && match (self.gradient.as_deref(), other.gradient.as_deref()) {
+                (None, None) => true,
+                (Some(a), Some(b)) => a == b,
+                _ => false,
+            }
             && self.shadows == other.shadows
             && self.shape.eq_shape(other.shape.as_ref())
     }
@@ -301,6 +366,7 @@ impl Debug for ShapeDecoration {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         f.debug_struct("ShapeDecoration")
             .field("color", &self.color)
+            .field("gradient", &self.gradient)
             .field("shadows", &self.shadows)
             .field("shape", &self.shape)
             .finish()
@@ -345,12 +411,22 @@ impl ShapeDecorationPainter {
             return;
         }
 
-        if self.interior_paint.is_none() && self.decoration.color.is_some() {
+        // We reach here in two cases:
+        //  - the very first time we paint, in which case everything except decoration is None
+        //  - subsequent times, if the rect has changed, in which case we only need to update
+        //    the features that depend on the actual rect.
+        if self.interior_paint.is_none()
+            && (self.decoration.color.is_some() || self.decoration.gradient.is_some())
+        {
             let mut paint = Paint::default();
             if let Some(color) = &self.decoration.color {
                 paint.color = color.color().into();
             }
             self.interior_paint = Some(paint);
+        }
+        if let Some(gradient) = &self.decoration.gradient {
+            self.interior_paint.as_mut().unwrap().shader =
+                Some(gradient.create_shader(rect, text_direction));
         }
         if let Some(shadows) = self.decoration.shadows.as_ref() {
             if self.shadow_count.is_none() {
@@ -536,6 +612,7 @@ mod tests {
     use crate::border_radius::BorderRadiusDirectional;
     use crate::box_border::Border;
     use crate::circle_border::CircleBorder;
+    use crate::gradient::LinearGradient;
     use crate::oval_border::OvalBorder;
     use crate::rounded_rectangle_border::RoundedRectangleBorder;
 
@@ -610,6 +687,72 @@ mod tests {
                 ..crate::box_border::BorderDirectional::default()
             })
         );
+    }
+
+    #[test]
+    #[should_panic]
+    fn a_shape_decoration_cannot_have_both_a_colour_and_a_gradient() {
+        let color_r = Color::new(0xffff0000);
+        let color_g = Color::new(0xff00ff00);
+        let _ = ShapeDecoration::new(Border::default())
+            .color(color_r)
+            .gradient(LinearGradient::new(vec![color_r, color_g]));
+    }
+
+    #[test]
+    fn a_shape_decoration_lerps_smoothly_between_a_gradient_and_a_colour() {
+        let color_r = Color::new(0xffff0000);
+        let color_g = Color::new(0xff00ff00);
+        let color_decoration = ShapeDecoration::new(CircleBorder::default()).color(color_r);
+        let gradient_decoration = ShapeDecoration::new(RoundedRectangleBorder::default())
+            .gradient(LinearGradient::new(vec![color_r, color_g]));
+
+        // The end points are returned unchanged.
+        assert_eq!(
+            ShapeDecoration::lerp(Some(&color_decoration), Some(&gradient_decoration), 0.0),
+            Some(color_decoration.clone())
+        );
+        assert_eq!(
+            ShapeDecoration::lerp(Some(&color_decoration), Some(&gradient_decoration), 1.0),
+            Some(gradient_decoration.clone())
+        );
+
+        // In between, the color is represented as a uniform-color gradient, so the
+        // result is always a gradient (and never both a color and a gradient, which
+        // would otherwise throw the constructor's assertion).
+        let is_linear = |decoration: &ShapeDecoration| {
+            decoration
+                .gradient
+                .as_ref()
+                .is_some_and(|gradient| gradient.as_any().is::<LinearGradient>())
+        };
+        for t in [0.1, 0.25, 0.49, 0.5, 0.51, 0.75, 0.9] {
+            let forward =
+                ShapeDecoration::lerp(Some(&color_decoration), Some(&gradient_decoration), t)
+                    .unwrap();
+            assert!(forward.color.is_none());
+            assert!(is_linear(&forward), "{t}: {forward:?}");
+
+            // The reverse direction (gradient -> color) behaves the same way.
+            let reverse =
+                ShapeDecoration::lerp(Some(&gradient_decoration), Some(&color_decoration), t)
+                    .unwrap();
+            assert!(reverse.color.is_none());
+            assert!(is_linear(&reverse), "{t}: {reverse:?}");
+        }
+
+        // Close to the color end, the interpolated gradient is (almost) the uniform
+        // start color.
+        let near_color =
+            ShapeDecoration::lerp(Some(&color_decoration), Some(&gradient_decoration), 0.001)
+                .unwrap();
+        let gradient_near_color = near_color.gradient.as_ref().unwrap().colors();
+        assert_eq!(gradient_near_color.len(), 2);
+        for color in gradient_near_color {
+            assert!((color.r - color_r.r).abs() <= 0.05);
+            assert!((color.g - color_r.g).abs() <= 0.05);
+            assert!((color.b - color_r.b).abs() <= 0.05);
+        }
     }
 
     #[test]

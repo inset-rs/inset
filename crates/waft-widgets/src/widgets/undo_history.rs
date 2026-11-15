@@ -887,7 +887,7 @@ mod tests {
             focus_node,
             SizedBox::shrink(),
         )
-        .key(Rc::new(key.clone()));
+        .key(key.clone().into());
         let harness = Harness::mount(&mut app, widget.into_widget());
         harness.pump(&mut app);
         drop(app);

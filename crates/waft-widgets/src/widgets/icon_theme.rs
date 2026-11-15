@@ -1,13 +1,11 @@
 //! Flutter counterpart: `widgets/icon_theme.dart`.
-//!
-//! [`IconTheme`] is a plain inherited widget: the `InheritedTheme` capture (`wrap`,
-//! `captureAll`) waits.
 
 use waft_foundation::App;
 
 use crate::framework::{BuildContext, InheritedWidget, IntoWidget, KeyRef, WidgetRef};
 use crate::widgets::basic::Builder;
 use crate::widgets::icon_theme_data::IconThemeData;
+use crate::widgets::inherited_theme::InheritedTheme;
 
 /// Controls the default properties of icons in a widget subtree.
 ///
@@ -117,6 +115,16 @@ impl InheritedWidget for IconTheme {
     fn update_should_notify(&self, old_widget: &IconTheme) -> bool {
         self.data != old_widget.data
     }
+
+    fn as_inherited_theme(&self) -> Option<&dyn InheritedTheme> {
+        Some(self)
+    }
+}
+
+impl InheritedTheme for IconTheme {
+    fn wrap(&self, _app: &mut App, _context: BuildContext, child: WidgetRef) -> WidgetRef {
+        IconTheme::new(self.data.clone(), child).into_widget()
+    }
 }
 
 #[cfg(test)]
@@ -215,7 +223,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let (reader, seen) = reader();
         let red = Color::new(0xFFFF0000);
-        let key: KeyRef = Rc::new(ValueKey::new("merged"));
+        let key: KeyRef = ValueKey::new("merged").into();
         mount(
             &mut app,
             IconTheme::new(

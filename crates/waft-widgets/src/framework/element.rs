@@ -22,9 +22,10 @@ use waft_rendering::{AnyRenderObject, RenderHandle, RenderObject};
 use super::build_owner::{BuildOwner, BuildScope};
 use super::state::State;
 use super::widget::{
-    InheritedWidget, Widget, WidgetKind, WidgetRef, can_update, downcast_widget, global_key_id,
+    GlobalKey, InheritedWidget, KeyRef, Widget, WidgetKind, WidgetRef, can_update, downcast_widget,
     same_widget,
 };
+use crate::widgets::notification_listener::LayoutChangedNotification;
 use crate::widgets::scroll_notification::ScrollNotification;
 
 /// A handle to the location of a widget in the widget tree.
@@ -134,6 +135,18 @@ pub trait Notification: Any + Debug {
     /// This is Dart's `notification is ScrollNotification`, answered from the vtable as
     /// [`viewport_depth`](Self::viewport_depth) is, because the family is a trait.
     fn as_scroll_notification(&self) -> Option<&dyn ScrollNotification> {
+        None
+    }
+
+    /// The notification as a `LayoutChangedNotification`
+    /// (`widgets/notification_listener.rs`), for a
+    /// `NotificationListener<dyn LayoutChangedNotification>`; `None` — the default — for every
+    /// other notification.
+    ///
+    /// This is Dart's `notification is LayoutChangedNotification`, answered from the vtable as
+    /// [`as_scroll_notification`](Self::as_scroll_notification) is: every notification Dart
+    /// derives from `LayoutChangedNotification` answers it, scroll notifications included.
+    fn as_layout_changed_notification(&self) -> Option<&dyn LayoutChangedNotification> {
         None
     }
 
@@ -1209,7 +1222,7 @@ impl AnyElement {
 
         // Scan the old children in the middle of the list.
         let have_old_children = old_children_top as isize <= old_children_bottom;
-        let mut old_keyed_children: HashMap<KeyIdentity, AnyElement> = HashMap::new();
+        let mut old_keyed_children: HashMap<KeyRef, AnyElement> = HashMap::new();
         if have_old_children {
             while old_children_top as isize <= old_children_bottom {
                 let old_child = replace_with_null_if_forgotten(app, old_children[old_children_top]);
@@ -1219,7 +1232,7 @@ impl AnyElement {
                 if let Some(old_child) = old_child {
                     match old_child.widget(app).key().cloned() {
                         Some(key) => {
-                            old_keyed_children.insert(KeyIdentity(key), old_child);
+                            old_keyed_children.insert(key, old_child);
                         }
                         None => self.deactivate_child(app, old_child),
                     }
@@ -1232,16 +1245,15 @@ impl AnyElement {
         while new_children_top as isize <= new_children_bottom {
             let new_widget = &new_widgets[new_children_top];
             let mut old_child: Option<AnyElement> = None;
-            if have_old_children && let Some(key) = new_widget.key() {
-                let identity = KeyIdentity(key.clone());
-                if let Some(candidate) = old_keyed_children.get(&identity).copied()
-                    && can_update(&**candidate.widget(app), &**new_widget)
-                {
-                    // we found a match!
-                    // remove it from oldKeyedChildren so we don't unsync it later
-                    old_keyed_children.remove(&identity);
-                    old_child = Some(candidate);
-                }
+            if have_old_children
+                && let Some(key) = new_widget.key()
+                && let Some(candidate) = old_keyed_children.get(key).copied()
+                && can_update(&**candidate.widget(app), &**new_widget)
+            {
+                // we found a match!
+                // remove it from oldKeyedChildren so we don't unsync it later
+                old_keyed_children.remove(key);
+                old_child = Some(candidate);
             }
             debug_assert!(
                 old_child.is_none_or(|old| can_update(&**old.widget(app), &**new_widget))
@@ -1356,7 +1368,7 @@ impl AnyElement {
     fn retake_inactive_element(
         self,
         app: &mut App,
-        key: super::widget::GlobalKeyId,
+        key: &GlobalKey,
         new_widget: &WidgetRef,
     ) -> Option<AnyElement> {
         // The "inactivity" of the element being retaken here may be forward-looking: if
@@ -1871,23 +1883,6 @@ impl AnyElement {
     }
 }
 
-/// A widget key compared as Dart's `Map<Key, Element>` compares it.
-struct KeyIdentity(super::widget::KeyRef);
-
-impl PartialEq for KeyIdentity {
-    fn eq(&self, other: &KeyIdentity) -> bool {
-        *self.0 == *other.0
-    }
-}
-
-impl Eq for KeyIdentity {}
-
-impl Hash for KeyIdentity {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        (*self.0).hash(state);
-    }
-}
-
 fn activate_recursively(app: &mut App, element: AnyElement) {
     debug_assert!(element.lifecycle(app) == ElementLifecycle::Inactive);
     element.activate(app);
@@ -1958,8 +1953,8 @@ pub trait ElementBase: Element {
             data.parent_build_scope = parent_scope;
         }
         let owner = this.owner(app).expect("a mounted element has an owner");
-        if let Some(key) = this.widget(app).key().and_then(global_key_id) {
-            owner.register_global_key(app, key, this);
+        if let Some(KeyRef::Global(key)) = this.widget(app).key().cloned() {
+            owner.register_global_key(app, &key, this);
         }
         this.update_inheritance(app);
         this.attach_notification_tree(app);
@@ -2054,8 +2049,8 @@ pub trait ElementBase: Element {
         let owner = this
             .owner(app)
             .expect("an inactive element keeps its owner");
-        if let Some(key) = this.widget(app).key().and_then(global_key_id) {
-            owner.unregister_global_key(app, key, this);
+        if let Some(KeyRef::Global(key)) = this.widget(app).key().cloned() {
+            owner.unregister_global_key(app, &key, this);
         }
         // Release resources to reduce the severity of memory leaks caused by
         // defunct, but accidentally retained Elements.
@@ -2171,10 +2166,10 @@ pub trait ElementBase: Element {
         new_slot: Option<Slot>,
     ) -> AnyElement {
         let this = self.as_element();
-        let inactive_child = new_widget
-            .key()
-            .and_then(global_key_id)
-            .and_then(|key| this.retake_inactive_element(app, key, &new_widget));
+        let inactive_child = match new_widget.key() {
+            Some(KeyRef::Global(key)) => this.retake_inactive_element(app, key, &new_widget),
+            _ => None,
+        };
         match inactive_child {
             Some(inactive_child) => {
                 debug_assert!(inactive_child.parent(app).is_none());

@@ -4,8 +4,7 @@
 //! in hand. Everything a provider needs — the cache, the decode — is below in painting, so this
 //! layer is only about listening for the frame and rebuilding when it arrives.
 //!
-//! `precacheImage`, the frame-by-frame and loading builders, and the semantics wrapper are not
-//! here; see `PORTING.md`.
+//! `precacheImage` and the frame-by-frame and loading builders are not here; see `PORTING.md`.
 
 use std::rc::Rc;
 
@@ -21,7 +20,7 @@ use crate::framework::{
     BuildContext, IntoWidget, KeyRef, LeafRenderObjectWidget, RenderObjectWidget, State, StateData,
     StatefulWidget, WidgetRef,
 };
-use crate::widgets::basic::Directionality;
+use crate::widgets::basic::{Directionality, Semantics};
 use crate::widgets::localizations::Localizations;
 use crate::widgets::media_query::MediaQuery;
 
@@ -283,6 +282,16 @@ pub struct Image {
     pub repeat: ImageRepeat,
     /// Whether to mirror it in a right-to-left layout.
     pub match_text_direction: bool,
+    /// A Semantic description of the image.
+    ///
+    /// Used to provide a description of the image to TalkBack on Android, and
+    /// VoiceOver on iOS.
+    pub semantic_label: Option<String>,
+    /// Whether to exclude this image from semantics.
+    ///
+    /// Useful for images which do not contribute meaningful information to an
+    /// application.
+    pub exclude_from_semantics: bool,
 }
 
 impl Image {
@@ -298,6 +307,8 @@ impl Image {
             alignment: Alignment::CENTER,
             repeat: ImageRepeat::NoRepeat,
             match_text_direction: false,
+            semantic_label: None,
+            exclude_from_semantics: false,
         }
     }
 
@@ -356,6 +367,21 @@ impl Image {
     /// Dart `Image(matchTextDirection:)`.
     pub fn match_text_direction(mut self, match_text_direction: bool) -> Image {
         self.match_text_direction = match_text_direction;
+        self
+    }
+
+    /// Dart `Image(semanticLabel:)`.
+    ///
+    /// If [`exclude_from_semantics`](Self::exclude_from_semantics) is true, then
+    /// [`semantic_label`](Self::semantic_label) will be ignored.
+    pub fn semantic_label(mut self, semantic_label: impl Into<String>) -> Image {
+        self.semantic_label = Some(semantic_label.into());
+        self
+    }
+
+    /// Dart `Image(excludeFromSemantics:)`.
+    pub fn exclude_from_semantics(mut self, exclude_from_semantics: bool) -> Image {
+        self.exclude_from_semantics = exclude_from_semantics;
         self
     }
 }
@@ -487,7 +513,18 @@ impl State for ImageState {
         if let Some(fit) = widget.fit {
             raw = raw.fit(fit);
         }
-        raw.into_widget()
+        let mut result = raw.into_widget();
+
+        if !widget.exclude_from_semantics {
+            result = Semantics::new()
+                .container(widget.semantic_label.is_some())
+                .image(true)
+                .label(widget.semantic_label.clone().unwrap_or_default())
+                .child(result)
+                .into_widget();
+        }
+
+        result
     }
 }
 

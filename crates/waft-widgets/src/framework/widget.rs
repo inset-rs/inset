@@ -7,7 +7,7 @@ use std::fmt::{self, Debug};
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
-use waft_foundation::{App, Key};
+use waft_foundation::{App, HandleId, Key};
 use waft_rendering::{
     AnyRenderObject, ContainerRenderObjectMixin, ParentData, RenderHandle, RenderObject,
     RenderObjectWithChildMixin,
@@ -19,9 +19,71 @@ use super::elements::{
     SingleChildRenderObjectElement, StatefulElement, StatelessElement,
 };
 use super::state::State;
+use crate::widgets::inherited_theme::InheritedTheme;
 
-/// A shared key (Dart's `Key?` on a widget).
-pub type KeyRef = Rc<dyn Key>;
+/// A widget's key (Dart's `Key?` on a widget): a local key, or a [`GlobalKey`], which is a
+/// key the element tree registers.
+///
+/// Every key type converts into it with `.into()`: a [`GlobalKey`] into
+/// [`Global`](Self::Global), any other [`Key`] (including an app's own) into
+/// [`Local`](Self::Local).
+#[derive(Clone)]
+pub enum KeyRef {
+    /// A key the element tree does not register (Dart's `LocalKey`).
+    Local(Rc<dyn Key>),
+    /// A key the element tree registers (Dart's `GlobalKey`).
+    Global(GlobalKey),
+}
+
+impl KeyRef {
+    /// The key that decides how this key compares.
+    pub fn key(&self) -> &dyn Key {
+        match self {
+            KeyRef::Local(key) => &**key,
+            KeyRef::Global(global) => global.key(),
+        }
+    }
+}
+
+impl PartialEq for KeyRef {
+    fn eq(&self, other: &KeyRef) -> bool {
+        match (self, other) {
+            (KeyRef::Local(a), KeyRef::Local(b)) => **a == **b,
+            (KeyRef::Global(a), KeyRef::Global(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for KeyRef {}
+
+impl Hash for KeyRef {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        std::mem::discriminant(self).hash(state);
+        self.key().hash(state);
+    }
+}
+
+impl Debug for KeyRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            KeyRef::Local(key) => key.fmt(f),
+            KeyRef::Global(global) => global.fmt(f),
+        }
+    }
+}
+
+impl<K: Key> From<K> for KeyRef {
+    fn from(key: K) -> KeyRef {
+        KeyRef::Local(Rc::new(key))
+    }
+}
+
+impl From<GlobalKey> for KeyRef {
+    fn from(key: GlobalKey) -> KeyRef {
+        KeyRef::Global(key)
+    }
+}
 
 /// A shared, immutable widget (Dart's `Widget` reference).
 pub type WidgetRef = Rc<dyn Widget>;
@@ -52,9 +114,27 @@ pub trait Widget: Any + Debug {
     /// The concrete widget's type, Dart's `runtimeType`.
     fn widget_type(&self) -> TypeId;
 
+    /// The concrete widget's type name, as Dart's `runtimeType` prints in a message: the
+    /// type's own name without its module path.
+    ///
+    /// The default names `Self`, so an erased form overrides it with
+    /// [`short_type_name`]`::<W>()` of the widget it wraps.
+    fn type_name(&self) -> &'static str {
+        short_type_name::<Self>()
+    }
+
     /// The kind of element this widget inflates to, for `Element.updateChild`'s superclass
     /// check.
     fn kind(&self) -> WidgetKind;
+
+    /// Dart's `widget is InheritedTheme`: this widget as an [`InheritedTheme`], when it is one.
+    ///
+    /// Only the erased form of an inherited widget forwards it, from
+    /// [`InheritedWidget::as_inherited_theme`]; `InheritedTheme::capture` also checks that the
+    /// ancestor is an inherited element, as Dart's pattern does.
+    fn as_inherited_theme(&self) -> Option<&dyn InheritedTheme> {
+        None
+    }
 }
 
 /// Dart's `Widget._debugConcreteSubtype` classes.
@@ -83,7 +163,7 @@ pub fn can_update(old_widget: &dyn Widget, new_widget: &dyn Widget) -> bool {
 pub fn keys_equal(a: Option<&KeyRef>, b: Option<&KeyRef>) -> bool {
     match (a, b) {
         (None, None) => true,
-        (Some(a), Some(b)) => **a == **b,
+        (Some(a), Some(b)) => a == b,
         _ => false,
     }
 }
@@ -96,6 +176,17 @@ pub fn same_widget(a: &WidgetRef, b: &WidgetRef) -> bool {
 /// Dart's `widget as W`: the concrete widget behind a [`WidgetRef`], when it is a `W`.
 pub fn downcast_widget<W: 'static>(widget: &dyn Widget) -> Option<&W> {
     widget.as_any().downcast_ref::<W>()
+}
+
+/// `W`'s name as Dart's `runtimeType` prints it, for [`Widget::type_name`]: the module path
+/// before the type's own name is cut, and the type arguments are kept as Rust writes them.
+pub fn short_type_name<W: ?Sized>() -> &'static str {
+    let name = std::any::type_name::<W>();
+    let type_arguments = name.find('<').unwrap_or(name.len());
+    let own_name = name[..type_arguments]
+        .rfind("::")
+        .map_or(0, |path_end| path_end + 2);
+    &name[own_name..]
 }
 
 /// The conversion of a widget value into a tree node.
@@ -131,6 +222,14 @@ pub trait StatelessWidget: Debug + 'static {
         None
     }
 
+    /// Dart's constructor asserts that relate two or more arguments.
+    ///
+    /// A fluent chain of setters has seen every argument only once it ends, so the framework
+    /// calls this in a debug build when the widget is turned into a [`WidgetRef`]
+    /// (`into_widget`), and a bad combination panics where the widget is handed to the tree.
+    /// An assert on one argument stays in that argument's setter.
+    fn debug_check_constructor(&self) {}
+
     /// Describes the part of the user interface represented by this widget.
     ///
     /// The framework calls this method when this widget is inserted into the tree in a given
@@ -148,6 +247,9 @@ pub struct Stateless<W: StatelessWidget>(pub W);
 
 impl<W: StatelessWidget> IntoWidget<StatelessKind> for W {
     fn into_widget(self) -> WidgetRef {
+        if cfg!(debug_assertions) {
+            self.debug_check_constructor();
+        }
         Rc::new(Stateless(self))
     }
 }
@@ -167,6 +269,10 @@ impl<W: StatelessWidget> Widget for Stateless<W> {
 
     fn widget_type(&self) -> TypeId {
         TypeId::of::<W>()
+    }
+
+    fn type_name(&self) -> &'static str {
+        short_type_name::<W>()
     }
 
     fn kind(&self) -> WidgetKind {
@@ -204,6 +310,15 @@ pub trait StatefulWidget: Debug + 'static {
         None
     }
 
+    /// See [`StatelessWidget::debug_check_constructor`].
+    fn debug_check_constructor(&self) {}
+
+    /// See [`Widget::type_name`]. A stateful form another widget kind becomes (an animated or
+    /// status transition widget) names the widget it wraps.
+    fn type_name(&self) -> &'static str {
+        short_type_name::<Self>()
+    }
+
     /// Creates the mutable state for this widget at a given location in the tree.
     ///
     /// The framework can call this method multiple times over the lifetime of a
@@ -223,6 +338,9 @@ pub struct Stateful<W: StatefulWidget>(pub W);
 
 impl<W: StatefulWidget> IntoWidget<StatefulKind> for W {
     fn into_widget(self) -> WidgetRef {
+        if cfg!(debug_assertions) {
+            self.debug_check_constructor();
+        }
         Rc::new(Stateful(self))
     }
 }
@@ -242,6 +360,10 @@ impl<W: StatefulWidget> Widget for Stateful<W> {
 
     fn widget_type(&self) -> TypeId {
         TypeId::of::<W>()
+    }
+
+    fn type_name(&self) -> &'static str {
+        StatefulWidget::type_name(&self.0)
     }
 
     fn kind(&self) -> WidgetKind {
@@ -271,6 +393,9 @@ pub trait InheritedWidget: Debug + 'static {
         None
     }
 
+    /// See [`StatelessWidget::debug_check_constructor`].
+    fn debug_check_constructor(&self) {}
+
     /// The widget below this widget in the tree.
     fn child(&self) -> &WidgetRef;
 
@@ -285,6 +410,12 @@ pub trait InheritedWidget: Debug + 'static {
     /// previously occupied this location in the tree as an argument. The given widget is
     /// guaranteed to have the same `runtimeType` as this object.
     fn update_should_notify(&self, old_widget: &Self) -> bool;
+
+    /// Dart's `this is InheritedTheme`: an inherited widget that is an [`InheritedTheme`]
+    /// answers with itself, which is what `InheritedTheme::capture` collects.
+    fn as_inherited_theme(&self) -> Option<&dyn InheritedTheme> {
+        None
+    }
 }
 
 /// The kind tag of [`IntoWidget`] for an [`InheritedWidget`].
@@ -295,6 +426,9 @@ pub struct Inherited<W: InheritedWidget>(pub W);
 
 impl<W: InheritedWidget> IntoWidget<InheritedKind> for W {
     fn into_widget(self) -> WidgetRef {
+        if cfg!(debug_assertions) {
+            self.debug_check_constructor();
+        }
         Rc::new(Inherited(self))
     }
 }
@@ -316,8 +450,16 @@ impl<W: InheritedWidget> Widget for Inherited<W> {
         TypeId::of::<W>()
     }
 
+    fn type_name(&self) -> &'static str {
+        short_type_name::<W>()
+    }
+
     fn kind(&self) -> WidgetKind {
         WidgetKind::Other
+    }
+
+    fn as_inherited_theme(&self) -> Option<&dyn InheritedTheme> {
+        self.0.as_inherited_theme()
     }
 }
 
@@ -341,6 +483,9 @@ pub trait ParentDataWidget: Debug + 'static {
     fn key(&self) -> Option<&KeyRef> {
         None
     }
+
+    /// See [`StatelessWidget::debug_check_constructor`].
+    fn debug_check_constructor(&self) {}
 
     /// The widget below this widget in the tree.
     fn child(&self) -> &WidgetRef;
@@ -388,6 +533,9 @@ pub struct ParentDataWrapper<W: ParentDataWidget>(pub W);
 
 impl<W: ParentDataWidget> IntoWidget<ParentDataKind> for W {
     fn into_widget(self) -> WidgetRef {
+        if cfg!(debug_assertions) {
+            self.debug_check_constructor();
+        }
         Rc::new(ParentDataWrapper(self))
     }
 }
@@ -407,6 +555,10 @@ impl<W: ParentDataWidget> Widget for ParentDataWrapper<W> {
 
     fn widget_type(&self) -> TypeId {
         TypeId::of::<W>()
+    }
+
+    fn type_name(&self) -> &'static str {
+        short_type_name::<W>()
     }
 
     fn kind(&self) -> WidgetKind {
@@ -434,6 +586,9 @@ pub trait RenderObjectWidget: Debug + 'static {
     fn key(&self) -> Option<&KeyRef> {
         None
     }
+
+    /// See [`StatelessWidget::debug_check_constructor`].
+    fn debug_check_constructor(&self) {}
 
     /// Creates an instance of the `RenderObject` class that this widget represents, using the
     /// configuration described by this widget.
@@ -486,6 +641,9 @@ pub struct LeafRenderObject<W: LeafRenderObjectWidget>(pub W);
 
 impl<W: LeafRenderObjectWidget> IntoWidget<LeafRenderObjectKind> for W {
     fn into_widget(self) -> WidgetRef {
+        if cfg!(debug_assertions) {
+            RenderObjectWidget::debug_check_constructor(&self);
+        }
         Rc::new(LeafRenderObject(self))
     }
 }
@@ -505,6 +663,10 @@ impl<W: LeafRenderObjectWidget> Widget for LeafRenderObject<W> {
 
     fn widget_type(&self) -> TypeId {
         TypeId::of::<W>()
+    }
+
+    fn type_name(&self) -> &'static str {
+        short_type_name::<W>()
     }
 
     fn kind(&self) -> WidgetKind {
@@ -556,6 +718,9 @@ where
     W::RenderObject: RenderObjectWithChildMixin,
 {
     fn into_widget(self) -> WidgetRef {
+        if cfg!(debug_assertions) {
+            RenderObjectWidget::debug_check_constructor(&self);
+        }
         Rc::new(SingleChildRenderObject(self))
     }
 }
@@ -578,6 +743,10 @@ where
 
     fn widget_type(&self) -> TypeId {
         TypeId::of::<W>()
+    }
+
+    fn type_name(&self) -> &'static str {
+        short_type_name::<W>()
     }
 
     fn kind(&self) -> WidgetKind {
@@ -646,6 +815,9 @@ where
     W::RenderObject: ContainerRenderObjectMixin,
 {
     fn into_widget(self) -> WidgetRef {
+        if cfg!(debug_assertions) {
+            RenderObjectWidget::debug_check_constructor(&self);
+        }
         Rc::new(MultiChildRenderObject(self))
     }
 }
@@ -668,6 +840,10 @@ where
 
     fn widget_type(&self) -> TypeId {
         TypeId::of::<W>()
+    }
+
+    fn type_name(&self) -> &'static str {
+        short_type_name::<W>()
     }
 
     fn kind(&self) -> WidgetKind {
@@ -702,43 +878,60 @@ where
 /// will trigger a call to `State::deactivate` on the associated [`State`] and all of its
 /// descendants; then force all widgets that depends on an `InheritedWidget` to rebuild.
 ///
-/// Two global keys are equal only when they are the same key (Dart's `LabeledGlobalKey`).
-/// Dart's type argument names the state; here [`current_state`](Self::current_state) does.
+/// A global key is a key the element tree registers: it compares and hashes as the [`Key`] it
+/// wraps, and the registry maps it to its element as Dart's `Map<GlobalKey, Element>` does.
+/// [`new`](Self::new) and [`labeled`](Self::labeled) compare by themselves (Dart's
+/// `LabeledGlobalKey`), [`object`](Self::object) by an object (Dart's `GlobalObjectKey`), and
+/// [`wrapping`](Self::wrapping) as the key it is given (Dart's subclasses that override `==`).
+/// Cloning shares the key. Dart's type argument names the state; here
+/// [`current_state`](Self::current_state) does.
 #[derive(Clone)]
 pub struct GlobalKey {
-    id: Rc<GlobalKeyIdentity>,
-    debug_label: Option<String>,
+    key: Rc<dyn Key>,
 }
 
-/// The identity a [`GlobalKey`] compares by; one allocation per key.
-struct GlobalKeyIdentity;
-
 impl GlobalKey {
-    /// Creates a global key.
+    /// Creates a global key that is equal only to itself and its clones; Dart's factory
+    /// `GlobalKey()`, a `LabeledGlobalKey` without a label.
     #[expect(
         clippy::new_without_default,
         reason = "each call creates a distinct key; Default would suggest a neutral value"
     )]
     pub fn new() -> GlobalKey {
-        GlobalKey {
-            id: Rc::new(GlobalKeyIdentity),
-            debug_label: None,
-        }
+        GlobalKey::wrapping(Rc::new(LabeledGlobalKeyValue::new(None)))
     }
 
     /// Creates a global key with a debugging label (Dart's `LabeledGlobalKey`).
     ///
     /// The label does not affect the key's identity.
     pub fn labeled(debug_label: impl Into<String>) -> GlobalKey {
-        GlobalKey {
-            id: Rc::new(GlobalKeyIdentity),
-            debug_label: Some(debug_label.into()),
-        }
+        GlobalKey::wrapping(Rc::new(LabeledGlobalKeyValue::new(Some(
+            debug_label.into(),
+        ))))
     }
 
-    /// The registry identity every global key compares by.
-    pub fn identity(&self) -> GlobalKeyId {
-        GlobalKeyId(Rc::as_ptr(&self.id) as usize)
+    /// Creates a global key that uses the identity of `value` for its `==` (Dart's
+    /// `GlobalObjectKey`).
+    ///
+    /// An object's identity is its [`Handle`](waft_foundation::Handle): Dart's
+    /// `GlobalObjectKey(this)` in a `State` is `GlobalKey::object(self.id())`.
+    pub fn object(value: impl Into<HandleId>) -> GlobalKey {
+        GlobalKey::wrapping(Rc::new(GlobalObjectKeyValue {
+            value: value.into(),
+        }))
+    }
+
+    /// Creates a global key that compares and hashes as `key`: Dart's `GlobalKey` subclasses
+    /// that override `==` and `hashCode`, such as `_ReorderableItemGlobalKey`.
+    ///
+    /// Two global keys wrapping equal keys name the same element.
+    pub fn wrapping(key: Rc<dyn Key>) -> GlobalKey {
+        GlobalKey { key }
+    }
+
+    /// The key this global key compares and hashes as.
+    pub fn key(&self) -> &dyn Key {
+        &*self.key
     }
 
     /// The build context in which the widget with this key builds.
@@ -770,42 +963,137 @@ impl GlobalKey {
 
     fn current_element(&self, app: &mut App) -> Option<AnyElement> {
         let owner = crate::binding::current_build_owner(app)?;
-        owner.global_key_element(app, self.identity())
+        owner.global_key_element(app, self)
     }
 }
 
-impl Key for GlobalKey {
-    fn eq_key(&self, other: &dyn Key) -> bool {
-        (other as &dyn Any)
-            .downcast_ref::<GlobalKey>()
-            .is_some_and(|other| Rc::ptr_eq(&self.id, &other.id))
+impl PartialEq for GlobalKey {
+    fn eq(&self, other: &GlobalKey) -> bool {
+        *self.key == *other.key
     }
+}
 
-    fn hash_key(&self, mut state: &mut dyn Hasher) {
-        self.identity().hash(&mut state);
+impl Eq for GlobalKey {}
+
+impl Hash for GlobalKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.key.hash(state);
     }
 }
 
 impl Debug for GlobalKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.debug_label {
-            Some(label) => write!(
-                f,
-                "[GlobalKey#{:05x} {label}]",
-                self.identity().0 & 0xF_FFFF
-            ),
-            None => write!(f, "[GlobalKey#{:05x}]", self.identity().0 & 0xF_FFFF),
+        self.key.fmt(f)
+    }
+}
+
+/// What a [`GlobalKey::new`] or [`GlobalKey::labeled`] key compares by: itself (Dart's
+/// `LabeledGlobalKey`).
+struct LabeledGlobalKeyValue {
+    unique: waft_foundation::UniqueKey,
+    debug_label: Option<String>,
+}
+
+impl LabeledGlobalKeyValue {
+    fn new(debug_label: Option<String>) -> LabeledGlobalKeyValue {
+        LabeledGlobalKeyValue {
+            unique: waft_foundation::UniqueKey::new(),
+            debug_label,
         }
     }
 }
 
-/// The identity of a [`GlobalKey`], as the `BuildOwner` registers it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct GlobalKeyId(usize);
+impl Key for LabeledGlobalKeyValue {
+    fn eq_key(&self, other: &dyn Key) -> bool {
+        (other as &dyn Any)
+            .downcast_ref::<LabeledGlobalKeyValue>()
+            .is_some_and(|other| other.unique == self.unique)
+    }
 
-/// Dart's `key is GlobalKey`: the registry identity when a key is a global key.
-pub fn global_key_id(key: &KeyRef) -> Option<GlobalKeyId> {
-    ((&**key) as &dyn Any)
-        .downcast_ref::<GlobalKey>()
-        .map(GlobalKey::identity)
+    fn hash_key(&self, mut state: &mut dyn Hasher) {
+        TypeId::of::<LabeledGlobalKeyValue>().hash(&mut state);
+        self.unique.hash(&mut state);
+    }
+}
+
+impl Debug for LabeledGlobalKeyValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let id = std::ptr::from_ref(self) as usize & 0xF_FFFF;
+        match &self.debug_label {
+            Some(label) => write!(f, "[GlobalKey#{id:05x} {label}]"),
+            None => write!(f, "[GlobalKey#{id:05x}]"),
+        }
+    }
+}
+
+/// What a [`GlobalKey::object`] key compares by: an object's identity (Dart's
+/// `GlobalObjectKey`).
+struct GlobalObjectKeyValue {
+    value: HandleId,
+}
+
+impl Key for GlobalObjectKeyValue {
+    fn eq_key(&self, other: &dyn Key) -> bool {
+        (other as &dyn Any)
+            .downcast_ref::<GlobalObjectKeyValue>()
+            .is_some_and(|other| other.value == self.value)
+    }
+
+    fn hash_key(&self, mut state: &mut dyn Hasher) {
+        TypeId::of::<GlobalObjectKeyValue>().hash(&mut state);
+        self.value.hash(&mut state);
+    }
+}
+
+impl Debug for GlobalObjectKeyValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "[GlobalObjectKey {:?}]", self.value)
+    }
+}
+
+/// A key that uses the identity of an object as its value (Dart's `ObjectKey`).
+///
+/// Used to tie the identity of a widget to the identity of an object used to generate that
+/// widget. An object's identity is its [`Handle`](waft_foundation::Handle): pass
+/// `Some(handle.id())`.
+///
+/// See also:
+///
+///  * [`waft_foundation::Key`], the base trait for all keys.
+///  * The discussion at `Widget.key` for more information about how widgets use keys.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ObjectKey {
+    /// The object whose identity is used by this key's `==`.
+    pub value: Option<HandleId>,
+}
+
+impl ObjectKey {
+    /// Creates a key that uses the identity of `value` for its `==`.
+    pub const fn new(value: Option<HandleId>) -> ObjectKey {
+        ObjectKey { value }
+    }
+}
+
+impl Key for ObjectKey {
+    fn eq_key(&self, other: &dyn Key) -> bool {
+        (other as &dyn Any)
+            .downcast_ref::<ObjectKey>()
+            .is_some_and(|other| other.value == self.value)
+    }
+
+    fn hash_key(&self, mut state: &mut dyn Hasher) {
+        TypeId::of::<ObjectKey>().hash(&mut state);
+        self.value.hash(&mut state);
+    }
+}
+
+impl waft_foundation::LocalKey for ObjectKey {}
+
+impl Debug for ObjectKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.value {
+            Some(value) => write!(f, "[{value:?}]"),
+            None => f.write_str("[null]"),
+        }
+    }
 }

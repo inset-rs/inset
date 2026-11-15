@@ -30,7 +30,7 @@ impl<C: EmbedderClient> MainLoop<C> {
         request: WindowRequest,
     ) {
         match request {
-            WindowRequest::Open(requested) => self.open_window(event_loop, requested),
+            WindowRequest::Open(requested) => self.open_window(event_loop, *requested),
             WindowRequest::Close(id) => self.close_window(id),
             WindowRequest::ChangeFocus(change) => self.change_view_focus(change),
         }

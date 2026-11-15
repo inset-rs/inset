@@ -1,0 +1,44 @@
+[package]
+name = "material-gallery"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[package.metadata.waft]
+identifier = "rs.waft.material-gallery"
+name = "Material gallery"
+
+# Named apart from the binary: on Windows a cdylib and a binary of one name write the same
+# `.pdb`.
+[lib]
+name = "material_gallery_lib"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+waft.workspace = true
+waft-embedder.workspace = true
+waft-embedder-default.workspace = true
+waft-foundation.workspace = true
+waft-material.workspace = true
+waft-painting.workspace = true
+# The flex enums (`MainAxisAlignment`, `CrossAxisAlignment`) live here, as Flutter's do in
+# `rendering/`; waft-widgets re-exports the widget half only.
+waft-rendering.workspace = true
+waft-shell.workspace = true
+waft-widgets.workspace = true
+
+[[bin]]
+name = "material-gallery"
+path = "src/main.rs"
+
+[dev-dependencies]
+waft-test.workspace = true
+waft-gestures.workspace = true
+waft-scheduler.workspace = true
+valo-system-fonts.workspace = true
+
+[lints]
+workspace = true

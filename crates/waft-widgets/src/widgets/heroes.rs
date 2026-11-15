@@ -654,7 +654,7 @@ impl State for HeroState {
                     .offstage(show_placeholder)
                     .child(TickerMode::new(
                         !show_placeholder,
-                        KeyedSubtree::new(child).key(Rc::new(key)),
+                        KeyedSubtree::new(child).key(key.into()),
                     )),
             )
             .into_widget()
@@ -1848,11 +1848,9 @@ mod tests {
             TextDirection::Ltr,
             HeroControllerScope::new(
                 controller,
-                Navigator::new()
-                    .key(Rc::new(key.clone()))
-                    .on_generate_route(move |app, _settings| {
-                        Some(hero_route(app, "/", first_page.clone()).as_route())
-                    }),
+                Navigator::new().key(key.clone().into()).on_generate_route(
+                    move |app, _settings| Some(hero_route(app, "/", first_page.clone()).as_route()),
+                ),
             ),
         )
         .into_widget()

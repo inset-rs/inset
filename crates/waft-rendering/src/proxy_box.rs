@@ -1,10 +1,13 @@
 //! Flutter counterpart: `rendering/proxy_box.dart` (`RenderProxyBoxMixin`,
 //! `HitTestBehavior`, `RenderConstrainedBox`, `RenderLimitedBox`, `RenderOpacity`,
 //! `RenderAnimatedOpacityMixin`, `RenderAnimatedOpacity`, `CustomClipper`,
-//! `RenderCustomClip`, `RenderClipRect`, `RenderClipRRect`, `RenderPointerListener`,
+//! `RenderCustomClip`, `RenderClipRect`, `RenderClipRRect`, `RenderPhysicalModel`,
+//! `RenderPhysicalShape`, `RenderPointerListener`,
 //! `DecorationPosition`, `RenderDecoratedBox`, `RenderTransform`,
 //! `RenderFractionalTranslation`, `RenderRepaintBoundary`, `RenderMouseRegion`,
-//! `RenderIgnorePointer`, `RenderOffstage`, `RenderAbsorbPointer`, `RenderAnnotatedRegion`),
+//! `RenderIgnorePointer`, `RenderOffstage`, `RenderAbsorbPointer`, `RenderSemanticsAnnotations`,
+//! `RenderBlockSemantics`, `RenderMergeSemantics`, `RenderExcludeSemantics`,
+//! `RenderIndexedSemantics`, `RenderAnnotatedRegion`),
 //! plus
 //! `widgets/basic.dart`'s `_RenderColoredBox`.
 //!
@@ -15,9 +18,11 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use waft_animation::AnyAnimation;
+use waft_embedder::Locale;
 use waft_embedder::{
-    BlendMode, Clip, Color, FillRule, ImageFilter, Matrix4, Offset, Paint, Path, PathBuilder,
-    RRect, RSuperellipse, Rect, Size, TextBaseline, rsuperellipse_radii_elliptical, valo::Point,
+    BlendMode, Clip, Color, FillRule, ImageFilter, Matrix4, Offset, Paint, PaintStyle, Path,
+    PathBuilder, RRect, RSuperellipse, Rect, Size, Stroke, TextBaseline, rrect_radii_elliptical,
+    rsuperellipse_radii_elliptical, valo, valo::Point,
 };
 use waft_foundation::{App, Handle, Listenable, Listener};
 use waft_gestures::{
@@ -27,8 +32,9 @@ use waft_gestures::{
     PointerPanZoomUpdateEventListener, PointerSignalEventListener, PointerUpEventListener,
 };
 use waft_painting::{
-    Alignment, AlignmentGeometry, BorderRadiusGeometry, BoxFit, BoxPainter, ClipContext,
-    Decoration, ImageConfiguration, ShapeBorder, TextDirection, apply_box_fit, get_as_translation,
+    Alignment, AlignmentGeometry, BorderRadius, BorderRadiusGeometry, BoxFit, BoxPainter, BoxShape,
+    ClipContext, Decoration, ImageConfiguration, ShapeBorder, TextDirection, apply_box_fit,
+    debug_disable_shadows, draw_rrect, get_as_translation,
 };
 use waft_services::{MouseCursor, MouseCursorRef, MouseTrackerAnnotation};
 
@@ -47,8 +53,11 @@ use crate::object::{
     AnyRenderObject, Constraints, EmptyParentData, RenderHandle, RenderObject, RenderObjectData,
     RenderObjectWithChildData, RenderObjectWithChildMixin,
 };
-use crate::painting_context::PaintingContext;
+use crate::painting_context::{PaintingContext, shift_path};
 use crate::pipeline_owner::PipelineOwner;
+use crate::semantics::SemanticsProperties;
+use crate::semantics_annotations::{SemanticsAnnotationsData, SemanticsAnnotationsMixin};
+use crate::view::RenderView;
 
 /// A base class for render boxes that resemble their children.
 ///
@@ -563,6 +572,11 @@ impl RenderObject for RenderOpacity {
         };
         layer.set_alpha(app, self.get(app).alpha);
         layer.as_offset_layer()
+    }
+
+    fn paints_child(self: RenderHandle<Self>, app: &App, child: AnyRenderObject) -> bool {
+        debug_assert!(child.parent(app) == Some(self.as_object()));
+        self.get(app).alpha > 0
     }
 
     fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
@@ -1208,8 +1222,8 @@ impl Default for RenderAnimatedOpacityData {
 /// layout models, e.g. the way that [`RenderAnimatedOpacity`] uses it for
 /// [`RenderBox`] and `RenderSliverAnimatedOpacity` uses it for `RenderSliver`.
 ///
-/// The host wires the virtuals: `is_repaint_boundary`, `update_composited_layer`, `did_attach`,
-/// `did_detach`, and `paint` call the same-named functions here.
+/// The host wires the virtuals: `is_repaint_boundary`, `update_composited_layer`,
+/// `paints_child`, `did_attach`, `did_detach`, and `paint` call the same-named functions here.
 pub trait RenderAnimatedOpacityMixin:
     RenderObjectWithChildMixin<ChildType = AnyRenderBox> + RenderBox
 {
@@ -1314,6 +1328,12 @@ pub trait RenderAnimatedOpacityMixin:
         }
     }
 
+    /// Flutter's `paintsChild`: the child is painted while the opacity is above zero.
+    fn paints_child(self: RenderHandle<Self>, app: &App, child: AnyRenderObject) -> bool {
+        debug_assert!(child.parent(app) == Some(self.as_object()));
+        self.opacity(app).value(app) > 0.0
+    }
+
     /// Flutter's `paint`: nothing when fully transparent, else the proxy paint.
     fn paint(self: RenderHandle<Self>, app: &mut App, context: &mut PaintingContext, offset: Offset)
     where
@@ -1406,6 +1426,10 @@ impl RenderObject for RenderAnimatedOpacity {
         old_layer: Option<crate::AnyOffsetLayer>,
     ) -> crate::AnyOffsetLayer {
         RenderAnimatedOpacityMixin::update_composited_layer(self, app, old_layer)
+    }
+
+    fn paints_child(self: RenderHandle<Self>, app: &App, child: AnyRenderObject) -> bool {
+        RenderAnimatedOpacityMixin::paints_child(self, app, child)
     }
 
     fn did_attach(self: RenderHandle<Self>, app: &mut App, owner: Handle<crate::PipelineOwner>) {
@@ -2249,6 +2273,229 @@ impl RenderBox for RenderRepaintBoundary {
     }
 }
 
+/// Flutter's `RenderMouseRegion` fields.
+pub struct RenderMouseRegionData {
+    on_enter: Option<PointerEnterEventListener>,
+    on_hover: Option<PointerHoverEventListener>,
+    on_exit: Option<PointerExitEventListener>,
+    cursor: MouseCursorRef,
+    valid_for_mouse_tracker: bool,
+    opaque: bool,
+    behavior: HitTestBehavior,
+}
+
+impl RenderMouseRegionData {
+    /// Dart's constructor defaults: no callbacks, `MouseCursor.defer`, `opaque` true and
+    /// `hit_test_behavior` opaque. `valid_for_mouse_tracker` has no setter, so it is a
+    /// parameter (Dart's default is true).
+    pub fn new(valid_for_mouse_tracker: bool) -> RenderMouseRegionData {
+        RenderMouseRegionData {
+            on_enter: None,
+            on_hover: None,
+            on_exit: None,
+            cursor: <dyn MouseCursor>::defer(),
+            valid_for_mouse_tracker,
+            opaque: true,
+            behavior: HitTestBehavior::Opaque,
+        }
+    }
+
+    /// The hit test behavior a leaf answers from
+    /// [`RenderProxyBoxWithHitTestBehavior::behavior`].
+    pub fn behavior(&self) -> HitTestBehavior {
+        self.behavior
+    }
+}
+
+/// Flutter's `RenderMouseRegion` bodies. [`RenderMouseRegion`] is the plain leaf; a Dart
+/// subclass (`raw_tooltip.dart`'s `_RenderExclusiveMouseRegion`) is a leaf that implements this
+/// trait too and overrides what Dart's subclass overrides.
+///
+/// A leaf calls [`did_attach`](Self::did_attach), [`did_detach`](Self::did_detach),
+/// [`mouse_tracker_annotation`](Self::mouse_tracker_annotation),
+/// [`hit_test`](Self::hit_test) and [`handle_event`](Self::handle_event) from its
+/// [`RenderObject`] and [`RenderBox`] impls, where Dart inherits them.
+pub trait RenderMouseRegionBase:
+    RenderProxyBoxWithHitTestBehavior + RenderObjectWithChildMixin<ChildType = AnyRenderBox>
+{
+    /// Mixin field access.
+    fn mouse_region_data(self: RenderHandle<Self>, app: &App) -> &RenderMouseRegionData;
+
+    /// See [`mouse_region_data`](Self::mouse_region_data).
+    fn mouse_region_data_mut(self: RenderHandle<Self>, app: &mut App)
+    -> &mut RenderMouseRegionData;
+
+    /// Whether this object should prevent [`RenderMouseRegion`]s visually behind it
+    /// from detecting the pointer, thus affecting how their `on_hover`, `on_enter`,
+    /// and `on_exit` behave.
+    ///
+    /// If `opaque` is true, this object will absorb the mouse pointer and
+    /// prevent this object's siblings (or any other objects that are not
+    /// ancestors or descendants of this object) from detecting the mouse
+    /// pointer even when the pointer is within their areas.
+    ///
+    /// If `opaque` is false, this object will not affect how [`RenderMouseRegion`]s
+    /// behind it behave, which will detect the mouse pointer as long as the
+    /// pointer is within their areas.
+    ///
+    /// This defaults to true.
+    fn opaque(self: RenderHandle<Self>, app: &App) -> bool {
+        self.mouse_region_data(app).opaque
+    }
+
+    /// Sets [`opaque`](Self::opaque).
+    fn set_opaque(self: RenderHandle<Self>, app: &mut App, value: bool) {
+        if self.mouse_region_data(app).opaque != value {
+            self.mouse_region_data_mut(app).opaque = value;
+            // Trigger [MouseTracker]'s device update to recalculate mouse states.
+            self.mark_needs_paint(app);
+        }
+    }
+
+    /// How to behave during hit testing.
+    ///
+    /// This defaults to [`HitTestBehavior::Opaque`] if `None`.
+    fn hit_test_behavior(self: RenderHandle<Self>, app: &App) -> Option<HitTestBehavior> {
+        Some(self.mouse_region_data(app).behavior)
+    }
+
+    /// Sets [`hit_test_behavior`](Self::hit_test_behavior).
+    fn set_hit_test_behavior(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        value: Option<HitTestBehavior>,
+    ) {
+        let new_value = value.unwrap_or(HitTestBehavior::Opaque);
+        if self.mouse_region_data(app).behavior != new_value {
+            self.mouse_region_data_mut(app).behavior = new_value;
+            // Trigger [MouseTracker]'s device update to recalculate mouse states.
+            self.mark_needs_paint(app);
+        }
+    }
+
+    /// Triggered when a mouse pointer, with or without buttons pressed, has entered the region and `valid_for_mouse_tracker` is true.
+    fn on_enter(self: RenderHandle<Self>, app: &App) -> Option<PointerEnterEventListener> {
+        self.mouse_region_data(app).on_enter.clone()
+    }
+
+    /// Sets [`on_enter`](Self::on_enter).
+    fn set_on_enter(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        value: Option<PointerEnterEventListener>,
+    ) {
+        self.mouse_region_data_mut(app).on_enter = value;
+    }
+
+    /// Triggered when a pointer has moved onto or within the region without buttons pressed.
+    fn on_hover(self: RenderHandle<Self>, app: &App) -> Option<PointerHoverEventListener> {
+        self.mouse_region_data(app).on_hover.clone()
+    }
+
+    /// Sets [`on_hover`](Self::on_hover).
+    fn set_on_hover(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        value: Option<PointerHoverEventListener>,
+    ) {
+        self.mouse_region_data_mut(app).on_hover = value;
+    }
+
+    /// Triggered when a mouse pointer, with or without buttons pressed, has exited the region and `valid_for_mouse_tracker` is true.
+    fn on_exit(self: RenderHandle<Self>, app: &App) -> Option<PointerExitEventListener> {
+        self.mouse_region_data(app).on_exit.clone()
+    }
+
+    /// Sets [`on_exit`](Self::on_exit).
+    fn set_on_exit(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        value: Option<PointerExitEventListener>,
+    ) {
+        self.mouse_region_data_mut(app).on_exit = value;
+    }
+
+    /// The mouse cursor for mouse pointers that are hovering over the region.
+    ///
+    /// When a mouse enters the region, its cursor will be changed to the `cursor`.
+    /// When the mouse leaves the region, the cursor will be set by the region
+    /// found at the new location.
+    ///
+    /// Defaults to `MouseCursor.defer`, deferring the choice of cursor to the next
+    /// region behind it in hit-test order.
+    fn cursor(self: RenderHandle<Self>, app: &App) -> MouseCursorRef {
+        Rc::clone(&self.mouse_region_data(app).cursor)
+    }
+
+    /// Sets [`cursor`](Self::cursor).
+    fn set_cursor(self: RenderHandle<Self>, app: &mut App, value: MouseCursorRef) {
+        if *self.mouse_region_data(app).cursor != *value {
+            self.mouse_region_data_mut(app).cursor = value;
+            // A repaint is needed in order to trigger a device update of
+            // [MouseTracker] so that this new value can be found.
+            self.mark_needs_paint(app);
+        }
+    }
+
+    /// Whether this is included when a `MouseTracker` collects the list of
+    /// annotations: true while attached to a pipeline owner.
+    fn valid_for_mouse_tracker(self: RenderHandle<Self>, app: &App) -> bool {
+        self.mouse_region_data(app).valid_for_mouse_tracker
+    }
+
+    /// Flutter's `attach` override; call it from [`RenderObject::did_attach`].
+    fn did_attach(self: RenderHandle<Self>, app: &mut App, owner: Handle<PipelineOwner>) {
+        for child in [self.child(app)].into_iter().flatten() {
+            child.as_object().attach(app, owner);
+        }
+        self.mouse_region_data_mut(app).valid_for_mouse_tracker = true;
+    }
+
+    /// Flutter's `detach` override; call it from [`RenderObject::did_detach`].
+    fn did_detach(self: RenderHandle<Self>, app: &mut App) {
+        // Dart clears the flag before `super.detach()`; nothing in the base body reads it.
+        self.mouse_region_data_mut(app).valid_for_mouse_tracker = false;
+        for child in [self.child(app)].into_iter().flatten() {
+            child.as_object().detach(app);
+        }
+    }
+
+    /// Flutter's `implements MouseTrackerAnnotation`; call it from
+    /// [`RenderObject::mouse_tracker_annotation`].
+    fn mouse_tracker_annotation(
+        self: RenderHandle<Self>,
+        app: &App,
+    ) -> Option<MouseTrackerAnnotation> {
+        let data = self.mouse_region_data(app);
+        Some(MouseTrackerAnnotation {
+            on_enter: data.on_enter.clone(),
+            on_exit: data.on_exit.clone(),
+            cursor: Rc::clone(&data.cursor),
+            valid_for_mouse_tracker: data.valid_for_mouse_tracker,
+        })
+    }
+
+    /// Flutter's `hitTest` override: the proxy box's hit test, stopped by an opaque region.
+    fn hit_test(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        result: &mut BoxHitTestResult<'_>,
+        position: Offset,
+    ) -> bool {
+        RenderProxyBoxWithHitTestBehavior::hit_test(self, app, result, position)
+            && self.mouse_region_data(app).opaque
+    }
+
+    /// Flutter's `handleEvent` override; call it from [`RenderBox::handle_event`].
+    fn handle_event(self: RenderHandle<Self>, app: &mut App, event: &PointerEvent) {
+        if let PointerEvent::Hover(event) = event
+            && let Some(on_hover) = self.mouse_region_data(app).on_hover.clone()
+        {
+            on_hover(app, event.clone());
+        }
+    }
+}
+
 /// Calls callbacks in response to pointer events that are exclusive to mice.
 ///
 /// It responds to events that are related to hovering, i.e. when the mouse
@@ -2265,6 +2512,7 @@ impl RenderBox for RenderRepaintBoundary {
 ///
 /// Flutter's `RenderMouseRegion implements MouseTrackerAnnotation`: here it answers
 /// [`RenderObject::mouse_tracker_annotation`] with its current callbacks, cursor, and validity.
+/// Its members are [`RenderMouseRegionBase`]'s.
 ///
 /// See also:
 ///
@@ -2274,13 +2522,7 @@ pub struct RenderMouseRegion {
     render_object: RenderObjectData,
     render_box: RenderBoxData,
     child: RenderObjectWithChildData<AnyRenderBox>,
-    on_enter: Option<PointerEnterEventListener>,
-    on_hover: Option<PointerHoverEventListener>,
-    on_exit: Option<PointerExitEventListener>,
-    cursor: MouseCursorRef,
-    valid_for_mouse_tracker: bool,
-    opaque: bool,
-    behavior: HitTestBehavior,
+    mouse_region: RenderMouseRegionData,
 }
 
 impl RenderMouseRegion {
@@ -2300,112 +2542,24 @@ impl RenderMouseRegion {
                 render_object: RenderObjectData::new(),
                 render_box: RenderBoxData::new(),
                 child: RenderObjectWithChildData::new(),
-                on_enter: None,
-                on_hover: None,
-                on_exit: None,
-                cursor: <dyn MouseCursor>::defer(),
-                valid_for_mouse_tracker,
-                opaque: true,
-                behavior: HitTestBehavior::Opaque,
+                mouse_region: RenderMouseRegionData::new(valid_for_mouse_tracker),
             },
         );
         this.set_child(app, child);
         this
     }
+}
 
-    /// Whether this object should prevent [`RenderMouseRegion`]s visually behind it
-    /// from detecting the pointer, thus affecting how their `on_hover`, `on_enter`,
-    /// and `on_exit` behave.
-    ///
-    /// If `opaque` is true, this object will absorb the mouse pointer and
-    /// prevent this object's siblings (or any other objects that are not
-    /// ancestors or descendants of this object) from detecting the mouse
-    /// pointer even when the pointer is within their areas.
-    ///
-    /// If `opaque` is false, this object will not affect how [`RenderMouseRegion`]s
-    /// behind it behave, which will detect the mouse pointer as long as the
-    /// pointer is within their areas.
-    ///
-    /// This defaults to true.
-    pub fn opaque(self: RenderHandle<Self>, app: &App) -> bool {
-        self.get(app).opaque
+impl RenderMouseRegionBase for RenderMouseRegion {
+    fn mouse_region_data(self: RenderHandle<Self>, app: &App) -> &RenderMouseRegionData {
+        &self.get(app).mouse_region
     }
 
-    /// Sets [`opaque`](Self::opaque).
-    pub fn set_opaque(self: RenderHandle<Self>, app: &mut App, value: bool) {
-        if self.get(app).opaque != value {
-            self.get_mut(app).opaque = value;
-            // Trigger [MouseTracker]'s device update to recalculate mouse states.
-            self.mark_needs_paint(app);
-        }
-    }
-
-    /// How to behave during hit testing.
-    ///
-    /// This defaults to [`HitTestBehavior::Opaque`] if `None`.
-    pub fn hit_test_behavior(self: RenderHandle<Self>, app: &App) -> Option<HitTestBehavior> {
-        Some(self.get(app).behavior)
-    }
-
-    /// Sets [`hit_test_behavior`](Self::hit_test_behavior).
-    pub fn set_hit_test_behavior(
+    fn mouse_region_data_mut(
         self: RenderHandle<Self>,
         app: &mut App,
-        value: Option<HitTestBehavior>,
-    ) {
-        let new_value = value.unwrap_or(HitTestBehavior::Opaque);
-        if self.get(app).behavior != new_value {
-            self.get_mut(app).behavior = new_value;
-            // Trigger [MouseTracker]'s device update to recalculate mouse states.
-            self.mark_needs_paint(app);
-        }
-    }
-
-    pointer_listener_field!(
-        on_enter,
-        set_on_enter,
-        PointerEnterEventListener,
-        "Triggered when a mouse pointer, with or without buttons pressed, has entered the region and `valid_for_mouse_tracker` is true."
-    );
-    pointer_listener_field!(
-        on_hover,
-        set_on_hover,
-        PointerHoverEventListener,
-        "Triggered when a pointer has moved onto or within the region without buttons pressed."
-    );
-    pointer_listener_field!(
-        on_exit,
-        set_on_exit,
-        PointerExitEventListener,
-        "Triggered when a mouse pointer, with or without buttons pressed, has exited the region and `valid_for_mouse_tracker` is true."
-    );
-
-    /// The mouse cursor for mouse pointers that are hovering over the region.
-    ///
-    /// When a mouse enters the region, its cursor will be changed to the `cursor`.
-    /// When the mouse leaves the region, the cursor will be set by the region
-    /// found at the new location.
-    ///
-    /// Defaults to `MouseCursor.defer`, deferring the choice of cursor to the next
-    /// region behind it in hit-test order.
-    pub fn cursor(self: RenderHandle<Self>, app: &App) -> MouseCursorRef {
-        Rc::clone(&self.get(app).cursor)
-    }
-
-    /// Sets [`cursor`](Self::cursor).
-    pub fn set_cursor(self: RenderHandle<Self>, app: &mut App, value: MouseCursorRef) {
-        if *self.get(app).cursor != *value {
-            self.get_mut(app).cursor = value;
-            // A repaint is needed in order to trigger a device update of
-            // [MouseTracker] so that this new value can be found.
-            self.mark_needs_paint(app);
-        }
-    }
-
-    /// Whether this is included when a `MouseTracker` collects the list of
-    /// annotations: true while attached to a pipeline owner.
-    pub fn valid_for_mouse_tracker(self: RenderHandle<Self>, app: &App) -> bool {
-        self.get(app).valid_for_mouse_tracker
+    ) -> &mut RenderMouseRegionData {
+        &mut self.get_mut(app).mouse_region
     }
 }
 
@@ -2436,7 +2590,7 @@ impl RenderProxyBoxMixin for RenderMouseRegion {
 
 impl RenderProxyBoxWithHitTestBehavior for RenderMouseRegion {
     fn behavior(self: RenderHandle<Self>, app: &App) -> HitTestBehavior {
-        self.get(app).behavior
+        self.mouse_region_data(app).behavior
     }
 }
 
@@ -2444,18 +2598,11 @@ impl RenderObject for RenderMouseRegion {
     crate::render_object_accessors!();
 
     fn did_attach(self: RenderHandle<Self>, app: &mut App, owner: Handle<PipelineOwner>) {
-        for child in [self.child(app)].into_iter().flatten() {
-            child.as_object().attach(app, owner);
-        }
-        self.get_mut(app).valid_for_mouse_tracker = true;
+        RenderMouseRegionBase::did_attach(self, app, owner);
     }
 
     fn did_detach(self: RenderHandle<Self>, app: &mut App) {
-        // Dart clears the flag before `super.detach()`; nothing in the base body reads it.
-        self.get_mut(app).valid_for_mouse_tracker = false;
-        for child in [self.child(app)].into_iter().flatten() {
-            child.as_object().detach(app);
-        }
+        RenderMouseRegionBase::did_detach(self, app);
     }
 
     fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
@@ -2466,13 +2613,7 @@ impl RenderObject for RenderMouseRegion {
         self: RenderHandle<Self>,
         app: &App,
     ) -> Option<MouseTrackerAnnotation> {
-        let this = self.get(app);
-        Some(MouseTrackerAnnotation {
-            on_enter: this.on_enter.clone(),
-            on_exit: this.on_exit.clone(),
-            cursor: Rc::clone(&this.cursor),
-            valid_for_mouse_tracker: this.valid_for_mouse_tracker,
-        })
+        RenderMouseRegionBase::mouse_tracker_annotation(self, app)
     }
 
     fn paint(
@@ -2517,8 +2658,7 @@ impl RenderBox for RenderMouseRegion {
         result: &mut BoxHitTestResult<'_>,
         position: Offset,
     ) -> bool {
-        RenderProxyBoxWithHitTestBehavior::hit_test(self, app, result, position)
-            && self.get(app).opaque
+        RenderMouseRegionBase::hit_test(self, app, result, position)
     }
 
     fn hit_test_self(self: RenderHandle<Self>, app: &App, position: Offset) -> bool {
@@ -2540,11 +2680,7 @@ impl RenderBox for RenderMouseRegion {
         event: &PointerEvent,
         _entry: &BoxHitTestEntry,
     ) {
-        if let PointerEvent::Hover(event) = event
-            && let Some(on_hover) = self.get(app).on_hover.clone()
-        {
-            on_hover(app, event.clone());
-        }
+        RenderMouseRegionBase::handle_event(self, app, event);
     }
 
     fn compute_min_intrinsic_width(self: RenderHandle<Self>, app: &mut App, height: f64) -> f64 {
@@ -5063,6 +5199,752 @@ impl RenderBox for RenderClipRSuperellipse {
     }
 }
 
+/// The fields of [`RenderPhysicalModelBase`].
+pub struct RenderPhysicalModelBaseData {
+    elevation: f64,
+    color: Color,
+    shadow_color: Color,
+}
+
+impl RenderPhysicalModelBaseData {
+    /// The fields of a physical model; the `elevation` must be non-negative.
+    pub fn new(elevation: f64, color: Color, shadow_color: Color) -> RenderPhysicalModelBaseData {
+        debug_assert!(elevation >= 0.0);
+        RenderPhysicalModelBaseData {
+            elevation,
+            color,
+            shadow_color,
+        }
+    }
+}
+
+/// The shared members of [`RenderPhysicalModel`] and [`RenderPhysicalShape`]; Flutter's private
+/// `_RenderPhysicalModelBase<T>`.
+pub trait RenderPhysicalModelBase<T: Clone + 'static>: RenderCustomClip<T> {
+    /// Mixin field access.
+    fn physical_model_data(self: RenderHandle<Self>, app: &App) -> &RenderPhysicalModelBaseData;
+
+    /// See [`physical_model_data`](Self::physical_model_data).
+    fn physical_model_data_mut(
+        self: RenderHandle<Self>,
+        app: &mut App,
+    ) -> &mut RenderPhysicalModelBaseData;
+
+    /// The z-coordinate relative to the parent at which to place this material.
+    ///
+    /// The value is non-negative.
+    ///
+    /// If `debug_disable_shadows` is set, this value is ignored and no shadow is
+    /// drawn (an outline is rendered instead).
+    fn elevation(self: RenderHandle<Self>, app: &App) -> f64 {
+        self.physical_model_data(app).elevation
+    }
+
+    /// Sets [`elevation`](Self::elevation).
+    fn set_elevation(self: RenderHandle<Self>, app: &mut App, value: f64) {
+        debug_assert!(value >= 0.0);
+        if self.elevation(app) == value {
+            return;
+        }
+        let did_need_compositing = self.as_object().always_needs_compositing(app);
+        self.physical_model_data_mut(app).elevation = value;
+        if did_need_compositing != self.as_object().always_needs_compositing(app) {
+            self.as_object().mark_needs_compositing_bits_update(app);
+        }
+        self.mark_needs_paint(app);
+    }
+
+    /// The shadow color.
+    fn shadow_color(self: RenderHandle<Self>, app: &App) -> Color {
+        self.physical_model_data(app).shadow_color
+    }
+
+    /// Sets [`shadow_color`](Self::shadow_color).
+    fn set_shadow_color(self: RenderHandle<Self>, app: &mut App, value: Color) {
+        if self.shadow_color(app) == value {
+            return;
+        }
+        self.physical_model_data_mut(app).shadow_color = value;
+        self.mark_needs_paint(app);
+    }
+
+    /// The background color.
+    fn color(self: RenderHandle<Self>, app: &App) -> Color {
+        self.physical_model_data(app).color
+    }
+
+    /// Sets [`color`](Self::color).
+    fn set_color(self: RenderHandle<Self>, app: &mut App, value: Color) {
+        if self.color(app) == value {
+            return;
+        }
+        self.physical_model_data_mut(app).color = value;
+        self.mark_needs_paint(app);
+    }
+}
+
+/// The device pixel ratio of the view `render_object` paints into, which the engine's
+/// `Canvas.drawShadow` reads from the implicit view; 1 outside a view, as the engine's is
+/// without metrics.
+fn device_pixel_ratio_of_view(app: &App, render_object: AnyRenderObject) -> f64 {
+    render_object
+        .owner(app)
+        .and_then(|owner| owner.root_node(app))
+        .and_then(|root| root.downcast::<RenderView>(app))
+        .map_or(1.0, |view| view.configuration(app).device_pixel_ratio)
+}
+
+/// Creates a physical model layer that clips its child to a rounded
+/// rectangle.
+///
+/// A physical model layer casts a shadow based on its [`elevation`](RenderPhysicalModelBase::elevation).
+pub struct RenderPhysicalModel {
+    render_object: RenderObjectData,
+    render_box: RenderBoxData,
+    child: RenderObjectWithChildData<AnyRenderBox>,
+    custom_clip: RenderCustomClipData<RRect>,
+    physical_model: RenderPhysicalModelBaseData,
+    shape: BoxShape,
+    border_radius: Option<BorderRadius>,
+}
+
+impl RenderPhysicalModel {
+    /// Creates a rounded-rectangular clip.
+    ///
+    /// The `color` is required.
+    ///
+    /// The `elevation` parameter must be non-negative. Dart's defaults: `shape`
+    /// [`BoxShape::Rectangle`], `clip_behavior` [`Clip::None`], `elevation` 0, `shadow_color`
+    /// opaque black.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Dart's named arguments, in Dart's order"
+    )]
+    pub fn new(
+        app: &mut App,
+        child: Option<AnyRenderBox>,
+        shape: BoxShape,
+        clip_behavior: Clip,
+        border_radius: Option<BorderRadius>,
+        elevation: f64,
+        color: Color,
+        shadow_color: Color,
+    ) -> RenderHandle<RenderPhysicalModel> {
+        debug_assert!(elevation >= 0.0);
+        let this = RenderHandle::new_box(
+            app,
+            RenderPhysicalModel {
+                render_object: RenderObjectData::new(),
+                render_box: RenderBoxData::new(),
+                child: RenderObjectWithChildData::new(),
+                custom_clip: RenderCustomClipData::new(None, clip_behavior),
+                physical_model: RenderPhysicalModelBaseData::new(elevation, color, shadow_color),
+                shape,
+                border_radius,
+            },
+        );
+        this.set_child(app, child);
+        this
+    }
+
+    /// The shape of the layer.
+    ///
+    /// Defaults to [`BoxShape::Rectangle`]. The [`border_radius`](Self::border_radius) affects
+    /// the corners of the rectangle.
+    pub fn shape(self: RenderHandle<Self>, app: &App) -> BoxShape {
+        self.get(app).shape
+    }
+
+    /// Sets [`shape`](Self::shape).
+    pub fn set_shape(self: RenderHandle<Self>, app: &mut App, value: BoxShape) {
+        if self.shape(app) == value {
+            return;
+        }
+        self.get_mut(app).shape = value;
+        self.mark_needs_clip(app);
+    }
+
+    /// The border radius of the rounded corners.
+    ///
+    /// Values are clamped so that horizontal and vertical radii sums do not
+    /// exceed width/height.
+    ///
+    /// This property is ignored if the [`shape`](Self::shape) is not [`BoxShape::Rectangle`].
+    ///
+    /// The value `None` is treated like [`BorderRadius::ZERO`].
+    pub fn border_radius(self: RenderHandle<Self>, app: &App) -> Option<BorderRadius> {
+        self.get(app).border_radius
+    }
+
+    /// Sets [`border_radius`](Self::border_radius).
+    pub fn set_border_radius(self: RenderHandle<Self>, app: &mut App, value: Option<BorderRadius>) {
+        if self.border_radius(app) == value {
+            return;
+        }
+        self.get_mut(app).border_radius = value;
+        self.mark_needs_clip(app);
+    }
+}
+
+impl RenderObjectWithChildMixin for RenderPhysicalModel {
+    type ChildType = AnyRenderBox;
+
+    fn child_data(self: RenderHandle<Self>, app: &App) -> &RenderObjectWithChildData<AnyRenderBox> {
+        &self.get(app).child
+    }
+
+    fn child_data_mut(
+        self: RenderHandle<Self>,
+        app: &mut App,
+    ) -> &mut RenderObjectWithChildData<AnyRenderBox> {
+        &mut self.get_mut(app).child
+    }
+}
+
+impl RenderProxyBoxMixin for RenderPhysicalModel {}
+
+impl RenderCustomClip<RRect> for RenderPhysicalModel {
+    fn custom_clip_data(self: RenderHandle<Self>, app: &App) -> &RenderCustomClipData<RRect> {
+        &self.get(app).custom_clip
+    }
+
+    fn custom_clip_data_mut(
+        self: RenderHandle<Self>,
+        app: &mut App,
+    ) -> &mut RenderCustomClipData<RRect> {
+        &mut self.get_mut(app).custom_clip
+    }
+
+    fn default_clip(self: RenderHandle<Self>, app: &App) -> RRect {
+        debug_assert!(self.has_size(app));
+        let rect = Offset::ZERO & self.size(app);
+        match self.get(app).shape {
+            BoxShape::Rectangle => self
+                .get(app)
+                .border_radius
+                .unwrap_or(BorderRadius::ZERO)
+                .to_rrect(rect),
+            BoxShape::Circle => RRect::from_rect_xy(rect, rect.width() / 2.0, rect.height() / 2.0),
+        }
+    }
+}
+
+impl RenderPhysicalModelBase<RRect> for RenderPhysicalModel {
+    fn physical_model_data(self: RenderHandle<Self>, app: &App) -> &RenderPhysicalModelBaseData {
+        &self.get(app).physical_model
+    }
+
+    fn physical_model_data_mut(
+        self: RenderHandle<Self>,
+        app: &mut App,
+    ) -> &mut RenderPhysicalModelBaseData {
+        &mut self.get_mut(app).physical_model
+    }
+}
+
+impl RenderObject for RenderPhysicalModel {
+    crate::render_object_accessors!();
+
+    fn did_attach(self: RenderHandle<Self>, app: &mut App, owner: Handle<PipelineOwner>) {
+        if let Some(child) = self.child(app) {
+            child.as_object().attach(app, owner);
+        }
+        RenderCustomClip::did_attach(self, app);
+    }
+
+    fn did_detach(self: RenderHandle<Self>, app: &mut App) {
+        RenderCustomClip::did_detach(self, app);
+        if let Some(child) = self.child(app) {
+            child.as_object().detach(app);
+        }
+    }
+
+    fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
+        RenderCustomClip::perform_layout(self, app);
+    }
+
+    fn paint(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        context: &mut PaintingContext,
+        offset: Offset,
+    ) {
+        if self.child(app).is_none() {
+            self.as_object().set_layer(app, None);
+            return;
+        }
+
+        self.update_clip(app);
+        let offset_rrect = self.clip(app).shift(offset);
+        let elevation = self.elevation(app);
+        let shadow_color = self.shadow_color(app);
+        let color = self.color(app);
+        let mut paint_shadows = true;
+        if cfg!(debug_assertions) && debug_disable_shadows() {
+            if elevation > 0.0 {
+                draw_rrect(
+                    context.canvas(),
+                    offset_rrect,
+                    &Paint {
+                        color: shadow_color.into(),
+                        style: PaintStyle::Stroke(Stroke::new((elevation * 2.0) as f32)),
+                        ..Paint::default()
+                    },
+                );
+            }
+            paint_shadows = false;
+        }
+
+        let device_pixel_ratio = device_pixel_ratio_of_view(app, self.as_object());
+        let canvas = context.canvas();
+        if elevation != 0.0 && paint_shadows {
+            let mut offset_rrect_as_path = PathBuilder::new();
+            offset_rrect_as_path.rrect_radii_elliptical(
+                valo::Rect::from(offset_rrect.outer_rect()),
+                rrect_radii_elliptical(offset_rrect),
+            );
+            #[expect(deprecated, reason = "Dart's paint reads the deprecated `Color.alpha`")]
+            let transparent_occluder = color.alpha() != 0xFF;
+            canvas.draw_shadow(
+                &offset_rrect_as_path.build(),
+                FillRule::NonZero,
+                shadow_color.into(),
+                elevation as f32,
+                transparent_occluder,
+                device_pixel_ratio as f32,
+            );
+        }
+        let clip_behavior = self.clip_behavior(app);
+        let uses_save_layer = clip_behavior == Clip::AntiAliasWithSaveLayer;
+        if !uses_save_layer {
+            draw_rrect(
+                canvas,
+                offset_rrect,
+                &Paint {
+                    color: color.into(),
+                    ..Paint::default()
+                },
+            );
+        }
+        let clip = self.clip(app);
+        let old = self.as_object().layer_as::<ClipRRectLayer>(app);
+        let layer = context.push_clip_rrect(
+            app,
+            self.as_object().needs_compositing(app),
+            offset,
+            Offset::ZERO & self.size(app),
+            clip,
+            |app, context, offset| {
+                if uses_save_layer {
+                    // If we want to avoid the bleeding edge artifact
+                    // (https://github.com/flutter/flutter/issues/18057#issue-328003931)
+                    // using saveLayer, we have to call drawPaint instead of drawPath as
+                    // anti-aliased drawPath will always have such artifacts.
+                    context.canvas().draw_paint(&Paint {
+                        color: color.into(),
+                        ..Paint::default()
+                    });
+                }
+                RenderProxyBoxMixin::paint(self, app, context, offset)
+            },
+            clip_behavior,
+            old,
+        );
+        self.as_object()
+            .set_layer(app, layer.map(|layer| layer.as_container_layer()));
+    }
+
+    fn visit_children(
+        self: RenderHandle<Self>,
+        app: &App,
+        visitor: &mut dyn FnMut(AnyRenderObject),
+    ) {
+        if let Some(child) = self.child(app) {
+            visitor(child.as_object());
+        }
+    }
+}
+
+impl RenderBox for RenderPhysicalModel {
+    crate::render_box_accessors!();
+
+    fn setup_parent_data(self: RenderHandle<Self>, app: &mut App, child: AnyRenderObject) {
+        RenderProxyBoxMixin::setup_parent_data(self, app, child);
+    }
+
+    fn apply_paint_transform(
+        self: RenderHandle<Self>,
+        app: &App,
+        child: AnyRenderObject,
+        transform: &mut Matrix4,
+    ) {
+        RenderProxyBoxMixin::apply_paint_transform(self, app, child, transform);
+    }
+
+    fn hit_test(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        result: &mut BoxHitTestResult<'_>,
+        position: Offset,
+    ) -> bool {
+        if self.clipper(app).is_some() {
+            self.update_clip(app);
+            if !self.clip(app).contains(position) {
+                return false;
+            }
+        }
+        RenderBoxBase::hit_test(self, app, result, position)
+    }
+
+    fn hit_test_children(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        result: &mut BoxHitTestResult<'_>,
+        position: Offset,
+    ) -> bool {
+        RenderProxyBoxMixin::hit_test_children(self, app, result, position)
+    }
+
+    fn compute_min_intrinsic_width(self: RenderHandle<Self>, app: &mut App, height: f64) -> f64 {
+        RenderProxyBoxMixin::compute_min_intrinsic_width(self, app, height)
+    }
+
+    fn compute_max_intrinsic_width(self: RenderHandle<Self>, app: &mut App, height: f64) -> f64 {
+        RenderProxyBoxMixin::compute_max_intrinsic_width(self, app, height)
+    }
+
+    fn compute_min_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
+        RenderProxyBoxMixin::compute_min_intrinsic_height(self, app, width)
+    }
+
+    fn compute_max_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
+        RenderProxyBoxMixin::compute_max_intrinsic_height(self, app, width)
+    }
+
+    fn compute_distance_to_actual_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        RenderProxyBoxMixin::compute_distance_to_actual_baseline(self, app, baseline)
+    }
+
+    fn compute_dry_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        RenderProxyBoxMixin::compute_dry_baseline(self, app, constraints, baseline)
+    }
+
+    fn compute_dry_layout(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+    ) -> Size {
+        RenderProxyBoxMixin::compute_dry_layout(self, app, constraints)
+    }
+}
+
+/// Creates a physical shape layer that clips its child to a [`Path`].
+///
+/// A physical shape layer casts a shadow based on its [`elevation`](RenderPhysicalModelBase::elevation).
+///
+/// See also:
+///
+///  * [`RenderPhysicalModel`], which is optimized for rounded rectangles and
+///    circles.
+pub struct RenderPhysicalShape {
+    render_object: RenderObjectData,
+    render_box: RenderBoxData,
+    child: RenderObjectWithChildData<AnyRenderBox>,
+    custom_clip: RenderCustomClipData<Arc<Path>>,
+    physical_model: RenderPhysicalModelBaseData,
+}
+
+impl RenderPhysicalShape {
+    /// Creates an arbitrary shape clip.
+    ///
+    /// The `color` and `clipper` parameters are required.
+    ///
+    /// The `elevation` parameter must be non-negative. Dart's defaults: `clip_behavior`
+    /// [`Clip::None`], `elevation` 0, `shadow_color` opaque black.
+    pub fn new(
+        app: &mut App,
+        child: Option<AnyRenderBox>,
+        clipper: Rc<dyn CustomClipper<Arc<Path>>>,
+        clip_behavior: Clip,
+        elevation: f64,
+        color: Color,
+        shadow_color: Color,
+    ) -> RenderHandle<RenderPhysicalShape> {
+        debug_assert!(elevation >= 0.0);
+        let this = RenderHandle::new_box(
+            app,
+            RenderPhysicalShape {
+                render_object: RenderObjectData::new(),
+                render_box: RenderBoxData::new(),
+                child: RenderObjectWithChildData::new(),
+                custom_clip: RenderCustomClipData::new(Some(clipper), clip_behavior),
+                physical_model: RenderPhysicalModelBaseData::new(elevation, color, shadow_color),
+            },
+        );
+        this.set_child(app, child);
+        this
+    }
+}
+
+impl RenderObjectWithChildMixin for RenderPhysicalShape {
+    type ChildType = AnyRenderBox;
+
+    fn child_data(self: RenderHandle<Self>, app: &App) -> &RenderObjectWithChildData<AnyRenderBox> {
+        &self.get(app).child
+    }
+
+    fn child_data_mut(
+        self: RenderHandle<Self>,
+        app: &mut App,
+    ) -> &mut RenderObjectWithChildData<AnyRenderBox> {
+        &mut self.get_mut(app).child
+    }
+}
+
+impl RenderProxyBoxMixin for RenderPhysicalShape {}
+
+impl RenderCustomClip<Arc<Path>> for RenderPhysicalShape {
+    fn custom_clip_data(self: RenderHandle<Self>, app: &App) -> &RenderCustomClipData<Arc<Path>> {
+        &self.get(app).custom_clip
+    }
+
+    fn custom_clip_data_mut(
+        self: RenderHandle<Self>,
+        app: &mut App,
+    ) -> &mut RenderCustomClipData<Arc<Path>> {
+        &mut self.get_mut(app).custom_clip
+    }
+
+    fn default_clip(self: RenderHandle<Self>, app: &App) -> Arc<Path> {
+        let mut path = PathBuilder::new();
+        path.rect((Offset::ZERO & self.size(app)).into());
+        path.build()
+    }
+}
+
+impl RenderPhysicalModelBase<Arc<Path>> for RenderPhysicalShape {
+    fn physical_model_data(self: RenderHandle<Self>, app: &App) -> &RenderPhysicalModelBaseData {
+        &self.get(app).physical_model
+    }
+
+    fn physical_model_data_mut(
+        self: RenderHandle<Self>,
+        app: &mut App,
+    ) -> &mut RenderPhysicalModelBaseData {
+        &mut self.get_mut(app).physical_model
+    }
+}
+
+impl RenderObject for RenderPhysicalShape {
+    crate::render_object_accessors!();
+
+    fn did_attach(self: RenderHandle<Self>, app: &mut App, owner: Handle<PipelineOwner>) {
+        if let Some(child) = self.child(app) {
+            child.as_object().attach(app, owner);
+        }
+        RenderCustomClip::did_attach(self, app);
+    }
+
+    fn did_detach(self: RenderHandle<Self>, app: &mut App) {
+        RenderCustomClip::did_detach(self, app);
+        if let Some(child) = self.child(app) {
+            child.as_object().detach(app);
+        }
+    }
+
+    fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
+        RenderCustomClip::perform_layout(self, app);
+    }
+
+    fn paint(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        context: &mut PaintingContext,
+        offset: Offset,
+    ) {
+        if self.child(app).is_none() {
+            self.as_object().set_layer(app, None);
+            return;
+        }
+
+        self.update_clip(app);
+        let clip = self.clip(app);
+        let offset_path = shift_path(&clip, offset);
+        let elevation = self.elevation(app);
+        let shadow_color = self.shadow_color(app);
+        let color = self.color(app);
+        let mut paint_shadows = true;
+        if cfg!(debug_assertions) && debug_disable_shadows() {
+            if elevation > 0.0 {
+                context.canvas().draw_path(
+                    &offset_path,
+                    FillRule::NonZero,
+                    &Paint {
+                        color: shadow_color.into(),
+                        style: PaintStyle::Stroke(Stroke::new((elevation * 2.0) as f32)),
+                        ..Paint::default()
+                    },
+                );
+            }
+            paint_shadows = false;
+        }
+
+        let device_pixel_ratio = device_pixel_ratio_of_view(app, self.as_object());
+        let canvas = context.canvas();
+        if elevation != 0.0 && paint_shadows {
+            #[expect(deprecated, reason = "Dart's paint reads the deprecated `Color.alpha`")]
+            let transparent_occluder = color.alpha() != 0xFF;
+            canvas.draw_shadow(
+                &offset_path,
+                FillRule::NonZero,
+                shadow_color.into(),
+                elevation as f32,
+                transparent_occluder,
+                device_pixel_ratio as f32,
+            );
+        }
+        let clip_behavior = self.clip_behavior(app);
+        let uses_save_layer = clip_behavior == Clip::AntiAliasWithSaveLayer;
+        if !uses_save_layer {
+            canvas.draw_path(
+                &offset_path,
+                FillRule::NonZero,
+                &Paint {
+                    color: color.into(),
+                    ..Paint::default()
+                },
+            );
+        }
+        let old = self.as_object().layer_as::<ClipPathLayer>(app);
+        let layer = context.push_clip_path(
+            app,
+            self.as_object().needs_compositing(app),
+            offset,
+            Offset::ZERO & self.size(app),
+            clip,
+            |app, context, offset| {
+                if uses_save_layer {
+                    // If we want to avoid the bleeding edge artifact
+                    // (https://github.com/flutter/flutter/issues/18057#issue-328003931)
+                    // using saveLayer, we have to call drawPaint instead of drawPath as
+                    // anti-aliased drawPath will always have such artifacts.
+                    context.canvas().draw_paint(&Paint {
+                        color: color.into(),
+                        ..Paint::default()
+                    });
+                }
+                RenderProxyBoxMixin::paint(self, app, context, offset)
+            },
+            clip_behavior,
+            old,
+        );
+        self.as_object()
+            .set_layer(app, layer.map(|layer| layer.as_container_layer()));
+    }
+
+    fn visit_children(
+        self: RenderHandle<Self>,
+        app: &App,
+        visitor: &mut dyn FnMut(AnyRenderObject),
+    ) {
+        if let Some(child) = self.child(app) {
+            visitor(child.as_object());
+        }
+    }
+}
+
+impl RenderBox for RenderPhysicalShape {
+    crate::render_box_accessors!();
+
+    fn setup_parent_data(self: RenderHandle<Self>, app: &mut App, child: AnyRenderObject) {
+        RenderProxyBoxMixin::setup_parent_data(self, app, child);
+    }
+
+    fn apply_paint_transform(
+        self: RenderHandle<Self>,
+        app: &App,
+        child: AnyRenderObject,
+        transform: &mut Matrix4,
+    ) {
+        RenderProxyBoxMixin::apply_paint_transform(self, app, child, transform);
+    }
+
+    fn hit_test(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        result: &mut BoxHitTestResult<'_>,
+        position: Offset,
+    ) -> bool {
+        if self.clipper(app).is_some() {
+            self.update_clip(app);
+            let point = Point::new(position.dx() as f32, position.dy() as f32);
+            if !self.clip(app).contains(point, FillRule::NonZero) {
+                return false;
+            }
+        }
+        RenderBoxBase::hit_test(self, app, result, position)
+    }
+
+    fn hit_test_children(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        result: &mut BoxHitTestResult<'_>,
+        position: Offset,
+    ) -> bool {
+        RenderProxyBoxMixin::hit_test_children(self, app, result, position)
+    }
+
+    fn compute_min_intrinsic_width(self: RenderHandle<Self>, app: &mut App, height: f64) -> f64 {
+        RenderProxyBoxMixin::compute_min_intrinsic_width(self, app, height)
+    }
+
+    fn compute_max_intrinsic_width(self: RenderHandle<Self>, app: &mut App, height: f64) -> f64 {
+        RenderProxyBoxMixin::compute_max_intrinsic_width(self, app, height)
+    }
+
+    fn compute_min_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
+        RenderProxyBoxMixin::compute_min_intrinsic_height(self, app, width)
+    }
+
+    fn compute_max_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
+        RenderProxyBoxMixin::compute_max_intrinsic_height(self, app, width)
+    }
+
+    fn compute_distance_to_actual_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        RenderProxyBoxMixin::compute_distance_to_actual_baseline(self, app, baseline)
+    }
+
+    fn compute_dry_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        RenderProxyBoxMixin::compute_dry_baseline(self, app, constraints, baseline)
+    }
+
+    fn compute_dry_layout(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+    ) -> Size {
+        RenderProxyBoxMixin::compute_dry_layout(self, app, constraints)
+    }
+}
+
 /// Applies a transformation before painting its child.
 pub struct RenderTransform {
     render_object: RenderObjectData,
@@ -5607,15 +6489,6 @@ impl RenderFittedBox {
         self.mark_needs_paint(app);
     }
 
-    /// Whether the given child would be painted if [`RenderObject::paint`] were called.
-    ///
-    /// Flutter's `RenderObject.paintsChild` is a virtual whose default is true; here it is an
-    /// inherent method (`PORTING.md`).
-    pub fn paints_child(self: RenderHandle<Self>, app: &App, child: AnyRenderBox) -> bool {
-        debug_assert_eq!(child.as_object().parent(app), Some(self.as_object()));
-        !self.size(app).is_empty() && !child.size(app).is_empty()
-    }
-
     fn clear_paint_data(self: RenderHandle<Self>, app: &mut App) {
         let this = self.get_mut(app);
         this.has_visual_overflow = None;
@@ -5773,6 +6646,12 @@ impl RenderObject for RenderFittedBox {
         }
     }
 
+    fn paints_child(self: RenderHandle<Self>, app: &App, child: AnyRenderObject) -> bool {
+        debug_assert!(child.parent(app) == Some(self.as_object()));
+        let child = child.as_box().expect("a fitted box has a box child");
+        !self.size(app).is_empty() && !child.size(app).is_empty()
+    }
+
     fn visit_children(
         self: RenderHandle<Self>,
         app: &App,
@@ -5797,8 +6676,7 @@ impl RenderBox for RenderFittedBox {
         child: AnyRenderObject,
         transform: &mut Matrix4,
     ) {
-        let child = child.as_box().expect("a fitted box has a box child");
-        if !self.paints_child(app, child) {
+        if !RenderObject::paints_child(self, app, child) {
             *transform = crate::object::zero_matrix();
             return;
         }
@@ -6333,15 +7211,6 @@ impl RenderOffstage {
         self.as_object()
             .mark_needs_layout_for_sized_by_parent_change(app);
     }
-
-    /// Whether the given child would be painted if [`RenderObject::paint`] were called.
-    ///
-    /// Flutter's `RenderObject.paintsChild` is a virtual whose default is true; here only this
-    /// override exists, as an inherent method (`PORTING.md`).
-    pub fn paints_child(self: RenderHandle<Self>, app: &App, child: AnyRenderBox) -> bool {
-        debug_assert_eq!(child.as_object().parent(app), Some(self.as_object()));
-        !self.get(app).offstage
-    }
 }
 
 impl RenderObjectWithChildMixin for RenderOffstage {
@@ -6389,6 +7258,11 @@ impl RenderObject for RenderOffstage {
             return;
         }
         RenderProxyBoxMixin::paint(self, app, context, offset);
+    }
+
+    fn paints_child(self: RenderHandle<Self>, app: &App, child: AnyRenderObject) -> bool {
+        debug_assert!(child.parent(app) == Some(self.as_object()));
+        !self.get(app).offstage
     }
 
     fn visit_children(
@@ -7078,6 +7952,800 @@ impl RenderBox for RenderMetaData {
     }
 }
 
+/// Add annotations to the `SemanticsNode` for this subtree.
+pub struct RenderSemanticsAnnotations {
+    render_object: RenderObjectData,
+    render_box: RenderBoxData,
+    child: RenderObjectWithChildData<AnyRenderBox>,
+    semantics_annotations: SemanticsAnnotationsData,
+}
+
+impl RenderSemanticsAnnotations {
+    /// Creates a render object that attaches a semantic annotation.
+    ///
+    /// If the [`SemanticsProperties::attributed_label`] is not null, the `text_direction` must
+    /// also not be null. Dart's defaults: `container`, `explicit_child_nodes`,
+    /// `exclude_semantics` and `block_user_actions` false.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        app: &mut App,
+        properties: Rc<SemanticsProperties>,
+        container: bool,
+        explicit_child_nodes: bool,
+        exclude_semantics: bool,
+        block_user_actions: bool,
+        locale_for_subtree: Option<Locale>,
+        text_direction: Option<TextDirection>,
+        child: Option<AnyRenderBox>,
+    ) -> RenderHandle<RenderSemanticsAnnotations> {
+        let this = RenderHandle::new_box(
+            app,
+            RenderSemanticsAnnotations {
+                render_object: RenderObjectData::new(),
+                render_box: RenderBoxData::new(),
+                child: RenderObjectWithChildData::new(),
+                semantics_annotations: SemanticsAnnotationsData::new(),
+            },
+        );
+        this.set_child(app, child);
+        this.init_semantics_annotations(
+            app,
+            properties,
+            container,
+            explicit_child_nodes,
+            exclude_semantics,
+            block_user_actions,
+            locale_for_subtree,
+            text_direction,
+        );
+        this
+    }
+}
+
+impl SemanticsAnnotationsMixin for RenderSemanticsAnnotations {
+    fn semantics_annotations_data(
+        self: RenderHandle<Self>,
+        app: &App,
+    ) -> &SemanticsAnnotationsData {
+        &self.get(app).semantics_annotations
+    }
+
+    fn semantics_annotations_data_mut(
+        self: RenderHandle<Self>,
+        app: &mut App,
+    ) -> &mut SemanticsAnnotationsData {
+        &mut self.get_mut(app).semantics_annotations
+    }
+}
+
+impl RenderObjectWithChildMixin for RenderSemanticsAnnotations {
+    type ChildType = AnyRenderBox;
+
+    fn child_data(self: RenderHandle<Self>, app: &App) -> &RenderObjectWithChildData<AnyRenderBox> {
+        &self.get(app).child
+    }
+
+    fn child_data_mut(
+        self: RenderHandle<Self>,
+        app: &mut App,
+    ) -> &mut RenderObjectWithChildData<AnyRenderBox> {
+        &mut self.get_mut(app).child
+    }
+}
+
+impl RenderProxyBoxMixin for RenderSemanticsAnnotations {}
+
+impl RenderObject for RenderSemanticsAnnotations {
+    crate::render_object_accessors!();
+
+    fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
+        RenderProxyBoxMixin::perform_layout(self, app);
+    }
+
+    fn paint(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        context: &mut PaintingContext,
+        offset: Offset,
+    ) {
+        RenderProxyBoxMixin::paint(self, app, context, offset);
+    }
+
+    fn visit_children(
+        self: RenderHandle<Self>,
+        app: &App,
+        visitor: &mut dyn FnMut(AnyRenderObject),
+    ) {
+        if let Some(child) = self.child(app) {
+            visitor(child.as_object());
+        }
+    }
+}
+
+impl RenderBox for RenderSemanticsAnnotations {
+    crate::render_box_accessors!();
+
+    fn setup_parent_data(self: RenderHandle<Self>, app: &mut App, child: AnyRenderObject) {
+        RenderProxyBoxMixin::setup_parent_data(self, app, child);
+    }
+
+    fn apply_paint_transform(
+        self: RenderHandle<Self>,
+        app: &App,
+        child: AnyRenderObject,
+        transform: &mut Matrix4,
+    ) {
+        RenderProxyBoxMixin::apply_paint_transform(self, app, child, transform);
+    }
+
+    fn hit_test_children(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        result: &mut BoxHitTestResult<'_>,
+        position: Offset,
+    ) -> bool {
+        RenderProxyBoxMixin::hit_test_children(self, app, result, position)
+    }
+
+    fn compute_min_intrinsic_width(self: RenderHandle<Self>, app: &mut App, height: f64) -> f64 {
+        RenderProxyBoxMixin::compute_min_intrinsic_width(self, app, height)
+    }
+
+    fn compute_max_intrinsic_width(self: RenderHandle<Self>, app: &mut App, height: f64) -> f64 {
+        RenderProxyBoxMixin::compute_max_intrinsic_width(self, app, height)
+    }
+
+    fn compute_min_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
+        RenderProxyBoxMixin::compute_min_intrinsic_height(self, app, width)
+    }
+
+    fn compute_max_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
+        RenderProxyBoxMixin::compute_max_intrinsic_height(self, app, width)
+    }
+
+    fn compute_distance_to_actual_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        RenderProxyBoxMixin::compute_distance_to_actual_baseline(self, app, baseline)
+    }
+
+    fn compute_dry_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        RenderProxyBoxMixin::compute_dry_baseline(self, app, constraints, baseline)
+    }
+
+    fn compute_dry_layout(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+    ) -> Size {
+        RenderProxyBoxMixin::compute_dry_layout(self, app, constraints)
+    }
+}
+
+/// Causes the semantics of all earlier render objects below the same semantic
+/// boundary to be dropped.
+///
+/// This is useful in a stack where an opaque mask should prevent interactions
+/// with the render objects painted below the mask.
+pub struct RenderBlockSemantics {
+    render_object: RenderObjectData,
+    render_box: RenderBoxData,
+    child: RenderObjectWithChildData<AnyRenderBox>,
+    blocking: bool,
+}
+
+impl RenderBlockSemantics {
+    /// Create a render object that blocks semantics for nodes below it in paint
+    /// order. Dart's default `blocking` is true.
+    pub fn new(
+        app: &mut App,
+        blocking: bool,
+        child: Option<AnyRenderBox>,
+    ) -> RenderHandle<RenderBlockSemantics> {
+        let this = RenderHandle::new_box(
+            app,
+            RenderBlockSemantics {
+                render_object: RenderObjectData::new(),
+                render_box: RenderBoxData::new(),
+                child: RenderObjectWithChildData::new(),
+                blocking,
+            },
+        );
+        this.set_child(app, child);
+        this
+    }
+
+    /// Whether this render object is blocking semantics of previously painted
+    /// [`RenderObject`]s below a common semantics boundary from the semantic tree.
+    pub fn blocking(self: RenderHandle<Self>, app: &App) -> bool {
+        self.get(app).blocking
+    }
+
+    /// Sets [`blocking`](Self::blocking).
+    pub fn set_blocking(self: RenderHandle<Self>, app: &mut App, value: bool) {
+        if value == self.get(app).blocking {
+            return;
+        }
+        self.get_mut(app).blocking = value;
+    }
+}
+
+impl RenderObjectWithChildMixin for RenderBlockSemantics {
+    type ChildType = AnyRenderBox;
+
+    fn child_data(self: RenderHandle<Self>, app: &App) -> &RenderObjectWithChildData<AnyRenderBox> {
+        &self.get(app).child
+    }
+
+    fn child_data_mut(
+        self: RenderHandle<Self>,
+        app: &mut App,
+    ) -> &mut RenderObjectWithChildData<AnyRenderBox> {
+        &mut self.get_mut(app).child
+    }
+}
+
+impl RenderProxyBoxMixin for RenderBlockSemantics {}
+
+impl RenderObject for RenderBlockSemantics {
+    crate::render_object_accessors!();
+
+    fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
+        RenderProxyBoxMixin::perform_layout(self, app);
+    }
+
+    fn paint(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        context: &mut PaintingContext,
+        offset: Offset,
+    ) {
+        RenderProxyBoxMixin::paint(self, app, context, offset);
+    }
+
+    fn visit_children(
+        self: RenderHandle<Self>,
+        app: &App,
+        visitor: &mut dyn FnMut(AnyRenderObject),
+    ) {
+        if let Some(child) = self.child(app) {
+            visitor(child.as_object());
+        }
+    }
+}
+
+impl RenderBox for RenderBlockSemantics {
+    crate::render_box_accessors!();
+
+    fn setup_parent_data(self: RenderHandle<Self>, app: &mut App, child: AnyRenderObject) {
+        RenderProxyBoxMixin::setup_parent_data(self, app, child);
+    }
+
+    fn apply_paint_transform(
+        self: RenderHandle<Self>,
+        app: &App,
+        child: AnyRenderObject,
+        transform: &mut Matrix4,
+    ) {
+        RenderProxyBoxMixin::apply_paint_transform(self, app, child, transform);
+    }
+
+    fn hit_test_children(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        result: &mut BoxHitTestResult<'_>,
+        position: Offset,
+    ) -> bool {
+        RenderProxyBoxMixin::hit_test_children(self, app, result, position)
+    }
+
+    fn compute_min_intrinsic_width(self: RenderHandle<Self>, app: &mut App, height: f64) -> f64 {
+        RenderProxyBoxMixin::compute_min_intrinsic_width(self, app, height)
+    }
+
+    fn compute_max_intrinsic_width(self: RenderHandle<Self>, app: &mut App, height: f64) -> f64 {
+        RenderProxyBoxMixin::compute_max_intrinsic_width(self, app, height)
+    }
+
+    fn compute_min_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
+        RenderProxyBoxMixin::compute_min_intrinsic_height(self, app, width)
+    }
+
+    fn compute_max_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
+        RenderProxyBoxMixin::compute_max_intrinsic_height(self, app, width)
+    }
+
+    fn compute_distance_to_actual_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        RenderProxyBoxMixin::compute_distance_to_actual_baseline(self, app, baseline)
+    }
+
+    fn compute_dry_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        RenderProxyBoxMixin::compute_dry_baseline(self, app, constraints, baseline)
+    }
+
+    fn compute_dry_layout(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+    ) -> Size {
+        RenderProxyBoxMixin::compute_dry_layout(self, app, constraints)
+    }
+}
+
+/// Causes the semantics of all descendants to be merged into this
+/// node such that the entire subtree becomes a single leaf in the
+/// semantics tree.
+///
+/// Useful for combining the semantics of multiple render objects that
+/// form part of a single conceptual widget, e.g. a checkbox, a label,
+/// and the gesture detector that goes with them.
+pub struct RenderMergeSemantics {
+    render_object: RenderObjectData,
+    render_box: RenderBoxData,
+    child: RenderObjectWithChildData<AnyRenderBox>,
+}
+
+impl RenderMergeSemantics {
+    /// Creates a render object that merges the semantics from its descendants.
+    pub fn new(app: &mut App, child: Option<AnyRenderBox>) -> RenderHandle<RenderMergeSemantics> {
+        let this = RenderHandle::new_box(
+            app,
+            RenderMergeSemantics {
+                render_object: RenderObjectData::new(),
+                render_box: RenderBoxData::new(),
+                child: RenderObjectWithChildData::new(),
+            },
+        );
+        this.set_child(app, child);
+        this
+    }
+}
+
+impl RenderObjectWithChildMixin for RenderMergeSemantics {
+    type ChildType = AnyRenderBox;
+
+    fn child_data(self: RenderHandle<Self>, app: &App) -> &RenderObjectWithChildData<AnyRenderBox> {
+        &self.get(app).child
+    }
+
+    fn child_data_mut(
+        self: RenderHandle<Self>,
+        app: &mut App,
+    ) -> &mut RenderObjectWithChildData<AnyRenderBox> {
+        &mut self.get_mut(app).child
+    }
+}
+
+impl RenderProxyBoxMixin for RenderMergeSemantics {}
+
+impl RenderObject for RenderMergeSemantics {
+    crate::render_object_accessors!();
+
+    fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
+        RenderProxyBoxMixin::perform_layout(self, app);
+    }
+
+    fn paint(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        context: &mut PaintingContext,
+        offset: Offset,
+    ) {
+        RenderProxyBoxMixin::paint(self, app, context, offset);
+    }
+
+    fn visit_children(
+        self: RenderHandle<Self>,
+        app: &App,
+        visitor: &mut dyn FnMut(AnyRenderObject),
+    ) {
+        if let Some(child) = self.child(app) {
+            visitor(child.as_object());
+        }
+    }
+}
+
+impl RenderBox for RenderMergeSemantics {
+    crate::render_box_accessors!();
+
+    fn setup_parent_data(self: RenderHandle<Self>, app: &mut App, child: AnyRenderObject) {
+        RenderProxyBoxMixin::setup_parent_data(self, app, child);
+    }
+
+    fn apply_paint_transform(
+        self: RenderHandle<Self>,
+        app: &App,
+        child: AnyRenderObject,
+        transform: &mut Matrix4,
+    ) {
+        RenderProxyBoxMixin::apply_paint_transform(self, app, child, transform);
+    }
+
+    fn hit_test_children(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        result: &mut BoxHitTestResult<'_>,
+        position: Offset,
+    ) -> bool {
+        RenderProxyBoxMixin::hit_test_children(self, app, result, position)
+    }
+
+    fn compute_min_intrinsic_width(self: RenderHandle<Self>, app: &mut App, height: f64) -> f64 {
+        RenderProxyBoxMixin::compute_min_intrinsic_width(self, app, height)
+    }
+
+    fn compute_max_intrinsic_width(self: RenderHandle<Self>, app: &mut App, height: f64) -> f64 {
+        RenderProxyBoxMixin::compute_max_intrinsic_width(self, app, height)
+    }
+
+    fn compute_min_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
+        RenderProxyBoxMixin::compute_min_intrinsic_height(self, app, width)
+    }
+
+    fn compute_max_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
+        RenderProxyBoxMixin::compute_max_intrinsic_height(self, app, width)
+    }
+
+    fn compute_distance_to_actual_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        RenderProxyBoxMixin::compute_distance_to_actual_baseline(self, app, baseline)
+    }
+
+    fn compute_dry_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        RenderProxyBoxMixin::compute_dry_baseline(self, app, constraints, baseline)
+    }
+
+    fn compute_dry_layout(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+    ) -> Size {
+        RenderProxyBoxMixin::compute_dry_layout(self, app, constraints)
+    }
+}
+
+/// Excludes this subtree from the semantic tree.
+///
+/// When [`excluding`](Self::excluding) is true, this render object (and its subtree) is
+/// excluded from the semantic tree.
+///
+/// Useful e.g. for hiding text that is redundant with other text next
+/// to it (e.g. text included only for the visual effect).
+pub struct RenderExcludeSemantics {
+    render_object: RenderObjectData,
+    render_box: RenderBoxData,
+    child: RenderObjectWithChildData<AnyRenderBox>,
+    excluding: bool,
+}
+
+impl RenderExcludeSemantics {
+    /// Creates a render object that ignores the semantics of its subtree. Dart's default
+    /// `excluding` is true.
+    pub fn new(
+        app: &mut App,
+        excluding: bool,
+        child: Option<AnyRenderBox>,
+    ) -> RenderHandle<RenderExcludeSemantics> {
+        let this = RenderHandle::new_box(
+            app,
+            RenderExcludeSemantics {
+                render_object: RenderObjectData::new(),
+                render_box: RenderBoxData::new(),
+                child: RenderObjectWithChildData::new(),
+                excluding,
+            },
+        );
+        this.set_child(app, child);
+        this
+    }
+
+    /// Whether this render object is excluded from the semantic tree.
+    pub fn excluding(self: RenderHandle<Self>, app: &App) -> bool {
+        self.get(app).excluding
+    }
+
+    /// Sets [`excluding`](Self::excluding).
+    pub fn set_excluding(self: RenderHandle<Self>, app: &mut App, value: bool) {
+        if value == self.get(app).excluding {
+            return;
+        }
+        self.get_mut(app).excluding = value;
+    }
+}
+
+impl RenderObjectWithChildMixin for RenderExcludeSemantics {
+    type ChildType = AnyRenderBox;
+
+    fn child_data(self: RenderHandle<Self>, app: &App) -> &RenderObjectWithChildData<AnyRenderBox> {
+        &self.get(app).child
+    }
+
+    fn child_data_mut(
+        self: RenderHandle<Self>,
+        app: &mut App,
+    ) -> &mut RenderObjectWithChildData<AnyRenderBox> {
+        &mut self.get_mut(app).child
+    }
+}
+
+impl RenderProxyBoxMixin for RenderExcludeSemantics {}
+
+impl RenderObject for RenderExcludeSemantics {
+    crate::render_object_accessors!();
+
+    fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
+        RenderProxyBoxMixin::perform_layout(self, app);
+    }
+
+    fn paint(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        context: &mut PaintingContext,
+        offset: Offset,
+    ) {
+        RenderProxyBoxMixin::paint(self, app, context, offset);
+    }
+
+    fn visit_children(
+        self: RenderHandle<Self>,
+        app: &App,
+        visitor: &mut dyn FnMut(AnyRenderObject),
+    ) {
+        if let Some(child) = self.child(app) {
+            visitor(child.as_object());
+        }
+    }
+}
+
+impl RenderBox for RenderExcludeSemantics {
+    crate::render_box_accessors!();
+
+    fn setup_parent_data(self: RenderHandle<Self>, app: &mut App, child: AnyRenderObject) {
+        RenderProxyBoxMixin::setup_parent_data(self, app, child);
+    }
+
+    fn apply_paint_transform(
+        self: RenderHandle<Self>,
+        app: &App,
+        child: AnyRenderObject,
+        transform: &mut Matrix4,
+    ) {
+        RenderProxyBoxMixin::apply_paint_transform(self, app, child, transform);
+    }
+
+    fn hit_test_children(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        result: &mut BoxHitTestResult<'_>,
+        position: Offset,
+    ) -> bool {
+        RenderProxyBoxMixin::hit_test_children(self, app, result, position)
+    }
+
+    fn compute_min_intrinsic_width(self: RenderHandle<Self>, app: &mut App, height: f64) -> f64 {
+        RenderProxyBoxMixin::compute_min_intrinsic_width(self, app, height)
+    }
+
+    fn compute_max_intrinsic_width(self: RenderHandle<Self>, app: &mut App, height: f64) -> f64 {
+        RenderProxyBoxMixin::compute_max_intrinsic_width(self, app, height)
+    }
+
+    fn compute_min_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
+        RenderProxyBoxMixin::compute_min_intrinsic_height(self, app, width)
+    }
+
+    fn compute_max_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
+        RenderProxyBoxMixin::compute_max_intrinsic_height(self, app, width)
+    }
+
+    fn compute_distance_to_actual_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        RenderProxyBoxMixin::compute_distance_to_actual_baseline(self, app, baseline)
+    }
+
+    fn compute_dry_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        RenderProxyBoxMixin::compute_dry_baseline(self, app, constraints, baseline)
+    }
+
+    fn compute_dry_layout(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+    ) -> Size {
+        RenderProxyBoxMixin::compute_dry_layout(self, app, constraints)
+    }
+}
+
+/// A render objects that annotates semantics with an index.
+///
+/// Certain widgets will automatically provide a child index for building
+/// semantics. For example, the `ScrollView` uses the index of the first
+/// visible child semantics node to determine the
+/// `SemanticsConfiguration.scrollIndex`.
+pub struct RenderIndexedSemantics {
+    render_object: RenderObjectData,
+    render_box: RenderBoxData,
+    child: RenderObjectWithChildData<AnyRenderBox>,
+    index: i32,
+}
+
+impl RenderIndexedSemantics {
+    /// Creates a render object that annotates the child semantics with an index.
+    pub fn new(
+        app: &mut App,
+        index: i32,
+        child: Option<AnyRenderBox>,
+    ) -> RenderHandle<RenderIndexedSemantics> {
+        let this = RenderHandle::new_box(
+            app,
+            RenderIndexedSemantics {
+                render_object: RenderObjectData::new(),
+                render_box: RenderBoxData::new(),
+                child: RenderObjectWithChildData::new(),
+                index,
+            },
+        );
+        this.set_child(app, child);
+        this
+    }
+
+    /// The index used to annotated child semantics.
+    pub fn index(self: RenderHandle<Self>, app: &App) -> i32 {
+        self.get(app).index
+    }
+
+    /// Sets [`index`](Self::index).
+    pub fn set_index(self: RenderHandle<Self>, app: &mut App, value: i32) {
+        if value == self.index(app) {
+            return;
+        }
+        self.get_mut(app).index = value;
+    }
+}
+
+impl RenderObjectWithChildMixin for RenderIndexedSemantics {
+    type ChildType = AnyRenderBox;
+
+    fn child_data(self: RenderHandle<Self>, app: &App) -> &RenderObjectWithChildData<AnyRenderBox> {
+        &self.get(app).child
+    }
+
+    fn child_data_mut(
+        self: RenderHandle<Self>,
+        app: &mut App,
+    ) -> &mut RenderObjectWithChildData<AnyRenderBox> {
+        &mut self.get_mut(app).child
+    }
+}
+
+impl RenderProxyBoxMixin for RenderIndexedSemantics {}
+
+impl RenderObject for RenderIndexedSemantics {
+    crate::render_object_accessors!();
+
+    fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
+        RenderProxyBoxMixin::perform_layout(self, app);
+    }
+
+    fn paint(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        context: &mut PaintingContext,
+        offset: Offset,
+    ) {
+        RenderProxyBoxMixin::paint(self, app, context, offset);
+    }
+
+    fn visit_children(
+        self: RenderHandle<Self>,
+        app: &App,
+        visitor: &mut dyn FnMut(AnyRenderObject),
+    ) {
+        if let Some(child) = self.child(app) {
+            visitor(child.as_object());
+        }
+    }
+}
+
+impl RenderBox for RenderIndexedSemantics {
+    crate::render_box_accessors!();
+
+    fn setup_parent_data(self: RenderHandle<Self>, app: &mut App, child: AnyRenderObject) {
+        RenderProxyBoxMixin::setup_parent_data(self, app, child);
+    }
+
+    fn apply_paint_transform(
+        self: RenderHandle<Self>,
+        app: &App,
+        child: AnyRenderObject,
+        transform: &mut Matrix4,
+    ) {
+        RenderProxyBoxMixin::apply_paint_transform(self, app, child, transform);
+    }
+
+    fn hit_test_children(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        result: &mut BoxHitTestResult<'_>,
+        position: Offset,
+    ) -> bool {
+        RenderProxyBoxMixin::hit_test_children(self, app, result, position)
+    }
+
+    fn compute_min_intrinsic_width(self: RenderHandle<Self>, app: &mut App, height: f64) -> f64 {
+        RenderProxyBoxMixin::compute_min_intrinsic_width(self, app, height)
+    }
+
+    fn compute_max_intrinsic_width(self: RenderHandle<Self>, app: &mut App, height: f64) -> f64 {
+        RenderProxyBoxMixin::compute_max_intrinsic_width(self, app, height)
+    }
+
+    fn compute_min_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
+        RenderProxyBoxMixin::compute_min_intrinsic_height(self, app, width)
+    }
+
+    fn compute_max_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
+        RenderProxyBoxMixin::compute_max_intrinsic_height(self, app, width)
+    }
+
+    fn compute_distance_to_actual_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        RenderProxyBoxMixin::compute_distance_to_actual_baseline(self, app, baseline)
+    }
+
+    fn compute_dry_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        RenderProxyBoxMixin::compute_dry_baseline(self, app, constraints, baseline)
+    }
+
+    fn compute_dry_layout(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+    ) -> Size {
+        RenderProxyBoxMixin::compute_dry_layout(self, app, constraints)
+    }
+}
+
 /// Applies a filter to the existing painted content and then paints `child`.
 ///
 /// This effect is relatively expensive, especially if the filter is non-local,
@@ -7565,6 +9233,7 @@ mod tests {
     use super::*;
     use crate::layer::{ErasedLayer, OffsetLayer, PictureLayer};
     use crate::pipeline_owner::PipelineOwner;
+    use crate::view::ViewConfiguration;
     use waft_embedder::SceneBuilder;
 
     fn sized_box(app: &mut App, size: Size) -> RenderHandle<RenderConstrainedBox> {
@@ -7913,6 +9582,83 @@ mod tests {
             .handle::<OpacityLayer>(layer.id())
             .expect("an OpacityLayer");
         assert_eq!(opacity.alpha(&app), Some(255));
+    }
+
+    /// Dart's `RenderOpacity.paintsChild`: `_alpha > 0`.
+    #[test]
+    fn render_opacity_paints_its_child_only_above_zero_opacity() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        for (opacity, paints) in [(0.0, false), (0.001, false), (0.01, true), (1.0, true)] {
+            let child = sized_box(&mut app, Size::new(1.0, 1.0));
+            let opacity = RenderOpacity::new(&mut app, opacity, Some(child.as_box()));
+            assert_eq!(
+                opacity.as_object().paints_child(&app, child.as_object()),
+                paints
+            );
+        }
+    }
+
+    /// Dart's `RenderAnimatedOpacityMixin.paintsChild`: the animation's value above zero.
+    #[test]
+    fn animated_opacity_paints_its_child_while_its_animation_is_above_zero() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let child = sized_box(&mut app, Size::new(1.0, 1.0));
+        let dismissed = k_always_dismissed_animation(&mut app);
+        let complete = k_always_complete_animation(&mut app);
+        let fade = RenderAnimatedOpacity::new(&mut app, dismissed, Some(child.as_box()));
+        assert!(!fade.as_object().paints_child(&app, child.as_object()));
+        fade.set_opacity(&mut app, complete);
+        assert!(fade.as_object().paints_child(&app, child.as_object()));
+    }
+
+    /// Dart's `RenderFittedBox.paintsChild`: neither the box nor its child is empty, and an
+    /// unpainted child gets a zero paint transform.
+    #[test]
+    fn fitted_box_does_not_paint_an_empty_child() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let child = sized_box(&mut app, Size::new(0.0, 100.0));
+        let fitted = RenderFittedBox::new(
+            &mut app,
+            BoxFit::Contain,
+            AlignmentGeometry::CENTER,
+            None,
+            Some(child.as_box()),
+        );
+        fitted.layout(
+            &mut app,
+            BoxConstraints::tight(Size::new(50.0, 50.0)),
+            false,
+        );
+        assert!(!fitted.as_object().paints_child(&app, child.as_object()));
+        let mut transform = Matrix4::IDENTITY;
+        RenderBox::apply_paint_transform(fitted, &app, child.as_object(), &mut transform);
+        assert_eq!(transform, crate::object::zero_matrix());
+
+        let painted = sized_box(&mut app, Size::new(100.0, 100.0));
+        fitted.set_child(&mut app, Some(painted.as_box()));
+        fitted.layout(
+            &mut app,
+            BoxConstraints::tight(Size::new(50.0, 50.0)),
+            false,
+        );
+        assert!(fitted.as_object().paints_child(&app, painted.as_object()));
+    }
+
+    /// Dart's `RenderObject.paintsChild` default: a proxy paints its child.
+    #[test]
+    fn a_render_object_paints_its_child_by_default() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let child = sized_box(&mut app, Size::new(10.0, 10.0));
+        let parent = RenderConstrainedBox::new(
+            &mut app,
+            BoxConstraints::tight(Size::new(10.0, 10.0)),
+            Some(child.as_box()),
+        );
+        assert!(parent.as_object().paints_child(&app, child.as_object()));
     }
 
     #[test]
@@ -8470,7 +10216,7 @@ mod tests {
             hit_test(&mut app, offstage.as_box(), Offset::new(50.0, 50.0)),
             (false, 0)
         );
-        assert!(!offstage.paints_child(&app, child.as_box()));
+        assert!(!offstage.as_object().paints_child(&app, child.as_object()));
 
         offstage.set_offstage(&mut app, false);
         pump_frame(&mut app, owner);
@@ -8479,7 +10225,7 @@ mod tests {
             [fill(Rect::from_ltwh(0.0, 0.0, 100.0, 100.0), RED)]
         );
         assert!(hit_test(&mut app, offstage.as_box(), Offset::new(50.0, 50.0)).0);
-        assert!(offstage.paints_child(&app, child.as_box()));
+        assert!(offstage.as_object().paints_child(&app, child.as_object()));
     }
 
     #[test]
@@ -8832,5 +10578,576 @@ mod tests {
         assert!(!clipper.should_reclip(&same));
         let other = ShapeBorderClipper::new(square, Some(TextDirection::Rtl));
         assert!(clipper.should_reclip(&other));
+    }
+
+    /// The shadows a repaint boundary's recording draws: `drawShadow`'s draws.
+    fn shadow_count(app: &App, boundary: AnyRenderObject) -> usize {
+        picture_ops(app, boundary)
+            .iter()
+            .filter(|op| matches!(op, Op::DrawShadow { .. }))
+            .count()
+    }
+
+    fn physical_model(
+        app: &mut App,
+        child: Option<AnyRenderBox>,
+        clip_behavior: Clip,
+    ) -> RenderHandle<RenderPhysicalModel> {
+        RenderPhysicalModel::new(
+            app,
+            child,
+            BoxShape::Rectangle,
+            clip_behavior,
+            None,
+            0.0,
+            Color::new(0xffff00ff),
+            Color::new(0xFF000000),
+        )
+    }
+
+    /// `proxy_box_test.dart`: "RenderPhysicalModel compositing".
+    #[test]
+    fn a_physical_model_needs_no_compositing_at_any_elevation() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let model = physical_model(&mut app, None, Clip::None);
+        let root = RenderRepaintBoundary::new(&mut app, Some(model.as_box()));
+        let owner = first_frame(&mut app, root.as_box());
+        assert!(!model.as_object().needs_compositing(&app));
+
+        model.set_elevation(&mut app, 1.0);
+        pump_frame(&mut app, owner);
+        assert!(!model.as_object().needs_compositing(&app));
+
+        model.set_elevation(&mut app, 0.0);
+        pump_frame(&mut app, owner);
+        assert!(!model.as_object().needs_compositing(&app));
+    }
+
+    /// `proxy_box_test.dart`: "RenderPhysicalModel paints shadow only for non-zero elevation".
+    #[test]
+    fn a_physical_model_paints_a_shadow_only_at_a_non_zero_elevation() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let child = sized_box(&mut app, Size::new(10.0, 10.0));
+        let model = physical_model(&mut app, Some(child.as_box()), Clip::None);
+        let root = RenderRepaintBoundary::new(&mut app, Some(model.as_box()));
+        let owner = first_frame(&mut app, root.as_box());
+        assert_eq!(shadow_count(&app, root.as_object()), 0);
+
+        model.set_elevation(&mut app, 1.0);
+        pump_frame(&mut app, owner);
+        assert_eq!(shadow_count(&app, root.as_object()), 1);
+    }
+
+    /// `_TestPathClipper` of `proxy_box_test.dart`.
+    struct TestPathClipper;
+
+    impl CustomClipper<Arc<Path>> for TestPathClipper {
+        fn get_clip(&self, _size: Size) -> Arc<Path> {
+            let mut path = PathBuilder::new();
+            path.rect(Rect::from_ltwh(50.0, 50.0, 100.0, 100.0).into());
+            path.build()
+        }
+
+        fn should_reclip(&self, _old_clipper: &dyn CustomClipper<Arc<Path>>) -> bool {
+            false
+        }
+
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+    }
+
+    /// `proxy_box_test.dart`'s `_testLayerReuse`: a repaint keeps the clip layer.
+    fn assert_reuses_its_clip_layer<L: 'static>(app: &mut App, clip: AnyRenderBox) {
+        assert!(clip.as_object().layer_as::<L>(app).is_none());
+        let root = RenderRepaintBoundary::new(app, Some(clip));
+        let owner = first_frame(app, root.as_box());
+        let layer = clip
+            .as_object()
+            .layer_as::<L>(app)
+            .expect("the clip pushes its layer");
+
+        // Mark for repaint otherwise pump_frame is a noop.
+        clip.as_object().mark_needs_paint(app);
+        assert!(clip.as_object().debug_needs_paint(app));
+        pump_frame(app, owner);
+        assert!(!clip.as_object().debug_needs_paint(app));
+        assert!(clip.as_object().layer_as::<L>(app) == Some(layer));
+    }
+
+    #[test]
+    fn a_physical_model_reuses_its_layer() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let leaf = sized_box(&mut app, Size::new(1.0, 1.0));
+        let boundary = RenderRepaintBoundary::new(&mut app, Some(leaf.as_box()));
+        let model = RenderPhysicalModel::new(
+            &mut app,
+            Some(boundary.as_box()),
+            BoxShape::Rectangle,
+            Clip::HardEdge,
+            None,
+            0.0,
+            Color::from_rgbo(0, 0, 0, 1.0),
+            Color::new(0xFF000000),
+        );
+        assert_reuses_its_clip_layer::<ClipRRectLayer>(&mut app, model.as_box());
+    }
+
+    #[test]
+    fn a_physical_shape_reuses_its_layer() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let leaf = sized_box(&mut app, Size::new(1.0, 1.0));
+        let boundary = RenderRepaintBoundary::new(&mut app, Some(leaf.as_box()));
+        let shape = RenderPhysicalShape::new(
+            &mut app,
+            Some(boundary.as_box()),
+            Rc::new(TestPathClipper),
+            Clip::HardEdge,
+            0.0,
+            Color::from_rgbo(0, 0, 0, 1.0),
+            Color::new(0xFF000000),
+        );
+        assert_reuses_its_clip_layer::<ClipPathLayer>(&mut app, shape.as_box());
+    }
+
+    #[test]
+    fn a_physical_model_fills_its_shape_and_draws_its_shadow_below_it() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let child = sized_box(&mut app, Size::new(10.0, 10.0));
+        let model = RenderPhysicalModel::new(
+            &mut app,
+            Some(child.as_box()),
+            BoxShape::Rectangle,
+            Clip::None,
+            Some(BorderRadius::circular(2.0)),
+            4.0,
+            BLUE,
+            Color::new(0xFF000000),
+        );
+        let root = RenderRepaintBoundary::new(&mut app, Some(model.as_box()));
+        first_frame_in_view(&mut app, root.as_box(), 3.0);
+        let ops = picture_ops(&app, root.as_object());
+        let shadow = ops
+            .iter()
+            .position(|op| {
+                matches!(op, Op::DrawShadow { elevation, transparent_occluder, .. }
+                    if *elevation == 4.0 && !*transparent_occluder)
+            })
+            .expect("a shadow at elevation 4");
+        let Op::DrawShadow {
+            round_rect,
+            device_pixel_ratio,
+            ..
+        } = &ops[shadow]
+        else {
+            unreachable!("found as a shadow");
+        };
+        assert_eq!(
+            *round_rect,
+            Some((
+                valo::Rect::from(Rect::from_ltwh(0.0, 0.0, 100.0, 100.0)),
+                2.0
+            )),
+            "a rounded rect the shadow fills in closed form"
+        );
+        assert_eq!(*device_pixel_ratio, 3.0);
+        let fill = ops
+            .iter()
+            .position(|op| {
+                matches!(op, Op::DrawPath { paint, .. }
+                    if paint.mask_blur.is_none() && paint.color == BLUE.into())
+            })
+            .expect("the rounded fill");
+        assert!(shadow < fill, "the shadow is drawn under the fill");
+    }
+
+    /// Lays `root` out and paints it under a [`RenderView`] of 100x100 logical pixels at
+    /// `device_pixel_ratio`, as Flutter's test binding puts one above the tree.
+    fn first_frame_in_view(
+        app: &mut App,
+        root: AnyRenderBox,
+        device_pixel_ratio: f64,
+    ) -> Handle<PipelineOwner> {
+        let constraints = BoxConstraints::tight(Size::new(100.0, 100.0));
+        let view = RenderView::new(
+            app,
+            Some(root),
+            Some(ViewConfiguration::new(
+                constraints * device_pixel_ratio,
+                constraints,
+                device_pixel_ratio,
+            )),
+            Rc::new(waft_test::TestView::new(100.0, 100.0)),
+        );
+        let owner = PipelineOwner::new(app, None, None);
+        owner.set_root_node(app, Some(view.as_object()));
+        view.prepare_initial_frame(app);
+        owner.flush_layout(app);
+        owner.flush_compositing_bits(app);
+        owner.flush_paint(app);
+        owner
+    }
+
+    /// Whether `ops` fill with `color` only through a `draw_paint` inside a save layer, as a
+    /// physical model with [`Clip::AntiAliasWithSaveLayer`] does to avoid the bleeding edge.
+    fn fills_only_with_draw_paint_inside_a_save_layer(ops: &[Op], color: Color) -> bool {
+        let filled = |paint: &valo::Paint| paint.color == color.into() && paint.mask_blur.is_none();
+        let save_layer = ops.iter().position(|op| matches!(op, Op::SaveLayer { .. }));
+        let draw_paint = ops
+            .iter()
+            .position(|op| matches!(op, Op::DrawPaint { paint, .. } if filled(paint)));
+        let other_fill = ops.iter().any(|op| {
+            matches!(op, Op::DrawPath { paint, .. } | Op::DrawRect { paint, .. } if filled(paint))
+        });
+        matches!((save_layer, draw_paint), (Some(layer), Some(paint)) if layer < paint)
+            && !other_fill
+    }
+
+    #[test]
+    fn a_physical_model_clipping_with_a_save_layer_fills_with_draw_paint_inside_the_clip() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let child = sized_box(&mut app, Size::new(10.0, 10.0));
+        let model = RenderPhysicalModel::new(
+            &mut app,
+            Some(child.as_box()),
+            BoxShape::Rectangle,
+            Clip::AntiAliasWithSaveLayer,
+            Some(BorderRadius::circular(2.0)),
+            0.0,
+            BLUE,
+            Color::new(0xFF000000),
+        );
+        let root = RenderRepaintBoundary::new(&mut app, Some(model.as_box()));
+        first_frame(&mut app, root.as_box());
+        let ops = picture_ops(&app, root.as_object());
+        assert!(
+            fills_only_with_draw_paint_inside_a_save_layer(&ops, BLUE),
+            "{ops:?}"
+        );
+    }
+
+    #[test]
+    fn a_physical_shape_clipping_with_a_save_layer_fills_with_draw_paint_inside_the_clip() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let child = sized_box(&mut app, Size::new(10.0, 10.0));
+        let shape = RenderPhysicalShape::new(
+            &mut app,
+            Some(child.as_box()),
+            circle_clipper(),
+            Clip::AntiAliasWithSaveLayer,
+            0.0,
+            BLUE,
+            Color::new(0xFF000000),
+        );
+        let root = RenderRepaintBoundary::new(&mut app, Some(shape.as_box()));
+        first_frame(&mut app, root.as_box());
+        let ops = picture_ops(&app, root.as_object());
+        assert!(
+            fills_only_with_draw_paint_inside_a_save_layer(&ops, BLUE),
+            "{ops:?}"
+        );
+    }
+
+    fn circle_clipper() -> Rc<dyn CustomClipper<Arc<Path>>> {
+        Rc::new(ShapeBorderClipper::new(
+            Box::new(waft_painting::CircleBorder::new(
+                waft_painting::BorderSide::NONE,
+                0.0,
+            )),
+            None,
+        ))
+    }
+
+    fn physical_shape(app: &mut App) -> RenderHandle<RenderPhysicalShape> {
+        RenderPhysicalShape::new(
+            app,
+            None,
+            circle_clipper(),
+            Clip::None,
+            0.0,
+            Color::new(0xffff00ff),
+            Color::new(0xFF000000),
+        )
+    }
+
+    /// `proxy_box_test.dart`: "RenderPhysicalShape shape change triggers repaint".
+    #[test]
+    fn a_physical_shape_repaints_only_for_a_different_shape() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let shape = physical_shape(&mut app);
+        let root = RenderRepaintBoundary::new(&mut app, Some(shape.as_box()));
+        first_frame(&mut app, root.as_box());
+        assert!(!shape.as_object().debug_needs_paint(&app));
+
+        // Same shape, no repaint.
+        shape.set_clipper(&mut app, Some(circle_clipper()));
+        assert!(!shape.as_object().debug_needs_paint(&app));
+
+        // Different shape triggers repaint.
+        shape.set_clipper(
+            &mut app,
+            Some(Rc::new(ShapeBorderClipper::new(
+                Box::new(waft_painting::StadiumBorder::default()),
+                None,
+            ))),
+        );
+        assert!(shape.as_object().debug_needs_paint(&app));
+    }
+
+    /// `proxy_box_test.dart`: "RenderPhysicalShape compositing".
+    #[test]
+    fn a_physical_shape_needs_no_compositing_at_any_elevation() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let shape = physical_shape(&mut app);
+        let root = RenderRepaintBoundary::new(&mut app, Some(shape.as_box()));
+        let owner = first_frame(&mut app, root.as_box());
+        assert!(!shape.as_object().needs_compositing(&app));
+        shape.set_elevation(&mut app, 1.0);
+        pump_frame(&mut app, owner);
+        assert!(!shape.as_object().needs_compositing(&app));
+        shape.set_elevation(&mut app, 0.0);
+        pump_frame(&mut app, owner);
+        assert!(!shape.as_object().needs_compositing(&app));
+    }
+
+    /// A leaf that takes every hit, wherever it lands, as `_RenderInputPadding` does for hits
+    /// around its child.
+    struct EveryHitBox {
+        render_object: RenderObjectData,
+        render_box: RenderBoxData,
+    }
+
+    impl RenderObject for EveryHitBox {
+        crate::render_object_accessors!();
+
+        fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
+            let size = self.constraints(app).biggest();
+            self.set_size(app, size);
+        }
+    }
+
+    impl RenderBox for EveryHitBox {
+        crate::render_box_accessors!();
+
+        fn hit_test(
+            self: RenderHandle<Self>,
+            _app: &mut App,
+            result: &mut BoxHitTestResult<'_>,
+            position: Offset,
+        ) -> bool {
+            result.add(BoxHitTestEntry::new(self.as_box(), position).into());
+            true
+        }
+    }
+
+    use crate::semantics::AttributedString;
+
+    fn semantics_annotations(
+        app: &mut App,
+        properties: SemanticsProperties,
+        child: Option<AnyRenderBox>,
+    ) -> RenderHandle<RenderSemanticsAnnotations> {
+        RenderSemanticsAnnotations::new(
+            app,
+            Rc::new(properties),
+            false,
+            false,
+            false,
+            false,
+            None,
+            None,
+            child,
+        )
+    }
+
+    #[test]
+    fn semantics_annotations_bound_the_hit_test_of_a_child_that_takes_hits_outside_itself() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let child = RenderHandle::new_box(
+            &mut app,
+            EveryHitBox {
+                render_object: RenderObjectData::new(),
+                render_box: RenderBoxData::new(),
+            },
+        );
+        let semantics =
+            semantics_annotations(&mut app, SemanticsProperties::new(), Some(child.as_box()));
+        semantics.layout(
+            &mut app,
+            BoxConstraints::tight(Size::new(50.0, 50.0)),
+            false,
+        );
+
+        assert_eq!(
+            hit_test(&mut app, child.as_box(), Offset::new(75.0, 75.0)),
+            (true, 1),
+            "the child alone takes a hit outside itself"
+        );
+        assert_eq!(
+            hit_test(&mut app, semantics.as_box(), Offset::new(75.0, 75.0)),
+            (false, 0)
+        );
+        assert_eq!(
+            hit_test(&mut app, semantics.as_box(), Offset::new(25.0, 25.0)),
+            (true, 2),
+            "the child and the annotations"
+        );
+    }
+
+    /// Dart's `_RenderNoBaseline`: a 40x20 box that answers no dry baseline.
+    struct NoBaselineBox {
+        render_object: RenderObjectData,
+        render_box: RenderBoxData,
+    }
+
+    impl RenderObject for NoBaselineBox {
+        crate::render_object_accessors!();
+
+        fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
+            let size = self.constraints(app).constrain(Size::new(40.0, 20.0));
+            self.set_size(app, size);
+        }
+    }
+
+    impl RenderBox for NoBaselineBox {
+        crate::render_box_accessors!();
+
+        fn compute_dry_layout(
+            self: RenderHandle<Self>,
+            _app: &mut App,
+            constraints: BoxConstraints,
+        ) -> Size {
+            constraints.constrain(Size::new(40.0, 20.0))
+        }
+
+        fn compute_dry_baseline(
+            self: RenderHandle<Self>,
+            _app: &mut App,
+            _constraints: BoxConstraints,
+            _baseline: TextBaseline,
+        ) -> Option<f64> {
+            None
+        }
+    }
+
+    // 'RenderProxyBoxMixin.computeDryBaseline returns null when the child has no baseline'
+    #[test]
+    fn a_proxy_box_dry_baseline_is_none_when_the_child_has_no_baseline() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let child = RenderHandle::new_box(
+            &mut app,
+            NoBaselineBox {
+                render_object: RenderObjectData::new(),
+                render_box: RenderBoxData::new(),
+            },
+        );
+        let proxy =
+            semantics_annotations(&mut app, SemanticsProperties::new(), Some(child.as_box()));
+        proxy.layout(&mut app, BoxConstraints::new(), false);
+        assert_eq!(
+            proxy.as_box().get_dry_baseline(
+                &mut app,
+                BoxConstraints::tight_for(Some(40.0), Some(20.0)),
+                TextBaseline::Alphabetic,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn semantics_annotations_keep_what_they_are_given() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let properties = Rc::new(SemanticsProperties::new().label("label").hint("hint"));
+        let semantics = RenderSemanticsAnnotations::new(
+            &mut app,
+            properties.clone(),
+            true,
+            false,
+            false,
+            true,
+            Some(Locale::new("es")),
+            Some(TextDirection::Rtl),
+            None,
+        );
+        assert!(Rc::ptr_eq(&semantics.properties(&app), &properties));
+        assert!(semantics.container(&app));
+        assert!(!semantics.explicit_child_nodes(&app));
+        assert!(!semantics.exclude_semantics(&app));
+        assert!(semantics.block_user_actions(&app));
+        assert_eq!(semantics.locale_for_subtree(&app), Some(Locale::new("es")));
+        assert_eq!(semantics.text_direction(&app), Some(TextDirection::Rtl));
+        assert_eq!(
+            semantics.attributed_label(&app),
+            Some(AttributedString::new("label"))
+        );
+        assert_eq!(
+            semantics.attributed_hint(&app),
+            Some(AttributedString::new("hint"))
+        );
+        assert_eq!(semantics.attributed_value(&app), None);
+
+        let attributed_value = AttributedString::new("value");
+        semantics.set_properties(
+            &mut app,
+            Rc::new(
+                SemanticsProperties::new()
+                    .attributed_value(attributed_value.clone())
+                    .decreased_value("less"),
+            ),
+        );
+        assert_eq!(semantics.attributed_label(&app), None);
+        assert_eq!(semantics.attributed_value(&app), Some(attributed_value));
+        assert_eq!(
+            semantics.attributed_decreased_value(&app),
+            Some(AttributedString::new("less"))
+        );
+
+        semantics.set_container(&mut app, false);
+        semantics.set_explicit_child_nodes(&mut app, true);
+        semantics.set_exclude_semantics(&mut app, true);
+        semantics.set_block_user_actions(&mut app, false);
+        semantics.set_locale_for_subtree(&mut app, None);
+        semantics.set_text_direction(&mut app, None);
+        assert!(!semantics.container(&app));
+        assert!(semantics.explicit_child_nodes(&app));
+        assert!(semantics.exclude_semantics(&app));
+        assert!(!semantics.block_user_actions(&app));
+        assert_eq!(semantics.locale_for_subtree(&app), None);
+        assert_eq!(semantics.text_direction(&app), None);
+    }
+
+    #[test]
+    fn the_block_exclude_and_indexed_semantics_boxes_keep_their_values() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let block = RenderBlockSemantics::new(&mut app, true, None);
+        block.set_blocking(&mut app, false);
+        assert!(!block.blocking(&app));
+        let exclude = RenderExcludeSemantics::new(&mut app, true, None);
+        exclude.set_excluding(&mut app, false);
+        assert!(!exclude.excluding(&app));
+        let indexed = RenderIndexedSemantics::new(&mut app, 3, None);
+        assert_eq!(indexed.index(&app), 3);
+        indexed.set_index(&mut app, 4);
+        assert_eq!(indexed.index(&app), 4);
+        let merge = RenderMergeSemantics::new(&mut app, None);
+        merge.layout(
+            &mut app,
+            BoxConstraints::tight(Size::new(10.0, 10.0)),
+            false,
+        );
+        assert_eq!(merge.size(&app), Size::new(10.0, 10.0));
     }
 }

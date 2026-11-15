@@ -1732,7 +1732,7 @@ mod tests {
                 RootRestorationScope::new(
                     Some("app".to_string()),
                     Bag {
-                        key: Some(Rc::new(key.clone())),
+                        key: Some(key.clone().into()),
                     },
                 )
                 .into_widget(),
@@ -1740,7 +1740,7 @@ mod tests {
             harness.pump(&mut app);
             let state = harness
                 .owner
-                .global_key_element(&app, key.identity())
+                .global_key_element(&app, &key)
                 .expect("the bag is in the tree")
                 .state_handle::<BagState>(&app)
                 .expect("a BagState");
@@ -2019,7 +2019,7 @@ mod tests {
             RootRestorationScope::new(
                 Some("app".to_string()),
                 Editor {
-                    key: Some(Rc::new(key.clone())),
+                    key: Some(key.clone().into()),
                 },
             )
             .into_widget(),
@@ -2027,7 +2027,7 @@ mod tests {
         harness.pump(&mut app);
         let state = harness
             .owner
-            .global_key_element(&app, key.identity())
+            .global_key_element(&app, &key)
             .expect("the editor is in the tree")
             .state_handle::<EditorState>(&app)
             .expect("an EditorState");

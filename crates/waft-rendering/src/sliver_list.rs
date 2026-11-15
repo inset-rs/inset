@@ -144,6 +144,10 @@ impl RenderObject for RenderSliverList {
         RenderSliverMultiBoxAdaptor::apply_paint_transform(self, app, child, transform)
     }
 
+    fn paints_child(self: RenderHandle<Self>, app: &App, child: AnyRenderObject) -> bool {
+        RenderSliverMultiBoxAdaptor::paints_child(self, app, child)
+    }
+
     fn paint(
         self: RenderHandle<Self>,
         app: &mut App,

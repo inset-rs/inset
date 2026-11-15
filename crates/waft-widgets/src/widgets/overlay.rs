@@ -31,6 +31,7 @@ use crate::framework::{
 };
 use crate::view::View;
 use crate::widgets::basic::{Builder, Directionality, WidgetBuilder};
+use crate::widgets::lookup_boundary::LookupBoundary;
 use crate::widgets::media_query::MediaQuery;
 use crate::widgets::ticker_provider::{
     TickerMode, TickerProviderStateMixin, TickerProviderStateMixinData,
@@ -974,7 +975,7 @@ impl State for OverlayState {
         let mut onstage = true;
         let mut onstage_count = 0usize;
         for entry in app.get(self).entries.clone().into_iter().rev() {
-            let key: KeyRef = Rc::new(app.get(entry).key.clone());
+            let key: KeyRef = app.get(entry).key.clone().into();
             if onstage {
                 onstage_count += 1;
                 children.push(
@@ -2148,11 +2149,17 @@ struct TheaterLocation {
 
 impl RenderTheaterMarker {
     fn of(app: &mut App, context: BuildContext, target_root_overlay: bool) -> TheaterLocation {
-        RenderTheaterMarker::maybe_of(app, context, target_root_overlay, true).expect(
-            "No Overlay widget found. This widget requires an Overlay widget ancestor. An \
-             overlay lets widgets float on top of other widget children. To introduce an \
-             Overlay widget, you can either directly include one, or use a widget that \
-             contains an Overlay itself, such as a Navigator or WidgetsApp.",
+        RenderTheaterMarker::maybe_of(app, context, target_root_overlay, true).unwrap_or_else(
+            || {
+                panic!(
+                    "No Overlay widget found.\n{} widgets require an Overlay widget ancestor.\n\
+                     An overlay lets widgets float on top of other widget children.\n\
+                     To introduce an Overlay widget, you can either directly include one, or \
+                     use a widget that contains an Overlay itself, such as a Navigator or \
+                     WidgetsApp.",
+                    context.widget(app).type_name()
+                )
+            },
         )
     }
 
@@ -2173,8 +2180,9 @@ impl RenderTheaterMarker {
         };
 
         if target_root_overlay {
-            let nearest =
-                context.get_element_for_inherited_widget_of_exact_type::<RenderTheaterMarker>(app);
+            let nearest = LookupBoundary::get_element_for_inherited_widget_of_exact_type::<
+                RenderTheaterMarker,
+            >(app, context);
             let ancestor = RenderTheaterMarker::root_marker_of(app, nearest)?;
             if create_dependency {
                 context.depend_on_inherited_element(app, ancestor, None);
@@ -2183,10 +2191,13 @@ impl RenderTheaterMarker {
         }
 
         if create_dependency {
-            context.depend_on_inherited_widget_of_exact_type::<RenderTheaterMarker>(app)?;
+            LookupBoundary::depend_on_inherited_widget_of_exact_type::<RenderTheaterMarker>(
+                app, context,
+            )?;
         }
-        let element =
-            context.get_element_for_inherited_widget_of_exact_type::<RenderTheaterMarker>(app)?;
+        let element = LookupBoundary::get_element_for_inherited_widget_of_exact_type::<
+            RenderTheaterMarker,
+        >(app, context)?;
         Some(read(app, element))
     }
 
@@ -2194,8 +2205,9 @@ impl RenderTheaterMarker {
         let marker_element = marker_element?;
         let mut ancestor = None;
         marker_element.visit_ancestor_elements(app, &mut |element| {
-            ancestor =
-                element.get_element_for_inherited_widget_of_exact_type::<RenderTheaterMarker>(app);
+            ancestor = LookupBoundary::get_element_for_inherited_widget_of_exact_type::<
+                RenderTheaterMarker,
+            >(app, element);
             false
         });
         match ancestor {

@@ -160,6 +160,17 @@ impl SceneBuilder {
         });
     }
 
+    /// Pushes an image filter operation onto the operation stack.
+    ///
+    /// The given filter is applied to the children's rasterization before compositing them into
+    /// the scene, the children moved by `offset` first.
+    pub fn push_image_filter(&mut self, filter: &ImageFilter, offset: Offset) {
+        self.push_layer(Effect::ImageFilter {
+            filter: filter.clone(),
+            offset,
+        });
+    }
+
     /// Ends the effect of the most recently pushed operation.
     ///
     /// The container built is the [`EngineLayer`] returned, a child of the one beneath it: the

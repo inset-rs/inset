@@ -2501,7 +2501,7 @@ impl ComboBoxState {
                         .corner_radius_corners(r.control_corner_radius),
                 ),
         )
-        .key(Rc::new(app.get(self).background_key.clone()));
+        .key(app.get(self).background_key.clone().into());
         let popup = OverlayPortal::overlay_child_layout_builder(
             self.popup(app),
             move |app, context, info| self.popup_overlay(app, context, info),
@@ -2867,7 +2867,7 @@ impl ComboBoxState {
                             r.combo_box_drop_down_button_background_corner_radius,
                         ),
                 )
-                .key(Rc::new(app.get(self).overlay_key.clone())),
+                .key(app.get(self).overlay_key.clone().into()),
             );
         let overlay = self.pointer_target(app, overlay.into_widget(), text_box_enabled);
         // Right-aligned and stretched to the row, inside its margin; it adds nothing to the
@@ -2979,7 +2979,7 @@ impl ComboBoxState {
         let list = ListView::builder(move |app, _, index| self.item_container(app, index as usize))
             .item_count(ids.len() as i32)
             .find_child_index_callback(Rc::new(move |key| {
-                (key.as_ref() as &dyn std::any::Any)
+                (key.key() as &dyn std::any::Any)
                     .downcast_ref::<ValueKey<String>>()
                     .and_then(|key| ids.iter().position(|id| *id == key.value))
                     .map(|index| index as i32)
@@ -3054,7 +3054,7 @@ impl ComboBoxState {
                 container,
                 Rc::new(move |app, size| self.item_measured(app, &measured, size)),
             ))
-            .key(Rc::new(ValueKey::new(id)))
+            .key(ValueKey::new(id).into())
             .into_widget(),
         )
     }

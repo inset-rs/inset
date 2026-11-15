@@ -8,7 +8,7 @@ description: >-
 
 # Porting Flutter
 
-Ground truth: `.reference/flutter/packages/flutter/lib/src`. If that checkout is missing, clone it as `AGENTS.md` says. Read the Dart. Do not write it from memory.
+Ground truth: `../flutter/packages/flutter/lib/src` for the framework, and `../flutter-packages/packages/cupertino_ui/lib/src` for `waft-cupertino`. Each crate's `PORTING.md` names its home and the commit it was ported against. If a checkout is missing, clone it as `AGENTS.md` says. Read the Dart. Do not write it from memory.
 
 Copy the file, then change only what Rust forces. Names, member order, defaults, branches, who decides, when hooks run — same as Flutter. A Flutter-shaped name on a different mechanism is a bug.
 

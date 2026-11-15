@@ -665,7 +665,9 @@ mod tests {
     use crate::object::RenderObject;
     use crate::object::RenderObjectWithChildMixin;
     use crate::pipeline_owner::PipelineOwner;
-    use crate::proxy_box::{RenderConstrainedBox, RenderMouseRegion, RenderRepaintBoundary};
+    use crate::proxy_box::{
+        RenderConstrainedBox, RenderMouseRegion, RenderMouseRegionBase, RenderRepaintBoundary,
+    };
     use crate::shifted_box::RenderPadding;
 
     /// An app on a platform with views 0 and 2, whose hosts record the cursors they are asked
@@ -870,8 +872,7 @@ mod tests {
         region.as_object().detach(&mut app);
         assert!(!region.valid_for_mouse_tracker(&app));
         assert!(
-            !region
-                .mouse_tracker_annotation(&app)
+            !RenderObject::mouse_tracker_annotation(region, &app)
                 .unwrap()
                 .valid_for_mouse_tracker
         );
@@ -1045,7 +1046,7 @@ mod tests {
         let log = record_events(&mut app, region);
         let event = mouse_hover(Offset::new(3.0, 4.0));
         let entry = BoxHitTestEntry::new(region.as_box(), Offset::new(3.0, 4.0));
-        region.handle_event(&mut app, &event, &entry);
+        RenderBox::handle_event(region, &mut app, &event, &entry);
         assert_eq!(*log.borrow(), ["hover Offset(3.0, 4.0)"]);
     }
 
@@ -1065,14 +1066,16 @@ mod tests {
         );
 
         let mut result = HitTestResult::new();
-        assert!(region.hit_test(
+        assert!(RenderBox::hit_test(
+            region,
             &mut app,
             &mut BoxHitTestResult::wrap(&mut result),
             Offset::new(5.0, 5.0)
         ));
         region.set_opaque(&mut app, false);
         let mut result = HitTestResult::new();
-        assert!(!region.hit_test(
+        assert!(!RenderBox::hit_test(
+            region,
             &mut app,
             &mut BoxHitTestResult::wrap(&mut result),
             Offset::new(5.0, 5.0)

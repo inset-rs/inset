@@ -290,8 +290,6 @@ pub fn show_cupertino_sheet(
     debug_assert!(
         (builder.is_none() && scrollable_builder.is_some()) || scrollable_builder.is_none()
     );
-    // Dart accepts `showDragHandle` but never forwards it to the route it builds.
-    let _ = show_drag_handle;
 
     let effective_builder = builder;
     let nested_navigator_key = GlobalKey::new();
@@ -309,6 +307,7 @@ pub fn show_cupertino_sheet(
         if let Some(top_gap) = top_gap {
             route.top_gap(app, top_gap);
         }
+        route.show_drag_handle(app, show_drag_handle);
 
         let navigator = Navigator::of(app, context, true);
         navigator.push(app, Route::as_route(route))
@@ -340,6 +339,7 @@ pub fn show_cupertino_sheet(
         if let Some(top_gap) = top_gap {
             route.top_gap(app, top_gap);
         }
+        route.show_drag_handle(app, show_drag_handle);
         let navigator = Navigator::of(app, context, true);
         navigator.push(app, Route::as_route(route))
     }
@@ -350,7 +350,7 @@ fn nested_navigation_content(
     nested_navigator_key: &GlobalKey,
     builder: WidgetBuilder,
 ) -> WidgetRef {
-    let key: KeyRef = Rc::new(nested_navigator_key.clone());
+    let key: KeyRef = nested_navigator_key.clone().into();
     let pop_key = nested_navigator_key.clone();
     NavigatorPopHandler::new(
         Navigator::new()
@@ -855,14 +855,13 @@ impl State for CupertinoSheetTransitionState {
                             linear_transition,
                             child,
                         );
-                        let secondary = self.cover_sheet_secondary_transition(
+                        self.cover_sheet_secondary_transition(
                             app,
                             secondary_route_animation,
-                            primary,
-                        );
-                        Padding::new(EdgeInsetsGeometry::only(0.0, top, 0.0, 0.0))
-                            .child(secondary)
-                            .into_widget()
+                            Padding::new(EdgeInsetsGeometry::only(0.0, top, 0.0, 0.0))
+                                .child(primary)
+                                .into_widget(),
+                        )
                     },
                 ))
                 .into_widget(),
@@ -1245,7 +1244,6 @@ impl CupertinoSheetRouteTransitionMixin for CupertinoSheetRoute {
                     CupertinoUserInterfaceLevelData::Elevated,
                     CupertinoSheetScope {
                         child: CupertinoDraggableScrollableSheet {
-                            key: None,
                             enabled_callback: Rc::new(move || enable_drag),
                             on_start_pop_gesture: Rc::new(move |app| {
                                 start_pop_gesture(self, app, top_gap)
@@ -1323,7 +1321,9 @@ trait CupertinoSheetRouteTransitionMixin: PageRoute {
         if self.has_custom_top_gap(app) {
             return None;
         }
-        Some(Rc::new(CupertinoSheetTransition::delegate_transition))
+        Some(DelegatedTransitionBuilder::function(
+            CupertinoSheetTransition::delegate_transition,
+        ))
     }
 
     /// Determines whether the content can be dragged.
@@ -1446,7 +1446,6 @@ fn build_page_transitions<R: ModalRoute>(
         animation,
         secondary_animation,
         CupertinoDragGestureDetector {
-            key: None,
             enabled_callback: Rc::new(move || enable_drag),
             on_start_pop_gesture: Rc::new(move |app| start_pop_gesture(this, app, top_gap)),
             child,
@@ -1460,9 +1459,22 @@ fn build_page_transitions<R: ModalRoute>(
 // ---------------------------------------------------------------------------------------------
 // The drag-to-dismiss gesture
 
+// Reads the height from the render box instead of context.size, which throws
+// in debug mode when the box is dirty for layout. A drag can end while a
+// relayout is pending, and the last laid out height is the one the drag was
+// made against.
+fn sheet_height_of(app: &App, context: BuildContext) -> f64 {
+    context
+        .find_render_object(app)
+        .expect("the sheet has a render object")
+        .as_box()
+        .expect("the sheet is a box")
+        .size(app)
+        .height()
+}
+
 /// Dart's `_CupertinoDragGestureDetector`.
 struct CupertinoDragGestureDetector {
-    key: Option<KeyRef>,
     enabled_callback: DragEnabledCallback,
     on_start_pop_gesture: StartPopGestureCallback,
     child: WidgetRef,
@@ -1478,10 +1490,6 @@ impl Debug for CupertinoDragGestureDetector {
 
 impl StatefulWidget for CupertinoDragGestureDetector {
     type State = CupertinoDragGestureDetectorState;
-
-    fn key(&self) -> Option<&KeyRef> {
-        self.key.as_ref()
-    }
 
     fn create_state(&self) -> CupertinoDragGestureDetectorState {
         CupertinoDragGestureDetectorState {
@@ -1513,13 +1521,6 @@ impl CupertinoDragGestureDetectorState {
         app.get(self).recognizer.expect("init_state ran first")
     }
 
-    fn sheet_height(self: Handle<Self>, app: &App) -> f64 {
-        self.context(app)
-            .size(app)
-            .expect("the detector is laid out")
-            .height()
-    }
-
     fn handle_drag_start(self: Handle<Self>, app: &mut App, _details: DragStartDetails) {
         debug_assert!(self.mounted(app));
         debug_assert!(app.get(self).drag_gesture_controller.is_none());
@@ -1537,7 +1538,7 @@ impl CupertinoDragGestureDetectorState {
         let Some(stretch_drag_controller) = app.get(self).stretch_drag_controller else {
             return;
         };
-        let sheet_height = self.sheet_height(app);
+        let sheet_height = sheet_height_of(app, self.context(app));
         let delta = if sheet_height > 0.0 {
             details.primary_delta.expect("a vertical drag") / sheet_height
         } else {
@@ -1557,7 +1558,7 @@ impl CupertinoDragGestureDetectorState {
             app.get_mut(self).drag_gesture_controller = None;
             return;
         };
-        let sheet_height = self.sheet_height(app);
+        let sheet_height = sheet_height_of(app, self.context(app));
         let velocity = if sheet_height > 0.0 {
             details.velocity.pixels_per_second.dy() / sheet_height
         } else {
@@ -2085,7 +2086,6 @@ impl ScrollPositionWithSingleContextLeaf for CupertinoSheetScrollPosition {
 /// Dart's `_CupertinoDraggableScrollableSheet`: the sheet's content, built with the scroll
 /// controller that feeds the dismiss gesture.
 struct CupertinoDraggableScrollableSheet {
-    key: Option<KeyRef>,
     builder: ScrollableWidgetBuilder,
     #[expect(
         dead_code,
@@ -2104,10 +2104,6 @@ impl Debug for CupertinoDraggableScrollableSheet {
 
 impl StatefulWidget for CupertinoDraggableScrollableSheet {
     type State = CupertinoDraggableScrollableSheetState;
-
-    fn key(&self) -> Option<&KeyRef> {
-        self.key.as_ref()
-    }
 
     fn create_state(&self) -> CupertinoDraggableScrollableSheetState {
         CupertinoDraggableScrollableSheetState {
@@ -2130,13 +2126,6 @@ impl CupertinoDraggableScrollableSheetState {
         app.get(self).scroll_controller.expect("init_state has run")
     }
 
-    fn sheet_height(self: Handle<Self>, app: &App) -> f64 {
-        self.context(app)
-            .size(app)
-            .expect("the sheet is laid out")
-            .height()
-    }
-
     fn drag_start(self: Handle<Self>, app: &mut App) {
         debug_assert!(self.mounted(app));
         if app.get(self).drag_gesture_controller.is_none() {
@@ -2149,7 +2138,7 @@ impl CupertinoDraggableScrollableSheetState {
     fn drag_update(self: Handle<Self>, app: &mut App, delta: f64) {
         debug_assert!(self.mounted(app));
         if let Some(controller) = app.get(self).drag_gesture_controller {
-            let sheet_height = self.sheet_height(app);
+            let sheet_height = sheet_height_of(app, self.context(app));
             controller.drag_update(
                 app,
                 delta / (sheet_height - (sheet_height * K_TOP_GAP_RATIO)),
@@ -2161,8 +2150,11 @@ impl CupertinoDraggableScrollableSheetState {
     fn handle_drag_end(self: Handle<Self>, app: &mut App, velocity: f64) {
         debug_assert!(self.mounted(app));
         if let Some(controller) = app.get(self).drag_gesture_controller {
-            let sheet_height = self.sheet_height(app);
-            controller.drag_end(app, -velocity / sheet_height, None);
+            controller.drag_end(
+                app,
+                -velocity / sheet_height_of(app, self.context(app)),
+                None,
+            );
             app.get_mut(self).drag_gesture_controller = None;
         }
     }
@@ -2253,7 +2245,7 @@ mod tests {
     /// not the one the route handed the builder.
     fn page(probe: &Rc<Probe>, key: &GlobalKey) -> WidgetBuilder {
         let probe = Rc::clone(probe);
-        let key: KeyRef = Rc::new(key.clone());
+        let key: KeyRef = key.clone().into();
         Rc::new(move |_app: &mut App, _context: BuildContext| {
             let probe = Rc::clone(&probe);
             let key = key.clone();
@@ -2343,7 +2335,7 @@ mod tests {
     }
 
     fn navigator(key: &GlobalKey, configure: impl FnOnce(Navigator) -> Navigator) -> WidgetRef {
-        let navigator = configure(Navigator::new().key(Rc::new(key.clone())));
+        let navigator = configure(Navigator::new().key(key.clone().into()));
         Localizations::new(
             Locale::new("en"),
             vec![
@@ -2377,28 +2369,17 @@ mod tests {
         let sheet_key = GlobalKey::new();
         let context = page_probe.context.get().expect("the page built");
         let builder = page(&sheet_probe, &sheet_key);
-        let popped = if show_drag_handle {
-            // `show_cupertino_sheet` never forwards its `show_drag_handle`, as Dart's
-            // `showCupertinoSheet` does not either, so a sheet with a handle is pushed as
-            // its own route.
-            let route = CupertinoSheetRoute::new(&mut app)
-                .builder(&mut app, builder)
-                .show_drag_handle(&mut app, true);
-            let navigator = Navigator::of(&mut app, context, true);
-            navigator.push(&mut app, Route::as_route(route))
-        } else {
-            show_cupertino_sheet(
-                &mut app,
-                context,
-                Some(builder),
-                None,
-                false,
-                true,
-                None,
-                None,
-                false,
-            )
-        };
+        let popped = show_cupertino_sheet(
+            &mut app,
+            context,
+            Some(builder),
+            None,
+            false,
+            true,
+            None,
+            None,
+            show_drag_handle,
+        );
         drop(app);
         Sheet {
             cell,
@@ -2520,6 +2501,101 @@ mod tests {
         );
     }
 
+    /// How many drag handles are painted under `root`: decorated boxes whose shape is filled
+    /// with the handle's tertiary label colour.
+    fn drag_handle_count(app: &App, root: waft_rendering::AnyRenderObject) -> usize {
+        let mut count = 0;
+        if let Some(decorated) = root.downcast::<waft_rendering::RenderDecoratedBox>(app)
+            && decorated
+                .decoration(app)
+                .as_any()
+                .downcast_ref::<ShapeDecoration>()
+                .is_some_and(|decoration| {
+                    decoration.color.as_ref() == Some(&CupertinoColors::TERTIARY_LABEL)
+                })
+        {
+            count += 1;
+        }
+        root.visit_children(app, &mut |child| count += drag_handle_count(app, child));
+        count
+    }
+
+    #[test]
+    fn show_cupertino_sheet_forwards_show_drag_handle_to_the_sheet_route() {
+        // Regression test for https://github.com/flutter/flutter/issues/187693.
+        for use_nested_navigation in [false, true] {
+            let page_probe: Rc<Probe> = Rc::default();
+            let page_key = GlobalKey::new();
+            let (cell, at) = app_with_page(&page_probe, &page_key);
+            let mut app = cell.borrow_mut();
+            let context = page_probe.context.get().expect("the page built");
+            let sheet_probe: Rc<Probe> = Rc::default();
+            let sheet_key = GlobalKey::new();
+            let builder = page(&sheet_probe, &sheet_key);
+            show_cupertino_sheet(
+                &mut app,
+                context,
+                None,
+                Some(Rc::new(move |app, context, _controller| {
+                    builder(app, context)
+                })),
+                use_nested_navigation,
+                true,
+                None,
+                None,
+                true,
+            );
+            settle(&mut app, at);
+
+            assert!(
+                sheet_probe.context.get().is_some(),
+                "the sheet content built (nested navigation {use_nested_navigation})"
+            );
+            let root = context
+                .find_ancestor_render_object_of_type::<waft_rendering::RenderView>(&app)
+                .expect("the page is under the view")
+                .as_object();
+            assert_eq!(
+                drag_handle_count(&app, root),
+                1,
+                "one drag handle (nested navigation {use_nested_navigation})"
+            );
+        }
+    }
+
+    #[test]
+    fn a_covered_sheet_does_not_reveal_the_root_route_through_its_top_gap() {
+        let page_probe: Rc<Probe> = Rc::default();
+        let page_key = GlobalKey::new();
+        let (cell, at) = app_with_page(&page_probe, &page_key);
+        let mut app = cell.borrow_mut();
+
+        let second_probe: Rc<Probe> = Rc::default();
+        let second_key = GlobalKey::new();
+        let context = page_probe.context.get().expect("the page built");
+        let second =
+            CupertinoSheetRoute::new(&mut app).builder(&mut app, page(&second_probe, &second_key));
+        Navigator::of(&mut app, context, false).push(&mut app, Route::as_route(second));
+        let at = settle(&mut app, at);
+
+        let third_probe: Rc<Probe> = Rc::default();
+        let third_key = GlobalKey::new();
+        let context = second_probe.context.get().expect("the second sheet built");
+        let third =
+            CupertinoSheetRoute::new(&mut app).builder(&mut app, page(&third_probe, &third_key));
+        Navigator::of(&mut app, context, false).push(&mut app, Route::as_route(third));
+        settle(&mut app, at);
+
+        let page1_top = top_left(&page_key, &mut app).dy();
+        let page2_top = top_left(&second_key, &mut app).dy();
+        let page3_top = top_left(&third_key, &mut app).dy();
+        // Sheet 2 moves up above Page 1 so that the root route (Page 1) is completely hidden
+        // behind Sheet 2.
+        assert!(page2_top <= page1_top, "{page2_top} <= {page1_top}");
+        // Sheet 3 is stacked on top of Sheet 2, with Sheet 2 peeking out above Sheet 3.
+        assert!(page2_top <= page3_top, "{page2_top} <= {page3_top}");
+    }
+
     #[test]
     fn pop_sheet_pops_the_sheet() {
         let Sheet {
@@ -2619,6 +2695,57 @@ mod tests {
             "the sheet snapped back open"
         );
     }
+    #[test]
+    fn a_drag_can_end_while_a_relayout_of_the_sheet_is_pending() {
+        // Regression test for https://github.com/flutter/flutter/issues/194681.
+        let Sheet {
+            cell,
+            sheet_key,
+            popped,
+            at,
+            ..
+        } = show_sheet(false);
+        let mut app = cell.borrow_mut();
+        let at = settle(&mut app, at);
+        let initial_position = top_left(&sheet_key, &mut app).dy();
+
+        send(&mut app, PointerChange::Down, 100.0, 200.0, Duration::ZERO);
+        send_from(
+            &mut app,
+            PointerChange::Move,
+            100.0,
+            300.0,
+            200.0,
+            Duration::from_millis(20),
+        );
+        pump(&mut app, at + Duration::from_millis(20));
+
+        // The sheet measures the drag against the height of the box the drag gesture
+        // detector renders. Mark it dirty so the drag ends before the next layout.
+        let detector = sheet_key
+            .current_context(&mut app)
+            .expect("the sheet content is mounted")
+            .find_ancestor_state_of_type::<CupertinoDragGestureDetectorState>(&app)
+            .expect("the sheet content is under the drag gesture detector");
+        detector
+            .context(&app)
+            .find_render_object(&app)
+            .expect("the detector has a render object")
+            .mark_needs_layout(&mut app);
+
+        send(
+            &mut app,
+            PointerChange::Up,
+            100.0,
+            300.0,
+            Duration::from_millis(40),
+        );
+        settle(&mut app, at + Duration::from_millis(40));
+
+        assert!(!popped.is_completed(), "the sheet is still up");
+        assert_eq!(top_left(&sheet_key, &mut app).dy(), initial_position);
+    }
+
     /// The whole scenario for a sheet whose content is a scroll view under the route's own
     /// controller: the view fills the sheet, the content is three views tall.
     struct ScrollableSheet {
@@ -2641,8 +2768,8 @@ mod tests {
         let content_key = GlobalKey::new();
         let context = page_probe.context.get().expect("the page built");
         let scrollable_builder: ScrollableWidgetBuilder = {
-            let view_key: KeyRef = Rc::new(view_key.clone());
-            let content_key: KeyRef = Rc::new(content_key.clone());
+            let view_key: KeyRef = view_key.clone().into();
+            let content_key: KeyRef = content_key.clone().into();
             Rc::new(move |_app, _context, controller| {
                 SingleChildScrollView::new()
                     .key(view_key.clone())
@@ -2770,6 +2897,67 @@ mod tests {
             popped.is_completed(),
             "the drag handed over to the sheet's dismiss gesture"
         );
+    }
+
+    #[test]
+    fn a_drag_can_end_while_a_relayout_of_the_sheet_content_is_pending() {
+        // Regression test for https://github.com/flutter/flutter/issues/194681.
+        let ScrollableSheet {
+            cell,
+            view_key,
+            popped,
+            at,
+            ..
+        } = show_scrollable_sheet();
+        let mut app = cell.borrow_mut();
+        let initial_position = top_left(&view_key, &mut app).dy();
+
+        // Drag the sheet down while its content is scrolled to the top, with a small drag
+        // first to win the gesture arena.
+        send(&mut app, PointerChange::Down, 100.0, 150.0, Duration::ZERO);
+        send_from(
+            &mut app,
+            PointerChange::Move,
+            100.0,
+            180.0,
+            150.0,
+            Duration::from_millis(100),
+        );
+        send_from(
+            &mut app,
+            PointerChange::Move,
+            100.0,
+            230.0,
+            180.0,
+            Duration::from_millis(200),
+        );
+        pump(&mut app, at + Duration::from_millis(200));
+        let dragged = top_left(&view_key, &mut app).dy();
+        assert!(
+            dragged > initial_position,
+            "the drag moved the sheet down, to {dragged}"
+        );
+
+        // The sheet measures the drag against the height of its content. Mark the content
+        // dirty so the drag ends before the next layout.
+        view_key
+            .current_context(&mut app)
+            .expect("the scroll view is mounted")
+            .find_render_object(&app)
+            .expect("the scroll view has a render object")
+            .mark_needs_layout(&mut app);
+
+        send(
+            &mut app,
+            PointerChange::Up,
+            100.0,
+            230.0,
+            Duration::from_millis(300),
+        );
+        settle(&mut app, at + Duration::from_millis(300));
+
+        assert!(!popped.is_completed(), "the sheet is still up");
+        assert_eq!(top_left(&view_key, &mut app).dy(), initial_position);
     }
 
     #[test]

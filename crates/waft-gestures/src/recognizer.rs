@@ -266,6 +266,19 @@ impl PrimaryPointerData {
             deadline_event: None,
         }
     }
+
+    /// The ID of the primary pointer this recognizer is tracking.
+    ///
+    /// If this recognizer is no longer tracking any pointers, this field holds
+    /// the ID of the primary pointer this recognizer was most recently tracking.
+    /// This enables the recognizer to know which pointer it was most recently
+    /// tracking when `accept_gesture` or `reject_gesture` is called (which may be
+    /// called after the recognizer is no longer tracking a pointer if, e.g.
+    /// `GestureArenaManager::hold` has been called, or if there are other
+    /// recognizers keeping the arena open).
+    pub fn primary_pointer(&self) -> Option<i64> {
+        self.primary_pointer
+    }
 }
 
 /// A container for a [`local`](Self::local) and [`global`](Self::global) [`Offset`] pair.

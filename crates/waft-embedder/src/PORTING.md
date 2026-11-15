@@ -7,12 +7,60 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
 - text.rs → dart:ui text.dart (the text and font enums, `FontFeature`, `FontVariation`)
 - locale.rs → dart:ui `Locale`
 - `AppLifecycleState`, `AppExitResponse`, `AppExitType` in platform.rs → dart:ui `platform_dispatcher.dart`
+- semantics.rs → lib/ui/semantics.dart (SemanticsAction, SemanticsRole, SemanticsInputType, SemanticsHitTestBehavior, SemanticsValidationResult, StringAttribute, SpellOutStringAttribute, LocaleStringAttribute)
 
 ## painting.rs → dart:ui `Canvas` / `Paint` / `Paragraph` / `TextStyle`
 
-- Change: `ImageFilter` is an enum over what this host can replay — a blur, a colour filter and a composition of two.
+- Change: `ImageFilter` is an enum over what this host can replay — a blur, a colour filter, a fragment shader and a composition of two.
   Reason: platform — valo's display list has no other image filter.
-  Affect: the tile-mode blur and the dilate, erode, matrix and shader filters cannot be built at all.
+  Affect: the tile-mode blur and the dilate, erode and matrix filters cannot be built at all.
+
+- Change: `ImageFilter::shader` copies the shader's uniforms and images when it is called, where Dart's filter copies them when the engine first converts it, at the first scene or paint that uses it.
+  Reason: language — the filter is a value a scene keeps, and a value cannot keep reading a shader the app goes on changing.
+  Affect: a uniform set after the filter is made changes the next filter made, not this one; set the uniforms first.
+
+- Change: `Canvas::draw_shadow` (valo's) takes the device pixel ratio of the view the canvas is painted into, where dart:ui's `Canvas.drawShadow` reads the implicit view's from the engine.
+  Reason: platform — a canvas here belongs to no view, and the embedder holds no implicit view whose metrics a canvas could read.
+  Affect: the caller says which view's ratio the shadow is drawn at; a render object passes its own view's.
+
+## fragment_program.rs, fragment_shader.rs → dart:ui `FragmentProgram`, `FragmentShader`, the uniform slots and `UniformArray` (`painting.dart`), engine `lib/ui/painting/fragment_program.cc`, `fragment_shader.cc`
+Ported against Flutter `9c427b5d7b`.
+
+- Change: `FragmentProgram::from_wgsl` makes a program from WGSL in valo's form, a string the app builds into its code with `include_str!`, checked by naga when it is made, where `FragmentProgram.fromAsset` loads an impellerc-compiled asset by key and caches it by that key.
+  Reason: platform — valo runs WGSL, and Waft's hosts have no asset bundle, so a library's shaders travel in its code.
+  Affect: an app writes its shaders in WGSL and keeps the program in a static, as Flutter's registry would; an invalid shader is an `Err` with naga's message pointing into the WGSL.
+
+- Change: a float index counts the floats of the WGSL uniform struct's fields packed tightly in field order, and a paint or filter made from the shader repacks them into WGSL's layout, as Impeller's `padding_layout` repacks them for its backends.
+  Reason: platform — WGSL aligns a `vec2` to 8 bytes and a `vec3`, a `vec4` and every element of a uniform array to 16, and keeps no array of `f32` or `vec2` in a uniform struct.
+  Affect: Flutter's indices and named slots hold for a struct declared in the GLSL's order; a GLSL `float` or `vec2` array becomes an `array<vec4<f32>, N>`, whose padding floats are counted, so a `float a[3]` followed by `b` puts `b` at index 4 where Flutter has it at 3.
+
+- Change: `from_wgsl` refuses a uniform that is not a float, a float vector, a square float matrix or a fixed-size array of one, such as an integer.
+  Reason: platform — WGSL declares integer and nested uniforms, which Flutter's float API cannot set.
+  Affect: an effect with such uniforms is made through `valo::RuntimeEffect` directly.
+
+- Change: a uniform slot is a `Copy` handle of a float index and its program, whose `set` takes the shader it writes, and it keeps no name; Dart's slot holds its shader and the uniform's name.
+  Reason: language — a slot that held its shader would borrow it and could not be kept beside it, as Flutter advises keeping slots.
+  Affect: one slot sets every shader of its program; given a shader of another program it panics in a debug build.
+
+- Change: the uniform lookups answer a `Result` whose `UniformError` reads as Dart's `ArgumentError` or `IndexError` message, and `get_uniform_float`'s index is an `Option<usize>`.
+  Reason: language — a misnamed uniform is an error the caller can handle, which Rust returns rather than throws.
+  Affect: a caller writes `?` or `expect`; a negative index cannot be written.
+
+- Change: a paint's shader is `Shader::from(&shader)`, which copies the uniforms and images when it is made, where Dart's `Paint.shader` keeps the `FragmentShader` and the engine copies them when the paint is drawn.
+  Reason: platform — valo's `Paint` holds a value, the runtime shader, not the app's object.
+  Affect: set the uniforms before making the paint; a uniform set after it changes the next paint made.
+
+- Change: making a paint from a shader with an image unset panics, in every build, where Dart's `Paint.shader` setter throws only in a debug build.
+  Reason: platform — valo refuses to draw a paint shader whose image is unset.
+  Affect: a release build stops where Flutter's draws undefined pixels.
+
+- Change: `FragmentShader` has no `dispose`; it goes when its owner drops it.
+  Reason: language — dropping frees it, where Dart's collector needs telling.
+  Affect: there is no disposed shader to misuse, and Dart's tests of one have no counterpart.
+
+- Change: every program made is listed for the hosts, and each host prepares it on each of its renderers for that renderer's format before the renderer's next draw (`PreparedPrograms`, `valo::Context::prepare_runtime_effect`), where the engine posts `CacheRuntimeStage` to its raster thread when the program loads.
+  Reason: platform — a program is made with no platform at hand, from a static, and each of a host's views draws with a renderer of its own.
+  Affect: a program's common pipeline is compiled before the first frame of each view drawn after the program is made, so a program made in the frame that first draws it still compiles then.
 
 ## paragraph.rs → text.dart (`TextStyle`, `ParagraphStyle`, `ParagraphBuilder`, `Paragraph`), fonts.rs
 
@@ -41,6 +89,10 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Affect: setting them on a `TextStyle` changes nothing on screen.
 
 ## platform.rs → dart:ui `platform_dispatcher.dart`
+
+- Change: `Picture.toImageSync` is `Platform::picture_to_image_sync(picture, width, height)`, which draws the picture into an image on the host's device at once (`SnapshotDelegate`, valo's `display_list_to_image`), with no target format, and answers `None` on a host with no renderer.
+  Reason: platform — a picture here is valo's display list, which holds no device, and a valo image is a texture already drawn, where Impeller's is a deferred image it rasterizes at its first draw.
+  Affect: an app reaches it through `app.platform()`; the drawing is submitted at the call, and anything drawn with the image waits for it on the GPU.
 
 - Change: `Platform` is `Any`, and `downcast_ref` on the trait object hands an app its host's own type; `PlatformDispatcher` is one class on every platform.
   Reason: platform — what a host offers beyond the interface (a picture from an `IOSurface`-backed buffer, its renderer's image context) belongs to that host, and naming each system's kinds in the interface would close it to the next system.
@@ -247,22 +299,26 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
 
 ## Deferred
 
+- paragraph.rs: `LineMetrics::height` is the line's ascent plus descent, unrounded; dart:ui's is skparagraph's line height rounded to the nearest integer (`InternalLineMetrics::height()`, then `littleRound` in TextLine.cpp). Trigger: the Valo release that rounds line heights (fixed in Valo, unreleased): take Valo's line height then.
 - A backdrop filter over a composition layer, which shows the layer unfiltered. Trigger: an app that needs glass over a video.
-- `SceneBuilder`'s shader-mask, colour-filter and image-filter pushes. Trigger: the framework layers that call them.
+- `SceneBuilder`'s shader-mask and colour-filter pushes. Trigger: the framework layers that call them.
 - Decoding at any size but the file's own, which in Dart is `instantiateImageCodec`'s target width and height and the `getTargetSize` callback of `instantiateImageCodecWithSize`. Trigger: `ResizeImage`, which is what the image widget's `cacheWidth` and `cacheHeight` become.
 - Reading an image's pixels back (`Image.toByteData`). Trigger: golden tests.
 - The colour space an image carries beyond sRGB, so a photograph in a wider one is drawn as though it were sRGB. Trigger: a display that shows more colours than sRGB.
 - Making an image from pixels that were never encoded (`ImageDescriptor.raw`, `decodeImageFromPixels`). Trigger: a caller holding pixels rather than a file.
 - How far along a decode is, which Dart's codec reports as it reads the file. Trigger: a provider that reports progress.
 - `StrutStyle`, `TextStyle.locale` / `ParagraphStyle.locale`. Trigger: strut, locale-specific glyphs; valo has neither.
-- `ImageFilter.blur(tileMode:)` and the `dilate` / `erode` / `matrix` / `shader` filters. Trigger: valo growing those ops.
+- `ImageFilter.blur(tileMode:)` and the `dilate` / `erode` / `matrix` filters. Trigger: valo growing those ops.
+- `FragmentProgram._reinitializeShader`, which reloads a program and its slots. Trigger: hot reload.
+- `Picture.toImageSync(targetFormat:)`. Trigger: valo images of another format.
 - `PlatformDispatcher.locale`, the first of `locales`. Trigger: a caller of the single-locale getter.
 - The system font's optical size by text size, which CoreText applies for the engine. Trigger: valo-text setting variation axes from the text size.
 - `FontFeature` named tag constructors. Trigger: a caller that uses those factories instead of `new` / `enable` / `disable`.
 - `debugDefaultTargetPlatformOverride`. Trigger: a debug switcher that must override a live host without swapping `Platform`.
 - `PointerData.respond` / `onRespond`. Trigger: a web host, where they call `preventDefault` on the originating DOM event.
 - A report's `embedder_id`, which Flutter's Android embedder sets to the `MotionEvent`'s id so that a platform view can take back the system's touch, and every other embedder leaves at 0. Trigger: a platform view that takes back the system's touch.
-- Semantics callbacks. Trigger: semantics.
+- Semantics callbacks. Trigger: the semantics tree.
+- semantics.rs: SemanticsFlag, SemanticsFlags, CheckedState, Tristate, SemanticsUpdateBuilder, SemanticsUpdate. Trigger: the semantics tree.
 - `PlatformDispatcher` callback setters and Zones. Trigger: a requirement to expose dart:ui callbacks independently of `Shell`.
 - `_updateFrameData` and the `frameNumber` argument to `_beginFrame`. Trigger: `FrameData`.
 - The rest of `hooks.dart`. Trigger: the matching dart:ui callback.
@@ -422,4 +478,3 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
 - Change: a camera's photos are answered encoded by the system at a size from the format's list, as bytes and their MIME type, and its recordings written by the system to a path the app gives, where the `camera` plugin answers an `XFile` in a folder of its own.
   Reason: platform — the system encodes and writes them, and an app chooses where its files go.
   Affect: a photo arrives as JPEG bytes at the size asked for, and a recording is a QuickTime movie at the app's path.
-

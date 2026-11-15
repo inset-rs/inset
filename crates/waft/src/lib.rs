@@ -20,9 +20,10 @@
 /// picture the `Image` widget shows, as `dart:ui`'s `Image` is to Flutter's.
 pub use waft_embedder as ui;
 pub use waft_embedder::{
-    BlurStyle, HostWindow, MacosTitleBar, MacosWindowConfig, MenuEntry, MenuItem, Platform,
-    RequestId, TitleBarAction, ViewError, WindowBackground, WindowConfig, WindowLevel, WindowRef,
-    WindowSizeLimits,
+    BlurStyle, HostWindow, LinuxWindowConfig, MacosTitleBar, MacosWindowConfig, MenuEntry,
+    MenuItem, Platform, RequestId, TitleBarAction, ViewError, WindowBackground, WindowConfig,
+    WindowLevel, WindowRef, WindowSizeLimits, WindowsIconResource, WindowsRelaunch,
+    WindowsWindowConfig,
 };
 pub use waft_embedder::{
     Brightness, Color, DragChange, DragReport, FontFeature, FontWeight, Offset, Radius, Rect, Size,
@@ -33,7 +34,7 @@ pub use waft_embedder_default::AndroidApp;
 #[cfg(not(all(target_arch = "wasm32", target_os = "wasi")))]
 pub use waft_embedder_default::DefaultEmbedder;
 #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
-pub use waft_embedder_default::LinuxSettings;
+pub use waft_embedder_default::{LinuxSettings, WindowsSettings};
 /// Change-notifier callback used by buttons. The pointer widget is [`waft_widgets::Listener`].
 pub use waft_foundation::Listener;
 pub use waft_foundation::*;

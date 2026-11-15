@@ -35,25 +35,34 @@ fn trim(original: Option<Rect>, top: f64, right: f64, bottom: f64, left: f64) ->
 /// An erased [`TickerProvider`] a render object can hold as a field, compared by identity.
 ///
 /// Dart's `TickerProvider? vsync` field.
+///
+/// Two refs are equal when they erase the same arena object, as Dart compares the provider
+/// object itself; a widget that erases its state on every build must not look like a new vsync.
 #[derive(Clone)]
-pub struct TickerProviderRef(Rc<dyn TickerProvider>);
+pub struct TickerProviderRef {
+    id: HandleId,
+    provider: Rc<dyn TickerProvider>,
+}
 
 impl TickerProviderRef {
     /// Erases an arena object that vends tickers.
     pub fn new<T: TickerProviderObject>(provider: Handle<T>) -> TickerProviderRef {
-        TickerProviderRef(Rc::new(provider))
+        TickerProviderRef {
+            id: provider.id(),
+            provider: Rc::new(provider),
+        }
     }
 }
 
 impl TickerProvider for TickerProviderRef {
     fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
-        self.0.create_ticker(app, on_tick)
+        self.provider.create_ticker(app, on_tick)
     }
 }
 
 impl PartialEq for TickerProviderRef {
     fn eq(&self, other: &TickerProviderRef) -> bool {
-        Rc::ptr_eq(&self.0, &other.0)
+        self.id == other.id
     }
 }
 
@@ -1660,5 +1669,29 @@ mod tests {
         assert_eq!(configuration.max_show_on_screen_extent, f64::INFINITY);
         let snap = FloatingHeaderSnapConfiguration::new();
         assert_eq!(snap.duration, Duration::from_millis(300));
+    }
+
+    /// A vsync that vends plain tickers.
+    struct Vsync;
+
+    impl TickerProviderObject for Vsync {
+        fn create_ticker(
+            self: Handle<Self>,
+            app: &mut App,
+            on_tick: TickerCallback,
+        ) -> Handle<Ticker> {
+            Ticker::new(app, on_tick, None)
+        }
+    }
+
+    #[test]
+    fn two_ticker_provider_refs_are_equal_when_they_erase_the_same_provider() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let vsync = app.create(Vsync);
+        let other_vsync = app.create(Vsync);
+
+        assert!(TickerProviderRef::new(vsync) == TickerProviderRef::new(vsync));
+        assert!(TickerProviderRef::new(vsync) != TickerProviderRef::new(other_vsync));
     }
 }

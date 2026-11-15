@@ -18,6 +18,8 @@ mod cue;
 mod drag_drop;
 mod file_dialogs;
 mod fonts;
+mod fragment_program;
+mod fragment_shader;
 mod geometry;
 mod hardware_buffers;
 mod image;
@@ -37,6 +39,8 @@ mod pointer_data_packet_converter;
 mod pointer_report;
 mod restoration;
 mod scene;
+mod semantics;
+mod snapshot_delegate;
 mod system_context_menu;
 #[cfg(feature = "test-support")]
 pub mod test_support;
@@ -73,6 +77,11 @@ pub use fonts::{
     FontCollection, FontDemand, FontId, FontManager, FontSource, SystemFontSource, Typeface,
     default_font_families, set_default_font_manager,
 };
+pub use fragment_program::{FragmentProgram, PreparedPrograms, UniformError};
+pub use fragment_shader::{
+    FragmentShader, ImageSamplerSlot, UniformArray, UniformFloatSlot, UniformMat2Slot,
+    UniformMat3Slot, UniformMat4Slot, UniformVec2Slot, UniformVec3Slot, UniformVec4Slot,
+};
 pub use geometry::*;
 pub use hardware_buffers::{HardwareBuffer, HardwareBufferAllocator, HardwareBufferUsage};
 pub use image::{
@@ -101,7 +110,7 @@ pub use notifications::{
     NotificationPermission, NotificationReplies, NotificationScheduling, Notifications,
     PermissionFuture, PermissionState, PostFuture,
 };
-pub use opener::{OpenError, OpenFuture, OpenRequest, Opener, file_uri_path};
+pub use opener::{OpenError, OpenFuture, OpenRequest, Opener, file_uri, file_uri_path};
 pub use painting::*;
 pub use paragraph::*;
 pub use platform::{
@@ -121,6 +130,12 @@ pub use scene::{
     ContainerLayer, DisplayListLayer, Effect, EmbeddedLayer, EngineLayer, Layer, Mutator, Part,
     Placement, Scene, SceneBuilder, Slices, VideoLayer, slices,
 };
+pub use semantics::{
+    LocaleStringAttribute, SemanticsAction, SemanticsHitTestBehavior, SemanticsInputType,
+    SemanticsRole, SemanticsValidationResult, SpellOutStringAttribute, StringAttribute,
+    StringAttributeRef,
+};
+pub use snapshot_delegate::SnapshotDelegate;
 pub use system_context_menu::SystemContextMenuItem;
 pub use text::*;
 pub use text_editing::*;
@@ -132,6 +147,7 @@ pub use views::{
 pub use vsync::{VsyncObserver, VsyncWaiter};
 pub use web_time::Instant;
 pub use window::{
-    HostWindow, MacosTitleBar, MacosWindowConfig, RawWindowHandle, RequestId, TitleBarAction,
-    ViewError, WindowBackground, WindowConfig, WindowLevel, WindowRef, WindowSizeLimits,
+    HostWindow, LinuxWindowConfig, MacosTitleBar, MacosWindowConfig, RawWindowHandle, RequestId,
+    TitleBarAction, ViewError, WindowBackground, WindowConfig, WindowLevel, WindowRef,
+    WindowSizeLimits, WindowsIconResource, WindowsRelaunch, WindowsWindowConfig,
 };

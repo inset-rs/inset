@@ -27,6 +27,7 @@ use crate::widgets::focus_scope::FocusScope;
 use crate::widgets::focus_traversal::{
     AnyFocusTraversalPolicy, FocusTraversalGroup, FocusTraversalPolicy, ReadingOrderTraversalPolicy,
 };
+use crate::widgets::lookup_boundary::LookupBoundary;
 use crate::widgets::media_query::MediaQuery;
 use crate::window::WindowScopeOfView;
 
@@ -50,7 +51,7 @@ use crate::window::WindowScopeOfView;
 ///
 /// Each `FlutterView` can be associated with at most one [`View`] widget in the widget tree.
 /// Two or more [`View`] widgets configured with the same `FlutterView` must never exist within
-/// the same widget tree at the same time. This limitation is enforced by a `GlobalObjectKey`
+/// the same widget tree at the same time. This limitation is enforced by a `GlobalKey`
 /// that derives its identity from the [`view`](Self::view) provided to this widget.
 ///
 /// Since the [`View`] widget bootstraps its own independent render tree, neither it nor any of
@@ -94,8 +95,7 @@ impl View {
     /// different `FlutterView` then before). The dependency is not triggered when the
     /// properties on the `FlutterView` itself change.
     pub fn maybe_of(app: &mut App, context: BuildContext) -> Option<ViewRef> {
-        context
-            .depend_on_inherited_widget_of_exact_type::<ViewScope>(app)
+        LookupBoundary::depend_on_inherited_widget_of_exact_type::<ViewScope>(app, context)
             .map(|scope| Rc::clone(&scope.view))
     }
 
@@ -375,7 +375,7 @@ pub struct RawViewInternal {
 impl RawViewInternal {
     fn new(view: ViewRef, builder: RawViewContentBuilder) -> RawViewInternal {
         RawViewInternal {
-            key: Rc::new(ValueKey::new(view.id().0)),
+            key: ValueKey::new(view.id().0).into(),
             view,
             builder,
         }
@@ -914,10 +914,12 @@ impl StatelessWidget for ViewAnchor {
     }
 
     fn build(&self, _app: &mut App, _context: BuildContext) -> WidgetRef {
-        // `LookupBoundary` around the view waits (`## Deferred`).
         MultiChildComponentWidget::new(
             None,
-            self.view.iter().cloned().collect(),
+            self.view
+                .iter()
+                .map(|view| LookupBoundary::new(view.clone()).into_widget())
+                .collect(),
             Some(self.child.clone()),
         )
         .into_widget()
@@ -1156,12 +1158,12 @@ mod tests {
     fn a_dirty_render_object_under_a_view_schedules_a_frame() {
         let cell = binding_cell();
         let app = cell.borrow();
-        let key = Rc::new(GlobalKey::new());
+        let key = GlobalKey::new();
         drop(app);
         binding_mount(
             &cell,
             SizedBox::new()
-                .key(key.clone())
+                .key(key.clone().into())
                 .width(10.0)
                 .height(10.0)
                 .into_widget(),
@@ -1511,7 +1513,7 @@ mod tests {
         let ticks = Ticks::default();
         let tree = |in_first: bool| -> WidgetRef {
             let ticking =
-                || -> WidgetRef { Ticking::new(&ticks).key(Rc::new(key.clone())).into_widget() };
+                || -> WidgetRef { Ticking::new(&ticks).key(key.clone().into()).into_widget() };
             let (first, second): (WidgetRef, WidgetRef) = if in_first {
                 (ticking(), SizedBox::new().into_widget())
             } else {
@@ -1561,7 +1563,7 @@ mod tests {
                 super::ViewAnchor::new(SizedBox::new().width(10.0).height(10.0)).view(
                     super::View::new(
                         platform.test_view(SECOND),
-                        SizedBox::new().key(Rc::new(key.clone())),
+                        SizedBox::new().key(key.clone().into()),
                     ),
                 ),
             )
@@ -1606,7 +1608,7 @@ mod tests {
                 super::View::new(platform.test_view(FIRST), SizedBox::new()).into_widget(),
                 super::View::new(
                     platform.test_view(SECOND),
-                    SizedBox::new().key(Rc::new(key.clone())),
+                    SizedBox::new().key(key.clone().into()),
                 )
                 .into_widget(),
             ])
@@ -1642,7 +1644,7 @@ mod tests {
         let keys = [GlobalKey::new(), GlobalKey::new(), GlobalKey::new()];
         let keyed = |key: &GlobalKey, child: WidgetRef| -> WidgetRef {
             crate::KeyedSubtree::new(child)
-                .key(Rc::new(key.clone()))
+                .key(key.clone().into())
                 .into_widget()
         };
         mount_root(
@@ -1766,7 +1768,7 @@ mod tests {
             let (ticks, key, in_first) = (Rc::clone(&ticks), key.clone(), Rc::clone(&in_first));
             let platform = Rc::clone(&platform);
             crate::Builder::new(move |_app, _context| {
-                let ticking = Ticking::new(&ticks).key(Rc::new(key.clone())).into_widget();
+                let ticking = Ticking::new(&ticks).key(key.clone().into()).into_widget();
                 let empty = || SizedBox::new().into_widget();
                 let (first, second) = if in_first.get() {
                     (ticking, empty())
@@ -1779,7 +1781,7 @@ mod tests {
                 ])
                 .into_widget()
             })
-            .key(Rc::new(above.clone()))
+            .key(above.clone().into())
             .into_widget()
         };
         mount_root(&cell, tree);

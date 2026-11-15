@@ -392,7 +392,6 @@ impl Debug for CupertinoScrollbarState {
 
 #[cfg(test)]
 mod tests {
-    use std::rc::Rc;
 
     use waft_embedder::{Size, TextDirection};
     use waft_widgets::{
@@ -409,13 +408,13 @@ mod tests {
     fn a_cupertino_scrollbar_thickens_while_its_thumb_is_pressed() {
         let cell = test_cell();
         let mut app = cell.borrow_mut();
-        let key = Rc::new(GlobalKey::new());
+        let key = GlobalKey::new();
         let controller = ScrollController::default(&mut app);
         let list = ListView::new()
             .controller(controller.as_controller())
             .children((0..40).map(|_| SizedBox::new().height(ITEM_EXTENT).into_widget()));
         let scrollbar = CupertinoScrollbar::new(list)
-            .key(key.clone())
+            .key(key.clone().into())
             .controller(controller.as_controller());
         let tree: WidgetRef = MediaQuery::new(
             MediaQueryData::new().size(Size::new(400.0, 300.0)),

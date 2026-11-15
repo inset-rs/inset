@@ -11,7 +11,7 @@ use waft_foundation::{App, Handle, ListenableObject, Listener};
 use crate::framework::{
     AnyElement, ComponentElement, ComponentElementData, Element, ElementBase, ElementData,
     ElementLifecycle, InheritedWidget, IntoWidget, KeyRef, ProxyElement, Slot, Widget, WidgetKind,
-    WidgetRef, debug_check_owner_build_target_exists, downcast_widget,
+    WidgetRef, debug_check_owner_build_target_exists, downcast_widget, short_type_name,
 };
 
 /// An inherited widget for a [`Listenable`](waft_foundation::Listenable) [`notifier`](Self::notifier), which updates its
@@ -87,6 +87,9 @@ pub struct InheritedNotifierWrapper<W: InheritedNotifier>(pub W);
 
 impl<W: InheritedNotifier> IntoWidget<InheritedNotifierKind> for W {
     fn into_widget(self) -> WidgetRef {
+        if cfg!(debug_assertions) {
+            InheritedWidget::debug_check_constructor(&self);
+        }
         Rc::new(InheritedNotifierWrapper(self))
     }
 }
@@ -106,6 +109,10 @@ impl<W: InheritedNotifier> Widget for InheritedNotifierWrapper<W> {
 
     fn widget_type(&self) -> TypeId {
         TypeId::of::<W>()
+    }
+
+    fn type_name(&self) -> &'static str {
+        short_type_name::<W>()
     }
 
     fn kind(&self) -> WidgetKind {

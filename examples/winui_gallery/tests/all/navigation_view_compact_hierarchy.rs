@@ -18,7 +18,7 @@ struct PageState {
     state: StateData<Page>,
     open: bool,
     top: bool,
-    nav: Rc<GlobalKey>,
+    nav: GlobalKey,
 }
 
 impl StatefulWidget for Page {
@@ -29,7 +29,7 @@ impl StatefulWidget for Page {
             state: StateData::new(),
             open: true,
             top: false,
-            nav: Rc::new(GlobalKey::new()),
+            nav: GlobalKey::new(),
         }
     }
 }
@@ -58,7 +58,7 @@ impl State for PageState {
                 |_, _| {},
                 Text::new("Page"),
             )
-            .key(app.get(self).nav.clone())
+            .key(app.get(self).nav.clone().into())
             .pane_display_mode(if app.get(self).top {
                 NavigationViewPaneDisplayMode::Top
             } else {

@@ -8,15 +8,16 @@ use std::time::Duration;
 
 use waft_animation::{
     Animatable, Animation, AnimationBehavior, AnimationController, AnimationStatusListener,
-    AnyAnimation, Curve, CurvedAnimation, Curves, Tween, TweenLerp,
+    AnyAnimation, ColorTween, Curve, CurvedAnimation, Curves, Tween, TweenLerp,
 };
 use waft_embedder::{
-    Clip, Matrix4, Offset, Rect, TextAlign, TextHeightBehavior, compose, decompose,
+    Clip, Color, Matrix4, Offset, Rect, TextAlign, TextHeightBehavior, compose, decompose,
 };
 use waft_foundation::{App, Handle, Listener};
 use waft_painting::{
-    Alignment, AlignmentGeometry, AnyColor, Border, BorderRadius, BoxDecoration, Decoration,
-    EdgeInsets, EdgeInsetsGeometry, TextOverflow, TextStyle, TextWidthBasis,
+    Alignment, AlignmentGeometry, AnyColor, Border, BorderRadius, BoxDecoration, BoxShape,
+    Decoration, EdgeInsets, EdgeInsetsGeometry, ShapeBorder, TextOverflow, TextStyle,
+    TextWidthBasis,
 };
 use waft_rendering::{AlignmentGeometryTween, BoxConstraints, Constraints};
 use waft_scheduler::{Ticker, TickerCallback, TickerProviderObject};
@@ -24,7 +25,9 @@ use waft_scheduler::{Ticker, TickerCallback, TickerProviderObject};
 use crate::framework::{
     BuildContext, IntoWidget, KeyRef, State, StateData, StatefulWidget, WidgetRef,
 };
-use crate::widgets::basic::{Align, Directionality, FractionallySizedBox, Padding, Positioned};
+use crate::widgets::basic::{
+    Align, Directionality, FractionallySizedBox, Padding, PhysicalModel, Positioned,
+};
 use crate::widgets::container::Container;
 use crate::widgets::text::DefaultTextStyle;
 use crate::widgets::ticker_provider::{
@@ -637,9 +640,25 @@ impl TweenValue for Option<AlignmentGeometry> {
     }
 }
 
+impl TweenValue for Option<Color> {
+    fn same(&self, other: &Option<Color>) -> bool {
+        self == other
+    }
+}
+
 impl TweenValue for Box<dyn Decoration> {
     fn same(&self, other: &Box<dyn Decoration>) -> bool {
         self.eq_decoration(&**other)
+    }
+}
+
+/// Dart's `Tween<ShapeBorder?>`, which material's `ShapeBorderTween` is.
+impl TweenValue for Option<Box<dyn ShapeBorder>> {
+    fn same(&self, other: &Option<Box<dyn ShapeBorder>>) -> bool {
+        match (self, other) {
+            (Some(this), Some(other)) => this.eq_shape(&**other),
+            (this, other) => this.is_none() && other.is_none(),
+        }
     }
 }
 
@@ -755,6 +774,32 @@ macro_rules! tween_slot_for_nullable_value {
 }
 
 tween_slot_for_nullable_value!(BorderRadiusTween, BorderRadius);
+
+/// `ColorTween` is Dart's `Tween<Color?>`: an unset endpoint and a null one are the same, as
+/// in [`tween_slot_for_nullable_value!`].
+impl TweenSlot for Handle<ColorTween> {
+    type Value = Option<Color>;
+
+    fn begin(&self, app: &App) -> Option<Option<Color>> {
+        ColorTween::begin(*self, app).map(Some)
+    }
+
+    fn set_begin(&mut self, app: &mut App, begin: Option<Option<Color>>) {
+        ColorTween::set_begin(*self, app, begin.flatten());
+    }
+
+    fn end(&self, app: &App) -> Option<Option<Color>> {
+        ColorTween::end(*self, app).map(Some)
+    }
+
+    fn set_end(&mut self, app: &mut App, end: Option<Option<Color>>) {
+        ColorTween::set_end(*self, app, end.flatten());
+    }
+
+    fn dispose(&self, app: &mut App) {
+        app.destroy(*self);
+    }
+}
 tween_slot_for_nullable_value!(BorderTween, Border);
 tween_slot_for_nullable_value!(AlignmentGeometryTween, AlignmentGeometry);
 
@@ -3369,6 +3414,269 @@ impl State for AnimatedDefaultTextStyleState {
     }
 }
 
+/// Animated version of [`PhysicalModel`].
+///
+/// The [`border_radius`](Self::border_radius) and [`elevation`](Self::elevation) are
+/// animated.
+///
+/// The [`color`](Self::color) is animated if the [`animate_color`](Self::animate_color)
+/// property is set; otherwise, the color changes immediately at the start of the animation
+/// for the other two properties. This allows the color to be animated independently (e.g.
+/// using an `AnimatedContainer` as the [`child`](Self::child)).
+///
+/// The [`shape`](Self::shape) is not animated.
+///
+/// Here's an illustration of what using this widget looks like, using a
+/// [`curve`](ImplicitlyAnimatedWidgetData::curve) of `Curves::fast_out_slow_in`.
+#[derive(Debug)]
+pub struct AnimatedPhysicalModel {
+    implicitly_animated_widget: ImplicitlyAnimatedWidgetData,
+
+    /// The widget below this widget in the tree.
+    pub child: WidgetRef,
+
+    /// The type of shape.
+    ///
+    /// This property is not animated.
+    pub shape: BoxShape,
+
+    /// The content will be clipped (or not) according to this option.
+    ///
+    /// Defaults to [`Clip::None`].
+    pub clip_behavior: Clip,
+
+    /// The target border radius of the rounded corners for a rectangle shape.
+    pub border_radius: Option<BorderRadius>,
+
+    /// The target z-coordinate relative to the parent at which to place this
+    /// physical object.
+    ///
+    /// The value will always be non-negative.
+    pub elevation: f64,
+
+    /// The target background color.
+    pub color: AnyColor,
+
+    /// Whether the color should be animated.
+    pub animate_color: bool,
+
+    /// The target shadow color.
+    pub shadow_color: AnyColor,
+
+    /// Whether the shadow color should be animated.
+    pub animate_shadow_color: bool,
+}
+
+impl AnimatedPhysicalModel {
+    /// Creates a widget that animates the properties of a [`PhysicalModel`]; Dart's optional
+    /// named arguments are the setters.
+    ///
+    /// Dart's defaults: `shape` [`BoxShape::Rectangle`], `clip_behavior` [`Clip::None`],
+    /// `elevation` 0, `animate_color` and `animate_shadow_color` true.
+    pub fn new<K>(
+        child: impl IntoWidget<K>,
+        color: impl Into<AnyColor>,
+        shadow_color: impl Into<AnyColor>,
+        duration: Duration,
+    ) -> AnimatedPhysicalModel {
+        AnimatedPhysicalModel {
+            implicitly_animated_widget: ImplicitlyAnimatedWidgetData::new(duration),
+            child: child.into_widget(),
+            shape: BoxShape::Rectangle,
+            clip_behavior: Clip::None,
+            border_radius: None,
+            elevation: 0.0,
+            color: color.into(),
+            animate_color: true,
+            shadow_color: shadow_color.into(),
+            animate_shadow_color: true,
+        }
+    }
+
+    /// Dart `AnimatedPhysicalModel(shape:)`.
+    pub fn shape(mut self, shape: BoxShape) -> AnimatedPhysicalModel {
+        self.shape = shape;
+        self
+    }
+
+    /// Dart `AnimatedPhysicalModel(clipBehavior:)`.
+    pub fn clip_behavior(mut self, clip_behavior: Clip) -> AnimatedPhysicalModel {
+        self.clip_behavior = clip_behavior;
+        self
+    }
+
+    /// Dart `AnimatedPhysicalModel(borderRadius:)`.
+    pub fn border_radius(mut self, border_radius: BorderRadius) -> AnimatedPhysicalModel {
+        self.border_radius = Some(border_radius);
+        self
+    }
+
+    /// Dart `AnimatedPhysicalModel(elevation:)`.
+    pub fn elevation(mut self, elevation: f64) -> AnimatedPhysicalModel {
+        debug_assert!(elevation >= 0.0);
+        self.elevation = elevation;
+        self
+    }
+
+    /// Dart `AnimatedPhysicalModel(animateColor:)`.
+    pub fn animate_color(mut self, animate_color: bool) -> AnimatedPhysicalModel {
+        self.animate_color = animate_color;
+        self
+    }
+
+    /// Dart `AnimatedPhysicalModel(animateShadowColor:)`.
+    pub fn animate_shadow_color(mut self, animate_shadow_color: bool) -> AnimatedPhysicalModel {
+        self.animate_shadow_color = animate_shadow_color;
+        self
+    }
+
+    crate::implicitly_animated_widget_setters!(AnimatedPhysicalModel);
+}
+
+impl ImplicitlyAnimatedWidget for AnimatedPhysicalModel {
+    crate::implicitly_animated_widget_accessors!();
+}
+
+impl StatefulWidget for AnimatedPhysicalModel {
+    type State = AnimatedPhysicalModelState;
+
+    fn key(&self) -> Option<&KeyRef> {
+        self.implicitly_animated_widget.key.as_ref()
+    }
+
+    fn create_state(&self) -> AnimatedPhysicalModelState {
+        AnimatedPhysicalModelState {
+            state: StateData::new(),
+            single_ticker_provider: SingleTickerProviderStateMixinData::new(),
+            implicitly_animated_widget_state: ImplicitlyAnimatedWidgetStateData::new(),
+            border_radius: None,
+            elevation: None,
+            color: None,
+            shadow_color: None,
+        }
+    }
+}
+
+/// Dart's `_AnimatedPhysicalModelState`.
+pub struct AnimatedPhysicalModelState {
+    state: StateData<AnimatedPhysicalModel>,
+    single_ticker_provider: SingleTickerProviderStateMixinData,
+    implicitly_animated_widget_state: ImplicitlyAnimatedWidgetStateData,
+    border_radius: Option<BorderRadiusTween>,
+    elevation: Option<Handle<Tween<f64>>>,
+    color: Option<Handle<ColorTween>>,
+    shadow_color: Option<Handle<ColorTween>>,
+}
+
+impl SingleTickerProviderStateMixin for AnimatedPhysicalModelState {
+    fn single_ticker_provider_data(
+        self: Handle<Self>,
+        app: &App,
+    ) -> &SingleTickerProviderStateMixinData {
+        &app.get(self).single_ticker_provider
+    }
+
+    fn single_ticker_provider_data_mut(
+        self: Handle<Self>,
+        app: &mut App,
+    ) -> &mut SingleTickerProviderStateMixinData {
+        &mut app.get_mut(self).single_ticker_provider
+    }
+}
+
+impl TickerProviderObject for AnimatedPhysicalModelState {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+        SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
+    }
+}
+
+impl ImplicitlyAnimatedWidgetState for AnimatedPhysicalModelState {
+    crate::implicitly_animated_widget_state_accessors!();
+
+    fn for_each_tween<V: TweenVisitor>(self: Handle<Self>, app: &mut App, visitor: &mut V) {
+        let tween = app.get(self).border_radius.clone();
+        let target = self.widget(app).border_radius.unwrap_or(BorderRadius::ZERO);
+        app.get_mut(self).border_radius =
+            visitor.visit(app, tween, Some(Some(target)), |_app, value| {
+                BorderRadiusTween::new(*value, None)
+            });
+        let (tween, target) = (app.get(self).elevation, Some(self.widget(app).elevation));
+        app.get_mut(self).elevation = visitor.visit(app, tween, target, double_tween);
+        let (tween, target) = (app.get(self).color, self.widget(app).color.color());
+        app.get_mut(self).color = visitor.visit(app, tween, Some(Some(target)), color_tween);
+        let (tween, target) = (
+            app.get(self).shadow_color,
+            self.widget(app).shadow_color.color(),
+        );
+        app.get_mut(self).shadow_color = visitor.visit(app, tween, Some(Some(target)), color_tween);
+    }
+}
+
+impl AnimatedWidgetBaseState for AnimatedPhysicalModelState {}
+
+impl State for AnimatedPhysicalModelState {
+    type Widget = AnimatedPhysicalModel;
+    crate::state_accessors!();
+
+    fn init_state(self: Handle<Self>, app: &mut App) {
+        AnimatedWidgetBaseState::init_state(self, app);
+    }
+
+    fn activate(self: Handle<Self>, app: &mut App) {
+        SingleTickerProviderStateMixin::activate(self, app);
+    }
+
+    fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &AnimatedPhysicalModel) {
+        ImplicitlyAnimatedWidgetState::did_update_widget(self, app, old_widget);
+    }
+
+    fn dispose(self: Handle<Self>, app: &mut App) {
+        ImplicitlyAnimatedWidgetState::dispose(self, app);
+    }
+
+    fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
+        let animation = self.animation(app);
+        let state = app.get(self);
+        let border_radius = state
+            .border_radius
+            .clone()
+            .expect("for_each_tween made the tween");
+        let elevation = state.elevation.expect("for_each_tween made the tween");
+        let color = state.color.expect("for_each_tween made the tween");
+        let shadow_color = state.shadow_color.expect("for_each_tween made the tween");
+        let widget = self.widget(app);
+        let (shape, clip_behavior, child) =
+            (widget.shape, widget.clip_behavior, widget.child.clone());
+        let (animate_color, widget_color) = (widget.animate_color, widget.color.clone());
+        let (animate_shadow_color, widget_shadow_color) =
+            (widget.animate_shadow_color, widget.shadow_color.clone());
+        let mut physical_model = PhysicalModel::new(if animate_color {
+            AnyColor::new(
+                color
+                    .evaluate(app, animation)
+                    .expect("a colour tween between colours"),
+            )
+        } else {
+            widget_color
+        })
+        .shape(shape)
+        .clip_behavior(clip_behavior)
+        .elevation(elevation.evaluate(app, animation))
+        .shadow_color(if animate_shadow_color {
+            AnyColor::new(
+                shadow_color
+                    .evaluate(app, animation)
+                    .expect("a colour tween between colours"),
+            )
+        } else {
+            widget_shadow_color
+        })
+        .child(child);
+        physical_model.border_radius = border_radius.evaluate(app, animation);
+        physical_model.into_widget()
+    }
+}
+
 /// Animated version of [`FractionallySizedBox`] which automatically transitions the
 /// child's size over a given duration whenever the given
 /// [`width_factor`](Self::width_factor) or [`height_factor`](Self::height_factor) changes,
@@ -3588,6 +3896,11 @@ fn double_tween(app: &mut App, value: &f64) -> Handle<Tween<f64>> {
     Tween::new(app, Some(*value), None)
 }
 
+/// Dart's `(dynamic value) => ColorTween(begin: value as Color)`.
+fn color_tween(app: &mut App, value: &Option<Color>) -> Handle<ColorTween> {
+    ColorTween::new(app, *value, None)
+}
+
 /// Dart's `(dynamic value) => Tween<Offset>(begin: value as Offset)`.
 fn offset_tween(app: &mut App, value: &Offset) -> Handle<Tween<Offset>> {
     Tween::new(app, Some(*value), None)
@@ -3607,6 +3920,7 @@ mod tests {
     use crate::test_harness::{binding_cell, binding_mount, binding_pump};
     use crate::view::View;
     use crate::widgets::basic::{Align, Builder, Directionality, SizedBox, Stack};
+    use waft_rendering::RenderHandle;
 
     const DURATION: Duration = Duration::from_millis(100);
 
@@ -3627,9 +3941,9 @@ mod tests {
             .expect("a box")
     }
 
-    fn positioned_tree(key: &Rc<GlobalKey>, width: f64, on_end: Option<Listener>) -> WidgetRef {
+    fn positioned_tree(key: &GlobalKey, width: f64, on_end: Option<Listener>) -> WidgetRef {
         let mut positioned = AnimatedPositioned::new(SizedBox::expand(), DURATION)
-            .key(key.clone())
+            .key(key.clone().into())
             .left(0.0)
             .top(0.0)
             .width(width)
@@ -3647,7 +3961,7 @@ mod tests {
     #[test]
     fn an_animated_positioned_animates_its_box_and_calls_on_end_once() {
         let cell = binding_cell();
-        let key = Rc::new(GlobalKey::new());
+        let key = GlobalKey::new();
         let ends = Rc::new(Cell::new(0));
         let counted = Rc::clone(&ends);
         let on_end = Listener::new(move |_app| counted.set(counted.get() + 1));
@@ -3693,9 +4007,9 @@ mod tests {
         assert_eq!(ends.get(), 1, "on_end fires once per animation");
     }
 
-    fn opacity_tree(key: &Rc<GlobalKey>, opacity: f64) -> WidgetRef {
+    fn opacity_tree(key: &GlobalKey, opacity: f64) -> WidgetRef {
         AnimatedOpacity::new(opacity, DURATION)
-            .key(key.clone())
+            .key(key.clone().into())
             .child(SizedBox::square(Some(10.0)))
             .into_widget()
     }
@@ -3714,7 +4028,7 @@ mod tests {
     #[test]
     fn an_animated_opacity_reaches_its_target_after_the_duration() {
         let cell = binding_cell();
-        let key = Rc::new(GlobalKey::new());
+        let key = GlobalKey::new();
         binding_mount(&cell, opacity_tree(&key, 1.0));
         let mut app = cell.borrow_mut();
         assert_eq!(opacity_of(&mut app, &key), 1.0);
@@ -3733,7 +4047,7 @@ mod tests {
     #[test]
     fn a_new_target_mid_flight_retargets_from_the_value_on_screen() {
         let cell = binding_cell();
-        let key = Rc::new(GlobalKey::new());
+        let key = GlobalKey::new();
         binding_mount(&cell, opacity_tree(&key, 0.0));
         let mut app = cell.borrow_mut();
         rebuild(&mut app, opacity_tree(&key, 1.0), Duration::ZERO);
@@ -3800,7 +4114,7 @@ mod tests {
     #[test]
     fn a_target_that_did_not_change_leaves_the_controller_dismissed() {
         let cell = binding_cell();
-        let key = Rc::new(GlobalKey::new());
+        let key = GlobalKey::new();
         binding_mount(&cell, opacity_tree(&key, 0.5));
         let mut app = cell.borrow_mut();
         rebuild(&mut app, opacity_tree(&key, 0.5), Duration::ZERO);
@@ -3858,7 +4172,7 @@ mod tests {
     #[test]
     fn dispose_frees_the_arena_tweens_the_constructors_made() {
         let cell = binding_cell();
-        let key = Rc::new(GlobalKey::new());
+        let key = GlobalKey::new();
         binding_mount(&cell, opacity_tree(&key, 0.5));
         let mut app = cell.borrow_mut();
         let state = key
@@ -3904,9 +4218,9 @@ mod tests {
         assert_eq!(halfway.max_height, 20.0);
     }
 
-    fn container_tree(key: &Rc<GlobalKey>, width: f64, on_end: Option<Listener>) -> WidgetRef {
+    fn container_tree(key: &GlobalKey, width: f64, on_end: Option<Listener>) -> WidgetRef {
         let mut container = AnimatedContainer::new(DURATION)
-            .key(key.clone())
+            .key(key.clone().into())
             .width(width)
             .height(10.0);
         if let Some(on_end) = on_end {
@@ -3918,7 +4232,7 @@ mod tests {
     #[test]
     fn an_animated_container_animates_its_width_and_calls_on_end_once() {
         let cell = binding_cell();
-        let key = Rc::new(GlobalKey::new());
+        let key = GlobalKey::new();
         let ends = Rc::new(Cell::new(0));
         let counted = Rc::clone(&ends);
         let on_end = Listener::new(move |_app| counted.set(counted.get() + 1));
@@ -3964,14 +4278,14 @@ mod tests {
         render_box_of(app, key).local_to_global(app, Offset::ZERO, None)
     }
 
-    fn padding_tree(key: &Rc<GlobalKey>, text_direction: TextDirection, start: f64) -> WidgetRef {
+    fn padding_tree(key: &GlobalKey, text_direction: TextDirection, start: f64) -> WidgetRef {
         Directionality::new(
             text_direction,
             AnimatedPadding::new(
                 EdgeInsetsGeometry::from_steb(start, 0.0, 0.0, 0.0),
                 DURATION,
             )
-            .child(SizedBox::square(Some(10.0)).key(key.clone())),
+            .child(SizedBox::square(Some(10.0)).key(key.clone().into())),
         )
         .into_widget()
     }
@@ -3979,7 +4293,7 @@ mod tests {
     #[test]
     fn an_animated_padding_interpolates_a_directional_inset() {
         let cell = binding_cell();
-        let key = Rc::new(GlobalKey::new());
+        let key = GlobalKey::new();
         binding_mount(&cell, padding_tree(&key, TextDirection::Ltr, 0.0));
         let mut app = cell.borrow_mut();
         assert_eq!(offset_of(&mut app, &key), Offset::ZERO);
@@ -4007,16 +4321,16 @@ mod tests {
         );
     }
 
-    fn align_tree(key: &Rc<GlobalKey>, alignment: AlignmentGeometry) -> WidgetRef {
+    fn align_tree(key: &GlobalKey, alignment: AlignmentGeometry) -> WidgetRef {
         AnimatedAlign::new(alignment, DURATION)
-            .child(SizedBox::square(Some(10.0)).key(key.clone()))
+            .child(SizedBox::square(Some(10.0)).key(key.clone().into()))
             .into_widget()
     }
 
     #[test]
     fn an_animated_align_interpolates_the_alignment() {
         let cell = binding_cell();
-        let key = Rc::new(GlobalKey::new());
+        let key = GlobalKey::new();
         binding_mount(&cell, align_tree(&key, AlignmentGeometry::TOP_LEFT));
         let mut app = cell.borrow_mut();
         assert_eq!(offset_of(&mut app, &key), Offset::ZERO);
@@ -4033,12 +4347,12 @@ mod tests {
         assert_eq!(offset_of(&mut app, &key), Offset::new(290.0, 190.0));
     }
 
-    fn slide_tree(key: &Rc<GlobalKey>, offset: Offset) -> WidgetRef {
+    fn slide_tree(key: &GlobalKey, offset: Offset) -> WidgetRef {
         Align::new()
             .alignment(AlignmentGeometry::TOP_LEFT)
             .child(
                 AnimatedSlide::new(offset, DURATION)
-                    .child(SizedBox::square(Some(10.0)).key(key.clone())),
+                    .child(SizedBox::square(Some(10.0)).key(key.clone().into())),
             )
             .into_widget()
     }
@@ -4046,7 +4360,7 @@ mod tests {
     #[test]
     fn an_animated_slide_moves_the_child_by_a_fraction_of_its_size() {
         let cell = binding_cell();
-        let key = Rc::new(GlobalKey::new());
+        let key = GlobalKey::new();
         binding_mount(&cell, slide_tree(&key, Offset::ZERO));
         let mut app = cell.borrow_mut();
         assert_eq!(offset_of(&mut app, &key), Offset::ZERO);
@@ -4129,11 +4443,11 @@ mod tests {
                 .with_views(&[first, second]),
         );
         let cell = AppCell::with_platform(platform.clone());
-        let key = Rc::new(GlobalKey::new());
+        let key = GlobalKey::new();
         let tree = |view: ViewId, enabled: bool, opacity: f64| -> WidgetRef {
             let animated = TickerMode::new(
                 enabled,
-                AnimatedOpacity::new(opacity, DURATION).key(key.clone()),
+                AnimatedOpacity::new(opacity, DURATION).key(key.clone().into()),
             )
             .into_widget();
             let (in_first, in_second) = if view == first {
@@ -4189,5 +4503,163 @@ mod tests {
         pump(&mut app, first, 96);
         pump(&mut app, second, 96);
         assert_eq!(value(&mut app), muted, "muted by its new TickerMode");
+    }
+
+    /// `implicit_animations_test.dart`: "PhysicalModel default args".
+    #[test]
+    fn an_animated_physical_model_defaults_to_a_physical_models_arguments() {
+        let color = Color::new(0x00000000);
+        let animated = AnimatedPhysicalModel::new(SizedBox::shrink(), color, color, Duration::ZERO);
+        let physical = PhysicalModel::new(color).shadow_color(color);
+        assert_eq!(animated.shape, physical.shape);
+        assert_eq!(animated.clip_behavior, physical.clip_behavior);
+        assert_eq!(animated.border_radius, physical.border_radius);
+    }
+
+    fn physical_model_tree(
+        key: &GlobalKey,
+        elevation: f64,
+        color: Color,
+        animate_color: bool,
+    ) -> WidgetRef {
+        AnimatedPhysicalModel::new(
+            SizedBox::square(Some(10.0)),
+            color,
+            Color::new(0xFF000000),
+            DURATION,
+        )
+        .key(key.clone().into())
+        .elevation(elevation)
+        .animate_color(animate_color)
+        .into_widget()
+    }
+
+    fn physical_model_of(
+        app: &mut App,
+        key: &GlobalKey,
+    ) -> RenderHandle<waft_rendering::RenderPhysicalModel> {
+        key.current_context(app)
+            .expect("the widget is mounted")
+            .find_render_object(app)
+            .expect("a mounted render object")
+            .downcast::<waft_rendering::RenderPhysicalModel>(app)
+            .expect("a RenderPhysicalModel")
+    }
+
+    /// The elevation and, when asked, the colour move through the duration; without
+    /// `animate_color` the colour jumps at the start.
+    #[test]
+    fn an_animated_physical_model_animates_its_elevation_and_colour() {
+        use waft_rendering::RenderPhysicalModelBase;
+        for animate_color in [true, false] {
+            let cell = binding_cell();
+            let key = GlobalKey::new();
+            let red = Color::new(0xFFFF0000);
+            let blue = Color::new(0xFF0000FF);
+            binding_mount(&cell, physical_model_tree(&key, 0.0, red, animate_color));
+            let mut app = cell.borrow_mut();
+            assert_eq!(physical_model_of(&mut app, &key).elevation(&app), 0.0);
+
+            rebuild(
+                &mut app,
+                physical_model_tree(&key, 8.0, blue, animate_color),
+                Duration::ZERO,
+            );
+            binding_pump(&mut app, Duration::from_millis(50));
+            let model = physical_model_of(&mut app, &key);
+            let halfway = model.elevation(&app);
+            assert!((halfway - 4.0).abs() < 0.001, "{halfway}");
+            let color = model.color(&app);
+            if animate_color {
+                assert_eq!(
+                    color,
+                    Color::lerp(Some(red), Some(blue), 0.5).expect("two colours")
+                );
+            } else {
+                assert_eq!(color, blue);
+            }
+
+            binding_pump(&mut app, Duration::from_millis(100));
+            let model = physical_model_of(&mut app, &key);
+            assert_eq!(model.elevation(&app), 8.0);
+            assert_eq!(model.color(&app), blue);
+        }
+    }
+
+    /// `implicit_animations_test.dart`: "AnimatedPhysicalModel onEnd callback test".
+    #[test]
+    fn an_animated_physical_model_calls_on_end_once_its_animation_ends() {
+        let cell = binding_cell();
+        let key = GlobalKey::new();
+        let ends = Rc::new(Cell::new(0));
+        let counted = Rc::clone(&ends);
+        let on_end = Listener::new(move |_app| counted.set(counted.get() + 1));
+        let tree = |elevation: f64| {
+            AnimatedPhysicalModel::new(
+                SizedBox::square(Some(10.0)),
+                Color::new(0xFF0000FF),
+                Color::new(0xFF000000),
+                DURATION,
+            )
+            .key(key.clone().into())
+            .elevation(elevation)
+            .on_end(on_end.clone())
+            .into_widget()
+        };
+        binding_mount(&cell, tree(0.0));
+        let mut app = cell.borrow_mut();
+        rebuild(&mut app, tree(4.0), Duration::ZERO);
+        binding_pump(&mut app, Duration::from_millis(50));
+        assert_eq!(ends.get(), 0);
+        binding_pump(&mut app, Duration::from_millis(100));
+        binding_pump(&mut app, Duration::from_millis(150));
+        assert_eq!(ends.get(), 1);
+        binding_pump(&mut app, Duration::from_millis(200));
+        assert_eq!(ends.get(), 1);
+    }
+
+    /// `implicit_animations_test.dart`: "AnimatedPhysicalModel does not crash at zero area".
+    #[test]
+    fn an_animated_physical_model_in_a_view_of_no_area_takes_no_space() {
+        let key = GlobalKey::new();
+        let platform = waft_test::TestPlatform::new()
+            .on(waft_embedder::TargetPlatform::MacOS)
+            .with_view(Rc::new(waft_test::TestView::new(0.0, 0.0)));
+        let cell = AppCell::with_platform(Rc::new(platform));
+        binding_mount(
+            &cell,
+            Directionality::new(
+                TextDirection::Ltr,
+                crate::widgets::basic::Center::new().child(
+                    AnimatedPhysicalModel::new(
+                        SizedBox::shrink(),
+                        Color::new(0xAABBCC00),
+                        Color::new(0xFF000000),
+                        DURATION,
+                    )
+                    .key(key.clone().into()),
+                ),
+            )
+            .into_widget(),
+        );
+        let mut app = cell.borrow_mut();
+        assert_eq!(render_box_of(&mut app, &key).size(&app), Size::ZERO);
+    }
+
+    /// A shape border target is unchanged when it equals the tween's end by Dart's `==`.
+    #[test]
+    fn a_shape_border_value_is_the_same_by_its_equality() {
+        use waft_painting::{BorderSide, CircleBorder, RoundedRectangleBorder};
+        let rounded = |radius: f64| -> Option<Box<dyn ShapeBorder>> {
+            Some(Box::new(RoundedRectangleBorder::new(
+                BorderSide::NONE,
+                BorderRadius::circular(radius).into(),
+            )))
+        };
+        assert!(rounded(2.0).same(&rounded(2.0)));
+        assert!(!rounded(2.0).same(&rounded(4.0)));
+        assert!(!rounded(2.0).same(&Some(Box::new(CircleBorder::new(BorderSide::NONE, 0.0)))));
+        assert!(!rounded(2.0).same(&None));
+        assert!(None::<Box<dyn ShapeBorder>>.same(&None));
     }
 }

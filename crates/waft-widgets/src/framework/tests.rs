@@ -421,8 +421,8 @@ fn inherited_widgets_notify_their_dependents_only_when_they_should() {
 fn a_global_key_moves_an_element_with_its_state() {
     let cell = AppCell::new();
     let mut app = cell.borrow_mut();
-    let key: KeyRef = Rc::new(GlobalKey::new());
-    let global = downcast_key(&key);
+    let global = GlobalKey::new();
+    let key: KeyRef = global.clone().into();
     let counter = |key: &KeyRef| {
         Counter {
             key: Some(key.clone()),
@@ -441,10 +441,7 @@ fn a_global_key_moves_an_element_with_its_state() {
     );
     harness.pump(&mut app);
     assert_eq!(harness.owner.global_key_count(&app), 1);
-    let registered = harness
-        .owner
-        .global_key_element(&app, global.identity())
-        .unwrap();
+    let registered = harness.owner.global_key_element(&app, &global).unwrap();
     let state = registered.state_handle::<CounterState>(&app).unwrap();
     state.set_state(&mut app, |state| state.padding = 8.0);
     harness.pump(&mut app);
@@ -467,21 +464,12 @@ fn a_global_key_moves_an_element_with_its_state() {
         .into_widget(),
     );
     harness.pump(&mut app);
-    let moved = harness
-        .owner
-        .global_key_element(&app, global.identity())
-        .unwrap();
+    let moved = harness.owner.global_key_element(&app, &global).unwrap();
     assert_eq!(moved, registered, "the same element was reparented");
     assert_eq!(moved.depth(&app), registered.depth(&app));
     assert_eq!(app.get(state).padding, 8.0, "its state survived the move");
     assert!(!app.get(state).disposed);
     assert_eq!(harness.owner.global_key_count(&app), 1);
-}
-
-fn downcast_key(key: &KeyRef) -> &GlobalKey {
-    ((&**key) as &dyn std::any::Any)
-        .downcast_ref::<GlobalKey>()
-        .expect("a global key")
 }
 
 struct Store {
@@ -585,7 +573,7 @@ fn an_entity_notify_while_inactive_rebuilds_on_activate() {
     let store = app.new_entity(|_cx| Store { count: 1 });
     let builds = Rc::new(Cell::new(0));
     let last = Rc::new(Cell::new(0));
-    let key: KeyRef = Rc::new(GlobalKey::new());
+    let key: KeyRef = GlobalKey::new().into();
     let view = || {
         StoreView {
             key: Some(key.clone()),
@@ -632,4 +620,259 @@ fn an_entity_notify_while_inactive_rebuilds_on_activate() {
     harness.pump(&mut app);
     assert_eq!(builds.get(), 2);
     assert_eq!(last.get(), 4);
+}
+
+/// `framework_test.dart`: "ObjectKey control test", an object's identity being its handle.
+#[test]
+fn object_keys_compare_by_the_identity_of_their_object() {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let cell = AppCell::new();
+    let mut app = cell.borrow_mut();
+    let a = app.create(Cell::new(0));
+    let b = app.create(Cell::new(0));
+    let key_a: KeyRef = ObjectKey::new(Some(a.id())).into();
+    let key_a2: KeyRef = ObjectKey::new(Some(a.id())).into();
+    let key_b: KeyRef = ObjectKey::new(Some(b.id())).into();
+    assert!(key_a == key_a2);
+    let hash = |key: &KeyRef| {
+        let mut hasher = DefaultHasher::new();
+        key.hash(&mut hasher);
+        hasher.finish()
+    };
+    assert_eq!(hash(&key_a), hash(&key_a2));
+    assert!(key_a != key_b);
+    assert!(!format!("{:?}", key_a).contains('\n'), "one line");
+}
+
+/// `framework_test.dart`: "GlobalObjectKey control test" and "GlobalObjectKey toString test".
+#[test]
+fn global_object_keys_compare_by_their_object_and_never_equal_a_labeled_key() {
+    let cell = AppCell::new();
+    let mut app = cell.borrow_mut();
+    let a = app.create(Cell::new(0));
+    let b = app.create(Cell::new(0));
+    let key_a = GlobalKey::object(a.id());
+    let key_a2 = GlobalKey::object(a.id());
+    let key_b = GlobalKey::object(b.id());
+    assert!(key_a == key_a2);
+    assert!(key_a != key_b);
+    assert!(key_a != GlobalKey::new());
+    assert_eq!(
+        format!("{:?}", GlobalKey::object(a.id())),
+        format!("[GlobalObjectKey {:?}]", a.id())
+    );
+}
+
+/// A global object key made again from the same object finds the element the first one keyed.
+#[test]
+fn a_global_object_key_made_again_finds_the_same_element() {
+    let cell = AppCell::new();
+    let mut app = cell.borrow_mut();
+    let object = app.create(Cell::new(0));
+    let harness = Harness::mount(
+        &mut app,
+        Padding {
+            key: Some(GlobalKey::object(object.id()).into()),
+            padding: 2.0,
+            child: None,
+        }
+        .into_widget(),
+    );
+    harness.pump(&mut app);
+    let found = GlobalKey::object(object.id())
+        .current_widget(&mut app)
+        .expect("the keyed widget is mounted");
+    assert!(downcast_widget::<Padding>(&*found).is_some());
+    assert!(GlobalKey::new().current_widget(&mut app).is_none());
+}
+
+/// A global key of each kind finds its element, and a key held as a widget's key is
+/// `KeyRef::Global` only when it is a global key.
+#[test]
+fn every_global_key_kind_finds_its_element() {
+    let cell = AppCell::new();
+    let mut app = cell.borrow_mut();
+    let object = app.create(Cell::new(0));
+    let kinds = vec![
+        GlobalKey::labeled("labeled"),
+        GlobalKey::object(object.id()),
+        GlobalKey::wrapping(Rc::new(waft_foundation::ValueKey::new("wrapped"))),
+    ];
+    for key in kinds {
+        let harness = Harness::mount(
+            &mut app,
+            Padding {
+                key: Some(key.clone().into()),
+                padding: 2.0,
+                child: None,
+            }
+            .into_widget(),
+        );
+        harness.pump(&mut app);
+        let widget = key.current_widget(&mut app).expect("mounted");
+        assert!(downcast_widget::<Padding>(&*widget).is_some(), "{key:?}");
+        assert!(key.current_context(&mut app).is_some());
+        assert!(
+            key.current_state::<NoState>(&mut app).is_none(),
+            "a render object widget has no state"
+        );
+        assert!(matches!(KeyRef::from(key.clone()), KeyRef::Global(_)));
+        harness.set_child(
+            &mut app,
+            Padding {
+                key: None,
+                padding: 2.0,
+                child: None,
+            }
+            .into_widget(),
+        );
+        harness.pump(&mut app);
+        assert!(
+            key.current_widget(&mut app).is_none(),
+            "the key left the tree"
+        );
+    }
+    let value: KeyRef = waft_foundation::ValueKey::new(1).into();
+    assert!(matches!(value, KeyRef::Local(_)));
+}
+
+/// Two global keys wrapping equal keys name the same element, as two instances of a Dart
+/// `GlobalKey` subclass with an `==` override do; a local key of the same value is a different
+/// key.
+#[test]
+fn global_keys_wrapping_equal_keys_find_the_same_element() {
+    let cell = AppCell::new();
+    let mut app = cell.borrow_mut();
+    let wrapped = || GlobalKey::wrapping(Rc::new(waft_foundation::ValueKey::new(7)));
+    let harness = Harness::mount(
+        &mut app,
+        Padding {
+            key: Some(wrapped().into()),
+            padding: 2.0,
+            child: None,
+        }
+        .into_widget(),
+    );
+    harness.pump(&mut app);
+    assert!(wrapped() == wrapped());
+    assert!(wrapped().current_widget(&mut app).is_some());
+    let local: KeyRef = waft_foundation::ValueKey::new(7).into();
+    assert!(local != KeyRef::from(wrapped()));
+}
+
+/// A state type no element has, for `current_state` lookups that must miss.
+struct NoState {
+    state: StateData<NoStateWidget>,
+}
+
+#[derive(Debug)]
+struct NoStateWidget;
+
+impl StatefulWidget for NoStateWidget {
+    type State = NoState;
+
+    fn create_state(&self) -> NoState {
+        NoState {
+            state: StateData::new(),
+        }
+    }
+}
+
+impl State for NoState {
+    type Widget = NoStateWidget;
+    crate::state_accessors!();
+
+    fn build(self: Handle<Self>, _app: &mut App, _context: BuildContext) -> WidgetRef {
+        unreachable!("never mounted")
+    }
+}
+
+/// A widget with Dart's kind of cross-field constructor assert: `min` may not exceed `max`,
+/// each written by its own setter.
+#[derive(Debug)]
+struct Range {
+    min: f64,
+    max: f64,
+}
+
+impl Range {
+    fn new() -> Range {
+        Range { min: 0.0, max: 1.0 }
+    }
+
+    fn min(mut self, min: f64) -> Range {
+        self.min = min;
+        self
+    }
+
+    fn max(mut self, max: f64) -> Range {
+        self.max = max;
+        self
+    }
+}
+
+impl StatelessWidget for Range {
+    fn debug_check_constructor(&self) {
+        debug_assert!(self.min <= self.max, "min must not exceed max");
+    }
+
+    fn build(&self, _app: &mut App, _context: BuildContext) -> WidgetRef {
+        Sized {
+            size: Size::new(self.max - self.min, 10.0),
+        }
+        .into_widget()
+    }
+}
+
+#[test]
+#[should_panic(expected = "min must not exceed max")]
+fn a_bad_combination_panics_when_the_widget_is_made_a_widget_ref() {
+    Range::new().min(2.0).into_widget();
+}
+
+#[test]
+fn a_chain_that_passes_through_a_bad_combination_does_not_panic() {
+    let range = Range::new().min(2.0).max(3.0).into_widget();
+    assert_eq!(
+        downcast_widget::<Range>(&*range).map(|range| range.max),
+        Some(3.0)
+    );
+}
+
+#[test]
+fn a_widget_names_its_type_without_its_module_path() {
+    let builds = Rc::new(Cell::new(0));
+    assert_eq!(
+        Labelled {
+            builds: Rc::clone(&builds),
+            padding: 0.0,
+        }
+        .into_widget()
+        .type_name(),
+        "Labelled"
+    );
+    assert_eq!(
+        Counter {
+            key: None,
+            initial: 0.0,
+        }
+        .into_widget()
+        .type_name(),
+        "Counter"
+    );
+    let child = Sized {
+        size: Size::new(1.0, 1.0),
+    }
+    .into_widget();
+    assert_eq!(child.type_name(), "Sized");
+    assert_eq!(
+        Theme { value: 0.0, child }.into_widget().type_name(),
+        "Theme"
+    );
+    assert_eq!(
+        short_type_name::<Option<Labelled>>(),
+        "Option<waft_widgets::framework::tests::Labelled>"
+    );
 }

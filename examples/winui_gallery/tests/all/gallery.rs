@@ -118,7 +118,7 @@ fn navigation_demo_minimal_header_clears_back_and_toggle_buttons() {
         if widget.key().is_some_and(|key| {
             ["NavigationViewBackButton", "TogglePaneButton"]
                 .iter()
-                .any(|name| key.as_ref().eq_key(&ValueKey::new(*name)))
+                .any(|name| *key == ValueKey::new(*name).into())
         }) {
             let render = element.find_render_object(&app).unwrap().as_box().unwrap();
             buttons.push(render.local_to_global(&app, Offset::ZERO, None) & render.size(&app));

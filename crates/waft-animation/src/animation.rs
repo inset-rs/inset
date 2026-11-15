@@ -410,6 +410,10 @@ impl<T: 'static> waft_foundation::Listenable for AnyAnimation<T> {
     fn remove_listener(&self, app: &mut App, listener: &Listener) {
         AnyAnimation::remove_listener(*self, app, listener);
     }
+
+    fn retain(&self, app: &mut App) -> Vec<waft_foundation::RetainedHandleId> {
+        vec![app.retain_id(self.id)]
+    }
 }
 
 // Written by hand so that `AnyAnimation<T>: Copy` does not require `T: Copy`,

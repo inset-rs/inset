@@ -29,6 +29,8 @@ waft-embedder-winit = { version = "0.5.0", path = "crates/waft-embedder-winit" }
 waft-foundation = { version = "0.5.0", path = "crates/waft-foundation" }
 waft-gestures = { version = "0.5.0", path = "crates/waft-gestures" }
 waft-markdown = { version = "0.5.0", path = "crates/waft-markdown" }
+waft-material = { version = "0.5.0", path = "crates/waft-material" }
+waft-material-color-utilities = { version = "0.5.0", path = "crates/waft-material-color-utilities" }
 waft-macros = { version = "0.5.0", path = "crates/waft-macros" }
 waft-painting = { version = "0.5.0", path = "crates/waft-painting" }
 waft-physics = { version = "0.5.0", path = "crates/waft-physics" }
@@ -49,10 +51,10 @@ winit = "=0.31.0-beta.4"
 raw-window-handle = "0.6"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-valo = "0.22.0"
-valo-codec = "0.22.0"
-valo-system-fonts = "0.22.0"
-valo-geometry = "0.22.0"
+valo = "0.23.0"
+valo-codec = "0.23.0"
+valo-system-fonts = "0.23.0"
+valo-geometry = "0.23.0"
 wgpu = "30"
 pollster = "0.4"
 png = "0.17"

@@ -16,7 +16,7 @@ use waft_embedder::EmbedderClient;
 #[cfg(target_os = "android")]
 pub use waft_embedder_android::AndroidApp;
 #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
-pub use waft_embedder_winit::LinuxSettings;
+pub use waft_embedder_winit::{LinuxSettings, WindowsSettings};
 
 /// Runs the application on this target's host.
 #[derive(Default)]
@@ -52,6 +52,15 @@ impl DefaultEmbedder {
     #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
     pub fn linux(mut self, settings: LinuxSettings) -> DefaultEmbedder {
         self.inner = self.inner.linux(settings);
+        self
+    }
+
+    /// What the app tells Windows' shell, its AppUserModelID among it; ignored on every other
+    /// system. `#[waft::main]` gives the manifest's `identifier`, which `cargo waft`'s installers
+    /// put on the app's shortcuts; an entry written by hand gives the same.
+    #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
+    pub fn windows(mut self, settings: WindowsSettings) -> DefaultEmbedder {
+        self.inner = self.inner.windows(settings);
         self
     }
 

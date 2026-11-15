@@ -474,7 +474,7 @@ fn main() {}
     /// the root render object of the item.
     fn mount_in_panel<K>(cell: &AppCell, width: f64, child: impl IntoWidget<K>) -> AnyRenderObject {
         let key = GlobalKey::new();
-        let item_key: KeyRef = Rc::new(key.clone());
+        let item_key: KeyRef = key.clone().into();
         let panel = SizedBox::new().width(width).height(600.0).child(
             ListView::new().children([
                 Padding::new(EdgeInsets::all(8.0).into())
@@ -964,7 +964,7 @@ fn main() {}
     fn the_scrolling_widget_lists_the_blocks() {
         let cell = test_cell();
         let key = GlobalKey::new();
-        let markdown_key: KeyRef = Rc::new(key.clone());
+        let markdown_key: KeyRef = key.clone().into();
         build(
             &cell,
             Directionality::new(

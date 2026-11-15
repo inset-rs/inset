@@ -3482,10 +3482,10 @@ impl NavigatorState {
         for page in &self.widget(app).pages {
             if let Some(key) = page.key() {
                 assert!(
-                    !key_reservation.iter().any(|other| **other == **key),
+                    !key_reservation.iter().any(|other| other == key),
                     "The Navigator.pages must not contain two pages with the same key."
                 );
-                key_reservation.push(Rc::clone(key));
+                key_reservation.push(key.clone());
             }
         }
     }
@@ -3680,7 +3680,7 @@ impl NavigatorState {
                 phantom_entries.insert(old_entry);
                 continue;
             }
-            debug_assert!(!page_key_to_old_entry.iter().any(|(k, _)| **k == *key));
+            debug_assert!(!page_key_to_old_entry.iter().any(|(k, _)| *k == key));
             page_key_to_old_entry.push((key, old_entry));
         }
 
@@ -3691,7 +3691,7 @@ impl NavigatorState {
             let matching = next_page.key().and_then(|key| {
                 page_key_to_old_entry
                     .iter()
-                    .position(|(other, _)| **other == **key)
+                    .position(|(other, _)| other == key)
             });
             let matching = matching.filter(|index| {
                 let entry = page_key_to_old_entry[*index].1;
@@ -3759,9 +3759,7 @@ impl NavigatorState {
             // was not taken during updating the middle of new page, or is a phantom entry.
             let key_is_free = match potential_page_to_remove.key() {
                 None => true,
-                Some(key) => page_key_to_old_entry
-                    .iter()
-                    .any(|(other, _)| **other == **key),
+                Some(key) => page_key_to_old_entry.iter().any(|(other, _)| other == key),
             };
             if key_is_free || phantom_entries.contains(&potential_entry_to_remove) {
                 location_to_exiting_page_route
@@ -5231,12 +5229,12 @@ impl State for NavigatorState {
         debug_assert!(!app.get(self).debug_locked);
         debug_assert!(!self.history(app).is_empty(app));
 
-        let overlay_key: KeyRef = Rc::new(
-            app.get(self)
-                .overlay_key
-                .clone()
-                .expect("restore_state has run"),
-        );
+        let overlay_key: KeyRef = app
+            .get(self)
+            .overlay_key
+            .clone()
+            .expect("restore_state has run")
+            .into();
         let initial_entries = match self.overlay(app) {
             None => self.all_route_overlay_entries(app),
             Some(_) => Vec::new(),
@@ -5262,18 +5260,25 @@ impl State for NavigatorState {
         }
         // `absorbing` is mutated directly by `cancel_active_pointers` above.
         let absorb = AbsorbPointer::new().absorbing(false).child(group);
+        // The callbacks keep the state, as Dart's tear-offs keep `this`: a pointer that went
+        // down before the navigator was disposed still ends on it.
+        let this = Rc::new(app.retain(self));
+        let on_up = Rc::clone(&this);
+        let on_cancel = Rc::clone(&this);
         let listener = crate::widgets::basic::Listener::new()
             .on_pointer_down(Rc::new(
                 move |app, event: waft_gestures::PointerDownEvent| {
-                    self.handle_pointer_down(app, event.pointer);
+                    this.get().handle_pointer_down(app, event.pointer);
                 },
             ))
             .on_pointer_up(Rc::new(move |app, event: waft_gestures::PointerUpEvent| {
-                self.handle_pointer_up_or_cancel(app, event.pointer);
+                on_up.get().handle_pointer_up_or_cancel(app, event.pointer);
             }))
             .on_pointer_cancel(Rc::new(
                 move |app, event: waft_gestures::PointerCancelEvent| {
-                    self.handle_pointer_up_or_cancel(app, event.pointer);
+                    on_cancel
+                        .get()
+                        .handle_pointer_up_or_cancel(app, event.pointer);
                 },
             ))
             .child(absorb);
@@ -6048,7 +6053,7 @@ mod tests {
         fn page(name: &str) -> PageRef {
             Rc::new(TestPage {
                 name: name.to_string(),
-                key: Rc::new(ValueKey::new(name.to_string())),
+                key: ValueKey::new(name.to_string()).into(),
                 restoration_id: None,
             })
         }
@@ -6056,7 +6061,7 @@ mod tests {
         fn restorable_page(name: &str) -> PageRef {
             Rc::new(TestPage {
                 name: name.to_string(),
-                key: Rc::new(ValueKey::new(name.to_string())),
+                key: ValueKey::new(name.to_string()).into(),
                 restoration_id: Some(name.to_string()),
             })
         }
@@ -6106,7 +6111,7 @@ mod tests {
         Directionality::new(
             TextDirection::Ltr,
             Navigator::new()
-                .key(Rc::new(key.clone()))
+                .key(key.clone().into())
                 .pages(pages)
                 .on_did_remove_page(|_app, _page| {}),
         )
@@ -6263,7 +6268,7 @@ mod tests {
             Directionality::new(
                 TextDirection::Ltr,
                 Navigator::new()
-                    .key(Rc::new(key.clone()))
+                    .key(key.clone().into())
                     .observers(vec![observer.as_observer()])
                     .on_generate_route(|app, settings| {
                         let name = settings.name.clone().unwrap_or_default();
@@ -6314,7 +6319,7 @@ mod tests {
                 RootRestorationScope::new(
                     Some("root".to_string()),
                     Navigator::new()
-                        .key(Rc::new(key.clone()))
+                        .key(key.clone().into())
                         .restoration_scope_id("nav")
                         .pages(vec![TestPage::restorable_page("a")])
                         .on_did_remove_page(|_app, _page| {})
@@ -6355,7 +6360,7 @@ mod tests {
                 RootRestorationScope::new(
                     Some("root".to_string()),
                     Navigator::new()
-                        .key(Rc::new(key.clone()))
+                        .key(key.clone().into())
                         .restoration_scope_id("nav")
                         .pages(vec![TestPage::restorable_page("a")])
                         .on_did_remove_page(|_app, _page| {})
@@ -6386,16 +6391,14 @@ mod tests {
             &cell,
             Directionality::new(
                 TextDirection::Ltr,
-                Navigator::new()
-                    .key(Rc::new(key.clone()))
-                    .on_generate_route({
-                        let pushed = Rc::clone(&pushed);
-                        move |app, _settings| {
-                            let route = PageRouteBuilder::new(app, corner_page()).as_route();
-                            pushed.set(Some(route));
-                            Some(route)
-                        }
-                    }),
+                Navigator::new().key(key.clone().into()).on_generate_route({
+                    let pushed = Rc::clone(&pushed);
+                    move |app, _settings| {
+                        let route = PageRouteBuilder::new(app, corner_page()).as_route();
+                        pushed.set(Some(route));
+                        Some(route)
+                    }
+                }),
             )
             .into_widget(),
         );
@@ -6423,7 +6426,7 @@ mod tests {
         Directionality::new(
             TextDirection::Ltr,
             Navigator::new()
-                .key(Rc::new(key.clone()))
+                .key(key.clone().into())
                 .on_generate_route(|app, _settings| {
                     Some(PageRouteBuilder::new(app, corner_page()).as_route())
                 }),
@@ -6506,5 +6509,49 @@ mod tests {
         drop(app);
         cell.checkpoint();
         assert_eq!(awaited.get(), Some("B"));
+    }
+
+    /// Not a Dart case: the pointer listener keeps the disposed state readable, as Dart's
+    /// tear-off keeps it alive, until the pointer ends.
+    #[test]
+    fn a_pointer_that_ends_after_its_navigator_is_disposed_ends_on_the_disposed_state() {
+        let (cell, _restoration) = app_with_view(None);
+        let key = GlobalKey::new();
+        mount(&cell, pageless_navigator(&key));
+        let mut app = cell.borrow_mut();
+        let navigator_state = state(&key, &mut app);
+        let at = settle(&mut app, Duration::ZERO);
+        let position = waft_embedder::Offset::new(5.0, 5.0);
+        GestureBinding::instance(&mut app).handle_pointer_event(
+            &mut app,
+            waft_gestures::PointerEvent::Down(waft_gestures::PointerDownEvent {
+                pointer: 1,
+                position,
+                kind: waft_embedder::PointerDeviceKind::Touch,
+                ..waft_gestures::PointerDownEvent::default()
+            }),
+        );
+        app.drain_microtasks();
+        assert!(app.get(navigator_state).active_pointers.contains(&1));
+
+        let binding = crate::binding::WidgetsBinding::instance(&mut app);
+        attach(binding, &mut app, SizedBox::new().into_widget());
+        settle(&mut app, at);
+        assert!(
+            app.is_disposed(navigator_state),
+            "the navigator was disposed"
+        );
+
+        GestureBinding::instance(&mut app).handle_pointer_event(
+            &mut app,
+            waft_gestures::PointerEvent::Up(waft_gestures::PointerUpEvent {
+                pointer: 1,
+                position,
+                kind: waft_embedder::PointerDeviceKind::Touch,
+                ..waft_gestures::PointerUpEvent::default()
+            }),
+        );
+        assert!(!app.get(navigator_state).active_pointers.contains(&1));
+        app.drain_microtasks();
     }
 }

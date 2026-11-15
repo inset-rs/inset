@@ -947,12 +947,9 @@ pub trait RenderSliverMultiBoxAdaptor:
             .layout_offset()
     }
 
-    /// Whether the given child is painted, i.e. it is reified and not kept alive off-screen.
-    ///
-    /// Flutter's `paintsChild` override; `RenderObject.paintsChild` is not a virtual here (see
-    /// `PORTING.md`).
-    fn paints_child(self: RenderHandle<Self>, app: &App, child: AnyRenderBox) -> bool {
-        let child = child.as_object();
+    /// The body of Flutter's `paintsChild` override: the child is painted when it is reified
+    /// and not kept alive off-screen.
+    fn paints_child(self: RenderHandle<Self>, app: &App, child: AnyRenderObject) -> bool {
         let index = child
             .parent_data_is::<SliverMultiBoxAdaptorParentData>(app)
             .then(|| {
@@ -977,8 +974,8 @@ pub trait RenderSliverMultiBoxAdaptor:
         child: AnyRenderObject,
         transform: &mut Matrix4,
     ) {
-        let child = child.as_box().expect("the children are boxes");
-        if self.paints_child(app, child) {
+        if RenderObject::paints_child(self, app, child) {
+            let child = child.as_box().expect("the children are boxes");
             self.apply_paint_transform_for_box_child(app, child, transform);
         } else {
             // This can happen if some child asks for the global transform even though they are

@@ -21,22 +21,27 @@ use waft_foundation::{
     Task, ValueChanged, ValueListenable, ValueNotifier,
 };
 use waft_gestures::{
-    BaseTapAndDragGestureRecognizer, DragEndDetails, DragStartBehavior, DragStartDetails,
-    DragUpdateDetails, ForcePressDetails, ForcePressGestureRecognizer, GestureCancelCallback,
-    GestureForcePressEndCallback, GestureForcePressStartCallback, GestureLongPressCancelCallback,
-    GestureLongPressEndCallback, GestureLongPressMoveUpdateCallback, GestureLongPressStartCallback,
-    GestureTapCallback, GestureTapDownCallback, GestureTapDragDownCallback,
-    GestureTapDragEndCallback, GestureTapDragStartCallback, GestureTapDragUpCallback,
-    GestureTapDragUpdateCallback, LongPressEndDetails, LongPressGestureRecognizer,
-    LongPressMoveUpdateDetails, LongPressStartDetails, TapAndHorizontalDragGestureRecognizer,
+    BaseTapAndDragGestureRecognizer, DeviceGestureSettings, DragEndDetails, DragGestureRecognizer,
+    DragStartBehavior, DragStartDetails, DragUpdateDetails, ForcePressDetails,
+    ForcePressGestureRecognizer, GestureCancelCallback, GestureForcePressEndCallback,
+    GestureForcePressStartCallback, GestureLongPressCancelCallback, GestureLongPressEndCallback,
+    GestureLongPressMoveUpdateCallback, GestureLongPressStartCallback, GestureTapCallback,
+    GestureTapDownCallback, GestureTapDragDownCallback, GestureTapDragEndCallback,
+    GestureTapDragStartCallback, GestureTapDragUpCallback, GestureTapDragUpdateCallback,
+    LongPressEndDetails, LongPressGestureRecognizer, LongPressMoveUpdateDetails,
+    LongPressStartDetails, PanGestureRecognizer, TapAndHorizontalDragGestureRecognizer,
     TapAndPanGestureRecognizer, TapDownDetails, TapDragDownDetails, TapDragEndDetails,
     TapDragStartDetails, TapDragUpDetails, TapDragUpdateDetails, TapGestureRecognizer,
     TapStatusTracker,
 };
-use waft_painting::{Axis, AxisDirection, axis_direction_to_axis, transform_rect};
+use waft_painting::{
+    AlignmentGeometry, Axis, AxisDirection, EdgeInsetsGeometry, axis_direction_to_axis,
+    transform_rect,
+};
 use waft_rendering::{
     AnyRenderBox, BoxParentData, ContainerBoxParentData, ContainerParentData, HitTestBehavior,
-    LayerLink, ParentData, RenderBox, RenderEditable, RenderHandle, TextSelectionPoint,
+    LayerLink, ParentData, RelativeRect, RenderBox, RenderEditable, RenderHandle,
+    TextSelectionPoint,
 };
 use waft_scheduler::{
     FrameCallback, SchedulerBinding, SchedulerPhase, Ticker, TickerCallback, TickerProviderObject,
@@ -48,17 +53,23 @@ use waft_services::{
 
 use crate::binding::{WidgetsBinding, WidgetsBindingObserverObject, WidgetsBindingObserverRef};
 use crate::framework::{
-    BuildContext, IntoWidget, KeyRef, State, StateData, StatefulWidget, WidgetRef,
+    BuildContext, GlobalKey, IntoWidget, KeyRef, State, StateData, StatefulWidget, WidgetRef,
 };
 use crate::view::View;
-use crate::widgets::basic::{CompositedTransformFollower, Directionality, SizedBox, WidgetBuilder};
+use crate::widgets::basic::{
+    Align, CompositedTransformFollower, Directionality, ExcludeSemantics, Padding, SizedBox,
+    WidgetBuilder,
+};
+use crate::widgets::constants::K_MIN_INTERACTIVE_DIMENSION;
 use crate::widgets::editable_text::EditableTextState;
 use crate::widgets::feedback::Feedback;
 use crate::widgets::gesture_detector::{
     GestureRecognizerFactories, GestureRecognizerFactory, GestureRecognizerFactoryWithHandlers,
     RawGestureDetector,
 };
+use crate::widgets::inherited_theme::{CapturedThemes, InheritedTheme};
 use crate::widgets::magnifier::{MagnifierController, MagnifierInfo, TextMagnifierConfiguration};
+use crate::widgets::navigator::Navigator;
 use crate::widgets::overlay::{Overlay, OverlayEntry};
 use crate::widgets::scrollable::Scrollable;
 use crate::widgets::tap_region::TextFieldTapRegion;
@@ -79,6 +90,16 @@ pub enum TextSelectionHandleType {
     /// The start and end of the selection are co-incident at this point.
     Collapsed,
 }
+
+/// The type for a Function that builds a toolbar's container with the given
+/// child.
+///
+/// See also:
+///
+///   * `TextSelectionToolbar.toolbarBuilder`, which is of this type.
+///   * `CupertinoTextSelectionToolbar.toolbarBuilder`, which is similar, but
+///     for a Cupertino-style toolbar.
+pub type ToolbarBuilder = Rc<dyn Fn(&mut App, BuildContext, WidgetRef) -> WidgetRef>;
 
 /// Parent data that determines whether or not to paint the corresponding child.
 ///
@@ -595,6 +616,15 @@ pub trait TextSelectionControls {
     /// Returns the size of the selection handle.
     fn get_handle_size(&self, text_line_height: f64) -> Size;
 
+    /// These controls as [`TextSelectionHandleControls`] when they mix it in: Dart's
+    /// `selectionControls is TextSelectionHandleControls`.
+    ///
+    /// Every type that implements [`TextSelectionHandleControls`] answers `Some(self)`; the
+    /// framework reads this to leave the toolbar to `EditableText.contextMenuBuilder`.
+    fn as_text_selection_handle_controls(&self) -> Option<&dyn TextSelectionHandleControls> {
+        None
+    }
+
     /// Whether the current selection of the text field managed by the given
     /// `delegate` can be removed from the text field and placed into the
     /// [`Clipboard`].
@@ -1080,15 +1110,22 @@ impl TextSelectionOverlay {
         self.update_selection_overlay(app);
         let overlay = app.get(self).selection_overlay;
         let context = app.get(self).context;
-        let builder = app.get(self).context_menu_builder.clone();
-        if let Some(builder) = builder {
-            debug_assert!(context.mounted(app));
-            overlay.show_toolbar(app, Some(context), Some(builder));
+        if app
+            .get(self)
+            .selection_controls
+            .as_ref()
+            .is_some_and(|controls| controls.as_text_selection_handle_controls().is_none())
+        {
+            overlay.show_toolbar(app, None, None);
             return;
         }
-        if app.get(self).selection_controls.is_some() {
-            overlay.show_toolbar(app, None, None);
-        }
+
+        let Some(builder) = app.get(self).context_menu_builder.clone() else {
+            return;
+        };
+
+        debug_assert!(context.mounted(app));
+        overlay.show_toolbar(app, Some(context), Some(builder));
     }
 
     /// Shows toolbar with spell check suggestions of misspelled words that are
@@ -1683,19 +1720,30 @@ impl TextSelectionOverlay {
         let overlay = app.get(self).selection_overlay;
         let dragging_handles =
             overlay.is_dragging_start_handle(app) || overlay.is_dragging_end_handle(app);
-        if dragging_handles {
+        if !self.has_handle_controls(app) {
+            if !dragging_handles {
+                overlay.hide_magnifier(app);
+                if !self.selection(app).is_collapsed() {
+                    overlay.show_toolbar(app, None, None);
+                }
+            }
             return;
         }
-        overlay.hide_magnifier(app);
-        if self.selection(app).is_collapsed() {
-            return;
+        if !dragging_handles {
+            overlay.hide_magnifier(app);
+            if !self.selection(app).is_collapsed() {
+                let builder = app.get(self).context_menu_builder.clone();
+                overlay.show_toolbar(app, Some(context), builder);
+            }
         }
-        let builder = app.get(self).context_menu_builder.clone();
-        if let Some(builder) = builder {
-            overlay.show_toolbar(app, Some(context), Some(builder));
-        } else {
-            overlay.show_toolbar(app, None, None);
-        }
+    }
+
+    /// Dart's `selectionControls is TextSelectionHandleControls`.
+    fn has_handle_controls(self: Handle<Self>, app: &App) -> bool {
+        app.get(self)
+            .selection_controls
+            .as_ref()
+            .is_some_and(|controls| controls.as_text_selection_handle_controls().is_some())
     }
 
     fn handle_selection_handle_changed(
@@ -1980,9 +2028,16 @@ impl SelectionOverlay {
 
     /// Whether the toolbar is currently visible.
     pub fn toolbar_is_visible(self: Handle<Self>, app: &App) -> bool {
-        app.get(self).toolbar.is_some()
-            || app.get(self).context_menu.is_some()
-            || app.get(self).spell_check_toolbar.is_some()
+        let this = app.get(self);
+        if this
+            .selection_controls
+            .as_ref()
+            .is_some_and(|controls| controls.as_text_selection_handle_controls().is_some())
+        {
+            this.context_menu.is_some() || this.spell_check_toolbar.is_some()
+        } else {
+            this.toolbar.is_some() || this.spell_check_toolbar.is_some()
+        }
     }
 
     /// Whether the magnifier is currently visible.
@@ -2095,7 +2150,7 @@ impl SelectionOverlay {
     }
 
     /// Called when the users start dragging the start selection handles.
-    pub fn handle_start_handle_drag_start(
+    fn handle_start_handle_drag_start(
         self: Handle<Self>,
         app: &mut App,
         details: DragStartDetails,
@@ -2116,7 +2171,7 @@ impl SelectionOverlay {
     }
 
     /// Called when the users drag the start selection handles to new locations.
-    pub fn handle_start_handle_drag_update(
+    fn handle_start_handle_drag_update(
         self: Handle<Self>,
         app: &mut App,
         details: DragUpdateDetails,
@@ -2147,11 +2202,7 @@ impl SelectionOverlay {
     }
 
     /// Called when the users lift their fingers after dragging the start selection handles.
-    pub fn handle_start_handle_drag_end(
-        self: Handle<Self>,
-        app: &mut App,
-        details: DragEndDetails,
-    ) {
+    fn handle_start_handle_drag_end(self: Handle<Self>, app: &mut App, details: DragEndDetails) {
         app.get_mut(self).is_dragging_start_handle = false;
         if app.get(self).handles.is_none() {
             return;
@@ -2207,11 +2258,7 @@ impl SelectionOverlay {
     }
 
     /// Called when the users start dragging the end selection handles.
-    pub fn handle_end_handle_drag_start(
-        self: Handle<Self>,
-        app: &mut App,
-        details: DragStartDetails,
-    ) {
+    fn handle_end_handle_drag_start(self: Handle<Self>, app: &mut App, details: DragStartDetails) {
         debug_assert!(!app.get(self).is_dragging_end_handle);
         if app.get(self).handles.is_none() {
             app.get_mut(self).is_dragging_end_handle = false;
@@ -2228,7 +2275,7 @@ impl SelectionOverlay {
     }
 
     /// Called when the users drag the end selection handles to new locations.
-    pub fn handle_end_handle_drag_update(
+    fn handle_end_handle_drag_update(
         self: Handle<Self>,
         app: &mut App,
         details: DragUpdateDetails,
@@ -2259,7 +2306,7 @@ impl SelectionOverlay {
     }
 
     /// Called when the users lift their fingers after dragging the end selection handles.
-    pub fn handle_end_handle_drag_end(self: Handle<Self>, app: &mut App, details: DragEndDetails) {
+    fn handle_end_handle_drag_end(self: Handle<Self>, app: &mut App, details: DragEndDetails) {
         app.get_mut(self).is_dragging_end_handle = false;
         if app.get(self).handles.is_none() {
             return;
@@ -2316,17 +2363,26 @@ impl SelectionOverlay {
         }
         let context = app.get(self).context;
         let overlay = Overlay::of(app, context, true);
+
+        let overlay_context = overlay.context(app);
+        let captured_themes = Rc::new(<dyn InheritedTheme>::capture(
+            app,
+            context,
+            Some(overlay_context),
+        ));
+
         let this = self;
+        let start_themes = Rc::clone(&captured_themes);
         let start = OverlayEntry::new(
             app,
-            Rc::new(move |app, context| this.build_start_handle(app, context)),
+            Rc::new(move |app, context| start_themes.wrap(this.build_start_handle(app, context))),
             false,
             false,
             false,
         );
         let end = OverlayEntry::new(
             app,
-            Rc::new(move |app, context| this.build_end_handle(app, context)),
+            Rc::new(move |app, context| captured_themes.wrap(this.build_end_handle(app, context))),
             false,
             false,
             false,
@@ -2404,7 +2460,9 @@ impl SelectionOverlay {
                 if let Some(visibility) = visibility {
                     wrapper = wrapper.visibility(visibility);
                 }
-                wrapper.into_widget()
+                // `ContextMenuController.show` captures from the entry's context up to its
+                // navigator's.
+                capture_to_navigator(app, overlay_context).wrap(wrapper.into_widget())
             }),
             false,
             false,
@@ -2448,7 +2506,8 @@ impl SelectionOverlay {
                     .and_then(|object| object.as_box())
                     .map(|box_| -box_.local_to_global(app, Offset::ZERO, None))
                     .unwrap_or(Offset::ZERO);
-                SelectionToolbarWrapper::new(layer_link, offset, child).into_widget()
+                capture_to_navigator(app, overlay_context)
+                    .wrap(SelectionToolbarWrapper::new(layer_link, offset, child).into_widget())
             }),
             false,
             false,
@@ -2536,44 +2595,75 @@ impl SelectionOverlay {
         app.get_mut(app.get(self).magnifier_info).dispose();
     }
 
-    fn build_start_handle(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
-        let controls = app.get(self).selection_controls.clone();
-        let handle_type = app.get(self).start_handle_type;
-        let dragging_end = app.get(self).is_dragging_end_handle;
-        let handle = if controls.is_none()
-            || (handle_type == TextSelectionHandleType::Collapsed && dragging_end)
-        {
-            SizedBox::shrink().into_widget()
-        } else if let Some(controls) = controls {
-            let line_height = app.get(self).line_height_at_start;
-            let on_tap = app.get(self).on_selection_handle_tapped.clone();
-            controls.build_handle(app, context, handle_type, line_height, on_tap)
-        } else {
-            SizedBox::shrink().into_widget()
+    fn build_start_handle(self: Handle<Self>, app: &App, _context: BuildContext) -> WidgetRef {
+        let this = app.get(self);
+        let handle = match this.selection_controls.clone() {
+            Some(selection_controls)
+                if !(this.start_handle_type == TextSelectionHandleType::Collapsed
+                    && this.is_dragging_end_handle) =>
+            {
+                SelectionHandleOverlay::new(
+                    this.start_handle_type,
+                    this.start_handle_layer_link,
+                    selection_controls,
+                    this.line_height_at_start,
+                )
+                .on_selection_handle_tapped(this.on_selection_handle_tapped.clone())
+                .on_selection_handle_drag_start(Rc::new(move |app, details| {
+                    self.handle_start_handle_drag_start(app, details);
+                }))
+                .on_selection_handle_drag_update(Rc::new(move |app, details| {
+                    self.handle_start_handle_drag_update(app, details);
+                }))
+                .on_selection_handle_drag_end(Rc::new(move |app, details| {
+                    self.handle_start_handle_drag_end(app, details);
+                }))
+                .visibility(this.start_handles_visible)
+                .drag_start_behavior(this.drag_start_behavior)
+                .into_widget()
+            }
+            // Hide the start handle when dragging the end handle and collapsing
+            // the selection.
+            _ => SizedBox::shrink().into_widget(),
         };
-        TextFieldTapRegion::new(handle).into_widget()
+        TextFieldTapRegion::new(ExcludeSemantics::new().child(handle)).into_widget()
     }
 
-    fn build_end_handle(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
-        let controls = app.get(self).selection_controls.clone();
-        let handle_type = app.get(self).end_handle_type;
-        let dragging_start = app.get(self).is_dragging_start_handle;
-        let dragging_end = app.get(self).is_dragging_end_handle;
-        let handle = if controls.is_none()
-            || (handle_type == TextSelectionHandleType::Collapsed && dragging_start)
-            || (handle_type == TextSelectionHandleType::Collapsed
-                && !dragging_start
-                && !dragging_end)
-        {
-            SizedBox::shrink().into_widget()
-        } else if let Some(controls) = controls {
-            let line_height = app.get(self).line_height_at_end;
-            let on_tap = app.get(self).on_selection_handle_tapped.clone();
-            controls.build_handle(app, context, handle_type, line_height, on_tap)
-        } else {
-            SizedBox::shrink().into_widget()
+    fn build_end_handle(self: Handle<Self>, app: &App, _context: BuildContext) -> WidgetRef {
+        let this = app.get(self);
+        let collapsed = this.end_handle_type == TextSelectionHandleType::Collapsed;
+        let handle = match this.selection_controls.clone() {
+            Some(selection_controls)
+                if !((collapsed && this.is_dragging_start_handle)
+                    || (collapsed
+                        && !this.is_dragging_start_handle
+                        && !this.is_dragging_end_handle)) =>
+            {
+                SelectionHandleOverlay::new(
+                    this.end_handle_type,
+                    this.end_handle_layer_link,
+                    selection_controls,
+                    this.line_height_at_end,
+                )
+                .on_selection_handle_tapped(this.on_selection_handle_tapped.clone())
+                .on_selection_handle_drag_start(Rc::new(move |app, details| {
+                    self.handle_end_handle_drag_start(app, details);
+                }))
+                .on_selection_handle_drag_update(Rc::new(move |app, details| {
+                    self.handle_end_handle_drag_update(app, details);
+                }))
+                .on_selection_handle_drag_end(Rc::new(move |app, details| {
+                    self.handle_end_handle_drag_end(app, details);
+                }))
+                .visibility(this.end_handles_visible)
+                .drag_start_behavior(this.drag_start_behavior)
+                .into_widget()
+            }
+            // Hide the end handle when dragging the start handle and collapsing the selection
+            // or when the selection is collapsed and no handle is being dragged.
+            _ => SizedBox::shrink().into_widget(),
         };
-        TextFieldTapRegion::new(handle).into_widget()
+        TextFieldTapRegion::new(ExcludeSemantics::new().child(handle)).into_widget()
     }
 
     #[allow(deprecated)]
@@ -2832,12 +2922,363 @@ impl State for SelectionToolbarWrapperState {
     }
 }
 
+/// This widget represents a single draggable selection handle.
+///
+/// Dart's `_SelectionHandleOverlay`.
+#[derive(Clone)]
+struct SelectionHandleOverlay {
+    handle_layer_link: Handle<LayerLink>,
+    on_selection_handle_tapped: Option<Listener>,
+    on_selection_handle_drag_start: Option<ValueChanged<DragStartDetails>>,
+    on_selection_handle_drag_update: Option<ValueChanged<DragUpdateDetails>>,
+    on_selection_handle_drag_end: Option<ValueChanged<DragEndDetails>>,
+    selection_controls: Rc<dyn TextSelectionControls>,
+    visibility: Option<Handle<ValueNotifier<bool>>>,
+    preferred_line_height: f64,
+    handle_type: TextSelectionHandleType,
+    drag_start_behavior: DragStartBehavior,
+}
+
+impl SelectionHandleOverlay {
+    /// Create selection overlay.
+    fn new(
+        handle_type: TextSelectionHandleType,
+        handle_layer_link: Handle<LayerLink>,
+        selection_controls: Rc<dyn TextSelectionControls>,
+        preferred_line_height: f64,
+    ) -> SelectionHandleOverlay {
+        SelectionHandleOverlay {
+            handle_layer_link,
+            on_selection_handle_tapped: None,
+            on_selection_handle_drag_start: None,
+            on_selection_handle_drag_update: None,
+            on_selection_handle_drag_end: None,
+            selection_controls,
+            visibility: None,
+            preferred_line_height,
+            handle_type,
+            drag_start_behavior: DragStartBehavior::Start,
+        }
+    }
+
+    /// Dart `_SelectionHandleOverlay(onSelectionHandleTapped:)`.
+    fn on_selection_handle_tapped(mut self, on_selection_handle_tapped: Option<Listener>) -> Self {
+        self.on_selection_handle_tapped = on_selection_handle_tapped;
+        self
+    }
+
+    /// Dart `_SelectionHandleOverlay(onSelectionHandleDragStart:)`.
+    fn on_selection_handle_drag_start(
+        mut self,
+        on_selection_handle_drag_start: ValueChanged<DragStartDetails>,
+    ) -> Self {
+        self.on_selection_handle_drag_start = Some(on_selection_handle_drag_start);
+        self
+    }
+
+    /// Dart `_SelectionHandleOverlay(onSelectionHandleDragUpdate:)`.
+    fn on_selection_handle_drag_update(
+        mut self,
+        on_selection_handle_drag_update: ValueChanged<DragUpdateDetails>,
+    ) -> Self {
+        self.on_selection_handle_drag_update = Some(on_selection_handle_drag_update);
+        self
+    }
+
+    /// Dart `_SelectionHandleOverlay(onSelectionHandleDragEnd:)`.
+    fn on_selection_handle_drag_end(
+        mut self,
+        on_selection_handle_drag_end: ValueChanged<DragEndDetails>,
+    ) -> Self {
+        self.on_selection_handle_drag_end = Some(on_selection_handle_drag_end);
+        self
+    }
+
+    /// Dart `_SelectionHandleOverlay(visibility:)`.
+    fn visibility(mut self, visibility: Option<Handle<ValueNotifier<bool>>>) -> Self {
+        self.visibility = visibility;
+        self
+    }
+
+    /// Dart `_SelectionHandleOverlay(dragStartBehavior:)`.
+    fn drag_start_behavior(mut self, drag_start_behavior: DragStartBehavior) -> Self {
+        self.drag_start_behavior = drag_start_behavior;
+        self
+    }
+}
+
+impl Debug for SelectionHandleOverlay {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SelectionHandleOverlay")
+            .field("type", &self.handle_type)
+            .field("preferred_line_height", &self.preferred_line_height)
+            .finish_non_exhaustive()
+    }
+}
+
+impl StatefulWidget for SelectionHandleOverlay {
+    type State = SelectionHandleOverlayState;
+
+    fn key(&self) -> Option<&KeyRef> {
+        None
+    }
+
+    fn create_state(&self) -> SelectionHandleOverlayState {
+        SelectionHandleOverlayState {
+            state: StateData::new(),
+            controller: None,
+            single_ticker_provider: SingleTickerProviderStateMixinData::new(),
+        }
+    }
+}
+
+/// Dart's `_SelectionHandleOverlayState`.
+struct SelectionHandleOverlayState {
+    state: StateData<SelectionHandleOverlay>,
+    controller: Option<Handle<AnimationController>>,
+    single_ticker_provider: SingleTickerProviderStateMixinData,
+}
+
+impl SelectionHandleOverlayState {
+    fn controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
+        app.get(self)
+            .controller
+            .expect("the controller is created in initState")
+    }
+
+    fn opacity(self: Handle<Self>, app: &App) -> waft_animation::AnyAnimation<f64> {
+        self.controller(app).view()
+    }
+
+    fn handle_visibility_changed(self: Handle<Self>, app: &mut App) {
+        let visible = self
+            .widget(app)
+            .visibility
+            .map(|visibility| *visibility.value(app))
+            .unwrap_or(true);
+        let controller = self.controller(app);
+        if visible {
+            controller.forward(app, None);
+        } else {
+            controller.reverse(app, None);
+        }
+    }
+
+    /// Returns the bounding [`Rect`] of the text selection handle in local
+    /// coordinates.
+    ///
+    /// When interacting with a text selection handle through a touch event, the
+    /// interactive area should be at least [`K_MIN_INTERACTIVE_DIMENSION`] square,
+    /// which this method does not consider.
+    fn get_handle_rect(
+        self: Handle<Self>,
+        app: &App,
+        _handle_type: TextSelectionHandleType,
+        preferred_line_height: f64,
+    ) -> Rect {
+        let handle_size = self
+            .widget(app)
+            .selection_controls
+            .get_handle_size(preferred_line_height);
+        Rect::from_ltwh(0.0, 0.0, handle_size.width(), handle_size.height())
+    }
+}
+
+impl SingleTickerProviderStateMixin for SelectionHandleOverlayState {
+    fn single_ticker_provider_data(
+        self: Handle<Self>,
+        app: &App,
+    ) -> &SingleTickerProviderStateMixinData {
+        &app.get(self).single_ticker_provider
+    }
+
+    fn single_ticker_provider_data_mut(
+        self: Handle<Self>,
+        app: &mut App,
+    ) -> &mut SingleTickerProviderStateMixinData {
+        &mut app.get_mut(self).single_ticker_provider
+    }
+}
+
+impl TickerProviderObject for SelectionHandleOverlayState {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+        SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
+    }
+}
+
+impl State for SelectionHandleOverlayState {
+    type Widget = SelectionHandleOverlay;
+    crate::state_accessors!();
+
+    fn init_state(self: Handle<Self>, app: &mut App) {
+        let controller = AnimationController::create(
+            app,
+            None,
+            Some(SelectionOverlay::FADE_DURATION),
+            None,
+            0.0,
+            1.0,
+            AnimationBehavior::Normal,
+            self,
+        );
+        app.get_mut(self).controller = Some(controller);
+
+        self.handle_visibility_changed(app);
+        if let Some(visibility) = self.widget(app).visibility {
+            visibility.add_listener(
+                app,
+                Listener::handle_method(self, Self::handle_visibility_changed),
+            );
+        }
+    }
+
+    fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &SelectionHandleOverlay) {
+        if let Some(visibility) = old_widget.visibility {
+            visibility.remove_listener(
+                app,
+                &Listener::handle_method(self, Self::handle_visibility_changed),
+            );
+        }
+        self.handle_visibility_changed(app);
+        if let Some(visibility) = self.widget(app).visibility {
+            visibility.add_listener(
+                app,
+                Listener::handle_method(self, Self::handle_visibility_changed),
+            );
+        }
+    }
+
+    fn activate(self: Handle<Self>, app: &mut App) {
+        SingleTickerProviderStateMixin::activate(self, app);
+    }
+
+    fn dispose(self: Handle<Self>, app: &mut App) {
+        if let Some(visibility) = self.widget(app).visibility {
+            visibility.remove_listener(
+                app,
+                &Listener::handle_method(self, Self::handle_visibility_changed),
+            );
+        }
+        let controller = self.controller(app);
+        controller.dispose(app);
+        SingleTickerProviderStateMixin::dispose(self, app);
+        app.get_mut(self).controller = None;
+        app.destroy(controller);
+    }
+
+    fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
+        let widget = self.widget(app).clone();
+        let handle_rect =
+            self.get_handle_rect(app, widget.handle_type, widget.preferred_line_height);
+
+        // Make sure the GestureDetector is big enough to be easily interactive if
+        // the handleRect is not empty.
+        let interactive_rect = if handle_rect.is_empty() {
+            handle_rect
+        } else {
+            handle_rect.expand_to_include(Rect::from_circle(
+                handle_rect.center(),
+                K_MIN_INTERACTIVE_DIMENSION / 2.0,
+            ))
+        };
+        let padding = if interactive_rect.is_empty() {
+            RelativeRect::FILL
+        } else {
+            RelativeRect::from_ltrb(
+                ((interactive_rect.width() - handle_rect.width()) / 2.0).max(0.0),
+                ((interactive_rect.height() - handle_rect.height()) / 2.0).max(0.0),
+                ((interactive_rect.width() - handle_rect.width()) / 2.0).max(0.0),
+                ((interactive_rect.height() - handle_rect.height()) / 2.0).max(0.0),
+            )
+        };
+
+        let handle_anchor = widget
+            .selection_controls
+            .get_handle_anchor(widget.handle_type, widget.preferred_line_height);
+
+        // Make sure a drag is eagerly accepted. This is used on iOS to match the
+        // behavior where a drag directly on a collapse handle will always win against
+        // other drag gestures.
+        let eagerly_accept_drag_when_collapsed = widget.handle_type
+            == TextSelectionHandleType::Collapsed
+            && app.platform().target_platform() == TargetPlatform::IOS;
+
+        let configured = widget.clone();
+        let pan = GestureRecognizerFactoryWithHandlers::<PanGestureRecognizer>::new(
+            |app| {
+                // Mouse events select the text and do not drag the cursor.
+                PanGestureRecognizer::new(app).supported_devices(
+                    app,
+                    [
+                        PointerDeviceKind::Touch,
+                        PointerDeviceKind::Stylus,
+                        PointerDeviceKind::Unknown,
+                    ],
+                )
+            },
+            move |app, instance| {
+                DragGestureRecognizer::set_drag_start_behavior(
+                    instance,
+                    app,
+                    configured.drag_start_behavior,
+                );
+                instance.set_gesture_settings(
+                    app,
+                    eagerly_accept_drag_when_collapsed
+                        .then(|| DeviceGestureSettings::new(Some(1.0))),
+                );
+                instance.set_on_start(app, configured.on_selection_handle_drag_start.clone());
+                instance.set_on_update(app, configured.on_selection_handle_drag_update.clone());
+                instance.set_on_end(app, configured.on_selection_handle_drag_end.clone());
+            },
+        )
+        .into_factory();
+
+        let handle = widget.selection_controls.build_handle(
+            app,
+            context,
+            widget.handle_type,
+            widget.preferred_line_height,
+            widget.on_selection_handle_tapped.clone(),
+        );
+
+        CompositedTransformFollower::new(widget.handle_layer_link)
+            // Put the handle's anchor point on the leader's anchor point.
+            .offset(-handle_anchor - Offset::new(padding.left, padding.top))
+            .show_when_unlinked(false)
+            .child(
+                FadeTransition::new(self.opacity(app)).child(
+                    SizedBox::new()
+                        .width(interactive_rect.width())
+                        .height(interactive_rect.height())
+                        .child(
+                            Align::new().alignment(AlignmentGeometry::TOP_LEFT).child(
+                                RawGestureDetector::new()
+                                    .behavior(HitTestBehavior::Translucent)
+                                    .gestures(vec![(TypeId::of::<PanGestureRecognizer>(), pan)])
+                                    .child(
+                                        Padding::new(EdgeInsetsGeometry::only(
+                                            padding.left,
+                                            padding.top,
+                                            padding.right,
+                                            padding.bottom,
+                                        ))
+                                        .child(handle),
+                                    ),
+                            ),
+                        ),
+                ),
+            )
+            .into_widget()
+    }
+}
+
 /// [GlobalKey] to the [`EditableText`] for which the
 /// [`TextSelectionGestureDetectorBuilder`] will build a [`TextSelectionGestureDetector`].
 pub trait TextSelectionGestureDetectorBuilderDelegate: Sized + 'static {
     /// [GlobalKey] to the [`EditableText`] for which the
     /// [`TextSelectionGestureDetectorBuilder`] will build a [`TextSelectionGestureDetector`].
-    fn editable_text_key(self: Handle<Self>, app: &App) -> crate::framework::GlobalKey;
+    fn editable_text_key(self: Handle<Self>, app: &App) -> GlobalKey;
 
     /// Whether the text field should respond to force presses.
     fn force_press_enabled(self: Handle<Self>, app: &App) -> bool;
@@ -2857,7 +3298,7 @@ pub trait TextSelectionGestureDetectorBuilderDelegate: Sized + 'static {
 }
 
 struct TextSelectionGestureDetectorBuilderDelegateVTable {
-    editable_text_key: fn(&App, HandleId) -> crate::framework::GlobalKey,
+    editable_text_key: fn(&App, HandleId) -> GlobalKey,
     force_press_enabled: fn(&App, HandleId) -> bool,
     selection_enabled: fn(&App, HandleId) -> bool,
 }
@@ -2887,7 +3328,7 @@ pub struct AnyTextSelectionGestureDetectorBuilderDelegate {
 }
 
 impl AnyTextSelectionGestureDetectorBuilderDelegate {
-    pub fn editable_text_key(self, app: &App) -> crate::framework::GlobalKey {
+    pub fn editable_text_key(self, app: &App) -> GlobalKey {
         (self.vtable.editable_text_key)(app, self.id)
     }
 
@@ -4949,6 +5390,13 @@ impl State for TextSelectionGestureDetectorState {
     }
 }
 
+/// `ContextMenuController.show`'s capture inside its entry's builder: the themes from the
+/// entry's `context` up to its navigator's.
+fn capture_to_navigator(app: &mut App, context: BuildContext) -> CapturedThemes {
+    let to = Navigator::maybe_of(app, context, false).map(|navigator| navigator.context(app));
+    <dyn InheritedTheme>::capture(app, context, to)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5322,5 +5770,111 @@ mod tests {
         pump(&cell);
         shown.set_value(&mut cell.borrow_mut(), false);
         pump(&cell);
+    }
+
+    /// Selection controls whose handles record the default text style they are built under.
+    struct RecordingControls {
+        font_sizes: Rc<RefCell<Vec<Option<f64>>>>,
+    }
+
+    #[allow(deprecated)]
+    impl TextSelectionControls for RecordingControls {
+        fn build_handle(
+            &self,
+            app: &mut App,
+            context: BuildContext,
+            _handle_type: TextSelectionHandleType,
+            _text_line_height: f64,
+            _on_tap: Option<Listener>,
+        ) -> WidgetRef {
+            let font_size = crate::DefaultTextStyle::of(app, context).style.font_size;
+            self.font_sizes.borrow_mut().push(font_size);
+            SizedBox::shrink().into_widget()
+        }
+
+        fn get_handle_anchor(
+            &self,
+            _handle_type: TextSelectionHandleType,
+            _text_line_height: f64,
+        ) -> Offset {
+            Offset::ZERO
+        }
+
+        fn build_toolbar(
+            &self,
+            _app: &mut App,
+            _context: BuildContext,
+            _global_editable_region: Rect,
+            _text_line_height: f64,
+            _selection_midpoint: Offset,
+            _endpoints: &[TextSelectionPoint],
+            _delegate: AnyTextSelectionDelegate,
+            _clipboard_status: Option<Handle<ClipboardStatusNotifier>>,
+            _last_secondary_tap_down_position: Option<Offset>,
+        ) -> WidgetRef {
+            SizedBox::shrink().into_widget()
+        }
+
+        fn get_handle_size(&self, _text_line_height: f64) -> Size {
+            Size::ZERO
+        }
+    }
+
+    /// `SelectionOverlay.showHandles` captures the themes between the context that shows the
+    /// handles and the overlay, so a handle built in the root overlay sees a theme local to
+    /// the field.
+    #[test]
+    fn the_selection_handles_carry_the_themes_of_the_context_that_shows_them() {
+        use crate::{DefaultTextStyle, Directionality, Overlay};
+        use waft_embedder::TextDirection;
+        use waft_painting::TextStyle;
+
+        let cell = binding_cell();
+        let field_context: Rc<std::cell::Cell<Option<BuildContext>>> = Rc::default();
+        let tree = {
+            let field_context = Rc::clone(&field_context);
+            Directionality::new(
+                TextDirection::Ltr,
+                Overlay::wrap(DefaultTextStyle::new(
+                    TextStyle::new().font_size(42.0),
+                    crate::Builder::new(move |_app, context| {
+                        field_context.set(Some(context));
+                        SizedBox::expand().into_widget()
+                    }),
+                )),
+            )
+            .into_widget()
+        };
+        binding_mount(&cell, tree);
+        let mut app = cell.borrow_mut();
+        let context = field_context.get().expect("the field built");
+        let font_sizes: Rc<RefCell<Vec<Option<f64>>>> = Rc::default();
+        let links = (
+            waft_rendering::LayerLink::new(&mut app),
+            waft_rendering::LayerLink::new(&mut app),
+            waft_rendering::LayerLink::new(&mut app),
+        );
+        let overlay = SelectionOverlay::new(
+            &mut app,
+            context,
+            TextSelectionHandleType::Left,
+            10.0,
+            TextSelectionHandleType::Right,
+            10.0,
+            Vec::new(),
+            Some(Rc::new(RecordingControls {
+                font_sizes: Rc::clone(&font_sizes),
+            })),
+            None,
+            None,
+            links.0,
+            links.1,
+            links.2,
+        );
+        overlay.show_handles(&mut app);
+        crate::test_harness::binding_pump(&mut app, std::time::Duration::from_millis(16));
+        let seen = font_sizes.borrow().clone();
+        assert!(!seen.is_empty(), "a handle was built");
+        assert!(seen.iter().all(|size| *size == Some(42.0)), "{seen:?}");
     }
 }

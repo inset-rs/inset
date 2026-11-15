@@ -615,7 +615,7 @@ impl State for TextControlState {
         })
         .autocorrect(password.is_none())
         .enable_suggestions(password.is_none())
-        .key(Rc::new(app.get(self).editable_key.clone()));
+        .key(app.get(self).editable_key.clone().into());
         // A WinUI text box keeps the focus on Enter: the platform's done action ends the
         // composition without the unfocusing Flutter defaults to.
         let controller = config.controller;

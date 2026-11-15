@@ -1,0 +1,48 @@
+[package]
+name = "shaders"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[package.metadata.waft]
+identifier = "rs.waft.shaders"
+name = "Shaders"
+
+# Named apart from the binary: on Windows a cdylib and a binary of one name write the same
+# `.pdb`.
+[lib]
+name = "shaders_lib"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+waft.workspace = true
+waft-embedder.workspace = true
+waft-foundation.workspace = true
+waft-rendering.workspace = true
+waft-widgets.workspace = true
+
+[[bin]]
+name = "shaders"
+path = "src/main.rs"
+
+[dev-dependencies]
+waft-embedder = { workspace = true, features = ["test-support"] }
+waft-scheduler.workspace = true
+waft-test.workspace = true
+
+# The desktop host the app is checked on, and what reads back what it draws on the host's device.
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+pollster.workspace = true
+waft-embedder-winit.workspace = true
+waft-shell.workspace = true
+wgpu.workspace = true
+
+[[test]]
+name = "on_the_desktop"
+harness = false
+
+[lints]
+workspace = true

@@ -32,6 +32,7 @@ mod keyboard;
 mod keys;
 mod launch;
 mod lifecycle;
+mod linux;
 mod locales;
 mod macos;
 mod main_loop;
@@ -61,6 +62,7 @@ mod views;
 mod vsync_source;
 mod vsync_waiter;
 mod windows;
+mod windows_os;
 
 use waft_embedder::{EmbedderClient, PlatformRef};
 
@@ -114,6 +116,7 @@ pub mod test_support {
 }
 
 pub use images::{DecodeExecution, create_image_loader};
+pub use linux::Linux;
 pub use macos::MacOs;
 #[cfg(target_os = "linux")]
 pub use os::DmabufBuffer;
@@ -122,13 +125,15 @@ pub use os::SharedTexture;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 pub use os::{CoreVideoFrame, SurfaceBuffer};
 pub use platform::WinitPlatform;
-pub use system_requests::{Reopen, ReopenHandler};
+pub use system_requests::{NotificationActivationHandler, Reopen, ReopenHandler};
+pub use windows_os::Windows;
 
 /// Runs the winit event loop until quit. The app decides what happens when its last window
 /// closes, as it decides every window's close.
 #[derive(Default)]
 pub struct WinitEmbedder {
     linux: LinuxSettings,
+    windows: WindowsSettings,
     force_fallback_adapter: bool,
 }
 
@@ -140,6 +145,18 @@ pub struct LinuxSettings {
     /// class (`WM_CLASS`). `#[waft::main]` gives `[package.metadata.waft] identifier`, as
     /// `cargo waft` names the desktop file. Without it a window is of no app the desktop knows.
     pub app_id: Option<String>,
+}
+
+/// What the app tells Windows' shell about itself, which no other system asks of it.
+#[derive(Clone, Debug, Default)]
+pub struct WindowsSettings {
+    /// The process's AppUserModelID (`SetCurrentProcessExplicitAppUserModelID`), set before any
+    /// window shows: the taskbar groups and pins the app's windows by it, and the notification
+    /// platform shows the app's toasts only under an ID it knows, from a Start menu shortcut
+    /// carrying it or its registration. `#[waft::main]` gives `[package.metadata.waft]
+    /// identifier`, which `cargo waft`'s installers put on their shortcuts. Without it Windows
+    /// guesses one from the executable, and the app has no notifications.
+    pub app_user_model_id: Option<String>,
 }
 
 impl WinitEmbedder {
@@ -155,6 +172,12 @@ impl WinitEmbedder {
     /// What the app tells Linux's desktops; ignored on every other system.
     pub fn linux(mut self, settings: LinuxSettings) -> WinitEmbedder {
         self.linux = settings;
+        self
+    }
+
+    /// What the app tells Windows' shell; ignored on every other system.
+    pub fn windows(mut self, settings: WindowsSettings) -> WinitEmbedder {
+        self.windows = settings;
         self
     }
 
@@ -174,6 +197,7 @@ impl WinitEmbedder {
             Box::new(start),
             None,
             self.linux,
+            &self.windows,
             self.force_fallback_adapter,
         );
     }
@@ -193,6 +217,7 @@ impl WinitEmbedder {
             Box::new(start),
             Some(Box::new(make_loader)),
             self.linux,
+            &self.windows,
             self.force_fallback_adapter,
         );
     }

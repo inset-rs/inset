@@ -36,7 +36,9 @@ use std::cell::RefCell;
 use std::sync::Arc;
 use std::time::Instant;
 
-use waft_embedder::{Canvas, CompositionLayer, Picture, Placement, Scene, Slices, ViewId, slices};
+use waft_embedder::{
+    Canvas, CompositionLayer, Picture, Placement, PreparedPrograms, Scene, Slices, ViewId, slices,
+};
 
 use crate::gpu::{Gpu, LazyGpu};
 use crate::os::capabilities::{FramePresentation, ViewLayer as _};
@@ -52,6 +54,8 @@ pub(crate) struct Rasterizer {
     gpu: LazyGpu,
     /// What renders the scenes, made at the view's first draw.
     context: Option<valo::Context>,
+    /// The fragment programs the context has prepared for the surface's format.
+    prepared_programs: PreparedPrograms,
     /// What the view shows into; `None` while it is in no window.
     layer: Option<ViewLayer>,
     /// The view's size in physical pixels, which its surface is made at.
@@ -103,6 +107,7 @@ impl Rasterizer {
         Rasterizer {
             gpu: gpu.clone(),
             context: None,
+            prepared_programs: PreparedPrograms::new(),
             layer: None,
             size: [0, 0],
             surface: ViewSurface::None,
@@ -319,8 +324,8 @@ impl Rasterizer {
     }
 
     /// Renders `picture` over `clear` into the surface's next drawable and presents it, making
-    /// the surface and the context first if this is the first draw on them. `Err` is the surface
-    /// refusing a drawable.
+    /// the surface and the context first if this is the first draw on them, and preparing first
+    /// the fragment programs made since the last draw. `Err` is the surface refusing a drawable.
     fn render_and_present(
         &mut self,
         picture: &Picture,
@@ -335,6 +340,9 @@ impl Rasterizer {
         let context = self
             .context
             .get_or_insert_with(|| context_on(self.gpu.get()));
+        let format = surface.format();
+        self.prepared_programs
+            .prepare_new(|effect| context.prepare_runtime_effect(effect, format));
         let surface_frame = surface.acquire()?;
         context.render(picture, &surface_frame.target(Some(clear)));
         if let Some(layer) = &self.layer {

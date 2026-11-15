@@ -24,7 +24,7 @@ use waft_rendering::{
 use crate::framework::{
     AnyElement, BuildContext, Element, ElementData, IntoWidget, KeyRef, ParentDataWidget,
     RenderObjectElement, RenderObjectElementData, RenderObjectElementWidget, RenderObjectWidget,
-    Slot, Widget, WidgetKind, WidgetRef, downcast_widget,
+    Slot, Widget, WidgetKind, WidgetRef, downcast_widget, short_type_name,
 };
 use crate::widgets::scroll_delegate::{
     ChildIndexGetter, NullableIndexedWidgetBuilder, SemanticIndexCallback,
@@ -127,6 +127,9 @@ where
     W::RenderObject: RenderSliverMultiBoxAdaptor,
 {
     fn into_widget(self) -> WidgetRef {
+        if cfg!(debug_assertions) {
+            RenderObjectWidget::debug_check_constructor(&self);
+        }
         Rc::new(SliverMultiBoxAdaptor(self))
     }
 }
@@ -149,6 +152,10 @@ where
 
     fn widget_type(&self) -> TypeId {
         TypeId::of::<W>()
+    }
+
+    fn type_name(&self) -> &'static str {
+        short_type_name::<W>()
     }
 
     fn kind(&self) -> WidgetKind {
@@ -1285,7 +1292,7 @@ impl IntoWidget<SliverMultiBoxAdaptorKind> for SliverGridList {
 // SliverMultiBoxAdaptorElement
 
 /// Dart's `context as SliverMultiBoxAdaptorElement`, as the render object's child manager.
-fn child_manager_of<W: SliverMultiBoxAdaptorWidget>(
+pub(crate) fn child_manager_of<W: SliverMultiBoxAdaptorWidget>(
     app: &App,
     context: BuildContext,
 ) -> Rc<dyn RenderSliverBoxChildManager>
@@ -2125,7 +2132,7 @@ mod tests {
     use crate::widgets::viewport::Viewport;
 
     fn key(value: u32) -> KeyRef {
-        Rc::new(ValueKey::new(value)) as KeyRef
+        KeyRef::from(ValueKey::new(value))
     }
 
     fn item(value: u32) -> WidgetRef {
@@ -2214,6 +2221,7 @@ mod tests {
         children.extend((1..8).map(item));
         let sliver = SliverList::list(children)
             .add_repaint_boundaries(false)
+            .add_semantic_indexes(false)
             .into_widget();
         let harness = Harness::mount(&mut app, viewport_over(sliver, offset));
         harness.pump(&mut app);
@@ -2310,6 +2318,7 @@ mod tests {
         let tiles = SliverGridDelegateWithFixedCrossAxisCount::new(2).child_aspect_ratio(3.0);
         let sliver = SliverGrid::list(Rc::new(tiles), children)
             .add_repaint_boundaries(false)
+            .add_semantic_indexes(false)
             .into_widget();
         let harness = Harness::mount(&mut app, viewport_over(sliver, offset));
         harness.pump(&mut app);

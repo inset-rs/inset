@@ -13,8 +13,8 @@ use waft_embedder::{Offset, Size};
 use waft_foundation::{App, Handle, Key, Listenable, Listener};
 
 use crate::box_::{
-    AnyRenderBox, BoxConstraints, BoxHitTestResult, BoxParentData, ContainerBoxParentData,
-    RenderBox, RenderBoxContainerDefaultsMixin, RenderBoxData,
+    AnyBoxConstraints, AnyRenderBox, BoxConstraints, BoxHitTestResult, BoxParentData,
+    ContainerBoxParentData, RenderBox, RenderBoxContainerDefaultsMixin, RenderBoxData,
 };
 use crate::object::{
     AnyRenderObject, Constraints, ContainerParentData, ContainerParentDataMixin,
@@ -143,8 +143,9 @@ impl MultiChildLayoutChildren {
         &mut self,
         app: &mut App,
         child_id: &ChildLayoutId,
-        constraints: BoxConstraints,
+        constraints: impl Into<AnyBoxConstraints>,
     ) -> Size {
+        let constraints: AnyBoxConstraints = constraints.into();
         let child = *self.id_to_child.get(child_id).unwrap_or_else(|| {
             panic!(
                 "The custom multichild layout delegate tried to lay out a non-existent child. \

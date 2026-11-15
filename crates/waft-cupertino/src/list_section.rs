@@ -399,15 +399,16 @@ impl StatelessWidget for CupertinoListSection {
         self.key.as_ref()
     }
 
-    fn build(&self, app: &mut App, context: BuildContext) -> WidgetRef {
-        // Dart's constructor assert; the fluent setters fill both operands, so it holds here.
+    fn debug_check_constructor(&self) {
         debug_assert!(
             self.children
                 .as_ref()
                 .is_some_and(|children| !children.is_empty())
                 || self.header.is_some()
         );
+    }
 
+    fn build(&self, app: &mut App, context: BuildContext) -> WidgetRef {
         let divider_color = match &self.separator_color {
             Some(separator_color) => separator_color.clone(),
             None => CupertinoDynamicColor::resolve(&CupertinoColors::SEPARATOR, app, context),
@@ -585,7 +586,7 @@ mod tests {
     use crate::test_support::{build, test_cell};
 
     fn key_of(key: &GlobalKey) -> KeyRef {
-        Rc::new(key.clone())
+        key.clone().into()
     }
 
     /// A `SizedBox` of `width` x `height`, findable through `key`.

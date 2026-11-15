@@ -123,6 +123,10 @@ impl TextSelectionControls for CupertinoDesktopTextSelectionControls {
 }
 
 impl TextSelectionControls for CupertinoDesktopTextSelectionHandleControls {
+    fn as_text_selection_handle_controls(&self) -> Option<&dyn TextSelectionHandleControls> {
+        Some(self)
+    }
+
     fn get_handle_size(&self, text_line_height: f64) -> Size {
         CupertinoDesktopTextSelectionControls.get_handle_size(text_line_height)
     }
@@ -223,13 +227,25 @@ impl TextSelectionControls for CupertinoDesktopTextSelectionHandleControls {
 impl TextSelectionHandleControls for CupertinoDesktopTextSelectionHandleControls {}
 
 /// Text selection handle controls that follow MacOS design conventions.
+///
+/// Dart's global: every call hands out the same controls, so an `EditableText` given them
+/// again sees them unchanged.
 pub fn cupertino_desktop_text_selection_handle_controls() -> Rc<dyn TextSelectionControls> {
-    Rc::new(CupertinoDesktopTextSelectionHandleControls)
+    thread_local! {
+        static CONTROLS: Rc<dyn TextSelectionControls> = Rc::new(CupertinoDesktopTextSelectionHandleControls);
+    }
+    CONTROLS.with(Rc::clone)
 }
 
 /// Text selection controls that follow MacOS design conventions.
+///
+/// Dart's global: every call hands out the same controls, so an `EditableText` given them
+/// again sees them unchanged.
 pub fn cupertino_desktop_text_selection_controls() -> Rc<dyn TextSelectionControls> {
-    Rc::new(CupertinoDesktopTextSelectionControls)
+    thread_local! {
+        static CONTROLS: Rc<dyn TextSelectionControls> = Rc::new(CupertinoDesktopTextSelectionControls);
+    }
+    CONTROLS.with(Rc::clone)
 }
 
 #[allow(dead_code)]

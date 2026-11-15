@@ -1803,7 +1803,7 @@ mod tests {
     fn counter_state(harness: &Harness, app: &App, key: &GlobalKey) -> Handle<CounterState> {
         harness
             .owner
-            .global_key_element(app, key.identity())
+            .global_key_element(app, key)
             .expect("the counter is in the tree")
             .state_handle::<CounterState>(app)
             .expect("a CounterState")
@@ -1887,7 +1887,7 @@ mod tests {
             RootRestorationScope::new(
                 Some("app".to_string()),
                 Counter {
-                    key: Some(Rc::new(key.clone())),
+                    key: Some(key.clone().into()),
                     restoration_id: Some("counter".to_string()),
                 },
             )
@@ -1910,7 +1910,7 @@ mod tests {
             RootRestorationScope::new(
                 Some("app".to_string()),
                 Counter {
-                    key: Some(Rc::new(key.clone())),
+                    key: Some(key.clone().into()),
                     restoration_id: Some("counter".to_string()),
                 },
             )
@@ -1946,7 +1946,7 @@ mod tests {
             RootRestorationScope::new(
                 Some("app".to_string()),
                 Counter {
-                    key: Some(Rc::new(key.clone())),
+                    key: Some(key.clone().into()),
                     restoration_id: Some("counter".to_string()),
                 },
             )
@@ -1983,7 +1983,7 @@ mod tests {
         )));
         let mut app = cell.borrow_mut();
         let key = GlobalKey::new();
-        let key_ref: KeyRef = Rc::new(key.clone());
+        let key_ref: KeyRef = key.clone().into();
         let tree = |restoration_id: &str, key: &KeyRef| {
             RootRestorationScope::new(
                 Some("app".to_string()),
@@ -2037,7 +2037,7 @@ mod tests {
             RootRestorationScope::new(
                 Some("app".to_string()),
                 Counter {
-                    key: Some(Rc::new(key.clone())),
+                    key: Some(key.clone().into()),
                     restoration_id: Some("counter".to_string()),
                 },
             )
@@ -2069,7 +2069,7 @@ mod tests {
         let harness = mount(
             &mut app,
             Counter {
-                key: Some(Rc::new(key.clone())),
+                key: Some(key.clone().into()),
                 restoration_id: Some("counter".to_string()),
             }
             .into_widget(),

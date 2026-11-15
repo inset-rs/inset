@@ -18,6 +18,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - shifted_box.rs → OverflowBoxFit, RenderConstrainedOverflowBox, RenderSizedOverflowBox, RenderFractionallySizedOverflowBox, RenderCustomSingleChildLayoutBox, SingleChildLayoutDelegate, RenderBaseline
 - animated_size.rs → animated_size.dart
 - viewport.rs → RenderViewportBase.debugThrowIfNotCheckingIntrinsics and the four intrinsics, RenderViewport.computeDryLayout
+- semantics.rs → semantics/semantics.dart (handler typedefs, AccessibilityFocusBlockType, SemanticsTag, CustomSemanticsAction, AttributedString, SemanticsHintOverrides, SemanticsProperties, SemanticsSortKey, OrdinalSortKey)
+- semantics_annotations.rs → object.dart (SemanticsAnnotationsMixin)
+- proxy_box.rs → RenderSemanticsAnnotations, RenderBlockSemantics, RenderMergeSemantics, RenderExcludeSemantics, RenderIndexedSemantics
 - object.rs / box.rs → getTransformTo, globalToLocal, localToGlobal
 - editable.rs → TextSelectionPoint
 - debug.rs → debug.dart
@@ -25,6 +28,8 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - sliver_fixed_extent_list.rs → sliver_fixed_extent_list.dart
 - image.rs → image.dart (RenderImage)
 - wrap.rs → wrap.dart
+- list_body.rs → list_body.dart
+- sliver_fill.rs → sliver_fill.dart
 
 ## object.rs → object.dart (RenderObject)
 
@@ -119,12 +124,16 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Affect: a fresh `Rc` around an equal clipper counts as a different clipper and re-subscribes; `old_clipper` is read with `as_any().downcast_ref()`.
 
 - Change: `RenderTransform` has no `filterQuality`.
-  Reason: platform — the filtered path is an `ImageFilterLayer` over `ImageFilter.matrix`, which neither the embedder's `Paint` nor `SceneBuilder` has.
+  Reason: platform — the filtered path is an `ImageFilterLayer` over `ImageFilter.matrix`, which the embedder's `ImageFilter` lacks, as valo has no matrix filter.
   Affect: a transform always paints through `push_transform`, or through the child's paint offset when the matrix is a translation.
 
 - Change: `RenderColoredBox` does not pass `is_anti_alias` to the canvas.
   Reason: platform — valo's `Paint` has no anti-alias flag.
   Affect: the fill is drawn the way valo draws it, and setting the flag only marks a repaint.
+
+- Change: `RenderPhysicalModel` and `RenderPhysicalShape` draw their shadow at the device pixel ratio of the view they paint into, read from their pipeline owner's root `RenderView`, and at 1 outside a view, where the engine reads the implicit view's.
+  Reason: platform — a canvas belongs to no view and the embedder holds no implicit view whose metrics it could read, so Valo's `draw_shadow` takes the ratio from its caller.
+  Affect: a physical model in a second view with another pixel ratio draws its shadow at that view's ratio, where Flutter's uses the implicit view's.
 
 ## shifted_box.rs → shifted_box.dart (RenderConstraintsTransformBox)
 
@@ -234,23 +243,40 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — orphan rule: an `Animatable` impl for a `Handle` of one of these tweens names no type of this crate.
   Affect: `drive` takes a clone, so writing `begin` or `end` afterwards does not reach the driven animation, as it does on a Dart `Tween`.
 
+## semantics.rs → semantics/semantics.dart
+- Change: `SemanticsProperties::link_url` is a `String`, where Dart's `linkUrl` is a `Uri`.
+  Reason: language — Waft has no `Uri` type.
+  Affect: none until the semantics tree reads it; the URL is kept as the text the caller gave, unparsed.
+- Change: `SemanticsTag` is held as `Rc<SemanticsTag>` and two tags are the same tag only when they are the same `Rc`.
+  Reason: language — Dart's `const SemanticsTag(name)` canonicalizes, so two `const` tags of one name are identical, and Rust has no const canonicalization.
+  Affect: none until the semantics tree compares tags; a tag written twice with one name is two tags, where Dart's two `const` ones are one.
+
+## box.rs → box.dart (BoxConstraints subclasses)
+- Change: a box stores the constraints its parent passed to `layout` as an `AnyBoxConstraints`, which carries a `BoxConstraints` subclass as a `BoxConstraintsExtension` beside the plain `Copy` value; `constraints()` returns the plain value and `any_constraints()` the wrapper, and `layout`'s early return and `==` include the extension as Dart's `runtimeType` check and subclass `==` do.
+  Reason: language — a Rust struct cannot be subclassed, and keeping `BoxConstraints` `Copy` means the subclass rides beside it, as `AnyColor` carries a `Color`'s (D17).
+  Affect: a subclass instance survives one hop (parent's `layout` or `layout_child` → the child's stored constraints → a `LayoutBuilder`'s builder); a render object that hands its own `constraints()` on to its child passes the plain value, where Dart passes the subclass object along. Nothing in Flutter's scaffold relies on more than one hop.
+
 ## Deferred
 
+- box.rs: `AnyBoxConstraints`'s `Hash` (Dart's subclasses override `hashCode`). Trigger: the first map or set keyed by one.
 - `RenderImage`'s `color` / `colorBlendMode` and `invertColors`. Trigger: painting's colour filters.
 - `RenderImage`'s `centerSlice`. Trigger: an image drawn as a resizable frame.
 - `RenderImage`'s `filterQuality` and `isAntiAlias`. Trigger: a caller that needs to choose how an image is sampled.
-- `RenderImage`'s semantics label. Trigger: accessibility.
-- `PlatformViewLayer`, `PerformanceOverlayLayer`, `ClipRSuperellipseLayer`, `ColorFilterLayer`, `ImageFilterLayer`, `ShaderMaskLayer`, `OffsetLayer.toImage` / `toImageSync`, `PaintingContext.pushColorFilter`. Trigger: a platform view, a superellipse clip, a colour/image/shader filter widget, `RepaintBoundary.toImage`.
+- `RenderImage`'s semantics label. Trigger: the semantics tree.
+- `PlatformViewLayer`, `PerformanceOverlayLayer`, `ClipRSuperellipseLayer`, `ColorFilterLayer`, `ShaderMaskLayer`, `OffsetLayer.toImage` / `toImageSync`, `PaintingContext.pushColorFilter`. Trigger: a platform view, a superellipse clip, a colour or shader-mask widget, `RepaintBoundary.toImage`, `SnapshotWidget`'s snapshot (Material's zoom page transition).
 - `PaintingContext.addCompositionCallback`. Trigger: a caller that needs composition callbacks on the painting context (layers already have them).
-- Debug paint overlays on boxes, slivers and the viewport, and the overflow indicators of `RenderFlex` and `RenderConstraintsTransformBox` (an overflowing box clips but paints no striped hint); with them, `paintsChild` as a virtual. Trigger: inspector.
-- Semantics on `PipelineOwner`, `RenderObject`, `RenderCustomPaint`, the ignore- and absorb-pointer boxes, `RenderOffstage`, the opacity boxes' `alwaysIncludeSemantics`, `RenderTable`, the viewport and the slivers. Trigger: a11y; do not stub.
-- The semantics half of `PipelineManifold`; the frame-request half is ported, and `RendererBinding::init_render_view` stays for render-tree-only hosts and must never be called in an app that runs `run_app`. Trigger: semantics.
+- Debug paint overlays on boxes, slivers and the viewport, and the overflow indicators of `RenderFlex` and `RenderConstraintsTransformBox` (an overflowing box clips but paints no striped hint). Trigger: inspector.
+- Semantics on `PipelineOwner`, `RenderObject`, `RenderCustomPaint`, the ignore- and absorb-pointer boxes, `RenderOffstage`, the opacity boxes' `alwaysIncludeSemantics`, `RenderTable`, the viewport and the slivers. Trigger: the semantics tree.
+- SemanticsAnnotationsMixin's describeSemanticsConfiguration, visitChildrenForSemantics and _perform* handlers, and markNeedsSemanticsUpdate in its setters and in the block, merge, exclude and indexed boxes. Trigger: the semantics tree.
+- semantics.rs: SemanticsNode, SemanticsOwner, SemanticsConfiguration, SemanticsData, SemanticsLabelBuilder, ChildSemanticsConfigurationsResult(Builder), CustomSemanticsAction's id registry, AccessibilityFocusBlockType's merge. Trigger: the semantics tree.
+- RenderSliverSemanticsAnnotations (proxy_sliver.dart). Trigger: SliverSemantics' first caller.
+- The semantics half of `PipelineManifold`; the frame-request half is ported, and `RendererBinding::init_render_view` stays for render-tree-only hosts and must never be called in an app that runs `run_app`. Trigger: the semantics tree.
 - The layout-contract asserts: `_DebugSize` and `debugAssertDoesMeetConstraints` on box, sliver and the fixed-extent adaptor; `SliverGeometry::debug_assert_is_valid` is ported and the viewport calls it. Trigger: the first layout bug one of them would have caught.
-- `layout` and `constraints` as override points; `markNeedsLayout` is one on the box protocol only. Trigger: OverlayPortal, `RenderView`. Ask before adding.
-- `RenderView.applyPaintTransform`; `performReassemble`. Trigger: `getTransformTo`, hot reload.
+- `layout` and `constraints` as override points; `markNeedsLayout` is one on the box protocol only. Trigger: a render object that must override them (OverlayPortal and `RenderView` are ported without). Ask before adding.
+- `RenderView.performReassemble`. Trigger: hot reload.
 - `RenderParagraph.applyPaintTransform`. Trigger: a caller that needs the paragraph's paint transform.
-- `RenderEditable` inline children, the custom-paint child boxes and the internal tap / long-press recognizers. Trigger: `WidgetSpan`; a field that does not set `ignorePointer`.
+- `RenderEditable` inline children, the custom-paint child boxes and the internal tap / long-press recognizers. Trigger: the next edit of editable.rs for the inline children (`WidgetSpan` exists); a field that does not set `ignorePointer` for the recognizers.
 - `SliverConstraints.debugAssertIsValid` extra numeric checks. Trigger: a caller that relies on those messages.
 - `RenderIgnoreBaseline`, which reports no baseline for a child that has one, so that a baseline-aligned row puts that child at the top. Trigger: a child a baseline-aligned `Row` should not align by its baseline.
-- `RenderBoxBase` sits in `proxy_box.rs` beside its callers instead of next to `RenderBox`. Trigger: the next edit of `box.rs`.
-- `RenderTransform.filterQuality` and Dart's `ImageFilterLayer` path. Trigger: the first `Transform(filterQuality:)`, with `PaintingContext.pushColorFilter`.
+- `RenderTransform.filterQuality` and Dart's `ImageFilterLayer` path, which waits on `ImageFilter.matrix`. Trigger: the first `Transform(filterQuality:)`, with `PaintingContext.pushColorFilter`.
+- proxy_box.rs: the physical models' diagnostics. Trigger: diagnostics.

@@ -300,6 +300,11 @@ impl SliceRecording {
             Effect::BackdropFilter { blend_mode, .. } => {
                 canvas.save_layer(None, &blending(*blend_mode));
             }
+            Effect::ImageFilter { filter, offset } => {
+                canvas.save();
+                canvas.translate(offset.dx() as f32, offset.dy() as f32);
+                canvas.save_layer(None, &filtering(filter));
+            }
         }
     }
 
@@ -339,7 +344,8 @@ impl SliceRecording {
 /// What the containers whose effects are `open` do to a composition layer placed in them, the
 /// outermost first. An offset opacity moves before it fades, as flow's `OpacityLayer` translates
 /// before it applies its opacity. A backdrop filter does nothing to a composition layer beneath the
-/// buffer it reads.
+/// buffer it reads, and an image filter only moves it by its offset: flow's state stack has no
+/// image filter mutator, so the layer shows unfiltered.
 fn mutators_of(open: &[&Effect]) -> Vec<Mutator> {
     let mut mutators = Vec::new();
     for effect in open {
@@ -354,6 +360,11 @@ fn mutators_of(open: &[&Effect]) -> Vec<Mutator> {
                     mutators.push(Mutator::Transform(translation(*offset)));
                 }
                 mutators.push(Mutator::Opacity(*alpha));
+            }
+            Effect::ImageFilter { offset, .. } => {
+                if *offset != Offset::ZERO {
+                    mutators.push(Mutator::Transform(translation(*offset)));
+                }
             }
         }
     }
@@ -429,6 +440,14 @@ fn blending(blend_mode: BlendMode) -> Paint {
     }
 }
 
+/// The paint of the layer an image filter composites its children through.
+fn filtering(filter: &ImageFilter) -> Paint {
+    Paint {
+        image_filter: Some(filter.to_valo()),
+        ..Paint::default()
+    }
+}
+
 fn translation(offset: Offset) -> Matrix4 {
     Matrix4::translation(offset.dx() as f32, offset.dy() as f32)
 }
@@ -496,6 +515,37 @@ mod tests {
             },
             "the backdrop filter does nothing to the layer"
         );
+    }
+
+    /// flow's `ImageFilterLayer::Paint`: translate by the offset, then a layer of the filter
+    /// around the children; a composition layer in it is only moved.
+    #[test]
+    fn an_image_filter_composites_its_children_through_the_filter_at_its_offset() {
+        let filter = ImageFilter::blur(3.0, 3.0);
+        let mut builder = SceneBuilder::new();
+        builder.push_image_filter(&filter, Offset::new(5.0, 6.0));
+        builder.add_picture(Offset::ZERO, &square(), false, false);
+        builder.add_embedded_layer(idle_layer(), Rect::from_ltwh(0.0, 0.0, 4.0, 4.0));
+        builder.pop();
+        let slices = slices(&builder.build(), |_| None);
+        let (_, placement) = slices.composition_layers().next().expect("the layer");
+        assert_eq!(
+            placement.mutators,
+            [Mutator::Transform(Matrix4::translation(5.0, 6.0))]
+        );
+        let Some(Part::Slice(beneath)) = slices.parts().first() else {
+            panic!("a slice first: {:?}", slices.parts());
+        };
+        let moved = beneath
+            .ops()
+            .iter()
+            .any(|op| matches!(op, valo::Op::Transform(matrix) if *matrix == valo::Matrix::translation(5.0, 6.0)));
+        assert!(moved, "{:?}", beneath.ops());
+        let layer_filter = beneath.ops().iter().find_map(|op| match op {
+            valo::Op::SaveLayer { paint, .. } => paint.image_filter.clone(),
+            _ => None,
+        });
+        assert_eq!(layer_filter, Some(filter.to_valo()));
     }
 
     #[test]

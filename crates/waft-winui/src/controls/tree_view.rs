@@ -1508,9 +1508,9 @@ impl TreeViewState {
                     row,
                     Rc::new(move |app, _, size| self.row_measured(app, &measured, size)),
                 )
-                .key(Rc::new(key)),
+                .key(key.into()),
             )
-            .key(Rc::new(ValueKey::new(id)))
+            .key(ValueKey::new(id).into())
             .into_widget(),
         )
     }
@@ -1526,7 +1526,7 @@ impl TreeViewState {
         })
         .item_count(ids.len() as i32)
         .find_child_index_callback(Rc::new(move |key| {
-            (key.as_ref() as &dyn std::any::Any)
+            (key.key() as &dyn std::any::Any)
                 .downcast_ref::<ValueKey<String>>()
                 .and_then(|key| ids.iter().position(|id| *id == key.value))
                 .map(|index| index as i32)
@@ -1535,7 +1535,7 @@ impl TreeViewState {
         .controller(scroll.native_controller(app))
         .shrink_wrap(shrink_wrap)
         .padding(EdgeInsetsGeometry::ZERO);
-        let viewport = KeyedSubtree::new(list).key(Rc::new(app.get(self).viewport_key.clone()));
+        let viewport = KeyedSubtree::new(list).key(app.get(self).viewport_key.clone().into());
         ScrollBarViewport::scroller(scroll, viewport).into_widget()
     }
 }

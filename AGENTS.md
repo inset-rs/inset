@@ -2,16 +2,17 @@
 
 A Flutter port in Rust. The framework matches Flutter closely enough that upstream changes land without worry. Below it, dart:ui as an embedder interface (value types and host traits) so the same framework runs in tests and on real hosts.
 
-Reference checkouts live under `.reference/` at the repo root. That folder is not committed.
+Reference checkouts live under `.reference/` at the repo root. That folder is not committed. Flutter's two live beside the repo instead, as `../flutter` and `../flutter-packages`.
 
-- Flutter is the spec: `.reference/flutter/packages/flutter/lib/src`. Read the Dart. Do not write Flutter from memory.
+- Flutter is the spec: `../flutter/packages/flutter/lib/src` for the framework, and `../flutter-packages/packages/cupertino_ui/lib/src` for `crates/waft-cupertino`, since Flutter develops its kits in `flutter/packages`. Read the Dart. Do not write Flutter from memory.
 - Zed (`crates/gpui`) is prior art for `Entity` as a user-facing store (not used to implement Flutter): `.reference/zed/crates/gpui`.
 - Microsoft UI XAML is the spec of `crates/waft-winui`, the WinUI kit: `.reference/microsoft-ui-xaml`.
 
 If a checkout is missing, clone it there.
 
 ```
-git clone https://github.com/flutter/flutter.git .reference/flutter
+git clone https://github.com/flutter/flutter.git ../flutter
+git clone https://github.com/flutter/packages.git ../flutter-packages
 git clone https://github.com/zed-industries/zed.git .reference/zed
 git clone https://github.com/microsoft/microsoft-ui-xaml.git .reference/microsoft-ui-xaml
 ```
@@ -54,7 +55,7 @@ Port bottom-up so an upper layer never meets a missing dependency — that is wh
 
 When something does not fit: stop and ask. If a divergence is needed, use a proved pattern (`Handle`, a mixin-as-field, a `Drop` guard) — not a one-off workaround. A silent "seems compatible" change is a bug.
 
-When a port has tests, you can ref to cases from Flutter's matching file under `packages/flutter/test` as it's a good resource about expected behavior. While we don't aim at porting all tests if they buy us little value.
+When a port has tests, you can ref to cases from Flutter's matching file under `packages/flutter/test` (`packages/cupertino_ui/test` in `../flutter-packages` for the Cupertino kit) as it's a good resource about expected behavior. While we don't aim at porting all tests if they buy us little value.
 
 ## Docs
 

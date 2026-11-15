@@ -17,6 +17,7 @@ use crate::app_requests::{AppRequest, EmbedderRequest, WindowRequest};
 use crate::clipboard::ClipboardChanges;
 use crate::dispatcher::WinitDispatcher;
 use crate::file_dialogs::ParentWindows;
+use crate::linux::Linux;
 use crate::macos::MacOs;
 use crate::main_loop::MainLoopProxy;
 use crate::menus::MenuEvents;
@@ -31,6 +32,7 @@ use crate::popup_menus::NativePopupMenus;
 use crate::state::EmbedderState;
 use crate::view::WinitView;
 use crate::windows::RequestedWindow;
+use crate::windows_os::Windows;
 use waft_embedder::image_codecs::ImageCodecs;
 use waft_embedder::{
     AppExit, Brightness, Cameras, CaptionSettings, Clipboard, CompositionLayer, Compositor,
@@ -48,11 +50,14 @@ use waft_embedder::{
 /// are).
 ///
 /// Beyond [`Platform`], the embedder hands out its renderer's [`image_context`], for an image
-/// from a texture the app makes itself, and what only macOS offers, through [`macos`]. An app
-/// reaches these with `platform.downcast_ref::<WinitPlatform>()`.
+/// from a texture the app makes itself, and what only macOS, Windows and Linux offer, through
+/// [`macos`], [`windows`] and [`linux`]. An app reaches these with
+/// `platform.downcast_ref::<WinitPlatform>()`.
 ///
 /// [`image_context`]: WinitPlatform::image_context
 /// [`macos`]: WinitPlatform::macos
+/// [`windows`]: WinitPlatform::windows
+/// [`linux`]: WinitPlatform::linux
 pub struct WinitPlatform {
     /// What the embedder knows, shared with the main loop, which changes it.
     state: Rc<EmbedderState>,
@@ -92,6 +97,10 @@ pub struct WinitPlatform {
     caption_settings: Option<Rc<dyn CaptionSettings>>,
     /// What only macOS offers; `None` elsewhere.
     macos: Option<MacOs>,
+    /// What only Windows offers; `None` elsewhere.
+    windows: Option<Windows>,
+    /// What only Linux offers; `None` elsewhere.
+    linux: Option<Linux>,
 }
 
 impl WinitPlatform {
@@ -105,6 +114,9 @@ impl WinitPlatform {
         WinitPlatform {
             next_request_id: Cell::new(1),
             macos: cfg!(target_os = "macos").then(|| MacOs::new(Rc::clone(&state))),
+            windows: cfg!(target_os = "windows")
+                .then(|| Windows::new(Rc::clone(&state), proxy.clone())),
+            linux: cfg!(target_os = "linux").then(|| Linux::new(Rc::clone(&state))),
             file_dialogs: System::file_dialogs(ParentWindows::new(Rc::clone(&state))),
             opener: System::opener(ParentWindows::new(Rc::clone(&state))),
             notifications: System::notifications(NotificationActivations::new(proxy.clone())),
@@ -141,6 +153,18 @@ impl WinitPlatform {
         self.macos.as_ref()
     }
 
+    /// What only Windows offers an app: posting notifications as another app. `None` on every
+    /// other system.
+    pub fn windows(&self) -> Option<&Windows> {
+        self.windows.as_ref()
+    }
+
+    /// What only Linux offers an app: bringing a window forward with a launch's activation token.
+    /// `None` on every other system.
+    pub fn linux(&self) -> Option<&Linux> {
+        self.linux.as_ref()
+    }
+
     /// Sends the main loop a request, which it serves after those sent before.
     pub(crate) fn send(&self, request: AppRequest) {
         self.state.requests().send(request);
@@ -148,7 +172,7 @@ impl WinitPlatform {
 
     /// Sends the main loop what the app asks of the views it embeds, in order with the rest.
     fn send_to_embedder(&self, request: EmbedderRequest) {
-        self.send(AppRequest::Embedder(request));
+        self.send(AppRequest::Embedder(Box::new(request)));
     }
 
     pub(crate) fn elapsed(&self) -> Duration {
@@ -264,11 +288,13 @@ impl Platform for WinitPlatform {
             return Err(ViewError::Unsupported);
         }
         let request_id = self.take_request_id();
-        self.send(AppRequest::Window(WindowRequest::Open(RequestedWindow {
-            request_id,
-            config,
-            initial_data,
-        })));
+        self.send(AppRequest::Window(WindowRequest::Open(Box::new(
+            RequestedWindow {
+                request_id,
+                config,
+                initial_data,
+            },
+        ))));
         Ok(request_id)
     }
 
@@ -280,6 +306,22 @@ impl Platform for WinitPlatform {
 
     fn import_pixels(&self, pixels: valo::PixelBuffer) -> Option<valo::Image> {
         self.image_context().upload_pixels(pixels, false).ok()
+    }
+
+    /// The picture drawn on the device every window draws with, which this makes if nothing has
+    /// needed it yet.
+    fn picture_to_image_sync(
+        &self,
+        picture: &waft_embedder::Picture,
+        width: u32,
+        height: u32,
+    ) -> Option<valo::Image> {
+        Some(
+            self.state
+                .images()
+                .snapshots()
+                .make_raster_snapshot_sync(picture, width, height),
+        )
     }
 
     /// The frame's buffer as an image, as any buffer is.

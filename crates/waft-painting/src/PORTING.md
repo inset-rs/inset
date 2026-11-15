@@ -29,6 +29,12 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - image_stream.rs → image_stream.dart (ImageInfo, ImageStreamListener, completer listener/keep-alive lifetime)
 - image_cache.rs → image_cache.dart (pending/live/LRU tracking, limits, status, and post-frame retention release)
 
+## borders.rs (`AnyBorderSide`), text_style.rs (`AnyTextStyle`) → the `BorderSide` and `TextStyle` subclass mechanism
+
+- Change: Flutter's `BorderSide` and `TextStyle` subclasses (`WidgetStateBorderSide`, `WidgetStateTextStyle`) are `BorderSideExtension` and `TextStyleExtension` payloads that `AnyBorderSide` and `AnyTextStyle` carry beside the plain value, as `AnyColor` carries a `Color`'s; each derefs to its value and `extension::<T>()` is Dart's `is T`.
+  Reason: language — `BorderSide` and `TextStyle` are values here and cannot be subclassed.
+  Affect: only the fields that resolve a widget-state value hold these types; a side or style that reaches any other field has dropped its payload and no longer resolves or compares as its subclass.
+
 ## colors.rs → colors.dart (+ the `Color` subclass mechanism)
 
 - Change: Flutter's `Color` subclasses (`CupertinoDynamicColor`, `WidgetStateColor`, `ColorSwatch`) are `ColorExtension` payloads that `AnyColor` carries beside the plain `Color`; `AnyColor` derefs to `Color` and `extension::<T>()` is Dart's `is T`.
@@ -37,8 +43,8 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## draw.rs
 
-- Change: `draw_rrect` / `draw_drrect` / `draw_oval` / `draw_rsuperellipse` are free functions that reduce the dart:ui `Canvas` methods to an rrect or a path.
-  Reason: platform — valo has no `drawDRRect`, `drawOval` or `drawRSuperellipse` primitive.
+- Change: `draw_rrect` / `draw_drrect` / `draw_oval` / `draw_rsuperellipse` / `draw_arc` are free functions that reduce the dart:ui `Canvas` methods to an rrect or a path.
+  Reason: platform — valo has no `drawDRRect`, `drawOval`, `drawRSuperellipse` or `drawArc` primitive.
   Affect: a display-list dump shows an rrect or a path where Flutter's shows the shape.
 
 ## clip.rs → clip.dart
@@ -59,13 +65,13 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## box_decoration.rs → box_decoration.dart
 
-- Change: `BoxDecoration` and `ShapeDecoration` have no `image` or `gradient` field.
-  Reason: platform — `DecorationImage` and `Gradient.createShader` are deferred (valo shaders).
-  Affect: a decoration paints a solid colour, border, radius and shadow only; `background_blend_mode` still needs a `color`.
+- Change: `BoxDecoration` and `ShapeDecoration` have no `image` field.
+  Reason: platform — `DecorationImage` is deferred.
+  Affect: a decoration paints a colour or gradient, border, radius and shadow only.
 
 - Change: Dart's `assert(backgroundBlendMode == null || color != null)` runs when `background_blend_mode` is set, not once at the end of the constructor.
   Reason: language — a builder checks each field as it arrives.
-  Affect: setting `background_blend_mode` before `color` trips the debug assert; the other order is fine.
+  Affect: setting `background_blend_mode` before `color` or `gradient` trips the debug assert; the other order is fine.
 
 ## binding.rs → binding.dart
 
@@ -97,6 +103,22 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — the renderer tints an image by alpha and ignores the paint's colour channels.
   Affect: fading an image works; tinting one does nothing.
 
+## notched_shapes.rs → notched_shapes.dart
+
+- Change: `AutomaticNotchedShape::get_outer_path` returns the host shape's path and ignores the guest.
+  Reason: platform — waiting on Valo: path boolean operations, for `Path.combine(PathOperation.difference, ...)`.
+  Affect: a notch drawn from a guest `ShapeBorder` is missing; the host is drawn whole.
+
+## gradient.rs → gradient.dart
+
+- Change: `create_shader` paints `TileMode::Decal` as clamp.
+  Reason: platform — waiting on Valo: a gradient shader has no transparent (decal) spread.
+  Affect: a decal gradient extends its edge colours beyond its ends instead of turning transparent.
+
+- Change: `SweepGradient::create_shader` passes only `start_angle`; `end_angle` and `tile_mode` reach no shader.
+  Reason: platform — waiting on Valo: its sweep is one full clockwise turn from the start angle, with no spread.
+  Affect: a sweep that ends short of 2π, or tiles other than clamp, paints a full-turn gradient; with the defaults it paints as Flutter's.
+
 ## Deferred
 
 - `DecorationImage`, and the `image` field on `BoxDecoration` and `ShapeDecoration`. Trigger: a decoration that paints an image.
@@ -106,14 +128,13 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - `ResizeImage`, `FileImage` and `NetworkImage`. Trigger: decoding to a chosen size; a file system; an HTTP client.
 - `ImageProvider.evict` and `obtainCacheStatus`. Trigger: a caller that drops or inspects one image in the cache.
 - `debug.dart` beyond `debugDisableShadows`. Trigger: image loading, or tests that need it.
-- `ColorProperty`; `ColorSwatch` as a `const` table. Trigger: diagnostics; Material's `Colors`.
+- `ColorProperty`. Trigger: diagnostics.
 - Custom `TextScaler` / `SystemTextScaler`. Trigger: `MediaQuery`.
 - `EdgeInsets.fromViewPadding` / `fromWindowPadding`. Trigger: embedder / `MediaQuery`.
 - `_MixedBorderRadius` and cross-kind `add` / `subtract` / `lerp`. Trigger: first consumer that adds a `BorderRadius` to a `BorderRadiusDirectional`.
 - `hashCode` / `Hash`. Trigger: the first map or set keyed by insets, alignment, border radius, `TextScaler` or `TextStyle`.
 - Diagnostics / `debugCheckCanResolveTextDirection`. Trigger: porting diagnostics; a missing `TextDirection` on resolve panics until then.
 - `ui.Locale`, `ImageConfiguration.locale`, `TextStyle.locale`. Trigger: locale-specific assets or region-specific glyphs.
-- `Gradient`, the decoration `gradient` fields, `createShader`. Trigger: first decoration that paints a gradient; `TileMode.decal` and sweep `endAngle` have no valo counterpart.
 - `AssetBundle.loadString` / `loadStructuredData` / `loadBuffer` / caching, `NetworkAssetBundle`, `rootBundle`. Trigger: string or structured assets, or a default bundle on `App`.
 - `StarBorder`. Trigger: a star or polygon `ShapeBorder`.
 - `NotchedShape` / `CircularNotchedRectangle` / `AutomaticNotchedShape`. Trigger: `BottomAppBar`; valo has no `Path.arcToPoint` or `Path.combine`.

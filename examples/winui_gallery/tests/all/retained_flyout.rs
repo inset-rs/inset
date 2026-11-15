@@ -92,7 +92,7 @@ impl State for PageState {
                 .focus_node(opener)
                 .into_widget()
             }))
-            .key(Rc::new(waft_foundation::ValueKey::new(name)))
+            .key(waft_foundation::ValueKey::new(name).into())
             .into_widget()
         };
         ThemeScope::new(

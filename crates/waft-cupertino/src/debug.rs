@@ -26,14 +26,14 @@ pub fn debug_check_has_cupertino_localizations(app: &mut App, context: BuildCont
     {
         panic!(
             "No CupertinoLocalizations found.\n\
-             {:?} widgets require CupertinoLocalizations to be provided by a Localizations \
+             {} widgets require CupertinoLocalizations to be provided by a Localizations \
              widget ancestor.\n\
              The cupertino library uses Localizations to generate messages, labels, and \
              abbreviations.\n\
              To introduce a CupertinoLocalizations, either use a CupertinoApp at the root of \
              your application to include them automatically, or add a Localization widget \
              with a CupertinoLocalizations delegate.",
-            context.widget(app)
+            context.widget(app).type_name()
         );
     }
     true

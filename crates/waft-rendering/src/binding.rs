@@ -541,7 +541,7 @@ mod tests {
         use waft_gestures::{PointerAddedEvent, PointerEnterEvent, PointerEvent, PointerExitEvent};
         use waft_painting::EdgeInsetsGeometry;
 
-        use crate::proxy_box::RenderMouseRegion;
+        use crate::proxy_box::{RenderMouseRegion, RenderMouseRegionBase};
         use crate::shifted_box::RenderPadding;
 
         let (cell, view, _platform) = app_with_view();

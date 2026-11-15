@@ -3,7 +3,8 @@
 //! point and icons in the notification area (`menus`), the shell's file dialogs
 //! (`file_dialogs`), whose loops run from the embedder's hidden window (`hidden_window`), the
 //! shell's opener (`opener`), WinRT's toasts (`notifications`), the console of the process that
-//! started a GUI program (`console`), the app's icon in its executable's resources, DirectComposition's
+//! started a GUI program (`console`), the app's icon in its executable's resources, which app the
+//! taskbar takes the process and each window for (`app_identity`), DirectComposition's
 //! composition layers beneath a view drawn on a visual of its own (`composition`), over textures
 //! shared by NT handle (`shared_textures`), and each display's refreshes (`display_links`).
 
@@ -11,6 +12,7 @@
 // children are the one place on Windows that writes it.
 #![allow(unsafe_code)]
 
+mod app_identity;
 mod composition;
 mod console;
 mod display_links;
@@ -28,6 +30,7 @@ use std::sync::Arc;
 use waft_embedder::{
     Compositor, HardwareBuffer, IconImage, TargetPlatform, TitleBarAction, WindowConfig,
 };
+use windows::Win32::Foundation::HWND;
 use windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     GetSystemMetrics, SM_CXICON, SM_CXSMICON, SM_CYICON, SM_CYSMICON, SYSTEM_METRICS_INDEX,
@@ -36,18 +39,20 @@ use winit::dpi::PhysicalSize;
 use winit::event_loop::ActiveEventLoop;
 use winit::icon::Icon;
 use winit::platform::windows::{WinIcon, WindowAttributesWindows, WindowExtWindows};
+use winit::raw_window_handle::RawWindowHandle;
 use winit::window::{Window, WindowAttributes};
 
-use crate::LinuxSettings;
 use crate::clipboard::{ChangeProbe, TextClipboard};
 use crate::host_window::winit_icon;
+use crate::{LinuxSettings, WindowsSettings};
 
 use super::absent::{NoTrackpadTouchObserver, NoVisibilityNotices};
 use super::capabilities::{
-    ApplicationControl, ApplicationLifecycle, EventLoopSetup, FramePresentation, GpuInterop,
-    ImageDecoding, NativeComposition, OperatingSystem, PointerQueries, Screens, StandardStreams,
-    SystemChanges, SystemClipboard, SystemDrags, SystemImageCodecs, SystemMedia, SystemRequests,
-    TrackpadTouches, WindowChrome, WindowGeometry, WindowMotion, WindowVisibility, WorkQueue,
+    ApplicationControl, ApplicationIdentity, ApplicationLifecycle, EventLoopSetup,
+    FramePresentation, GpuInterop, ImageDecoding, NativeComposition, OperatingSystem,
+    PointerQueries, Screens, StandardStreams, SystemChanges, SystemClipboard, SystemDrags,
+    SystemImageCodecs, SystemMedia, SystemRequests, TrackpadTouches, WindowChrome, WindowGeometry,
+    WindowMotion, WindowVisibility, WorkQueue,
 };
 use super::window_handle_layer::{NoWindowHold, WindowHandleLayer};
 use crate::gpu::Gpu;
@@ -121,7 +126,9 @@ impl WindowMotion for Windows {}
 /// A window keeps two icons, as Win32 has them: winit's window icon, the title bar's, and the
 /// taskbar's and the task switcher's, larger. Where it names none, each is the executable's at its
 /// own size, which Windows picks out of the icon's images as it does a window class's icon. A
-/// caption's double-click maximizes or restores the window, which Windows has no setting for.
+/// caption's double-click maximizes or restores the window, which Windows has no setting for. A
+/// window with an AppUserModelID of its own is made hidden, given it, and only then shown
+/// (`app_identity`).
 impl WindowChrome for Windows {
     fn extend_attributes(
         _event_loop: &dyn ActiveEventLoop,
@@ -133,7 +140,29 @@ impl WindowChrome for Windows {
         let windows = WindowAttributesWindows::default()
             .with_taskbar_icon(taskbar_icon(config.icon.as_ref()))
             .with_no_redirection_bitmap(true);
-        attributes.with_platform_attributes(Box::new(windows))
+        let attributes = attributes.with_platform_attributes(Box::new(windows));
+        if has_identity(config) {
+            attributes.with_visible(false)
+        } else {
+            attributes
+        }
+    }
+
+    fn configure(window: &dyn Window, config: &WindowConfig) {
+        if !has_identity(config) {
+            return;
+        }
+        if let Some(hwnd) = hwnd(window) {
+            app_identity::label(hwnd, &config.windows);
+        }
+        // winit shows it as it would have at creation, without activating it where it may not.
+        window.set_visible(config.visible);
+    }
+
+    fn before_close(window: &dyn Window) {
+        if let Some(hwnd) = hwnd(window) {
+            app_identity::unlabel(hwnd);
+        }
     }
 
     fn app_icon() -> Option<Icon> {
@@ -147,6 +176,20 @@ impl WindowChrome for Windows {
     fn title_bar_double_click_action() -> TitleBarAction {
         TitleBarAction::Maximize
     }
+}
+
+/// Whether `config` gives the window an AppUserModelID of its own.
+fn has_identity(config: &WindowConfig) -> bool {
+    config.windows.app_user_model_id.is_some()
+}
+
+/// The window's handle; `None` for a window winit gives none.
+fn hwnd(window: &dyn Window) -> Option<HWND> {
+    let handle = window.rwh_06_window_handle().window_handle().ok()?;
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+        return None;
+    };
+    Some(HWND(handle.hwnd.get() as *mut core::ffi::c_void))
 }
 
 /// The taskbar's icon for `icon`, a window's own: the executable's where it names none.
@@ -170,6 +213,15 @@ fn executable_icon(width: SYSTEM_METRICS_INDEX, height: SYSTEM_METRICS_INDEX) ->
 /// The resource id of the app's icon in its executable, as `waft-cli`'s `windows_resources`
 /// writes it: 1, the lowest, whose icon Explorer shows for the file.
 const APP_ICON_RESOURCE: u16 = 1;
+
+/// The process's AppUserModelID, where the app names one (`app_identity`).
+impl ApplicationIdentity for Windows {
+    fn set_identity(settings: &WindowsSettings) {
+        if let Some(id) = &settings.app_user_model_id {
+            app_identity::set_process_app_user_model_id(id);
+        }
+    }
+}
 
 impl StandardStreams for Windows {
     fn attach_to_parent_console() {

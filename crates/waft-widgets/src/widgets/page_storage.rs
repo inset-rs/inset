@@ -27,7 +27,7 @@ use crate::framework::{
 ///
 ///  * `RestorationManager`, which manages state restoration.
 pub struct PageStorageKey {
-    value: KeyRef,
+    value: Rc<dyn Key>,
 }
 
 impl PageStorageKey {
@@ -42,7 +42,7 @@ impl PageStorageKey {
 
     /// The key as a tree node's key.
     pub fn into_key(self) -> KeyRef {
-        Rc::new(self)
+        self.into()
     }
 }
 
@@ -50,7 +50,7 @@ impl Key for PageStorageKey {
     fn eq_key(&self, other: &dyn Key) -> bool {
         (other as &dyn Any)
             .downcast_ref::<PageStorageKey>()
-            .is_some_and(|other| other.value.eq_key(&*self.value))
+            .is_some_and(|other| *other.value == *self.value)
     }
 
     fn hash_key(&self, mut state: &mut dyn Hasher) {
@@ -87,7 +87,7 @@ impl PartialEq for StorageEntryIdentifier {
                 .keys
                 .iter()
                 .zip(&other.keys)
-                .all(|(mine, theirs)| mine.eq_key(&**theirs))
+                .all(|(mine, theirs)| mine == theirs)
     }
 }
 
@@ -96,7 +96,7 @@ impl Eq for StorageEntryIdentifier {}
 impl Hash for StorageEntryIdentifier {
     fn hash<H: Hasher>(&self, state: &mut H) {
         for key in &self.keys {
-            key.hash_key(state);
+            key.hash(state);
         }
     }
 }
@@ -126,9 +126,7 @@ impl PartialEq for StorageSlot {
     fn eq(&self, other: &StorageSlot) -> bool {
         match (self, other) {
             (StorageSlot::Entry(mine), StorageSlot::Entry(theirs)) => mine == theirs,
-            (StorageSlot::Identifier(mine), StorageSlot::Identifier(theirs)) => {
-                mine.eq_key(&**theirs)
-            }
+            (StorageSlot::Identifier(mine), StorageSlot::Identifier(theirs)) => mine == theirs,
             _ => false,
         }
     }
@@ -145,7 +143,7 @@ impl Hash for StorageSlot {
             }
             StorageSlot::Identifier(key) => {
                 1u8.hash(state);
-                key.hash_key(state);
+                key.hash(state);
             }
         }
     }
@@ -171,7 +169,7 @@ impl PageStorageBucket {
     fn maybe_add_key(app: &App, context: AnyElement, keys: &mut Vec<KeyRef>) -> bool {
         let widget = context.widget(app);
         if let Some(key) = widget.key()
-            && (&**key as &dyn Any).is::<PageStorageKey>()
+            && (key.key() as &dyn Any).is::<PageStorageKey>()
         {
             keys.push(key.clone());
         }
@@ -322,7 +320,8 @@ impl PageStorage {
                  widget.\nNo PageStorage widget ancestor could be found starting from the \
                  context that was passed to PageStorage.of(). This can happen because you are \
                  using a widget that looks for a PageStorage ancestor, but no such ancestor \
-                 exists.\nThe context used was:\n  {context:?}"
+                 exists.\nThe context used was:\n  {}",
+                context.widget(app).type_name()
             )
         })
     }
@@ -421,7 +420,7 @@ mod tests {
         let context = context.get().expect("the probe built");
         assert_eq!(PageStorage::maybe_of(&app, context), Some(bucket));
 
-        let identifier: KeyRef = Rc::new(waft_foundation::ValueKey::new("scroll"));
+        let identifier: KeyRef = waft_foundation::ValueKey::new("scroll").into();
         bucket.write_state(&mut app, context, Rc::new(4.5f64), Some(identifier.clone()));
         let read = bucket
             .read_state(&app, context, Some(identifier))

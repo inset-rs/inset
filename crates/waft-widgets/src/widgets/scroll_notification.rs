@@ -10,6 +10,7 @@ use waft_gestures::{DragEndDetails, DragStartDetails, DragUpdateDetails};
 use waft_rendering::ScrollDirection;
 
 use crate::framework::{BuildContext, Element, Notification, NotificationNode, NotificationTarget};
+use crate::widgets::notification_listener::LayoutChangedNotification;
 use crate::widgets::scroll_metrics::ScrollMetrics;
 
 /// The fields of Dart's `ViewportNotificationMixin`.
@@ -149,7 +150,7 @@ pub struct ScrollNotificationData {
 ///
 /// To drive layout based on the scroll position, consider listening to the
 /// `ScrollPosition` directly (or indirectly via a `ScrollController`).
-pub trait ScrollNotification: ViewportNotificationMixin {
+pub trait ScrollNotification: LayoutChangedNotification + ViewportNotificationMixin {
     /// Dart's base-class fields, held under the field `scroll_notification`.
     fn scroll_notification_data(&self) -> &ScrollNotificationData;
 
@@ -226,7 +227,13 @@ impl Notification for ScrollStartNotification {
     fn as_scroll_notification(&self) -> Option<&dyn ScrollNotification> {
         Some(self)
     }
+
+    fn as_layout_changed_notification(&self) -> Option<&dyn LayoutChangedNotification> {
+        Some(self)
+    }
 }
+
+impl LayoutChangedNotification for ScrollStartNotification {}
 
 impl ViewportNotificationMixin for ScrollStartNotification {
     fn viewport_notification_data(&self) -> &ViewportNotificationData {
@@ -320,7 +327,13 @@ impl Notification for ScrollUpdateNotification {
     fn as_scroll_notification(&self) -> Option<&dyn ScrollNotification> {
         Some(self)
     }
+
+    fn as_layout_changed_notification(&self) -> Option<&dyn LayoutChangedNotification> {
+        Some(self)
+    }
 }
+
+impl LayoutChangedNotification for ScrollUpdateNotification {}
 
 impl ViewportNotificationMixin for ScrollUpdateNotification {
     fn viewport_notification_data(&self) -> &ViewportNotificationData {
@@ -430,7 +443,13 @@ impl Notification for OverscrollNotification {
     fn as_scroll_notification(&self) -> Option<&dyn ScrollNotification> {
         Some(self)
     }
+
+    fn as_layout_changed_notification(&self) -> Option<&dyn LayoutChangedNotification> {
+        Some(self)
+    }
 }
+
+impl LayoutChangedNotification for OverscrollNotification {}
 
 impl ViewportNotificationMixin for OverscrollNotification {
     fn viewport_notification_data(&self) -> &ViewportNotificationData {
@@ -515,7 +534,13 @@ impl Notification for ScrollEndNotification {
     fn as_scroll_notification(&self) -> Option<&dyn ScrollNotification> {
         Some(self)
     }
+
+    fn as_layout_changed_notification(&self) -> Option<&dyn LayoutChangedNotification> {
+        Some(self)
+    }
 }
+
+impl LayoutChangedNotification for ScrollEndNotification {}
 
 impl ViewportNotificationMixin for ScrollEndNotification {
     fn viewport_notification_data(&self) -> &ViewportNotificationData {
@@ -593,7 +618,13 @@ impl Notification for UserScrollNotification {
     fn as_scroll_notification(&self) -> Option<&dyn ScrollNotification> {
         Some(self)
     }
+
+    fn as_layout_changed_notification(&self) -> Option<&dyn LayoutChangedNotification> {
+        Some(self)
+    }
 }
+
+impl LayoutChangedNotification for UserScrollNotification {}
 
 impl ViewportNotificationMixin for UserScrollNotification {
     fn viewport_notification_data(&self) -> &ViewportNotificationData {
@@ -642,7 +673,9 @@ mod tests {
     };
     use crate::test_harness::Harness;
     use crate::widgets::basic::{Builder, SizedBox};
-    use crate::widgets::notification_listener::NotificationListener;
+    use crate::widgets::notification_listener::{
+        NotificationListener, PlainLayoutChangedNotification,
+    };
     use crate::widgets::scroll_metrics::FixedScrollMetrics;
 
     /// A stand-in for `Viewport`: a proxy whose element mixes in
@@ -811,6 +844,42 @@ mod tests {
             seen[1]
         );
         assert!(seen[2].starts_with("ScrollEndNotification"), "{}", seen[2]);
+    }
+
+    #[test]
+    fn a_layout_changed_listener_receives_scroll_notifications_and_plain_layout_changes() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let seen: Rc<RefCell<Vec<String>>> = Rc::default();
+        let dispatcher = Builder::new(|app, context| {
+            PlainLayoutChangedNotification.dispatch(app, Some(context));
+            ScrollUpdateNotification::new(test_metrics(), context)
+                .scroll_delta(4.0)
+                .dispatch(app, Some(context));
+            UserScrollNotification::new(test_metrics(), context, ScrollDirection::Idle)
+                .dispatch(app, Some(context));
+            SizedBox::shrink().into_widget()
+        });
+        let tree = NotificationListener::<dyn LayoutChangedNotification>::new(dispatcher)
+            .on_notification({
+                let seen = Rc::clone(&seen);
+                move |_app, notification| {
+                    seen.borrow_mut().push(format!("{notification:?}"));
+                    false
+                }
+            })
+            .into_widget();
+        let harness = Harness::mount(&mut app, tree);
+        harness.pump(&mut app);
+        let seen = seen.borrow();
+        assert_eq!(seen.len(), 3);
+        assert_eq!(seen[0], "PlainLayoutChangedNotification");
+        assert!(
+            seen[1].starts_with("ScrollUpdateNotification"),
+            "{}",
+            seen[1]
+        );
+        assert!(seen[2].starts_with("UserScrollNotification"), "{}", seen[2]);
     }
 
     #[test]

@@ -24,6 +24,7 @@ use crate::framework::{
     AnyElement, BuildContext, Element, ElementData, IntoWidget, KeyRef, RenderObjectElement,
     RenderObjectElementData, RenderObjectElementWidget, RenderObjectWidget, Slot, State, StateData,
     StatefulWidget, StatelessWidget, Widget, WidgetKind, WidgetRef, downcast_widget,
+    short_type_name,
 };
 use crate::widgets::scroll_position::AnyScrollPosition;
 use crate::widgets::scrollable::Scrollable;
@@ -272,6 +273,10 @@ where
 
     fn widget_type(&self) -> TypeId {
         TypeId::of::<W>()
+    }
+
+    fn type_name(&self) -> &'static str {
+        short_type_name::<W>()
     }
 
     fn kind(&self) -> WidgetKind {

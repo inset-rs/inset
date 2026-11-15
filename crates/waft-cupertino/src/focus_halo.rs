@@ -192,7 +192,6 @@ impl State for CupertinoFocusHaloState {
 
 #[cfg(test)]
 mod tests {
-    use std::rc::Rc;
 
     use waft_embedder::TextDirection;
     use waft_rendering::{AnyRenderObject, RenderDecoratedBox, RenderHandle, RenderObject};
@@ -239,7 +238,7 @@ mod tests {
     fn a_halo_outlines_its_shape_while_a_focus_node_inside_it_has_focus() {
         let cell = test_cell();
         let mut app = cell.borrow_mut();
-        let key = Rc::new(GlobalKey::new());
+        let key = GlobalKey::new();
         let node = FocusNode::new(&mut app).as_node();
         drop(app);
         build(
@@ -250,7 +249,7 @@ mod tests {
                     BorderRadius::circular(10.0).into(),
                     Focus::new(SizedBox::square(Some(40.0))).focus_node(node),
                 )
-                .key(key.clone()),
+                .key(key.clone().into()),
             )
             .into_widget(),
         );

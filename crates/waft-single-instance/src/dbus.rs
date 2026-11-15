@@ -6,7 +6,9 @@
 //! yet.
 //!
 //! `org.freedesktop.Application`'s `Open` takes URIs, which would make every argument a file: a
-//! launch's arguments are the app's to read, so they go through an interface of Waft's own.
+//! launch's arguments are the app's to read, so they go through an interface of Waft's own. Its
+//! activation token goes with them, as `org.freedesktop.Application`'s platform data carries it,
+//! so the first instance's window takes the focus the desktop gave the launch.
 
 use std::ffi::OsString;
 use std::io;
@@ -21,7 +23,7 @@ use zbus::fdo::{RequestNameFlags, RequestNameReply};
 use zbus::interface;
 use zbus::names::WellKnownName;
 
-use crate::{Arrivals, FirstInstance, SingleInstance, this_launch};
+use crate::{Arrivals, FirstInstance, Launch, SingleInstance, this_launch};
 
 const SINGLE_INSTANCE: &str = "rs.waft.SingleInstance";
 /// The longest a call to the bus may take.
@@ -67,21 +69,30 @@ fn object_path(id: &str) -> String {
     format!("/{}", id.replace('.', "/").replace('-', "_"))
 }
 
-/// Hands this launch's arguments and folder to the first instance.
+/// Hands this launch's arguments, folder and activation token to the first instance.
 fn hand_over(connection: &Connection, id: &str, path: &str) -> zbus::Result<()> {
     let (arguments, current_dir) = this_launch();
     let arguments: Vec<&[u8]> = arguments
         .iter()
         .map(|argument| argument.as_bytes())
         .collect();
+    let token = activation_token().unwrap_or_default();
     connection.call_method(
         Some(id),
         path,
         Some(SINGLE_INSTANCE),
         "Launch",
-        &(arguments, current_dir.as_os_str().as_bytes()),
+        &(arguments, current_dir.as_os_str().as_bytes(), token),
     )?;
     Ok(())
+}
+
+/// The activation token the desktop gave this launch: Wayland's, or X11's startup id.
+fn activation_token() -> Option<String> {
+    ["XDG_ACTIVATION_TOKEN", "DESKTOP_STARTUP_ID"]
+        .into_iter()
+        .find_map(|name| std::env::var(name).ok())
+        .filter(|token| !token.is_empty())
 }
 
 /// The first instance's `rs.waft.SingleInstance`.
@@ -91,11 +102,14 @@ struct Instance {
 
 #[interface(name = "rs.waft.SingleInstance")]
 impl Instance {
-    /// A later launch, with its arguments and the folder it was started in.
-    fn launch(&self, arguments: Vec<Vec<u8>>, current_dir: Vec<u8>) {
-        let arguments = arguments.into_iter().map(OsString::from_vec).collect();
-        self.arrivals
-            .arrive(arguments, PathBuf::from(OsString::from_vec(current_dir)));
+    /// A later launch, with its arguments, the folder it was started in and its activation
+    /// token, empty for none.
+    fn launch(&self, arguments: Vec<Vec<u8>>, current_dir: Vec<u8>, activation_token: String) {
+        self.arrivals.arrive(Launch {
+            arguments: arguments.into_iter().map(OsString::from_vec).collect(),
+            current_dir: PathBuf::from(OsString::from_vec(current_dir)),
+            activation_token: Some(activation_token).filter(|token| !token.is_empty()),
+        });
     }
 }
 
@@ -125,7 +139,11 @@ mod tests {
                 object_path(id).as_str(),
                 Some(SINGLE_INSTANCE),
                 "Launch",
-                &(arguments, b"/home/me".as_slice()),
+                &(
+                    arguments,
+                    b"/home/me".as_slice(),
+                    "gnome-shell/Notes/2313-3_TIME1",
+                ),
             )
             .expect("the first instance answers");
         let mut launches = first.launches();
@@ -135,5 +153,9 @@ mod tests {
             ["phone", "--verbose", "café notes.txt"].map(OsString::from)
         );
         assert_eq!(launch.current_dir, PathBuf::from("/home/me"));
+        assert_eq!(
+            launch.activation_token.as_deref(),
+            Some("gnome-shell/Notes/2313-3_TIME1")
+        );
     }
 }

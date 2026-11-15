@@ -1,6 +1,4 @@
 //! Flutter counterpart: `cupertino/segmented_control.dart`.
-//!
-//! The `Semantics` wrappers around each segment wait with accessibility.
 
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
@@ -29,7 +27,7 @@ use waft_widgets::{
     DefaultTextStyle, Directionality, Focus, FocusNode, FocusNodeLeaf, GestureDetector, GlobalKey,
     IconTheme, IconThemeData, IntoWidget, KeyEventResult, KeyRef, MouseRegion,
     MultiChildRenderObjectWidget, Padding, RadioClient, RadioClientData, RadioGroup,
-    RenderObjectWidget, State, StateData, StatefulWidget, TickerProviderStateMixin,
+    RenderObjectWidget, Semantics, State, StateData, StatefulWidget, TickerProviderStateMixin,
     TickerProviderStateMixinData, UnconstrainedBox, VoidCallbackAction, VoidCallbackIntent,
     WidgetRef,
 };
@@ -860,11 +858,18 @@ impl<T: Copy + Eq + Hash + Debug + 'static> State for SegmentedControlState<T> {
                 }))
                 .child(IconTheme::new(
                     icon_theme,
-                    DefaultTextStyle::new(text_style, child),
+                    DefaultTextStyle::new(
+                        text_style,
+                        Semantics::new()
+                            .button(true)
+                            .in_mutually_exclusive_group(true)
+                            .selected(self.widget(app).group_value == Some(current_key))
+                            .child(child),
+                    ),
                 ));
 
             let segment = SegmentButton {
-                key: Some(Rc::new(segment_key)),
+                key: Some(segment_key.into()),
                 value: current_key,
                 enabled: is_enabled,
                 child: MouseRegion::new()
@@ -891,7 +896,6 @@ impl<T: Copy + Eq + Hash + Debug + 'static> State for SegmentedControlState<T> {
             .expect("update_colors ran")
             .color();
         let segmented_box = SegmentedControlRenderWidget {
-            key: None,
             children: gesture_children,
             selected_index,
             pressed_index,
@@ -946,7 +950,6 @@ fn color_of(color: &Option<AnyColor>) -> Option<Color> {
 /// Dart's `_SegmentedControlRenderWidget`.
 #[derive(Debug)]
 struct SegmentedControlRenderWidget {
-    key: Option<KeyRef>,
     children: Vec<WidgetRef>,
     selected_index: Option<usize>,
     pressed_index: Option<usize>,
@@ -956,10 +959,6 @@ struct SegmentedControlRenderWidget {
 
 impl RenderObjectWidget for SegmentedControlRenderWidget {
     type RenderObject = RenderSegmentedControl;
-
-    fn key(&self) -> Option<&KeyRef> {
-        self.key.as_ref()
-    }
 
     fn create_render_object(&self, app: &mut App, context: BuildContext) -> AnyRenderObject {
         let text_direction = Directionality::of(app, context);
@@ -1615,7 +1614,7 @@ mod tests {
             .pressed_color(AnyColor::new(PRESSED))
             .border_color(AnyColor::new(BORDER))
             .disabled_children(self.widget(app).disabled.clone())
-            .key(Rc::new(app.get(self).control_key.clone()));
+            .key(app.get(self).control_key.clone().into());
             waft_widgets::Directionality::new(self.widget(app).text_direction, control)
                 .into_widget()
         }
@@ -1692,7 +1691,7 @@ mod tests {
         build(
             &cell,
             Host {
-                key: Some(Rc::new(host_key.clone())),
+                key: Some(host_key.clone().into()),
                 changes: Rc::clone(&changes),
                 disabled,
                 text_direction,

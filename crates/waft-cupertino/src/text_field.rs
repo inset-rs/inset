@@ -1,6 +1,6 @@
 //! Flutter counterpart: `cupertino/text_field.dart`.
 //!
-//! `_BaselineAlignedStack`, the iOS magnifier, and `Semantics` wait.
+//! `_BaselineAlignedStack` waits.
 //! Placeholder and editable share a `Stack` rather than baseline alignment.
 
 use std::any::TypeId;
@@ -9,10 +9,11 @@ use std::rc::Rc;
 
 use waft_embedder::{
     BoxHeightStyle, BoxWidthStyle, Brightness, Clip, Color, FontWeight, Offset, Radius,
-    SmartDashesType, SmartQuotesType, TargetPlatform, TextAlign, TextCapitalization,
+    SmartDashesType, SmartQuotesType, TargetPlatform, TextAffinity, TextAlign, TextCapitalization,
     TextDecoration, TextDecorationStyle, TextDirection, TextInputAction, TextInputType,
+    TextSelection,
 };
-use waft_foundation::{App, Handle, Listenable, Listener};
+use waft_foundation::{App, Handle, Listenable, Listener, ValueNotifier, VoidCallback};
 use waft_gestures::{
     DragStartBehavior, GestureTapCallback, HitTestResult, PointerDownEvent, PointerUpEvent,
     TapDragEndDetails, TapDragUpDetails,
@@ -30,20 +31,23 @@ use waft_widgets::{
     AutomaticKeepAliveClientMixinData, BuildContext, Container, ContentInsertionConfiguration,
     Directionality, EditableText, EditableTextContextMenuBuilder, EditableTextState, Expanded,
     FocusNode, FocusNodeLeaf, GestureDetector, GlobalKey, IgnorePointer, IntoWidget, KeyRef,
-    MediaQuery, Padding, RepaintBoundary, RestorableListenable, RestorableProperty,
-    RestorableTextEditingController, RestorationBucket, RestorationMixin, RestorationMixinData,
-    Row, ScrollController, ScrollPhysicsRef, SizedBox, SpellCheckConfiguration, Stack, State,
-    StateData, StatefulWidget, SystemContextMenu, Text, TextEditingControllerLeaf,
-    TextFieldTapRegion, TextMagnifierConfiguration, TextSelectionControls,
-    TextSelectionGestureDetectorBuilder, TextSelectionGestureDetectorBuilderBase,
-    TextSelectionGestureDetectorBuilderData, TextSelectionGestureDetectorBuilderDelegate,
-    ToolbarOptions, UndoHistoryController, UnmanagedRestorationScope, Visibility, WidgetRef,
+    MagnifierController, MagnifierInfo, MediaQuery, Padding, RepaintBoundary, RestorableListenable,
+    RestorableProperty, RestorableTextEditingController, RestorationBucket, RestorationMixin,
+    RestorationMixinData, Row, ScrollController, ScrollPhysicsRef, Semantics, SizedBox,
+    SpellCheckConfiguration, Stack, State, StateData, StatefulWidget, SystemContextMenu, Text,
+    TextEditingControllerLeaf, TextFieldTapRegion, TextMagnifierConfiguration,
+    TextSelectionControls, TextSelectionGestureDetectorBuilder,
+    TextSelectionGestureDetectorBuilderBase, TextSelectionGestureDetectorBuilderData,
+    TextSelectionGestureDetectorBuilderDelegate, ToolbarOptions, UndoHistoryController,
+    UnfocusDisposition, UnmanagedRestorationScope, Visibility, WidgetRef,
 };
 
 use crate::adaptive_text_selection_toolbar::CupertinoAdaptiveTextSelectionToolbar;
 use crate::colors::{CupertinoColors, CupertinoDynamicColor};
 use crate::desktop_text_selection::cupertino_desktop_text_selection_handle_controls;
 use crate::icons::CupertinoIcons;
+use crate::localizations::CupertinoLocalizations;
+use crate::magnifier::CupertinoTextMagnifier;
 use crate::text_selection::cupertino_text_selection_handle_controls;
 use crate::theme::CupertinoTheme;
 
@@ -895,6 +899,32 @@ impl CupertinoTextField {
     /// The color of the selection highlight when the spell check menu is visible.
     pub const K_MISSPELLED_SELECTION_COLOR: Color = Color::new(0x62FF9699);
 
+    /// Dart's `static final _iosMagnifierConfiguration`: one value per thread, so that its
+    /// builder keeps one identity, which `TextMagnifierConfiguration`'s comparison reads.
+    fn ios_magnifier_configuration() -> TextMagnifierConfiguration {
+        thread_local! {
+            static CONFIGURATION: TextMagnifierConfiguration = TextMagnifierConfiguration::new()
+                .with_magnifier_builder(Rc::new(
+                    |app: &mut App,
+                     _context: BuildContext,
+                     controller: Handle<MagnifierController>,
+                     magnifier_info: Handle<ValueNotifier<MagnifierInfo>>| {
+                        match app.platform().target_platform() {
+                            TargetPlatform::Android | TargetPlatform::IOS => Some(
+                                CupertinoTextMagnifier::new(controller, magnifier_info)
+                                    .into_widget(),
+                            ),
+                            TargetPlatform::Fuchsia
+                            | TargetPlatform::Linux
+                            | TargetPlatform::MacOS
+                            | TargetPlatform::Windows => None,
+                        }
+                    },
+                ));
+        }
+        CONFIGURATION.with(TextMagnifierConfiguration::clone)
+    }
+
     /// Returns a new [`SpellCheckConfiguration`] where the given configuration has
     /// had any missing values replaced with their defaults for the iOS platform.
     pub fn infer_ios_spell_check_configuration(
@@ -1151,14 +1181,24 @@ impl CupertinoTextFieldState {
         let color = CupertinoDynamicColor::resolve(&clear_button_color(), app, context);
         let this = self;
         let on_tap = Listener::new(move |app| this.on_clear_button_tapped(app));
+        let clear_label = match self.widget(app).clear_button_semantic_label.clone() {
+            Some(clear_label) => clear_label,
+            None => <dyn CupertinoLocalizations>::of(app, context).clear_button_label(),
+        };
         let icon = waft_widgets::Icon::new(Some(CupertinoIcons::clear_thick_circled()))
             .size(18.0)
             .color(color);
-        let _ = enabled;
-        GestureDetector::new()
-            .key(Rc::new(app.get(self).clear_global_key.clone()) as KeyRef)
-            .on_tap(on_tap)
-            .child(Padding::new(EdgeInsetsGeometry::symmetric(0.0, 6.0)).child(icon))
+        let mut detector =
+            GestureDetector::new().key(app.get(self).clear_global_key.clone().into());
+        if enabled {
+            detector = detector.on_tap(on_tap);
+        }
+        Semantics::new()
+            .button(true)
+            .label(clear_label)
+            .child(
+                detector.child(Padding::new(EdgeInsetsGeometry::symmetric(0.0, 6.0)).child(icon)),
+            )
             .into_widget()
     }
 
@@ -1596,7 +1636,7 @@ impl State for CupertinoTextFieldState {
         .stylus_handwriting_enabled(self.widget(app).stylus_handwriting_enabled)
         .enable_ime_personalized_learning(self.widget(app).enable_ime_personalized_learning)
         .spell_check_configuration(spell_check_configuration)
-        .key(Rc::new(app.get(self).editable_text_key.clone()) as KeyRef);
+        .key(app.get(self).editable_text_key.clone().into());
 
         if let Some(show_cursor) = self.widget(app).show_cursor {
             editable = editable.show_cursor(show_cursor);
@@ -1663,11 +1703,12 @@ impl State for CupertinoTextFieldState {
         if let Some(context_menu_builder) = self.widget(app).context_menu_builder.clone() {
             editable = editable.context_menu_builder(context_menu_builder);
         }
-        if let Some(magnifier_configuration) = self.widget(app).magnifier_configuration.clone() {
-            editable = editable.magnifier_configuration(magnifier_configuration);
-        } else {
-            editable = editable.magnifier_configuration(TextMagnifierConfiguration::DISABLED);
-        }
+        editable = editable.magnifier_configuration(
+            self.widget(app)
+                .magnifier_configuration
+                .clone()
+                .unwrap_or_else(CupertinoTextField::ios_magnifier_configuration),
+        );
         if let Some(undo_controller) = self.widget(app).undo_controller {
             editable = editable.undo_controller(undo_controller);
         }
@@ -1675,6 +1716,8 @@ impl State for CupertinoTextFieldState {
             editable = editable.enable_inline_prediction(enable_inline_prediction);
         }
         let mut text_selection_controls = self.widget(app).selection_controls.clone();
+        let mut handle_did_gain_accessibility_focus: Option<VoidCallback> = None;
+        let mut handle_did_lose_accessibility_focus: Option<VoidCallback> = None;
         match app.platform().target_platform() {
             TargetPlatform::IOS | TargetPlatform::Android | TargetPlatform::Fuchsia => {
                 if text_selection_controls.is_none() {
@@ -1686,6 +1729,17 @@ impl State for CupertinoTextFieldState {
                     text_selection_controls =
                         Some(cupertino_desktop_text_selection_handle_controls());
                 }
+                handle_did_gain_accessibility_focus = Some(Rc::new(move |app: &mut App| {
+                    // Automatically activate the TextField when it receives accessibility focus.
+                    let focus_node = self.effective_focus_node(app);
+                    if !focus_node.has_focus(app) && focus_node.can_request_focus(app) {
+                        focus_node.request_focus(app, None);
+                    }
+                }));
+                handle_did_lose_accessibility_focus = Some(Rc::new(move |app: &mut App| {
+                    self.effective_focus_node(app)
+                        .unfocus(app, UnfocusDisposition::Scope);
+                }));
             }
         }
         if let Some(selection_controls) = text_selection_controls
@@ -1730,12 +1784,65 @@ impl State for CupertinoTextFieldState {
         } else if !widget_enabled {
             container = container.color(disabled_color);
         }
-        TextFieldTapRegion::new(
-            IgnorePointer::new()
-                .ignoring(!widget_enabled)
-                .child(container.child(gestured)),
-        )
-        .into_widget()
+        let mut semantics = Semantics::new().enabled(widget_enabled);
+        if widget_enabled && !read_only {
+            semantics = semantics.on_tap(Rc::new(move |app: &mut App| {
+                let controller = self.effective_controller(app);
+                if !controller.selection(app).is_valid() {
+                    let length = controller.text_value(app).encode_utf16().count() as i32;
+                    controller.set_selection(
+                        app,
+                        TextSelection::collapsed(length, TextAffinity::Downstream),
+                    );
+                }
+                self.request_keyboard(app);
+            }));
+        }
+        if let Some(handle_did_gain_accessibility_focus) = handle_did_gain_accessibility_focus {
+            semantics =
+                semantics.on_did_gain_accessibility_focus(handle_did_gain_accessibility_focus);
+        }
+        if let Some(handle_did_lose_accessibility_focus) = handle_did_lose_accessibility_focus {
+            semantics =
+                semantics.on_did_lose_accessibility_focus(handle_did_lose_accessibility_focus);
+        }
+        if widget_enabled {
+            semantics = semantics.on_focus(Rc::new(move |app: &mut App| {
+                let focus_node = self.effective_focus_node(app);
+                debug_assert!(
+                    focus_node.can_request_focus(app),
+                    "Received SemanticsAction.focus from the engine. However, the FocusNode of \
+                     this text field cannot gain focus. This likely indicates a bug. If this text \
+                     field cannot be focused (e.g. because it is not enabled), then its \
+                     corresponding semantics node must be configured such that the assistive \
+                     technology cannot request focus on it."
+                );
+
+                if focus_node.can_request_focus(app) && !focus_node.has_focus(app) {
+                    focus_node.request_focus(app, None);
+                } else if !self.widget(app).read_only {
+                    // If the platform requested focus, that means that previously the
+                    // platform believed that the text field did not have focus (even
+                    // though Flutter's widget system believed otherwise). This likely
+                    // means that the on-screen keyboard is hidden, or more generally,
+                    // there is no current editing session in this field. To correct
+                    // that, keyboard must be requested.
+                    //
+                    // A concrete scenario where this can happen is when the user
+                    // dismisses the keyboard on the web. The editing session is
+                    // closed by the engine, but the text field widget stays focused
+                    // in the framework.
+                    self.request_keyboard(app);
+                }
+            }));
+        }
+        semantics
+            .child(TextFieldTapRegion::new(
+                IgnorePointer::new()
+                    .ignoring(!widget_enabled)
+                    .child(container.child(gestured)),
+            ))
+            .into_widget()
     }
 }
 
@@ -1926,6 +2033,86 @@ mod tests {
         app.drain_microtasks();
     }
 
+    /// The first element of `element`'s subtree whose widget is a `W`, and that widget.
+    fn first_widget_of<W: 'static>(
+        app: &App,
+        element: AnyElement,
+    ) -> Option<(AnyElement, WidgetRef)> {
+        let widget = element.widget(app).clone();
+        if waft_widgets::downcast_widget::<W>(&*widget).is_some() {
+            return Some((element, widget));
+        }
+        let mut found = None;
+        element.visit_children(app, &mut |child| {
+            if found.is_none() {
+                found = first_widget_of::<W>(app, child);
+            }
+        });
+        found
+    }
+
+    /// The magnifier the `EditableText` of `CupertinoApp(home: CupertinoTextField())` builds on
+    /// `platform`, as the magnifier builder tests call its builder.
+    fn default_magnifier_on(platform: TargetPlatform) -> Option<WidgetRef> {
+        let platform = waft_test::TestPlatform::new()
+            .on(platform)
+            .with_view(crate::test_support::test_view());
+        let cell = AppCell::with_platform(Rc::new(platform));
+        install_fonts(&mut cell.borrow_mut());
+        build(
+            &cell,
+            CupertinoApp::new()
+                .home(CupertinoTextField::new())
+                .into_widget(),
+        );
+        let mut app = cell.borrow_mut();
+        let root = WidgetsBinding::instance(&mut app)
+            .root_element(&app)
+            .expect("a mounted app");
+        let (context, _) =
+            first_widget_of::<CupertinoTextField>(&app, root).expect("a CupertinoTextField");
+        let (_, editable_text) =
+            first_widget_of::<EditableText>(&app, root).expect("an EditableText");
+        let magnifier_builder = waft_widgets::downcast_widget::<EditableText>(&*editable_text)
+            .expect("an EditableText")
+            .magnifier_configuration
+            .magnifier_builder();
+        let controller = MagnifierController::new(&mut app);
+        let magnifier_info = app.create(ValueNotifier::new(MagnifierInfo::EMPTY));
+        magnifier_builder(&mut app, context, controller, magnifier_info)
+    }
+
+    #[test]
+    fn should_build_cupertino_magnifier_on_ios_and_android() {
+        for platform in [TargetPlatform::IOS, TargetPlatform::Android] {
+            let magnifier = default_magnifier_on(platform).expect("a magnifier");
+            assert!(
+                waft_widgets::downcast_widget::<CupertinoTextMagnifier>(&*magnifier).is_some(),
+                "{platform:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn should_build_nothing_on_all_platforms_but_ios_and_android() {
+        for platform in [
+            TargetPlatform::Fuchsia,
+            TargetPlatform::Linux,
+            TargetPlatform::MacOS,
+            TargetPlatform::Windows,
+        ] {
+            assert!(default_magnifier_on(platform).is_none(), "{platform:?}");
+        }
+    }
+
+    #[test]
+    fn the_default_magnifier_configuration_keeps_one_builder() {
+        assert!(Rc::ptr_eq(
+            &CupertinoTextField::ios_magnifier_configuration().magnifier_builder(),
+            &CupertinoTextField::ios_magnifier_configuration().magnifier_builder(),
+        ));
+    }
+
     fn tree_contains(app: &App, element: AnyElement, type_id: TypeId) -> bool {
         if element.widget(app).widget_type() == type_id {
             return true;
@@ -1956,7 +2143,7 @@ mod tests {
         let controller = TextEditingController::new(&mut app);
         controller.set_text(&mut app, text);
         let key = GlobalKey::new();
-        let key_ref: KeyRef = Rc::new(key.clone());
+        let key_ref: KeyRef = key.clone().into();
         drop(app);
         build(
             &cell,
@@ -2045,7 +2232,7 @@ mod tests {
         let controller = TextEditingController::new(&mut app);
         controller.set_text(&mut app, text);
         let key = GlobalKey::new();
-        let key_ref: KeyRef = Rc::new(key.clone());
+        let key_ref: KeyRef = key.clone().into();
         drop(app);
         build(
             &cell,

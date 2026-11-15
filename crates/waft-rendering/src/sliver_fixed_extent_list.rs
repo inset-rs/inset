@@ -601,6 +601,10 @@ macro_rules! fixed_extent_box_adaptor_leaf {
                 RenderSliverMultiBoxAdaptor::apply_paint_transform(self, app, child, transform)
             }
 
+            fn paints_child(self: RenderHandle<Self>, app: &App, child: AnyRenderObject) -> bool {
+                RenderSliverMultiBoxAdaptor::paints_child(self, app, child)
+            }
+
             fn paint(
                 self: RenderHandle<Self>,
                 app: &mut App,
@@ -652,6 +656,8 @@ macro_rules! fixed_extent_box_adaptor_leaf {
         }
     };
 }
+
+pub(crate) use fixed_extent_box_adaptor_leaf;
 
 /// A sliver that places multiple box children with the same main axis extent in a linear array.
 ///
@@ -890,7 +896,7 @@ mod tests {
                 .parent_data_of::<SliverMultiBoxAdaptorParentData>(&app)
                 .kept_alive()
         );
-        assert!(!list.paints_child(&app, first));
+        assert!(!list.as_object().paints_child(&app, first.as_object()));
         let created_before = manager.created.borrow().len();
 
         harness.scroll_to(&mut app, 0.0);
@@ -898,7 +904,7 @@ mod tests {
         // Index 0 came back from the bucket, so the manager was not asked to create it again.
         assert_eq!(list.first_child(&app), Some(first));
         assert!(list.keep_alive_children(&app).is_empty());
-        assert!(list.paints_child(&app, first));
+        assert!(list.as_object().paints_child(&app, first.as_object()));
         assert!(
             !manager.created.borrow()[created_before..].contains(&0),
             "the kept-alive child was rebuilt"

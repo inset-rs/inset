@@ -153,6 +153,17 @@ pub struct Draggable<T: 'static> {
     /// Defaults to `childDragAnchorStrategy`.
     pub drag_anchor_strategy: DragAnchorStrategy<T>,
 
+    /// Whether the semantics of the `feedback` widget is ignored when building
+    /// the semantics tree.
+    ///
+    /// This value should be set to false when the `feedback` widget is intended
+    /// to be the same object as the `child`. Placing a `GlobalKey` on this
+    /// widget will ensure semantic focus is kept on the element as it moves in
+    /// and out of the feedback position.
+    ///
+    /// Defaults to true.
+    pub ignoring_feedback_semantics: bool,
+
     /// Whether the `feedback` widget is ignored during hit testing.
     ///
     /// Regardless of whether this widget is ignored during hit testing, it will
@@ -258,6 +269,7 @@ impl<T: 'static> Clone for Draggable<T> {
             feedback: self.feedback.clone(),
             feedback_offset: self.feedback_offset,
             drag_anchor_strategy: self.drag_anchor_strategy.clone(),
+            ignoring_feedback_semantics: self.ignoring_feedback_semantics,
             ignoring_feedback_pointer: self.ignoring_feedback_pointer,
             affinity: self.affinity,
             max_simultaneous_drags: self.max_simultaneous_drags,
@@ -291,6 +303,7 @@ impl<T: 'static> Draggable<T> {
             feedback: feedback.into_widget(),
             feedback_offset: Offset::ZERO,
             drag_anchor_strategy: Rc::new(child_drag_anchor_strategy::<T>),
+            ignoring_feedback_semantics: true,
             ignoring_feedback_pointer: true,
             affinity: None,
             max_simultaneous_drags: None,
@@ -338,6 +351,12 @@ impl<T: 'static> Draggable<T> {
     /// Sets `drag_anchor_strategy` for this draggable.
     pub fn drag_anchor_strategy(mut self, value: DragAnchorStrategy<T>) -> Self {
         self.drag_anchor_strategy = value;
+        self
+    }
+
+    /// Sets `ignoring_feedback_semantics` for this draggable.
+    pub fn ignoring_feedback_semantics(mut self, value: bool) -> Self {
+        self.ignoring_feedback_semantics = value;
         self
     }
 
@@ -546,6 +565,12 @@ impl<T: 'static> LongPressDraggable<T> {
         self
     }
 
+    /// Sets `ignoring_feedback_semantics` for this draggable.
+    pub fn ignoring_feedback_semantics(mut self, value: bool) -> Self {
+        self.draggable.ignoring_feedback_semantics = value;
+        self
+    }
+
     /// Sets `ignoring_feedback_pointer` for this draggable.
     pub fn ignoring_feedback_pointer(mut self, value: bool) -> Self {
         self.draggable.ignoring_feedback_pointer = value;
@@ -724,6 +749,7 @@ impl<W: DraggableWidget> DraggableState<W> {
             start,
             widget.feedback.clone(),
             widget.feedback_offset,
+            widget.ignoring_feedback_semantics,
             widget.ignoring_feedback_pointer,
             view_id,
             Rc::new(move |app, details| {
@@ -1203,6 +1229,9 @@ struct DragAvatar {
     /// Overlay into which the feedback entry is inserted.
     overlay_state: Handle<OverlayState>,
 
+    /// Whether feedback is excluded from the semantics tree.
+    ignoring_feedback_semantics: bool,
+
     /// Whether feedback is excluded from pointer hit testing.
     ignoring_feedback_pointer: bool,
 
@@ -1240,6 +1269,7 @@ impl DragAvatar {
         drag_start_point: Offset,
         feedback: WidgetRef,
         feedback_offset: Offset,
+        ignoring_feedback_semantics: bool,
         ignoring_feedback_pointer: bool,
         view_id: ViewId,
         on_drag_update: DragUpdateCallback,
@@ -1254,6 +1284,7 @@ impl DragAvatar {
             on_drag_update,
             on_drag_end,
             overlay_state,
+            ignoring_feedback_semantics,
             ignoring_feedback_pointer,
             view_id,
             active_target: None,
@@ -1387,13 +1418,17 @@ impl DragAvatar {
         app.destroy(self);
     }
 
-    /// Positions feedback in overlay coordinates; accessibility is deferred framework-wide.
+    /// Positions feedback in overlay coordinates.
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
         let state = app.get(self);
         Positioned::new(
-            IgnorePointer::new()
-                .ignoring(state.ignoring_feedback_pointer)
-                .child(state.feedback.clone()),
+            ExcludeSemantics::new()
+                .excluding(state.ignoring_feedback_semantics)
+                .child(
+                    IgnorePointer::new()
+                        .ignoring(state.ignoring_feedback_pointer)
+                        .child(state.feedback.clone()),
+                ),
         )
         .left(state.overlay_offset.dx())
         .top(state.overlay_offset.dy())

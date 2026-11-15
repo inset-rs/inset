@@ -862,7 +862,7 @@ impl State for CupertinoTextSelectionToolbarContentState {
                                 }))
                                 .child(
                                     CupertinoTextSelectionToolbarItems {
-                                        key: Some(Rc::new(toolbar_items_key)),
+                                        key: Some(toolbar_items_key.into()),
                                         page,
                                         back_button,
                                         divider_color,

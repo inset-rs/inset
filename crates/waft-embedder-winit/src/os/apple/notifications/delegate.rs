@@ -163,7 +163,7 @@ mod tests {
 
     #[test]
     fn the_delegate_answers_the_center_for_clicks_and_for_the_app_in_front() {
-        let delegate = CenterDelegate::new(NotificationActivations::to(|_| {}));
+        let delegate = CenterDelegate::new(NotificationActivations::to(|_, _| {}));
         let protocol = ProtocolObject::<dyn UNUserNotificationCenterDelegate>::from_ref(&*delegate);
         assert!(protocol.respondsToSelector(sel!(
             userNotificationCenter:didReceiveNotificationResponse:withCompletionHandler:

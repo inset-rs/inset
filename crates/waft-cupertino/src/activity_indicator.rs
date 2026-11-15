@@ -557,7 +557,7 @@ mod tests {
     }
 
     fn key_of(key: &GlobalKey) -> KeyRef {
-        Rc::new(key.clone())
+        key.clone().into()
     }
 
     /// Mounts `child` where it may take its own size; the view's root is tight.

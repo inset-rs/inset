@@ -241,7 +241,7 @@ mod tests {
     use crate::test_support::{build, test_cell};
 
     fn key_of(key: &GlobalKey) -> KeyRef {
-        Rc::new(key.clone())
+        key.clone().into()
     }
 
     /// A `SizedBox` of `width` x `height`, findable through `key`.

@@ -351,7 +351,7 @@ impl<C: EmbedderClient> MainLoop<C> {
         match request {
             AppRequest::RequestFrame(view) => self.request_frame(view),
             AppRequest::Window(request) => self.on_window_request(event_loop, request),
-            AppRequest::Embedder(request) => self.on_embedder_request(event_loop, request),
+            AppRequest::Embedder(request) => self.on_embedder_request(event_loop, *request),
             AppRequest::Exit(request) => self.on_exit_request(event_loop, request),
             AppRequest::LookAtClipboard => self.look_at_clipboard(),
         }

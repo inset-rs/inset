@@ -40,7 +40,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use ndk::native_window::NativeWindow;
-use waft_embedder::{HardwareBufferAllocator, HardwareBufferUsage, Picture, Slices, ViewId};
+use waft_embedder::{
+    HardwareBufferAllocator, HardwareBufferUsage, Picture, PreparedPrograms, Slices, ViewId,
+};
 
 use crate::frame_fence::{FrameFences, SignalledFrame};
 use crate::gpu::Gpu;
@@ -79,6 +81,8 @@ pub(crate) struct SurfaceControlViewLayer {
     in_flight: FramesInFlight,
     gpu: Gpu,
     context: valo::Context,
+    /// The fragment programs the context has prepared for the buffers' format.
+    prepared_programs: PreparedPrograms,
 }
 
 impl SurfaceControlViewLayer {
@@ -106,6 +110,7 @@ impl SurfaceControlViewLayer {
             in_flight: FramesInFlight::new(),
             gpu: gpu.clone(),
             context,
+            prepared_programs: PreparedPrograms::new(),
         }
     }
 
@@ -167,6 +172,9 @@ impl SurfaceControlViewLayer {
         self.in_flight.wait_for_turn();
         let slot = buffers.take_free(&self.gpu).ok_or(valo::Refused::Lost)?;
         slot.drawn.take_back_from_compositor(&self.gpu);
+        let format = slot.drawn.texture.format();
+        self.prepared_programs
+            .prepare_new(|effect| self.context.prepare_runtime_effect(effect, format));
         render(
             &mut self.context,
             &slices.picture_with_room(),

@@ -52,7 +52,7 @@ impl Fixture {
             PaintingBinding::instance(&mut app).install_platform_fonts(&mut app);
             let controller = TextEditingController::new(&mut app).as_controller();
             let text_box = TextBox::new(controller)
-                .key(Rc::new(key.clone()))
+                .key(key.clone().into())
                 .accepts_return(true)
                 .text_wrapping(TextWrapping::NoWrap)
                 .horizontal_scroll_bar_visibility(visibility)

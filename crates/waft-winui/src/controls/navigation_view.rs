@@ -287,11 +287,11 @@ impl NavigationView {
 #[derive(Clone)]
 struct NavigationContainer {
     /// Global identity preserving state in caller-supplied item content.
-    key: Rc<GlobalKey>,
+    key: GlobalKey,
     /// Focus shared with the item's native input presenter.
     focus: AnyFocusNode,
     /// Exact source indicator geometry, including while its opacity is zero.
-    indicator_key: Rc<GlobalKey>,
+    indicator_key: GlobalKey,
     /// Source compositor CenterPoint.X survives completion and is retained per owner.
     indicator_pivot_x: Rc<Cell<f64>>,
     /// An existing CenterPoint animation keeps its final step even if Scale is replaced.
@@ -305,7 +305,7 @@ pub struct NavigationViewState {
     /// Stable item containers, including currently collapsed children.
     containers: HashMap<String, NavigationContainer>,
     /// Stable native identities for owner content reparented by pane-mode changes.
-    slot_keys: HashMap<&'static str, Rc<GlobalKey>>,
+    slot_keys: HashMap<&'static str, GlobalKey>,
     /// Expanded ids independent of where their children are presented.
     expanded: HashSet<String>,
     /// Expanded left items restored when a compact pane reopens.
@@ -374,12 +374,7 @@ impl StatefulWidget for NavigationView {
                 "search",
             ]
             .into_iter()
-            .map(|slot| {
-                (
-                    slot,
-                    Rc::new(GlobalKey::labeled(format!("Navigation {slot}"))),
-                )
-            })
+            .map(|slot| (slot, GlobalKey::labeled(format!("Navigation {slot}"))))
             .collect(),
             expanded: HashSet::new(),
             restore_expanded: HashSet::new(),
@@ -487,7 +482,7 @@ impl NavigationViewState {
     /// Retains an owner-supplied content subtree when the source template reparents its slot.
     fn slot(self: Handle<Self>, app: &App, name: &'static str, child: WidgetRef) -> WidgetRef {
         KeyedSubtree::new(child)
-            .key(app.get(self).slot_keys[name].clone())
+            .key(app.get(self).slot_keys[name].clone().into())
             .into_widget()
     }
 
@@ -547,9 +542,9 @@ impl NavigationViewState {
         for id in ids {
             if !app.get(self).containers.contains_key(&id) {
                 let entry = NavigationContainer {
-                    key: Rc::new(GlobalKey::labeled(id.clone())),
+                    key: GlobalKey::labeled(id.clone()),
                     focus: FocusNode::new(app).as_node(),
-                    indicator_key: Rc::new(GlobalKey::labeled(format!("Indicator {id}"))),
+                    indicator_key: GlobalKey::labeled(format!("Indicator {id}")),
                     indicator_pivot_x: Rc::new(Cell::new(0.0)),
                     indicator_pivot_step: Cell::new(None),
                 };
@@ -1334,7 +1329,9 @@ impl NavigationViewState {
                     ])
                     .into_widget()
             };
-        KeyedSubtree::new(result).key(container.key).into_widget()
+        KeyedSubtree::new(result)
+            .key(container.key.into())
+            .into_widget()
     }
 
     /// Measures a group's natural height without replacing its source-owned scroll controller.
@@ -1838,11 +1835,14 @@ impl NavigationViewState {
                     .mirrored_when_right_to_left(true),
                 callback,
             )
-            .key(Rc::new(waft_foundation::ValueKey::new(if close {
-                "NavigationViewCloseButton"
-            } else {
-                "NavigationViewBackButton"
-            })))
+            .key(
+                waft_foundation::ValueKey::new(if close {
+                    "NavigationViewCloseButton"
+                } else {
+                    "NavigationViewBackButton"
+                })
+                .into(),
+            )
             .is_enabled(close || widget.is_back_enabled)
             .template(move |app, context, states, child| {
                 back_button_template(app, context, states, child, back_width, small)
@@ -1866,7 +1866,7 @@ impl NavigationViewState {
                 title,
                 Listener::new(move |app| self.set_pane_open(app, !self.is_pane_open(app), true)),
             )
-            .key(Rc::new(waft_foundation::ValueKey::new("TogglePaneButton")))
+            .key(waft_foundation::ValueKey::new("TogglePaneButton").into())
             .template(move |app, context, states, child| {
                 pane_toggle_template(app, context, states, child, icon_width)
             });
@@ -2228,9 +2228,7 @@ impl NavigationViewState {
                     .clone()
                     .unwrap_or_else(|| Listener::new(|_| {})),
             )
-            .key(Rc::new(waft_foundation::ValueKey::new(
-                "NavigationViewBackButton",
-            )))
+            .key(waft_foundation::ValueKey::new("NavigationViewBackButton").into())
             .is_enabled(widget.is_back_enabled)
             .template(move |app, context, states, child| {
                 back_button_template(app, context, states, child, width, false)

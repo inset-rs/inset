@@ -2,8 +2,7 @@
 //!
 //! [`CupertinoSwitchState`] is a [`ToggleableStateMixin`], and its painter an arena
 //! [`ToggleablePainter`] the state keeps for its lifetime, as Dart's `_painter` field is. The
-//! thumb images wait with painting's `DecorationImage` and the `Semantics(toggled:)` wrapper with
-//! accessibility; the deprecated `activeColor` and `trackColor` are not ported (`PORTING.md`).
+//! thumb images wait with painting's `DecorationImage`; the deprecated `activeColor` and `trackColor` are not ported (`PORTING.md`).
 
 use std::cell::Cell;
 use std::fmt::{self, Debug};
@@ -30,7 +29,7 @@ use waft_scheduler::{Ticker, TickerCallback, TickerProviderObject};
 use waft_services::{HapticFeedback, MouseCursor, MouseCursorRef, SystemMouseCursors};
 use waft_widgets::{
     AnyFocusNode, BuildContext, Directionality, GestureDetector, Icon, IconTheme, IconThemeData,
-    IntoWidget, KeyRef, MediaQuery, Opacity, State, StateData, StatefulWidget,
+    IntoWidget, KeyRef, MediaQuery, Opacity, Semantics, State, StateData, StatefulWidget,
     TickerProviderStateMixin, TickerProviderStateMixinData, ToggleablePainter,
     ToggleablePainterData, ToggleablePainterRef, ToggleableStateMixin, ToggleableStateMixinData,
     WidgetRef, WidgetState, WidgetStateProperty, WidgetStatePropertyRef, WidgetStates,
@@ -985,9 +984,8 @@ impl State for CupertinoSwitchState {
             K_SWITCH_SIZE,
             ToggleablePainterRef::new(painter),
         );
-        // `Semantics(toggled: widget.value)` and the detector's `excludeFromSemantics` wait
-        // with accessibility.
-        GestureDetector::new()
+        // The detector's `excludeFromSemantics` waits with accessibility.
+        let detector = GestureDetector::new()
             .on_tap_down(Rc::new(move |app: &mut App, details| {
                 self.handle_on_tap_down(app, details)
             }))
@@ -1001,7 +999,10 @@ impl State for CupertinoSwitchState {
                 self.handle_drag_end(app, details)
             }))
             .drag_start_behavior(widget.drag_start_behavior)
-            .child(Opacity::new(opacity).child(toggleable))
+            .child(Opacity::new(opacity).child(toggleable));
+        Semantics::new()
+            .toggled(widget.value)
+            .child(detector)
             .into_widget()
     }
 }
@@ -1953,7 +1954,7 @@ mod tests {
                 }) as ValueChanged<bool>
             });
             let mut switch = CupertinoSwitch::new(app.get(self).value, on_changed)
-                .key(Rc::new(app.get(self).switch_key.clone()));
+                .key(app.get(self).switch_key.clone().into());
             if let Some(focus_node) = self.widget(app).focus_node {
                 switch = switch.focus_node(focus_node);
             }
@@ -2061,7 +2062,7 @@ mod tests {
             build(
                 &cell,
                 Host {
-                    key: Some(Rc::new(host_key.clone())),
+                    key: Some(host_key.clone().into()),
                     initial: self.initial,
                     text_direction: self.text_direction,
                     media: self.media,
@@ -2907,7 +2908,7 @@ mod tests {
                 Center::new().child(
                     SizedBox::shrink().child(
                         CupertinoSwitch::new(false, Some(Rc::new(|_app: &mut App, _| {})))
-                            .key(Rc::new(key.clone())),
+                            .key(key.clone().into()),
                     ),
                 ),
             )

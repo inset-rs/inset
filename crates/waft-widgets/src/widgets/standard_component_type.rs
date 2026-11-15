@@ -1,7 +1,5 @@
 //! Flutter counterpart: `widgets/standard_component_type.dart`.
 
-use std::rc::Rc;
-
 use waft_foundation::ValueKey;
 
 use crate::framework::KeyRef;
@@ -50,6 +48,6 @@ impl StandardComponentType {
     ///
     /// Attach this key to a widget to indicate it is a standard UI component.
     pub fn key(self) -> KeyRef {
-        Rc::new(ValueKey::new(self))
+        ValueKey::new(self).into()
     }
 }

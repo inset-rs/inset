@@ -15,7 +15,7 @@ use std::rc::Rc;
 use waft_embedder::{
     Clipboard, ClipboardError, ClipboardItem, ClipboardItemsFuture, ClipboardReadFuture,
     ClipboardWriteFuture, Content, ContentFuture, CopyOptions, DataTransferItem, FileSink,
-    URI_LIST, WriteFuture,
+    URI_LIST, WriteFuture, file_uri,
 };
 
 /// A clipboard held in memory, which answers every call at once but a promise's, which answers
@@ -227,7 +227,8 @@ impl DataTransferItem for MockDataTransferItem {
     }
 }
 
-/// The `file:` URL of each file, one per line, a promised one written into `folder` first.
+/// The `file:` URL of each file, one per line, as a host writes it ([`file_uri`]), a promised one
+/// written into `folder` first.
 async fn uri_list(files: Vec<File>, folder: &Path) -> Result<Vec<u8>, ClipboardError> {
     let mut list = String::new();
     for file in files {
@@ -241,7 +242,7 @@ async fn uri_list(files: Vec<File>, folder: &Path) -> Result<Vec<u8>, ClipboardE
                 path
             }
         };
-        list.push_str(&file_url(&path));
+        list.push_str(&file_uri(&path));
         list.push_str("\r\n");
     }
     Ok(list.into_bytes())
@@ -271,20 +272,6 @@ impl FileSink for FileWritten {
     ) -> Pin<Box<dyn Future<Output = io::Result<()>> + 'a>> {
         Box::pin(ready(self.0.write_all(bytes)))
     }
-}
-
-/// `path`'s `file:` URL: each byte but a path's unreserved ones and its slashes
-/// percent-encoded (RFC 3986).
-fn file_url(path: &Path) -> String {
-    let mut url = String::from("file://");
-    for byte in path.to_string_lossy().bytes() {
-        if byte.is_ascii_alphanumeric() || b"-._~/".contains(&byte) {
-            url.push(char::from(byte));
-        } else {
-            url.push_str(&format!("%{byte:02X}"));
-        }
-    }
-    url
 }
 
 #[cfg(test)]
@@ -366,14 +353,15 @@ mod tests {
     #[test]
     fn a_file_is_offered_and_read_as_its_url() {
         let clipboard = MockClipboard::new();
-        let file = Content::File(PathBuf::from("/photos/a b.png"));
+        let path = std::env::temp_dir().join("a b.png");
+        let file = Content::File(path.clone());
         written(&clipboard, vec![("image/png".to_owned(), file)]);
 
         let items = now(clipboard.items());
         assert_eq!(items[0].types(), [URI_LIST]);
         assert_eq!(
             now(items[0].read(URI_LIST)),
-            Ok(b"file:///photos/a%20b.png\r\n".to_vec())
+            Ok(format!("{}\r\n", file_uri(&path)).into_bytes())
         );
     }
 
@@ -414,7 +402,7 @@ mod tests {
         let items = now(clipboard.items());
         let list = now(items[0].read(URI_LIST)).expect("the file was written");
         let path = folder.join("note.txt");
-        assert_eq!(list, format!("{}\r\n", file_url(&path)).into_bytes());
+        assert_eq!(list, format!("{}\r\n", file_uri(&path)).into_bytes());
         assert_eq!(fs::read(&path).unwrap(), b"promised");
         fs::remove_dir_all(&folder).unwrap();
     }

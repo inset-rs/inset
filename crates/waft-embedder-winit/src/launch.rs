@@ -6,28 +6,31 @@
 use waft_embedder::{EmbedderClient, PlatformRef};
 use winit::event_loop::EventLoop;
 
-use crate::LinuxSettings;
 use crate::gpu::GpuRequest;
 use crate::images::CreateImageLoader;
 use crate::main_loop::{MainLoop, MainLoopEvent, MainLoopProxy};
 use crate::notifications::NotificationActivations;
 use crate::os::System;
 use crate::os::capabilities::{
-    ApplicationLifecycle, EventLoopSetup, NativeComposition, SystemChanges, SystemNotifications,
-    SystemRequests,
+    ApplicationIdentity, ApplicationLifecycle, EventLoopSetup, NativeComposition, SystemChanges,
+    SystemNotifications, SystemRequests,
 };
+use crate::{LinuxSettings, WindowsSettings};
 
 /// What starts the app, on the platform it is handed, and answers the client the embedder drives.
 pub(crate) type StartApp<C> = Box<dyn FnOnce(PlatformRef) -> C>;
 
-/// Runs the app on winit's loop until it quits, with what it tells Linux's desktops, its device
-/// on the system's software adapter where `force_fallback_adapter` asks.
+/// Runs the app on winit's loop until it quits, with what it tells Linux's desktops and Windows'
+/// shell, its device on the system's software adapter where `force_fallback_adapter` asks.
 pub(crate) fn run<C: EmbedderClient + 'static>(
     start: StartApp<C>,
     create_image_loader: Option<CreateImageLoader>,
     linux: LinuxSettings,
+    windows: &WindowsSettings,
     force_fallback_adapter: bool,
 ) {
+    // Before any window, and before the toast activator is looked up under the process's ID.
+    System::set_identity(windows);
     let mut builder = EventLoop::builder();
     System::configure_event_loop(&mut builder);
     let event_loop = builder.build().expect("create winit event loop");
