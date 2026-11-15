@@ -6,9 +6,8 @@ use std::time::Instant;
 
 use objc2_quartz_core::CACurrentMediaTime;
 
-/// The moment `media_time`, on Core Animation's clock, is on the host's: a macOS display link's
-/// target time.
-#[cfg(any(target_os = "macos", test))]
+/// The moment `media_time`, on Core Animation's clock, is on the host's: a display link's target
+/// time.
 pub fn instant_of(media_time: f64) -> Instant {
     use std::time::Duration;
 

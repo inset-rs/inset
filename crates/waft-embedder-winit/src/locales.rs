@@ -2,7 +2,7 @@
 //! most preferred first, read as the app starts, and again when the system says it changed, which
 //! only macOS says (`system_changes.rs`).
 //!
-//! Every system lists them as language tags, which `sys_locale` reads: macOS and iOS their
+//! Every system lists them as language tags, which `sys_locale` reads: macOS its
 //! preferred languages, as `NSLocale.preferredLanguages` lists them, Windows the user's preferred
 //! UI languages, and the other systems the `LANGUAGE`, `LC_ALL`, `LC_MESSAGES` and `LANG`
 //! variables, which are what GLib reads for Flutter's Linux embedder.

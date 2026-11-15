@@ -5,7 +5,8 @@
 //! (`vsync_waiter`), the pointer (`pointer`), composition layers, a window's view's own among them,
 //! in its view's layer (`composition`, over the compositor iOS shares, `waft-embedder-apple`'s `composition`),
 //! whether a window is visible, for the app (`visibility`), the menus: the menu bar, pop-up menus,
-//! the Dock icon's menu and the status items (`menus`), work off the main thread (`work_queue`),
+//! the Dock icon's menu and the status items (`menus`), work off the main thread
+//! (`waft-embedder-apple`'s `work_queue`),
 //! what AppKit asks of the application through its delegate, how it quits and hiding it
 //! (`app_delegate`), what it says of the application's activation and visibility
 //! (`app_lifecycle`), and what it says changed about the screens and the user's languages
@@ -17,7 +18,7 @@
 //! on a panic by itself: the delegate methods the embedder adds, and dispatch2's wrapper of work on
 //! a queue. A method `define_class!` makes is `extern "C-unwind"`, so its body runs through
 //! [`abort_on_panic`]. Work on Grand Central Dispatch's worker threads is the one exception
-//! (`work_queue`).
+//! (`waft-embedder-apple`'s `work_queue`).
 
 // AppKit's selectors and view hierarchy need `unsafe`; this module and its children are
 // the one place in the embedder that writes it.
@@ -41,10 +42,7 @@ mod trackpad_touches;
 mod visibility;
 mod vsync_waiter;
 mod window_chrome;
-mod work_queue;
 
-use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::process;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -62,13 +60,21 @@ use winit::window::Window;
 
 use super::capabilities::{
     ApplicationIdentity, GpuInterop, ImageDecoding, OperatingSystem, StandardStreams,
-    SystemImageCodecs, SystemMedia, SystemNotifications, WindowGeometry,
+    SystemImageCodecs, SystemMedia, SystemNotifications, WindowGeometry, WorkQueue,
 };
 use crate::notifications::NotificationActivations;
-use waft_embedder_apple::{image_io_decoders, notifications};
+use waft_embedder_apple::{abort_on_panic, image_io_decoders, notifications};
 
 /// macOS, as AppKit answers. A type only: never made, its answers are associated functions.
 pub(crate) enum AppKit {}
+
+/// On Grand Central Dispatch's worker pool, which iOS shares (`waft-embedder-apple`'s
+/// `work_queue`).
+impl WorkQueue for AppKit {
+    fn run_off_main(work: Box<dyn FnOnce() + Send>) {
+        waft_embedder_apple::work_queue::run_off_main(work);
+    }
+}
 
 impl OperatingSystem for AppKit {
     const TARGET_PLATFORM: TargetPlatform = TargetPlatform::MacOS;
@@ -150,10 +156,4 @@ fn ns_view(window: &dyn Window) -> Option<Retained<NSView>> {
 
 fn ns_window(window: &dyn Window) -> Option<Retained<NSWindow>> {
     ns_view(window)?.window()
-}
-
-/// Runs `body`, the body of a method AppKit calls, and aborts the process if it panics, once the
-/// panic hook has printed the panic.
-fn abort_on_panic<R>(body: impl FnOnce() -> R) -> R {
-    catch_unwind(AssertUnwindSafe(body)).unwrap_or_else(|_| process::abort())
 }

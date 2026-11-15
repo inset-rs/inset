@@ -5,9 +5,6 @@
 //! A method `define_class!` makes may be unwound through, and the center's frames were never
 //! built to be: each body aborts the process on a panic, once the panic hook has printed it.
 
-use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::process;
-
 use block2::DynBlock;
 use objc2::rc::Retained;
 use objc2::runtime::NSObject;
@@ -21,6 +18,7 @@ use objc2_user_notifications::{
 use waft_embedder::NotificationActivation;
 
 use super::ActivationHandler;
+use crate::abort_on_panic;
 
 define_class!(
     // SAFETY: NSObject has no subclassing requirements, and `CenterDelegate` has no `Drop`.
@@ -113,10 +111,6 @@ fn activation_for(
         action: (!action.isEqualToString(clicked)).then(|| action.to_string()),
         reply,
     })
-}
-
-fn abort_on_panic<R>(body: impl FnOnce() -> R) -> R {
-    catch_unwind(AssertUnwindSafe(body)).unwrap_or_else(|_| process::abort())
 }
 
 #[cfg(test)]

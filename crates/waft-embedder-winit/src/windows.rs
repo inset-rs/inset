@@ -2,10 +2,9 @@
 //! share, and how a window and its view are made. The views themselves, a window's among them, are
 //! in the registry of views (`views.rs`).
 //!
-//! Where the system's window is the screen, the screen view is made when the app starts, before it
-//! has a window, as Flutter's engine adds it with empty metrics; its window opens at winit's first
-//! call, the first moment winit lets one be made. A desktop has no screen view. A view the app asks
-//! for is made with its window, on a turn of the loop: winit hands out its `ActiveEventLoop` only
+//! The app opens every window it has, its first included, as Flutter's multi-window apps do, and
+//! has no view until it asks. A view the app asks for is made with its window, on a turn of the
+//! loop: winit hands out its `ActiveEventLoop` only
 //! inside its calls, so the request goes to the loop as a command, and the window arrives through
 //! the future the request returned.
 //!
@@ -32,14 +31,12 @@ use crate::LinuxSettings;
 use crate::app_requests::AppRequests;
 use crate::gpu::LazyGpu;
 use crate::host_window::{WinitWindow, window_icon};
-use crate::os::capabilities::{
-    NativeComposition, OperatingSystem, SystemDrags, WindowChrome, WindowGeometry,
-};
+use crate::os::capabilities::{NativeComposition, SystemDrags, WindowChrome, WindowGeometry};
 use crate::os::{System, TrackpadTouchObserver, ViewLayer, VisibilityNotices, WindowHold};
 use crate::screens::screen_of;
 use crate::view::WinitView;
 use crate::view_host::WindowViewHost;
-use crate::views::{SCREEN_VIEW, Views};
+use crate::views::Views;
 
 /// A window with its view, as the registry answers it.
 #[derive(Clone)]
@@ -48,9 +45,8 @@ pub(crate) struct OpenWindow {
     pub(crate) view: Rc<WinitView>,
     /// The view's host, the window's: it takes the window's keys and input methods.
     pub(crate) host: Rc<WindowViewHost>,
-    /// The app's handle on a window it asked for, through which it closes it; the screen view's
-    /// window has none, and lasts as long as the app.
-    pub(crate) handle: Option<Rc<WinitWindow>>,
+    /// The app's handle on the window, through which it closes it.
+    pub(crate) handle: Rc<WinitWindow>,
 }
 
 /// A window just opened, holding a view that is yet to be added on the layer the window placed
@@ -89,7 +85,7 @@ struct WindowEntry {
     view: Rc<WinitView>,
     /// The view's host, which the window's code made with the view.
     host: Rc<WindowViewHost>,
-    handle: Option<Rc<WinitWindow>>,
+    handle: Rc<WinitWindow>,
 }
 
 /// What the embedder hears of one window from the system beyond winit's events, each kept until
@@ -187,14 +183,6 @@ pub(crate) struct RequestedWindow {
     pub initial_data: Option<String>,
 }
 
-/// The screen view's window, which opens at winit's first call: its configuration, and the view
-/// and its host, made with the app.
-pub(crate) struct ScreenWindow {
-    config: WindowConfig,
-    pub(crate) view: Rc<WinitView>,
-    host: Rc<WindowViewHost>,
-}
-
 /// Makes the windows' views, which share the one device they draw with, their hosts and their
 /// windows.
 pub(crate) struct ViewMaker {
@@ -213,19 +201,6 @@ impl ViewMaker {
             requests,
             linux,
         }
-    }
-
-    /// The screen view, with its host and its window to open, where the system's window is the
-    /// screen, as on iOS. A desktop has none: the app opens every window it has, as Flutter's
-    /// multi-window apps do.
-    pub(crate) fn make_screen_view(&self) -> Option<ScreenWindow> {
-        let config = System::WINDOW_IS_THE_SCREEN.then(WindowConfig::default)?;
-        let (view, host) = self.view(SCREEN_VIEW, &config);
-        Some(ScreenWindow {
-            config,
-            view: Rc::new(view),
-            host,
-        })
     }
 
     /// The window `window_request` asked for, with its view, numbered by `views`, carrying its
@@ -256,28 +231,7 @@ impl ViewMaker {
             window,
             view,
             host,
-            handle: Some(handle),
-        };
-        Ok(OpenedWindow {
-            open,
-            view_layer,
-            hold,
-        })
-    }
-
-    /// Opens the screen view's window, `screen`, holding the screen view.
-    pub(crate) fn open_screen_window(
-        &self,
-        event_loop: &dyn ActiveEventLoop,
-        screen: ScreenWindow,
-    ) -> Result<OpenedWindow, String> {
-        let window = self.open_window(event_loop, &screen.config)?;
-        let (view_layer, hold) = hold_view(&window, &screen.host);
-        let open = OpenWindow {
-            window,
-            view: screen.view,
-            host: screen.host,
-            handle: None,
+            handle,
         };
         Ok(OpenedWindow {
             open,
@@ -338,15 +292,14 @@ pub(crate) fn window_metrics(window: &dyn Window) -> ViewMetrics {
         padding,
         view_padding: padding,
         view_insets: ViewPadding::ZERO,
-        // Flutter's desktop and iOS embedders report no system gesture insets.
+        // Flutter's desktop embedders report no system gesture insets.
         system_gesture_insets: ViewPadding::ZERO,
         screen: screen_of(window),
     }
 }
 
 /// winit's attributes for a configuration, the system's own among them for this app's `linux`
-/// settings. What winit has no attribute for, the system's module applies after creation. A
-/// system whose window is the screen sizes it itself.
+/// settings. What winit has no attribute for, the system's module applies after creation.
 fn attributes_for(
     event_loop: &dyn ActiveEventLoop,
     config: &WindowConfig,
@@ -357,11 +310,8 @@ fn attributes_for(
         WindowLevel::AlwaysOnTop => winit::window::WindowLevel::AlwaysOnTop,
         WindowLevel::AlwaysOnBottom => winit::window::WindowLevel::AlwaysOnBottom,
     };
-    let mut attributes = WindowAttributes::default();
-    if !System::WINDOW_IS_THE_SCREEN {
-        attributes = attributes.with_surface_size(LogicalSize::new(config.size[0], config.size[1]));
-    }
-    attributes = attributes
+    let mut attributes = WindowAttributes::default()
+        .with_surface_size(LogicalSize::new(config.size[0], config.size[1]))
         .with_title(&config.title)
         .with_window_icon(window_icon(config.icon.as_ref()))
         .with_decorations(config.decorations)

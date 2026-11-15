@@ -24,10 +24,10 @@ use waft_embedder::{
     MediaAssetFuture, PlayerError, PlayerErrorKind, SeekTolerance, Size, VideoFrame,
 };
 
-use super::abort_on_panic;
 use super::drawn_frames::frame_of;
 use super::media_times::{cm_time_of, tolerance_time};
 use super::player_errors::error_of;
+use crate::abort_on_panic;
 use crate::answer::answer;
 
 /// `asset`'s picture at `time`, within `tolerance`, scaled down to fit `max_size` where given.

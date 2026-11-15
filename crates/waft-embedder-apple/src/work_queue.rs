@@ -8,18 +8,13 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use dispatch2::{DispatchQueue, DispatchQueueGlobalPriority, GlobalQueueIdentifier};
 
-use super::AppKit;
-use crate::os::capabilities::WorkQueue;
-
-impl WorkQueue for AppKit {
-    /// On the system's default-priority global queue: Grand Central Dispatch's worker pool,
-    /// which the system sizes and schedules with everything else on the machine.
-    fn run_off_main(work: Box<dyn FnOnce() + Send>) {
-        let queue = DispatchQueue::global_queue(GlobalQueueIdentifier::Priority(
-            DispatchQueueGlobalPriority::Default,
-        ));
-        queue.exec_async(catching_panic(work));
-    }
+/// Runs `work` on the system's default-priority global queue: Grand Central Dispatch's worker pool,
+/// which the system sizes and schedules with everything else on the machine.
+pub fn run_off_main(work: Box<dyn FnOnce() + Send>) {
+    let queue = DispatchQueue::global_queue(GlobalQueueIdentifier::Priority(
+        DispatchQueueGlobalPriority::Default,
+    ));
+    queue.exec_async(catching_panic(work));
 }
 
 /// `work`, with a panic in it caught and dropped. What the work held is dropped as the panic

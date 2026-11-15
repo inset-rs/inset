@@ -23,8 +23,8 @@ use objc2_core_media::CMTime;
 use objc2_foundation::{NSArray, NSAttributedString};
 use waft_embedder::Cue;
 
-use super::abort_on_panic;
 use super::cue_markup::cue_of;
+use crate::abort_on_panic;
 use crate::media_futures::Changes;
 
 /// The cues of a player item's legible output, as they come.

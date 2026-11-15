@@ -15,17 +15,17 @@ struct Shared<T> {
 }
 
 /// The system's side: given once, from any thread, or the dropped answer if dropped unused.
-pub(crate) struct Answer<T> {
+pub struct Answer<T> {
     shared: Arc<Mutex<Shared<T>>>,
     if_dropped: Option<T>,
 }
 
 /// The app's side: the future that resolves to the answer.
-pub(crate) struct Answered<T>(Arc<Mutex<Shared<T>>>);
+pub struct Answered<T>(Arc<Mutex<Shared<T>>>);
 
 /// An answer and the future awaiting it; `if_dropped` answers the future if the answer is dropped
 /// without being given.
-pub(crate) fn answer<T>(if_dropped: T) -> (Answer<T>, Answered<T>) {
+pub fn answer<T>(if_dropped: T) -> (Answer<T>, Answered<T>) {
     let shared = Arc::new(Mutex::new(Shared {
         answered: None,
         waiter: None,
@@ -40,7 +40,7 @@ pub(crate) fn answer<T>(if_dropped: T) -> (Answer<T>, Answered<T>) {
 }
 
 impl<T> Answer<T> {
-    pub(crate) fn give(mut self, answer: T) {
+    pub fn give(mut self, answer: T) {
         self.if_dropped = None;
         give(&self.shared, answer);
     }

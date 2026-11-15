@@ -277,16 +277,12 @@ impl Platform for WinitPlatform {
         Some(Arc::clone(&self.vsync_waiter))
     }
 
-    /// A window for the view, made on a turn of the main loop, where the app may open windows:
-    /// none on iOS.
+    /// A window for the view, made on a turn of the main loop.
     fn request_view(
         &self,
         config: WindowConfig,
         initial_data: Option<String>,
     ) -> Result<RequestId, ViewError> {
-        if !System::APP_MAY_OPEN_WINDOWS {
-            return Err(ViewError::Unsupported);
-        }
         let request_id = self.take_request_id();
         self.send(AppRequest::Window(WindowRequest::Open(Box::new(
             RequestedWindow {
@@ -336,7 +332,7 @@ impl Platform for WinitPlatform {
         images.import_texture(texture, false).ok()
     }
 
-    /// Metal's texture over the buffer's `IOSurface` on macOS and iOS (`waft-embedder-apple`'s `gpu_interop`),
+    /// Metal's texture over the buffer's `IOSurface` on macOS (`waft-embedder-apple`'s `gpu_interop`),
     /// and none elsewhere, where the host hands out no buffers.
     fn import_texture(
         &self,
@@ -346,7 +342,7 @@ impl Platform for WinitPlatform {
         System::import_texture(buffer, device)
     }
 
-    /// The allocator of the system's `IOSurface`s on macOS and iOS (`waft-embedder-apple`'s `hardware_buffers`).
+    /// The allocator of the system's `IOSurface`s on macOS (`waft-embedder-apple`'s `hardware_buffers`).
     fn hardware_buffer_allocator(&self) -> Option<Arc<dyn HardwareBufferAllocator>> {
         self.hardware_buffer_allocator.clone()
     }
@@ -400,7 +396,7 @@ impl Platform for WinitPlatform {
         self.video_frame_readers.as_deref()
     }
 
-    /// Media Accessibility's on macOS and iOS, and none elsewhere.
+    /// Media Accessibility's on macOS, and none elsewhere.
     fn caption_settings(&self) -> Option<&dyn CaptionSettings> {
         self.caption_settings.as_deref()
     }
@@ -411,7 +407,7 @@ impl Platform for WinitPlatform {
     }
 
     fn app_exit(&self) -> Option<&dyn AppExit> {
-        System::APP_MAY_QUIT.then_some(self)
+        Some(self)
     }
 
     fn opener(&self) -> Option<&dyn Opener> {

@@ -1,5 +1,6 @@
 //! The file dialogs: UIKit's `UIDocumentPickerViewController`, presented by the parent view's view
-//! controller, or the screen view's, answering the paths of the documents picked.
+//! controller, or that of a view in sight (`Views::presenter`), answering the paths of the
+//! documents picked.
 //!
 //! A document outside the app's sandbox is reached only while its security-scoped access lasts,
 //! between `startAccessingSecurityScopedResource` and its stop. A path carries no lifetime the app
@@ -16,7 +17,7 @@
 //! iOS shows no type's label and no confirming label of the app's. Every pick may be read and
 //! written, as the picker opens in place, so `writable` asks nothing more here.
 
-// UIKit's classes and the window's raw handle need `unsafe`; this module writes it for them.
+// UIKit's classes need `unsafe`; this module writes it for them.
 #![allow(unsafe_code)]
 
 use std::cell::RefCell;
@@ -28,30 +29,15 @@ use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send};
 use objc2_foundation::{NSArray, NSObject, NSObjectProtocol, NSString, NSURL};
-use objc2_ui_kit::{
-    UIDocumentPickerDelegate, UIDocumentPickerViewController, UIView, UIViewController,
-};
+use objc2_ui_kit::{UIDocumentPickerDelegate, UIDocumentPickerViewController};
 use objc2_uniform_type_identifiers::{UTType, UTTypeFolder, UTTypeItem};
 use waft_embedder::{
     FileDialogError, FileDialogFuture, FileDialogs, FileType, FolderOptions, OpenOptions,
     PickedFile, PickedFolder, SaveOptions, ViewId,
 };
-use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
-use winit::window::Window;
+use waft_embedder_apple::answer::{Answer, answer};
 
-use super::Ios;
-use crate::file_dialogs::{DialogAnswer, ParentWindows, dialog_answer};
-use crate::os::capabilities::SystemFileDialogs;
-
-impl SystemFileDialogs for Ios {
-    fn file_dialogs(windows: ParentWindows) -> Option<Rc<dyn FileDialogs>> {
-        let main_thread = MainThreadMarker::new()?;
-        Some(Rc::new(DocumentPickers {
-            main_thread,
-            windows,
-        }))
-    }
-}
+use crate::views::Views;
 
 thread_local! {
     /// The pickers' delegates until they answer, which UIKit holds only weakly. Main thread.
@@ -60,10 +46,26 @@ thread_local! {
     static ACCESSED: RefCell<Vec<Retained<NSURL>>> = RefCell::default();
 }
 
-/// UIKit's document pickers.
-struct DocumentPickers {
-    main_thread: MainThreadMarker,
-    windows: ParentWindows,
+/// UIKit's document pickers, presented from the app's views.
+pub(crate) struct DocumentPickers {
+    views: Rc<Views>,
+}
+
+impl DocumentPickers {
+    pub(crate) fn new(views: Rc<Views>) -> DocumentPickers {
+        DocumentPickers { views }
+    }
+}
+
+/// The system's side of a dialog's answer: given once, or a failure if dropped unused.
+type DialogAnswer<T> = Answer<Result<T, FileDialogError>>;
+
+/// A dialog's answer: what the system gives, and the future the app awaits.
+fn dialog_answer<T: Send + 'static>() -> (DialogAnswer<T>, FileDialogFuture<T>) {
+    let (answer, answered) = answer(Err(FileDialogError::Failed(
+        "the dialog closed without an answer".to_owned(),
+    )));
+    (answer, Box::pin(answered))
 }
 
 impl FileDialogs for DocumentPickers {
@@ -123,8 +125,11 @@ impl FileDialogs for DocumentPickers {
         let Some(url) = NSURL::from_file_path(&file) else {
             return failed(format!("no URL for {}", file.display()));
         };
+        let Some(main_thread) = MainThreadMarker::new() else {
+            return failed("a save asked off the main thread".to_owned());
+        };
         let picker = UIDocumentPickerViewController::initForExportingURLs_asCopy(
-            self.main_thread.alloc(),
+            main_thread.alloc(),
             &NSArray::from_retained_slice(&[url]),
             false,
         );
@@ -148,8 +153,11 @@ impl DocumentPickers {
         initial_folder: &Option<PathBuf>,
         multiple: bool,
     ) -> FileDialogFuture<Vec<PathBuf>> {
+        let Some(main_thread) = MainThreadMarker::new() else {
+            return failed("a pick asked off the main thread".to_owned());
+        };
         let picker = UIDocumentPickerViewController::initForOpeningContentTypes_asCopy(
-            self.main_thread.alloc(),
+            main_thread.alloc(),
             types,
             false,
         );
@@ -160,22 +168,18 @@ impl DocumentPickers {
         self.present(parent, &picker)
     }
 
-    /// Presents `picker` from `parent`'s view controller, or the screen view's, and answers the
-    /// paths picked, none if the user cancelled.
+    /// Presents `picker` from `parent`'s view controller, or that of a view in sight, and answers
+    /// the paths picked, none if the user cancelled.
     fn present(
         &self,
         parent: Option<ViewId>,
         picker: &UIDocumentPickerViewController,
     ) -> FileDialogFuture<Vec<PathBuf>> {
-        let window = self
-            .windows
-            .window(parent)
-            .or_else(|| self.windows.first_window());
-        let Some(presenter) = window.and_then(|window| view_controller(&*window)) else {
+        let Some(presenter) = self.views.presenter(parent) else {
             return failed("no view controller to present the picker from".to_owned());
         };
         let (answer, answered) = dialog_answer();
-        let delegate = PickerDelegate::new(self.main_thread, answer);
+        let delegate = PickerDelegate::new(presenter.mtm(), answer);
         picker.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
         ANSWERING.with_borrow_mut(|answering| answering.push(delegate));
         presenter.presentViewController_animated_completion(picker, true, None);
@@ -222,20 +226,6 @@ fn empty_file(name: Option<&str>) -> std::io::Result<PathBuf> {
     let file = folder.join(name.filter(|name| !name.is_empty()).unwrap_or("Untitled"));
     std::fs::write(&file, [])?;
     Ok(file)
-}
-
-/// The view controller of `window`'s view: winit's own, or its window's root.
-pub(super) fn view_controller(window: &dyn Window) -> Option<Retained<UIViewController>> {
-    let RawWindowHandle::UiKit(uikit) = window.window_handle().ok()?.as_raw() else {
-        return None;
-    };
-    if let Some(controller) = uikit.ui_view_controller {
-        // SAFETY: winit's view controller of a live window, on the main thread.
-        return unsafe { Retained::retain(controller.cast::<UIViewController>().as_ptr()) };
-    }
-    // SAFETY: winit's view of a live window, on the main thread.
-    let view = unsafe { Retained::retain(uikit.ui_view.cast::<UIView>().as_ptr()) }?;
-    view.window()?.rootViewController()
 }
 
 /// Where a picker's answer goes.

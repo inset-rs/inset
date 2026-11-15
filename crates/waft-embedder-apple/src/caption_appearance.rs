@@ -38,7 +38,8 @@ use waft_embedder::{
     ColorSpace, CueTextEdge, MediaChangeFuture,
 };
 
-use super::media::{abort_on_panic, as_ns_string};
+use super::media::as_ns_string;
+use crate::abort_on_panic;
 use crate::media_futures::Changes;
 
 const USER: MACaptionAppearanceDomain = MACaptionAppearanceDomain::User;

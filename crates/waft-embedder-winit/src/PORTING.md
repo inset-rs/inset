@@ -8,8 +8,6 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 - lifecycle.rs, os/macos/app_lifecycle.rs → the macOS embedder's lifecycle states (`FlutterEngine`)
 - os/macos/app_delegate.rs, quitting → the macOS embedder's `FlutterAppDelegate`, which asks the framework before the app quits
 - launch.rs, os/macos/event_loop.rs → a Flutter macOS app's launch, which comes forward or stays behind as macOS launched it
-- launch.rs, main_loop/ → the engine's start (`Shell` adds the implicit view with empty metrics): where the system's window is the screen, the app starts with the screen view at no size, and its window and surface come after
-- platform.rs, views.rs, main_loop/windows.rs → the embedders' implicit view, here the screen view, which the framework never hears added or removed: the app has it from its start, and has no handle to close its window
 - views.rs, main_loop/views.rs, main_loop/windows.rs → the embedder API's `AddView`, `SendWindowMetricsEvent` and `RemoveView`, which a window's code calls for its view as the window opens, resizes or changes screen, and closes
 - platform.rs, app_requests.rs, main_loop/views.rs → the embedder API's `AddView`, `SendWindowMetricsEvent`, `RemoveView`, `SendPointerEvent` and `SendViewFocusEvent` for a view the app adds on a composition layer of its own, through the view embedder macOS gives, served on a turn of the loop by the calls a window's code makes for its view
 - main_loop/windows.rs → the engine's window close request, which goes to the framework and closes nothing until the framework closes the window
@@ -21,7 +19,7 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 
 ## lib.rs / main_loop/
 
-- Change: the app's metrics, sight and removal of a view are refused for a view it did not add, the screen view or a window's, and the first refusal is printed, where Flutter's embedder API takes them for any view.
+- Change: the app's metrics, sight and removal of a view are refused for a view it did not add, a window's, and the first refusal is printed, where Flutter's embedder API takes them for any view.
   Reason: platform — a window's view takes its size, its sight and its end from its window, which the host holds.
   Affect: an app that resizes or removes a window's view sees nothing change.
 
@@ -40,10 +38,6 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 - Change: on macOS a panic inside a call from AppKit aborts the process once the panic hook has printed it.
   Reason: platform — a panic cannot unwind through AppKit's frames.
   Affect: such a panic ends the process rather than coming out of `run`.
-
-- Change: on iOS the views keep their surfaces for the app's life, and their frames are held in the background, where Flutter's iOS embedder lets its surface go when the app enters the background and makes it again as it comes to the foreground.
-  Reason: platform — winit gives the surfaces at `can_create_surfaces` and takes them at `destroy_surfaces`, which it calls on iOS at launch alone, and reports the background as every window occluded.
-  Affect: an app in the background draws nothing but keeps its surface's memory, and one that is inactive but in sight, under the Control Center, goes on drawing, as Flutter's does.
 
 ## frame_scheduler.rs / vsync_source.rs / vsync_waiter.rs / os/macos/vsync_waiter.rs
 
@@ -65,7 +59,7 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — `NSScreen` answers the rate itself from macOS 12, with no display link to make.
   Affect: a screen that varies its rate reports the fastest, and before macOS 12 a screen reports none.
 
-- Change: on Windows, Linux and iOS the screens are winit's monitors, listed through the app's first window, numbered in the order first seen, with no visible frame of their own and no notice when they change, where Flutter's Windows embedder lists `HMONITOR`s again at `WM_DISPLAYCHANGE` and its iOS embedder reports the main screen alone.
+- Change: on Windows and Linux the screens are winit's monitors, listed through the app's first window, numbered in the order first seen, with no visible frame of their own and no notice when they change, where Flutter's Windows embedder lists `HMONITOR`s again at `WM_DISPLAYCHANGE`.
   Reason: platform — winit lists monitors only through a window or inside its own calls, gives them no number, knows no taskbar, and reports no monitor coming or going.
   Affect: an app there has no screens until its first window opens, which it hears as that view coming; a visible frame includes the taskbar; a monitor plugged in shows in the list the next time it is read, and a window moved onto it is reported as a metrics change.
 
@@ -119,26 +113,18 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — winit has one cursor per window where Flutter's engine maps cursor kinds per embedder.
   Affect: a `MouseRegion` cursor shows on hover, the device id is ignored (one mouse), and an unsupported kind is silently the arrow.
 
-## clipboard/, os/macos/pasteboard/, os/ios/pasteboard/
+## clipboard/, os/macos/pasteboard/
 
 - Change: on macOS the clipboard is the general pasteboard, its items in every type it carries, given or promised, files and promised files, a promised file written at the receiver's URL as its producer makes its bytes and removed when it fails, a sensitive copy marked concealed, one for this device only written for this host only, and one that expires cleared by the embedder; elsewhere it is plain text through arboard, every other form refused.
   Reason: platform — Flutter's desktop engines carry plain text over the platform channel, and winit owns no clipboard, so the embedder reaches each system's itself.
   Affect: on macOS an app copies and pastes images, HTML and files with other apps, and on Windows and Linux text alone.
 
-- Change: on iOS the clipboard is UIKit's general pasteboard, its items in every type it carries, a copy with every form given written whole, and one with a promised form or file written as item providers, a promised file written by its producer into a temporary file the provider hands over, one for this device only written local only, and one that expires carrying its expiration date.
-  Reason: platform — Flutter's iOS engine carries plain text over the platform channel, and arboard has no iOS code.
-  Affect: an iOS app copies and pastes images, HTML and files with other apps, and its expired copy is cleared by the system after the app has quit too.
-
-- Change: on iOS listing the pasteboard reads only its types, and a read loads the form through the item's provider, off the main thread.
-  Reason: platform — iOS shows its paste alert when an app reads another app's content, and the app's own promised form is produced on the main thread.
-  Affect: the alert shows when the app reads, never when it lists, and a read of the app's own promise never stalls it.
-
 - Change: on Windows and Linux a sensitive copy is kept out of the clipboard's history, and on Windows out of its monitoring, a copy for this device only is kept off Windows' cloud clipboard, and one that expires is cleared by the main loop, which wakes for it as it wakes for the app's timers.
   Reason: platform — arboard carries those of the options the systems have, and neither system has an expiry of its own.
   Affect: a password copied stays out of Windows' clipboard history, and a copy whose app quits before its time stays on the clipboard.
 
-- Change: the app hears the clipboard changed when it becomes active and when one of its windows takes the focus, if another writer moved the system's count of changes (on Linux, changed the text), when iOS says the pasteboard changed, and when a copy of its own expired and was cleared.
-  Reason: platform — no desktop system tells an application that another one wrote the clipboard, and iOS tells only an app that is active.
+- Change: the app hears the clipboard changed when it becomes active and when one of its windows takes the focus, if another writer moved the system's count of changes (on Linux, changed the text), and when a copy of its own expired and was cleared.
+  Reason: platform — no desktop system tells an application that another one wrote the clipboard.
   Affect: a toolbar's Paste button follows a copy made in another app once the user comes back to this one.
 
 - Change: on macOS a promised form is produced while the paste waits, on the main thread, for up to ten seconds.
@@ -199,7 +185,7 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — AppKit offers a window only the drags that hold a type it is registered for.
   Affect: a drag holding only a link, rich text or a promised file reaches the app, and a promised file is written when its URI list is read.
 
-## system_requests.rs / launch.rs / os/macos/app_delegate.rs / os/ios/open_requests.rs → the macOS embedder's `FlutterAppDelegate`, iOS's `FlutterAppDelegate` and `FlutterSceneDelegate`
+## system_requests.rs / launch.rs / os/macos/app_delegate.rs → the macOS embedder's `FlutterAppDelegate`
 
 - Change: the files and links the system asks the app to open reach the client as `EmbedderClient::open_requested`, and a reopen, such as a click on the Dock icon, the handler the app sets through `WinitPlatform::macos`, where a Flutter app answers them in its own application delegate: macOS's `application:openURLs:`, a file URL as a path and any other as a link, at launch and while the app runs.
   Reason: platform — the embedder's own application delegate answers AppKit, as winit leaves the delegate to it, so an app writes none.
@@ -208,10 +194,6 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 - Change: on Windows and Linux the embedder reads no launch arguments: the app reads its own command line, as a Flutter app does in `main`, and hands what it decides are files to `App::open_requested`.
   Reason: platform — the system starts the app with strings on its command line, and which of them are files the app chose when it registered its file types; Windows and Linux start a new process with what it opens, so a running app hears a later launch only through `waft-single-instance`.
   Affect: an app's own words on its command line, such as a subcommand, are never taken for files to open.
-
-- Change: on iOS a link or a file opened with the app comes through the application delegate's `application:openURL:options:`, where Flutter's scene-based apps hear `scene:openURLContexts:`; the launch's URL is read from the launch options when the application finishes launching, and a delegate of the embedder's is set then. A file URL's security-scoped access starts as it arrives and is kept for the app's life, as a picked document's is.
-  Reason: platform — winit gives `UIApplicationMain` no delegate class and runs no scenes, so the scene delegate's calls never come; the application delegate's are what UIKit sends an app without scenes.
-  Affect: an app opened with a file or a link on iOS hears it as on every other system; once winit runs scenes, the delegate's calls move to the scene's.
 
 ## menus/, popup_menus.rs, main_loop/menus.rs, os/macos/menus/, os/windows/menus/, os/linux/status_notifier_items/ → the macOS embedder's `FlutterMenuPlugin`, and the system menus Flutter does not reach
 
@@ -247,7 +229,7 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — the desktop draws a StatusNotifierItem's menu and decides when to open it, and Linux's toolkits draw their own menus at a point.
   Affect: a click reaches the app as the desktop reports it, `Activate`, `SecondaryActivate`, `ContextMenu` or a vertical scroll, at the desktop's position, which Wayland often leaves at zero.
 
-## file_dialogs.rs, os/*/file_dialogs.rs → `file_selector`'s macOS, Windows, Linux and iOS implementations
+## file_dialogs.rs, os/*/file_dialogs.rs → `file_selector`'s macOS, Windows and Linux implementations
 
 - Change: on macOS the dialogs are `NSOpenPanel` and `NSSavePanel`, begun without blocking, as a sheet on the parent view's window where there is one, as `file_selector_macos` shows them; a type's extensions and MIME types become the uniform types the panel enables, with no label, since a label needs an accessory view.
   Reason: platform — a sheet keeps the dialog with its window and the app's loop running.
@@ -260,10 +242,6 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 - Change: on Linux the dialogs are the desktop portal's `FileChooser` over the session bus, asked from a thread of its own that waits for the portal's `Response`, answering its `file://` URIs as paths; the dialogs are `None` where the bus has no portal, running or activatable. A dialog is modal to its parent on X11 only, since naming a Wayland window would need it exported, which winit does not.
   Reason: platform — the portal is the desktop's own dialog, on GNOME, KDE and in a Flatpak alike, without linking GTK or Qt.
   Affect: the dialog is the desktop's, and on Wayland it stands apart from its window.
-
-- Change: on iOS the dialogs are `UIDocumentPickerViewController`, presented by the parent view's view controller or the screen view's, opening in place; each picked URL's security-scoped access starts when it is answered and is kept for the app's life, since a path carries no lifetime to end it by. A save makes an empty file under the suggested name in a folder of its own in the temporary folder and has the picker export it, answering the file where the user put it.
-  Reason: platform — iOS has no dialog that answers a file yet to be written, and a picked document outside the sandbox is reached only while its access lasts.
-  Affect: a picked path stays readable and writable until the app quits; an app picking without end would run out of the kernel's sandbox extensions.
 
 ## os/*/opener.rs, os/linux/portal.rs → `url_launcher`'s and Electron's `shell` implementations
 
@@ -278,10 +256,6 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 - Change: on Linux the opener is the desktop portal's `OpenURI`, over the session bus, as the file dialogs are: `OpenURI` for a link, `OpenFile` for a file and `OpenDirectory` to reveal one, each handed the file's descriptor and asked from a thread of its own that waits for the portal's `Response`; `can_open_link` is `None`, since the portal never says; the opener is `None` where the bus has no portal.
   Reason: platform — the portal is the desktop's own way, in a Flatpak too, and reveals a file the way its file manager does.
   Affect: the user may be asked to choose an app, and a choice cancelled answers a failure.
-
-- Change: on iOS the opener is `UIApplication`'s `openURL:options:completionHandler:` for a link, its `false` being no app, and `UIDocumentInteractionController`'s Open In menu for a file, presented from the first window's view controller, its `false` being no app; revealing fails, and `can_open_link` asks `canOpenURL:` only for a scheme the app's `LSApplicationQueriesSchemes` declares, `None` for another.
-  Reason: platform — iOS shares a file with another app only through a controller the user chooses the app in, and answers `canOpenURL:` falsely for a scheme the app did not declare.
-  Affect: opening a file on iOS shows the user the apps that take it.
 
 ## notifications.rs, os/*/notifications, `waft-embedder-apple`'s notifications/ → `flutter_local_notifications`' macOS, iOS, Windows and Linux implementations
 
@@ -355,7 +329,7 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 
 ## Deferred
 
-- The lifecycle state on iOS, Windows and Linux, where the framework hears none. Trigger: an app there that must pause in the background.
+- The lifecycle state on Windows and Linux, where the framework hears none. Trigger: an app there that must pause in the background.
 - The fallback languages Flutter's Windows and Linux embedders add after the user's: Windows's own (`MUI_UI_FALLBACK`), and GLib's, such as `en` after `en_US`, and `C`. Trigger: an app whose locale resolution needs a fallback the user did not set.
 - Hearing the user's languages change on Windows (`WM_SETTINGCHANGE`), which winit does not report and Flutter's Windows embedder does not hear either. Trigger: an app there that must follow a change without a restart.
 - Letting a logout or shutdown go on once the app agrees, through `NSTerminateLater`: the delegate cancels it at once, as Flutter's does, so an Waft app stops every logout. Trigger: an app that must not stop a logout it agrees to; AppKit's loop while it waits needs an experiment first.

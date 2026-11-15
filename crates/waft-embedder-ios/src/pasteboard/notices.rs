@@ -1,12 +1,11 @@
-//! UIKit's notices that have the main loop look at the pasteboard: that the pasteboard changed,
-//! which UIKit posts while the app is active, and that the application became active, which
-//! winit does not report on iOS.
+//! UIKit's notice that the pasteboard changed, which it posts while the app is active, and which has
+//! the host look at the pasteboard; the host looks again as a scene becomes active (`host.rs`).
 
 use objc2::rc::Retained;
 use objc2::runtime::NSObject;
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
 use objc2_foundation::{NSNotification, NSNotificationCenter, NSObjectProtocol};
-use objc2_ui_kit::{UIApplicationDidBecomeActiveNotification, UIPasteboardChangedNotification};
+use objc2_ui_kit::UIPasteboardChangedNotification;
 
 /// The notices heard, until this is dropped.
 pub(super) struct Notices {
@@ -14,30 +13,20 @@ pub(super) struct Notices {
 }
 
 impl Notices {
-    /// Calls `look` at each of the notices, on the main thread, from UIKit's posting, so `look`
-    /// must only queue.
+    /// Calls `look` at each notice, on the main thread, from UIKit's posting.
     pub(super) fn observe(main_thread: MainThreadMarker, look: Box<dyn Fn()>) -> Notices {
         let observer = NoticeObserver::new(main_thread, look);
         let center = NSNotificationCenter::defaultCenter();
-        // SAFETY: the names are constants UIKit exports for the life of the process.
-        let names = unsafe {
-            [
-                UIPasteboardChangedNotification,
-                UIApplicationDidBecomeActiveNotification,
-            ]
-        };
-        for name in names {
-            // SAFETY: `pasteboardMayHaveChanged:` is defined on `NoticeObserver` below with the
-            // one-argument signature a notice is sent with, and `Drop` removes the observer before
-            // it goes.
-            unsafe {
-                center.addObserver_selector_name_object(
-                    &observer,
-                    sel!(pasteboardMayHaveChanged:),
-                    Some(name),
-                    None,
-                );
-            }
+        // SAFETY: `pasteboardMayHaveChanged:` is defined on `NoticeObserver` below with the
+        // one-argument signature a notice is sent with, and `Drop` removes the observer before it
+        // goes; the name is a constant UIKit exports for the life of the process.
+        unsafe {
+            center.addObserver_selector_name_object(
+                &observer,
+                sel!(pasteboardMayHaveChanged:),
+                Some(UIPasteboardChangedNotification),
+                None,
+            );
         }
         Notices { observer }
     }

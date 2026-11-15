@@ -49,8 +49,6 @@ mod player_errors;
 mod tracks;
 mod video_frame;
 
-use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::process;
 use std::rc::Rc;
 
 use objc2::MainThreadMarker;
@@ -92,11 +90,4 @@ pub(crate) fn as_ns_string(
     let pointer: *const objc2_core_foundation::CFString = string;
     // SAFETY: a CFString is an NSString.
     unsafe { &*pointer.cast::<objc2_foundation::NSString>() }
-}
-
-/// Runs `body`, the body of a method AVFoundation calls, and aborts the process if it panics,
-/// once the panic hook has printed the panic: AVFoundation's frames were never built to be
-/// unwound.
-pub(crate) fn abort_on_panic<R>(body: impl FnOnce() -> R) -> R {
-    catch_unwind(AssertUnwindSafe(body)).unwrap_or_else(|_| process::abort())
 }

@@ -51,7 +51,6 @@
 mod buffers;
 mod layer_geometry;
 mod placed;
-#[cfg(target_os = "macos")]
 mod view_layer;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -73,7 +72,6 @@ use layer_geometry::{ClipShape, LayerGeometry};
 use placed::PlacedLayers;
 
 pub use placed::SceneLayers;
-#[cfg(target_os = "macos")]
 pub use view_layer::CoreAnimationViewLayer;
 
 const HELD_BRIEFLY: &str = "a layer's state is never held across a panic";
@@ -97,7 +95,6 @@ enum Placer {
     Layer(u64),
     #[cfg(target_os = "macos")]
     App,
-    #[cfg(target_os = "macos")]
     Window,
 }
 
@@ -438,12 +435,11 @@ pub fn place_layer_in(
     place_on_top(parent, &layer, placement, scale, Placer::App);
 }
 
-/// Places `layer` in `parent`, the layer of a window's view, filling the bounds AppKit gives it, at
-/// `scale` pixels to its point: how a window places the layer its view draws into. The rectangle is
-/// in the view's logical pixels under a transform by `scale`, as a scene's root places what it
-/// draws, so the layer's content is in the view's logical pixels, as `parent` is. A layer no
+/// Places `layer` in `parent`, the layer of a window's view, filling the bounds AppKit or UIKit
+/// gives it, at `scale` pixels to its point: how a window places the layer its view draws into. The
+/// rectangle is in the view's logical pixels under a transform by `scale`, as a scene's root places
+/// what it draws, so the layer's content is in the view's logical pixels, as `parent` is. A layer no
 /// compositor of this host made, or one another placer holds, shows nothing. Main thread.
-#[cfg(target_os = "macos")]
 pub fn place_filling(parent: &CALayer, layer: &Arc<dyn CompositionLayer>, scale: f64) {
     let Some(layer) = CoreAnimationLayer::downcast_from(layer) else {
         placed::report_foreign_layer();
@@ -467,7 +463,6 @@ pub fn place_filling(parent: &CALayer, layer: &Arc<dyn CompositionLayer>, scale:
 /// Places `layer` in `parent`, a `CALayer` outside every composition layer, above its sublayers,
 /// where `placement` says, in pixels `scale` of which make one of `parent`'s points, if `placer`
 /// holds it or nothing does. Main thread.
-#[cfg(target_os = "macos")]
 fn place_on_top(
     parent: &CALayer,
     layer: &CoreAnimationLayer,
@@ -522,7 +517,6 @@ fn is_sublayer_at(parent: &CALayer, layer: &CALayer, index: u32) -> bool {
 
 /// Where `layer` lies among `parent`'s sublayers, or past the last when it is not one: what
 /// keeps a layer the app places above the sublayers it had.
-#[cfg(target_os = "macos")]
 fn index_on_top(parent: &CALayer, layer: &CALayer) -> u32 {
     // SAFETY: as in `is_sublayer_at`, on the main thread.
     let Some(sublayers) = (unsafe { parent.sublayers() }) else {

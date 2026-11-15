@@ -1,6 +1,6 @@
 [package]
 name = "waft-embedder-winit"
-description = "Native winit host for Waft"
+description = "Desktop winit host for Waft"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -32,7 +32,7 @@ sys-locale = "0.3"
 
 
 # The clipboard's plain text where the embedder has no system code of its own for one.
-[target.'cfg(not(any(target_os = "macos", target_os = "ios")))'.dependencies]
+[target.'cfg(not(target_os = "macos"))'.dependencies]
 arboard.workspace = true
 
 # The clipboard's sequence number, menus at a point, icons in the notification area, opening
@@ -68,8 +68,8 @@ wayland-protocols = { version = "0.32", features = ["client", "staging", "unstab
 libloading = "0.8"
 libc = "0.2"
 
-[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
-# What macOS shares with iOS's host: the compositor, buffers, media, codecs and notifications.
+[target.'cfg(target_os = "macos")'.dependencies]
+# What macOS shares with the iOS host: the compositor, buffers, media, codecs and notifications.
 waft-embedder-apple = { workspace = true, default-features = false }
 # The pasteboards' completion handlers and load handlers, and the main queue the app's futures run
 # on for them.
@@ -79,17 +79,10 @@ objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSString", "NSObject", "NSGeometry", "NSArray", "NSAttributedString", "NSBundle", "NSCalendar", "NSData", "NSDate", "NSDictionary", "NSError", "NSSet", "NSIndexSet", "NSItemProvider", "NSKeyValueObserving", "NSLocale", "NSNotification", "NSOperation", "NSProgress", "NSPropertyList", "NSRange", "NSRunLoop", "NSURL", "NSValue", "NSProcessInfo", "NSTimeZone", "NSUserDefaults", "block2"] }
 # The UTI a pasteboard names a MIME type by.
 objc2-uniform-type-identifiers = { version = "0.3", features = ["UTType", "UTCoreTypes"] }
-# The layer of winit's view, which a view's drawing and its composition layers are placed in.
-objc2-quartz-core = { version = "0.3", features = ["CALayer"] }
-
-[target.'cfg(target_os = "ios")'.dependencies]
-# The general pasteboard, and the notices that it changed or the application became active.
-objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-quartz-core", "objc2-uniform-type-identifiers", "UIPasteboard", "UIApplication", "objc2-core-foundation", "UIDocumentInteractionController", "UIDocumentPickerViewController", "UIResponder", "UIView", "UIViewController", "UIWindow"] }
-
-[target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSMenu", "NSMenuItem", "NSEvent", "NSGraphicsContext", "NSView", "NSCell", "NSResponder", "NSWindow", "NSScreen", "NSAnimation", "NSAnimationContext", "NSVisualEffectView", "NSGlassEffectView", "NSGraphics", "NSTrackingArea", "NSPasteboard", "NSPasteboardItem", "NSFilePromiseProvider", "NSFilePromiseReceiver", "NSOpenPanel", "NSSavePanel", "NSWorkspace", "objc2-uniform-type-identifiers", "NSTouch", "NSStatusBar", "NSStatusItem", "NSStatusBarButton", "NSButton", "NSControl", "NSImage", "NSImageRep", "NSBitmapImageRep", "NSButtonCell", "NSActionCell", "NSColorSpace", "block2", "objc2-quartz-core"] }
-# The display links' timing, and the `CAMetalLayer` a view draws into.
-objc2-quartz-core = { version = "0.3", features = ["CAMediaTimingFunction", "CADisplayLink", "CAMetalLayer"] }
+# The display links' timing, the `CAMetalLayer` a view draws into, and the layer of winit's view,
+# which a view's drawing and its composition layers are placed in.
+objc2-quartz-core = { version = "0.3", features = ["CALayer", "CAMediaTimingFunction", "CADisplayLink", "CAMetalLayer"] }
 
 # Each test is a program of its own, without the test harness, which runs every test on a thread
 # it spawns: winit makes AppKit's event loop on the main thread only, once per process, and a
@@ -177,21 +170,16 @@ waft-embedder-winit = { path = ".", features = ["test-support"] }
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSResponder", "NSWindow", "NSView", "NSMenu", "NSMenuItem", "NSEvent", "block2", "objc2-quartz-core"] }
-objc2-foundation = { version = "0.3", features = ["NSArray", "NSString", "NSGeometry"] }
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSDate", "NSGeometry", "NSRunLoop", "NSString"] }
 objc2-quartz-core = { version = "0.3", features = ["CALayer", "CAMetalLayer", "objc2-metal"] }
-
 # What the media tests ask of the system that the host offers no call for: serving the main run
 # loop, and reading a frame's pixel buffer.
-[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dev-dependencies]
-objc2-foundation = { version = "0.3", features = ["NSDate", "NSRunLoop", "NSString"] }
 objc2-core-foundation = { version = "0.3", features = ["CFCGTypes"] }
 objc2-core-video = { version = "0.3", default-features = false, features = ["std", "objc2-io-surface", "CVBuffer", "CVImageBuffer", "CVPixelBuffer", "CVPixelBufferIOSurface"] }
 
-# AppKit's selectors and view hierarchy, UIKit's pasteboard, document picker and view, Core
-# Animation's layers, and Win32 and COM, the toast activator's included, need `unsafe`, which the
-# workspace forbids; here it is denied instead, and `os/macos`, `os/ios/pasteboard`,
-# `os/ios/file_dialogs`, `os/ios/opener`, `os/ios/open_requests`, `os/ios/composition`,
-# `os/windows`, `os/linux/wayland` and `os/linux/dmabuf` (libwayland's proxies, GBM, DRM and dma-buf
-# ioctls) and the tests' AppKit support, for a local event monitor, alone allow it.
+# AppKit's selectors and view hierarchy, Core Animation's layers, and Win32 and COM, the toast
+# activator's included, need `unsafe`, which the workspace forbids; here it is denied instead, and
+# `os/macos`, `os/windows`, `os/linux/wayland` and `os/linux/dmabuf` (libwayland's proxies, GBM,
+# DRM and dma-buf ioctls) and the tests' AppKit support, for a local event monitor, alone allow it.
 [lints.rust]
 unsafe_code = "deny"

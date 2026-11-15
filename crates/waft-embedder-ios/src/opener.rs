@@ -1,6 +1,6 @@
 //! Opening: UIKit's. A link opens in the app that handles its scheme (`openURL:options:`), and a
 //! file through the system's Open In menu, which lists the apps that open its kind
-//! (`UIDocumentInteractionController`), from the screen view's window. iOS has no file manager to
+//! (`UIDocumentInteractionController`), from a view in sight (`Views::presenter`). iOS has no file manager to
 //! reveal a file in, so a reveal fails. Whether some app opens a link is asked only for a scheme
 //! the app declared (`LSApplicationQueriesSchemes`), as iOS answers no other; the rest is `None`.
 
@@ -12,28 +12,16 @@ use std::path::Path;
 use std::rc::Rc;
 
 use block2::RcBlock;
-use objc2::MainThreadMarker;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Bool};
+use objc2::{MainThreadMarker, MainThreadOnly};
 use objc2_foundation::{NSArray, NSBundle, NSDictionary, NSPoint, NSRect, NSSize, NSString, NSURL};
 use objc2_ui_kit::{UIApplication, UIDocumentInteractionController};
 use waft_embedder::{OpenError, OpenFuture, Opener};
 
-use super::Ios;
-use super::file_dialogs::view_controller;
-use crate::answer::answer;
-use crate::file_dialogs::ParentWindows;
-use crate::os::capabilities::SystemOpener;
+use waft_embedder_apple::answer::answer;
 
-impl SystemOpener for Ios {
-    fn opener(windows: ParentWindows) -> Option<Rc<dyn Opener>> {
-        let main_thread = MainThreadMarker::new()?;
-        Some(Rc::new(UiKitOpener {
-            main_thread,
-            windows,
-        }))
-    }
-}
+use crate::views::Views;
 
 thread_local! {
     /// The last Open In menu's controller, kept while its menu may show. Main thread.
@@ -41,10 +29,15 @@ thread_local! {
         const { RefCell::new(None) };
 }
 
-/// UIKit's opener.
-struct UiKitOpener {
-    main_thread: MainThreadMarker,
-    windows: ParentWindows,
+/// UIKit's opener, which shows its menus from the app's views.
+pub(crate) struct UiKitOpener {
+    views: Rc<Views>,
+}
+
+impl UiKitOpener {
+    pub(crate) fn new(views: Rc<Views>) -> UiKitOpener {
+        UiKitOpener { views }
+    }
 }
 
 impl Opener for UiKitOpener {
@@ -65,10 +58,13 @@ impl Opener for UiKitOpener {
                 });
             }
         });
+        let Some(main_thread) = MainThreadMarker::new() else {
+            return failed(format!("{link} asked to open off the main thread"));
+        };
         let options: Retained<NSDictionary<NSString, AnyObject>> = NSDictionary::new();
         // SAFETY: an empty dictionary of the options' type, and a completion UIKit calls once.
         unsafe {
-            UIApplication::sharedApplication(self.main_thread).openURL_options_completionHandler(
+            UIApplication::sharedApplication(main_thread).openURL_options_completionHandler(
                 &url,
                 &options,
                 Some(&completion),
@@ -84,18 +80,14 @@ impl Opener for UiKitOpener {
         let Some(url) = NSURL::from_file_path(path) else {
             return failed(format!("{} has no URL", path.display()));
         };
-        let Some(presenter) = self
-            .windows
-            .first_window()
-            .and_then(|window| view_controller(&*window))
-        else {
+        let Some(presenter) = self.views.presenter(None) else {
             return failed("no view to show the Open In menu from".to_owned());
         };
         let Some(view) = presenter.view() else {
             return failed("no view to show the Open In menu from".to_owned());
         };
         let controller =
-            UIDocumentInteractionController::interactionControllerWithURL(&url, self.main_thread);
+            UIDocumentInteractionController::interactionControllerWithURL(&url, presenter.mtm());
         let bounds = view.bounds();
         let centre = NSRect::new(
             NSPoint::new(bounds.size.width / 2.0, bounds.size.height / 2.0),
@@ -126,7 +118,8 @@ impl Opener for UiKitOpener {
             return None;
         }
         let url = NSURL::URLWithString(&NSString::from_str(link))?;
-        Some(UIApplication::sharedApplication(self.main_thread).canOpenURL(&url))
+        let main_thread = MainThreadMarker::new()?;
+        Some(UIApplication::sharedApplication(main_thread).canOpenURL(&url))
     }
 }
 

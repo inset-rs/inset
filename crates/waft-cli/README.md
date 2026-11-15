@@ -168,6 +168,10 @@ Signing happens when credentials are present, never by flag.
 
 `panic = "abort"` changes nothing on wasm. `new` writes the LTO pair, which mostly buys speed; add `opt-level = "s"` when download size matters more than native speed.
 
+## iOS
+
+The CLI puts the `.app` together itself, with no Xcode project: the executable, the `Info.plist`, the icons and the resources. The `Info.plist` adopts UIKit's scene lifecycle, which iOS 27 requires of an app built with its SDK: its `UIApplicationSceneManifest` names `WaftSceneDelegate`, the scene delegate of Waft's iOS host (`waft-embedder-ios`), for the app's one window scene; and `CADisableMinimumFrameDurationOnPhone` lets a ProMotion iPhone draw the app at its full rate.
+
 ## macOS
 
 The CLI puts the `.app` together itself, as it does an iOS app: the executable in `Contents/MacOS`, the `Info.plist`, the icon (an `.icns` made by `iconutil`) and the resources in `Contents/Resources`, signed with `codesign` as [Signing](#signing) says. `build dmg` makes the disk image around it with `hdiutil`: the app beside a link to Applications in a 600 by 400 window, laid out by a `.DS_Store` the CLI writes, so no Finder window opens while it builds, and the app's icon as the volume's.

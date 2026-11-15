@@ -63,12 +63,7 @@ impl NotificationActivations {
     }
 
     #[cfg_attr(
-        not(any(
-            target_os = "macos",
-            target_os = "ios",
-            target_os = "windows",
-            target_os = "linux"
-        )),
+        not(any(target_os = "macos", target_os = "windows", target_os = "linux")),
         allow(dead_code, reason = "a system without notifications reports no click")
     )]
     pub(crate) fn send(&self, activation: NotificationActivation) {

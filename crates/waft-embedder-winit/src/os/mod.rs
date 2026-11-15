@@ -10,18 +10,18 @@
 //! (`window_handle_layer`, with the window's composition layers `absent` answers for a system with no
 //! compositor); and the clipboard, which is arboard's plain text on a system without code of its
 //! own for one. What a system lets the app do is answered in one place, on [`OperatingSystem`].
-//! Five systems: macOS adds a window frame that animates, its menus (the menu bar, a menu at a
+//! Four systems: macOS adds a window frame that animates, its menus (the menu bar, a menu at a
 //! point, the Dock icon's and the status items), its pasteboard, a display link, composition
 //! layers, a view drawn into a composition layer of its own, its own answers about
 //! its screens, whether a window is occluded and its notices that a window was minimized, the
 //! fingers coming down on a trackpad, and the requests it makes of the application and what it says
-//! changed, among others (`macos`); iOS reports its window's size and safe area differently, and
-//! has its pasteboard and composition layers (`ios`); Windows tells the clipboard's changes by its
+//! changed, among others (`macos`); Windows tells the clipboard's changes by its
 //! sequence number, and has a menu at a point, icons in the notification area, toasts, a display
 //! link and DirectComposition's composition layers, a view drawn on a visual of its own
 //! (`windows`); Linux has the desktop's tray and its notification server (`linux`); every other
-//! system winit covers by itself (`winit_only`). What macOS and iOS share, their notification
-//! center and the compositor of composition layers among it, is in `waft-embedder-apple`.
+//! system winit covers by itself (`winit_only`). What macOS shares with the iOS host, its
+//! notification center and the compositor of composition layers among it, is in
+//! `waft-embedder-apple`.
 //!
 //! A system's module is compiled for its own target only, so a change to a trait is checked
 //! against that system's answers only when building for it: build every target a change
@@ -33,15 +33,13 @@ mod absent;
 pub use linux::DmabufBuffer;
 #[cfg(target_os = "macos")]
 pub(crate) use waft_embedder_apple::composition::{place_layer_in, show_system_layer};
-#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[cfg(target_os = "macos")]
 pub use waft_embedder_apple::hardware_buffers::SurfaceBuffer;
-#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[cfg(target_os = "macos")]
 pub use waft_embedder_apple::media::CoreVideoFrame;
 #[cfg(target_os = "windows")]
 pub use windows::SharedTexture;
 pub(crate) mod capabilities;
-#[cfg(target_os = "ios")]
-mod ios;
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "macos")]
@@ -50,12 +48,7 @@ mod macos;
 mod window_handle_layer;
 #[cfg(target_os = "windows")]
 mod windows;
-#[cfg(not(any(
-    target_os = "macos",
-    target_os = "ios",
-    target_os = "windows",
-    target_os = "linux"
-)))]
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 mod winit_only;
 
 use capabilities::{
@@ -66,18 +59,11 @@ use capabilities::{
 /// The system this build targets.
 #[cfg(target_os = "macos")]
 pub(crate) type System = macos::AppKit;
-#[cfg(target_os = "ios")]
-pub(crate) type System = ios::Ios;
 #[cfg(target_os = "windows")]
 pub(crate) type System = windows::Windows;
 #[cfg(target_os = "linux")]
 pub(crate) type System = linux::Linux;
-#[cfg(not(any(
-    target_os = "macos",
-    target_os = "ios",
-    target_os = "windows",
-    target_os = "linux"
-)))]
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 pub(crate) type System = winit_only::WinitOnly;
 
 /// This system's vsyncs for a display.

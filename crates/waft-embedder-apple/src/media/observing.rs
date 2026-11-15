@@ -18,7 +18,7 @@ use objc2_foundation::{
     NSOperationQueue, NSString,
 };
 
-use super::abort_on_panic;
+use crate::abort_on_panic;
 use crate::media_futures::Changes;
 
 define_class!(

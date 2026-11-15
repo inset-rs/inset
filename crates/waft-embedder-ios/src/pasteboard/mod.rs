@@ -1,5 +1,6 @@
 //! The general pasteboard as the framework's clipboard: UIKit's `UIPasteboard`, whose items are
-//! each offered in several types, named by UTI as on macOS (`apple::pasteboard_types`). A copy
+//! each offered in several types, named by UTI as on macOS (`waft-embedder-apple`'s
+//! `pasteboard_types`). A copy
 //! with every form given is written whole with `setItems:options:`; one with a form produced when
 //! someone pastes it, or a file that exists only once pasted, is written as item providers, which
 //! UIKit asks on a queue of its own (`providers`).
@@ -15,8 +16,8 @@
 //! lets an app ask without the paste alert iOS 16 shows. Reading another app's content is what
 //! shows it, as the system asks the user first; a read loads the item's form through its item
 //! provider, so the app's own promised form is produced on the main thread while a read of it
-//! waits (`loads`). UIKit says the pasteboard changed while the app is active, and the main loop
-//! looks again as the app becomes active (`notices`); the app's own writes count as seen.
+//! waits (`loads`). UIKit says the pasteboard changed while the app is active, and the host looks
+//! again as a scene becomes active (`notices`); the app's own writes count as seen.
 //!
 //! The invariant: an item read is the pasteboard's as listed. Listing notes the pasteboard's count
 //! of changes, and a read once it has moved fails.
@@ -46,9 +47,11 @@ use waft_embedder::{
     ClipboardWriteFuture, Content, CopyOptions, DataTransferItem,
 };
 
-use crate::clipboard::ClipboardChanges;
 use notices::Notices;
+
 use waft_embedder_apple::pasteboard_types as types;
+
+use crate::host::{HostEvent, deliver};
 
 /// A pasteboard, the general one but in tests, as this app reaches it, on the main thread.
 pub(crate) struct Pasteboard {
@@ -56,14 +59,22 @@ pub(crate) struct Pasteboard {
     /// The pasteboard's count of changes when it was last asked whether it changed, or the app
     /// last wrote it, whichever came last.
     seen: Cell<NSInteger>,
-    /// UIKit's notices that have the main loop look, while the clipboard is the app's.
+    /// UIKit's notice that has the host look, while the clipboard is the app's.
     _notices: Option<Notices>,
 }
 
 impl Pasteboard {
-    /// The general pasteboard as it is at launch, which the app hears no change of; `look` has the
-    /// main loop look at it again, each time UIKit says it changed or the app became active.
-    pub(crate) fn general(look: Box<dyn Fn()>) -> Pasteboard {
+    /// Whether another writer changed the pasteboard since this was last asked; the app's own
+    /// writes count as seen.
+    pub(crate) fn has_changed(&self) -> bool {
+        let now = change_count(&self.pasteboard);
+        self.seen.replace(now) != now
+    }
+
+    /// The general pasteboard as it is at launch, which the app hears no change of; the host looks
+    /// at it again each time UIKit says it changed.
+    pub(crate) fn general() -> Pasteboard {
+        let look = Box::new(|| deliver(HostEvent::ClipboardMayHaveChanged));
         let notices =
             MainThreadMarker::new().map(|main_thread| Notices::observe(main_thread, look));
         Pasteboard::new(UIPasteboard::generalPasteboard(), notices)
@@ -149,13 +160,6 @@ impl Clipboard for Pasteboard {
     /// asked for later, by whoever pastes it.
     fn write(&self, items: Vec<ClipboardItem>, options: CopyOptions) -> ClipboardWriteFuture {
         Box::pin(ready(self.write_now(items, options)))
-    }
-}
-
-impl ClipboardChanges for Pasteboard {
-    fn has_changed(&self) -> bool {
-        let now = change_count(&self.pasteboard);
-        self.seen.replace(now) != now
     }
 }
 

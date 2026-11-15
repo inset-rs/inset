@@ -73,14 +73,10 @@
 //! # The app, its views and their surfaces
 //!
 //! The embedder starts the app before winit's loop runs, as Flutter's engine runs Dart's `main`
-//! before its window is ready (`launch.rs`). On a desktop the app opens its windows itself, its
-//! first one included, which `run_app` asks for. Where the system's window is the screen, the
-//! screen view is made first, with no window and no size, then the app, whose `run_app` builds
-//! in that view; the view's window opens at winit's first call, the first moment winit
-//! lets one be made, and the app hears its new metrics. Views come and go while the app runs,
-//! each with its window: one the app opens reaches it through `view_added`, and one that closes
-//! through `view_removed`. The screen view's window lasts as long as the app, which has no handle
-//! on it to close it. A window closes only when the app closes it: the user's asking only reports
+//! before its window is ready (`launch.rs`). The app opens its windows itself, its first one
+//! included, which `run_app` asks for. Views come and go while the app runs, each with its window:
+//! one the app opens reaches it through `view_added`, and one that closes through `view_removed`.
+//! A window closes only when the app closes it: the user's asking only reports
 //! it (`view_close_requested`), and what the last window's closing means is the app's to decide.
 //!
 //! A view comes, changes and goes as Flutter's embedder API has it, whoever holds it: it is added
@@ -133,7 +129,7 @@ use crate::system_requests::SystemRequest;
 use crate::touch::Touches;
 use crate::trackpad::Trackpad;
 use crate::views::Views;
-use crate::windows::{ScreenWindow, ViewMaker, Windows};
+use crate::windows::{ViewMaker, Windows};
 
 /// What reaches the loop through its proxy: the framework's requests, wakes asked for from
 /// other threads, and the system's requests of the application.
@@ -227,9 +223,6 @@ pub(crate) struct MainLoop<C> {
     state: Rc<EmbedderState>,
     /// Makes the windows' views, which share the one device they draw with, and their windows.
     view_maker: ViewMaker,
-    /// The screen view's window, opened at winit's first call; `None` once it is open, and on
-    /// a desktop, which has no screen view.
-    screen_window: Option<ScreenWindow>,
     /// The mouse, as Flutter's pointer.
     pointer: Pointer,
     /// The fingers and pens on the screen, each as a pointer of its own.
@@ -250,9 +243,7 @@ pub(crate) struct MainLoop<C> {
 }
 
 impl<C: EmbedderClient> MainLoop<C> {
-    /// Starts the app: the screen view is made, where the system's window is the screen, with
-    /// no window yet, and then the app, with that view among its views. The view's window opens
-    /// at winit's first call. The loop hears `events`, which `proxy` sends.
+    /// Starts the app, with no view yet. The loop hears `events`, which `proxy` sends.
     pub(crate) fn start(
         start: StartApp<C>,
         create_image_loader: Option<CreateImageLoader>,
@@ -268,10 +259,6 @@ impl<C: EmbedderClient> MainLoop<C> {
         ));
         let platform = Rc::new(WinitPlatform::new(Rc::clone(&state), proxy.clone()));
         let view_maker = ViewMaker::new(state.gpu().clone(), Rc::clone(state.requests()), linux);
-        let screen_window = view_maker.make_screen_view();
-        if let Some(screen) = &screen_window {
-            state.views().add_screen_view(Rc::clone(&screen.view));
-        }
         let client = start(platform.clone());
         MainLoop {
             client,
@@ -283,7 +270,6 @@ impl<C: EmbedderClient> MainLoop<C> {
             }),
             wakeups: Wakeups::default(),
             view_maker,
-            screen_window,
             pointer: Pointer::new(),
             touches: Touches::default(),
             trackpad: Trackpad::default(),
@@ -296,11 +282,10 @@ impl<C: EmbedderClient> MainLoop<C> {
         }
     }
 
-    /// winit made its first call: the screen view's window opens, and the loop hears from now on
-    /// the events sent before, on a wake of its own.
-    fn on_started(&mut self, event_loop: &dyn ActiveEventLoop) {
+    /// winit made its first call: the loop hears from now on the events sent before, on a wake of
+    /// its own.
+    fn on_started(&mut self) {
         self.started = true;
-        self.open_screen_window(event_loop);
         self.proxy.wake();
     }
 
@@ -364,10 +349,10 @@ impl<C: EmbedderClient> MainLoop<C> {
 }
 
 impl<C: EmbedderClient> ApplicationHandler for MainLoop<C> {
-    fn new_events(&mut self, event_loop: &dyn ActiveEventLoop, cause: StartCause) {
+    fn new_events(&mut self, _event_loop: &dyn ActiveEventLoop, cause: StartCause) {
         match cause {
             // winit's first call, on every system.
-            StartCause::Init => self.on_started(event_loop),
+            StartCause::Init => self.on_started(),
             StartCause::ResumeTimeReached {
                 requested_resume, ..
             } => self.on_wait_ended(requested_resume),

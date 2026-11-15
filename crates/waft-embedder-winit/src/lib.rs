@@ -6,11 +6,9 @@
 //! Flutter's multi-view model, three things with lifetimes of their own: the app, started at
 //! launch and running until it quits; its views, each with a window here, zero or more, opened
 //! and closed while it runs; and the surface each view draws on, which the system gives and takes
-//! away, and which the app never sees. On a desktop the app opens every window it has, its first
-//! included, as Flutter's multi-window apps do, and has no view until it asks. Where the system's
-//! window is the screen, as on iOS, the app is given that window's view, the screen view, which
-//! is Flutter's implicit view: it is made with the app, before its window, as Flutter's engine
-//! adds it with empty metrics, and the window opens at winit's first call.
+//! away, and which the app never sees. The app opens every window it has, its first included, as
+//! Flutter's multi-window apps do, and has no view until it asks. iOS has a host of its own,
+//! `waft-embedder-ios`'s scenes, as Android does.
 
 // wgpu's handle registry nests auto-trait obligations past the default depth.
 #![recursion_limit = "256"]
@@ -119,7 +117,7 @@ pub use macos::MacOs;
 pub use os::DmabufBuffer;
 #[cfg(target_os = "windows")]
 pub use os::SharedTexture;
-#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[cfg(target_os = "macos")]
 pub use os::{CoreVideoFrame, SurfaceBuffer};
 pub use platform::WinitPlatform;
 pub use system_requests::{NotificationActivationHandler, Reopen, ReopenHandler};
@@ -186,9 +184,8 @@ impl WinitEmbedder {
         <os::System as os::capabilities::StandardStreams>::attach_to_parent_console();
     }
 
-    /// Runs the app until it quits. `start` runs first, before winit's loop, and returns the
-    /// client; where the system's window is the screen, the screen view is already among the
-    /// platform's views then, with no window yet, which opens at winit's first call.
+    /// Runs the app until it quits. `start` runs first, before winit's loop, with no view yet, and
+    /// returns the client.
     pub fn run<C: EmbedderClient + 'static>(self, start: impl FnOnce(PlatformRef) -> C + 'static) {
         launch::run(
             Box::new(start),

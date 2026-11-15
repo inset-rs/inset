@@ -19,8 +19,8 @@ use objc2_core_media::CMVideoDimensions;
 use objc2_foundation::{NSArray, NSDictionary, NSError, NSNumber, NSString, NSURL};
 use waft_embedder::{CaptureState, MediaError, Photo, PhotoFuture, RecordingFuture};
 
-use super::abort_on_panic;
 use super::capture_session::SessionShared;
+use crate::abort_on_panic;
 use crate::media_futures::{MediaAnswer, media_answer};
 
 /// A session's photos, in JPEG, which every system reads. Every clone is the same output.

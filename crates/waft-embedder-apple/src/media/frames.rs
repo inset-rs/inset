@@ -31,9 +31,10 @@ use objc2_core_video::{
 use objc2_foundation::{NSDictionary, NSNumber, NSString};
 use waft_embedder::{VideoFrame, VideoFrameReader, VideoFrameReaders};
 
+use super::as_ns_string;
 use super::camera_rotation::{RotationAngles, shown_orientation};
 use super::video_frame::CoreVideoFrame;
-use super::{abort_on_panic, as_ns_string};
+use crate::abort_on_panic;
 use crate::media_time::media_time_of;
 
 /// The readers AVFoundation's players and cameras feed.
