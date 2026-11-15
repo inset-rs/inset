@@ -59,9 +59,13 @@ pollster = "0.4"
 png = "0.17"
 web-time = "1"
 
-# Every crate outside the workspace, valo's and wgpu's among them, with line tables as its only
-# debug information in debug builds, their build scripts and proc macros too: a backtrace still
-# names their files and lines, while the workspace's own crates keep all of it for the debugger.
-# The rest was 0.4 GB of the 10 GB a fresh `cargo test --workspace --no-run` wrote.
+# Line tables as the only debug information in debug builds, the workspace's own crates and every
+# other, valo's and wgpu's among them, their build scripts and proc macros too: a backtrace names
+# files and lines, and a debugger shows no variables. It shrank the target folder by 29% and
+# changed no rebuild's time (`../experiments/2026-11-15-build-time-and-disk`). For a session in a
+# debugger, `CARGO_PROFILE_DEV_DEBUG=full` builds the workspace's crates with all of it.
+[profile.dev]
+debug = "line-tables-only"
+
 [profile.dev.package."*"]
 debug = "line-tables-only"
