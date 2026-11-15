@@ -4,6 +4,7 @@ use waft_foundation::App;
 
 use crate::framework::{BuildContext, downcast_widget};
 use crate::widgets::basic::Directionality;
+use crate::widgets::localizations::{Localizations, WidgetsLocalizations};
 use crate::widgets::lookup_boundary::LookupBoundary;
 use crate::widgets::media_query::MediaQuery;
 use crate::widgets::overlay::Overlay;
@@ -108,6 +109,38 @@ pub fn debug_check_has_directionality(
     true
 }
 
+/// Asserts that the given context has a [`Localizations`] ancestor that contains
+/// a [`WidgetsLocalizations`] delegate.
+///
+/// To call this function, use the following pattern, typically in the
+/// relevant Widget's build method:
+///
+/// ```text
+/// debug_assert!(debug_check_has_widgets_localizations(app, context));
+/// ```
+///
+/// Always place this before any early returns, so that the invariant is checked
+/// in all cases. This prevents bugs from hiding until a particular codepath is
+/// hit.
+///
+/// Does nothing if asserts are disabled. Always returns true.
+pub fn debug_check_has_widgets_localizations(app: &mut App, context: BuildContext) -> bool {
+    if cfg!(debug_assertions)
+        && Localizations::of::<dyn WidgetsLocalizations>(app, context).is_none()
+    {
+        panic!(
+            "No WidgetsLocalizations found.\n{} widgets require WidgetsLocalizations to be \
+             provided by a Localizations widget ancestor.\nThe widgets library uses \
+             Localizations to generate messages, labels, and abbreviations.\nTo introduce a \
+             WidgetsLocalizations, either use a WidgetsApp at the root of your application to \
+             include them automatically, or add a Localization widget with a \
+             WidgetsLocalizations delegate.",
+            context.widget(app).type_name(),
+        );
+    }
+    true
+}
+
 /// Asserts that the given context has an [`Overlay`] ancestor.
 ///
 /// To call this function, use the following pattern, typically in the relevant Widget's build
@@ -153,15 +186,18 @@ pub fn debug_check_has_overlay(app: &App, context: BuildContext) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
     use std::panic::{AssertUnwindSafe, catch_unwind};
+    use std::rc::Rc;
 
-    use waft_embedder::TextDirection;
+    use waft_embedder::{Locale, TextDirection};
     use waft_foundation::AppCell;
 
     use super::*;
     use crate::framework::{IntoWidget, WidgetRef};
     use crate::test_harness::Harness;
     use crate::widgets::basic::{Builder, SizedBox};
+    use crate::widgets::localizations::DefaultWidgetsLocalizations;
     use crate::widgets::media_query::MediaQueryData;
 
     /// A leaf that runs `check` on its own context when it builds.
@@ -225,6 +261,34 @@ mod tests {
             "{message}"
         );
         assert_eq!(lines.next(), None);
+    }
+
+    #[test]
+    fn debug_check_has_widgets_localizations_passes_under_widgets_localizations_and_panics_without_them()
+     {
+        let checked = Rc::new(Cell::new(false));
+        let checking_localizations = |checked: Rc<Cell<bool>>| {
+            Builder::new(move |app, context| {
+                assert!(debug_check_has_widgets_localizations(app, context));
+                checked.set(true);
+                SizedBox::shrink().into_widget()
+            })
+        };
+        let localized = Localizations::new(
+            Locale::new("en"),
+            vec![DefaultWidgetsLocalizations::delegate()],
+        )
+        .child(checking_localizations(Rc::clone(&checked)))
+        .into_widget();
+        assert_eq!(mount_panic(localized), None);
+        assert!(checked.get(), "the check ran under the localizations");
+
+        let message = mount_panic(checking_localizations(Rc::default()).into_widget())
+            .expect("no WidgetsLocalizations");
+        assert!(
+            message.starts_with("No WidgetsLocalizations found.\n"),
+            "{message}"
+        );
     }
 
     #[test]

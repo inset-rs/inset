@@ -1309,7 +1309,7 @@ impl DraggableScrollableSheetScrollPosition {
     fn get_current_snap_size(self: Handle<Self>, app: &App) -> Option<f64> {
         let extent = self.extent(app);
         let metrics = self.copy_with(app);
-        let tolerance = self.physics(app).tolerance_for(&metrics).distance;
+        let tolerance = self.physics(app).tolerance_for(&*metrics).distance;
         let current_size = extent.current_size(app);
         app.get(extent)
             .snap_sizes
@@ -1414,7 +1414,7 @@ impl ScrollPositionWithSingleContextLeaf for DraggableScrollableSheetScrollPosit
         }
 
         let metrics = self.copy_with(app);
-        let tolerance = self.physics(app).tolerance_for(&metrics);
+        let tolerance = self.physics(app).tolerance_for(&*metrics);
         let simulation: Box<dyn Simulation> = if app.get(extent).snap {
             // Snap is enabled, simulate snapping instead of clamping scroll.
             Box::new(SnappingSimulation::new(
@@ -1470,7 +1470,7 @@ impl ScrollPositionWithSingleContextLeaf for DraggableScrollableSheetScrollPosit
                     let metrics = self.copy_with(app);
                     velocity.set(
                         controller_velocity
-                            + self.physics(app).tolerance_for(&metrics).velocity
+                            + self.physics(app).tolerance_for(&*metrics).velocity
                                 * controller_velocity.signum(),
                     );
                     ScrollPositionWithSingleContext::go_ballistic(self, app, velocity.get());

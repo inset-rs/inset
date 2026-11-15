@@ -184,6 +184,8 @@ const SURFACE_TINT_ELEVATION_OPACITIES: [ElevationOpacity; 6] = [
 
 #[cfg(test)]
 mod tests {
+    use std::rc::Rc;
+
     use waft_widgets::IntoWidget;
 
     use super::*;
@@ -269,7 +271,7 @@ mod tests {
         theme_of: impl Fn(&App) -> ThemeData + 'static,
         color_of: impl Fn(&ThemeData) -> Color + 'static,
         elevation: f64,
-    ) -> (Color, Color, ThemeData) {
+    ) -> (Color, Color, Rc<ThemeData>) {
         let cell = test_cell();
         probe(
             &cell,

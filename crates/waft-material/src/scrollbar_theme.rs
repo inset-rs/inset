@@ -363,7 +363,7 @@ impl ScrollbarTheme {
     pub fn of(app: &mut App, context: BuildContext) -> ScrollbarThemeData {
         match context.depend_on_inherited_widget_of_exact_type::<ScrollbarTheme>(app) {
             Some(scrollbar_theme) => scrollbar_theme.data.clone(),
-            None => Theme::of(app, context).scrollbar_theme,
+            None => Theme::of(app, context).scrollbar_theme.clone(),
         }
     }
 }

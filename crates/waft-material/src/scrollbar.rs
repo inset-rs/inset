@@ -616,7 +616,7 @@ impl State for MaterialScrollbarState {
             | TargetPlatform::Windows => false,
         };
         let state = app.get_mut(self);
-        state.color_scheme = Some(theme.color_scheme);
+        state.color_scheme = Some(theme.color_scheme.clone());
         state.scrollbar_theme = Some(scrollbar_theme);
         state.use_android_scrollbar = Some(use_android_scrollbar);
         RawScrollbarState::did_change_dependencies(self, app);
@@ -2259,6 +2259,104 @@ pub(crate) mod tests {
         });
     }
 
+    // 'Scrollbar.thumbVisibility triggers assertion when multiple ScrollPositions are
+    // attached.'
+    #[test]
+    fn thumb_visibility_panics_when_the_controller_has_two_positions() {
+        fn get_tab_content(scroll_controller: Option<AnyScrollController>) -> WidgetRef {
+            let list =
+                ListView::builder(|_app, _context, _index| Some(Text::new("Test").into_widget()))
+                    .item_count(200)
+                    .build();
+            let list = match scroll_controller {
+                Some(controller) => list.controller(controller),
+                None => list,
+            };
+            let scrollbar = Scrollbar::new(list).thumb_visibility(true);
+            match scroll_controller {
+                Some(controller) => scrollbar.controller(controller),
+                None => scrollbar,
+            }
+            .into_widget()
+        }
+
+        fn build_app(
+            tester: &WidgetTester,
+            scroll_controller: Option<AnyScrollController>,
+        ) -> WidgetRef {
+            let theme = ThemeData::new(&tester.cell.borrow());
+            material_app(
+                theme,
+                crate::tab_controller::DefaultTabController::new(
+                    2,
+                    Scaffold::new().body(crate::tabs::TabBarView::new([
+                        get_tab_content(scroll_controller),
+                        get_tab_content(scroll_controller),
+                    ])),
+                )
+                .into_widget(),
+            )
+        }
+
+        /// The panic message of swiping to the second tab, resulting in two attached
+        /// ScrollPositions during the transition: Dart's `tester.drag` and `pump`, then
+        /// `tester.takeException()`.
+        fn swipe_and_take_exception(tester: &mut WidgetTester) -> String {
+            let first = tester.find_text("Test")[0];
+            let center = {
+                let render = tester.render_box_of(first);
+                let app = tester.cell.borrow();
+                let size = render.size(&app);
+                render.local_to_global(&app, size.center(Offset::ZERO), None)
+            };
+            let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                tester.drag_from(center, Offset::new(-100.0, 0.0), 1);
+                tester.pump(Duration::ZERO);
+            }))
+            .expect_err("two attached positions panic");
+            panicked
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| panicked.downcast_ref::<&str>().map(|text| text.to_string()))
+                .expect("a panic message")
+        }
+
+        with_main_thread_stack(|| {
+            // Asserts when using the PrimaryScrollController.
+            let mut tester = tester_on(TargetPlatform::Android);
+            let app = build_app(&tester, None);
+            tester.pump_widget(app);
+            assert_eq!(
+                swipe_and_take_exception(&mut tester),
+                "The PrimaryScrollController is attached to more than one ScrollPosition.\n\
+                 The Scrollbar requires a single ScrollPosition in order to be painted.\n\
+                 When Scrollbar.thumbVisibility is true, the associated ScrollController must \
+                 only have one ScrollPosition attached.\n\
+                 If a ScrollController has not been provided, the PrimaryScrollController is \
+                 used by default on mobile platforms for ScrollViews with an Axis.vertical \
+                 scroll direction.\n\
+                 More than one ScrollView may have tried to use the PrimaryScrollController of \
+                 the current context. ScrollView.primary can override this behavior."
+            );
+        });
+        with_main_thread_stack(|| {
+            // Asserts when using the ScrollController provided by the user; Dart's second app
+            // has its own key, so a fresh tester stands for it.
+            let mut tester = tester_on(TargetPlatform::Android);
+            let scroll_controller = controller(&tester);
+            let app = build_app(&tester, Some(scroll_controller));
+            tester.pump_widget(app);
+            assert_eq!(
+                swipe_and_take_exception(&mut tester),
+                "The provided ScrollController is attached to more than one ScrollPosition.\n\
+                 The Scrollbar requires a single ScrollPosition in order to be painted.\n\
+                 When Scrollbar.thumbVisibility is true, the associated ScrollController must \
+                 only have one ScrollPosition attached.\n\
+                 The provided ScrollController cannot be shared by multiple ScrollView widgets."
+            );
+        });
+    }
+
     /// The toggle cases' tree: a `Scaffold` whose `FloatingActionButton` flips the
     /// scrollbar's `thumbVisibility`, which starts as `thumb_visibility`.
     fn toggled_view(controller: AnyScrollController, thumb_visibility: bool) -> WidgetRef {
@@ -2371,7 +2469,7 @@ pub(crate) mod tests {
     /// it adapted to a `CupertinoScrollbar` or not.
     fn painted_under(tester: &WidgetTester, key: &GlobalKey) -> Vec<Drawn> {
         let keyed = key
-            .current_context(&mut tester.cell.borrow_mut())
+            .current_context(&tester.cell.borrow_mut())
             .expect("the keyed scrollbar is mounted");
         let raw = tester
             .elements()

@@ -2125,9 +2125,9 @@ mod tests {
             .icon(icon(Icons::add()).key(icon_key.clone().into()))));
 
             // Verify that Icon is present and label is not.
-            let mut app = tester.cell.borrow_mut();
-            assert!(icon_key.current_context(&mut app).is_some());
-            assert!(label_key.current_context(&mut app).is_none());
+            let app = tester.cell.borrow();
+            assert!(icon_key.current_context(&app).is_some());
+            assert!(label_key.current_context(&app).is_none());
         });
     }
 

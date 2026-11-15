@@ -222,7 +222,7 @@ impl StatelessWidget for TextSelectionToolbarTextButton {
     }
 
     fn build(&self, app: &mut App, context: BuildContext) -> WidgetRef {
-        let color_scheme = Theme::of(app, context).color_scheme;
+        let color_scheme = Theme::of(app, context).color_scheme.clone();
         let mut style = TextButton::style_from()
             .background_color(Self::DEFAULT_BACKGROUND_COLOR_TRANSPARENT)
             .foreground_color(Self::get_foreground_color(app, &color_scheme))

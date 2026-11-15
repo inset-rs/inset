@@ -1,8 +1,7 @@
 //! Flutter counterpart: `widgets/transitions.dart`.
 //!
-//! `SliverFadeTransition` waits with the slivers, [`MatrixTransition`]'s `filterQuality`
-//! with `RenderTransform`'s, and [`FadeTransition`]'s `alwaysIncludeSemantics` with
-//! accessibility.
+//! `SliverFadeTransition` waits with the slivers, and [`FadeTransition`]'s
+//! `alwaysIncludeSemantics` with accessibility.
 
 use std::any::TypeId;
 use std::f64::consts::PI;
@@ -10,7 +9,7 @@ use std::fmt::{self, Debug};
 use std::rc::Rc;
 
 use waft_animation::{Animatable, AnyAnimation};
-use waft_embedder::{Matrix4, Offset, Rect, Size, TextAlign, TextDirection};
+use waft_embedder::{FilterQuality, Matrix4, Offset, Rect, Size, TextAlign, TextDirection};
 use waft_foundation::{App, Handle, Listenable, Listener, RetainedHandleId};
 use waft_painting::{Alignment, AlignmentGeometry, Axis, Decoration, TextOverflow, TextStyle};
 use waft_rendering::{
@@ -484,6 +483,16 @@ pub struct MatrixTransition {
     /// use an alignment of (0.0, 1.0).
     pub alignment: Alignment,
 
+    /// The filter quality with which to apply the transform as a bitmap operation.
+    ///
+    /// When the animation is stopped (either in `AnimationStatus::Dismissed` or
+    /// `AnimationStatus::Completed`), the filter quality argument will be ignored.
+    ///
+    /// The transform will be applied by re-rendering the child if
+    /// [`filter_quality`](Self::filter_quality) is `None`, otherwise it controls the quality
+    /// of an `ImageFilter.matrix` applied to a bitmap rendering of the child.
+    pub filter_quality: Option<FilterQuality>,
+
     /// The widget below this widget in the tree.
     pub child: Option<WidgetRef>,
 }
@@ -501,6 +510,7 @@ impl MatrixTransition {
             on_transform: Rc::new(on_transform),
             animation,
             alignment: Alignment::CENTER,
+            filter_quality: None,
             child: None,
         }
     }
@@ -517,6 +527,12 @@ impl MatrixTransition {
         self
     }
 
+    /// Dart `MatrixTransition(filterQuality:)`.
+    pub fn filter_quality(mut self, filter_quality: FilterQuality) -> MatrixTransition {
+        self.filter_quality = Some(filter_quality);
+        self
+    }
+
     /// Dart `MatrixTransition(child:)`.
     pub fn child<K>(mut self, child: impl IntoWidget<K>) -> MatrixTransition {
         self.child = Some(child.into_widget());
@@ -526,12 +542,24 @@ impl MatrixTransition {
     /// `MatrixTransition.build`'s body, shared with [`ScaleTransition`] and
     /// [`RotationTransition`].
     fn build_transform(
+        app: &App,
+        animation: AnyAnimation<f64>,
         transform: Matrix4,
         alignment: Alignment,
+        filter_quality: Option<FilterQuality>,
         child: Option<&WidgetRef>,
     ) -> WidgetRef {
+        // The ImageFilter layer created by setting filterQuality will introduce
+        // a saveLayer call. This is usually worthwhile when animating the layer,
+        // but leaving it in the layer tree before the animation has started or after
+        // it has finished significantly hurts performance.
         let mut transform =
             Transform::new(transform).alignment(AlignmentGeometry::Alignment(alignment));
+        transform.filter_quality = if animation.is_animating(app) {
+            filter_quality
+        } else {
+            None
+        };
         if let Some(child) = child {
             transform = transform.child(child.clone());
         }
@@ -544,6 +572,7 @@ impl Debug for MatrixTransition {
         f.debug_struct("MatrixTransition")
             .field("animation", &self.animation)
             .field("alignment", &self.alignment)
+            .field("filter_quality", &self.filter_quality)
             .field("child", &self.child)
             .finish_non_exhaustive()
     }
@@ -560,7 +589,14 @@ impl AnimatedWidget for MatrixTransition {
 
     fn build(&self, app: &mut App, _context: BuildContext) -> WidgetRef {
         let transform = (self.on_transform)(self.animation.value(app));
-        MatrixTransition::build_transform(transform, self.alignment, self.child.as_ref())
+        MatrixTransition::build_transform(
+            app,
+            self.animation,
+            transform,
+            self.alignment,
+            self.filter_quality,
+            self.child.as_ref(),
+        )
     }
 }
 
@@ -586,6 +622,9 @@ pub struct ScaleTransition {
     /// See [`MatrixTransition::alignment`].
     pub alignment: Alignment,
 
+    /// See [`MatrixTransition::filter_quality`].
+    pub filter_quality: Option<FilterQuality>,
+
     /// The widget below this widget in the tree.
     pub child: Option<WidgetRef>,
 }
@@ -599,6 +638,7 @@ impl ScaleTransition {
             key: None,
             animation: scale,
             alignment: Alignment::CENTER,
+            filter_quality: None,
             child: None,
         }
     }
@@ -617,6 +657,12 @@ impl ScaleTransition {
     /// Dart `ScaleTransition(alignment:)`.
     pub fn alignment(mut self, alignment: Alignment) -> ScaleTransition {
         self.alignment = alignment;
+        self
+    }
+
+    /// Dart `ScaleTransition(filterQuality:)`.
+    pub fn filter_quality(mut self, filter_quality: FilterQuality) -> ScaleTransition {
+        self.filter_quality = Some(filter_quality);
         self
     }
 
@@ -646,7 +692,14 @@ impl AnimatedWidget for ScaleTransition {
 
     fn build(&self, app: &mut App, _context: BuildContext) -> WidgetRef {
         let transform = ScaleTransition::handle_scale_matrix(self.animation.value(app));
-        MatrixTransition::build_transform(transform, self.alignment, self.child.as_ref())
+        MatrixTransition::build_transform(
+            app,
+            self.animation,
+            transform,
+            self.alignment,
+            self.filter_quality,
+            self.child.as_ref(),
+        )
     }
 }
 
@@ -669,6 +722,9 @@ pub struct RotationTransition {
     /// See [`MatrixTransition::alignment`].
     pub alignment: Alignment,
 
+    /// See [`MatrixTransition::filter_quality`].
+    pub filter_quality: Option<FilterQuality>,
+
     /// The widget below this widget in the tree.
     pub child: Option<WidgetRef>,
 }
@@ -680,6 +736,7 @@ impl RotationTransition {
             key: None,
             animation: turns,
             alignment: Alignment::CENTER,
+            filter_quality: None,
             child: None,
         }
     }
@@ -698,6 +755,12 @@ impl RotationTransition {
     /// Dart `RotationTransition(alignment:)`.
     pub fn alignment(mut self, alignment: Alignment) -> RotationTransition {
         self.alignment = alignment;
+        self
+    }
+
+    /// Dart `RotationTransition(filterQuality:)`.
+    pub fn filter_quality(mut self, filter_quality: FilterQuality) -> RotationTransition {
+        self.filter_quality = Some(filter_quality);
         self
     }
 
@@ -727,7 +790,14 @@ impl AnimatedWidget for RotationTransition {
 
     fn build(&self, app: &mut App, _context: BuildContext) -> WidgetRef {
         let transform = RotationTransition::handle_turns_matrix(self.animation.value(app));
-        MatrixTransition::build_transform(transform, self.alignment, self.child.as_ref())
+        MatrixTransition::build_transform(
+            app,
+            self.animation,
+            transform,
+            self.alignment,
+            self.filter_quality,
+            self.child.as_ref(),
+        )
     }
 }
 
@@ -1876,6 +1946,77 @@ mod tests {
         );
 
         controller.dispose(&mut app);
+    }
+
+    /// Whether a layer of `harness`'s tree is an `ImageFilterLayer` whose filter prints as
+    /// `ImageFilter.matrix(…)`.
+    fn has_matrix_filter_layer(harness: &Harness, app: &App) -> bool {
+        harness.layers(app).into_iter().any(|layer| {
+            app.handle::<waft_rendering::ImageFilterLayer>(layer.id())
+                .and_then(|filter_layer| filter_layer.image_filter(app))
+                .is_some_and(|filter| filter.to_string().starts_with("ImageFilter.matrix("))
+        })
+    }
+
+    /// transitions_test.dart's 'uses ImageFilter when provided with FilterQuality argument',
+    /// for the transition `transition` builds over the animation it is handed.
+    fn uses_an_image_filter_while_animating(
+        transition: impl FnOnce(AnyAnimation<f64>) -> WidgetRef,
+    ) {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let controller = new_controller(&mut app);
+        let animation = waft_animation::Tween::new(&mut app, Some(0.0), Some(1.0))
+            .animate(&mut app, controller.view());
+        let harness = Harness::mount(&mut app, ltr(transition(animation)));
+        harness.pump(&mut app);
+
+        // Validate that expensive layer is not left in tree before animation has started.
+        assert!(!has_matrix_filter_layer(&harness, &app));
+
+        for value in [0.25, 0.5, 0.75] {
+            controller.set_value(&mut app, value);
+            harness.pump(&mut app);
+            assert!(has_matrix_filter_layer(&harness, &app), "at {value}");
+        }
+
+        controller.set_value(&mut app, 1.0);
+        harness.pump(&mut app);
+
+        // Validate that expensive layer is not left in tree after animation has finished.
+        assert!(!has_matrix_filter_layer(&harness, &app));
+
+        controller.dispose(&mut app);
+    }
+
+    #[test]
+    fn a_matrix_transition_uses_an_image_filter_when_provided_with_a_filter_quality() {
+        uses_an_image_filter_while_animating(|animation| {
+            MatrixTransition::new(animation, |_value| Matrix4::IDENTITY)
+                .filter_quality(FilterQuality::None)
+                .child(ten_by_ten())
+                .into_widget()
+        });
+    }
+
+    #[test]
+    fn a_scale_transition_uses_an_image_filter_when_provided_with_a_filter_quality() {
+        uses_an_image_filter_while_animating(|animation| {
+            ScaleTransition::new(animation)
+                .filter_quality(FilterQuality::None)
+                .child(ten_by_ten())
+                .into_widget()
+        });
+    }
+
+    #[test]
+    fn a_rotation_transition_uses_an_image_filter_when_provided_with_a_filter_quality() {
+        uses_an_image_filter_while_animating(|animation| {
+            RotationTransition::new(animation)
+                .filter_quality(FilterQuality::None)
+                .child(ten_by_ten())
+                .into_widget()
+        });
     }
 
     // transitions_test.dart 'SizeTransition clamps negative size factors'

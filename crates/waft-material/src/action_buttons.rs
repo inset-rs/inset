@@ -1073,7 +1073,7 @@ mod tests {
                 .end_drawer(Drawer::new()),
         );
         tester.pump_and_settle();
-        key.current_state::<ScaffoldState>(&mut tester.cell.borrow_mut())
+        key.current_state::<ScaffoldState>(&tester.cell.borrow_mut())
             .expect("a mounted scaffold")
     }
 

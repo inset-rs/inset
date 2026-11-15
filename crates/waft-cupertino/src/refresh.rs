@@ -1281,9 +1281,9 @@ mod tests {
         }
 
         fn rect_of(&self, key: &GlobalKey) -> Option<Rect> {
-            let mut app = self.cell.borrow_mut();
+            let app = self.cell.borrow();
             let object = key
-                .current_context(&mut app)?
+                .current_context(&app)?
                 .find_render_object(&app)?
                 .as_box()?;
             Some(object.local_to_global(&app, Offset::ZERO, None) & object.size(&app))
@@ -1309,7 +1309,7 @@ mod tests {
         /// `find.text('-1')` finds a widget.
         fn indicator_shown(&self) -> bool {
             self.indicator
-                .current_context(&mut self.cell.borrow_mut())
+                .current_context(&self.cell.borrow_mut())
                 .is_some()
         }
 

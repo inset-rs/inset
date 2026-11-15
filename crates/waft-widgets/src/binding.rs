@@ -1455,9 +1455,10 @@ impl Element for RootElement {
     }
 }
 
-/// The build owner a `GlobalKey` resolves against: the binding's.
-pub(crate) fn current_build_owner(app: &mut App) -> Option<Handle<BuildOwner>> {
-    let binding = WidgetsBinding::instance(app);
+/// The build owner a `GlobalKey` resolves against: the binding's, as Dart's
+/// `WidgetsBinding.instance.buildOwner` reads it; `None` before the binding exists.
+pub(crate) fn current_build_owner(app: &App) -> Option<Handle<BuildOwner>> {
+    let binding = app.existing_singleton::<WidgetsBinding>()?;
     app.get(binding).build_owner
 }
 

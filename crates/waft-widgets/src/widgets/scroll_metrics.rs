@@ -1,5 +1,6 @@
 //! Flutter counterpart: `widgets/scroll_metrics.dart`.
 
+use std::any::Any;
 use std::fmt::{self, Debug};
 
 use waft_embedder::clamp_double;
@@ -33,6 +34,9 @@ use waft_painting::{Axis, AxisDirection, axis_direction_to_axis};
 ///  * [`FixedScrollMetrics`], which is an immutable object that implements this
 ///    interface.
 pub trait ScrollMetrics: Debug {
+    /// Downcast support for Dart's `is` on a metrics object (`position is _PagePosition`).
+    fn as_any(&self) -> &dyn Any;
+
     /// Creates a [`ScrollMetrics`] that has the same properties as this object.
     ///
     /// This is useful if this object is mutable, but you want to get a snapshot
@@ -244,6 +248,10 @@ impl FixedScrollMetrics {
 }
 
 impl ScrollMetrics for FixedScrollMetrics {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
     fn min_scroll_extent(&self) -> f64 {
         self.min_scroll_extent
             .expect("FixedScrollMetrics.minScrollExtent was read without content dimensions")

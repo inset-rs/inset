@@ -540,9 +540,9 @@ mod tests {
             &cell,
             localized(Directionality::new(TextDirection::Ltr, Overlay::wrap(host))),
         );
-        let mut app = cell.borrow_mut();
+        let app = cell.borrow();
         let state = global_key
-            .current_state::<CupertinoExpansionTileState>(&mut app)
+            .current_state::<CupertinoExpansionTileState>(&app)
             .expect("the tile mounted");
         drop(app);
         Mounted { cell, state }
@@ -633,7 +633,7 @@ mod tests {
         );
         let mut app = cell.borrow_mut();
         let state = global_key
-            .current_state::<CupertinoExpansionTileState>(&mut app)
+            .current_state::<CupertinoExpansionTileState>(&app)
             .expect("the tile mounted");
         assert_eq!(state.tile_controller(&app), controller);
 

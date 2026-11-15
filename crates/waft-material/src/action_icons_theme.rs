@@ -219,7 +219,7 @@ impl ActionIconTheme {
     pub fn of(app: &mut App, context: BuildContext) -> Option<ActionIconThemeData> {
         match context.depend_on_inherited_widget_of_exact_type::<ActionIconTheme>(app) {
             Some(action_icon_theme) => Some(action_icon_theme.data.clone()),
-            None => Theme::of(app, context).action_icon_theme,
+            None => Theme::of(app, context).action_icon_theme.clone(),
         }
     }
 }

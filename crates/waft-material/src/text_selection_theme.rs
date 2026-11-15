@@ -188,7 +188,7 @@ impl TextSelectionTheme {
     pub fn of(app: &mut App, context: BuildContext) -> TextSelectionThemeData {
         match context.depend_on_inherited_widget_of_exact_type::<TextSelectionTheme>(app) {
             Some(selection_theme) => selection_theme.data.clone(),
-            None => Theme::of(app, context).text_selection_theme,
+            None => Theme::of(app, context).text_selection_theme.clone(),
         }
     }
 }

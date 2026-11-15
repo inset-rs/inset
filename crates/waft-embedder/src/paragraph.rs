@@ -1060,7 +1060,7 @@ impl Paragraph {
                     ascent: f64::from(line.ascent),
                     descent: f64::from(line.descent),
                     unscaled_ascent: f64::from(line.ascent),
-                    height: f64::from(line.ascent + line.descent),
+                    height: line_height(line),
                     width: f64::from(line.width),
                     left: f64::from(line.left),
                     baseline: f64::from(line.baseline),
@@ -1119,6 +1119,13 @@ impl Paragraph {
     pub(crate) fn native(&self) -> &valo::Paragraph {
         &self.inner
     }
+}
+
+/// The height Valo lays `line` out at: its ascent plus descent rounded to the nearest whole
+/// pixel, as skparagraph's `InternalLineMetrics::height` rounds a line and Valo's wrap advances
+/// by. Valo's `Line` keeps the room above and below the baseline but not that rounded sum.
+fn line_height(line: &valo::Line) -> f64 {
+    (f64::from(line.ascent) + f64::from(line.descent)).round()
 }
 
 fn text_box(rect: valo::Rect, direction: TextDirection) -> TextBox {
@@ -1407,6 +1414,24 @@ mod layout_tests {
         assert!(paragraph.alphabetic_baseline() < paragraph.height());
         assert!(!paragraph.did_exceed_max_lines());
         assert_eq!(paragraph.max_intrinsic_width(), paragraph.longest_line());
+    }
+
+    /// A 14 px line at a height of 1.43 asks for 20.02 pixels; skparagraph, and Valo with it,
+    /// lays it out at the nearest whole pixel, and its metrics say so.
+    #[test]
+    fn a_lines_height_is_rounded_to_a_whole_pixel() {
+        let mut builder = ParagraphBuilder::new(ParagraphStyle::new());
+        builder.push_style(TextStyle {
+            font_size: Some(14.0),
+            height: Some(1.43),
+            ..TextStyle::default()
+        });
+        builder.add_text("Hello");
+        let mut paragraph = builder.build(&mut fonts());
+        paragraph.layout(ParagraphConstraints::new(f64::INFINITY));
+        let metrics = paragraph.compute_line_metrics();
+        assert_eq!(metrics[0].height, 20.0);
+        assert_eq!(paragraph.height(), 20.0);
     }
 
     #[test]

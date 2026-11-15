@@ -2596,7 +2596,7 @@ pub(crate) mod tests {
             tester.pump(Duration::ZERO);
             // While the pointer is down, the widget disappears.
             tester.pump_widget(build_radio(false));
-            assert!(key.current_context(&mut tester.cell.borrow_mut()).is_none());
+            assert!(key.current_context(&tester.cell.borrow_mut()).is_none());
             // Release pointer after widget disappeared.
             tester.up(&gesture);
         });

@@ -134,7 +134,7 @@ fn bounds(f: &Fixture, text: &str) -> Option<Rect> {
 fn item_bounds(f: &Fixture, p: &Probe, id: &str) -> Rect {
     let mut app = f.cell.borrow_mut();
     let key = app.get(p.0.get().unwrap()).nav.clone();
-    let nav = key.current_state::<NavigationViewState>(&mut app).unwrap();
+    let nav = key.current_state::<NavigationViewState>(&app).unwrap();
     let context = nav.container_from_menu_item(&mut app, id).unwrap();
     let object = context.find_render_object(&app).unwrap().as_box().unwrap();
     object.local_to_global(&app, Offset::ZERO, None) & object.size(&app)

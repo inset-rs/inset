@@ -6982,7 +6982,7 @@ impl InputDecorationTheme {
     pub fn of(app: &mut App, context: BuildContext) -> InputDecorationThemeData {
         match context.depend_on_inherited_widget_of_exact_type::<InputDecorationTheme>(app) {
             Some(input_decoration_theme) => input_decoration_theme.data(),
-            None => Theme::of(app, context).input_decoration_theme,
+            None => Theme::of(app, context).input_decoration_theme.clone(),
         }
     }
 
@@ -8762,7 +8762,7 @@ mod tests {
                 MaterialApp::new()
                     .home(Material::new().child(Builder::new(move |app, context| {
                         let base = match theme {
-                            Some(theme) => theme(app),
+                            Some(theme) => Rc::new(theme(app)),
                             None => Theme::of(app, context),
                         };
                         let mut copy = base.copy_with();
@@ -9605,7 +9605,7 @@ mod tests {
         }
 
         /// Dart's `Theme.of(tester.element(findDecorator()))`.
-        fn theme_of(tester: &WidgetTester) -> ThemeData {
+        fn theme_of(tester: &WidgetTester) -> Rc<ThemeData> {
             let element = tester.find_by_type::<InputDecorator>()[0];
             Theme::of(&mut tester.cell.borrow_mut(), element)
         }
@@ -11344,7 +11344,7 @@ mod tests {
         }
 
         /// Dart's `Theme.of(tester.element(findDecorator()))`.
-        fn decorator_theme(tester: &WidgetTester) -> ThemeData {
+        fn decorator_theme(tester: &WidgetTester) -> Rc<ThemeData> {
             let element = tester.find_by_type::<InputDecorator>()[0];
             let mut app = tester.cell.borrow_mut();
             Theme::of(&mut app, element)
@@ -13213,7 +13213,7 @@ mod tests {
         }
 
         /// Dart's `Theme.of(tester.element(findDecorator()))`.
-        fn decorator_theme(tester: &WidgetTester) -> ThemeData {
+        fn decorator_theme(tester: &WidgetTester) -> Rc<ThemeData> {
             let element = tester.find_by_type::<InputDecorator>()[0];
             let mut app = tester.cell.borrow_mut();
             Theme::of(&mut app, element)
@@ -17319,7 +17319,7 @@ mod tests {
                 let text_direction = self.text_direction;
                 let home = Material::new().child(Builder::new(move |app, context| {
                     let base = match theme {
-                        Some(theme) => theme(app),
+                        Some(theme) => Rc::new(theme(app)),
                         None => Theme::of(app, context),
                     };
                     let mut copy = base.copy_with();

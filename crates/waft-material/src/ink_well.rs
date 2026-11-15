@@ -1509,7 +1509,7 @@ impl InkResponseState {
         let splash_factory = response
             .splash_factory
             .clone()
-            .unwrap_or_else(|| Theme::of(app, context).splash_factory);
+            .unwrap_or_else(|| Theme::of(app, context).splash_factory.clone());
         let text_direction = Directionality::of(app, context);
         let created = splash_factory.create(
             app,

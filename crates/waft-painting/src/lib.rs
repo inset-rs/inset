@@ -58,7 +58,7 @@ pub use continuous_rectangle_border::*;
 pub use debug::*;
 pub use decoration::*;
 pub use decoration_image::*;
-pub use draw::{draw_arc, draw_drrect, draw_oval, draw_rrect, draw_rsuperellipse};
+pub use draw::{draw_arc, draw_drrect, draw_line, draw_oval, draw_rrect, draw_rsuperellipse};
 pub use edge_insets::*;
 pub use fractional_offset::*;
 pub use geometry::*;

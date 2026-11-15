@@ -262,6 +262,45 @@ impl Harness {
     pub(crate) fn render_root(&self, app: &App) -> RenderHandle<RenderView> {
         self.root.typed_render_object(app)
     }
+
+    /// Flutter's `tester.layers`: the layer tree from the root, depth first.
+    pub(crate) fn layers(&self, app: &App) -> Vec<waft_rendering::AnyLayer> {
+        let root = self
+            .render_root(app)
+            .as_object()
+            .layer(app)
+            .expect("the root's layer");
+        layer_tree(app, root)
+    }
+}
+
+/// The layers of the tree under `root`, `root` first, depth first: what Flutter's
+/// `tester.layers` lists from the root's layer.
+pub(crate) fn layer_tree(
+    app: &App,
+    root: waft_rendering::AnyContainerLayer,
+) -> Vec<waft_rendering::AnyLayer> {
+    fn walk(
+        app: &App,
+        layer: waft_rendering::AnyLayer,
+        layers: &mut Vec<waft_rendering::AnyLayer>,
+    ) {
+        layers.push(layer);
+        if let Some(container) = layer.as_container_layer() {
+            let mut child = container.first_child(app);
+            while let Some(current) = child {
+                walk(app, current, layers);
+                child = current.next_sibling(app);
+            }
+        }
+    }
+    let mut layers = Vec::new();
+    walk(
+        app,
+        waft_rendering::ErasedLayer::as_layer(root),
+        &mut layers,
+    );
+    layers
 }
 
 /// The erased `TestRoot`: the test root is not one of the public kinds.

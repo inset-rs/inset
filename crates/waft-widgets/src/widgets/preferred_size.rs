@@ -239,6 +239,10 @@ impl StatelessWidget for PreferredSize {
         self.key.as_ref()
     }
 
+    fn as_preferred_size_widget(&self) -> Option<&dyn PreferredSizeWidget> {
+        Some(self)
+    }
+
     fn build(&self, _app: &mut App, _context: BuildContext) -> WidgetRef {
         self.child.clone()
     }

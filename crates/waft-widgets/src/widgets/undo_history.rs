@@ -900,7 +900,7 @@ mod tests {
 
         let mut app = cell.borrow_mut();
         let state = key
-            .current_state::<UndoHistoryState<i32>>(&mut app)
+            .current_state::<UndoHistoryState<i32>>(&app)
             .expect("the history is mounted");
         assert!(state.can_undo(&app));
         assert!(!state.can_redo(&app));

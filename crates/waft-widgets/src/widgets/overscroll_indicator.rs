@@ -1855,6 +1855,22 @@ mod tests {
             }
         }
 
+        /// `tester.layers.contains(isA<ImageFilterLayer>())`.
+        fn has_image_filter_layer(&self) -> bool {
+            let mut app = self.cell.borrow_mut();
+            let root = crate::binding::WidgetsBinding::instance(&mut app)
+                .root_element(&app)
+                .and_then(|root| root.find_render_object(&app))
+                .and_then(|view| view.layer(&app))
+                .expect("the view's layer");
+            crate::test_harness::layer_tree(&app, root)
+                .into_iter()
+                .any(|layer| {
+                    app.handle::<waft_rendering::ImageFilterLayer>(layer.id())
+                        .is_some()
+                })
+        }
+
         /// `tester.pumpAndSettle()` with its default 100ms step.
         fn settle(&mut self) {
             self.pump_and_settle(Duration::from_millis(100));
@@ -2175,9 +2191,9 @@ mod tests {
 
         /// `box.localToGlobal(Offset.zero)` for the box under `key`.
         fn origin_of(&self, key: &GlobalKey) -> Offset {
-            let mut app = self.cell.borrow_mut();
+            let app = self.cell.borrow();
             let render_box = key
-                .current_context(&mut app)
+                .current_context(&app)
                 .expect("the keyed widget is mounted")
                 .find_render_object(&app)
                 .and_then(|object| object.as_box())
@@ -2187,9 +2203,9 @@ mod tests {
 
         /// `tester.getCenter(find.byKey(key))`.
         fn center_of(&self, key: &GlobalKey) -> Offset {
-            let mut app = self.cell.borrow_mut();
+            let app = self.cell.borrow();
             let render_box = key
-                .current_context(&mut app)
+                .current_context(&app)
                 .expect("the keyed widget is mounted")
                 .find_render_object(&app)
                 .and_then(|object| object.as_box())
@@ -2205,7 +2221,7 @@ mod tests {
         /// Whether the box under `key` is built and on screen: `find.byKey(key)` finding one
         /// widget, as its onstage walk only finds what the viewport shows.
         fn is_onstage(&self, key: &GlobalKey) -> bool {
-            let present = key.current_context(&mut self.cell.borrow_mut()).is_some();
+            let present = key.current_context(&self.cell.borrow_mut()).is_some();
             if !present {
                 return false;
             }
@@ -3076,9 +3092,9 @@ mod tests {
                     .key(key.clone().into()),
             ),
         )));
-        let mut app = tester.cell.borrow_mut();
+        let app = tester.cell.borrow();
         let size = key
-            .current_context(&mut app)
+            .current_context(&app)
             .and_then(|context| context.find_render_object(&app))
             .and_then(|object| object.as_box())
             .expect("the indicator is laid out")
@@ -3098,9 +3114,9 @@ mod tests {
                     .child(ListView::new()),
             ),
         )));
-        let mut app = tester.cell.borrow_mut();
+        let app = tester.cell.borrow();
         let size = key
-            .current_context(&mut app)
+            .current_context(&app)
             .and_then(|context| context.find_render_object(&app))
             .and_then(|object| object.as_box())
             .expect("the indicator is laid out")
@@ -3534,6 +3550,29 @@ mod tests {
             axis: Axis::Horizontal,
             ..BuildTest::default()
         });
+    }
+
+    /// "Stretch overscroll only uses image filter during stretch effect".
+    #[test]
+    fn a_stretch_filters_its_child_only_while_it_stretches() {
+        let mut tester = WidgetTester::new();
+        let boxes = Boxes::new(&tester);
+        tester.pump_widget(build_test(
+            &boxes,
+            BuildTest {
+                axis: Axis::Horizontal,
+                ..BuildTest::default()
+            },
+        ));
+
+        assert!(!tester.has_image_filter_layer());
+
+        let mut gesture = tester.start_gesture(tester.view_center());
+        // Overscroll
+        tester.move_by(&mut gesture, Offset::new(200.0, 0.0));
+        tester.settle();
+
+        assert!(tester.has_image_filter_layer());
     }
 
     /// "Stretch overscroll horizontally RTL".

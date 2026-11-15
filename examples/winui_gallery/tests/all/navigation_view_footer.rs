@@ -71,8 +71,8 @@ impl State for PageState {
 }
 
 fn assert_footer_visible(f: &mut Fixture, probe: &Probe, height: f64) {
-    let mut app = f.cell.borrow_mut();
-    let context = probe.footer.current_context(&mut app).unwrap();
+    let app = f.cell.borrow();
+    let context = probe.footer.current_context(&app).unwrap();
     let render = context.find_render_object(&app).unwrap().as_box().unwrap();
     let origin = render.local_to_global(&app, Offset::ZERO, None);
     let size = render.size(&app);

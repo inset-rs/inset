@@ -357,7 +357,7 @@ impl RadioTheme {
     pub fn of(app: &mut App, context: BuildContext) -> RadioThemeData {
         match context.depend_on_inherited_widget_of_exact_type::<RadioTheme>(app) {
             Some(radio_theme) => radio_theme.data.clone(),
-            None => Theme::of(app, context).radio_theme,
+            None => Theme::of(app, context).radio_theme.clone(),
         }
     }
 }

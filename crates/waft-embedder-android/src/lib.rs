@@ -105,6 +105,8 @@ mod runtime_permissions;
 #[cfg(any(target_os = "android", test))]
 mod saved_view;
 #[cfg(target_os = "android")]
+mod settings;
+#[cfg(target_os = "android")]
 mod surface;
 #[cfg(target_os = "android")]
 mod surface_control;

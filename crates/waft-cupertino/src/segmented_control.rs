@@ -1700,13 +1700,13 @@ mod tests {
         );
         let mut app = cell.borrow_mut();
         let host = host_key
-            .current_state::<HostState>(&mut app)
+            .current_state::<HostState>(&app)
             .expect("the host mounted");
         let control = app
             .get(host)
             .control_key
             .clone()
-            .current_state::<SegmentedControlState<u32>>(&mut app)
+            .current_state::<SegmentedControlState<u32>>(&app)
             .expect("the control mounted");
         let binding = WidgetsBinding::instance(&mut app);
         drop(app);
@@ -1864,7 +1864,7 @@ mod tests {
             .cloned()
             .expect("a key for the first segment");
         let first = key
-            .current_state::<SegmentButtonState<u32>>(&mut mounted.cell.borrow_mut())
+            .current_state::<SegmentButtonState<u32>>(&mounted.cell.borrow_mut())
             .expect("the segment mounted");
         first.request_focus(&mut mounted.cell.borrow_mut());
         mounted.cell.borrow_mut().drain_microtasks();

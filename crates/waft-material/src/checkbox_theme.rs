@@ -428,7 +428,7 @@ impl CheckboxTheme {
     pub fn of(app: &mut App, context: BuildContext) -> CheckboxThemeData {
         match context.depend_on_inherited_widget_of_exact_type::<CheckboxTheme>(app) {
             Some(checkbox_theme) => checkbox_theme.data.clone(),
-            None => Theme::of(app, context).checkbox_theme,
+            None => Theme::of(app, context).checkbox_theme.clone(),
         }
     }
 }

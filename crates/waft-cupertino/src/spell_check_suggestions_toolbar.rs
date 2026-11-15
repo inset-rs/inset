@@ -288,9 +288,9 @@ mod tests {
                 )
                 .into_widget(),
         );
-        let mut app = cell.borrow_mut();
+        let app = cell.borrow();
         let size = key
-            .current_context(&mut app)
+            .current_context(&app)
             .expect("the toolbar is mounted")
             .find_render_object(&app)
             .expect("the toolbar is laid out")

@@ -1622,7 +1622,7 @@ impl ColorScheme {
     ///
     /// Equivalent to `Theme::of(app, context).color_scheme`.
     pub fn of(app: &mut App, context: BuildContext) -> ColorScheme {
-        Theme::of(app, context).color_scheme
+        Theme::of(app, context).color_scheme.clone()
     }
 }
 
@@ -2862,7 +2862,7 @@ mod tests {
                 Builder::new({
                     let seen = Rc::clone(&seen);
                     move |app, context| {
-                        let color_scheme_of_theme = Theme::of(app, context).color_scheme;
+                        let color_scheme_of_theme = Theme::of(app, context).color_scheme.clone();
                         let color_scheme_from_context = ColorScheme::of(app, context);
                         *seen.borrow_mut() =
                             Some((color_scheme_of_theme, color_scheme_from_context));

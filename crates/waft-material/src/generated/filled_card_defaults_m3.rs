@@ -18,7 +18,7 @@ use crate::theme::Theme;
 
 /// Dart's `_FilledCardDefaultsM3(context)`.
 pub(crate) fn filled_card_defaults_m3(app: &mut App, context: BuildContext) -> CardThemeData {
-    let colors = Theme::of(app, context).color_scheme;
+    let colors = Theme::of(app, context).color_scheme.clone();
     CardThemeData::new()
         .clip_behavior(Clip::None)
         .elevation(0.0)

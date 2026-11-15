@@ -5,10 +5,28 @@
 //! and inner contours.
 
 use waft_embedder::valo::FillRule;
-use waft_embedder::{Canvas, Paint, PathBuilder};
+use waft_embedder::{Canvas, Offset, Paint, PaintStyle, PathBuilder, Stroke};
 use waft_embedder::{
     RRect, RSuperellipse, Rect, rrect_radii_elliptical, rsuperellipse_radii_elliptical,
 };
+
+/// Draws a line between `p1` and `p2` with `paint` (Flutter `Canvas.drawLine`).
+///
+/// The line is always stroked, as Dart's `drawLine` ignores `Paint.style`. A valo paint keeps its
+/// stroke width in its stroke style, so a fill paint strokes at Dart's default `strokeWidth`, 0,
+/// a hairline.
+pub fn draw_line(canvas: &mut Canvas, p1: Offset, p2: Offset, paint: &Paint) {
+    let mut path = PathBuilder::new();
+    path.move_to(p1);
+    path.line_to(p2);
+    if let PaintStyle::Stroke(_) = paint.style {
+        canvas.draw_path(&path.build(), FillRule::NonZero, paint);
+        return;
+    }
+    let mut stroked = paint.clone();
+    stroked.style = PaintStyle::Stroke(Stroke::new(0.0));
+    canvas.draw_path(&path.build(), FillRule::NonZero, &stroked);
+}
 
 /// Draws a rounded rect, falling back to the plain rect op when every corner
 /// is sharp (Flutter's `drawRect` vs `drawRRect` split).

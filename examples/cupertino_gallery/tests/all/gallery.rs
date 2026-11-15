@@ -129,7 +129,7 @@ impl Fixture {
 
     fn navigator(&mut self) -> waft_foundation::Handle<NavigatorState> {
         self.navigator
-            .current_state::<NavigatorState>(&mut self.cell.borrow_mut())
+            .current_state::<NavigatorState>(&self.cell.borrow_mut())
             .expect("the CupertinoApp's navigator is mounted")
     }
 

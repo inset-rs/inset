@@ -3026,7 +3026,7 @@ pub(crate) mod tests {
     /// The focus node of the `Focus` above `key`'s widget: Dart's `Focus.of(key.currentContext!)`.
     fn focus_of(tester: &WidgetTester, key: &GlobalKey) -> AnyFocusNode {
         let mut app = tester.cell.borrow_mut();
-        let context = key.current_context(&mut app).expect("mounted");
+        let context = key.current_context(&app).expect("mounted");
         waft_widgets::Focus::of(&mut app, context, false, true)
     }
 

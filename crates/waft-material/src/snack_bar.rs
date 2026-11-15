@@ -1010,17 +1010,19 @@ impl State for SnackBarState {
         // Invert the theme values for Material 2. Material 3 values are tokenized to pre-inverted
         // values.
         let effective_theme = if theme.use_material3 {
-            theme.clone()
+            Rc::clone(&theme)
         } else {
-            theme
-                .copy_with()
-                .color_scheme(inverted_color_scheme(
-                    &color_scheme,
-                    button_color,
-                    defaults.background_color,
-                    brightness,
-                ))
-                .build()
+            Rc::new(
+                theme
+                    .copy_with()
+                    .color_scheme(inverted_color_scheme(
+                        &color_scheme,
+                        button_color,
+                        defaults.background_color,
+                        brightness,
+                    ))
+                    .build(),
+            )
         };
 
         let widget = self.widget(app).clone();
@@ -1117,7 +1119,7 @@ impl State for SnackBarState {
                 .map(|action| action.label.clone())
                 .unwrap_or_default(),
         );
-        if let Some(label_large) = Theme::of(app, context).text_theme.label_large {
+        if let Some(label_large) = Theme::of(app, context).text_theme.label_large.clone() {
             action_text_span = action_text_span.style(label_large);
         }
         let mut action_text_painter = TextPainter::new();
@@ -2070,8 +2072,8 @@ mod tests {
     #[test]
     fn a_snack_bar_inherits_its_ancestor_s_theme_but_for_the_colour_scheme() {
         with_main_thread_stack(|| {
-            let theme_before_snack_bar: Rc<RefCell<Option<ThemeData>>> = Rc::default();
-            let theme_after_snack_bar: Rc<RefCell<Option<ThemeData>>> = Rc::default();
+            let theme_before_snack_bar: Rc<RefCell<Option<Rc<ThemeData>>>> = Rc::default();
+            let theme_after_snack_bar: Rc<RefCell<Option<Rc<ThemeData>>>> = Rc::default();
             let mut tester = tester();
             let home = Scaffold::new().body(Builder::new({
                 let theme_before_snack_bar = Rc::clone(&theme_before_snack_bar);
@@ -2121,7 +2123,7 @@ mod tests {
                 .copy_with()
                 .color_scheme(theme_after_snack_bar.color_scheme.clone())
                 .build(); // Fields replaced by SnackBar.
-            assert!(compared_theme == theme_after_snack_bar);
+            assert!(compared_theme == *theme_after_snack_bar);
         });
     }
 
@@ -3542,7 +3544,7 @@ mod tests {
             {
                 let mut app = tester.cell.borrow_mut();
                 let messenger = scaffold_messenger_key
-                    .current_state::<crate::scaffold::ScaffoldMessengerState>(&mut app)
+                    .current_state::<crate::scaffold::ScaffoldMessengerState>(&app)
                     .expect("mounted");
                 messenger.clear_snack_bars(&mut app);
             }

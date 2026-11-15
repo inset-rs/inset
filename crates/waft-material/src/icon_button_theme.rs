@@ -172,7 +172,7 @@ impl IconButtonTheme {
     pub fn of(app: &mut App, context: BuildContext) -> IconButtonThemeData {
         match context.depend_on_inherited_widget_of_exact_type::<IconButtonTheme>(app) {
             Some(button_theme) => button_theme.data.clone(),
-            None => Theme::of(app, context).icon_button_theme,
+            None => Theme::of(app, context).icon_button_theme.clone(),
         }
     }
 

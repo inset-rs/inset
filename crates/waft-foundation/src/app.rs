@@ -379,6 +379,14 @@ impl App {
         handle
     }
 
+    /// The `T` an earlier [`singleton`](App::singleton) call made, or `None` before the
+    /// first one: Dart's `instance` getter of a binding, which reads and never creates.
+    pub fn existing_singleton<T: 'static>(&self) -> Option<Handle<T>> {
+        self.singletons
+            .get(&std::any::TypeId::of::<T>())
+            .map(|&id| Handle::new(id))
+    }
+
     /// Dart's `scheduleMicrotask`: queues `callback` to run after the current
     /// turn, before the next platform event — never inline.
     ///

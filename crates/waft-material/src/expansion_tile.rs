@@ -1632,7 +1632,7 @@ pub(crate) mod tests {
     }
 
     fn element_of(tester: &WidgetTester, key: &GlobalKey) -> AnyElement {
-        key.current_context(&mut tester.cell.borrow_mut())
+        key.current_context(&tester.cell.borrow_mut())
             .expect("the keyed widget is mounted")
     }
 

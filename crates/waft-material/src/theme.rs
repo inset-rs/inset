@@ -1,5 +1,6 @@
 //! Flutter counterpart: material_ui's `theme.dart`.
 
+use std::rc::Rc;
 use std::time::Duration;
 
 use waft_animation::Animatable;
@@ -57,7 +58,10 @@ pub const K_THEME_ANIMATION_DURATION: Duration = Duration::from_millis(200);
 pub struct Theme {
     pub key: Option<KeyRef>,
     /// Specifies the color and typography values for descendant widgets.
-    pub data: ThemeData,
+    ///
+    /// Shared, as Dart shares the one `ThemeData` object: [`Theme::of`] hands out this
+    /// value, and [`ThemeData::localize`] keys its cache on its identity.
+    pub data: Rc<ThemeData>,
     /// The widget below this widget in the tree.
     pub child: WidgetRef,
 }
@@ -65,15 +69,15 @@ pub struct Theme {
 /// Dart's static `_cachedFallbackTheme`, one per app.
 #[derive(Default)]
 struct CachedFallbackTheme {
-    theme: Option<ThemeData>,
+    theme: Option<Rc<ThemeData>>,
 }
 
 impl Theme {
     /// Applies the given theme `data` to `child`.
-    pub fn new<K>(data: ThemeData, child: impl IntoWidget<K>) -> Theme {
+    pub fn new<K>(data: impl Into<Rc<ThemeData>>, child: impl IntoWidget<K>) -> Theme {
         Theme {
             key: None,
-            data,
+            data: data.into(),
             child: child.into_widget(),
         }
     }
@@ -90,7 +94,7 @@ impl Theme {
     /// but it is rebuilt whenever `defaultTargetPlatform` no longer matches the
     /// platform it was built for (for example after a platform override), so a theme-less
     /// subtree adapts to the current platform the same way a `MaterialApp` would.
-    fn fallback_theme(app: &mut App) -> ThemeData {
+    fn fallback_theme(app: &mut App) -> Rc<ThemeData> {
         let cache = app.singleton::<CachedFallbackTheme>();
         let platform = app.platform().target_platform();
         let stale = app
@@ -99,7 +103,7 @@ impl Theme {
             .as_ref()
             .is_none_or(|theme| theme.platform != platform);
         if stale {
-            let theme = ThemeData::fallback(app, None);
+            let theme = Rc::new(ThemeData::fallback(app, None));
             app.get_mut(cache).theme = Some(theme);
         }
         app.get(cache).theme.clone().expect("filled above")
@@ -131,10 +135,10 @@ impl Theme {
     ///   `Theme::of(app, context).text_theme`).
     /// * [`IconTheme::of`], that returns [`ThemeData::icon_theme`] from the closest
     ///   [`Theme`] or `IconThemeData::fallback` if there is no [`IconTheme`] ancestor.
-    pub fn of(app: &mut App, context: BuildContext) -> ThemeData {
+    pub fn of(app: &mut App, context: BuildContext) -> Rc<ThemeData> {
         let inherited_theme = context
             .depend_on_inherited_widget_of_exact_type::<InheritedTheme>(app)
-            .map(|inherited_theme| inherited_theme.theme.data.clone());
+            .map(|inherited_theme| Rc::clone(&inherited_theme.theme.data));
         let localizations = Localizations::of::<dyn MaterialLocalizations>(app, context);
         let category = localizations
             .map(|localizations| localizations.script_category())
@@ -149,7 +153,8 @@ impl Theme {
             }
             (None, None) => Theme::fallback_theme(app),
         };
-        ThemeData::localize(&theme, theme.typography.geometry_theme_for(category))
+        let local_text_geometry = Rc::clone(theme.typography.geometry_theme_for(category));
+        ThemeData::localize(app, &theme, &local_text_geometry)
     }
 
     // The inherited themes in widgets library can not infer their values from
@@ -263,7 +268,7 @@ struct InheritedTheme {
 
 impl waft_widgets::InheritedTheme for InheritedTheme {
     fn wrap(&self, _app: &mut App, _context: BuildContext, child: WidgetRef) -> WidgetRef {
-        Theme::new(self.theme.data.clone(), child).into_widget()
+        Theme::new(Rc::clone(&self.theme.data), child).into_widget()
     }
 }
 
@@ -294,10 +299,10 @@ impl InheritedWidget for InheritedTheme {
 #[derive(Clone, Debug)]
 pub struct ThemeDataTween {
     /// The value this variable has at the beginning of the animation.
-    pub begin: Option<ThemeData>,
+    pub begin: Option<Rc<ThemeData>>,
 
     /// The value this variable has at the end of the animation.
-    pub end: Option<ThemeData>,
+    pub end: Option<Rc<ThemeData>>,
 }
 
 impl ThemeDataTween {
@@ -306,24 +311,24 @@ impl ThemeDataTween {
     /// The [`begin`](Self::begin) and [`end`](Self::end) properties must be non-null before
     /// the tween is first used, but the arguments can be null if the values are going to be
     /// filled in later.
-    pub fn new(begin: Option<ThemeData>, end: Option<ThemeData>) -> ThemeDataTween {
+    pub fn new(begin: Option<Rc<ThemeData>>, end: Option<Rc<ThemeData>>) -> ThemeDataTween {
         ThemeDataTween { begin, end }
     }
 
     /// Returns the value this variable has at the given animation clock value.
-    pub fn lerp(&self, t: f64) -> ThemeData {
-        ThemeData::lerp(
+    pub fn lerp(&self, t: f64) -> Rc<ThemeData> {
+        Rc::new(ThemeData::lerp(
             self.begin
                 .as_ref()
                 .expect("Tween.begin must be set before use"),
             self.end.as_ref().expect("Tween.end must be set before use"),
             t,
-        )
+        ))
     }
 }
 
-impl Animatable<ThemeData> for ThemeDataTween {
-    fn transform(&self, _app: &App, t: f64) -> ThemeData {
+impl Animatable<Rc<ThemeData>> for ThemeDataTween {
+    fn transform(&self, _app: &App, t: f64) -> Rc<ThemeData> {
         if t == 0.0 {
             return self
                 .begin
@@ -344,21 +349,21 @@ impl TweenValue for ThemeData {
 }
 
 impl TweenSlot for ThemeDataTween {
-    type Value = ThemeData;
+    type Value = Rc<ThemeData>;
 
-    fn begin(&self, _app: &App) -> Option<ThemeData> {
+    fn begin(&self, _app: &App) -> Option<Rc<ThemeData>> {
         self.begin.clone()
     }
 
-    fn set_begin(&mut self, _app: &mut App, begin: Option<ThemeData>) {
+    fn set_begin(&mut self, _app: &mut App, begin: Option<Rc<ThemeData>>) {
         self.begin = begin;
     }
 
-    fn end(&self, _app: &App) -> Option<ThemeData> {
+    fn end(&self, _app: &App) -> Option<Rc<ThemeData>> {
         self.end.clone()
     }
 
-    fn set_end(&mut self, _app: &mut App, end: Option<ThemeData>) {
+    fn set_end(&mut self, _app: &mut App, end: Option<Rc<ThemeData>>) {
         self.end = end;
     }
 }
@@ -378,7 +383,7 @@ pub struct AnimatedTheme {
     implicitly_animated_widget: ImplicitlyAnimatedWidgetData,
 
     /// Specifies the color and typography values for descendant widgets.
-    pub data: ThemeData,
+    pub data: Rc<ThemeData>,
 
     /// The widget below this widget in the tree.
     pub child: WidgetRef,
@@ -388,12 +393,12 @@ impl AnimatedTheme {
     /// Creates an animated theme.
     ///
     /// By default, the theme transition uses a linear curve.
-    pub fn new<K>(data: ThemeData, child: impl IntoWidget<K>) -> AnimatedTheme {
+    pub fn new<K>(data: impl Into<Rc<ThemeData>>, child: impl IntoWidget<K>) -> AnimatedTheme {
         AnimatedTheme {
             implicitly_animated_widget: ImplicitlyAnimatedWidgetData::new(
                 K_THEME_ANIMATION_DURATION,
             ),
-            data,
+            data: data.into(),
             child: child.into_widget(),
         }
     }
@@ -463,9 +468,9 @@ impl ImplicitlyAnimatedWidgetState for AnimatedThemeState {
 
     fn for_each_tween<V: TweenVisitor>(self: Handle<Self>, app: &mut App, visitor: &mut V) {
         let tween = app.get(self).data.clone();
-        let target = Some(self.widget(app).data.clone());
+        let target = Some(Rc::clone(&self.widget(app).data));
         app.get_mut(self).data = visitor.visit(app, tween, target, |_app, value| {
-            ThemeDataTween::new(Some(value.clone()), None)
+            ThemeDataTween::new(Some(Rc::clone(value)), None)
         });
     }
 }
@@ -545,10 +550,10 @@ mod tests {
         with_main_thread_stack(|| {
             let cell = test_cell();
             let app = cell.borrow();
-            let light = ThemeData::new(&app);
-            let dark = ThemeData::dark(&app, None);
-            let tween = ThemeDataTween::new(Some(light.clone()), Some(dark.clone()));
-            assert_eq!(tween.lerp(0.25), ThemeData::lerp(&light, &dark, 0.25));
+            let light = Rc::new(ThemeData::new(&app));
+            let dark = Rc::new(ThemeData::dark(&app, None));
+            let tween = ThemeDataTween::new(Some(Rc::clone(&light)), Some(Rc::clone(&dark)));
+            assert_eq!(*tween.lerp(0.25), ThemeData::lerp(&light, &dark, 0.25));
         });
     }
 
@@ -636,16 +641,41 @@ mod tests {
                     },
                     Theme::of,
                 );
-                let app = cell.borrow();
-                let fallback = ThemeData::fallback(&app, Some(use_material3));
-                let geometry = if use_material3 {
+                let mut app = cell.borrow_mut();
+                let fallback = Rc::new(ThemeData::fallback(&app, Some(use_material3)));
+                let geometry = Rc::new(if use_material3 {
                     Typography::english_like2021()
                 } else {
                     Typography::english_like2014()
-                };
-                assert_eq!(theme, ThemeData::localize(&fallback, &geometry));
+                });
+                assert_eq!(theme, ThemeData::localize(&mut app, &fallback, &geometry));
             });
         }
+    }
+
+    #[test]
+    fn theme_data_localize_memoizes_the_result() {
+        with_main_thread_stack(|| {
+            let cell = test_cell();
+            let mut app = cell.borrow_mut();
+            let light = Rc::new(ThemeData::new(&app));
+            let dark = Rc::new(ThemeData::dark(&app, None));
+            let default_geometry_theme = Rc::new(Typography::english_like2014());
+            let tall2014 = Rc::new(Typography::tall2014());
+
+            // Same input, same output.
+            let first = ThemeData::localize(&mut app, &light, &default_geometry_theme);
+            let second = ThemeData::localize(&mut app, &light, &default_geometry_theme);
+            assert!(Rc::ptr_eq(&first, &second));
+
+            // Different text geometry, different output.
+            let tall = ThemeData::localize(&mut app, &light, &tall2014);
+            assert!(!Rc::ptr_eq(&first, &tall));
+
+            // Different base theme, different output.
+            let dark_localized = ThemeData::localize(&mut app, &dark, &default_geometry_theme);
+            assert!(!Rc::ptr_eq(&first, &dark_localized));
+        });
     }
 
     #[test]
@@ -791,6 +821,7 @@ mod tests {
                 Theme::of(app, context)
                     .primary_text_theme
                     .body_medium
+                    .as_ref()
                     .and_then(|style| style.font_size)
             });
             assert_eq!(actual_font_size, Some(k_magic_font_size));
@@ -845,7 +876,8 @@ mod tests {
                 theme
                     .text_theme
                     .display_large
-                    .and_then(|style| style.debug_label)
+                    .as_ref()
+                    .and_then(|style| style.debug_label.clone())
                     .as_deref(),
                 Some(
                     "(englishLike displayLarge 2021).merge((blackMountainView displayLarge).apply)"
@@ -1396,7 +1428,7 @@ mod tests {
                 &cell,
                 |_app, child| child,
                 |app, context| {
-                    let material = ThemeData::dark(app, None);
+                    let material = Rc::new(ThemeData::dark(app, None));
                     let resolved =
                         MaterialBasedCupertinoThemeData::new(&material).resolve_from(app, context);
                     (material, resolved)
@@ -1517,7 +1549,7 @@ mod tests {
                                 .selection_handle_color(Color::new(0xaabbccdd)),
                         )
                         .build(app);
-                    let theme = MaterialBasedCupertinoThemeData::new(&material);
+                    let theme = MaterialBasedCupertinoThemeData::new(&Rc::new(material));
                     (
                         theme.selection_handle_color(),
                         theme
@@ -1558,7 +1590,7 @@ mod tests {
             let cupertino_theme_data = {
                 let mut app = tester.cell.borrow_mut();
                 let context = text_field_key
-                    .current_context(&mut app)
+                    .current_context(&app)
                     .expect("the text field is mounted");
                 CupertinoTheme::of(&mut app, context)
             };

@@ -41,6 +41,7 @@ type BufferImporter = Rc<dyn Fn(&dyn HardwareBuffer) -> Option<Image>>;
 /// would through `EmbedderClient::view_added` and `view_removed`.
 pub struct TestPlatform {
     target: Cell<TargetPlatform>,
+    briefly_show_password: Cell<bool>,
     brightness: Cell<Brightness>,
     default_route: String,
     /// The views the platform gave the app, as a phone gives its screen.
@@ -95,6 +96,7 @@ impl TestPlatform {
     pub fn new() -> TestPlatform {
         TestPlatform {
             target: Cell::new(TargetPlatform::Android),
+            briefly_show_password: Cell::new(true),
             brightness: Cell::new(Brightness::Light),
             default_route: "/".into(),
             views: RefCell::default(),
@@ -184,6 +186,13 @@ impl TestPlatform {
     /// Takes the view numbered `id` back while the app runs.
     pub fn take_view(&self, id: ViewId) {
         self.views.borrow_mut().retain(|view| view.id() != id);
+    }
+
+    /// The same platform answering `shown` for the system's setting of whether an obscured field
+    /// briefly shows the character just typed; on unless set, as dart:ui's default is.
+    pub fn with_briefly_show_password(self, shown: bool) -> TestPlatform {
+        self.briefly_show_password.set(shown);
+        self
     }
 
     pub fn with_brightness(self, brightness: Brightness) -> TestPlatform {
@@ -391,6 +400,13 @@ impl TestPlatform {
         self.target.set(target);
     }
 
+    /// Changes whether an obscured field briefly shows the character just typed, as the user
+    /// changes the system's setting; dart:ui tells no one, and the framework reads it next as
+    /// it needs it.
+    pub fn set_briefly_show_password(&self, shown: bool) {
+        self.briefly_show_password.set(shown);
+    }
+
     /// Changes the brightness; the client hears of it as it would from a host.
     pub fn set_brightness(&self, brightness: Brightness) {
         self.brightness.set(brightness);
@@ -490,6 +506,10 @@ impl Platform for TestPlatform {
         let id = self.take_request_id();
         windows.request(id, config, initial_data);
         Ok(id)
+    }
+
+    fn briefly_show_password(&self) -> bool {
+        self.briefly_show_password.get()
     }
 
     fn platform_brightness(&self) -> Brightness {
@@ -715,5 +735,31 @@ impl Dispatcher for TestDispatcher {
 
     fn dispatch(&self, work: Box<dyn FnOnce() + Send>) {
         work();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use waft_embedder::Platform;
+
+    use super::TestPlatform;
+
+    #[test]
+    fn a_test_platform_briefly_shows_passwords_unless_told_not_to() {
+        assert!(TestPlatform::new().briefly_show_password());
+        assert!(
+            !TestPlatform::new()
+                .with_briefly_show_password(false)
+                .briefly_show_password()
+        );
+    }
+
+    #[test]
+    fn a_change_of_the_setting_is_what_the_platform_answers_next() {
+        let platform = TestPlatform::new();
+        platform.set_briefly_show_password(false);
+        assert!(!platform.briefly_show_password());
+        platform.set_briefly_show_password(true);
+        assert!(platform.briefly_show_password());
     }
 }

@@ -342,7 +342,7 @@ impl ExpansionTileTheme {
     pub fn of(app: &mut App, context: BuildContext) -> ExpansionTileThemeData {
         match context.depend_on_inherited_widget_of_exact_type::<ExpansionTileTheme>(app) {
             Some(inherited_theme) => inherited_theme.data.clone(),
-            None => Theme::of(app, context).expansion_tile_theme,
+            None => Theme::of(app, context).expansion_tile_theme.clone(),
         }
     }
 }

@@ -2268,7 +2268,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         focus_field(&mut app, &key);
         let state = key
-            .current_state::<CupertinoTextFieldState>(&mut app)
+            .current_state::<CupertinoTextFieldState>(&app)
             .expect("the field mounted");
         assert!(
             state.effective_focus_node(&app).has_focus(&mut app),
@@ -2505,11 +2505,11 @@ mod tests {
         pump(&mut app, Duration::ZERO);
 
         let state = key
-            .current_state::<CupertinoTextFieldState>(&mut app)
+            .current_state::<CupertinoTextFieldState>(&app)
             .expect("the field mounted");
         let editable_key = state.editable_text_key(&app);
         let editable = editable_key
-            .current_state::<EditableTextState>(&mut app)
+            .current_state::<EditableTextState>(&app)
             .expect("the field mounts an EditableText");
         TextInputClient::perform_selector(editable, &mut app, "deleteBackward:");
         pump(&mut app, Duration::ZERO);

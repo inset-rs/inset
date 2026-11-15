@@ -1429,9 +1429,9 @@ mod tests {
             tester.pump_widget(root);
 
             let field_value = |tester: &WidgetTester| {
-                let mut app = tester.cell.borrow_mut();
+                let app = tester.cell.borrow();
                 let state = state_key
-                    .current_state::<TextFormFieldState>(&mut app)
+                    .current_state::<TextFormFieldState>(&app)
                     .expect("the field mounted");
                 state.value(&app).cloned()
             };
@@ -1449,7 +1449,7 @@ mod tests {
             {
                 let mut app = tester.cell.borrow_mut();
                 let form = form_key
-                    .current_state::<FormState>(&mut app)
+                    .current_state::<FormState>(&app)
                     .expect("the form mounted");
                 form.reset(&mut app);
             }
@@ -1499,10 +1499,10 @@ mod tests {
 
             let mut app = tester.cell.borrow_mut();
             let state1 = field_key1
-                .current_state::<TextFormFieldState>(&mut app)
+                .current_state::<TextFormFieldState>(&app)
                 .expect("the first field mounted");
             let state2 = field_key2
-                .current_state::<TextFormFieldState>(&mut app)
+                .current_state::<TextFormFieldState>(&app)
                 .expect("the second field mounted");
             assert!(state1.is_valid(&mut app));
             assert!(!state1.has_error(&app));
@@ -1582,7 +1582,7 @@ mod tests {
             {
                 let mut app = tester.cell.borrow_mut();
                 let form = form_key
-                    .current_state::<FormState>(&mut app)
+                    .current_state::<FormState>(&app)
                     .expect("the form mounted");
                 form.reset(&mut app);
             }

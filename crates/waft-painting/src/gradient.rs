@@ -1339,8 +1339,7 @@ fn spread_mode(tile_mode: TileMode) -> SpreadMode {
         TileMode::Clamp => SpreadMode::Pad,
         TileMode::Repeat => SpreadMode::Repeat,
         TileMode::Mirror => SpreadMode::Reflect,
-        // Waiting on Valo: a gradient has no transparent spread, so decal clamps.
-        TileMode::Decal => SpreadMode::Pad,
+        TileMode::Decal => SpreadMode::Decal,
     }
 }
 
@@ -1403,10 +1402,6 @@ fn gradient_radial(
 }
 
 /// dart:ui `Gradient.sweep`.
-///
-/// Waiting on Valo: its sweep is one full clockwise turn from `start_angle` with no spread,
-/// so `end_angle` and `tile_mode` reach no shader; with the defaults (`2π`, clamp) the result
-/// is Dart's.
 fn gradient_sweep(
     center: Offset,
     colors: &[Color],
@@ -1419,11 +1414,12 @@ fn gradient_sweep(
     debug_assert!(offset_is_valid(center));
     debug_assert!(start_angle < end_angle);
     validate_color_stops(colors, color_stops);
-    let _ = tile_mode;
     Shader::Sweep {
         center: center.into(),
         start_angle: start_angle as f32,
+        end_angle: end_angle as f32,
         stops: encode_stops(colors, color_stops),
+        spread: spread_mode(tile_mode),
         local: matrix4.unwrap_or(Matrix4::IDENTITY),
     }
 }
@@ -2287,7 +2283,9 @@ mod tests {
                 Shader::Sweep {
                     center: point(150.0, 200.0),
                     start_angle: 0.0,
+                    end_angle: (PI * 2.0) as f32,
                     stops: stops.clone(),
+                    spread: SpreadMode::Pad,
                     local,
                 }
             );

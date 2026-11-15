@@ -655,7 +655,7 @@ impl ListTileTheme {
     pub fn of(app: &mut App, context: BuildContext) -> ListTileThemeData {
         match context.depend_on_inherited_widget_of_exact_type::<ListTileTheme>(app) {
             Some(result) => result.effective_data(),
-            None => Theme::of(app, context).list_tile_theme,
+            None => Theme::of(app, context).list_tile_theme.clone(),
         }
     }
 
@@ -945,7 +945,7 @@ mod tests {
         trailing: Rc<Cell<Option<Color>>>,
         title: Rc<RefCell<Option<TextStyle>>>,
         subtitle: Rc<RefCell<Option<TextStyle>>>,
-        theme: Rc<RefCell<Option<ThemeData>>>,
+        theme: Rc<RefCell<Option<Rc<ThemeData>>>>,
         leading_key: GlobalKey,
         trailing_key: GlobalKey,
         list_tile_key: GlobalKey,
@@ -1049,7 +1049,7 @@ mod tests {
             ]
         }
 
-        fn theme(&self) -> ThemeData {
+        fn theme(&self) -> Rc<ThemeData> {
             self.theme.borrow().clone().expect("built")
         }
     }
@@ -1198,7 +1198,7 @@ mod tests {
                 });
                 // Wait for text color to animate.
                 tester.pump_and_settle();
-                let theme: ThemeData = theme.borrow_mut().take().expect("built");
+                let theme: Rc<ThemeData> = theme.borrow_mut().take().expect("built");
                 (style_color(&leading), style_color(&trailing), theme)
             };
 
@@ -1449,7 +1449,7 @@ mod tests {
             tester.pump_and_settle();
 
             let scaffold_state = scaffold_key
-                .current_state::<ScaffoldState>(&mut tester.cell.borrow_mut())
+                .current_state::<ScaffoldState>(&tester.cell.borrow_mut())
                 .expect("a mounted scaffold");
             scaffold_state.open_drawer(&mut tester.cell.borrow_mut());
             // Start drawer animation.

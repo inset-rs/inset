@@ -247,7 +247,7 @@ mod tests {
 
         {
             let mut app = tester.cell.borrow_mut();
-            if let Some(state) = key.current_state::<TooltipState>(&mut app) {
+            if let Some(state) = key.current_state::<TooltipState>(&app) {
                 state.ensure_tooltip_visible(&mut app);
             }
         }

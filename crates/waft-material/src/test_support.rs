@@ -58,8 +58,10 @@ pub(crate) fn pump(app: &mut App, at: Duration) {
     app.drain_microtasks();
 }
 
-/// The stack a platform's main thread gives the framework: 8 MiB.
-const MAIN_THREAD_STACK_SIZE: usize = 8 * 1024 * 1024;
+/// The stack a case runs on: the 8 MiB a platform's main thread gives the framework, and
+/// 1 MiB more, which a debug build's theme animation (`ThemeData::lerp` of two 180 KB themes)
+/// came to need once `ThemeData` held a `TabBarThemeData`.
+const MAIN_THREAD_STACK_SIZE: usize = 9 * 1024 * 1024;
 
 /// Runs `body` on a thread with a main thread's stack, re-raising its panic.
 ///
@@ -864,8 +866,8 @@ impl WidgetTester {
         &self,
         key: &waft_widgets::GlobalKey,
     ) -> waft_rendering::AnyRenderObject {
-        let mut app = self.cell.borrow_mut();
-        key.current_context(&mut app)
+        let app = self.cell.borrow();
+        key.current_context(&app)
             .expect("the keyed widget is mounted")
             .find_render_object(&app)
             .expect("the keyed widget has a render object")
@@ -1032,6 +1034,31 @@ impl WidgetTester {
                     .is_some_and(|data| !data.should_paint)
             {
                 return false;
+            }
+            // Dart's `SliverMultiBoxAdaptorElement.debugVisitOnstageChildren`: a lazy sliver's
+            // child is onstage only while its layout offset falls in the sliver's painted
+            // window, which a kept-alive child's does not.
+            if let Some(sliver) = parent.as_sliver()
+                && let Some(child_parent_data) = object
+                    .parent_data(&app)
+                    .and_then(|data| data.part::<waft_rendering::SliverMultiBoxAdaptorParentData>())
+            {
+                let constraints = sliver.constraints(&app);
+                let paint_bounds = object.paint_bounds(&app);
+                let item_extent = match constraints.axis() {
+                    waft_painting::Axis::Horizontal => paint_bounds.width(),
+                    waft_painting::Axis::Vertical => paint_bounds.height(),
+                };
+                let onstage = child_parent_data
+                    .layout_offset()
+                    .is_some_and(|layout_offset| {
+                        layout_offset
+                            < constraints.scroll_offset + constraints.remaining_paint_extent
+                            && layout_offset + item_extent > constraints.scroll_offset
+                    });
+                if !onstage {
+                    return false;
+                }
             }
             object = parent;
         }

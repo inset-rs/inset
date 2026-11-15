@@ -230,7 +230,7 @@ impl EdgeDraggingAutoScroller {
         let scrollable = app.get(self).scrollable;
         let physics = scrollable.resolved_physics(app);
         if let Some(physics) = physics
-            && !physics.should_accept_user_offset(&scrollable.position(app).copy_with(app))
+            && !physics.should_accept_user_offset(&*scrollable.position(app).copy_with(app))
         {
             self.stop_auto_scroll(app);
             return;
@@ -505,10 +505,10 @@ impl ScrollAction {
         debug_assert!(
             state
                 .resolved_physics(app)
-                .is_none_or(|physics| physics.should_accept_user_offset(&position.copy_with(app)))
+                .is_none_or(|physics| physics.should_accept_user_offset(&*position.copy_with(app)))
         );
         if let Some(increment_calculator) = state.widget(app).increment_calculator.clone() {
-            let metrics: Rc<dyn ScrollMetrics> = Rc::new(position.copy_with(app));
+            let metrics = position.copy_with(app);
             return increment_calculator(&ScrollIncrementDetails::new(r#type, metrics));
         }
         match r#type {
@@ -595,7 +595,7 @@ impl ContextAction for ScrollAction {
         // Don't do anything if the user isn't allowed to scroll.
         let position = state.position(app);
         if let Some(physics) = state.resolved_physics(app)
-            && !physics.should_accept_user_offset(&position.copy_with(app))
+            && !physics.should_accept_user_offset(&*position.copy_with(app))
         {
             return None;
         }

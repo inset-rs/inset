@@ -503,7 +503,7 @@ impl FloatingActionButtonTheme {
     pub fn of(app: &mut App, context: BuildContext) -> FloatingActionButtonThemeData {
         match context.depend_on_inherited_widget_of_exact_type::<FloatingActionButtonTheme>(app) {
             Some(fab_theme) => fab_theme.data.clone(),
-            None => Theme::of(app, context).floating_action_button_theme,
+            None => Theme::of(app, context).floating_action_button_theme.clone(),
         }
     }
 }

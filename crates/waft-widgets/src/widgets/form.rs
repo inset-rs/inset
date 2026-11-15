@@ -1767,12 +1767,12 @@ mod tests {
         }
 
         fn form(&self, key: &GlobalKey) -> Handle<FormState> {
-            key.current_state::<FormState>(&mut self.app())
+            key.current_state::<FormState>(&self.app())
                 .expect("the form is mounted")
         }
 
         fn field<T: Clone + 'static>(&self, key: &GlobalKey) -> Handle<FormFieldState<T>> {
-            key.current_state::<FormFieldState<T>>(&mut self.app())
+            key.current_state::<FormFieldState<T>>(&self.app())
                 .expect("the field is mounted")
         }
 
@@ -3228,7 +3228,7 @@ mod tests {
     }
 
     fn key_state<S: State>(tester: &WidgetTester, key: &GlobalKey) -> Handle<S> {
-        key.current_state::<S>(&mut tester.app())
+        key.current_state::<S>(&tester.app())
             .expect("the field is mounted")
     }
 

@@ -1111,7 +1111,7 @@ mod tests {
     /// Dart's `scaffoldKey.currentState!`, or `tester.firstState(find.byType(Scaffold))` of the
     /// one scaffold, which the case keys.
     fn scaffold_state(tester: &WidgetTester, key: &GlobalKey) -> Handle<ScaffoldState> {
-        key.current_state::<ScaffoldState>(&mut tester.cell.borrow_mut())
+        key.current_state::<ScaffoldState>(&tester.cell.borrow_mut())
             .expect("a mounted scaffold")
     }
 

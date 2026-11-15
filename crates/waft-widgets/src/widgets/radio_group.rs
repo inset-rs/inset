@@ -994,9 +994,9 @@ mod tests {
             )
             .into_widget(),
         );
-        let mut app = cell.borrow_mut();
+        let app = cell.borrow();
         let state = key
-            .current_state::<RadioGroupState<u32>>(&mut app)
+            .current_state::<RadioGroupState<u32>>(&app)
             .expect("the group is mounted");
         drop(app);
         GroupHarness {

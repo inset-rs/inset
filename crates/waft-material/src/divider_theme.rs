@@ -176,7 +176,7 @@ impl DividerTheme {
     pub fn of(app: &mut App, context: BuildContext) -> DividerThemeData {
         match context.depend_on_inherited_widget_of_exact_type::<DividerTheme>(app) {
             Some(divider_theme) => divider_theme.data.clone(),
-            None => Theme::of(app, context).divider_theme,
+            None => Theme::of(app, context).divider_theme.clone(),
         }
     }
 }
