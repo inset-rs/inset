@@ -23,7 +23,8 @@ use waft_foundation::{
 };
 use waft_gestures::{DragStartBehavior, PointerDownEvent, PointerUpEvent};
 use waft_painting::{
-    AxisDirection, EdgeInsets, InlineSpanRef, TextScaler, TextSpan, TextStyle, TextWidthBasis,
+    AxisDirection, EdgeInsets, InlineSpanRef, RenderComparison, TextScaler, TextSpan, TextStyle,
+    TextWidthBasis,
 };
 use waft_physics::{Simulation, Tolerance};
 use waft_rendering::{
@@ -31,7 +32,7 @@ use waft_rendering::{
     CompositionCallback, HitTestBehavior, LayerLink, LineBoundary, PaintingContext, RenderBox,
     RenderBoxData, RenderEditable, RenderHandle, RenderObject, RenderObjectData,
     RenderObjectWithChildData, RenderObjectWithChildMixin, RenderProxyBoxMixin,
-    RenderProxyBoxWithHitTestBehavior, RevealedOffset, VerticalCaretMovementRun,
+    RenderProxyBoxWithHitTestBehavior, RevealedOffset, ScrollDirection, VerticalCaretMovementRun,
 };
 use waft_scheduler::{
     FrameCallback, SchedulerBinding, Ticker, TickerCallback, TickerProviderObject,
@@ -40,7 +41,7 @@ use waft_services::{
     AnyAutofillClient, AnyTextSelectionDelegate, AutofillClient, AutofillHints, CharacterBoundary,
     Clipboard, ClipboardData, DefaultProcessTextService, DocumentBoundary,
     FilteringTextInputFormatter, KeyboardInsertedContent, LiveText, MouseCursorRef,
-    ParagraphBoundary, ProcessTextAction, ProcessTextService, SelectionChangedCause,
+    ParagraphBoundary, ProcessTextAction, ProcessTextService, SelectionChangedCause, SelectionRect,
     SpellCheckResults, SuggestionSpan, TextBoundary, TextEditingValue, TextInput, TextInputClient,
     TextInputConnection, TextInputFormatter, TextInputFormatterRef, TextInputStyle,
     TextSelectionDelegate,
@@ -73,8 +74,10 @@ use crate::widgets::focus_scope::{Focus, FocusScope};
 use crate::widgets::focus_traversal::{DirectionalFocusAction, DirectionalFocusIntent};
 use crate::widgets::magnifier::TextMagnifierConfiguration;
 use crate::widgets::media_query::{MediaQuery, Orientation};
+use crate::widgets::notification_listener::NotificationListener;
 use crate::widgets::scroll_configuration::{ScrollBehaviorRef, ScrollConfiguration};
 use crate::widgets::scroll_controller::{ScrollController, ScrollControllerLeaf};
+use crate::widgets::scroll_notification::ScrollNotification;
 use crate::widgets::scroll_physics::{ScrollPhysics, ScrollPhysicsBase, ScrollPhysicsRef};
 use crate::widgets::scrollable::{Scrollable, ScrollableState, ViewportBuilder};
 use crate::widgets::scrollable_helpers::{ScrollAction, ScrollIncrementType, ScrollIntent};
@@ -1985,6 +1988,7 @@ impl StatefulWidget for EditableText {
             view_id: None,
             composite_callback: None,
             last_known_remote_text_editing_value: None,
+            scribble_cache_key: None,
             internal_scroll_controller: None,
             toolbar_layer_link: None,
             start_handle_layer_link: None,
@@ -2290,6 +2294,7 @@ pub struct EditableTextState {
     /// Dart's `_compositeCallback` tear-off; one `Rc` so the widget can assert identity.
     composite_callback: Option<CompositionCallback>,
     last_known_remote_text_editing_value: Option<TextEditingValue>,
+    scribble_cache_key: Option<ScribbleCacheKey>,
     internal_scroll_controller: Option<Handle<ScrollController>>,
     toolbar_layer_link: Option<Handle<LayerLink>>,
     start_handle_layer_link: Option<Handle<LayerLink>>,
@@ -3117,6 +3122,16 @@ impl EditableTextState {
         self.widget(app)
             .text_direction
             .unwrap_or_else(|| Directionality::of(app, context))
+    }
+
+    /// Dart's `_stylusHandwritingEnabled`.
+    fn stylus_handwriting_enabled(self: Handle<Self>, app: &App) -> bool {
+        // During the deprecation period, respect scribbleEnabled being explicitly
+        // set.
+        if !self.widget(app).scribble_enabled {
+            return self.widget(app).scribble_enabled;
+        }
+        self.widget(app).stylus_handwriting_enabled
     }
 
     fn has_input_connection(self: Handle<Self>, app: &mut App) -> bool {
@@ -4144,6 +4159,7 @@ impl EditableTextState {
             }
             app.get_mut(self).text_input_connection = None;
             app.get_mut(self).last_known_remote_text_editing_value = None;
+            app.get_mut(self).scribble_cache_key = None;
         }
     }
 
@@ -4644,7 +4660,7 @@ impl EditableTextState {
         if !app.contains(self) || !self.has_input_connection(app) {
             return;
         }
-        // `_updateSelectionRects` waits with scribble (PORTING.md).
+        self.update_selection_rects(app, false);
         self.update_composing_rect_if_needed(app);
         self.update_caret_rect_if_needed(app);
         SchedulerBinding::add_post_frame_callback(
@@ -4652,6 +4668,90 @@ impl EditableTextState {
             FrameCallback::handle_method(self, Self::schedule_periodic_post_frame_callbacks),
             View::maybe_id_of(app, self.context(app)),
         );
+    }
+
+    fn update_selection_rects(self: Handle<Self>, app: &mut App, force: bool) {
+        if !self.stylus_handwriting_enabled(app)
+            || app.platform().target_platform() != TargetPlatform::IOS
+        {
+            return;
+        }
+
+        let scroll_direction = self
+            .scroll_controller(app)
+            .position(app)
+            .user_scroll_direction(app);
+        if scroll_direction != ScrollDirection::Idle {
+            return;
+        }
+
+        let render_editable = self.render_editable(app);
+        let Some(inline_span) = render_editable.text(app) else {
+            return;
+        };
+        let context = self.context(app);
+        let text_height_behavior = self
+            .widget(app)
+            .text_height_behavior
+            .or_else(|| DefaultTextHeightBehavior::maybe_of(app, context));
+        let new_cache_key = ScribbleCacheKey {
+            inline_span: inline_span.clone(),
+            text_align: self.widget(app).text_align,
+            text_direction: self.text_direction(app, context),
+            text_scaler: self.effective_text_scaler(app, context),
+            text_height_behavior,
+            locale: self.widget(app).locale.clone(),
+            size: render_editable.size(app),
+        };
+
+        let comparison = if force {
+            RenderComparison::Layout
+        } else {
+            app.get(self)
+                .scribble_cache_key
+                .as_ref()
+                .map_or(RenderComparison::Layout, |key| key.compare(&new_cache_key))
+        };
+        if comparison < RenderComparison::Layout {
+            return;
+        }
+        app.get_mut(self).scribble_cache_key = Some(new_cache_key);
+
+        let mut rects = Vec::new();
+        let mut grapheme_start = 0;
+        // Can't use _value.text here: the controller value could change between
+        // frames.
+        let plain_text = inline_span.to_plain_text(false, true);
+        let characters = CharacterBoundary::new(plain_text);
+        while let Some(grapheme_end) = characters.get_trailing_text_boundary_at(app, grapheme_start)
+        {
+            let boxes = render_editable
+                .get_boxes_for_selection(app, TextSelection::new(grapheme_start, grapheme_end));
+
+            if let Some(text_box) = boxes.first() {
+                let paint_bounds = render_editable.as_object().paint_bounds(app);
+                // Stop early when characters are already below the bottom edge of the
+                // RenderEditable, regardless of its clipBehavior.
+                if paint_bounds.bottom <= text_box.top {
+                    break;
+                }
+                // Include any TextBox which intersects with the RenderEditable.
+                if paint_bounds.left <= text_box.right
+                    && text_box.left <= paint_bounds.right
+                    && paint_bounds.top <= text_box.bottom
+                {
+                    // At least some part of the letter is visible within the text field.
+                    rects.push(SelectionRect::new(
+                        grapheme_start,
+                        text_box.to_rect(),
+                        text_box.direction,
+                    ));
+                }
+            }
+            grapheme_start = grapheme_end;
+        }
+        self.text_input_connection(app)
+            .set_selection_rects(app, rects);
     }
 
     // Sends the current composing rect to the embedder's text input plugin.
@@ -5261,6 +5361,13 @@ impl State for EditableTextState {
         if let Some(restoration_id) = restoration_id {
             scrollable = scrollable.restoration_id(restoration_id);
         }
+        let state = self;
+        let scrollable = NotificationListener::<dyn ScrollNotification>::new(scrollable)
+            .on_notification(move |app: &mut App, _: &dyn ScrollNotification| {
+                app.get_mut(state).scribble_cache_key = None;
+                false
+            })
+            .into_widget();
         let focused = Focus::new(scrollable)
             .focus_node(focus_node.as_node())
             .include_semantics(false);
@@ -6023,6 +6130,37 @@ impl Debug for NeverUserScrollableScrollPhysics {
         f.debug_struct("NeverUserScrollableScrollPhysics")
             .field("parent", &self.parent)
             .finish()
+    }
+}
+
+/// Dart's `_ScribbleCacheKey`: what the selection rects sent last were laid out with.
+struct ScribbleCacheKey {
+    text_align: TextAlign,
+    text_direction: TextDirection,
+    text_scaler: TextScaler,
+    text_height_behavior: Option<TextHeightBehavior>,
+    locale: Option<Locale>,
+    size: Size,
+    inline_span: InlineSpanRef,
+}
+
+impl ScribbleCacheKey {
+    fn compare(&self, other: &ScribbleCacheKey) -> RenderComparison {
+        if std::ptr::eq(self, other) {
+            return RenderComparison::Identical;
+        }
+        let needs_layout = self.text_align != other.text_align
+            || self.text_direction != other.text_direction
+            || self.text_scaler != other.text_scaler
+            || self.text_height_behavior.unwrap_or_default()
+                != other.text_height_behavior.unwrap_or_default()
+            || self.locale != other.locale
+            || self.size != other.size;
+        if needs_layout {
+            RenderComparison::Layout
+        } else {
+            self.inline_span.compare_to(&*other.inline_span)
+        }
     }
 }
 
@@ -7501,6 +7639,8 @@ mod tests {
     struct FieldTester {
         cell: Rc<AppCell>,
         platform: Rc<waft_test::TestPlatform>,
+        /// The view the field is in, whose host records what the field asks of the text input.
+        view: Rc<waft_test::TestView>,
         state: Handle<EditableTextState>,
         /// The `obscureText` the field is built with, which a `StatefulBuilder` holds in Dart.
         obscure_text: Rc<Cell<bool>>,
@@ -7517,10 +7657,11 @@ mod tests {
             use crate::{ListenableBuilder, run_app};
             use waft_foundation::ValueNotifier;
 
+            let view = Rc::new(waft_test::TestView::new(800.0, 600.0));
             let platform = Rc::new(
                 waft_test::TestPlatform::new()
                     .on(target)
-                    .with_view(Rc::new(waft_test::TestView::new(800.0, 600.0))),
+                    .with_view(Rc::clone(&view) as waft_embedder::ViewRef),
             );
             let cell = AppCell::with_platform(Rc::clone(&platform) as waft_embedder::PlatformRef);
             let key = GlobalKey::new();
@@ -7564,6 +7705,7 @@ mod tests {
             FieldTester {
                 cell,
                 platform,
+                view,
                 state,
                 obscure_text,
                 rebuild,
@@ -7613,6 +7755,19 @@ mod tests {
             let render_editable = self.state.render_editable(&app);
             render_editable.plain_text(&mut app)
         }
+
+        /// The selection rects the field sent its view's text input, oldest first.
+        fn selection_rects_sent(&self) -> Vec<Vec<SelectionRect>> {
+            self.view
+                .test_host()
+                .text_input_calls()
+                .into_iter()
+                .filter_map(|call| match call {
+                    waft_test::TextInputCall::SetSelectionRects(rects) => Some(rects),
+                    _ => None,
+                })
+                .collect()
+        }
     }
 
     const HALF_A_BLINK: Duration = Duration::from_millis(500);
@@ -7643,6 +7798,32 @@ mod tests {
                 "on {target:?}"
             );
         }
+    }
+
+    /// Dart's `selection rects re-sent when refocused`, its first update: on iOS the field sends
+    /// the bounds of each grapheme as its text is laid out, once, and nowhere else sends any.
+    #[test]
+    fn selection_rects_are_sent_on_ios_once_the_text_is_laid_out() {
+        let mut tester = FieldTester::obscured(TargetPlatform::IOS);
+        tester.set_obscure_text(false);
+        tester.enter_text("Text1");
+        tester.pump(Duration::ZERO);
+
+        let sent = tester.selection_rects_sent();
+        let positions: Vec<i32> = sent
+            .last()
+            .expect("the rects of the laid out text")
+            .iter()
+            .map(|rect| rect.position)
+            .collect();
+        assert_eq!(positions, [0, 1, 2, 3, 4]);
+        tester.pump(Duration::ZERO);
+        assert_eq!(tester.selection_rects_sent().len(), sent.len(), "sent once");
+
+        let mut tester = FieldTester::obscured(TargetPlatform::Android);
+        tester.enter_text("Text1");
+        tester.pump(Duration::ZERO);
+        assert!(tester.selection_rects_sent().is_empty(), "iOS alone");
     }
 
     /// Dart's case runs on flutter_test's default platform, Android.

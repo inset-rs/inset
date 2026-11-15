@@ -786,7 +786,7 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - app.rs: the state's route-push handlers. Trigger: the binding's pushed-route events.
 - app.rs: the performance overlay, semantics debugger and widget inspector the three carried debug flags would show. Trigger: `performance_overlay.dart`; the semantics tree; `widget_inspector.dart`.
 - default_text_editing_shortcuts.rs: the Control-key editing bindings macOS supplies from its own key tables (Control-A, Control-E, Control-K, Control-D), which Dart's macOS map leaves to the host. Trigger: nothing else supplies them over a host that reports plain key presses.
-- editable_text.rs: scribble and stylus support, the spell-check fetch, the magnifier overlay, `StrutStyle`, the floating cursor and `insertContent`. Trigger: `StrutStyle`; `UndoManagerClient`; `RenderEditable.setFloatingCursor`.
+- editable_text.rs: scribble and stylus support but the selection rects (`_ScribbleFocusable`, `_ScribblePlaceholder`, and `_ScribbleCacheKey`'s strut style and placeholder), the spell-check fetch, the magnifier overlay, `StrutStyle`, the floating cursor and `insertContent`; the scroll notification's `_handleContextMenuOnScroll`. Trigger: `StrutStyle`; `UndoManagerClient`; `RenderEditable.setFloatingCursor`; Scribble on the iOS host.
 - editable_text.rs: `Semantics(inputType:, onCopy:, onCut:, onPaste:)`. Trigger: the next edit of editable_text.rs.
 - app_lifecycle_listener.rs: diagnostics. Trigger: diagnostics.
 - text_selection.rs: `EmptyTextSelectionControls`. Trigger: its first caller.
