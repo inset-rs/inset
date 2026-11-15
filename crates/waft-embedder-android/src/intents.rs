@@ -1,11 +1,12 @@
 //! The intents that reach an activity: the one it started with, and each one Waft's activity hands
 //! on from `onNewIntent` (`NativeActivity` keeps it to itself). Each is read where it arrives, the
 //! one an activity started with on the app's thread and a later one on Android's main thread, into
-//! what it asks of the app: files and links to open (`open_requests`), or a tap on one of the app's
-//! notifications (`notifications`); other intents ask nothing. Under an activity that is not
+//! what it asks of the app: files and links to open (`open_requests`), a tap on one of the app's
+//! notifications (`notifications`), or a tap on one of its shortcuts that opens its own activity
+//! (`shortcuts`); other intents ask nothing. Under an activity that is not
 //! Waft's, only the intent the activity started with comes. A document activity's intents ask
-//! nothing of the app: the one it started with is its view's (`view_requests.rs`), and no other is
-//! sent it.
+//! nothing of the app: the one it started with is its view's (`view_requests.rs`), and a later one,
+//! a shortcut's tapped while its task runs, only brought the task forward.
 //!
 //! What an intent asks is asked of the app, whichever activity it reached: it is set down in one
 //! queue and the app's loop woken; the loop hands it on once the client is there, so the intent an
@@ -26,6 +27,7 @@ use crate::application::{Application, package_class};
 use crate::log::warn_to_log;
 use crate::loop_waker::wake_app_loop;
 use crate::open_requests::{self, Viewed};
+use crate::shortcuts::ShortcutActivation;
 
 /// What the intents that arrived ask, not yet handed on.
 static ARRIVED: LazyLock<Mutex<Arrived>> = LazyLock::new(Mutex::default);
@@ -37,6 +39,8 @@ pub(crate) struct Arrived {
     pub(crate) viewed: Vec<Viewed>,
     /// The taps on the app's notifications, in the order they came.
     pub(crate) activations: Vec<NotificationActivation>,
+    /// The taps on the app's shortcuts that open its own activity, in the order they came.
+    pub(crate) shortcut_taps: Vec<ShortcutActivation>,
 }
 
 /// Hears the intents that reach Waft's activities from now on.
@@ -127,7 +131,9 @@ fn record(
     if intent.is_null() {
         return Ok(());
     }
-    if let Some(viewed) = open_requests::viewed(env, intent)? {
+    if let Some(tap) = crate::shortcuts::tap_of(env, activity, intent)? {
+        locked(&ARRIVED).shortcut_taps.push(tap);
+    } else if let Some(viewed) = open_requests::viewed(env, intent)? {
         locked(&ARRIVED).viewed.push(viewed);
     } else if let Some(activation) = crate::notifications::activation(env, activity, intent)? {
         locked(&ARRIVED).activations.push(activation);

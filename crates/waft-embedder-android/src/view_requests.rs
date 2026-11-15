@@ -209,7 +209,7 @@ fn start_document(
 
 /// What a failed call into Java tells: the exception it left, which is cleared, or the call's
 /// error.
-fn exception_text(env: &mut Env<'_>, error: &jni::errors::Error) -> String {
+pub(crate) fn exception_text(env: &mut Env<'_>, error: &jni::errors::Error) -> String {
     let Some(exception) = env.exception_occurred() else {
         return error.to_string();
     };

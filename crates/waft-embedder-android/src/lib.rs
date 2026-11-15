@@ -107,6 +107,8 @@ mod saved_view;
 #[cfg(target_os = "android")]
 mod settings;
 #[cfg(target_os = "android")]
+mod shortcuts;
+#[cfg(target_os = "android")]
 mod surface;
 #[cfg(target_os = "android")]
 mod surface_control;
@@ -141,3 +143,9 @@ pub use host::AndroidEmbedder;
 pub use media::AndroidVideoFrame;
 #[cfg(target_os = "android")]
 pub use platform::AndroidPlatform;
+#[cfg(target_os = "android")]
+pub use shortcuts::{
+    DisabledReason, PublishedShortcut, ShortcutActivation, ShortcutActivationHandler,
+    ShortcutError, ShortcutFuture, ShortcutIcon, ShortcutInfo, ShortcutMatch, ShortcutTarget,
+    Shortcuts,
+};

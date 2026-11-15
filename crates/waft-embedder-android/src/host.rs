@@ -684,7 +684,8 @@ impl<C: EmbedderClient> Host<C> {
     }
 
     /// Hands the client what the intents that arrived ask: the files and links to open, and the
-    /// taps on the app's notifications. They wait while there is no client yet.
+    /// taps on the app's notifications; and the taps on its shortcuts to the shortcuts' handler.
+    /// They wait while there is no client yet.
     fn hand_on_intents(&mut self) {
         let Some(client) = &mut self.client else {
             return;
@@ -696,6 +697,7 @@ impl<C: EmbedderClient> Host<C> {
         for activation in arrived.activations {
             client.notification_activated(activation);
         }
+        self.platform.shortcuts.hand_on(arrived.shortcut_taps);
     }
 
     /// Hands the client what the keyboards did to the fields that take text, each in its view, in
