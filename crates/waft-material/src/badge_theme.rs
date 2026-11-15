@@ -51,6 +51,22 @@ pub struct BadgeThemeData {
     pub offset: Option<Offset>,
 }
 
+crate::theme_data_getters::theme_data_getters! {
+    /// Dart's getters of `BadgeThemeData`: the theme data answers with its fields, and a defaults
+    /// subclass (Dart's `_...Defaults...(context)`) computes the ones it overrides when they
+    /// are read.
+    pub trait BadgeThemeDataGetters for BadgeThemeData, fields: badge_theme_data {
+        background_color: Option<Color>,
+        text_color: Option<Color>,
+        small_size: Option<f64>,
+        large_size: Option<f64>,
+        text_style: Option<TextStyle>,
+        padding: Option<EdgeInsetsGeometry>,
+        alignment: Option<AlignmentGeometry>,
+        offset: Option<Offset>,
+    }
+}
+
 impl BadgeThemeData {
     /// Creates the set of color, style, and size properties used to configure
     /// [`Badge`](crate::Badge); Dart's optional named arguments are the fluent setters.

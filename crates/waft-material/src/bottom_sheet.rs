@@ -24,7 +24,7 @@ use waft_gestures::{
 };
 use waft_painting::{
     AlignmentGeometry, AnyColor, BorderRadius, BoxDecoration, EdgeInsets, EdgeInsetsGeometry,
-    ShapeBorder,
+    ShapeBorderRef,
 };
 use waft_rendering::{
     AnyRenderBox, AnyRenderObject, BoxConstraints, BoxHitTestResult, BoxParentData, Constraints,
@@ -44,11 +44,11 @@ use waft_widgets::{
     WidgetStateProperty, WidgetStates, debug_check_has_media_query,
 };
 
-use crate::bottom_sheet_theme::BottomSheetThemeData;
+use crate::bottom_sheet_theme::{BottomSheetThemeData, BottomSheetThemeDataGetters};
 use crate::colors::Colors;
 use crate::constants::K_MIN_INTERACTIVE_DIMENSION;
 use crate::debug::{debug_check_has_material_localizations, debug_check_has_scaffold};
-use crate::generated::bottom_sheet_defaults_m3::bottom_sheet_defaults_m3;
+use crate::generated::bottom_sheet_defaults_m3::BottomSheetDefaultsM3;
 use crate::material::Material;
 use crate::material_localizations::MaterialLocalizations;
 use crate::motion::Easing;
@@ -216,7 +216,7 @@ pub struct BottomSheet {
     /// Defines the bottom sheet's `Material.shape`.
     ///
     /// Defaults to null and falls back to [`Material`]'s default.
-    pub shape: Option<Box<dyn ShapeBorder>>,
+    pub shape: Option<ShapeBorderRef>,
 
     /// The content will be clipped (or not) according to this option.
     ///
@@ -352,7 +352,7 @@ impl BottomSheet {
     }
 
     /// Dart `BottomSheet(shape:)`.
-    pub fn shape(mut self, shape: impl Into<Box<dyn ShapeBorder>>) -> BottomSheet {
+    pub fn shape(mut self, shape: impl Into<ShapeBorderRef>) -> BottomSheet {
         self.shape = Some(shape.into());
         self
     }
@@ -579,37 +579,39 @@ impl State for BottomSheetState {
         let theme = Theme::of(app, context);
         let bottom_sheet_theme = theme.bottom_sheet_theme.clone();
         let use_material3 = theme.use_material3;
-        let defaults = if use_material3 {
-            bottom_sheet_defaults_m3(app, context)
+        let defaults: Box<dyn BottomSheetThemeDataGetters> = if use_material3 {
+            Box::new(BottomSheetDefaultsM3::new(context))
         } else {
-            BottomSheetThemeData::new()
+            Box::new(BottomSheetThemeData::new())
         };
-        let widget = self.widget(app);
+        let widget_ref = context.widget(app).clone();
+        let widget = waft_widgets::downcast_widget::<BottomSheet>(&*widget_ref)
+            .expect("a BottomSheetState builds its BottomSheet");
         let constraints = widget
             .constraints
             .or(bottom_sheet_theme.constraints)
-            .or(defaults.constraints);
+            .or_else(|| defaults.constraints(app));
         let color = widget
             .background_color
             .or(bottom_sheet_theme.background_color)
-            .or(defaults.background_color);
+            .or_else(|| defaults.background_color(app));
         let surface_tint_color = bottom_sheet_theme
             .surface_tint_color
-            .or(defaults.surface_tint_color);
+            .or_else(|| defaults.surface_tint_color(app));
         let shadow_color = widget
             .shadow_color
             .or(bottom_sheet_theme.shadow_color)
-            .or(defaults.shadow_color);
+            .or_else(|| defaults.shadow_color(app));
         let elevation = widget
             .elevation
             .or(bottom_sheet_theme.elevation)
-            .or(defaults.elevation)
+            .or_else(|| defaults.elevation(app))
             .unwrap_or(0.0);
         let shape = widget
             .shape
             .clone()
             .or_else(|| bottom_sheet_theme.shape.clone())
-            .or_else(|| defaults.shape.clone());
+            .or_else(|| defaults.shape(app));
         let clip_behavior = widget
             .clip_behavior
             .or(bottom_sheet_theme.clip_behavior)
@@ -740,11 +742,11 @@ impl Debug for DragHandle {
 impl StatelessWidget for DragHandle {
     fn build(&self, app: &mut App, context: BuildContext) -> WidgetRef {
         let bottom_sheet_theme = Theme::of(app, context).bottom_sheet_theme.clone();
-        let m3_defaults = bottom_sheet_defaults_m3(app, context);
+        let m3_defaults = BottomSheetDefaultsM3::new(context);
         let handle_size = self
             .drag_handle_size
             .or(bottom_sheet_theme.drag_handle_size)
-            .or(m3_defaults.drag_handle_size)
+            .or_else(|| m3_defaults.drag_handle_size(app))
             .expect("the Material 3 defaults have a drag handle size");
         let color =
             <dyn WidgetStateProperty<Color>>::resolve_as(&self.drag_handle_color, &self.states)
@@ -754,7 +756,7 @@ impl StatelessWidget for DragHandle {
                         &self.states,
                     )
                 })
-                .or(m3_defaults.drag_handle_color)
+                .or_else(|| m3_defaults.drag_handle_color(app))
                 .map(|color| color.color());
         let mut decoration =
             BoxDecoration::new().border_radius(BorderRadius::circular(handle_size.height() / 2.0));
@@ -1116,7 +1118,7 @@ struct ModalBottomSheet {
     scroll_control_disabled_max_height_ratio: f64,
     background_color: Option<Color>,
     elevation: Option<f64>,
-    shape: Option<Box<dyn ShapeBorder>>,
+    shape: Option<ShapeBorderRef>,
     clip_behavior: Option<Clip>,
     constraints: Option<BoxConstraints>,
     enable_drag: bool,
@@ -1516,7 +1518,7 @@ pub struct ModalBottomSheetRoute {
     /// Defines the bottom sheet's `Material.shape`.
     ///
     /// If this property is not provided, it falls back to [`Material`]'s default.
-    pub shape: Option<Box<dyn ShapeBorder>>,
+    pub shape: Option<ShapeBorderRef>,
 
     /// The content will be clipped (or not) according to this option.
     ///
@@ -1732,7 +1734,7 @@ impl ModalBottomSheetRoute {
     pub fn shape(
         self: Handle<Self>,
         app: &mut App,
-        shape: impl Into<Box<dyn ShapeBorder>>,
+        shape: impl Into<ShapeBorderRef>,
     ) -> Handle<Self> {
         app.get_mut(self).shape = Some(shape.into());
         self
@@ -2051,24 +2053,24 @@ impl ModalRoute for ModalBottomSheetRoute {
         let content = Builder::new(move |app, context| {
             let theme = Theme::of(app, context);
             let sheet_theme = theme.bottom_sheet_theme.clone();
-            let defaults = if theme.use_material3 {
-                bottom_sheet_defaults_m3(app, context)
+            let defaults: Box<dyn BottomSheetThemeDataGetters> = if theme.use_material3 {
+                Box::new(BottomSheetDefaultsM3::new(context))
             } else {
-                BottomSheetThemeData::new()
+                Box::new(BottomSheetThemeData::new())
             };
             let route = app.get(self);
             let mut modal_bottom_sheet = ModalBottomSheet::new(self);
             modal_bottom_sheet.animation_style = route.sheet_animation_style.clone();
-            modal_bottom_sheet.background_color = route
-                .background_color
+            let (background_color, elevation) = (route.background_color, route.elevation);
+            modal_bottom_sheet.background_color = background_color
                 .or(sheet_theme.modal_background_color)
                 .or(sheet_theme.background_color)
-                .or(defaults.background_color);
-            modal_bottom_sheet.elevation = route
-                .elevation
+                .or_else(|| defaults.background_color(app));
+            modal_bottom_sheet.elevation = elevation
                 .or(sheet_theme.modal_elevation)
                 .or(sheet_theme.elevation)
-                .or(defaults.modal_elevation);
+                .or_else(|| defaults.modal_elevation(app));
+            let route = app.get(self);
             modal_bottom_sheet.shape = route.shape.clone();
             modal_bottom_sheet.clip_behavior = route.clip_behavior;
             modal_bottom_sheet.constraints = route.constraints;
@@ -2252,7 +2254,7 @@ pub fn show_modal_bottom_sheet(
     background_color: Option<Color>,
     barrier_label: Option<String>,
     elevation: Option<f64>,
-    shape: Option<Box<dyn ShapeBorder>>,
+    shape: Option<ShapeBorderRef>,
     clip_behavior: Option<Clip>,
     constraints: Option<BoxConstraints>,
     barrier_color: Option<Color>,
@@ -2381,7 +2383,7 @@ pub fn show_bottom_sheet(
     builder: WidgetBuilder,
     background_color: Option<Color>,
     elevation: Option<f64>,
-    shape: Option<Box<dyn ShapeBorder>>,
+    shape: Option<ShapeBorderRef>,
     clip_behavior: Option<Clip>,
     constraints: Option<BoxConstraints>,
     enable_drag: Option<bool>,
@@ -2449,6 +2451,7 @@ impl StatelessWidget for BottomSheetGestureDetector {
 #[cfg(test)]
 mod tests {
     use std::cell::{Cell, RefCell};
+    use waft_painting::ShapeBorder;
 
     use waft_embedder::{Rect, TargetPlatform};
     use waft_widgets::{AnyElement, Notification, RouteSettings};
@@ -2524,7 +2527,7 @@ mod tests {
         background_color: Option<Color>,
         barrier_label: Option<String>,
         elevation: Option<f64>,
-        shape: Option<Box<dyn ShapeBorder>>,
+        shape: Option<ShapeBorderRef>,
         clip_behavior: Option<Clip>,
         constraints: Option<BoxConstraints>,
         barrier_color: Option<Color>,
@@ -3364,10 +3367,11 @@ mod tests {
             let scaffold_key = GlobalKey::new();
             let color = Colors::PINK.primary();
             let elevation = 9.0;
-            let shape: Box<dyn ShapeBorder> = Box::new(waft_painting::BeveledRectangleBorder::new(
-                waft_painting::BorderSide::NONE,
-                waft_painting::BorderRadiusGeometry::all(waft_embedder::Radius::circular(12.0)),
-            ));
+            let shape: ShapeBorderRef =
+                ShapeBorderRef::new(waft_painting::BeveledRectangleBorder::new(
+                    waft_painting::BorderSide::NONE,
+                    waft_painting::BorderRadiusGeometry::all(waft_embedder::Radius::circular(12.0)),
+                ));
             let clip_behavior = Clip::AntiAlias;
             let barrier_color = Colors::RED.primary();
 
@@ -3428,8 +3432,8 @@ mod tests {
             let mut tester = tester();
             let surface_color = Colors::PINK.primary();
             let surface_tint_color = Colors::BLUE.primary();
-            let default_shape: Box<dyn ShapeBorder> =
-                Box::new(waft_painting::RoundedRectangleBorder::new(
+            let default_shape: ShapeBorderRef =
+                ShapeBorderRef::new(waft_painting::RoundedRectangleBorder::new(
                     waft_painting::BorderSide::NONE,
                     waft_painting::BorderRadiusGeometry::vertical(
                         waft_embedder::Radius::circular(28.0),
@@ -5642,10 +5646,11 @@ mod tests {
             let scaffold_key = GlobalKey::new();
             let color = Colors::PINK.primary();
             let elevation = 9.0;
-            let shape: Box<dyn ShapeBorder> = Box::new(waft_painting::BeveledRectangleBorder::new(
-                waft_painting::BorderSide::NONE,
-                waft_painting::BorderRadiusGeometry::all(waft_embedder::Radius::circular(12.0)),
-            ));
+            let shape: ShapeBorderRef =
+                ShapeBorderRef::new(waft_painting::BeveledRectangleBorder::new(
+                    waft_painting::BorderSide::NONE,
+                    waft_painting::BorderRadiusGeometry::all(waft_embedder::Radius::circular(12.0)),
+                ));
             let clip_behavior = Clip::AntiAlias;
 
             tester.pump_widget(app_with_scaffold(m3(&tester), &scaffold_key));
@@ -6210,8 +6215,8 @@ mod tests {
             let surface_container_low = theme.color_scheme.surface_container_low();
             tester.pump_widget(bottom_sheet_in_scaffold(theme, plain_sheet()));
 
-            let default_shape: Box<dyn ShapeBorder> =
-                Box::new(waft_painting::RoundedRectangleBorder::new(
+            let default_shape: ShapeBorderRef =
+                ShapeBorderRef::new(waft_painting::RoundedRectangleBorder::new(
                     waft_painting::BorderSide::NONE,
                     waft_painting::BorderRadiusGeometry::vertical(
                         waft_embedder::Radius::circular(28.0),
@@ -6277,10 +6282,11 @@ mod tests {
             let background_color = Colors::PURPLE.primary();
             let shadow_color = Colors::BLUE.primary();
             let elevation = 7.0;
-            let shape: Box<dyn ShapeBorder> = Box::new(waft_painting::RoundedRectangleBorder::new(
-                waft_painting::BorderSide::NONE,
-                waft_painting::BorderRadiusGeometry::all(waft_embedder::Radius::circular(9.0)),
-            ));
+            let shape: ShapeBorderRef =
+                ShapeBorderRef::new(waft_painting::RoundedRectangleBorder::new(
+                    waft_painting::BorderSide::NONE,
+                    waft_painting::BorderRadiusGeometry::all(waft_embedder::Radius::circular(9.0)),
+                ));
             let clip_behavior = Clip::HardEdge;
 
             let theme = ThemeData::builder()

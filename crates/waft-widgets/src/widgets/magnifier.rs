@@ -11,7 +11,8 @@ use waft_embedder::{
 };
 use waft_foundation::{App, Handle, Listener, ValueNotifier};
 use waft_painting::{
-    Alignment, AlignmentGeometry, BoxShadow, RoundedRectangleBorder, ShapeBorder, ShapeDecoration,
+    Alignment, AlignmentGeometry, BoxShadow, RoundedRectangleBorder, ShapeBorderRef,
+    ShapeDecoration,
 };
 use waft_rendering::{
     AnyRenderBox, AnyRenderObject, BackdropFilterLayer, BoxConstraints, BoxHitTestResult,
@@ -452,7 +453,7 @@ pub struct MagnifierDecoration {
     /// Shapes can be stacked (using `plus`). In that case, the magnifier and shadow are
     /// drawn according to the outside edge of the last shape, with the borders painted on
     /// top.
-    pub shape: Box<dyn ShapeBorder>,
+    pub shape: ShapeBorderRef,
 }
 
 impl MagnifierDecoration {
@@ -477,7 +478,7 @@ impl MagnifierDecoration {
     }
 
     /// Dart `MagnifierDecoration(shape:)`.
-    pub fn shape(mut self, shape: impl Into<Box<dyn ShapeBorder>>) -> MagnifierDecoration {
+    pub fn shape(mut self, shape: impl Into<ShapeBorderRef>) -> MagnifierDecoration {
         self.shape = shape.into();
         self
     }
@@ -488,16 +489,14 @@ impl Default for MagnifierDecoration {
         MagnifierDecoration {
             opacity: 1.0,
             shadows: None,
-            shape: Box::new(RoundedRectangleBorder::default()),
+            shape: ShapeBorderRef::new(RoundedRectangleBorder::default()),
         }
     }
 }
 
 impl PartialEq for MagnifierDecoration {
     fn eq(&self, other: &MagnifierDecoration) -> bool {
-        self.opacity == other.opacity
-            && self.shadows == other.shadows
-            && self.shape.eq_shape(&*other.shape)
+        self.opacity == other.opacity && self.shadows == other.shadows && self.shape == other.shape
     }
 }
 
@@ -669,11 +668,11 @@ impl StatelessWidget for RawMagnifier {
 
 /// A clip that renders everything except the inside of a shape.
 struct NegativeClip {
-    shape: Box<dyn ShapeBorder>,
+    shape: ShapeBorderRef,
 }
 
 impl NegativeClip {
-    fn new(shape: Box<dyn ShapeBorder>) -> NegativeClip {
+    fn new(shape: ShapeBorderRef) -> NegativeClip {
         NegativeClip { shape }
     }
 }
@@ -697,7 +696,7 @@ impl CustomClipper<Path> for NegativeClip {
         let Some(old_clipper) = old_clipper.as_any().downcast_ref::<NegativeClip>() else {
             return true;
         };
-        !old_clipper.shape.eq_shape(&*self.shape)
+        old_clipper.shape != self.shape
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -1310,12 +1309,12 @@ mod tests {
         let app = cell.borrow();
         let size = Size::new(100.0, 60.0);
         for shape in [
-            Box::new(RoundedRectangleBorder::default()) as Box<dyn ShapeBorder>,
-            Box::new(RoundedRectangleBorder::new(
+            ShapeBorderRef::new(RoundedRectangleBorder::default()),
+            ShapeBorderRef::new(RoundedRectangleBorder::new(
                 BorderSide::NONE,
                 BorderRadius::all(Radius::elliptical(60.0, 50.0)).into(),
             )),
-            Box::new(CircleBorder::default()),
+            ShapeBorderRef::new(CircleBorder::default()),
         ] {
             let clip = NegativeClip::new(shape.clone()).get_clip(&app, size);
             assert_eq!(clip.fill_type, PathFillType::EvenOdd);
@@ -1339,9 +1338,9 @@ mod tests {
     fn the_negative_clip_reclips_only_for_another_shape() {
         let cell = waft_foundation::AppCell::new();
         let app = cell.borrow();
-        let square = NegativeClip::new(Box::new(RoundedRectangleBorder::default()));
-        let same = NegativeClip::new(Box::new(RoundedRectangleBorder::default()));
-        let round = NegativeClip::new(Box::new(CircleBorder::default()));
+        let square = NegativeClip::new(ShapeBorderRef::new(RoundedRectangleBorder::default()));
+        let same = NegativeClip::new(ShapeBorderRef::new(RoundedRectangleBorder::default()));
+        let round = NegativeClip::new(ShapeBorderRef::new(CircleBorder::default()));
         assert!(!same.should_reclip(&app, &square));
         assert!(round.should_reclip(&app, &square));
     }

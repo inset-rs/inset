@@ -10,8 +10,8 @@ use waft_embedder::{Brightness, Color, Offset, Size, TextBaseline, TextDirection
 use waft_foundation::{App, Handle, ValueChanged};
 use waft_gestures::{GestureLongPressCallback, GestureTapCallback};
 use waft_painting::{
-    AnyColor, Border, BoxDecoration, EdgeInsets, EdgeInsetsGeometry, ShapeBorder, ShapeDecoration,
-    TextStyle,
+    AnyColor, Border, BoxDecoration, EdgeInsets, EdgeInsetsGeometry, ShapeBorderRef,
+    ShapeDecoration, TextStyle,
 };
 use waft_rendering::{
     AnyRenderBox, AnyRenderObject, BaselineOffset, BoxConstraints, BoxHitTestResult, BoxParentData,
@@ -32,16 +32,17 @@ use crate::colors::Colors;
 use crate::constants::K_THEME_CHANGE_DURATION;
 use crate::debug::debug_check_has_material;
 use crate::divider::Divider;
-use crate::generated::list_tile_defaults_m3::list_tile_defaults_m3;
+use crate::generated::list_tile_defaults_m3::ListTileDefaultsM3;
 use crate::icon_button::IconButton;
 use crate::icon_button_theme::{IconButtonTheme, IconButtonThemeData};
 use crate::ink_decoration::Ink;
 use crate::ink_well::InkWell;
-use crate::list_tile_theme::{ListTileTheme, ListTileThemeData};
+use crate::list_tile_theme::{ListTileTheme, ListTileThemeData, ListTileThemeDataGetters};
 use crate::material::Material;
 use crate::material_state::MaterialStatesController;
 use crate::theme::Theme;
 use crate::theme_data::{ThemeData, VisualDensity};
+use crate::theme_data_getters::DefaultsContext;
 
 /// Dart's `_Sizes`: what `_RenderListTile._computeSizes` works out.
 struct Sizes {
@@ -383,7 +384,7 @@ pub struct ListTile {
     ///
     /// * [`ListTileTheme::of`], which returns the nearest [`ListTileTheme`]'s
     ///   [`ListTileThemeData`].
-    pub shape: Option<Box<dyn ShapeBorder>>,
+    pub shape: Option<ShapeBorderRef>,
 
     /// Defines the color used for icons and text when the list tile is selected.
     ///
@@ -735,7 +736,7 @@ impl ListTile {
     list_tile_setters!(
         dense: bool => "dense",
         visual_density: VisualDensity => "visualDensity",
-        shape: Box<dyn ShapeBorder> => "shape",
+        shape: ShapeBorderRef => "shape",
         style: ListTileStyle => "style",
         selected_color: Color => "selectedColor",
         icon_color: AnyColor => "iconColor",
@@ -909,22 +910,30 @@ impl StatelessWidget for ListTile {
             .or(tile_theme.style)
             .or(theme.list_tile_theme.style)
             .unwrap_or(ListTileStyle::List);
-        let defaults = if theme.use_material3 {
-            list_tile_defaults_m3(app, context)
+        let defaults: Box<dyn ListTileThemeDataGetters> = if theme.use_material3 {
+            Box::new(ListTileDefaultsM3::new(context))
         } else {
-            lis_tile_defaults_m2(app, context, list_tile_style)
+            Box::new(LisTileDefaultsM2::new(context, list_tile_style))
         };
 
         let background_color = self
             .tile_color
             .or(tile_theme.tile_color)
             .or(theme.list_tile_theme.tile_color)
-            .unwrap_or_else(|| defaults.tile_color.expect("the defaults have a tile color"));
+            .unwrap_or_else(|| {
+                defaults
+                    .tile_color(app)
+                    .expect("the defaults have a tile color")
+            });
         let selected_background_color = self
             .selected_tile_color
             .or(tile_theme.selected_tile_color)
             .or(theme.list_tile_theme.selected_tile_color)
-            .unwrap_or_else(|| defaults.tile_color.expect("the defaults have a tile color"));
+            .unwrap_or_else(|| {
+                defaults
+                    .tile_color(app)
+                    .expect("the defaults have a tile color")
+            });
         let effective_tile_color = if self.selected {
             selected_background_color
         } else {
@@ -980,10 +989,11 @@ impl StatelessWidget for ListTile {
             )
         });
 
+        let default_icon_color = defaults.icon_color(app);
         let default_effective_icon_color = resolve_color(
-            defaults.icon_color.as_ref(),
-            defaults.selected_color,
-            defaults.icon_color.as_ref(),
+            default_icon_color.as_ref(),
+            defaults.selected_color(app),
+            default_icon_color.as_ref(),
             Some(theme.disabled_color),
         );
 
@@ -1022,10 +1032,11 @@ impl StatelessWidget for ListTile {
             )
         })
         .or_else(|| {
+            let default_text_color = defaults.text_color(app);
             resolve_color(
-                defaults.text_color.as_ref(),
-                defaults.selected_color,
-                defaults.text_color.as_ref(),
+                default_text_color.as_ref(),
+                defaults.selected_color(app),
+                default_text_color.as_ref(),
                 Some(theme.disabled_color),
             )
         });
@@ -1060,8 +1071,7 @@ impl StatelessWidget for ListTile {
                 .or(tile_theme.leading_and_trailing_text_style.clone())
                 .unwrap_or_else(|| {
                     defaults
-                        .leading_and_trailing_text_style
-                        .clone()
+                        .leading_and_trailing_text_style(app)
                         .expect("the defaults have a leading and trailing text style")
                 });
             let leading_and_trailing_text_color = effective_color;
@@ -1088,8 +1098,7 @@ impl StatelessWidget for ListTile {
             .or(tile_theme.title_text_style.clone())
             .unwrap_or_else(|| {
                 defaults
-                    .title_text_style
-                    .clone()
+                    .title_text_style(app)
                     .expect("the defaults have a title text style")
             });
         let title_color = effective_color;
@@ -1115,8 +1124,7 @@ impl StatelessWidget for ListTile {
                 .or(tile_theme.subtitle_text_style.clone())
                 .unwrap_or_else(|| {
                     defaults
-                        .subtitle_text_style
-                        .clone()
+                        .subtitle_text_style(app)
                         .expect("the defaults have a subtitle text style")
                 });
             let subtitle_color = effective_color;
@@ -1160,7 +1168,7 @@ impl StatelessWidget for ListTile {
             })
             .unwrap_or_else(|| {
                 defaults
-                    .content_padding
+                    .content_padding(app)
                     .expect("the defaults have a content padding")
                     .resolve(Some(text_direction))
             });
@@ -1211,7 +1219,7 @@ impl StatelessWidget for ListTile {
             text_direction,
             title_baseline_type: title_style.text_baseline.unwrap_or_else(|| {
                 defaults
-                    .title_text_style
+                    .title_text_style(app)
                     .as_ref()
                     .and_then(|style| style.text_baseline)
                     .expect("the default title text style has a text baseline")
@@ -1222,7 +1230,7 @@ impl StatelessWidget for ListTile {
                     .and_then(|style| style.text_baseline)
                     .unwrap_or_else(|| {
                         defaults
-                            .subtitle_text_style
+                            .subtitle_text_style(app)
                             .as_ref()
                             .and_then(|style| style.text_baseline)
                             .expect("the default subtitle text style has a text baseline")
@@ -1237,7 +1245,7 @@ impl StatelessWidget for ListTile {
                 .or(tile_theme.min_vertical_padding)
                 .unwrap_or_else(|| {
                     defaults
-                        .min_vertical_padding
+                        .min_vertical_padding(app)
                         .expect("the defaults have a min vertical padding")
                 }),
             min_leading_width: self
@@ -1245,7 +1253,7 @@ impl StatelessWidget for ListTile {
                 .or(tile_theme.min_leading_width)
                 .unwrap_or_else(|| {
                     defaults
-                        .min_leading_width
+                        .min_leading_width(app)
                         .expect("the defaults have a min leading width")
                 }),
             min_tile_height: self.min_tile_height.or(tile_theme.min_tile_height),
@@ -1276,7 +1284,7 @@ impl StatelessWidget for ListTile {
                                     self.shape
                                         .clone()
                                         .or(tile_theme.shape.clone())
-                                        .unwrap_or_else(|| Box::new(Border::default())),
+                                        .unwrap_or_else(|| ShapeBorderRef::new(Border::default())),
                                 )
                                 .color(effective_tile_color),
                             )
@@ -2167,48 +2175,81 @@ impl RenderBox for RenderListTile {
     }
 }
 
-/// Dart's `_LisTileDefaultsM2(context, style)`: the [`ListTileThemeData`] whose fields are
-/// the constructor's arguments and the values of that subclass's getters.
-///
-/// A getter's `!` on a text theme style that is null leaves its field null here, so the
-/// tile's `expect` fails where it reads the field, as Dart's getter fails when it is read.
-fn lis_tile_defaults_m2(
-    app: &mut App,
-    context: BuildContext,
-    style: ListTileStyle,
-) -> ListTileThemeData {
-    let theme = Theme::of(app, context);
-    let text_theme = &theme.text_theme;
+/// Dart's `_LisTileDefaultsM2`.
+struct LisTileDefaultsM2 {
+    /// Dart's `super(..)` arguments.
+    list_tile_theme_data: ListTileThemeData,
+    context: DefaultsContext,
+}
 
-    let mut defaults = ListTileThemeData::new()
-        .content_padding(EdgeInsets::symmetric(0.0, 16.0))
-        .min_leading_width(40.0)
-        .min_vertical_padding(4.0)
-        .shape(Border::default())
-        .style(style)
-        .tile_color(Colors::TRANSPARENT)
-        .selected_color(theme.color_scheme.primary);
-    defaults.title_text_style = match style {
-        ListTileStyle::Drawer => text_theme.body_large.clone(),
-        ListTileStyle::List => text_theme.title_medium.clone(),
-    };
-    defaults.subtitle_text_style = text_theme
-        .body_medium
-        .as_ref()
-        .zip(text_theme.body_small.as_ref())
-        .map(|(body_medium, body_small)| match &body_small.color {
+impl LisTileDefaultsM2 {
+    fn new(context: BuildContext, style: ListTileStyle) -> LisTileDefaultsM2 {
+        LisTileDefaultsM2 {
+            list_tile_theme_data: ListTileThemeData::new()
+                .content_padding(EdgeInsets::symmetric(0.0, 16.0))
+                .min_leading_width(40.0)
+                .min_vertical_padding(4.0)
+                .shape(Border::default())
+                .style(style),
+            context: DefaultsContext::new(context),
+        }
+    }
+}
+
+impl ListTileThemeDataGetters for LisTileDefaultsM2 {
+    fn list_tile_theme_data(&self) -> &ListTileThemeData {
+        &self.list_tile_theme_data
+    }
+
+    fn tile_color(&self, _app: &mut App) -> Option<Color> {
+        Some(Colors::TRANSPARENT)
+    }
+
+    fn title_text_style(&self, app: &mut App) -> Option<TextStyle> {
+        let text_theme = self.context.text_theme(app);
+        match self
+            .list_tile_theme_data
+            .style
+            .expect("the constructor sets a style")
+        {
+            ListTileStyle::Drawer => text_theme.body_large.clone(),
+            ListTileStyle::List => text_theme.title_medium.clone(),
+        }
+    }
+
+    fn subtitle_text_style(&self, app: &mut App) -> Option<TextStyle> {
+        let text_theme = self.context.text_theme(app);
+        let body_medium = text_theme
+            .body_medium
+            .as_ref()
+            .expect("the text theme has a body medium style");
+        let body_small = text_theme
+            .body_small
+            .as_ref()
+            .expect("the text theme has a body small style");
+        Some(match &body_small.color {
             Some(color) => body_medium.copy_with().color(color.clone()),
             None => body_medium.copy_with(),
-        });
-    defaults.leading_and_trailing_text_style = text_theme.body_medium.clone();
-    defaults.icon_color = match theme.brightness() {
-        // For the sake of backwards compatibility, the default for unselected
-        // tiles is Colors.black45 rather than colorScheme.onSurface.withAlpha(0x73).
-        Brightness::Light => Some(AnyColor::new(Colors::BLACK45)),
-        // null -> use current icon theme color
-        Brightness::Dark => None,
-    };
-    defaults
+        })
+    }
+
+    fn leading_and_trailing_text_style(&self, app: &mut App) -> Option<TextStyle> {
+        self.context.text_theme(app).body_medium.clone()
+    }
+
+    fn selected_color(&self, app: &mut App) -> Option<Color> {
+        Some(self.context.colors(app).primary)
+    }
+
+    fn icon_color(&self, app: &mut App) -> Option<AnyColor> {
+        match self.context.theme(app).brightness() {
+            // For the sake of backwards compatibility, the default for unselected
+            // tiles is Colors.black45 rather than colorScheme.onSurface.withAlpha(0x73).
+            Brightness::Light => Some(AnyColor::new(Colors::BLACK45)),
+            // null -> use current icon theme color
+            Brightness::Dark => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -2216,6 +2257,7 @@ pub(crate) mod tests {
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
     use std::time::Duration;
+    use waft_painting::OutlinedBorderRef;
 
     use waft_embedder::{Rect, TargetPlatform};
     use waft_foundation::{Listenable, Listener};
@@ -3303,7 +3345,7 @@ pub(crate) mod tests {
         with_main_thread_stack(|| {
             // Regression test for https://github.com/flutter/flutter/issues/63877
             let tile_color = Colors::RED.shade500();
-            let pump_shape = |shape: Box<dyn ShapeBorder>| {
+            let pump_shape = |shape: ShapeBorderRef| {
                 pump_app(m3, |_app| {
                     Material::new()
                         .child(
@@ -3315,7 +3357,7 @@ pub(crate) mod tests {
             };
 
             // Test rectangle shape
-            let tester = pump_shape(Box::<RoundedRectangleBorder>::default());
+            let tester = pump_shape(ShapeBorderRef::new(RoundedRectangleBorder::default()));
             let rect = tile_rect(&tester, 0);
             // Check if a rounded rectangle was painted with the correct color and shape
             assert!(
@@ -3325,7 +3367,7 @@ pub(crate) mod tests {
             );
 
             // Test stadium shape
-            let tester = pump_shape(Box::<StadiumBorder>::default());
+            let tester = pump_shape(ShapeBorderRef::new(StadiumBorder::default()));
             let rect = tile_rect(&tester, 0);
             // Check if a rounded rectangle was painted with the correct color and shape
             assert!(
@@ -4252,14 +4294,12 @@ pub(crate) mod tests {
     #[test]
     fn list_tile_respects_and_combines_parent_icon_button_theme_data_style() {
         with_main_thread_stack(|| {
-            let custom_shape: WidgetStatePropertyRef<
-                Option<Box<dyn waft_painting::OutlinedBorder>>,
-            > = Rc::new(WidgetStatePropertyAll::new(Some(
-                Box::new(RoundedRectangleBorder {
+            let custom_shape: WidgetStatePropertyRef<Option<OutlinedBorderRef>> = Rc::new(
+                WidgetStatePropertyAll::new(Some(OutlinedBorderRef::new(RoundedRectangleBorder {
                     side: waft_painting::BorderSide::default(),
                     ..RoundedRectangleBorder::default()
-                }) as Box<dyn waft_painting::OutlinedBorder>,
-            )));
+                }))),
+            );
             // Specially treated in ButtonStyle.merge, thus check these, too.
             let overlay_color: WidgetStatePropertyRef<Option<Color>> =
                 Rc::new(WidgetStatePropertyAll::new(Some(Colors::PURPLE.primary())));

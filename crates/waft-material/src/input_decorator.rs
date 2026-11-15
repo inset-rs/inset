@@ -24,8 +24,8 @@ use waft_foundation::{
 };
 use waft_painting::{
     AnyBorderSide, AnyColor, AnyTextStyle, BorderSide, EdgeInsets, EdgeInsetsDirectional,
-    EdgeInsetsGeometry, ShapeBorder, TextAlign, TextAlignVertical, TextDirection, TextOverflow,
-    TextStyle,
+    EdgeInsetsGeometry, ShapeBorder, ShapeBorderRef, TextAlign, TextAlignVertical, TextDirection,
+    TextOverflow, TextStyle,
 };
 use waft_rendering::{
     AnyRenderBox, AnyRenderObject, BoxConstraints, BoxHitTestResult, BoxParentData,
@@ -51,11 +51,12 @@ use waft_widgets::{
 use crate::button_style::ButtonStyle;
 use crate::colors::Colors;
 use crate::constants::K_MIN_INTERACTIVE_DIMENSION;
-use crate::generated::input_decorator_defaults_m3::input_decorator_defaults_m3;
+use crate::generated::input_decorator_defaults_m3::InputDecoratorDefaultsM3;
 use crate::icon_button_theme::{IconButtonTheme, IconButtonThemeData};
 use crate::input_border::{InputBorder, OutlineInputBorder, UnderlineInputBorder, input_border_of};
 use crate::theme::Theme;
 use crate::theme_data::{ThemeData, VisualDensity};
+use crate::theme_data_getters::DefaultsContext;
 
 // The duration value extracted from:
 // https://github.com/material-components/material-components-android/blob/master/lib/java/com/google/android/material/textfield/TextInputLayout.java
@@ -167,9 +168,9 @@ impl InputBorderTween {
 
     /// Dart's `ShapeBorder.lerp(begin, end, t)! as InputBorder`.
     fn lerp(&self, t: f64) -> Box<dyn InputBorder> {
-        let begin: &dyn ShapeBorder = &*self.begin;
-        let end: &dyn ShapeBorder = &*self.end;
-        let lerped = <dyn ShapeBorder>::lerp(Some(begin), Some(end), t)
+        let begin = ShapeBorderRef::from(self.begin.clone() as Box<dyn ShapeBorder>);
+        let end = ShapeBorderRef::from(self.end.clone() as Box<dyn ShapeBorder>);
+        let lerped = ShapeBorderRef::lerp(Some(&begin), Some(&end), t)
             .expect("lerping two borders gives a border");
         input_border_of(&*lerped).unwrap_or_else(|| {
             if t < 0.5 {
@@ -3058,7 +3059,7 @@ impl InputDecoratorState {
         self: Handle<Self>,
         app: &mut App,
         _theme_data: &ThemeData,
-        defaults: &InputDecorationThemeData,
+        defaults: &dyn InputDecorationThemeDataGetters,
     ) -> Color {
         let widget_state = self.widget_state(app);
         let decoration = self.decoration(app);
@@ -3070,7 +3071,10 @@ impl InputDecoratorState {
             return *<dyn WidgetStateProperty<Color>>::resolve_as(fill_color, &widget_state);
         }
         *<dyn WidgetStateProperty<Color>>::resolve_as(
-            defaults.fill_color.as_ref().expect("the defaults give one"),
+            defaults
+                .fill_color(app)
+                .as_ref()
+                .expect("the defaults give one"),
             &widget_state,
         )
     }
@@ -3088,7 +3092,7 @@ impl InputDecoratorState {
         self: Handle<Self>,
         app: &mut App,
         _theme_data: &ThemeData,
-        defaults: &InputDecorationThemeData,
+        defaults: &dyn InputDecorationThemeDataGetters,
     ) -> Color {
         let widget_state = self.widget_state(app);
         let decoration = self.decoration(app);
@@ -3096,7 +3100,10 @@ impl InputDecoratorState {
             .map(|color| *color)
             .unwrap_or_else(|| {
                 *<dyn WidgetStateProperty<Color>>::resolve_as(
-                    defaults.icon_color.as_ref().expect("the defaults give one"),
+                    defaults
+                        .icon_color(app)
+                        .as_ref()
+                        .expect("the defaults give one"),
                     &widget_state,
                 )
             })
@@ -3106,7 +3113,7 @@ impl InputDecoratorState {
         self: Handle<Self>,
         app: &mut App,
         icon_button_theme: &IconButtonThemeData,
-        defaults: &InputDecorationThemeData,
+        defaults: &dyn InputDecorationThemeDataGetters,
     ) -> Color {
         let widget_state = self.widget_state(app);
         let decoration = self.decoration(app);
@@ -3122,7 +3129,7 @@ impl InputDecoratorState {
             .unwrap_or_else(|| {
                 *<dyn WidgetStateProperty<Color>>::resolve_as(
                     defaults
-                        .prefix_icon_color
+                        .prefix_icon_color(app)
                         .as_ref()
                         .expect("the defaults give one"),
                     &widget_state,
@@ -3134,7 +3141,7 @@ impl InputDecoratorState {
         self: Handle<Self>,
         app: &mut App,
         icon_button_theme: &IconButtonThemeData,
-        defaults: &InputDecorationThemeData,
+        defaults: &dyn InputDecorationThemeDataGetters,
     ) -> Color {
         let widget_state = self.widget_state(app);
         let decoration = self.decoration(app);
@@ -3150,7 +3157,7 @@ impl InputDecoratorState {
             .unwrap_or_else(|| {
                 *<dyn WidgetStateProperty<Color>>::resolve_as(
                     defaults
-                        .suffix_icon_color
+                        .suffix_icon_color(app)
                         .as_ref()
                         .expect("the defaults give one"),
                     &widget_state,
@@ -3179,12 +3186,12 @@ impl InputDecoratorState {
         self: Handle<Self>,
         app: &mut App,
         theme_data: &ThemeData,
-        defaults: &InputDecorationThemeData,
+        defaults: &dyn InputDecorationThemeDataGetters,
     ) -> TextStyle {
         let widget_state = self.widget_state(app);
         let default_style = <dyn WidgetStateProperty<TextStyle>>::resolve_as(
             defaults
-                .label_style
+                .label_style(app)
                 .as_ref()
                 .expect("the defaults give one"),
             &widget_state,
@@ -3213,11 +3220,14 @@ impl InputDecoratorState {
         self: Handle<Self>,
         app: &mut App,
         theme_data: &ThemeData,
-        defaults: &InputDecorationThemeData,
+        defaults: &dyn InputDecorationThemeDataGetters,
     ) -> TextStyle {
         let widget_state = self.widget_state(app);
         let default_style = <dyn WidgetStateProperty<TextStyle>>::resolve_as(
-            defaults.hint_style.as_ref().expect("the defaults give one"),
+            defaults
+                .hint_style(app)
+                .as_ref()
+                .expect("the defaults give one"),
             &widget_state,
         );
 
@@ -3241,13 +3251,13 @@ impl InputDecoratorState {
         self: Handle<Self>,
         app: &mut App,
         theme_data: &ThemeData,
-        defaults: &InputDecorationThemeData,
+        defaults: &dyn InputDecorationThemeDataGetters,
     ) -> TextStyle {
         let widget_state = self.widget_state(app);
         let has_error = self.has_error(app);
         let mut default_text_style: TextStyle = <dyn WidgetStateProperty<TextStyle>>::resolve_as(
             defaults
-                .floating_label_style
+                .floating_label_style(app)
                 .as_ref()
                 .expect("the defaults give one"),
             &widget_state,
@@ -3291,7 +3301,7 @@ impl InputDecoratorState {
         self: Handle<Self>,
         app: &mut App,
         _theme_data: &ThemeData,
-        defaults: &InputDecorationThemeData,
+        defaults: &dyn InputDecorationThemeDataGetters,
     ) -> TextStyle {
         let widget_state = self.widget_state(app);
         let style = <dyn WidgetStateProperty<TextStyle>>::resolve_as(
@@ -3300,7 +3310,7 @@ impl InputDecoratorState {
         );
         <dyn WidgetStateProperty<TextStyle>>::resolve_as(
             defaults
-                .helper_style
+                .helper_style(app)
                 .as_ref()
                 .expect("the defaults give one"),
             &widget_state,
@@ -3312,13 +3322,13 @@ impl InputDecoratorState {
         self: Handle<Self>,
         app: &mut App,
         _theme_data: &ThemeData,
-        defaults: &InputDecorationThemeData,
+        defaults: &dyn InputDecorationThemeDataGetters,
     ) -> TextStyle {
         let widget_state = self.widget_state(app);
         let error_style = self.decoration(app).error_style.clone();
         <dyn WidgetStateProperty<TextStyle>>::resolve_as(
             defaults
-                .error_style
+                .error_style(app)
                 .as_ref()
                 .expect("the defaults give one"),
             &widget_state,
@@ -3351,7 +3361,7 @@ impl InputDecoratorState {
         self: Handle<Self>,
         app: &mut App,
         theme_data: &ThemeData,
-        defaults: &InputDecorationThemeData,
+        defaults: &dyn InputDecorationThemeDataGetters,
     ) -> Box<dyn InputBorder> {
         let widget_state = self.widget_state(app);
         let decoration = self.decoration(app).clone();
@@ -3381,7 +3391,7 @@ impl InputDecoratorState {
                 let active_indicator_border = decoration_theme
                     .active_indicator_border
                     .clone()
-                    .or_else(|| defaults.active_indicator_border.clone());
+                    .or_else(|| defaults.active_indicator_border(app));
                 InputBorder::copy_with(
                     &*border,
                     <dyn WidgetStateProperty<Option<BorderSide>>>::resolve_as(
@@ -3394,7 +3404,7 @@ impl InputDecoratorState {
                 InputBorder::copy_with(
                     &*border,
                     <dyn WidgetStateProperty<Option<BorderSide>>>::resolve_as(
-                        &defaults.outline_border,
+                        &defaults.outline_border(app),
                         &widget_state,
                     )
                     .map(|side| *side),
@@ -3623,19 +3633,19 @@ impl State for InputDecoratorState {
             .visual_density
             .unwrap_or(theme_data.visual_density);
         let use_material3 = Theme::of(app, context).use_material3;
-        let defaults = if use_material3 {
-            input_decorator_defaults_m3(app, context)
+        let defaults: Box<dyn InputDecorationThemeDataGetters> = if use_material3 {
+            Box::new(InputDecoratorDefaultsM3::new(context))
         } else {
-            input_decorator_defaults_m2(app, context)
+            Box::new(InputDecoratorDefaultsM2::new(context))
         };
         let icon_button_theme = IconButtonTheme::of(app, context);
 
-        let label_style = self.get_inline_label_style(app, &theme_data, &defaults);
+        let label_style = self.get_inline_label_style(app, &theme_data, &*defaults);
         let text_baseline = label_style
             .text_baseline
             .expect("the label style gives a text baseline");
 
-        let hint_style = self.get_inline_hint_style(app, &theme_data, &defaults);
+        let hint_style = self.get_inline_hint_style(app, &theme_data, &*defaults);
         let is_empty = self.is_empty(app);
         let has_inline_label = self.has_inline_label(app);
         let text_align = self.text_align(app);
@@ -3714,9 +3724,9 @@ impl State for InputDecoratorState {
         };
         let border = border
             .take()
-            .unwrap_or_else(|| self.get_default_border(app, &theme_data, &defaults));
+            .unwrap_or_else(|| self.get_default_border(app, &theme_data, &*defaults));
 
-        let fill_color = self.get_fill_color(app, &theme_data, &defaults);
+        let fill_color = self.get_fill_color(app, &theme_data, &*defaults);
         let hover_color = self.get_hover_color(app, &theme_data);
         let is_hovering = self.is_hovering(app);
         let container = BorderContainer {
@@ -3734,7 +3744,7 @@ impl State for InputDecoratorState {
         if decoration.label_text.is_some() || decoration.label.is_some() {
             let should_show_label = self.should_show_label(app);
             let style = if label_should_withdraw {
-                self.get_floating_label_style(app, &theme_data, &defaults)
+                self.get_floating_label_style(app, &theme_data, &*defaults)
             } else {
                 label_style.clone()
             };
@@ -3831,7 +3841,7 @@ impl State for InputDecoratorState {
         let icon = match &decoration.icon {
             None => None,
             Some(decoration_icon) => {
-                let icon_color = self.get_icon_color(app, &theme_data, &defaults);
+                let icon_color = self.get_icon_color(app, &theme_data, &*defaults);
                 Some(
                     MouseRegion::new()
                         .cursor(SystemMouseCursors::BASIC.into())
@@ -3852,7 +3862,7 @@ impl State for InputDecoratorState {
             None => None,
             Some(decoration_prefix_icon) => {
                 let prefix_icon_color =
-                    self.get_prefix_icon_color(app, &icon_button_theme, &defaults);
+                    self.get_prefix_icon_color(app, &icon_button_theme, &*defaults);
                 Some(Self::build_affix_icon(
                     decoration_prefix_icon.clone(),
                     decoration.prefix_icon_constraints,
@@ -3868,7 +3878,7 @@ impl State for InputDecoratorState {
             None => None,
             Some(decoration_suffix_icon) => {
                 let suffix_icon_color =
-                    self.get_suffix_icon_color(app, &icon_button_theme, &defaults);
+                    self.get_suffix_icon_color(app, &icon_button_theme, &*defaults);
                 Some(Self::build_affix_icon(
                     decoration_suffix_icon.clone(),
                     decoration.suffix_icon_constraints,
@@ -3880,8 +3890,8 @@ impl State for InputDecoratorState {
             }
         };
 
-        let helper_style = self.get_helper_style(app, &theme_data, &defaults);
-        let error_style = self.get_error_style(app, &theme_data, &defaults);
+        let helper_style = self.get_helper_style(app, &theme_data, &*defaults);
+        let error_style = self.get_error_style(app, &theme_data, &*defaults);
         let helper_error = HelperError {
             text_align,
             helper: decoration.helper.clone(),
@@ -7740,6 +7750,52 @@ pub struct InputDecorationThemeData {
     pub supporting_text_padding: Option<EdgeInsetsGeometry>,
 }
 
+crate::theme_data_getters::theme_data_getters! {
+    /// Dart's getters of `InputDecorationThemeData`: the theme data answers with its fields, and a defaults
+    /// subclass (Dart's `_...Defaults...(context)`) computes the ones it overrides when they
+    /// are read.
+    pub trait InputDecorationThemeDataGetters for InputDecorationThemeData, fields: input_decoration_theme_data {
+        label_style: Option<AnyTextStyle>,
+        floating_label_style: Option<AnyTextStyle>,
+        helper_style: Option<AnyTextStyle>,
+        helper_max_lines: Option<i32>,
+        hint_style: Option<AnyTextStyle>,
+        hint_fade_duration: Option<Duration>,
+        hint_max_lines: Option<i32>,
+        error_style: Option<AnyTextStyle>,
+        error_max_lines: Option<i32>,
+        floating_label_behavior: FloatingLabelBehavior,
+        floating_label_alignment: FloatingLabelAlignment,
+        is_dense: bool,
+        content_padding: Option<EdgeInsetsGeometry>,
+        is_collapsed: bool,
+        icon_color: Option<AnyColor>,
+        prefix_style: Option<AnyTextStyle>,
+        prefix_icon_color: Option<AnyColor>,
+        prefix_icon_constraints: Option<BoxConstraints>,
+        suffix_style: Option<AnyTextStyle>,
+        suffix_icon_color: Option<AnyColor>,
+        suffix_icon_constraints: Option<BoxConstraints>,
+        counter_style: Option<AnyTextStyle>,
+        filled: bool,
+        fill_color: Option<AnyColor>,
+        outline_border: Option<AnyBorderSide>,
+        active_indicator_border: Option<AnyBorderSide>,
+        focus_color: Option<Color>,
+        hover_color: Option<Color>,
+        error_border: Option<Box<dyn InputBorder>>,
+        focused_border: Option<Box<dyn InputBorder>>,
+        focused_error_border: Option<Box<dyn InputBorder>>,
+        disabled_border: Option<Box<dyn InputBorder>>,
+        enabled_border: Option<Box<dyn InputBorder>>,
+        border: Option<Box<dyn InputBorder>>,
+        align_label_with_hint: bool,
+        constraints: Option<BoxConstraints>,
+        visual_density: Option<VisualDensity>,
+        supporting_text_padding: Option<EdgeInsetsGeometry>,
+    }
+}
+
 impl InputDecorationThemeData {
     /// Creates a `InputDecorationThemeData` that can be used to override default
     /// properties in a `InputDecorationTheme` widget.
@@ -8343,130 +8399,185 @@ impl Debug for InputDecorationThemeData {
     }
 }
 
-/// Dart's `_InputDecoratorDefaultsM2(context)`: the [`InputDecorationThemeData`] whose fields
-/// are the values of that subclass's getters, read from the context's theme when it is made.
-///
-/// A getter's `bodySmall!` is the resolver's `expect`, which fails where the style is
-/// resolved, as Dart's getter fails when it is read.
-fn input_decorator_defaults_m2(app: &mut App, context: BuildContext) -> InputDecorationThemeData {
-    let theme = Theme::of(app, context);
-    let brightness = Theme::brightness_of(app, context);
-    let disabled_color = theme.disabled_color;
-    let hint_color = theme.hint_color;
-    let error = theme.color_scheme.error;
-    let primary = theme.color_scheme.primary;
-    let body_small = theme.text_theme.body_small.clone();
+/// Dart's `_InputDecoratorDefaultsM2`.
+struct InputDecoratorDefaultsM2 {
+    /// Dart's `super(..)` arguments.
+    input_decoration_theme_data: InputDecorationThemeData,
+    context: DefaultsContext,
+}
 
-    let hint_style = WidgetStateTextStyle::resolve_with(move |states: &WidgetStates| {
-        if states.contains(&WidgetState::Disabled) {
-            return TextStyle::new().color(disabled_color);
+impl InputDecoratorDefaultsM2 {
+    fn new(context: BuildContext) -> InputDecoratorDefaultsM2 {
+        InputDecoratorDefaultsM2 {
+            input_decoration_theme_data: InputDecorationThemeData::new(),
+            context: DefaultsContext::new(context),
         }
-        TextStyle::new().color(hint_color)
-    });
+    }
+}
 
-    let label_style = WidgetStateTextStyle::resolve_with(move |states: &WidgetStates| {
-        if states.contains(&WidgetState::Disabled) {
-            return TextStyle::new().color(disabled_color);
-        }
-        TextStyle::new().color(hint_color)
-    });
+impl InputDecorationThemeDataGetters for InputDecoratorDefaultsM2 {
+    fn input_decoration_theme_data(&self) -> &InputDecorationThemeData {
+        &self.input_decoration_theme_data
+    }
 
-    let floating_label_style = WidgetStateTextStyle::resolve_with(move |states: &WidgetStates| {
-        if states.contains(&WidgetState::Disabled) {
-            return TextStyle::new().color(disabled_color);
-        }
-        if states.contains(&WidgetState::Error) {
-            return TextStyle::new().color(error);
-        }
-        if states.contains(&WidgetState::Focused) {
-            return TextStyle::new().color(primary);
-        }
-        TextStyle::new().color(hint_color)
-    });
+    fn hint_style(&self, app: &mut App) -> Option<AnyTextStyle> {
+        let theme = self.context.theme(app);
+        let disabled_color = theme.disabled_color;
+        let hint_color = theme.hint_color;
+        let hint_style = WidgetStateTextStyle::resolve_with(move |states: &WidgetStates| {
+            if states.contains(&WidgetState::Disabled) {
+                return TextStyle::new().color(disabled_color);
+            }
+            TextStyle::new().color(hint_color)
+        });
+        Some(hint_style.into())
+    }
 
-    let helper_body_small = body_small.clone();
-    let helper_style = WidgetStateTextStyle::resolve_with(move |states: &WidgetStates| {
-        let body_small = helper_body_small
-            .clone()
-            .expect("ThemeData::text_theme has a body_small");
-        if states.contains(&WidgetState::Disabled) {
-            return body_small.copy_with().color(Colors::TRANSPARENT);
-        }
+    fn label_style(&self, app: &mut App) -> Option<AnyTextStyle> {
+        let theme = self.context.theme(app);
+        let disabled_color = theme.disabled_color;
+        let hint_color = theme.hint_color;
+        let label_style = WidgetStateTextStyle::resolve_with(move |states: &WidgetStates| {
+            if states.contains(&WidgetState::Disabled) {
+                return TextStyle::new().color(disabled_color);
+            }
+            TextStyle::new().color(hint_color)
+        });
+        Some(label_style.into())
+    }
 
-        body_small.copy_with().color(hint_color)
-    });
+    fn floating_label_style(&self, app: &mut App) -> Option<AnyTextStyle> {
+        let theme = self.context.theme(app);
+        let disabled_color = theme.disabled_color;
+        let hint_color = theme.hint_color;
+        let error = theme.color_scheme.error;
+        let primary = theme.color_scheme.primary;
+        let floating_label_style =
+            WidgetStateTextStyle::resolve_with(move |states: &WidgetStates| {
+                if states.contains(&WidgetState::Disabled) {
+                    return TextStyle::new().color(disabled_color);
+                }
+                if states.contains(&WidgetState::Error) {
+                    return TextStyle::new().color(error);
+                }
+                if states.contains(&WidgetState::Focused) {
+                    return TextStyle::new().color(primary);
+                }
+                TextStyle::new().color(hint_color)
+            });
+        Some(floating_label_style.into())
+    }
 
-    let error_style = WidgetStateTextStyle::resolve_with(move |states: &WidgetStates| {
-        let body_small = body_small
-            .clone()
-            .expect("ThemeData::text_theme has a body_small");
-        if states.contains(&WidgetState::Disabled) {
-            return body_small.copy_with().color(Colors::TRANSPARENT);
-        }
-        body_small.copy_with().color(error)
-    });
+    fn helper_style(&self, app: &mut App) -> Option<AnyTextStyle> {
+        let theme = self.context.theme(app);
+        let hint_color = theme.hint_color;
+        let body_small = theme.text_theme.body_small.clone();
+        let helper_body_small = body_small.clone();
+        let helper_style = WidgetStateTextStyle::resolve_with(move |states: &WidgetStates| {
+            let body_small = helper_body_small
+                .clone()
+                .expect("ThemeData::text_theme has a body_small");
+            if states.contains(&WidgetState::Disabled) {
+                return body_small.copy_with().color(Colors::TRANSPARENT);
+            }
 
-    let fill_color = WidgetStateColor::resolve_with(move |states: &WidgetStates| {
-        match (brightness, states.contains(&WidgetState::Disabled)) {
-            (Brightness::Dark, true) => Color::new(0x0DFFFFFF), //  5% white
-            (Brightness::Dark, false) => Color::new(0x1AFFFFFF), // 10% white
-            (Brightness::Light, true) => Color::new(0x05000000), //  2% black
-            (Brightness::Light, false) => Color::new(0x0A000000), //  4% black
-        }
-    });
+            body_small.copy_with().color(hint_color)
+        });
+        Some(helper_style.into())
+    }
 
-    let icon_color = WidgetStateColor::resolve_with(move |states: &WidgetStates| {
-        if states.contains(&WidgetState::Disabled) && !states.contains(&WidgetState::Focused) {
-            return disabled_color;
-        }
-        if states.contains(&WidgetState::Focused) {
-            return primary;
-        }
-        match brightness {
-            Brightness::Dark => Colors::WHITE70,
-            Brightness::Light => Colors::BLACK45,
-        }
-    });
+    fn error_style(&self, app: &mut App) -> Option<AnyTextStyle> {
+        let theme = self.context.theme(app);
+        let error = theme.color_scheme.error;
+        let body_small = theme.text_theme.body_small.clone();
+        let error_style = WidgetStateTextStyle::resolve_with(move |states: &WidgetStates| {
+            let body_small = body_small
+                .clone()
+                .expect("ThemeData::text_theme has a body_small");
+            if states.contains(&WidgetState::Disabled) {
+                return body_small.copy_with().color(Colors::TRANSPARENT);
+            }
+            body_small.copy_with().color(error)
+        });
+        Some(error_style.into())
+    }
 
-    let prefix_icon_color = WidgetStateColor::resolve_with(move |states: &WidgetStates| {
-        if states.contains(&WidgetState::Disabled) && !states.contains(&WidgetState::Focused) {
-            return disabled_color;
-        }
-        if states.contains(&WidgetState::Focused) {
-            return primary;
-        }
-        match brightness {
-            Brightness::Dark => Colors::WHITE70,
-            Brightness::Light => Colors::BLACK45,
-        }
-    });
+    fn fill_color(&self, app: &mut App) -> Option<AnyColor> {
+        let brightness = Theme::brightness_of(app, self.context.context());
+        let fill_color = WidgetStateColor::resolve_with(move |states: &WidgetStates| {
+            match (brightness, states.contains(&WidgetState::Disabled)) {
+                (Brightness::Dark, true) => Color::new(0x0DFFFFFF), //  5% white
+                (Brightness::Dark, false) => Color::new(0x1AFFFFFF), // 10% white
+                (Brightness::Light, true) => Color::new(0x05000000), //  2% black
+                (Brightness::Light, false) => Color::new(0x0A000000), //  4% black
+            }
+        });
+        Some(fill_color.into())
+    }
 
-    let suffix_icon_color = WidgetStateColor::resolve_with(move |states: &WidgetStates| {
-        if states.contains(&WidgetState::Disabled) && !states.contains(&WidgetState::Focused) {
-            return disabled_color;
-        }
-        if states.contains(&WidgetState::Error) {
-            return error;
-        }
-        if states.contains(&WidgetState::Focused) {
-            return primary;
-        }
-        match brightness {
-            Brightness::Dark => Colors::WHITE70,
-            Brightness::Light => Colors::BLACK45,
-        }
-    });
+    fn icon_color(&self, app: &mut App) -> Option<AnyColor> {
+        let theme = self.context.theme(app);
+        let brightness = Theme::brightness_of(app, self.context.context());
+        let disabled_color = theme.disabled_color;
+        let primary = theme.color_scheme.primary;
+        let icon_color = WidgetStateColor::resolve_with(move |states: &WidgetStates| {
+            if states.contains(&WidgetState::Disabled) && !states.contains(&WidgetState::Focused) {
+                return disabled_color;
+            }
+            if states.contains(&WidgetState::Focused) {
+                return primary;
+            }
+            match brightness {
+                Brightness::Dark => Colors::WHITE70,
+                Brightness::Light => Colors::BLACK45,
+            }
+        });
+        Some(icon_color.into())
+    }
 
-    InputDecorationThemeData::new()
-        .hint_style(hint_style)
-        .label_style(label_style)
-        .floating_label_style(floating_label_style)
-        .helper_style(helper_style)
-        .error_style(error_style)
-        .fill_color(fill_color)
-        .icon_color(icon_color)
-        .prefix_icon_color(prefix_icon_color)
-        .suffix_icon_color(suffix_icon_color)
+    fn prefix_icon_color(&self, app: &mut App) -> Option<AnyColor> {
+        let theme = self.context.theme(app);
+        let brightness = Theme::brightness_of(app, self.context.context());
+        let disabled_color = theme.disabled_color;
+        let primary = theme.color_scheme.primary;
+        let prefix_icon_color = WidgetStateColor::resolve_with(move |states: &WidgetStates| {
+            if states.contains(&WidgetState::Disabled) && !states.contains(&WidgetState::Focused) {
+                return disabled_color;
+            }
+            if states.contains(&WidgetState::Focused) {
+                return primary;
+            }
+            match brightness {
+                Brightness::Dark => Colors::WHITE70,
+                Brightness::Light => Colors::BLACK45,
+            }
+        });
+        Some(prefix_icon_color.into())
+    }
+
+    fn suffix_icon_color(&self, app: &mut App) -> Option<AnyColor> {
+        let theme = self.context.theme(app);
+        let brightness = Theme::brightness_of(app, self.context.context());
+        let disabled_color = theme.disabled_color;
+        let error = theme.color_scheme.error;
+        let primary = theme.color_scheme.primary;
+        let suffix_icon_color = WidgetStateColor::resolve_with(move |states: &WidgetStates| {
+            if states.contains(&WidgetState::Disabled) && !states.contains(&WidgetState::Focused) {
+                return disabled_color;
+            }
+            if states.contains(&WidgetState::Error) {
+                return error;
+            }
+            if states.contains(&WidgetState::Focused) {
+                return primary;
+            }
+            match brightness {
+                Brightness::Dark => Colors::WHITE70,
+                Brightness::Light => Colors::BLACK45,
+            }
+        });
+        Some(suffix_icon_color.into())
+    }
 }
 
 #[cfg(test)]
@@ -14806,6 +14917,7 @@ mod tests {
     // on an `InputDecorator` with the `TextField`'s `isEmpty`/`isFocused` (said at each case).
     mod themes_and_intrinsics {
         use std::time::Duration;
+        use waft_painting::OutlinedBorderRef;
 
         use waft_embedder::valo::Op;
         use waft_embedder::{Color, Offset, PaintStyle, Radius, Size};
@@ -16930,9 +17042,7 @@ mod tests {
                 .overlay_color(property(overlay_color))
                 .shadow_color(property(shadow_color))
                 .elevation(property(ELEVATION))
-                .shape(property(
-                    Box::new(shape) as Box<dyn waft_painting::OutlinedBorder>
-                ));
+                .shape(property(OutlinedBorderRef::new(shape)));
 
             let button = IconButton::new(Some(noop()), icon(button_icon.clone()));
             let decoration = if prefix {

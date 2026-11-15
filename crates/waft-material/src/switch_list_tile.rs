@@ -10,7 +10,7 @@ use std::rc::Rc;
 use waft_embedder::Color;
 use waft_foundation::{App, Handle, ValueChanged};
 use waft_gestures::{DragStartBehavior, GestureTapCallback};
-use waft_painting::{EdgeInsetsGeometry, ShapeBorder};
+use waft_painting::{EdgeInsetsGeometry, ShapeBorderRef};
 use waft_services::MouseCursorRef;
 use waft_widgets::{
     AnyFocusNode, BuildContext, ExcludeFocus, Icon, IntoWidget, KeyRef, MergeSemantics,
@@ -274,7 +274,7 @@ pub struct SwitchListTile {
     /// [`ListTileControlAffinity::Platform`].
     pub control_affinity: Option<ListTileControlAffinity>,
     /// Defines the tile's `InkWell::custom_border` and `Ink::decoration` shape.
-    pub shape: Option<Box<dyn ShapeBorder>>,
+    pub shape: Option<ShapeBorderRef>,
     /// If non-null, defines the background color when [`SwitchListTile::selected`] is true.
     pub selected_tile_color: Option<Color>,
     /// Defines how compact the list tile's layout will be.
@@ -457,7 +457,7 @@ impl SwitchListTile {
         dense: bool => "dense",
         content_padding: EdgeInsetsGeometry => "contentPadding",
         control_affinity: ListTileControlAffinity => "controlAffinity",
-        shape: Box<dyn ShapeBorder> => "shape",
+        shape: ShapeBorderRef => "shape",
         selected_tile_color: Color => "selectedTileColor",
         visual_density: VisualDensity => "visualDensity",
         enable_feedback: bool => "enableFeedback",
@@ -1053,10 +1053,10 @@ mod tests {
             pump_in_material(&mut tester, m3, |_app| {
                 SwitchListTile::new(true, None)
                     .title(Text::new("Title"))
-                    .shape(Box::new(right_rounded_border()) as Box<dyn ShapeBorder>)
+                    .shape(ShapeBorderRef::new(right_rounded_border()))
                     .into_widget()
             });
-            let shape: Box<dyn ShapeBorder> = Box::new(right_rounded_border());
+            let shape: ShapeBorderRef = ShapeBorderRef::new(right_rounded_border());
             assert!(ink_well_custom_border(&tester).as_deref() == Some(&*shape));
         });
     }

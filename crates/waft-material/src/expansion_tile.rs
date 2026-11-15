@@ -13,8 +13,8 @@ use waft_animation::{
 use waft_embedder::{Clip, Color, TargetPlatform};
 use waft_foundation::{App, Handle, HandleId, ListenableObject, Listener, ValueChanged};
 use waft_painting::{
-    Alignment, AlignmentGeometry, Border, BorderSide, Decoration, EdgeInsetsGeometry, ShapeBorder,
-    ShapeDecoration,
+    Alignment, AlignmentGeometry, Border, BorderSide, Decoration, EdgeInsetsGeometry,
+    ShapeBorderRef, ShapeDecoration,
 };
 use waft_rendering::{AccessibilityFocusBlockType, CrossAxisAlignment, MainAxisSize};
 use waft_widgets::{
@@ -24,8 +24,10 @@ use waft_widgets::{
 };
 
 use crate::colors::Colors;
-use crate::expansion_tile_theme::{ExpansionTileTheme, ExpansionTileThemeData};
-use crate::generated::expansion_tile_defaults_m3::expansion_tile_defaults_m3;
+use crate::expansion_tile_theme::{
+    ExpansionTileTheme, ExpansionTileThemeData, ExpansionTileThemeDataGetters,
+};
+use crate::generated::expansion_tile_defaults_m3::ExpansionTileDefaultsM3;
 use crate::icons::Icons;
 use crate::list_tile::{ListTile, ListTileControlAffinity};
 use crate::list_tile_theme::ListTileTheme;
@@ -33,6 +35,7 @@ use crate::material::{Material, MaterialType, ShapeBorderTween};
 use crate::material_localizations::MaterialLocalizations;
 use crate::theme::Theme;
 use crate::theme_data::{ThemeData, VisualDensity};
+use crate::theme_data_getters::DefaultsContext;
 
 const K_EXPAND: Duration = Duration::from_millis(200);
 
@@ -338,7 +341,7 @@ pub struct ExpansionTile {
     ///
     /// * [`ExpansionTileTheme::of`], which returns the nearest [`ExpansionTileTheme`]'s
     ///   [`ExpansionTileThemeData`].
-    pub shape: Option<Box<dyn ShapeBorder>>,
+    pub shape: Option<ShapeBorderRef>,
 
     /// The tile's border shape when the sublist is collapsed.
     ///
@@ -350,7 +353,7 @@ pub struct ExpansionTile {
     ///
     /// * [`ExpansionTileTheme::of`], which returns the nearest [`ExpansionTileTheme`]'s
     ///   [`ExpansionTileThemeData`].
-    pub collapsed_shape: Option<Box<dyn ShapeBorder>>,
+    pub collapsed_shape: Option<ShapeBorderRef>,
 
     /// The content will be clipped (or not) according to this option.
     ///
@@ -652,16 +655,13 @@ impl ExpansionTile {
     }
 
     /// Dart `ExpansionTile(shape:)`.
-    pub fn shape(mut self, shape: impl Into<Box<dyn ShapeBorder>>) -> ExpansionTile {
+    pub fn shape(mut self, shape: impl Into<ShapeBorderRef>) -> ExpansionTile {
         self.shape = Some(shape.into());
         self
     }
 
     /// Dart `ExpansionTile(collapsedShape:)`.
-    pub fn collapsed_shape(
-        mut self,
-        collapsed_shape: impl Into<Box<dyn ShapeBorder>>,
-    ) -> ExpansionTile {
+    pub fn collapsed_shape(mut self, collapsed_shape: impl Into<ShapeBorderRef>) -> ExpansionTile {
         self.collapsed_shape = Some(collapsed_shape.into());
         self
     }
@@ -804,7 +804,7 @@ pub struct ExpansionTileState {
     icon_color_tween: Option<Handle<ColorTween>>,
     background_color_tween: Option<Handle<ColorTween>>,
     icon_turns: Option<AnyAnimation<f64>>,
-    border: Option<AnyAnimation<Option<Box<dyn ShapeBorder>>>>,
+    border: Option<AnyAnimation<Option<ShapeBorderRef>>>,
     header_color: Option<AnyAnimation<Option<Color>>>,
     icon_color: Option<AnyAnimation<Option<Color>>>,
     background_color: Option<AnyAnimation<Option<Color>>>,
@@ -1096,7 +1096,7 @@ impl ExpansionTileState {
             .unwrap_or(Colors::TRANSPARENT);
         let expansion_tile_border = border
             .value(app)
-            .unwrap_or_else(|| Box::new(transparent_border()));
+            .unwrap_or_else(|| ShapeBorderRef::new(transparent_border()));
         let widget = self.widget(app);
         let clip_behavior = widget
             .clip_behavior
@@ -1167,13 +1167,13 @@ impl ExpansionTileState {
             .collapsed_shape
             .clone()
             .or_else(|| state.expansion_tile_theme.collapsed_shape.clone())
-            .unwrap_or_else(|| Box::new(transparent_border()));
+            .unwrap_or_else(|| ShapeBorderRef::new(transparent_border()));
         let end = widget
             .shape
             .clone()
             .or_else(|| state.expansion_tile_theme.shape.clone())
             .unwrap_or_else(|| {
-                Box::new(Border {
+                ShapeBorderRef::new(Border {
                     top: BorderSide {
                         color: theme.divider_color,
                         ..BorderSide::default()
@@ -1190,34 +1190,38 @@ impl ExpansionTileState {
         border_tween.end = Some(end);
     }
 
-    fn update_header_color(self: Handle<Self>, app: &mut App, defaults: &ExpansionTileThemeData) {
+    fn update_header_color(
+        self: Handle<Self>,
+        app: &mut App,
+        defaults: &dyn ExpansionTileThemeDataGetters,
+    ) {
         let state = app.get(self);
         let widget = self.widget(app);
         let begin = widget
             .collapsed_text_color
-            .or(state.expansion_tile_theme.collapsed_text_color)
-            .or(defaults.collapsed_text_color);
-        let end = widget
-            .text_color
-            .or(state.expansion_tile_theme.text_color)
-            .or(defaults.text_color);
+            .or(state.expansion_tile_theme.collapsed_text_color);
+        let end = widget.text_color.or(state.expansion_tile_theme.text_color);
         let header_color_tween = state.header_color_tween.expect("created in init_state");
+        let begin = begin.or_else(|| defaults.collapsed_text_color(app));
+        let end = end.or_else(|| defaults.text_color(app));
         header_color_tween.set_begin(app, begin);
         header_color_tween.set_end(app, end);
     }
 
-    fn update_icon_color(self: Handle<Self>, app: &mut App, defaults: &ExpansionTileThemeData) {
+    fn update_icon_color(
+        self: Handle<Self>,
+        app: &mut App,
+        defaults: &dyn ExpansionTileThemeDataGetters,
+    ) {
         let state = app.get(self);
         let widget = self.widget(app);
         let begin = widget
             .collapsed_icon_color
-            .or(state.expansion_tile_theme.collapsed_icon_color)
-            .or(defaults.collapsed_icon_color);
-        let end = widget
-            .icon_color
-            .or(state.expansion_tile_theme.icon_color)
-            .or(defaults.icon_color);
+            .or(state.expansion_tile_theme.collapsed_icon_color);
+        let end = widget.icon_color.or(state.expansion_tile_theme.icon_color);
         let icon_color_tween = state.icon_color_tween.expect("created in init_state");
+        let begin = begin.or_else(|| defaults.collapsed_icon_color(app));
+        let end = end.or_else(|| defaults.icon_color(app));
         icon_color_tween.set_begin(app, begin);
         icon_color_tween.set_end(app, end);
     }
@@ -1257,11 +1261,14 @@ impl ExpansionTileState {
 
     /// Dart's `theme.useMaterial3 ? _ExpansionTileDefaultsM3(context) :
     /// _ExpansionTileDefaultsM2(context)`.
-    fn defaults(app: &mut App, context: BuildContext, theme: &ThemeData) -> ExpansionTileThemeData {
+    fn defaults(
+        context: BuildContext,
+        theme: &ThemeData,
+    ) -> Box<dyn ExpansionTileThemeDataGetters> {
         if theme.use_material3 {
-            expansion_tile_defaults_m3(app, context)
+            Box::new(ExpansionTileDefaultsM3::new(context))
         } else {
-            expansion_tile_defaults_m2(app, context)
+            Box::new(ExpansionTileDefaultsM2::new(context))
         }
     }
 }
@@ -1363,7 +1370,7 @@ impl State for ExpansionTileState {
         let theme = Theme::of(app, context);
         let expansion_tile_theme = ExpansionTileTheme::of(app, context);
         app.get_mut(self).expansion_tile_theme = expansion_tile_theme;
-        let defaults = ExpansionTileState::defaults(app, context, &theme);
+        let defaults = ExpansionTileState::defaults(context, &theme);
         let widget = self.widget(app);
         if widget.collapsed_shape != old_widget.collapsed_shape || widget.shape != old_widget.shape
         {
@@ -1373,13 +1380,13 @@ impl State for ExpansionTileState {
         if widget.collapsed_text_color != old_widget.collapsed_text_color
             || widget.text_color != old_widget.text_color
         {
-            self.update_header_color(app, &defaults);
+            self.update_header_color(app, &*defaults);
         }
         let widget = self.widget(app);
         if widget.collapsed_icon_color != old_widget.collapsed_icon_color
             || widget.icon_color != old_widget.icon_color
         {
-            self.update_icon_color(app, &defaults);
+            self.update_icon_color(app, &*defaults);
         }
         let widget = self.widget(app);
         if widget.background_color != old_widget.background_color
@@ -1419,11 +1426,11 @@ impl State for ExpansionTileState {
         let theme = Theme::of(app, context);
         let expansion_tile_theme = ExpansionTileTheme::of(app, context);
         app.get_mut(self).expansion_tile_theme = expansion_tile_theme;
-        let defaults = ExpansionTileState::defaults(app, context, &theme);
+        let defaults = ExpansionTileState::defaults(context, &theme);
         self.update_animation_duration(app);
         self.update_shape_border(app, &theme);
-        self.update_header_color(app, &defaults);
-        self.update_icon_color(app, &defaults);
+        self.update_header_color(app, &*defaults);
+        self.update_icon_color(app, &*defaults);
         self.update_background_color(app);
         self.update_height_factor_curve(app);
     }
@@ -1456,30 +1463,55 @@ impl fmt::Debug for ExpansionTileState {
     }
 }
 
-/// Dart's `_ExpansionTileDefaultsM2(context)`: the [`ExpansionTileThemeData`] whose fields
-/// are the values of that subclass's getters.
-fn expansion_tile_defaults_m2(app: &mut App, context: BuildContext) -> ExpansionTileThemeData {
-    let theme = Theme::of(app, context);
-    let color_scheme = &theme.color_scheme;
+/// Dart's `_ExpansionTileDefaultsM2`.
+struct ExpansionTileDefaultsM2 {
+    /// Dart's `super(..)` arguments.
+    expansion_tile_theme_data: ExpansionTileThemeData,
+    context: DefaultsContext,
+}
 
-    let mut defaults = ExpansionTileThemeData::new()
-        .text_color(color_scheme.primary)
-        .icon_color(color_scheme.primary)
-        .collapsed_icon_color(theme.unselected_widget_color);
-    defaults.collapsed_text_color = theme
-        .text_theme
-        .title_medium
-        .as_ref()
-        .expect("the theme's text theme has a title medium style")
-        .color
-        .as_deref()
-        .copied();
-    defaults
+impl ExpansionTileDefaultsM2 {
+    fn new(context: BuildContext) -> ExpansionTileDefaultsM2 {
+        ExpansionTileDefaultsM2 {
+            expansion_tile_theme_data: ExpansionTileThemeData::new(),
+            context: DefaultsContext::new(context),
+        }
+    }
+}
+
+impl ExpansionTileThemeDataGetters for ExpansionTileDefaultsM2 {
+    fn expansion_tile_theme_data(&self) -> &ExpansionTileThemeData {
+        &self.expansion_tile_theme_data
+    }
+
+    fn text_color(&self, app: &mut App) -> Option<Color> {
+        Some(self.context.colors(app).primary)
+    }
+
+    fn icon_color(&self, app: &mut App) -> Option<Color> {
+        Some(self.context.colors(app).primary)
+    }
+
+    fn collapsed_text_color(&self, app: &mut App) -> Option<Color> {
+        self.context
+            .text_theme(app)
+            .title_medium
+            .as_ref()
+            .expect("the theme's text theme has a title medium style")
+            .color
+            .as_deref()
+            .copied()
+    }
+
+    fn collapsed_icon_color(&self, app: &mut App) -> Option<Color> {
+        Some(self.context.theme(app).unselected_widget_color)
+    }
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use std::cell::{Cell, RefCell};
+    use waft_painting::ShapeBorder;
 
     use waft_embedder::{Offset, Radius, Rect, TargetPlatform, TextDirection};
     use waft_painting::{
@@ -1664,7 +1696,7 @@ pub(crate) mod tests {
     /// shape, colour and clip behaviour.
     pub(crate) fn tile_material(
         tester: &WidgetTester,
-    ) -> (Option<Box<dyn ShapeBorder>>, Option<Color>, Clip) {
+    ) -> (Option<ShapeBorderRef>, Option<Color>, Clip) {
         let tile = tester.find_by_type::<ExpansionTile>()[0];
         let material = tester.descendants_of_type::<Material>(tile)[0];
         tester.widget(material, |material: &Material| {
@@ -2434,8 +2466,8 @@ pub(crate) mod tests {
         });
     }
 
-    fn boxed(shape: impl ShapeBorder + 'static) -> Option<Box<dyn ShapeBorder>> {
-        Some(Box::new(shape))
+    fn some_shape(shape: impl ShapeBorder + 'static) -> Option<ShapeBorderRef> {
+        Some(ShapeBorderRef::new(shape))
     }
 
     /// "ExpansionTile Border".
@@ -2477,7 +2509,7 @@ pub(crate) mod tests {
             // instead of a Container.
             let (material_shape, _, clip_behavior) = tile_material(&tester);
             // ExpansionTile should be collapsed initially.
-            assert_eq!(material_shape, boxed(collapsed_shape));
+            assert_eq!(material_shape, some_shape(collapsed_shape));
             assert_eq!(clip_behavior, Clip::AntiAlias);
 
             tap_text(&mut tester, "ExpansionTile");
@@ -2485,7 +2517,7 @@ pub(crate) mod tests {
 
             // ExpansionTile should be Expanded now.
             let (material_shape, _, clip_behavior) = tile_material(&tester);
-            assert_eq!(material_shape, boxed(shape));
+            assert_eq!(material_shape, some_shape(shape));
             assert_eq!(clip_behavior, Clip::AntiAlias);
         });
     }
@@ -2571,7 +2603,7 @@ pub(crate) mod tests {
 
     /// The values a case's `StatefulBuilder` builds its tile with, and a button sets.
     struct TileValues {
-        shape: Box<dyn ShapeBorder>,
+        shape: ShapeBorderRef,
         text_color: Color,
         background_color: Color,
         icon_color: Color,
@@ -2631,7 +2663,7 @@ pub(crate) mod tests {
             let icon = probe();
             let text = probe();
             let values = Rc::new(RefCell::new(TileValues {
-                shape: Box::new(rounded(4.0)),
+                shape: ShapeBorderRef::new(rounded(4.0)),
                 text_color: Color::new(0xffffffff),
                 background_color: Color::new(0xffff0000),
                 icon_color: Color::new(0xffffffff),
@@ -2643,7 +2675,7 @@ pub(crate) mod tests {
                 Material::new().child(updatable_tile(
                     values,
                     || TileValues {
-                        shape: Box::new(rounded(16.0)),
+                        shape: ShapeBorderRef::new(rounded(16.0)),
                         text_color: Color::new(0xff000000),
                         background_color: Color::new(0xffffff00),
                         icon_color: Color::new(0xff000000),
@@ -2665,7 +2697,7 @@ pub(crate) mod tests {
             let (shape, color, clip_behavior) = tile_material(&tester);
 
             // Test initial ExpansionTile properties.
-            assert_eq!(shape, boxed(rounded(4.0)));
+            assert_eq!(shape, some_shape(rounded(4.0)));
             assert_eq!(color, Some(Color::new(0xffff0000)));
             assert_eq!(clip_behavior, Clip::AntiAlias);
             assert_eq!(icon.get(), Some(Color::new(0xffffffff)));
@@ -2678,7 +2710,7 @@ pub(crate) mod tests {
             let (shape, color, clip_behavior) = tile_material(&tester);
 
             // Test updated ExpansionTile properties.
-            assert_eq!(shape, boxed(rounded(16.0)));
+            assert_eq!(shape, some_shape(rounded(16.0)));
             assert_eq!(color, Some(Color::new(0xffffff00)));
             assert_eq!(clip_behavior, Clip::AntiAlias);
             assert_eq!(icon.get(), Some(Color::new(0xff000000)));
@@ -2694,7 +2726,7 @@ pub(crate) mod tests {
             let icon = probe();
             let text = probe();
             let values = Rc::new(RefCell::new(TileValues {
-                shape: Box::new(rounded(12.0)),
+                shape: ShapeBorderRef::new(rounded(12.0)),
                 text_color: Color::new(0xff00ffff),
                 background_color: Color::new(0xff0000ff),
                 icon_color: Color::new(0xff00ffff),
@@ -2706,7 +2738,7 @@ pub(crate) mod tests {
                 Material::new().child(updatable_tile(
                     values,
                     || TileValues {
-                        shape: Box::new(rounded(6.0)),
+                        shape: ShapeBorderRef::new(rounded(6.0)),
                         text_color: Color::new(0xffffffff),
                         background_color: Color::new(0xff123456),
                         icon_color: Color::new(0xffffffff),
@@ -2732,7 +2764,7 @@ pub(crate) mod tests {
             let (shape, color, clip_behavior) = tile_material(&tester);
 
             // Test initial ExpansionTile properties.
-            assert_eq!(shape, boxed(rounded(12.0)));
+            assert_eq!(shape, some_shape(rounded(12.0)));
             assert_eq!(color, Some(Color::new(0xff0000ff)));
             assert_eq!(clip_behavior, Clip::AntiAlias);
             assert_eq!(icon.get(), Some(Color::new(0xff00ffff)));
@@ -2745,7 +2777,7 @@ pub(crate) mod tests {
             let (shape, color, clip_behavior) = tile_material(&tester);
 
             // Test updated ExpansionTile properties.
-            assert_eq!(shape, boxed(rounded(6.0)));
+            assert_eq!(shape, some_shape(rounded(6.0)));
             assert_eq!(color, Some(Color::new(0xff123456)));
             assert_eq!(clip_behavior, Clip::AntiAlias);
             assert_eq!(icon.get(), Some(Color::new(0xffffffff)));

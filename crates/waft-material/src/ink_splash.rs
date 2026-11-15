@@ -13,7 +13,7 @@ use waft_animation::{
 };
 use waft_embedder::{Canvas, Color, Matrix4, Offset, Paint, Size, TextDirection};
 use waft_foundation::{App, Handle, Listener};
-use waft_painting::{BorderRadius, ShapeBorder};
+use waft_painting::{BorderRadius, ShapeBorderRef};
 use waft_rendering::AnyRenderBox;
 
 use crate::ink_well::{
@@ -88,7 +88,7 @@ impl InteractiveInkFeatureFactory for InkSplashFactory {
         contained_ink_well: bool,
         rect_callback: Option<RectCallback>,
         border_radius: Option<BorderRadius>,
-        custom_border: Option<Box<dyn ShapeBorder>>,
+        custom_border: Option<ShapeBorderRef>,
         radius: Option<f64>,
         on_removed: Option<Listener>,
     ) -> AnyInteractiveInkFeature {
@@ -176,7 +176,7 @@ impl InkSplash {
         contained_ink_well: bool,
         rect_callback: Option<RectCallback>,
         border_radius: Option<BorderRadius>,
-        custom_border: Option<Box<dyn ShapeBorder>>,
+        custom_border: Option<ShapeBorderRef>,
         radius: Option<f64>,
         on_removed: Option<Listener>,
     ) -> Handle<InkSplash> {

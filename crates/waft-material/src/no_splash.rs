@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use waft_embedder::{Canvas, Color, Matrix4, Offset, TextDirection};
 use waft_foundation::{App, Handle, Listener};
-use waft_painting::{BorderRadius, ShapeBorder};
+use waft_painting::{BorderRadius, ShapeBorderRef};
 use waft_rendering::AnyRenderBox;
 
 use crate::ink_well::{
@@ -32,7 +32,7 @@ impl InteractiveInkFeatureFactory for NoSplashFactory {
         _contained_ink_well: bool,
         _rect_callback: Option<RectCallback>,
         _border_radius: Option<BorderRadius>,
-        _custom_border: Option<Box<dyn ShapeBorder>>,
+        _custom_border: Option<ShapeBorderRef>,
         _radius: Option<f64>,
         on_removed: Option<Listener>,
     ) -> AnyInteractiveInkFeature {

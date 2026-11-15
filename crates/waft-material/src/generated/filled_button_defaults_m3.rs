@@ -1,9 +1,5 @@
-//! Flutter counterpart: material_ui's `generated/filled_button_defaults_m3.g.dart`, a part
-//! of `filled_button.dart`.
-//!
-//! Dart's private `_FilledButtonDefaultsM3` is a `ButtonStyle` whose getters read the
-//! context's theme; [`filled_button_defaults_m3`] returns the style those getters answer,
-//! read once from the theme as the button's `default_style_of` asks for it.
+//! Flutter counterpart: material_ui's `generated/filled_button_defaults_m3.g.dart`, a part of
+//! `filled_button.dart`.
 
 // Do not edit by hand. The code is generated from data in the Material
 // Design token database by the script:
@@ -15,44 +11,87 @@ use std::rc::Rc;
 
 use waft_embedder::Size;
 use waft_foundation::App;
-use waft_painting::{AlignmentGeometry, BorderSide, OutlinedBorder, StadiumBorder};
+use waft_painting::{AlignmentGeometry, BorderSide, OutlinedBorderRef, StadiumBorder};
 use waft_services::MouseCursorRef;
 use waft_widgets::{
     BuildContext, WidgetState, WidgetStateMouseCursor, WidgetStateProperty, WidgetStatePropertyRef,
 };
 
-use crate::button_style::ButtonStyle;
+use crate::button_style::{ButtonStyle, ButtonStyleGetters};
 use crate::colors::Colors;
 use crate::constants::K_THEME_CHANGE_DURATION;
 use crate::filled_button::scaled_padding;
+use crate::ink_well::InteractiveInkFeatureFactoryRef;
 use crate::material_state::MaterialStatePropertyAll;
-use crate::theme::Theme;
+use crate::theme_data::MaterialTapTargetSize;
+use crate::theme_data::VisualDensity;
+use crate::theme_data_getters::DefaultsContext;
+use waft_embedder::Color;
+use waft_painting::EdgeInsetsGeometry;
+use waft_painting::TextStyle;
 
-/// Dart's `_FilledButtonDefaultsM3(context)`.
-pub(crate) fn filled_button_defaults_m3(app: &mut App, context: BuildContext) -> ButtonStyle {
-    let theme = Theme::of(app, context);
-    let colors = &theme.color_scheme;
-    let (primary, on_primary, on_surface) = (colors.primary, colors.on_primary, colors.on_surface);
-    ButtonStyle::new()
-        .animation_duration(K_THEME_CHANGE_DURATION)
-        .enable_feedback(true)
-        .alignment(AlignmentGeometry::CENTER)
-        .text_style(Rc::new(MaterialStatePropertyAll::new(
+/// Dart's `_FilledButtonDefaultsM3`.
+pub(crate) struct FilledButtonDefaultsM3 {
+    /// Dart's `super(..)` arguments.
+    button_style: ButtonStyle,
+    context: DefaultsContext,
+}
+
+impl FilledButtonDefaultsM3 {
+    pub(crate) fn new(context: BuildContext) -> FilledButtonDefaultsM3 {
+        FilledButtonDefaultsM3 {
+            button_style: ButtonStyle::new()
+                .animation_duration(K_THEME_CHANGE_DURATION)
+                .enable_feedback(true)
+                .alignment(AlignmentGeometry::CENTER),
+            context: DefaultsContext::new(context),
+        }
+    }
+}
+
+impl ButtonStyleGetters for FilledButtonDefaultsM3 {
+    fn button_style(&self) -> &ButtonStyle {
+        &self.button_style
+    }
+
+    fn text_style(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<TextStyle>>> {
+        let theme = self.context.theme(app);
+        Some(Rc::new(MaterialStatePropertyAll::new(
             theme.text_theme.label_large.clone(),
         )))
-        .background_color(<dyn WidgetStateProperty<_>>::resolve_with(move |states| {
+    }
+
+    fn background_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        let theme = self.context.theme(app);
+        let colors = &theme.color_scheme;
+        let primary = colors.primary;
+        let on_surface = colors.on_surface;
+        Some(<dyn WidgetStateProperty<_>>::resolve_with(move |states| {
             if states.contains(&WidgetState::Disabled) {
                 return Some(on_surface.with_opacity(0.12));
             }
             Some(primary)
         }))
-        .foreground_color(<dyn WidgetStateProperty<_>>::resolve_with(move |states| {
+    }
+
+    fn foreground_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        let theme = self.context.theme(app);
+        let colors = &theme.color_scheme;
+        let on_primary = colors.on_primary;
+        let on_surface = colors.on_surface;
+        Some(<dyn WidgetStateProperty<_>>::resolve_with(move |states| {
             if states.contains(&WidgetState::Disabled) {
                 return Some(on_surface.with_opacity(0.38));
             }
             Some(on_primary)
         }))
-        .overlay_color(<dyn WidgetStateProperty<_>>::resolve_with(move |states| {
+    }
+
+    fn overlay_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        let theme = self.context.theme(app);
+        let colors = &theme.color_scheme;
+        let on_primary = colors.on_primary;
+        Some(<dyn WidgetStateProperty<_>>::resolve_with(move |states| {
             if states.contains(&WidgetState::Pressed) {
                 return Some(on_primary.with_opacity(0.1));
             }
@@ -64,9 +103,20 @@ pub(crate) fn filled_button_defaults_m3(app: &mut App, context: BuildContext) ->
             }
             None
         }))
-        .shadow_color(all(colors.shadow()))
-        .surface_tint_color(all(Colors::TRANSPARENT))
-        .elevation(<dyn WidgetStateProperty<_>>::resolve_with(|states| {
+    }
+
+    fn shadow_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        let theme = self.context.theme(app);
+        let colors = &theme.color_scheme;
+        Some(all(colors.shadow()))
+    }
+
+    fn surface_tint_color(&self, _app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        Some(all(Colors::TRANSPARENT))
+    }
+
+    fn elevation(&self, _app: &mut App) -> Option<WidgetStatePropertyRef<Option<f64>>> {
+        Some(<dyn WidgetStateProperty<_>>::resolve_with(|states| {
             if states.contains(&WidgetState::Disabled) {
                 return Some(0.0);
             }
@@ -81,11 +131,27 @@ pub(crate) fn filled_button_defaults_m3(app: &mut App, context: BuildContext) ->
             }
             Some(0.0)
         }))
-        .padding(all(scaled_padding(app, context)))
-        .minimum_size(all(Size::new(64.0, 40.0)))
-        // No default fixedSize
-        .icon_size(all(18.0))
-        .icon_color(<dyn WidgetStateProperty<_>>::resolve_with(move |states| {
+    }
+
+    fn padding(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<EdgeInsetsGeometry>>> {
+        Some(all(scaled_padding(app, self.context.context())))
+    }
+
+    fn minimum_size(&self, _app: &mut App) -> Option<WidgetStatePropertyRef<Option<Size>>> {
+        Some(all(Size::new(64.0, 40.0)))
+    }
+
+    // No default fixedSize
+    fn icon_size(&self, _app: &mut App) -> Option<WidgetStatePropertyRef<Option<f64>>> {
+        Some(all(18.0))
+    }
+
+    fn icon_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        let theme = self.context.theme(app);
+        let colors = &theme.color_scheme;
+        let on_primary = colors.on_primary;
+        let on_surface = colors.on_surface;
+        Some(<dyn WidgetStateProperty<_>>::resolve_with(move |states| {
             if states.contains(&WidgetState::Disabled) {
                 return Some(on_surface.with_opacity(0.38));
             }
@@ -100,15 +166,40 @@ pub(crate) fn filled_button_defaults_m3(app: &mut App, context: BuildContext) ->
             }
             Some(on_primary)
         }))
-        .maximum_size(all(Size::INFINITE))
-        // No default side
-        .shape(all(
-            Box::new(StadiumBorder::new(BorderSide::NONE)) as Box<dyn OutlinedBorder>
-        ))
-        .mouse_cursor(adaptive_clickable())
-        .visual_density(theme.visual_density)
-        .tap_target_size(theme.material_tap_target_size)
-        .splash_factory(theme.splash_factory.clone())
+    }
+
+    fn maximum_size(&self, _app: &mut App) -> Option<WidgetStatePropertyRef<Option<Size>>> {
+        Some(all(Size::INFINITE))
+    }
+
+    // No default side
+    fn shape(&self, _app: &mut App) -> Option<WidgetStatePropertyRef<Option<OutlinedBorderRef>>> {
+        Some(all(OutlinedBorderRef::new(StadiumBorder::new(
+            BorderSide::NONE,
+        ))))
+    }
+
+    fn mouse_cursor(
+        &self,
+        _app: &mut App,
+    ) -> Option<WidgetStatePropertyRef<Option<MouseCursorRef>>> {
+        Some(adaptive_clickable())
+    }
+
+    fn visual_density(&self, app: &mut App) -> Option<VisualDensity> {
+        let theme = self.context.theme(app);
+        Some(theme.visual_density)
+    }
+
+    fn tap_target_size(&self, app: &mut App) -> Option<MaterialTapTargetSize> {
+        let theme = self.context.theme(app);
+        Some(theme.material_tap_target_size)
+    }
+
+    fn splash_factory(&self, app: &mut App) -> Option<InteractiveInkFeatureFactoryRef> {
+        let theme = self.context.theme(app);
+        Some(theme.splash_factory.clone())
+    }
 }
 
 /// Dart's `const MaterialStatePropertyAll<T>(value)`.

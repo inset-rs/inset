@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 use waft_embedder::{Offset, Rect, Size, TextBaseline, TextDirection};
 use waft_foundation::{App, PRECISION_ERROR_TOLERANCE};
-use waft_painting::{BoxPainter, ClipContext, Decoration, ImageConfiguration};
+use waft_painting::{BoxPainter, ClipContext, DecorationRef, ImageConfiguration};
 
 use crate::box_::{
     AnyRenderBox, BoxConstraints, BoxHitTestResult, BoxParentData, DryLayoutFailure, RenderBox,
@@ -544,7 +544,7 @@ pub struct RenderTable {
     border: Option<TableBorder>,
     // row_decorations and row_decoration_painters need to be in sync. They have to either both
     // be None or have same length.
-    row_decorations: Option<Vec<Option<Box<dyn Decoration>>>>,
+    row_decorations: Option<Vec<Option<DecorationRef>>>,
     row_decoration_painters: Option<Vec<Option<Box<dyn BoxPainter>>>>,
     configuration: ImageConfiguration,
     default_vertical_alignment: TableCellVerticalAlignment,
@@ -767,7 +767,7 @@ impl RenderTable {
     ///
     /// Row decorations fill the horizontal and vertical extent of each row in the table, unlike
     /// decorations for individual cells, which might not fill either.
-    pub fn row_decorations(self: RenderHandle<Self>, app: &App) -> &[Option<Box<dyn Decoration>>] {
+    pub fn row_decorations(self: RenderHandle<Self>, app: &App) -> &[Option<DecorationRef>] {
         self.get(app).row_decorations.as_deref().unwrap_or(&[])
     }
 
@@ -775,7 +775,7 @@ impl RenderTable {
     pub fn set_row_decorations(
         self: RenderHandle<Self>,
         app: &mut App,
-        value: Option<Vec<Option<Box<dyn Decoration>>>>,
+        value: Option<Vec<Option<DecorationRef>>>,
     ) {
         let this = self.get_mut(app);
         this.row_decorations = value;
@@ -1974,7 +1974,7 @@ mod tests {
             &mut app,
             Some(vec![
                 None,
-                Some(Box::new(
+                Some(DecorationRef::new(
                     waft_painting::BoxDecoration::new().color(Color::new(0xFF0000FF)),
                 )),
             ]),

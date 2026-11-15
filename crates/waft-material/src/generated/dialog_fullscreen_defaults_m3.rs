@@ -1,27 +1,39 @@
-//! Flutter counterpart: material_ui's `generated/dialog_fullscreen_defaults_m3.g.dart`, a Dart
-//! `part` of `dialog.dart`.
-//!
-//! Dart's private `_DialogFullscreenDefaultsM3` is a `DialogThemeData` whose getter reads the
-//! context's theme; [`dialog_fullscreen_defaults_m3`] returns the data it answers, read once
-//! from the theme.
+//! Flutter counterpart: material_ui's `generated/dialog_fullscreen_defaults_m3.g.dart`, a part
+//! of `dialog.dart`.
 
 // Do not edit by hand. The code is generated from data in the Material
 // Design token database by the script:
 //   packages/material_ui/tool/gen_defaults/bin/gen_defaults.dart.
 
-use waft_embedder::Clip;
+use waft_embedder::{Clip, Color};
 use waft_foundation::App;
 use waft_widgets::BuildContext;
 
-use crate::dialog_theme::DialogThemeData;
+use crate::dialog_theme::{DialogThemeData, DialogThemeDataGetters};
 use crate::theme::Theme;
 
-/// Dart's `_DialogFullscreenDefaultsM3(context)`.
-pub(crate) fn dialog_fullscreen_defaults_m3(
-    app: &mut App,
+/// Dart's `_DialogFullscreenDefaultsM3`.
+pub(crate) struct DialogFullscreenDefaultsM3 {
+    /// Dart's `super(..)` arguments.
+    dialog_theme_data: DialogThemeData,
     context: BuildContext,
-) -> DialogThemeData {
-    DialogThemeData::new()
-        .clip_behavior(Clip::None)
-        .background_color(Theme::of(app, context).color_scheme.surface)
+}
+
+impl DialogFullscreenDefaultsM3 {
+    pub(crate) fn new(context: BuildContext) -> DialogFullscreenDefaultsM3 {
+        DialogFullscreenDefaultsM3 {
+            dialog_theme_data: DialogThemeData::new().clip_behavior(Clip::None),
+            context,
+        }
+    }
+}
+
+impl DialogThemeDataGetters for DialogFullscreenDefaultsM3 {
+    fn dialog_theme_data(&self) -> &DialogThemeData {
+        &self.dialog_theme_data
+    }
+
+    fn background_color(&self, app: &mut App) -> Option<Color> {
+        Some(Theme::of(app, self.context).color_scheme.surface)
+    }
 }

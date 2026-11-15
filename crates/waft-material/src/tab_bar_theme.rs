@@ -3,7 +3,7 @@
 use waft_embedder::Color;
 use waft_foundation::App;
 use waft_painting::{
-    AnyColor, BorderRadius, Decoration, EdgeInsetsGeometry, TextScaler, TextStyle,
+    AnyColor, BorderRadius, DecorationRef, EdgeInsetsGeometry, TextScaler, TextStyle,
 };
 use waft_services::MouseCursorRef;
 use waft_widgets::{
@@ -33,11 +33,11 @@ use crate::theme::Theme;
 ///
 ///  * [`TabBarThemeData`], which describes the actual configuration of a tab
 ///    bar theme.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct TabBarTheme {
     pub key: Option<KeyRef>,
     data: Option<TabBarThemeData>,
-    indicator: Option<Box<dyn Decoration>>,
+    indicator: Option<DecorationRef>,
     indicator_color: Option<Color>,
     indicator_size: Option<TabBarIndicatorSize>,
     divider_color: Option<Color>,
@@ -102,9 +102,9 @@ impl TabBarTheme {
     }
 
     /// Dart `TabBarTheme(indicator:)`.
-    pub fn with_indicator(mut self, indicator: impl Decoration) -> TabBarTheme {
+    pub fn with_indicator(mut self, indicator: impl Into<DecorationRef>) -> TabBarTheme {
         debug_assert!(self.data.is_none());
-        self.indicator = Some(Box::new(indicator));
+        self.indicator = Some(indicator.into());
         self
     }
 
@@ -232,10 +232,10 @@ impl TabBarTheme {
     ///
     /// This property is obsolete and will be deprecated in a future release:
     /// please use the [`TabBarThemeData::indicator`] property in [`data`](Self::data) instead.
-    pub fn indicator(&self) -> Option<&dyn Decoration> {
+    pub fn indicator(&self) -> Option<&DecorationRef> {
         match &self.data {
-            Some(data) => data.indicator.as_deref(),
-            None => self.indicator.as_deref(),
+            Some(data) => data.indicator.as_ref(),
+            None => self.indicator.as_ref(),
         }
     }
 
@@ -407,10 +407,7 @@ impl TabBarTheme {
     /// The properties used for all descendant `TabBar` widgets.
     pub fn data(&self) -> TabBarThemeData {
         self.data.clone().unwrap_or_else(|| TabBarThemeData {
-            indicator: self
-                .indicator
-                .as_ref()
-                .map(|indicator| indicator.clone_box()),
+            indicator: self.indicator.clone(),
             indicator_color: self.indicator_color,
             indicator_size: self.indicator_size,
             divider_color: self.divider_color,
@@ -443,7 +440,7 @@ impl TabBarTheme {
         TabBarTheme {
             key: None,
             data: None,
-            indicator: self.indicator().map(|indicator| indicator.clone_box()),
+            indicator: self.indicator().cloned(),
             indicator_color: self.indicator_color(),
             indicator_size: self.indicator_size(),
             divider_color: self.divider_color(),
@@ -491,7 +488,7 @@ impl TabBarTheme {
         TabBarTheme {
             key: None,
             data: None,
-            indicator: <dyn Decoration>::lerp(a.indicator(), b.indicator(), t),
+            indicator: DecorationRef::lerp(a.indicator(), b.indicator(), t),
             indicator_color: Color::lerp(a.indicator_color(), b.indicator_color(), t),
             indicator_size: if t < 0.5 {
                 a.indicator_size()
@@ -573,35 +570,6 @@ impl TabBarTheme {
     }
 }
 
-impl Clone for TabBarTheme {
-    fn clone(&self) -> TabBarTheme {
-        TabBarTheme {
-            key: self.key.clone(),
-            data: self.data.clone(),
-            indicator: self
-                .indicator
-                .as_ref()
-                .map(|indicator| indicator.clone_box()),
-            indicator_color: self.indicator_color,
-            indicator_size: self.indicator_size,
-            divider_color: self.divider_color,
-            divider_height: self.divider_height,
-            label_color: self.label_color.clone(),
-            label_padding: self.label_padding,
-            label_style: self.label_style.clone(),
-            unselected_label_color: self.unselected_label_color,
-            unselected_label_style: self.unselected_label_style.clone(),
-            overlay_color: self.overlay_color.clone(),
-            splash_factory: self.splash_factory.clone(),
-            mouse_cursor: self.mouse_cursor.clone(),
-            tab_alignment: self.tab_alignment,
-            text_scaler: self.text_scaler.clone(),
-            indicator_animation: self.indicator_animation,
-            child: self.child.clone(),
-        }
-    }
-}
-
 impl Default for TabBarTheme {
     fn default() -> TabBarTheme {
         TabBarTheme::new()
@@ -653,10 +621,10 @@ impl InheritedWidget for TabBarTheme {
 ///  * `TabBar`, which displays a row of tabs.
 ///  * `ThemeData`, which describes the overall theme information for the
 ///    application.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct TabBarThemeData {
     /// Overrides the default value for `TabBar::indicator`.
-    pub indicator: Option<Box<dyn Decoration>>,
+    pub indicator: Option<DecorationRef>,
 
     /// Overrides the default value for `TabBar::indicator_color`.
     pub indicator_color: Option<Color>,
@@ -725,6 +693,31 @@ pub struct TabBarThemeData {
     pub splash_border_radius: Option<BorderRadius>,
 }
 
+crate::theme_data_getters::theme_data_getters! {
+    /// Dart's getters of `TabBarThemeData`: the theme data answers with its fields, and a defaults
+    /// subclass (Dart's `_...Defaults...(context)`) computes the ones it overrides when they
+    /// are read.
+    pub trait TabBarThemeDataGetters for TabBarThemeData, fields: tab_bar_theme_data {
+        indicator: Option<DecorationRef>,
+        indicator_color: Option<Color>,
+        indicator_size: Option<TabBarIndicatorSize>,
+        divider_color: Option<Color>,
+        divider_height: Option<f64>,
+        label_color: Option<AnyColor>,
+        label_padding: Option<EdgeInsetsGeometry>,
+        label_style: Option<TextStyle>,
+        unselected_label_color: Option<Color>,
+        unselected_label_style: Option<TextStyle>,
+        overlay_color: Option<WidgetStatePropertyRef<Option<Color>>>,
+        splash_factory: Option<InteractiveInkFeatureFactoryRef>,
+        mouse_cursor: Option<WidgetStatePropertyRef<Option<MouseCursorRef>>>,
+        tab_alignment: Option<TabAlignment>,
+        text_scaler: Option<TextScaler>,
+        indicator_animation: Option<TabIndicatorAnimation>,
+        splash_border_radius: Option<BorderRadius>,
+    }
+}
+
 impl TabBarThemeData {
     /// Creates a tab bar theme that can be used with `ThemeData::tab_bar_theme`; Dart's
     /// named arguments are the fluent setters.
@@ -733,8 +726,8 @@ impl TabBarThemeData {
     }
 
     /// Dart `TabBarThemeData(indicator:)`.
-    pub fn indicator(mut self, indicator: impl Decoration) -> TabBarThemeData {
-        self.indicator = Some(Box::new(indicator));
+    pub fn indicator(mut self, indicator: impl Into<DecorationRef>) -> TabBarThemeData {
+        self.indicator = Some(indicator.into());
         self
     }
 
@@ -866,7 +859,7 @@ impl TabBarThemeData {
             return a.clone();
         }
         TabBarThemeData {
-            indicator: <dyn Decoration>::lerp(a.indicator.as_deref(), b.indicator.as_deref(), t),
+            indicator: DecorationRef::lerp(a.indicator.as_ref(), b.indicator.as_ref(), t),
             indicator_color: Color::lerp(a.indicator_color, b.indicator_color, t),
             indicator_size: if t < 0.5 {
                 a.indicator_size
@@ -934,48 +927,12 @@ impl TabBarThemeData {
     }
 }
 
-impl Clone for TabBarThemeData {
-    fn clone(&self) -> TabBarThemeData {
-        TabBarThemeData {
-            indicator: self
-                .indicator
-                .as_ref()
-                .map(|indicator| indicator.clone_box()),
-            indicator_color: self.indicator_color,
-            indicator_size: self.indicator_size,
-            divider_color: self.divider_color,
-            divider_height: self.divider_height,
-            label_color: self.label_color.clone(),
-            label_padding: self.label_padding,
-            label_style: self.label_style.clone(),
-            unselected_label_color: self.unselected_label_color,
-            unselected_label_style: self.unselected_label_style.clone(),
-            overlay_color: self.overlay_color.clone(),
-            splash_factory: self.splash_factory.clone(),
-            mouse_cursor: self.mouse_cursor.clone(),
-            tab_alignment: self.tab_alignment,
-            text_scaler: self.text_scaler.clone(),
-            indicator_animation: self.indicator_animation,
-            splash_border_radius: self.splash_border_radius,
-        }
-    }
-}
-
-/// Dart's `Decoration ==`.
-fn same_decoration(a: &Option<Box<dyn Decoration>>, b: &Option<Box<dyn Decoration>>) -> bool {
-    match (a.as_deref(), b.as_deref()) {
-        (None, None) => true,
-        (Some(a), Some(b)) => a.eq_decoration(b),
-        _ => false,
-    }
-}
-
 impl PartialEq for TabBarThemeData {
     fn eq(&self, other: &TabBarThemeData) -> bool {
         if std::ptr::eq(self, other) {
             return true;
         }
-        same_decoration(&other.indicator, &self.indicator)
+        other.indicator == self.indicator
             && other.indicator_color == self.indicator_color
             && other.indicator_size == self.indicator_size
             && other.divider_color == self.divider_color
@@ -1082,6 +1039,15 @@ mod tests {
             .copy_with()
             .indicator(BoxDecoration::new().color(Colors::BLUE.primary()));
         assert_eq!(decorated.copy_with(), decorated);
+        // An `UnderlineTabIndicator` does not override `==`: a copy shares the one indicator
+        // and is equal, and another indicator of the same fields is not.
+        let underlined = theme.copy_with().indicator(UnderlineTabIndicator::new());
+        assert_eq!(underlined.copy_with(), underlined);
+        assert_eq!(underlined.clone(), underlined);
+        assert_ne!(
+            theme.copy_with().indicator(UnderlineTabIndicator::new()),
+            underlined
+        );
     }
 
     #[test]

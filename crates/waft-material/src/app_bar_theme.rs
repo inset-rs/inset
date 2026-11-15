@@ -2,7 +2,7 @@
 
 use waft_embedder::{Color, SystemUiOverlayStyle, lerp_double};
 use waft_foundation::App;
-use waft_painting::{EdgeInsetsGeometry, ShapeBorder, TextStyle};
+use waft_painting::{EdgeInsetsGeometry, ShapeBorderRef, TextStyle};
 use waft_widgets::{
     BuildContext, IconThemeData, InheritedTheme, InheritedWidget, IntoWidget, KeyRef, SizedBox,
     WidgetRef,
@@ -41,7 +41,7 @@ pub struct AppBarTheme {
     scrolled_under_elevation: Option<f64>,
     shadow_color: Option<Color>,
     surface_tint_color: Option<Color>,
-    shape: Option<Box<dyn ShapeBorder>>,
+    shape: Option<ShapeBorderRef>,
     icon_theme: Option<IconThemeData>,
     actions_icon_theme: Option<IconThemeData>,
     center_title: Option<bool>,
@@ -153,7 +153,7 @@ impl AppBarTheme {
     }
 
     /// Dart `AppBarTheme(shape:)`.
-    pub fn with_shape(mut self, shape: impl Into<Box<dyn ShapeBorder>>) -> AppBarTheme {
+    pub fn with_shape(mut self, shape: impl Into<ShapeBorderRef>) -> AppBarTheme {
         debug_assert!(self.data.is_none());
         self.shape = Some(shape.into());
         self
@@ -298,10 +298,10 @@ impl AppBarTheme {
 
     /// Overrides the default value of `AppBar::shape` in all
     /// descendant `AppBar` widgets.
-    pub fn shape(&self) -> Option<&dyn ShapeBorder> {
+    pub fn shape(&self) -> Option<&ShapeBorderRef> {
         match &self.data {
-            Some(data) => data.shape.as_deref(),
-            None => self.shape.as_deref(),
+            Some(data) => data.shape.as_ref(),
+            None => self.shape.as_ref(),
         }
     }
 
@@ -468,7 +468,7 @@ impl AppBarTheme {
             scrolled_under_elevation: self.scrolled_under_elevation(),
             shadow_color: self.shadow_color(),
             surface_tint_color: self.surface_tint_color(),
-            shape: self.shape().map(|shape| shape.clone_box()),
+            shape: self.shape().cloned(),
             icon_theme: self.icon_theme().cloned(),
             actions_icon_theme: self.actions_icon_theme().cloned(),
             center_title: self.center_title(),
@@ -542,7 +542,7 @@ impl AppBarTheme {
                 b.and_then(|b| b.surface_tint_color()),
                 t,
             ),
-            shape: <dyn ShapeBorder>::lerp(a.and_then(|a| a.shape()), b.and_then(|b| b.shape()), t),
+            shape: ShapeBorderRef::lerp(a.and_then(|a| a.shape()), b.and_then(|b| b.shape()), t),
             icon_theme: Some(IconThemeData::lerp(
                 a.and_then(|a| a.icon_theme()),
                 b.and_then(|b| b.icon_theme()),
@@ -699,7 +699,7 @@ pub struct AppBarThemeData {
     pub surface_tint_color: Option<Color>,
 
     /// Overrides the default value of `AppBar::shape`.
-    pub shape: Option<Box<dyn ShapeBorder>>,
+    pub shape: Option<ShapeBorderRef>,
 
     /// Overrides the default value of `AppBar::icon_theme`.
     pub icon_theme: Option<IconThemeData>,
@@ -730,6 +730,31 @@ pub struct AppBarThemeData {
 
     /// Overrides the default value of `AppBar::actions_padding`.
     pub actions_padding: Option<EdgeInsetsGeometry>,
+}
+
+crate::theme_data_getters::theme_data_getters! {
+    /// Dart's getters of `AppBarThemeData`: the theme data answers with its fields, and a defaults
+    /// subclass (Dart's `_...Defaults...(context)`) computes the ones it overrides when they
+    /// are read.
+    pub trait AppBarThemeDataGetters for AppBarThemeData, fields: app_bar_theme_data {
+        background_color: Option<Color>,
+        foreground_color: Option<Color>,
+        elevation: Option<f64>,
+        scrolled_under_elevation: Option<f64>,
+        shadow_color: Option<Color>,
+        surface_tint_color: Option<Color>,
+        shape: Option<ShapeBorderRef>,
+        icon_theme: Option<IconThemeData>,
+        actions_icon_theme: Option<IconThemeData>,
+        center_title: Option<bool>,
+        title_spacing: Option<f64>,
+        leading_width: Option<f64>,
+        toolbar_height: Option<f64>,
+        toolbar_text_style: Option<TextStyle>,
+        title_text_style: Option<TextStyle>,
+        system_overlay_style: Option<SystemUiOverlayStyle>,
+        actions_padding: Option<EdgeInsetsGeometry>,
+    }
 }
 
 #[allow(deprecated)]
@@ -787,7 +812,7 @@ impl AppBarThemeData {
     }
 
     /// Dart `AppBarThemeData(shape:)`.
-    pub fn shape(mut self, shape: impl Into<Box<dyn ShapeBorder>>) -> AppBarThemeData {
+    pub fn shape(mut self, shape: impl Into<ShapeBorderRef>) -> AppBarThemeData {
         self.shape = Some(shape.into());
         self
     }
@@ -882,7 +907,7 @@ impl AppBarThemeData {
             ),
             shadow_color: Color::lerp(a.shadow_color, b.shadow_color, t),
             surface_tint_color: Color::lerp(a.surface_tint_color, b.surface_tint_color, t),
-            shape: <dyn ShapeBorder>::lerp(a.shape.as_deref(), b.shape.as_deref(), t),
+            shape: ShapeBorderRef::lerp(a.shape.as_ref(), b.shape.as_ref(), t),
             icon_theme: Some(IconThemeData::lerp(
                 a.icon_theme.as_ref(),
                 b.icon_theme.as_ref(),
@@ -923,6 +948,7 @@ impl AppBarThemeData {
 
 #[cfg(test)]
 mod tests {
+    use waft_painting::ShapeBorder;
     use waft_painting::{BorderRadiusGeometry, BorderSide, FontStyle, RoundedRectangleBorder};
 
     use super::*;
@@ -1120,7 +1146,7 @@ mod tests {
         assert_eq!(theme.scrolled_under_elevation(), Some(6.0));
         assert_eq!(theme.shadow_color(), Some(Color::new(0xff1212ff)));
         assert_eq!(theme.surface_tint_color(), None);
-        assert_eq!(theme.shape(), Some(&rounded(14.0) as &dyn ShapeBorder));
+        assert_eq!(theme.shape(), Some(&ShapeBorderRef::new(rounded(14.0))));
         assert_eq!(
             theme.icon_theme(),
             Some(&IconThemeData::new().color(Color::new(0xffff0000)))
@@ -1137,7 +1163,7 @@ mod tests {
 
         assert_eq!(theme.background_color(), Some(Color::new(0xff00ff00)));
         assert_eq!(theme.elevation(), Some(4.0));
-        assert_eq!(theme.shape(), Some(&rounded(14.0) as &dyn ShapeBorder));
+        assert_eq!(theme.shape(), Some(&ShapeBorderRef::new(rounded(14.0))));
         assert_eq!(theme.center_title(), Some(false));
         assert_eq!(theme.data(), app_bar_theme_data());
     }

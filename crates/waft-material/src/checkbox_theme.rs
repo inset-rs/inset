@@ -2,7 +2,7 @@
 
 use waft_embedder::{Color, lerp_double};
 use waft_foundation::App;
-use waft_painting::{AnyBorderSide, BorderSide, EdgeInsets, OutlinedBorder};
+use waft_painting::{AnyBorderSide, BorderSide, EdgeInsets, OutlinedBorderRef};
 use waft_services::MouseCursorRef;
 use waft_widgets::{
     BuildContext, InheritedWidget, IntoWidget, KeyRef, WidgetRef, WidgetStateBorderSide,
@@ -97,7 +97,7 @@ pub struct CheckboxThemeData {
     /// The shape of the checkbox's `Material`.
     ///
     /// If specified, overrides the default value of `Checkbox::shape`.
-    pub shape: Option<Box<dyn OutlinedBorder>>,
+    pub shape: Option<OutlinedBorderRef>,
 
     /// The color and width of the checkbox's border.
     ///
@@ -143,6 +143,24 @@ pub struct CheckboxThemeData {
     /// If null, [`CheckboxThemeData::mark_insets`] is used. If that is also null,
     /// it defaults to [`EdgeInsets::ZERO`] and the check mark renders at full size.
     pub mark_insets: Option<EdgeInsets>,
+}
+
+crate::theme_data_getters::theme_data_getters! {
+    /// Dart's getters of `CheckboxThemeData`: the theme data answers with its fields, and a defaults
+    /// subclass (Dart's `_...Defaults...(context)`) computes the ones it overrides when they
+    /// are read.
+    pub trait CheckboxThemeDataGetters for CheckboxThemeData, fields: checkbox_theme_data {
+        mouse_cursor: Option<WidgetStatePropertyRef<Option<MouseCursorRef>>>,
+        fill_color: Option<WidgetStatePropertyRef<Option<Color>>>,
+        check_color: Option<WidgetStatePropertyRef<Option<Color>>>,
+        overlay_color: Option<WidgetStatePropertyRef<Option<Color>>>,
+        splash_radius: Option<f64>,
+        material_tap_target_size: Option<MaterialTapTargetSize>,
+        visual_density: Option<VisualDensity>,
+        shape: Option<OutlinedBorderRef>,
+        side: Option<AnyBorderSide>,
+        mark_insets: Option<EdgeInsets>,
+    }
 }
 
 impl CheckboxThemeData {
@@ -210,7 +228,7 @@ impl CheckboxThemeData {
     }
 
     /// Dart `CheckboxThemeData(shape:)`.
-    pub fn shape(mut self, shape: impl Into<Box<dyn OutlinedBorder>>) -> CheckboxThemeData {
+    pub fn shape(mut self, shape: impl Into<OutlinedBorderRef>) -> CheckboxThemeData {
         self.shape = Some(shape.into());
         self
     }
@@ -288,9 +306,9 @@ impl CheckboxThemeData {
             } else {
                 b.and_then(|b| b.visual_density)
             },
-            shape: <dyn OutlinedBorder>::lerp(
-                a.and_then(|a| a.shape.as_deref()),
-                b.and_then(|b| b.shape.as_deref()),
+            shape: OutlinedBorderRef::lerp(
+                a.and_then(|a| a.shape.as_ref()),
+                b.and_then(|b| b.shape.as_ref()),
                 t,
             ),
             side: Self::lerp_sides(

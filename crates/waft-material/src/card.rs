@@ -3,16 +3,17 @@
 use waft_embedder::{Clip, Color};
 use waft_foundation::App;
 use waft_painting::{
-    BorderRadiusGeometry, BorderSide, EdgeInsetsGeometry, RoundedRectangleBorder, ShapeBorder,
+    BorderRadiusGeometry, BorderSide, EdgeInsetsGeometry, RoundedRectangleBorder, ShapeBorderRef,
 };
 use waft_widgets::{
     BuildContext, IntoWidget, KeyRef, Padding, Semantics, StatelessWidget, WidgetRef,
 };
 
+use crate::card_theme::CardThemeDataGetters;
 use crate::card_theme::{CardTheme, CardThemeData};
-use crate::generated::card_defaults_m3::card_defaults_m3;
-use crate::generated::filled_card_defaults_m3::filled_card_defaults_m3;
-use crate::generated::outlined_card_defaults_m3::outlined_card_defaults_m3;
+use crate::generated::card_defaults_m3::CardDefaultsM3;
+use crate::generated::filled_card_defaults_m3::FilledCardDefaultsM3;
+use crate::generated::outlined_card_defaults_m3::OutlinedCardDefaultsM3;
 use crate::material::{Material, MaterialType};
 use crate::theme::Theme;
 
@@ -103,7 +104,7 @@ pub struct Card {
     /// The default corner radius is 12.0 when `ThemeData::use_material3` is true,
     /// and 4.0 otherwise. For Material 3 outlined cards, the default [`shape`](Self::shape)
     /// also includes a border side (see `OutlinedBorder::side`).
-    pub shape: Option<Box<dyn ShapeBorder>>,
+    pub shape: Option<ShapeBorderRef>,
 
     /// Whether to paint the [`shape`](Self::shape) border in front of the
     /// [`child`](Self::child).
@@ -234,7 +235,7 @@ impl Card {
     }
 
     /// Dart `Card(shape:)`.
-    pub fn shape(mut self, shape: impl Into<Box<dyn ShapeBorder>>) -> Card {
+    pub fn shape(mut self, shape: impl Into<ShapeBorderRef>) -> Card {
         self.shape = Some(shape.into());
         self
     }
@@ -283,14 +284,14 @@ impl StatelessWidget for Card {
 
     fn build(&self, app: &mut App, context: BuildContext) -> WidgetRef {
         let card_theme = CardTheme::of(app, context);
-        let defaults = if Theme::of(app, context).use_material3 {
+        let defaults: Box<dyn CardThemeDataGetters> = if Theme::of(app, context).use_material3 {
             match self.variant {
-                CardVariant::Elevated => card_defaults_m3(app, context),
-                CardVariant::Filled => filled_card_defaults_m3(app, context),
-                CardVariant::Outlined => outlined_card_defaults_m3(app, context),
+                CardVariant::Elevated => Box::new(CardDefaultsM3::new(context)),
+                CardVariant::Filled => Box::new(FilledCardDefaultsM3::new(context)),
+                CardVariant::Outlined => Box::new(OutlinedCardDefaultsM3::new(context)),
             }
         } else {
-            card_defaults_m2(app, context)
+            Box::new(CardDefaultsM2::new(context))
         };
 
         let mut material = Material::new()
@@ -298,26 +299,33 @@ impl StatelessWidget for Card {
             .elevation(
                 self.elevation
                     .or(card_theme.elevation)
-                    .or(defaults.elevation)
+                    .or_else(|| defaults.elevation(app))
                     .expect("the defaults give an elevation"),
             )
             .border_on_foreground(self.border_on_foreground)
             .clip_behavior(
                 self.clip_behavior
                     .or(card_theme.clip_behavior)
-                    .or(defaults.clip_behavior)
+                    .or_else(|| defaults.clip_behavior(app))
                     .expect("the defaults give a clip behavior"),
             );
-        material.color = self.color.or(card_theme.color).or(defaults.color);
+        material.color = self
+            .color
+            .or(card_theme.color)
+            .or_else(|| defaults.color(app));
         material.shadow_color = self
             .shadow_color
             .or(card_theme.shadow_color)
-            .or(defaults.shadow_color);
+            .or_else(|| defaults.shadow_color(app));
         material.surface_tint_color = self
             .surface_tint_color
             .or(card_theme.surface_tint_color)
-            .or(defaults.surface_tint_color);
-        material.shape = self.shape.clone().or(card_theme.shape).or(defaults.shape);
+            .or_else(|| defaults.surface_tint_color(app));
+        material.shape = self
+            .shape
+            .clone()
+            .or(card_theme.shape)
+            .or_else(|| defaults.shape(app));
         let mut child_semantics = Semantics::new().explicit_child_nodes(!self.semantic_container);
         child_semantics.child = self.child.clone();
         material.child = Some(child_semantics.into_widget());
@@ -328,7 +336,7 @@ impl StatelessWidget for Card {
                 Padding::new(
                     self.margin
                         .or(card_theme.margin)
-                        .or(defaults.margin)
+                        .or_else(|| defaults.margin(app))
                         .expect("the defaults give a margin"),
                 )
                 .child(material),
@@ -339,19 +347,41 @@ impl StatelessWidget for Card {
 
 /// Hand coded defaults based on Material Design 2.
 ///
-/// Dart's `_CardDefaultsM2(context)`.
-fn card_defaults_m2(app: &mut App, context: BuildContext) -> CardThemeData {
-    let theme = Theme::of(app, context);
-    CardThemeData::new()
-        .clip_behavior(Clip::None)
-        .elevation(1.0)
-        .margin(EdgeInsetsGeometry::all(4.0))
-        .shape(RoundedRectangleBorder::new(
-            BorderSide::NONE,
-            BorderRadiusGeometry::circular(4.0),
-        ))
-        .color(theme.card_color)
-        .shadow_color(theme.shadow_color)
+/// Dart's `_CardDefaultsM2`.
+struct CardDefaultsM2 {
+    /// Dart's `super(..)` arguments.
+    card_theme_data: CardThemeData,
+    context: BuildContext,
+}
+
+impl CardDefaultsM2 {
+    fn new(context: BuildContext) -> CardDefaultsM2 {
+        CardDefaultsM2 {
+            card_theme_data: CardThemeData::new()
+                .clip_behavior(Clip::None)
+                .elevation(1.0)
+                .margin(EdgeInsetsGeometry::all(4.0))
+                .shape(RoundedRectangleBorder::new(
+                    BorderSide::NONE,
+                    BorderRadiusGeometry::circular(4.0),
+                )),
+            context,
+        }
+    }
+}
+
+impl CardThemeDataGetters for CardDefaultsM2 {
+    fn card_theme_data(&self) -> &CardThemeData {
+        &self.card_theme_data
+    }
+
+    fn color(&self, app: &mut App) -> Option<Color> {
+        Some(Theme::of(app, self.context).card_color)
+    }
+
+    fn shadow_color(&self, app: &mut App) -> Option<Color> {
+        Some(Theme::of(app, self.context).shadow_color)
+    }
 }
 
 #[cfg(test)]
@@ -380,7 +410,7 @@ pub(crate) mod tests {
         pub(crate) color: Option<Color>,
         pub(crate) shadow_color: Option<Color>,
         pub(crate) surface_tint_color: Option<Color>,
-        pub(crate) shape: Option<Box<dyn ShapeBorder>>,
+        pub(crate) shape: Option<ShapeBorderRef>,
     }
 
     pub(crate) fn card_material(tester: &WidgetTester) -> CardMaterial {
@@ -406,8 +436,8 @@ pub(crate) mod tests {
         tester.widget(paddings[0], |padding: &Padding| padding.padding)
     }
 
-    pub(crate) fn rounded(radius: f64) -> Option<Box<dyn ShapeBorder>> {
-        Some(Box::new(RoundedRectangleBorder::new(
+    pub(crate) fn rounded(radius: f64) -> Option<ShapeBorderRef> {
+        Some(ShapeBorderRef::new(RoundedRectangleBorder::new(
             BorderSide::NONE,
             BorderRadiusGeometry::circular(radius),
         )))
@@ -480,13 +510,13 @@ pub(crate) mod tests {
             assert_eq!(material.surface_tint_color, Some(Colors::TRANSPARENT));
             assert_eq!(
                 material.shape,
-                Some(Box::new(RoundedRectangleBorder::new(
+                Some(ShapeBorderRef::new(RoundedRectangleBorder::new(
                     BorderSide {
                         color: colors.outline_variant(),
                         ..BorderSide::default()
                     },
                     BorderRadiusGeometry::circular(12.0),
-                )) as Box<dyn ShapeBorder>)
+                )))
             );
         });
     }

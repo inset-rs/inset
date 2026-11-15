@@ -36,11 +36,14 @@ use waft_widgets::{
 };
 
 use crate::generated::progress_indicator_defaults_m3::{
-    circular_progress_indicator_defaults_m3, linear_progress_indicator_defaults_m3,
+    CircularProgressIndicatorDefaultsM3, LinearProgressIndicatorDefaultsM3,
 };
 use crate::material::{Material, MaterialType};
-use crate::progress_indicator_theme::{ProgressIndicatorTheme, ProgressIndicatorThemeData};
+use crate::progress_indicator_theme::{
+    ProgressIndicatorTheme, ProgressIndicatorThemeData, ProgressIndicatorThemeDataGetters,
+};
 use crate::theme::Theme;
+use crate::theme_data_getters::DefaultsContext;
 
 // This value is extracted from
 // https://cs.android.com/android/platform/superproject/+/master:frameworks/base/core/res/res/anim/progress_indeterminate_material.xml;drc=9cb5b4c2d93acb9d6f5e14167e265c328c487d6b
@@ -558,7 +561,7 @@ impl CustomPainter for LinearProgressIndicatorPainter {
 ///  * `RefreshIndicator`, which automatically displays a [`CircularProgressIndicator`]
 ///    when the underlying vertical scrollable is overscrolled.
 ///  * <https://material.io/design/components/progress-indicators.html#linear-progress-indicators>
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct LinearProgressIndicator {
     /// The base class's fields.
     ///
@@ -809,36 +812,37 @@ impl LinearProgressIndicatorState {
         let indicator_theme = ProgressIndicatorTheme::of(app, context);
         let widget = self.widget(app);
         let year2023 = widget.year2023.or(indicator_theme.year2023).unwrap_or(true);
-        let defaults = if Theme::of(app, context).use_material3 {
-            if year2023 {
-                linear_progress_indicator_defaults_m3_year2023(app, context)
+        let defaults: Box<dyn ProgressIndicatorThemeDataGetters> =
+            if Theme::of(app, context).use_material3 {
+                if year2023 {
+                    Box::new(LinearProgressIndicatorDefaultsM3Year2023::new(context))
+                } else {
+                    Box::new(LinearProgressIndicatorDefaultsM3::new(context))
+                }
             } else {
-                linear_progress_indicator_defaults_m3(app, context)
-            }
-        } else {
-            linear_progress_indicator_defaults_m2(app, context)
-        };
-        let widget = self.widget(app);
+                Box::new(LinearProgressIndicatorDefaultsM2::new(context))
+            };
+        let widget = self.widget(app).clone();
         let track_color = widget
             .progress_indicator
             .background_color
             .or(indicator_theme.linear_track_color)
-            .or(defaults.linear_track_color)
+            .or_else(|| defaults.linear_track_color(app))
             .expect("the defaults give a track colour");
         let min_height = widget
             .min_height
             .or(indicator_theme.linear_min_height)
-            .or(defaults.linear_min_height)
+            .or_else(|| defaults.linear_min_height(app))
             .expect("the defaults give a minimum height");
         let border_radius = widget
             .border_radius
             .or(indicator_theme.border_radius)
-            .or(defaults.border_radius);
+            .or_else(|| defaults.border_radius(app));
         let stop_indicator_color = if !year2023 {
             widget
                 .stop_indicator_color
                 .or(indicator_theme.stop_indicator_color)
-                .or(defaults.stop_indicator_color)
+                .or_else(|| defaults.stop_indicator_color(app))
         } else {
             None
         };
@@ -846,7 +850,7 @@ impl LinearProgressIndicatorState {
             widget
                 .stop_indicator_radius
                 .or(indicator_theme.stop_indicator_radius)
-                .or(defaults.stop_indicator_radius)
+                .or_else(|| defaults.stop_indicator_radius(app))
         } else {
             None
         };
@@ -854,12 +858,13 @@ impl LinearProgressIndicatorState {
             widget
                 .track_gap
                 .or(indicator_theme.track_gap)
-                .or(defaults.track_gap)
+                .or_else(|| defaults.track_gap(app))
         } else {
             None
         };
         let progress_indicator = widget.progress_indicator.clone();
         let effective_value = progress_indicator.effective_value();
+        let default_color = defaults.color(app);
 
         let mut result = ConstrainedBox::new(
             BoxConstraints::new()
@@ -872,7 +877,7 @@ impl LinearProgressIndicatorState {
                 app,
                 context,
                 progress_indicator.color,
-                defaults.color,
+                default_color,
             ),
             value: effective_value, // may be null
             animation_value,        // ignored if widget._effectiveValue is not null
@@ -1211,7 +1216,7 @@ impl CustomPainter for CircularProgressIndicatorPainter {
 ///  * `RefreshIndicator`, which automatically displays a [`CircularProgressIndicator`]
 ///    when the underlying vertical scrollable is overscrolled.
 ///  * <https://material.io/design/components/progress-indicators.html#circular-progress-indicators>
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct CircularProgressIndicator {
     /// The base class's fields.
     ///
@@ -1634,36 +1639,46 @@ trait CircularProgressIndicatorStateBase:
             .progress_indicator
             .effective_value()
             .is_none();
-        let defaults = if Theme::of(app, context).use_material3 {
-            if year2023 {
-                circular_progress_indicator_defaults_m3_year2023(app, context, indeterminate)
+        let defaults: Box<dyn ProgressIndicatorThemeDataGetters> =
+            if Theme::of(app, context).use_material3 {
+                if year2023 {
+                    Box::new(CircularProgressIndicatorDefaultsM3Year2023::new(
+                        context,
+                        indeterminate,
+                    ))
+                } else {
+                    Box::new(CircularProgressIndicatorDefaultsM3::new(
+                        context,
+                        indeterminate,
+                    ))
+                }
             } else {
-                circular_progress_indicator_defaults_m3(app, context, indeterminate)
-            }
-        } else {
-            circular_progress_indicator_defaults_m2(app, context, indeterminate)
-        };
-        let widget = self.circular_widget(app);
+                Box::new(CircularProgressIndicatorDefaultsM2::new(
+                    context,
+                    indeterminate,
+                ))
+            };
+        let widget = self.circular_widget(app).clone();
         let track_color = widget
             .progress_indicator
             .background_color
             .or(indicator_theme.circular_track_color)
-            .or(defaults.circular_track_color);
+            .or_else(|| defaults.circular_track_color(app));
         let stroke_width = widget
             .stroke_width
             .or(indicator_theme.stroke_width)
-            .or(defaults.stroke_width)
+            .or_else(|| defaults.stroke_width(app))
             .expect("the defaults give a stroke width");
         let stroke_align = widget
             .stroke_align
             .or(indicator_theme.stroke_align)
-            .or(defaults.stroke_align)
+            .or_else(|| defaults.stroke_align(app))
             .expect("the defaults give a stroke alignment");
         let stroke_cap = widget.stroke_cap.or(indicator_theme.stroke_cap);
         let constraints = widget
             .constraints
             .or(indicator_theme.constraints)
-            .or(defaults.constraints)
+            .or_else(|| defaults.constraints(app))
             .expect("the defaults give constraints");
         let track_gap = if year2023 {
             None
@@ -1671,19 +1686,20 @@ trait CircularProgressIndicatorStateBase:
             widget
                 .track_gap
                 .or(indicator_theme.track_gap)
-                .or(defaults.track_gap)
+                .or_else(|| defaults.track_gap(app))
         };
         let effective_padding = widget
             .padding
             .or(indicator_theme.circular_track_padding)
-            .or(defaults.circular_track_padding);
+            .or_else(|| defaults.circular_track_padding(app));
         let progress_indicator = widget.progress_indicator.clone();
         let color = widget.effective_color();
+        let default_color = defaults.color(app);
 
         let result = ConstrainedBox::new(constraints).child(CustomPaint::new().painter(
             CircularProgressIndicatorPainter::new(
                 track_color,
-                progress_indicator.get_value_color(app, context, color, defaults.color),
+                progress_indicator.get_value_color(app, context, color, default_color),
                 progress_indicator.effective_value(), // may be null
                 head_value, // remaining arguments are ignored if widget._effectiveValue is not null
                 tail_value,
@@ -2175,11 +2191,18 @@ impl CircularProgressIndicatorStateBase for RefreshProgressIndicatorState {
         let opacity = value_color.opacity();
         let value_color = value_color.with_opacity(1.0);
 
-        let defaults = if Theme::of(app, context).use_material3 {
-            circular_progress_indicator_defaults_m3_year2023(app, context, value.is_none())
-        } else {
-            circular_progress_indicator_defaults_m2(app, context, value.is_none())
-        };
+        let defaults: Box<dyn ProgressIndicatorThemeDataGetters> =
+            if Theme::of(app, context).use_material3 {
+                Box::new(CircularProgressIndicatorDefaultsM3Year2023::new(
+                    context,
+                    value.is_none(),
+                ))
+            } else {
+                Box::new(CircularProgressIndicatorDefaultsM2::new(
+                    context,
+                    value.is_none(),
+                ))
+            };
         let indicator_theme = ProgressIndicatorTheme::of(app, context);
         let background_color = match progress_indicator
             .background_color
@@ -2188,19 +2211,19 @@ impl CircularProgressIndicatorStateBase for RefreshProgressIndicatorState {
             Some(background_color) => background_color,
             None => Theme::of(app, context).canvas_color,
         };
-        let widget = self.widget(app);
-        let circular = &widget.circular_progress_indicator;
+        let circular = self.circular_widget(app).clone();
         let stroke_width = circular
             .stroke_width
             .or(indicator_theme.stroke_width)
-            .or(defaults.stroke_width)
+            .or_else(|| defaults.stroke_width(app))
             .expect("the defaults give a stroke width");
         let stroke_align = circular
             .stroke_align
             .or(indicator_theme.stroke_align)
-            .or(defaults.stroke_align)
+            .or_else(|| defaults.stroke_align(app))
             .expect("the defaults give a stroke alignment");
         let stroke_cap = circular.stroke_cap.or(indicator_theme.stroke_cap);
+        let widget = self.widget(app);
 
         progress_indicator.build_semantics_wrapper(
             context,
@@ -2294,60 +2317,165 @@ impl State for RefreshProgressIndicatorState {
 }
 
 // Hand coded defaults based on Material Design 2.
-/// Dart's `_CircularProgressIndicatorDefaultsM2(context, indeterminate:)`.
-fn circular_progress_indicator_defaults_m2(
-    app: &mut App,
-    context: BuildContext,
-    _indeterminate: bool,
-) -> ProgressIndicatorThemeData {
-    let colors = Theme::of(app, context).color_scheme.clone();
-
-    ProgressIndicatorThemeData::new()
-        .color(colors.primary)
-        .stroke_width(4.0)
-        .stroke_align(CircularProgressIndicator::STROKE_ALIGN_CENTER)
-        .constraints(BoxConstraints::new().min_width(36.0).min_height(36.0))
+/// Dart's `_CircularProgressIndicatorDefaultsM2`.
+struct CircularProgressIndicatorDefaultsM2 {
+    /// Dart's `super(..)` arguments.
+    progress_indicator_theme_data: ProgressIndicatorThemeData,
+    context: DefaultsContext,
+    /// Dart's `indeterminate`.
+    #[expect(
+        dead_code,
+        reason = "Dart's constructor argument, which no getter of this class reads"
+    )]
+    indeterminate: bool,
 }
 
-/// Dart's `_LinearProgressIndicatorDefaultsM2(context)`.
-fn linear_progress_indicator_defaults_m2(
-    app: &mut App,
-    context: BuildContext,
-) -> ProgressIndicatorThemeData {
-    let colors = Theme::of(app, context).color_scheme.clone();
-
-    ProgressIndicatorThemeData::new()
-        .color(colors.primary)
-        .linear_track_color(colors.background())
-        .linear_min_height(4.0)
+impl CircularProgressIndicatorDefaultsM2 {
+    fn new(context: BuildContext, indeterminate: bool) -> CircularProgressIndicatorDefaultsM2 {
+        CircularProgressIndicatorDefaultsM2 {
+            progress_indicator_theme_data: ProgressIndicatorThemeData::new(),
+            context: DefaultsContext::new(context),
+            indeterminate,
+        }
+    }
 }
 
-/// Dart's `_CircularProgressIndicatorDefaultsM3Year2023(context, indeterminate:)`.
-fn circular_progress_indicator_defaults_m3_year2023(
-    app: &mut App,
-    context: BuildContext,
-    _indeterminate: bool,
-) -> ProgressIndicatorThemeData {
-    let colors = Theme::of(app, context).color_scheme.clone();
+impl ProgressIndicatorThemeDataGetters for CircularProgressIndicatorDefaultsM2 {
+    fn progress_indicator_theme_data(&self) -> &ProgressIndicatorThemeData {
+        &self.progress_indicator_theme_data
+    }
 
-    ProgressIndicatorThemeData::new()
-        .color(colors.primary)
-        .stroke_width(4.0)
-        .stroke_align(CircularProgressIndicator::STROKE_ALIGN_CENTER)
-        .constraints(BoxConstraints::new().min_width(36.0).min_height(36.0))
+    fn color(&self, app: &mut App) -> Option<Color> {
+        Some(self.context.colors(app).primary)
+    }
+
+    fn stroke_width(&self, _app: &mut App) -> Option<f64> {
+        Some(4.0)
+    }
+
+    fn stroke_align(&self, _app: &mut App) -> Option<f64> {
+        Some(CircularProgressIndicator::STROKE_ALIGN_CENTER)
+    }
+
+    fn constraints(&self, _app: &mut App) -> Option<BoxConstraints> {
+        Some(BoxConstraints::new().min_width(36.0).min_height(36.0))
+    }
 }
 
-/// Dart's `_LinearProgressIndicatorDefaultsM3Year2023(context)`.
-fn linear_progress_indicator_defaults_m3_year2023(
-    app: &mut App,
-    context: BuildContext,
-) -> ProgressIndicatorThemeData {
-    let colors = Theme::of(app, context).color_scheme.clone();
+/// Dart's `_LinearProgressIndicatorDefaultsM2`.
+struct LinearProgressIndicatorDefaultsM2 {
+    /// Dart's `super(..)` arguments.
+    progress_indicator_theme_data: ProgressIndicatorThemeData,
+    context: DefaultsContext,
+}
 
-    ProgressIndicatorThemeData::new()
-        .color(colors.primary)
-        .linear_track_color(colors.secondary_container())
-        .linear_min_height(4.0)
+impl LinearProgressIndicatorDefaultsM2 {
+    fn new(context: BuildContext) -> LinearProgressIndicatorDefaultsM2 {
+        LinearProgressIndicatorDefaultsM2 {
+            progress_indicator_theme_data: ProgressIndicatorThemeData::new(),
+            context: DefaultsContext::new(context),
+        }
+    }
+}
+
+impl ProgressIndicatorThemeDataGetters for LinearProgressIndicatorDefaultsM2 {
+    fn progress_indicator_theme_data(&self) -> &ProgressIndicatorThemeData {
+        &self.progress_indicator_theme_data
+    }
+
+    fn color(&self, app: &mut App) -> Option<Color> {
+        Some(self.context.colors(app).primary)
+    }
+
+    fn linear_track_color(&self, app: &mut App) -> Option<Color> {
+        Some(self.context.colors(app).background())
+    }
+
+    fn linear_min_height(&self, _app: &mut App) -> Option<f64> {
+        Some(4.0)
+    }
+}
+
+/// Dart's `_CircularProgressIndicatorDefaultsM3Year2023`.
+struct CircularProgressIndicatorDefaultsM3Year2023 {
+    /// Dart's `super(..)` arguments.
+    progress_indicator_theme_data: ProgressIndicatorThemeData,
+    context: DefaultsContext,
+    /// Dart's `indeterminate`.
+    #[expect(
+        dead_code,
+        reason = "Dart's constructor argument, which no getter of this class reads"
+    )]
+    indeterminate: bool,
+}
+
+impl CircularProgressIndicatorDefaultsM3Year2023 {
+    fn new(
+        context: BuildContext,
+        indeterminate: bool,
+    ) -> CircularProgressIndicatorDefaultsM3Year2023 {
+        CircularProgressIndicatorDefaultsM3Year2023 {
+            progress_indicator_theme_data: ProgressIndicatorThemeData::new(),
+            context: DefaultsContext::new(context),
+            indeterminate,
+        }
+    }
+}
+
+impl ProgressIndicatorThemeDataGetters for CircularProgressIndicatorDefaultsM3Year2023 {
+    fn progress_indicator_theme_data(&self) -> &ProgressIndicatorThemeData {
+        &self.progress_indicator_theme_data
+    }
+
+    fn color(&self, app: &mut App) -> Option<Color> {
+        Some(self.context.colors(app).primary)
+    }
+
+    fn stroke_width(&self, _app: &mut App) -> Option<f64> {
+        Some(4.0)
+    }
+
+    fn stroke_align(&self, _app: &mut App) -> Option<f64> {
+        Some(CircularProgressIndicator::STROKE_ALIGN_CENTER)
+    }
+
+    fn constraints(&self, _app: &mut App) -> Option<BoxConstraints> {
+        Some(BoxConstraints::new().min_width(36.0).min_height(36.0))
+    }
+}
+
+/// Dart's `_LinearProgressIndicatorDefaultsM3Year2023`.
+struct LinearProgressIndicatorDefaultsM3Year2023 {
+    /// Dart's `super(..)` arguments.
+    progress_indicator_theme_data: ProgressIndicatorThemeData,
+    context: DefaultsContext,
+}
+
+impl LinearProgressIndicatorDefaultsM3Year2023 {
+    fn new(context: BuildContext) -> LinearProgressIndicatorDefaultsM3Year2023 {
+        LinearProgressIndicatorDefaultsM3Year2023 {
+            progress_indicator_theme_data: ProgressIndicatorThemeData::new(),
+            context: DefaultsContext::new(context),
+        }
+    }
+}
+
+impl ProgressIndicatorThemeDataGetters for LinearProgressIndicatorDefaultsM3Year2023 {
+    fn progress_indicator_theme_data(&self) -> &ProgressIndicatorThemeData {
+        &self.progress_indicator_theme_data
+    }
+
+    fn color(&self, app: &mut App) -> Option<Color> {
+        Some(self.context.colors(app).primary)
+    }
+
+    fn linear_track_color(&self, app: &mut App) -> Option<Color> {
+        Some(self.context.colors(app).secondary_container())
+    }
+
+    fn linear_min_height(&self, _app: &mut App) -> Option<f64> {
+        Some(4.0)
+    }
 }
 
 #[cfg(test)]

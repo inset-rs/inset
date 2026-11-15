@@ -1,7 +1,9 @@
 //! Flutter counterpart: `painting/decoration.dart`.
 
 use std::any::Any;
-use std::fmt::Debug;
+use std::fmt::{Debug, Formatter, Result as FmtResult};
+use std::ops::Deref;
+use std::rc::Rc;
 
 use waft_embedder::{Canvas, Offset, Path, Rect, Size};
 use waft_foundation::{App, VoidCallback};
@@ -43,14 +45,14 @@ pub trait Decoration: Any + Debug {
     ///
     /// Return None if this class cannot interpolate from `a`. If `a` is None,
     /// this must not return None.
-    fn lerp_from(&self, a: Option<&dyn Decoration>, t: f64) -> Option<Box<dyn Decoration>> {
+    fn lerp_from(&self, a: Option<&dyn Decoration>, t: f64) -> Option<DecorationRef> {
         let _ = (a, t);
         None
     }
 
     /// Linearly interpolates from `this` to another [`Decoration`] (which may be of
     /// a different class).
-    fn lerp_to(&self, b: Option<&dyn Decoration>, t: f64) -> Option<Box<dyn Decoration>> {
+    fn lerp_to(&self, b: Option<&dyn Decoration>, t: f64) -> Option<DecorationRef> {
         let _ = (b, t);
         None
     }
@@ -83,20 +85,31 @@ pub trait Decoration: Any + Debug {
         );
     }
 
-    /// A heap clone, so lerp can duplicate like Dart.
-    fn clone_box(&self) -> Box<dyn Decoration>;
-
     /// Downcast support for `is` / `as` in Dart.
     fn as_any(&self) -> &dyn Any;
 
     /// Field equality. Dart's default `==` is identity; subclasses that override
     /// `==` implement this.
     fn eq_decoration(&self, other: &dyn Decoration) -> bool {
-        std::ptr::eq(self.as_any(), other.as_any())
+        std::ptr::addr_eq(self.as_any(), other.as_any())
     }
 }
 
-impl dyn Decoration {
+/// A [`Decoration`] held by value: what a Dart field or parameter typed `Decoration` becomes.
+///
+/// Clones share one decoration, as Dart's references do, so a decoration handed on keeps its
+/// identity: a widget given the same decoration again sees an unchanged one. Two refs are equal
+/// when they share a decoration or when [`eq_decoration`](Decoration::eq_decoration) says so,
+/// Dart's `==`.
+#[derive(Clone)]
+pub struct DecorationRef(Rc<dyn Decoration>);
+
+impl DecorationRef {
+    /// Erases a [`Decoration`].
+    pub fn new(decoration: impl Decoration) -> DecorationRef {
+        DecorationRef(Rc::new(decoration))
+    }
+
     /// Linearly interpolates between two [`Decoration`]s.
     ///
     /// This attempts to use [`lerp_from`](Decoration::lerp_from) and
@@ -104,45 +117,59 @@ impl dyn Decoration {
     /// solution. If the two values can't directly be interpolated, then the
     /// interpolation is done via null (at `t == 0.5`).
     pub fn lerp(
-        a: Option<&dyn Decoration>,
-        b: Option<&dyn Decoration>,
+        a: Option<&DecorationRef>,
+        b: Option<&DecorationRef>,
         t: f64,
-    ) -> Option<Box<dyn Decoration>> {
-        if let (Some(a), Some(b)) = (a, b)
-            && std::ptr::eq(a.as_any(), b.as_any())
-        {
-            return Some(a.clone_box());
-        }
-        if a.is_none() {
-            return match b {
-                None => None,
-                Some(b) => b.lerp_from(None, t).or_else(|| Some(b.clone_box())),
-            };
-        }
-        if b.is_none() {
-            return a
-                .unwrap()
-                .lerp_to(None, t)
-                .or_else(|| Some(a.unwrap().clone_box()));
-        }
+    ) -> Option<DecorationRef> {
+        let (a, b) = match (a, b) {
+            (None, None) => return None,
+            (Some(a), Some(b)) if Rc::ptr_eq(&a.0, &b.0) => return Some(a.clone()),
+            (None, Some(b)) => return b.lerp_from(None, t).or_else(|| Some(b.clone())),
+            (Some(a), None) => return a.lerp_to(None, t).or_else(|| Some(a.clone())),
+            (Some(a), Some(b)) => (a, b),
+        };
         if t == 0.0 {
-            return a.map(Decoration::clone_box);
+            return Some(a.clone());
         }
         if t == 1.0 {
-            return b.map(Decoration::clone_box);
+            return Some(b.clone());
         }
-        let a = a.unwrap();
-        let b = b.unwrap();
-        b.lerp_from(Some(a), t)
-            .or_else(|| a.lerp_to(Some(b), t))
+        b.lerp_from(Some(&**a), t)
+            .or_else(|| a.lerp_to(Some(&**b), t))
             .or_else(|| {
                 if t < 0.5 {
-                    a.lerp_to(None, t * 2.0).or_else(|| Some(a.clone_box()))
+                    a.lerp_to(None, t * 2.0).or_else(|| Some(a.clone()))
                 } else {
                     b.lerp_from(None, (t - 0.5) * 2.0)
-                        .or_else(|| Some(b.clone_box()))
+                        .or_else(|| Some(b.clone()))
                 }
             })
+    }
+}
+
+impl<T: Decoration> From<T> for DecorationRef {
+    fn from(decoration: T) -> DecorationRef {
+        DecorationRef::new(decoration)
+    }
+}
+
+impl Deref for DecorationRef {
+    type Target = dyn Decoration;
+
+    fn deref(&self) -> &dyn Decoration {
+        &*self.0
+    }
+}
+
+impl PartialEq for DecorationRef {
+    fn eq(&self, other: &DecorationRef) -> bool {
+        Rc::ptr_eq(&self.0, &other.0) || self.0.eq_decoration(&*other.0)
+    }
+}
+
+impl Debug for DecorationRef {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        Debug::fmt(&*self.0, f)
     }
 }
 
@@ -186,27 +213,23 @@ mod tests {
             panic!("DummyDecoration does not paint");
         }
 
-        fn clone_box(&self) -> Box<dyn Decoration> {
-            Box::new(*self)
-        }
-
         fn as_any(&self) -> &dyn Any {
             self
         }
 
-        fn lerp_from(&self, a: Option<&dyn Decoration>, t: f64) -> Option<Box<dyn Decoration>> {
+        fn lerp_from(&self, a: Option<&dyn Decoration>, t: f64) -> Option<DecorationRef> {
             if a.is_none() {
                 let _ = t;
-                Some(self.clone_box())
+                Some(DecorationRef::new(*self))
             } else {
                 None
             }
         }
 
-        fn lerp_to(&self, b: Option<&dyn Decoration>, t: f64) -> Option<Box<dyn Decoration>> {
+        fn lerp_to(&self, b: Option<&dyn Decoration>, t: f64) -> Option<DecorationRef> {
             if b.is_none() {
                 let _ = t;
-                Some(self.clone_box())
+                Some(DecorationRef::new(*self))
             } else {
                 None
             }
@@ -214,10 +237,20 @@ mod tests {
     }
 
     #[test]
+    fn a_decoration_ref_equals_its_clones_and_not_another_of_an_identity_type() {
+        let decoration = DecorationRef::new(DummyDecoration);
+        assert_eq!(decoration.clone(), decoration);
+        assert_ne!(DecorationRef::new(DummyDecoration), decoration);
+    }
+
+    #[test]
     fn lerp_identical_and_null() {
-        assert!(<dyn Decoration>::lerp(None, None, 0.0).is_none());
-        let decoration = DummyDecoration;
-        let lerped = <dyn Decoration>::lerp(Some(&decoration), Some(&decoration), 0.5).unwrap();
-        assert!(lerped.as_any().downcast_ref::<DummyDecoration>().is_some());
+        assert!(DecorationRef::lerp(None, None, 0.0).is_none());
+        let decoration = DecorationRef::new(DummyDecoration);
+        let lerped = DecorationRef::lerp(Some(&decoration), Some(&decoration), 0.5).unwrap();
+        assert!(
+            Rc::ptr_eq(&lerped.0, &decoration.0),
+            "identical decorations lerp to the same one"
+        );
     }
 }

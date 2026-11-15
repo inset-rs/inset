@@ -1,9 +1,5 @@
-//! Flutter counterpart: material_ui's `generated/menu_defaults_m3.g.dart`, a Dart `part` of
+//! Flutter counterpart: material_ui's `generated/menu_defaults_m3.g.dart`, a part of
 //! `menu_anchor.dart`.
-//!
-//! Dart's private `_MenuBarDefaultsM3`, `_MenuButtonDefaultsM3` and `_MenuDefaultsM3` are a
-//! `MenuStyle` or `ButtonStyle` whose getters read the context's theme; each function here
-//! returns the style those getters answer, read once from the theme.
 
 // Do not edit by hand. The code is generated from data in the Material
 // Design token database by the script:
@@ -16,7 +12,7 @@ use std::rc::Rc;
 use waft_embedder::{Radius, Size};
 use waft_foundation::App;
 use waft_painting::{
-    AlignmentGeometry, BorderRadiusGeometry, BorderSide, EdgeInsetsGeometry, OutlinedBorder,
+    AlignmentGeometry, BorderRadiusGeometry, BorderSide, EdgeInsetsGeometry, OutlinedBorderRef,
     RoundedRectangleBorder,
 };
 use waft_services::MouseCursorRef;
@@ -25,53 +21,121 @@ use waft_widgets::{
     WidgetStatePropertyRef,
 };
 
-use crate::button_style::ButtonStyle;
+use crate::button_style::{ButtonStyle, ButtonStyleGetters};
 use crate::button_style_button::ButtonStyleButton;
 use crate::colors::Colors;
 use crate::constants::K_THEME_CHANGE_DURATION;
+use crate::ink_well::InteractiveInkFeatureFactoryRef;
 use crate::material_state::MaterialStatePropertyAll;
 use crate::menu_anchor::{
     K_LABEL_ITEM_DEFAULT_SPACING, K_MENU_VERTICAL_MIN_PADDING, K_MENU_VIEW_PADDING,
     K_TOP_LEVEL_MENU_HORIZONTAL_MIN_PADDING,
 };
-use crate::menu_style::MenuStyle;
+use crate::menu_style::{MenuStyle, MenuStyleGetters};
 use crate::theme::Theme;
+use crate::theme_data::MaterialTapTargetSize;
 use crate::theme_data::VisualDensity;
+use crate::theme_data_getters::DefaultsContext;
+use waft_embedder::Color;
+use waft_painting::TextStyle;
 
-/// Dart's `_MenuBarDefaultsM3(context)`.
-pub(crate) fn menu_bar_defaults_m3(app: &mut App, context: BuildContext) -> MenuStyle {
-    let theme = Theme::of(app, context);
-    let colors = &theme.color_scheme;
-    MenuStyle::new()
-        .elevation(all(3.0))
-        .shape(all(default_menu_border()))
-        .alignment(AlignmentGeometry::BOTTOM_START)
-        .background_color(all(colors.surface_container()))
-        .shadow_color(all(colors.shadow()))
-        .surface_tint_color(all(Colors::TRANSPARENT))
-        .padding(all(EdgeInsetsGeometry::directional(
+/// Dart's `_MenuBarDefaultsM3`.
+pub(crate) struct MenuBarDefaultsM3 {
+    /// Dart's `super(..)` arguments.
+    menu_style: MenuStyle,
+    context: DefaultsContext,
+}
+
+impl MenuBarDefaultsM3 {
+    pub(crate) fn new(context: BuildContext) -> MenuBarDefaultsM3 {
+        MenuBarDefaultsM3 {
+            menu_style: MenuStyle::new()
+                .elevation(all(3.0))
+                .shape(all(default_menu_border()))
+                .alignment(AlignmentGeometry::BOTTOM_START),
+            context: DefaultsContext::new(context),
+        }
+    }
+}
+
+impl MenuStyleGetters for MenuBarDefaultsM3 {
+    fn menu_style(&self) -> &MenuStyle {
+        &self.menu_style
+    }
+
+    fn background_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        let theme = self.context.theme(app);
+        let colors = &theme.color_scheme;
+        Some(all(colors.surface_container()))
+    }
+
+    fn shadow_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        let theme = self.context.theme(app);
+        let colors = &theme.color_scheme;
+        Some(all(colors.shadow()))
+    }
+
+    fn surface_tint_color(&self, _app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        Some(all(Colors::TRANSPARENT))
+    }
+
+    fn padding(
+        &self,
+        _app: &mut App,
+    ) -> Option<WidgetStatePropertyRef<Option<EdgeInsetsGeometry>>> {
+        Some(all(EdgeInsetsGeometry::directional(
             K_TOP_LEVEL_MENU_HORIZONTAL_MIN_PADDING,
             0.0,
             K_TOP_LEVEL_MENU_HORIZONTAL_MIN_PADDING,
             0.0,
         )))
-        .visual_density(theme.visual_density)
+    }
+
+    fn visual_density(&self, app: &mut App) -> Option<VisualDensity> {
+        let theme = self.context.theme(app);
+        Some(theme.visual_density)
+    }
 }
 
-/// Dart's `_MenuButtonDefaultsM3(context)`.
-pub(crate) fn menu_button_defaults_m3(app: &mut App, context: BuildContext) -> ButtonStyle {
-    let theme = Theme::of(app, context);
-    let colors = &theme.color_scheme;
-    let (on_surface, on_surface_variant) = (colors.on_surface, colors.on_surface_variant());
-    ButtonStyle::new()
-        .animation_duration(K_THEME_CHANGE_DURATION)
-        .enable_feedback(true)
-        .alignment(AlignmentGeometry::CENTER_START)
-        .background_color(all(Colors::TRANSPARENT))
-        // No default shadow color
-        // No default surface tint color
-        .elevation(all(0.0))
-        .foreground_color(<dyn WidgetStateProperty<_>>::resolve_with(move |states| {
+/// Dart's `_MenuButtonDefaultsM3`.
+pub(crate) struct MenuButtonDefaultsM3 {
+    /// Dart's `super(..)` arguments.
+    button_style: ButtonStyle,
+    context: DefaultsContext,
+}
+
+impl MenuButtonDefaultsM3 {
+    pub(crate) fn new(context: BuildContext) -> MenuButtonDefaultsM3 {
+        MenuButtonDefaultsM3 {
+            button_style: ButtonStyle::new()
+                .animation_duration(K_THEME_CHANGE_DURATION)
+                .enable_feedback(true)
+                .alignment(AlignmentGeometry::CENTER_START),
+            context: DefaultsContext::new(context),
+        }
+    }
+}
+
+impl ButtonStyleGetters for MenuButtonDefaultsM3 {
+    fn button_style(&self) -> &ButtonStyle {
+        &self.button_style
+    }
+
+    fn background_color(&self, _app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        Some(all(Colors::TRANSPARENT))
+    }
+
+    // No default shadow color
+    // No default surface tint color
+    fn elevation(&self, _app: &mut App) -> Option<WidgetStatePropertyRef<Option<f64>>> {
+        Some(all(0.0))
+    }
+
+    fn foreground_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        let theme = self.context.theme(app);
+        let colors = &theme.color_scheme;
+        let on_surface = colors.on_surface;
+        Some(<dyn WidgetStateProperty<_>>::resolve_with(move |states| {
             if states.contains(&WidgetState::Disabled) {
                 return Some(on_surface.with_opacity(0.38));
             }
@@ -86,7 +150,14 @@ pub(crate) fn menu_button_defaults_m3(app: &mut App, context: BuildContext) -> B
             }
             Some(on_surface)
         }))
-        .icon_color(<dyn WidgetStateProperty<_>>::resolve_with(move |states| {
+    }
+
+    fn icon_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        let theme = self.context.theme(app);
+        let colors = &theme.color_scheme;
+        let on_surface = colors.on_surface;
+        let on_surface_variant = colors.on_surface_variant();
+        Some(<dyn WidgetStateProperty<_>>::resolve_with(move |states| {
             if states.contains(&WidgetState::Disabled) {
                 return Some(on_surface.with_opacity(0.38));
             }
@@ -101,12 +172,33 @@ pub(crate) fn menu_button_defaults_m3(app: &mut App, context: BuildContext) -> B
             }
             Some(on_surface_variant)
         }))
-        // No default fixedSize
-        .icon_size(all(24.0))
-        .maximum_size(all(Size::INFINITE))
-        .minimum_size(all(Size::new(64.0, 48.0)))
-        .mouse_cursor(adaptive_clickable())
-        .overlay_color(<dyn WidgetStateProperty<_>>::resolve_with(move |states| {
+    }
+
+    // No default fixedSize
+    fn icon_size(&self, _app: &mut App) -> Option<WidgetStatePropertyRef<Option<f64>>> {
+        Some(all(24.0))
+    }
+
+    fn maximum_size(&self, _app: &mut App) -> Option<WidgetStatePropertyRef<Option<Size>>> {
+        Some(all(Size::INFINITE))
+    }
+
+    fn minimum_size(&self, _app: &mut App) -> Option<WidgetStatePropertyRef<Option<Size>>> {
+        Some(all(Size::new(64.0, 48.0)))
+    }
+
+    fn mouse_cursor(
+        &self,
+        _app: &mut App,
+    ) -> Option<WidgetStatePropertyRef<Option<MouseCursorRef>>> {
+        Some(adaptive_clickable())
+    }
+
+    fn overlay_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        let theme = self.context.theme(app);
+        let colors = &theme.color_scheme;
+        let on_surface = colors.on_surface;
+        Some(<dyn WidgetStateProperty<_>>::resolve_with(move |states| {
             if states.contains(&WidgetState::Pressed) {
                 return Some(on_surface.with_opacity(0.1));
             }
@@ -118,19 +210,42 @@ pub(crate) fn menu_button_defaults_m3(app: &mut App, context: BuildContext) -> B
             }
             Some(Colors::TRANSPARENT)
         }))
-        .padding(all(scaled_padding(app, context)))
-        // No default side
-        .shape(all(
-            Box::new(RoundedRectangleBorder::default()) as Box<dyn OutlinedBorder>
-        ))
-        .splash_factory(theme.splash_factory.clone())
-        .tap_target_size(theme.material_tap_target_size)
-        // TODO(tahatesser): This is taken from https://m3.material.io/components/menus/specs
-        // Update this when the token is available.
-        .text_style(Rc::new(MaterialStatePropertyAll::new(
+    }
+
+    fn padding(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<EdgeInsetsGeometry>>> {
+        Some(all(scaled_padding(app, self.context.context())))
+    }
+
+    // No default side
+    fn shape(&self, _app: &mut App) -> Option<WidgetStatePropertyRef<Option<OutlinedBorderRef>>> {
+        Some(all(OutlinedBorderRef::new(
+            RoundedRectangleBorder::default(),
+        )))
+    }
+
+    fn splash_factory(&self, app: &mut App) -> Option<InteractiveInkFeatureFactoryRef> {
+        let theme = self.context.theme(app);
+        Some(theme.splash_factory.clone())
+    }
+
+    fn tap_target_size(&self, app: &mut App) -> Option<MaterialTapTargetSize> {
+        let theme = self.context.theme(app);
+        Some(theme.material_tap_target_size)
+    }
+
+    // TODO(tahatesser): This is taken from https://m3.material.io/components/menus/specs
+    // Update this when the token is available.
+    fn text_style(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<TextStyle>>> {
+        let theme = self.context.theme(app);
+        Some(Rc::new(MaterialStatePropertyAll::new(
             theme.text_theme.label_large.clone(),
         )))
-        .visual_density(theme.visual_density)
+    }
+
+    fn visual_density(&self, app: &mut App) -> Option<VisualDensity> {
+        let theme = self.context.theme(app);
+        Some(theme.visual_density)
+    }
 }
 
 // The horizontal padding number comes from the spec.
@@ -167,29 +282,67 @@ fn scaled_padding(app: &mut App, context: BuildContext) -> EdgeInsetsGeometry {
     )
 }
 
-/// Dart's `_MenuDefaultsM3(context)`.
-pub(crate) fn menu_defaults_m3(app: &mut App, context: BuildContext) -> MenuStyle {
-    let theme = Theme::of(app, context);
-    let colors = &theme.color_scheme;
-    MenuStyle::new()
-        .elevation(all(3.0))
-        .shape(all(default_menu_border()))
-        .alignment(AlignmentGeometry::TOP_END)
-        .background_color(all(colors.surface_container()))
-        .surface_tint_color(all(Colors::TRANSPARENT))
-        .shadow_color(all(colors.shadow()))
-        .padding(all(EdgeInsetsGeometry::directional(
+/// Dart's `_MenuDefaultsM3`.
+pub(crate) struct MenuDefaultsM3 {
+    /// Dart's `super(..)` arguments.
+    menu_style: MenuStyle,
+    context: DefaultsContext,
+}
+
+impl MenuDefaultsM3 {
+    pub(crate) fn new(context: BuildContext) -> MenuDefaultsM3 {
+        MenuDefaultsM3 {
+            menu_style: MenuStyle::new()
+                .elevation(all(3.0))
+                .shape(all(default_menu_border()))
+                .alignment(AlignmentGeometry::TOP_END),
+            context: DefaultsContext::new(context),
+        }
+    }
+}
+
+impl MenuStyleGetters for MenuDefaultsM3 {
+    fn menu_style(&self) -> &MenuStyle {
+        &self.menu_style
+    }
+
+    fn background_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        let theme = self.context.theme(app);
+        let colors = &theme.color_scheme;
+        Some(all(colors.surface_container()))
+    }
+
+    fn surface_tint_color(&self, _app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        Some(all(Colors::TRANSPARENT))
+    }
+
+    fn shadow_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        let theme = self.context.theme(app);
+        let colors = &theme.color_scheme;
+        Some(all(colors.shadow()))
+    }
+
+    fn padding(
+        &self,
+        _app: &mut App,
+    ) -> Option<WidgetStatePropertyRef<Option<EdgeInsetsGeometry>>> {
+        Some(all(EdgeInsetsGeometry::directional(
             0.0,
             K_MENU_VERTICAL_MIN_PADDING,
             0.0,
             K_MENU_VERTICAL_MIN_PADDING,
         )))
-        .visual_density(theme.visual_density)
+    }
+
+    fn visual_density(&self, app: &mut App) -> Option<VisualDensity> {
+        let theme = self.context.theme(app);
+        Some(theme.visual_density)
+    }
 }
 
 /// Dart's `_MenuBarDefaultsM3._defaultMenuBorder` and `_MenuDefaultsM3._defaultMenuBorder`.
-fn default_menu_border() -> Box<dyn OutlinedBorder> {
-    Box::new(RoundedRectangleBorder::new(
+fn default_menu_border() -> OutlinedBorderRef {
+    OutlinedBorderRef::new(RoundedRectangleBorder::new(
         BorderSide::NONE,
         BorderRadiusGeometry::all(Radius::circular(4.0)),
     ))

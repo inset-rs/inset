@@ -20,12 +20,15 @@ use waft_widgets::{
     StatefulWidget, WidgetRef, debug_check_has_media_query,
 };
 
-use crate::banner_theme::{MaterialBannerTheme, MaterialBannerThemeData};
+use crate::banner_theme::{
+    MaterialBannerTheme, MaterialBannerThemeData, MaterialBannerThemeDataGetters,
+};
 use crate::divider::Divider;
-use crate::generated::banner_defaults_m3::banner_defaults_m3;
+use crate::generated::banner_defaults_m3::BannerDefaultsM3;
 use crate::material::Material;
 use crate::scaffold::ScaffoldMessenger;
 use crate::theme::Theme;
+use crate::theme_data::ThemeData;
 
 const MATERIAL_BANNER_TRANSITION_DURATION: Duration = Duration::from_millis(250);
 
@@ -564,10 +567,10 @@ impl State for MaterialBannerState {
 
         let theme = Theme::of(app, context);
         let banner_theme = MaterialBannerTheme::of(app, context);
-        let defaults = if theme.use_material3 {
-            banner_defaults_m3(app, context)
+        let defaults: Box<dyn MaterialBannerThemeDataGetters> = if theme.use_material3 {
+            Box::new(BannerDefaultsM3::new(context))
         } else {
-            banner_defaults_m2(app, context)
+            Box::new(BannerDefaultsM2::new(app, context))
         };
 
         let widget = self.widget(app).clone();
@@ -609,22 +612,22 @@ impl State for MaterialBannerState {
         let background_color = widget
             .background_color
             .or(banner_theme.background_color)
-            .or(defaults.background_color)
+            .or_else(|| defaults.background_color(app))
             .expect("the banner defaults have a background color");
         let surface_tint_color = widget
             .surface_tint_color
             .or(banner_theme.surface_tint_color)
-            .or(defaults.surface_tint_color);
+            .or_else(|| defaults.surface_tint_color(app));
         let shadow_color = widget.shadow_color.or(banner_theme.shadow_color);
         let divider_color = widget
             .divider_color
             .or(banner_theme.divider_color)
-            .or(defaults.divider_color);
+            .or_else(|| defaults.divider_color(app));
         let text_style = widget
             .content_text_style
             .clone()
             .or_else(|| banner_theme.content_text_style.clone())
-            .or_else(|| defaults.content_text_style.clone());
+            .or_else(|| defaults.content_text_style(app));
 
         let mut row_children: Vec<WidgetRef> = Vec::new();
         if let Some(leading) = &widget.leading {
@@ -746,15 +749,35 @@ impl State for MaterialBannerState {
     }
 }
 
-/// Dart's `_BannerDefaultsM2(context)`: a [`MaterialBannerThemeData`] whose getters read the
-/// context's theme, read once.
-fn banner_defaults_m2(app: &mut App, context: BuildContext) -> MaterialBannerThemeData {
-    let theme = Theme::of(app, context);
-    let mut defaults = MaterialBannerThemeData::new()
-        .elevation(0.0)
-        .background_color(theme.color_scheme.surface);
-    defaults.content_text_style = theme.text_theme.body_medium.clone();
-    defaults
+/// Dart's `_BannerDefaultsM2`.
+struct BannerDefaultsM2 {
+    /// Dart's `super(..)` arguments.
+    material_banner_theme_data: MaterialBannerThemeData,
+    /// Dart's `_theme`, which the constructor reads.
+    theme: Rc<ThemeData>,
+}
+
+impl BannerDefaultsM2 {
+    fn new(app: &mut App, context: BuildContext) -> BannerDefaultsM2 {
+        BannerDefaultsM2 {
+            material_banner_theme_data: MaterialBannerThemeData::new().elevation(0.0),
+            theme: Theme::of(app, context),
+        }
+    }
+}
+
+impl MaterialBannerThemeDataGetters for BannerDefaultsM2 {
+    fn material_banner_theme_data(&self) -> &MaterialBannerThemeData {
+        &self.material_banner_theme_data
+    }
+
+    fn background_color(&self, _app: &mut App) -> Option<Color> {
+        Some(self.theme.color_scheme.surface)
+    }
+
+    fn content_text_style(&self, _app: &mut App) -> Option<TextStyle> {
+        self.theme.text_theme.body_medium.clone()
+    }
 }
 
 #[cfg(test)]

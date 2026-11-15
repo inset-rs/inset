@@ -14,7 +14,7 @@ use std::time::Duration;
 use waft_embedder::{Clip, Color, Radius, Size, clamp_double, lerp_double};
 use waft_foundation::{App, K_IS_WEB, Listener};
 use waft_painting::{
-    AlignmentGeometry, BorderRadius, BorderSide, EdgeInsetsGeometry, OutlinedBorder,
+    AlignmentGeometry, BorderRadius, BorderSide, EdgeInsetsGeometry, OutlinedBorderRef,
     RoundedRectangleBorder, TextStyle,
 };
 use waft_services::{MouseCursorRef, SystemMouseCursors};
@@ -24,13 +24,14 @@ use waft_widgets::{
     WidgetStatePropertyAll, WidgetStatePropertyRef, WidgetStates,
 };
 
+use crate::button_style::ButtonStyleGetters;
 use crate::button_style::{ButtonLayerBuilder, ButtonStyle};
 use crate::button_style_button::{
     ButtonStyleButton, ButtonStyleButtonData, ButtonStyleState, IconAlignment,
 };
 use crate::colors::Colors;
 use crate::constants::K_THEME_CHANGE_DURATION;
-use crate::generated::text_button_defaults_m3::text_button_defaults_m3;
+use crate::generated::text_button_defaults_m3::TextButtonDefaultsM3;
 use crate::ink_ripple::InkRipple;
 use crate::ink_well::InteractiveInkFeatureFactoryRef;
 use crate::material_state::MaterialStatePropertyAll;
@@ -276,47 +277,53 @@ impl ButtonStyleButton for TextButton {
     ///
     /// For the [`TextButton::icon`] factory, the end (generally the right) value of
     /// `padding` is increased from 12 to 16.
-    fn default_style_of(&self, app: &mut App, context: BuildContext) -> ButtonStyle {
+    fn default_style_of(
+        &self,
+        app: &mut App,
+        context: BuildContext,
+    ) -> Box<dyn ButtonStyleGetters> {
         let theme = Theme::of(app, context);
         let color_scheme = &theme.color_scheme;
-        let button_style = if theme.use_material3 {
-            text_button_defaults_m3(app, context)
+        let button_style: Box<dyn ButtonStyleGetters> = if theme.use_material3 {
+            Box::new(TextButtonDefaultsM3::new(context))
         } else {
-            TextButtonStyleFromBuilder {
-                text_style: theme.text_theme.label_large.clone(),
-                ..TextButton::style_from()
-            }
-            .foreground_color(color_scheme.primary)
-            .disabled_foreground_color(color_scheme.on_surface.with_opacity(0.38))
-            .background_color(Colors::TRANSPARENT)
-            .disabled_background_color(Colors::TRANSPARENT)
-            .shadow_color(theme.shadow_color)
-            .elevation(0.0)
-            .padding(scaled_padding(app, context))
-            .minimum_size(Size::new(64.0, 36.0))
-            .maximum_size(Size::INFINITE)
-            .shape(RoundedRectangleBorder::new(
-                BorderSide::NONE,
-                BorderRadius::all(Radius::circular(4.0)).into(),
-            ))
-            .enabled_mouse_cursor(if K_IS_WEB {
-                SystemMouseCursors::CLICK.into()
-            } else {
-                SystemMouseCursors::BASIC.into()
-            })
-            .disabled_mouse_cursor(SystemMouseCursors::BASIC.into())
-            .visual_density(theme.visual_density)
-            .tap_target_size(theme.material_tap_target_size)
-            .animation_duration(K_THEME_CHANGE_DURATION)
-            .enable_feedback(true)
-            .alignment(AlignmentGeometry::CENTER)
-            .splash_factory(InkRipple::splash_factory())
-            .build()
+            Box::new(
+                TextButtonStyleFromBuilder {
+                    text_style: theme.text_theme.label_large.clone(),
+                    ..TextButton::style_from()
+                }
+                .foreground_color(color_scheme.primary)
+                .disabled_foreground_color(color_scheme.on_surface.with_opacity(0.38))
+                .background_color(Colors::TRANSPARENT)
+                .disabled_background_color(Colors::TRANSPARENT)
+                .shadow_color(theme.shadow_color)
+                .elevation(0.0)
+                .padding(scaled_padding(app, context))
+                .minimum_size(Size::new(64.0, 36.0))
+                .maximum_size(Size::INFINITE)
+                .shape(RoundedRectangleBorder::new(
+                    BorderSide::NONE,
+                    BorderRadius::all(Radius::circular(4.0)).into(),
+                ))
+                .enabled_mouse_cursor(if K_IS_WEB {
+                    SystemMouseCursors::CLICK.into()
+                } else {
+                    SystemMouseCursors::BASIC.into()
+                })
+                .disabled_mouse_cursor(SystemMouseCursors::BASIC.into())
+                .visual_density(theme.visual_density)
+                .tap_target_size(theme.material_tap_target_size)
+                .animation_duration(K_THEME_CHANGE_DURATION)
+                .enable_feedback(true)
+                .alignment(AlignmentGeometry::CENTER)
+                .splash_factory(InkRipple::splash_factory())
+                .build(),
+            )
         };
 
         // Only apply padding when TextButton has an Icon.
         if self.add_padding {
-            let default_font_size = default_font_size(Some(&button_style));
+            let default_font_size = default_font_size(app, Some(&*button_style));
             let effective_text_scale =
                 MediaQuery::text_scaler_of(app, context).scale(default_font_size) / 14.0;
             let scaled_padding = <dyn ButtonStyleButton>::scaled_padding(
@@ -330,7 +337,7 @@ impl ButtonStyleButton for TextButton {
                 effective_text_scale,
             );
             let padding = Rc::new(MaterialStatePropertyAll::new(Some(scaled_padding)));
-            return button_style.copy_with().padding(padding);
+            return Box::new(button_style.copy_with(app).padding(padding));
         }
 
         button_style
@@ -385,9 +392,9 @@ pub(crate) fn scaled_padding(app: &mut App, context: BuildContext) -> EdgeInsets
 }
 
 /// The font size of `button_style`'s text style with no state, or 14.
-fn default_font_size(button_style: Option<&ButtonStyle>) -> f64 {
+fn default_font_size(app: &mut App, button_style: Option<&dyn ButtonStyleGetters>) -> f64 {
     button_style
-        .and_then(|style| style.text_style.as_ref())
+        .and_then(|style| style.text_style(app))
         .and_then(|text_style| text_style.resolve(&WidgetStates::new()))
         .and_then(|text_style| text_style.font_size)
         .unwrap_or(14.0)
@@ -404,7 +411,12 @@ struct TextButtonWithIconChild {
 
 impl StatelessWidget for TextButtonWithIconChild {
     fn build(&self, app: &mut App, context: BuildContext) -> WidgetRef {
-        let default_font_size = default_font_size(self.button_style.as_ref());
+        let default_font_size = default_font_size(
+            app,
+            self.button_style
+                .as_ref()
+                .map(|style| style as &dyn ButtonStyleGetters),
+        );
         let scale = clamp_double(
             MediaQuery::text_scaler_of(app, context).scale(default_font_size) / 14.0,
             1.0,
@@ -516,7 +528,7 @@ pub struct TextButtonStyleFromBuilder {
     fixed_size: Option<Size>,
     maximum_size: Option<Size>,
     side: Option<BorderSide>,
-    shape: Option<Box<dyn OutlinedBorder>>,
+    shape: Option<OutlinedBorderRef>,
     enabled_mouse_cursor: Option<MouseCursorRef>,
     disabled_mouse_cursor: Option<MouseCursorRef>,
     visual_density: Option<VisualDensity>,
@@ -575,10 +587,7 @@ impl TextButtonStyleFromBuilder {
     );
 
     /// Dart `TextButton.styleFrom(shape:)`.
-    pub fn shape(
-        mut self,
-        shape: impl Into<Box<dyn OutlinedBorder>>,
-    ) -> TextButtonStyleFromBuilder {
+    pub fn shape(mut self, shape: impl Into<OutlinedBorderRef>) -> TextButtonStyleFromBuilder {
         self.shape = Some(shape.into());
         self
     }
@@ -662,7 +671,7 @@ mod tests {
     use std::cell::{Cell, RefCell};
 
     use waft_embedder::{FontWeight, Offset, PointerChange, Rect, TargetPlatform, TextDirection};
-    use waft_painting::{ShapeBorder, StadiumBorder};
+    use waft_painting::{ShapeBorder, ShapeBorderRef, StadiumBorder};
     use waft_widgets::{
         Align, Builder, Center, Directionality, FocusHighlightStrategy, FocusNode, FocusNodeLeaf,
         GlobalKey, Icon, MouseRegion, Padding, SizedBox, Text, UnfocusDisposition,
@@ -864,10 +873,10 @@ mod tests {
             assert_eq!(text_style.font_weight, Some(FontWeight::W500));
             assert_eq!(material.r#type, MaterialType::Button);
         });
-        let expected: Box<dyn ShapeBorder> = if material3 {
-            Box::new(StadiumBorder::new(BorderSide::NONE))
+        let expected: ShapeBorderRef = if material3 {
+            ShapeBorderRef::new(StadiumBorder::new(BorderSide::NONE))
         } else {
-            Box::new(RoundedRectangleBorder::new(
+            ShapeBorderRef::new(RoundedRectangleBorder::new(
                 BorderSide::NONE,
                 BorderRadius::all(Radius::circular(4.0)).into(),
             ))
@@ -942,7 +951,7 @@ mod tests {
             Builder::new({
                 let seen = Rc::clone(&seen);
                 move |app, context| {
-                    let style = button.default_style_of(app, context);
+                    let style = button.default_style_of(app, context).copy_with(app);
                     *seen.borrow_mut() = Some((
                         vec![
                             style.text_style.is_some(),

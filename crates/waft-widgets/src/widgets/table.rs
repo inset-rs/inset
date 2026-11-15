@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use waft_embedder::{SemanticsRole, TextBaseline, TextDirection};
 use waft_foundation::{App, Handle, Key, LocalKey};
-use waft_painting::Decoration;
+use waft_painting::DecorationRef;
 use waft_rendering::{
     AnyRenderBox, AnyRenderObject, ErasedRenderObject, RenderBox, RenderHandle, RenderTable,
 };
@@ -39,7 +39,7 @@ pub struct TableRow {
     ///
     /// Row decorations fill the horizontal and vertical extent of each row in the table, unlike
     /// decorations for individual cells, which might not fill either.
-    pub decoration: Option<Box<dyn Decoration>>,
+    pub decoration: Option<DecorationRef>,
 
     /// The widgets that comprise the cells in this row.
     ///
@@ -61,8 +61,8 @@ impl TableRow {
     }
 
     /// Dart `TableRow(decoration:)`.
-    pub fn decoration(mut self, decoration: impl Decoration + 'static) -> TableRow {
-        self.decoration = Some(Box::new(decoration));
+    pub fn decoration(mut self, decoration: impl Into<DecorationRef>) -> TableRow {
+        self.decoration = Some(decoration.into());
         self
     }
 
@@ -254,18 +254,14 @@ impl Table {
 
     /// Dart's `_rowDecorations` field, as its constructor fills it: each row's decoration when
     /// any row has one, else `None`.
-    pub fn effective_row_decorations(&self) -> Option<Vec<Option<Box<dyn Decoration>>>> {
+    pub fn effective_row_decorations(&self) -> Option<Vec<Option<DecorationRef>>> {
         if !self.children.iter().any(|row| row.decoration.is_some()) {
             return None;
         }
         Some(
             self.children
                 .iter()
-                .map(|row| {
-                    row.decoration
-                        .as_ref()
-                        .map(|decoration| decoration.clone_box())
-                })
+                .map(|row| row.decoration.clone())
                 .collect(),
         )
     }

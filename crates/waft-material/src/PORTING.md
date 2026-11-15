@@ -46,6 +46,11 @@ Ported against: 34b89b2086d4
 - generated/divider_defaults_m3.rs → generated/divider_defaults_m3.g.dart
 - divider_theme.rs → divider_theme.dart
 - drawer_header.rs → drawer_header.dart
+- drawer.rs → drawer.dart
+- generated/drawer_defaults_m3.rs → generated/drawer_defaults_m3.g.dart
+- generated/navigation_drawer_defaults_m3.rs → generated/navigation_drawer_defaults_m3.g.dart
+- navigation_drawer.rs → navigation_drawer.dart
+- navigation_drawer_theme.rs → navigation_drawer_theme.dart
 - generated/list_tile_defaults_m3.rs → generated/list_tile_defaults_m3.g.dart
 - generated/snackbar_defaults_m3.rs → generated/snackbar_defaults_m3.g.dart
 - generated/banner_defaults_m3.rs → generated/banner_defaults_m3.g.dart
@@ -196,7 +201,7 @@ Ported against: 34b89b2086d4
   Affect: a caller writes `resolve_with(|states| Some(..))` or `WidgetStatePropertyAll::new(Some(c))` where Dart passes the color property itself.
 
 ## button.rs → button.dart
-- Change: `RawMaterialButton.shape` is a `Box<dyn ShapeBorder>`, and the button resolves it by state only when it is a `WidgetStateOutlinedBorder`; any other border is used as it is.
+- Change: `RawMaterialButton.shape` is a `ShapeBorderRef`, and the button resolves it by state only when it is a `WidgetStateOutlinedBorder`; any other border is used as it is.
   Reason: language — Dart's `resolveAs<ShapeBorder?>` answers `is WidgetStateProperty<ShapeBorder?>` for any class that implements both, and a Rust trait object cannot be asked that.
   Affect: a user-defined border that is also a `WidgetStateProperty` is not resolved.
 
@@ -299,11 +304,6 @@ Ported against: 34b89b2086d4
   Reason: language — a Dart `Color` field can hold a `WidgetStateColor` subclass, which a plain `Color` cannot.
   Affect: a caller passes a `Color` (through `Into`) or `WidgetStateColor::into_any()`.
 
-## drawer.rs → drawer.dart (and generated/drawer_defaults_m3.g.dart)
-- Change: the Material 3 drawer defaults resolve their start and end shapes when they are made, so a Material 3 `Drawer` reads `Directionality::of` even when it or its theme gives a shape.
-  Reason: language — Dart's `_DrawerDefaultsM3` getters run only when read, and `DrawerThemeData` here is a value whose fields are filled when it is made.
-  Affect: a Material 3 `Drawer` with a shape and no `Directionality` above it panics; in Dart it builds.
-
 ## app_bar.rs → app_bar.dart (and generated/app_bar_defaults_m3.g.dart)
 - Change: `AppBar` treats `BackButton`, `CloseButton`, `DrawerButton` and `EndDrawerButton` as `IconButton`s for Dart's `leading is IconButton`, by name.
   Reason: language — Dart's `_ActionButton extends IconButton`, and the ported action buttons are widgets of their own that build an `IconButton`.
@@ -365,9 +365,6 @@ Ported against: 34b89b2086d4
   Affect: a caller writes `resolve_with(|states| Some(..))` or `WidgetStatePropertyAll::new(Some(c))` where Dart passes the property itself.
 
 ## switch.rs → switch.dart
-- Change: the iOS and macOS defaults of `Switch::adaptive` (Dart's `_SwitchDefaultsCupertino`) resolve `CupertinoColors.systemGreen` and `secondarySystemFill` against the context when they are made.
-  Reason: language — Dart's subclass getters run only when read, and `SwitchThemeData` here is a value whose fields are filled when it is made (drawer.rs entry).
-  Affect: an adaptive switch on iOS or macOS depends on the ambient `CupertinoTheme` and `MediaQuery` even when it is given its own track colours, so it rebuilds when they change.
 - Change: `Switch::new` has the `apply_cupertino_theme` setter, and its `effective_apply_cupertino_theme()` is `Some(false)` whatever was set.
   Reason: language — one set of fluent setters serves both of Dart's constructors, and only `Switch.adaptive` has an `applyCupertinoTheme` parameter.
   Affect: `Switch::new(v, f).apply_cupertino_theme(true)` compiles and changes nothing, where Dart rejects it.
@@ -477,6 +474,9 @@ Ported against: 34b89b2086d4
   Affect: `set_text` on a `SelectableText`'s `EditableText` controller changes the shown text where Dart throws `UnimplementedError`.
 
 ## button_style_button.rs → button_style_button.dart, button.rs → button.dart
+- Change: `ButtonStyleButton::default_style_of`, `MenuItemButton::default_style_of` and `SubmenuButton::default_style_of` return a `Box<dyn ButtonStyleGetters>`, the getters of `ButtonStyle` as a trait that `ButtonStyle` and each button's defaults implement; `copy_with(app)` makes a `ButtonStyle` holding what every getter answers.
+  Reason: language — Dart's `_ElevatedButtonDefaultsM3 extends ButtonStyle` overrides getters that read the theme only when called, and a Rust struct cannot extend `ButtonStyle` (patterns/lazy-defaults.md).
+  Affect: a button written outside this crate returns `Box::new(style)` from `default_style_of`, and a caller that wants Dart's `ButtonStyle` value from it calls `copy_with(app)`.
 - Change: `RenderInputPadding::hit_test`'s debug check accepts the redirected position within f32 precision of the child's centre.
   Reason: platform — `Matrix4` is valo's f32 matrix, so `force_to_point` rounds the centre to f32.
   Affect: a debug build accepts the rounded centre where Dart asserts exact equality.
@@ -508,11 +508,6 @@ Ported against: 34b89b2086d4
 - Change: `_RailDestinationState` makes each label fade (`drive(CurveTween(curve: Interval(..)))`) once per parent animation and interval and keeps it until disposed, where Dart makes a new one on each build.
   Reason: language — no collector frees the animation each build would replace.
   Affect: the label's `FadeTransition` keeps one animation across builds (at most three per destination, plus those of earlier parents after a reset).
-
-## navigation_drawer.rs → navigation_drawer.dart (and generated/navigation_drawer_defaults_m3.g.dart), navigation_drawer_theme.rs → navigation_drawer_theme.dart
-- Change: the Material 3 navigation drawer defaults read `Theme::of` when they are made, so `NavigationDrawerDestination` and its private builder always depend on the theme.
-  Reason: language — Dart's `_NavigationDrawerDefaultsM3` getters run only when read (and `??` skips them), and `NavigationDrawerThemeData` here is a value whose fields are filled when it is made (drawer.rs entry).
-  Affect: a destination under a `NavigationDrawerTheme` that gives every value still rebuilds when the ambient `Theme` changes.
 
 ## bottom_navigation_bar.rs → bottom_navigation_bar.dart, bottom_navigation_bar_theme.rs → bottom_navigation_bar_theme.dart
 - Change: `BottomNavigationBar::selected_item_color` and `fixed_color` hold what the caller gave; `effective_selected_item_color()` and `effective_fixed_color()` give Dart's `selectedItemColor ?? fixedColor`.

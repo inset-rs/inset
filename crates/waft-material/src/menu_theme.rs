@@ -206,7 +206,7 @@ pub(crate) mod tests {
 
     use waft_embedder::{Color, Rect};
     use waft_painting::{
-        BeveledRectangleBorder, EdgeInsetsGeometry, OutlinedBorder, ShapeBorder, StadiumBorder,
+        BeveledRectangleBorder, EdgeInsetsGeometry, OutlinedBorderRef, ShapeBorder, StadiumBorder,
     };
     use waft_rendering::BoxConstraints;
     use waft_services::{LogicalKeyboardKey, PhysicalKeyboardKey};
@@ -253,9 +253,9 @@ pub(crate) mod tests {
         pub(crate) item_padding: Option<EdgeInsetsGeometry>,
         pub(crate) menu_background: Option<Color>,
         pub(crate) menu_padding: Option<EdgeInsetsGeometry>,
-        pub(crate) menu_shape: Option<Box<dyn OutlinedBorder>>,
+        pub(crate) menu_shape: Option<OutlinedBorderRef>,
         pub(crate) menu_elevation: Option<f64>,
-        pub(crate) item_shape: Option<Box<dyn OutlinedBorder>>,
+        pub(crate) item_shape: Option<OutlinedBorderRef>,
     }
 
     fn all<T: Clone + std::fmt::Debug + PartialEq + 'static>(
@@ -414,9 +414,7 @@ pub(crate) mod tests {
         MenuStyle::new()
             .background_color(all(Colors::RED.primary()))
             .elevation(all(15.0))
-            .shape(all(
-                Box::new(StadiumBorder::default()) as Box<dyn OutlinedBorder>
-            ))
+            .shape(all(OutlinedBorderRef::new(StadiumBorder::default())))
             .padding(all(EdgeInsetsGeometry::directional(10.0, 10.0, 10.0, 10.0)))
     }
 
@@ -433,12 +431,12 @@ pub(crate) mod tests {
             menu_background: Some(Colors::CYAN.primary()),
             menu_elevation: Some(18.0),
             menu_padding: Some(EdgeInsetsGeometry::directional(14.0, 14.0, 14.0, 14.0)),
-            menu_shape: Some(Box::new(BeveledRectangleBorder::default())),
+            menu_shape: Some(OutlinedBorderRef::new(BeveledRectangleBorder::default())),
             item_background: Some(Colors::AMBER.primary()),
             item_foreground: Some(Colors::GREY.primary()),
             item_overlay: Some(Colors::BLUE_GREY.primary()),
             item_padding: Some(EdgeInsetsGeometry::directional(11.0, 11.0, 11.0, 11.0)),
-            item_shape: Some(Box::new(StadiumBorder::default())),
+            item_shape: Some(OutlinedBorderRef::new(StadiumBorder::default())),
         }))
         .style(
             MenuStyle::new()

@@ -2,6 +2,7 @@
 
 use std::any::Any;
 use std::fmt::{Debug, Formatter, Result as FmtResult};
+use std::rc::Rc;
 
 use waft_embedder::{
     Canvas, Color, FillRule, Offset, Paint, PaintStyle, Path, PathBuilder, Rect, Stroke,
@@ -9,7 +10,9 @@ use waft_embedder::{
 };
 
 use crate::basic_types::TextDirection;
-use crate::borders::{BorderSide, BorderStyle, OutlinedBorder, ShapeBorder};
+use crate::borders::{
+    BorderSide, BorderStyle, OutlinedBorder, OutlinedBorderRef, ShapeBorder, ShapeBorderRef,
+};
 use crate::edge_insets::{EdgeInsetsDirectional, EdgeInsetsGeometry};
 
 /// Defines the relative size and alignment of one [`LinearBorder`] edge.
@@ -246,13 +249,13 @@ impl ShapeBorder for LinearBorder {
         .into()
     }
 
-    fn scale(&self, t: f64) -> Box<dyn ShapeBorder> {
-        Box::new(LinearBorder::scale(self, t))
+    fn scale(&self, t: f64) -> ShapeBorderRef {
+        ShapeBorderRef::new(LinearBorder::scale(self, t))
     }
 
-    fn lerp_from(&self, a: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
+    fn lerp_from(&self, a: Option<&dyn ShapeBorder>, t: f64) -> Option<ShapeBorderRef> {
         if let Some(a) = a.and_then(|a| a.as_any().downcast_ref::<LinearBorder>()) {
-            Some(Box::new(LinearBorder::from_fields(
+            Some(ShapeBorderRef::new(LinearBorder::from_fields(
                 BorderSide::lerp(a.side, self.side, t),
                 LinearBorderEdge::lerp(a.start, self.start, t),
                 LinearBorderEdge::lerp(a.end, self.end, t),
@@ -266,9 +269,9 @@ impl ShapeBorder for LinearBorder {
         }
     }
 
-    fn lerp_to(&self, b: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
+    fn lerp_to(&self, b: Option<&dyn ShapeBorder>, t: f64) -> Option<ShapeBorderRef> {
         if let Some(b) = b.and_then(|b| b.as_any().downcast_ref::<LinearBorder>()) {
-            Some(Box::new(LinearBorder::from_fields(
+            Some(ShapeBorderRef::new(LinearBorder::from_fields(
                 BorderSide::lerp(self.side, b.side, t),
                 LinearBorderEdge::lerp(self.start, b.start, t),
                 LinearBorderEdge::lerp(self.end, b.end, t),
@@ -408,15 +411,15 @@ impl ShapeBorder for LinearBorder {
         }
     }
 
-    fn clone_box(&self) -> Box<dyn ShapeBorder> {
-        Box::new(*self)
-    }
-
     fn as_any(&self) -> &dyn Any {
         self
     }
 
     fn as_outlined_border(&self) -> Option<&dyn OutlinedBorder> {
+        Some(self)
+    }
+
+    fn into_outlined_border(self: Rc<Self>) -> Option<Rc<dyn OutlinedBorder>> {
         Some(self)
     }
 
@@ -433,12 +436,8 @@ impl OutlinedBorder for LinearBorder {
         self.side
     }
 
-    fn copy_with(&self, side: Option<BorderSide>) -> Box<dyn OutlinedBorder> {
-        Box::new(self.copy_with().side(side.unwrap_or(self.side)))
-    }
-
-    fn clone_outlined(&self) -> Box<dyn OutlinedBorder> {
-        Box::new(*self)
+    fn copy_with(&self, side: Option<BorderSide>) -> OutlinedBorderRef {
+        OutlinedBorderRef::new(self.copy_with().side(side.unwrap_or(self.side)))
     }
 }
 
@@ -516,12 +515,16 @@ mod tests {
 
     #[test]
     fn lerp_identical() {
-        assert!(<dyn OutlinedBorder>::lerp(None, None, 0.0).is_none());
+        assert!(OutlinedBorderRef::lerp(None, None, 0.0).is_none());
         let border = LinearBorder::NONE;
         assert!(
-            <dyn OutlinedBorder>::lerp(Some(&border), Some(&border), 0.5)
-                .unwrap()
-                .eq_shape(&border)
+            OutlinedBorderRef::lerp(
+                Some(&OutlinedBorderRef::new(border)),
+                Some(&OutlinedBorderRef::new(border)),
+                0.5
+            )
+            .unwrap()
+            .eq_shape(&border)
         );
         assert!(LinearBorderEdge::lerp(None, None, 0.0).is_none());
         let edge = LinearBorderEdge::default();

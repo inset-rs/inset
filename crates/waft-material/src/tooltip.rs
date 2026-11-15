@@ -7,7 +7,7 @@ use std::time::Duration;
 use waft_embedder::{Brightness, Radius, TargetPlatform, TextAlign};
 use waft_foundation::{App, Handle};
 use waft_painting::{
-    BorderRadius, BoxDecoration, Decoration, EdgeInsets, EdgeInsetsGeometry, InlineSpanRef,
+    BorderRadius, BoxDecoration, DecorationRef, EdgeInsets, EdgeInsetsGeometry, InlineSpanRef,
     TextSpan, TextStyle, position_dependent_box,
 };
 use waft_rendering::BoxConstraints;
@@ -152,7 +152,7 @@ pub struct Tooltip {
     /// 4.0. Tooltips will also default to an opacity of 90% and with the color
     /// `Colors::GREY[700]` if `ThemeData::brightness` is [`Brightness::Light`], and
     /// `Colors::WHITE` if it is [`Brightness::Dark`].
-    pub decoration: Option<Box<dyn Decoration>>,
+    pub decoration: Option<DecorationRef>,
 
     /// The style to use for the message of the tooltip.
     ///
@@ -404,8 +404,8 @@ impl Tooltip {
     }
 
     /// Dart `Tooltip(decoration:)`.
-    pub fn decoration(mut self, decoration: impl Decoration + 'static) -> Tooltip {
-        self.decoration = Some(Box::new(decoration));
+    pub fn decoration(mut self, decoration: impl Into<DecorationRef>) -> Tooltip {
+        self.decoration = Some(decoration.into());
         self
     }
 
@@ -789,8 +789,8 @@ impl State for TooltipState {
                     .decoration
                     .as_ref()
                     .or(tooltip_theme.decoration.as_ref())
-                    .map(|decoration| decoration.clone_box())
-                    .unwrap_or_else(|| Box::new(default_decoration)),
+                    .cloned()
+                    .unwrap_or_else(|| DecorationRef::new(default_decoration)),
             ),
             padding: Some(
                 widget
@@ -903,7 +903,7 @@ struct TooltipBox {
     constraints: BoxConstraints,
     text_style: TextStyle,
     text_align: TextAlign,
-    decoration: Option<Box<dyn Decoration>>,
+    decoration: Option<DecorationRef>,
     padding: Option<EdgeInsetsGeometry>,
     margin: Option<EdgeInsetsGeometry>,
     rich_message: InlineSpanRef,
@@ -912,10 +912,7 @@ struct TooltipBox {
 impl StatelessWidget for TooltipBox {
     fn build(&self, _app: &mut App, _context: BuildContext) -> WidgetRef {
         let mut container = Container::new();
-        container.decoration = self
-            .decoration
-            .as_ref()
-            .map(|decoration| decoration.clone_box());
+        container.decoration = self.decoration.clone();
         container.padding = self.padding;
         container.margin = self.margin;
         ConstrainedBox::new(self.constraints)

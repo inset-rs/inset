@@ -15,7 +15,7 @@ use crate::box_shadow::BoxShadow;
 use crate::circle_border::{oval_path, rrect_path};
 use crate::colors::AnyColor;
 use crate::debug::debug_disable_shadows;
-use crate::decoration::{BoxPainter, Decoration};
+use crate::decoration::{BoxPainter, Decoration, DecorationRef};
 use crate::draw::draw_rrect;
 use crate::edge_insets::{EdgeInsets, EdgeInsetsGeometry};
 use crate::gradient::Gradient;
@@ -323,23 +323,23 @@ impl Decoration for BoxDecoration {
         self.box_shadow.is_some()
     }
 
-    fn lerp_from(&self, a: Option<&dyn Decoration>, t: f64) -> Option<Box<dyn Decoration>> {
+    fn lerp_from(&self, a: Option<&dyn Decoration>, t: f64) -> Option<DecorationRef> {
         match a {
-            None => Some(Box::new(self.scale(t))),
-            Some(a) => a.as_any().downcast_ref::<BoxDecoration>().map(|a| {
-                Box::new(BoxDecoration::lerp(Some(a), Some(self), t).unwrap())
-                    as Box<dyn Decoration>
-            }),
+            None => Some(DecorationRef::new(self.scale(t))),
+            Some(a) => a
+                .as_any()
+                .downcast_ref::<BoxDecoration>()
+                .map(|a| DecorationRef::new(BoxDecoration::lerp(Some(a), Some(self), t).unwrap())),
         }
     }
 
-    fn lerp_to(&self, b: Option<&dyn Decoration>, t: f64) -> Option<Box<dyn Decoration>> {
+    fn lerp_to(&self, b: Option<&dyn Decoration>, t: f64) -> Option<DecorationRef> {
         match b {
-            None => Some(Box::new(self.scale(1.0 - t))),
-            Some(b) => b.as_any().downcast_ref::<BoxDecoration>().map(|b| {
-                Box::new(BoxDecoration::lerp(Some(self), Some(b), t).unwrap())
-                    as Box<dyn Decoration>
-            }),
+            None => Some(DecorationRef::new(self.scale(1.0 - t))),
+            Some(b) => b
+                .as_any()
+                .downcast_ref::<BoxDecoration>()
+                .map(|b| DecorationRef::new(BoxDecoration::lerp(Some(self), Some(b), t).unwrap())),
         }
     }
 
@@ -371,10 +371,6 @@ impl Decoration for BoxDecoration {
 
     fn create_box_painter(&self, on_changed: Option<VoidCallback>) -> Box<dyn BoxPainter> {
         Box::new(BoxDecorationPainter::new(self.clone(), on_changed))
-    }
-
-    fn clone_box(&self) -> Box<dyn Decoration> {
-        Box::new(self.clone())
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -653,7 +649,7 @@ mod tests {
 
     use crate::alignment::AlignmentGeometry;
     use crate::border_radius::{BorderRadius, BorderRadiusDirectional};
-    use crate::borders::ShapeBorder;
+    use crate::borders::{ShapeBorder, ShapeBorderRef};
     use crate::box_border::BoxBorder;
     use crate::gradient::LinearGradient;
 
@@ -667,15 +663,15 @@ mod tests {
             EdgeInsets::all(self.width).into()
         }
 
-        fn scale(&self, t: f64) -> Box<dyn ShapeBorder> {
-            Box::new(TestBoxBorder {
+        fn scale(&self, t: f64) -> ShapeBorderRef {
+            ShapeBorderRef::new(TestBoxBorder {
                 width: self.width * t,
             })
         }
 
-        fn lerp_from(&self, a: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
+        fn lerp_from(&self, a: Option<&dyn ShapeBorder>, t: f64) -> Option<ShapeBorderRef> {
             if let Some(a) = a.and_then(|a| a.as_any().downcast_ref::<TestBoxBorder>()) {
-                Some(Box::new(TestBoxBorder {
+                Some(ShapeBorderRef::new(TestBoxBorder {
                     width: lerp_double(Some(a.width), Some(self.width), t).unwrap(),
                 }))
             } else if a.is_none() {
@@ -685,9 +681,9 @@ mod tests {
             }
         }
 
-        fn lerp_to(&self, b: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
+        fn lerp_to(&self, b: Option<&dyn ShapeBorder>, t: f64) -> Option<ShapeBorderRef> {
             if let Some(b) = b.and_then(|b| b.as_any().downcast_ref::<TestBoxBorder>()) {
-                Some(Box::new(TestBoxBorder {
+                Some(ShapeBorderRef::new(TestBoxBorder {
                     width: lerp_double(Some(self.width), Some(b.width), t).unwrap(),
                 }))
             } else if b.is_none() {
@@ -708,10 +704,6 @@ mod tests {
         }
 
         fn paint(&self, _canvas: &mut Canvas, _rect: Rect, _text_direction: Option<TextDirection>) {
-        }
-
-        fn clone_box(&self) -> Box<dyn ShapeBorder> {
-            Box::new(*self)
         }
 
         fn as_any(&self) -> &dyn Any {

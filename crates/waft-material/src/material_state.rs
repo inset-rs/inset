@@ -13,7 +13,7 @@ use std::fmt::{self, Debug};
 use std::rc::Rc;
 
 use waft_embedder::{Canvas, Paint, Path, Rect};
-use waft_painting::{BorderSide, EdgeInsetsGeometry, ShapeBorder, TextDirection};
+use waft_painting::{BorderSide, EdgeInsetsGeometry, ShapeBorder, ShapeBorderRef, TextDirection};
 use waft_widgets::{
     WidgetPropertyResolver, WidgetState, WidgetStateBorderSide, WidgetStateColor, WidgetStateMap,
     WidgetStateMapper, WidgetStateMouseCursor, WidgetStateOutlinedBorder, WidgetStateProperty,
@@ -203,19 +203,15 @@ macro_rules! state_input_border {
                 self.border.dimensions()
             }
 
-            fn scale(&self, t: f64) -> Box<dyn ShapeBorder> {
+            fn scale(&self, t: f64) -> ShapeBorderRef {
                 ShapeBorder::scale(&self.border, t)
             }
 
-            fn lerp_from(
-                &self,
-                a: Option<&dyn ShapeBorder>,
-                t: f64,
-            ) -> Option<Box<dyn ShapeBorder>> {
+            fn lerp_from(&self, a: Option<&dyn ShapeBorder>, t: f64) -> Option<ShapeBorderRef> {
                 self.border.lerp_from(a, t)
             }
 
-            fn lerp_to(&self, b: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
+            fn lerp_to(&self, b: Option<&dyn ShapeBorder>, t: f64) -> Option<ShapeBorderRef> {
                 self.border.lerp_to(b, t)
             }
 
@@ -249,10 +245,6 @@ macro_rules! state_input_border {
                 text_direction: Option<TextDirection>,
             ) {
                 ShapeBorder::paint(&self.border, canvas, rect, text_direction);
-            }
-
-            fn clone_box(&self) -> Box<dyn ShapeBorder> {
-                Box::new(self.clone())
             }
 
             fn as_any(&self) -> &dyn Any {

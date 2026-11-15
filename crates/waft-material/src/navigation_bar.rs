@@ -15,7 +15,7 @@ use waft_embedder::{Color, Offset, Radius, SemanticsRole, Size};
 use waft_foundation::{App, Handle, K_IS_WEB, Listenable, Listener, ValueChanged, ValueKey};
 use waft_painting::{
     AlignmentGeometry, BorderRadius, BorderSide, EdgeInsetsGeometry, RoundedRectangleBorder,
-    ShapeBorder, ShapeDecoration, TextStyle,
+    ShapeBorderRef, ShapeDecoration, TextStyle,
 };
 use waft_rendering::{
     AnyRenderBox, BoxConstraints, ChildLayoutId, MultiChildLayoutChildren, MultiChildLayoutDelegate,
@@ -32,15 +32,18 @@ use waft_widgets::{
 
 use crate::colors::Colors;
 use crate::elevation_overlay::ElevationOverlay;
-use crate::generated::navigation_bar_defaults_m3::navigation_bar_defaults_m3;
+use crate::generated::navigation_bar_defaults_m3::NavigationBarDefaultsM3;
 use crate::ink_decoration::Ink;
 use crate::ink_well::InkResponse;
 use crate::material::{Material, RectCallback};
 use crate::material_localizations::MaterialLocalizations;
 #[allow(deprecated)]
 use crate::material_state::MaterialStatePropertyAll;
-use crate::navigation_bar_theme::{NavigationBarTheme, NavigationBarThemeData};
+use crate::navigation_bar_theme::{
+    NavigationBarTheme, NavigationBarThemeData, NavigationBarThemeDataGetters,
+};
 use crate::theme::Theme;
+use crate::theme_data_getters::DefaultsContext;
 use crate::tooltip::Tooltip;
 
 const K_INDICATOR_HEIGHT: f64 = 32.0;
@@ -156,7 +159,7 @@ pub struct NavigationBar {
     /// If null, `NavigationBarThemeData::indicator_shape` is used. If that
     /// is also null and `ThemeData::use_material3` is true, `StadiumBorder` is used.
     /// Otherwise, [`RoundedRectangleBorder`] with a circular border radius of 16 is used.
-    pub indicator_shape: Option<Box<dyn ShapeBorder>>,
+    pub indicator_shape: Option<ShapeBorderRef>,
 
     /// The height of the [`NavigationBar`] itself.
     ///
@@ -312,10 +315,7 @@ impl NavigationBar {
     }
 
     /// Dart `NavigationBar(indicatorShape:)`.
-    pub fn indicator_shape(
-        mut self,
-        indicator_shape: impl Into<Box<dyn ShapeBorder>>,
-    ) -> NavigationBar {
+    pub fn indicator_shape(mut self, indicator_shape: impl Into<ShapeBorderRef>) -> NavigationBar {
         self.indicator_shape = Some(indicator_shape.into());
         self
     }
@@ -418,35 +418,35 @@ impl StatelessWidget for NavigationBar {
         let effective_height = self
             .height
             .or(navigation_bar_theme.height)
-            .or(defaults.height)
+            .or_else(|| defaults.height(app))
             .expect("the defaults give a height");
         let effective_label_behavior = self
             .label_behavior
             .or(navigation_bar_theme.label_behavior)
-            .or(defaults.label_behavior)
+            .or_else(|| defaults.label_behavior(app))
             .expect("the defaults give a label behavior");
 
         let mut material = Material::new()
             .color(
                 self.background_color
                     .or(navigation_bar_theme.background_color)
-                    .or(defaults.background_color)
+                    .or_else(|| defaults.background_color(app))
                     .expect("the defaults give a background color"),
             )
             .elevation(
                 self.elevation
                     .or(navigation_bar_theme.elevation)
-                    .or(defaults.elevation)
+                    .or_else(|| defaults.elevation(app))
                     .expect("the defaults give an elevation"),
             );
         material.shadow_color = self
             .shadow_color
             .or(navigation_bar_theme.shadow_color)
-            .or(defaults.shadow_color);
+            .or_else(|| defaults.shadow_color(app));
         material.surface_tint_color = self
             .surface_tint_color
             .or(navigation_bar_theme.surface_tint_color)
-            .or(defaults.surface_tint_color);
+            .or_else(|| defaults.surface_tint_color(app));
 
         let destination_count = self.destinations.len();
         let destinations = (0..destination_count).map(|i| {
@@ -654,31 +654,30 @@ impl StatelessWidget for NavigationDestination {
         let selected_icon = self.selected_icon.clone();
         let build_icon = {
             let navigation_bar_theme = navigation_bar_theme.clone();
-            let defaults = defaults.clone();
+            let defaults = Rc::clone(&defaults);
             let info = info.clone();
             let (selected_state, unselected_state, disabled_state) = (
                 selected_state.clone(),
                 unselected_state.clone(),
                 disabled_state.clone(),
             );
-            move |_app: &mut App, _context: BuildContext| {
-                let resolve_icon_theme = |states: &WidgetStates| {
+            move |app: &mut App, _context: BuildContext| {
+                let resolve_icon_theme = |app: &mut App, states: &WidgetStates| {
                     navigation_bar_theme
                         .icon_theme
                         .as_ref()
                         .and_then(|icon_theme| icon_theme.resolve(states))
                         .unwrap_or_else(|| {
                             defaults
-                                .icon_theme
-                                .as_ref()
+                                .icon_theme(app)
                                 .expect("the defaults give an icon theme")
                                 .resolve(states)
                                 .expect("the default icon theme resolves")
                         })
                 };
-                let selected_icon_theme = resolve_icon_theme(&selected_state);
-                let unselected_icon_theme = resolve_icon_theme(&unselected_state);
-                let disabled_icon_theme = resolve_icon_theme(&disabled_state);
+                let selected_icon_theme = resolve_icon_theme(app, &selected_state);
+                let unselected_icon_theme = resolve_icon_theme(app, &unselected_state);
+                let disabled_icon_theme = resolve_icon_theme(app, &disabled_state);
 
                 let selected_icon_widget = IconTheme::merge(
                     None,
@@ -706,14 +705,14 @@ impl StatelessWidget for NavigationDestination {
                             .color(
                                 info.indicator_color
                                     .or(navigation_bar_theme.indicator_color)
-                                    .or(defaults.indicator_color)
+                                    .or_else(|| defaults.indicator_color(app))
                                     .expect("the defaults give an indicator color"),
                             )
                             .shape(
                                 info.indicator_shape
                                     .clone()
                                     .or_else(|| navigation_bar_theme.indicator_shape.clone())
-                                    .or_else(|| defaults.indicator_shape.clone())
+                                    .or_else(|| defaults.indicator_shape(app))
                                     .expect("the defaults give an indicator shape"),
                             )
                             .into_widget(),
@@ -734,7 +733,7 @@ impl StatelessWidget for NavigationDestination {
         };
         let label = self.label.clone();
         let build_label = move |app: &mut App, _context: BuildContext| {
-            let resolve_label_text_style = |states: &WidgetStates| {
+            let resolve_label_text_style = |app: &mut App, states: &WidgetStates| {
                 info.label_text_style
                     .as_ref()
                     .and_then(|style| style.resolve(states))
@@ -746,19 +745,21 @@ impl StatelessWidget for NavigationDestination {
                     })
                     .or_else(|| {
                         defaults
-                            .label_text_style
-                            .as_ref()
+                            .label_text_style(app)
                             .expect("the defaults give a label text style")
                             .resolve(states)
                     })
             };
-            let effective_selected_label_text_style = resolve_label_text_style(&selected_state);
-            let effective_unselected_label_text_style = resolve_label_text_style(&unselected_state);
-            let effective_disabled_label_text_style = resolve_label_text_style(&disabled_state);
+            let effective_selected_label_text_style =
+                resolve_label_text_style(app, &selected_state);
+            let effective_unselected_label_text_style =
+                resolve_label_text_style(app, &unselected_state);
+            let effective_disabled_label_text_style =
+                resolve_label_text_style(app, &disabled_state);
             let label_padding = info
                 .label_padding
                 .or(navigation_bar_theme.label_padding)
-                .or(defaults.label_padding)
+                .or_else(|| defaults.label_padding(app))
                 .expect("the defaults give a label padding");
 
             let text_style = if enabled {
@@ -908,7 +909,7 @@ impl State for NavigationDestinationBuilderState {
             .indicator_shape
             .clone()
             .or_else(|| navigation_bar_theme.indicator_shape.clone())
-            .or_else(|| defaults.indicator_shape.clone())
+            .or_else(|| defaults.indicator_shape(app))
         {
             ink_well = ink_well.custom_border(custom_border);
         }
@@ -997,7 +998,7 @@ impl IndicatorInkWell {
     }
 
     /// Dart `_IndicatorInkWell(customBorder:)`.
-    fn custom_border(mut self, custom_border: Box<dyn ShapeBorder>) -> Self {
+    fn custom_border(mut self, custom_border: ShapeBorderRef) -> Self {
         self.ink_response = self.ink_response.custom_border(custom_border);
         self
     }
@@ -1079,7 +1080,7 @@ struct NavigationDestinationInfo {
     /// The shape of the selection indicator.
     ///
     /// This is used by destinations to override the indicator shape.
-    indicator_shape: Option<Box<dyn ShapeBorder>>,
+    indicator_shape: Option<ShapeBorderRef>,
 
     /// The highlight color that's typically used to indicate that
     /// the [`NavigationDestination`] is focused, hovered, or pressed.
@@ -1203,7 +1204,7 @@ pub struct NavigationIndicator {
     /// If non-null this is used as the shape used to draw the background
     /// of the indicator. If null then a `RoundedRectangleBorder` with the
     /// [`border_radius`](Self::border_radius) is used.
-    pub shape: Option<Box<dyn ShapeBorder>>,
+    pub shape: Option<ShapeBorderRef>,
 }
 
 impl NavigationIndicator {
@@ -1252,7 +1253,7 @@ impl NavigationIndicator {
     }
 
     /// Dart `NavigationIndicator(shape:)`.
-    pub fn shape(mut self, shape: impl Into<Box<dyn ShapeBorder>>) -> NavigationIndicator {
+    pub fn shape(mut self, shape: impl Into<ShapeBorderRef>) -> NavigationIndicator {
         self.shape = Some(shape.into());
         self
     }
@@ -1323,7 +1324,7 @@ impl StatelessWidget for NavigationIndicator {
                     animation.is_forward_or_completed(app),
                     move |app, context, fade_animation| {
                         let shape = shape.clone().unwrap_or_else(|| {
-                            Box::new(RoundedRectangleBorder::new(
+                            ShapeBorderRef::new(RoundedRectangleBorder::new(
                                 BorderSide::NONE,
                                 border_radius.into(),
                             ))
@@ -2109,40 +2110,73 @@ impl State for CurvedAnimationBuilderState {
 }
 
 /// Dart's `_defaultsFor(context)`.
-fn defaults_for(app: &mut App, context: BuildContext) -> NavigationBarThemeData {
+fn defaults_for(app: &mut App, context: BuildContext) -> Rc<dyn NavigationBarThemeDataGetters> {
     if Theme::of(app, context).use_material3 {
-        navigation_bar_defaults_m3(app, context)
+        Rc::new(NavigationBarDefaultsM3::new(context))
     } else {
-        navigation_bar_defaults_m2(app, context)
+        Rc::new(NavigationBarDefaultsM2::new(app, context))
     }
 }
 
-/// Hand coded defaults based on Material Design 2: Dart's `_NavigationBarDefaultsM2(context)`.
-#[allow(deprecated)]
-fn navigation_bar_defaults_m2(app: &mut App, context: BuildContext) -> NavigationBarThemeData {
-    let theme = Theme::of(app, context);
-    let colors = &theme.color_scheme;
+/// Hand coded defaults based on Material Design 2: Dart's `_NavigationBarDefaultsM2`.
+struct NavigationBarDefaultsM2 {
+    /// Dart's `super(..)` arguments.
+    navigation_bar_theme_data: NavigationBarThemeData,
+    context: DefaultsContext,
+}
 
-    NavigationBarThemeData::new()
-        .height(80.0)
-        .elevation(0.0)
-        .indicator_shape(RoundedRectangleBorder::new(
-            BorderSide::NONE,
-            BorderRadius::all(Radius::circular(16.0)).into(),
-        ))
-        .label_behavior(NavigationDestinationLabelBehavior::AlwaysShow)
-        // With Material 2, the NavigationBar uses an overlay blend for the
-        // default color regardless of light/dark mode.
-        .background_color(ElevationOverlay::color_with_overlay(
+impl NavigationBarDefaultsM2 {
+    fn new(app: &mut App, context: BuildContext) -> NavigationBarDefaultsM2 {
+        NavigationBarDefaultsM2 {
+            navigation_bar_theme_data: NavigationBarThemeData::new()
+                .height(80.0)
+                .elevation(0.0)
+                .indicator_shape(RoundedRectangleBorder::new(
+                    BorderSide::NONE,
+                    BorderRadius::all(Radius::circular(16.0)).into(),
+                ))
+                .label_behavior(NavigationDestinationLabelBehavior::AlwaysShow),
+            context: DefaultsContext::with_theme(app, context),
+        }
+    }
+}
+
+#[allow(deprecated)]
+impl NavigationBarThemeDataGetters for NavigationBarDefaultsM2 {
+    fn navigation_bar_theme_data(&self) -> &NavigationBarThemeData {
+        &self.navigation_bar_theme_data
+    }
+
+    // With Material 2, the NavigationBar uses an overlay blend for the
+    // default color regardless of light/dark mode.
+    fn background_color(&self, app: &mut App) -> Option<Color> {
+        let theme = self.context.theme(app);
+        let colors = &theme.color_scheme;
+        Some(ElevationOverlay::color_with_overlay(
             colors.surface,
             colors.on_surface,
             3.0,
         ))
-        .icon_theme(Rc::new(MaterialStatePropertyAll::new(Some(
+    }
+
+    fn icon_theme(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<IconThemeData>>> {
+        let theme = self.context.theme(app);
+        let colors = &theme.color_scheme;
+        Some(Rc::new(MaterialStatePropertyAll::new(Some(
             IconThemeData::new().size(24.0).color(colors.on_surface),
         ))))
-        .indicator_color(colors.secondary.with_opacity(0.24))
-        .label_text_style(Rc::new(MaterialStatePropertyAll::new(Some(
+    }
+
+    fn indicator_color(&self, app: &mut App) -> Option<Color> {
+        let theme = self.context.theme(app);
+        let colors = &theme.color_scheme;
+        Some(colors.secondary.with_opacity(0.24))
+    }
+
+    fn label_text_style(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<TextStyle>>> {
+        let theme = self.context.theme(app);
+        let colors = &theme.color_scheme;
+        Some(Rc::new(MaterialStatePropertyAll::new(Some(
             theme
                 .text_theme
                 .label_small
@@ -2151,9 +2185,13 @@ fn navigation_bar_defaults_m2(app: &mut App, context: BuildContext) -> Navigatio
                 .copy_with()
                 .color(colors.on_surface),
         ))))
-        .label_padding(EdgeInsetsGeometry::from(waft_painting::EdgeInsets::only(
+    }
+
+    fn label_padding(&self, _app: &mut App) -> Option<EdgeInsetsGeometry> {
+        Some(EdgeInsetsGeometry::from(waft_painting::EdgeInsets::only(
             0.0, 4.0, 0.0, 0.0,
         )))
+    }
 }
 
 /// Dart's `CurveTween(curve: curve).transform(t)`.
@@ -2175,6 +2213,7 @@ fn transform_tween(app: &mut App, begin: f64, end: f64, t: f64) -> f64 {
 #[cfg(test)]
 pub(crate) mod tests {
     use std::cell::Cell;
+    use waft_painting::ShapeBorder;
 
     use waft_embedder::{PointerChange, TextDirection, valo};
     use waft_painting::{EdgeInsets, StadiumBorder, TextScaler};
@@ -2241,9 +2280,7 @@ pub(crate) mod tests {
 
     /// Dart's `_getIndicatorDecoration(tester)`: the color and shape of the first `Ink` under
     /// a `FadeTransition`.
-    pub(crate) fn indicator_decoration(
-        tester: &WidgetTester,
-    ) -> (Option<Color>, Box<dyn ShapeBorder>) {
+    pub(crate) fn indicator_decoration(tester: &WidgetTester) -> (Option<Color>, ShapeBorderRef) {
         let fade = tester.find_by_type::<FadeTransition>();
         let ink = tester
             .find_by_type::<Ink>()

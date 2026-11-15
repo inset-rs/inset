@@ -2,7 +2,7 @@
 
 use waft_embedder::{Clip, Color, lerp_double};
 use waft_foundation::App;
-use waft_painting::ShapeBorder;
+use waft_painting::ShapeBorderRef;
 use waft_widgets::{BuildContext, InheritedTheme, InheritedWidget, IntoWidget, KeyRef, WidgetRef};
 
 use crate::theme::Theme;
@@ -42,16 +42,33 @@ pub struct DrawerThemeData {
     pub surface_tint_color: Option<Color>,
 
     /// Overrides the default value of `Drawer::shape`.
-    pub shape: Option<Box<dyn ShapeBorder>>,
+    pub shape: Option<ShapeBorderRef>,
 
     /// Overrides the default value of `Drawer::shape` for an end drawer.
-    pub end_shape: Option<Box<dyn ShapeBorder>>,
+    pub end_shape: Option<ShapeBorderRef>,
 
     /// Overrides the default value of `Drawer::width`.
     pub width: Option<f64>,
 
     /// Overrides the default value of `Drawer::clip_behavior`.
     pub clip_behavior: Option<Clip>,
+}
+
+crate::theme_data_getters::theme_data_getters! {
+    /// Dart's getters of `DrawerThemeData`: the theme data answers with its fields, and a defaults
+    /// subclass (Dart's `_...Defaults...(context)`) computes the ones it overrides when they
+    /// are read.
+    pub trait DrawerThemeDataGetters for DrawerThemeData, fields: drawer_theme_data {
+        background_color: Option<Color>,
+        scrim_color: Option<Color>,
+        elevation: Option<f64>,
+        shadow_color: Option<Color>,
+        surface_tint_color: Option<Color>,
+        shape: Option<ShapeBorderRef>,
+        end_shape: Option<ShapeBorderRef>,
+        width: Option<f64>,
+        clip_behavior: Option<Clip>,
+    }
 }
 
 impl DrawerThemeData {
@@ -92,13 +109,13 @@ impl DrawerThemeData {
     }
 
     /// Dart `DrawerThemeData(shape:)`.
-    pub fn shape(mut self, shape: impl Into<Box<dyn ShapeBorder>>) -> DrawerThemeData {
+    pub fn shape(mut self, shape: impl Into<ShapeBorderRef>) -> DrawerThemeData {
         self.shape = Some(shape.into());
         self
     }
 
     /// Dart `DrawerThemeData(endShape:)`.
-    pub fn end_shape(mut self, end_shape: impl Into<Box<dyn ShapeBorder>>) -> DrawerThemeData {
+    pub fn end_shape(mut self, end_shape: impl Into<ShapeBorderRef>) -> DrawerThemeData {
         self.end_shape = Some(end_shape.into());
         self
     }
@@ -161,14 +178,14 @@ impl DrawerThemeData {
                 b.and_then(|b| b.surface_tint_color),
                 t,
             ),
-            shape: <dyn ShapeBorder>::lerp(
-                a.and_then(|a| a.shape.as_deref()),
-                b.and_then(|b| b.shape.as_deref()),
+            shape: ShapeBorderRef::lerp(
+                a.and_then(|a| a.shape.as_ref()),
+                b.and_then(|b| b.shape.as_ref()),
                 t,
             ),
-            end_shape: <dyn ShapeBorder>::lerp(
-                a.and_then(|a| a.end_shape.as_deref()),
-                b.and_then(|b| b.end_shape.as_deref()),
+            end_shape: ShapeBorderRef::lerp(
+                a.and_then(|a| a.end_shape.as_ref()),
+                b.and_then(|b| b.end_shape.as_ref()),
                 t,
             ),
             width: lerp_double(a.and_then(|a| a.width), b.and_then(|b| b.width), t),
@@ -260,6 +277,7 @@ impl InheritedWidget for DrawerTheme {
 pub(crate) mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
+    use waft_painting::ShapeBorder;
 
     use waft_foundation::AppCell;
     use waft_painting::{BorderRadiusGeometry, BorderSide, RoundedRectangleBorder};
@@ -376,7 +394,7 @@ pub(crate) mod tests {
         );
         assert_eq!(
             halfway.end_shape.as_deref(),
-            <dyn ShapeBorder>::lerp(None, Some(&rounded(8.0)), 0.5).as_deref()
+            ShapeBorderRef::lerp(None, Some(&ShapeBorderRef::new(rounded(8.0))), 0.5).as_deref()
         );
         assert_eq!(halfway.width, Some(200.0));
         assert_eq!(halfway.clip_behavior, Some(Clip::AntiAlias));

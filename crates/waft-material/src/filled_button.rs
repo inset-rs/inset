@@ -14,7 +14,9 @@ use std::time::Duration;
 
 use waft_embedder::{Clip, Color, Size, clamp_double, lerp_double};
 use waft_foundation::{App, Listener};
-use waft_painting::{AlignmentGeometry, BorderSide, EdgeInsetsGeometry, OutlinedBorder, TextStyle};
+use waft_painting::{
+    AlignmentGeometry, BorderSide, EdgeInsetsGeometry, OutlinedBorderRef, TextStyle,
+};
 use waft_services::MouseCursorRef;
 use waft_widgets::{
     BuildContext, Flexible, IntoWidget, KeyRef, MainAxisSize, MediaQuery, Row, StatefulKind,
@@ -22,13 +24,14 @@ use waft_widgets::{
     WidgetStatePropertyRef, WidgetStates,
 };
 
+use crate::button_style::ButtonStyleGetters;
 use crate::button_style::{ButtonLayerBuilder, ButtonStyle};
 use crate::button_style_button::{
     ButtonStyleButton, ButtonStyleButtonData, ButtonStyleState, IconAlignment,
 };
 use crate::filled_button_theme::FilledButtonTheme;
-use crate::generated::filled_button_defaults_m3::filled_button_defaults_m3;
-use crate::generated::filled_tonal_button_defaults_m3::filled_tonal_button_defaults_m3;
+use crate::generated::filled_button_defaults_m3::FilledButtonDefaultsM3;
+use crate::generated::filled_tonal_button_defaults_m3::FilledTonalButtonDefaultsM3;
 use crate::ink_well::InteractiveInkFeatureFactoryRef;
 use crate::material_state::MaterialStatePropertyAll;
 use crate::theme::Theme;
@@ -346,17 +349,20 @@ impl ButtonStyleButton for FilledButton {
     ///
     /// For the [`FilledButton::icon`] factory, the start (generally the left) value of
     /// [`ButtonStyle::padding`] is reduced from 24 to 16.
-    fn default_style_of(&self, app: &mut App, context: BuildContext) -> ButtonStyle {
-        let button_style = match self.variant {
-            FilledButtonVariant::Filled => filled_button_defaults_m3(app, context),
-            FilledButtonVariant::Tonal => filled_tonal_button_defaults_m3(app, context),
+    fn default_style_of(
+        &self,
+        app: &mut App,
+        context: BuildContext,
+    ) -> Box<dyn ButtonStyleGetters> {
+        let button_style: Box<dyn ButtonStyleGetters> = match self.variant {
+            FilledButtonVariant::Filled => Box::new(FilledButtonDefaultsM3::new(context)),
+            FilledButtonVariant::Tonal => Box::new(FilledTonalButtonDefaultsM3::new(context)),
         };
 
         if self.add_padding {
             let use_material3 = Theme::of(app, context).use_material3;
             let default_font_size = button_style
-                .text_style
-                .as_ref()
+                .text_style(app)
                 .and_then(|text_style| text_style.resolve(&WidgetStates::new()))
                 .and_then(|text_style| text_style.font_size)
                 .unwrap_or(14.0);
@@ -378,9 +384,11 @@ impl ButtonStyleButton for FilledButton {
                     effective_text_scale,
                 )
             };
-            return button_style
-                .copy_with()
-                .padding(Rc::new(MaterialStatePropertyAll::new(Some(scaled_padding))));
+            return Box::new(
+                button_style
+                    .copy_with(app)
+                    .padding(Rc::new(MaterialStatePropertyAll::new(Some(scaled_padding)))),
+            );
         }
 
         button_style
@@ -433,7 +441,7 @@ pub struct FilledButtonStyleFromBuilder {
     fixed_size: Option<Size>,
     maximum_size: Option<Size>,
     side: Option<BorderSide>,
-    shape: Option<Box<dyn OutlinedBorder>>,
+    shape: Option<OutlinedBorderRef>,
     enabled_mouse_cursor: Option<MouseCursorRef>,
     disabled_mouse_cursor: Option<MouseCursorRef>,
     visual_density: Option<VisualDensity>,
@@ -492,10 +500,7 @@ impl FilledButtonStyleFromBuilder {
     );
 
     /// Dart `FilledButton.styleFrom(shape:)`.
-    pub fn shape(
-        mut self,
-        shape: impl Into<Box<dyn OutlinedBorder>>,
-    ) -> FilledButtonStyleFromBuilder {
+    pub fn shape(mut self, shape: impl Into<OutlinedBorderRef>) -> FilledButtonStyleFromBuilder {
         self.shape = Some(shape.into());
         self
     }
@@ -954,7 +959,7 @@ mod tests {
             let style = Rc::clone(&style);
             let button = Rc::clone(&button);
             move |app, context| {
-                *style.borrow_mut() = Some(button.default_style_of(app, context));
+                *style.borrow_mut() = Some(button.default_style_of(app, context).copy_with(app));
                 SizedBox::shrink().into_widget()
             }
         });

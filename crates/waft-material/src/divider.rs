@@ -7,8 +7,8 @@ use waft_widgets::{
     BuildContext, Center, Container, IntoWidget, KeyRef, SizedBox, StatelessWidget, WidgetRef,
 };
 
-use crate::divider_theme::{DividerTheme, DividerThemeData};
-use crate::generated::divider_defaults_m3::divider_defaults_m3;
+use crate::divider_theme::{DividerTheme, DividerThemeData, DividerThemeDataGetters};
+use crate::generated::divider_defaults_m3::DividerDefaultsM3;
 use crate::theme::Theme;
 
 /// A thin horizontal line, with padding on either side.
@@ -166,10 +166,14 @@ impl Divider {
         let defaults = context.map(|context| divider_defaults(app, context));
         let effective_color = color
             .or(divider_theme.as_ref().and_then(|theme| theme.color))
-            .or(defaults.as_ref().and_then(|defaults| defaults.color));
+            .or_else(|| defaults.as_ref().and_then(|defaults| defaults.color(app)));
         let effective_width = width
             .or(divider_theme.as_ref().and_then(|theme| theme.thickness))
-            .or(defaults.as_ref().and_then(|defaults| defaults.thickness))
+            .or_else(|| {
+                defaults
+                    .as_ref()
+                    .and_then(|defaults| defaults.thickness(app))
+            })
             .unwrap_or(0.0);
 
         // Prevent assertion since it is possible that context is null and no color
@@ -190,11 +194,11 @@ impl Divider {
 
 /// The defaults of the theme in `context`: Material 3's, or Material 2's when
 /// `ThemeData::use_material3` is false.
-fn divider_defaults(app: &mut App, context: BuildContext) -> DividerThemeData {
+fn divider_defaults(app: &mut App, context: BuildContext) -> Box<dyn DividerThemeDataGetters> {
     if Theme::of(app, context).use_material3 {
-        divider_defaults_m3(app, context)
+        Box::new(DividerDefaultsM3::new(context))
     } else {
-        divider_defaults_m2(app, context)
+        Box::new(DividerDefaultsM2::new(context))
     }
 }
 
@@ -209,22 +213,22 @@ impl StatelessWidget for Divider {
         let height = self
             .height
             .or(divider_theme.space)
-            .or(defaults.space)
+            .or_else(|| defaults.space(app))
             .expect("the defaults give a space");
         let thickness = self
             .thickness
             .or(divider_theme.thickness)
-            .or(defaults.thickness)
+            .or_else(|| defaults.thickness(app))
             .expect("the defaults give a thickness");
         let indent = self
             .indent
             .or(divider_theme.indent)
-            .or(defaults.indent)
+            .or_else(|| defaults.indent(app))
             .expect("the defaults give an indent");
         let end_indent = self
             .end_indent
             .or(divider_theme.end_indent)
-            .or(defaults.end_indent)
+            .or_else(|| defaults.end_indent(app))
             .expect("the defaults give an end indent");
 
         SizedBox::new()
@@ -237,7 +241,9 @@ impl StatelessWidget for Divider {
                             indent, 0.0, end_indent, 0.0,
                         ))
                         .decoration(divider_decoration(
-                            self.radius.or(divider_theme.radius).or(defaults.radius),
+                            self.radius
+                                .or(divider_theme.radius)
+                                .or_else(|| defaults.radius(app)),
                             Border {
                                 bottom: Divider::create_border_side(
                                     app,
@@ -392,22 +398,22 @@ impl StatelessWidget for VerticalDivider {
         let width = self
             .width
             .or(divider_theme.space)
-            .or(defaults.space)
+            .or_else(|| defaults.space(app))
             .expect("the defaults give a space");
         let thickness = self
             .thickness
             .or(divider_theme.thickness)
-            .or(defaults.thickness)
+            .or_else(|| defaults.thickness(app))
             .expect("the defaults give a thickness");
         let indent = self
             .indent
             .or(divider_theme.indent)
-            .or(defaults.indent)
+            .or_else(|| defaults.indent(app))
             .expect("the defaults give an indent");
         let end_indent = self
             .end_indent
             .or(divider_theme.end_indent)
-            .or(defaults.end_indent)
+            .or_else(|| defaults.end_indent(app))
             .expect("the defaults give an end indent");
 
         SizedBox::new()
@@ -420,7 +426,9 @@ impl StatelessWidget for VerticalDivider {
                             0.0, indent, 0.0, end_indent,
                         ))
                         .decoration(divider_decoration(
-                            self.radius.or(divider_theme.radius).or(defaults.radius),
+                            self.radius
+                                .or(divider_theme.radius)
+                                .or_else(|| defaults.radius(app)),
                             Border {
                                 left: Divider::create_border_side(
                                     app,
@@ -437,14 +445,34 @@ impl StatelessWidget for VerticalDivider {
     }
 }
 
-/// Dart's `_DividerDefaultsM2(context)`.
-fn divider_defaults_m2(app: &mut App, context: BuildContext) -> DividerThemeData {
-    DividerThemeData::new()
-        .space(16.0)
-        .thickness(0.0)
-        .indent(0.0)
-        .end_indent(0.0)
-        .color(Theme::of(app, context).divider_color)
+/// Dart's `_DividerDefaultsM2`.
+struct DividerDefaultsM2 {
+    /// Dart's `super(..)` arguments.
+    divider_theme_data: DividerThemeData,
+    context: BuildContext,
+}
+
+impl DividerDefaultsM2 {
+    fn new(context: BuildContext) -> DividerDefaultsM2 {
+        DividerDefaultsM2 {
+            divider_theme_data: DividerThemeData::new()
+                .space(16.0)
+                .thickness(0.0)
+                .indent(0.0)
+                .end_indent(0.0),
+            context,
+        }
+    }
+}
+
+impl DividerThemeDataGetters for DividerDefaultsM2 {
+    fn divider_theme_data(&self) -> &DividerThemeData {
+        &self.divider_theme_data
+    }
+
+    fn color(&self, app: &mut App) -> Option<Color> {
+        Some(Theme::of(app, self.context).divider_color)
+    }
 }
 
 #[cfg(test)]

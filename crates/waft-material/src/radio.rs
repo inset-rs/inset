@@ -28,10 +28,11 @@ use crate::constants::{
     K_MIN_INTERACTIVE_DIMENSION, K_RADIAL_REACTION_ALPHA, K_RADIAL_REACTION_RADIUS,
 };
 use crate::debug::debug_check_has_material;
-use crate::generated::radio_defaults_m3::radio_defaults_m3;
-use crate::radio_theme::{RadioTheme, RadioThemeData};
+use crate::generated::radio_defaults_m3::RadioDefaultsM3;
+use crate::radio_theme::{RadioTheme, RadioThemeData, RadioThemeDataGetters};
 use crate::theme::Theme;
 use crate::theme_data::{MaterialTapTargetSize, VisualDensity};
+use crate::theme_data_getters::DefaultsContext;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RadioType {
@@ -756,6 +757,7 @@ impl<T: Clone + PartialEq + 'static> RadioGroupRegistry<T> for RadioRegistry<T> 
 }
 
 /// Dart's `_RadioPaint`.
+#[derive(Clone)]
 struct RadioPaint {
     toggleable_state: AnyToggleableState,
     active_color: Option<Color>,
@@ -861,26 +863,14 @@ impl State for RadioPaintState {
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
         let radio_theme = RadioTheme::of(app, context);
-        let defaults = if Theme::of(app, context).use_material3 {
-            radio_defaults_m3(app, context)
+        let defaults: Box<dyn RadioThemeDataGetters> = if Theme::of(app, context).use_material3 {
+            Box::new(RadioDefaultsM3::new(context))
         } else {
-            radio_defaults_m2(app, context)
+            Box::new(RadioDefaultsM2::new(context))
         };
-        let widget = self.widget(app);
+        let widget = self.widget(app).clone();
         let toggleable_state = widget.toggleable_state;
         let widget_fill_color = self.widget_fill_color(app);
-        let default_fill_color = defaults
-            .fill_color
-            .as_ref()
-            .expect("the defaults' fill color");
-        let default_overlay_color = defaults
-            .overlay_color
-            .as_ref()
-            .expect("the defaults' overlay color");
-        let default_background_color = defaults
-            .background_color
-            .as_ref()
-            .expect("the defaults' background color");
 
         // Colors need to be resolved in selected and non selected states separately
         // so that they can be lerped between.
@@ -892,7 +882,9 @@ impl State for RadioPaintState {
             .or_else(|| widget_fill_color.resolve(&active_states))
             .or_else(|| resolve(&radio_theme.fill_color, &active_states));
         let effective_active_color = active_color.unwrap_or_else(|| {
-            default_fill_color
+            defaults
+                .fill_color(app)
+                .expect("the defaults' fill color")
                 .resolve(&active_states)
                 .expect("the defaults resolve a fill color")
         });
@@ -900,21 +892,27 @@ impl State for RadioPaintState {
             .or_else(|| widget_fill_color.resolve(&inactive_states))
             .or_else(|| resolve(&radio_theme.fill_color, &inactive_states));
         let effective_inactive_color = inactive_color.unwrap_or_else(|| {
-            default_fill_color
+            defaults
+                .fill_color(app)
+                .expect("the defaults' fill color")
                 .resolve(&inactive_states)
                 .expect("the defaults resolve a fill color")
         });
         let active_background_color = resolve(&widget.background_color, &active_states)
             .or_else(|| resolve(&radio_theme.background_color, &active_states))
             .unwrap_or_else(|| {
-                default_background_color
+                defaults
+                    .background_color(app)
+                    .expect("the defaults' background color")
                     .resolve(&active_states)
                     .expect("the defaults resolve a background color")
             });
         let inactive_background_color = resolve(&widget.background_color, &inactive_states)
             .or_else(|| resolve(&radio_theme.background_color, &inactive_states))
             .unwrap_or_else(|| {
-                default_background_color
+                defaults
+                    .background_color(app)
+                    .expect("the defaults' background color")
                     .resolve(&inactive_states)
                     .expect("the defaults resolve a background color")
             });
@@ -925,7 +923,9 @@ impl State for RadioPaintState {
             .or(widget.focus_color)
             .or_else(|| resolve(&radio_theme.overlay_color, &focused_states))
             .unwrap_or_else(|| {
-                default_overlay_color
+                defaults
+                    .overlay_color(app)
+                    .expect("the defaults' overlay color")
                     .resolve(&focused_states)
                     .expect("the defaults resolve an overlay color")
             });
@@ -936,7 +936,9 @@ impl State for RadioPaintState {
             .or(widget.hover_color)
             .or_else(|| resolve(&radio_theme.overlay_color, &hovered_states))
             .unwrap_or_else(|| {
-                default_overlay_color
+                defaults
+                    .overlay_color(app)
+                    .expect("the defaults' overlay color")
                     .resolve(&hovered_states)
                     .expect("the defaults resolve an overlay color")
             });
@@ -950,7 +952,9 @@ impl State for RadioPaintState {
                 .or_else(|| resolve(&radio_theme.overlay_color, active_pressed_states))
                 .or_else(|| active_color.map(|color| color.with_alpha(K_RADIAL_REACTION_ALPHA)))
                 .unwrap_or_else(|| {
-                    default_overlay_color
+                    defaults
+                        .overlay_color(app)
+                        .expect("the defaults' overlay color")
                         .resolve(active_pressed_states)
                         .expect("the defaults resolve an overlay color")
                 });
@@ -962,7 +966,9 @@ impl State for RadioPaintState {
                 .or_else(|| resolve(&radio_theme.overlay_color, inactive_pressed_states))
                 .or_else(|| inactive_color.map(|color| color.with_alpha(K_RADIAL_REACTION_ALPHA)))
                 .unwrap_or_else(|| {
-                    default_overlay_color
+                    defaults
+                        .overlay_color(app)
+                        .expect("the defaults' overlay color")
                         .resolve(inactive_pressed_states)
                         .expect("the defaults resolve an overlay color")
                 });
@@ -989,12 +995,12 @@ impl State for RadioPaintState {
         let effective_material_tap_target_size = widget
             .material_tap_target_size
             .or(radio_theme.material_tap_target_size)
-            .or(defaults.material_tap_target_size)
+            .or_else(|| defaults.material_tap_target_size(app))
             .expect("the defaults' tap target size");
         let effective_visual_density = widget
             .visual_density
             .or(radio_theme.visual_density)
-            .or(defaults.visual_density)
+            .or_else(|| defaults.visual_density(app))
             .expect("the defaults' visual density");
         let mut size = match effective_material_tap_target_size {
             MaterialTapTargetSize::Padded => {
@@ -1226,30 +1232,63 @@ impl ToggleablePainter for RadioPainter {
     }
 }
 
-/// Hand coded defaults based on Material Design 2: Dart's `_RadioDefaultsM2(context)`, the
-/// [`RadioThemeData`] whose fields are the values of that subclass's getters.
-fn radio_defaults_m2(app: &mut App, context: BuildContext) -> RadioThemeData {
-    let theme = Theme::of(app, context);
-    let disabled_color = theme.disabled_color;
-    let secondary = theme.color_scheme.secondary;
-    let unselected_widget_color = theme.unselected_widget_color;
-    let hover_color = theme.hover_color;
-    let focus_color = theme.focus_color;
-    let fill_color = move |states: &WidgetStates| -> Color {
-        if states.contains(&WidgetState::Disabled) {
-            return disabled_color;
-        }
-        if states.contains(&WidgetState::Selected) {
-            return secondary;
-        }
-        unselected_widget_color
-    };
+/// Hand coded defaults based on Material Design 2: Dart's `_RadioDefaultsM2`.
+struct RadioDefaultsM2 {
+    /// Dart's `super(..)` arguments.
+    radio_theme_data: RadioThemeData,
+    context: DefaultsContext,
+}
 
-    RadioThemeData::new()
-        .fill_color(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
+impl RadioDefaultsM2 {
+    fn new(context: BuildContext) -> RadioDefaultsM2 {
+        RadioDefaultsM2 {
+            radio_theme_data: RadioThemeData::new(),
+            context: DefaultsContext::new(context),
+        }
+    }
+}
+
+impl RadioThemeDataGetters for RadioDefaultsM2 {
+    fn radio_theme_data(&self) -> &RadioThemeData {
+        &self.radio_theme_data
+    }
+
+    fn fill_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        let theme = self.context.theme(app);
+        let disabled_color = theme.disabled_color;
+        let secondary = theme.color_scheme.secondary;
+        let unselected_widget_color = theme.unselected_widget_color;
+        let fill_color = move |states: &WidgetStates| -> Color {
+            if states.contains(&WidgetState::Disabled) {
+                return disabled_color;
+            }
+            if states.contains(&WidgetState::Selected) {
+                return secondary;
+            }
+            unselected_widget_color
+        };
+        Some(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
             move |states| Some(fill_color(states)),
         ))
-        .overlay_color(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
+    }
+
+    fn overlay_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        let theme = self.context.theme(app);
+        let disabled_color = theme.disabled_color;
+        let secondary = theme.color_scheme.secondary;
+        let unselected_widget_color = theme.unselected_widget_color;
+        let hover_color = theme.hover_color;
+        let focus_color = theme.focus_color;
+        let fill_color = move |states: &WidgetStates| -> Color {
+            if states.contains(&WidgetState::Disabled) {
+                return disabled_color;
+            }
+            if states.contains(&WidgetState::Selected) {
+                return secondary;
+            }
+            unselected_widget_color
+        };
+        Some(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
             move |states| {
                 if states.contains(&WidgetState::Pressed) {
                     return Some(fill_color(states).with_alpha(K_RADIAL_REACTION_ALPHA));
@@ -1263,11 +1302,23 @@ fn radio_defaults_m2(app: &mut App, context: BuildContext) -> RadioThemeData {
                 Some(Colors::TRANSPARENT)
             },
         ))
-        .material_tap_target_size(theme.material_tap_target_size)
-        .visual_density(theme.visual_density)
-        .background_color(<dyn WidgetStateProperty<Option<Color>>>::all(Some(
+    }
+
+    fn material_tap_target_size(&self, app: &mut App) -> Option<MaterialTapTargetSize> {
+        let theme = self.context.theme(app);
+        Some(theme.material_tap_target_size)
+    }
+
+    fn visual_density(&self, app: &mut App) -> Option<VisualDensity> {
+        let theme = self.context.theme(app);
+        Some(theme.visual_density)
+    }
+
+    fn background_color(&self, _app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        Some(<dyn WidgetStateProperty<Option<Color>>>::all(Some(
             Colors::TRANSPARENT,
         )))
+    }
 }
 
 #[cfg(test)]

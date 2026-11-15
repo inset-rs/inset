@@ -8,14 +8,14 @@ use waft_embedder::{Path, PathBuilder, Rect, Size};
 use waft_foundation::{App, VoidCallback};
 
 use crate::basic_types::TextDirection;
-use crate::borders::{BorderSide, BorderStyle, ShapeBorder};
+use crate::borders::{BorderSide, BorderStyle, ShapeBorder, ShapeBorderRef};
 use crate::box_border::{Border, BoxShape};
 use crate::box_decoration::BoxDecoration;
 use crate::box_shadow::BoxShadow;
 use crate::circle_border::CircleBorder;
 use crate::colors::AnyColor;
 use crate::debug::debug_disable_shadows;
-use crate::decoration::{BoxPainter, Decoration};
+use crate::decoration::{BoxPainter, Decoration, DecorationRef};
 use crate::edge_insets::EdgeInsetsGeometry;
 use crate::gradient::Gradient;
 use crate::image_provider::ImageConfiguration;
@@ -28,6 +28,7 @@ use crate::rounded_rectangle_border::RoundedRectangleBorder;
 ///
 /// [`image`](https://api.flutter.dev/flutter/painting/ShapeDecoration/image.html)
 /// is deferred (see PORTING.md).
+#[derive(Clone)]
 pub struct ShapeDecoration {
     /// The color to fill in the background of the shape.
     ///
@@ -51,7 +52,7 @@ pub struct ShapeDecoration {
     ///
     /// The [`shape`](Self::shape) property specifies the outline (border) of the
     /// decoration.
-    pub shape: Box<dyn ShapeBorder>,
+    pub shape: ShapeBorderRef,
 }
 
 impl ShapeDecoration {
@@ -69,7 +70,7 @@ impl ShapeDecoration {
     ///
     /// The [`color`](Self::color) and [`gradient`](Self::gradient) properties are mutually
     /// exclusive, one (or both) of them must be None.
-    pub fn new(shape: impl Into<Box<dyn ShapeBorder>>) -> ShapeDecoration {
+    pub fn new(shape: impl Into<ShapeBorderRef>) -> ShapeDecoration {
         ShapeDecoration {
             color: None,
             gradient: None,
@@ -105,23 +106,23 @@ impl ShapeDecoration {
     }
 
     /// The shape to fill and to cast as the shadows.
-    pub fn shape(mut self, shape: impl Into<Box<dyn ShapeBorder>>) -> ShapeDecoration {
+    pub fn shape(mut self, shape: impl Into<ShapeBorderRef>) -> ShapeDecoration {
         self.shape = shape.into();
         self
     }
 
     /// Creates a shape decoration configured to match a [`BoxDecoration`].
     pub fn from_box_decoration(source: &BoxDecoration) -> ShapeDecoration {
-        let shape: Box<dyn ShapeBorder> = match source.shape {
+        let shape: ShapeBorderRef = match source.shape {
             BoxShape::Circle => {
                 if let Some(border) = source.border.as_ref() {
                     debug_assert!(
                         border.is_uniform(),
                         "A circular border cannot have non-uniform borders."
                     );
-                    Box::new(CircleBorder::new(border.top(), 0.0))
+                    ShapeBorderRef::new(CircleBorder::new(border.top(), 0.0))
                 } else {
-                    Box::new(CircleBorder::default())
+                    ShapeBorderRef::new(CircleBorder::default())
                 }
             }
             BoxShape::Rectangle => {
@@ -133,7 +134,7 @@ impl ShapeDecoration {
                             .is_none_or(|border| border.is_uniform()),
                         "A borderRadius cannot be applied to a non-uniform border."
                     );
-                    Box::new(RoundedRectangleBorder::new(
+                    ShapeBorderRef::new(RoundedRectangleBorder::new(
                         source
                             .border
                             .as_ref()
@@ -142,9 +143,9 @@ impl ShapeDecoration {
                         border_radius,
                     ))
                 } else if let Some(border) = source.border.as_ref() {
-                    border.clone_box()
+                    ShapeBorderRef::from(border.clone_box_border() as Box<dyn ShapeBorder>)
                 } else {
-                    Box::new(Border::default())
+                    ShapeBorderRef::new(Border::default())
                 }
             }
         };
@@ -160,7 +161,7 @@ impl ShapeDecoration {
         color: Option<AnyColor>,
         gradient: Option<Box<dyn Gradient>>,
         shadows: Option<Vec<BoxShadow>>,
-        shape: Box<dyn ShapeBorder>,
+        shape: ShapeBorderRef,
     ) -> ShapeDecoration {
         let decoration = ShapeDecoration {
             color,
@@ -244,20 +245,9 @@ impl ShapeDecoration {
                 b.and_then(|b| b.shadows.as_deref()),
                 t,
             ),
-            <dyn ShapeBorder>::lerp(a.map(|a| a.shape.as_ref()), b.map(|b| b.shape.as_ref()), t)
+            ShapeBorderRef::lerp(a.map(|a| &a.shape), b.map(|b| &b.shape), t)
                 .expect("ShapeBorder.lerp of a ShapeDecoration shape"),
         ))
-    }
-}
-
-impl Clone for ShapeDecoration {
-    fn clone(&self) -> ShapeDecoration {
-        ShapeDecoration {
-            color: self.color.clone(),
-            gradient: self.gradient.clone(),
-            shadows: self.shadows.clone(),
-            shape: self.shape.clone_box(),
-        }
     }
 }
 
@@ -270,7 +260,7 @@ impl PartialEq for ShapeDecoration {
                 _ => false,
             }
             && self.shadows == other.shadows
-            && self.shape.eq_shape(other.shape.as_ref())
+            && self.shape == other.shape
     }
 }
 
@@ -283,7 +273,7 @@ impl Decoration for ShapeDecoration {
         self.shadows.is_some()
     }
 
-    fn lerp_from(&self, a: Option<&dyn Decoration>, t: f64) -> Option<Box<dyn Decoration>> {
+    fn lerp_from(&self, a: Option<&dyn Decoration>, t: f64) -> Option<DecorationRef> {
         match a {
             Some(a) if a.as_any().downcast_ref::<BoxDecoration>().is_some() => {
                 let a = a.as_any().downcast_ref::<BoxDecoration>().unwrap();
@@ -292,20 +282,18 @@ impl Decoration for ShapeDecoration {
                     Some(self),
                     t,
                 )
-                .map(|decoration| Box::new(decoration) as Box<dyn Decoration>)
+                .map(DecorationRef::new)
             }
             Some(a) if a.as_any().downcast_ref::<ShapeDecoration>().is_some() => {
                 let a = a.as_any().downcast_ref::<ShapeDecoration>().unwrap();
-                ShapeDecoration::lerp(Some(a), Some(self), t)
-                    .map(|decoration| Box::new(decoration) as Box<dyn Decoration>)
+                ShapeDecoration::lerp(Some(a), Some(self), t).map(DecorationRef::new)
             }
-            None => ShapeDecoration::lerp(None, Some(self), t)
-                .map(|decoration| Box::new(decoration) as Box<dyn Decoration>),
+            None => ShapeDecoration::lerp(None, Some(self), t).map(DecorationRef::new),
             Some(_) => None,
         }
     }
 
-    fn lerp_to(&self, b: Option<&dyn Decoration>, t: f64) -> Option<Box<dyn Decoration>> {
+    fn lerp_to(&self, b: Option<&dyn Decoration>, t: f64) -> Option<DecorationRef> {
         match b {
             Some(b) if b.as_any().downcast_ref::<BoxDecoration>().is_some() => {
                 let b = b.as_any().downcast_ref::<BoxDecoration>().unwrap();
@@ -314,15 +302,13 @@ impl Decoration for ShapeDecoration {
                     Some(&ShapeDecoration::from_box_decoration(b)),
                     t,
                 )
-                .map(|decoration| Box::new(decoration) as Box<dyn Decoration>)
+                .map(DecorationRef::new)
             }
             Some(b) if b.as_any().downcast_ref::<ShapeDecoration>().is_some() => {
                 let b = b.as_any().downcast_ref::<ShapeDecoration>().unwrap();
-                ShapeDecoration::lerp(Some(self), Some(b), t)
-                    .map(|decoration| Box::new(decoration) as Box<dyn Decoration>)
+                ShapeDecoration::lerp(Some(self), Some(b), t).map(DecorationRef::new)
             }
-            None => ShapeDecoration::lerp(Some(self), None, t)
-                .map(|decoration| Box::new(decoration) as Box<dyn Decoration>),
+            None => ShapeDecoration::lerp(Some(self), None, t).map(DecorationRef::new),
             Some(_) => None,
         }
     }
@@ -343,10 +329,6 @@ impl Decoration for ShapeDecoration {
 
     fn get_clip_path(&self, rect: Rect, text_direction: TextDirection) -> Path {
         self.shape.get_outer_path(rect, Some(text_direction))
-    }
-
-    fn clone_box(&self) -> Box<dyn Decoration> {
-        Box::new(self.clone())
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -760,102 +742,102 @@ mod tests {
 
     #[test]
     fn lerp_null_a_b() {
-        let a: &dyn Decoration = &ShapeDecoration::new(CircleBorder::default());
-        let b: &dyn Decoration = &ShapeDecoration::new(RoundedRectangleBorder::default());
+        let a = DecorationRef::new(ShapeDecoration::new(CircleBorder::default()));
+        let b = DecorationRef::new(ShapeDecoration::new(RoundedRectangleBorder::default()));
         assert!(
-            <dyn Decoration>::lerp(Some(a), None, 0.0)
+            DecorationRef::lerp(Some(&a), None, 0.0)
                 .unwrap()
-                .eq_decoration(a)
+                .eq_decoration(&*a)
         );
         assert!(
-            <dyn Decoration>::lerp(None, Some(b), 0.0)
+            DecorationRef::lerp(None, Some(&b), 0.0)
                 .unwrap()
-                .eq_decoration(b)
+                .eq_decoration(&*b)
         );
-        assert!(<dyn Decoration>::lerp(None, None, 0.0).is_none());
+        assert!(DecorationRef::lerp(None, None, 0.0).is_none());
     }
 
     #[test]
     fn lerp_and_hit_test() {
-        let a: &dyn Decoration = &ShapeDecoration::new(CircleBorder::default());
-        let b: &dyn Decoration = &ShapeDecoration::new(RoundedRectangleBorder::default());
-        let c: &dyn Decoration = &ShapeDecoration::new(OvalBorder::default());
+        let a = DecorationRef::new(ShapeDecoration::new(CircleBorder::default()));
+        let b = DecorationRef::new(ShapeDecoration::new(RoundedRectangleBorder::default()));
+        let c = DecorationRef::new(ShapeDecoration::new(OvalBorder::default()));
         assert!(
-            <dyn Decoration>::lerp(Some(a), Some(b), 0.0)
+            DecorationRef::lerp(Some(&a), Some(&b), 0.0)
                 .unwrap()
-                .eq_decoration(a)
+                .eq_decoration(&*a)
         );
         assert!(
-            <dyn Decoration>::lerp(Some(a), Some(b), 1.0)
+            DecorationRef::lerp(Some(&a), Some(&b), 1.0)
                 .unwrap()
-                .eq_decoration(b)
+                .eq_decoration(&*b)
         );
         assert!(
-            <dyn Decoration>::lerp(Some(a), Some(c), 0.0)
+            DecorationRef::lerp(Some(&a), Some(&c), 0.0)
                 .unwrap()
-                .eq_decoration(a)
+                .eq_decoration(&*a)
         );
         assert!(
-            <dyn Decoration>::lerp(Some(a), Some(c), 1.0)
+            DecorationRef::lerp(Some(&a), Some(&c), 1.0)
                 .unwrap()
-                .eq_decoration(c)
+                .eq_decoration(&*c)
         );
         assert!(
-            <dyn Decoration>::lerp(Some(b), Some(c), 0.0)
+            DecorationRef::lerp(Some(&b), Some(&c), 0.0)
                 .unwrap()
-                .eq_decoration(b)
+                .eq_decoration(&*b)
         );
         assert!(
-            <dyn Decoration>::lerp(Some(b), Some(c), 1.0)
+            DecorationRef::lerp(Some(&b), Some(&c), 1.0)
                 .unwrap()
-                .eq_decoration(c)
+                .eq_decoration(&*c)
         );
         let size = Size::new(200.0, 100.0);
         assert!(!a.hit_test(size, Offset::new(20.0, 50.0), None));
         assert!(!c.hit_test(size, Offset::new(50.0, 5.0), None));
         assert!(!c.hit_test(size, Offset::new(5.0, 30.0), None));
         assert!(
-            !<dyn Decoration>::lerp(Some(a), Some(b), 0.1)
+            !DecorationRef::lerp(Some(&a), Some(&b), 0.1)
                 .unwrap()
                 .hit_test(size, Offset::new(20.0, 50.0), None)
         );
         assert!(
-            !<dyn Decoration>::lerp(Some(a), Some(b), 0.5)
+            !DecorationRef::lerp(Some(&a), Some(&b), 0.5)
                 .unwrap()
                 .hit_test(size, Offset::new(20.0, 50.0), None)
         );
         assert!(
-            <dyn Decoration>::lerp(Some(a), Some(b), 0.9)
+            DecorationRef::lerp(Some(&a), Some(&b), 0.9)
                 .unwrap()
                 .hit_test(size, Offset::new(20.0, 50.0), None)
         );
         assert!(
-            !<dyn Decoration>::lerp(Some(a), Some(c), 0.1)
+            !DecorationRef::lerp(Some(&a), Some(&c), 0.1)
                 .unwrap()
                 .hit_test(size, Offset::new(30.0, 50.0), None)
         );
         assert!(
-            <dyn Decoration>::lerp(Some(a), Some(c), 0.5)
+            DecorationRef::lerp(Some(&a), Some(&c), 0.5)
                 .unwrap()
                 .hit_test(size, Offset::new(30.0, 50.0), None)
         );
         assert!(
-            <dyn Decoration>::lerp(Some(a), Some(c), 0.9)
+            DecorationRef::lerp(Some(&a), Some(&c), 0.9)
                 .unwrap()
                 .hit_test(size, Offset::new(30.0, 50.0), None)
         );
         assert!(
-            <dyn Decoration>::lerp(Some(b), Some(c), 0.1)
+            DecorationRef::lerp(Some(&b), Some(&c), 0.1)
                 .unwrap()
                 .hit_test(size, Offset::new(45.0, 10.0), None)
         );
         assert!(
-            <dyn Decoration>::lerp(Some(b), Some(c), 0.5)
+            DecorationRef::lerp(Some(&b), Some(&c), 0.5)
                 .unwrap()
                 .hit_test(size, Offset::new(30.0, 10.0), None)
         );
         assert!(
-            <dyn Decoration>::lerp(Some(b), Some(c), 0.9)
+            DecorationRef::lerp(Some(&b), Some(&c), 0.9)
                 .unwrap()
                 .hit_test(size, Offset::new(10.0, 30.0), None)
         );

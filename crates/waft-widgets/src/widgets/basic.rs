@@ -25,7 +25,7 @@ use waft_gestures::{
 };
 use waft_painting::{
     Alignment, AlignmentGeometry, AnyColor, Axis, AxisDirection, BorderRadius,
-    BorderRadiusGeometry, BoxFit, BoxShape, EdgeInsetsGeometry, ShapeBorder, VerticalDirection,
+    BorderRadiusGeometry, BoxFit, BoxShape, EdgeInsetsGeometry, ShapeBorderRef, VerticalDirection,
     flip_axis_direction, text_direction_to_axis_direction,
 };
 use waft_rendering::{
@@ -1356,10 +1356,10 @@ impl ClipPath {
     /// Uses a `ShapeBorderClipper` to configure the [`ClipPath`] to clip to the
     /// given `ShapeBorder`. Dart's optional arguments are the setters of the
     /// [`ClipPathShape`] this returns.
-    pub fn shape(shape: Box<dyn ShapeBorder>) -> ClipPathShape {
+    pub fn shape(shape: impl Into<ShapeBorderRef>) -> ClipPathShape {
         ClipPathShape {
             key: None,
-            shape,
+            shape: shape.into(),
             clip_behavior: Clip::AntiAlias,
             child: None,
         }
@@ -1452,7 +1452,7 @@ impl Debug for ClipPath {
 /// clips to a `ShapeBorder` resolved against the ambient [`Directionality`].
 pub struct ClipPathShape {
     key: Option<KeyRef>,
-    shape: Box<dyn ShapeBorder>,
+    shape: ShapeBorderRef,
     clip_behavior: Clip,
     child: Option<WidgetRef>,
 }
@@ -1493,7 +1493,7 @@ impl IntoWidget<ClipPathShapeKind> for ClipPathShape {
             ClipPath {
                 key: None,
                 clipper: Some(Rc::new(ShapeBorderClipper::new(
-                    shape.clone_box(),
+                    shape.clone(),
                     text_direction,
                 ))),
                 clip_behavior,
@@ -11604,10 +11604,11 @@ mod tests {
             waft_painting::BorderRadiusGeometry::circular(8.0)
         );
 
-        let shape: Box<dyn ShapeBorder> = Box::new(waft_painting::RoundedRectangleBorder::new(
-            waft_painting::BorderSide::NONE,
-            waft_painting::BorderRadiusGeometry::circular(4.0),
-        ));
+        let shape: ShapeBorderRef =
+            ShapeBorderRef::new(waft_painting::RoundedRectangleBorder::new(
+                waft_painting::BorderSide::NONE,
+                waft_painting::BorderRadiusGeometry::circular(4.0),
+            ));
         harness.set_child(
             &mut app,
             Directionality::new(
@@ -11659,7 +11660,7 @@ mod tests {
 
     fn circle_clipper() -> Rc<dyn CustomClipper<Path>> {
         Rc::new(ShapeBorderClipper::new(
-            Box::new(waft_painting::CircleBorder::new(
+            ShapeBorderRef::new(waft_painting::CircleBorder::new(
                 waft_painting::BorderSide::NONE,
                 0.0,
             )),

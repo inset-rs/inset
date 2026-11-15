@@ -2,7 +2,7 @@
 
 use waft_embedder::{Color, lerp_double};
 use waft_foundation::App;
-use waft_painting::{EdgeInsetsGeometry, ShapeBorder, TextStyle};
+use waft_painting::{EdgeInsetsGeometry, ShapeBorderRef, TextStyle};
 use waft_widgets::{
     BuildContext, IconThemeData, InheritedTheme, InheritedWidget, IntoWidget, KeyRef, WidgetRef,
     WidgetStateProperty, WidgetStatePropertyRef,
@@ -53,7 +53,7 @@ pub struct NavigationBarThemeData {
     pub indicator_color: Option<Color>,
 
     /// Overrides the default shape of the `NavigationBar`'s selection indicator.
-    pub indicator_shape: Option<Box<dyn ShapeBorder>>,
+    pub indicator_shape: Option<ShapeBorderRef>,
 
     /// The style to merge with the default text style for
     /// `NavigationDestination` labels.
@@ -76,6 +76,26 @@ pub struct NavigationBarThemeData {
 
     /// Overrides the default value of `NavigationBar::label_padding`.
     pub label_padding: Option<EdgeInsetsGeometry>,
+}
+
+crate::theme_data_getters::theme_data_getters! {
+    /// Dart's getters of `NavigationBarThemeData`: the theme data answers with its fields, and a defaults
+    /// subclass (Dart's `_...Defaults...(context)`) computes the ones it overrides when they
+    /// are read.
+    pub trait NavigationBarThemeDataGetters for NavigationBarThemeData, fields: navigation_bar_theme_data {
+        height: Option<f64>,
+        background_color: Option<Color>,
+        elevation: Option<f64>,
+        shadow_color: Option<Color>,
+        surface_tint_color: Option<Color>,
+        indicator_color: Option<Color>,
+        indicator_shape: Option<ShapeBorderRef>,
+        label_text_style: Option<WidgetStatePropertyRef<Option<TextStyle>>>,
+        icon_theme: Option<WidgetStatePropertyRef<Option<IconThemeData>>>,
+        label_behavior: Option<NavigationDestinationLabelBehavior>,
+        overlay_color: Option<WidgetStatePropertyRef<Option<Color>>>,
+        label_padding: Option<EdgeInsetsGeometry>,
+    }
 }
 
 impl NavigationBarThemeData {
@@ -124,7 +144,7 @@ impl NavigationBarThemeData {
     /// Dart `NavigationBarThemeData(indicatorShape:)`.
     pub fn indicator_shape(
         mut self,
-        indicator_shape: impl Into<Box<dyn ShapeBorder>>,
+        indicator_shape: impl Into<ShapeBorderRef>,
     ) -> NavigationBarThemeData {
         self.indicator_shape = Some(indicator_shape.into());
         self
@@ -222,9 +242,9 @@ impl NavigationBarThemeData {
                 b.and_then(|b| b.indicator_color),
                 t,
             ),
-            indicator_shape: <dyn ShapeBorder>::lerp(
-                a.and_then(|a| a.indicator_shape.as_deref()),
-                b.and_then(|b| b.indicator_shape.as_deref()),
+            indicator_shape: ShapeBorderRef::lerp(
+                a.and_then(|a| a.indicator_shape.as_ref()),
+                b.and_then(|b| b.indicator_shape.as_ref()),
                 t,
             ),
             label_text_style: <dyn WidgetStateProperty<Option<TextStyle>>>::lerp_optional(
@@ -361,6 +381,7 @@ impl InheritedWidget for NavigationBarTheme {
 
 #[cfg(test)]
 mod tests {
+    use waft_painting::ShapeBorder;
     use waft_painting::{BorderSide, CircleBorder, EdgeInsets};
     use waft_widgets::{Icon, IconData, Opacity, WidgetState};
 

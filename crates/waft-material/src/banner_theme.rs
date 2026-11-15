@@ -53,6 +53,22 @@ pub struct MaterialBannerThemeData {
     pub leading_padding: Option<EdgeInsetsGeometry>,
 }
 
+crate::theme_data_getters::theme_data_getters! {
+    /// Dart's getters of `MaterialBannerThemeData`: the theme data answers with its fields, and a defaults
+    /// subclass (Dart's `_...Defaults...(context)`) computes the ones it overrides when they
+    /// are read.
+    pub trait MaterialBannerThemeDataGetters for MaterialBannerThemeData, fields: material_banner_theme_data {
+        background_color: Option<Color>,
+        surface_tint_color: Option<Color>,
+        shadow_color: Option<Color>,
+        divider_color: Option<Color>,
+        content_text_style: Option<TextStyle>,
+        elevation: Option<f64>,
+        padding: Option<EdgeInsetsGeometry>,
+        leading_padding: Option<EdgeInsetsGeometry>,
+    }
+}
+
 impl MaterialBannerThemeData {
     /// Creates a theme that can be used for [`MaterialBannerTheme`] or
     /// `ThemeData::banner_theme`; Dart's optional named arguments are the fluent setters.

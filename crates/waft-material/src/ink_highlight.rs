@@ -12,7 +12,7 @@ use waft_animation::{
 };
 use waft_embedder::{Canvas, Color, Matrix4, Offset, Paint, Rect, TextDirection};
 use waft_foundation::{App, Handle, Listener};
-use waft_painting::{BorderRadius, BoxShape, ShapeBorder, draw_rrect, get_as_translation};
+use waft_painting::{BorderRadius, BoxShape, ShapeBorderRef, draw_rrect, get_as_translation};
 use waft_rendering::AnyRenderBox;
 
 use crate::ink_well::{
@@ -85,7 +85,7 @@ impl InkHighlight {
         shape: BoxShape,
         radius: Option<f64>,
         border_radius: Option<BorderRadius>,
-        custom_border: Option<Box<dyn ShapeBorder>>,
+        custom_border: Option<ShapeBorderRef>,
         rect_callback: Option<RectCallback>,
         on_removed: Option<Listener>,
         fade_duration: Duration,

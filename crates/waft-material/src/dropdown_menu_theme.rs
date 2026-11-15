@@ -44,6 +44,18 @@ pub struct DropdownMenuThemeData {
     pub disabled_color: Option<Color>,
 }
 
+crate::theme_data_getters::theme_data_getters! {
+    /// Dart's getters of `DropdownMenuThemeData`: the theme data answers with its fields, and a defaults
+    /// subclass (Dart's `_...Defaults...(context)`) computes the ones it overrides when they
+    /// are read.
+    pub trait DropdownMenuThemeDataGetters for DropdownMenuThemeData, fields: dropdown_menu_theme_data {
+        text_style: Option<TextStyle>,
+        input_decoration_theme: Option<InputDecorationThemeData>,
+        menu_style: Option<MenuStyle>,
+        disabled_color: Option<Color>,
+    }
+}
+
 impl DropdownMenuThemeData {
     /// Creates a [`DropdownMenuThemeData`] that can be used to override default properties in
     /// a [`DropdownMenuTheme`] widget.
@@ -296,7 +308,7 @@ mod tests {
 
     use waft_embedder::{Color, Radius};
     use waft_painting::{
-        BorderRadiusGeometry, BorderSide, OutlinedBorder, RoundedRectangleBorder, Shadow,
+        BorderRadiusGeometry, BorderSide, OutlinedBorderRef, RoundedRectangleBorder, Shadow,
         ShapeBorder, TextDecoration,
     };
     use waft_widgets::{AnyElement, EditableText};
@@ -370,7 +382,7 @@ mod tests {
 
     impl Expected {
         fn styles(&self) -> Styles {
-            let shape: Box<dyn OutlinedBorder> = Box::new(rounded(self.menu_radius));
+            let shape: OutlinedBorderRef = OutlinedBorderRef::new(rounded(self.menu_radius));
             Styles {
                 text_style: TextStyle::new()
                     .color(self.color.clone())

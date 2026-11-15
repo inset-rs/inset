@@ -90,6 +90,23 @@ pub struct RadioThemeData {
     pub inner_radius: Option<WidgetStatePropertyRef<Option<f64>>>,
 }
 
+crate::theme_data_getters::theme_data_getters! {
+    /// Dart's getters of `RadioThemeData`: the theme data answers with its fields, and a defaults
+    /// subclass (Dart's `_...Defaults...(context)`) computes the ones it overrides when they
+    /// are read.
+    pub trait RadioThemeDataGetters for RadioThemeData, fields: radio_theme_data {
+        mouse_cursor: Option<WidgetStatePropertyRef<Option<MouseCursorRef>>>,
+        fill_color: Option<WidgetStatePropertyRef<Option<Color>>>,
+        overlay_color: Option<WidgetStatePropertyRef<Option<Color>>>,
+        splash_radius: Option<f64>,
+        material_tap_target_size: Option<MaterialTapTargetSize>,
+        visual_density: Option<VisualDensity>,
+        background_color: Option<WidgetStatePropertyRef<Option<Color>>>,
+        side: Option<AnyBorderSide>,
+        inner_radius: Option<WidgetStatePropertyRef<Option<f64>>>,
+    }
+}
+
 impl RadioThemeData {
     /// Creates a theme that can be used for `ThemeData::radio_theme`.
     pub fn new() -> RadioThemeData {

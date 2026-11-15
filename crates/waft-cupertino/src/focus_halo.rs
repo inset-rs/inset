@@ -4,8 +4,8 @@ use std::fmt::{self, Debug};
 
 use waft_foundation::{App, Handle};
 use waft_painting::{
-    BorderRadius, BorderRadiusGeometry, BorderSide, BorderStyle, HSLColor, RoundedRectangleBorder,
-    RoundedSuperellipseBorder, ShapeBorder, ShapeDecoration,
+    BorderRadius, BorderRadiusGeometry, BorderSide, BorderStyle, DecorationRef, HSLColor,
+    RoundedRectangleBorder, RoundedSuperellipseBorder, ShapeBorderRef, ShapeDecoration,
 };
 use waft_rendering::DecorationPosition;
 use waft_widgets::{
@@ -20,7 +20,7 @@ use crate::constants::{
 };
 
 /// Dart's `ShapeBorder Function({BorderRadiusGeometry borderRadius, BorderSide side})`.
-type ShapeBuilder = fn(BorderRadiusGeometry, BorderSide) -> Box<dyn ShapeBorder>;
+type ShapeBuilder = fn(BorderRadiusGeometry, BorderSide) -> ShapeBorderRef;
 
 /// Applies an iOS-style focus border around its child when any of child focus nodes gain focus.
 ///
@@ -109,16 +109,16 @@ impl Debug for CupertinoFocusHalo {
 fn rounded_rectangle_border(
     border_radius: BorderRadiusGeometry,
     side: BorderSide,
-) -> Box<dyn ShapeBorder> {
-    Box::new(RoundedRectangleBorder::new(side, border_radius))
+) -> ShapeBorderRef {
+    ShapeBorderRef::new(RoundedRectangleBorder::new(side, border_radius))
 }
 
 /// Dart's `RoundedSuperellipseBorder.new` as a shape builder.
 fn rounded_superellipse_border(
     border_radius: BorderRadiusGeometry,
     side: BorderSide,
-) -> Box<dyn ShapeBorder> {
-    Box::new(RoundedSuperellipseBorder::new(side, Some(border_radius)))
+) -> ShapeBorderRef {
+    ShapeBorderRef::new(RoundedSuperellipseBorder::new(side, Some(border_radius)))
 }
 
 impl StatefulWidget for CupertinoFocusHalo {
@@ -176,7 +176,7 @@ impl State for CupertinoFocusHaloState {
         let shape = (widget.shape_builder)(widget.border_radius, side);
         Focus::new(DecoratedBox {
             key: None,
-            decoration: Box::new(ShapeDecoration::new(shape)),
+            decoration: DecorationRef::new(ShapeDecoration::new(shape)),
             position: DecorationPosition::Foreground,
             child: Some(widget.child.clone()),
         })

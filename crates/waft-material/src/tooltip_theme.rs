@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use waft_embedder::{TextAlign, lerp_double};
 use waft_foundation::App;
-use waft_painting::{Decoration, EdgeInsetsGeometry, TextStyle};
+use waft_painting::{DecorationRef, EdgeInsetsGeometry, TextStyle};
 use waft_rendering::BoxConstraints;
 use waft_widgets::{
     BuildContext, InheritedTheme, InheritedWidget, IntoWidget, KeyRef, TooltipTriggerMode,
@@ -28,7 +28,7 @@ use crate::theme::Theme;
 ///  * `ThemeData::tooltip_theme`, which specifies a tooltip theme as part of
 ///    an overall theme.
 ///  * `MaterialApp::theme`, which specifies a theme for the whole application.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct TooltipThemeData {
     /// The minimum height of the `Tooltip`'s message.
     #[deprecated(
@@ -72,7 +72,7 @@ pub struct TooltipThemeData {
     pub exclude_from_semantics: Option<bool>,
 
     /// The `Tooltip`'s shape and background color.
-    pub decoration: Option<Box<dyn Decoration>>,
+    pub decoration: Option<DecorationRef>,
 
     /// The style to use for the message of `Tooltip`s.
     pub text_style: Option<TextStyle>,
@@ -178,8 +178,8 @@ impl TooltipThemeData {
     }
 
     /// Dart `TooltipThemeData(decoration:)`.
-    pub fn decoration(mut self, decoration: impl Decoration + 'static) -> TooltipThemeData {
-        self.decoration = Some(Box::new(decoration));
+    pub fn decoration(mut self, decoration: impl Into<DecorationRef>) -> TooltipThemeData {
+        self.decoration = Some(decoration.into());
         self
     }
 
@@ -275,9 +275,9 @@ impl TooltipThemeData {
             ),
             prefer_below: pick(a, b, t, |theme| theme.prefer_below),
             exclude_from_semantics: pick(a, b, t, |theme| theme.exclude_from_semantics),
-            decoration: <dyn Decoration>::lerp(
-                a.and_then(|a| a.decoration.as_deref()),
-                b.and_then(|b| b.decoration.as_deref()),
+            decoration: DecorationRef::lerp(
+                a.and_then(|a| a.decoration.as_ref()),
+                b.and_then(|b| b.decoration.as_ref()),
                 t,
             ),
             text_style: TextStyle::lerp(
@@ -311,33 +311,6 @@ fn pick<T>(
 }
 
 #[allow(deprecated)]
-impl Clone for TooltipThemeData {
-    fn clone(&self) -> TooltipThemeData {
-        TooltipThemeData {
-            height: self.height,
-            constraints: self.constraints,
-            padding: self.padding,
-            margin: self.margin,
-            vertical_offset: self.vertical_offset,
-            prefer_below: self.prefer_below,
-            exclude_from_semantics: self.exclude_from_semantics,
-            decoration: self
-                .decoration
-                .as_ref()
-                .map(|decoration| decoration.clone_box()),
-            text_style: self.text_style.clone(),
-            text_align: self.text_align,
-            wait_duration: self.wait_duration,
-            show_duration: self.show_duration,
-            exit_duration: self.exit_duration,
-            trigger_mode: self.trigger_mode,
-            enable_feedback: self.enable_feedback,
-            ignore_pointer: self.ignore_pointer,
-        }
-    }
-}
-
-#[allow(deprecated)]
 impl PartialEq for TooltipThemeData {
     fn eq(&self, other: &TooltipThemeData) -> bool {
         if std::ptr::eq(self, other) {
@@ -350,11 +323,7 @@ impl PartialEq for TooltipThemeData {
             && other.vertical_offset == self.vertical_offset
             && other.prefer_below == self.prefer_below
             && other.exclude_from_semantics == self.exclude_from_semantics
-            && match (other.decoration.as_deref(), self.decoration.as_deref()) {
-                (None, None) => true,
-                (Some(other), Some(this)) => other.eq_decoration(this),
-                _ => false,
-            }
+            && other.decoration == self.decoration
             && other.text_style == self.text_style
             && other.text_align == self.text_align
             && other.wait_duration == self.wait_duration

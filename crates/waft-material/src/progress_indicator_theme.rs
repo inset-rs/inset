@@ -138,6 +138,30 @@ pub struct ProgressIndicatorThemeData {
     pub controller: Option<Handle<AnimationController>>,
 }
 
+crate::theme_data_getters::theme_data_getters! {
+    /// Dart's getters of `ProgressIndicatorThemeData`: the theme data answers with its fields, and a defaults
+    /// subclass (Dart's `_...Defaults...(context)`) computes the ones it overrides when they
+    /// are read.
+    pub trait ProgressIndicatorThemeDataGetters for ProgressIndicatorThemeData, fields: progress_indicator_theme_data {
+        color: Option<Color>,
+        linear_track_color: Option<Color>,
+        linear_min_height: Option<f64>,
+        circular_track_color: Option<Color>,
+        refresh_background_color: Option<Color>,
+        border_radius: Option<BorderRadiusGeometry>,
+        stop_indicator_color: Option<Color>,
+        stop_indicator_radius: Option<f64>,
+        stroke_width: Option<f64>,
+        stroke_align: Option<f64>,
+        stroke_cap: Option<StrokeCap>,
+        constraints: Option<BoxConstraints>,
+        track_gap: Option<f64>,
+        circular_track_padding: Option<EdgeInsetsGeometry>,
+        year2023: Option<bool>,
+        controller: Option<Handle<AnimationController>>,
+    }
+}
+
 #[allow(deprecated)]
 impl ProgressIndicatorThemeData {
     /// Creates the set of properties used to configure `ProgressIndicator` widgets.

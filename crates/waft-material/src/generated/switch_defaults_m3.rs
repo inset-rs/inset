@@ -1,5 +1,5 @@
-//! Flutter counterpart: material_ui's `generated/switch_defaults_m3.g.dart`, a Dart `part` of
-//! `switch.dart`: `Switch`'s Material 3 build reads it.
+//! Flutter counterpart: material_ui's `generated/switch_defaults_m3.g.dart`, a part of
+//! `switch.dart`.
 
 // Do not edit by hand. The code is generated from data in the Material
 // Design token database by the script:
@@ -19,134 +19,169 @@ use crate::colors::Colors;
 use crate::constants::K_MIN_INTERACTIVE_DIMENSION;
 use crate::shadows::k_elevation_to_shadow;
 use crate::switch::SwitchConfig;
-use crate::switch_theme::SwitchThemeData;
+use crate::switch_theme::{SwitchThemeData, SwitchThemeDataGetters};
 use crate::theme::Theme;
+use crate::theme_data_getters::DefaultsContext;
+use waft_services::MouseCursorRef;
 
-/// Dart's `_SwitchDefaultsM3(context)`: the [`SwitchThemeData`] whose fields are the values of
-/// that subclass's getters.
-pub(crate) fn switch_defaults_m3(app: &mut App, context: BuildContext) -> SwitchThemeData {
-    let colors = Theme::of(app, context).color_scheme.clone();
+/// Dart's `_SwitchDefaultsM3`.
+pub(crate) struct SwitchDefaultsM3 {
+    /// Dart's `super(..)` arguments.
+    switch_theme_data: SwitchThemeData,
+    context: DefaultsContext,
+}
 
-    SwitchThemeData::new()
-        .thumb_color(thumb_color(colors.clone()))
-        .track_color(track_color(colors.clone()))
-        .track_outline_color(track_outline_color(colors.clone()))
-        .overlay_color(overlay_color(colors))
-        .mouse_cursor(<dyn WidgetStateProperty<_>>::resolve_with(
+impl SwitchDefaultsM3 {
+    pub(crate) fn new(context: BuildContext) -> SwitchDefaultsM3 {
+        SwitchDefaultsM3 {
+            switch_theme_data: SwitchThemeData::new(),
+            context: DefaultsContext::new(context),
+        }
+    }
+}
+
+impl SwitchThemeDataGetters for SwitchDefaultsM3 {
+    fn switch_theme_data(&self) -> &SwitchThemeData {
+        &self.switch_theme_data
+    }
+
+    fn thumb_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        let colors = self.context.colors(app).clone();
+        Some(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
+            move |states: &WidgetStates| {
+                if states.contains(&WidgetState::Disabled) {
+                    if states.contains(&WidgetState::Selected) {
+                        return Some(colors.surface);
+                    }
+                    return Some(colors.on_surface.with_opacity(0.38));
+                }
+                if states.contains(&WidgetState::Selected) {
+                    if states.contains(&WidgetState::Pressed) {
+                        return Some(colors.primary_container());
+                    }
+                    if states.contains(&WidgetState::Hovered) {
+                        return Some(colors.primary_container());
+                    }
+                    if states.contains(&WidgetState::Focused) {
+                        return Some(colors.primary_container());
+                    }
+                    return Some(colors.on_primary);
+                }
+                if states.contains(&WidgetState::Pressed) {
+                    return Some(colors.on_surface_variant());
+                }
+                if states.contains(&WidgetState::Hovered) {
+                    return Some(colors.on_surface_variant());
+                }
+                if states.contains(&WidgetState::Focused) {
+                    return Some(colors.on_surface_variant());
+                }
+                Some(colors.outline())
+            },
+        ))
+    }
+
+    fn track_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        let colors = self.context.colors(app).clone();
+        Some(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
+            move |states: &WidgetStates| {
+                if states.contains(&WidgetState::Disabled) {
+                    if states.contains(&WidgetState::Selected) {
+                        return Some(colors.on_surface.with_opacity(0.12));
+                    }
+                    return Some(colors.surface_container_highest().with_opacity(0.12));
+                }
+                if states.contains(&WidgetState::Selected) {
+                    if states.contains(&WidgetState::Pressed) {
+                        return Some(colors.primary);
+                    }
+                    if states.contains(&WidgetState::Hovered) {
+                        return Some(colors.primary);
+                    }
+                    if states.contains(&WidgetState::Focused) {
+                        return Some(colors.primary);
+                    }
+                    return Some(colors.primary);
+                }
+                if states.contains(&WidgetState::Pressed) {
+                    return Some(colors.surface_container_highest());
+                }
+                if states.contains(&WidgetState::Hovered) {
+                    return Some(colors.surface_container_highest());
+                }
+                if states.contains(&WidgetState::Focused) {
+                    return Some(colors.surface_container_highest());
+                }
+                Some(colors.surface_container_highest())
+            },
+        ))
+    }
+
+    fn track_outline_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        let colors = self.context.colors(app).clone();
+        Some(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
+            move |states: &WidgetStates| {
+                if states.contains(&WidgetState::Selected) {
+                    return Some(Colors::TRANSPARENT);
+                }
+                if states.contains(&WidgetState::Disabled) {
+                    return Some(colors.on_surface.with_opacity(0.12));
+                }
+                Some(colors.outline())
+            },
+        ))
+    }
+
+    fn overlay_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        let colors = self.context.colors(app).clone();
+        Some(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
+            move |states: &WidgetStates| {
+                if states.contains(&WidgetState::Selected) {
+                    if states.contains(&WidgetState::Pressed) {
+                        return Some(colors.primary.with_opacity(0.1));
+                    }
+                    if states.contains(&WidgetState::Hovered) {
+                        return Some(colors.primary.with_opacity(0.08));
+                    }
+                    if states.contains(&WidgetState::Focused) {
+                        return Some(colors.primary.with_opacity(0.1));
+                    }
+                    return None;
+                }
+                if states.contains(&WidgetState::Pressed) {
+                    return Some(colors.on_surface.with_opacity(0.1));
+                }
+                if states.contains(&WidgetState::Hovered) {
+                    return Some(colors.on_surface.with_opacity(0.08));
+                }
+                if states.contains(&WidgetState::Focused) {
+                    return Some(colors.on_surface.with_opacity(0.1));
+                }
+                None
+            },
+        ))
+    }
+
+    fn mouse_cursor(
+        &self,
+        _app: &mut App,
+    ) -> Option<WidgetStatePropertyRef<Option<MouseCursorRef>>> {
+        Some(<dyn WidgetStateProperty<_>>::resolve_with(
             |states: &WidgetStates| Some(WidgetStateMouseCursor::clickable().resolve(states)),
         ))
-        .track_outline_width(<dyn WidgetStateProperty<Option<f64>>>::all(Some(2.0)))
-        .splash_radius(40.0 / 2.0)
-        .padding(EdgeInsetsGeometry::symmetric(0.0, 4.0))
-}
+    }
 
-/// Dart's `_SwitchDefaultsM3.thumbColor`.
-fn thumb_color(colors: ColorScheme) -> WidgetStatePropertyRef<Option<Color>> {
-    <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states: &WidgetStates| {
-        if states.contains(&WidgetState::Disabled) {
-            if states.contains(&WidgetState::Selected) {
-                return Some(colors.surface);
-            }
-            return Some(colors.on_surface.with_opacity(0.38));
-        }
-        if states.contains(&WidgetState::Selected) {
-            if states.contains(&WidgetState::Pressed) {
-                return Some(colors.primary_container());
-            }
-            if states.contains(&WidgetState::Hovered) {
-                return Some(colors.primary_container());
-            }
-            if states.contains(&WidgetState::Focused) {
-                return Some(colors.primary_container());
-            }
-            return Some(colors.on_primary);
-        }
-        if states.contains(&WidgetState::Pressed) {
-            return Some(colors.on_surface_variant());
-        }
-        if states.contains(&WidgetState::Hovered) {
-            return Some(colors.on_surface_variant());
-        }
-        if states.contains(&WidgetState::Focused) {
-            return Some(colors.on_surface_variant());
-        }
-        Some(colors.outline())
-    })
-}
+    fn track_outline_width(&self, _app: &mut App) -> Option<WidgetStatePropertyRef<Option<f64>>> {
+        Some(<dyn WidgetStateProperty<Option<f64>>>::all(Some(2.0)))
+    }
 
-/// Dart's `_SwitchDefaultsM3.trackColor`.
-fn track_color(colors: ColorScheme) -> WidgetStatePropertyRef<Option<Color>> {
-    <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states: &WidgetStates| {
-        if states.contains(&WidgetState::Disabled) {
-            if states.contains(&WidgetState::Selected) {
-                return Some(colors.on_surface.with_opacity(0.12));
-            }
-            return Some(colors.surface_container_highest().with_opacity(0.12));
-        }
-        if states.contains(&WidgetState::Selected) {
-            if states.contains(&WidgetState::Pressed) {
-                return Some(colors.primary);
-            }
-            if states.contains(&WidgetState::Hovered) {
-                return Some(colors.primary);
-            }
-            if states.contains(&WidgetState::Focused) {
-                return Some(colors.primary);
-            }
-            return Some(colors.primary);
-        }
-        if states.contains(&WidgetState::Pressed) {
-            return Some(colors.surface_container_highest());
-        }
-        if states.contains(&WidgetState::Hovered) {
-            return Some(colors.surface_container_highest());
-        }
-        if states.contains(&WidgetState::Focused) {
-            return Some(colors.surface_container_highest());
-        }
-        Some(colors.surface_container_highest())
-    })
-}
+    fn splash_radius(&self, _app: &mut App) -> Option<f64> {
+        Some(40.0 / 2.0)
+    }
 
-/// Dart's `_SwitchDefaultsM3.trackOutlineColor`.
-fn track_outline_color(colors: ColorScheme) -> WidgetStatePropertyRef<Option<Color>> {
-    <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states: &WidgetStates| {
-        if states.contains(&WidgetState::Selected) {
-            return Some(Colors::TRANSPARENT);
-        }
-        if states.contains(&WidgetState::Disabled) {
-            return Some(colors.on_surface.with_opacity(0.12));
-        }
-        Some(colors.outline())
-    })
-}
-
-/// Dart's `_SwitchDefaultsM3.overlayColor`.
-fn overlay_color(colors: ColorScheme) -> WidgetStatePropertyRef<Option<Color>> {
-    <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states: &WidgetStates| {
-        if states.contains(&WidgetState::Selected) {
-            if states.contains(&WidgetState::Pressed) {
-                return Some(colors.primary.with_opacity(0.1));
-            }
-            if states.contains(&WidgetState::Hovered) {
-                return Some(colors.primary.with_opacity(0.08));
-            }
-            if states.contains(&WidgetState::Focused) {
-                return Some(colors.primary.with_opacity(0.1));
-            }
-            return None;
-        }
-        if states.contains(&WidgetState::Pressed) {
-            return Some(colors.on_surface.with_opacity(0.1));
-        }
-        if states.contains(&WidgetState::Hovered) {
-            return Some(colors.on_surface.with_opacity(0.08));
-        }
-        if states.contains(&WidgetState::Focused) {
-            return Some(colors.on_surface.with_opacity(0.1));
-        }
-        None
-    })
+    fn padding(&self, _app: &mut App) -> Option<EdgeInsetsGeometry> {
+        Some(EdgeInsetsGeometry::symmetric(0.0, 4.0))
+    }
 }
 
 /// Dart's `_SwitchConfigM3`.

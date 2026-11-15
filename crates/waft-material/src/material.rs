@@ -13,7 +13,7 @@ use waft_embedder::{
 use waft_foundation::{App, Handle, HandleId, Listener};
 use waft_painting::{
     BorderRadius, BorderRadiusGeometry, BorderSide, CircleBorder, Clip, ClipContext,
-    RoundedRectangleBorder, ShapeBorder, TextStyle,
+    RoundedRectangleBorder, ShapeBorderRef, TextStyle,
 };
 use waft_rendering::{
     AnyRenderBox, AnyRenderObject, BoxConstraints, BoxHitTestResult, CustomClipper, CustomPainter,
@@ -415,7 +415,7 @@ pub struct Material {
     ///
     /// A shadow is only displayed if the [`elevation`](Self::elevation) is greater than
     /// zero.
-    pub shape: Option<Box<dyn ShapeBorder>>,
+    pub shape: Option<ShapeBorderRef>,
 
     /// Whether to paint the [`shape`](Self::shape) border in front of the
     /// [`child`](Self::child).
@@ -540,7 +540,7 @@ impl Material {
     }
 
     /// Dart `Material(shape:)`.
-    pub fn shape(mut self, shape: impl Into<Box<dyn ShapeBorder>>) -> Material {
+    pub fn shape(mut self, shape: impl Into<ShapeBorderRef>) -> Material {
         self.shape = Some(shape.into());
         self.debug_assert_shape_fits_type();
         self
@@ -751,8 +751,8 @@ impl State for MaterialWidgetState {
             })
             .into_widget();
 
-        let mut shape: Option<Box<dyn ShapeBorder>> = match widget.border_radius {
-            Some(border_radius) => Some(Box::new(RoundedRectangleBorder::new(
+        let shape: Option<ShapeBorderRef> = match widget.border_radius {
+            Some(border_radius) => Some(ShapeBorderRef::new(RoundedRectangleBorder::new(
                 BorderSide::NONE,
                 border_radius,
             ))),
@@ -793,23 +793,24 @@ impl State for MaterialWidgetState {
             .into_widget();
         }
 
-        let shape = shape.get_or_insert_with(|| match widget.r#type {
-            MaterialType::Circle => Box::new(CircleBorder::default()),
+        let shape = shape.unwrap_or_else(|| match widget.r#type {
+            MaterialType::Circle => ShapeBorderRef::new(CircleBorder::default()),
             MaterialType::Canvas | MaterialType::Transparency => {
-                Box::new(RoundedRectangleBorder::default())
+                ShapeBorderRef::new(RoundedRectangleBorder::default())
             }
-            MaterialType::Card | MaterialType::Button => Box::new(RoundedRectangleBorder::new(
-                BorderSide::NONE,
-                BorderRadius::all(Radius::circular(2.0)).into(),
-            )),
+            MaterialType::Card | MaterialType::Button => {
+                ShapeBorderRef::new(RoundedRectangleBorder::new(
+                    BorderSide::NONE,
+                    BorderRadius::all(Radius::circular(2.0)).into(),
+                ))
+            }
         });
-        let shape = shape.clone_box();
 
         if widget.r#type == MaterialType::Transparency {
             let text_direction = Directionality::maybe_of(app, context);
             return ClipPath::new()
                 .clipper(Rc::new(ShapeBorderClipper::new(
-                    shape.clone_box(),
+                    shape.clone(),
                     text_direction,
                 )))
                 .clip_behavior(widget.clip_behavior)
@@ -1432,13 +1433,13 @@ impl InkFeature {
 ///
 /// A value rather than an arena object, as waft-widgets' `DecorationTween`: a driven
 /// animation holds a clone.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ShapeBorderTween {
     /// The value this variable has at the beginning of the animation.
-    pub begin: Option<Box<dyn ShapeBorder>>,
+    pub begin: Option<ShapeBorderRef>,
 
     /// The value this variable has at the end of the animation.
-    pub end: Option<Box<dyn ShapeBorder>>,
+    pub end: Option<ShapeBorderRef>,
 }
 
 impl ShapeBorderTween {
@@ -1446,31 +1447,19 @@ impl ShapeBorderTween {
     ///
     /// the [`begin`](Self::begin) and [`end`](Self::end) properties may be null; see
     /// `ShapeBorder::lerp` for the null handling semantics.
-    pub fn new(
-        begin: Option<Box<dyn ShapeBorder>>,
-        end: Option<Box<dyn ShapeBorder>>,
-    ) -> ShapeBorderTween {
+    pub fn new(begin: Option<ShapeBorderRef>, end: Option<ShapeBorderRef>) -> ShapeBorderTween {
         ShapeBorderTween { begin, end }
     }
 
     /// Returns the value this tween has at the given animation clock value.
-    pub fn lerp(&self, t: f64) -> Option<Box<dyn ShapeBorder>> {
-        <dyn ShapeBorder>::lerp(self.begin.as_deref(), self.end.as_deref(), t)
-    }
-}
-
-impl Clone for ShapeBorderTween {
-    fn clone(&self) -> ShapeBorderTween {
-        ShapeBorderTween {
-            begin: self.begin.clone(),
-            end: self.end.clone(),
-        }
+    pub fn lerp(&self, t: f64) -> Option<ShapeBorderRef> {
+        ShapeBorderRef::lerp(self.begin.as_ref(), self.end.as_ref(), t)
     }
 }
 
 /// Dart's `Tween.transform`, which hands back the nullable endpoints themselves at 0 and 1.
-impl Animatable<Option<Box<dyn ShapeBorder>>> for ShapeBorderTween {
-    fn transform(&self, _app: &App, t: f64) -> Option<Box<dyn ShapeBorder>> {
+impl Animatable<Option<ShapeBorderRef>> for ShapeBorderTween {
+    fn transform(&self, _app: &App, t: f64) -> Option<ShapeBorderRef> {
         if t == 0.0 {
             return self.begin.clone();
         }
@@ -1483,21 +1472,21 @@ impl Animatable<Option<Box<dyn ShapeBorder>>> for ShapeBorderTween {
 
 /// Dart's `Tween<ShapeBorder?>`: an unset endpoint and a null one are the same.
 impl TweenSlot for ShapeBorderTween {
-    type Value = Option<Box<dyn ShapeBorder>>;
+    type Value = Option<ShapeBorderRef>;
 
-    fn begin(&self, _app: &App) -> Option<Option<Box<dyn ShapeBorder>>> {
+    fn begin(&self, _app: &App) -> Option<Option<ShapeBorderRef>> {
         self.begin.clone().map(Some)
     }
 
-    fn set_begin(&mut self, _app: &mut App, begin: Option<Option<Box<dyn ShapeBorder>>>) {
+    fn set_begin(&mut self, _app: &mut App, begin: Option<Option<ShapeBorderRef>>) {
         self.begin = begin.flatten();
     }
 
-    fn end(&self, _app: &App) -> Option<Option<Box<dyn ShapeBorder>>> {
+    fn end(&self, _app: &App) -> Option<Option<ShapeBorderRef>> {
         self.end.clone().map(Some)
     }
 
-    fn set_end(&mut self, _app: &mut App, end: Option<Option<Box<dyn ShapeBorder>>>) {
+    fn set_end(&mut self, _app: &mut App, end: Option<Option<ShapeBorderRef>>) {
         self.end = end.flatten();
     }
 }
@@ -1519,7 +1508,7 @@ struct MaterialInterior {
     ///
     /// This border will be painted, and in addition the outer path of the border
     /// determines the physical shape.
-    shape: Box<dyn ShapeBorder>,
+    shape: ShapeBorderRef,
 
     /// Whether to paint the border in front of the child.
     ///
@@ -1554,7 +1543,7 @@ impl MaterialInterior {
     /// The [`elevation`](Self::elevation) must be specified and greater than or equal to zero.
     fn new(
         child: WidgetRef,
-        shape: Box<dyn ShapeBorder>,
+        shape: ShapeBorderRef,
         elevation: f64,
         color: Color,
         shadow_color: Color,
@@ -1666,7 +1655,7 @@ impl ImplicitlyAnimatedWidgetState for MaterialInteriorState {
             None
         };
         let tween = app.get(self).border.clone();
-        let target = Some(Some(self.widget(app).shape.clone_box()));
+        let target = Some(Some(self.widget(app).shape.clone()));
         app.get_mut(self).border = visitor.visit(app, tween, target, |_app, value| {
             ShapeBorderTween::new(value.clone(), None)
         });
@@ -1724,7 +1713,7 @@ impl State for MaterialInteriorState {
         let child = widget.child.clone();
         let text_direction = Directionality::maybe_of(app, context);
         let clipper: Rc<dyn CustomClipper<Path>> =
-            Rc::new(ShapeBorderClipper::new(shape.clone_box(), text_direction));
+            Rc::new(ShapeBorderClipper::new(shape.clone(), text_direction));
         PhysicalShape::new(clipper, color)
             .clip_behavior(clip_behavior)
             .elevation(elevation)
@@ -1738,12 +1727,12 @@ impl State for MaterialInteriorState {
 #[derive(Debug)]
 struct ShapeBorderPaint {
     child: WidgetRef,
-    shape: Box<dyn ShapeBorder>,
+    shape: ShapeBorderRef,
     border_on_foreground: bool,
 }
 
 impl ShapeBorderPaint {
-    fn new(child: WidgetRef, shape: Box<dyn ShapeBorder>) -> ShapeBorderPaint {
+    fn new(child: WidgetRef, shape: ShapeBorderRef) -> ShapeBorderPaint {
         ShapeBorderPaint {
             child,
             shape,
@@ -1759,10 +1748,8 @@ impl ShapeBorderPaint {
 
 impl StatelessWidget for ShapeBorderPaint {
     fn build(&self, app: &mut App, context: BuildContext) -> WidgetRef {
-        let painter = ShapeBorderPainter::new(
-            self.shape.clone_box(),
-            Directionality::maybe_of(app, context),
-        );
+        let painter =
+            ShapeBorderPainter::new(self.shape.clone(), Directionality::maybe_of(app, context));
         let paint = CustomPaint::new().child(self.child.clone());
         if self.border_on_foreground {
             paint.foreground_painter(painter)
@@ -1775,15 +1762,12 @@ impl StatelessWidget for ShapeBorderPaint {
 
 /// Dart's `_ShapeBorderPainter`.
 struct ShapeBorderPainter {
-    border: Box<dyn ShapeBorder>,
+    border: ShapeBorderRef,
     text_direction: Option<TextDirection>,
 }
 
 impl ShapeBorderPainter {
-    fn new(
-        border: Box<dyn ShapeBorder>,
-        text_direction: Option<TextDirection>,
-    ) -> ShapeBorderPainter {
+    fn new(border: ShapeBorderRef, text_direction: Option<TextDirection>) -> ShapeBorderPainter {
         ShapeBorderPainter {
             border,
             text_direction,
@@ -1802,7 +1786,7 @@ impl CustomPainter for ShapeBorderPainter {
             .as_any()
             .downcast_ref::<ShapeBorderPainter>()
             .expect("compared with a painter of its own type");
-        !old_delegate.border.eq_shape(&*self.border)
+        old_delegate.border != self.border
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -1813,6 +1797,7 @@ impl CustomPainter for ShapeBorderPainter {
 #[cfg(test)]
 mod tests {
     use std::cell::{Cell, RefCell};
+    use waft_painting::ShapeBorder;
 
     use waft_embedder::{Paint, TargetPlatform, TextDirection, ViewId, ViewRef};
     use waft_foundation::AppCell;
@@ -1880,7 +1865,7 @@ mod tests {
         tester.first::<RenderPhysicalShape>()
     }
 
-    fn shape_of(tester: &WidgetTester) -> Box<dyn ShapeBorder> {
+    fn shape_of(tester: &WidgetTester) -> ShapeBorderRef {
         let model = model(tester);
         let app = tester.cell.borrow();
         let clipper = RenderCustomClip::clipper(model, &app).expect("a shape clipper");
@@ -1958,6 +1943,85 @@ mod tests {
 
             tester.pump(K_THEME_CHANGE_DURATION);
             assert_eq!(model(&tester).elevation(&tester.cell.borrow()), 9.0);
+        });
+    }
+
+    /// A shape with Dart's default `==`, identity, as a user's own border has.
+    #[derive(Clone, Copy, Debug)]
+    struct IdentityShape;
+
+    impl ShapeBorder for IdentityShape {
+        fn dimensions(&self) -> waft_painting::EdgeInsetsGeometry {
+            waft_painting::EdgeInsetsGeometry::ZERO
+        }
+
+        fn scale(&self, _t: f64) -> ShapeBorderRef {
+            ShapeBorderRef::new(*self)
+        }
+
+        fn get_outer_path(
+            &self,
+            rect: waft_embedder::Rect,
+            _text_direction: Option<TextDirection>,
+        ) -> waft_embedder::Path {
+            let mut path = waft_embedder::PathBuilder::new();
+            path.rect(rect.into());
+            waft_embedder::Path::new(path.build())
+        }
+
+        fn get_inner_path(
+            &self,
+            rect: waft_embedder::Rect,
+            text_direction: Option<TextDirection>,
+        ) -> waft_embedder::Path {
+            self.get_outer_path(rect, text_direction)
+        }
+
+        fn paint(
+            &self,
+            _canvas: &mut waft_embedder::Canvas,
+            _rect: waft_embedder::Rect,
+            _text_direction: Option<TextDirection>,
+        ) {
+        }
+
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+    }
+
+    // ---- not in material_test.dart: a shape compared by identity ----
+
+    #[test]
+    fn a_material_given_its_own_shape_again_does_not_animate_its_shape() {
+        with_main_thread_stack(|| {
+            let shaped = |shape: &ShapeBorderRef| {
+                centered(Material::new().color(GREEN).shape(shape.clone()))
+            };
+            let transient_callbacks = |tester: &WidgetTester| {
+                waft_scheduler::SchedulerBinding::transient_callback_count(
+                    &mut tester.cell.borrow_mut(),
+                )
+            };
+            let mut tester = tester();
+            let shape = ShapeBorderRef::new(IdentityShape);
+            tester.pump_widget(shaped(&shape));
+            tester.pump(K_THEME_CHANGE_DURATION);
+
+            tester.pump_widget(shaped(&shape));
+            assert_eq!(
+                transient_callbacks(&tester),
+                0,
+                "the same shape is no new target"
+            );
+            assert_eq!(shape_of(&tester), shape);
+
+            tester.pump_widget(shaped(&ShapeBorderRef::new(IdentityShape)));
+            assert_eq!(
+                transient_callbacks(&tester),
+                1,
+                "another shape of the same type is, as Dart's identity `==` makes it"
+            );
         });
     }
 
@@ -2176,7 +2240,7 @@ mod tests {
         });
     }
 
-    fn clip_shape(tester: &WidgetTester) -> (Clip, Box<dyn ShapeBorder>) {
+    fn clip_shape(tester: &WidgetTester) -> (Clip, ShapeBorderRef) {
         let clip = tester.first::<RenderClipPath>();
         let app = tester.cell.borrow();
         let clipper = RenderCustomClip::clipper(clip, &app).expect("a shape clipper");

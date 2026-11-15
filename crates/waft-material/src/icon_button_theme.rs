@@ -256,7 +256,7 @@ mod tests {
     use waft_foundation::{App, Listener, ValueNotifier};
     use waft_painting::{
         Alignment, AlignmentGeometry, BorderRadius, BorderSide, BorderStyle, EdgeInsets,
-        OutlinedBorder, RoundedRectangleBorder, ShapeBorder, StadiumBorder,
+        OutlinedBorderRef, RoundedRectangleBorder, ShapeBorder, StadiumBorder,
     };
     use waft_services::{
         LogicalKeyboardKey, MouseCursorRef, PhysicalKeyboardKey, SystemMouseCursors,
@@ -497,7 +497,7 @@ mod tests {
             .padding(EdgeInsets::all(3.0).into())
             .minimum_size(MINIMUM_SIZE)
             .side(side())
-            .shape(Box::new(shape()) as Box<dyn OutlinedBorder>)
+            .shape(OutlinedBorderRef::new(shape()))
             .enabled_mouse_cursor(SystemMouseCursors::TEXT.into())
             .disabled_mouse_cursor(SystemMouseCursors::GRAB.into())
             .tap_target_size(MaterialTapTargetSize::ShrinkWrap)

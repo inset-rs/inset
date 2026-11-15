@@ -10,8 +10,8 @@ use waft_embedder::{Canvas, Color, Offset, Paint, Path, Rect};
 use waft_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, K_IS_WEB};
 use waft_painting::{
     AnyBorderSide, AnyColor, AnyTextStyle, BorderSide, BorderSideExtension, ColorExtension,
-    EdgeInsetsGeometry, OutlinedBorder, RoundedRectangleBorder, ShapeBorder, TextDirection,
-    TextStyle, TextStyleExtension,
+    EdgeInsetsGeometry, OutlinedBorder, OutlinedBorderRef, RoundedRectangleBorder, ShapeBorder,
+    ShapeBorderRef, TextDirection, TextStyle, TextStyleExtension,
 };
 use waft_services::{MouseCursor, MouseCursorRef, MouseCursorSession, SystemMouseCursors};
 
@@ -1034,11 +1034,11 @@ impl Debug for LerpSides {
 /// [`WidgetStateOutlinedBorder::resolve_with`] or [`WidgetStateOutlinedBorder::from_map`].
 ///
 /// If a [`WidgetStateOutlinedBorder`] is used for a property or a parameter that doesn't
-/// support resolving [`WidgetStateProperty<Option<Box<dyn OutlinedBorder>>>`]s, then its
+/// support resolving [`WidgetStateProperty<Option<OutlinedBorderRef>>`]s, then its
 /// default value, Dart's `RoundedRectangleBorder()`, will be used for all states.
 ///
-/// It is itself an `OutlinedBorder`, as `OutlinedBorder` is a trait here: a
-/// `Box<dyn OutlinedBorder>` is recovered with
+/// It is itself an `OutlinedBorder`, as `OutlinedBorder` is a trait here: it is recovered
+/// from an `OutlinedBorderRef` with
 /// `border.as_any().downcast_ref::<WidgetStateOutlinedBorder>()`.
 #[derive(Clone)]
 pub struct WidgetStateOutlinedBorder {
@@ -1051,9 +1051,9 @@ pub struct WidgetStateOutlinedBorder {
 #[derive(Clone)]
 enum OutlinedBorderSubclass {
     /// `_WidgetStateOutlinedBorder`.
-    ResolveWith(WidgetPropertyResolver<Option<Box<dyn OutlinedBorder>>>),
+    ResolveWith(WidgetPropertyResolver<Option<OutlinedBorderRef>>),
     /// `_WidgetOutlinedBorderMapper`.
-    Mapper(Rc<WidgetStateMapper<Option<Box<dyn OutlinedBorder>>>>),
+    Mapper(Rc<WidgetStateMapper<Option<OutlinedBorderRef>>>),
 }
 
 impl WidgetStateOutlinedBorder {
@@ -1063,7 +1063,7 @@ impl WidgetStateOutlinedBorder {
     /// If used as a regular `OutlinedBorder`, it acts the same as an empty
     /// `RoundedRectangleBorder()` constructor.
     pub fn resolve_with(
-        callback: impl Fn(&WidgetStates) -> Option<Box<dyn OutlinedBorder>> + 'static,
+        callback: impl Fn(&WidgetStates) -> Option<OutlinedBorderRef> + 'static,
     ) -> WidgetStateOutlinedBorder {
         WidgetStateOutlinedBorder {
             subclass: OutlinedBorderSubclass::ResolveWith(Rc::new(callback)),
@@ -1075,9 +1075,7 @@ impl WidgetStateOutlinedBorder {
     ///
     /// This constructor's [`resolve`](WidgetStateProperty::resolve) method finds the first
     /// entry whose key is satisfied by the set of states, and returns its associated value.
-    pub fn from_map(
-        map: WidgetStateMap<Option<Box<dyn OutlinedBorder>>>,
-    ) -> WidgetStateOutlinedBorder {
+    pub fn from_map(map: WidgetStateMap<Option<OutlinedBorderRef>>) -> WidgetStateOutlinedBorder {
         WidgetStateOutlinedBorder {
             subclass: OutlinedBorderSubclass::Mapper(Rc::new(WidgetStateMapper::new(map))),
             border: RoundedRectangleBorder::default(),
@@ -1085,8 +1083,8 @@ impl WidgetStateOutlinedBorder {
     }
 }
 
-impl WidgetStateProperty<Option<Box<dyn OutlinedBorder>>> for WidgetStateOutlinedBorder {
-    fn resolve(&self, states: &WidgetStates) -> Option<Box<dyn OutlinedBorder>> {
+impl WidgetStateProperty<Option<OutlinedBorderRef>> for WidgetStateOutlinedBorder {
+    fn resolve(&self, states: &WidgetStates) -> Option<OutlinedBorderRef> {
         match &self.subclass {
             OutlinedBorderSubclass::ResolveWith(resolve) => resolve(states),
             OutlinedBorderSubclass::Mapper(mapper) => mapper.resolve(states),
@@ -1097,7 +1095,7 @@ impl WidgetStateProperty<Option<Box<dyn OutlinedBorder>>> for WidgetStateOutline
         self
     }
 
-    fn as_mapper(&self) -> Option<&WidgetStateMapper<Option<Box<dyn OutlinedBorder>>>> {
+    fn as_mapper(&self) -> Option<&WidgetStateMapper<Option<OutlinedBorderRef>>> {
         match &self.subclass {
             OutlinedBorderSubclass::Mapper(mapper) => Some(mapper.as_ref()),
             OutlinedBorderSubclass::ResolveWith(_) => None,
@@ -1105,10 +1103,7 @@ impl WidgetStateProperty<Option<Box<dyn OutlinedBorder>>> for WidgetStateOutline
     }
 
     // Dart's `RoundedRectangleBorder.==`; the mapper subclass has `WidgetStateMapper.==`.
-    fn eq_property(
-        &self,
-        other: &dyn WidgetStateProperty<Option<Box<dyn OutlinedBorder>>>,
-    ) -> bool {
+    fn eq_property(&self, other: &dyn WidgetStateProperty<Option<OutlinedBorderRef>>) -> bool {
         if let OutlinedBorderSubclass::Mapper(mapper) = &self.subclass {
             return mapper.eq_property(other);
         }
@@ -1137,15 +1132,15 @@ impl ShapeBorder for WidgetStateOutlinedBorder {
         self.border.dimensions()
     }
 
-    fn scale(&self, t: f64) -> Box<dyn ShapeBorder> {
+    fn scale(&self, t: f64) -> ShapeBorderRef {
         ShapeBorder::scale(&self.border, t)
     }
 
-    fn lerp_from(&self, a: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
+    fn lerp_from(&self, a: Option<&dyn ShapeBorder>, t: f64) -> Option<ShapeBorderRef> {
         self.border.lerp_from(a, t)
     }
 
-    fn lerp_to(&self, b: Option<&dyn ShapeBorder>, t: f64) -> Option<Box<dyn ShapeBorder>> {
+    fn lerp_to(&self, b: Option<&dyn ShapeBorder>, t: f64) -> Option<ShapeBorderRef> {
         self.border.lerp_to(b, t)
     }
 
@@ -1185,15 +1180,15 @@ impl ShapeBorder for WidgetStateOutlinedBorder {
         self.border.paint(canvas, rect, text_direction);
     }
 
-    fn clone_box(&self) -> Box<dyn ShapeBorder> {
-        Box::new(self.clone())
-    }
-
     fn as_any(&self) -> &dyn Any {
         self
     }
 
     fn as_outlined_border(&self) -> Option<&dyn OutlinedBorder> {
+        Some(self)
+    }
+
+    fn into_outlined_border(self: Rc<Self>) -> Option<Rc<dyn OutlinedBorder>> {
         Some(self)
     }
 
@@ -1225,27 +1220,23 @@ impl OutlinedBorder for WidgetStateOutlinedBorder {
         self.border.side()
     }
 
-    fn copy_with(&self, side: Option<BorderSide>) -> Box<dyn OutlinedBorder> {
+    fn copy_with(&self, side: Option<BorderSide>) -> OutlinedBorderRef {
         OutlinedBorder::copy_with(&self.border, side)
-    }
-
-    fn clone_outlined(&self) -> Box<dyn OutlinedBorder> {
-        Box::new(self.clone())
     }
 }
 
 /// Dart's `T?` is `OutlinedBorder?`: a `WidgetStateOutlinedBorder` resolves to an optional
 /// border.
-impl MaybeWidgetStateProperty<Option<Box<dyn OutlinedBorder>>> for Option<Box<dyn OutlinedBorder>> {
+impl MaybeWidgetStateProperty<Option<OutlinedBorderRef>> for Option<OutlinedBorderRef> {
     fn as_widget_state_property(
         &self,
-    ) -> Option<&dyn WidgetStateProperty<Option<Box<dyn OutlinedBorder>>>> {
+    ) -> Option<&dyn WidgetStateProperty<Option<OutlinedBorderRef>>> {
         self.as_ref()
             .and_then(|border| border.as_any().downcast_ref::<WidgetStateOutlinedBorder>())
-            .map(|border| border as &dyn WidgetStateProperty<Option<Box<dyn OutlinedBorder>>>)
+            .map(|border| border as &dyn WidgetStateProperty<Option<OutlinedBorderRef>>)
     }
 
-    fn from_resolved(value: Option<Box<dyn OutlinedBorder>>) -> Option<Box<dyn OutlinedBorder>> {
+    fn from_resolved(value: Option<OutlinedBorderRef>) -> Option<OutlinedBorderRef> {
         value
     }
 }
@@ -2293,8 +2284,8 @@ mod tests {
         assert!(side(white_border, black_border) == side(white_border, black_border));
         assert!(side(white_border, black_border) != side(black_border, white_border));
 
-        let rrect = |side: BorderSide| -> Box<dyn OutlinedBorder> {
-            Box::new(RoundedRectangleBorder {
+        let rrect = |side: BorderSide| -> OutlinedBorderRef {
+            OutlinedBorderRef::new(RoundedRectangleBorder {
                 side,
                 ..RoundedRectangleBorder::default()
             })
@@ -2445,16 +2436,16 @@ mod tests {
         let resolved = <dyn WidgetStateProperty<TextStyle>>::resolve_as(&style, &pressed);
         assert_eq!(resolved.font_size, Some(20.0));
 
-        let border: Option<Box<dyn OutlinedBorder>> = Some(Box::new(
+        let border: Option<OutlinedBorderRef> = Some(OutlinedBorderRef::new(
             WidgetStateOutlinedBorder::resolve_with(|states| {
                 states.contains(&WidgetState::Pressed).then(|| {
-                    Box::new(RoundedRectangleBorder {
+                    OutlinedBorderRef::new(RoundedRectangleBorder {
                         side: BorderSide {
                             width: 3.0,
                             ..BorderSide::default()
                         },
                         ..RoundedRectangleBorder::default()
-                    }) as Box<dyn OutlinedBorder>
+                    })
                 })
             }),
         ));
@@ -2463,10 +2454,9 @@ mod tests {
             RoundedRectangleBorder::default().side,
             "as a plain border it is the default rounded rectangle"
         );
-        let resolved = <dyn WidgetStateProperty<Option<Box<dyn OutlinedBorder>>>>::resolve_as(
-            &border, &pressed,
-        )
-        .expect("a border");
+        let resolved =
+            <dyn WidgetStateProperty<Option<OutlinedBorderRef>>>::resolve_as(&border, &pressed)
+                .expect("a border");
         assert_eq!(resolved.side().width, 3.0);
     }
 

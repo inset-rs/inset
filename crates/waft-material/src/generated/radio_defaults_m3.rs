@@ -1,8 +1,5 @@
-//! Flutter counterpart: material_ui's `generated/radio_defaults_m3.g.dart`, a Dart `part` of
-//! `radio.dart`: `Radio`'s Material 3 paint reads it.
-//!
-//! Dart's private `_RadioDefaultsM3` is a `RadioThemeData` whose getters read the context's
-//! theme; [`radio_defaults_m3`] returns the data those getters answer, read once from the theme.
+//! Flutter counterpart: material_ui's `generated/radio_defaults_m3.g.dart`, a part of
+//! `radio.dart`.
 
 // Do not edit by hand. The code is generated from data in the Material
 // Design token database by the script:
@@ -14,16 +11,37 @@ use waft_foundation::App;
 use waft_widgets::{BuildContext, WidgetState, WidgetStateProperty};
 
 use crate::colors::Colors;
-use crate::radio_theme::RadioThemeData;
-use crate::theme::Theme;
+use crate::radio_theme::{RadioThemeData, RadioThemeDataGetters};
+use crate::theme_data::MaterialTapTargetSize;
+use crate::theme_data::VisualDensity;
+use crate::theme_data_getters::DefaultsContext;
+use waft_widgets::WidgetStatePropertyRef;
 
-/// Dart's `_RadioDefaultsM3(context)`.
-pub(crate) fn radio_defaults_m3(app: &mut App, context: BuildContext) -> RadioThemeData {
-    let theme = Theme::of(app, context);
-    let colors = theme.color_scheme.clone();
+/// Dart's `_RadioDefaultsM3`.
+pub(crate) struct RadioDefaultsM3 {
+    /// Dart's `super(..)` arguments.
+    radio_theme_data: RadioThemeData,
+    context: DefaultsContext,
+}
 
-    RadioThemeData::new()
-        .fill_color({
+impl RadioDefaultsM3 {
+    pub(crate) fn new(context: BuildContext) -> RadioDefaultsM3 {
+        RadioDefaultsM3 {
+            radio_theme_data: RadioThemeData::new(),
+            context: DefaultsContext::new(context),
+        }
+    }
+}
+
+impl RadioThemeDataGetters for RadioDefaultsM3 {
+    fn radio_theme_data(&self) -> &RadioThemeData {
+        &self.radio_theme_data
+    }
+
+    fn fill_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        let theme = self.context.theme(app);
+        let colors = theme.color_scheme.clone();
+        Some({
             let colors = colors.clone();
             <dyn WidgetStateProperty<Option<Color>>>::resolve_with(move |states| {
                 if states.contains(&WidgetState::Selected) {
@@ -56,7 +74,12 @@ pub(crate) fn radio_defaults_m3(app: &mut App, context: BuildContext) -> RadioTh
                 Some(colors.on_surface_variant())
             })
         })
-        .overlay_color(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
+    }
+
+    fn overlay_color(&self, app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        let theme = self.context.theme(app);
+        let colors = theme.color_scheme.clone();
+        Some(<dyn WidgetStateProperty<Option<Color>>>::resolve_with(
             move |states| {
                 if states.contains(&WidgetState::Selected) {
                     if states.contains(&WidgetState::Pressed) {
@@ -82,9 +105,21 @@ pub(crate) fn radio_defaults_m3(app: &mut App, context: BuildContext) -> RadioTh
                 Some(Colors::TRANSPARENT)
             },
         ))
-        .material_tap_target_size(theme.material_tap_target_size)
-        .visual_density(theme.visual_density)
-        .background_color(<dyn WidgetStateProperty<Option<Color>>>::all(Some(
+    }
+
+    fn material_tap_target_size(&self, app: &mut App) -> Option<MaterialTapTargetSize> {
+        let theme = self.context.theme(app);
+        Some(theme.material_tap_target_size)
+    }
+
+    fn visual_density(&self, app: &mut App) -> Option<VisualDensity> {
+        let theme = self.context.theme(app);
+        Some(theme.visual_density)
+    }
+
+    fn background_color(&self, _app: &mut App) -> Option<WidgetStatePropertyRef<Option<Color>>> {
+        Some(<dyn WidgetStateProperty<Option<Color>>>::all(Some(
             Colors::TRANSPARENT,
         )))
+    }
 }

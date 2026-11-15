@@ -2,7 +2,7 @@
 
 use waft_embedder::{Color, lerp_double};
 use waft_foundation::App;
-use waft_painting::{AnyColor, EdgeInsets, ShapeBorder, TextStyle};
+use waft_painting::{AnyColor, EdgeInsets, ShapeBorderRef, TextStyle};
 use waft_widgets::{
     BuildContext, DismissDirection, InheritedTheme, InheritedWidget, IntoWidget, KeyRef, WidgetRef,
     WidgetStateColor,
@@ -97,7 +97,7 @@ pub struct SnackBarThemeData {
     /// specified, so the `SnackBar` is rectangular. For
     /// [`SnackBarBehavior::Floating`], it uses a `RoundedRectangleBorder` with a
     /// circular corner radius of 4.0.
-    pub shape: Option<Box<dyn ShapeBorder>>,
+    pub shape: Option<ShapeBorderRef>,
 
     /// Overrides the default value for `SnackBar::behavior`.
     ///
@@ -147,6 +147,29 @@ pub struct SnackBarThemeData {
     pub dismiss_direction: Option<DismissDirection>,
 }
 
+crate::theme_data_getters::theme_data_getters! {
+    /// Dart's getters of `SnackBarThemeData`: the theme data answers with its fields, and a defaults
+    /// subclass (Dart's `_...Defaults...(context)`) computes the ones it overrides when they
+    /// are read.
+    pub trait SnackBarThemeDataGetters for SnackBarThemeData, fields: snack_bar_theme_data {
+        background_color: Option<Color>,
+        action_text_color: Option<AnyColor>,
+        disabled_action_text_color: Option<Color>,
+        content_text_style: Option<TextStyle>,
+        elevation: Option<f64>,
+        shape: Option<ShapeBorderRef>,
+        behavior: Option<SnackBarBehavior>,
+        width: Option<f64>,
+        inset_padding: Option<EdgeInsets>,
+        show_close_icon: Option<bool>,
+        close_icon_color: Option<AnyColor>,
+        action_overflow_threshold: Option<f64>,
+        action_background_color: Option<AnyColor>,
+        disabled_action_background_color: Option<Color>,
+        dismiss_direction: Option<DismissDirection>,
+    }
+}
+
 impl SnackBarThemeData {
     /// Creates a theme that can be used for `ThemeData::snack_bar_theme`; Dart's optional
     /// named arguments are the fluent setters.
@@ -194,7 +217,7 @@ impl SnackBarThemeData {
     }
 
     /// Dart `SnackBarThemeData(shape:)`.
-    pub fn shape(mut self, shape: impl Into<Box<dyn ShapeBorder>>) -> SnackBarThemeData {
+    pub fn shape(mut self, shape: impl Into<ShapeBorderRef>) -> SnackBarThemeData {
         self.shape = Some(shape.into());
         self
     }
@@ -333,9 +356,9 @@ impl SnackBarThemeData {
                 t,
             ),
             elevation: lerp_double(a.and_then(|a| a.elevation), b.and_then(|b| b.elevation), t),
-            shape: <dyn ShapeBorder>::lerp(
-                a.and_then(|a| a.shape.as_deref()),
-                b.and_then(|b| b.shape.as_deref()),
+            shape: ShapeBorderRef::lerp(
+                a.and_then(|a| a.shape.as_ref()),
+                b.and_then(|b| b.shape.as_ref()),
                 t,
             ),
             behavior: if t < 0.5 {
@@ -491,6 +514,7 @@ impl InheritedWidget for SnackBarTheme {
 
 #[cfg(test)]
 mod tests {
+    use waft_painting::ShapeBorder;
     use waft_painting::{BorderRadiusGeometry, BorderSide, RoundedRectangleBorder};
     use waft_widgets::{SizedBox, WidgetState};
 

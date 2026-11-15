@@ -38,7 +38,7 @@ use waft_gestures::{
     VerticalDragGestureRecognizerBase,
 };
 use waft_painting::{
-    Axis, AxisDirection, EdgeInsets, EdgeInsetsGeometry, OutlinedBorder,
+    Axis, AxisDirection, EdgeInsets, EdgeInsetsGeometry, OutlinedBorderRef,
     axis_direction_is_reversed, axis_direction_to_axis, draw_rrect,
 };
 use waft_rendering::{AnyRenderBox, CustomPainter};
@@ -150,7 +150,7 @@ pub struct ScrollbarPainter {
     main_axis_margin: f64,
     cross_axis_margin: f64,
     radius: Option<Radius>,
-    shape: Option<Box<dyn OutlinedBorder>>,
+    shape: Option<OutlinedBorderRef>,
     padding: EdgeInsetsGeometry,
     min_length: f64,
     min_overscroll_length: f64,
@@ -362,25 +362,22 @@ impl ScrollbarPainter {
         self.notify_listeners(app);
     }
 
-    /// The [`OutlinedBorder`] of the scrollbar's thumb.
+    /// The [`OutlinedBorder`](waft_painting::OutlinedBorder) of the scrollbar's thumb.
     ///
     /// Only one of [`radius`](Self::radius) and this may be specified. For a rounded
     /// rectangle, it is simplest to just specify a radius. By default, the scrollbar thumb's
     /// shape is a simple rectangle.
     ///
     /// If a shape is specified, the thumb will take the shape of the passed
-    /// [`OutlinedBorder`] and fill itself with [`color`](Self::color).
-    pub fn shape(self: Handle<Self>, app: &App) -> Option<Box<dyn OutlinedBorder>> {
-        app.get(self)
-            .shape
-            .as_ref()
-            .map(|shape| shape.clone_outlined())
+    /// [`OutlinedBorder`](waft_painting::OutlinedBorder) and fill itself with [`color`](Self::color).
+    pub fn shape(self: Handle<Self>, app: &App) -> Option<OutlinedBorderRef> {
+        app.get(self).shape.clone()
     }
 
     /// Sets [`shape`](Self::shape).
-    pub fn set_shape(self: Handle<Self>, app: &mut App, value: Option<Box<dyn OutlinedBorder>>) {
+    pub fn set_shape(self: Handle<Self>, app: &mut App, value: Option<OutlinedBorderRef>) {
         debug_assert!(app.get(self).radius.is_none() || value.is_none());
-        if shapes_equal(app.get(self).shape.as_deref(), value.as_deref()) {
+        if app.get(self).shape == value {
             return;
         }
         app.get_mut(self).shape = value;
@@ -984,11 +981,7 @@ impl ScrollbarPainter {
     /// `old_delegate`'s.
     pub fn should_repaint(self: Handle<Self>, app: &App, old_delegate: Handle<Self>) -> bool {
         let (new, old) = (app.get(self), app.get(old_delegate));
-        let same_shape = match (&new.shape, &old.shape) {
-            (None, None) => true,
-            (Some(new), Some(old)) => new.eq_shape(&**old),
-            _ => false,
-        };
+        let same_shape = new.shape == old.shape;
         new.color != old.color
             || new.track_color != old.track_color
             || new.track_border_color != old.track_border_color
@@ -1149,16 +1142,6 @@ fn need_paint(metrics: Option<&dyn ScrollMetrics>) -> bool {
     })
 }
 
-fn shapes_equal(a: Option<&dyn OutlinedBorder>, b: Option<&dyn OutlinedBorder>) -> bool {
-    match (a, b) {
-        (None, None) => true,
-        (Some(a), Some(b)) => {
-            a as &dyn waft_painting::ShapeBorder == b as &dyn waft_painting::ShapeBorder
-        }
-        _ => false,
-    }
-}
-
 /// A [`ScrollbarPainter`] as the `CustomPainter` a `CustomPaint` holds: the painter is an
 /// arena object, so the value the widget carries is its handle plus the `Listenable` the
 /// render object subscribes to.
@@ -1243,10 +1226,10 @@ pub struct RawScrollbarData {
     /// Defaults to false when `None`.
     pub thumb_visibility: Option<bool>,
 
-    /// The [`OutlinedBorder`] of the scrollbar's thumb.
+    /// The [`OutlinedBorder`](waft_painting::OutlinedBorder) of the scrollbar's thumb.
     ///
     /// Only one of [`radius`](Self::radius) and this may be specified.
-    pub shape: Option<Box<dyn OutlinedBorder>>,
+    pub shape: Option<OutlinedBorderRef>,
 
     /// The [`Radius`] of the scrollbar thumb's rounded rectangle corners.
     ///
@@ -1445,9 +1428,9 @@ macro_rules! raw_scrollbar_setters {
         }
 
         /// Dart `shape:`.
-        pub fn shape(mut self, shape: Box<dyn waft_painting::OutlinedBorder>) -> $name {
+        pub fn shape(mut self, shape: impl Into<OutlinedBorderRef>) -> $name {
             debug_assert!(self.raw_scrollbar.radius.is_none());
-            self.raw_scrollbar.shape = Some(shape);
+            self.raw_scrollbar.shape = Some(shape.into());
             self
         }
 
@@ -1959,7 +1942,7 @@ impl RawScrollbarState {
         let track_radius = widget.track_radius;
         let scrollbar_orientation = widget.scrollbar_orientation;
         let main_axis_margin = widget.main_axis_margin;
-        let shape = widget.shape.as_ref().map(|shape| shape.clone_outlined());
+        let shape = widget.shape.clone();
         let cross_axis_margin = widget.cross_axis_margin;
         let min_length = widget.min_thumb_length;
         let min_overscroll_length = widget.min_overscroll_length.unwrap_or(min_length);
@@ -2114,7 +2097,7 @@ impl RawScrollbarState {
         let padding = widget.padding;
         let scrollbar_orientation = widget.scrollbar_orientation;
         let main_axis_margin = widget.main_axis_margin;
-        let shape = widget.shape.as_ref().map(|shape| shape.clone_outlined());
+        let shape = widget.shape.clone();
         let cross_axis_margin = widget.cross_axis_margin;
         let min_length = widget.min_thumb_length;
         let min_overscroll_length = widget.min_overscroll_length.unwrap_or(min_length);

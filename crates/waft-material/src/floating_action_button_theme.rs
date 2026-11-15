@@ -2,7 +2,7 @@
 
 use waft_embedder::{Color, lerp_double};
 use waft_foundation::App;
-use waft_painting::{EdgeInsetsGeometry, ShapeBorder, TextStyle};
+use waft_painting::{EdgeInsetsGeometry, ShapeBorderRef, TextStyle};
 use waft_rendering::BoxConstraints;
 use waft_services::MouseCursorRef;
 use waft_widgets::{
@@ -75,7 +75,7 @@ pub struct FloatingActionButtonThemeData {
     pub highlight_elevation: Option<f64>,
 
     /// The shape to be used for the floating action button's `Material`.
-    pub shape: Option<Box<dyn ShapeBorder>>,
+    pub shape: Option<ShapeBorderRef>,
 
     /// If specified, defines the feedback property for `FloatingActionButton`.
     ///
@@ -121,6 +121,35 @@ pub struct FloatingActionButtonThemeData {
     ///
     /// If specified, overrides the default value of `FloatingActionButton::mouse_cursor`.
     pub mouse_cursor: Option<WidgetStatePropertyRef<Option<MouseCursorRef>>>,
+}
+
+crate::theme_data_getters::theme_data_getters! {
+    /// Dart's getters of `FloatingActionButtonThemeData`: the theme data answers with its fields, and a defaults
+    /// subclass (Dart's `_...Defaults...(context)`) computes the ones it overrides when they
+    /// are read.
+    pub trait FloatingActionButtonThemeDataGetters for FloatingActionButtonThemeData, fields: floating_action_button_theme_data {
+        foreground_color: Option<Color>,
+        background_color: Option<Color>,
+        focus_color: Option<Color>,
+        hover_color: Option<Color>,
+        splash_color: Option<Color>,
+        elevation: Option<f64>,
+        focus_elevation: Option<f64>,
+        hover_elevation: Option<f64>,
+        disabled_elevation: Option<f64>,
+        highlight_elevation: Option<f64>,
+        shape: Option<ShapeBorderRef>,
+        enable_feedback: Option<bool>,
+        icon_size: Option<f64>,
+        size_constraints: Option<BoxConstraints>,
+        small_size_constraints: Option<BoxConstraints>,
+        large_size_constraints: Option<BoxConstraints>,
+        extended_size_constraints: Option<BoxConstraints>,
+        extended_icon_label_spacing: Option<f64>,
+        extended_padding: Option<EdgeInsetsGeometry>,
+        extended_text_style: Option<TextStyle>,
+        mouse_cursor: Option<WidgetStatePropertyRef<Option<MouseCursorRef>>>,
+    }
 }
 
 impl FloatingActionButtonThemeData {
@@ -194,10 +223,7 @@ impl FloatingActionButtonThemeData {
     }
 
     /// Dart `FloatingActionButtonThemeData(shape:)`.
-    pub fn shape(
-        mut self,
-        shape: impl Into<Box<dyn ShapeBorder>>,
-    ) -> FloatingActionButtonThemeData {
+    pub fn shape(mut self, shape: impl Into<ShapeBorderRef>) -> FloatingActionButtonThemeData {
         self.shape = Some(shape.into());
         self
     }
@@ -357,9 +383,9 @@ impl FloatingActionButtonThemeData {
                 b.and_then(|b| b.highlight_elevation),
                 t,
             ),
-            shape: <dyn ShapeBorder>::lerp(
-                a.and_then(|a| a.shape.as_deref()),
-                b.and_then(|b| b.shape.as_deref()),
+            shape: ShapeBorderRef::lerp(
+                a.and_then(|a| a.shape.as_ref()),
+                b.and_then(|b| b.shape.as_ref()),
                 t,
             ),
             enable_feedback: if t < 0.5 {
@@ -520,6 +546,7 @@ impl InheritedWidget for FloatingActionButtonTheme {
 #[cfg(test)]
 mod tests {
     use std::rc::Rc;
+    use waft_painting::ShapeBorder;
 
     use waft_embedder::Size;
     use waft_painting::{BorderRadiusGeometry, BorderSide, RoundedRectangleBorder};

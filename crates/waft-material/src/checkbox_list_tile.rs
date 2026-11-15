@@ -6,7 +6,7 @@ use std::rc::Rc;
 use waft_embedder::Color;
 use waft_foundation::{App, Handle, ValueChanged};
 use waft_gestures::GestureTapCallback;
-use waft_painting::{AnyBorderSide, EdgeInsetsGeometry, OutlinedBorder, ShapeBorder};
+use waft_painting::{AnyBorderSide, EdgeInsetsGeometry, OutlinedBorderRef, ShapeBorderRef};
 use waft_services::MouseCursorRef;
 use waft_widgets::{
     AnyFocusNode, BuildContext, ExcludeFocus, IntoWidget, KeyRef, MergeSemantics, StatelessWidget,
@@ -164,7 +164,7 @@ pub struct CheckboxListTile {
     /// node in its scope is currently focused.
     pub autofocus: bool,
     /// Defines the tile's `InkWell::custom_border` and `Ink::decoration` shape.
-    pub shape: Option<Box<dyn ShapeBorder>>,
+    pub shape: Option<ShapeBorderRef>,
     /// The color and width of the checkbox's border.
     ///
     /// The given value is passed directly to [`Checkbox::side`].
@@ -235,7 +235,7 @@ pub struct CheckboxListTile {
     /// If this property is null then `CheckboxThemeData::shape` of `ThemeData::checkbox_theme`
     /// is used. If that's null then the shape will be a `RoundedRectangleBorder`
     /// with a circular corner radius of 1.0.
-    pub checkbox_shape: Option<Box<dyn OutlinedBorder>>,
+    pub checkbox_shape: Option<OutlinedBorderRef>,
     /// If non-null, defines the background color when [`CheckboxListTile::selected`] is true.
     pub selected_tile_color: Option<Color>,
     /// Handler called when the focus changes.
@@ -422,14 +422,14 @@ impl CheckboxListTile {
         visual_density: VisualDensity => "visualDensity",
         focus_node: AnyFocusNode => "focusNode",
         states_controller: Handle<WidgetStatesController> => "statesController",
-        shape: Box<dyn ShapeBorder> => "shape",
+        shape: ShapeBorderRef => "shape",
         side: AnyBorderSide => "side",
         tile_color: Color => "tileColor",
         is_three_line: bool => "isThreeLine",
         dense: bool => "dense",
         control_affinity: ListTileControlAffinity => "controlAffinity",
         content_padding: EdgeInsetsGeometry => "contentPadding",
-        checkbox_shape: Box<dyn OutlinedBorder> => "checkboxShape",
+        checkbox_shape: OutlinedBorderRef => "checkboxShape",
         selected_tile_color: Color => "selectedTileColor",
         on_focus_change: ValueChanged<bool> => "onFocusChange",
         enable_feedback: bool => "enableFeedback",
@@ -634,6 +634,7 @@ impl StatelessWidget for CheckboxListTile {
 pub(crate) mod tests {
     use std::cell::{Cell, RefCell};
     use std::time::Duration;
+    use waft_painting::ShapeBorder;
 
     use waft_embedder::TextDirection;
     use waft_embedder::{
@@ -728,7 +729,7 @@ pub(crate) mod tests {
     }
 
     /// The `customBorder` of the tile's `InkWell`.
-    pub(crate) fn ink_well_custom_border(tester: &WidgetTester) -> Option<Box<dyn ShapeBorder>> {
+    pub(crate) fn ink_well_custom_border(tester: &WidgetTester) -> Option<ShapeBorderRef> {
         tester.widget(nth::<InkWell>(tester, 0), |ink_well: &InkWell| {
             ink_well.ink_response.custom_border.clone()
         })
@@ -1235,10 +1236,10 @@ pub(crate) mod tests {
             pump_wrapped(&mut tester, |_app| {
                 CheckboxListTile::new(Some(false), None)
                     .title(Text::new("Title"))
-                    .shape(Box::new(right_rounded_border()) as Box<dyn ShapeBorder>)
+                    .shape(ShapeBorderRef::new(right_rounded_border()))
                     .into_widget()
             });
-            let shape: Box<dyn ShapeBorder> = Box::new(right_rounded_border());
+            let shape: ShapeBorderRef = ShapeBorderRef::new(right_rounded_border());
             assert!(ink_well_custom_border(&tester).as_deref() == Some(&*shape));
         });
     }
@@ -1347,7 +1348,7 @@ pub(crate) mod tests {
                         .child(
                             CheckboxListTile::new(Some(false), ignore())
                                 .side(side)
-                                .checkbox_shape(Box::new(border()) as Box<dyn OutlinedBorder>),
+                                .checkbox_shape(OutlinedBorderRef::new(border())),
                         )
                         .into_widget()
                 });
