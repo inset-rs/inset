@@ -26,7 +26,8 @@ use objc2_foundation::NSURL;
 use objc2_ui_kit::UIWindowScene;
 use waft_embedder::{
     AppLifecycleState, EmbedderClient, Frame, FrameVsync, KeyData, NotificationActivation,
-    PlatformRef, PointerReport, View, ViewFocusDirection, ViewFocusEvent, ViewFocusState, ViewId,
+    PlatformRef, PointerReport, TextEditingValue, TextInputAction, View, ViewFocusDirection,
+    ViewFocusEvent, ViewFocusState, ViewId,
 };
 use waft_embedder_apple::abort_on_panic;
 
@@ -77,6 +78,12 @@ pub(crate) enum HostEvent {
     ClipboardMayHaveChanged,
     /// The user clicked one of the app's notifications.
     NotificationActivated(NotificationActivation),
+    /// The keyboard edited the field of the view numbered by this id: its value now.
+    TextEdited(ViewId, TextEditingValue),
+    /// The keyboard's return key asked the field of the view numbered by this id for its action.
+    TextInputAction(ViewId, TextInputAction),
+    /// The field of the view numbered by this id gave up the keyboard of its own accord.
+    TextInputClosed(ViewId),
 }
 
 /// The host as the main thread's callers reach it, whatever its client.
@@ -114,6 +121,12 @@ pub(crate) fn key_data(data: KeyData) -> bool {
             host.as_mut().is_some_and(|host| host.key_data(data))
         })
     })
+}
+
+/// The events waiting, taken, for a test with no host to serve them. Main thread.
+#[cfg(feature = "test-support")]
+pub(crate) fn take_waiting() -> Vec<HostEvent> {
+    QUEUE.with_borrow_mut(|queue| queue.drain(..).collect())
 }
 
 /// Makes `host` the host, and serves what waited for it. Main thread.
@@ -411,6 +424,9 @@ impl<C: EmbedderClient> Serve for Host<C> {
             HostEvent::NotificationActivated(activation) => {
                 self.client.notification_activated(activation)
             }
+            HostEvent::TextEdited(view, value) => self.client.text_input_editing_value(view, value),
+            HostEvent::TextInputAction(view, action) => self.client.text_input_action(view, action),
+            HostEvent::TextInputClosed(view) => self.client.text_input_closed(view),
         }
         self.keep_pace();
     }

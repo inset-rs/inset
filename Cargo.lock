@@ -5228,6 +5228,7 @@ dependencies = [
  "valo-codec-software",
  "waft-embedder",
  "waft-embedder-apple",
+ "waft-embedder-ios",
  "wgpu",
 ]
 
