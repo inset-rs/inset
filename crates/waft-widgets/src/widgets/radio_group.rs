@@ -7,6 +7,7 @@
 use std::fmt::{self, Debug};
 use std::rc::Rc;
 
+use waft_embedder::SemanticsRole;
 use waft_foundation::{
     App, ChangeNotifier, ChangeNotifierData, Handle, HandleId, Listener, ValueChanged,
 };
@@ -16,6 +17,7 @@ use crate::framework::{
     BuildContext, InheritedWidget, IntoWidget, KeyRef, State, StateData, StatefulWidget, WidgetRef,
 };
 use crate::widgets::actions::{IntentRef, VoidCallbackIntent};
+use crate::widgets::basic::Semantics;
 use crate::widgets::focus_manager::{AnyFocusNode, KeyEventResult};
 use crate::widgets::focus_traversal::{
     DirectionalFocusTraversalPolicyMixin, DirectionalFocusTraversalPolicyMixinData,
@@ -31,7 +33,7 @@ use crate::widgets::shortcuts::{
 // RadioGroupRegistry
 
 /// The vtable of an erased [`AnyRadioGroupRegistry`]: one `&'static` table per leaf type.
-struct RadioGroupRegistryVTable<T: Copy + PartialEq + 'static> {
+struct RadioGroupRegistryVTable<T: Clone + PartialEq + 'static> {
     type_name: fn() -> &'static str,
     group_value: fn(&App, HandleId) -> Option<T>,
     register_client: fn(&mut App, HandleId, AnyRadioClient<T>),
@@ -44,7 +46,7 @@ fn resolve<L: 'static>(id: HandleId) -> Handle<L> {
     Handle::from_id(id)
 }
 
-impl<T: Copy + PartialEq + 'static> RadioGroupRegistryVTable<T> {
+impl<T: Clone + PartialEq + 'static> RadioGroupRegistryVTable<T> {
     const fn of<L: RadioGroupRegistry<T>>() -> RadioGroupRegistryVTable<T> {
         RadioGroupRegistryVTable {
             type_name: std::any::type_name::<L>,
@@ -63,7 +65,7 @@ impl<T: Copy + PartialEq + 'static> RadioGroupRegistryVTable<T> {
 ///
 /// The registry manages the group value for the radios. The radio needs to call
 /// [`on_changed`](Self::on_changed) to notify the group value needs to be changed.
-pub trait RadioGroupRegistry<T: Copy + PartialEq + 'static>: Sized + 'static {
+pub trait RadioGroupRegistry<T: Clone + PartialEq + 'static>: Sized + 'static {
     /// This registry as the erased [`AnyRadioGroupRegistry`] — what to pass where a Dart API
     /// takes a `RadioGroupRegistry<T>`.
     fn as_radio_group_registry(self: Handle<Self>) -> AnyRadioGroupRegistry<T> {
@@ -92,34 +94,34 @@ pub trait RadioGroupRegistry<T: Copy + PartialEq + 'static>: Sized + 'static {
 /// Erased `RadioGroupRegistry<T>`: one identity and a static vtable.
 ///
 /// This is what a field or parameter Dart types as `RadioGroupRegistry<T>` becomes.
-pub struct AnyRadioGroupRegistry<T: Copy + PartialEq + 'static> {
+pub struct AnyRadioGroupRegistry<T: Clone + PartialEq + 'static> {
     id: HandleId,
     vtable: &'static RadioGroupRegistryVTable<T>,
 }
 
-impl<T: Copy + PartialEq + 'static> Clone for AnyRadioGroupRegistry<T> {
+impl<T: Clone + PartialEq + 'static> Clone for AnyRadioGroupRegistry<T> {
     fn clone(&self) -> AnyRadioGroupRegistry<T> {
         *self
     }
 }
 
-impl<T: Copy + PartialEq + 'static> Copy for AnyRadioGroupRegistry<T> {}
+impl<T: Clone + PartialEq + 'static> Copy for AnyRadioGroupRegistry<T> {}
 
-impl<T: Copy + PartialEq + 'static> PartialEq for AnyRadioGroupRegistry<T> {
+impl<T: Clone + PartialEq + 'static> PartialEq for AnyRadioGroupRegistry<T> {
     fn eq(&self, other: &AnyRadioGroupRegistry<T>) -> bool {
         self.id == other.id
     }
 }
 
-impl<T: Copy + PartialEq + 'static> Eq for AnyRadioGroupRegistry<T> {}
+impl<T: Clone + PartialEq + 'static> Eq for AnyRadioGroupRegistry<T> {}
 
-impl<T: Copy + PartialEq + 'static> Debug for AnyRadioGroupRegistry<T> {
+impl<T: Clone + PartialEq + 'static> Debug for AnyRadioGroupRegistry<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}({:?})", (self.vtable.type_name)(), self.id)
     }
 }
 
-impl<T: Copy + PartialEq + 'static> AnyRadioGroupRegistry<T> {
+impl<T: Clone + PartialEq + 'static> AnyRadioGroupRegistry<T> {
     /// The arena id behind this handle.
     pub fn id(self) -> HandleId {
         self.id
@@ -150,7 +152,7 @@ impl<T: Copy + PartialEq + 'static> AnyRadioGroupRegistry<T> {
 // RadioClient
 
 /// The vtable of an erased [`AnyRadioClient`]: one `&'static` table per leaf type.
-struct RadioClientVTable<T: Copy + PartialEq + 'static> {
+struct RadioClientVTable<T: Clone + PartialEq + 'static> {
     type_name: fn() -> &'static str,
     tristate: fn(&App, HandleId) -> bool,
     radio_value: fn(&App, HandleId) -> T,
@@ -158,7 +160,7 @@ struct RadioClientVTable<T: Copy + PartialEq + 'static> {
     focus_node: fn(&App, HandleId) -> AnyFocusNode,
 }
 
-impl<T: Copy + PartialEq + 'static> RadioClientVTable<T> {
+impl<T: Clone + PartialEq + 'static> RadioClientVTable<T> {
     const fn of<L: RadioClient<T>>() -> RadioClientVTable<T> {
         RadioClientVTable {
             type_name: std::any::type_name::<L>,
@@ -172,18 +174,18 @@ impl<T: Copy + PartialEq + 'static> RadioClientVTable<T> {
 
 /// The field Dart's `RadioClient` mixin declares; a client carries this bag under the field
 /// `radio_client` ([`radio_client_accessors!`](crate::radio_client_accessors)).
-pub struct RadioClientData<T: Copy + PartialEq + 'static> {
+pub struct RadioClientData<T: Clone + PartialEq + 'static> {
     registry: Option<AnyRadioGroupRegistry<T>>,
 }
 
-impl<T: Copy + PartialEq + 'static> RadioClientData<T> {
+impl<T: Clone + PartialEq + 'static> RadioClientData<T> {
     /// The bag of a freshly created client.
     pub fn new() -> RadioClientData<T> {
         RadioClientData { registry: None }
     }
 }
 
-impl<T: Copy + PartialEq + 'static> Default for RadioClientData<T> {
+impl<T: Clone + PartialEq + 'static> Default for RadioClientData<T> {
     fn default() -> RadioClientData<T> {
         RadioClientData::new()
     }
@@ -220,7 +222,7 @@ macro_rules! radio_client_accessors {
 ///
 /// To unregister from the previous [`RadioGroupRegistry`], either assign a different value or
 /// set it to `None`.
-pub trait RadioClient<T: Copy + PartialEq + 'static>: Sized + 'static {
+pub trait RadioClient<T: Clone + PartialEq + 'static>: Sized + 'static {
     /// Dart's `RadioClient` field, held under the field `radio_client`
     /// ([`radio_client_accessors!`](crate::radio_client_accessors)).
     fn radio_client_data(self: Handle<Self>, app: &App) -> &RadioClientData<T>;
@@ -287,34 +289,34 @@ pub trait RadioClient<T: Copy + PartialEq + 'static>: Sized + 'static {
 /// Erased `RadioClient<T>`: one identity and a static vtable.
 ///
 /// This is what a field or parameter Dart types as `RadioClient<T>` becomes.
-pub struct AnyRadioClient<T: Copy + PartialEq + 'static> {
+pub struct AnyRadioClient<T: Clone + PartialEq + 'static> {
     id: HandleId,
     vtable: &'static RadioClientVTable<T>,
 }
 
-impl<T: Copy + PartialEq + 'static> Clone for AnyRadioClient<T> {
+impl<T: Clone + PartialEq + 'static> Clone for AnyRadioClient<T> {
     fn clone(&self) -> AnyRadioClient<T> {
         *self
     }
 }
 
-impl<T: Copy + PartialEq + 'static> Copy for AnyRadioClient<T> {}
+impl<T: Clone + PartialEq + 'static> Copy for AnyRadioClient<T> {}
 
-impl<T: Copy + PartialEq + 'static> PartialEq for AnyRadioClient<T> {
+impl<T: Clone + PartialEq + 'static> PartialEq for AnyRadioClient<T> {
     fn eq(&self, other: &AnyRadioClient<T>) -> bool {
         self.id == other.id
     }
 }
 
-impl<T: Copy + PartialEq + 'static> Eq for AnyRadioClient<T> {}
+impl<T: Clone + PartialEq + 'static> Eq for AnyRadioClient<T> {}
 
-impl<T: Copy + PartialEq + 'static> Debug for AnyRadioClient<T> {
+impl<T: Clone + PartialEq + 'static> Debug for AnyRadioClient<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}({:?})", (self.vtable.type_name)(), self.id)
     }
 }
 
-impl<T: Copy + PartialEq + 'static> AnyRadioClient<T> {
+impl<T: Clone + PartialEq + 'static> AnyRadioClient<T> {
     /// The arena id behind this handle.
     pub fn id(self) -> HandleId {
         self.id
@@ -365,7 +367,7 @@ impl<T: Copy + PartialEq + 'static> AnyRadioClient<T> {
 ///   order.
 ///
 /// Arrow keys will wrap around if they reach the first or last radio in the group.
-pub struct RadioGroup<T: Copy + PartialEq + 'static> {
+pub struct RadioGroup<T: Clone + PartialEq + 'static> {
     /// See [`Widget::key`](crate::Widget::key).
     pub key: Option<KeyRef>,
 
@@ -383,7 +385,7 @@ pub struct RadioGroup<T: Copy + PartialEq + 'static> {
     pub child: WidgetRef,
 }
 
-impl<T: Copy + PartialEq + 'static> RadioGroup<T> {
+impl<T: Clone + PartialEq + 'static> RadioGroup<T> {
     /// Creates a radio group; Dart's optional `groupValue` argument is the setter.
     ///
     /// The `on_changed` callback is called when the selection has changed in the subtree
@@ -421,13 +423,13 @@ impl<T: Copy + PartialEq + 'static> RadioGroup<T> {
     }
 }
 
-impl<T: Copy + PartialEq + 'static> Debug for RadioGroup<T> {
+impl<T: Clone + PartialEq + 'static> Debug for RadioGroup<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RadioGroup").finish_non_exhaustive()
     }
 }
 
-impl<T: Copy + PartialEq + 'static> StatefulWidget for RadioGroup<T> {
+impl<T: Clone + PartialEq + 'static> StatefulWidget for RadioGroup<T> {
     type State = RadioGroupState<T>;
 
     fn key(&self) -> Option<&KeyRef> {
@@ -445,14 +447,14 @@ impl<T: Copy + PartialEq + 'static> StatefulWidget for RadioGroup<T> {
 }
 
 /// Dart's `_RadioGroupState`.
-pub struct RadioGroupState<T: Copy + PartialEq + 'static> {
+pub struct RadioGroupState<T: Clone + PartialEq + 'static> {
     state: StateData<RadioGroup<T>>,
     radio_group_shortcut_manager: Option<Handle<RadioGroupShortcutManager<T>>>,
     policy: Option<Handle<SkipUnselectedRadioPolicy<T>>>,
     radios: Vec<AnyRadioClient<T>>,
 }
 
-impl<T: Copy + PartialEq + 'static> RadioGroupState<T> {
+impl<T: Clone + PartialEq + 'static> RadioGroupState<T> {
     /// Dart's `_radioGroupShortcuts`, built once the state has an `App`.
     fn radio_group_shortcuts(self: Handle<Self>) -> ShortcutMap {
         let select_previous = || {
@@ -514,7 +516,7 @@ impl<T: Copy + PartialEq + 'static> RadioGroupState<T> {
             return;
         };
         let value = radio.radio_value(app);
-        if Some(value) != self.widget(app).group_value {
+        if Some(&value) != self.widget(app).group_value.as_ref() {
             self.on_changed(app, Some(value));
             return;
         }
@@ -573,9 +575,9 @@ impl<T: Copy + PartialEq + 'static> RadioGroupState<T> {
     }
 }
 
-impl<T: Copy + PartialEq + 'static> RadioGroupRegistry<T> for RadioGroupState<T> {
+impl<T: Clone + PartialEq + 'static> RadioGroupRegistry<T> for RadioGroupState<T> {
     fn group_value(self: Handle<Self>, app: &App) -> Option<T> {
-        self.widget(app).group_value
+        self.widget(app).group_value.clone()
     }
 
     fn register_client(self: Handle<Self>, app: &mut App, radio: AnyRadioClient<T>) {
@@ -595,7 +597,7 @@ impl<T: Copy + PartialEq + 'static> RadioGroupRegistry<T> for RadioGroupState<T>
     }
 }
 
-impl<T: Copy + PartialEq + 'static> State for RadioGroupState<T> {
+impl<T: Clone + PartialEq + 'static> State for RadioGroupState<T> {
     type Widget = RadioGroup<T>;
     crate::state_accessors!();
 
@@ -621,31 +623,34 @@ impl<T: Copy + PartialEq + 'static> State for RadioGroupState<T> {
             .radio_group_shortcut_manager
             .expect("created in init_state");
         let policy = app.get(self).policy.expect("created in init_state");
-        let group_value = self.widget(app).group_value;
-        policy.set_group_value(app, group_value);
+        let group_value = self.widget(app).group_value.clone();
+        policy.set_group_value(app, group_value.clone());
         let child = self.widget(app).child.clone();
-        Shortcuts::manager(
-            manager.as_shortcut_manager(),
-            FocusTraversalGroup::new(RadioGroupStateScope {
-                state: self,
-                group_value,
-                child,
-            })
-            .policy(policy.as_policy()),
-        )
-        .into_widget()
+        Semantics::new()
+            .container(true)
+            .role(SemanticsRole::RadioGroup)
+            .child(Shortcuts::manager(
+                manager.as_shortcut_manager(),
+                FocusTraversalGroup::new(RadioGroupStateScope {
+                    state: self,
+                    group_value,
+                    child,
+                })
+                .policy(policy.as_policy()),
+            ))
+            .into_widget()
     }
 }
 
 /// Dart's `_RadioGroupShortcutManager`: a [`ShortcutManagerBase`] that ignores a key event
 /// while no radio in its group has focus.
-pub struct RadioGroupShortcutManager<T: Copy + PartialEq + 'static> {
+pub struct RadioGroupShortcutManager<T: Clone + PartialEq + 'static> {
     change_notifier: ChangeNotifierData,
     shortcut_manager: ShortcutManagerData,
     state: Handle<RadioGroupState<T>>,
 }
 
-impl<T: Copy + PartialEq + 'static> RadioGroupShortcutManager<T> {
+impl<T: Clone + PartialEq + 'static> RadioGroupShortcutManager<T> {
     fn new(
         app: &mut App,
         state: Handle<RadioGroupState<T>>,
@@ -658,7 +663,7 @@ impl<T: Copy + PartialEq + 'static> RadioGroupShortcutManager<T> {
     }
 }
 
-impl<T: Copy + PartialEq + 'static> ShortcutManagerBase for RadioGroupShortcutManager<T> {
+impl<T: Clone + PartialEq + 'static> ShortcutManagerBase for RadioGroupShortcutManager<T> {
     crate::shortcut_manager_accessors!();
 
     fn handle_keypress(
@@ -682,7 +687,7 @@ impl<T: Copy + PartialEq + 'static> ShortcutManagerBase for RadioGroupShortcutMa
     }
 }
 
-impl<T: Copy + PartialEq + 'static> ChangeNotifier for RadioGroupShortcutManager<T> {
+impl<T: Clone + PartialEq + 'static> ChangeNotifier for RadioGroupShortcutManager<T> {
     fn change_notifier_data(&self) -> &ChangeNotifierData {
         &self.change_notifier
     }
@@ -693,14 +698,14 @@ impl<T: Copy + PartialEq + 'static> ChangeNotifier for RadioGroupShortcutManager
 }
 
 /// Dart's `_RadioGroupStateScope`.
-pub struct RadioGroupStateScope<T: Copy + PartialEq + 'static> {
+pub struct RadioGroupStateScope<T: Clone + PartialEq + 'static> {
     state: Handle<RadioGroupState<T>>,
     /// The group value is part of the scope so that dependents are notified when it changes.
     group_value: Option<T>,
     child: WidgetRef,
 }
 
-impl<T: Copy + PartialEq + 'static> Debug for RadioGroupStateScope<T> {
+impl<T: Clone + PartialEq + 'static> Debug for RadioGroupStateScope<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RadioGroupStateScope")
             .field("state", &self.state)
@@ -708,7 +713,7 @@ impl<T: Copy + PartialEq + 'static> Debug for RadioGroupStateScope<T> {
     }
 }
 
-impl<T: Copy + PartialEq + 'static> InheritedWidget for RadioGroupStateScope<T> {
+impl<T: Clone + PartialEq + 'static> InheritedWidget for RadioGroupStateScope<T> {
     fn child(&self) -> &WidgetRef {
         &self.child
     }
@@ -726,14 +731,14 @@ impl<T: Copy + PartialEq + 'static> InheritedWidget for RadioGroupStateScope<T> 
 ///
 /// This policy ensures that tabbing into a radio group only focuses the currently selected
 /// radio button and prevents focus from reaching unselected ones.
-pub struct SkipUnselectedRadioPolicy<T: Copy + PartialEq + 'static> {
+pub struct SkipUnselectedRadioPolicy<T: Clone + PartialEq + 'static> {
     policy: FocusTraversalPolicyData,
     directional: DirectionalFocusTraversalPolicyMixinData,
     state: Handle<RadioGroupState<T>>,
     group_value: Option<T>,
 }
 
-impl<T: Copy + PartialEq + 'static> SkipUnselectedRadioPolicy<T> {
+impl<T: Clone + PartialEq + 'static> SkipUnselectedRadioPolicy<T> {
     fn new(
         app: &mut App,
         state: Handle<RadioGroupState<T>>,
@@ -753,11 +758,11 @@ impl<T: Copy + PartialEq + 'static> SkipUnselectedRadioPolicy<T> {
     }
 
     fn radio_selected(self: Handle<Self>, app: &App, radio: AnyRadioClient<T>) -> bool {
-        Some(radio.radio_value(app)) == app.get(self).group_value
+        Some(&radio.radio_value(app)) == app.get(self).group_value.as_ref()
     }
 }
 
-impl<T: Copy + PartialEq + 'static> FocusTraversalPolicy for SkipUnselectedRadioPolicy<T> {
+impl<T: Clone + PartialEq + 'static> FocusTraversalPolicy for SkipUnselectedRadioPolicy<T> {
     crate::focus_traversal_policy_accessors!();
     crate::directional_focus_traversal_policy_overrides!();
 
@@ -808,7 +813,7 @@ impl<T: Copy + PartialEq + 'static> FocusTraversalPolicy for SkipUnselectedRadio
     }
 }
 
-impl<T: Copy + PartialEq + 'static> DirectionalFocusTraversalPolicyMixin
+impl<T: Clone + PartialEq + 'static> DirectionalFocusTraversalPolicyMixin
     for SkipUnselectedRadioPolicy<T>
 {
     fn directional_data(

@@ -326,10 +326,14 @@ impl Visibility {
         }
         is_visible
     }
+}
 
-    /// Dart's constructor asserts, which the fluent setters can only complete at build time
-    /// (see `PORTING.md`).
-    fn debug_check_maintain_flags(&self) {
+impl StatelessWidget for Visibility {
+    fn key(&self) -> Option<&KeyRef> {
+        self.key.as_ref()
+    }
+
+    fn debug_check_constructor(&self) {
         debug_assert!(
             self.maintain_state || !self.maintain_animation,
             "Cannot maintain animations if the state is not also maintained."
@@ -351,15 +355,8 @@ impl Visibility {
             "Cannot maintain focusability if the state is not also maintained."
         );
     }
-}
-
-impl StatelessWidget for Visibility {
-    fn key(&self) -> Option<&KeyRef> {
-        self.key.as_ref()
-    }
 
     fn build(&self, _app: &mut App, _context: BuildContext) -> WidgetRef {
-        self.debug_check_maintain_flags();
         let mut result = ExcludeFocus::new(self.child.clone())
             .excluding(!self.visible && !self.maintain_focusability)
             .into_widget();

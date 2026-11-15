@@ -25,6 +25,7 @@ use super::widget::{
     GlobalKey, InheritedWidget, KeyRef, Widget, WidgetKind, WidgetRef, can_update, downcast_widget,
     same_widget,
 };
+use crate::widgets::notification_listener::LayoutChangedNotification;
 use crate::widgets::scroll_notification::ScrollNotification;
 
 /// A handle to the location of a widget in the widget tree.
@@ -134,6 +135,18 @@ pub trait Notification: Any + Debug {
     /// This is Dart's `notification is ScrollNotification`, answered from the vtable as
     /// [`viewport_depth`](Self::viewport_depth) is, because the family is a trait.
     fn as_scroll_notification(&self) -> Option<&dyn ScrollNotification> {
+        None
+    }
+
+    /// The notification as a `LayoutChangedNotification`
+    /// (`widgets/notification_listener.rs`), for a
+    /// `NotificationListener<dyn LayoutChangedNotification>`; `None` — the default — for every
+    /// other notification.
+    ///
+    /// This is Dart's `notification is LayoutChangedNotification`, answered from the vtable as
+    /// [`as_scroll_notification`](Self::as_scroll_notification) is: every notification Dart
+    /// derives from `LayoutChangedNotification` answers it, scroll notifications included.
+    fn as_layout_changed_notification(&self) -> Option<&dyn LayoutChangedNotification> {
         None
     }
 

@@ -17,7 +17,7 @@ use waft_rendering::{
 use crate::framework::{
     AnyElement, Element, ElementData, IntoWidget, KeyRef, RenderObjectElement,
     RenderObjectElementData, RenderObjectElementWidget, RenderObjectWidget, Slot, Widget,
-    WidgetKind, WidgetRef, downcast_widget,
+    WidgetKind, WidgetRef, downcast_widget, short_type_name,
 };
 
 /// A value that names one of a [`SlottedMultiChildRenderObjectWidget`]'s slots: Dart's
@@ -72,6 +72,9 @@ where
     W::RenderObject: SlottedContainerRenderObjectMixin<W::Slot>,
 {
     fn into_widget(self) -> WidgetRef {
+        if cfg!(debug_assertions) {
+            RenderObjectWidget::debug_check_constructor(&self);
+        }
         Rc::new(SlottedMultiChildRenderObject(self))
     }
 }
@@ -94,6 +97,10 @@ where
 
     fn widget_type(&self) -> TypeId {
         TypeId::of::<W>()
+    }
+
+    fn type_name(&self) -> &'static str {
+        short_type_name::<W>()
     }
 
     fn kind(&self) -> WidgetKind {

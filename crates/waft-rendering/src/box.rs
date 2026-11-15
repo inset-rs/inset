@@ -1,5 +1,6 @@
 //! Flutter counterpart: `rendering/box.dart` (`BoxConstraints`, `RenderBox`
-//! layout wrapper, intrinsics, dry layout and baselines).
+//! layout wrapper, intrinsics, dry layout and baselines), with the `BoxConstraints` subclass
+//! mechanism ([`AnyBoxConstraints`]) that a box's stored constraints travel in.
 //!
 //! `_DebugSize` and `debugAssertDoesMeetConstraints` wait.
 
@@ -10,6 +11,7 @@ use std::hash::{Hash, Hasher};
 
 use std::cell::Cell;
 use std::ops::{Add, Deref, DerefMut};
+use std::rc::Rc;
 
 use waft_embedder::{
     Matrix4, Offset, Rect, Size, TextBaseline, ViewConstraints, clamp_double, lerp_double,
@@ -676,6 +678,123 @@ impl Debug for BoxConstraints {
     }
 }
 
+/// What a subclass of `BoxConstraints` adds to its value.
+///
+/// Flutter's scaffold lays out its body and its bottom sheet with private subclasses
+/// (`_BodyBoxConstraints`, `_BottomSheetBoxConstraints`) that a `LayoutBuilder` below
+/// recognises with an `as` cast. Here [`BoxConstraints`] is a plain `Copy` value; a subclass
+/// is an extension that an [`AnyBoxConstraints`] carries beside the value the subclass
+/// constructor passed to `super`, as `AnyColor` carries a `Color` subclass.
+pub trait BoxConstraintsExtension: Any {
+    /// The extension as `Any`, for Dart's `is` checks ([`AnyBoxConstraints::extension`]).
+    fn as_any(&self) -> &dyn Any;
+
+    /// Dart's `==` override on the subclass, called once the values compared equal. `other`
+    /// is the same runtime type when it downcasts; any other type is unequal, as
+    /// `BoxConstraints.==`'s `runtimeType` check makes it.
+    fn eq_extension(&self, other: &dyn BoxConstraintsExtension) -> bool;
+}
+
+/// A `BoxConstraints` that may be an instance of a `BoxConstraints` subclass.
+///
+/// Rendering stores this where Flutter stores constraints that a later reader type-checks: a
+/// box's constraints from its last [`AnyRenderBox::layout`], read back with
+/// [`any_constraints`](AnyRenderBox::any_constraints), and what a `LayoutBuilder` hands its
+/// builder. The plain value is the one the subclass passed to `super`, reached by
+/// [`constraints`](Self::constraints) or by deref, so every `BoxConstraints` method is
+/// available and returns a plain [`BoxConstraints`], as an inherited method does in Dart. The
+/// subclass is recovered with [`extension`](Self::extension), Dart's `is` check.
+///
+/// Equality follows Dart's: two plain constraints compare by value, two extended ones by value
+/// and by the subclass's `==`, and a plain value never equals an extended one. So
+/// [`AnyRenderBox::layout`]'s early return lays out again when only the extension changed.
+///
+/// A box's [`constraints`](AnyRenderBox::constraints) is the plain value: a render object that
+/// hands its own constraints on to its child passes the value without the extension.
+#[derive(Clone)]
+pub struct AnyBoxConstraints {
+    constraints: BoxConstraints,
+    extension: Option<Rc<dyn BoxConstraintsExtension>>,
+}
+
+impl AnyBoxConstraints {
+    /// Plain constraints.
+    pub const fn new(constraints: BoxConstraints) -> AnyBoxConstraints {
+        AnyBoxConstraints {
+            constraints,
+            extension: None,
+        }
+    }
+
+    /// A subclass instance: `constraints` is what it passed to `super`.
+    pub fn with_shared(
+        constraints: BoxConstraints,
+        extension: Rc<dyn BoxConstraintsExtension>,
+    ) -> AnyBoxConstraints {
+        AnyBoxConstraints {
+            constraints,
+            extension: Some(extension),
+        }
+    }
+
+    /// The constraints as a layout reads them: the subclass's `super` value.
+    pub fn constraints(&self) -> BoxConstraints {
+        self.constraints
+    }
+
+    /// Dart's `constraints is T`: the subclass instance, if these constraints are one.
+    pub fn extension<T: BoxConstraintsExtension>(&self) -> Option<&T> {
+        self.extension
+            .as_ref()
+            .and_then(|extension| extension.as_any().downcast_ref::<T>())
+    }
+
+    /// Whether these constraints are a subclass instance.
+    pub fn has_extension(&self) -> bool {
+        self.extension.is_some()
+    }
+}
+
+impl Deref for AnyBoxConstraints {
+    type Target = BoxConstraints;
+
+    fn deref(&self) -> &BoxConstraints {
+        &self.constraints
+    }
+}
+
+impl From<BoxConstraints> for AnyBoxConstraints {
+    fn from(constraints: BoxConstraints) -> AnyBoxConstraints {
+        AnyBoxConstraints::new(constraints)
+    }
+}
+
+impl PartialEq for AnyBoxConstraints {
+    fn eq(&self, other: &AnyBoxConstraints) -> bool {
+        if self.constraints != other.constraints {
+            return false;
+        }
+        match (&self.extension, &other.extension) {
+            (None, None) => true,
+            (Some(mine), Some(theirs)) => mine.eq_extension(&**theirs),
+            _ => false,
+        }
+    }
+}
+
+impl PartialEq<BoxConstraints> for AnyBoxConstraints {
+    fn eq(&self, other: &BoxConstraints) -> bool {
+        self.extension.is_none() && self.constraints == *other
+    }
+}
+
+/// A subclass prints as its `BoxConstraints`: neither scaffold subclass overrides `toString`.
+impl Debug for AnyBoxConstraints {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        Debug::fmt(&self.constraints, f)
+    }
+}
+
 /// Method signature for hit testing a [`RenderBox`].
 ///
 /// Used by [`BoxHitTestResult::add_with_paint_transform`] to hit test children of a
@@ -1065,7 +1184,7 @@ impl LayoutCacheStorage {
 /// Flutter's `RenderBox` fields.
 pub struct RenderBoxData {
     pub(crate) size: Option<Size>,
-    pub(crate) constraints: Option<BoxConstraints>,
+    pub(crate) constraints: Option<AnyBoxConstraints>,
     layout_cache: LayoutCacheStorage,
     debug_computing_this_dry_layout: bool,
     debug_computing_this_dry_baseline: bool,
@@ -1264,9 +1383,29 @@ pub trait RenderBox: RenderObject {
     ///
     /// If layout has not yet happened.
     fn constraints(self: RenderHandle<Self>, app: &App) -> BoxConstraints {
-        self.render_box_data(app).constraints.unwrap_or_else(|| {
-            panic!("A RenderObject does not have any constraints before it has been laid out.")
-        })
+        self.render_box_data(app)
+            .constraints
+            .as_ref()
+            .map(AnyBoxConstraints::constraints)
+            .unwrap_or_else(|| {
+                panic!("A RenderObject does not have any constraints before it has been laid out.")
+            })
+    }
+
+    /// The box constraints most recently supplied by the parent, with the `BoxConstraints`
+    /// subclass they may be an instance of: Dart's `constraints` getter, for a reader that
+    /// type-checks it.
+    ///
+    /// # Panics
+    ///
+    /// If layout has not yet happened.
+    fn any_constraints(self: RenderHandle<Self>, app: &App) -> AnyBoxConstraints {
+        self.render_box_data(app)
+            .constraints
+            .clone()
+            .unwrap_or_else(|| {
+                panic!("A RenderObject does not have any constraints before it has been laid out.")
+            })
     }
 
     /// Installs [`BoxParentData`] unless the child already has it.
@@ -1720,7 +1859,7 @@ pub trait RenderBox: RenderObject {
     fn layout(
         self: RenderHandle<Self>,
         app: &mut App,
-        constraints: BoxConstraints,
+        constraints: impl Into<AnyBoxConstraints>,
         parent_uses_size: bool,
     ) {
         self.as_box().layout(app, constraints, parent_uses_size)
@@ -1794,8 +1933,9 @@ pub trait RenderBox: RenderObject {
 ///
 /// A trait default cannot call `super`, and a leaf's [`RenderBox::hit_test`] shadows the default
 /// it would call; this sibling trait, blanket-implemented for every box, carries that body (the
-/// shape `ElementBase` has for `Element`).
-pub(crate) trait RenderBoxBase: RenderBox {
+/// shape `ElementBase` has for `Element`). A leaf in any crate calls it at Dart's `super` call:
+/// `RenderBoxBase::hit_test(self, app, result, position)`.
+pub trait RenderBoxBase: RenderBox {
     /// Flutter's `RenderBox.performResize`.
     fn perform_resize(self: RenderHandle<Self>, app: &mut App) {
         // Default behavior for subclasses that have sized_by_parent = true.
@@ -2043,15 +2183,26 @@ impl AnyRenderBox {
     }
 
     /// Compute the layout for this box.
-    pub fn layout(self, app: &mut App, constraints: BoxConstraints, parent_uses_size: bool) {
+    ///
+    /// A `BoxConstraints` subclass instance ([`AnyBoxConstraints`]) is stored as it is given,
+    /// and its `==` decides the early return: constraints equal in value but not in extension
+    /// lay the box out again.
+    pub fn layout(
+        self,
+        app: &mut App,
+        constraints: impl Into<AnyBoxConstraints>,
+        parent_uses_size: bool,
+    ) {
+        let constraints: AnyBoxConstraints = constraints.into();
         debug_assert!(
             !app.is_disposed(self.id),
             "layout on a disposed render object"
         );
         debug_assert!(constraints.debug_assert_is_valid(true));
-        let same = self.box_data(app).constraints == Some(constraints);
+        let same = self.box_data(app).constraints.as_ref() == Some(&constraints);
+        let tight = constraints.is_tight();
         self.as_object()
-            .run_layout(app, parent_uses_size, constraints.is_tight(), same, |app| {
+            .run_layout(app, parent_uses_size, tight, same, |app| {
                 self.box_data_mut(app).constraints = Some(constraints)
             });
     }
@@ -2078,7 +2229,18 @@ impl AnyRenderBox {
     ///
     /// If layout has not yet happened.
     pub fn constraints(self, app: &App) -> BoxConstraints {
-        self.box_data(app).constraints.unwrap_or_else(|| {
+        self.box_data(app)
+            .constraints
+            .as_ref()
+            .map(AnyBoxConstraints::constraints)
+            .unwrap_or_else(|| {
+                panic!("A RenderObject does not have any constraints before it has been laid out.")
+            })
+    }
+
+    /// See [`RenderBox::any_constraints`].
+    pub fn any_constraints(self, app: &App) -> AnyBoxConstraints {
+        self.box_data(app).constraints.clone().unwrap_or_else(|| {
             panic!("A RenderObject does not have any constraints before it has been laid out.")
         })
     }
@@ -2337,6 +2499,8 @@ impl AnyRenderBox {
         let constraints = self
             .box_data(app)
             .constraints
+            .as_ref()
+            .map(AnyBoxConstraints::constraints)
             .expect("a RenderBox has constraints once it has been laid out");
         memoize_baseline(self, app, constraints, baseline, |this, app| {
             BaselineOffset((this.vtable.compute_distance_to_actual_baseline)(
@@ -2667,6 +2831,8 @@ mod tests {
 
 #[cfg(test)]
 mod hit_test_tests {
+    use waft_painting::force_to_point;
+
     use super::*;
 
     #[derive(Debug)]
@@ -2763,16 +2929,6 @@ mod hit_test_tests {
         );
         assert!(!is_hit);
         assert!(positions.is_empty());
-    }
-
-    /// Dart's `MatrixUtils.forceToPoint`: every point maps to `offset`.
-    fn force_to_point(offset: Offset) -> Matrix4 {
-        let mut storage = [0.0; 16];
-        storage[10] = 1.0;
-        storage[12] = offset.dx() as f32;
-        storage[13] = offset.dy() as f32;
-        storage[15] = 1.0;
-        Matrix4::from_flutter_array(&storage)
     }
 
     /// A child under a perspective transform, as Flutter's docs build one:
@@ -2992,5 +3148,232 @@ mod intrinsics_tests {
             parent.debug_needs_layout(&app),
             "the parent read an intrinsic, so it has to lay out again"
         );
+    }
+}
+
+#[cfg(test)]
+mod any_box_constraints_tests {
+    use std::cell::Cell;
+    use std::rc::Rc;
+    use waft_foundation::{AppCell, ValueKey};
+
+    use super::*;
+    use crate::custom_layout::{
+        ChildLayoutId, MultiChildLayoutChildren, MultiChildLayoutDelegate,
+        MultiChildLayoutParentData, RenderCustomMultiChildLayoutBox,
+    };
+    use crate::object::RenderObjectData;
+    use crate::proxy_box::RenderOpacity;
+
+    /// A `BoxConstraints` subclass with one field, as `_BottomSheetBoxConstraints` is.
+    #[derive(Debug)]
+    struct Inset(f64);
+
+    impl BoxConstraintsExtension for Inset {
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn eq_extension(&self, other: &dyn BoxConstraintsExtension) -> bool {
+            other
+                .as_any()
+                .downcast_ref::<Inset>()
+                .is_some_and(|other| other.0 == self.0)
+        }
+    }
+
+    /// Another subclass with the same field, to tell the runtime types apart.
+    #[derive(Debug)]
+    struct Other(f64);
+
+    impl BoxConstraintsExtension for Other {
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn eq_extension(&self, other: &dyn BoxConstraintsExtension) -> bool {
+            other
+                .as_any()
+                .downcast_ref::<Other>()
+                .is_some_and(|other| other.0 == self.0)
+        }
+    }
+
+    fn inset(constraints: BoxConstraints, inset: f64) -> AnyBoxConstraints {
+        AnyBoxConstraints::with_shared(constraints, Rc::new(Inset(inset)))
+    }
+
+    fn inset_of(constraints: &AnyBoxConstraints) -> Option<f64> {
+        constraints.extension::<Inset>().map(|inset| inset.0)
+    }
+
+    /// A leaf that takes the smallest size its constraints allow, counting its layouts.
+    struct CountingLeaf {
+        render_object: RenderObjectData,
+        render_box: RenderBoxData,
+        layouts: Rc<Cell<u32>>,
+    }
+
+    impl RenderObject for CountingLeaf {
+        crate::render_object_accessors!();
+
+        fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
+            let layouts = Rc::clone(&self.get(app).layouts);
+            layouts.set(layouts.get() + 1);
+            let size = self.constraints(app).smallest();
+            self.set_size(app, size);
+        }
+    }
+
+    impl RenderBox for CountingLeaf {
+        crate::render_box_accessors!();
+    }
+
+    fn counting_leaf(app: &mut App, layouts: &Rc<Cell<u32>>) -> RenderHandle<CountingLeaf> {
+        RenderHandle::new_box(
+            app,
+            CountingLeaf {
+                render_object: RenderObjectData::new(),
+                render_box: RenderBoxData::new(),
+                layouts: Rc::clone(layouts),
+            },
+        )
+    }
+
+    fn child_id() -> ChildLayoutId {
+        Rc::new(ValueKey::new("child"))
+    }
+
+    /// Lays out its one child with an `Inset` subclass instance, as `_ScaffoldLayout` lays out
+    /// the bottom sheet.
+    #[derive(Debug)]
+    struct InsetDelegate;
+
+    impl MultiChildLayoutDelegate for InsetDelegate {
+        fn perform_layout(
+            &self,
+            app: &mut App,
+            children: &mut MultiChildLayoutChildren,
+            size: Size,
+        ) {
+            children.layout_child(app, &child_id(), inset(BoxConstraints::loose(size), 3.0));
+        }
+
+        fn should_relayout(&self, _old_delegate: &dyn MultiChildLayoutDelegate) -> bool {
+            false
+        }
+
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+    }
+
+    #[test]
+    fn equality_includes_the_subclass_and_its_fields() {
+        let constraints = BoxConstraints::tight(Size::new(10.0, 20.0));
+        let plain = AnyBoxConstraints::new(constraints);
+        let converted: AnyBoxConstraints = constraints.into();
+        assert!(plain == converted);
+        assert!(plain == constraints);
+
+        assert!(
+            inset(constraints, 1.0) != plain,
+            "a plain value never equals a subclass instance, as Dart's runtimeType check"
+        );
+        assert!(inset(constraints, 1.0) != constraints);
+        assert!(inset(constraints, 1.0) == inset(constraints, 1.0));
+        assert!(inset(constraints, 1.0) != inset(constraints, 2.0));
+        assert!(
+            inset(constraints, 1.0)
+                != AnyBoxConstraints::with_shared(constraints, Rc::new(Other(1.0)))
+        );
+        assert!(inset(constraints, 1.0) != inset(BoxConstraints::new(), 1.0));
+    }
+
+    #[test]
+    fn a_subclass_instance_derefs_to_its_value_and_answers_its_is_check() {
+        let constraints = BoxConstraints::new().max_width(30.0).max_height(40.0);
+        let extended = inset(constraints, 5.0);
+        assert_eq!(extended.constraints(), constraints);
+        assert_eq!(extended.max_width, 30.0);
+        assert_eq!(extended.loosen(), constraints.loosen());
+        assert!(extended.has_extension());
+        assert_eq!(inset_of(&extended), Some(5.0));
+        assert!(extended.extension::<Other>().is_none());
+        assert!(!AnyBoxConstraints::new(constraints).has_extension());
+        assert_eq!(format!("{extended:?}"), format!("{constraints:?}"));
+    }
+
+    #[test]
+    fn layout_lays_out_again_when_only_the_subclass_fields_change() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let layouts = Rc::new(Cell::new(0));
+        let leaf = counting_leaf(&mut app, &layouts);
+        let constraints = BoxConstraints::new().max_width(50.0).max_height(50.0);
+
+        leaf.layout(&mut app, inset(constraints, 1.0), false);
+        assert_eq!(layouts.get(), 1);
+        assert_eq!(inset_of(&leaf.any_constraints(&app)), Some(1.0));
+
+        leaf.layout(&mut app, inset(constraints, 1.0), false);
+        assert_eq!(layouts.get(), 1, "equal constraints return early");
+
+        leaf.layout(&mut app, inset(constraints, 2.0), false);
+        assert_eq!(layouts.get(), 2, "only the inset changed");
+        assert_eq!(inset_of(&leaf.any_constraints(&app)), Some(2.0));
+
+        leaf.layout(&mut app, constraints, false);
+        assert_eq!(
+            layouts.get(),
+            3,
+            "a plain value is not the subclass instance"
+        );
+        assert!(!leaf.any_constraints(&app).has_extension());
+        assert_eq!(leaf.constraints(&app), constraints);
+    }
+
+    #[test]
+    fn a_subclass_instance_reaches_the_child_a_layout_delegate_lays_out() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let layouts = Rc::new(Cell::new(0));
+        let leaf = counting_leaf(&mut app, &layouts);
+        let parent = RenderCustomMultiChildLayoutBox::new(&mut app, Rc::new(InsetDelegate));
+        parent.add(&mut app, leaf.as_box());
+        leaf.as_object()
+            .parent_data_of_mut::<MultiChildLayoutParentData>(&mut app)
+            .id = Some(child_id());
+
+        parent.layout(
+            &mut app,
+            BoxConstraints::tight(Size::new(100.0, 80.0)),
+            false,
+        );
+        assert_eq!(layouts.get(), 1);
+        let child_constraints = leaf.as_box().any_constraints(&app);
+        assert_eq!(inset_of(&child_constraints), Some(3.0));
+        assert_eq!(
+            leaf.as_box().constraints(&app),
+            BoxConstraints::loose(Size::new(100.0, 80.0))
+        );
+    }
+
+    #[test]
+    fn a_proxy_box_hands_its_child_the_plain_value() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let layouts = Rc::new(Cell::new(0));
+        let leaf = counting_leaf(&mut app, &layouts);
+        let proxy = RenderOpacity::new(&mut app, 1.0, Some(leaf.as_box()));
+        let constraints = BoxConstraints::new().max_width(60.0).max_height(70.0);
+
+        proxy.layout(&mut app, inset(constraints, 4.0), false);
+        assert_eq!(inset_of(&proxy.any_constraints(&app)), Some(4.0));
+        assert!(
+            !leaf.any_constraints(&app).has_extension(),
+            "the subclass instance rides one hop: the proxy passes its `constraints()` on"
+        );
+        assert_eq!(leaf.constraints(&app), constraints);
     }
 }

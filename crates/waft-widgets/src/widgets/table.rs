@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::rc::Rc;
 
-use waft_embedder::{TextBaseline, TextDirection};
+use waft_embedder::{SemanticsRole, TextBaseline, TextDirection};
 use waft_foundation::{App, Handle, Key, LocalKey};
 use waft_painting::Decoration;
 use waft_rendering::{
@@ -22,7 +22,7 @@ use crate::framework::{
     RenderObjectElementData, RenderObjectElementWidget, RenderObjectWidget, Slot, StatelessWidget,
     Widget, WidgetKind, WidgetRef, downcast_widget,
 };
-use crate::widgets::basic::Directionality;
+use crate::widgets::basic::{Directionality, Semantics};
 use crate::widgets::image::create_local_image_configuration;
 
 /// A horizontal group of cells in a [`Table`].
@@ -747,7 +747,10 @@ impl StatelessWidget for TableCell {
         use crate::framework::IntoWidget;
         TableCellParentDataWidget {
             vertical_alignment: self.vertical_alignment,
-            child: self.child.clone(),
+            child: Semantics::new()
+                .role(SemanticsRole::Cell)
+                .child(self.child.clone())
+                .into_widget(),
         }
         .into_widget()
     }

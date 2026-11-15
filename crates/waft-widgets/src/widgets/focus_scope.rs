@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 
+use waft_embedder::TargetPlatform;
 use waft_foundation::{App, Handle, Listener, ValueChanged};
 
 use crate::framework::{
@@ -12,6 +13,7 @@ use crate::framework::{
     ElementLifecycle, IntoWidget, KeyRef, ProxyElement, Slot, State, StateData, StatefulWidget,
     Widget, WidgetKind, WidgetRef, component_element_overrides, downcast_widget,
 };
+use crate::widgets::basic::Semantics;
 use crate::widgets::focus_manager::{
     AnyFocusNode, FocusAttachment, FocusNode, FocusNodeLeaf, FocusOnKeyEventCallback,
     FocusScopeNode,
@@ -102,8 +104,7 @@ pub struct Focus {
 
     /// Include semantics information in this widget.
     ///
-    /// Defaults to true. Nothing reads it yet: the `Semantics` wrapper waits with
-    /// accessibility.
+    /// Defaults to true.
     pub include_semantics: bool,
 
     /// Dart's `Focus._usingExternalFocus`: whether the widget's focus node attributes should
@@ -768,10 +769,29 @@ impl State for FocusState {
             .focus_attachment
             .expect("attached in init_state")
             .reparent(app, parent_node);
-        let child = self.widget(app).child.clone();
-        // Dart wraps the child in `Semantics` when `includeSemantics` is set, and in a
-        // `_DebugFocusBorder` when `debugPaintFocusBoxes` is set; both wait.
+        let mut child = self.widget(app).child.clone();
         let node = self.focus_node(app);
+        if self.widget(app).include_semantics {
+            let could_request_focus = self.focus_state_data(app).could_request_focus;
+            let had_primary_focus = self.focus_state_data(app).had_primary_focus;
+            let mut semantics = Semantics::new().focusable(could_request_focus);
+            // Automatically request the focus for a focusable widget when it
+            // receives an input focus action from the semantics. Nothing is needed
+            // for losing the focus because if focus is lost, that means another
+            // node will gain focus and take focus from this widget.
+            // TODO(gspencergoog): Allow this to be set on iOS once the issue is
+            // addressed: https://github.com/flutter/flutter/issues/150030
+            if app.platform().target_platform() != TargetPlatform::IOS && could_request_focus {
+                semantics =
+                    semantics.on_focus(Rc::new(move |app: &mut App| node.request_focus(app, None)));
+            }
+            if could_request_focus {
+                semantics = semantics.focused(had_primary_focus);
+            }
+            child = semantics.child(child).into_widget();
+        }
+        // Dart wraps the child in a `_DebugFocusBorder` when `debugPaintFocusBoxes` is set;
+        // that waits.
         FocusInheritedScope { node, child }.into_widget()
     }
 }
@@ -1014,9 +1034,14 @@ impl State for FocusScopeState {
             .reparent(app, parent_node);
         let child = self.widget(app).focus.child.clone();
         let node = self.focus_node(app);
-        // Dart wraps the result in `Semantics(explicitChildNodes: true)` when
-        // `includeSemantics` is set; accessibility waits.
-        FocusInheritedScope { node, child }.into_widget()
+        let result = FocusInheritedScope { node, child }.into_widget();
+        if self.widget(app).focus.include_semantics {
+            return Semantics::new()
+                .explicit_child_nodes(true)
+                .child(result)
+                .into_widget();
+        }
+        result
     }
 }
 

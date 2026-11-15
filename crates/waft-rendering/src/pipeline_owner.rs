@@ -477,7 +477,8 @@ mod tests {
             let size = self
                 .render_box_data(app)
                 .constraints
-                .map(crate::box_::BoxConstraints::smallest)
+                .as_ref()
+                .map(|constraints| constraints.smallest())
                 .unwrap_or(Size::ZERO);
             self.set_size(app, size);
         }

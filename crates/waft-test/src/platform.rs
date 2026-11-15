@@ -19,7 +19,7 @@ use waft_embedder::image_codecs::ImageCodecs;
 use waft_embedder::valo;
 
 use crate::windows::view_of_request;
-use crate::{TestView, TestWindows};
+use crate::{TestFontSource, TestView, TestWindows};
 
 type FontSourceMaker = Rc<dyn Fn() -> Box<dyn FontSource>>;
 type ImageCodecOpener = Rc<dyn Fn(Arc<[u8]>) -> ImageCodecFuture>;
@@ -55,7 +55,9 @@ pub struct TestPlatform {
     /// The view of each frame asked for since the test last took them, in the order asked.
     frame_requests: RefCell<Vec<ViewId>>,
     dispatcher: Arc<TestDispatcher>,
-    font_source: Option<FontSourceMaker>,
+    /// Makes the source the platform's fonts come from: flutter_test's unless the test gives
+    /// one.
+    font_source: FontSourceMaker,
     image_codec: Option<ImageCodecOpener>,
     pixel_import: Option<PixelImporter>,
     picture_to_image: Option<PictureRasterizer>,
@@ -89,7 +91,7 @@ pub struct TestPlatform {
 
 impl TestPlatform {
     /// A platform claiming to be Android, as Flutter's test binding does, in light mode, with
-    /// no view and no capability.
+    /// flutter_test's fonts, no view and no capability.
     pub fn new() -> TestPlatform {
         TestPlatform {
             target: Cell::new(TargetPlatform::Android),
@@ -101,7 +103,7 @@ impl TestPlatform {
             added_views: RefCell::default(),
             frame_requests: RefCell::default(),
             dispatcher: Arc::new(TestDispatcher::default()),
-            font_source: None,
+            font_source: Rc::new(|| Box::new(TestFontSource::new())),
             image_codec: None,
             pixel_import: None,
             picture_to_image: None,
@@ -201,12 +203,13 @@ impl TestPlatform {
         self
     }
 
-    /// Fonts for text to shape against; none unless set, so text lays out empty.
+    /// Fonts for text to shape against, in place of flutter_test's, where every family is
+    /// FlutterTest ([`TestFontSource`]).
     pub fn with_font_source(
         mut self,
         make: impl Fn() -> Box<dyn FontSource> + 'static,
     ) -> TestPlatform {
-        self.font_source = Some(Rc::new(make));
+        self.font_source = Rc::new(make);
         self
     }
 
@@ -502,7 +505,7 @@ impl Platform for TestPlatform {
     }
 
     fn font_source(&self) -> Option<Box<dyn FontSource>> {
-        self.font_source.as_ref().map(|make| make())
+        Some((self.font_source)())
     }
 
     fn open_image_codec(&self, bytes: Arc<[u8]>) -> ImageCodecFuture {

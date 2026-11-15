@@ -2381,6 +2381,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "material-gallery"
+version = "0.5.0"
+dependencies = [
+ "valo-system-fonts",
+ "waft",
+ "waft-embedder",
+ "waft-embedder-default",
+ "waft-foundation",
+ "waft-gestures",
+ "waft-material",
+ "waft-painting",
+ "waft-rendering",
+ "waft-scheduler",
+ "waft-shell",
+ "waft-test",
+ "waft-widgets",
+]
+
+[[package]]
 name = "maybe-rayon"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5262,6 +5281,35 @@ dependencies = [
  "waft-scheduler",
  "waft-test",
  "waft-widgets",
+]
+
+[[package]]
+name = "waft-material"
+version = "0.5.0"
+dependencies = [
+ "indexmap",
+ "unicode-segmentation",
+ "valo-system-fonts",
+ "waft-animation",
+ "waft-cupertino",
+ "waft-embedder",
+ "waft-foundation",
+ "waft-gestures",
+ "waft-material-color-utilities",
+ "waft-painting",
+ "waft-physics",
+ "waft-rendering",
+ "waft-scheduler",
+ "waft-services",
+ "waft-test",
+ "waft-widgets",
+]
+
+[[package]]
+name = "waft-material-color-utilities"
+version = "0.5.0"
+dependencies = [
+ "indexmap",
 ]
 
 [[package]]

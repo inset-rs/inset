@@ -39,6 +39,7 @@ mod pointer_data_packet_converter;
 mod pointer_report;
 mod restoration;
 mod scene;
+mod semantics;
 mod snapshot_delegate;
 mod system_context_menu;
 #[cfg(feature = "test-support")]
@@ -128,6 +129,11 @@ pub use restoration::{RestorationData, RestorationMap, RestorationUpdate};
 pub use scene::{
     ContainerLayer, DisplayListLayer, Effect, EmbeddedLayer, EngineLayer, Layer, Mutator, Part,
     Placement, Scene, SceneBuilder, Slices, VideoLayer, slices,
+};
+pub use semantics::{
+    LocaleStringAttribute, SemanticsAction, SemanticsHitTestBehavior, SemanticsInputType,
+    SemanticsRole, SemanticsValidationResult, SpellOutStringAttribute, StringAttribute,
+    StringAttributeRef,
 };
 pub use snapshot_delegate::SnapshotDelegate;
 pub use system_context_menu::SystemContextMenuItem;

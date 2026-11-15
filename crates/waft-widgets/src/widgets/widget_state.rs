@@ -1434,6 +1434,55 @@ impl<T> Debug for LerpProperties<T> {
     }
 }
 
+impl<T: 'static> dyn WidgetStateProperty<Option<T>> {
+    /// Linearly interpolate between two [`WidgetStateProperty`]s of a nullable value.
+    ///
+    /// This is Dart's `WidgetStateProperty.lerp<T>` with `T` nullable, such as the
+    /// `WidgetStateProperty<Color?>` fields of a `ButtonStyle`: Dart's `T??` is `T?`, so the
+    /// lerped property resolves to `Option<T>`, where [`lerp`](Self::lerp) over
+    /// `Option<T>` would resolve to `Option<Option<T>>`. A side that resolves to `None` is
+    /// handed to `lerp_function` as `None`, as Dart hands it `null`.
+    pub fn lerp_optional(
+        a: Option<WidgetStatePropertyRef<Option<T>>>,
+        b: Option<WidgetStatePropertyRef<Option<T>>>,
+        t: f64,
+        lerp_function: impl Fn(Option<T>, Option<T>, f64) -> Option<T> + 'static,
+    ) -> Option<WidgetStatePropertyRef<Option<T>>> {
+        // Avoid creating a LerpProperties object for a common case.
+        if a.is_none() && b.is_none() {
+            return None;
+        }
+        Some(Rc::new(LerpOptionalProperties {
+            a,
+            b,
+            t,
+            lerp_function: Rc::new(lerp_function),
+        }))
+    }
+}
+
+/// Dart's `_LerpProperties<T>` with `T` nullable, which `lerp_optional` makes.
+struct LerpOptionalProperties<T> {
+    a: Option<WidgetStatePropertyRef<Option<T>>>,
+    b: Option<WidgetStatePropertyRef<Option<T>>>,
+    t: f64,
+    lerp_function: LerpFunction<T>,
+}
+
+impl<T: 'static> WidgetStateProperty<Option<T>> for LerpOptionalProperties<T> {
+    fn resolve(&self, states: &WidgetStates) -> Option<T> {
+        let resolved_a = self.a.as_ref().and_then(|a| a.resolve(states));
+        let resolved_b = self.b.as_ref().and_then(|b| b.resolve(states));
+        (self.lerp_function)(resolved_a, resolved_b, self.t)
+    }
+}
+
+impl<T> Debug for LerpOptionalProperties<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "LerpProperties({:?}, {:?}, {})", self.a, self.b, self.t)
+    }
+}
+
 struct WidgetStatePropertyWith<T> {
     resolve: WidgetPropertyResolver<T>,
 }
@@ -1875,6 +1924,41 @@ mod tests {
         assert_eq!(lerp(1.0), Some(20.0));
         assert!(
             <dyn WidgetStateProperty<TextStyle>>::lerp(None, None, 0.5, |_, _, _| None).is_none()
+        );
+    }
+
+    #[test]
+    fn lerp_optional_interpolates_nullable_values_and_hands_a_none_side_on() {
+        let enabled = WidgetStates::new();
+        let some: WidgetStatePropertyRef<Option<f64>> =
+            Rc::new(WidgetStatePropertyAll::new(Some(10.0)));
+        let none: WidgetStatePropertyRef<Option<f64>> = Rc::new(WidgetStatePropertyAll::new(None));
+        let lerp = |a: &WidgetStatePropertyRef<Option<f64>>,
+                    b: Option<&WidgetStatePropertyRef<Option<f64>>>,
+                    t: f64| {
+            <dyn WidgetStateProperty<Option<f64>>>::lerp_optional(
+                Some(Rc::clone(a)),
+                b.cloned(),
+                t,
+                |a, b, t| match (a, b) {
+                    (Some(a), Some(b)) => Some(a + (b - a) * t),
+                    (Some(a), None) => Some(a * (1.0 - t)),
+                    (None, Some(b)) => Some(b * t),
+                    (None, None) => None,
+                },
+            )
+            .expect("one side")
+            .resolve(&enabled)
+        };
+        let twenty: WidgetStatePropertyRef<Option<f64>> =
+            Rc::new(WidgetStatePropertyAll::new(Some(20.0)));
+        assert_eq!(lerp(&some, Some(&twenty), 0.5), Some(15.0));
+        assert_eq!(lerp(&some, Some(&none), 0.5), Some(5.0));
+        assert_eq!(lerp(&some, None, 0.5), Some(5.0));
+        assert_eq!(lerp(&none, Some(&none), 0.5), None);
+        assert!(
+            <dyn WidgetStateProperty<Option<f64>>>::lerp_optional(None, None, 0.5, |_, _, _| None)
+                .is_none()
         );
     }
 

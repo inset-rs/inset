@@ -1144,7 +1144,7 @@ pub struct EditableText {
     pub on_submitted: Option<Rc<dyn Fn(&mut App, String)>>,
     pub on_app_private_command: Option<AppPrivateCommandCallback>,
     pub on_selection_changed: Option<SelectionChangedCallback>,
-    pub on_selection_handle_tapped: Option<Rc<dyn Fn(&mut App)>>,
+    pub on_selection_handle_tapped: Option<Listener>,
     pub group_id: TypeId,
     pub on_tap_outside: Option<Rc<dyn Fn(&mut App, PointerDownEvent)>>,
     pub on_tap_up_outside: Option<Rc<dyn Fn(&mut App, PointerUpEvent)>>,
@@ -1527,11 +1527,8 @@ impl EditableText {
     }
 
     /// Dart `EditableText(onSelectionHandleTapped:)`.
-    pub fn on_selection_handle_tapped(
-        mut self,
-        on_selection_handle_tapped: impl Fn(&mut App) + 'static,
-    ) -> Self {
-        self.on_selection_handle_tapped = Some(Rc::new(on_selection_handle_tapped));
+    pub fn on_selection_handle_tapped(mut self, on_selection_handle_tapped: Listener) -> Self {
+        self.on_selection_handle_tapped = Some(on_selection_handle_tapped);
         self
     }
 
@@ -1911,8 +1908,18 @@ impl EditableText {
 
     /// Dart's `toolbarOptions` field, as its constructor fills it.
     pub fn effective_toolbar_options(&self) -> ToolbarOptions {
+        if self.has_handle_controls() && self.toolbar_options.is_none() {
+            return ToolbarOptions::EMPTY;
+        }
         self.toolbar_options
             .unwrap_or_else(|| default_toolbar_options(self.read_only, self.obscure_text))
+    }
+
+    /// Dart's `selectionControls is TextSelectionHandleControls`.
+    fn has_handle_controls(&self) -> bool {
+        self.selection_controls
+            .as_ref()
+            .is_some_and(|controls| controls.as_text_selection_handle_controls().is_some())
     }
 
     /// Dart's `keyboardType` field, as its constructor fills it.
@@ -2706,7 +2713,7 @@ impl EditableTextState {
 
     /// Express interest in interacting with the keyboard.
     pub fn request_keyboard(self: Handle<Self>, app: &mut App) {
-        if app.get(self).has_focus {
+        if self.has_focus(app) {
             self.open_input_connection(app);
         } else {
             app.get_mut(self).next_focus_change_is_internal = true;
@@ -2760,8 +2767,7 @@ impl EditableTextState {
             overlay = overlay.selection_controls(app, controls);
         }
         if let Some(on_tapped) = on_selection_handle_tapped {
-            overlay =
-                overlay.on_selection_handle_tapped(app, Listener::new(move |app| on_tapped(app)));
+            overlay = overlay.on_selection_handle_tapped(app, on_tapped);
         }
         if !Self::web_context_menu_enabled()
             && let Some(builder) = context_menu_builder
@@ -2776,7 +2782,7 @@ impl EditableTextState {
 
     fn update_or_dispose_selection_overlay_if_needed(self: Handle<Self>, app: &mut App) {
         if let Some(overlay) = app.get(self).selection_overlay {
-            if app.get(self).has_focus {
+            if self.has_focus(app) {
                 overlay.update(app, self.value(app));
             } else {
                 overlay.dispose(app);
@@ -3039,7 +3045,7 @@ impl EditableTextState {
             let text = obscuring_character.repeat(n);
             return TextSpan::new().style(style).text(text);
         }
-        let with_composing = !read_only && app.get(self).has_focus;
+        let with_composing = !read_only && self.has_focus(app);
         if self.spell_check_results_received(app) {
             debug_assert!(
                 !value.composing.is_valid() || !with_composing || value.is_composing_range_valid()
@@ -3183,8 +3189,14 @@ impl EditableTextState {
         cursor_color.with_alpha((255.0 * opacity).round() as i32)
     }
 
+    /// Dart's `_hasFocus`: the focus node's focus as it is now, which the focus flag
+    /// `want_keep_alive` reads only catches up with once this state's focus listener runs.
+    fn has_focus(self: Handle<Self>, app: &mut App) -> bool {
+        self.widget(app).focus_node.has_focus(app)
+    }
+
     fn show_blinking_cursor(self: Handle<Self>, app: &mut App) -> bool {
-        app.get(self).has_focus
+        self.has_focus(app)
             && self.value(app).selection.is_collapsed()
             && self.widget(app).effective_show_cursor()
             && app.get(self).tickers_enabled
@@ -3963,7 +3975,7 @@ impl EditableTextState {
     }
 
     fn did_change_text_editing_value(self: Handle<Self>, app: &mut App) {
-        if app.get(self).has_focus && !self.value(app).selection.is_valid() {
+        if self.has_focus(app) && !self.value(app).selection.is_valid() {
             let controller = self.widget(app).controller;
             controller.remove_listener(
                 app,
@@ -4110,7 +4122,7 @@ impl EditableTextState {
     }
 
     fn open_or_close_input_connection_if_needed(self: Handle<Self>, app: &mut App) {
-        let has_focus = app.get(self).has_focus;
+        let has_focus = self.has_focus(app);
         let focus_node = self.widget(app).focus_node;
         if has_focus && focus_node.consume_keyboard_token(app) {
             self.open_input_connection(app);
@@ -4408,6 +4420,9 @@ impl EditableTextState {
     }
 
     fn on_cursor_color_tick(self: Handle<Self>, app: &mut App) {
+        let cursor_color = self.cursor_color(app);
+        self.render_editable(app)
+            .set_cursor_color(app, Some(cursor_color));
         let show_cursor = self.widget(app).effective_show_cursor();
         let visible = show_cursor
             && (EditableText::debug_deterministic_cursor()
@@ -4416,6 +4431,17 @@ impl EditableTextState {
     }
 
     fn start_cursor_blink(self: Handle<Self>, app: &mut App) {
+        if cfg!(debug_assertions) {
+            let timer_active = app
+                .get(self)
+                .cursor_timer
+                .is_some_and(|timer| timer.is_active(app));
+            let animating = app
+                .get(self)
+                .backing_cursor_blink_opacity_controller
+                .is_some_and(|controller| controller.is_animating(app));
+            debug_assert!(!timer_active || !animating);
+        }
         if !self.widget(app).effective_show_cursor() || !app.get(self).tickers_enabled {
             return;
         }
@@ -4454,13 +4480,29 @@ impl EditableTextState {
             if let Some(timer) = app.get(self).cursor_timer {
                 timer.cancel(app);
             }
-            let future = self.cursor_blink_opacity_controller(app).animate_with(
+            // Schedule this as an async task to avoid blocking tester.pumpAndSettle
+            // indefinitely.
+            let this = self;
+            let timer = Timer::new(
                 app,
-                Box::new(DiscreteKeyFrameSimulation::ios_blinking_caret()),
+                Duration::ZERO,
+                Listener::new(move |app| {
+                    let future = this.cursor_blink_opacity_controller(app).animate_with(
+                        app,
+                        Box::new(DiscreteKeyFrameSimulation::ios_blinking_caret()),
+                    );
+                    future.when_complete(app, Listener::handle_method(this, Self::on_cursor_tick));
+                }),
             );
-            future.when_complete(app, Listener::handle_method(self, Self::on_cursor_tick));
+            app.get_mut(self).cursor_timer = Some(timer);
         } else {
-            if app.get(self).tickers_enabled {
+            // Dart's `Timer.periodic` stays active between ticks; the one-shot timer that
+            // stands in for it has just fired, so it is re-armed here.
+            let timer_active = app
+                .get(self)
+                .cursor_timer
+                .is_some_and(|timer| timer.is_active(app));
+            if !timer_active && app.get(self).tickers_enabled {
                 let timer = Timer::new(
                     app,
                     K_CURSOR_BLINK_HALF_PERIOD,
@@ -4652,7 +4694,7 @@ impl EditableTextState {
         let show_cursor = self.cursor_visibility_notifier(app);
         let force_line = self.widget(app).force_line;
         let read_only = self.widget(app).read_only;
-        let has_focus = app.get(self).has_focus;
+        let has_focus = self.has_focus(app);
         let max_lines = self.widget(app).max_lines;
         let min_lines = self.widget(app).min_lines;
         let expands = self.widget(app).expands;
@@ -4910,7 +4952,7 @@ impl State for EditableTextState {
         }
         if !self.should_create_input_connection(app) {
             self.close_input_connection_if_needed(app);
-        } else if old_widget.read_only && app.get(self).has_focus {
+        } else if old_widget.read_only && self.has_focus(app) {
             SchedulerBinding::add_post_frame_callback(
                 app,
                 FrameCallback::handle_method(self, Self::post_frame_open_connection),
@@ -5002,10 +5044,8 @@ impl State for EditableTextState {
                     &self.widget(app).selection_controls,
                     &old_widget.selection_controls,
                 )
-                || !option_rc_eq(
-                    &self.widget(app).on_selection_handle_tapped,
-                    &old_widget.on_selection_handle_tapped,
-                )
+                || self.widget(app).on_selection_handle_tapped
+                    != old_widget.on_selection_handle_tapped
                 || self.widget(app).drag_start_behavior != old_widget.drag_start_behavior
                 || !self
                     .widget(app)
@@ -5044,11 +5084,14 @@ impl State for EditableTextState {
             overlay.set_handles_visible(app, self.widget(app).show_selection_handles);
         }
         #[allow(deprecated)]
-        let can_paste = self
-            .widget(app)
-            .selection_controls
-            .as_ref()
-            .is_some_and(|controls| controls.can_paste(app, self.as_text_selection_delegate()));
+        let can_paste = if self.widget(app).has_handle_controls() {
+            self.paste_enabled(app)
+        } else {
+            self.widget(app)
+                .selection_controls
+                .as_ref()
+                .is_some_and(|controls| controls.can_paste(app, self.as_text_selection_delegate()))
+        };
         if self.widget(app).effective_enable_interactive_selection()
             && self.paste_enabled(app)
             && can_paste
@@ -5234,7 +5277,7 @@ impl State for EditableTextState {
         }
         let focused = history.into_widget();
         let actions = self.ensure_actions(app, context);
-        let has_focus = app.get(self).has_focus;
+        let has_focus = self.has_focus(app);
         let group_id = self.widget(app).group_id;
         let state = self;
         let composite_callback = app
@@ -5549,7 +5592,7 @@ impl TextSelectionDelegate for EditableTextState {
         // the selection overlay. For example, this happens when right clicking an
         // unfocused field that previously had a selection in the same spot.
         if value == self.value(app) {
-            if !app.get(self).has_focus {
+            if !self.has_focus(app) {
                 app.get_mut(self).next_focus_change_is_internal = true;
                 let focus_node = self.widget(app).focus_node;
                 focus_node.request_focus(app, None);
@@ -5573,24 +5616,57 @@ impl TextSelectionDelegate for EditableTextState {
 
     fn cut_enabled(self: Handle<Self>, app: &App) -> bool {
         let widget = self.widget(app);
-        widget.effective_toolbar_options().cut && !widget.read_only && !widget.obscure_text
+        if !widget.has_handle_controls() {
+            return widget.effective_toolbar_options().cut
+                && !widget.read_only
+                && !widget.obscure_text;
+        }
+        !widget.read_only && !widget.obscure_text && !self.value(app).selection.is_collapsed()
     }
 
     fn copy_enabled(self: Handle<Self>, app: &App) -> bool {
         let widget = self.widget(app);
-        widget.effective_toolbar_options().copy && !widget.obscure_text
+        if !widget.has_handle_controls() {
+            return widget.effective_toolbar_options().copy && !widget.obscure_text;
+        }
+        !widget.obscure_text && !self.value(app).selection.is_collapsed()
     }
 
     fn paste_enabled(self: Handle<Self>, app: &App) -> bool {
         let widget = self.widget(app);
-        widget.effective_toolbar_options().paste && !widget.read_only
+        if !widget.has_handle_controls() {
+            return widget.effective_toolbar_options().paste && !widget.read_only;
+        }
+        !widget.read_only && self.clipboard_status(app).value(app) == ClipboardStatus::Pasteable
     }
 
     fn select_all_enabled(self: Handle<Self>, app: &App) -> bool {
         let widget = self.widget(app);
-        widget.effective_toolbar_options().select_all
-            && (!widget.read_only || !widget.obscure_text)
-            && widget.effective_enable_interactive_selection()
+        if !widget.has_handle_controls() {
+            return widget.effective_toolbar_options().select_all
+                && (!widget.read_only || !widget.obscure_text)
+                && widget.effective_enable_interactive_selection();
+        }
+
+        if !widget.effective_enable_interactive_selection()
+            || (widget.read_only && widget.obscure_text)
+        {
+            return false;
+        }
+
+        let value = self.value(app);
+        match app.platform().target_platform() {
+            TargetPlatform::MacOS => false,
+            TargetPlatform::IOS => !value.text.is_empty() && value.selection.is_collapsed(),
+            TargetPlatform::Android
+            | TargetPlatform::Fuchsia
+            | TargetPlatform::Linux
+            | TargetPlatform::Windows => {
+                !value.text.is_empty()
+                    && !(value.selection.start() == 0
+                        && value.selection.end() == value.text.encode_utf16().count() as i32)
+            }
+        }
     }
 
     fn look_up_enabled(self: Handle<Self>, app: &App) -> bool {

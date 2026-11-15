@@ -11,10 +11,11 @@ use std::rc::Rc;
 use waft_embedder::{Offset, Size, TextBaseline};
 use waft_foundation::{App, Handle, Listener};
 use waft_rendering::{
-    AnyRenderBox, AnyRenderObject, BoxConstraints, BoxHitTestResult, DryLayoutFailure,
-    PaintingContext, RenderBox, RenderBoxData, RenderHandle, RenderObject, RenderObjectData,
-    RenderObjectWithChildData, RenderObjectWithChildMixin, RenderObjectWithLayoutCallbackData,
-    RenderObjectWithLayoutCallbackMixin, debug_checking_intrinsics,
+    AnyBoxConstraints, AnyRenderBox, AnyRenderObject, BoxConstraints, BoxHitTestResult,
+    DryLayoutFailure, PaintingContext, RenderBox, RenderBoxData, RenderHandle, RenderObject,
+    RenderObjectData, RenderObjectWithChildData, RenderObjectWithChildMixin,
+    RenderObjectWithLayoutCallbackData, RenderObjectWithLayoutCallbackMixin,
+    debug_checking_intrinsics,
 };
 use waft_scheduler::{FrameCallback, SchedulerBinding, SchedulerPhase};
 
@@ -26,7 +27,10 @@ use crate::framework::{
 use crate::view::View;
 
 /// The signature of the [`LayoutBuilder`] builder function.
-pub type LayoutWidgetBuilder = Rc<dyn Fn(&mut App, BuildContext, BoxConstraints) -> WidgetRef>;
+///
+/// The constraints are the box's as its parent gave them, a `BoxConstraints` subclass
+/// instance included ([`AnyBoxConstraints::extension`] is Dart's `constraints as T`).
+pub type LayoutWidgetBuilder = Rc<dyn Fn(&mut App, BuildContext, AnyBoxConstraints) -> WidgetRef>;
 
 /// Builds a widget tree that can depend on the parent widget's size.
 ///
@@ -67,7 +71,7 @@ pub struct LayoutBuilder {
 impl LayoutBuilder {
     /// Creates a widget that defers its building until layout.
     pub fn new(
-        builder: impl Fn(&mut App, BuildContext, BoxConstraints) -> WidgetRef + 'static,
+        builder: impl Fn(&mut App, BuildContext, AnyBoxConstraints) -> WidgetRef + 'static,
     ) -> LayoutBuilder {
         LayoutBuilder {
             key: None,
@@ -169,7 +173,7 @@ pub struct LayoutBuilderElement {
     // The constraints that were used to invoke the layout callback with last time,
     // during layout. The `previous_layout_info` value is compared to the new one
     // to determine whether the builder needs to be called.
-    previous_layout_info: Option<BoxConstraints>,
+    previous_layout_info: Option<AnyBoxConstraints>,
     needs_build: bool,
 }
 
@@ -236,13 +240,13 @@ impl LayoutBuilderElement {
         let render_object = self.render_layout_builder(app);
         let layout_info = render_object.layout_info(app);
         let this = self.as_element();
-        let needs_callback =
-            app.get(self).needs_build || Some(layout_info) != app.get(self).previous_layout_info;
+        let needs_callback = app.get(self).needs_build
+            || Some(&layout_info) != app.get(self).previous_layout_info.as_ref();
         let callback: Option<BuildScopeCallback> = needs_callback.then(|| {
             Box::new(move |app: &mut App| {
                 debug_assert!(layout_info == render_object.layout_info(app));
                 let builder = Self::widget_of(this.widget(app)).builder.clone();
-                let built = builder(app, this, layout_info);
+                let built = builder(app, this, layout_info.clone());
                 // A panic in the builder unwinds; there is no `ErrorWidget`.
                 let child = app.get(self).child;
                 let child = this.update_child(app, child, Some(built), None);
@@ -448,9 +452,9 @@ pub trait RenderAbstractLayoutBuilderMixin: RenderObjectWithLayoutCallbackMixin 
         self.schedule_layout_callback(app);
     }
 
-    /// The information the builder is given: this box's constraints.
-    fn layout_info(self: RenderHandle<Self>, app: &App) -> BoxConstraints {
-        self.constraints(app)
+    /// The information the builder is given: this box's constraints, with their subclass.
+    fn layout_info(self: RenderHandle<Self>, app: &App) -> AnyBoxConstraints {
+        self.any_constraints(app)
     }
 }
 
@@ -656,7 +660,7 @@ mod tests {
     fn builder(seen: &Seen) -> WidgetRef {
         let seen = Rc::clone(seen);
         LayoutBuilder::new(move |_app, _context, constraints| {
-            seen.borrow_mut().push(constraints);
+            seen.borrow_mut().push(constraints.constraints());
             SizedBox::square(Some(10.0)).into_widget()
         })
         .into_widget()
@@ -691,6 +695,110 @@ mod tests {
         assert_eq!(
             seen.borrow()[1],
             BoxConstraints::tight(Size::new(80.0, 50.0))
+        );
+    }
+
+    /// A `BoxConstraints` subclass with one field, as material's `_BottomSheetBoxConstraints`.
+    #[derive(Debug)]
+    struct Inset(f64);
+
+    impl waft_rendering::BoxConstraintsExtension for Inset {
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn eq_extension(&self, other: &dyn waft_rendering::BoxConstraintsExtension) -> bool {
+            other
+                .as_any()
+                .downcast_ref::<Inset>()
+                .is_some_and(|other| other.0 == self.0)
+        }
+    }
+
+    /// Lays out its one child with the same plain constraints and an `Inset` of `self.0`.
+    #[derive(Debug)]
+    struct InsetDelegate(f64);
+
+    impl waft_rendering::MultiChildLayoutDelegate for InsetDelegate {
+        fn perform_layout(
+            &self,
+            app: &mut App,
+            children: &mut waft_rendering::MultiChildLayoutChildren,
+            size: Size,
+        ) {
+            children.layout_child(
+                app,
+                &child_id(),
+                AnyBoxConstraints::with_shared(BoxConstraints::loose(size), Rc::new(Inset(self.0))),
+            );
+        }
+
+        fn should_relayout(
+            &self,
+            old_delegate: &dyn waft_rendering::MultiChildLayoutDelegate,
+        ) -> bool {
+            old_delegate
+                .as_any()
+                .downcast_ref::<InsetDelegate>()
+                .is_none_or(|old_delegate| old_delegate.0 != self.0)
+        }
+
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+    }
+
+    fn child_id() -> waft_rendering::ChildLayoutId {
+        Rc::new(waft_foundation::ValueKey::new("child"))
+    }
+
+    #[test]
+    fn the_builder_gets_the_constraints_subclass_and_reruns_when_only_its_fields_change() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let layout_builder = {
+            let seen = Rc::clone(&seen);
+            LayoutBuilder::new(move |_app, _context, constraints| {
+                seen.borrow_mut().push((
+                    constraints.constraints(),
+                    constraints.extension::<Inset>().map(|inset| inset.0),
+                ));
+                SizedBox::square(Some(10.0)).into_widget()
+            })
+            .into_widget()
+        };
+        let layout = |inset: f64| {
+            sized(
+                100.0,
+                crate::widgets::basic::CustomMultiChildLayout::new(Rc::new(InsetDelegate(inset)))
+                    .children([crate::widgets::basic::LayoutId::new(
+                        child_id(),
+                        layout_builder.clone(),
+                    )
+                    .into_widget()])
+                    .into_widget(),
+            )
+        };
+        let loose = BoxConstraints::loose(Size::new(100.0, 50.0));
+        let harness = Harness::mount(&mut app, layout(1.0));
+        harness.pump(&mut app);
+        assert_eq!(*seen.borrow(), vec![(loose, Some(1.0))]);
+
+        harness.set_child(&mut app, layout(1.0));
+        harness.pump(&mut app);
+        assert_eq!(
+            seen.borrow().len(),
+            1,
+            "equal constraints, the same builder widget"
+        );
+
+        harness.set_child(&mut app, layout(2.0));
+        harness.pump(&mut app);
+        assert_eq!(
+            *seen.borrow(),
+            vec![(loose, Some(1.0)), (loose, Some(2.0))],
+            "only the subclass field changed"
         );
     }
 

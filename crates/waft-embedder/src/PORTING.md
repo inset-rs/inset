@@ -7,6 +7,7 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
 - text.rs → dart:ui text.dart (the text and font enums, `FontFeature`, `FontVariation`)
 - locale.rs → dart:ui `Locale`
 - `AppLifecycleState`, `AppExitResponse`, `AppExitType` in platform.rs → dart:ui `platform_dispatcher.dart`
+- semantics.rs → lib/ui/semantics.dart (SemanticsAction, SemanticsRole, SemanticsInputType, SemanticsHitTestBehavior, SemanticsValidationResult, StringAttribute, SpellOutStringAttribute, LocaleStringAttribute)
 
 ## painting.rs → dart:ui `Canvas` / `Paint` / `Paragraph` / `TextStyle`
 
@@ -298,6 +299,7 @@ Ported against Flutter `9c427b5d7b`.
 
 ## Deferred
 
+- paragraph.rs: `LineMetrics::height` is the line's ascent plus descent, unrounded; dart:ui's is skparagraph's line height rounded to the nearest integer (`InternalLineMetrics::height()`, then `littleRound` in TextLine.cpp). Trigger: the Valo release that rounds line heights (fixed in Valo, unreleased): take Valo's line height then.
 - A backdrop filter over a composition layer, which shows the layer unfiltered. Trigger: an app that needs glass over a video.
 - `SceneBuilder`'s shader-mask and colour-filter pushes. Trigger: the framework layers that call them.
 - Decoding at any size but the file's own, which in Dart is `instantiateImageCodec`'s target width and height and the `getTargetSize` callback of `instantiateImageCodecWithSize`. Trigger: `ResizeImage`, which is what the image widget's `cacheWidth` and `cacheHeight` become.
@@ -315,7 +317,8 @@ Ported against Flutter `9c427b5d7b`.
 - `debugDefaultTargetPlatformOverride`. Trigger: a debug switcher that must override a live host without swapping `Platform`.
 - `PointerData.respond` / `onRespond`. Trigger: a web host, where they call `preventDefault` on the originating DOM event.
 - A report's `embedder_id`, which Flutter's Android embedder sets to the `MotionEvent`'s id so that a platform view can take back the system's touch, and every other embedder leaves at 0. Trigger: a platform view that takes back the system's touch.
-- Semantics callbacks. Trigger: semantics.
+- Semantics callbacks. Trigger: the semantics tree.
+- semantics.rs: SemanticsFlag, SemanticsFlags, CheckedState, Tristate, SemanticsUpdateBuilder, SemanticsUpdate. Trigger: the semantics tree.
 - `PlatformDispatcher` callback setters and Zones. Trigger: a requirement to expose dart:ui callbacks independently of `Shell`.
 - `_updateFrameData` and the `frameNumber` argument to `_beginFrame`. Trigger: `FrameData`.
 - The rest of `hooks.dart`. Trigger: the matching dart:ui callback.
@@ -475,4 +478,3 @@ Ported against Flutter `9c427b5d7b`.
 - Change: a camera's photos are answered encoded by the system at a size from the format's list, as bytes and their MIME type, and its recordings written by the system to a path the app gives, where the `camera` plugin answers an `XFile` in a folder of its own.
   Reason: platform — the system encodes and writes them, and an app chooses where its files go.
   Affect: a photo arrives as JPEG bytes at the size asked for, and a recording is a QuickTime movie at the app's path.
-

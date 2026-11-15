@@ -11,7 +11,6 @@ Ported against: 4765bd950d31784578608cfbb0c723453cc49216
 - form_section.rs → form_section.dart
 - focus_halo.rs → cupertino_focus_halo.dart
 - constants.rs → constants.dart
-- theme.rs → theme.dart
 - localizations.rs → localizations.dart
 - text_field.rs → text_field.dart
 - desktop_text_selection_toolbar.rs → desktop_text_selection_toolbar.dart
@@ -19,6 +18,10 @@ Ported against: 4765bd950d31784578608cfbb0c723453cc49216
 - desktop_text_selection.rs → desktop_text_selection.dart
 - text_selection.rs → text_selection.dart
 - text_selection_toolbar_button.rs → text_selection_toolbar_button.dart
+- thumb_painter.rs → thumb_painter.dart
+- magnifier.rs → magnifier.dart
+- radio.rs → radio.dart
+- spell_check_suggestions_toolbar.rs → spell_check_suggestions_toolbar.dart
 
 ## app.rs → app.dart
 
@@ -54,29 +57,11 @@ Ported against: 4765bd950d31784578608cfbb0c723453cc49216
   Reason: platform — there is no asset bundle or `pubspec.yaml` for a host to read a font declaration from.
   Affect: every cupertino icon draws blank until that call runs, and the whole font is registered where Flutter's tool subsets it to the icons an app names.
 
-## expansion_tile.rs → expansion_tile.dart
-
-- Change: the header is not wrapped in Dart's `Semantics(hint:, onTapHint:)`.
-  Reason: platform — accessibility is deferred.
-  Affect: nothing announces the tile's expanded state or what a tap will do.
-
-## button.rs → button.dart
-
-- Change: `Semantics(button: true)` is not in the tree.
-  Reason: platform — accessibility is deferred.
-  Affect: nothing announces the button.
-
 ## list_section.rs → list_section.dart
 
-- Change: the assert that a section has children or a header runs at the start of `build`.
-  Reason: language — the fluent setters fill those fields after the constructor, so the pair is only complete once the widget builds.
-  Affect: an empty section without a header panics on its first build rather than where it is constructed.
-
-## scrollbar.rs → scrollbar.dart
-
-- Change: the thumb-press handlers do not record the press position or compare the release position and velocity against it.
-  Reason: platform — `HapticFeedback` is not ported, and that comparison exists only to decide whether to fire it.
-  Affect: pressing and releasing the thumb produces no haptic feedback.
+- Change: Dart's assert that a section has children or a header runs when the widget is turned into a `WidgetRef` (`into_widget`).
+  Reason: language — the fluent setters fill those fields after the constructor, so the pair is only complete once the chain ends.
+  Affect: an empty section without a header panics where it is handed to the tree, not where it is constructed.
 
 ## page_scaffold.rs → page_scaffold.dart
 
@@ -90,15 +75,7 @@ Ported against: 4765bd950d31784578608cfbb0c723453cc49216
   Reason: language — the key travels back to the caller through a vtable slot, and `Debug` stands in for the `Object.toString` a segment's focus label reads.
   Affect: a segment is keyed by an enum or an integer; a key that is not a plain value has no way in.
 
-- Change: the `Semantics` wrapper around each segment is not in the tree.
-  Reason: platform — accessibility is deferred.
-  Affect: nothing announces a segment or which one is selected.
-
 ## switch.rs → switch.dart
-
-- Change: the `Semantics(toggled:)` wrapper is not in the tree.
-  Reason: platform — accessibility is deferred.
-  Affect: nothing announces the switch or whether it is on.
 
 - Change: `activeThumbImage`, `inactiveThumbImage` and their two error listeners are not on `CupertinoSwitch`; the thumb is its colour and, when set, its `thumb_icon`.
   Reason: platform — painting's `DecorationImage`, which the thumb's `ShapeDecoration` paints them with, is deferred (waft-painting's PORTING.md).
@@ -138,9 +115,9 @@ Ported against: 4765bd950d31784578608cfbb0c723453cc49216
 
 ## dialog.rs → dialog.dart
 
-- Change: `CupertinoActionSheet`'s "at least one of actions, title, message, cancelButton" assert runs in `create_state`.
+- Change: `CupertinoActionSheet`'s "at least one of actions, title, message, cancelButton" constructor assert runs when the widget is turned into a `WidgetRef` (`into_widget`).
   Reason: language — the four fields arrive through fluent setters.
-  Affect: an action sheet with none of the four set panics the first time it is built in debug, where Dart panics at construction.
+  Affect: an action sheet with none of the four set panics in debug where it is handed to the tree, not where it is constructed.
 
 - Change: the alert-dialog actions layout panics on invalid constraints where Dart throws a `FlutterError` the binding catches.
   Reason: language — no catchable error; diagnostics deferred.
@@ -156,33 +133,54 @@ Ported against: 4765bd950d31784578608cfbb0c723453cc49216
   Reason: language — two Dart constructors of one class are two associated functions returning the same struct, so a field the other constructor forbids can only be guarded where it is written.
   Affect: writing both `middle` and `large_title` panics in debug, where Dart's two constructors make it unsayable.
 
+## checkbox.rs → checkbox.dart
+
+- Change: Dart's `tristate || value != null` constructor assert runs when the widget is turned into a `WidgetRef` (`into_widget`).
+  Reason: language — `tristate` arrives through a fluent setter after `new`, so the pair is only complete once the chain ends.
+  Affect: a checkbox that is not tristate and has no value panics where it is handed to the tree, not where it is constructed.
+
+## slider.rs → slider.dart
+
+- Change: Dart's `value >= min && value <= max` constructor assert runs when the widget is turned into a `WidgetRef` (`into_widget`); `divisions > 0` is asserted in the `divisions` setter.
+  Reason: language — `min` and `max` arrive through fluent setters after `new`.
+  Affect: an out-of-range value panics where the slider is handed to the tree, not where it is constructed.
+
+## refresh.rs → refresh.dart
+
+- Change: Dart's `refreshTriggerPullDistance >= refreshIndicatorExtent` constructor assert runs when the widget is turned into a `WidgetRef` (`into_widget`); the single-field asserts run in their setters.
+  Reason: language — both distances arrive through fluent setters, so the pair is only complete once the chain ends.
+  Affect: a control whose indicator extent is larger than its trigger distance panics in debug where it is handed to the tree, not where it is constructed.
+
+## theme.rs → theme.dart
+
+- Change: a `CupertinoThemeData` subclass is a `CupertinoThemeDataOverrides` the theme data holds (`CupertinoThemeData::raw_with_overrides`), which answers `brightness`, `primary_color`, `primary_contrasting_color`, `scaffold_background_color` and `resolve_from` in place of the base's bodies.
+  Reason: language — Rust cannot subclass a value type or override its inherent getters.
+  Affect: a subclass cannot override `text_theme`, `bar_background_color`, `selection_handle_color`, `apply_theme_to_all`, `no_default`, `copy_with` or `==`; `copy_with` and the `with_*` setters keep the subclass.
+
 ## Deferred
-- text_field.rs: the placeholder and the editable sharing a `Stack` with baseline alignment. Trigger: widgets' `SlottedMultiChildRenderObjectWidget`.
-- text_field.rs: `CupertinoTextMagnifier` and its magnifier configuration. Trigger: that cupertino file.
-- text_field.rs: `CupertinoSpellCheckSuggestionsToolbar` and the default builder that shows it. Trigger: that cupertino file.
-- text_field.rs: the `Semantics` wrappers. Trigger: accessibility (do not stub).
+- checkbox.rs: the deprecated `inactiveColor`, which nothing reads. Trigger: Flutter un-deprecating it.
+- slider.rs: `describeSemanticsConfiguration`, `_increaseAction`, `_decreaseAction`, `_semanticActionUnit`, `_kAdjustmentUnit`, and the setters' `markNeedsSemanticsUpdate`. Trigger: the semantics tree.
+- text_field.rs: the placeholder and the editable sharing a `Stack` with baseline alignment. Trigger: the next edit of text_field.rs (widgets' `SlottedMultiChildRenderObjectWidget` exists).
+- text_field.rs: `CupertinoTextField.defaultSpellCheckSuggestionsToolbarBuilder` and its use as the spell-check configuration's fallback. Trigger: wiring spell_check_suggestions_toolbar.rs into text_field.rs.
+- spell_check_suggestions_toolbar.rs: nothing gives `EditableTextState` spell-check results, so `build_button_items` answers `None` and no field shows the toolbar. Trigger: widgets' spell-check fetch.
 - text_field.rs: `strutStyle`. Trigger: painting's `StrutStyle` (valo has no strut).
 - text_field.rs: `CupertinoTextFieldState` as `AutofillClient`; `EditableText` is the autofill client until then. Trigger: autofill.
 - adaptive_text_selection_toolbar.rs: `CupertinoAdaptiveTextSelectionToolbar.selectable`. Trigger: `SelectableRegion`.
-- nav_bar.rs: every `Semantics` wrapper the file carries, including the back button's localised label. Trigger: accessibility (do not stub).
 - nav_bar.rs: the large-title sliver delegate's `DiagnosticableTreeMixin`. Trigger: diagnostics.
 - route.rs, sheet.rs, nav_bar.rs: a disposed `CurvedAnimation` or driven animation keeps its arena slot. Trigger: an arena-slot lifetime for disposed foundation objects.
-- route.rs: `CupertinoPageTransitionsBuilder`. Trigger: widgets' `page_transitions_builder.dart`.
 - route.rs: the page routes' `debugLabel` and the edge shadow decoration's diagnostics and `hashCode`. Trigger: `TransitionRoute::debug_label` taking the `App`; diagnostics.
-- route.rs: the `Semantics(scopesRoute:, explicitChildNodes:)` wrapper around a route's page, and `includeRouteSemantics` on the mixin, `CupertinoPageRoute` and `CupertinoPage`, which only opts out of it. Trigger: accessibility (do not stub).
 - route.rs: `anchorPoint` on `CupertinoModalPopupRoute` and `CupertinoDialogRoute`, and the `DisplayFeatureSubScreen` it feeds. Trigger: `display_feature_sub_screen.dart`, which needs `MediaQuery.displayFeatures`.
 - sheet.rs: `showCupertinoSheet`'s deprecated `pageBuilder`, a duplicate of the deprecated `builder`. Trigger: never — port it only if Flutter un-deprecates it.
 - sheet.rs: the `filterQuality` on the three `ScaleTransition`s, and `hasPlatformViews` on `showCupertinoSheet`, `CupertinoSheetTransition`, `CupertinoSheetRoute` and `delegateTransition`, which turns that filter quality off and makes the route offer a second delegated-transition function (`_delegateTransitionWithPlatformViews`), so that a sheet with platform views and one without do not compare equal. Trigger: `MatrixTransition.filterQuality`.
-- dialog.rs: every accessibility wrapper the file carries, including the alert-dialog and action-sheet labels that are read and dropped. Trigger: accessibility (do not stub).
-- dialog.rs: the `debugCheckHasMediaQuery` assert in `CupertinoActionSheet.build`. Trigger: widgets' `debug.dart`.
+- dialog.rs: the `sendSemanticsEvent(TapSemanticEvent())` calls and the gesture detector's `excludeFromSemantics`. Trigger: the semantics tree.
+- dialog.rs: the `debugCheckHasMediaQuery` assert in `CupertinoActionSheet.build`. Trigger: the next edit of dialog.rs (widgets' `debug_check_has_media_query` exists).
 - colors.rs, interface_level.rs, theme.rs, text_theme.rs, icon_theme_data.rs, page_scaffold.rs: the diagnostics members and the theme types' `hashCode`. Trigger: diagnostics.
 - localizations.rs, debug.rs: `describeMissingAncestor`, which Dart appends to the missing-localizations error. Trigger: diagnostics.
-- button.rs: the button `Semantics` and tap event, the diagnostics, and the deprecated `minSize`. Trigger: accessibility; diagnostics.
-- expansion_tile.rs: the header's `Semantics(hint:, onTapHint:)` and the localised hints it reads. Trigger: accessibility (do not stub).
-- scrollbar.rs: the haptic feedback on a thumb press and on a slow release. Trigger: `services/haptic_feedback.dart`.
+- interface_level.rs: the 'The context used was' lines print the widget's type where Dart describes the element. Trigger: diagnostics.
+- button.rs: the tap's `sendSemanticsEvent`, the diagnostics, and the deprecated `minSize`. Trigger: the semantics tree; diagnostics.
+- scrollbar.rs: the haptic feedback on a thumb press and on a slow release, with the press position and release comparison that decide it. Trigger: the next edit of scrollbar.rs (services' `HapticFeedback` exists).
 - page_scaffold.rs: the binding observer's status-bar tap callback. Trigger: the binding's status-bar tap event.
-- segmented_control.rs: the `Semantics` around each segment. Trigger: accessibility (do not stub).
-- switch.rs: the `Semantics(toggled:)` wrapper. Trigger: accessibility (do not stub).
+- switch.rs: the gesture detector's `excludeFromSemantics`. Trigger: the semantics tree.
 - switch.rs: `activeThumbImage`, `inactiveThumbImage`, `onActiveThumbImageError` and `onInactiveThumbImageError`, and the painter's cache of them. Trigger: painting's `DecorationImage` and the `image` field on `ShapeDecoration`.
 - switch.rs: the deprecated `activeColor` and `trackColor`, Dart's aliases of `activeTrackColor` and `inactiveTrackColor`. Trigger: never — port them only if Flutter un-deprecates them.
 - app.rs: `CupertinoApp.router` and everything only it fills. Trigger: `WidgetsApp.router` / `router.dart`.

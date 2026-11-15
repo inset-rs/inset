@@ -947,6 +947,24 @@ pub trait RenderObject: 'static + Sized {
         debug_assert!(child.parent(app).map(AnyRenderObject::id) == Some(self.id()));
     }
 
+    /// Whether the given child would be painted if [`paint`](Self::paint) were called.
+    ///
+    /// Some RenderObjects skip painting their children if they are configured to
+    /// not produce any visible effects. For example, a `RenderOffstage` with
+    /// its `offstage` property set to true, or a `RenderOpacity` with its opacity
+    /// value set to zero.
+    ///
+    /// In these cases, the parent may still supply a non-zero matrix in
+    /// [`apply_paint_transform`](Self::apply_paint_transform) to inform callers about where it
+    /// would paint the child if the child were painted at all. Alternatively, the parent may
+    /// supply a zeroed out matrix if it would not otherwise be able to determine
+    /// a valid matrix for the child and thus cannot meaningfully determine where
+    /// the child would paint.
+    fn paints_child(self: RenderHandle<Self>, app: &App, child: AnyRenderObject) -> bool {
+        debug_assert!(child.parent(app).map(AnyRenderObject::id) == Some(self.id()));
+        true
+    }
+
     /// Whether this render object repaints separately from its parent.
     ///
     /// Override this in subclasses to indicate that instances of your class ought
@@ -1217,6 +1235,7 @@ pub(crate) struct RenderObjectVTable {
     pub mark_needs_layout: fn(&mut App, HandleId),
     pub paint_bounds: fn(&App, HandleId) -> Rect,
     pub apply_paint_transform: fn(&App, HandleId, AnyRenderObject, &mut Matrix4),
+    pub paints_child: fn(&App, HandleId, AnyRenderObject) -> bool,
     pub is_repaint_boundary: fn(&App, HandleId) -> bool,
     pub always_needs_compositing: fn(&App, HandleId) -> bool,
     pub mouse_tracker_annotation: fn(&App, HandleId) -> Option<MouseTrackerAnnotation>,
@@ -1257,6 +1276,7 @@ impl RenderObjectVTable {
             mark_needs_layout,
             paint_bounds,
             apply_paint_transform,
+            paints_child: |app, id, child| T::paints_child(resolve(id), app, child),
             is_repaint_boundary: |app, id| T::is_repaint_boundary(resolve(id), app),
             always_needs_compositing: |app, id| T::always_needs_compositing(resolve(id), app),
             mouse_tracker_annotation: |app, id| T::mouse_tracker_annotation(resolve(id), app),
@@ -1845,6 +1865,11 @@ impl AnyRenderObject {
     /// See [`RenderObject::apply_paint_transform`].
     pub fn apply_paint_transform(self, app: &App, child: AnyRenderObject, transform: &mut Matrix4) {
         (self.vtable.apply_paint_transform)(app, self.id, child, transform)
+    }
+
+    /// See [`RenderObject::paints_child`].
+    pub fn paints_child(self, app: &App, child: AnyRenderObject) -> bool {
+        (self.vtable.paints_child)(app, self.id, child)
     }
 
     /// Applies the paint transform from this [`AnyRenderObject`] to the `target`

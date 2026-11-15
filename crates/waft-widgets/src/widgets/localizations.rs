@@ -20,7 +20,7 @@ use crate::framework::{
 use crate::widgets::app::{
     LocaleListResolutionCallback, LocaleResolutionCallback, basic_locale_list_resolution,
 };
-use crate::widgets::basic::{Directionality, SizedBox};
+use crate::widgets::basic::{Directionality, Semantics, SizedBox};
 
 /// The resources every delegate loaded, keyed by the delegate's [`type`](AnyLocalizationsDelegate::type).
 ///
@@ -878,16 +878,26 @@ impl State for LocalizationsState {
             .child
             .clone()
             .expect("a Localizations widget needs a child");
-        let state = app.get(self);
-        // Dart wraps the scope in `Semantics(localeForSubtree:, container:, textDirection:)`.
-        LocalizationsScope {
-            key: Some(state.localized_resources_scope_key.clone().into()),
-            locale,
-            localizations_state: self,
-            type_to_resources: Rc::clone(&state.type_to_resources),
-            child: Directionality::new(text_direction, child).into_widget(),
+        let widget = self.widget(app);
+        let is_application_level = widget.is_application_level;
+        let mut semantics = Semantics::new()
+            .container(!is_application_level)
+            .text_direction(text_direction);
+        // If this is not application level, we need to explicit mark the
+        // semantics subtree with the locale.
+        if !is_application_level {
+            semantics = semantics.locale_for_subtree(widget.locale.clone());
         }
-        .into_widget()
+        let state = app.get(self);
+        semantics
+            .child(LocalizationsScope {
+                key: Some(state.localized_resources_scope_key.clone().into()),
+                locale,
+                localizations_state: self,
+                type_to_resources: Rc::clone(&state.type_to_resources),
+                child: Directionality::new(text_direction, child).into_widget(),
+            })
+            .into_widget()
     }
 }
 

@@ -34,17 +34,29 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - widgets/status_transitions.rs → status_transitions.dart
 - widgets/text_editing_intents.rs → text_editing_intents.dart
 - widgets/text.rs → text.dart (+ `RichText` from basic.dart)
-- widgets/preferred_size.rs → preferred_size.dart
 - widgets/context_menu_button_item.rs → context_menu_button_item.dart
 - widgets/text_selection_toolbar_anchors.rs → text_selection_toolbar_anchors.dart
 - widgets/desktop_text_selection_toolbar_layout_delegate.rs → desktop_text_selection_toolbar_layout_delegate.dart
 - widgets/text_selection_toolbar_layout_delegate.rs → text_selection_toolbar_layout_delegate.dart
+- widgets/overscroll_indicator.rs → overscroll_indicator.dart
+- widgets/dual_transition_builder.rs → dual_transition_builder.dart
+- widgets/debug.rs → debug.dart (the checks ported so far)
 - widgets/animated_size.rs → animated_size.dart
 - widgets/lookup_boundary.rs → lookup_boundary.dart
 - widgets/default_selection_style.rs → default_selection_style.dart
 - widgets/overflow_bar.rs → overflow_bar.dart
 - widgets/bottom_navigation_bar_item.rs → bottom_navigation_bar_item.dart
 - widgets/date.rs → date.dart
+- widgets/animated_switcher.rs → animated_switcher.dart
+- widgets/animated_cross_fade.rs → animated_cross_fade.dart
+- widgets/sliver_fill.rs → sliver_fill.dart
+- widgets/raw_radio.rs → raw_radio.dart
+
+## widgets/preferred_size.rs → preferred_size.dart (+ the `Size` subclass mechanism)
+
+- Change: Flutter's `Size` subclass `_PreferredAppBarSize` is a `SizeExtension` payload that `AnySize` carries beside the plain `Size`, as `AnyColor` carries a `Color`'s; `PreferredSizeWidget::preferred_size` and `PreferredSize`'s field hold `AnySize`, which derefs to `Size`, and `extension::<T>()` is Dart's `is T`.
+  Reason: language — dart:ui `Size` is a `Copy` value here and cannot be subclassed.
+  Affect: a preferred size keeps its subclass only while it stays an `AnySize`; one copied into a plain `Size` is a plain size.
 
 ## widgets/inherited_theme.rs → inherited_theme.dart
 
@@ -82,7 +94,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## binding.rs → binding.dart
 
-- Change: `WidgetsBinding`'s lifecycle and exit handlers do not catch a panicking observer.
+- Change: `WidgetsBinding`'s lifecycle, exit and back-gesture handlers do not catch a panicking observer.
   Reason: language — no `FlutterError.reportError` hook to catch and continue.
   Affect: one failing observer unwinds the lifecycle change or the exit request, and the observers after it hear nothing.
 
@@ -125,6 +137,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - Change: each element marked dirty outside a build pass asks for a frame of its own view, or of every view for one above every `View`, where Flutter asks once for the first.
   Reason: platform — another view may be hidden and get no frames, while each frame builds every dirty element.
   Affect: a `setState` in one window gives that window a frame and is built at the first frame of any window.
+
+- Change: `WidgetsBinding::handle_commit_back_gesture` takes the view the gesture was in and answers whether the application handled it; when no observer handles the gesture it goes back through `handle_pop_route` for that view and returns its answer, where Dart's `handlePopRoute` calls `SystemNavigator.pop` itself.
+  Reason: platform — Back is reported per view, and the host does the platform's own Back when the app answers `false` (the `did_pop_route` entry).
+  Affect: a committed gesture nothing handled goes back in its own view, and the host closes or backgrounds the activity when nothing went back.
 
 ## multi_view_app.rs → `MultiViewApp` of Flutter web's embedding guide
 
@@ -192,12 +208,12 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## widgets/basic.rs → basic.dart (+ `WidgetBuilder` from framework.dart, `Spacer` from spacer.dart, `IndexedStack` from indexed_stack.dart)
 
-- Change: a Dart constructor assert runs on the setter that can violate it, or, when it needs several fields, when the element creates or updates the render object; every widget in this crate with such asserts follows this.
+- Change: a Dart constructor assert on one argument runs on its setter, and one across arguments in the widget's `debug_check_constructor`, when it is turned into a `WidgetRef` (`into_widget`); `Flex`, `RawIndexedStack`, `CustomPaint` and `Table` still check theirs when the element creates or updates the render object.
   Reason: language — a struct literal has no constructor body, and a fluent setter cannot see the arguments a later setter will supply.
-  Affect: an invalid combination panics during build rather than where the widget is written, and a single-field assert fires at its setter, so a chain Dart's constructor would accept (`Positioned::fill(..).width(..)`) panics at `.width`.
+  Affect: a bad combination panics where the widget is handed to the tree (for those four, during build), and a single-field assert fires at its setter, so a chain Dart's constructor would accept (`Positioned::fill(..).width(..)`) panics at `.width`.
 
 - Change: the semantics flags (`Opacity.alwaysIncludeSemantics`, the deprecated `ignoringSemantics`) and `Transform.filterQuality` are absent, here and in the transitions and implicit animations built on these widgets.
-  Reason: platform — accessibility is deferred, and `RenderTransform` carries no filter quality.
+  Reason: platform — the flags only feed the semantics tree, which is deferred, and `RenderTransform` carries no filter quality.
   Affect: a transformed subtree is always applied by re-rendering the child, never rasterised through an image filter.
 
 - `BackdropFilter`'s blend modes and anisotropic sigmas follow rendering's `RenderBackdropFilter` entry.
@@ -236,12 +252,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - Change: a `CupertinoIconThemeData` is an `IconThemeData` carrying a `resolve` override, which `copy_with` and `merge` keep and `lerp` drops.
   Reason: language — `IconTheme.data` is a value, not a subclassable object.
   Affect: a lerped cupertino icon theme resolves like a plain one, where Dart's subclass keeps resolving as itself.
-
-## widgets/icon.rs → icon.dart
-
-- Change: `Icon` has no `semanticLabel`, and its build returns the sized glyph without Dart's `Semantics` wrappers.
-  Reason: platform — accessibility is deferred.
-  Affect: nothing announces the icon; the render tree is one node shallower on each side.
 
 ## widgets/gesture_detector.rs → gesture_detector.dart
 
@@ -293,7 +303,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## framework: notifications → framework.dart (`Notification`, `NotifiableElementMixin`, `_NotificationNode`)
 
-- Change: `NotificationListener<T>` matches one concrete notification type, or a family such as `dyn ScrollNotification` that a notification declares itself part of.
+- Change: `NotificationListener<T>` matches one concrete notification type, or a family such as `dyn ScrollNotification` or `dyn LayoutChangedNotification` that a notification declares itself part of.
   Reason: language — Dart's `notification is T` covers subclasses, and a trait family has no `TypeId` a downcast can name.
   Affect: a listener sees only that exact type or a declared family, where Dart's also catches every subclass.
 
@@ -329,7 +339,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## widgets/app.rs → app.dart
 
-- `WidgetsApp`'s constructor asserts run when the widget is inflated, so a contradictory configuration panics at mount; see basic.rs's assert entry.
+- Change: `WidgetsApp`'s cross-argument constructor asserts run when the widget is turned into a `WidgetRef` (`into_widget`).
+  Reason: language — the arguments arrive through fluent setters, so they are only complete once the chain ends (basic.rs's assert entry).
+  Affect: a contradictory configuration panics where the app widget is handed to the tree, not on its first build.
 
 - Change: `WidgetsApp::default_shortcuts` and `default_actions` build a fresh value per call, with new action objects.
   Reason: language — an `Rc` or an arena handle cannot be a `const`, and Dart's `defaultActions` is one mutable map of shared action objects.
@@ -357,10 +369,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## widgets/scroll_notification.rs → scroll_notification.dart
 
-- Change: the five scroll notifications answer `is ScrollNotification` through a declared family slot, and none of them is a `LayoutChangedNotification`.
-  Reason: language — no inheritance, so a listener matches an exact type or a declared family.
-  Affect: a `NotificationListener<LayoutChangedNotification>` does not see scroll notifications, where Dart's does.
-
 ## widgets/scroll_position.rs → scroll_position.dart
 
 - Change: everything that reads a position's metrics — the physics, a `ScrollMetricsNotification`, `ScrollIncrementDetails` — is handed a `copy_with` snapshot instead of the position itself.
@@ -368,7 +376,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Affect: a `ScrollPhysics` sees the metrics as they were at the call, not the live position Dart lets it re-read.
 
 - Change: the semantic-action bookkeeping and the `notifyListeners` override that ran it are gone.
-  Reason: platform — `ScrollContext.setSemanticsActions` is deferred (accessibility).
+  Reason: platform — `ScrollContext.setSemanticsActions` waits with the semantics tree.
   Affect: nothing schedules a semantics update when the offset or the dimensions change.
 
 ## widgets/scroll_position_with_single_context.rs → scroll_position_with_single_context.dart
@@ -377,16 +385,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — the arena answers only the type a handle was created with.
   Affect: absorbing a position of a different leaf type goes idle and keeps its own scroll direction and drag, where Dart hands both over.
 
-## widgets/scroll_configuration.rs → scroll_configuration.dart
-
-- Change: `build_overscroll_indicator` returns the child on every platform.
-  Reason: platform — `GlowingOverscrollIndicator` is not ported (`## Deferred`).
-  Affect: a scroll view has no overscroll glow, so its tree is one node shallower.
-
 ## widgets/scrollable.rs → scrollable.dart, widgets/scrollable_helpers.rs → scrollable_helpers.dart
 
-- Change: `build` wraps the viewport in `Listener` → `RawGestureDetector` → `IgnorePointer` only: the semantics wrappers and the selection handler are gone.
-  Reason: platform — accessibility and selection are deferred (`## Deferred`).
+- Change: `build` wraps the viewport in `Listener` → `RawGestureDetector` → `IgnorePointer` only: `_ScrollSemantics` and the selection handler are gone.
+  Reason: platform — `_ScrollSemantics` is a render object that only feeds the semantics tree, and selection is deferred (`## Deferred`).
   Affect: a scrollable exposes no scroll actions to a screen reader and cannot be selected across; its tree is three nodes shallower.
 
 - Change: a pointer scroll signal is resolved through gestures' `PointerSignalResolver`, but the host is not told the event was handled.
@@ -415,25 +417,15 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## widgets/focus_scope.rs → focus_scope.dart
 
-- Change: `Focus.includeSemantics` is carried but nothing reads it, and the debug focus border is absent.
-  Reason: platform — accessibility is deferred; diagnostics wait.
-  Affect: a focusable widget exposes no semantics focusable / focused flags and cannot be focused by a semantics action.
+- Change: the debug focus border (`debugPaintFocusBoxes`'s `_DebugFocusBorder`) is absent.
+  Reason: platform — diagnostics wait.
+  Affect: `debug_paint_focus_boxes` draws nothing.
 
 ## widgets/actions.rs → actions.dart
 
 - Change: Dart's `const ActionDispatcher()` is `PlainActionDispatcher`, a fresh object per call.
   Reason: language — no `const` object holding an `Rc`, and a trait and a struct cannot share a name.
   Affect: two dispatchers are never equal, so an `Actions` widget that sets one rebuilds its dependents on every update.
-
-- Change: `FocusableActionDetector.includeFocusSemantics` is carried but nothing reads it.
-  Reason: platform — accessibility is deferred.
-  Affect: a detector exposes no semantics focusable / focused flags.
-
-## widgets/toggleable.rs → toggleable.dart
-
-- Change: `build_toggleable_with_child` builds without Dart's `Semantics(enabled:)` around the child, and a tap sends no `TapSemanticEvent`.
-  Reason: platform — accessibility is deferred.
-  Affect: nothing announces whether a toggleable is enabled, or that it was tapped.
 
 ## widgets/shortcuts.rs → shortcuts.dart
 
@@ -477,8 +469,8 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — a Rust type parameter cannot answer "is this erased route an `R`" without a witness.
   Affect: which routes an observer is told about is whatever predicate it was given, not a route class.
 
-- Change: `RawDialogRoute.buildPage` returns the page builder's widget directly, and there is no `anchorPoint`.
-  Reason: platform — the `Semantics` and `DisplayFeatureSubScreen` wrappers Dart adds are deferred, and `anchorPoint` exists only to feed the latter.
+- Change: `RawDialogRoute.buildPage` wraps the page builder's widget in `Semantics(scopesRoute:, explicitChildNodes:)` without Dart's `DisplayFeatureSubScreen`, and there is no `anchorPoint`.
+  Reason: platform — the `DisplayFeatureSubScreen` wrapper is deferred, and `anchorPoint` exists only to feed it.
   Affect: a dialog is not confined to the display-feature sub-screen closest to an anchor point.
 
 - Change: `AnyTransitionRoute` carries `underlying_animation` beside `animation`, for the animation a route runs on rather than whatever a subclass answers with.
@@ -502,10 +494,12 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the old name, and the shared scope lives in basic.rs with the rest of `IndexedStack`.
 
-- `Visibility`'s five `maintain*` asserts run on the widget's first build, so any order of the setter chain is accepted; see basic.rs's assert entry.
+- Change: `Visibility`'s five `maintain*` constructor asserts run when the widget is turned into a `WidgetRef` (`into_widget`).
+  Reason: language — the flags arrive through fluent setters, so they are only complete once the chain ends (basic.rs's assert entry).
+  Affect: any order of the setter chain is accepted, and a bad combination panics where the widget is handed to the tree, not on its first build.
 
 - Change: `maintain_semantics` is carried but nothing reads it.
-  Reason: platform — accessibility is deferred.
+  Reason: platform — it only feeds `visitChildrenForSemantics`, and the semantics tree is deferred.
   Affect: a hidden child is never reported to accessibility tools, `maintain_semantics` or not.
 
 ## widgets/draggable_scrollable_sheet.rs → draggable_scrollable_sheet.dart
@@ -523,10 +517,6 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - Change: `want_keep_alive` reads a focus flag the focus listener updates instead of walking the node.
   Reason: language — `FocusNode::has_focus` needs `&mut App`, which the getter does not have.
   Affect: keep-alive follows the last focus change the state handled, so it lags a change no listener has run for yet.
-
-- Change: `EditableText` cannot tell whether its selection controls are handle-controls, so the default `toolbar_options` follow the read-only / obscured table in every case.
-  Reason: language — an erased `TextSelectionControls` cannot be tested for the mixin.
-  Affect: handle-controls no longer force an empty toolbar unless `toolbar_options` is set.
 
 - Change: the selection's glyph heights are measured from its first and last Unicode scalar, not its grapheme clusters.
   Reason: language — there is no `characters` package.
@@ -590,10 +580,6 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
   Reason: platform — Flutter's engines never say the clipboard changed; a host that can tell, says so.
   Affect: a toolbar's Paste button follows a copy made in another app without the app having to resume first.
 
-- Change: `show_toolbar` uses `context_menu_builder` whenever it is set, and only otherwise the deprecated `build_toolbar` path.
-  Reason: language — an erased `TextSelectionControls` cannot be asked whether it is handle-controls.
-  Affect: old-style controls combined with a context-menu builder show the builder, where Dart would still call `buildToolbar`.
-
 - Change: each overlay owns its context-menu and spell-check `OverlayEntry`; there is no `ContextMenuController` singleton.
   Reason: language — Dart's static `_shownInstance` is isolate-global.
   Affect: two `SelectionOverlay`s can show two menus at once.
@@ -631,7 +617,7 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 ## widgets/widget_span.rs → widget_span.dart
 
 - Change: `WidgetSpan::extract_from_inline_span` wraps each inline widget in its parent-data and scaling widgets only, without Dart's `Semantics` tagged with the placeholder's index.
-  Reason: platform — the `Semantics` wrappers Dart adds are deferred, as on `RawDialogRoute`.
+  Reason: language — the tag needs `SemanticsTag` equality by index, and `SemanticsTag` compares by identity until the semantics tree needs it.
   Affect: an inline widget contributes no semantics node of its own.
 
 ## widgets/table.rs → table.dart
@@ -646,97 +632,177 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
   Reason: platform — every view in a window, asked for or made by the system, has its window from the host (`View::window`), and there is no controller to hand.
   Affect: content reads its window's frame, minimizing and closing from its context, and rebuilds when the window is minimized or restored, covered or shown, or moved, as it rebuilds with its view's metrics; content in no window, a phone's screen, has none.
 
+## widgets/snapshot_widget.rs → snapshot_widget.dart
+
+- Change: `RenderSnapshotWidget` never rasterises its child: while `allow_snapshotting` is true it paints the child live through `SnapshotPainter::paint(context, offset, size, super.paint)`, where Flutter rasterises the child into an `Image` and calls `paint_snapshot`.
+  Reason: platform — `OffsetLayer.toImageSync` is deferred, so a layer cannot be turned into an `Image`.
+  Affect: a snapshotted child keeps repainting and animating, `paint_snapshot` is never called, `SnapshotController::clear` and a device-pixel-ratio change cause no re-rasterisation, and `SnapshotMode` changes nothing (no platform-view check runs, so `Normal` never panics).
+
+## widgets/page_transitions_builder.rs → page_transitions_builder.dart
+
+- Change: two `PageTransitionsBuilderRef`s are equal only when they share one allocation.
+  Reason: language — no canonical `const` objects: Dart's `const FadeUpwardsPageTransitionsBuilder()` is one object wherever it is written.
+  Affect: two themes or builder maps built with separately made builders compare unequal where Dart's const builders are identical.
+
+## widgets/raw_menu_anchor.rs → raw_menu_anchor.dart
+
+- Change: `MenuController` is one concrete type, so an app cannot override its `open` and `close`.
+  Reason: language — a Rust struct cannot be subclassed, and Flutter's `MenuController` is a plain class apps extend (its `final` modifier was removed for that).
+  Affect: code that wants to see every open or close request does so in `on_open_requested` / `on_close_requested`, or around its own calls.
+
+- Change: `RawMenuAnchor` and `RawMenuAnchorGroup` detach from the replaced controller in `did_update_widget` only while the arena still holds it.
+  Reason: language — no GC keeps a dropped `MenuController` alive: Material's `MenuAnchor` and `SubmenuButton` drop their internal controller in their own `didUpdateWidget`, before the anchor's runs, and Dart's object lives on until the anchor detaches.
+  Affect: an owner can destroy the controller it replaces before the anchor rebuilds; the anchor then skips the detach instead of panicking.
+
+## widgets/raw_tooltip.rs → raw_tooltip.dart
+
+- Change: the list of open tooltips (`RawTooltip._openedTooltips`), and `_RenderExclusiveMouseRegion`'s `isOutermostMouseRegion` / `foundInnermostMouseRegion`, are kept per `App` (an `app.singleton`), not in Dart statics.
+  Reason: language — Dart's statics are isolate-global.
+  Affect: `RawTooltip::dismiss_all_tool_tips(app)` dismisses only that `App`'s tooltips, and two `App`s can each show a hovered tooltip at once.
+
+- Change: `RawTooltipState::ensure_tooltip_visible` cannot be called after the state is disposed.
+  Reason: language — the arena frees the state's slot at dispose, while Dart keeps the object until it is collected.
+  Affect: calling it on a stale handle panics, where Dart returns false; reaching it through a `GlobalKey`, as Material's `TooltipState` does, gives `None` (Dart's `?? false`).
+
+## widgets/form.rs → form.dart
+
+- Change: `FormField` and `FormFieldState` are leaves of `FormFieldLeaf` and `FormFieldStateLeaf`, with the shared bodies as associated functions on `FormFieldState`; a `FormState` holds its fields as `DynamicFormFieldState` (Dart's `FormFieldState<dynamic>`), whose `value` is a `&dyn Any` and whose `typed::<T>()` answers Dart's `is FormFieldState<T>`, and a builder is handed `AnyFormFieldState<T>`, which `downcast::<S>` narrows to the leaf as Dart's `field as S`.
+  Reason: language — no subclassing of a generic class, and the form's fields have mixed value types.
+  Affect: a subclass such as `TextFormField` overrides `did_change`, `reset` and `restore_state` on its own state and calls `FormFieldState::did_change(self, ..)` where Dart writes `super`; a caller reads a field's value from the form's `fields` by downcasting it or by `typed::<T>()`.
+
+## widgets/dismissible.rs → dismissible.dart
+
+- Change: `confirm_dismiss` returns a `Task<Option<bool>>`, and the resize starts after it resolves, at the next checkpoint.
+  Reason: language — waft-foundation's `Task` entry.
+  Affect: when the slide ends inside a frame, the child is replaced by the collapsing background, or `on_dismissed` runs when there is no `resize_duration`, one frame later than in Flutter.
+
+- Change: Dart's `secondaryBackground == null || background != null` constructor assert runs when the widget is turned into a `WidgetRef` (`into_widget`).
+  Reason: language — `background` and `secondary_background` arrive through fluent setters after `new`, so the pair is only complete once the chain ends.
+  Affect: a secondary background without a background panics where the dismissible is handed to the tree, not on its first build.
+
+## widgets/magnifier.rs → magnifier.dart
+
+- Change: `RawMagnifier`'s lens (`_RenderMagnification`) paints its child without a `BackdropFilterLayer`; it keeps the focal point, the scale and the transform Flutter filters the backdrop with.
+  Reason: platform — waiting on Valo: a matrix image filter (`ImageFilter.matrix`) for a backdrop; the embedder's `ImageFilter` cannot build one.
+  Affect: the lens shows the content under it unscaled and not shifted to the focal point; the decoration, shadows, opacity and clips paint as in Flutter.
+
+- Change: `_NegativeClip` winds `Rect.largest` the other way from the shape's inner path, instead of filling both with the even-odd rule.
+  Reason: platform — valo `Path` has no fill type and a path clip is always non-zero (`waft-painting`'s `PORTING.md`).
+  Affect: an inner path of one contour cuts the same hole as in Flutter; an inner path of several nested contours cuts a different one.
+
+## widgets/page_view.rs → page_view.dart
+
+- Change: Dart's `scrollCacheExtent == null || (scrollCacheExtent.value > 0.0) == allowImplicitScrolling` constructor assert runs when the widget is turned into a `WidgetRef` (`into_widget`).
+  Reason: language — `allow_implicit_scrolling` and `scroll_cache_extent` arrive through fluent setters after `new`, so the pair is only complete once the chain ends.
+  Affect: an inconsistent pair panics where the page view is handed to the tree, not on its first build.
+
+## widgets/layout_builder.rs → layout_builder.dart
+
+- Change: `LayoutBuilder`'s builder receives an `AnyBoxConstraints`, and the element compares it, extension included, to decide whether the builder runs again.
+  Reason: language — the constraints are a `BoxConstraints` subclass instance only through rendering's wrapper (D17).
+  Affect: a builder reads fields through deref and calls `.constraints()` to hand the plain value on; a parent that changes only a subclass field reruns the builder, as in Dart.
+
+## widgets/editable_text.rs → editable_text.dart (passwords)
+- Change: an obscured field reveals the last typed character for its cursor ticks whatever `brieflyShowPassword` says.
+  Reason: platform — the host does not report the setting.
+  Affect: with "Show passwords" off on Android, the last character still shows briefly.
+
 ## Deferred
 
+- page_view.rs: `PageScrollPhysics`'s `_PagePosition` branch (pages of `viewportFraction`, the offset of pages wider than the viewport, the cached page), and `ScrollNotification.metrics` being a `PageMetrics` for a page view. Trigger: the lead's decision on how physics and notifications reach the position (`ScrollPosition::copy_with` returning `PageMetrics`, or the position itself handed to the physics as Dart does).
+- page_view.rs, sliver_fill.rs: `PageView`'s and `SliverFillRemaining`'s `debugFillProperties`. Trigger: diagnostics.
+- raw_tooltip.rs: `SelectionContainer.disabled` around the overlay child (the check is kept as `selection_container_maybe_of`, which answers `None`). Trigger: `selection_container.dart`.
+- raw_tooltip.rs: the `SemanticsService.tooltip` announcement. Trigger: the semantics tree.
+- form.rs: `Form.onWillPop`, the `WillPopScope` it builds, and the deprecated `Form.onPopInvoked`. Trigger: `WillPopScope` (deferred; Flutter deprecates both).
+- form.rs: the error announcement `FormState._validate` sends through `SemanticsService`. Trigger: the semantics tree.
+- dismissible.rs: `_DismissibleClipper` and its `getApproximateClipRect`. Trigger: `CustomClipper::get_clip` / `should_reclip` taking the `App`.
+- stretch_effect.rs: the shader stretch (`_StretchOverscrollEffect`, `_StretchEffectPainter`, `_StretchEffectShader` and the `ImageFilter.isShaderFilterSupported` branch), so the stretch is always the matrix scale Flutter uses where shader filters are unsupported. Trigger: the next edit of stretch_effect.rs (embedder's `FragmentProgram` and `ImageFilter::shader` exist).
+- snapshot_widget.rs: `SnapshotWidget`'s raster path (`_paintAndDetachToImage`: painting into an `OffsetLayer`, the `supportsRasterization` platform-view check with its `SnapshotMode` branches, `toImageSync`, and `paintSnapshot` with that raster). Trigger: `OffsetLayer.toImageSync`.
+- snapshot_widget.rs: `SnapshotPainter`'s memory-allocation events (`kFlutterMemoryAllocationsEnabled`). Trigger: leak tracking.
+- animated_switcher.rs, animated_cross_fade.rs, dual_transition_builder.rs: diagnostics. Trigger: diagnostics.
 - media/subtitle_painter.rs: Media3's `BidiUtils` wrapping of each right-to-left line of a cue before it is laid out. Trigger: the first right-to-left subtitles.
 - image.rs: `Image.network` and `Image.file`. Trigger: an HTTP client; a file system.
 - image.rs: `Image.asset`'s bundle lookup, and the bundle `createLocalImageConfiguration` would carry, without which `AssetImage` cannot resolve from a widget. Trigger: `DefaultAssetBundle`.
 - image.rs: the frame, loading and error builders, and `gaplessPlayback`. Trigger: a caller that wants to show something while an image loads or after it fails.
 - image.rs: `precacheImage`. Trigger: a caller that warms an image before showing it.
 - image.rs: `color` / `colorBlendMode`, `centerSlice` and `filterQuality`. Trigger: painting's colour filters; an image drawn as a resizable frame; a caller that needs to choose how an image is sampled.
-- image.rs: `excludeFromSemantics` and the semantics label. Trigger: accessibility.
 - focus_manager.rs: `FocusNode.onKey` and the Android IME key check. Trigger: services' raw key path.
-- focus_manager.rs, focus_scope.rs: the focus semantics actions and the `Semantics` wrapper `Focus.includeSemantics` controls. Trigger: accessibility.
+- focus_manager.rs, focus_scope.rs: `FocusManager`'s semantics action listener (`handleSemanticsAction`). Trigger: the semantics tree.
 - focus_manager.rs, focus_scope.rs: focus-tree diagnostics and the debug focus border. Trigger: diagnostics.
 - focus_scope.rs: `_FocusInheritedScope` keeps the copy of the inherited-notifier element it grew before inherited_notifier.rs was ported. Trigger: the next change to that element.
-- A disposed arena object keeps its slot — `dispose` does Dart's work and frees nothing — across the focus, scroll, draggable-sheet, restoration, action, shortcut, traversal and route objects. Trigger: an arena-slot lifetime for disposed foundation objects.
+- A disposed arena object keeps its slot — `dispose` does Dart's work and frees nothing — across the focus, scroll, draggable-sheet, restoration, action, shortcut, traversal and route objects, the animations, tweens and proxies the transitions (`AnimatedSwitcher`, `AnimatedCrossFade`, `DualTransitionBuilder`, the page transitions) create, the overscroll indicators' glow and stretch controllers (one per overscroll release), and `Dismissible`'s move tween and driven animation. Trigger: an arena-slot lifetime for disposed foundation objects.
 - framework/: `ErrorWidget` with its exception reporting, and the build-time diagnostics and duplicate-key checks, `Table`'s checks for duplicate row and cell keys among them. Trigger: diagnostics.
-- table.rs: the `Semantics(role: cell)` wrapper `TableCell.build` adds. Trigger: accessibility (do not stub).
 - framework/: `reassemble`. Trigger: hot reload.
-- binding.rs: the observer callbacks no host reports (memory pressure, predictive back, pushed routes and route information, the text scale, accessibility features), `scheduleWarmUpFrame`. Trigger: a host that reports those events.
+- binding.rs: the observer callbacks no host reports (memory pressure, pushed routes and route information, the text scale, accessibility features), `scheduleWarmUpFrame`. Trigger: a host that reports those events.
+- binding.rs: the host callback that reports a predictive back gesture to `WidgetsBinding::handle_start_back_gesture`, `handle_update_back_gesture_progress`, `handle_commit_back_gesture` and `handle_cancel_back_gesture` (Flutter's `SystemChannels.backGesture`). Trigger: a host that reports back gestures.
 - platform_menu_bar.rs: `PlatformMenuItem.onOpen` and `onClose`, and the tooltip. Trigger: a host that reports a menu opened or closed.
 - binding.rs: first-frame-rasterized reporting and the push/pop route handlers. Trigger: `SchedulerBinding.addTimingsCallback`; navigation.
-- view.rs: the view's semantics owner callbacks. Trigger: accessibility.
+- view.rs: the view's semantics owner callbacks. Trigger: the semantics tree.
 - view.rs, overlay.rs: the hidden-by-a-`LookupBoundary` variants of the `View.of` and `Overlay.of` error messages. Trigger: diagnostics.
-- `debugCheckHasDirectionality` in the widgets that resolve a directional value. Trigger: diagnostics.
-- text.rs: selection, `locale`, `strutStyle`, the semantics labels, and the deprecated `textScaleFactor`. Trigger: `SelectionContainer`; `Locale` / `StrutStyle`.
+- form.rs, page_storage.rs, tap_region.rs: the 'The context used was' lines print the widget's type where Dart describes the element. Trigger: diagnostics.
+- `debugCheckHasDirectionality` in the widgets that resolve a directional value (the check is in debug.rs). Trigger: each such widget's next edit.
+- text.rs: selection, `locale`, `strutStyle`, and the deprecated `textScaleFactor`. Trigger: `SelectionContainer`; the next edit of text.rs for `locale` (embedder's `Locale` exists); `StrutStyle`.
 - basic.rs: `Flow`, `RotatedBox`, `IgnoreBaseline`, `ShaderMask`, `RawImage`, `WidgetToRenderBoxAdapter`. Trigger: each one's render object.
-- basic.rs: the key-wrapping helpers, `DefaultAssetBundle`. Trigger: a key over object identity; asset bundles.
 - basic.rs, implicit_animations.rs: the `PhysicalModel`, `PhysicalShape` and `AnimatedPhysicalModel` diagnostics. Trigger: diagnostics.
-- basic.rs: the semantics widgets and the semantics flags on the pointer and opacity widgets. Trigger: accessibility (do not stub).
-- `Transform.filterQuality`, and with it the transitions and implicit animations that pass it on. Trigger: `RenderTransform.filterQuality`.
+- basic.rs: `RepaintBoundary.wrap` and `wrapAll`, `DefaultAssetBundle`. Trigger: the sliver child delegates that call them; asset bundles.
+- basic.rs: `SliverSemantics`, which waits on `RenderSliverSemanticsAnnotations`, and the semantics flags on the pointer and opacity widgets, which only feed `visitChildrenForSemantics`. Trigger: a `SliverSemantics` caller; the semantics tree.
+- `Transform.filterQuality`, and with it the transitions and implicit animations that pass it on, and stretch_effect.rs's `filterQuality: medium` while stretching. Trigger: `RenderTransform.filterQuality`, which needs a matrix image filter (waiting on Valo; the embedder's `ImageFilter` entry).
 - basic.rs: the inspector-only transform labels and the onstage-child debug walks. Trigger: diagnostics.
-- icon.rs: `Icon.semanticLabel` and the semantics wrappers `Icon.build` returns. Trigger: accessibility (do not stub).
 - icon.rs: icon diagnostics. Trigger: diagnostics.
 - visibility.rs: `SliverVisibility`. Trigger: `SliverOpacity`, `SliverIgnorePointer` and `SliverOffstage`.
-- visibility.rs: what `Visibility.maintainSemantics` controls. Trigger: accessibility (do not stub).
+- visibility.rs: what `Visibility.maintainSemantics` controls. Trigger: the semantics tree.
 - visibility.rs: `Visibility` diagnostics. Trigger: diagnostics.
-- image.rs: `Image`, `precacheImage`, the image-loading state, and the asset-bundle input of `create_local_image_configuration`. Trigger: the image cache; asset bundles.
-- ticker_provider.rs: the ticker unregistration Dart's `_WidgetTicker` does, and `TickerMode.merge`. Trigger: a dispose hook on scheduler's `Ticker`; `Builder`.
-- transitions.rs: `SliverFadeTransition`, and with it implicit_animations.rs's `SliverAnimatedOpacity`. Trigger: slivers.
+- ticker_provider.rs: the ticker unregistration Dart's `_WidgetTicker` does, and `TickerMode.merge`. Trigger: a dispose hook on scheduler's `Ticker`; the next edit of ticker_provider.rs for `TickerMode.merge` (`Builder` exists).
+- transitions.rs: `SliverFadeTransition`, and with it implicit_animations.rs's `SliverAnimatedOpacity`. Trigger: `SliverOpacity`'s render sliver.
 - transitions.rs, implicit_animations.rs: diagnostics. Trigger: diagnostics.
 - icon_theme: `IconThemeData.hashCode` (no `Hash` over `f64`). Trigger: a map keyed by `IconThemeData`.
-- gesture_detector.rs: the semantics gesture handling, and the double-tap and force-press callbacks. Trigger: accessibility (do not stub); `DoubleTapGestureRecognizer`; a caller of the force-press callbacks.
+- gesture_detector.rs: the semantics gesture handling (`excludeFromSemantics`, `semantics`, `_GestureSemantics`), and the double-tap and force-press callbacks. Trigger: the semantics tree; `DoubleTapGestureRecognizer`; a caller of the force-press callbacks.
 - media_query.rs: `DisplayFeature`, `SystemTextScaler`, the platform sources for the accessibility flags, 24-hour format, text style overrides and corner radii, and the media-query debug checks. Trigger: observers in binding.rs; those members on `Platform` / `ViewMetrics`; diagnostics.
 - widget_state.rs: `WidgetStatesController` as a `ValueListenable`, and hashing. Trigger: the first caller that listens to a controller as a value; theme-data hashing.
-- bottom_navigation_bar_item.rs: `semanticsLabel`. Trigger: accessibility (do not stub).
-- localizations.rs: the semantics wrapper `_LocalizationsState.build` adds, and the localization debug checks. Trigger: semantics; diagnostics.
+- bottom_navigation_bar_item.rs: `semanticsLabel`. Trigger: the next edit of bottom_navigation_bar_item.rs (the semantics widgets that read it exist).
+- localizations.rs: the localization debug checks. Trigger: diagnostics.
 - banner.rs: repaint on `PaintingBinding.systemFonts`. Trigger: a host reporting system font changes.
 - app.rs: `WidgetsApp.router` and every router field it fills, with their branches of `_updateRouting` and `build`. Trigger: `router.dart`.
-- app.rs: the state's route-push and route-pop handlers. Trigger: the binding's route events.
-- app.rs: the escape-key handler that dismisses tooltips. Trigger: `raw_tooltip.dart`.
-- app.rs: the performance overlay, semantics debugger and widget inspector the three carried debug flags would show. Trigger: `performance_overlay.dart`; accessibility (do not stub); `widget_inspector.dart`.
+- app.rs: the state's route-push handlers. Trigger: the binding's pushed-route events.
+- app.rs: the performance overlay, semantics debugger and widget inspector the three carried debug flags would show. Trigger: `performance_overlay.dart`; the semantics tree; `widget_inspector.dart`.
 - default_text_editing_shortcuts.rs: the Control-key editing bindings macOS supplies from its own key tables (Control-A, Control-E, Control-K, Control-D), which Dart's macOS map leaves to the host. Trigger: nothing else supplies them over a host that reports plain key presses.
-- editable_text.rs: scribble and stylus support, the spell-check fetch, the magnifier overlay, `StrutStyle`, the floating cursor, `insertContent`, and the semantics wrappers. Trigger: `StrutStyle`; `UndoManagerClient`; `RenderEditable.setFloatingCursor`; accessibility.
+- editable_text.rs: scribble and stylus support, the spell-check fetch, the magnifier overlay, `StrutStyle`, the floating cursor and `insertContent`. Trigger: `StrutStyle`; `UndoManagerClient`; `RenderEditable.setFloatingCursor`.
+- editable_text.rs: `Semantics(inputType:, onCopy:, onCut:, onPaste:)`. Trigger: the next edit of editable_text.rs.
 - app_lifecycle_listener.rs: diagnostics. Trigger: diagnostics.
-- text_selection.rs: the selection handle overlay and the empty selection controls; handle entries do not yet follow a composited transform, and a `Builder` under each entry's captured themes builds the handle where `_SelectionHandleOverlay`'s build would. Trigger: those types; `EditableText`.
-- text_selection.rs: the toolbar wrapper's outer tap region. Trigger: `SelectableRegion`.
-- feedback.rs: the system sound in `for_tap` and iOS `for_long_press`, and the semantic events they send. Trigger: services' `SystemSound`; accessibility (do not stub).
+- text_selection.rs: `EmptyTextSelectionControls`. Trigger: its first caller.
+- text_selection.rs: the outer `TapRegion(groupId: SelectableRegion)` around the toolbar wrapper and around each selection handle. Trigger: `SelectableRegion`.
+- feedback.rs: the system sound in `for_tap` and iOS `for_long_press`, and the semantic events they send. Trigger: services' `SystemSound`; the semantics tree.
 - text_selection.rs: the Android stylus path and the `Scribe` availability check in `onTapDown`. Trigger: host `Scribe`.
-- magnifier.rs: the decorative magnifier widgets and their render objects. Trigger: those widgets.
-- tap_region.rs: the surface's semantics listeners and semantics action handling. Trigger: accessibility (do not stub).
+- tap_region.rs: the surface's semantics listeners and semantics action handling. Trigger: the semantics tree.
 - automatic_keep_alive.rs: diagnostics. Trigger: diagnostics.
-- layout_builder.rs: `SliverLayoutBuilder` with the abstract generic builders, and the error widget on a builder panic. Trigger: slivers; diagnostics.
+- layout_builder.rs: `SliverLayoutBuilder` with the abstract generic builders, and the error widget on a builder panic. Trigger: the next edit of layout_builder.rs (slivers exist); diagnostics.
 - sliver.rs: `SliverOpacity`, `SliverIgnorePointer`, `SliverOffstage`, `SliverConstrainedCrossAxis`, `SliverCrossAxisExpanded`, `SliverCrossAxisGroup` and `SliverMainAxisGroup`. Trigger: each one's render sliver.
-- sliver.rs: `SliverEnsureSemantics` and the adaptor element's onstage-child debug walk. Trigger: accessibility (do not stub); diagnostics.
+- sliver.rs: `SliverEnsureSemantics` and the adaptor element's onstage-child debug walk. Trigger: the semantics tree; diagnostics.
 - Two-dimensional scrolling: the two-dimensional viewport, its scrollable and scopes, its child delegates, `DiagonalDragBehavior`, and sliver.rs's `KeepAlive` under such a viewport. Trigger: `two_dimensional_viewport.dart`.
-- scroll_delegate.rs: the keep-alive and semantic-index wrappers the delegates add, and the delegate description's exception branch. Trigger: wiring `AutomaticKeepAlive`; `selection_container.dart`; accessibility (do not stub); diagnostics.
+- scroll_delegate.rs: the keep-alive wrappers the delegates add, and the delegate description's exception branch. Trigger: the next edit of scroll_delegate.rs (`AutomaticKeepAlive` exists); `selection_container.dart`; diagnostics.
 - viewport.rs: the viewport diagnostics and the onstage-child debug walk. Trigger: diagnostics.
-- Scroll semantics: `ScrollContext.setSemanticsActions`, scrollable.rs's semantics widget and its render object with `excludeFromSemantics` and `semanticChildCount`, and scroll_position.rs's semantic action bookkeeping. Trigger: accessibility (do not stub).
+- Scroll semantics: `ScrollContext.setSemanticsActions`, scrollable.rs's semantics widget and its render object with `excludeFromSemantics` and `semanticChildCount`, and scroll_position.rs's semantic action bookkeeping. Trigger: the semantics tree.
 - scrollable.rs: the selection handler and container delegate around a scrollable. Trigger: `SelectionContainer` / `SelectionRegistrar`.
-- scroll_configuration.rs: the `GlowingOverscrollIndicator` `build_overscroll_indicator` would build, with `OverscrollIndicatorNotification`; `PageScrollPhysics`. Trigger: `overscroll_indicator.dart`; `page_view.dart`.
 - scrollable.rs, scroll_configuration.rs, primary_scroll_controller.rs: diagnostics, and `ScrollableDetails.hashCode` (no `Hash` over an erased physics). Trigger: diagnostics; a map keyed by scrollable details.
 - scroll_view.rs: `ListView.prototypeItem` and its branch of the child layout. Trigger: `sliver_prototype_extent_list.dart`.
 - scroll_view.rs: the scroll view diagnostics. Trigger: diagnostics.
-- single_child_scroll_view.rs: the semantics clip and the approximate paint clip (deferred crate-wide in rendering's PORTING.md), and its diagnostics. Trigger: accessibility (do not stub); the inspector; diagnostics.
-- scrollbar.rs: the painter's semantics and the structured error reports, which are plain assert messages here. Trigger: accessibility (do not stub); diagnostics.
-- radio_group.rs: the radio-group semantics wrapper. Trigger: accessibility (do not stub).
-- toggleable.rs: the `Semantics(enabled:)` wrapper and the tap's `TapSemanticEvent`. Trigger: accessibility (do not stub).
+- single_child_scroll_view.rs: the semantics clip and the approximate paint clip (deferred crate-wide in rendering's PORTING.md), and its diagnostics. Trigger: the semantics tree; the inspector; diagnostics.
+- scrollbar.rs: the painter's semantics and the structured error reports, which are plain assert messages here. Trigger: the semantics tree; diagnostics.
+- toggleable.rs: the tap's `TapSemanticEvent`. Trigger: the semantics tree.
 - radio_group.rs: the post-frame check that at most one radio carries the group value. Trigger: diagnostics, and a post-frame callback usable from a state that may run without a binding.
-- shortcuts.rs: the deprecated `isActivatedBy`, the duplicate-shortcut check, and `Shortcuts.includeSemantics`. Trigger: content equality on `ShortcutActivator`; diagnostics; accessibility.
+- shortcuts.rs: the deprecated `isActivatedBy` and the duplicate-shortcut check. Trigger: content equality on `ShortcutActivator`; diagnostics.
 - actions.rs, shortcuts.rs, focus_traversal.rs: diagnostics on the actions, intents, activators, managers, policies and orders. Trigger: diagnostics.
 - navigator.rs, routes.rs, pop_scope.rs: the members Dart deprecates in favour of the pop-with-result and mark-for-complete ones. Trigger: never — port them only if Flutter un-deprecates them.
-- navigator.rs: restoring the focused semantic node after a pop. Trigger: accessibility (do not stub).
+- navigator.rs: restoring the focused semantic node after a pop. Trigger: the semantics tree.
 - navigator.rs: the navigator diagnostics and the error reports around route generation. Trigger: diagnostics.
 - routes.rs: the latency performance mode a transition requests from the engine. Trigger: scheduler's `requestPerformanceMode`.
 - routes.rs: `ModalRoute`'s deprecated scoped will-pop callbacks, whose list everything else reads as always empty. Trigger: an async `WillPopCallback`, which needs an event loop — Flutter's own replacement `PopScope` is ported.
-- routes.rs: the semantics wrappers around the modal barrier and the modal scope, and what `semanticsDismissible` controls. Trigger: accessibility (do not stub).
-- routes.rs: `RawDialogRoute.anchorPoint` with the display-feature sub-screen and semantics wrappers, so `showGeneralDialog` has no `anchorPoint`. Trigger: `display_feature_sub_screen.dart`, which needs `MediaQuery.displayFeatures`; accessibility.
-- modal_barrier.rs: the barrier's semantics widgets and clipper, and the platform gate on dismissing a barrier. Trigger: accessibility (do not stub).
+- routes.rs: `RawDialogRoute.anchorPoint` with the display-feature sub-screen, so `showGeneralDialog` has no `anchorPoint`. Trigger: `display_feature_sub_screen.dart`, which needs `MediaQuery.displayFeatures`.
+- modal_barrier.rs: the barrier's `_SemanticsClipper`. Trigger: the semantics tree.
 - modal_barrier.rs: the alert sound when a non-dismissible barrier is tapped. Trigger: services' `SystemSound`.
 - overlay.rs: the theater's intrinsics, dry layout and baselines, and the deferred layout box's dry baseline. Trigger: intrinsics and baselines through a theater child.
 - overlay.rs: the overlay diagnostics, including the stack trace an invalidated entry location records (a flag stands in). Trigger: diagnostics.
-- overlay.rs: the overlay's semantics wrappers, child identifiers and semantics updates. Trigger: accessibility (do not stub).
+- overlay.rs: the overlay's semantics wrappers with their `traversalParentIdentifier` child identifiers, and its semantics updates. Trigger: the next edit of overlay.rs (the semantics widgets exist); the semantics tree.
 - overlay.rs: the theater's clip layer handle and the entry location's compositing-bits update. Trigger: layer handles and compositing bits in `waft-rendering`.
 - overlay.rs: the deferred-child gates on the theater's `markNeedsLayout` and the layout box's dirty flag. Trigger: a public `RenderBox` super-hook for `markNeedsLayout` and a readable dirty flag in `waft-rendering`.
 - heroes.rs: the hero diagnostics and the structured report behind the duplicate-tag check (a `debug_assert!` carrying Dart's message meanwhile). Trigger: diagnostics.

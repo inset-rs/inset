@@ -11,7 +11,7 @@ use std::rc::Rc;
 
 use waft_animation::{Animatable, AnyAnimation};
 use waft_embedder::{Matrix4, Offset, Rect, Size, TextAlign, TextDirection};
-use waft_foundation::{App, Handle, Listenable, Listener};
+use waft_foundation::{App, Handle, Listenable, Listener, RetainedHandleId};
 use waft_painting::{Alignment, AlignmentGeometry, Axis, Decoration, TextOverflow, TextStyle};
 use waft_rendering::{
     AnyRenderObject, DecorationPosition, RelativeRect, RenderAnimatedOpacity,
@@ -20,7 +20,7 @@ use waft_rendering::{
 
 use crate::framework::{
     BuildContext, IntoWidget, KeyRef, RenderObjectWidget, SingleChildRenderObjectWidget, State,
-    StateData, Stateful, StatefulWidget, WidgetRef, downcast_widget,
+    StateData, Stateful, StatefulWidget, WidgetRef, downcast_widget, short_type_name,
 };
 use crate::widgets::basic::{Align, ClipRect, FractionalTranslation, Positioned, Transform};
 use crate::widgets::container::DecoratedBox;
@@ -117,9 +117,14 @@ impl<W: AnimatedWidget> StatefulWidget for Animated<W> {
         self.0.key()
     }
 
+    fn type_name(&self) -> &'static str {
+        short_type_name::<W>()
+    }
+
     fn create_state(&self) -> AnimatedState<W> {
         AnimatedState {
             state: StateData::new(),
+            listened: Vec::new(),
         }
     }
 }
@@ -133,6 +138,11 @@ impl<W: AnimatedWidget> Debug for Animated<W> {
 /// Dart's `_AnimatedState`.
 pub struct AnimatedState<W: AnimatedWidget> {
     state: StateData<Animated<W>>,
+    /// The listenable's arena objects, kept while this state listens to them: the widget's
+    /// owner may destroy the animation it handed down (a tile that drives a new one each
+    /// build) before this state removes its listener from the old one, which Dart's lingering
+    /// object allows.
+    listened: Vec<RetainedHandleId>,
 }
 
 impl<W: AnimatedWidget> State for AnimatedState<W> {
@@ -142,6 +152,8 @@ impl<W: AnimatedWidget> State for AnimatedState<W> {
     fn init_state(self: Handle<Self>, app: &mut App) {
         let listenable = self.widget(app).0.listenable();
         listenable.add_listener(app, Listener::handle_method(self, Self::handle_change));
+        let listened = listenable.retain(app);
+        app.get_mut(self).listened = listened;
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &Animated<W>) {
@@ -151,12 +163,15 @@ impl<W: AnimatedWidget> State for AnimatedState<W> {
             old_listenable
                 .remove_listener(app, &Listener::handle_method(self, Self::handle_change));
             listenable.add_listener(app, Listener::handle_method(self, Self::handle_change));
+            let listened = listenable.retain(app);
+            self.release_listened(app, listened);
         }
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
         let listenable = self.widget(app).0.listenable();
         listenable.remove_listener(app, &Listener::handle_method(self, Self::handle_change));
+        self.release_listened(app, Vec::new());
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -169,6 +184,15 @@ impl<W: AnimatedWidget> State for AnimatedState<W> {
 }
 
 impl<W: AnimatedWidget> AnimatedState<W> {
+    /// Gives back the objects of the listenable this state stopped listening to, keeping
+    /// `listened` in their place.
+    fn release_listened(self: Handle<Self>, app: &mut App, listened: Vec<RetainedHandleId>) {
+        let released = std::mem::replace(&mut app.get_mut(self).listened, listened);
+        for released in released {
+            app.release_id(released);
+        }
+    }
+
     fn handle_change(self: Handle<Self>, app: &mut App) {
         if !self.mounted(app) {
             return;

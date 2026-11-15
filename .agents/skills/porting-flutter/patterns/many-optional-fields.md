@@ -6,6 +6,8 @@ Do not add a separate builder type when the chain on the value does the job; a v
 
 Constructor asserts run on the setter that can violate them (or on a private assemble that lerp / scale use when they must write `Option`s).
 
+On a widget, an assert on one field runs in its setter, and one across fields in the widget's `debug_check_constructor`, which `into_widget` calls in a debug build; never in `build`.
+
 ```
 BoxDecoration::new()
     .color(c)

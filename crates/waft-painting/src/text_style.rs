@@ -445,10 +445,10 @@ impl TextStyle {
 
     /// Interpolate between two text styles for animated transitions.
     pub fn lerp(a: Option<&TextStyle>, b: Option<&TextStyle>, t: f64) -> Option<TextStyle> {
-        if let (Some(a), Some(b)) = (a, b)
-            && std::ptr::eq(a, b)
-        {
-            return Some(a.clone());
+        match (a, b) {
+            (None, None) => return None,
+            (Some(a), Some(b)) if std::ptr::eq(a, b) => return Some(a.clone()),
+            _ => {}
         }
 
         let mut lerp_debug_label = None;
@@ -1527,5 +1527,15 @@ mod tests {
             style.font_family.as_deref(),
             Some("packages/cool_fonts/Roboto")
         );
+    }
+
+    // text_style_test.dart 'TextStyle.lerp identical a,b'.
+    #[test]
+    fn text_style_lerp_identical_a_b() {
+        assert!(TextStyle::lerp(None, None, 0.0).is_none());
+        let style = TextStyle::new().debug_label("style");
+        let lerped = TextStyle::lerp(Some(&style), Some(&style), 0.5).expect("a style");
+        assert_eq!(lerped, style);
+        assert_eq!(lerped.debug_label.as_deref(), Some("style"));
     }
 }

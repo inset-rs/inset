@@ -19,6 +19,9 @@ pub type Canvas = DisplayListBuilder;
 /// draws.
 pub type Picture = DisplayList;
 
+/// Flutter `StrokeCap` — valo's `Cap`: how a stroke ends at an open contour, `Butt` by default.
+pub type StrokeCap = valo::Cap;
+
 /// The picture's operations in replay order with every embedded list's following its embedding
 /// op, for a test or a diagnostic that asks what a scene draws regardless of how its layers
 /// nested it.

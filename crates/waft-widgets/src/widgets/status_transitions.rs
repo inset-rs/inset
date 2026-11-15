@@ -8,7 +8,7 @@ use waft_foundation::{App, Handle};
 
 use crate::framework::{
     BuildContext, IntoWidget, KeyRef, State, StateData, Stateful, StatefulWidget, WidgetRef,
-    downcast_widget,
+    downcast_widget, short_type_name,
 };
 
 /// A widget that rebuilds when the given animation changes status.
@@ -44,6 +44,10 @@ impl<W: StatusTransitionWidget> StatefulWidget for StatusTransition<W> {
 
     fn key(&self) -> Option<&KeyRef> {
         self.0.key()
+    }
+
+    fn type_name(&self) -> &'static str {
+        short_type_name::<W>()
     }
 
     fn create_state(&self) -> StatusTransitionState<W> {

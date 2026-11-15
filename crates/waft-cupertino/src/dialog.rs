@@ -1,6 +1,6 @@
 //! Flutter counterpart: `cupertino/dialog.dart`.
 //!
-//! The `Semantics`, `MergeSemantics` and `sendSemanticsEvent` wrappers wait with
+//! `sendSemanticsEvent` and the gesture detector's `excludeFromSemantics` wait with
 //! accessibility.
 
 use std::any::{Any, TypeId};
@@ -11,8 +11,8 @@ use std::time::Duration;
 
 use waft_animation::{Curve, Curves};
 use waft_embedder::{
-    Brightness, Color, ColorFilter, ImageFilter, Offset, PointerDeviceKind, Radius, Size,
-    TargetPlatform, TextAlign, TextBaseline, TextDirection, lerp_double,
+    Brightness, Color, ColorFilter, ImageFilter, Offset, PointerDeviceKind, Radius, SemanticsRole,
+    Size, TargetPlatform, TextAlign, TextBaseline, TextDirection, lerp_double,
 };
 use waft_foundation::{App, Handle, K_IS_WEB, Listener, ValueSetter};
 use waft_gestures::{
@@ -41,11 +41,11 @@ use waft_widgets::{
     ConstrainedBox, Container, DecoratedBox, DefaultTextStyle, Directionality, FittedBox, Flexible,
     FocusableActionDetector, GestureRecognizerFactories, GestureRecognizerFactory,
     GestureRecognizerFactoryWithHandlers, IntoWidget, KeyRef, LayoutBuilder, LimitedBox,
-    MediaQuery, MetaData, MouseRegion, MultiChildRenderObjectWidget, NotificationListener,
-    Orientation, Padding, Positioned, RawGestureDetector, RenderObjectWidget, SafeArea,
-    ScrollBehaviorRef, ScrollConfiguration, ScrollController, ScrollControllerLeaf,
-    ScrollNotification, ScrollUpdateNotification, SingleChildScrollView, SizedBox, Stack, State,
-    StateData, StatefulWidget, StatelessWidget, View, WidgetRef,
+    MediaQuery, MergeSemantics, MetaData, MouseRegion, MultiChildRenderObjectWidget,
+    NotificationListener, Orientation, Padding, Positioned, RawGestureDetector, RenderObjectWidget,
+    SafeArea, ScrollBehaviorRef, ScrollConfiguration, ScrollController, ScrollControllerLeaf,
+    ScrollNotification, ScrollUpdateNotification, Semantics, SingleChildScrollView, SizedBox,
+    Stack, State, StateData, StatefulWidget, StatelessWidget, View, WidgetRef,
 };
 
 use crate::button::CupertinoButtonSize;
@@ -607,9 +607,7 @@ impl State for CupertinoAlertDialogState {
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
-        // `Semantics(label: localizations.alertDialogLabel)` waits with accessibility; the read
-        // keeps the dependency on `Localizations` Dart registers here.
-        <dyn CupertinoLocalizations>::of(app, context).alert_dialog_label();
+        let localizations = <dyn CupertinoLocalizations>::of(app, context);
         let is_in_accessibility_mode = is_in_accessibility_mode(app, context);
         let behavior = ScrollConfiguration::of(app, context)
             .copy_with()
@@ -653,8 +651,20 @@ impl State for CupertinoAlertDialogState {
                                                 })
                                                 .child(
                                                     ActionSheetGestureDetector::new().child(
-                                                        CupertinoPopupSurface::new(body)
-                                                            .is_surface_painted(false),
+                                                        CupertinoPopupSurface::new(
+                                                            Semantics::new()
+                                                                .role(SemanticsRole::AlertDialog)
+                                                                .names_route(true)
+                                                                .scopes_route(true)
+                                                                .explicit_child_nodes(true)
+                                                                .label(
+                                                                    localizations
+                                                                        .alert_dialog_label(),
+                                                                )
+                                                                .child(body)
+                                                                .into_widget(),
+                                                        )
+                                                        .is_surface_painted(false),
                                                     ),
                                                 ),
                                         ),
@@ -1607,7 +1617,7 @@ impl StatefulWidget for CupertinoActionSheet {
         self.key.as_ref()
     }
 
-    fn create_state(&self) -> CupertinoActionSheetState {
+    fn debug_check_constructor(&self) {
         debug_assert!(
             self.actions.is_some()
                 || self.title.is_some()
@@ -1616,6 +1626,9 @@ impl StatefulWidget for CupertinoActionSheet {
             "An action sheet must have a non-null value for at least one of the following \
              arguments: actions, title, message, or cancelButton"
         );
+    }
+
+    fn create_state(&self) -> CupertinoActionSheetState {
         CupertinoActionSheetState {
             state: StateData::new(),
             pressed_index: None,
@@ -1905,37 +1918,44 @@ impl State for CupertinoActionSheetState {
         let behavior = ScrollConfiguration::of(app, context)
             .copy_with()
             .scrollbars(false);
-        // `Semantics(label: localizations.alertDialogLabel)` waits with accessibility; the read
-        // keeps the dependency on `Localizations` Dart registers here.
-        <dyn CupertinoLocalizations>::of(app, context).alert_dialog_label();
+        let alert_dialog_label =
+            <dyn CupertinoLocalizations>::of(app, context).alert_dialog_label();
 
         SafeArea::new(ScrollConfiguration::new(
             // A CupertinoScrollbar is built-in below
             ScrollBehaviorRef::new(behavior),
-            CupertinoUserInterfaceLevel::new(
-                CupertinoUserInterfaceLevelData::Elevated,
-                Padding::new(EdgeInsetsGeometry::only(
-                    K_ACTION_SHEET_EDGE_PADDING,
-                    top_padding,
-                    K_ACTION_SHEET_EDGE_PADDING,
-                    // The bottom padding is set on SafeArea::minimum, allowing it to
-                    // be consumed by bottom view padding.
-                    0.0,
-                ))
-                .child(
-                    SizedBox::new()
-                        .width(action_sheet_width - K_ACTION_SHEET_EDGE_PADDING * 2.0)
-                        .child(
-                            ActionSheetGestureDetector::new().child(
-                                Column::new()
-                                    .main_axis_alignment(MainAxisAlignment::End)
-                                    .main_axis_size(MainAxisSize::Min)
-                                    .cross_axis_alignment(CrossAxisAlignment::Stretch)
-                                    .children(children),
+            Semantics::new()
+                .names_route(true)
+                .scopes_route(true)
+                .explicit_child_nodes(true)
+                .role(SemanticsRole::Dialog)
+                .label(alert_dialog_label)
+                .child(CupertinoUserInterfaceLevel::new(
+                    CupertinoUserInterfaceLevelData::Elevated,
+                    Padding::new(EdgeInsetsGeometry::only(
+                        K_ACTION_SHEET_EDGE_PADDING,
+                        top_padding,
+                        K_ACTION_SHEET_EDGE_PADDING,
+                        // The bottom padding is set on SafeArea::minimum, allowing it to
+                        // be consumed by bottom view padding.
+                        0.0,
+                    ))
+                    .child(
+                        SizedBox::new()
+                            .width(action_sheet_width - K_ACTION_SHEET_EDGE_PADDING * 2.0)
+                            .child(
+                                ActionSheetGestureDetector::new().child(
+                                    Semantics::new().explicit_child_nodes(true).child(
+                                        Column::new()
+                                            .main_axis_alignment(MainAxisAlignment::End)
+                                            .main_axis_size(MainAxisSize::Min)
+                                            .cross_axis_alignment(CrossAxisAlignment::Stretch)
+                                            .children(children),
+                                    ),
+                                ),
                             ),
-                        ),
-                ),
-            ),
+                    ),
+                )),
         ))
         .minimum(EdgeInsets::only(0.0, 0.0, 0.0, K_ACTION_SHEET_EDGE_PADDING))
         .into_widget()
@@ -2172,7 +2192,12 @@ impl State for CupertinoActionSheetActionState {
         } else {
             content.into_widget()
         };
-        let mut detector = FocusableActionDetector::new(highlighted)
+        let on_pressed = widget.on_pressed.clone();
+        let semantics = Semantics::new()
+            .button(true)
+            .on_tap(Rc::new(move |app: &mut App| on_pressed.call(app)))
+            .child(highlighted);
+        let mut detector = FocusableActionDetector::new(semantics)
             .actions(app.get(self).action_map.clone())
             .on_show_focus_highlight(move |app, show_highlight| {
                 self.on_show_focus_highlight(app, show_highlight)
@@ -2187,7 +2212,6 @@ impl State for CupertinoActionSheetActionState {
                 <dyn MouseCursor>::defer()
             }
         });
-        // `Semantics(button: true, onTap:)` waits with accessibility.
         MouseRegion::new()
             .cursor(cursor)
             .child(
@@ -3163,13 +3187,14 @@ impl State for AlertDialogButtonBackgroundState {
             widget.idle_color
         };
         let color = CupertinoDynamicColor::resolve(&background_color, app, context);
-        // `MergeSemantics` waits with accessibility.
         MetaData::new()
             .meta_data(slide_target_meta_data(&app.get(self).slide_target))
             .child(
-                Container::new()
-                    .decoration(BoxDecoration::new().color(color))
-                    .child(widget.child),
+                MergeSemantics::new().child(
+                    Container::new()
+                        .decoration(BoxDecoration::new().color(color))
+                        .child(widget.child),
+                ),
             )
             .into_widget()
     }
@@ -3338,7 +3363,10 @@ impl CupertinoDialogActionState {
             .scale(text_style.font_size.expect("the style carries a font size"))
             / K_DIALOG_MIN_BUTTON_FONT_SIZE;
 
-        // `Semantics(button: true, onTap:)` waits with accessibility.
+        let mut semantics = Semantics::new().button(true);
+        if let Some(on_pressed) = self.widget(app).on_pressed.clone() {
+            semantics = semantics.on_tap(Rc::new(move |app: &mut App| on_pressed.call(app)));
+        }
         FittedBox::new()
             .fit(BoxFit::ScaleDown)
             .child(
@@ -3347,10 +3375,12 @@ impl CupertinoDialogActionState {
                         .max_width(font_size_ratio * (dialog_width - (2.0 * padding))),
                 )
                 .child(
-                    DefaultTextStyle::new(text_style, content)
-                        .text_align(TextAlign::Center)
-                        .overflow(TextOverflow::Ellipsis)
-                        .max_lines(1),
+                    semantics.child(
+                        DefaultTextStyle::new(text_style, content)
+                            .text_align(TextAlign::Center)
+                            .overflow(TextOverflow::Ellipsis)
+                            .max_lines(1),
+                    ),
                 ),
             )
             .into_widget()

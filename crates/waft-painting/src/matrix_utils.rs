@@ -100,9 +100,58 @@ pub fn inverse_transform_rect(transform: Matrix4, rect: Rect) -> Rect {
     transform_rect(&inverted, rect)
 }
 
+/// Returns a matrix that transforms every point to `offset`.
+pub fn force_to_point(offset: Offset) -> Matrix4 {
+    let mut storage = [0.0; 16];
+    // Matrix4 is column-major.
+    // The first two columns (indices 0, 1, 4, 5) are zero, so x and y are ignored.
+    storage[10] = 1.0; // Row 2, Column 2: z' = z
+    storage[12] = offset.dx() as f32; // Row 0, Column 3: x' = offset.dx
+    storage[13] = offset.dy() as f32; // Row 1, Column 3: y' = offset.dy
+    storage[15] = 1.0; // Row 3, Column 3: w' = w
+    Matrix4::from_flutter_array(&storage)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // 'forceToPoint'
+    #[test]
+    fn force_to_point_maps_every_point_to_the_offset() {
+        let forced_offset = Offset::new(20.0, -30.0);
+        let forced_transform = force_to_point(forced_offset);
+
+        assert_eq!(
+            transform_point(&forced_transform, forced_offset),
+            forced_offset
+        );
+
+        assert_eq!(
+            transform_point(&forced_transform, Offset::ZERO),
+            forced_offset
+        );
+
+        assert_eq!(
+            transform_point(&forced_transform, Offset::new(1.0, 1.0)),
+            forced_offset
+        );
+
+        assert_eq!(
+            transform_point(&forced_transform, Offset::new(-1.0, -1.0)),
+            forced_offset
+        );
+
+        assert_eq!(
+            transform_point(&forced_transform, Offset::new(-20.0, 30.0)),
+            forced_offset
+        );
+
+        assert_eq!(
+            transform_point(&forced_transform, Offset::new(-1.2344, 1422434.23)),
+            forced_offset
+        );
+    }
 
     #[test]
     fn identity_leaves_a_rect_alone() {

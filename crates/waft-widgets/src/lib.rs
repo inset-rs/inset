@@ -38,6 +38,12 @@ pub use waft_rendering::{
 };
 // The widget, not dart:ui's `Image` that painting carries: Flutter's `widgets.dart` makes
 // the same choice, leaving the other as `ui.Image`.
+pub use widgets::animated_cross_fade::*;
+pub use widgets::animated_switcher::*;
+pub use widgets::debug::*;
+pub use widgets::dismissible::*;
+pub use widgets::dual_transition_builder::*;
+pub use widgets::form::*;
 pub use widgets::image::Image;
 
 /// Paths the crate's macros name. Not an API.
@@ -97,7 +103,10 @@ pub use widgets::navigator_pop_handler::*;
 pub use widgets::notification_listener::*;
 pub use widgets::overflow_bar::*;
 pub use widgets::overlay::*;
+pub use widgets::overscroll_indicator::*;
 pub use widgets::page_storage::*;
+pub use widgets::page_transitions_builder::*;
+pub use widgets::page_view::*;
 pub use widgets::pages::*;
 pub use widgets::platform_menu_bar::*;
 pub use widgets::platform_tray_icon::*;
@@ -105,6 +114,9 @@ pub use widgets::pop_scope::*;
 pub use widgets::preferred_size::*;
 pub use widgets::primary_scroll_controller::*;
 pub use widgets::radio_group::*;
+pub use widgets::raw_menu_anchor::*;
+pub use widgets::raw_radio::*;
+pub use widgets::raw_tooltip::*;
 pub use widgets::restoration::*;
 pub use widgets::restoration_properties::*;
 pub use widgets::routes::*;
@@ -129,11 +141,14 @@ pub use widgets::shared_app_data::*;
 pub use widgets::shortcuts::*;
 pub use widgets::single_child_scroll_view::*;
 pub use widgets::sliver::*;
+pub use widgets::sliver_fill::*;
 pub use widgets::sliver_persistent_header::*;
 pub use widgets::slotted_render_object_widget::*;
+pub use widgets::snapshot_widget::*;
 pub use widgets::spell_check::*;
 pub use widgets::standard_component_type::*;
 pub use widgets::status_transitions::*;
+pub use widgets::stretch_effect::*;
 pub use widgets::system_context_menu::*;
 pub use widgets::table::*;
 pub use widgets::tap_region::*;

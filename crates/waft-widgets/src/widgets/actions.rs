@@ -1539,8 +1539,7 @@ pub struct FocusableActionDetector {
 
     /// Whether to include semantics from `Focus`.
     ///
-    /// Defaults to true. Nothing reads it yet: the `Semantics` wrapper waits with
-    /// accessibility.
+    /// Defaults to true.
     pub include_focus_semantics: bool,
 
     /// The child widget for this [`FocusableActionDetector`] widget.

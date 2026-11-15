@@ -9,7 +9,8 @@
 //! for it to decode and encode images with, with the user's caption settings ([`MockCaptionSettings`]) to draw subtitles
 //! in, so a test supplies only the piece it is about. The shape of `flutter_test`'s `TestPlatformDispatcher` and
 //! `TestFlutterView`: real implementations of the host traits that answer what a test
-//! configures and record what the framework asks of them.
+//! configures and record what the framework asks of them. Its fonts are flutter_test's: every
+//! family is FlutterTest ([`TestFontSource`]) unless the test gives the platform other fonts.
 //!
 //! A dev-dependency of a crate with tests:
 //!
@@ -28,6 +29,7 @@ mod menus;
 mod notifications;
 mod opener;
 mod platform;
+mod test_font_manager;
 mod view;
 mod view_host;
 mod windows;
@@ -48,6 +50,7 @@ pub use menus::{
 pub use notifications::MockNotifications;
 pub use opener::{MockOpener, Opened};
 pub use platform::{TestDispatcher, TestPlatform};
+pub use test_font_manager::TestFontSource;
 pub use view::{IMPLICIT_VIEW_ID, TestView};
 pub use view_host::{TestViewHost, TextInputCall};
 pub use windows::{TestWindow, TestWindows};

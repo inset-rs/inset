@@ -88,7 +88,8 @@ impl CupertinoUserInterfaceLevel {
              to CupertinoUserInterfaceLevel.of(). This can happen because you do not have a WidgetsApp or \
              MaterialApp widget (those widgets introduce a CupertinoUserInterfaceLevel), or it can happen \
              if the context you use comes from a widget above those widgets.\n\
-             The context used was:\n  {context:?}"
+             The context used was:\n  {}",
+            context.widget(app).type_name()
         );
     }
 

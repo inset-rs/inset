@@ -16,6 +16,7 @@ use waft_foundation::{
 };
 use waft_painting::Color;
 use waft_physics::Simulation;
+use waft_rendering::OrdinalSortKey;
 use waft_scheduler::{FrameCallback, SchedulerBinding, SchedulerPhase, TickerFuture};
 
 use crate::framework::{
@@ -24,7 +25,7 @@ use crate::framework::{
 };
 use crate::view::View;
 use crate::widgets::actions::{Action, ActionData, Actions, DismissAction, DismissIntent};
-use crate::widgets::basic::{Builder, IgnorePointer, Offstage, RepaintBoundary};
+use crate::widgets::basic::{Builder, IgnorePointer, Offstage, RepaintBoundary, Semantics};
 use crate::widgets::focus_manager::{FocusNodeLeaf, FocusScopeNode, TraversalEdgeBehavior};
 use crate::widgets::focus_scope::FocusScope;
 use crate::widgets::modal_barrier::{AnimatedModalBarrier, ModalBarrier};
@@ -961,6 +962,7 @@ struct TransitionRouteVTable {
     route: fn(HandleId) -> AnyRoute,
     animation: fn(&App, HandleId) -> Option<AnyAnimation<f64>>,
     underlying_animation: fn(&App, HandleId) -> Option<AnyAnimation<f64>>,
+    controller: fn(&App, HandleId) -> Option<Handle<AnimationController>>,
     controller_value: fn(&App, HandleId) -> f64,
     opaque: fn(&App, HandleId) -> bool,
     allow_snapshotting: fn(&App, HandleId) -> bool,
@@ -986,6 +988,7 @@ impl TransitionRouteVTable {
             underlying_animation: |app, id| {
                 R::transition_route_data(resolve::<R>(id), app).animation
             },
+            controller: |app, id| R::controller(resolve(id), app),
             controller_value: |app, id| {
                 let controller = R::transition_route_data(resolve::<R>(id), app)
                     .controller
@@ -1063,6 +1066,11 @@ impl AnyTransitionRoute {
     /// really runs.
     pub fn underlying_animation(self, app: &App) -> Option<AnyAnimation<f64>> {
         (self.vtable.underlying_animation)(app, self.id)
+    }
+
+    /// See [`TransitionRoute::controller`].
+    pub fn controller(self, app: &App) -> Option<Handle<AnimationController>> {
+        (self.vtable.controller)(app, self.id)
     }
 
     /// The value of Dart's `_controller`, which `didReplace` copies.
@@ -2457,10 +2465,20 @@ pub trait ModalRoute: LocalHistoryRoute {
         let animation = TransitionRoute::animation(self, app).expect("an installed route");
         // `changed_internal_state` is called when the animation status updates; dismissed is
         // possible when doing a manual pop gesture.
-        IgnorePointer::new()
+        barrier = IgnorePointer::new()
             .ignoring(!animation.is_forward_or_completed(app))
             .child(barrier)
-            .into_widget()
+            .into_widget();
+        if ModalRoute::semantics_dismissible(self, app)
+            && ModalRoute::barrier_dismissible(self, app)
+        {
+            // To be sorted after the _modalScope.
+            barrier = Semantics::new()
+                .sort_key(Rc::new(OrdinalSortKey::new(1.0)))
+                .child(barrier)
+                .into_widget();
+        }
+        barrier
     }
 
     /// Builds the barrier for this [`ModalRoute`]; subclasses can override this method to
@@ -2478,11 +2496,14 @@ pub trait ModalRoute: LocalHistoryRoute {
             Some(cache) => cache,
             None => {
                 let key = self.modal_route_data(app).scope_key.clone();
-                let scope = ModalScope {
-                    key: Some(key.into()),
-                    route: ModalRoute::as_modal_route(self),
-                }
-                .into_widget();
+                // To be sorted before the _modalBarrier.
+                let scope = Semantics::new()
+                    .sort_key(Rc::new(OrdinalSortKey::new(0.0)))
+                    .child(ModalScope {
+                        key: Some(key.into()),
+                        route: ModalRoute::as_modal_route(self),
+                    })
+                    .into_widget();
                 self.modal_route_data_mut(app).modal_scope_cache = Some(scope.clone());
                 scope
             }
@@ -3948,7 +3969,11 @@ impl RawDialogRoute {
         secondary_animation: AnyAnimation<f64>,
     ) -> WidgetRef {
         let page_builder = Rc::clone(&this.raw_dialog_route_data(app).page_builder);
-        page_builder(app, context, animation, secondary_animation)
+        Semantics::new()
+            .scopes_route(true)
+            .explicit_child_nodes(true)
+            .child(page_builder(app, context, animation, secondary_animation))
+            .into_widget()
     }
 
     /// Dart's `RawDialogRoute.buildTransitions`, which a leaf's

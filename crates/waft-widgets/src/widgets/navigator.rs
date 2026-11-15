@@ -5260,18 +5260,25 @@ impl State for NavigatorState {
         }
         // `absorbing` is mutated directly by `cancel_active_pointers` above.
         let absorb = AbsorbPointer::new().absorbing(false).child(group);
+        // The callbacks keep the state, as Dart's tear-offs keep `this`: a pointer that went
+        // down before the navigator was disposed still ends on it.
+        let this = Rc::new(app.retain(self));
+        let on_up = Rc::clone(&this);
+        let on_cancel = Rc::clone(&this);
         let listener = crate::widgets::basic::Listener::new()
             .on_pointer_down(Rc::new(
                 move |app, event: waft_gestures::PointerDownEvent| {
-                    self.handle_pointer_down(app, event.pointer);
+                    this.get().handle_pointer_down(app, event.pointer);
                 },
             ))
             .on_pointer_up(Rc::new(move |app, event: waft_gestures::PointerUpEvent| {
-                self.handle_pointer_up_or_cancel(app, event.pointer);
+                on_up.get().handle_pointer_up_or_cancel(app, event.pointer);
             }))
             .on_pointer_cancel(Rc::new(
                 move |app, event: waft_gestures::PointerCancelEvent| {
-                    self.handle_pointer_up_or_cancel(app, event.pointer);
+                    on_cancel
+                        .get()
+                        .handle_pointer_up_or_cancel(app, event.pointer);
                 },
             ))
             .child(absorb);
@@ -6502,5 +6509,49 @@ mod tests {
         drop(app);
         cell.checkpoint();
         assert_eq!(awaited.get(), Some("B"));
+    }
+
+    /// Not a Dart case: the pointer listener keeps the disposed state readable, as Dart's
+    /// tear-off keeps it alive, until the pointer ends.
+    #[test]
+    fn a_pointer_that_ends_after_its_navigator_is_disposed_ends_on_the_disposed_state() {
+        let (cell, _restoration) = app_with_view(None);
+        let key = GlobalKey::new();
+        mount(&cell, pageless_navigator(&key));
+        let mut app = cell.borrow_mut();
+        let navigator_state = state(&key, &mut app);
+        let at = settle(&mut app, Duration::ZERO);
+        let position = waft_embedder::Offset::new(5.0, 5.0);
+        GestureBinding::instance(&mut app).handle_pointer_event(
+            &mut app,
+            waft_gestures::PointerEvent::Down(waft_gestures::PointerDownEvent {
+                pointer: 1,
+                position,
+                kind: waft_embedder::PointerDeviceKind::Touch,
+                ..waft_gestures::PointerDownEvent::default()
+            }),
+        );
+        app.drain_microtasks();
+        assert!(app.get(navigator_state).active_pointers.contains(&1));
+
+        let binding = crate::binding::WidgetsBinding::instance(&mut app);
+        attach(binding, &mut app, SizedBox::new().into_widget());
+        settle(&mut app, at);
+        assert!(
+            app.is_disposed(navigator_state),
+            "the navigator was disposed"
+        );
+
+        GestureBinding::instance(&mut app).handle_pointer_event(
+            &mut app,
+            waft_gestures::PointerEvent::Up(waft_gestures::PointerUpEvent {
+                pointer: 1,
+                position,
+                kind: waft_embedder::PointerDeviceKind::Touch,
+                ..waft_gestures::PointerUpEvent::default()
+            }),
+        );
+        assert!(!app.get(navigator_state).active_pointers.contains(&1));
+        app.drain_microtasks();
     }
 }

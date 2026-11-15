@@ -111,7 +111,8 @@ pub trait TapRegionRegistry: RenderObject {
                  TapRegionSurface widget.\n\
                  No TapRegionSurface widget ancestor could be found starting from the context \
                  that was passed to TapRegionRegistry.of().\n\
-                 The context used was:\n  {context:?}"
+                 The context used was:\n  {}",
+                context.widget(app).type_name()
             )
         })
     }

@@ -3,11 +3,12 @@ name = "waft-test"
 description = "Test scaffolding for Waft: a platform and a view to run an App under"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license = "MIT AND BSD-3-Clause"
 repository.workspace = true
 homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
+include = ["src/**", "assets/**", "THIRD_PARTY.md", "Cargo.toml"]
 
 [dependencies]
 waft-embedder.workspace = true

@@ -5,7 +5,7 @@ use std::fmt::{self, Debug};
 use std::rc::Rc;
 
 use waft_animation::AnyAnimation;
-use waft_embedder::Color;
+use waft_embedder::{Color, TargetPlatform};
 use waft_foundation::{App, Handle, Listenable, Listener, ValueNotifier};
 use waft_gestures::{
     BaseTapData, BaseTapGestureRecognizer, BaseTapLeaf, BaseTapLeafData, GestureDisposition,
@@ -19,7 +19,11 @@ use waft_rendering::{BoxConstraints, HitTestBehavior};
 use waft_services::SystemMouseCursors;
 
 use crate::framework::{BuildContext, IntoWidget, KeyRef, StatelessWidget, WidgetRef};
-use crate::widgets::basic::{ColoredBox, ConstrainedBox, MouseRegion};
+use crate::widgets::basic::{
+    BlockSemantics, ColoredBox, ConstrainedBox, Directionality, ExcludeSemantics, MouseRegion,
+    Semantics,
+};
+use crate::widgets::debug::debug_check_has_directionality;
 use crate::widgets::gesture_detector::{
     GestureRecognizerFactories, GestureRecognizerFactory, RawGestureDetector,
 };
@@ -185,7 +189,21 @@ impl StatelessWidget for ModalBarrier {
         self.key.as_ref()
     }
 
-    fn build(&self, _app: &mut App, context: BuildContext) -> WidgetRef {
+    fn build(&self, app: &mut App, context: BuildContext) -> WidgetRef {
+        debug_assert!(
+            !self.dismissible
+                || self.semantics_label.is_none()
+                || debug_check_has_directionality(app, context, None, None, None)
+        );
+        let platform_supports_dismissing_barrier = match app.platform().target_platform() {
+            TargetPlatform::Fuchsia | TargetPlatform::Linux | TargetPlatform::Windows => false,
+            TargetPlatform::Android | TargetPlatform::IOS | TargetPlatform::MacOS => true,
+        };
+        let semantics_dismissible = self.dismissible && platform_supports_dismissing_barrier;
+        let modal_barrier_semantics_dismissible = self
+            .barrier_semantics_dismissible
+            .unwrap_or(semantics_dismissible);
+
         let dismissible = self.dismissible;
         let on_dismiss = self.on_dismiss.clone();
         let handle_dismiss = Listener::new(move |app: &mut App| {
@@ -204,15 +222,47 @@ impl StatelessWidget for ModalBarrier {
         if let Some(color) = self.color {
             constrained = constrained.child(ColoredBox::new(color));
         }
-        let barrier = MouseRegion::new()
-            .cursor(SystemMouseCursors::BASIC.into())
-            .child(constrained);
-
-        ModalBarrierGestureDetector {
-            child: barrier.into_widget(),
-            on_dismiss: handle_dismiss,
+        let mut semantics = Semantics::new();
+        if let Some(semantics_on_tap_hint) = &self.semantics_on_tap_hint {
+            semantics = semantics.on_tap_hint(semantics_on_tap_hint.clone());
         }
-        .into_widget()
+        if semantics_dismissible && self.semantics_label.is_some() {
+            let on_tap = handle_dismiss.clone();
+            let on_dismiss = handle_dismiss.clone();
+            semantics = semantics
+                .on_tap(Rc::new(move |app: &mut App| on_tap.call(app)))
+                .on_dismiss(Rc::new(move |app: &mut App| on_dismiss.call(app)));
+        }
+        if semantics_dismissible && let Some(semantics_label) = &self.semantics_label {
+            semantics = semantics.label(semantics_label.clone());
+        }
+        if semantics_dismissible && self.semantics_label.is_some() {
+            semantics = semantics.text_direction(Directionality::of(app, context));
+        }
+        let barrier = semantics.child(
+            MouseRegion::new()
+                .cursor(SystemMouseCursors::BASIC.into())
+                .child(constrained),
+        );
+
+        // Developers can set [dismissible: true] and [barrierSemanticsDismissible: true]
+        // to allow assistive technology users to dismiss a modal BottomSheet by
+        // tapping on the Scrim focus.
+        // On iOS, some modal barriers are not dismissible in accessibility mode.
+        let excluding = !semantics_dismissible || !modal_barrier_semantics_dismissible;
+
+        // Dart wraps the barrier in `_SemanticsClipper` here when `!excluding` and a
+        // `clipDetailsNotifier` is given; it only clips the barrier's semantics bounds, which
+        // wait with the semantics tree.
+
+        BlockSemantics::new()
+            .child(ExcludeSemantics::new().excluding(excluding).child(
+                ModalBarrierGestureDetector {
+                    child: barrier.into_widget(),
+                    on_dismiss: handle_dismiss,
+                },
+            ))
+            .into_widget()
     }
 }
 

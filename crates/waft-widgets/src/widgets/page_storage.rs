@@ -320,7 +320,8 @@ impl PageStorage {
                  widget.\nNo PageStorage widget ancestor could be found starting from the \
                  context that was passed to PageStorage.of(). This can happen because you are \
                  using a widget that looks for a PageStorage ancestor, but no such ancestor \
-                 exists.\nThe context used was:\n  {context:?}"
+                 exists.\nThe context used was:\n  {}",
+                context.widget(app).type_name()
             )
         })
     }

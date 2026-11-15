@@ -1,6 +1,4 @@
 //! Flutter counterpart: `cupertino/segmented_control.dart`.
-//!
-//! The `Semantics` wrappers around each segment wait with accessibility.
 
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
@@ -29,7 +27,7 @@ use waft_widgets::{
     DefaultTextStyle, Directionality, Focus, FocusNode, FocusNodeLeaf, GestureDetector, GlobalKey,
     IconTheme, IconThemeData, IntoWidget, KeyEventResult, KeyRef, MouseRegion,
     MultiChildRenderObjectWidget, Padding, RadioClient, RadioClientData, RadioGroup,
-    RenderObjectWidget, State, StateData, StatefulWidget, TickerProviderStateMixin,
+    RenderObjectWidget, Semantics, State, StateData, StatefulWidget, TickerProviderStateMixin,
     TickerProviderStateMixinData, UnconstrainedBox, VoidCallbackAction, VoidCallbackIntent,
     WidgetRef,
 };
@@ -860,7 +858,14 @@ impl<T: Copy + Eq + Hash + Debug + 'static> State for SegmentedControlState<T> {
                 }))
                 .child(IconTheme::new(
                     icon_theme,
-                    DefaultTextStyle::new(text_style, child),
+                    DefaultTextStyle::new(
+                        text_style,
+                        Semantics::new()
+                            .button(true)
+                            .in_mutually_exclusive_group(true)
+                            .selected(self.widget(app).group_value == Some(current_key))
+                            .child(child),
+                    ),
                 ));
 
             let segment = SegmentButton {

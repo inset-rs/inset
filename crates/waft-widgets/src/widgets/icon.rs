@@ -1,7 +1,6 @@
 //! Flutter counterpart: `widgets/icon.dart`.
 //!
-//! `Icon.semanticLabel` and the `Semantics` / `ExcludeSemantics` wrappers around the glyph
-//! wait on accessibility; `debugCheckHasDirectionality` waits on diagnostics.
+//! `debugCheckHasDirectionality` waits on diagnostics.
 
 use waft_embedder::{
     BlendMode, FontVariation, FontWeight, Matrix4, Paint, Shadow, TextDirection,
@@ -13,7 +12,9 @@ use waft_painting::{
 };
 
 use crate::framework::{BuildContext, IntoWidget, KeyRef, StatelessWidget, WidgetRef};
-use crate::widgets::basic::{Center, Directionality, SizedBox, Transform};
+use crate::widgets::basic::{
+    Center, Directionality, ExcludeSemantics, Semantics, SizedBox, Transform,
+};
 use crate::widgets::icon_data::IconData;
 use crate::widgets::icon_theme::IconTheme;
 use crate::widgets::media_query::MediaQuery;
@@ -153,6 +154,15 @@ pub struct Icon {
     ///
     /// Defaults to the nearest [`IconTheme`]'s `IconThemeData::shadows`.
     pub shadows: Option<Vec<Shadow>>,
+    /// Semantic label for the icon.
+    ///
+    /// Announced by assistive technologies (e.g TalkBack/VoiceOver).
+    /// This label does not show in the UI.
+    ///
+    ///  * [`SemanticsProperties::label`](waft_rendering::SemanticsProperties::label), which is
+    ///    set to [`semantic_label`](Self::semantic_label) in the underlying [`Semantics`]
+    ///    widget.
+    pub semantic_label: Option<String>,
     /// The text direction to use for rendering the icon.
     ///
     /// If this is `None`, the ambient [`Directionality`] is used instead.
@@ -199,6 +209,7 @@ impl Icon {
             optical_size: None,
             color: None,
             shadows: None,
+            semantic_label: None,
             text_direction: None,
             apply_text_scaling: None,
             blend_mode: None,
@@ -255,6 +266,21 @@ impl Icon {
     pub fn shadows(mut self, shadows: Vec<Shadow>) -> Icon {
         self.shadows = Some(shadows);
         self
+    }
+
+    /// Dart `Icon(semanticLabel:)`.
+    pub fn semantic_label(mut self, semantic_label: impl Into<String>) -> Icon {
+        self.semantic_label = Some(semantic_label.into());
+        self
+    }
+
+    /// Dart's `Semantics(label: semanticLabel)` around what the icon builds.
+    fn semantics(&self) -> Semantics {
+        let semantics = Semantics::new();
+        match &self.semantic_label {
+            Some(semantic_label) => semantics.label(semantic_label.clone()),
+            None => semantics,
+        }
     }
 
     /// Dart `Icon(textDirection:)`.
@@ -372,9 +398,9 @@ impl StatelessWidget for Icon {
         let icon_shadows = self.shadows.clone().or(icon_theme.shadows.clone());
 
         let Some(icon) = &self.icon else {
-            return SizedBox::new()
-                .width(icon_size)
-                .height(icon_size)
+            return self
+                .semantics()
+                .child(SizedBox::new().width(icon_size).height(icon_size))
                 .into_widget();
         };
 
@@ -449,10 +475,15 @@ impl StatelessWidget for Icon {
             }
         }
 
-        SizedBox::new()
-            .width(icon_size)
-            .height(icon_size)
-            .child(Center::new().child(icon_widget))
+        self.semantics()
+            .child(
+                ExcludeSemantics::new().child(
+                    SizedBox::new()
+                        .width(icon_size)
+                        .height(icon_size)
+                        .child(Center::new().child(icon_widget)),
+                ),
+            )
             .into_widget()
     }
 }
@@ -464,8 +495,10 @@ mod tests {
     use waft_foundation::AppCell;
     use waft_painting::{PaintingBinding, TextScaler};
     use waft_rendering::{
-        AnyRenderBox, BoxConstraints, RenderBox, RenderConstrainedBox, RenderHandle, RenderObject,
-        RenderObjectWithChildMixin, RenderParagraph, RenderPositionedBox, RenderTransform,
+        AnyRenderBox, BoxConstraints, RenderBox, RenderConstrainedBox, RenderExcludeSemantics,
+        RenderHandle, RenderObject, RenderObjectWithChildMixin, RenderParagraph,
+        RenderPositionedBox, RenderSemanticsAnnotations, RenderTransform,
+        SemanticsAnnotationsMixin,
     };
 
     use super::*;
@@ -501,14 +534,30 @@ mod tests {
             .expect("the expected render object")
     }
 
-    fn square_under_root(harness: &Harness, app: &App) -> RenderHandle<RenderConstrainedBox> {
+    /// The `Semantics` under the root: what an `Icon` builds around everything else.
+    fn semantics_under_root(
+        harness: &Harness,
+        app: &App,
+    ) -> RenderHandle<RenderSemanticsAnnotations> {
         harness
             .render_root(app)
             .child(app)
             .expect("a child")
             .as_object()
-            .downcast::<RenderConstrainedBox>(app)
-            .expect("Icon builds a SizedBox")
+            .downcast::<RenderSemanticsAnnotations>(app)
+            .expect("Icon builds a Semantics")
+    }
+
+    /// The square inside the icon's `Semantics`, and its `ExcludeSemantics` when it has a glyph.
+    fn square_under_root(harness: &Harness, app: &App) -> RenderHandle<RenderConstrainedBox> {
+        let semantics = semantics_under_root(harness, app);
+        let child = semantics.child(app).expect("a child").as_object();
+        match child.downcast::<RenderExcludeSemantics>(app) {
+            Some(exclude) => typed_child(exclude, app),
+            None => child
+                .downcast::<RenderConstrainedBox>(app)
+                .expect("Icon builds a SizedBox"),
+        }
     }
 
     /// Mounts `icon` under an ambient `Directionality` and `IconTheme`, and pumps a frame.
@@ -605,6 +654,52 @@ mod tests {
             .find(|variation| variation.axis == "wght")
             .expect("the theme's weight");
         assert_eq!(weight.value, 700.0);
+    }
+
+    // icon_test.dart: 'Icon with semantic label', as the annotation keeps it.
+    #[test]
+    fn an_icon_labels_its_semantics_and_excludes_its_glyph() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let harness = mount(
+            &mut app,
+            TextDirection::Ltr,
+            IconThemeData::fallback(),
+            Icon::new(Some(glyph())).semantic_label("a label"),
+        );
+        let semantics = semantics_under_root(&harness, &app);
+        assert_eq!(semantics.properties(&app).label.as_deref(), Some("a label"));
+        let exclude = semantics
+            .child(&app)
+            .expect("a child")
+            .as_object()
+            .downcast::<RenderExcludeSemantics>(&app)
+            .expect("the glyph sits in an ExcludeSemantics");
+        assert!(exclude.excluding(&app));
+    }
+
+    // icon_test.dart: 'Null icon with semantic label', as the annotation keeps it.
+    #[test]
+    fn an_icon_without_an_icon_data_still_labels_its_semantics() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let harness = mount(
+            &mut app,
+            TextDirection::Ltr,
+            IconThemeData::fallback(),
+            Icon::new(None).semantic_label("a label"),
+        );
+        let semantics = semantics_under_root(&harness, &app);
+        assert_eq!(semantics.properties(&app).label.as_deref(), Some("a label"));
+        assert!(
+            semantics
+                .child(&app)
+                .expect("a child")
+                .as_object()
+                .downcast::<RenderConstrainedBox>(&app)
+                .is_some(),
+            "no ExcludeSemantics without a glyph"
+        );
     }
 
     #[test]

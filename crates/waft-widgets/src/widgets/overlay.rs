@@ -2149,11 +2149,17 @@ struct TheaterLocation {
 
 impl RenderTheaterMarker {
     fn of(app: &mut App, context: BuildContext, target_root_overlay: bool) -> TheaterLocation {
-        RenderTheaterMarker::maybe_of(app, context, target_root_overlay, true).expect(
-            "No Overlay widget found. This widget requires an Overlay widget ancestor. An \
-             overlay lets widgets float on top of other widget children. To introduce an \
-             Overlay widget, you can either directly include one, or use a widget that \
-             contains an Overlay itself, such as a Navigator or WidgetsApp.",
+        RenderTheaterMarker::maybe_of(app, context, target_root_overlay, true).unwrap_or_else(
+            || {
+                panic!(
+                    "No Overlay widget found.\n{} widgets require an Overlay widget ancestor.\n\
+                     An overlay lets widgets float on top of other widget children.\n\
+                     To introduce an Overlay widget, you can either directly include one, or \
+                     use a widget that contains an Overlay itself, such as a Navigator or \
+                     WidgetsApp.",
+                    context.widget(app).type_name()
+                )
+            },
         )
     }
 

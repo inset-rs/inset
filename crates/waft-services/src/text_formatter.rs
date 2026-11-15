@@ -2,6 +2,7 @@
 
 use std::rc::Rc;
 
+use unicode_segmentation::UnicodeSegmentation;
 use waft_embedder::{TargetPlatform, TextAffinity, TextRange, TextSelection};
 
 use crate::TextEditingValue;
@@ -364,10 +365,14 @@ impl LengthLimitingTextInputFormatter {
         }
     }
 
-    /// Truncate the given [`TextEditingValue`] to `max_length` Unicode scalar
-    /// values.
+    /// Truncate the given [`TextEditingValue`] to `max_length` characters (grapheme
+    /// clusters).
     pub fn truncate(value: &TextEditingValue, max_length: i32) -> TextEditingValue {
-        let truncated: String = value.text.chars().take(max_length as usize).collect();
+        let truncated: String = value
+            .text
+            .graphemes(true)
+            .take(max_length as usize)
+            .collect();
         let truncated_len = utf16_len(&truncated);
         TextEditingValue::new()
             .text(truncated)
@@ -390,8 +395,9 @@ impl LengthLimitingTextInputFormatter {
             )
     }
 
+    /// Dart's `text.characters.length`: the extended grapheme clusters of UAX #29.
     fn character_count(text: &str) -> i32 {
-        text.chars().count() as i32
+        text.graphemes(true).count() as i32
     }
 }
 

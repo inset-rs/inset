@@ -1,10 +1,12 @@
 //! Flutter counterpart: `widgets/binding.dart` (`WidgetsBinding`, `RootWidget`,
 //! `RootElement`, `runApp`).
 //!
-//! The memory-pressure, push-route and back-gesture observer callbacks, `performReassemble`,
-//! and the platform menu owner wait. `handleAppLifecycleStateChanged` tells the observers each
-//! lifecycle state the host reports, and `handleRequestAppExit` asks them whenever the host asks
-//! the app to quit. The windowing owner, which keeps the window controllers and hears every view
+//! The memory-pressure and push-route observer callbacks, `performReassemble`, and the
+//! platform menu owner wait. The back-gesture handlers (`handle_start_back_gesture` and the
+//! three after it) take a predictive back gesture to the observers that handle it, but no host
+//! reports one yet. `handleAppLifecycleStateChanged` tells the observers each lifecycle state
+//! the host reports, and `handleRequestAppExit` asks them whenever the host asks the app to
+//! quit. The windowing owner, which keeps the window controllers and hears every view
 //! event first, is here (`windowing.rs`); a view it does not claim goes to the observers.
 //! `run_app` builds its content in every view the app is given (`multi_view_app.rs`), and asks
 //! for a window where it is given none. The binding follows the platform's caption settings
@@ -26,7 +28,8 @@ use waft_foundation::{App, Handle, Listener, Task, Timer};
 use waft_rendering::{RendererBinding, RendererBindingOverridesObject};
 use waft_scheduler::{FrameTarget, SchedulerBinding, SchedulerBindingOverridesObject};
 use waft_services::{
-    Clipboard, SelectionChangedCause, ServicesBinding, ServicesBindingOverridesObject,
+    Clipboard, PredictiveBackEvent, SelectionChangedCause, ServicesBinding,
+    ServicesBindingOverridesObject,
 };
 
 use crate::framework::{
@@ -59,6 +62,8 @@ pub struct WidgetsBinding {
     root_element: Option<AnyElement>,
     ready_to_produce_frames: bool,
     observers: Vec<WidgetsBindingObserverRef>,
+    /// The observers that are currently handling an active predictive back gesture.
+    back_gesture_observers: Vec<WidgetsBindingObserverRef>,
     /// Who hears each change of a view's window, by the view: each view's `WindowScope`.
     window_listeners: HashMap<ViewId, Vec<Listener>>,
     /// Flutter's `platformMenuDelegate`.
@@ -78,10 +83,10 @@ pub type TrayIconListener = Rc<dyn Fn(&mut App, TrayIconEvent)>;
 /// accessibility settings. It is used to implement features such as `MediaQuery`.
 ///
 /// A `State` registers itself through the object twin
-/// [`WidgetsBindingObserverObject`], whose handle is the observer. The push-route,
-/// memory-pressure and back-gesture callbacks wait with their platform
-/// events; only the ones the renderer raises, the locale list, going back, the app's lifecycle
-/// states and exit requests are here.
+/// [`WidgetsBindingObserverObject`], whose handle is the observer. The push-route and
+/// memory-pressure callbacks wait with their platform events; only the ones the renderer
+/// raises, the locale list, going back, predictive back gestures, the app's lifecycle states
+/// and exit requests are here.
 pub trait WidgetsBindingObserver {
     /// Called when the application's dimensions change. For example, when a phone is rotated.
     fn did_change_metrics(&self, app: &mut App) {
@@ -172,6 +177,70 @@ pub trait WidgetsBindingObserver {
     fn did_pop_route(&self, app: &mut App, view: ViewId) -> bool {
         let _ = (app, view);
         false
+    }
+
+    /// Called at the start of a predictive back gesture.
+    ///
+    /// Observers are notified in registration order until one returns true or all observers
+    /// have been notified. If an observer returns true then that observer, and only that
+    /// observer, will be notified of subsequent events in this same gesture (for example
+    /// [`handle_update_back_gesture_progress`](Self::handle_update_back_gesture_progress),
+    /// etc.).
+    ///
+    /// Observers are expected to return true if they were able to handle the notification, for
+    /// example by starting a predictive back animation, and false otherwise.
+    /// `PredictiveBackPageTransitionsBuilder` uses this mechanism to listen for predictive back
+    /// gestures.
+    ///
+    /// If all observers indicate they are not handling this back gesture by returning false,
+    /// then a navigation pop will result when
+    /// [`handle_commit_back_gesture`](Self::handle_commit_back_gesture) is called, as in a
+    /// non-predictive system back gesture.
+    ///
+    /// Currently, this is only used on Android devices that support the predictive back
+    /// feature.
+    fn handle_start_back_gesture(&self, app: &mut App, back_event: PredictiveBackEvent) -> bool {
+        let _ = (app, back_event);
+        false
+    }
+
+    /// Called when a predictive back gesture moves.
+    ///
+    /// The observer which was notified of this gesture's
+    /// [`handle_start_back_gesture`](Self::handle_start_back_gesture) is the same observer
+    /// notified for this.
+    ///
+    /// Currently, this is only used on Android devices that support the predictive back
+    /// feature.
+    fn handle_update_back_gesture_progress(&self, app: &mut App, back_event: PredictiveBackEvent) {
+        let _ = (app, back_event);
+    }
+
+    /// Called when a predictive back gesture is finished successfully, indicating that the
+    /// current route should be popped.
+    ///
+    /// The observer which was notified of this gesture's
+    /// [`handle_start_back_gesture`](Self::handle_start_back_gesture) is the same observer
+    /// notified for this. If there is none, then a navigation pop will result, as in a
+    /// non-predictive system back gesture.
+    ///
+    /// Currently, this is only used on Android devices that support the predictive back
+    /// feature.
+    fn handle_commit_back_gesture(&self, app: &mut App) {
+        let _ = app;
+    }
+
+    /// Called when a predictive back gesture is canceled, indicating that no navigation should
+    /// occur.
+    ///
+    /// The observer which was notified of this gesture's
+    /// [`handle_start_back_gesture`](Self::handle_start_back_gesture) is the same observer
+    /// notified for this.
+    ///
+    /// Currently, this is only used on Android devices that support the predictive back
+    /// feature.
+    fn handle_cancel_back_gesture(&self, app: &mut App) {
+        let _ = app;
     }
 
     /// Called when the platform adds a view for the app, whoever started it: one the app asked
@@ -266,6 +335,35 @@ pub trait WidgetsBindingObserverObject: Sized + 'static {
         false
     }
 
+    /// See [`WidgetsBindingObserver::handle_start_back_gesture`].
+    fn handle_start_back_gesture(
+        self: Handle<Self>,
+        app: &mut App,
+        back_event: PredictiveBackEvent,
+    ) -> bool {
+        let _ = (app, back_event);
+        false
+    }
+
+    /// See [`WidgetsBindingObserver::handle_update_back_gesture_progress`].
+    fn handle_update_back_gesture_progress(
+        self: Handle<Self>,
+        app: &mut App,
+        back_event: PredictiveBackEvent,
+    ) {
+        let _ = (app, back_event);
+    }
+
+    /// See [`WidgetsBindingObserver::handle_commit_back_gesture`].
+    fn handle_commit_back_gesture(self: Handle<Self>, app: &mut App) {
+        let _ = app;
+    }
+
+    /// See [`WidgetsBindingObserver::handle_cancel_back_gesture`].
+    fn handle_cancel_back_gesture(self: Handle<Self>, app: &mut App) {
+        let _ = app;
+    }
+
     /// See [`WidgetsBindingObserver::did_add_view`].
     fn did_add_view(self: Handle<Self>, app: &mut App, view: &ViewRef) {
         let _ = (app, view);
@@ -338,6 +436,22 @@ impl<T: WidgetsBindingObserverObject> WidgetsBindingObserver for Handle<T> {
         T::did_pop_route(*self, app, view)
     }
 
+    fn handle_start_back_gesture(&self, app: &mut App, back_event: PredictiveBackEvent) -> bool {
+        T::handle_start_back_gesture(*self, app, back_event)
+    }
+
+    fn handle_update_back_gesture_progress(&self, app: &mut App, back_event: PredictiveBackEvent) {
+        T::handle_update_back_gesture_progress(*self, app, back_event);
+    }
+
+    fn handle_commit_back_gesture(&self, app: &mut App) {
+        T::handle_commit_back_gesture(*self, app);
+    }
+
+    fn handle_cancel_back_gesture(&self, app: &mut App) {
+        T::handle_cancel_back_gesture(*self, app);
+    }
+
     fn did_add_view(&self, app: &mut App, view: &ViewRef) {
         T::did_add_view(*self, app, view);
     }
@@ -357,6 +471,24 @@ impl<T: WidgetsBindingObserverObject> WidgetsBindingObserver for Handle<T> {
 
 /// A registered observer; removed again by identity of the `Rc`.
 pub type WidgetsBindingObserverRef = Rc<dyn WidgetsBindingObserver>;
+
+/// Dart's `List.remove` on a list of observers: removes the first registration of `observer`,
+/// and answers whether there was one.
+fn remove_first(
+    observers: &mut Vec<WidgetsBindingObserverRef>,
+    observer: &WidgetsBindingObserverRef,
+) -> bool {
+    match observers
+        .iter()
+        .position(|registered| Rc::ptr_eq(registered, observer))
+    {
+        Some(index) => {
+            observers.remove(index);
+            true
+        }
+        None => false,
+    }
+}
 
 impl WidgetsBinding {
     /// The current [`WidgetsBinding`], created on first use (Flutter's
@@ -705,10 +837,9 @@ impl WidgetsBinding {
         app: &mut App,
         observer: &WidgetsBindingObserverRef,
     ) -> bool {
-        let observers = &mut app.get_mut(self).observers;
-        let before = observers.len();
-        observers.retain(|registered| !Rc::ptr_eq(registered, observer));
-        observers.len() < before
+        remove_first(&mut app.get_mut(self).back_gesture_observers, observer);
+
+        remove_first(&mut app.get_mut(self).observers, observer)
     }
 
     fn is_observing(self: Handle<Self>, app: &App, observer: &WidgetsBindingObserverRef) -> bool {
@@ -862,6 +993,75 @@ impl WidgetsBinding {
             }
         }
         false
+    }
+
+    /// Called when a predictive back gesture starts: asks every observer whether it handles
+    /// the gesture, and keeps each that says it does as the one the rest of the gesture goes
+    /// to.
+    ///
+    /// Answers whether any observer handles it. Dart's `_handleStartBackGesture`, which
+    /// `SystemChannels.backGesture` calls.
+    pub fn handle_start_back_gesture(
+        self: Handle<Self>,
+        app: &mut App,
+        back_event: PredictiveBackEvent,
+    ) -> bool {
+        app.get_mut(self).back_gesture_observers.clear();
+        for observer in app.get(self).observers.clone() {
+            if observer.handle_start_back_gesture(app, back_event) {
+                app.get_mut(self).back_gesture_observers.push(observer);
+            }
+        }
+        !app.get(self).back_gesture_observers.is_empty()
+    }
+
+    /// Called when a predictive back gesture moves: tells the observers that handle it.
+    ///
+    /// Dart's `_handleUpdateBackGestureProgress`.
+    pub fn handle_update_back_gesture_progress(
+        self: Handle<Self>,
+        app: &mut App,
+        back_event: PredictiveBackEvent,
+    ) {
+        if app.get(self).back_gesture_observers.is_empty() {
+            return;
+        }
+
+        for observer in app.get(self).back_gesture_observers.clone() {
+            observer.handle_update_back_gesture_progress(app, back_event);
+        }
+    }
+
+    /// Called when a predictive back gesture in `view` finishes successfully: tells the
+    /// observers that handle it, or, when none does, goes back in `view` as Back does
+    /// ([`handle_pop_route`](Self::handle_pop_route)).
+    ///
+    /// Answers whether the application handled it; `false` means none of the observers
+    /// handled the gesture and nothing went back, and the host does what the platform does
+    /// without the application, as after [`handle_pop_route`](Self::handle_pop_route). Dart's
+    /// `_handleCommitBackGesture`.
+    pub fn handle_commit_back_gesture(self: Handle<Self>, app: &mut App, view: ViewId) -> bool {
+        if app.get(self).back_gesture_observers.is_empty() {
+            // If the predictive back was not handled, then the route should be popped
+            // like a normal, non-predictive back. For example, this will happen if a
+            // back gesture occurs but no predictive back route transition exists to
+            // handle it. The back gesture should still cause normal pop even if it
+            // doesn't cause a predictive transition.
+            return self.handle_pop_route(app, view);
+        }
+        for observer in app.get(self).back_gesture_observers.clone() {
+            observer.handle_commit_back_gesture(app);
+        }
+        true
+    }
+
+    /// Called when a predictive back gesture is canceled: tells the observers that handle it.
+    ///
+    /// Dart's `_handleCancelBackGesture`.
+    pub fn handle_cancel_back_gesture(self: Handle<Self>, app: &mut App) {
+        for observer in app.get(self).back_gesture_observers.clone() {
+            observer.handle_cancel_back_gesture(app);
+        }
     }
 
     /// Whether the [`root_element`](Self::root_element) has been initialized.
@@ -1757,5 +1957,263 @@ mod tests {
         cell.elapse(Duration::ZERO);
         pump_every_view(&mut cell.borrow_mut(), Duration::ZERO);
         assert_eq!(*styles.borrow(), vec![None]);
+    }
+
+    /// Logs each back-gesture callback it hears, and handles a gesture's start while `handles`.
+    struct BackGestureObserver {
+        name: &'static str,
+        handles: Cell<bool>,
+        log: Rc<std::cell::RefCell<Vec<String>>>,
+    }
+
+    impl BackGestureObserver {
+        fn new(
+            name: &'static str,
+            handles: bool,
+            log: &Rc<std::cell::RefCell<Vec<String>>>,
+        ) -> Rc<BackGestureObserver> {
+            Rc::new(BackGestureObserver {
+                name,
+                handles: Cell::new(handles),
+                log: Rc::clone(log),
+            })
+        }
+
+        fn note(&self, what: &str) {
+            self.log.borrow_mut().push(format!("{} {what}", self.name));
+        }
+    }
+
+    impl WidgetsBindingObserver for BackGestureObserver {
+        fn did_pop_route(&self, _app: &mut App, _view: ViewId) -> bool {
+            self.note("didPopRoute");
+            false
+        }
+
+        fn handle_start_back_gesture(&self, _app: &mut App, _event: PredictiveBackEvent) -> bool {
+            self.note("handleStartBackGesture");
+            self.handles.get()
+        }
+
+        fn handle_update_back_gesture_progress(&self, _app: &mut App, event: PredictiveBackEvent) {
+            self.note(&format!(
+                "handleUpdateBackGestureProgress {}",
+                event.progress
+            ));
+        }
+
+        fn handle_commit_back_gesture(&self, _app: &mut App) {
+            self.note("handleCommitBackGesture");
+        }
+
+        fn handle_cancel_back_gesture(&self, _app: &mut App) {
+            self.note("handleCancelBackGesture");
+        }
+    }
+
+    /// The events binding_test.dart sends on `flutter/backgesture`.
+    fn start_event() -> PredictiveBackEvent {
+        PredictiveBackEvent::new(
+            Some(waft_embedder::Offset::new(5.0, 300.0)),
+            0.0,
+            waft_services::SwipeEdge::Left,
+        )
+    }
+
+    fn update_event() -> PredictiveBackEvent {
+        PredictiveBackEvent::new(
+            Some(waft_embedder::Offset::new(100.0, 300.0)),
+            0.35,
+            waft_services::SwipeEdge::Left,
+        )
+    }
+
+    fn add_back_gesture_observers(
+        app: &mut App,
+        observers: impl IntoIterator<Item = Rc<BackGestureObserver>>,
+    ) -> Handle<WidgetsBinding> {
+        let binding = WidgetsBinding::instance(app);
+        for observer in observers {
+            binding.add_observer(app, observer);
+        }
+        binding
+    }
+
+    /// The dispatch of `startBackGesture`. binding_test.dart's `handleStartBackGesture` case
+    /// tests instead that a throwing observer is reported, which a panic here does not allow.
+    #[test]
+    fn a_back_gesture_s_start_asks_every_observer_and_answers_whether_one_handles_it() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let log = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let declining = BackGestureObserver::new("declining", false, &log);
+        let handling = BackGestureObserver::new("handling", true, &log);
+        let binding = add_back_gesture_observers(&mut app, [declining, Rc::clone(&handling)]);
+        assert!(binding.handle_start_back_gesture(&mut app, start_event()));
+        assert_eq!(
+            *log.borrow(),
+            [
+                "declining handleStartBackGesture",
+                "handling handleStartBackGesture"
+            ]
+        );
+
+        handling.handles.set(false);
+        assert!(
+            !binding.handle_start_back_gesture(&mut app, start_event()),
+            "no observer handles it"
+        );
+    }
+
+    /// The dispatch of `updateBackGestureProgress` to every observer that handled the start,
+    /// where binding_test.dart's `handleUpdateBackGestureProgress` case tests a throwing one.
+    #[test]
+    fn every_observer_that_handles_a_back_gesture_s_start_hears_its_progress() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let log = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let binding = add_back_gesture_observers(
+            &mut app,
+            [
+                BackGestureObserver::new("first", true, &log),
+                BackGestureObserver::new("declining", false, &log),
+                BackGestureObserver::new("second", true, &log),
+            ],
+        );
+        binding.handle_start_back_gesture(&mut app, start_event());
+        log.borrow_mut().clear();
+
+        binding.handle_update_back_gesture_progress(&mut app, update_event());
+        assert_eq!(
+            *log.borrow(),
+            [
+                "first handleUpdateBackGestureProgress 0.35",
+                "second handleUpdateBackGestureProgress 0.35"
+            ]
+        );
+    }
+
+    /// The dispatch of `commitBackGesture`, where binding_test.dart's `handleCommitBackGesture`
+    /// case tests a throwing observer.
+    #[test]
+    fn committing_a_back_gesture_tells_only_the_observers_that_handle_it() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let log = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let binding = add_back_gesture_observers(
+            &mut app,
+            [
+                BackGestureObserver::new("declining", false, &log),
+                BackGestureObserver::new("handling", true, &log),
+            ],
+        );
+        binding.handle_start_back_gesture(&mut app, start_event());
+        log.borrow_mut().clear();
+
+        assert!(binding.handle_commit_back_gesture(&mut app, IMPLICIT_VIEW_ID));
+        assert_eq!(*log.borrow(), ["handling handleCommitBackGesture"]);
+    }
+
+    /// The dispatch of `cancelBackGesture`, where binding_test.dart's `handleCancelBackGesture`
+    /// case tests a throwing observer.
+    #[test]
+    fn canceling_a_back_gesture_tells_only_the_observers_that_handle_it() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let log = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let binding = add_back_gesture_observers(
+            &mut app,
+            [
+                BackGestureObserver::new("declining", false, &log),
+                BackGestureObserver::new("handling", true, &log),
+            ],
+        );
+        binding.handle_start_back_gesture(&mut app, start_event());
+        log.borrow_mut().clear();
+
+        binding.handle_cancel_back_gesture(&mut app);
+        assert_eq!(*log.borrow(), ["handling handleCancelBackGesture"]);
+    }
+
+    #[test]
+    fn a_back_gesture_no_observer_handles_hears_no_progress_and_pops_the_route_on_commit() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let log = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let binding = add_back_gesture_observers(
+            &mut app,
+            [BackGestureObserver::new("declining", false, &log)],
+        );
+        binding.handle_start_back_gesture(&mut app, start_event());
+        log.borrow_mut().clear();
+
+        binding.handle_update_back_gesture_progress(&mut app, update_event());
+        binding.handle_cancel_back_gesture(&mut app);
+        assert!(log.borrow().is_empty());
+
+        assert!(
+            !binding.handle_commit_back_gesture(&mut app, IMPLICIT_VIEW_ID),
+            "no observer popped a route"
+        );
+        assert_eq!(*log.borrow(), ["declining didPopRoute"]);
+    }
+
+    #[test]
+    fn a_removed_observer_hears_no_more_of_the_back_gesture_it_handled() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let log = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let handling = BackGestureObserver::new("handling", true, &log);
+        let binding = add_back_gesture_observers(&mut app, [Rc::clone(&handling)]);
+        binding.handle_start_back_gesture(&mut app, start_event());
+        log.borrow_mut().clear();
+
+        let registered: WidgetsBindingObserverRef = handling;
+        binding.remove_observer(&mut app, &registered);
+        binding.handle_update_back_gesture_progress(&mut app, update_event());
+        assert!(log.borrow().is_empty());
+    }
+
+    #[test]
+    fn removing_an_observer_added_twice_removes_one_registration() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let log = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let observer = BackGestureObserver::new("twice", true, &log);
+        let binding =
+            add_back_gesture_observers(&mut app, [Rc::clone(&observer), Rc::clone(&observer)]);
+        binding.handle_start_back_gesture(&mut app, start_event());
+        log.borrow_mut().clear();
+
+        let registered: WidgetsBindingObserverRef = observer;
+        assert!(binding.remove_observer(&mut app, &registered));
+        binding.handle_update_back_gesture_progress(&mut app, update_event());
+        assert_eq!(
+            *log.borrow(),
+            ["twice handleUpdateBackGestureProgress 0.35"]
+        );
+
+        log.borrow_mut().clear();
+        binding.handle_start_back_gesture(&mut app, start_event());
+        assert_eq!(*log.borrow(), ["twice handleStartBackGesture"]);
+
+        assert!(binding.remove_observer(&mut app, &registered));
+        assert!(!binding.remove_observer(&mut app, &registered));
+    }
+
+    #[test]
+    fn a_new_back_gesture_forgets_the_observers_of_the_last_one() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let log = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let observer = BackGestureObserver::new("observer", true, &log);
+        let binding = add_back_gesture_observers(&mut app, [Rc::clone(&observer)]);
+        binding.handle_start_back_gesture(&mut app, start_event());
+        observer.handles.set(false);
+        binding.handle_start_back_gesture(&mut app, start_event());
+        log.borrow_mut().clear();
+
+        binding.handle_cancel_back_gesture(&mut app);
+        assert!(log.borrow().is_empty());
     }
 }

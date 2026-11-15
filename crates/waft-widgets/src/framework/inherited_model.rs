@@ -22,6 +22,7 @@ use super::element::{
 use super::elements::{ComponentElement, ComponentElementData, ProxyElement};
 use super::widget::{
     InheritedWidget, IntoWidget, KeyRef, Widget, WidgetKind, WidgetRef, downcast_widget,
+    short_type_name,
 };
 
 /// An [`InheritedWidget`] that's intended to be used as the base class for models whose
@@ -195,6 +196,9 @@ pub struct InheritedModelWrapper<W: InheritedModel>(pub W);
 
 impl<W: InheritedModel> IntoWidget<InheritedModelKind> for W {
     fn into_widget(self) -> WidgetRef {
+        if cfg!(debug_assertions) {
+            InheritedWidget::debug_check_constructor(&self);
+        }
         Rc::new(InheritedModelWrapper(self))
     }
 }
@@ -214,6 +218,10 @@ impl<W: InheritedModel> Widget for InheritedModelWrapper<W> {
 
     fn widget_type(&self) -> TypeId {
         TypeId::of::<W>()
+    }
+
+    fn type_name(&self) -> &'static str {
+        short_type_name::<W>()
     }
 
     fn kind(&self) -> WidgetKind {

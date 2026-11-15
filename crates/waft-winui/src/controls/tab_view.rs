@@ -891,7 +891,7 @@ impl State for TabViewState {
         let rtl = Directionality::of(app, context) == TextDirection::Rtl;
         Focus::new(
             LayoutBuilder::new(move |app, context, constraints| {
-                self.template(app, context, constraints)
+                self.template(app, context, constraints.constraints())
             })
             .into_widget(),
         )

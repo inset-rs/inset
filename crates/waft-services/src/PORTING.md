@@ -2,7 +2,7 @@
 Flutter home: packages/flutter/lib/src/services
 Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
-Only the app life cycle and the application exit of `ServicesBinding`, the hardware keyboard, haptic feedback, mouse cursors, the mouse tracking annotation, state restoration, the application switcher description, the system overlay style, `TextInput` / `TextInputConnection` / `TextInputClient` / `TextSelectionDelegate`, text layout metric statics, the text boundaries, the clipboard, text input formatters, `SelectionChangedCause`, autofill (`AutofillHints` / `AutofillClient` / `AutofillScope`), keyboard-inserted content, spell check, live text, process text, `UndoManager` / `UndoManagerClient`, and re-exports of the text-input value types are here; the rest of the package waits.
+Only the app life cycle and the application exit of `ServicesBinding`, the hardware keyboard, haptic feedback, mouse cursors, the mouse tracking annotation, state restoration, the application switcher description, the system overlay style, `TextInput` / `TextInputConnection` / `TextInputClient` / `TextSelectionDelegate`, text layout metric statics, the text boundaries, the clipboard, text input formatters, `SelectionChangedCause`, autofill (`AutofillHints` / `AutofillClient` / `AutofillScope`), keyboard-inserted content, spell check, live text, process text, predictive back events, `UndoManager` / `UndoManagerClient`, and re-exports of the text-input value types are here; the rest of the package waits.
 
 ## Identical
 
@@ -66,6 +66,12 @@ Only the app life cycle and the application exit of `ServicesBinding`, the hardw
   Reason: language — there is no isolate-wide static; platform — the host trait is the channel and carries no JSON.
   Affect: two `App`s can each show a system menu at once, and two custom items with equal contents keep separate callbacks.
 
+## predictive_back_event.rs → predictive_back_event.dart
+
+- Change: `PredictiveBackEvent::new` builds the event from the touch offset, progress and swipe edge, and there is no `fromMap`.
+  Reason: platform — there are no method channels; the host trait is the channel and hands the values.
+  Affect: a host or test builds an event directly, and an out-of-range swipe edge cannot be expressed where Dart's `fromMap` throws a `RangeError`.
+
 ## spell_check.rs → spell_check.dart
 
 - Change: `fetch_spell_check_suggestions` answers within the call, and answers `None` unless a host implements [`SpellCheckService`].
@@ -95,10 +101,6 @@ Only the app life cycle and the application exit of `ServicesBinding`, the hardw
 - Change: `FilteringTextInputFormatter` matches a [`FilterPattern`], either a literal or the digit class, where Dart takes any `Pattern`.
   Reason: language — there is no regular expression type in the port.
   Affect: a filter Dart writes as a regex cannot be expressed; only a literal and `digits_only` filter.
-
-- Change: `LengthLimitingTextInputFormatter` counts Unicode scalar values, and `get_default_max_length_enforcement` has no web branch.
-  Reason: language — Dart counts grapheme clusters through its `characters` package; platform — there is no web target.
-  Affect: a family emoji spends several characters of the limit, and truncating at the limit can cut one apart.
 
 ## undo_manager.rs → undo_manager.dart
 
@@ -178,6 +180,7 @@ The key constants and the four tables are machine-written from the Dart, as Flut
 
 ## Deferred
 
+- predictive_back_event.rs: `PredictiveBackEvent.hashCode` (no `Hash` over `f64`). Trigger: a map or set keyed by `PredictiveBackEvent`.
 - Platform channels, `SystemChannels`, `BinaryMessenger`. Trigger: the first service that needs a named channel rather than a `Platform` method.
 - `MouseCursor` diagnostics (`debugFillProperties`, `toString(minLevel)`). Trigger: diagnostics.
 - An `EmbedderClient` hook for restoration data that arrives while the app runs. Trigger: an embedder whose OS hands it new data after start; until then the host calls `RestorationManager::handle_restoration_update_from_engine`.

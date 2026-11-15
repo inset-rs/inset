@@ -6,16 +6,16 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use waft_animation::Curves;
-use waft_embedder::{Offset, Size};
+use waft_embedder::Offset;
 use waft_foundation::{App, Handle};
 use waft_gestures::{GestureBinding, HitTestResult};
 use waft_painting::{AnyColor, BoxDecoration, EdgeInsetsGeometry};
 use waft_rendering::{BoxHitTestEntry, HitTestBehavior};
 use waft_widgets::{
-    BuildContext, DecoratedBox, GlobalKey, InheritedWidget, IntoWidget, KeyRef, MediaQuery,
-    MetaData, Padding, Positioned, PreferredSizeWidget, ScrollNotificationObserver, SizedBox,
-    Stack, State, StateData, StatefulWidget, StatelessWidget, View, WidgetRef, WidgetsBinding,
-    WidgetsBindingObserverObject, WidgetsBindingObserverRef, downcast_widget,
+    AnySize, BuildContext, DecoratedBox, GlobalKey, InheritedWidget, IntoWidget, KeyRef,
+    MediaQuery, MetaData, Padding, Positioned, PreferredSizeWidget, ScrollNotificationObserver,
+    SizedBox, Stack, State, StateData, StatefulWidget, StatelessWidget, View, WidgetRef,
+    WidgetsBinding, WidgetsBindingObserverObject, WidgetsBindingObserverRef, downcast_widget,
 };
 
 use crate::colors::CupertinoDynamicColor;
@@ -40,7 +40,7 @@ pub trait ObstructingPreferredSizeWidget: PreferredSizeWidget {
 #[derive(Clone)]
 pub struct ObstructingPreferredSizeWidgetRef {
     widget: WidgetRef,
-    preferred_size: fn(&WidgetRef) -> Size,
+    preferred_size: fn(&WidgetRef) -> AnySize,
     should_fully_obstruct: fn(&WidgetRef, &mut App, BuildContext) -> bool,
 }
 
@@ -65,7 +65,7 @@ impl ObstructingPreferredSizeWidgetRef {
     }
 
     /// See [`PreferredSizeWidget::preferred_size`].
-    pub fn preferred_size(&self) -> Size {
+    pub fn preferred_size(&self) -> AnySize {
         (self.preferred_size)(&self.widget)
     }
 
@@ -519,7 +519,7 @@ impl StatelessWidget for HitTestableAtOrigin {
 
 #[cfg(test)]
 mod tests {
-    use waft_embedder::TextDirection;
+    use waft_embedder::{Size, TextDirection};
     use waft_foundation::AppCell;
     use waft_painting::EdgeInsets;
     use waft_rendering::{AnyRenderObject, RenderPadding};
@@ -537,8 +537,8 @@ mod tests {
     }
 
     impl PreferredSizeWidget for TestNavigationBar {
-        fn preferred_size(&self) -> Size {
-            Size::from_height(BAR_HEIGHT)
+        fn preferred_size(&self) -> AnySize {
+            Size::from_height(BAR_HEIGHT).into()
         }
     }
 

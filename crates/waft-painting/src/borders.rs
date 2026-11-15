@@ -506,6 +506,12 @@ impl dyn OutlinedBorder {
     }
 }
 
+impl<T: OutlinedBorder + 'static> From<T> for Box<dyn OutlinedBorder> {
+    fn from(border: T) -> Box<dyn OutlinedBorder> {
+        Box::new(border)
+    }
+}
+
 impl Clone for Box<dyn OutlinedBorder> {
     fn clone(&self) -> Self {
         self.clone_outlined()

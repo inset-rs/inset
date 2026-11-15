@@ -114,6 +114,15 @@ pub trait Widget: Any + Debug {
     /// The concrete widget's type, Dart's `runtimeType`.
     fn widget_type(&self) -> TypeId;
 
+    /// The concrete widget's type name, as Dart's `runtimeType` prints in a message: the
+    /// type's own name without its module path.
+    ///
+    /// The default names `Self`, so an erased form overrides it with
+    /// [`short_type_name`]`::<W>()` of the widget it wraps.
+    fn type_name(&self) -> &'static str {
+        short_type_name::<Self>()
+    }
+
     /// The kind of element this widget inflates to, for `Element.updateChild`'s superclass
     /// check.
     fn kind(&self) -> WidgetKind;
@@ -169,6 +178,17 @@ pub fn downcast_widget<W: 'static>(widget: &dyn Widget) -> Option<&W> {
     widget.as_any().downcast_ref::<W>()
 }
 
+/// `W`'s name as Dart's `runtimeType` prints it, for [`Widget::type_name`]: the module path
+/// before the type's own name is cut, and the type arguments are kept as Rust writes them.
+pub fn short_type_name<W: ?Sized>() -> &'static str {
+    let name = std::any::type_name::<W>();
+    let type_arguments = name.find('<').unwrap_or(name.len());
+    let own_name = name[..type_arguments]
+        .rfind("::")
+        .map_or(0, |path_end| path_end + 2);
+    &name[own_name..]
+}
+
 /// The conversion of a widget value into a tree node.
 ///
 /// Every widget kind gets a blanket implementation, told apart by the phantom `Kind` so the
@@ -202,6 +222,14 @@ pub trait StatelessWidget: Debug + 'static {
         None
     }
 
+    /// Dart's constructor asserts that relate two or more arguments.
+    ///
+    /// A fluent chain of setters has seen every argument only once it ends, so the framework
+    /// calls this in a debug build when the widget is turned into a [`WidgetRef`]
+    /// (`into_widget`), and a bad combination panics where the widget is handed to the tree.
+    /// An assert on one argument stays in that argument's setter.
+    fn debug_check_constructor(&self) {}
+
     /// Describes the part of the user interface represented by this widget.
     ///
     /// The framework calls this method when this widget is inserted into the tree in a given
@@ -219,6 +247,9 @@ pub struct Stateless<W: StatelessWidget>(pub W);
 
 impl<W: StatelessWidget> IntoWidget<StatelessKind> for W {
     fn into_widget(self) -> WidgetRef {
+        if cfg!(debug_assertions) {
+            self.debug_check_constructor();
+        }
         Rc::new(Stateless(self))
     }
 }
@@ -238,6 +269,10 @@ impl<W: StatelessWidget> Widget for Stateless<W> {
 
     fn widget_type(&self) -> TypeId {
         TypeId::of::<W>()
+    }
+
+    fn type_name(&self) -> &'static str {
+        short_type_name::<W>()
     }
 
     fn kind(&self) -> WidgetKind {
@@ -275,6 +310,15 @@ pub trait StatefulWidget: Debug + 'static {
         None
     }
 
+    /// See [`StatelessWidget::debug_check_constructor`].
+    fn debug_check_constructor(&self) {}
+
+    /// See [`Widget::type_name`]. A stateful form another widget kind becomes (an animated or
+    /// status transition widget) names the widget it wraps.
+    fn type_name(&self) -> &'static str {
+        short_type_name::<Self>()
+    }
+
     /// Creates the mutable state for this widget at a given location in the tree.
     ///
     /// The framework can call this method multiple times over the lifetime of a
@@ -294,6 +338,9 @@ pub struct Stateful<W: StatefulWidget>(pub W);
 
 impl<W: StatefulWidget> IntoWidget<StatefulKind> for W {
     fn into_widget(self) -> WidgetRef {
+        if cfg!(debug_assertions) {
+            self.debug_check_constructor();
+        }
         Rc::new(Stateful(self))
     }
 }
@@ -313,6 +360,10 @@ impl<W: StatefulWidget> Widget for Stateful<W> {
 
     fn widget_type(&self) -> TypeId {
         TypeId::of::<W>()
+    }
+
+    fn type_name(&self) -> &'static str {
+        StatefulWidget::type_name(&self.0)
     }
 
     fn kind(&self) -> WidgetKind {
@@ -341,6 +392,9 @@ pub trait InheritedWidget: Debug + 'static {
     fn key(&self) -> Option<&KeyRef> {
         None
     }
+
+    /// See [`StatelessWidget::debug_check_constructor`].
+    fn debug_check_constructor(&self) {}
 
     /// The widget below this widget in the tree.
     fn child(&self) -> &WidgetRef;
@@ -372,6 +426,9 @@ pub struct Inherited<W: InheritedWidget>(pub W);
 
 impl<W: InheritedWidget> IntoWidget<InheritedKind> for W {
     fn into_widget(self) -> WidgetRef {
+        if cfg!(debug_assertions) {
+            self.debug_check_constructor();
+        }
         Rc::new(Inherited(self))
     }
 }
@@ -391,6 +448,10 @@ impl<W: InheritedWidget> Widget for Inherited<W> {
 
     fn widget_type(&self) -> TypeId {
         TypeId::of::<W>()
+    }
+
+    fn type_name(&self) -> &'static str {
+        short_type_name::<W>()
     }
 
     fn kind(&self) -> WidgetKind {
@@ -422,6 +483,9 @@ pub trait ParentDataWidget: Debug + 'static {
     fn key(&self) -> Option<&KeyRef> {
         None
     }
+
+    /// See [`StatelessWidget::debug_check_constructor`].
+    fn debug_check_constructor(&self) {}
 
     /// The widget below this widget in the tree.
     fn child(&self) -> &WidgetRef;
@@ -469,6 +533,9 @@ pub struct ParentDataWrapper<W: ParentDataWidget>(pub W);
 
 impl<W: ParentDataWidget> IntoWidget<ParentDataKind> for W {
     fn into_widget(self) -> WidgetRef {
+        if cfg!(debug_assertions) {
+            self.debug_check_constructor();
+        }
         Rc::new(ParentDataWrapper(self))
     }
 }
@@ -488,6 +555,10 @@ impl<W: ParentDataWidget> Widget for ParentDataWrapper<W> {
 
     fn widget_type(&self) -> TypeId {
         TypeId::of::<W>()
+    }
+
+    fn type_name(&self) -> &'static str {
+        short_type_name::<W>()
     }
 
     fn kind(&self) -> WidgetKind {
@@ -515,6 +586,9 @@ pub trait RenderObjectWidget: Debug + 'static {
     fn key(&self) -> Option<&KeyRef> {
         None
     }
+
+    /// See [`StatelessWidget::debug_check_constructor`].
+    fn debug_check_constructor(&self) {}
 
     /// Creates an instance of the `RenderObject` class that this widget represents, using the
     /// configuration described by this widget.
@@ -567,6 +641,9 @@ pub struct LeafRenderObject<W: LeafRenderObjectWidget>(pub W);
 
 impl<W: LeafRenderObjectWidget> IntoWidget<LeafRenderObjectKind> for W {
     fn into_widget(self) -> WidgetRef {
+        if cfg!(debug_assertions) {
+            RenderObjectWidget::debug_check_constructor(&self);
+        }
         Rc::new(LeafRenderObject(self))
     }
 }
@@ -586,6 +663,10 @@ impl<W: LeafRenderObjectWidget> Widget for LeafRenderObject<W> {
 
     fn widget_type(&self) -> TypeId {
         TypeId::of::<W>()
+    }
+
+    fn type_name(&self) -> &'static str {
+        short_type_name::<W>()
     }
 
     fn kind(&self) -> WidgetKind {
@@ -637,6 +718,9 @@ where
     W::RenderObject: RenderObjectWithChildMixin,
 {
     fn into_widget(self) -> WidgetRef {
+        if cfg!(debug_assertions) {
+            RenderObjectWidget::debug_check_constructor(&self);
+        }
         Rc::new(SingleChildRenderObject(self))
     }
 }
@@ -659,6 +743,10 @@ where
 
     fn widget_type(&self) -> TypeId {
         TypeId::of::<W>()
+    }
+
+    fn type_name(&self) -> &'static str {
+        short_type_name::<W>()
     }
 
     fn kind(&self) -> WidgetKind {
@@ -727,6 +815,9 @@ where
     W::RenderObject: ContainerRenderObjectMixin,
 {
     fn into_widget(self) -> WidgetRef {
+        if cfg!(debug_assertions) {
+            RenderObjectWidget::debug_check_constructor(&self);
+        }
         Rc::new(MultiChildRenderObject(self))
     }
 }
@@ -749,6 +840,10 @@ where
 
     fn widget_type(&self) -> TypeId {
         TypeId::of::<W>()
+    }
+
+    fn type_name(&self) -> &'static str {
+        short_type_name::<W>()
     }
 
     fn kind(&self) -> WidgetKind {

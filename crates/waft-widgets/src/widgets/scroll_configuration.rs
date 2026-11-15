@@ -6,7 +6,7 @@ use std::fmt::{self, Debug};
 use std::ops::Deref;
 use std::rc::Rc;
 
-use waft_embedder::{PointerDeviceKind, TargetPlatform};
+use waft_embedder::{Color, PointerDeviceKind, TargetPlatform};
 use waft_foundation::App;
 use waft_gestures::{
     GestureVelocityTrackerBuilder, IOSScrollViewFlingVelocityTracker,
@@ -15,6 +15,7 @@ use waft_gestures::{
 use waft_services::LogicalKeyboardKey;
 
 use crate::framework::{BuildContext, InheritedWidget, IntoWidget, KeyRef, WidgetRef};
+use crate::widgets::overscroll_indicator::GlowingOverscrollIndicator;
 use crate::widgets::scroll_physics::{
     BouncingScrollPhysics, ClampingScrollPhysics, RangeMaintainingScrollPhysics,
     ScrollDecelerationRate, ScrollPhysicsRef,
@@ -22,6 +23,8 @@ use crate::widgets::scroll_physics::{
 use crate::widgets::scroll_view::ScrollViewKeyboardDismissBehavior;
 use crate::widgets::scrollable_helpers::ScrollableDetails;
 use crate::widgets::scrollbar::RawScrollbar;
+
+const K_DEFAULT_GLOW_COLOR: Color = Color::new(0xFFFFFFFF);
 
 /// Device types that scrollables should accept drag gestures from by default.
 ///
@@ -133,7 +136,7 @@ pub trait ScrollBehavior: Debug + 'static {
         ScrollBehaviorBase::build_scrollbar(self, app, context, child, details)
     }
 
-    /// Applies a `GlowingOverscrollIndicator` to the child widget on
+    /// Applies a [`GlowingOverscrollIndicator`] to the child widget on
     /// [`TargetPlatform::Android`] and [`TargetPlatform::Fuchsia`].
     fn build_overscroll_indicator(
         &self,
@@ -142,7 +145,7 @@ pub trait ScrollBehavior: Debug + 'static {
         child: WidgetRef,
         details: &ScrollableDetails,
     ) -> WidgetRef {
-        ScrollBehaviorBase::build_overscroll_indicator(app, context, child, details)
+        ScrollBehaviorBase::build_overscroll_indicator(self, app, context, child, details)
     }
 
     /// Specifies the type of velocity tracker to use in the descendant
@@ -266,16 +269,26 @@ impl ScrollBehaviorBase {
     }
 
     /// See [`ScrollBehavior::build_overscroll_indicator`].
-    pub fn build_overscroll_indicator(
+    pub fn build_overscroll_indicator<B: ScrollBehavior + ?Sized>(
+        behavior: &B,
         app: &mut App,
         context: BuildContext,
         child: WidgetRef,
         details: &ScrollableDetails,
     ) -> WidgetRef {
-        // Dart wraps the child in a `GlowingOverscrollIndicator` on Android and Fuchsia; the
-        // indicator widgets wait, so every platform takes Dart's other fallthrough.
-        let _ = (app, context, details);
-        child
+        // When modifying this function, consider modifying the implementation in the
+        // Material and Cupertino subclasses as well.
+        match behavior.get_platform(app, context) {
+            TargetPlatform::IOS
+            | TargetPlatform::Linux
+            | TargetPlatform::MacOS
+            | TargetPlatform::Windows => child,
+            TargetPlatform::Android | TargetPlatform::Fuchsia => {
+                GlowingOverscrollIndicator::new(details.direction, K_DEFAULT_GLOW_COLOR)
+                    .child(child)
+                    .into_widget()
+            }
+        }
     }
 
     /// See [`ScrollBehavior::velocity_tracker_builder`].
@@ -871,31 +884,129 @@ mod tests {
                 behavior.build_overscroll_indicator(&mut app, context, child.clone(), &details);
             assert!(
                 Rc::ptr_eq(&indicator, &child),
-                "the overscroll indicator waits"
+                "{platform:?} shows no overscroll indicator"
             );
         }
     }
 
     #[test]
-    fn the_decorations_fall_through_to_the_child_on_the_mobile_platforms() {
-        for platform in [
-            TargetPlatform::Android,
-            TargetPlatform::Fuchsia,
-            TargetPlatform::IOS,
-        ] {
+    fn ios_decorates_the_child_with_neither_a_scrollbar_nor_an_indicator() {
+        let cell = app_on(TargetPlatform::IOS);
+        let mut app = cell.borrow_mut();
+        let harness = mount(&mut app, SizedBox::shrink().into_widget());
+        let context = descendant(&harness, &app, 0);
+        let behavior = ScrollConfiguration::of(&mut app, context);
+        let details = ScrollableDetails::vertical(false);
+
+        let child = SizedBox::shrink().into_widget();
+        let scrollbar = behavior.build_scrollbar(&mut app, context, child.clone(), &details);
+        assert!(Rc::ptr_eq(&scrollbar, &child));
+        let indicator =
+            behavior.build_overscroll_indicator(&mut app, context, child.clone(), &details);
+        assert!(Rc::ptr_eq(&indicator, &child));
+    }
+
+    #[test]
+    fn android_and_fuchsia_wrap_the_child_in_a_white_glow_along_the_scroll_direction() {
+        for platform in [TargetPlatform::Android, TargetPlatform::Fuchsia] {
             let cell = app_on(platform);
             let mut app = cell.borrow_mut();
             let harness = mount(&mut app, SizedBox::shrink().into_widget());
             let context = descendant(&harness, &app, 0);
             let behavior = ScrollConfiguration::of(&mut app, context);
-            let details = ScrollableDetails::vertical(false);
+            let details = ScrollableDetails::vertical(true);
 
             let child = SizedBox::shrink().into_widget();
             let scrollbar = behavior.build_scrollbar(&mut app, context, child.clone(), &details);
             assert!(Rc::ptr_eq(&scrollbar, &child), "{platform:?}");
             let indicator =
                 behavior.build_overscroll_indicator(&mut app, context, child.clone(), &details);
-            assert!(Rc::ptr_eq(&indicator, &child), "{platform:?}");
+            let glow = crate::framework::downcast_widget::<GlowingOverscrollIndicator>(&*indicator)
+                .unwrap_or_else(|| panic!("{platform:?} glows"));
+            assert_eq!(glow.axis_direction, waft_painting::AxisDirection::Up);
+            assert_eq!(glow.color, Color::new(0xFFFFFFFF));
+            assert!(Rc::ptr_eq(
+                glow.child.as_ref().expect("the glow wraps the child"),
+                &child
+            ));
         }
+    }
+
+    /// An Android app with one view, the binding running.
+    fn android_with_view() -> Rc<AppCell> {
+        AppCell::with_platform(Rc::new(
+            TestPlatform::new()
+                .on(TargetPlatform::Android)
+                .with_view(Rc::new(waft_test::TestView::new(800.0, 600.0))),
+        ))
+    }
+
+    /// `tester.pumpWidget(widget)` under the view.
+    fn pump_widget(cell: &AppCell, widget: crate::framework::WidgetRef) {
+        crate::test_harness::binding_mount(cell, widget);
+    }
+
+    /// How many mounted widgets are a `W`: `find.byType(W)`.
+    fn count<W: 'static>(cell: &AppCell) -> usize {
+        let mut app = cell.borrow_mut();
+        let root = crate::binding::WidgetsBinding::instance(&mut app)
+            .root_element(&app)
+            .expect("a mounted tree");
+        let mut count = 0;
+        let mut stack = vec![root];
+        while let Some(element) = stack.pop() {
+            if crate::framework::downcast_widget::<W>(&**element.widget(&app)).is_some() {
+                count += 1;
+            }
+            element.visit_children(&app, &mut |child| stack.push(child));
+        }
+        count
+    }
+
+    fn list_under(behavior: ScrollBehaviorRef) -> crate::framework::WidgetRef {
+        crate::widgets::basic::Directionality::new(
+            waft_embedder::TextDirection::Ltr,
+            ScrollConfiguration::new(
+                behavior,
+                crate::widgets::scroll_view::ListView::new()
+                    .children([SizedBox::new().height(1000.0).width(1000.0).into_widget()]),
+            ),
+        )
+        .into_widget()
+    }
+
+    /// `scroll_behavior_test.dart`: "ScrollBehavior default android overscroll indicator".
+    #[test]
+    fn the_default_behavior_glows_on_android() {
+        let cell = android_with_view();
+        pump_widget(&cell, list_under(ScrollBehaviorRef::plain()));
+
+        assert_eq!(
+            count::<crate::widgets::overscroll_indicator::StretchingOverscrollIndicator>(&cell),
+            0
+        );
+        assert_eq!(count::<GlowingOverscrollIndicator>(&cell), 1);
+    }
+
+    /// `scroll_behavior_test.dart`: "ScrollBehavior configuration is maintained over multiple
+    /// copies": "overscroll".
+    #[test]
+    fn a_copy_without_overscroll_keeps_the_glow_off_through_a_second_copy() {
+        let cell = android_with_view();
+        let default_behavior = ScrollBehaviorRef::plain();
+        pump_widget(&cell, list_under(default_behavior.clone()));
+        // Default adds a glowing overscroll indicator
+        assert_eq!(count::<GlowingOverscrollIndicator>(&cell), 1);
+
+        let once_copied_behavior =
+            ScrollBehaviorRef::new(default_behavior.copy_with().overscroll(false));
+        pump_widget(&cell, list_under(once_copied_behavior.clone()));
+        // Copy does not add indicator
+        assert_eq!(count::<GlowingOverscrollIndicator>(&cell), 0);
+
+        let twice_copied_behavior = ScrollBehaviorRef::new(once_copied_behavior.copy_with());
+        pump_widget(&cell, list_under(twice_copied_behavior));
+        // Second copy maintains overscroll setting
+        assert_eq!(count::<GlowingOverscrollIndicator>(&cell), 0);
     }
 }

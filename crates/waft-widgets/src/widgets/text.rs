@@ -16,7 +16,7 @@ use crate::framework::{
     RenderObjectWidget, StatelessWidget, WidgetRef,
 };
 use crate::view::View;
-use crate::widgets::basic::{Builder, Directionality};
+use crate::widgets::basic::{Builder, Directionality, ExcludeSemantics, Semantics};
 use crate::widgets::inherited_theme::InheritedTheme;
 use crate::widgets::media_query::MediaQuery;
 use crate::widgets::widget_span::WidgetSpan;
@@ -576,6 +576,22 @@ pub struct Text {
     /// value will take precedence. You can use a [`RichText`] widget directly to entirely
     /// override the [`DefaultTextStyle`].
     pub max_lines: Option<i32>,
+    /// An alternative semantics label for this text.
+    ///
+    /// If present, the semantics of this widget will contain this value instead
+    /// of the actual text. This will overwrite any of the semantics labels applied
+    /// directly to the [`TextSpan`]s.
+    ///
+    /// This is useful for replacing abbreviations or shorthands with the full
+    /// text value: `Text::new("$$").semantics_label("Double dollars")`.
+    pub semantics_label: Option<String>,
+    /// A unique identifier for the semantics node for this widget.
+    ///
+    /// This is useful for cases where the text widget needs to have a uniquely
+    /// identifiable ID that is recognized through the automation tools without
+    /// having a dependency on the actual content of the text that can possibly be
+    /// dynamic in nature.
+    pub semantics_identifier: Option<String>,
     /// Defines how to measure the width of the rendered text.
     pub text_width_basis: Option<TextWidthBasis>,
     /// Defines how to apply `TextStyle.height` over and under text.
@@ -620,6 +636,8 @@ impl Text {
             overflow: None,
             text_scaler: None,
             max_lines: None,
+            semantics_label: None,
+            semantics_identifier: None,
             text_width_basis: None,
             text_height_behavior: None,
         }
@@ -670,6 +688,18 @@ impl Text {
     /// Dart `Text(maxLines:)`.
     pub fn max_lines(mut self, max_lines: i32) -> Text {
         self.max_lines = Some(max_lines);
+        self
+    }
+
+    /// Dart `Text(semanticsLabel:)`.
+    pub fn semantics_label(mut self, semantics_label: impl Into<String>) -> Text {
+        self.semantics_label = Some(semantics_label.into());
+        self
+    }
+
+    /// Dart `Text(semanticsIdentifier:)`.
+    pub fn semantics_identifier(mut self, semantics_identifier: impl Into<String>) -> Text {
+        self.semantics_identifier = Some(semantics_identifier.into());
         self
     }
 
@@ -761,7 +791,27 @@ impl StatelessWidget for Text {
         if let Some(text_height_behavior) = text_height_behavior {
             rich_text = rich_text.text_height_behavior(text_height_behavior);
         }
-        rich_text.into_widget()
+        let mut result = rich_text.into_widget();
+        if self.semantics_label.is_some() || self.semantics_identifier.is_some() {
+            let mut semantics = Semantics::new();
+            if let Some(text_direction) = self.text_direction {
+                semantics = semantics.text_direction(text_direction);
+            }
+            if let Some(semantics_label) = &self.semantics_label {
+                semantics = semantics.label(semantics_label.clone());
+            }
+            if let Some(semantics_identifier) = &self.semantics_identifier {
+                semantics = semantics.identifier(semantics_identifier.clone());
+            }
+            result = semantics
+                .child(
+                    ExcludeSemantics::new()
+                        .excluding(self.semantics_label.is_some())
+                        .child(result),
+                )
+                .into_widget();
+        }
+        result
     }
 }
 

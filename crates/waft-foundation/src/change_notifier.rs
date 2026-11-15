@@ -6,7 +6,7 @@ use std::fmt::{self, Debug};
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
-use crate::app::{App, Handle, HandleId};
+use crate::app::{App, Handle, HandleId, RetainedHandleId};
 
 /// A closure registered with a [`Listenable`].
 ///
@@ -136,6 +136,16 @@ pub trait Listenable {
     /// Remove a previously registered closure from the list of closures that the
     /// object notifies.
     fn remove_listener(&self, app: &mut App, listener: &Listener);
+
+    /// Keeps the arena objects this listenable notifies from past their owners' `destroy`, for
+    /// a listener that removes itself only after the owner let go: in Dart the object lingers
+    /// while the listener references it. Give each one back with [`App::release_id`].
+    ///
+    /// The default keeps nothing, for a listenable that is no arena object.
+    fn retain(&self, app: &mut App) -> Vec<RetainedHandleId> {
+        let _ = app;
+        Vec::new()
+    }
 }
 
 /// A [`Listenable`] that triggers when any of the given [`Listenable`]s
@@ -169,6 +179,14 @@ impl Listenable for MergingListenable {
         for child in self.children.iter().flatten() {
             child.remove_listener(app, listener);
         }
+    }
+
+    fn retain(&self, app: &mut App) -> Vec<RetainedHandleId> {
+        self.children
+            .iter()
+            .flatten()
+            .flat_map(|child| child.retain(app))
+            .collect()
     }
 }
 
@@ -567,6 +585,10 @@ impl<T: ListenableObject> Listenable for Handle<T> {
 
     fn remove_listener(&self, app: &mut App, listener: &Listener) {
         T::remove_listener(*self, app, listener);
+    }
+
+    fn retain(&self, app: &mut App) -> Vec<RetainedHandleId> {
+        vec![app.retain_id(self.id())]
     }
 }
 

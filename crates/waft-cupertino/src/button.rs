@@ -1,6 +1,4 @@
 //! Flutter counterpart: `cupertino/button.dart`.
-//!
-//! `Semantics(button: true)` waits with accessibility.
 
 use std::any::TypeId;
 use std::collections::HashMap;
@@ -27,7 +25,7 @@ use waft_widgets::{
     Action, ActivateIntent, Align, AnyAction, AnyFocusNode, BuildContext, CallbackAction,
     ConstrainedBox, DecoratedBox, DefaultTextStyle, FadeTransition, FocusableActionDetector,
     GestureRecognizerFactories, GestureRecognizerFactory, GestureRecognizerFactoryWithHandlers,
-    IconTheme, IntoWidget, KeyRef, MediaQuery, MouseRegion, Padding, RawGestureDetector,
+    IconTheme, IntoWidget, KeyRef, MediaQuery, MouseRegion, Padding, RawGestureDetector, Semantics,
     SingleTickerProviderStateMixin, SingleTickerProviderStateMixinData, State, StateData,
     StatefulWidget, WidgetRef, WidgetState, WidgetStateProperty, WidgetStatePropertyRef,
     WidgetStates,
@@ -855,19 +853,21 @@ impl State for CupertinoButtonState {
                 .behavior(HitTestBehavior::Opaque)
                 .gestures(gestures)
                 .child(
-                    ConstrainedBox::new(constraints).child(
-                        FadeTransition::new(opacity).child(
-                            DecoratedBox::new(shape_decoration).child(
-                                Padding::new(padding).child(
-                                    Align::new()
-                                        .alignment(widget.alignment)
-                                        .width_factor(1.0)
-                                        .height_factor(1.0)
-                                        .child(DefaultTextStyle::new(
-                                            text_style,
-                                            IconTheme::new(icon_theme, widget.child.clone())
-                                                .into_widget(),
-                                        )),
+                    Semantics::new().button(true).child(
+                        ConstrainedBox::new(constraints).child(
+                            FadeTransition::new(opacity).child(
+                                DecoratedBox::new(shape_decoration).child(
+                                    Padding::new(padding).child(
+                                        Align::new()
+                                            .alignment(widget.alignment)
+                                            .width_factor(1.0)
+                                            .height_factor(1.0)
+                                            .child(DefaultTextStyle::new(
+                                                text_style,
+                                                IconTheme::new(icon_theme, widget.child.clone())
+                                                    .into_widget(),
+                                            )),
+                                    ),
                                 ),
                             ),
                         ),
@@ -886,7 +886,6 @@ impl State for CupertinoButtonState {
         if let Some(on_focus_change) = widget.on_focus_change.clone() {
             detector = detector.on_focus_change(move |app, focused| on_focus_change(app, focused));
         }
-        // `Semantics(button: true)` waits with accessibility.
         MouseRegion::new()
             .cursor(effective_mouse_cursor)
             .child(detector)

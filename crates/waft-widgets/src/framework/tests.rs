@@ -788,3 +788,91 @@ impl State for NoState {
         unreachable!("never mounted")
     }
 }
+
+/// A widget with Dart's kind of cross-field constructor assert: `min` may not exceed `max`,
+/// each written by its own setter.
+#[derive(Debug)]
+struct Range {
+    min: f64,
+    max: f64,
+}
+
+impl Range {
+    fn new() -> Range {
+        Range { min: 0.0, max: 1.0 }
+    }
+
+    fn min(mut self, min: f64) -> Range {
+        self.min = min;
+        self
+    }
+
+    fn max(mut self, max: f64) -> Range {
+        self.max = max;
+        self
+    }
+}
+
+impl StatelessWidget for Range {
+    fn debug_check_constructor(&self) {
+        debug_assert!(self.min <= self.max, "min must not exceed max");
+    }
+
+    fn build(&self, _app: &mut App, _context: BuildContext) -> WidgetRef {
+        Sized {
+            size: Size::new(self.max - self.min, 10.0),
+        }
+        .into_widget()
+    }
+}
+
+#[test]
+#[should_panic(expected = "min must not exceed max")]
+fn a_bad_combination_panics_when_the_widget_is_made_a_widget_ref() {
+    Range::new().min(2.0).into_widget();
+}
+
+#[test]
+fn a_chain_that_passes_through_a_bad_combination_does_not_panic() {
+    let range = Range::new().min(2.0).max(3.0).into_widget();
+    assert_eq!(
+        downcast_widget::<Range>(&*range).map(|range| range.max),
+        Some(3.0)
+    );
+}
+
+#[test]
+fn a_widget_names_its_type_without_its_module_path() {
+    let builds = Rc::new(Cell::new(0));
+    assert_eq!(
+        Labelled {
+            builds: Rc::clone(&builds),
+            padding: 0.0,
+        }
+        .into_widget()
+        .type_name(),
+        "Labelled"
+    );
+    assert_eq!(
+        Counter {
+            key: None,
+            initial: 0.0,
+        }
+        .into_widget()
+        .type_name(),
+        "Counter"
+    );
+    let child = Sized {
+        size: Size::new(1.0, 1.0),
+    }
+    .into_widget();
+    assert_eq!(child.type_name(), "Sized");
+    assert_eq!(
+        Theme { value: 0.0, child }.into_widget().type_name(),
+        "Theme"
+    );
+    assert_eq!(
+        short_type_name::<Option<Labelled>>(),
+        "Option<waft_widgets::framework::tests::Labelled>"
+    );
+}

@@ -16,7 +16,8 @@ use waft_embedder::{
 use waft_foundation::{App, Handle, Listener};
 use waft_painting::{
     Alignment, AlignmentGeometry, AnyColor, Border, BorderRadius, BoxDecoration, BoxShape,
-    Decoration, EdgeInsets, EdgeInsetsGeometry, TextOverflow, TextStyle, TextWidthBasis,
+    Decoration, EdgeInsets, EdgeInsetsGeometry, ShapeBorder, TextOverflow, TextStyle,
+    TextWidthBasis,
 };
 use waft_rendering::{AlignmentGeometryTween, BoxConstraints, Constraints};
 use waft_scheduler::{Ticker, TickerCallback, TickerProviderObject};
@@ -648,6 +649,16 @@ impl TweenValue for Option<Color> {
 impl TweenValue for Box<dyn Decoration> {
     fn same(&self, other: &Box<dyn Decoration>) -> bool {
         self.eq_decoration(&**other)
+    }
+}
+
+/// Dart's `Tween<ShapeBorder?>`, which material's `ShapeBorderTween` is.
+impl TweenValue for Option<Box<dyn ShapeBorder>> {
+    fn same(&self, other: &Option<Box<dyn ShapeBorder>>) -> bool {
+        match (self, other) {
+            (Some(this), Some(other)) => this.eq_shape(&**other),
+            (this, other) => this.is_none() && other.is_none(),
+        }
     }
 }
 
@@ -4633,5 +4644,22 @@ mod tests {
         );
         let mut app = cell.borrow_mut();
         assert_eq!(render_box_of(&mut app, &key).size(&app), Size::ZERO);
+    }
+
+    /// A shape border target is unchanged when it equals the tween's end by Dart's `==`.
+    #[test]
+    fn a_shape_border_value_is_the_same_by_its_equality() {
+        use waft_painting::{BorderSide, CircleBorder, RoundedRectangleBorder};
+        let rounded = |radius: f64| -> Option<Box<dyn ShapeBorder>> {
+            Some(Box::new(RoundedRectangleBorder::new(
+                BorderSide::NONE,
+                BorderRadius::circular(radius).into(),
+            )))
+        };
+        assert!(rounded(2.0).same(&rounded(2.0)));
+        assert!(!rounded(2.0).same(&rounded(4.0)));
+        assert!(!rounded(2.0).same(&Some(Box::new(CircleBorder::new(BorderSide::NONE, 0.0)))));
+        assert!(!rounded(2.0).same(&None));
+        assert!(None::<Box<dyn ShapeBorder>>.same(&None));
     }
 }

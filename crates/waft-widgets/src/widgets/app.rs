@@ -15,6 +15,7 @@ use waft_embedder::{AppLifecycleState, Clip, Color, Locale, TargetPlatform, View
 use waft_foundation::{App, Handle, K_IS_WEB, Listenable};
 use waft_painting::{AxisDirection, TextStyle};
 use waft_scheduler::SchedulerBinding;
+use waft_services::{KeyEvent, LogicalKeyboardKey};
 
 use crate::binding::{WidgetsBinding, WidgetsBindingObserverObject, WidgetsBindingObserverRef};
 use crate::framework::{
@@ -29,7 +30,7 @@ use crate::widgets::actions::{
 use crate::widgets::banner::CheckedModeBanner;
 use crate::widgets::basic::{Builder, WidgetBuilder};
 use crate::widgets::default_text_editing_shortcuts::{DefaultTextEditingShortcuts, shortcut_map};
-use crate::widgets::focus_manager::TraversalEdgeBehavior;
+use crate::widgets::focus_manager::{KeyEventResult, TraversalEdgeBehavior};
 use crate::widgets::focus_scope::{Focus, FocusScope};
 use crate::widgets::focus_traversal::{
     DirectionalFocusAction, DirectionalFocusIntent, FocusTraversalGroup, FocusTraversalPolicy,
@@ -45,6 +46,7 @@ use crate::widgets::navigator::{
 };
 use crate::widgets::notification_listener::{NotificationListener, NotificationListenerCallback};
 use crate::widgets::pages::AnyPageRoute;
+use crate::widgets::raw_tooltip::RawTooltip;
 use crate::widgets::restoration::RootRestorationScope;
 use crate::widgets::scrollable_helpers::{ScrollAction, ScrollIncrementType, ScrollIntent};
 use crate::widgets::shared_app_data::SharedAppData;
@@ -787,8 +789,9 @@ impl WidgetsApp {
     /// The [`supported_locales`](Self::supported_locales) list must have one or more elements.
     /// By default it is `[Locale::new("en").country_code("US")]`.
     ///
-    /// The configuration is checked when the widget is inflated: Dart's constructor asserts
-    /// run there, because a fluent setter cannot see the fields that are still to come.
+    /// The configuration is checked when the widget is turned into a `WidgetRef`: Dart's
+    /// constructor asserts run there, because a fluent setter cannot see the fields that are
+    /// still to come.
     pub fn new(color: Color) -> WidgetsApp {
         WidgetsApp {
             key: None,
@@ -1127,9 +1130,27 @@ impl WidgetsApp {
             ),
         ])
     }
+}
 
-    /// Dart's constructor asserts, which run when the widget is inflated.
-    fn debug_check_configuration(&self) {
+impl Debug for WidgetsApp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("WidgetsApp")
+            .field("title", &self.title)
+            .field("color", &self.color)
+            .field("locale", &self.locale)
+            .field("restorationScopeId", &self.restoration_scope_id)
+            .finish_non_exhaustive()
+    }
+}
+
+impl StatefulWidget for WidgetsApp {
+    type State = WidgetsAppState;
+
+    fn key(&self) -> Option<&KeyRef> {
+        self.key.as_ref()
+    }
+
+    fn debug_check_constructor(&self) {
         debug_assert!(
             self.home.is_none() || self.on_generate_initial_routes.is_none(),
             "If onGenerateInitialRoutes is specified, the home argument will be redundant."
@@ -1173,30 +1194,9 @@ impl WidgetsApp {
              specified so that the default handler will know what kind of PageRoute transition \
              to build."
         );
-        debug_assert!(!self.supported_locales.is_empty());
-    }
-}
-
-impl Debug for WidgetsApp {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("WidgetsApp")
-            .field("title", &self.title)
-            .field("color", &self.color)
-            .field("locale", &self.locale)
-            .field("restorationScopeId", &self.restoration_scope_id)
-            .finish_non_exhaustive()
-    }
-}
-
-impl StatefulWidget for WidgetsApp {
-    type State = WidgetsAppState;
-
-    fn key(&self) -> Option<&KeyRef> {
-        self.key.as_ref()
     }
 
     fn create_state(&self) -> WidgetsAppState {
-        self.debug_check_configuration();
         WidgetsAppState {
             state: StateData::new(),
             navigator: None,
@@ -1393,11 +1393,13 @@ impl WidgetsAppState {
     ) -> Option<AnyRoute> {
         let widget = self.widget(app);
         let name = settings.name.clone();
-        let home = widget.home.clone();
-        let page_content_builder: Option<WidgetBuilder> = match (name.as_deref(), home) {
-            (Some(Navigator::DEFAULT_ROUTE_NAME), Some(home)) => {
-                Some(Rc::new(move |_app: &mut App, _context: BuildContext| {
-                    home.clone()
+        let page_content_builder: Option<WidgetBuilder> = match name.as_deref() {
+            Some(Navigator::DEFAULT_ROUTE_NAME) if widget.home.is_some() => {
+                Some(Rc::new(move |app: &mut App, _context: BuildContext| {
+                    self.widget(app)
+                        .home
+                        .clone()
+                        .expect("the home route is built while WidgetsApp has a home")
                 }))
             }
             _ => name
@@ -1646,7 +1648,24 @@ impl State for WidgetsAppState {
             result = CheckedModeBanner::new(result).into_widget();
         }
 
-        result = Focus::new(result).can_request_focus(false).into_widget();
+        // TODO(victorsanni): https://github.com/flutter/flutter/issues/180319
+        // Use actions and shortcuts to dismiss tooltips when esc is pressed instead
+        // of using a Focus widget.
+        result = Focus::new(result)
+            .can_request_focus(false)
+            .on_key_event(Rc::new(|app, _node, event| {
+                if !matches!(event, KeyEvent::Down(_) | KeyEvent::Repeat(_))
+                    || event.logical_key() != LogicalKeyboardKey::ESCAPE
+                {
+                    return KeyEventResult::Ignored;
+                }
+                if RawTooltip::dismiss_all_tool_tips(app) {
+                    KeyEventResult::Handled
+                } else {
+                    KeyEventResult::Ignored
+                }
+            }))
+            .into_widget();
 
         let color = self.widget(app).color;
         let title: Option<WidgetRef> = match self.widget(app).on_generate_title.clone() {
@@ -1970,6 +1989,35 @@ mod tests {
             has_widget::<Marker>(&app, root),
             "the home route shows home"
         );
+    }
+
+    /// A second leaf, told apart from [`Marker`].
+    #[derive(Debug)]
+    struct OtherMarker;
+
+    impl StatelessWidget for OtherMarker {
+        fn build(&self, _app: &mut App, _context: BuildContext) -> WidgetRef {
+            SizedBox::new().width(20.0).height(20.0).into_widget()
+        }
+    }
+
+    // The home route reads `widget.home` when it builds, as Dart's `_onGenerateRoute` does, so
+    // a new home shows on the next frame.
+    #[test]
+    fn pumping_the_app_with_a_new_home_shows_the_new_page() {
+        let cell = app_with_view();
+        let mut app = cell.borrow_mut();
+        install_fonts(&mut app);
+        drop(app);
+        mount(&cell, widgets_app().home(Marker).into_widget());
+        settle(&mut cell.borrow_mut());
+
+        mount(&cell, widgets_app().home(OtherMarker).into_widget());
+        let mut app = cell.borrow_mut();
+        settle(&mut app);
+        let root = root_element(&mut app);
+        assert!(has_widget::<OtherMarker>(&app, root), "the new home shows");
+        assert!(!has_widget::<Marker>(&app, root), "the old home is gone");
     }
 
     #[test]

@@ -1,25 +1,24 @@
 //! Flutter counterpart: `cupertino/expansion_tile.dart`.
-//!
-//! The header's `Semantics` hints wait with accessibility.
 
 use std::fmt;
 use std::rc::Rc;
 use std::time::Duration;
 
 use waft_animation::{Animatable, AnyAnimation, Curve, CurveTween, Curves, Tween};
-use waft_embedder::{FontWeight, Offset};
+use waft_embedder::{FontWeight, Offset, TargetPlatform};
 use waft_foundation::{App, Handle, Task};
 use waft_rendering::{BoxConstraints, MainAxisSize};
 use waft_widgets::{
     BuildContext, Center, Column, ConstrainedBox, Expansible, ExpansibleController, FadeTransition,
     GlobalKey, Icon, IntoWidget, KeyRef, LayoutBuilder, Opacity, Overlay, OverlayPortal,
-    OverlayPortalController, Positioned, RotationTransition, SizedBox, State, StateData,
+    OverlayPortalController, Positioned, RotationTransition, Semantics, SizedBox, State, StateData,
     StatefulWidget, Visibility, WidgetRef,
 };
 
 use crate::colors::CupertinoColors;
 use crate::icons::CupertinoIcons;
 use crate::list_tile::CupertinoListTile;
+use crate::localizations::CupertinoLocalizations;
 use crate::theme::CupertinoTheme;
 
 /// The curve of the animation used to expand or collapse the
@@ -236,17 +235,50 @@ impl CupertinoExpansionTileState {
         context: BuildContext,
         animation: AnyAnimation<f64>,
     ) -> WidgetRef {
+        let localizations = <dyn CupertinoLocalizations>::of(app, context);
+        let is_expanded = self.tile_controller(app).is_expanded(app);
+        let on_tap_hint = if is_expanded {
+            localizations.expansion_tile_expanded_tap_hint()
+        } else {
+            localizations.expansion_tile_collapsed_tap_hint()
+        };
+        let semantics_hint = match app.platform().target_platform() {
+            TargetPlatform::IOS | TargetPlatform::MacOS => Some(if is_expanded {
+                format!(
+                    "{}\n {}",
+                    localizations.collapsed_hint(),
+                    localizations.expansion_tile_expanded_hint()
+                )
+            } else {
+                format!(
+                    "{}\n {}",
+                    localizations.expanded_hint(),
+                    localizations.expansion_tile_collapsed_hint()
+                )
+            }),
+            TargetPlatform::Android
+            | TargetPlatform::Fuchsia
+            | TargetPlatform::Linux
+            | TargetPlatform::Windows => None,
+        };
         let trailing = self.build_icon(app, context, animation);
         let title = self.widget(app).title.clone();
         let header_key: KeyRef = app.get(self).header_key.clone().into();
-        CupertinoListTile::new(title)
-            .key(header_key)
-            .on_tap(Rc::new(move |app: &mut App| {
-                self.on_header_tap(app);
-                Task::ready(())
-            }))
-            .trailing(trailing)
-            .background_color_activated(CupertinoColors::TRANSPARENT)
+        let mut semantics = Semantics::new().on_tap_hint(on_tap_hint);
+        if let Some(semantics_hint) = semantics_hint {
+            semantics = semantics.hint(semantics_hint);
+        }
+        semantics
+            .child(
+                CupertinoListTile::new(title)
+                    .key(header_key)
+                    .on_tap(Rc::new(move |app: &mut App| {
+                        self.on_header_tap(app);
+                        Task::ready(())
+                    }))
+                    .trailing(trailing)
+                    .background_color_activated(CupertinoColors::TRANSPARENT),
+            )
             .into_widget()
     }
 
@@ -277,7 +309,7 @@ impl CupertinoExpansionTileState {
         let fade_controller = self.fade_controller(app);
         LayoutBuilder::new(move |_app, _context, constraints| {
             OverlayPortal::new(fade_controller, move |app, _context| {
-                self.build_fading_child(app, constraints, animation)
+                self.build_fading_child(app, constraints.constraints(), animation)
             })
             .child(child.clone())
             .into_widget()
@@ -406,6 +438,7 @@ impl fmt::Debug for CupertinoExpansionTileState {
 
 #[cfg(test)]
 mod tests {
+    use waft_embedder::Locale;
     use waft_embedder::{
         PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, TextDirection,
     };
@@ -416,10 +449,26 @@ mod tests {
         AnyRenderObject, CrossAxisAlignment, RenderAnimatedOpacity, RenderAnimatedOpacityMixin,
         RenderBox, RenderFlex, RenderHandle, RenderObject, RenderOpacity,
     };
-    use waft_widgets::{Directionality, GlobalKey, SizedBox};
+    use waft_widgets::{
+        DefaultWidgetsLocalizations, Directionality, GlobalKey, Localizations, SizedBox,
+    };
 
     use super::*;
+    use crate::localizations::DefaultCupertinoLocalizations;
     use crate::test_support::{build, pump};
+
+    /// The localizations `CupertinoApp` gives a tile; its header reads its tap hints there.
+    fn localized<K>(child: impl IntoWidget<K>) -> WidgetRef {
+        Localizations::new(
+            Locale::new("en"),
+            vec![
+                DefaultWidgetsLocalizations::delegate(),
+                DefaultCupertinoLocalizations::delegate(),
+            ],
+        )
+        .child(child)
+        .into_widget()
+    }
 
     /// The test view is 2x: logical coordinates double into the packet.
     fn send(app: &mut App, change: PointerChange, x: f64, y: f64, at: Duration) {
@@ -489,7 +538,7 @@ mod tests {
         drop(app);
         build(
             &cell,
-            Directionality::new(TextDirection::Ltr, Overlay::wrap(host)).into_widget(),
+            localized(Directionality::new(TextDirection::Ltr, Overlay::wrap(host))),
         );
         let mut app = cell.borrow_mut();
         let state = global_key
@@ -569,7 +618,7 @@ mod tests {
         drop(app);
         build(
             &cell,
-            Directionality::new(
+            localized(Directionality::new(
                 TextDirection::Ltr,
                 Overlay::wrap(
                     CupertinoExpansionTile::new(
@@ -580,8 +629,7 @@ mod tests {
                     .transition_mode(ExpansionTileTransitionMode::Scroll)
                     .key(key),
                 ),
-            )
-            .into_widget(),
+            )),
         );
         let mut app = cell.borrow_mut();
         let state = global_key

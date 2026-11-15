@@ -6,15 +6,18 @@
 //! one, so it is defined here next to `Builder`.
 
 use std::any::Any;
+use std::collections::HashSet;
 use std::fmt::{self, Debug};
 use std::rc::Rc;
 use std::sync::Arc;
 
+use indexmap::{IndexMap, IndexSet};
 use waft_embedder::{
-    BlendMode, Clip, Color, ImageFilter, Matrix4, Offset, Path, RRect, RSuperellipse, Rect, Size,
+    BlendMode, Clip, Color, ImageFilter, Locale, Matrix4, Offset, Path, RRect, RSuperellipse, Rect,
+    SemanticsHitTestBehavior, SemanticsInputType, SemanticsRole, SemanticsValidationResult, Size,
     TextBaseline, TextDirection,
 };
-use waft_foundation::{App, Handle};
+use waft_foundation::{App, Handle, ValueKey, VoidCallback};
 use waft_gestures::{
     PointerCancelEventListener, PointerDownEventListener, PointerEnterEventListener,
     PointerExitEventListener, PointerHoverEventListener, PointerMoveEventListener,
@@ -27,24 +30,28 @@ use waft_painting::{
     flip_axis_direction, text_direction_to_axis_direction,
 };
 use waft_rendering::{
-    AnyRenderObject, BackdropKey, BoxConstraints, BoxConstraintsTransform, ChildLayoutId,
-    CrossAxisAlignment, CustomClipper, CustomPainter, FlexFit, FlexParentData, HitTestBehavior,
-    ImageFilterConfig, LayerLink, MainAxisAlignment, MainAxisSize, MultiChildLayoutDelegate,
+    AccessibilityFocusBlockType, AnyRenderObject, AttributedString, BackdropKey, BoxConstraints,
+    BoxConstraintsTransform, ChildLayoutId, CrossAxisAlignment, CustomClipper, CustomPainter,
+    CustomSemanticsAction, FlexFit, FlexParentData, HitTestBehavior, ImageFilterConfig, LayerLink,
+    MainAxisAlignment, MainAxisSize, MoveCursorHandler, MultiChildLayoutDelegate,
     MultiChildLayoutParentData, OverflowBoxFit, RelativeRect, RenderAbsorbPointer,
-    RenderAligningShiftedBox, RenderAspectRatio, RenderBackdropFilter, RenderBaseline, RenderBox,
-    RenderClipOval, RenderClipPath, RenderClipRRect, RenderClipRSuperellipse, RenderClipRect,
-    RenderColoredBox, RenderConstrainedBox, RenderConstrainedOverflowBox,
-    RenderConstraintsTransformBox, RenderCustomClip, RenderCustomMultiChildLayoutBox,
-    RenderCustomPaint, RenderCustomSingleChildLayoutBox, RenderFittedBox, RenderFlex,
-    RenderFollowerLayer, RenderFractionalTranslation, RenderFractionallySizedOverflowBox,
-    RenderHandle, RenderIgnorePointer, RenderIndexedStack, RenderIntrinsicHeight,
-    RenderIntrinsicWidth, RenderLeaderLayer, RenderLimitedBox, RenderListBody, RenderMetaData,
-    RenderMouseRegion, RenderOffstage, RenderOpacity, RenderPadding, RenderPhysicalModel,
-    RenderPhysicalModelBase, RenderPhysicalShape, RenderPointerListener, RenderPositionedBox,
-    RenderRepaintBoundary, RenderSizedOverflowBox, RenderSliver, RenderSliverPadding,
+    RenderAligningShiftedBox, RenderAspectRatio, RenderBackdropFilter, RenderBaseline,
+    RenderBlockSemantics, RenderBox, RenderClipOval, RenderClipPath, RenderClipRRect,
+    RenderClipRSuperellipse, RenderClipRect, RenderColoredBox, RenderConstrainedBox,
+    RenderConstrainedOverflowBox, RenderConstraintsTransformBox, RenderCustomClip,
+    RenderCustomMultiChildLayoutBox, RenderCustomPaint, RenderCustomSingleChildLayoutBox,
+    RenderExcludeSemantics, RenderFittedBox, RenderFlex, RenderFollowerLayer,
+    RenderFractionalTranslation, RenderFractionallySizedOverflowBox, RenderHandle,
+    RenderIgnorePointer, RenderIndexedSemantics, RenderIndexedStack, RenderIntrinsicHeight,
+    RenderIntrinsicWidth, RenderLeaderLayer, RenderLimitedBox, RenderListBody,
+    RenderMergeSemantics, RenderMetaData, RenderMouseRegion, RenderMouseRegionBase, RenderOffstage,
+    RenderOpacity, RenderPadding, RenderPhysicalModel, RenderPhysicalModelBase,
+    RenderPhysicalShape, RenderPointerListener, RenderPositionedBox, RenderRepaintBoundary,
+    RenderSemanticsAnnotations, RenderSizedOverflowBox, RenderSliver, RenderSliverPadding,
     RenderSliverToBoxAdapter, RenderStack, RenderStackBase, RenderTransform, RenderWrap,
-    ShapeBorderClipper, SingleChildLayoutDelegate, StackFit, StackParentData, WrapAlignment,
-    WrapCrossAlignment,
+    SemanticsAnnotationsMixin, SemanticsProperties, SemanticsSortKeyRef, SemanticsTag,
+    SetSelectionHandler, SetTextHandler, ShapeBorderClipper, SingleChildLayoutDelegate, StackFit,
+    StackParentData, WrapAlignment, WrapCrossAlignment,
 };
 use waft_services::{MouseCursor, MouseCursorRef};
 
@@ -5154,8 +5161,13 @@ impl MouseRegion {
     }
 
     /// Copies the configuration onto the render object; Dart's constructor and the setters
-    /// share this list.
-    fn apply_configuration(&self, app: &mut App, render_object: RenderHandle<RenderMouseRegion>) {
+    /// share this list. Generic so a subclass's render object takes it as Dart's inherited
+    /// `updateRenderObject` does (`raw_tooltip.rs`'s `ExclusiveMouseRegion`).
+    pub(crate) fn apply_configuration<R: RenderMouseRegionBase>(
+        &self,
+        app: &mut App,
+        render_object: RenderHandle<R>,
+    ) {
         render_object.set_on_enter(app, self.on_enter.clone());
         render_object.set_on_hover(app, self.on_hover.clone());
         render_object.set_on_exit(app, self.on_exit.clone());
@@ -5286,8 +5298,8 @@ impl Debug for MouseRegion {
 ///  * `debugProfilePaintsEnabled`, a debugging flag to show render tree
 ///    repaints in Flutter DevTools' timeline view.
 ///
-/// Dart's `RepaintBoundary.wrap` and `wrapAll` wait on a key over `Object`
-/// (`child.key ?? childIndex`); their callers are the sliver child delegates.
+/// Dart's `RepaintBoundary.wrap` and `wrapAll` wait on their callers, the sliver child
+/// delegates; their key is formed as [`KeyedSubtree::wrap`]'s is.
 #[derive(Debug, Default)]
 pub struct RepaintBoundary {
     pub key: Option<KeyRef>,
@@ -5818,12 +5830,1005 @@ impl Debug for MetaData {
 
 // UTILITY NODES
 
+/// A widget that annotates the widget tree with a description of the meaning of
+/// the widgets.
+///
+/// Used by assistive technologies, search engines, and other semantic analysis
+/// software to determine the meaning of the application.
+///
+/// Its render object, a [`RenderSemanticsAnnotations`], is a proxy box: like any box it takes
+/// a hit only inside its size, so it bounds a child that takes hits outside itself.
+///
+/// Dart's sealed `_SemanticsBase` is these fields and `get_text_direction`; its other leaf,
+/// `SliverSemantics`, waits on `RenderSliverSemanticsAnnotations`.
+///
+/// See also:
+///
+///  * [`MergeSemantics`], which marks a subtree as being a single node for
+///    accessibility purposes.
+///  * [`ExcludeSemantics`], which excludes a subtree from the accessibility tree.
+///  * [`RenderSemanticsAnnotations`], the render object that implements this
+///    behavior.
+pub struct Semantics {
+    pub key: Option<KeyRef>,
+    pub child: Option<WidgetRef>,
+
+    /// Contains properties used by assistive technologies to make the application
+    /// more accessible.
+    pub properties: Rc<SemanticsProperties>,
+
+    /// If [`container`](Self::container) is true, this widget will introduce a new
+    /// node in the semantics tree. Otherwise, the semantics will be
+    /// merged with the semantics of any ancestors (if the ancestor allows that).
+    ///
+    /// Whether descendants of this widget can add their semantic information to the
+    /// `SemanticsNode` introduced by this configuration is controlled by
+    /// [`explicit_child_nodes`](Self::explicit_child_nodes).
+    pub container: bool,
+
+    /// Whether descendants of this widget are allowed to add semantic information
+    /// to the `SemanticsNode` annotated by this widget.
+    ///
+    /// When set to false descendants are allowed to annotate `SemanticsNode`s of
+    /// their parent with the semantic information they want to contribute to the
+    /// semantic tree.
+    /// When set to true the only way for descendants to contribute semantic
+    /// information to the semantic tree is to introduce new explicit
+    /// `SemanticsNode`s to the tree.
+    ///
+    /// If the semantics properties of this node include
+    /// [`SemanticsProperties::scopes_route`] set to true, then
+    /// [`explicit_child_nodes`](Self::explicit_child_nodes) must be true also.
+    ///
+    /// This setting is often used in combination with
+    /// `SemanticsConfiguration.isSemanticBoundary` to create semantic boundaries
+    /// that are either writable or not for children.
+    pub explicit_child_nodes: bool,
+
+    /// The [`Locale`] for the semantics subtree.
+    ///
+    /// If null, it inherits the locale from the ancestor semantics node.
+    pub locale_for_subtree: Option<Locale>,
+
+    /// Whether to replace all child semantics with this node.
+    ///
+    /// Defaults to false.
+    ///
+    /// When this flag is set to true, all child semantics nodes are ignored.
+    /// This can be used as a convenience for cases where a child is wrapped in
+    /// an [`ExcludeSemantics`] widget and then another [`Semantics`] widget.
+    pub exclude_semantics: bool,
+
+    /// Whether to block user interactions for the rendering subtree.
+    ///
+    /// Setting this to true will prevent users from interacting with the
+    /// rendering object configured by this widget and its subtree through
+    /// pointer-related `SemanticsAction`s in assistive technologies.
+    ///
+    /// The `SemanticsNode` created from this widget is still focusable by
+    /// assistive technologies. Only pointer-related `SemanticsAction`s, such as
+    /// `SemanticsAction::TAP` or its friends, are blocked.
+    ///
+    /// If this widget is merged into a parent semantics node, only the
+    /// `SemanticsAction`s from this widget and the widgets in the subtree are
+    /// blocked.
+    pub block_user_actions: bool,
+}
+
+impl Semantics {
+    /// Creates a semantic annotation.
+    ///
+    /// To create a [`Semantics`] widget with a whole [`SemanticsProperties`], use
+    /// [`from_properties`](Self::from_properties). Dart's named arguments are the setters; the
+    /// properties' own write into [`properties`](Self::properties).
+    pub fn new() -> Semantics {
+        Semantics::from_properties(Rc::new(SemanticsProperties::new()))
+    }
+
+    /// Creates a semantic annotation using [`SemanticsProperties`].
+    pub fn from_properties(properties: Rc<SemanticsProperties>) -> Semantics {
+        Semantics {
+            key: None,
+            child: None,
+            properties,
+            container: false,
+            explicit_child_nodes: false,
+            locale_for_subtree: None,
+            exclude_semantics: false,
+            block_user_actions: false,
+        }
+    }
+
+    /// Dart `Semantics(key:)`.
+    pub fn key(mut self, key: KeyRef) -> Semantics {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `Semantics(child:)`.
+    pub fn child<K>(mut self, child: impl IntoWidget<K>) -> Semantics {
+        self.child = Some(child.into_widget());
+        self
+    }
+
+    /// Dart `Semantics(container:)`.
+    pub fn container(mut self, container: bool) -> Semantics {
+        self.container = container;
+        self
+    }
+
+    /// Dart `Semantics(explicitChildNodes:)`.
+    pub fn explicit_child_nodes(mut self, explicit_child_nodes: bool) -> Semantics {
+        self.explicit_child_nodes = explicit_child_nodes;
+        self
+    }
+
+    /// Dart `Semantics(excludeSemantics:)`.
+    pub fn exclude_semantics(mut self, exclude_semantics: bool) -> Semantics {
+        self.exclude_semantics = exclude_semantics;
+        self
+    }
+
+    /// Dart `Semantics(blockUserActions:)`.
+    pub fn block_user_actions(mut self, block_user_actions: bool) -> Semantics {
+        self.block_user_actions = block_user_actions;
+        self
+    }
+
+    /// Writes one of Dart's `SemanticsProperties` arguments into [`properties`](Self::properties).
+    fn with_properties(
+        mut self,
+        update: impl FnOnce(SemanticsProperties) -> SemanticsProperties,
+    ) -> Semantics {
+        self.properties = Rc::new(update(Rc::unwrap_or_clone(self.properties)));
+        self
+    }
+
+    /// Dart `Semantics(enabled:)`.
+    pub fn enabled(self, enabled: bool) -> Semantics {
+        self.with_properties(|properties| properties.enabled(enabled))
+    }
+
+    /// Dart `Semantics(checked:)`.
+    pub fn checked(self, checked: bool) -> Semantics {
+        self.with_properties(|properties| properties.checked(checked))
+    }
+
+    /// Dart `Semantics(mixed:)`.
+    pub fn mixed(self, mixed: bool) -> Semantics {
+        self.with_properties(|properties| properties.mixed(mixed))
+    }
+
+    /// Dart `Semantics(selected:)`.
+    pub fn selected(self, selected: bool) -> Semantics {
+        self.with_properties(|properties| properties.selected(selected))
+    }
+
+    /// Dart `Semantics(toggled:)`.
+    pub fn toggled(self, toggled: bool) -> Semantics {
+        self.with_properties(|properties| properties.toggled(toggled))
+    }
+
+    /// Dart `Semantics(button:)`.
+    pub fn button(self, button: bool) -> Semantics {
+        self.with_properties(|properties| properties.button(button))
+    }
+
+    /// Dart `Semantics(slider:)`.
+    pub fn slider(self, slider: bool) -> Semantics {
+        self.with_properties(|properties| properties.slider(slider))
+    }
+
+    /// Dart `Semantics(keyboardKey:)`.
+    pub fn keyboard_key(self, keyboard_key: bool) -> Semantics {
+        self.with_properties(|properties| properties.keyboard_key(keyboard_key))
+    }
+
+    /// Dart `Semantics(link:)`.
+    pub fn link(self, link: bool) -> Semantics {
+        self.with_properties(|properties| properties.link(link))
+    }
+
+    /// Dart `Semantics(linkUrl:)`.
+    pub fn link_url(self, link_url: impl Into<String>) -> Semantics {
+        self.with_properties(|properties| properties.link_url(link_url))
+    }
+
+    /// Dart `Semantics(header:)`.
+    pub fn header(self, header: bool) -> Semantics {
+        self.with_properties(|properties| properties.header(header))
+    }
+
+    /// Dart `Semantics(headingLevel:)`.
+    pub fn heading_level(self, heading_level: i32) -> Semantics {
+        self.with_properties(|properties| properties.heading_level(heading_level))
+    }
+
+    /// Dart `Semantics(textField:)`.
+    pub fn text_field(self, text_field: bool) -> Semantics {
+        self.with_properties(|properties| properties.text_field(text_field))
+    }
+
+    /// Dart `Semantics(readOnly:)`.
+    pub fn read_only(self, read_only: bool) -> Semantics {
+        self.with_properties(|properties| properties.read_only(read_only))
+    }
+
+    /// Dart `Semantics(focusable:)`.
+    pub fn focusable(self, focusable: bool) -> Semantics {
+        self.with_properties(|properties| properties.focusable(focusable))
+    }
+
+    /// Dart `Semantics(focused:)`.
+    pub fn focused(self, focused: bool) -> Semantics {
+        self.with_properties(|properties| properties.focused(focused))
+    }
+
+    /// Dart `Semantics(accessibilityFocusBlockType:)`.
+    pub fn accessibility_focus_block_type(
+        self,
+        accessibility_focus_block_type: AccessibilityFocusBlockType,
+    ) -> Semantics {
+        self.with_properties(|properties| {
+            properties.accessibility_focus_block_type(accessibility_focus_block_type)
+        })
+    }
+
+    /// Dart `Semantics(inMutuallyExclusiveGroup:)`.
+    pub fn in_mutually_exclusive_group(self, in_mutually_exclusive_group: bool) -> Semantics {
+        self.with_properties(|properties| {
+            properties.in_mutually_exclusive_group(in_mutually_exclusive_group)
+        })
+    }
+
+    /// Dart `Semantics(obscured:)`.
+    pub fn obscured(self, obscured: bool) -> Semantics {
+        self.with_properties(|properties| properties.obscured(obscured))
+    }
+
+    /// Dart `Semantics(multiline:)`.
+    pub fn multiline(self, multiline: bool) -> Semantics {
+        self.with_properties(|properties| properties.multiline(multiline))
+    }
+
+    /// Dart `Semantics(scopesRoute:)`.
+    pub fn scopes_route(self, scopes_route: bool) -> Semantics {
+        self.with_properties(|properties| properties.scopes_route(scopes_route))
+    }
+
+    /// Dart `Semantics(namesRoute:)`.
+    pub fn names_route(self, names_route: bool) -> Semantics {
+        self.with_properties(|properties| properties.names_route(names_route))
+    }
+
+    /// Dart `Semantics(hidden:)`.
+    pub fn hidden(self, hidden: bool) -> Semantics {
+        self.with_properties(|properties| properties.hidden(hidden))
+    }
+
+    /// Dart `Semantics(image:)`.
+    pub fn image(self, image: bool) -> Semantics {
+        self.with_properties(|properties| properties.image(image))
+    }
+
+    /// Dart `Semantics(liveRegion:)`.
+    pub fn live_region(self, live_region: bool) -> Semantics {
+        self.with_properties(|properties| properties.live_region(live_region))
+    }
+
+    /// Dart `Semantics(expanded:)`.
+    pub fn expanded(self, expanded: bool) -> Semantics {
+        self.with_properties(|properties| properties.expanded(expanded))
+    }
+
+    /// Dart `Semantics(isRequired:)`.
+    pub fn is_required(self, is_required: bool) -> Semantics {
+        self.with_properties(|properties| properties.is_required(is_required))
+    }
+
+    /// Dart `Semantics(maxValueLength:)`.
+    pub fn max_value_length(self, max_value_length: i32) -> Semantics {
+        self.with_properties(|properties| properties.max_value_length(max_value_length))
+    }
+
+    /// Dart `Semantics(currentValueLength:)`.
+    pub fn current_value_length(self, current_value_length: i32) -> Semantics {
+        self.with_properties(|properties| properties.current_value_length(current_value_length))
+    }
+
+    /// Dart `Semantics(identifier:)`.
+    pub fn identifier(self, identifier: impl Into<String>) -> Semantics {
+        self.with_properties(|properties| properties.identifier(identifier))
+    }
+
+    /// Dart `Semantics(traversalParentIdentifier:)`.
+    pub fn traversal_parent_identifier(
+        self,
+        traversal_parent_identifier: Rc<dyn Any>,
+    ) -> Semantics {
+        self.with_properties(|properties| {
+            properties.traversal_parent_identifier(traversal_parent_identifier)
+        })
+    }
+
+    /// Dart `Semantics(traversalChildIdentifier:)`.
+    pub fn traversal_child_identifier(self, traversal_child_identifier: Rc<dyn Any>) -> Semantics {
+        self.with_properties(|properties| {
+            properties.traversal_child_identifier(traversal_child_identifier)
+        })
+    }
+
+    /// Dart `Semantics(label:)`.
+    pub fn label(self, label: impl Into<String>) -> Semantics {
+        self.with_properties(|properties| properties.label(label))
+    }
+
+    /// Dart `Semantics(attributedLabel:)`.
+    pub fn attributed_label(self, attributed_label: AttributedString) -> Semantics {
+        self.with_properties(|properties| properties.attributed_label(attributed_label))
+    }
+
+    /// Dart `Semantics(value:)`.
+    pub fn value(self, value: impl Into<String>) -> Semantics {
+        self.with_properties(|properties| properties.value(value))
+    }
+
+    /// Dart `Semantics(attributedValue:)`.
+    pub fn attributed_value(self, attributed_value: AttributedString) -> Semantics {
+        self.with_properties(|properties| properties.attributed_value(attributed_value))
+    }
+
+    /// Dart `Semantics(increasedValue:)`.
+    pub fn increased_value(self, increased_value: impl Into<String>) -> Semantics {
+        self.with_properties(|properties| properties.increased_value(increased_value))
+    }
+
+    /// Dart `Semantics(attributedIncreasedValue:)`.
+    pub fn attributed_increased_value(
+        self,
+        attributed_increased_value: AttributedString,
+    ) -> Semantics {
+        self.with_properties(|properties| {
+            properties.attributed_increased_value(attributed_increased_value)
+        })
+    }
+
+    /// Dart `Semantics(decreasedValue:)`.
+    pub fn decreased_value(self, decreased_value: impl Into<String>) -> Semantics {
+        self.with_properties(|properties| properties.decreased_value(decreased_value))
+    }
+
+    /// Dart `Semantics(attributedDecreasedValue:)`.
+    pub fn attributed_decreased_value(
+        self,
+        attributed_decreased_value: AttributedString,
+    ) -> Semantics {
+        self.with_properties(|properties| {
+            properties.attributed_decreased_value(attributed_decreased_value)
+        })
+    }
+
+    /// Dart `Semantics(hint:)`.
+    pub fn hint(self, hint: impl Into<String>) -> Semantics {
+        self.with_properties(|properties| properties.hint(hint))
+    }
+
+    /// Dart `Semantics(attributedHint:)`.
+    pub fn attributed_hint(self, attributed_hint: AttributedString) -> Semantics {
+        self.with_properties(|properties| properties.attributed_hint(attributed_hint))
+    }
+
+    /// Dart `Semantics(tooltip:)`.
+    pub fn tooltip(self, tooltip: impl Into<String>) -> Semantics {
+        self.with_properties(|properties| properties.tooltip(tooltip))
+    }
+
+    /// Dart `Semantics(onTapHint:)`: with the other hint, the properties' `hintOverrides`.
+    pub fn on_tap_hint(self, on_tap_hint: impl Into<String>) -> Semantics {
+        self.with_properties(|properties| {
+            let hint_overrides = properties.hint_overrides.clone().unwrap_or_default();
+            properties.hint_overrides(hint_overrides.on_tap_hint(on_tap_hint))
+        })
+    }
+
+    /// Dart `Semantics(onLongPressHint:)`: with the other hint, the properties' `hintOverrides`.
+    pub fn on_long_press_hint(self, on_long_press_hint: impl Into<String>) -> Semantics {
+        self.with_properties(|properties| {
+            let hint_overrides = properties.hint_overrides.clone().unwrap_or_default();
+            properties.hint_overrides(hint_overrides.on_long_press_hint(on_long_press_hint))
+        })
+    }
+
+    /// Dart `Semantics(textDirection:)`.
+    pub fn text_direction(self, text_direction: TextDirection) -> Semantics {
+        self.with_properties(|properties| properties.text_direction(text_direction))
+    }
+
+    /// Dart `Semantics(sortKey:)`.
+    pub fn sort_key(self, sort_key: SemanticsSortKeyRef) -> Semantics {
+        self.with_properties(|properties| properties.sort_key(sort_key))
+    }
+
+    /// Dart `Semantics(tagForChildren:)`.
+    pub fn tag_for_children(self, tag_for_children: Rc<SemanticsTag>) -> Semantics {
+        self.with_properties(|properties| properties.tag_for_children(tag_for_children))
+    }
+
+    /// Dart `Semantics(onTap:)`.
+    pub fn on_tap(self, on_tap: VoidCallback) -> Semantics {
+        self.with_properties(|properties| properties.on_tap(on_tap))
+    }
+
+    /// Dart `Semantics(onLongPress:)`.
+    pub fn on_long_press(self, on_long_press: VoidCallback) -> Semantics {
+        self.with_properties(|properties| properties.on_long_press(on_long_press))
+    }
+
+    /// Dart `Semantics(onScrollLeft:)`.
+    pub fn on_scroll_left(self, on_scroll_left: VoidCallback) -> Semantics {
+        self.with_properties(|properties| properties.on_scroll_left(on_scroll_left))
+    }
+
+    /// Dart `Semantics(onScrollRight:)`.
+    pub fn on_scroll_right(self, on_scroll_right: VoidCallback) -> Semantics {
+        self.with_properties(|properties| properties.on_scroll_right(on_scroll_right))
+    }
+
+    /// Dart `Semantics(onScrollUp:)`.
+    pub fn on_scroll_up(self, on_scroll_up: VoidCallback) -> Semantics {
+        self.with_properties(|properties| properties.on_scroll_up(on_scroll_up))
+    }
+
+    /// Dart `Semantics(onScrollDown:)`.
+    pub fn on_scroll_down(self, on_scroll_down: VoidCallback) -> Semantics {
+        self.with_properties(|properties| properties.on_scroll_down(on_scroll_down))
+    }
+
+    /// Dart `Semantics(onIncrease:)`.
+    pub fn on_increase(self, on_increase: VoidCallback) -> Semantics {
+        self.with_properties(|properties| properties.on_increase(on_increase))
+    }
+
+    /// Dart `Semantics(onDecrease:)`.
+    pub fn on_decrease(self, on_decrease: VoidCallback) -> Semantics {
+        self.with_properties(|properties| properties.on_decrease(on_decrease))
+    }
+
+    /// Dart `Semantics(onCopy:)`.
+    pub fn on_copy(self, on_copy: VoidCallback) -> Semantics {
+        self.with_properties(|properties| properties.on_copy(on_copy))
+    }
+
+    /// Dart `Semantics(onCut:)`.
+    pub fn on_cut(self, on_cut: VoidCallback) -> Semantics {
+        self.with_properties(|properties| properties.on_cut(on_cut))
+    }
+
+    /// Dart `Semantics(onPaste:)`.
+    pub fn on_paste(self, on_paste: VoidCallback) -> Semantics {
+        self.with_properties(|properties| properties.on_paste(on_paste))
+    }
+
+    /// Dart `Semantics(onDismiss:)`.
+    pub fn on_dismiss(self, on_dismiss: VoidCallback) -> Semantics {
+        self.with_properties(|properties| properties.on_dismiss(on_dismiss))
+    }
+
+    /// Dart `Semantics(onMoveCursorForwardByCharacter:)`.
+    pub fn on_move_cursor_forward_by_character(
+        self,
+        on_move_cursor_forward_by_character: MoveCursorHandler,
+    ) -> Semantics {
+        self.with_properties(|properties| {
+            properties.on_move_cursor_forward_by_character(on_move_cursor_forward_by_character)
+        })
+    }
+
+    /// Dart `Semantics(onMoveCursorBackwardByCharacter:)`.
+    pub fn on_move_cursor_backward_by_character(
+        self,
+        on_move_cursor_backward_by_character: MoveCursorHandler,
+    ) -> Semantics {
+        self.with_properties(|properties| {
+            properties.on_move_cursor_backward_by_character(on_move_cursor_backward_by_character)
+        })
+    }
+
+    /// Dart `Semantics(onSetSelection:)`.
+    pub fn on_set_selection(self, on_set_selection: SetSelectionHandler) -> Semantics {
+        self.with_properties(|properties| properties.on_set_selection(on_set_selection))
+    }
+
+    /// Dart `Semantics(onSetText:)`.
+    pub fn on_set_text(self, on_set_text: SetTextHandler) -> Semantics {
+        self.with_properties(|properties| properties.on_set_text(on_set_text))
+    }
+
+    /// Dart `Semantics(onDidGainAccessibilityFocus:)`.
+    pub fn on_did_gain_accessibility_focus(
+        self,
+        on_did_gain_accessibility_focus: VoidCallback,
+    ) -> Semantics {
+        self.with_properties(|properties| {
+            properties.on_did_gain_accessibility_focus(on_did_gain_accessibility_focus)
+        })
+    }
+
+    /// Dart `Semantics(onDidLoseAccessibilityFocus:)`.
+    pub fn on_did_lose_accessibility_focus(
+        self,
+        on_did_lose_accessibility_focus: VoidCallback,
+    ) -> Semantics {
+        self.with_properties(|properties| {
+            properties.on_did_lose_accessibility_focus(on_did_lose_accessibility_focus)
+        })
+    }
+
+    /// Dart `Semantics(onFocus:)`.
+    pub fn on_focus(self, on_focus: VoidCallback) -> Semantics {
+        self.with_properties(|properties| properties.on_focus(on_focus))
+    }
+
+    /// Dart `Semantics(onExpand:)`.
+    pub fn on_expand(self, on_expand: VoidCallback) -> Semantics {
+        self.with_properties(|properties| properties.on_expand(on_expand))
+    }
+
+    /// Dart `Semantics(onCollapse:)`.
+    pub fn on_collapse(self, on_collapse: VoidCallback) -> Semantics {
+        self.with_properties(|properties| properties.on_collapse(on_collapse))
+    }
+
+    /// Dart `Semantics(customSemanticsActions:)`.
+    pub fn custom_semantics_actions(
+        self,
+        custom_semantics_actions: IndexMap<CustomSemanticsAction, VoidCallback>,
+    ) -> Semantics {
+        self.with_properties(|properties| {
+            properties.custom_semantics_actions(custom_semantics_actions)
+        })
+    }
+
+    /// Dart `Semantics(role:)`.
+    pub fn role(self, role: SemanticsRole) -> Semantics {
+        self.with_properties(|properties| properties.role(role))
+    }
+
+    /// Dart `Semantics(controlsNodes:)`.
+    pub fn controls_nodes(self, controls_nodes: IndexSet<String>) -> Semantics {
+        self.with_properties(|properties| properties.controls_nodes(controls_nodes))
+    }
+
+    /// Dart `Semantics(validationResult:)`.
+    pub fn validation_result(self, validation_result: SemanticsValidationResult) -> Semantics {
+        self.with_properties(|properties| properties.validation_result(validation_result))
+    }
+
+    /// Dart `Semantics(hitTestBehavior:)`.
+    pub fn hit_test_behavior(self, hit_test_behavior: SemanticsHitTestBehavior) -> Semantics {
+        self.with_properties(|properties| properties.hit_test_behavior(hit_test_behavior))
+    }
+
+    /// Dart `Semantics(inputType:)`.
+    pub fn input_type(self, input_type: SemanticsInputType) -> Semantics {
+        self.with_properties(|properties| properties.input_type(input_type))
+    }
+
+    /// Dart `Semantics(localeForSubtree:)`.
+    pub fn locale_for_subtree(mut self, locale_for_subtree: Locale) -> Semantics {
+        self.locale_for_subtree = Some(locale_for_subtree);
+        self
+    }
+
+    /// Dart `Semantics(minValue:)`.
+    pub fn min_value(self, min_value: impl Into<String>) -> Semantics {
+        self.with_properties(|properties| properties.min_value(min_value))
+    }
+
+    /// Dart `Semantics(maxValue:)`.
+    pub fn max_value(self, max_value: impl Into<String>) -> Semantics {
+        self.with_properties(|properties| properties.max_value(max_value))
+    }
+
+    /// Dart's `_SemanticsBase._getTextDirection`.
+    fn get_text_direction(&self, app: &mut App, context: BuildContext) -> Option<TextDirection> {
+        if self.properties.text_direction.is_some() {
+            return self.properties.text_direction;
+        }
+
+        let properties = &self.properties;
+        let contains_text = properties.label.is_some()
+            || properties.attributed_label.is_some()
+            || properties.value.is_some()
+            || properties.attributed_value.is_some()
+            || properties.increased_value.is_some()
+            || properties.attributed_increased_value.is_some()
+            || properties.decreased_value.is_some()
+            || properties.attributed_decreased_value.is_some()
+            || properties.hint.is_some()
+            || properties.attributed_hint.is_some()
+            || properties.tooltip.is_some();
+
+        if !contains_text {
+            return None;
+        }
+
+        Directionality::maybe_of(app, context)
+    }
+}
+
+impl Default for Semantics {
+    fn default() -> Semantics {
+        Semantics::new()
+    }
+}
+
+impl RenderObjectWidget for Semantics {
+    type RenderObject = RenderSemanticsAnnotations;
+
+    fn key(&self) -> Option<&KeyRef> {
+        self.key.as_ref()
+    }
+
+    fn create_render_object(&self, app: &mut App, context: BuildContext) -> AnyRenderObject {
+        let text_direction = self.get_text_direction(app, context);
+        RenderSemanticsAnnotations::new(
+            app,
+            self.properties.clone(),
+            self.container,
+            self.explicit_child_nodes,
+            self.exclude_semantics,
+            self.block_user_actions,
+            self.locale_for_subtree.clone(),
+            text_direction,
+            None,
+        )
+        .as_object()
+    }
+
+    fn update_render_object(
+        &self,
+        app: &mut App,
+        context: BuildContext,
+        render_object: RenderHandle<RenderSemanticsAnnotations>,
+    ) {
+        render_object.set_container(app, self.container);
+        render_object.set_explicit_child_nodes(app, self.explicit_child_nodes);
+        render_object.set_exclude_semantics(app, self.exclude_semantics);
+        render_object.set_block_user_actions(app, self.block_user_actions);
+        render_object.set_properties(app, self.properties.clone());
+        let text_direction = self.get_text_direction(app, context);
+        render_object.set_text_direction(app, text_direction);
+        render_object.set_locale_for_subtree(app, self.locale_for_subtree.clone());
+    }
+
+    fn debug_check_constructor(&self) {
+        self.properties.debug_check_constructor();
+    }
+}
+
+impl SingleChildRenderObjectWidget for Semantics {
+    fn child(&self) -> Option<&WidgetRef> {
+        self.child.as_ref()
+    }
+}
+
+impl Debug for Semantics {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Semantics")
+            .field("container", &self.container)
+            .field("properties", &self.properties)
+            .finish_non_exhaustive()
+    }
+}
+
+/// A widget that merges the semantics of its descendants.
+///
+/// Causes all the semantics of the subtree rooted at this node to be
+/// merged into one node in the semantics tree. For example, if you
+/// have a widget with a Text node next to a checkbox widget, this
+/// could be used to merge the label from the Text node with the
+/// "checked" semantic state of the checkbox into a single node that
+/// had both the label and the checked state. Otherwise, the label
+/// would be presented as a separate feature than the checkbox, and
+/// the user would not be able to be sure that they were related.
+///
+/// Be aware that if two nodes in the subtree have conflicting
+/// semantics, the result may be nonsensical. For example, a subtree
+/// with a checked checkbox and an unchecked checkbox will be
+/// presented as checked. All the labels will be merged into a single
+/// string (with newlines separating each label from the other). If
+/// multiple nodes in the merged subtree can handle semantic gestures,
+/// the first one in tree order will be the one to receive the
+/// callbacks.
+#[derive(Debug, Default)]
+pub struct MergeSemantics {
+    pub key: Option<KeyRef>,
+    pub child: Option<WidgetRef>,
+}
+
+impl MergeSemantics {
+    /// Creates a widget that merges the semantics of its descendants; Dart's named arguments
+    /// are the setters.
+    pub fn new() -> MergeSemantics {
+        MergeSemantics::default()
+    }
+
+    /// Dart `MergeSemantics(key:)`.
+    pub fn key(mut self, key: KeyRef) -> MergeSemantics {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `MergeSemantics(child:)`.
+    pub fn child<K>(mut self, child: impl IntoWidget<K>) -> MergeSemantics {
+        self.child = Some(child.into_widget());
+        self
+    }
+}
+
+impl RenderObjectWidget for MergeSemantics {
+    type RenderObject = RenderMergeSemantics;
+
+    fn key(&self) -> Option<&KeyRef> {
+        self.key.as_ref()
+    }
+
+    fn create_render_object(&self, app: &mut App, _context: BuildContext) -> AnyRenderObject {
+        RenderMergeSemantics::new(app, None).as_object()
+    }
+}
+
+impl SingleChildRenderObjectWidget for MergeSemantics {
+    fn child(&self) -> Option<&WidgetRef> {
+        self.child.as_ref()
+    }
+}
+
+/// A widget that drops the semantics of all widget that were painted before it
+/// in the same semantic container.
+///
+/// This is useful to hide widgets from accessibility tools that are painted
+/// behind a certain widget, e.g. an alert should usually disallow interaction
+/// with any widget located "behind" the alert (even when they are still
+/// partially visible). Similarly, an open `Drawer` blocks interactions with
+/// any widget outside the drawer.
+///
+/// See also:
+///
+///  * [`ExcludeSemantics`] which drops all semantics of its descendants.
+#[derive(Debug)]
+pub struct BlockSemantics {
+    pub key: Option<KeyRef>,
+
+    /// Whether this widget is blocking semantics of all widget that were painted
+    /// before it in the same semantic container.
+    pub blocking: bool,
+    pub child: Option<WidgetRef>,
+}
+
+impl BlockSemantics {
+    /// Creates a widget that excludes the semantics of all widgets painted before
+    /// it in the same semantic container; Dart's named arguments are the setters.
+    pub fn new() -> BlockSemantics {
+        BlockSemantics::default()
+    }
+
+    /// Dart `BlockSemantics(key:)`.
+    pub fn key(mut self, key: KeyRef) -> BlockSemantics {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `BlockSemantics(blocking:)`.
+    pub fn blocking(mut self, blocking: bool) -> BlockSemantics {
+        self.blocking = blocking;
+        self
+    }
+
+    /// Dart `BlockSemantics(child:)`.
+    pub fn child<K>(mut self, child: impl IntoWidget<K>) -> BlockSemantics {
+        self.child = Some(child.into_widget());
+        self
+    }
+}
+
+impl Default for BlockSemantics {
+    fn default() -> BlockSemantics {
+        BlockSemantics {
+            key: None,
+            blocking: true,
+            child: None,
+        }
+    }
+}
+
+impl RenderObjectWidget for BlockSemantics {
+    type RenderObject = RenderBlockSemantics;
+
+    fn key(&self) -> Option<&KeyRef> {
+        self.key.as_ref()
+    }
+
+    fn create_render_object(&self, app: &mut App, _context: BuildContext) -> AnyRenderObject {
+        RenderBlockSemantics::new(app, self.blocking, None).as_object()
+    }
+
+    fn update_render_object(
+        &self,
+        app: &mut App,
+        _context: BuildContext,
+        render_object: RenderHandle<RenderBlockSemantics>,
+    ) {
+        render_object.set_blocking(app, self.blocking);
+    }
+}
+
+impl SingleChildRenderObjectWidget for BlockSemantics {
+    fn child(&self) -> Option<&WidgetRef> {
+        self.child.as_ref()
+    }
+}
+
+/// A widget that drops all the semantics of its descendants.
+///
+/// When [`excluding`](Self::excluding) is true, this widget (and its subtree) is excluded from
+/// the semantics tree.
+///
+/// This can be used to hide descendant widgets that would otherwise be
+/// reported but that would only be confusing. For example, the
+/// material library's `Chip` widget hides the avatar since it is
+/// redundant with the chip label.
+///
+/// See also:
+///
+///  * [`BlockSemantics`] which drops semantics of widgets earlier in the tree.
+#[derive(Debug)]
+pub struct ExcludeSemantics {
+    pub key: Option<KeyRef>,
+
+    /// Whether this widget is excluded in the semantics tree.
+    pub excluding: bool,
+    pub child: Option<WidgetRef>,
+}
+
+impl ExcludeSemantics {
+    /// Creates a widget that drops all the semantics of its descendants; Dart's named arguments
+    /// are the setters.
+    pub fn new() -> ExcludeSemantics {
+        ExcludeSemantics::default()
+    }
+
+    /// Dart `ExcludeSemantics(key:)`.
+    pub fn key(mut self, key: KeyRef) -> ExcludeSemantics {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `ExcludeSemantics(excluding:)`.
+    pub fn excluding(mut self, excluding: bool) -> ExcludeSemantics {
+        self.excluding = excluding;
+        self
+    }
+
+    /// Dart `ExcludeSemantics(child:)`.
+    pub fn child<K>(mut self, child: impl IntoWidget<K>) -> ExcludeSemantics {
+        self.child = Some(child.into_widget());
+        self
+    }
+}
+
+impl Default for ExcludeSemantics {
+    fn default() -> ExcludeSemantics {
+        ExcludeSemantics {
+            key: None,
+            excluding: true,
+            child: None,
+        }
+    }
+}
+
+impl RenderObjectWidget for ExcludeSemantics {
+    type RenderObject = RenderExcludeSemantics;
+
+    fn key(&self) -> Option<&KeyRef> {
+        self.key.as_ref()
+    }
+
+    fn create_render_object(&self, app: &mut App, _context: BuildContext) -> AnyRenderObject {
+        RenderExcludeSemantics::new(app, self.excluding, None).as_object()
+    }
+
+    fn update_render_object(
+        &self,
+        app: &mut App,
+        _context: BuildContext,
+        render_object: RenderHandle<RenderExcludeSemantics>,
+    ) {
+        render_object.set_excluding(app, self.excluding);
+    }
+}
+
+impl SingleChildRenderObjectWidget for ExcludeSemantics {
+    fn child(&self) -> Option<&WidgetRef> {
+        self.child.as_ref()
+    }
+}
+
+/// A widget that annotates the child semantics with an index.
+///
+/// Semantic indexes are used by TalkBack/Voiceover to make announcements about
+/// the current scroll state. Certain widgets like the `ListView` will
+/// automatically provide a child index for building semantics. A user may wish
+/// to manually provide semantic indexes if not all child of the scrollable
+/// contribute semantics.
+///
+/// See also:
+///
+///  * `CustomScrollView`, for an explanation of index semantics.
+#[derive(Debug)]
+pub struct IndexedSemantics {
+    pub key: Option<KeyRef>,
+
+    /// The index used to annotate the first child semantics node.
+    pub index: i32,
+    pub child: Option<WidgetRef>,
+}
+
+impl IndexedSemantics {
+    /// Creates a widget that annotated the first child semantics node with an index; Dart's
+    /// named arguments are the setters.
+    pub fn new(index: i32) -> IndexedSemantics {
+        IndexedSemantics {
+            key: None,
+            index,
+            child: None,
+        }
+    }
+
+    /// Dart `IndexedSemantics(key:)`.
+    pub fn key(mut self, key: KeyRef) -> IndexedSemantics {
+        self.key = Some(key);
+        self
+    }
+
+    /// Dart `IndexedSemantics(child:)`.
+    pub fn child<K>(mut self, child: impl IntoWidget<K>) -> IndexedSemantics {
+        self.child = Some(child.into_widget());
+        self
+    }
+}
+
+impl RenderObjectWidget for IndexedSemantics {
+    type RenderObject = RenderIndexedSemantics;
+
+    fn key(&self) -> Option<&KeyRef> {
+        self.key.as_ref()
+    }
+
+    fn create_render_object(&self, app: &mut App, _context: BuildContext) -> AnyRenderObject {
+        RenderIndexedSemantics::new(app, self.index, None).as_object()
+    }
+
+    fn update_render_object(
+        &self,
+        app: &mut App,
+        _context: BuildContext,
+        render_object: RenderHandle<RenderIndexedSemantics>,
+    ) {
+        render_object.set_index(app, self.index);
+    }
+}
+
+impl SingleChildRenderObjectWidget for IndexedSemantics {
+    fn child(&self) -> Option<&WidgetRef> {
+        self.child.as_ref()
+    }
+}
+
 /// A widget that builds its child.
 ///
 /// Useful for attaching a key to an existing widget.
-///
-/// Dart's `KeyedSubtree.wrap` and `ensureUniqueKeysForList` wait on a key over `Object`
-/// (`child.key ?? childIndex`); see `PORTING.md`.
 #[derive(Debug)]
 pub struct KeyedSubtree {
     pub key: Option<KeyRef>,
@@ -5843,10 +6848,45 @@ impl KeyedSubtree {
         }
     }
 
+    /// Creates a [`KeyedSubtree`] for child with a key that's based on the child's existing
+    /// key or `child_index`.
+    ///
+    /// Dart's `ValueKey<Object>(child.key ?? childIndex)` is one key type for both: it never
+    /// equals a `ValueKey` of another type, such as a caller's own `ValueKey<int>`.
+    pub fn wrap(child: WidgetRef, child_index: i64) -> KeyedSubtree {
+        let value = match child.key() {
+            Some(key) => WrapKeyValue::Key(key.clone()),
+            None => WrapKeyValue::Index(child_index),
+        };
+        KeyedSubtree {
+            key: Some(ValueKey::new(value).into()),
+            child,
+        }
+    }
+
     /// Dart `KeyedSubtree(key:)`.
     pub fn key(mut self, key: KeyRef) -> KeyedSubtree {
         self.key = Some(key);
         self
+    }
+
+    /// Wrap each item in a KeyedSubtree whose key is based on the item's existing key or
+    /// the sum of its list index and `base_index`.
+    ///
+    /// Dart's `baseIndex` defaults to 0.
+    pub fn ensure_unique_keys_for_list(items: Vec<WidgetRef>, base_index: i64) -> Vec<WidgetRef> {
+        if items.is_empty() {
+            return items;
+        }
+
+        let items_with_unique_keys: Vec<WidgetRef> = items
+            .into_iter()
+            .zip(0..)
+            .map(|(item, i)| KeyedSubtree::wrap(item, base_index + i).into_widget())
+            .collect();
+
+        debug_assert!(!debug_items_have_duplicate_keys(&items_with_unique_keys));
+        items_with_unique_keys
     }
 }
 
@@ -5858,6 +6898,42 @@ impl StatelessWidget for KeyedSubtree {
     fn build(&self, _app: &mut App, _context: BuildContext) -> WidgetRef {
         self.child.clone()
     }
+}
+
+/// The value of [`KeyedSubtree::wrap`]'s key: Dart's `Object` holding `child.key ?? childIndex`.
+#[derive(Clone, PartialEq, Eq, Hash)]
+enum WrapKeyValue {
+    Key(KeyRef),
+    Index(i64),
+}
+
+impl Debug for WrapKeyValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            WrapKeyValue::Key(key) => key.fmt(f),
+            WrapKeyValue::Index(index) => index.fmt(f),
+        }
+    }
+}
+
+/// Dart's `_firstNonUniqueKey` from `widgets/debug.dart`.
+fn first_non_unique_key(widgets: &[WidgetRef]) -> Option<&KeyRef> {
+    let mut key_set = HashSet::new();
+    widgets
+        .iter()
+        .filter_map(|widget| widget.key())
+        .find(|&key| !key_set.insert(key))
+}
+
+/// Asserts if the given list of items contains any duplicate non-null keys.
+///
+/// Call it as `debug_assert!(!debug_items_have_duplicate_keys(&items))`. Always returns
+/// false. Dart's from `widgets/debug.dart`.
+fn debug_items_have_duplicate_keys(items: &[WidgetRef]) -> bool {
+    if let Some(non_unique_key) = first_non_unique_key(items) {
+        panic!("Duplicate key found: {non_unique_key:?}.");
+    }
+    false
 }
 
 /// Signature for a function that creates a widget, e.g. [`StatelessWidget::build`]
@@ -9738,12 +10814,12 @@ mod tests {
         assert_eq!(offstage.size(&app), Size::ZERO, "no room in the parent");
         let child = offstage.child(&app).expect("laid out as if in the tree");
         assert_eq!(child.size(&app), Size::new(10.0, 10.0));
-        assert!(!offstage.paints_child(&app, child));
+        assert!(!offstage.as_object().paints_child(&app, child.as_object()));
 
         harness.set_child(&mut app, staged(false));
         harness.pump(&mut app);
         assert_eq!(offstage.size(&app), Size::new(10.0, 10.0));
-        assert!(offstage.paints_child(&app, child));
+        assert!(offstage.as_object().paints_child(&app, child.as_object()));
     }
 
     /// Counts its paint calls and records the size it was handed.
@@ -10741,5 +11817,315 @@ mod tests {
             center.child(&app).expect("the box").size(&app),
             Size::new(30.0, 10.0)
         );
+    }
+
+    fn keyed_sized(key: impl Into<KeyRef>) -> WidgetRef {
+        SizedBox {
+            key: Some(key.into()),
+            ..Default::default()
+        }
+        .into_widget()
+    }
+
+    #[test]
+    fn a_wrapped_index_key_never_equals_a_callers_own_int_key() {
+        let wrapped = KeyedSubtree::wrap(sized(1.0, 1.0), 3);
+        let callers: KeyRef = ValueKey::new(3_i64).into();
+        assert!(wrapped.key.as_ref() != Some(&callers));
+        assert!(wrapped.key == KeyedSubtree::wrap(sized(2.0, 2.0), 3).key);
+        assert!(wrapped.key != KeyedSubtree::wrap(sized(1.0, 1.0), 4).key);
+    }
+
+    #[test]
+    fn a_wrapped_child_key_never_equals_a_wrapped_index_key() {
+        let child_key: KeyRef = ValueKey::new(3_i64).into();
+        let by_child_key = KeyedSubtree::wrap(keyed_sized(child_key.clone()), 0);
+        assert!(by_child_key.key != KeyedSubtree::wrap(sized(1.0, 1.0), 3).key);
+        assert!(by_child_key.key != Some(child_key.clone()));
+        assert!(by_child_key.key == KeyedSubtree::wrap(keyed_sized(child_key), 7).key);
+    }
+
+    #[test]
+    fn ensure_unique_keys_for_list_keys_each_item_by_its_key_or_its_index_plus_the_base() {
+        assert!(KeyedSubtree::ensure_unique_keys_for_list(Vec::new(), 5).is_empty());
+
+        let child_key: KeyRef = ValueKey::new("a".to_string()).into();
+        let items = vec![
+            sized(1.0, 1.0),
+            keyed_sized(child_key.clone()),
+            sized(2.0, 2.0),
+        ];
+        let wrapped = KeyedSubtree::ensure_unique_keys_for_list(items, 5);
+        let keys: Vec<Option<KeyRef>> = wrapped.iter().map(|item| item.key().cloned()).collect();
+        assert!(keys[0] == KeyedSubtree::wrap(sized(1.0, 1.0), 5).key);
+        assert!(keys[1] == KeyedSubtree::wrap(keyed_sized(child_key), 0).key);
+        assert!(keys[2] == KeyedSubtree::wrap(sized(1.0, 1.0), 7).key);
+        assert!(downcast_widget::<KeyedSubtree>(&*wrapped[0]).is_some());
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "Duplicate key found")]
+    fn ensure_unique_keys_for_list_asserts_on_duplicate_keys() {
+        let key = || ValueKey::new("a".to_string());
+        KeyedSubtree::ensure_unique_keys_for_list(vec![keyed_sized(key()), keyed_sized(key())], 0);
+    }
+
+    fn semantics_under_root(
+        harness: &Harness,
+        app: &App,
+    ) -> RenderHandle<RenderSemanticsAnnotations> {
+        render_object_under_root::<RenderSemanticsAnnotations>(harness, app)
+    }
+
+    // semantics_test.dart: 'Semantics and Directionality - RTL'
+    #[test]
+    fn a_semantics_label_takes_the_ambient_rtl_direction() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let harness = Harness::mount(
+            &mut app,
+            Directionality::new(
+                TextDirection::Rtl,
+                Semantics::new().label("test1").child(sized(10.0, 10.0)),
+            )
+            .into_widget(),
+        );
+        harness.pump(&mut app);
+        let semantics = semantics_under_root(&harness, &app);
+        assert_eq!(
+            semantics.attributed_label(&app),
+            Some(AttributedString::new("test1"))
+        );
+        assert_eq!(semantics.text_direction(&app), Some(TextDirection::Rtl));
+    }
+
+    // semantics_test.dart: 'Semantics and Directionality - LTR'
+    #[test]
+    fn a_semantics_label_takes_the_ambient_ltr_direction() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let harness = Harness::mount(
+            &mut app,
+            Directionality::new(
+                TextDirection::Ltr,
+                Semantics::new().label("test1").child(sized(10.0, 10.0)),
+            )
+            .into_widget(),
+        );
+        harness.pump(&mut app);
+        let semantics = semantics_under_root(&harness, &app);
+        assert_eq!(
+            semantics.attributed_label(&app),
+            Some(AttributedString::new("test1"))
+        );
+        assert_eq!(semantics.text_direction(&app), Some(TextDirection::Ltr));
+    }
+
+    // semantics_test.dart: 'Semantics and Directionality - cannot override RTL with LTR'
+    #[test]
+    fn a_semantics_text_direction_overrides_an_ambient_rtl() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let harness = Harness::mount(
+            &mut app,
+            Directionality::new(
+                TextDirection::Rtl,
+                Semantics::new()
+                    .label("test1")
+                    .text_direction(TextDirection::Ltr)
+                    .child(sized(10.0, 10.0)),
+            )
+            .into_widget(),
+        );
+        harness.pump(&mut app);
+        let semantics = semantics_under_root(&harness, &app);
+        assert_eq!(semantics.text_direction(&app), Some(TextDirection::Ltr));
+    }
+
+    // semantics_test.dart: 'Semantics and Directionality - cannot override LTR with RTL'
+    #[test]
+    fn a_semantics_text_direction_overrides_an_ambient_ltr() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let harness = Harness::mount(
+            &mut app,
+            Directionality::new(
+                TextDirection::Ltr,
+                Semantics::new()
+                    .label("test1")
+                    .text_direction(TextDirection::Rtl)
+                    .child(sized(10.0, 10.0)),
+            )
+            .into_widget(),
+        );
+        harness.pump(&mut app);
+        let semantics = semantics_under_root(&harness, &app);
+        assert_eq!(semantics.text_direction(&app), Some(TextDirection::Rtl));
+    }
+
+    #[test]
+    fn a_semantics_without_text_takes_no_text_direction() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let harness = Harness::mount(
+            &mut app,
+            Directionality::new(
+                TextDirection::Rtl,
+                Semantics::new().button(true).child(sized(10.0, 10.0)),
+            )
+            .into_widget(),
+        );
+        harness.pump(&mut app);
+        let semantics = semantics_under_root(&harness, &app);
+        assert_eq!(semantics.text_direction(&app), None);
+        assert_eq!(semantics.properties(&app).button, Some(true));
+    }
+
+    // semantics_test.dart: 'Semantics excludeSemantics ignores children', and the tap and
+    // long-press hints of 'onTapHint and onLongPressHint create custom actions', as stored.
+    #[test]
+    fn a_semantics_widget_hands_its_configuration_to_its_render_object() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let tapped = Rc::new(Cell::new(0));
+        let on_tap: VoidCallback = {
+            let tapped = tapped.clone();
+            Rc::new(move |_app: &mut App| tapped.set(tapped.get() + 1))
+        };
+        let harness = Harness::mount(
+            &mut app,
+            Semantics::new()
+                .container(true)
+                .exclude_semantics(true)
+                .label("label")
+                .on_tap_hint("scan")
+                .on_long_press_hint("fill")
+                .on_tap(on_tap)
+                .child(sized(10.0, 10.0))
+                .into_widget(),
+        );
+        harness.pump(&mut app);
+        let semantics = semantics_under_root(&harness, &app);
+        assert!(semantics.container(&app));
+        assert!(semantics.exclude_semantics(&app));
+        assert!(!semantics.explicit_child_nodes(&app));
+        assert!(!semantics.block_user_actions(&app));
+        let properties = semantics.properties(&app);
+        assert_eq!(
+            properties.hint_overrides,
+            Some(
+                waft_rendering::SemanticsHintOverrides::new()
+                    .on_tap_hint("scan")
+                    .on_long_press_hint("fill")
+            )
+        );
+        (properties.on_tap.clone().expect("the tap handler is kept"))(&mut app);
+        assert_eq!(tapped.get(), 1);
+
+        harness.set_child(
+            &mut app,
+            Semantics::new()
+                .block_user_actions(true)
+                .child(sized(10.0, 10.0))
+                .into_widget(),
+        );
+        harness.pump(&mut app);
+        assert!(!semantics.container(&app));
+        assert!(!semantics.exclude_semantics(&app));
+        assert!(semantics.block_user_actions(&app));
+        assert_eq!(semantics.attributed_label(&app), None);
+        assert!(semantics.properties(&app).on_tap.is_none());
+    }
+
+    #[test]
+    fn a_semantics_render_object_keeps_the_same_properties_object() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let properties = Rc::new(SemanticsProperties::new().label("shared"));
+        let harness = Harness::mount(
+            &mut app,
+            Semantics::from_properties(properties.clone())
+                .child(sized(10.0, 10.0))
+                .into_widget(),
+        );
+        harness.pump(&mut app);
+        let semantics = semantics_under_root(&harness, &app);
+        assert!(Rc::ptr_eq(&semantics.properties(&app), &properties));
+    }
+
+    #[test]
+    #[should_panic(expected = "Only one of hint or attributedHint should be provided")]
+    fn a_semantics_widget_checks_its_properties_when_handed_over() {
+        let _ = Semantics::new()
+            .hint("a")
+            .attributed_hint(AttributedString::new("a"))
+            .into_widget();
+    }
+
+    #[test]
+    fn the_merge_block_exclude_and_indexed_semantics_widgets_configure_their_render_objects() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let harness = Harness::mount(
+            &mut app,
+            BlockSemantics::new().child(sized(10.0, 10.0)).into_widget(),
+        );
+        harness.pump(&mut app);
+        let block = render_object_under_root::<RenderBlockSemantics>(&harness, &app);
+        assert!(block.blocking(&app), "Dart's default");
+        harness.set_child(
+            &mut app,
+            BlockSemantics::new()
+                .blocking(false)
+                .child(sized(10.0, 10.0))
+                .into_widget(),
+        );
+        harness.pump(&mut app);
+        assert!(!block.blocking(&app));
+
+        harness.set_child(
+            &mut app,
+            ExcludeSemantics::new()
+                .child(sized(10.0, 10.0))
+                .into_widget(),
+        );
+        harness.pump(&mut app);
+        let exclude = render_object_under_root::<RenderExcludeSemantics>(&harness, &app);
+        assert!(exclude.excluding(&app), "Dart's default");
+        harness.set_child(
+            &mut app,
+            ExcludeSemantics::new()
+                .excluding(false)
+                .child(sized(10.0, 10.0))
+                .into_widget(),
+        );
+        harness.pump(&mut app);
+        assert!(!exclude.excluding(&app));
+
+        harness.set_child(
+            &mut app,
+            IndexedSemantics::new(2)
+                .child(sized(10.0, 10.0))
+                .into_widget(),
+        );
+        harness.pump(&mut app);
+        let indexed = render_object_under_root::<RenderIndexedSemantics>(&harness, &app);
+        assert_eq!(indexed.index(&app), 2);
+        harness.set_child(
+            &mut app,
+            IndexedSemantics::new(5)
+                .child(sized(10.0, 10.0))
+                .into_widget(),
+        );
+        harness.pump(&mut app);
+        assert_eq!(indexed.index(&app), 5);
+
+        harness.set_child(
+            &mut app,
+            MergeSemantics::new().child(sized(10.0, 10.0)).into_widget(),
+        );
+        harness.pump(&mut app);
+        let _ = render_object_under_root::<RenderMergeSemantics>(&harness, &app);
     }
 }

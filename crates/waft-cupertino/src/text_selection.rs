@@ -215,6 +215,10 @@ impl TextSelectionControls for CupertinoTextSelectionControls {
 }
 
 impl TextSelectionControls for CupertinoTextSelectionHandleControls {
+    fn as_text_selection_handle_controls(&self) -> Option<&dyn TextSelectionHandleControls> {
+        Some(self)
+    }
+
     fn get_handle_size(&self, text_line_height: f64) -> Size {
         CupertinoTextSelectionControls.get_handle_size(text_line_height)
     }
@@ -315,13 +319,25 @@ impl TextSelectionControls for CupertinoTextSelectionHandleControls {
 impl TextSelectionHandleControls for CupertinoTextSelectionHandleControls {}
 
 /// Text selection handle controls that follow iOS design conventions.
+///
+/// Dart's global: every call hands out the same controls, so an `EditableText` given them
+/// again sees them unchanged.
 pub fn cupertino_text_selection_handle_controls() -> Rc<dyn TextSelectionControls> {
-    Rc::new(CupertinoTextSelectionHandleControls)
+    thread_local! {
+        static CONTROLS: Rc<dyn TextSelectionControls> = Rc::new(CupertinoTextSelectionHandleControls);
+    }
+    CONTROLS.with(Rc::clone)
 }
 
 /// Text selection controls that follow iOS design conventions.
+///
+/// Dart's global: every call hands out the same controls, so an `EditableText` given them
+/// again sees them unchanged.
 pub fn cupertino_text_selection_controls() -> Rc<dyn TextSelectionControls> {
-    Rc::new(CupertinoTextSelectionControls)
+    thread_local! {
+        static CONTROLS: Rc<dyn TextSelectionControls> = Rc::new(CupertinoTextSelectionControls);
+    }
+    CONTROLS.with(Rc::clone)
 }
 
 struct CupertinoTextSelectionControlsToolbar {
