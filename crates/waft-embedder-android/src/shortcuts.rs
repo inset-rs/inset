@@ -10,17 +10,23 @@
 //! data, or starts one whose view the platform gives the app; or it brings Waft's activity forward
 //! with an action of the app's, a tap the app hears through its handler.
 //!
-//! The calls Android marks for a worker thread, which may take long, run on a thread of their own
-//! and answer a future; the others are made where they are called. The invariant a later editor
-//! will break: a tap is handed to the app's handler only from the app's loop, outside every call
-//! into the app, and a tap that comes before the app set a handler, as the one that started the
-//! app, waits for the first handler.
+//! Every call that changes the shortcuts or reads them back runs on one worker thread of the
+//! shortcuts' own, in the order the app made it, since some may take long and Android marks them
+//! for a worker thread: the slow ones answer a future, the others are only said in the log where
+//! they fail. What only asks a setting of the system, whether the launcher pins or how large an
+//! icon is, is answered where it is called. The invariants a later editor will break: no call that
+//! changes the shortcuts is made anywhere but that one thread, so none overtakes an earlier one,
+//! an update made after a disable or a disable after an update reaching Android as the app made
+//! them; and a tap is handed to the app's handler only from the app's loop, outside every call
+//! into the app, a tap that comes before the app set a handler, as the one that started the app,
+//! waiting for the first handler.
 
-use std::cell::RefCell;
+use std::cell::{OnceCell, RefCell};
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
+use std::sync::mpsc::{self, Sender};
 
 use jni::objects::{JClass, JObject, JObjectArray, JValue};
 use jni::sys::jint;
@@ -49,7 +55,8 @@ pub struct ShortcutInfo {
     pub short_label: String,
     /// What a launcher shows where it has room; the short label where none.
     pub long_label: Option<String>,
-    /// What a tap on it says while it is disabled; the system's own words where none.
+    /// What a tap on it says while it is disabled, where the launcher shows the app's words: some,
+    /// as Launcher3, show their own whatever this says.
     pub disabled_message: Option<String>,
     pub icon: Option<ShortcutIcon>,
     pub target: ShortcutTarget,
@@ -166,6 +173,9 @@ pub struct Shortcuts {
 
 struct Shared {
     application: Application,
+    /// Where the calls go to the shortcuts' thread, which starts with the first; none where no
+    /// thread could be made.
+    calls: OnceCell<Option<Sender<Call>>>,
     handler: RefCell<Option<ShortcutActivationHandler>>,
     /// The taps that came while no handler was set, in the order they came.
     waiting: RefCell<Vec<ShortcutActivation>>,
@@ -176,6 +186,7 @@ impl Shortcuts {
         Shortcuts {
             shared: Rc::new(Shared {
                 application,
+                calls: OnceCell::new(),
                 handler: RefCell::new(None),
                 waiting: RefCell::new(Vec::new()),
             }),
@@ -245,7 +256,7 @@ impl Shortcuts {
     /// nothing of the app is in front, and where a disabled shortcut has the same id.
     pub fn request_pin(&self, shortcut: &ShortcutInfo) -> ShortcutFuture<()> {
         let shortcut = shortcut.clone();
-        self.off_the_thread("waft-shortcut-pin", move |env, class, context| {
+        self.in_order(move |env, class, context| {
             let info = info_object(env, class, context, &shortcut)?;
             let asked = env
                 .call_static_method(
@@ -265,25 +276,26 @@ impl Shortcuts {
 
     /// Changes `shortcuts`, pinned or dynamic, by their ids, to what each says now.
     pub fn update(&self, shortcuts: &[ShortcutInfo]) -> ShortcutFuture<()> {
-        self.change_many("waft-shortcut-update", jni_str!("update"), shortcuts)
+        self.change_many(jni_str!("update"), shortcuts)
     }
 
     /// Makes `shortcuts` the app icon's dynamic shortcuts, in place of those it had.
     pub fn set_dynamic(&self, shortcuts: &[ShortcutInfo]) -> ShortcutFuture<()> {
-        self.change_many("waft-shortcut-set", jni_str!("setDynamic"), shortcuts)
+        self.change_many(jni_str!("setDynamic"), shortcuts)
     }
 
     /// Adds `shortcuts` to the app icon's dynamic shortcuts, or updates those of the same ids;
     /// fails where they would be more than the menu keeps.
     pub fn add_dynamic(&self, shortcuts: &[ShortcutInfo]) -> ShortcutFuture<()> {
-        self.change_many("waft-shortcut-add", jni_str!("addDynamic"), shortcuts)
+        self.change_many(jni_str!("addDynamic"), shortcuts)
     }
 
     /// Puts `shortcut` among the app icon's dynamic shortcuts at its rank, or updates the one of
     /// its id, pinned or dynamic; where the menu is full, the one of the lowest rank leaves.
     pub fn push_dynamic(&self, shortcut: &ShortcutInfo) {
-        self.tell("a dynamic shortcut pushed", |env, class, context| {
-            let info = info_object(env, class, context, shortcut)?;
+        let shortcut = shortcut.clone();
+        self.tell("a dynamic shortcut pushed", move |env, class, context| {
+            let info = info_object(env, class, context, &shortcut)?;
             env.call_static_method(
                 class,
                 jni_str!("pushDynamic"),
@@ -315,8 +327,9 @@ impl Shortcuts {
     /// Tells the launcher the user chose the shortcut `id`, or did in the app what it does, which
     /// a launcher ranks shortcuts by.
     pub fn report_used(&self, id: &str) {
-        self.tell("a shortcut's use reported", |env, class, context| {
-            let id = env.new_string(id)?;
+        let id = id.to_owned();
+        self.tell("a shortcut's use reported", move |env, class, context| {
+            let id = env.new_string(&id)?;
             env.call_static_method(
                 class,
                 jni_str!("reportUsed"),
@@ -333,14 +346,17 @@ impl Shortcuts {
     }
 
     /// Disables the shortcuts of `ids`, greyed out on the home screen, where a tap says
-    /// `message`, or the system's own words; a dynamic one leaves the app icon's menu.
+    /// `message`, or the system's own words, unless the launcher shows its own, as Launcher3 does;
+    /// a dynamic one leaves the app icon's menu.
     pub fn disable(&self, ids: &[&str], message: Option<&str>) {
         if ids.is_empty() {
             return;
         }
-        self.tell("shortcuts disabled", |env, class, context| {
-            let ids = string_array(env, ids)?;
-            let message = match message {
+        let ids = owned(ids);
+        let message = message.map(str::to_owned);
+        self.tell("shortcuts disabled", move |env, class, context| {
+            let ids = string_array(env, &ids)?;
+            let message = match &message {
                 Some(message) => JObject::from(env.new_string(message)?),
                 None => JObject::null(),
             };
@@ -362,7 +378,7 @@ impl Shortcuts {
     pub fn shortcuts(&self, which: ShortcutMatch) -> ShortcutFuture<Vec<PublishedShortcut>> {
         let flags = if which.pinned { MATCH_PINNED } else { 0 }
             | if which.dynamic { MATCH_DYNAMIC } else { 0 };
-        self.off_the_thread("waft-shortcut-read", move |env, class, context| {
+        self.in_order(move |env, class, context| {
             let found = env
                 .call_static_method(
                     class,
@@ -402,16 +418,14 @@ impl Shortcuts {
         }
     }
 
-    /// Calls `method` with `shortcuts` on a thread of its own, which answers whether Android
-    /// took the change.
+    /// Calls `method` with `shortcuts` in order, which answers whether Android took the change.
     fn change_many(
         &self,
-        thread: &str,
         method: &'static jni::strings::JNIStr,
         shortcuts: &[ShortcutInfo],
     ) -> ShortcutFuture<()> {
         let shortcuts = shortcuts.to_vec();
-        self.off_the_thread(thread, move |env, class, context| {
+        self.in_order(move |env, class, context| {
             let infos = info_array(env, class, context, &shortcuts)?;
             let taken = env
                 .call_static_method(
@@ -429,13 +443,14 @@ impl Shortcuts {
         })
     }
 
-    /// Calls `method` with `ids`, here.
-    fn with_ids(&self, what: &str, method: &'static jni::strings::JNIStr, ids: &[&str]) {
+    /// Calls `method` with `ids`, in order.
+    fn with_ids(&self, what: &'static str, method: &'static jni::strings::JNIStr, ids: &[&str]) {
         if ids.is_empty() {
             return;
         }
-        self.tell(what, |env, class, context| {
-            let ids = string_array(env, ids)?;
+        let ids = owned(ids);
+        self.tell(what, move |env, class, context| {
+            let ids = string_array(env, &ids)?;
             env.call_static_method(
                 class,
                 method,
@@ -454,40 +469,35 @@ impl Shortcuts {
         if_failed: T,
         work: impl FnOnce(&mut Env<'_>, &JClass<'_>, &JObject<'_>) -> jni::errors::Result<T>,
     ) -> T {
-        let application = &self.shared.application;
-        let asked = application.with(|env, context| {
-            let done = package_class(env, context, WAFT_SHORTCUTS)
-                .and_then(|class| work(env, &class, context));
-            Ok(done.map_err(|error| exception_text(env, &error)))
-        });
-        match asked {
-            Ok(Ok(answer)) => answer,
-            Ok(Err(reason)) => {
+        match call_java(&self.shared.application, work) {
+            Ok(answer) => answer,
+            Err(reason) => {
                 warn_to_log!("waft: {what}: {reason}");
-                if_failed
-            }
-            Err(error) => {
-                application.clear_exception();
-                warn_to_log!("waft: {what}: {error}");
                 if_failed
             }
         }
     }
 
-    /// Does `work` here, saying in the log where it fails.
+    /// Does `work` on the shortcuts' thread, after every call made before it, saying in the log
+    /// where it fails.
     fn tell(
         &self,
-        what: &str,
-        work: impl FnOnce(&mut Env<'_>, &JClass<'_>, &JObject<'_>) -> jni::errors::Result<()>,
+        what: &'static str,
+        work: impl FnOnce(&mut Env<'_>, &JClass<'_>, &JObject<'_>) -> jni::errors::Result<()>
+        + Send
+        + 'static,
     ) {
-        self.ask(what, (), work);
+        self.queue(Box::new(move |application| {
+            if let Err(reason) = call_java(application, work) {
+                warn_to_log!("waft: {what}: {reason}");
+            }
+        }));
     }
 
-    /// Runs `work` on a thread named `thread`, attached to the app's VM, and answers what it
+    /// Runs `work` on the shortcuts' thread, after every call made before it, and answers what it
     /// answers; a call into Java that fails is [`ShortcutError::Failed`] with its exception.
-    fn off_the_thread<T: Send + 'static>(
+    fn in_order<T: Send + 'static>(
         &self,
-        thread: &str,
         work: impl FnOnce(
             &mut Env<'_>,
             &JClass<'_>,
@@ -496,31 +506,76 @@ impl Shortcuts {
         + Send
         + 'static,
     ) -> ShortcutFuture<T> {
-        // Answered on the thread, or, dropped with it where no thread could be made, answered so.
+        // Answered on the thread, or, dropped unrun where there is no thread, answered so.
         let (given, answered) = answer(Err(ShortcutError::Failed(
             "the call was not handed to Android".to_owned(),
         )));
-        let application = self.shared.application.clone();
-        let started = std::thread::Builder::new()
-            .name(thread.to_owned())
-            .spawn(move || {
-                let done = application.with(|env, context| {
-                    let done = package_class(env, context, WAFT_SHORTCUTS)
-                        .and_then(|class| work(env, &class, context));
-                    Ok(done.unwrap_or_else(|error| {
-                        Err(ShortcutError::Failed(exception_text(env, &error)))
-                    }))
-                });
-                given.give(done.unwrap_or_else(|error| {
-                    application.clear_exception();
-                    Err(ShortcutError::Failed(error.to_string()))
-                }));
-            });
-        if let Err(error) = started {
-            warn_to_log!("waft: no thread for the shortcuts: {error}");
-        }
+        self.queue(Box::new(move |application| {
+            given.give(
+                call_java(application, work)
+                    .unwrap_or_else(|reason| Err(ShortcutError::Failed(reason))),
+            );
+        }));
         Box::pin(answered)
     }
+
+    /// Hands `call` to the shortcuts' thread, started for the first; a call with nowhere to go
+    /// is dropped unrun, which is said.
+    fn queue(&self, call: Call) {
+        let calls = self
+            .shared
+            .calls
+            .get_or_init(|| start_calls(self.shared.application.clone()));
+        let sent = calls.as_ref().map(|calls| calls.send(call));
+        if !matches!(sent, Some(Ok(()))) {
+            warn_to_log!("waft: a call on the shortcuts was dropped: no thread runs them");
+        }
+    }
+}
+
+/// A call on the shortcuts, run on their thread with the application.
+type Call = Box<dyn FnOnce(&Application) + Send>;
+
+/// Starts the shortcuts' thread, which runs the calls sent to it one at a time, in the order
+/// they came; none where no thread could be made, which is said.
+fn start_calls(application: Application) -> Option<Sender<Call>> {
+    let (calls, arriving) = mpsc::channel::<Call>();
+    let started = std::thread::Builder::new()
+        .name("waft-shortcuts".to_owned())
+        .spawn(move || {
+            for call in arriving {
+                call(&application);
+            }
+        });
+    match started {
+        Ok(_) => Some(calls),
+        Err(error) => {
+            warn_to_log!("waft: no thread for the shortcuts: {error}");
+            None
+        }
+    }
+}
+
+/// What `work` answers with `WaftShortcuts` and `application`, on this thread; why not, a failed
+/// call's exception cleared.
+fn call_java<T>(
+    application: &Application,
+    work: impl FnOnce(&mut Env<'_>, &JClass<'_>, &JObject<'_>) -> jni::errors::Result<T>,
+) -> Result<T, String> {
+    let done = application.with(|env, context| {
+        let done = package_class(env, context, WAFT_SHORTCUTS)
+            .and_then(|class| work(env, &class, context));
+        Ok(done.map_err(|error| exception_text(env, &error)))
+    });
+    done.unwrap_or_else(|error| {
+        application.clear_exception();
+        Err(error.to_string())
+    })
+}
+
+/// `texts`, owned, to go to the shortcuts' thread.
+fn owned(texts: &[&str]) -> Vec<String> {
+    texts.iter().map(|text| (*text).to_owned()).collect()
 }
 
 /// The tap `intent` is, on a shortcut whose target is the app's; none for any other intent.
@@ -707,7 +762,7 @@ fn optional_string<'local>(
 /// `texts` as a Java `String[]`.
 fn string_array<'local>(
     env: &mut Env<'local>,
-    texts: &[&str],
+    texts: &[String],
 ) -> jni::errors::Result<JObject<'local>> {
     let string_class = env.find_class(jni_str!("java/lang/String"))?;
     let array = env.new_object_array(texts.len() as i32, &string_class, JObject::null())?;

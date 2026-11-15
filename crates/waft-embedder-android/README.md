@@ -52,10 +52,10 @@ What is there:
 
 - Pinned shortcuts, an icon of the app's own on the home screen: `request_pin` asks the launcher, which asks the user, and answers once the launcher has the request, never with the user's answer, which Android tells no app; `is_request_pin_supported` says whether the default launcher pins on request.
 - Dynamic shortcuts, on the app icon's menu: `push_dynamic`, `set_dynamic`, `add_dynamic`, `remove_dynamic`, `remove_all_dynamic`, `max_per_activity`, and `report_used`, which a launcher ranks shortcuts by. A pinned and a dynamic shortcut of one id are one shortcut.
-- `update`, `enable`, and `disable` with a message a tap on the greyed-out icon says; `shortcuts` reads back the app's pinned and dynamic shortcuts, with what each opens, whether it is enabled, and why not.
+- `update`, `enable`, and `disable` with a message for a tap on the greyed-out icon, which a launcher may show or put its own words in place of, as Launcher3 shows "Shortcut isn't available"; `shortcuts` reads back the app's pinned and dynamic shortcuts, with what each opens, whether it is enabled, and why not.
 - A shortcut opens a view in a task of its own (`ShortcutTarget::View`): Waft's document activity with the view's initial data, so a tap brings the task that has that data forward, or starts one whose view arrives as one the platform gave, as a card restored from Recents does. Or it brings Waft's activity forward (`ShortcutTarget::App`), and the app hears its action through `set_activation_handler`, the tap that started the app among them.
 - An icon is adaptive, a full-bleed layer the launcher cuts to its shape, or a plain bitmap, scaled down to what the system keeps (`getIconMaxWidth`, half as much again for an adaptive layer's band).
-- The calls Android marks for a worker thread run on a thread of their own and answer a future; a change Android refuses for an app in the background answers `RateLimited`.
+- Every call that changes the shortcuts or reads them back runs on one thread of the shortcuts' own, in the order the app made it, so none overtakes an earlier one; those Android marks for a worker thread answer a future, and a change Android refuses for an app in the background answers `RateLimited`. What only asks a setting, whether the launcher pins or how large an icon is, is answered at once.
 
 What is not, and how an app sees it:
 
