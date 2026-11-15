@@ -538,9 +538,8 @@ impl TickerProviderStateMixinData {
 /// [`SingleTickerProviderStateMixin`] describes, and its tickers follow the element's view as
 /// that one's does.
 ///
-/// A vended ticker stays in the state's set after it is disposed: Dart's `_WidgetTicker`
-/// overrides `Ticker.dispose` to unregister itself, and [`Ticker::dispose`] is not a
-/// hook here. Muting a disposed ticker is a no-op.
+/// A vended ticker leaves the state's set when it is disposed, as Dart's `_WidgetTicker`
+/// does.
 pub trait TickerProviderStateMixin: State {
     /// Mixin field access.
     fn ticker_provider_data(self: Handle<Self>, app: &App) -> &TickerProviderStateMixinData;
@@ -577,6 +576,17 @@ pub trait TickerProviderStateMixin: State {
             .expect("set above")
             .value(app);
         let result = Ticker::new(app, on_tick, View::maybe_id_of(app, self.context(app)));
+        // Dart's `_WidgetTicker`: disposing the ticker takes it out of this state's set. A
+        // state is freed when its element unmounts, where Dart's lives on for a ticker
+        // disposed after it; its set is gone with it, so there is nothing to take out.
+        result.set_remove_from_creator(
+            app,
+            Rc::new(move |app: &mut App, ticker: Handle<Ticker>| {
+                if app.contains(self) {
+                    self.remove_ticker(app, ticker);
+                }
+            }),
+        );
         result.set_muted(app, !values.enabled);
         app.get_mut(result).force_frames = values.force_frames;
         self.ticker_provider_data_mut(app)
@@ -639,6 +649,16 @@ pub trait TickerProviderStateMixin: State {
 
 /// Dart's private members of `TickerProviderStateMixin`.
 trait TickerProviderStateMixinPrivate: TickerProviderStateMixin {
+    fn remove_ticker(self: Handle<Self>, app: &mut App, ticker: Handle<Ticker>) {
+        let tickers = self
+            .ticker_provider_data_mut(app)
+            .tickers
+            .as_mut()
+            .expect("a vended ticker is in the set");
+        debug_assert!(tickers.contains(&ticker));
+        tickers.remove(&ticker);
+    }
+
     fn update_tickers(self: Handle<Self>, app: &mut App) {
         let tickers: Option<Vec<Handle<Ticker>>> = self
             .ticker_provider_data(app)
@@ -680,9 +700,6 @@ trait TickerProviderStateMixinPrivate: TickerProviderStateMixin {
 }
 
 impl<S: TickerProviderStateMixin> TickerProviderStateMixinPrivate for S {}
-
-// Dart's `_WidgetTicker` (a `Ticker` whose `dispose` removes it from its creator's set)
-// waits for a dispose hook on `Ticker`; see the crate's PORTING.md.
 
 /// Dart's `_ConstantValueListenable<T>`: a value that never changes.
 struct ConstantValueListenable<T> {
@@ -1129,6 +1146,53 @@ mod tests {
         assert!(!app.contains(state));
         assert!(tickers.iter().all(|ticker| !ticker.is_active(&app)));
         assert_eq!(SchedulerBinding::transient_callback_count(&mut app), 0);
+    }
+
+    // Dart's `_WidgetTicker`: a ticker disposed with its controller leaves its provider's set.
+    #[test]
+    fn a_disposed_ticker_leaves_the_provider_s_set() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let harness = Harness::mount(&mut app, ticker_mode(true, MultiHost.into_widget()));
+        harness.pump(&mut app);
+        let state = descendant(&harness, &app, 2)
+            .state_handle::<MultiHostState>(&app)
+            .expect("the host's state");
+        let tickers = |app: &App| {
+            app.get(state)
+                .ticker_provider
+                .tickers
+                .as_ref()
+                .expect("vended")
+                .len()
+        };
+        assert_eq!(tickers(&app), 2);
+
+        let controller = app.get_mut(state).controllers.remove(0);
+        controller.dispose(&mut app);
+        assert_eq!(tickers(&app), 1);
+    }
+
+    // Dart's `_WidgetTicker` keeps its creator alive, so a ticker disposed after the state that
+    // vended it is gone still unregisters; here the state is freed with its element, and the
+    // ticker's dispose finds no set to leave.
+    #[test]
+    fn a_ticker_disposed_after_its_provider_is_gone_disposes_quietly() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let harness = Harness::mount(&mut app, ticker_mode(true, MultiHost.into_widget()));
+        harness.pump(&mut app);
+        let state = descendant(&harness, &app, 2)
+            .state_handle::<MultiHostState>(&app)
+            .expect("the host's state");
+        let controller = app.get_mut(state).controllers.remove(0);
+        controller.stop(&mut app, true);
+
+        harness.set_child(&mut app, Sized.into_widget());
+        harness.pump(&mut app);
+        assert!(!app.contains(state), "the state is freed with its element");
+
+        controller.dispose(&mut app);
     }
 
     // ---- TickerMode.valuesOf ----

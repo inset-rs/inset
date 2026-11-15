@@ -548,6 +548,43 @@ impl WidgetTester {
         }
     }
 
+    /// What Flutter's leak tracking checks: `cycle` (say, opening and closing a route) leaves
+    /// no object behind in the arena but `expected`, so many objects of each type (named as
+    /// `std::any::type_name` names them); `&[]` is nothing at all. The first run warms up what
+    /// is made once and kept, such as a singleton or a theme's cached value, and the second is
+    /// measured. While a known leak is being fixed, a fix that frees some of what is expected
+    /// fails this until its count here is brought down; a failure lists what the cycle left.
+    pub(crate) fn assert_leaves_behind(
+        &mut self,
+        expected: &[(&str, i64)],
+        mut cycle: impl FnMut(&mut WidgetTester),
+    ) {
+        cycle(self);
+        let before = self.cell.borrow().debug_object_counts_by_type();
+        cycle(self);
+        let after = self.cell.borrow().debug_object_counts_by_type();
+        let mut left: std::collections::BTreeMap<&str, i64> = std::collections::BTreeMap::new();
+        for name in before.keys().chain(after.keys()) {
+            let was = before.get(name).copied().unwrap_or(0) as i64;
+            let is = after.get(name).copied().unwrap_or(0) as i64;
+            if was != is {
+                left.insert(name, is - was);
+            }
+        }
+        let expected: std::collections::BTreeMap<&str, i64> = expected.iter().copied().collect();
+        if left == expected {
+            return;
+        }
+        let mut diff = String::new();
+        for (name, count) in &left {
+            diff.push_str(&format!("\n  {count:+} {name}"));
+        }
+        panic!(
+            "the cycle left these objects behind, not the {} kinds expected:{diff}",
+            expected.len()
+        );
+    }
+
     /// A touch pointer with the primary button, as `tester.startGesture` makes.
     pub(crate) fn touch(id: i64) -> TestPointer {
         TestPointer {

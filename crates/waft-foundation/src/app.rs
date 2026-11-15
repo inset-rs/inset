@@ -510,6 +510,13 @@ impl App {
         self.handles.debug_entry_count()
     }
 
+    /// [`debug_object_count`](Self::debug_object_count) by the type each object was created as,
+    /// so a test that finds objects left behind can say which.
+    #[cfg(debug_assertions)]
+    pub fn debug_object_counts_by_type(&self) -> std::collections::BTreeMap<&'static str, usize> {
+        self.handles.debug_entry_counts_by_type()
+    }
+
     /// A [`RetainedHandle`] that keeps the object past its owner's `destroy`; see
     /// [`HandleMap::retain`]. `T` is the Copy handle to keep (`Handle<U>` or an erased handle).
     pub fn retain<T: Copy + Into<HandleId>>(&mut self, handle: T) -> RetainedHandle<T> {

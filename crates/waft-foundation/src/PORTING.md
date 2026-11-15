@@ -32,7 +32,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — Dart keeps an object alive while anything references it; the arena frees it, and a cached hit-test path or the mouse tracker may still name it.
   Affect: a `Listener` rebuilt mid-press still receives its release, and a retained entry lingers until its holder lets go.
 
-- Change: `App::destroy_lingering(handle)` destroys an object that stays readable until the next checkpoint, and a debug build counts the arena's objects with `App::debug_object_count`.
+- Change: `App::destroy_lingering(handle)` destroys an object that stays readable until the next checkpoint, and a debug build counts the arena's objects with `App::debug_object_count`, and by type with `App::debug_object_counts_by_type`.
   Reason: language — Dart's collector keeps a dropped object alive while code that still names it runs, and a test for leaks needs a count where Flutter's leak tracking watches the collector.
   Affect: an object an owner replaces in a build can be freed in that build while the widgets built from it let go of it later in the frame; a release build has no count.
 

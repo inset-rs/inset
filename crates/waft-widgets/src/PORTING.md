@@ -235,10 +235,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — a `dyn` value has no identity of its own, and foundation's erased `Listenable` value is deferred (this is its trigger).
   Affect: two notifiers for one `TickerMode` never compare equal, so the ticker mixins drop and re-add their listener on every `activate`.
 
-- Change: a ticker vended by `TickerProviderStateMixin` stays in the state's set after it is disposed.
-  Reason: language — Dart's `_WidgetTicker` subclasses `Ticker` to unregister itself, and `dispose` here is an inherent method on a concrete arena struct.
-  Affect: a state that churns animation controllers holds one handle per dead ticker until it is itself disposed, and muting a disposed ticker does nothing.
-
 ## widgets/dual_transition_builder.rs → dual_transition_builder.dart
 
 - Change: `DualTransitionBuilderState` retains the widget's animation while it listens to it and while its `ReverseAnimation` reverses it, and frees its two proxies and that `ReverseAnimation` in `dispose`, lingering until the next checkpoint.
@@ -752,7 +748,7 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - focus_manager.rs, focus_scope.rs: `FocusManager`'s semantics action listener (`handleSemanticsAction`). Trigger: the semantics tree.
 - focus_manager.rs, focus_scope.rs: focus-tree diagnostics and the debug focus border. Trigger: diagnostics.
 - focus_scope.rs: `_FocusInheritedScope` keeps the copy of the inherited-notifier element it grew before inherited_notifier.rs was ported. Trigger: the next change to that element.
-- A disposed arena object keeps its slot — `dispose` does Dart's work and frees nothing — across elements (an unmounted element is never freed), routes with their `AnimationController`s, the `ProxyAnimation` of `TransitionRoute.secondaryAnimation` and `ModalRoute`'s animation proxies (a dialog pushed and popped leaves about 68 such objects), the focus, scroll, draggable-sheet, restoration, action, shortcut and traversal objects, the animations, tweens and proxies `AnimatedCrossFade` creates, the transitions' `AnimationController`s (Material's zoom transitions, Cupertino's sheet), the overscroll indicators' glow controllers, `Dismissible`'s move tween and driven animation, and the `Ticker` of every `AnimationController`, freed or not, which the `TickerProviderStateMixin` that vended it keeps in its set (Dart's `_WidgetTicker.dispose` unregisters it). Trigger: an arena-slot lifetime for disposed foundation objects; for the tickers, `Ticker::dispose` unregistering from its provider.
+- A disposed arena object keeps its slot — `dispose` does Dart's work and frees nothing — across routes with their `AnimationController`s, the `ProxyAnimation` of `TransitionRoute.secondaryAnimation` and `ModalRoute`'s animation proxies (a dialog pushed and popped leaves 22 such objects, a Material dropdown 35; waft-material's dialog and dropdown probes list them by type), the focus, scroll, draggable-sheet, restoration, action, shortcut and traversal objects, the animations, tweens and proxies `AnimatedCrossFade` creates, the transitions' `AnimationController`s (Material's zoom transitions, Cupertino's sheet), the overscroll indicators' glow controllers, `Dismissible`'s move tween and driven animation, and the `Ticker` of every `AnimationController`. Trigger: the counted `Ref` ownership of experiments/2026-11-15-waft-ownership, family by family.
 - framework/: `ErrorWidget` with its exception reporting, and the build-time diagnostics and duplicate-key checks, `Table`'s checks for duplicate row and cell keys among them. Trigger: diagnostics.
 - framework/: `reassemble`. Trigger: hot reload.
 - binding.rs: the observer callbacks no host reports (memory pressure, pushed routes and route information, the text scale, accessibility features), `scheduleWarmUpFrame`. Trigger: a host that reports those events.
@@ -773,7 +769,7 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - visibility.rs: `SliverVisibility`. Trigger: `SliverOpacity`, `SliverIgnorePointer` and `SliverOffstage`.
 - visibility.rs: what `Visibility.maintainSemantics` controls. Trigger: the semantics tree.
 - visibility.rs: `Visibility` diagnostics. Trigger: diagnostics.
-- ticker_provider.rs: the ticker unregistration Dart's `_WidgetTicker` does, and `TickerMode.merge`. Trigger: a dispose hook on scheduler's `Ticker`; the next edit of ticker_provider.rs for `TickerMode.merge` (`Builder` exists).
+- ticker_provider.rs: `TickerMode.merge`. Trigger: the next edit of ticker_provider.rs (`Builder` exists).
 - transitions.rs: `SliverFadeTransition`, and with it implicit_animations.rs's `SliverAnimatedOpacity`. Trigger: `SliverOpacity`'s render sliver.
 - transitions.rs, implicit_animations.rs: diagnostics. Trigger: diagnostics.
 - icon_theme: `IconThemeData.hashCode` (no `Hash` over `f64`). Trigger: a map keyed by `IconThemeData`.

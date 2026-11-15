@@ -89,7 +89,14 @@ pub struct Ticker {
     on_tick: TickerCallback,
     animation_id: Option<i64>,
     view: Option<ViewId>,
+    /// Dart's `_WidgetTicker._creator._removeTicker`: what the provider that vended this
+    /// ticker runs when it is disposed, to take it out of the provider's set.
+    remove_from_creator: Option<TickerRemover>,
 }
+
+/// What a ticker's provider runs when the ticker is disposed; see
+/// [`Ticker::set_remove_from_creator`].
+pub type TickerRemover = Rc<dyn Fn(&mut App, Handle<Ticker>)>;
 
 impl Ticker {
     /// Creates a ticker that will call the provided callback once per frame of `view`, or of
@@ -103,7 +110,14 @@ impl Ticker {
             on_tick,
             animation_id: None,
             view,
+            remove_from_creator: None,
         })
+    }
+
+    /// Dart's `_WidgetTicker(onTick, creator)`: a provider that keeps the tickers it vends in a
+    /// set has `dispose` take this one out of it first, as `_WidgetTicker.dispose` does.
+    pub fn set_remove_from_creator(self: Handle<Self>, app: &mut App, remover: TickerRemover) {
+        app.get_mut(self).remove_from_creator = Some(remover);
     }
 
     /// Its widget moved to `view`: a pending tick moves with it and asks for that view's frame.
@@ -374,6 +388,9 @@ impl Ticker {
     ///   [`TickerFuture::when_complete_or_cancel`] resolve as
     ///   canceled.
     pub fn dispose(self: Handle<Self>, app: &mut App) {
+        if let Some(remove_from_creator) = app.get_mut(self).remove_from_creator.take() {
+            remove_from_creator(app, self);
+        }
         if let Some(local_future) = app.get_mut(self).future.take() {
             debug_assert!(!self.is_active(app));
             self.unschedule_tick(app);

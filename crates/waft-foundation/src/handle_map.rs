@@ -219,6 +219,18 @@ impl HandleMap {
         self.entries.len()
     }
 
+    /// The number of entries of each type, live or destroyed but still retained.
+    #[cfg(debug_assertions)]
+    pub(crate) fn debug_entry_counts_by_type(
+        &self,
+    ) -> std::collections::BTreeMap<&'static str, usize> {
+        let mut counts = std::collections::BTreeMap::new();
+        for entry in self.entries.values() {
+            *counts.entry(entry.type_name).or_insert(0) += 1;
+        }
+        counts
+    }
+
     /// Whether the owner has destroyed the object while a retained handle still keeps it: it can
     /// be read and can receive events, but it is out of every tree and must not be laid out,
     /// painted or attached.

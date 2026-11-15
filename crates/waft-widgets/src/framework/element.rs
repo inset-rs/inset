@@ -747,8 +747,11 @@ impl AnyElement {
     }
 
     /// Returns true if the Element is active.
+    ///
+    /// A defunct element is freed after its unmount; a handle kept past that, as a callback
+    /// keeps its `BuildContext`, answers false.
     pub fn mounted(self, app: &App) -> bool {
-        self.data(app).widget.is_some()
+        app.contains(self.id) && self.data(app).widget.is_some()
     }
 
     /// The parent of this element, or `None` at the root.
@@ -781,8 +784,11 @@ impl AnyElement {
         (self.vtable.build_scope)(app, self.id)
     }
 
-    /// Where this element is in its lifecycle.
+    /// Where this element is in its lifecycle; a freed element is defunct.
     pub fn lifecycle(self, app: &App) -> ElementLifecycle {
+        if !app.contains(self.id) {
+            return ElementLifecycle::Defunct;
+        }
         self.data(app).lifecycle
     }
 

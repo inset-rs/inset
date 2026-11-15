@@ -39,6 +39,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — a Rust future has no error channel, and a queued callback needs the App.
   Affect: the callback runs at the next microtask drain, never inside the `stop()` that resolved the future, and never at all on a canceled ticker; a task awaiting `or_cancel()` matches on a `Result` where Dart catches `TickerCanceled`.
 
+- Change: `Ticker::set_remove_from_creator` gives a ticker a callback that its `dispose` runs first; widgets' `TickerProviderStateMixin` sets it on each ticker it vends, as Dart's `_WidgetTicker` overrides `dispose` to call `_creator._removeTicker`.
+  Reason: language — a Rust struct cannot be subclassed, so the override is a callback the one `Ticker` type holds.
+  Affect: a ticker from `TickerProviderStateMixin` is a plain `Ticker`, and code that sets the callback again replaces the mixin's removal.
+
 ## Deferred
 
 - `scheduleTask` and the priority task queue. Trigger: a `Timer` counterpart for `_ensureEventLoopCallback`.

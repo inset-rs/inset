@@ -2907,6 +2907,47 @@ pub(crate) mod tests {
         result
     }
 
+    /// Not a Dart case: what Flutter's leak tracking checks, that opening and closing a dialog
+    /// leaves nothing in the arena. Until the ownership migration is done, what it still
+    /// leaves is written in.
+    #[test]
+    fn opening_and_closing_a_dialog_leaves_only_the_known_leak() {
+        with_main_thread_stack(|| {
+            let mut tester = tester();
+            pump_with_dialog(
+                &mut tester,
+                m3,
+                AlertDialog::new().content(Text::new("Body")),
+            );
+            // What the cycle leaves today; each step of the ownership migration
+            // (experiments/2026-11-15-waft-ownership) brings these down to none.
+            tester.assert_leaves_behind(
+                &[
+                    ("waft_animation::animation_controller::AnimationController", 1),
+                    ("waft_animation::animations::ProxyAnimation", 3),
+                    ("waft_foundation::change_notifier::ValueNotifier<bool>", 1),
+                    ("waft_foundation::change_notifier::ValueNotifier<core::option::Option<alloc::string::String>>", 1),
+                    ("waft_foundation::change_notifier::ValueNotifier<core::option::Option<waft_foundation::app::Handle<waft_widgets::widgets::overlay::OverlayEntryWidgetState>>>", 2),
+                    ("waft_material::dialog::DialogRoute", 1),
+                    ("waft_scheduler::ticker::Ticker", 6),
+                    ("waft_widgets::widgets::focus_manager::FocusAttachment", 1),
+                    ("waft_widgets::widgets::focus_manager::FocusScopeNode", 1),
+                    ("waft_widgets::widgets::navigator::RouteEntry", 1),
+                    ("waft_widgets::widgets::overlay::OverlayEntry", 2),
+                    ("waft_widgets::widgets::page_storage::PageStorageBucket", 1),
+                    ("waft_widgets::widgets::scroll_controller::ScrollController", 1),
+                ],
+                |tester| {
+                    open(tester);
+                    let body = only(tester.find_onstage_text("Body"));
+                    Navigator::pop(&mut tester.cell.borrow_mut(), body, None);
+                    tester.pump_and_settle();
+                    assert_eq!(shows(tester, "Body"), 0);
+                },
+            );
+        });
+    }
+
     #[test]
     fn dialog_is_scrollable() {
         with_main_thread_stack(|| {

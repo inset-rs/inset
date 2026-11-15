@@ -542,6 +542,9 @@ fn unmount_recursively(app: &mut App, element: AnyElement) {
     }
     element.unmount(app);
     debug_assert!(element.lifecycle(app) == ElementLifecycle::Defunct);
+    // Dart drops a defunct element. A handle to it kept past this frame (a callback's
+    // `BuildContext`) still reads it until the next checkpoint, then finds it unmounted.
+    app.destroy_lingering(element.id());
 }
 
 fn deactivate_recursively(app: &mut App, element: AnyElement) {
