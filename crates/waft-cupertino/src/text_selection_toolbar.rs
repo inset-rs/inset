@@ -5,7 +5,6 @@ use std::collections::{HashMap, HashSet};
 use std::f64::consts::PI;
 use std::fmt::{self, Debug};
 use std::rc::Rc;
-use std::sync::Arc;
 use std::time::Duration;
 
 use waft_animation::{
@@ -378,17 +377,12 @@ impl RenderCupertinoTextSelectionToolbarShape {
         }
     }
 
-    fn clip_path(
-        self: RenderHandle<Self>,
-        app: &App,
-        child: AnyRenderBox,
-        rrect: RRect,
-    ) -> Arc<Path> {
+    fn clip_path(self: RenderHandle<Self>, app: &App, child: AnyRenderBox, rrect: RRect) -> Path {
         let mut path = PathBuilder::new();
         let size = self.size(app);
         if K_TOOLBAR_BORDER_RADIUS.x * 2.0 + K_TOOLBAR_ARROW_SIZE.width() > size.width() {
             path.rrect_radii_elliptical(rrect.outer_rect(), rrect_radii_elliptical(rrect));
-            return path.build();
+            return path.build().into();
         }
         let child_size = child.size(app);
         let is_above = self.is_above(app, child_size.height());
@@ -434,7 +428,7 @@ impl RenderCupertinoTextSelectionToolbarShape {
         let start_angle = if is_above { PI / 2.0 } else { -PI / 2.0 };
         Self::add_rrect_to_path(&mut path, rrect, start_angle);
         path.close();
-        path.build()
+        path.build().into()
     }
 }
 

@@ -1,10 +1,9 @@
 //! Flutter counterpart: material_ui's `menu_style.dart`.
 //!
 //! A state-dependent field holds a [`WidgetStatePropertyRef`] of `Option<T>`, as
-//! [`ButtonStyle`](crate::ButtonStyle)'s do; `==` compares those properties by identity.
+//! [`ButtonStyle`](crate::ButtonStyle)'s do.
 
 use std::fmt::{self, Debug};
-use std::rc::Rc;
 
 use waft_embedder::{Color, Size, lerp_double};
 use waft_painting::{AlignmentGeometry, BorderSide, EdgeInsetsGeometry, OutlinedBorder};
@@ -333,32 +332,22 @@ impl MenuStyle {
     }
 }
 
-/// Dart's `==` on a property: `WidgetStateProperty` has no equality hook here, so two
-/// properties are equal when they are the same object.
-fn same_property<T: ?Sized>(a: &Option<Rc<T>>, b: &Option<Rc<T>>) -> bool {
-    match (a, b) {
-        (None, None) => true,
-        (Some(a), Some(b)) => Rc::ptr_eq(a, b),
-        _ => false,
-    }
-}
-
 impl PartialEq for MenuStyle {
     fn eq(&self, other: &MenuStyle) -> bool {
         if std::ptr::eq(self, other) {
             return true;
         }
-        same_property(&other.background_color, &self.background_color)
-            && same_property(&other.shadow_color, &self.shadow_color)
-            && same_property(&other.surface_tint_color, &self.surface_tint_color)
-            && same_property(&other.elevation, &self.elevation)
-            && same_property(&other.padding, &self.padding)
-            && same_property(&other.minimum_size, &self.minimum_size)
-            && same_property(&other.fixed_size, &self.fixed_size)
-            && same_property(&other.maximum_size, &self.maximum_size)
-            && same_property(&other.side, &self.side)
-            && same_property(&other.shape, &self.shape)
-            && same_property(&other.mouse_cursor, &self.mouse_cursor)
+        other.background_color == self.background_color
+            && other.shadow_color == self.shadow_color
+            && other.surface_tint_color == self.surface_tint_color
+            && other.elevation == self.elevation
+            && other.padding == self.padding
+            && other.minimum_size == self.minimum_size
+            && other.fixed_size == self.fixed_size
+            && other.maximum_size == self.maximum_size
+            && other.side == self.side
+            && other.shape == self.shape
+            && other.mouse_cursor == self.mouse_cursor
             && other.visual_density == self.visual_density
             && other.alignment == self.alignment
     }
@@ -397,6 +386,7 @@ impl Debug for MenuStyle {
 
 #[cfg(test)]
 mod tests {
+    use std::rc::Rc;
     use std::time::Duration;
 
     use waft_embedder::Rect;
@@ -416,7 +406,7 @@ mod tests {
     use crate::theme_data::ThemeData;
     use crate::tooltip::tests::{m2, m3, tester};
 
-    fn all<T: Clone + Debug + 'static>(value: T) -> WidgetStatePropertyRef<Option<T>> {
+    fn all<T: Clone + Debug + PartialEq + 'static>(value: T) -> WidgetStatePropertyRef<Option<T>> {
         Rc::new(WidgetStatePropertyAll::new(Some(value)))
     }
 

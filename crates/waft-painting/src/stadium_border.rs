@@ -2,7 +2,6 @@
 
 use std::any::Any;
 use std::fmt::{Debug, Formatter, Result as FmtResult};
-use std::sync::Arc;
 
 use waft_embedder::{Canvas, Offset, Paint, Path, RRect, Radius, Rect, lerp_double};
 
@@ -113,13 +112,13 @@ impl ShapeBorder for StadiumBorder {
         }
     }
 
-    fn get_inner_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Arc<Path> {
+    fn get_inner_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Path {
         let radius = Radius::circular(rect.shortest_side() / 2.0);
         let border_rect = RRect::from_rect_and_radius(rect, radius);
         rrect_path(border_rect.deflate(self.side.stroke_inset()))
     }
 
-    fn get_outer_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Arc<Path> {
+    fn get_outer_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Path {
         let radius = Radius::circular(rect.shortest_side() / 2.0);
         rrect_path(RRect::from_rect_and_radius(rect, radius))
     }
@@ -337,7 +336,7 @@ impl ShapeBorder for StadiumToCircleBorder {
         }
     }
 
-    fn get_inner_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Arc<Path> {
+    fn get_inner_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Path {
         rrect_path(
             self.adjust_border_radius(rect)
                 .to_rrect(self.adjust_rect(rect))
@@ -345,7 +344,7 @@ impl ShapeBorder for StadiumToCircleBorder {
         )
     }
 
-    fn get_outer_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Arc<Path> {
+    fn get_outer_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Path {
         rrect_path(
             self.adjust_border_radius(rect)
                 .to_rrect(self.adjust_rect(rect)),
@@ -567,7 +566,7 @@ impl ShapeBorder for StadiumToRoundedRectangleBorder {
         }
     }
 
-    fn get_inner_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Arc<Path> {
+    fn get_inner_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Path {
         let border_rect = self
             .adjust_border_radius(rect)
             .resolve(text_direction)
@@ -578,7 +577,7 @@ impl ShapeBorder for StadiumToRoundedRectangleBorder {
         rrect_path(adjusted_rect)
     }
 
-    fn get_outer_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Arc<Path> {
+    fn get_outer_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Path {
         rrect_path(
             self.adjust_border_radius(rect)
                 .resolve(text_direction)

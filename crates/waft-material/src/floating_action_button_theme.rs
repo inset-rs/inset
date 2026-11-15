@@ -1,7 +1,5 @@
 //! Flutter counterpart: material_ui's `floating_action_button_theme.dart`.
 
-use std::rc::Rc;
-
 use waft_embedder::{Color, lerp_double};
 use waft_foundation::App;
 use waft_painting::{EdgeInsetsGeometry, ShapeBorder, TextStyle};
@@ -27,9 +25,6 @@ use crate::theme::Theme;
 ///
 /// All [`FloatingActionButtonThemeData`] properties are `null` by default.
 /// When null, the `FloatingActionButton` provides its own defaults.
-///
-/// [`==`](PartialEq) compares [`mouse_cursor`](Self::mouse_cursor) by identity: a
-/// `WidgetStateProperty` has no equality hook here.
 ///
 /// See also:
 ///
@@ -442,17 +437,7 @@ impl PartialEq for FloatingActionButtonThemeData {
             && other.extended_icon_label_spacing == self.extended_icon_label_spacing
             && other.extended_padding == self.extended_padding
             && other.extended_text_style == self.extended_text_style
-            && same_property(&other.mouse_cursor, &self.mouse_cursor)
-    }
-}
-
-/// Dart's `==` on a property: `WidgetStateProperty` has no equality hook here, so two
-/// properties are equal when they are the same object.
-fn same_property<T: ?Sized>(a: &Option<Rc<T>>, b: &Option<Rc<T>>) -> bool {
-    match (a, b) {
-        (None, None) => true,
-        (Some(a), Some(b)) => Rc::ptr_eq(a, b),
-        _ => false,
+            && other.mouse_cursor == self.mouse_cursor
     }
 }
 
@@ -534,6 +519,8 @@ impl InheritedWidget for FloatingActionButtonTheme {
 
 #[cfg(test)]
 mod tests {
+    use std::rc::Rc;
+
     use waft_embedder::Size;
     use waft_painting::{BorderRadiusGeometry, BorderSide, RoundedRectangleBorder};
     use waft_services::SystemMouseCursors;
@@ -572,14 +559,18 @@ mod tests {
     }
 
     #[test]
-    fn floating_action_button_theme_data_equality_compares_the_mouse_cursor_by_identity() {
+    fn floating_action_button_theme_data_equality_compares_the_mouse_cursor_by_value() {
         let forbidden = cursor(SystemMouseCursors::FORBIDDEN);
         let with = |mouse_cursor| FloatingActionButtonThemeData::new().mouse_cursor(mouse_cursor);
 
         assert_eq!(with(Rc::clone(&forbidden)), with(Rc::clone(&forbidden)));
-        assert_ne!(
+        assert_eq!(
             with(Rc::clone(&forbidden)),
             with(cursor(SystemMouseCursors::FORBIDDEN))
+        );
+        assert_ne!(
+            with(Rc::clone(&forbidden)),
+            with(cursor(SystemMouseCursors::CLICK))
         );
         assert_ne!(with(forbidden), FloatingActionButtonThemeData::new());
     }

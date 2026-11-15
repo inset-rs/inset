@@ -21,7 +21,7 @@ use waft_widgets::{
     TraversalEdgeBehavior, WidgetBuilder, WidgetRef,
 };
 
-use crate::page_transitions_theme::{PageTransitionsTheme, ZoomPageTransitionsBuilder};
+use crate::page_transitions_theme::ZoomPageTransitionsBuilder;
 use crate::theme::Theme;
 
 /// A modal route that replaces the entire screen with a platform-adaptive transition.
@@ -234,10 +234,10 @@ impl MaterialRouteTransitionMixin for MaterialPageRoute {
 ///
 /// See also:
 ///
-///  * [`PageTransitionsTheme`], which defines the default page transitions used by the
-///    [`MaterialRouteTransitionMixin::build_transitions`].
+///  * [`PageTransitionsTheme`](crate::PageTransitionsTheme), which defines the default page
+///    transitions used by the [`MaterialRouteTransitionMixin::build_transitions`].
 ///  * [`ZoomPageTransitionsBuilder`], which is the default page transition used by the
-///    [`PageTransitionsTheme`].
+///    [`PageTransitionsTheme`](crate::PageTransitionsTheme).
 ///  * [`CupertinoPageTransitionsBuilder`], which is the default page transition for iOS and
 ///    macOS.
 pub trait MaterialRouteTransitionMixin: PageRoute {
@@ -256,7 +256,7 @@ pub trait MaterialRouteTransitionMixin: PageRoute {
     }
 
     /// Dart's `MaterialRouteTransitionMixin.transitionDuration`.
-    fn transition_duration(self: Handle<Self>, app: &App) -> Duration {
+    fn transition_duration(self: Handle<Self>, app: &mut App) -> Duration {
         let context = navigator_context(self, app);
         get_page_transition_builder(app, context).map_or(Duration::from_micros(300), |builder| {
             builder.transition_duration()
@@ -264,7 +264,7 @@ pub trait MaterialRouteTransitionMixin: PageRoute {
     }
 
     /// Dart's `MaterialRouteTransitionMixin.reverseTransitionDuration`.
-    fn reverse_transition_duration(self: Handle<Self>, app: &App) -> Duration {
+    fn reverse_transition_duration(self: Handle<Self>, app: &mut App) -> Duration {
         let context = navigator_context(self, app);
         get_page_transition_builder(app, context).map_or(Duration::from_micros(300), |builder| {
             builder.reverse_transition_duration()
@@ -431,22 +431,12 @@ fn navigator_context<R: Route>(route: Handle<R>, app: &App) -> BuildContext {
 }
 
 /// Dart's `_getPageTransitionBuilder`.
-///
-/// Dart reads `Theme.of(context)`; this reads the nearest [`Theme`] above `context` without
-/// registering a dependency, because the getters that ask are given `&App` only. Without one it
-/// answers what `Theme.of`'s fallbacks answer: the default platform and the default
-/// [`PageTransitionsTheme`].
 fn get_page_transition_builder(
-    app: &App,
+    app: &mut App,
     context: BuildContext,
 ) -> Option<PageTransitionsBuilderRef> {
-    let theme = context
-        .find_ancestor_widget_of_exact_type::<Theme>(app)
-        .map(|theme| &theme.data);
-    let platform = theme.map_or_else(|| app.platform().target_platform(), |theme| theme.platform);
-    let page_transitions_theme = theme.map_or_else(PageTransitionsTheme::new, |theme| {
-        theme.page_transitions_theme.clone()
-    });
+    let platform = Theme::of(app, context).platform;
+    let page_transitions_theme = Theme::of(app, context).page_transitions_theme.clone();
     let builder = match page_transitions_theme.builders().get(&platform) {
         Some(builder) => builder.clone(),
         None => match platform {
@@ -652,14 +642,14 @@ macro_rules! material_route_transition_mixin_transition_route_overrides {
 
         fn transition_duration(
             self: ::waft_foundation::Handle<Self>,
-            app: &::waft_foundation::App,
+            app: &mut ::waft_foundation::App,
         ) -> ::std::time::Duration {
             $crate::MaterialRouteTransitionMixin::transition_duration(self, app)
         }
 
         fn reverse_transition_duration(
             self: ::waft_foundation::Handle<Self>,
-            app: &::waft_foundation::App,
+            app: &mut ::waft_foundation::App,
         ) -> ::std::time::Duration {
             $crate::MaterialRouteTransitionMixin::reverse_transition_duration(self, app)
         }
@@ -1742,9 +1732,9 @@ mod tests {
                     Route::as_route(route)
                 });
                 let route = pushed.get().expect("pushed");
-                let app = tester.cell.borrow();
+                let mut app = tester.cell.borrow_mut();
                 assert_eq!(
-                    TransitionRoute::transition_duration(route, &app),
+                    TransitionRoute::transition_duration(route, &mut app),
                     duration,
                     "{platform:?}"
                 );

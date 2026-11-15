@@ -196,7 +196,7 @@ fn default_menu_border() -> Box<dyn OutlinedBorder> {
 }
 
 /// Dart's `const MaterialStatePropertyAll<T>(value)`.
-fn all<T: Clone + Debug + 'static>(value: T) -> WidgetStatePropertyRef<Option<T>> {
+fn all<T: Clone + Debug + PartialEq + 'static>(value: T) -> WidgetStatePropertyRef<Option<T>> {
     Rc::new(MaterialStatePropertyAll::new(Some(value)))
 }
 

@@ -9,7 +9,6 @@ use std::any::Any;
 use std::collections::HashSet;
 use std::fmt::{self, Debug};
 use std::rc::Rc;
-use std::sync::Arc;
 
 use indexmap::{IndexMap, IndexSet};
 use waft_embedder::{
@@ -38,14 +37,14 @@ use waft_rendering::{
     RenderAligningShiftedBox, RenderAspectRatio, RenderBackdropFilter, RenderBaseline,
     RenderBlockSemantics, RenderBox, RenderClipOval, RenderClipPath, RenderClipRRect,
     RenderClipRSuperellipse, RenderClipRect, RenderColoredBox, RenderConstrainedBox,
-    RenderConstrainedOverflowBox, RenderConstraintsTransformBox, RenderCustomClip,
-    RenderCustomMultiChildLayoutBox, RenderCustomPaint, RenderCustomSingleChildLayoutBox,
-    RenderExcludeSemantics, RenderFittedBox, RenderFlex, RenderFollowerLayer,
-    RenderFractionalTranslation, RenderFractionallySizedOverflowBox, RenderHandle,
-    RenderIgnorePointer, RenderIndexedSemantics, RenderIndexedStack, RenderIntrinsicHeight,
-    RenderIntrinsicWidth, RenderLeaderLayer, RenderLimitedBox, RenderListBody,
-    RenderMergeSemantics, RenderMetaData, RenderMouseRegion, RenderMouseRegionBase, RenderOffstage,
-    RenderOpacity, RenderPadding, RenderPhysicalModel, RenderPhysicalModelBase,
+    RenderConstrainedBoxBase, RenderConstrainedOverflowBox, RenderConstraintsTransformBox,
+    RenderCustomClip, RenderCustomMultiChildLayoutBox, RenderCustomPaint,
+    RenderCustomSingleChildLayoutBox, RenderExcludeSemantics, RenderFittedBox, RenderFlex,
+    RenderFollowerLayer, RenderFractionalTranslation, RenderFractionallySizedOverflowBox,
+    RenderHandle, RenderIgnorePointer, RenderIndexedSemantics, RenderIndexedStack,
+    RenderIntrinsicHeight, RenderIntrinsicWidth, RenderLeaderLayer, RenderLimitedBox,
+    RenderListBody, RenderMergeSemantics, RenderMetaData, RenderMouseRegion, RenderMouseRegionBase,
+    RenderOffstage, RenderOpacity, RenderPadding, RenderPhysicalModel, RenderPhysicalModelBase,
     RenderPhysicalShape, RenderPointerListener, RenderPositionedBox, RenderRepaintBoundary,
     RenderSemanticsAnnotations, RenderSizedOverflowBox, RenderSliver, RenderSliverPadding,
     RenderSliverToBoxAdapter, RenderStack, RenderStackBase, RenderTransform, RenderWrap,
@@ -1337,7 +1336,7 @@ pub struct ClipPath {
     /// The default clip, which is used if this property is `None`, is the
     /// bounding box rectangle of the widget. [`ClipRect`] is a more
     /// efficient way of obtaining that effect.
-    pub clipper: Option<Rc<dyn CustomClipper<Arc<Path>>>>,
+    pub clipper: Option<Rc<dyn CustomClipper<Path>>>,
     /// Whether and how to clip the child.
     ///
     /// Defaults to [`Clip::AntiAlias`].
@@ -1373,7 +1372,7 @@ impl ClipPath {
     }
 
     /// Dart `ClipPath(clipper:)`.
-    pub fn clipper(mut self, clipper: Rc<dyn CustomClipper<Arc<Path>>>) -> ClipPath {
+    pub fn clipper(mut self, clipper: Rc<dyn CustomClipper<Path>>) -> ClipPath {
         self.clipper = Some(clipper);
         self
     }
@@ -1687,7 +1686,7 @@ pub struct PhysicalShape {
     /// If the path in question is expressed as a `ShapeBorder` subclass,
     /// consider using the `ShapeBorderClipper` delegate class to adapt the
     /// shape for use with this widget.
-    pub clipper: Rc<dyn CustomClipper<Arc<Path>>>,
+    pub clipper: Rc<dyn CustomClipper<Path>>,
     /// The content will be clipped (or not) according to this option.
     ///
     /// Defaults to [`Clip::None`].
@@ -1711,10 +1710,7 @@ impl PhysicalShape {
     ///
     /// Dart's defaults: `clip_behavior` [`Clip::None`], `elevation` 0, `shadow_color` opaque
     /// black.
-    pub fn new(
-        clipper: Rc<dyn CustomClipper<Arc<Path>>>,
-        color: impl Into<AnyColor>,
-    ) -> PhysicalShape {
+    pub fn new(clipper: Rc<dyn CustomClipper<Path>>, color: impl Into<AnyColor>) -> PhysicalShape {
         PhysicalShape {
             key: None,
             clipper,
@@ -11661,7 +11657,7 @@ mod tests {
         assert_eq!(render.clip_behavior(&app), Clip::AntiAlias);
     }
 
-    fn circle_clipper() -> Rc<dyn CustomClipper<Arc<Path>>> {
+    fn circle_clipper() -> Rc<dyn CustomClipper<Path>> {
         Rc::new(ShapeBorderClipper::new(
             Box::new(waft_painting::CircleBorder::new(
                 waft_painting::BorderSide::NONE,

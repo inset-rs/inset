@@ -10,7 +10,8 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use waft_animation::{
-    Animatable, Animation, AnyAnimation, Cubic, Curve, CurvedAnimation, Curves, TweenLerp,
+    Animatable, Animation, AnyAnimation, Cubic, Curve, CurvedAnimation, Curves, ValueCurveTween,
+    ValueTween,
 };
 use waft_embedder::{Color, Offset, Size};
 use waft_foundation::{App, Handle, Listenable, MergingListenable};
@@ -164,14 +165,15 @@ impl FadeUpwardsPageTransition {
     }
 
     // Fractional offset from 1/4 screen below the top to fully on screen.
-    const BOTTOM_UP_TWEEN: OffsetTween = OffsetTween::new(Offset::new(0.0, 0.25), Offset::ZERO);
+    const BOTTOM_UP_TWEEN: ValueTween<Offset> =
+        ValueTween::new(Offset::new(0.0, 0.25), Offset::ZERO);
 
-    fn fast_out_slow_in_tween() -> CurveTween {
-        CurveTween::new(Curves::fast_out_slow_in())
+    fn fast_out_slow_in_tween() -> ValueCurveTween {
+        ValueCurveTween::new(Curves::fast_out_slow_in())
     }
 
-    fn ease_in_tween() -> CurveTween {
-        CurveTween::new(Curves::ease_in())
+    fn ease_in_tween() -> ValueCurveTween {
+        ValueCurveTween::new(Curves::ease_in())
     }
 }
 
@@ -229,7 +231,17 @@ impl PageTransitionsBuilder for FadeUpwardsPageTransitionsBuilder {
         _secondary_animation: AnyAnimation<f64>,
         child: WidgetRef,
     ) -> WidgetRef {
-        FadeUpwardsPageTransition::new(app, animation, child).into_widget()
+        let transition = FadeUpwardsPageTransition::new(app, animation, child);
+        let made = [
+            transition.position_animation.id(),
+            transition.opacity_animation.id(),
+        ];
+        let transition = transition.into_widget();
+        // The `SlideTransition` and `FadeTransition` its build makes retain them.
+        for made in made {
+            app.destroy_lingering(made);
+        }
+        transition
     }
 }
 
@@ -243,18 +255,18 @@ struct OpenUpwardsPageTransition {
 impl OpenUpwardsPageTransition {
     // The new page slides upwards just a little as its clip rectangle exposes the page from
     // bottom to top.
-    const PRIMARY_TRANSLATION_TWEEN: OffsetTween =
-        OffsetTween::new(Offset::new(0.0, 0.05), Offset::ZERO);
+    const PRIMARY_TRANSLATION_TWEEN: ValueTween<Offset> =
+        ValueTween::new(Offset::new(0.0, 0.05), Offset::ZERO);
 
     // The old page slides upwards a little as the new page appears.
-    const SECONDARY_TRANSLATION_TWEEN: OffsetTween =
-        OffsetTween::new(Offset::ZERO, Offset::new(0.0, -0.025));
+    const SECONDARY_TRANSLATION_TWEEN: ValueTween<Offset> =
+        ValueTween::new(Offset::ZERO, Offset::new(0.0, -0.025));
 
     // The scrim color that obscures the old page during the transition.
     const SCRIM_COLOR: Color = Color::new(0xFF000000);
 
     // The scrim obscures the old page by becoming increasingly opaque.
-    const SCRIM_OPACITY_TWEEN: DoubleTween = DoubleTween::new(0.0, 0.25);
+    const SCRIM_OPACITY_TWEEN: ValueTween<f64> = ValueTween::new(0.0, 0.25);
 
     // Used by all of the transition animations.
     const TRANSITION_CURVE: Cubic = Cubic::new(0.20, 0.00, 0.00, 1.00);
@@ -335,6 +347,8 @@ impl OpenUpwardsPageTransitionState {
         ];
         for animation in animations.into_iter().flatten() {
             animation.dispose(app);
+            // The animations driven from it retain it while a build still reads them.
+            app.destroy_lingering(animation);
         }
     }
 
@@ -351,7 +365,7 @@ impl OpenUpwardsPageTransitionState {
             .as_animation();
 
         // Gradually expose the new page from bottom to top.
-        let clip_animation = DoubleTween::new(0.0, size.height()).animate(app, primary_animation);
+        let clip_animation = ValueTween::new(0.0, size.height()).animate(app, primary_animation);
 
         let opacity_animation =
             OpenUpwardsPageTransition::SCRIM_OPACITY_TWEEN.animate(app, primary_animation);
@@ -362,6 +376,19 @@ impl OpenUpwardsPageTransitionState {
             OpenUpwardsPageTransition::SECONDARY_TRANSLATION_TWEEN
                 .animate(app, secondary_translation_curved_animation);
 
+        // The builder reads them on every frame: it retains them, and this build frees its
+        // own part at once, so they go with the last builder that reads them.
+        let retained = (
+            app.retain(clip_animation),
+            app.retain(opacity_animation),
+            app.retain(primary_translation_animation),
+            app.retain(secondary_translation_animation),
+        );
+        app.destroy_lingering(clip_animation);
+        app.destroy_lingering(opacity_animation);
+        app.destroy_lingering(primary_translation_animation);
+        app.destroy_lingering(secondary_translation_animation);
+
         let widget = self.widget(app);
         let animation: Rc<dyn Listenable> = Rc::new(widget.animation);
         let secondary_animation: Rc<dyn Listenable> = Rc::new(widget.secondary_animation);
@@ -370,6 +397,12 @@ impl OpenUpwardsPageTransitionState {
             Some(secondary_animation),
         ]));
         AnimatedBuilder::new(merged, move |app, _context, _child| {
+            let (
+                clip_animation,
+                opacity_animation,
+                primary_translation_animation,
+                secondary_translation_animation,
+            ) = (*retained.0, *retained.1, *retained.2, *retained.3);
             // Dart's `withOpacity`, deprecated there too: its rounding to an 8-bit alpha is
             // part of the behaviour being ported.
             #[allow(deprecated)]
@@ -486,79 +519,6 @@ impl PageTransitionsBuilder for OpenUpwardsPageTransitionsBuilder {
         child: WidgetRef,
     ) -> WidgetRef {
         OpenUpwardsPageTransition::new(animation, secondary_animation, child).into_widget()
-    }
-}
-
-/// Dart's `Tween<double>` as a value; Dart's tweens here are `static final`, and an arena tween
-/// made per build would hold its slot for the life of the `App`.
-#[derive(Clone, Copy, Debug)]
-struct DoubleTween {
-    begin: f64,
-    end: f64,
-}
-
-impl DoubleTween {
-    const fn new(begin: f64, end: f64) -> DoubleTween {
-        DoubleTween { begin, end }
-    }
-}
-
-impl Animatable<f64> for DoubleTween {
-    fn transform(&self, _app: &App, t: f64) -> f64 {
-        if t == 0.0 {
-            return self.begin;
-        }
-        if t == 1.0 {
-            return self.end;
-        }
-        f64::lerp(&self.begin, &self.end, t)
-    }
-}
-
-/// Dart's `Tween<Offset>` as a value, for the reason [`DoubleTween`] gives.
-#[derive(Clone, Copy, Debug)]
-struct OffsetTween {
-    begin: Offset,
-    end: Offset,
-}
-
-impl OffsetTween {
-    const fn new(begin: Offset, end: Offset) -> OffsetTween {
-        OffsetTween { begin, end }
-    }
-}
-
-impl Animatable<Offset> for OffsetTween {
-    fn transform(&self, _app: &App, t: f64) -> Offset {
-        if t == 0.0 {
-            return self.begin;
-        }
-        if t == 1.0 {
-            return self.end;
-        }
-        Offset::lerp(Some(self.begin), Some(self.end), t).expect("both ends are set")
-    }
-}
-
-/// Dart's `CurveTween` as a value, for the reason [`DoubleTween`] gives.
-#[derive(Clone)]
-struct CurveTween {
-    curve: Rc<dyn Curve>,
-}
-
-impl CurveTween {
-    fn new(curve: Rc<dyn Curve>) -> CurveTween {
-        CurveTween { curve }
-    }
-}
-
-impl Animatable<f64> for CurveTween {
-    fn transform(&self, _app: &App, t: f64) -> f64 {
-        if t == 0.0 || t == 1.0 {
-            debug_assert_eq!(self.curve.transform(t).round(), t);
-            return t;
-        }
-        self.curve.transform(t)
     }
 }
 
@@ -927,6 +887,54 @@ mod tests {
 
         assert!(is_onstage(&mut app, &page_1));
         assert!(!is_onstage(&mut app, &page_2));
+    }
+
+    /// The arena objects a frame 100 ms into a push leaves behind with `builder`.
+    fn objects_a_mid_push_frame_leaves(builder: PageTransitionsBuilderRef) -> isize {
+        let cell = app_with_view();
+        let key = GlobalKey::new();
+        let page_1 = GlobalKey::new();
+        let page_2 = GlobalKey::new();
+        mount(
+            &cell,
+            navigator(&key, {
+                let page_1 = page_1.clone();
+                let page_2 = page_2.clone();
+                move |app, settings| {
+                    let pages = two_pages(&page_1, &page_2, settings);
+                    custom_page_route(app, settings, builder.clone(), pages)
+                }
+            }),
+        );
+        {
+            let mut app = cell.borrow_mut();
+            state(&key, &mut app).push_named(&mut app, "/second", None);
+            pump_every_view(&mut app, Duration::ZERO);
+            pump_every_view(&mut app, Duration::from_millis(100));
+        }
+        cell.checkpoint();
+        let before = cell.borrow().debug_object_count() as isize;
+        pump_every_view(&mut cell.borrow_mut(), Duration::from_millis(116));
+        cell.checkpoint();
+        cell.borrow().debug_object_count() as isize - before
+    }
+
+    /// Not a Dart case: Dart's collector frees the animations each frame's
+    /// `_FadeUpwardsPageTransition` drives; here the builder frees them once it has handed
+    /// them on, and the transitions that read them retain them.
+    #[test]
+    fn a_frame_of_a_fade_upwards_push_leaves_no_new_arena_objects() {
+        let builder = PageTransitionsBuilderRef::new(FadeUpwardsPageTransitionsBuilder::new());
+        assert_eq!(objects_a_mid_push_frame_leaves(builder), 0);
+    }
+
+    /// Not a Dart case: Dart's collector frees the animations each layout of
+    /// `_OpenUpwardsPageTransition` drives; here the layout frees them once its builder
+    /// retains them.
+    #[test]
+    fn a_frame_of_an_open_upwards_push_leaves_no_new_arena_objects() {
+        let builder = PageTransitionsBuilderRef::new(OpenUpwardsPageTransitionsBuilder::new());
+        assert_eq!(objects_a_mid_push_frame_leaves(builder), 0);
     }
 
     #[test]

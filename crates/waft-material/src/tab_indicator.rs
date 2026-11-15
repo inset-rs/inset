@@ -2,7 +2,6 @@
 
 use std::any::Any;
 use std::fmt;
-use std::sync::Arc;
 
 use waft_embedder::{
     Canvas, Offset, Paint, PaintStyle, Path, PathBuilder, RRect, Rect, StrokeCap,
@@ -133,16 +132,16 @@ impl Decoration for UnderlineTabIndicator {
         ))
     }
 
-    fn get_clip_path(&self, rect: Rect, text_direction: TextDirection) -> Arc<Path> {
+    fn get_clip_path(&self, rect: Rect, text_direction: TextDirection) -> Path {
         let indicator = self.indicator_rect_for(rect, text_direction);
         let mut path = PathBuilder::new();
         if let Some(border_radius) = self.border_radius {
             let rrect = border_radius.to_rrect(indicator);
             path.rrect_radii_elliptical(rrect.outer_rect(), rrect_radii_elliptical(rrect));
-            return path.build();
+            return path.build().into();
         }
         path.rect(indicator.into());
-        path.build()
+        path.build().into()
     }
 
     fn clone_box(&self) -> Box<dyn Decoration> {

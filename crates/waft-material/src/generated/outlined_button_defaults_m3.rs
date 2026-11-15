@@ -110,7 +110,7 @@ pub(crate) fn outlined_button_defaults_m3(app: &mut App, context: BuildContext) 
 }
 
 /// Dart's `const MaterialStatePropertyAll<T>(value)`.
-fn all<T: Clone + Debug + 'static>(value: T) -> WidgetStatePropertyRef<Option<T>> {
+fn all<T: Clone + Debug + PartialEq + 'static>(value: T) -> WidgetStatePropertyRef<Option<T>> {
     Rc::new(MaterialStatePropertyAll::new(Some(value)))
 }
 

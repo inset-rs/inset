@@ -23,7 +23,7 @@ use crate::ink_well::{
 };
 use crate::material::{
     AnyMaterialInkController, InkFeature, InkFeatureData, InkFeatureLeaf, InkFeatureLeafData,
-    InkFeatureObject, RectCallback, destroy_lingering,
+    InkFeatureObject, RectCallback,
 };
 
 const K_UNCONFIRMED_RIPPLE_DURATION: Duration = Duration::from_secs(1);
@@ -400,10 +400,10 @@ impl InkFeatureLeaf for InkRipple {
             controller.dispose(app);
         }
         for controller in controllers {
-            destroy_lingering(app, controller);
+            app.destroy_lingering(controller);
         }
         for owned in std::mem::take(&mut app.get_mut(self).owned) {
-            destroy_lingering(app, owned);
+            app.destroy_lingering(owned);
         }
         InkFeature::dispose(self, app);
     }

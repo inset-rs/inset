@@ -818,7 +818,7 @@ mod tests {
         tester.widget(padding, |padding: &Padding| padding.padding)
     }
 
-    fn all<T: Clone + Debug + 'static>(value: T) -> WidgetStatePropertyRef<Option<T>> {
+    fn all<T: Clone + Debug + PartialEq + 'static>(value: T) -> WidgetStatePropertyRef<Option<T>> {
         Rc::new(WidgetStatePropertyAll::new(Some(value)))
     }
 

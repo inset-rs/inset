@@ -25,6 +25,7 @@ use crate::badge_theme::BadgeThemeData;
 use crate::banner_theme::MaterialBannerThemeData;
 use crate::bottom_navigation_bar_theme::BottomNavigationBarThemeData;
 use crate::bottom_sheet_theme::BottomSheetThemeData;
+use crate::button_theme::ButtonThemeData;
 use crate::card_theme::CardThemeData;
 use crate::checkbox_theme::CheckboxThemeData;
 use crate::color_scheme::ColorScheme;
@@ -33,6 +34,7 @@ use crate::constants::{K_DEFAULT_ICON_DARK_COLOR, K_DEFAULT_ICON_LIGHT_COLOR};
 use crate::dialog_theme::DialogThemeData;
 use crate::divider_theme::DividerThemeData;
 use crate::drawer_theme::DrawerThemeData;
+use crate::dropdown_menu_theme::DropdownMenuThemeData;
 use crate::elevated_button_theme::ElevatedButtonThemeData;
 use crate::expansion_tile_theme::ExpansionTileThemeData;
 use crate::filled_button_theme::FilledButtonThemeData;
@@ -616,6 +618,9 @@ pub struct ThemeData {
     pub bottom_navigation_bar_theme: BottomNavigationBarThemeData,
     /// A theme for customizing the color, elevation, and shape of a bottom sheet.
     pub bottom_sheet_theme: BottomSheetThemeData,
+    /// Defines the default configuration of button widgets, like `DropdownButton` and
+    /// `ButtonBar`.
+    pub button_theme: ButtonThemeData,
     /// A theme for customizing the color, elevation, and shape of a [`Card`](crate::Card).
     ///
     /// This is the value returned from `CardTheme::of`.
@@ -630,6 +635,8 @@ pub struct ThemeData {
     pub divider_theme: DividerThemeData,
     /// A theme for customizing the appearance and layout of `Drawer` widgets.
     pub drawer_theme: DrawerThemeData,
+    /// A theme for customizing the appearance and layout of `DropdownMenu` widgets.
+    pub dropdown_menu_theme: DropdownMenuThemeData,
     /// A theme for customizing the appearance and internal layout of
     /// `ElevatedButton`s.
     pub elevated_button_theme: ElevatedButtonThemeData,
@@ -1117,6 +1124,11 @@ impl ThemeData {
                 t,
             )
             .expect("both sides"),
+            button_theme: if t < 0.5 {
+                a.button_theme.clone()
+            } else {
+                b.button_theme.clone()
+            },
             card_theme: CardThemeData::lerp(Some(&a.card_theme), Some(&b.card_theme), t),
             checkbox_theme: CheckboxThemeData::lerp(
                 Some(&a.checkbox_theme),
@@ -1131,6 +1143,11 @@ impl ThemeData {
             ),
             drawer_theme: DrawerThemeData::lerp(Some(&a.drawer_theme), Some(&b.drawer_theme), t)
                 .expect("both sides"),
+            dropdown_menu_theme: DropdownMenuThemeData::lerp(
+                Some(&a.dropdown_menu_theme),
+                Some(&b.dropdown_menu_theme),
+                t,
+            ),
             elevated_button_theme: ElevatedButtonThemeData::lerp(
                 Some(&a.elevated_button_theme),
                 Some(&b.elevated_button_theme),
@@ -1313,11 +1330,13 @@ impl PartialEq for ThemeData {
             && other.banner_theme == self.banner_theme
             && other.bottom_navigation_bar_theme == self.bottom_navigation_bar_theme
             && other.bottom_sheet_theme == self.bottom_sheet_theme
+            && other.button_theme == self.button_theme
             && other.card_theme == self.card_theme
             && other.checkbox_theme == self.checkbox_theme
             && other.dialog_theme == self.dialog_theme
             && other.divider_theme == self.divider_theme
             && other.drawer_theme == self.drawer_theme
+            && other.dropdown_menu_theme == self.dropdown_menu_theme
             && other.elevated_button_theme == self.elevated_button_theme
             && other.expansion_tile_theme == self.expansion_tile_theme
             && other.filled_button_theme == self.filled_button_theme
@@ -1410,11 +1429,13 @@ pub struct ThemeDataBuilder {
     banner_theme: Option<Box<MaterialBannerThemeData>>,
     bottom_navigation_bar_theme: Option<Box<BottomNavigationBarThemeData>>,
     bottom_sheet_theme: Option<Box<BottomSheetThemeData>>,
+    button_theme: Option<Box<ButtonThemeData>>,
     card_theme: Option<Box<CardThemeData>>,
     checkbox_theme: Option<Box<CheckboxThemeData>>,
     dialog_theme: Option<Box<DialogThemeData>>,
     divider_theme: Option<Box<DividerThemeData>>,
     drawer_theme: Option<Box<DrawerThemeData>>,
+    dropdown_menu_theme: Option<Box<DropdownMenuThemeData>>,
     elevated_button_theme: Option<Box<ElevatedButtonThemeData>>,
     expansion_tile_theme: Option<Box<ExpansionTileThemeData>>,
     filled_button_theme: Option<Box<FilledButtonThemeData>>,
@@ -1755,6 +1776,12 @@ impl ThemeDataBuilder {
         self
     }
 
+    /// Dart `ThemeData(buttonTheme:)`.
+    pub fn button_theme(mut self, button_theme: ButtonThemeData) -> ThemeDataBuilder {
+        self.button_theme = Some(Box::new(button_theme));
+        self
+    }
+
     /// Dart `ThemeData(cardTheme:)`.
     pub fn card_theme(mut self, card_theme: CardThemeData) -> ThemeDataBuilder {
         self.card_theme = Some(Box::new(card_theme));
@@ -1782,6 +1809,15 @@ impl ThemeDataBuilder {
     /// Dart `ThemeData(drawerTheme:)`.
     pub fn drawer_theme(mut self, drawer_theme: DrawerThemeData) -> ThemeDataBuilder {
         self.drawer_theme = Some(Box::new(drawer_theme));
+        self
+    }
+
+    /// Dart `ThemeData(dropdownMenuTheme:)`.
+    pub fn dropdown_menu_theme(
+        mut self,
+        dropdown_menu_theme: DropdownMenuThemeData,
+    ) -> ThemeDataBuilder {
+        self.dropdown_menu_theme = Some(Box::new(dropdown_menu_theme));
         self
     }
 
@@ -2023,11 +2059,13 @@ impl ThemeDataBuilder {
             banner_theme,
             bottom_navigation_bar_theme,
             bottom_sheet_theme,
+            button_theme,
             card_theme,
             checkbox_theme,
             dialog_theme,
             divider_theme,
             drawer_theme,
+            dropdown_menu_theme,
             elevated_button_theme,
             expansion_tile_theme,
             filled_button_theme,
@@ -2254,6 +2292,35 @@ impl ThemeDataBuilder {
                 Colors::BLACK.with_opacity(0.6)
             }
         });
+        // The default [buttonTheme] is here because it doesn't use the defaults for
+        // [disabledColor], [highlightColor], and [splashColor].
+        let button_theme = button_theme
+            .map(|button_theme| *button_theme)
+            .unwrap_or_else(|| {
+                let mut button_theme = ButtonThemeData::new()
+                    .with_color_scheme(color_scheme.clone())
+                    .with_button_color(if is_dark {
+                        primary_swatch.shade600()
+                    } else {
+                        Colors::GREY.shade300()
+                    })
+                    .with_focus_color(focus_color)
+                    .with_hover_color(hover_color);
+                if let Some(disabled_color) = disabled_color {
+                    button_theme = button_theme.with_disabled_color(disabled_color);
+                }
+                if let Some(highlight_color) = highlight_color {
+                    button_theme = button_theme.with_highlight_color(highlight_color);
+                }
+                if let Some(splash_color) = splash_color {
+                    button_theme = button_theme.with_splash_color(splash_color);
+                }
+                if let Some(material_tap_target_size) = material_tap_target_size {
+                    button_theme =
+                        button_theme.with_material_tap_target_size(material_tap_target_size);
+                }
+                button_theme
+            });
         let disabled_color = disabled_color.unwrap_or(if is_dark {
             Colors::WHITE38
         } else {
@@ -2403,11 +2470,13 @@ impl ThemeDataBuilder {
             banner_theme: unboxed_or_default(banner_theme),
             bottom_navigation_bar_theme: unboxed_or_default(bottom_navigation_bar_theme),
             bottom_sheet_theme: unboxed_or_default(bottom_sheet_theme),
+            button_theme,
             card_theme: unboxed_or_default(card_theme),
             checkbox_theme: unboxed_or_default(checkbox_theme),
             dialog_theme: unboxed_or_default(dialog_theme),
             divider_theme: unboxed_or_default(divider_theme),
             drawer_theme: unboxed_or_default(drawer_theme),
+            dropdown_menu_theme: unboxed_or_default(dropdown_menu_theme),
             elevated_button_theme: unboxed_or_default(elevated_button_theme),
             expansion_tile_theme: unboxed_or_default(expansion_tile_theme),
             filled_button_theme: unboxed_or_default(filled_button_theme),
@@ -2792,6 +2861,12 @@ impl ThemeDataCopyWith {
         self
     }
 
+    /// Dart `copyWith(buttonTheme:)`.
+    pub fn button_theme(mut self, button_theme: ButtonThemeData) -> ThemeDataCopyWith {
+        self.theme.button_theme = button_theme;
+        self
+    }
+
     /// Dart `copyWith(cardTheme:)`.
     pub fn card_theme(mut self, card_theme: CardThemeData) -> ThemeDataCopyWith {
         self.theme.card_theme = card_theme;
@@ -2819,6 +2894,15 @@ impl ThemeDataCopyWith {
     /// Dart `copyWith(drawerTheme:)`.
     pub fn drawer_theme(mut self, drawer_theme: DrawerThemeData) -> ThemeDataCopyWith {
         self.theme.drawer_theme = drawer_theme;
+        self
+    }
+
+    /// Dart `copyWith(dropdownMenuTheme:)`.
+    pub fn dropdown_menu_theme(
+        mut self,
+        dropdown_menu_theme: DropdownMenuThemeData,
+    ) -> ThemeDataCopyWith {
+        self.theme.dropdown_menu_theme = dropdown_menu_theme;
         self
     }
 
@@ -3676,6 +3760,57 @@ mod tests {
                 Color::lerp(Some(dark.primary_color), Some(light.primary_color), 0.25)
                     .expect("both sides")
             );
+        });
+    }
+
+    #[test]
+    fn theme_data_objects_with_style_from_members_are_equal() {
+        android(|app| {
+            let create_theme_data = || {
+                ThemeData::builder()
+                    .elevated_button_theme(
+                        ElevatedButtonThemeData::new().style(
+                            ElevatedButton::style_from()
+                                .foreground_color(Colors::BLACK)
+                                .background_color(Colors::BLACK)
+                                .elevation(1.0)
+                                .build(),
+                        ),
+                    )
+                    .filled_button_theme(
+                        FilledButtonThemeData::new().style(
+                            FilledButton::style_from()
+                                .foreground_color(Colors::BLACK)
+                                .disabled_foreground_color(Colors::BLACK)
+                                .background_color(Colors::BLACK)
+                                .disabled_background_color(Colors::BLACK)
+                                .overlay_color(Colors::BLACK)
+                                .build(),
+                        ),
+                    )
+                    .icon_button_theme(
+                        IconButtonThemeData::new().style(
+                            IconButton::style_from()
+                                .hover_color(Colors::BLACK)
+                                .focus_color(Colors::BLACK)
+                                .highlight_color(Colors::BLACK)
+                                .build(),
+                        ),
+                    )
+                    .text_button_theme(
+                        TextButtonThemeData::new().style(
+                            TextButton::style_from()
+                                .enabled_mouse_cursor(<dyn waft_services::MouseCursor>::defer())
+                                .disabled_mouse_cursor(
+                                    <dyn waft_services::MouseCursor>::uncontrolled(),
+                                )
+                                .build(),
+                        ),
+                    )
+                    .build(app)
+            };
+
+            assert!(create_theme_data() == create_theme_data());
         });
     }
 
@@ -4638,12 +4773,28 @@ mod tests {
     fn equality_includes_focus_color_and_hover_color() {
         // regression test for https://github.com/flutter/flutter/issues/91587
         android(|app| {
-            let focus_color_black = ThemeData::builder().focus_color(Colors::BLACK).build(app);
-            let focus_color_white = ThemeData::builder().focus_color(Colors::WHITE).build(app);
+            // Focus color and hover color are used in the default button theme, so
+            // use an empty one to ensure that just focus and hover colors are tested.
+            let button_theme = ButtonThemeData::new();
+
+            let focus_color_black = ThemeData::builder()
+                .focus_color(Colors::BLACK)
+                .button_theme(button_theme.clone())
+                .build(app);
+            let focus_color_white = ThemeData::builder()
+                .focus_color(Colors::WHITE)
+                .button_theme(button_theme.clone())
+                .build(app);
             assert_ne!(focus_color_black, focus_color_white);
 
-            let hover_color_black = ThemeData::builder().hover_color(Colors::BLACK).build(app);
-            let hover_color_white = ThemeData::builder().hover_color(Colors::WHITE).build(app);
+            let hover_color_black = ThemeData::builder()
+                .hover_color(Colors::BLACK)
+                .button_theme(button_theme.clone())
+                .build(app);
+            let hover_color_white = ThemeData::builder()
+                .hover_color(Colors::WHITE)
+                .button_theme(button_theme)
+                .build(app);
             assert_ne!(hover_color_black, hover_color_white);
         });
     }
@@ -4752,11 +4903,13 @@ mod tests {
             bottom_navigation_bar_theme: BottomNavigationBarThemeData::new()
                 .r#type(BottomNavigationBarType::Fixed),
             bottom_sheet_theme: BottomSheetThemeData::new().elevation(1.0),
+            button_theme: ButtonThemeData::new().with_color_scheme(ColorScheme::dark()),
             card_theme: CardThemeData::new().elevation(1.0),
             checkbox_theme: CheckboxThemeData::new(),
             dialog_theme: DialogThemeData::new().background_color(Colors::BLACK),
             divider_theme: DividerThemeData::new().color(Colors::BLACK),
             drawer_theme: DrawerThemeData::new().elevation(1.0),
+            dropdown_menu_theme: DropdownMenuThemeData::new(),
             elevated_button_theme: ElevatedButtonThemeData::new().style(
                 ElevatedButton::style_from()
                     .background_color(Colors::GREEN.primary())
@@ -4882,11 +5035,13 @@ mod tests {
             bottom_navigation_bar_theme: BottomNavigationBarThemeData::new()
                 .r#type(BottomNavigationBarType::Shifting),
             bottom_sheet_theme: BottomSheetThemeData::new().elevation(2.0),
+            button_theme: ButtonThemeData::new().with_color_scheme(ColorScheme::light()),
             card_theme: CardThemeData::new().elevation(2.0),
             checkbox_theme: CheckboxThemeData::new(),
             dialog_theme: DialogThemeData::new().background_color(Colors::WHITE),
             divider_theme: DividerThemeData::new().color(Colors::WHITE),
             drawer_theme: DrawerThemeData::new().elevation(2.0),
+            dropdown_menu_theme: DropdownMenuThemeData::new(),
             elevated_button_theme: ElevatedButtonThemeData::new(),
             expansion_tile_theme: ExpansionTileThemeData::new().background_color(Colors::BLACK),
             filled_button_theme: FilledButtonThemeData::new(),
@@ -4984,11 +5139,13 @@ mod tests {
             .banner_theme(other_theme.banner_theme.clone())
             .bottom_navigation_bar_theme(other_theme.bottom_navigation_bar_theme.clone())
             .bottom_sheet_theme(other_theme.bottom_sheet_theme.clone())
+            .button_theme(other_theme.button_theme.clone())
             .card_theme(other_theme.card_theme.clone())
             .checkbox_theme(other_theme.checkbox_theme.clone())
             .dialog_theme(other_theme.dialog_theme.clone())
             .divider_theme(other_theme.divider_theme.clone())
             .drawer_theme(other_theme.drawer_theme.clone())
+            .dropdown_menu_theme(other_theme.dropdown_menu_theme.clone())
             .elevated_button_theme(other_theme.elevated_button_theme.clone())
             .expansion_tile_theme(other_theme.expansion_tile_theme.clone())
             .filled_button_theme(other_theme.filled_button_theme.clone())
@@ -5127,11 +5284,16 @@ mod tests {
                 theme_data_copy.bottom_sheet_theme,
                 other_theme.bottom_sheet_theme
             );
+            assert_eq!(theme_data_copy.button_theme, other_theme.button_theme);
             assert_eq!(theme_data_copy.card_theme, other_theme.card_theme);
             assert_eq!(theme_data_copy.checkbox_theme, other_theme.checkbox_theme);
             assert_eq!(theme_data_copy.dialog_theme, other_theme.dialog_theme);
             assert_eq!(theme_data_copy.divider_theme, other_theme.divider_theme);
             assert_eq!(theme_data_copy.drawer_theme, other_theme.drawer_theme);
+            assert_eq!(
+                theme_data_copy.dropdown_menu_theme,
+                other_theme.dropdown_menu_theme
+            );
             assert_eq!(
                 theme_data_copy.elevated_button_theme,
                 other_theme.elevated_button_theme

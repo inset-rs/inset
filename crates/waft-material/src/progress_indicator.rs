@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use waft_animation::{
     Animatable, AnimationBehavior, AnimationController, AnyAnimation, Cubic, Curve, Curves,
-    Interval, SawTooth, TweenSequence, TweenSequenceItem,
+    Interval, SawTooth, TweenSequence, TweenSequenceItem, ValueCurveTween, ValueTween,
 };
 use waft_cupertino::CupertinoActivityIndicator;
 use waft_embedder::StrokeCap;
@@ -39,7 +39,6 @@ use crate::generated::progress_indicator_defaults_m3::{
     circular_progress_indicator_defaults_m3, linear_progress_indicator_defaults_m3,
 };
 use crate::material::{Material, MaterialType};
-use crate::page_transitions_theme::{CurveTween, DoubleTween};
 use crate::progress_indicator_theme::{ProgressIndicatorTheme, ProgressIndicatorThemeData};
 use crate::theme::Theme;
 
@@ -1490,24 +1489,24 @@ const ROTATION_COUNT: i64 = (K_INDETERMINATE_CIRCULAR_DURATION / 2222) as i64;
 
 /// Dart's `static final Animatable<double> _strokeHeadTween`.
 fn stroke_head_tween() -> impl Animatable<f64> {
-    CurveTween::new(Rc::new(Interval::new(0.0, 0.5, Curves::fast_out_slow_in())))
-        .chain(CurveTween::new(Rc::new(SawTooth::new(PATH_COUNT))))
+    ValueCurveTween::new(Rc::new(Interval::new(0.0, 0.5, Curves::fast_out_slow_in())))
+        .chain(ValueCurveTween::new(Rc::new(SawTooth::new(PATH_COUNT))))
 }
 
 /// Dart's `static final Animatable<double> _strokeTailTween`.
 fn stroke_tail_tween() -> impl Animatable<f64> {
-    CurveTween::new(Rc::new(Interval::new(0.5, 1.0, Curves::fast_out_slow_in())))
-        .chain(CurveTween::new(Rc::new(SawTooth::new(PATH_COUNT))))
+    ValueCurveTween::new(Rc::new(Interval::new(0.5, 1.0, Curves::fast_out_slow_in())))
+        .chain(ValueCurveTween::new(Rc::new(SawTooth::new(PATH_COUNT))))
 }
 
 /// Dart's `static final Animatable<double> _offsetTween`.
 fn offset_tween() -> impl Animatable<f64> {
-    CurveTween::new(Rc::new(SawTooth::new(PATH_COUNT)))
+    ValueCurveTween::new(Rc::new(SawTooth::new(PATH_COUNT)))
 }
 
 /// Dart's `static final Animatable<double> _rotationTween`.
 fn rotation_tween() -> impl Animatable<f64> {
-    CurveTween::new(Rc::new(SawTooth::new(ROTATION_COUNT)))
+    ValueCurveTween::new(Rc::new(SawTooth::new(ROTATION_COUNT)))
 }
 
 /// The fields of Dart's `_CircularProgressIndicatorState` that
@@ -2039,7 +2038,7 @@ impl StatefulWidget for RefreshProgressIndicator {
             state: StateData::new(),
             single_ticker_provider: SingleTickerProviderStateMixinData::default(),
             circular_state: CircularProgressIndicatorStateData::default(),
-            convert_tween: CurveTween::new(Rc::new(Interval::new(
+            convert_tween: ValueCurveTween::new(Rc::new(Interval::new(
                 0.1,
                 RefreshProgressIndicatorState::STROKE_HEAD_INTERVAL,
                 Curves::linear(),
@@ -2047,12 +2046,12 @@ impl StatefulWidget for RefreshProgressIndicator {
             additional_rotation_tween: TweenSequence::new(vec![
                 // Makes arrow to expand a little bit earlier, to match the Android look.
                 TweenSequenceItem::new(
-                    Arc::new(DoubleTween::new(-0.1, -0.2)),
+                    Arc::new(ValueTween::new(-0.1, -0.2)),
                     RefreshProgressIndicatorState::STROKE_HEAD_INTERVAL,
                 ),
                 // Additional rotation after the arrow expanded
                 TweenSequenceItem::new(
-                    Arc::new(DoubleTween::new(-0.2, 1.35)),
+                    Arc::new(ValueTween::new(-0.2, 1.35)),
                     1.0 - RefreshProgressIndicatorState::STROKE_HEAD_INTERVAL,
                 ),
             ]),
@@ -2067,7 +2066,7 @@ pub struct RefreshProgressIndicatorState {
     state: StateData<RefreshProgressIndicator>,
     single_ticker_provider: SingleTickerProviderStateMixinData,
     circular_state: CircularProgressIndicatorStateData,
-    convert_tween: CurveTween,
+    convert_tween: ValueCurveTween,
     additional_rotation_tween: TweenSequence<f64>,
     // Last value received from the widget before null.
     last_value: Option<f64>,

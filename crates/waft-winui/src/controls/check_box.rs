@@ -755,7 +755,7 @@ impl CustomPainter for AcceptVisualPainter {
 fn trimmed_polyline(
     points: &[(f32, f32)],
     (start, end): (f32, f32),
-) -> Option<std::sync::Arc<waft_embedder::Path>> {
+) -> Option<std::sync::Arc<waft_embedder::valo::Path>> {
     let lengths: Vec<f32> = points
         .windows(2)
         .map(|pair| {

@@ -24,11 +24,19 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — Rust cannot dispatch those operators on an open `T` at runtime.
   Affect: a type without the impl is rejected before the program runs, where Dart throws "Cannot lerp" on the first tick.
 
+- Change: `ValueTween`, `ValueCurveTween` and `ValueConstantTween` are Dart's `Tween`, `CurveTween` and `ConstantTween` as `Copy`/`Clone` values with fixed ends, beside the arena ones.
+  Reason: language — no collector frees an arena tween that a `static final`, a `const` or a build makes and drops.
+  Affect: a driven value tween keeps its own copy, so its ends cannot be written afterwards; a tween that is written after it is driven is the arena `Tween`.
+
 ## animations.rs → animations.dart
 
 - Change: `AnimationMax` and `AnimationMin` combine `f64` animations only.
   Reason: language — Rust has no numeric trait spanning `i64` and `f64`.
   Affect: an integer-valued max or min has nothing to instantiate.
+
+- Change: `ProxyAnimation` retains its parent while it follows it, and gives it back when `set_parent` replaces it.
+  Reason: language — Dart's reference keeps the parent alive; the arena frees an animation its owner destroyed, and a build may hand a proxy an animation it frees at once.
+  Affect: a proxied animation stays readable past its owner's `destroy` until the proxy moves off it or is freed.
 
 ## animation_controller.rs → animation_controller.dart
 

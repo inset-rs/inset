@@ -451,7 +451,7 @@ impl PaintingContext {
         needs_compositing: bool,
         offset: Offset,
         bounds: Rect,
-        clip_path: Arc<Path>,
+        clip_path: Path,
         painter: impl FnOnce(&mut App, &mut PaintingContext, Offset),
         clip_behavior: Clip,
         old_layer: Option<Handle<ClipPathLayer>>,
@@ -461,7 +461,7 @@ impl PaintingContext {
             return None;
         }
         let offset_bounds = bounds.shift(offset);
-        let offset_clip_path = shift_path(&clip_path, offset);
+        let offset_clip_path = clip_path.shift(offset);
         if needs_compositing {
             let layer = old_layer.unwrap_or_else(|| ClipPathLayer::new(app));
             layer.set_clip_path(app, Some(offset_clip_path));
@@ -547,18 +547,6 @@ impl PaintingContext {
         self.push_layer(app, layer.as_container_layer(), painter, Offset::ZERO, None);
         layer
     }
-}
-
-/// dart:ui `Path.shift`: Skia's `makeTransform` by a translation, so a path built as a rounded
-/// rectangle or an oval stays one, and a shadow drawn from it keeps its closed form.
-pub(crate) fn shift_path(path: &Arc<Path>, offset: Offset) -> Arc<Path> {
-    if offset == Offset::ZERO {
-        return Arc::clone(path);
-    }
-    path.transformed(&Matrix4::translation(
-        offset.dx() as f32,
-        offset.dy() as f32,
-    ))
 }
 
 impl ClipContext for PaintingContext {

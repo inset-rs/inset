@@ -1,7 +1,5 @@
 //! Flutter counterpart: `painting/clip.dart`.
 
-use std::sync::Arc;
-
 use waft_embedder::{
     Canvas, Clip, ClipOp, FillRule, Paint, Path, PathBuilder, RRect, RSuperellipse, Rect,
     rrect_radii_elliptical, rsuperellipse_radii_elliptical,
@@ -18,7 +16,7 @@ pub trait ClipContext {
     /// `bounds` is the saveLayer bounds used for [`Clip::AntiAliasWithSaveLayer`].
     fn clip_path_and_paint(
         &mut self,
-        path: &Arc<Path>,
+        path: &Path,
         clip_behavior: Clip,
         bounds: Rect,
         painter: impl FnOnce(&mut Self),
@@ -26,7 +24,12 @@ pub trait ClipContext {
         clip_and_paint(
             self,
             |canvas, do_anti_alias| {
-                canvas.clip_path(path, FillRule::NonZero, ClipOp::Intersect, do_anti_alias);
+                canvas.clip_path(
+                    path.as_valo(),
+                    path.fill_type,
+                    ClipOp::Intersect,
+                    do_anti_alias,
+                );
             },
             clip_behavior,
             bounds,

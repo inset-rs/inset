@@ -13,16 +13,21 @@
 //! The invariant a later editor must keep: every length here is in the parent layer's points, the
 //! window's physical pixels over its scale, as a placement's are in pixels.
 
-use std::sync::Arc;
-
 use objc2_core_foundation::{CFRetained, CGFloat};
 use objc2_core_graphics::CGMutablePath;
 use objc2_foundation::{NSPoint, NSRect, NSSize};
 use objc2_quartz_core::CATransform3D;
 use valo_geometry::{PathElement, Point};
 use waft_embedder::{
-    Matrix4, Mutator, Path, PathBuilder, Placement, RRect, Rect, rrect_radii_elliptical,
+    FillRule, Matrix4, Mutator, Path, PathBuilder, Placement, RRect, Rect, rrect_radii_elliptical,
 };
+
+/// A shape that masks a clip layer: a clip's outline, in the clip layer's points, and the rule
+/// that fills it.
+pub(super) struct ClipShape {
+    pub(super) path: CFRetained<CGMutablePath>,
+    pub(super) fill_rule: FillRule,
+}
 
 /// Where one placement puts a composition layer's `CALayer`s, in its parent layer's points.
 pub(super) struct LayerGeometry {
@@ -31,7 +36,7 @@ pub(super) struct LayerGeometry {
     /// The shapes that clip the layer within the clip layer's bounds, in its points, the
     /// outermost first: rounded and path clips, and rectangles under a turn. Empty when the
     /// bounds are all of it.
-    pub(super) clip_shapes: Vec<CFRetained<CGMutablePath>>,
+    pub(super) clip_shapes: Vec<ClipShape>,
     /// The content layer's bounds: the composition layer in its own coordinates.
     pub(super) content_size: NSSize,
     /// What takes the content layer's coordinates to the clip layer's: every transform above the
@@ -69,7 +74,7 @@ impl LayerGeometry {
 
 /// The clips above `placement` whose shape its clip layer's bounds do not make, in the clip
 /// layer's points, to which `to_clip_layer` takes the view's pixels.
-fn clip_shapes(placement: &Placement, to_clip_layer: &Matrix4) -> Vec<CFRetained<CGMutablePath>> {
+fn clip_shapes(placement: &Placement, to_clip_layer: &Matrix4) -> Vec<ClipShape> {
     let visible = placement.visible_bounds();
     let mut transform = Matrix4::IDENTITY;
     let mut shapes = Vec::new();
@@ -91,10 +96,13 @@ fn clip_shapes(placement: &Placement, to_clip_layer: &Matrix4) -> Vec<CFRetained
                 }
                 rrect_path(*rrect)
             }
-            Mutator::ClipPath(path) => Arc::clone(path),
+            Mutator::ClipPath(path) => path.clone(),
             Mutator::Opacity(_) => continue,
         };
-        shapes.push(core_graphics_path(&shape, &to_clip_layer.then(&transform)));
+        shapes.push(ClipShape {
+            path: core_graphics_path(&shape, &to_clip_layer.then(&transform)),
+            fill_rule: shape.fill_type,
+        });
     }
     shapes
 }
@@ -178,16 +186,16 @@ fn inside_ellipse((x, y): (f64, f64), (radius_x, radius_y): (f64, f64)) -> bool 
     (x * x) / (radius_x * radius_x) + (y * y) / (radius_y * radius_y) < 1.0
 }
 
-fn rect_path(rect: Rect) -> Arc<Path> {
+fn rect_path(rect: Rect) -> Path {
     let mut path = PathBuilder::new();
     path.rect(rect.into());
-    path.build()
+    path.build().into()
 }
 
-fn rrect_path(rrect: RRect) -> Arc<Path> {
+fn rrect_path(rrect: RRect) -> Path {
     let mut path = PathBuilder::new();
     path.rrect_radii_elliptical(rrect.outer_rect(), rrect_radii_elliptical(rrect));
-    path.build()
+    path.build().into()
 }
 
 /// `path` under `transform`, as Core Graphics holds a path. A conic, which Core Graphics has not,
@@ -195,7 +203,7 @@ fn rrect_path(rrect: RRect) -> Arc<Path> {
 /// Flutter's macOS embedder.
 fn core_graphics_path(path: &Path, transform: &Matrix4) -> CFRetained<CGMutablePath> {
     let mut transformed = PathBuilder::new();
-    transformed.append(path, transform);
+    transformed.append(path.as_valo(), transform);
     let transformed = transformed.build();
     let core_graphics = CGMutablePath::new();
     let target = Some(&*core_graphics);
@@ -439,7 +447,7 @@ mod tests {
         let [shape] = filling.clip_shapes.as_slice() else {
             panic!("one shape: {}", filling.clip_shapes.len());
         };
-        let bounds = CGPath::bounding_box(Some(shape));
+        let bounds = CGPath::bounding_box(Some(&shape.path));
         assert!(
             bounds.origin.x.abs() < 1e-6
                 && bounds.origin.y.abs() < 1e-6
@@ -462,7 +470,7 @@ mod tests {
                 .line_to((100.0, 0.0))
                 .line_to((0.0, 100.0))
                 .close();
-            path.build()
+            Path::new(path.build())
         };
         let rect = Rect::from_ltwh(0.0, 0.0, 100.0, 100.0);
         let geometry = LayerGeometry::of(
@@ -478,7 +486,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(geometry.clip_shapes.len(), 2);
-        let first = CGPath::bounding_box(Some(&geometry.clip_shapes[0]));
+        let first = CGPath::bounding_box(Some(&geometry.clip_shapes[0].path));
         assert!(
             (first.size.width - 100.0).abs() < 1e-3,
             "the triangle first: {first:?}"

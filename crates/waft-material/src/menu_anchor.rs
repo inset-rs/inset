@@ -68,7 +68,7 @@ use crate::generated::menu_defaults_m3::{
 };
 use crate::icons::Icons;
 use crate::ink_well::InteractiveInkFeatureFactoryRef;
-use crate::material::{Material, MaterialType, destroy_lingering};
+use crate::material::{Material, MaterialType};
 use crate::material_localizations::MaterialLocalizations;
 use crate::menu_bar_theme::MenuBarTheme;
 use crate::menu_button_theme::MenuButtonTheme;
@@ -834,7 +834,7 @@ trait MenuAnchorStateLeaf: SingleTickerProviderStateMixin + TickerProviderObject
             // The anchor below detaches from it when it rebuilds, as Dart's lingering object
             // allows.
             if let Some(replaced) = replaced {
-                destroy_lingering(app, replaced);
+                app.destroy_lingering(replaced);
             }
         }
 
@@ -903,7 +903,7 @@ trait MenuAnchorStateLeaf: SingleTickerProviderStateMixin + TickerProviderObject
         // The fades still showing the old ones let go of them when they rebuild.
         for animation in cached_animations {
             animation.dispose(app);
-            destroy_lingering(app, animation);
+            app.destroy_lingering(animation);
         }
 
         let widget = self.menu_anchor(app);
@@ -3743,7 +3743,7 @@ impl State for SubmenuButtonState {
             // The anchor below detaches from it when it rebuilds, as Dart's lingering object
             // allows.
             if let Some(replaced) = replaced {
-                destroy_lingering(app, replaced);
+                app.destroy_lingering(replaced);
             }
         }
     }

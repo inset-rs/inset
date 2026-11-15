@@ -1555,6 +1555,7 @@ impl StretchController {
                     self.set_overscroll(app, 0.0);
                     app.get_mut(self).interrupted_overscroll = 0.0;
                     controller.dispose(app);
+                    app.destroy_lingering(controller);
                     app.get_mut(self).controller = None;
                 }
             }),
@@ -1562,6 +1563,7 @@ impl StretchController {
 
         if let Some(old_controller) = app.get(self).controller {
             old_controller.dispose(app);
+            app.destroy_lingering(old_controller);
         }
         app.get_mut(self).controller = Some(controller);
     }
@@ -1574,6 +1576,7 @@ impl StretchController {
         if let Some(controller) = app.get(self).controller {
             app.get_mut(self).interrupted_overscroll = controller.value(app);
             controller.dispose(app);
+            app.destroy_lingering(controller);
             app.get_mut(self).controller = None;
         }
 
@@ -1600,6 +1603,7 @@ impl StretchController {
     fn dispose(self: Handle<Self>, app: &mut App) {
         if let Some(controller) = app.get_mut(self).controller.take() {
             controller.dispose(app);
+            app.destroy_lingering(controller);
         }
         let notifier = app.get(self).overscroll_notifier;
         app.get_mut(notifier).dispose();
@@ -3079,6 +3083,54 @@ mod tests {
         tester.pump_widget(SizedBox::new().into_widget());
         tester.settle();
         assert_eq!(tester.count::<StretchEffect>(), 0);
+    }
+
+    /// Dart's collector frees the `AnimationController` each stretch release animates with once
+    /// the next release or the animation's end replaces it; here the stretch controller frees
+    /// each one it disposes.
+    #[test]
+    fn a_stretch_controller_frees_each_release_animation_it_disposes() {
+        let mut tester = WidgetTester::new();
+        tester
+            .pump_widget(ltr(StretchingOverscrollIndicator::new(AxisDirection::Down)
+                .child(list_of_items(20, 100.0))));
+        let release_controller = |tester: &WidgetTester| {
+            let elements = tester.elements();
+            let mut app = tester.cell.borrow_mut();
+            let state = elements
+                .into_iter()
+                .find_map(|element| {
+                    element.state_handle::<StretchingOverscrollIndicatorState>(&app)
+                })
+                .expect("a mounted StretchingOverscrollIndicator");
+            let stretch = state.stretch_controller(&mut app);
+            app.get(stretch).controller
+        };
+
+        tester.fling_from(tester.view_center(), Offset::new(0.0, 300.0), 1000.0);
+        tester.pump(Duration::ZERO);
+        tester.pump(Duration::from_millis(100));
+        let first = release_controller(&tester).expect("the fling animates the release");
+
+        // A second fling replaces the release animation before it ends.
+        tester.fling_from(tester.view_center(), Offset::new(0.0, 300.0), 1000.0);
+        tester.pump(Duration::ZERO);
+        tester.pump(Duration::from_millis(100));
+        let second = release_controller(&tester).expect("the fling animates the release");
+        assert_ne!(first, second);
+        tester.cell.checkpoint();
+        assert!(
+            !tester.cell.borrow().contains(first),
+            "the replaced release's"
+        );
+
+        tester.settle();
+        assert!(release_controller(&tester).is_none());
+        tester.cell.checkpoint();
+        assert!(
+            !tester.cell.borrow().contains(second),
+            "the finished release's"
+        );
     }
 
     /// "GlowingOverscrollIndicator does not crash at zero area".

@@ -6,8 +6,6 @@ use std::fmt::{self, Debug};
 use std::ops::{BitAnd, BitOr, Deref, Not};
 use std::rc::Rc;
 
-use std::sync::Arc;
-
 use waft_embedder::{Canvas, Color, Offset, Paint, Path, Rect};
 use waft_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, K_IS_WEB};
 use waft_painting::{
@@ -460,6 +458,33 @@ impl WidgetStateProperty<Color> for WidgetStateColor {
             ColorSubclass::Mapper(mapper) => mapper.resolve(states),
         }
     }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_mapper(&self) -> Option<&WidgetStateMapper<Color>> {
+        match &self.subclass {
+            ColorSubclass::Mapper(mapper) => Some(mapper),
+            _ => None,
+        }
+    }
+
+    // Dart's `Color.==`: the same runtime type and value; the mapper subclass has
+    // `WidgetStateMapper.==`.
+    fn eq_property(&self, other: &dyn WidgetStateProperty<Color>) -> bool {
+        if let ColorSubclass::Mapper(mapper) = &self.subclass {
+            return mapper.eq_property(other);
+        }
+        let default_states = WidgetStates::new();
+        other
+            .as_any()
+            .downcast_ref::<WidgetStateColor>()
+            .is_some_and(|other| {
+                self.eq_extension(other)
+                    && self.resolve(&default_states) == other.resolve(&default_states)
+            })
+    }
 }
 
 impl ColorExtension for WidgetStateColor {
@@ -608,10 +633,11 @@ impl WidgetStateMouseCursor {
     /// By default this cursor resolves to [`SystemMouseCursors::CLICK`]. If the widget is
     /// disabled, the cursor resolves to [`SystemMouseCursors::BASIC`].
     pub fn clickable() -> WidgetStateMouseCursor {
-        WidgetStateMouseCursor::resolve_with(
-            Self::resolve_clickable,
-            Some("WidgetStateMouseCursor(clickable)"),
-        )
+        thread_local! {
+            static RESOLVE: WidgetPropertyResolver<MouseCursorRef> =
+                Rc::new(WidgetStateMouseCursor::resolve_clickable);
+        }
+        Self::canonical(&RESOLVE, "WidgetStateMouseCursor(clickable)")
     }
 
     fn resolve_clickable(states: &WidgetStates) -> MouseCursorRef {
@@ -635,10 +661,11 @@ impl WidgetStateMouseCursor {
     /// difference in behavior across platforms reflects native conventions (e.g.,
     /// web uses a hand pointer for buttons, while desktop platforms do not).
     pub fn adaptive_clickable() -> WidgetStateMouseCursor {
-        WidgetStateMouseCursor::resolve_with(
-            Self::resolve_adaptive_clickable,
-            Some("WidgetStateMouseCursor(adaptiveClickable)"),
-        )
+        thread_local! {
+            static RESOLVE: WidgetPropertyResolver<MouseCursorRef> =
+                Rc::new(WidgetStateMouseCursor::resolve_adaptive_clickable);
+        }
+        Self::canonical(&RESOLVE, "WidgetStateMouseCursor(adaptiveClickable)")
     }
 
     fn resolve_adaptive_clickable(states: &WidgetStates) -> MouseCursorRef {
@@ -660,10 +687,39 @@ impl WidgetStateMouseCursor {
     ///
     /// This cursor is the default for many widgets.
     pub fn textable() -> WidgetStateMouseCursor {
-        WidgetStateMouseCursor::resolve_with(
-            Self::resolve_textable,
-            Some("WidgetStateMouseCursor(textable)"),
-        )
+        thread_local! {
+            static RESOLVE: WidgetPropertyResolver<MouseCursorRef> =
+                Rc::new(WidgetStateMouseCursor::resolve_textable);
+        }
+        Self::canonical(&RESOLVE, "WidgetStateMouseCursor(textable)")
+    }
+
+    /// One of Dart's `static const` cursors: every call shares the one resolver, so the
+    /// cursors compare equal as Dart's one canonical object does.
+    fn canonical(
+        resolve: &'static std::thread::LocalKey<WidgetPropertyResolver<MouseCursorRef>>,
+        debug_description: &str,
+    ) -> WidgetStateMouseCursor {
+        WidgetStateMouseCursor {
+            subclass: MouseCursorSubclass::ResolveWith {
+                resolve: resolve.with(Rc::clone),
+                debug_description: debug_description.to_owned(),
+            },
+        }
+    }
+
+    /// Dart's identity of a `_WidgetStateMouseCursor`: a cursor is the object its resolver
+    /// was made for, so two share a resolver only when they are one of the canonical cursors.
+    fn same_resolver(&self, other: &WidgetStateMouseCursor) -> bool {
+        match (&self.subclass, &other.subclass) {
+            (
+                MouseCursorSubclass::ResolveWith { resolve: mine, .. },
+                MouseCursorSubclass::ResolveWith {
+                    resolve: theirs, ..
+                },
+            ) => Rc::ptr_eq(mine, theirs),
+            _ => false,
+        }
     }
 
     fn resolve_textable(states: &WidgetStates) -> MouseCursorRef {
@@ -694,17 +750,14 @@ impl MouseCursor for WidgetStateMouseCursor {
 
     // Identity, except that the mapper subclass compares maps (Dart's `WidgetStateMapper.==`).
     fn eq_cursor(&self, other: &dyn MouseCursor) -> bool {
-        match (
-            &self.subclass,
-            other.as_any().downcast_ref::<WidgetStateMouseCursor>(),
-        ) {
-            (
-                MouseCursorSubclass::Mapper(mine),
-                Some(WidgetStateMouseCursor {
-                    subclass: MouseCursorSubclass::Mapper(theirs),
-                }),
-            ) => mine == theirs,
-            _ => std::ptr::addr_eq(self as *const Self, other as *const dyn MouseCursor),
+        let Some(other) = other.as_any().downcast_ref::<WidgetStateMouseCursor>() else {
+            return false;
+        };
+        match (&self.subclass, &other.subclass) {
+            (MouseCursorSubclass::Mapper(mine), MouseCursorSubclass::Mapper(theirs)) => {
+                mine == theirs
+            }
+            _ => self.same_resolver(other),
         }
     }
 }
@@ -716,6 +769,28 @@ impl WidgetStateProperty<MouseCursorRef> for WidgetStateMouseCursor {
         match &self.subclass {
             MouseCursorSubclass::ResolveWith { resolve, .. } => resolve(states),
             MouseCursorSubclass::Mapper(mapper) => mapper.resolve(states),
+        }
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_mapper(&self) -> Option<&WidgetStateMapper<MouseCursorRef>> {
+        match &self.subclass {
+            MouseCursorSubclass::Mapper(mapper) => Some(mapper),
+            MouseCursorSubclass::ResolveWith { .. } => None,
+        }
+    }
+
+    // Identity, except that the mapper subclass has `WidgetStateMapper.==`.
+    fn eq_property(&self, other: &dyn WidgetStateProperty<MouseCursorRef>) -> bool {
+        match &self.subclass {
+            MouseCursorSubclass::Mapper(mapper) => mapper.eq_property(other),
+            MouseCursorSubclass::ResolveWith { .. } => other
+                .as_any()
+                .downcast_ref::<WidgetStateMouseCursor>()
+                .is_some_and(|other| self.same_resolver(other)),
         }
     }
 }
@@ -830,6 +905,28 @@ impl WidgetStateProperty<Option<BorderSide>> for WidgetStateBorderSide {
             BorderSideSubclass::Mapper(mapper) => mapper.resolve(states),
         }
     }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_mapper(&self) -> Option<&WidgetStateMapper<Option<BorderSide>>> {
+        match &self.subclass {
+            BorderSideSubclass::Mapper(mapper) => Some(mapper),
+            BorderSideSubclass::ResolveWith(_) => None,
+        }
+    }
+
+    // Dart's `BorderSide.==`; the mapper subclass has `WidgetStateMapper.==`.
+    fn eq_property(&self, other: &dyn WidgetStateProperty<Option<BorderSide>>) -> bool {
+        if let BorderSideSubclass::Mapper(mapper) = &self.subclass {
+            return mapper.eq_property(other);
+        }
+        other
+            .as_any()
+            .downcast_ref::<WidgetStateBorderSide>()
+            .is_some_and(|other| self.eq_extension(other))
+    }
 }
 
 impl BorderSideExtension for WidgetStateBorderSide {
@@ -917,6 +1014,10 @@ impl WidgetStateProperty<Option<BorderSide>> for LerpSides {
             }
         }
     }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 }
 
 impl Debug for LerpSides {
@@ -991,6 +1092,31 @@ impl WidgetStateProperty<Option<Box<dyn OutlinedBorder>>> for WidgetStateOutline
             OutlinedBorderSubclass::Mapper(mapper) => mapper.resolve(states),
         }
     }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_mapper(&self) -> Option<&WidgetStateMapper<Option<Box<dyn OutlinedBorder>>>> {
+        match &self.subclass {
+            OutlinedBorderSubclass::Mapper(mapper) => Some(mapper.as_ref()),
+            OutlinedBorderSubclass::ResolveWith(_) => None,
+        }
+    }
+
+    // Dart's `RoundedRectangleBorder.==`; the mapper subclass has `WidgetStateMapper.==`.
+    fn eq_property(
+        &self,
+        other: &dyn WidgetStateProperty<Option<Box<dyn OutlinedBorder>>>,
+    ) -> bool {
+        if let OutlinedBorderSubclass::Mapper(mapper) = &self.subclass {
+            return mapper.eq_property(other);
+        }
+        other
+            .as_any()
+            .downcast_ref::<WidgetStateOutlinedBorder>()
+            .is_some_and(|other| self.eq_shape(other))
+    }
 }
 
 impl Debug for WidgetStateOutlinedBorder {
@@ -1002,25 +1128,6 @@ impl Debug for WidgetStateOutlinedBorder {
             OutlinedBorderSubclass::Mapper(mapper) => mapper.fmt(f),
         }
     }
-}
-
-/// Dart's `mapEquals` over two border maps, comparing borders by `==`.
-fn outlined_border_maps_equal(
-    a: &WidgetStateMapper<Option<Box<dyn OutlinedBorder>>>,
-    b: &WidgetStateMapper<Option<Box<dyn OutlinedBorder>>>,
-) -> bool {
-    let same =
-        |x: &Option<Box<dyn OutlinedBorder>>, y: &Option<Box<dyn OutlinedBorder>>| match (x, y) {
-            (None, None) => true,
-            (Some(x), Some(y)) => x.eq_shape(&**y as &dyn ShapeBorder),
-            _ => false,
-        };
-    a.map.len() == b.map.len()
-        && a.map.iter().all(|(key, value)| {
-            b.map
-                .iter()
-                .any(|(other_key, other_value)| other_key == key && same(value, other_value))
-        })
 }
 
 /// `_WidgetStateOutlinedBorder extends RoundedRectangleBorder`: every `ShapeBorder` member is
@@ -1042,11 +1149,11 @@ impl ShapeBorder for WidgetStateOutlinedBorder {
         self.border.lerp_to(b, t)
     }
 
-    fn get_outer_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Arc<Path> {
+    fn get_outer_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Path {
         self.border.get_outer_path(rect, text_direction)
     }
 
-    fn get_inner_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Arc<Path> {
+    fn get_inner_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Path {
         self.border.get_inner_path(rect, text_direction)
     }
 
@@ -1106,7 +1213,7 @@ impl ShapeBorder for WidgetStateOutlinedBorder {
                         (
                             OutlinedBorderSubclass::Mapper(mine),
                             OutlinedBorderSubclass::Mapper(theirs),
-                        ) => outlined_border_maps_equal(mine, theirs),
+                        ) => mine == theirs,
                         _ => false,
                     }
             })
@@ -1210,6 +1317,28 @@ impl WidgetStateProperty<TextStyle> for WidgetStateTextStyle {
             TextStyleSubclass::Mapper(mapper) => mapper.resolve(states),
         }
     }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_mapper(&self) -> Option<&WidgetStateMapper<TextStyle>> {
+        match &self.subclass {
+            TextStyleSubclass::Mapper(mapper) => Some(mapper),
+            TextStyleSubclass::ResolveWith(_) => None,
+        }
+    }
+
+    // Dart's `TextStyle.==`; the mapper subclass has `WidgetStateMapper.==`.
+    fn eq_property(&self, other: &dyn WidgetStateProperty<TextStyle>) -> bool {
+        if let TextStyleSubclass::Mapper(mapper) = &self.subclass {
+            return mapper.eq_property(other);
+        }
+        other
+            .as_any()
+            .downcast_ref::<WidgetStateTextStyle>()
+            .is_some_and(|other| self.eq_extension(other))
+    }
 }
 
 impl TextStyleExtension for WidgetStateTextStyle {
@@ -1280,7 +1409,8 @@ impl MaybeWidgetStateProperty<TextStyle> for AnyTextStyle {
 /// ## Performance Consideration
 ///
 /// In order for constructed [`WidgetStateProperty`] objects to be recognized as
-/// equivalent, they need to have overrides for `==`.
+/// equivalent, they need to have overrides for `==`
+/// ([`eq_property`](WidgetStateProperty::eq_property)).
 ///
 /// This comes into play when, for instance, two `ThemeData` objects are being
 /// compared for equality.
@@ -1288,8 +1418,8 @@ impl MaybeWidgetStateProperty<TextStyle> for AnyTextStyle {
 /// For a concrete `WidgetStateProperty` object that supports stable
 /// equality checks, consider using [`WidgetStateMapper`].
 ///
-/// A property is stored erased as a [`WidgetStatePropertyRef`]; Dart's static members
-/// (`from_map`, `resolve_as`, `resolve_with`, `all`, `lerp`) are on
+/// A property is stored erased as a [`WidgetStatePropertyRef`], whose `==` is Dart's;
+/// Dart's static members (`from_map`, `resolve_as`, `resolve_with`, `all`, `lerp`) are on
 /// `<dyn WidgetStateProperty<T>>`.
 ///
 /// See also:
@@ -1300,13 +1430,37 @@ impl MaybeWidgetStateProperty<TextStyle> for AnyTextStyle {
 ///    implement it.
 ///
 /// [`resolve`]: WidgetStateProperty::resolve
-pub trait WidgetStateProperty<T>: Debug {
+pub trait WidgetStateProperty<T>: Debug + 'static {
     /// Returns a value of type `T` that depends on `states`.
     ///
     /// Widgets like `TextButton` and `ElevatedButton` apply this method to their
     /// current [`WidgetState`]s to compute colors and other visual parameters
     /// at build time.
     fn resolve(&self, states: &WidgetStates) -> T;
+
+    /// Downcast support for Dart's `is` checks in `==`.
+    fn as_any(&self) -> &dyn Any;
+
+    /// Dart's `other is WidgetStateMapper<T>`: the mapper this property is, if it is one,
+    /// as the private mapper subclasses of `WidgetStateColor` and the rest are.
+    fn as_mapper(&self) -> Option<&WidgetStateMapper<T>> {
+        None
+    }
+
+    /// Dart's `==`. Identity unless a class overrides it, as [`WidgetStatePropertyAll`] and
+    /// [`WidgetStateMapper`] do.
+    fn eq_property(&self, other: &dyn WidgetStateProperty<T>) -> bool {
+        std::ptr::addr_eq(
+            self as *const Self,
+            other as *const dyn WidgetStateProperty<T>,
+        )
+    }
+}
+
+impl<T: 'static> PartialEq for dyn WidgetStateProperty<T> {
+    fn eq(&self, other: &dyn WidgetStateProperty<T>) -> bool {
+        self.eq_property(other)
+    }
 }
 
 /// A shared, erased [`WidgetStateProperty`] (a Dart object reference).
@@ -1347,7 +1501,7 @@ impl<T: 'static> dyn WidgetStateProperty<T> {
     /// [`WidgetState::any`] as the final [`WidgetStateMap`] key.
     pub fn from_map(map: WidgetStateMap<T>) -> WidgetStatePropertyRef<T>
     where
-        T: Clone + Debug,
+        T: Clone + Debug + PartialEq,
     {
         Rc::new(WidgetStateMapper::new(map))
     }
@@ -1385,7 +1539,7 @@ impl<T: 'static> dyn WidgetStateProperty<T> {
     /// Prefer using [`WidgetStatePropertyAll`] directly.
     pub fn all(value: T) -> WidgetStatePropertyRef<T>
     where
-        T: Clone + Debug,
+        T: Clone + Debug + PartialEq,
     {
         Rc::new(WidgetStatePropertyAll::new(value))
     }
@@ -1425,6 +1579,10 @@ impl<T: 'static> WidgetStateProperty<Option<T>> for LerpProperties<T> {
         let resolved_a = self.a.as_ref().map(|a| a.resolve(states));
         let resolved_b = self.b.as_ref().map(|b| b.resolve(states));
         (self.lerp_function)(resolved_a, resolved_b, self.t)
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 
@@ -1475,6 +1633,10 @@ impl<T: 'static> WidgetStateProperty<Option<T>> for LerpOptionalProperties<T> {
         let resolved_b = self.b.as_ref().and_then(|b| b.resolve(states));
         (self.lerp_function)(resolved_a, resolved_b, self.t)
     }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 }
 
 impl<T> Debug for LerpOptionalProperties<T> {
@@ -1487,9 +1649,13 @@ struct WidgetStatePropertyWith<T> {
     resolve: WidgetPropertyResolver<T>,
 }
 
-impl<T> WidgetStateProperty<T> for WidgetStatePropertyWith<T> {
+impl<T: 'static> WidgetStateProperty<T> for WidgetStatePropertyWith<T> {
     fn resolve(&self, states: &WidgetStates) -> T {
         (self.resolve)(states)
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 
@@ -1584,7 +1750,7 @@ impl<T> WidgetStateMapper<T> {
     }
 }
 
-impl<T: Clone + Debug + 'static> WidgetStateProperty<T> for WidgetStateMapper<T> {
+impl<T: Clone + Debug + PartialEq + 'static> WidgetStateProperty<T> for WidgetStateMapper<T> {
     fn resolve(&self, states: &WidgetStates) -> T {
         for (key, value) in &self.map {
             if key.is_satisfied_by(states) {
@@ -1601,6 +1767,19 @@ impl<T: Clone + Debug + 'static> WidgetStateProperty<T> for WidgetStateMapper<T>
              or adding the \"WidgetState::any()\" key to this map.",
             t = type_name::<T>()
         );
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_mapper(&self) -> Option<&WidgetStateMapper<T>> {
+        Some(self)
+    }
+
+    // Dart's `other is WidgetStateMapper<T> && mapEquals(_map, other._map)`.
+    fn eq_property(&self, other: &dyn WidgetStateProperty<T>) -> bool {
+        other.as_mapper().is_some_and(|other| self == other)
     }
 }
 
@@ -1644,9 +1823,22 @@ impl<T> WidgetStatePropertyAll<T> {
     }
 }
 
-impl<T: Clone + Debug> WidgetStateProperty<T> for WidgetStatePropertyAll<T> {
+impl<T: Clone + Debug + PartialEq + 'static> WidgetStateProperty<T> for WidgetStatePropertyAll<T> {
     fn resolve(&self, _states: &WidgetStates) -> T {
         self.value.clone()
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    // Dart's `other is WidgetStatePropertyAll<T> && other.runtimeType == runtimeType &&
+    // other.value == value`.
+    fn eq_property(&self, other: &dyn WidgetStateProperty<T>) -> bool {
+        other
+            .as_any()
+            .downcast_ref::<WidgetStatePropertyAll<T>>()
+            .is_some_and(|other| other.value == self.value)
     }
 }
 
@@ -2133,6 +2325,52 @@ mod tests {
         assert!(text(WHITE, BLACK) != text(BLACK, WHITE));
     }
 
+    /// Not a Dart case: the `==` overrides of `widget_state.dart`, read through the erased
+    /// property a theme stores.
+    #[test]
+    fn erased_properties_compare_as_darts_equality_overrides_do() {
+        let all = |value: f64| <dyn WidgetStateProperty<f64>>::all(value);
+        assert!(*all(1.0) == *all(1.0));
+        assert!(*all(1.0) != *all(2.0));
+
+        let map = |first: Color, rest: Color| {
+            <dyn WidgetStateProperty<Color>>::from_map(vec![
+                (WidgetState::Disabled.into(), first),
+                (WidgetState::any(), rest),
+            ])
+        };
+        assert!(*map(WHITE, BLACK) == *map(WHITE, BLACK));
+        assert!(*map(WHITE, BLACK) != *map(BLACK, WHITE));
+        let mapped_color: WidgetStatePropertyRef<Color> =
+            Rc::new(WidgetStateColor::from_map(vec![
+                (WidgetState::Disabled.into(), WHITE),
+                (WidgetState::any(), BLACK),
+            ]));
+        assert!(*map(WHITE, BLACK) == *mapped_color);
+        assert!(*mapped_color == *map(WHITE, BLACK));
+        assert!(*map(WHITE, BLACK) != *<dyn WidgetStateProperty<Color>>::all(WHITE));
+
+        let resolved = <dyn WidgetStateProperty<f64>>::resolve_with(|_| 1.0);
+        assert!(*resolved == *Rc::clone(&resolved));
+        assert!(*resolved != *<dyn WidgetStateProperty<f64>>::resolve_with(|_| 1.0));
+
+        let color = |value: Color| -> WidgetStatePropertyRef<Color> {
+            Rc::new(WidgetStateColor::resolve_with(move |_| value))
+        };
+        assert!(*color(WHITE) == *color(WHITE));
+        assert!(*color(WHITE) != *color(BLACK));
+
+        // Dart's `WidgetStatePropertyAll<Widget?>`: widgets compare by identity.
+        use crate::framework::{IntoWidget, WidgetRef};
+        let icon: WidgetRef = crate::widgets::basic::SizedBox::new().into_widget();
+        let widget = |widget: &WidgetRef| {
+            <dyn WidgetStateProperty<Option<WidgetRef>>>::all(Some(Rc::clone(widget)))
+        };
+        assert!(*widget(&icon) == *widget(&icon));
+        let other: WidgetRef = crate::widgets::basic::SizedBox::new().into_widget();
+        assert!(*widget(&icon) != *widget(&other));
+    }
+
     // widget_state_property_test.dart 'WidgetStateBorderSide.lerp()'.
     #[test]
     fn border_side_lerp_interpolates_the_resolved_sides() {
@@ -2250,6 +2488,32 @@ mod tests {
         let textable = WidgetStateMouseCursor::textable();
         assert!(
             *textable.resolve(&WidgetStates::new()) == *cursor(SystemMouseCursors::TEXT.into())
+        );
+
+        // Dart's `static const` cursors are one object each, so they compare equal; a
+        // `resolve_with` cursor is equal only to itself.
+        let as_property =
+            |cursor: WidgetStateMouseCursor| -> WidgetStatePropertyRef<MouseCursorRef> {
+                Rc::new(cursor)
+            };
+        assert!(
+            *as_property(WidgetStateMouseCursor::clickable())
+                == *as_property(WidgetStateMouseCursor::clickable())
+        );
+        assert!(
+            *as_property(WidgetStateMouseCursor::clickable())
+                != *as_property(WidgetStateMouseCursor::textable())
+        );
+        let as_cursor = |cursor: WidgetStateMouseCursor| -> MouseCursorRef { Rc::new(cursor) };
+        assert!(
+            *as_cursor(WidgetStateMouseCursor::adaptive_clickable())
+                == *as_cursor(WidgetStateMouseCursor::adaptive_clickable())
+        );
+        let resolve_click =
+            |_: &WidgetStates| -> MouseCursorRef { SystemMouseCursors::CLICK.into() };
+        assert!(
+            *as_property(WidgetStateMouseCursor::resolve_with(resolve_click, None))
+                != *as_property(WidgetStateMouseCursor::resolve_with(resolve_click, None))
         );
         assert!(
             *textable.resolve(&states([WidgetState::Disabled]))

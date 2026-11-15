@@ -937,7 +937,7 @@ impl PredictiveBackRoute for ContentDialogRoute {
 impl TransitionRoute for ContentDialogRoute {
     waft_widgets::raw_dialog_route_transition_route_overrides!();
 
-    fn reverse_transition_duration(self: Handle<Self>, _app: &App) -> Duration {
+    fn reverse_transition_duration(self: Handle<Self>, _app: &mut App) -> Duration {
         CLOSE_SCALE_DURATION
     }
 }

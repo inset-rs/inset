@@ -896,16 +896,8 @@ impl ScrollBehavior for MaterialScrollBehavior {
         self
     }
 
-    /// Dart reads `Theme.of(context).platform`; this reads the nearest [`Theme`] above
-    /// `context` without registering a dependency, because the getter is given `&App` only.
-    /// Without one it answers what `Theme.of`'s fallbacks answer: the default platform.
-    fn get_platform(&self, app: &App, context: BuildContext) -> TargetPlatform {
-        context
-            .find_ancestor_widget_of_exact_type::<Theme>(app)
-            .map_or_else(
-                || app.platform().target_platform(),
-                |theme| theme.data.platform,
-            )
+    fn get_platform(&self, app: &mut App, context: BuildContext) -> TargetPlatform {
+        Theme::of(app, context).platform
     }
 
     fn build_scrollbar(
@@ -2131,7 +2123,7 @@ mod tests {
                 page_scroll_behavior(&mut tester, |probe| MaterialApp::new().home(probe));
             assert_eq!(behavior.type_id(), TypeId::of::<MaterialScrollBehavior>());
             assert_eq!(
-                behavior.get_keyboard_dismiss_behavior(&tester.cell.borrow(), context),
+                behavior.get_keyboard_dismiss_behavior(&mut tester.cell.borrow_mut(), context),
                 ScrollViewKeyboardDismissBehavior::Manual
             );
         });
@@ -2152,9 +2144,38 @@ mod tests {
                     .home(probe)
             });
             assert_eq!(
-                behavior.get_keyboard_dismiss_behavior(&tester.cell.borrow(), context),
+                behavior.get_keyboard_dismiss_behavior(&mut tester.cell.borrow_mut(), context),
                 ScrollViewKeyboardDismissBehavior::OnDrag
             );
+        });
+    }
+
+    // Dart's `getPlatform` reads `Theme.of(context)`, so a page that asks depends on the theme.
+    #[test]
+    fn the_material_scroll_behavior_platform_follows_a_theme_change() {
+        with_main_thread_stack(|| {
+            let mut tester = tester_on(TargetPlatform::Android);
+            let seen = Rc::new(RefCell::new(Vec::new()));
+            let probe = {
+                let seen = Rc::clone(&seen);
+                Builder::new(move |app, context| {
+                    seen.borrow_mut()
+                        .push(MaterialScrollBehavior::new().get_platform(app, context));
+                    SizedBox::new().into_widget()
+                })
+                .into_widget()
+            };
+            for platform in [TargetPlatform::Android, TargetPlatform::IOS] {
+                let probe = probe.clone();
+                pump(&mut tester, |app| {
+                    MaterialApp::new()
+                        .theme(ThemeData::builder().platform(platform).build(app))
+                        .home(probe)
+                });
+                tester.pump_and_settle();
+            }
+            assert_eq!(seen.borrow().first(), Some(&TargetPlatform::Android));
+            assert_eq!(seen.borrow().last(), Some(&TargetPlatform::IOS));
         });
     }
 
@@ -2167,7 +2188,7 @@ mod tests {
             self
         }
 
-        fn get_scroll_physics(&self, _app: &App, _context: BuildContext) -> ScrollPhysicsRef {
+        fn get_scroll_physics(&self, _app: &mut App, _context: BuildContext) -> ScrollPhysicsRef {
             Rc::new(NeverScrollableScrollPhysics::new())
         }
     }
@@ -2183,7 +2204,7 @@ mod tests {
                     .home(probe)
             });
             assert_eq!(behavior.type_id(), TypeId::of::<MockScrollBehavior>());
-            let physics = behavior.get_scroll_physics(&tester.cell.borrow(), context);
+            let physics = behavior.get_scroll_physics(&mut tester.cell.borrow_mut(), context);
             assert!(
                 physics
                     .as_any()

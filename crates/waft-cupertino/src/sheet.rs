@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use waft_animation::{
     Animatable, Animation, AnimationBehavior, AnimationController, AnimationStatus,
-    AnimationStatusListener, AnyAnimation, CurvedAnimation, Curves,
+    AnimationStatusListener, AnyAnimation, CurvedAnimation, Curves, ValueTween,
 };
 use waft_embedder::{Brightness, Color, Offset, Radius, SystemUiOverlayStyle};
 use waft_foundation::{App, ChangeNotifier, ChangeNotifierData, CompleterFuture, Handle, Listener};
@@ -69,52 +69,8 @@ const K_TOP_GAP_RATIO: f64 = 0.08;
 // running iOS 18.0 simulators.
 const K_STRETCHED_TOP_GAP_RATIO: f64 = 0.072;
 
-/// Dart's `Tween<Offset>`: a value rather than an arena object, so a driven animation may
-/// outlive the call that built it without a slot to free.
-#[derive(Clone, Copy, Debug)]
-struct OffsetTween {
-    begin: Offset,
-    end: Offset,
-}
-
-impl OffsetTween {
-    const fn new(begin: Offset, end: Offset) -> OffsetTween {
-        OffsetTween { begin, end }
-    }
-}
-
-impl Animatable<Offset> for OffsetTween {
-    fn transform(&self, _app: &App, t: f64) -> Offset {
-        if t == 0.0 {
-            return self.begin;
-        }
-        if t == 1.0 {
-            return self.end;
-        }
-        Offset::lerp(Some(self.begin), Some(self.end), t).expect("both ends are set")
-    }
-}
-
-/// Dart's `Tween<double>`, as a value; see [`OffsetTween`].
-#[derive(Clone, Copy, Debug)]
-struct DoubleTween {
-    begin: f64,
-    end: f64,
-}
-
-impl DoubleTween {
-    const fn new(begin: f64, end: f64) -> DoubleTween {
-        DoubleTween { begin, end }
-    }
-}
-
-impl Animatable<f64> for DoubleTween {
-    fn transform(&self, _app: &App, t: f64) -> f64 {
-        self.begin + (self.end - self.begin) * t
-    }
-}
-
-/// Dart's `Tween<BorderRadiusGeometry>`, as a value; see [`OffsetTween`].
+/// Dart's `Tween<BorderRadiusGeometry>` as a value, a [`ValueTween`] whose type has no
+/// `TweenLerp`: waft-painting does not depend on waft-animation, so neither crate can give it one.
 #[derive(Clone, Copy, Debug)]
 struct BorderRadiusGeometryTween {
     begin: BorderRadiusGeometry,
@@ -146,27 +102,27 @@ impl Animatable<BorderRadiusGeometry> for BorderRadiusGeometryTween {
 //
 // Begins fully offscreen below the screen and ends onscreen with a small gap at
 // the top of the screen. Values found from eyeballing a simulator running iOS 18.0.
-const K_BOTTOM_UP_TWEEN: OffsetTween = OffsetTween::new(Offset::new(0.0, 1.0), Offset::ZERO);
+const K_BOTTOM_UP_TWEEN: ValueTween<Offset> = ValueTween::new(Offset::new(0.0, 1.0), Offset::ZERO);
 
 // Offset change for when a new sheet covers another sheet. '0.0' represents the
 // top of the space available for the new sheet, but because the previous sheet
 // was lowered slightly, the new sheet needs to go slightly higher than that.
 // Values found from eyeballing a simulator running iOS 18.0.
-const K_BOTTOM_UP_TWEEN_WHEN_COVERING_OTHER_SHEET: OffsetTween =
-    OffsetTween::new(Offset::new(0.0, 1.0), Offset::new(0.0, -0.02));
+const K_BOTTOM_UP_TWEEN_WHEN_COVERING_OTHER_SHEET: ValueTween<Offset> =
+    ValueTween::new(Offset::new(0.0, 1.0), Offset::new(0.0, -0.02));
 
 // Tween that animates a sheet slightly up when it is covered by a new sheet.
 // Values found from eyeballing a simulator running iOS 18.0.
-const K_MID_UP_TWEEN: OffsetTween = OffsetTween::new(Offset::ZERO, Offset::new(0.0, -0.005));
+const K_MID_UP_TWEEN: ValueTween<Offset> = ValueTween::new(Offset::ZERO, Offset::new(0.0, -0.005));
 
 // Offset from top of screen to slightly down when a fullscreen page is covered
 // by a sheet. Values found from eyeballing a simulator running iOS 18.0.
-const K_TOP_DOWN_TWEEN: OffsetTween = OffsetTween::new(Offset::ZERO, Offset::new(0.0, 0.07));
+const K_TOP_DOWN_TWEEN: ValueTween<Offset> = ValueTween::new(Offset::ZERO, Offset::new(0.0, 0.07));
 
 // Opacity of the overlay color put over the sheet as it moves into the background.
 // Used to distinguish the sheet from the background. Value derived from eyeballing
 // a simulator running iOS 18.0.
-const K_OPACITY_TWEEN: DoubleTween = DoubleTween::new(0.0, 0.10);
+const K_OPACITY_TWEEN: ValueTween<f64> = ValueTween::new(0.0, 0.10);
 
 // The minimum velocity needed for a drag downwards to dismiss the sheet. Eyeballed
 // from a comparison against a simulator running iOS 18.0.
@@ -183,7 +139,7 @@ const K_DROPPED_SHEET_DRAG_ANIMATION_DURATION: Duration = Duration::from_millis(
 // will go from a default of 1.0 to 1.0 - _kSheetScaleFactor.
 const K_SHEET_SCALE_FACTOR: f64 = 0.0835;
 
-const K_SCALE_TWEEN: DoubleTween = DoubleTween::new(1.0, 1.0 - K_SHEET_SCALE_FACTOR);
+const K_SCALE_TWEEN: ValueTween<f64> = ValueTween::new(1.0, 1.0 - K_SHEET_SCALE_FACTOR);
 
 /// Dart's `ValueGetter<bool>` on a route flag.
 type RouteFlagGetter = Rc<dyn Fn(&App) -> bool>;
@@ -517,6 +473,18 @@ impl CupertinoSheetTransition {
         let slide_animation = curved_animation.as_animation().drive(app, K_TOP_DOWN_TWEEN);
         let scale_animation = curved_animation.as_animation().drive(app, K_SCALE_TWEEN);
         curved_animation.dispose(app);
+        // The builder below reads the radius on every frame, so it retains it; the driven
+        // animations retain the curve, and the transitions they are handed retain them.
+        let retained_radius_animation = app.retain(radius_animation);
+        app.destroy_lingering(curved_animation);
+        for driven in [
+            radius_animation.id(),
+            opacity_animation.id(),
+            slide_animation.id(),
+            scale_animation.id(),
+        ] {
+            app.destroy_lingering(driven);
+        }
 
         let is_dark_mode = CupertinoTheme::brightness_of(app, context) == Brightness::Dark;
         let overlay_color = if is_dark_mode {
@@ -560,7 +528,7 @@ impl CupertinoSheetTransition {
                                     move |app, _context, _child| {
                                         let mut clip = ClipRSuperellipse::new().border_radius(
                                             if !secondary_animation.is_dismissed(app) {
-                                                radius_animation.value(app)
+                                                retained_radius_animation.value(app)
                                             } else {
                                                 BorderRadiusGeometry::ZERO
                                             },
@@ -592,6 +560,10 @@ impl CupertinoSheetTransition {
         let slide_animation = curved_animation.as_animation().drive(app, K_MID_UP_TWEEN);
         let scale_animation = curved_animation.as_animation().drive(app, K_SCALE_TWEEN);
         curved_animation.dispose(app);
+        // The driven animations retain the curve, and the transitions below retain them.
+        app.destroy_lingering(curved_animation);
+        app.destroy_lingering(slide_animation);
+        app.destroy_lingering(scale_animation);
 
         let mut clip = ClipRSuperellipse::new().border_radius(BorderRadiusGeometry::BorderRadius(
             BorderRadius::vertical(Radius::circular(12.0), Radius::ZERO),
@@ -684,7 +656,7 @@ impl CupertinoSheetTransitionState {
         let stretched_top_gap = top_gap - STRETCH_DISTANCE;
         let stretch_drag_animation = self
             .stretch_drag_controller(app)
-            .drive(app, DoubleTween::new(top_gap, stretched_top_gap));
+            .drive(app, ValueTween::new(top_gap, stretched_top_gap));
         let secondary_position_animation = secondary_position_curve
             .as_animation()
             .drive(app, K_MID_UP_TWEEN);
@@ -702,10 +674,36 @@ impl CupertinoSheetTransitionState {
         let curves = [state.primary_position_curve, state.secondary_position_curve];
         for curve in curves.into_iter().flatten() {
             curve.dispose(app);
+            // The animations driven from it retain it until the transitions move off them.
+            app.destroy_lingering(curve);
         }
         let state = app.get_mut(self);
         state.primary_position_curve = None;
         state.secondary_position_curve = None;
+    }
+
+    /// Frees the driven animations `setup_animation` made, which Dart's collector frees once
+    /// they are replaced; the builder and transitions built from them retain them until they
+    /// move off.
+    fn free_animations(self: Handle<Self>, app: &mut App) {
+        let state = app.get_mut(self);
+        let animations = [
+            state
+                .stretch_drag_animation
+                .take()
+                .map(|animation| animation.id()),
+            state
+                .secondary_position_animation
+                .take()
+                .map(|animation| animation.id()),
+            state
+                .secondary_scale_animation
+                .take()
+                .map(|animation| animation.id()),
+        ];
+        for animation in animations.into_iter().flatten() {
+            app.destroy_lingering(animation);
+        }
     }
 
     fn cover_sheet_primary_transition(
@@ -737,6 +735,9 @@ impl CupertinoSheetTransitionState {
         let position_animation = curved_animation.as_animation().drive(app, offset_tween);
 
         curved_animation.dispose(app);
+        // The position animation retains the curve, and the `SlideTransition` the position.
+        app.destroy_lingering(curved_animation);
+        app.destroy_lingering(position_animation);
 
         SlideTransition::new(position_animation)
             .child(child)
@@ -820,12 +821,14 @@ impl State for CupertinoSheetTransitionState {
             || old_widget.secondary_route_animation != widget.secondary_route_animation;
         if changed {
             self.dispose_curve(app);
+            self.free_animations(app);
             self.setup_animation(app);
         }
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
         self.dispose_curve(app);
+        self.free_animations(app);
         self.stretch_drag_controller(app).dispose(app);
     }
 
@@ -1128,7 +1131,7 @@ impl TransitionRoute for CupertinoSheetRoute {
         PageRoute::allow_snapshotting(self, app)
     }
 
-    fn transition_duration(self: Handle<Self>, app: &App) -> Duration {
+    fn transition_duration(self: Handle<Self>, app: &mut App) -> Duration {
         CupertinoSheetRouteTransitionMixin::transition_duration(self, app)
     }
 
@@ -1311,7 +1314,7 @@ trait CupertinoSheetRouteTransitionMixin: PageRoute {
     fn build_content(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef;
 
     /// Dart's `_CupertinoSheetRouteTransitionMixin.transitionDuration`.
-    fn transition_duration(self: Handle<Self>, app: &App) -> Duration {
+    fn transition_duration(self: Handle<Self>, app: &mut App) -> Duration {
         let _ = app;
         Duration::from_millis(500)
     }
@@ -2400,6 +2403,27 @@ mod tests {
             .as_route()
     }
 
+    /// Not a Dart case: Dart's collector frees what each frame of a sheet's push builds and
+    /// replaces, for the sheet and for the page it covers; here the transitions free what they
+    /// make once they hand it on.
+    #[test]
+    fn a_frame_of_a_sheet_push_leaves_no_new_arena_objects() {
+        let Sheet { cell, at, .. } = show_sheet(false);
+        let mut at = at;
+        {
+            let mut app = cell.borrow_mut();
+            for _ in 0..3 {
+                at += Duration::from_millis(20);
+                pump(&mut app, at);
+            }
+        }
+        cell.checkpoint();
+        let before = cell.borrow().debug_object_count();
+        pump(&mut cell.borrow_mut(), at + Duration::from_millis(20));
+        cell.checkpoint();
+        assert_eq!(cell.borrow().debug_object_count(), before);
+    }
+
     #[test]
     fn show_cupertino_sheet_slides_a_sheet_route_up_from_the_bottom() {
         let Sheet {
@@ -2435,7 +2459,7 @@ mod tests {
         assert_eq!(animation.value(&app), 1.0);
         assert!(!TransitionRoute::opaque(sheet_route, &app));
         assert_eq!(
-            TransitionRoute::transition_duration(sheet_route, &app),
+            TransitionRoute::transition_duration(sheet_route, &mut app),
             Duration::from_millis(500)
         );
     }

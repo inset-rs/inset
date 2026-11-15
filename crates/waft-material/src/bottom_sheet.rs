@@ -1229,6 +1229,7 @@ impl ModalBottomSheetState {
         if let Some(drag_end_curved_animation) = app.get_mut(self).drag_end_curved_animation.take()
         {
             drag_end_curved_animation.dispose(app);
+            app.destroy_lingering(drag_end_curved_animation);
         }
     }
 
@@ -1271,6 +1272,7 @@ impl ModalBottomSheetState {
         // from [_sheetAnimation], so it is never disposed while still in use.
         if let Some(old_drag_end_curved_animation) = old_drag_end_curved_animation {
             old_drag_end_curved_animation.dispose(app);
+            app.destroy_lingering(old_drag_end_curved_animation);
         }
     }
 }
@@ -1332,10 +1334,14 @@ impl State for ModalBottomSheetState {
         let always_dismissed = k_always_dismissed_animation(app);
         self.sheet_animation(app)
             .set_parent(app, Some(always_dismissed));
-        self.curved_sheet_animation(app).dispose(app);
+        let curved_sheet_animation = self.curved_sheet_animation(app);
+        curved_sheet_animation.dispose(app);
+        app.destroy_lingering(curved_sheet_animation);
         if let Some(drag_end_curved_animation) = app.get(self).drag_end_curved_animation {
             drag_end_curved_animation.dispose(app);
+            app.destroy_lingering(drag_end_curved_animation);
         }
+        app.destroy_lingering(self.sheet_animation(app));
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -1952,7 +1958,7 @@ impl PredictiveBackRoute for ModalBottomSheetRoute {
 impl TransitionRoute for ModalBottomSheetRoute {
     waft_widgets::modal_transition_route_overrides!();
 
-    fn transition_duration(self: Handle<Self>, app: &App) -> Duration {
+    fn transition_duration(self: Handle<Self>, app: &mut App) -> Duration {
         let route = app.get(self);
         route
             .transition_animation_controller
@@ -1964,7 +1970,7 @@ impl TransitionRoute for ModalBottomSheetRoute {
             .unwrap_or(K_BOTTOM_SHEET_ENTER_DURATION)
     }
 
-    fn reverse_transition_duration(self: Handle<Self>, app: &App) -> Duration {
+    fn reverse_transition_duration(self: Handle<Self>, app: &mut App) -> Duration {
         let route = app.get(self);
         route
             .transition_animation_controller
@@ -2115,6 +2121,11 @@ impl ModalRoute for ModalBottomSheetRoute {
             let curve = ModalRoute::barrier_curve(self, app);
             let curve_tween = CurveTween::new(app, curve);
             let color = animation.drive(app, color_tween.chain(curve_tween));
+            waft_widgets::ModalRouteBase::replace_barrier_animations(
+                self,
+                app,
+                vec![color_tween.into(), curve_tween.into(), color.id()],
+            );
             let mut barrier = AnimatedModalBarrier::new(color)
                 // changedInternalState is called if barrierDismissible updates
                 .dismissible(dismissible)
@@ -2125,6 +2136,7 @@ impl ModalRoute for ModalBottomSheetRoute {
             barrier.semantics_on_tap_hint = barrier_on_tap_hint;
             barrier.into_widget()
         } else {
+            waft_widgets::ModalRouteBase::replace_barrier_animations(self, app, Vec::new());
             let mut barrier = ModalBarrier::new()
                 // changedInternalState is called if barrierDismissible updates
                 .dismissible(dismissible)
@@ -3651,6 +3663,42 @@ mod tests {
             );
 
             check_drag_handle_and_colors(&mut tester, default_color, hovering_color);
+        });
+    }
+
+    /// Not a Dart case: Dart's collector frees the tweens and the colour animation each build
+    /// of the sheet's barrier replaces; here the route keeps the last ones and frees what they
+    /// replace.
+    #[test]
+    fn rebuilding_a_modal_bottom_sheet_barrier_leaves_no_new_arena_objects() {
+        with_main_thread_stack(|| {
+            let mut tester = tester();
+            let scaffold_key = GlobalKey::new();
+            tester.pump_widget(app_with_scaffold(m3(&tester), &scaffold_key));
+            let sheet_route: Rc<Cell<Option<waft_widgets::AnyModalRoute>>> = Rc::default();
+            let route = Rc::clone(&sheet_route);
+            Modal::default().show(
+                &tester,
+                scaffold_context(&tester, &scaffold_key),
+                Rc::new(move |app, context| {
+                    route.set(waft_widgets::AnyModalRoute::of(app, context));
+                    text("BottomSheet")
+                }),
+            );
+            tester.pump(Duration::ZERO);
+            tester.pump(Duration::from_secs(1));
+            let sheet_route = sheet_route.get().expect("the sheet built");
+            let rebuild_barrier = |tester: &mut WidgetTester| {
+                sheet_route
+                    .as_route()
+                    .changed_internal_state(&mut tester.cell.borrow_mut());
+                tester.pump(Duration::from_millis(16));
+            };
+            rebuild_barrier(&mut tester);
+
+            let before = tester.cell.borrow().debug_object_count();
+            rebuild_barrier(&mut tester);
+            assert_eq!(tester.cell.borrow().debug_object_count(), before);
         });
     }
 
@@ -6461,6 +6509,64 @@ mod tests {
             ));
 
             drag_text(&mut tester, "BottomSheet", Offset::new(0.0, 150.0));
+        });
+    }
+
+    /// Dart's collector frees the curved animations and the proxy `_ModalBottomSheetState`
+    /// makes, and the drag-end curve each drag replaces; here the state frees each when it
+    /// disposes it.
+    #[test]
+    fn a_modal_bottom_sheet_frees_its_animations_as_it_disposes_them() {
+        with_main_thread_stack(|| {
+            let mut tester = tester();
+            let saved = Saved::default();
+            tester.pump_widget(app_saving_context(&tester, &saved));
+            tester.pump(Duration::ZERO);
+            drop(Modal::default().show(&tester, saved.get(), sheet_builder("BottomSheet")));
+            tester.pump_and_settle();
+            let state = |tester: &WidgetTester| {
+                let sheet = tester.find_by_type::<ModalBottomSheet>()[0];
+                let app = tester.cell.borrow();
+                sheet
+                    .state_handle::<ModalBottomSheetState>(&app)
+                    .expect("a ModalBottomSheet is stateful")
+            };
+            let drag_end_curve = |tester: &WidgetTester| {
+                let state = state(tester);
+                tester
+                    .cell
+                    .borrow()
+                    .get(state)
+                    .drag_end_curved_animation
+                    .expect("a drag ended")
+            };
+            let (curved, proxy) = {
+                let state = state(&tester);
+                let app = tester.cell.borrow();
+                (
+                    state.curved_sheet_animation(&app),
+                    state.sheet_animation(&app),
+                )
+            };
+
+            drag_text(&mut tester, "BottomSheet", Offset::new(0.0, 20.0));
+            tester.pump_and_settle();
+            let first_drag_end = drag_end_curve(&tester);
+            drag_text(&mut tester, "BottomSheet", Offset::new(0.0, 20.0));
+            tester.pump_and_settle();
+            let second_drag_end = drag_end_curve(&tester);
+            tester.cell.checkpoint();
+            assert!(!tester.cell.borrow().contains(first_drag_end));
+            assert!(tester.cell.borrow().contains(second_drag_end));
+
+            drag_text(&mut tester, "BottomSheet", Offset::new(0.0, 150.0));
+            tester.pump_and_settle();
+            assert_eq!(found(&tester, "BottomSheet"), 0);
+            tester.cell.checkpoint();
+            let app = tester.cell.borrow();
+            assert!(!app.contains(second_drag_end));
+            assert!(!app.contains(curved));
+            assert!(!app.contains(proxy));
         });
     }
 }

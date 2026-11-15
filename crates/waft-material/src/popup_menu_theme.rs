@@ -1,7 +1,5 @@
 //! Flutter counterpart: material_ui's `popup_menu_theme.dart`.
 
-use std::rc::Rc;
-
 use waft_embedder::{Color, lerp_double};
 use waft_foundation::App;
 use waft_painting::{EdgeInsetsGeometry, ShapeBorder, TextStyle};
@@ -271,15 +269,6 @@ fn pick<T>(
     }
 }
 
-/// Dart's `==` on a `WidgetStateProperty`, which no override makes more than identity here.
-fn same_property<T: ?Sized>(a: &Option<Rc<T>>, b: &Option<Rc<T>>) -> bool {
-    match (a, b) {
-        (None, None) => true,
-        (Some(a), Some(b)) => Rc::ptr_eq(a, b),
-        _ => false,
-    }
-}
-
 impl PartialEq for PopupMenuThemeData {
     fn eq(&self, other: &PopupMenuThemeData) -> bool {
         if std::ptr::eq(self, other) {
@@ -292,9 +281,9 @@ impl PartialEq for PopupMenuThemeData {
             && other.shadow_color == self.shadow_color
             && other.surface_tint_color == self.surface_tint_color
             && other.text_style == self.text_style
-            && same_property(&other.label_text_style, &self.label_text_style)
+            && other.label_text_style == self.label_text_style
             && other.enable_feedback == self.enable_feedback
-            && same_property(&other.mouse_cursor, &self.mouse_cursor)
+            && other.mouse_cursor == self.mouse_cursor
             && other.position == self.position
             && other.icon_color == self.icon_color
             && other.icon_size == self.icon_size

@@ -718,8 +718,8 @@ mod tests {
 
     use waft_embedder::{Size, TextDirection};
     use waft_rendering::{
-        AnyRenderObject, BoxConstraints, RenderBox, RenderConstrainedBox, RenderHandle,
-        RenderOffstage,
+        AnyRenderObject, BoxConstraints, RenderBox, RenderConstrainedBox, RenderConstrainedBoxBase,
+        RenderHandle, RenderOffstage,
     };
 
     use super::*;

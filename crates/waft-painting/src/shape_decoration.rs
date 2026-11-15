@@ -2,7 +2,6 @@
 
 use std::any::Any;
 use std::fmt::{Debug, Formatter, Result as FmtResult};
-use std::sync::Arc;
 
 use waft_embedder::{BlurStyle, Canvas, ClipOp, FillRule, Matrix4, Offset, Paint};
 use waft_embedder::{Path, PathBuilder, Rect, Size};
@@ -342,7 +341,7 @@ impl Decoration for ShapeDecoration {
         Box::new(ShapeDecorationPainter::new(self.clone(), on_changed))
     }
 
-    fn get_clip_path(&self, rect: Rect, text_direction: TextDirection) -> Arc<Path> {
+    fn get_clip_path(&self, rect: Rect, text_direction: TextDirection) -> Path {
         self.shape.get_outer_path(rect, Some(text_direction))
     }
 
@@ -379,11 +378,11 @@ struct ShapeDecorationPainter {
     on_changed: Option<VoidCallback>,
     last_rect: Option<Rect>,
     last_text_direction: Option<TextDirection>,
-    outer_path: Option<Arc<Path>>,
+    outer_path: Option<Path>,
     interior_paint: Option<Paint>,
     shadow_count: Option<usize>,
     shadow_bounds: Vec<Rect>,
-    shadow_paths: Vec<Arc<Path>>,
+    shadow_paths: Vec<Path>,
     shadow_paints: Vec<Paint>,
 }
 
@@ -460,16 +459,12 @@ impl ShapeDecorationPainter {
         self.last_text_direction = text_direction;
     }
 
-    fn debug_handle_disabled_shadow_start(
-        canvas: &mut Canvas,
-        box_shadow: BoxShadow,
-        path: &Arc<Path>,
-    ) {
+    fn debug_handle_disabled_shadow_start(canvas: &mut Canvas, box_shadow: BoxShadow, path: &Path) {
         if debug_disable_shadows() && box_shadow.blur_style == BlurStyle::Outer {
             canvas.save();
             let mut clip_path = PathBuilder::new();
             clip_path.rect(Rect::LARGEST.into());
-            clip_path.append(path, &Matrix4::IDENTITY);
+            clip_path.append(path.as_valo(), &Matrix4::IDENTITY);
             canvas.clip_path(
                 &clip_path.build(),
                 FillRule::EvenOdd,
@@ -523,9 +518,10 @@ impl ShapeDecorationPainter {
                         &self.shadow_paths[index],
                     );
                 }
+                let shadow_path = &self.shadow_paths[index];
                 canvas.draw_path(
-                    &self.shadow_paths[index],
-                    FillRule::NonZero,
+                    shadow_path.as_valo(),
+                    shadow_path.fill_type,
                     &self.shadow_paints[index],
                 );
                 if cfg!(debug_assertions) {
@@ -556,11 +552,8 @@ impl ShapeDecorationPainter {
                 text_direction,
             );
         } else {
-            canvas.draw_path(
-                self.outer_path.as_ref().unwrap(),
-                FillRule::NonZero,
-                interior_paint,
-            );
+            let outer_path = self.outer_path.as_ref().unwrap();
+            canvas.draw_path(outer_path.as_valo(), outer_path.fill_type, interior_paint);
         }
     }
 
@@ -607,7 +600,7 @@ mod tests {
     use super::*;
     use waft_embedder::Color;
 
-    use waft_embedder::{FillRule, Radius};
+    use waft_embedder::Radius;
 
     use crate::border_radius::BorderRadiusDirectional;
     use crate::box_border::Border;
@@ -616,8 +609,8 @@ mod tests {
     use crate::oval_border::OvalBorder;
     use crate::rounded_rectangle_border::RoundedRectangleBorder;
 
-    fn contains(path: &Arc<Path>, x: f64, y: f64) -> bool {
-        path.contains(Offset::new(x, y).into(), FillRule::NonZero)
+    fn contains(path: &Path, x: f64, y: f64) -> bool {
+        path.contains(Offset::new(x, y))
     }
 
     #[test]

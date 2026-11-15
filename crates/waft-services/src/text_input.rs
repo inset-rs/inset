@@ -5,10 +5,9 @@
 //! connection, the client, and [`TextInput`].
 
 use waft_embedder::{
-    FontWeight, Matrix4, Offset, Rect, Size, TargetPlatform, TextAlign, TextDirection, ViewId,
-    ViewRef,
+    FontWeight, Matrix4, Offset, Rect, Size, TextAlign, TextDirection, ViewId, ViewRef,
 };
-use waft_foundation::{App, Handle, HandleId, Listener, Task};
+use waft_foundation::{App, Handle, HandleId, K_IS_WEB, Listener, Task};
 
 pub use waft_embedder::{
     AutofillConfiguration, FloatingCursorDragState, RawFloatingCursorPoint, SmartDashesType,
@@ -825,7 +824,7 @@ impl TextInput {
         connection: Handle<TextInputConnection>,
         configuration: TextInputConfiguration,
     ) {
-        debug_ensure_input_action_works_on_platform(app, configuration.input_action);
+        debug_ensure_input_action_works_on_platform(configuration.input_action);
         app.get_mut(self).current_connection = Some(connection);
         app.get_mut(self).current_configuration = Some(configuration.clone());
         app.get_mut(self).last_connection = Some(connection);
@@ -989,24 +988,24 @@ const IOS_SUPPORTED_INPUT_ACTIONS: &[TextInputAction] = &[
     TextInputAction::EmergencyCall,
 ];
 
-fn debug_ensure_input_action_works_on_platform(app: &App, input_action: TextInputAction) {
+fn debug_ensure_input_action_works_on_platform(input_action: TextInputAction) {
     if !cfg!(debug_assertions) {
         return;
     }
-    match app.platform().target_platform() {
-        TargetPlatform::IOS => {
-            debug_assert!(
-                IOS_SUPPORTED_INPUT_ACTIONS.contains(&input_action),
-                "The requested TextInputAction \"{input_action:?}\" is not supported on iOS."
-            );
-        }
-        TargetPlatform::Android => {
-            debug_assert!(
-                ANDROID_SUPPORTED_INPUT_ACTIONS.contains(&input_action),
-                "The requested TextInputAction \"{input_action:?}\" is not supported on Android."
-            );
-        }
-        _ => {}
+    if K_IS_WEB {
+        // TODO(flutterweb): what makes sense here?
+        return;
+    }
+    if cfg!(target_os = "ios") {
+        debug_assert!(
+            IOS_SUPPORTED_INPUT_ACTIONS.contains(&input_action),
+            "The requested TextInputAction \"{input_action:?}\" is not supported on iOS."
+        );
+    } else if cfg!(target_os = "android") {
+        debug_assert!(
+            ANDROID_SUPPORTED_INPUT_ACTIONS.contains(&input_action),
+            "The requested TextInputAction \"{input_action:?}\" is not supported on Android."
+        );
     }
 }
 

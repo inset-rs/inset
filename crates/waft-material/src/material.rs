@@ -4,7 +4,6 @@ use std::any::Any;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
-use std::sync::Arc;
 use std::time::Duration;
 
 use waft_animation::{Animatable, ColorTween, Curves, Tween};
@@ -1143,16 +1142,6 @@ impl SingleChildRenderObjectWidget for InkFeatures {
     }
 }
 
-/// Destroys `handle`'s entry, which stays readable until the next checkpoint.
-///
-/// Dart's collector keeps an object that is disposed inside its own callback alive until that
-/// callback returns: an ink feature disposes the controller whose status listener is running.
-pub(crate) fn destroy_lingering<T: Copy + Into<HandleId>>(app: &mut App, handle: T) {
-    let retained = app.retain(handle);
-    app.destroy(handle);
-    drop(retained);
-}
-
 /// The fields of Dart's `InkFeature`, which every ink feature leaf carries.
 pub struct InkFeatureData {
     controller: Handle<RenderInkFeatures>,
@@ -1360,7 +1349,7 @@ impl InkFeature {
         if let Some(on_removed) = InkFeature::on_removed(this, app) {
             on_removed.call(app);
         }
-        destroy_lingering(app, this);
+        app.destroy_lingering(this);
     }
 
     // Returns the paint transform that allows `fromRenderObject` to perform paint
@@ -1734,7 +1723,7 @@ impl State for MaterialInteriorState {
         let border_on_foreground = widget.border_on_foreground;
         let child = widget.child.clone();
         let text_direction = Directionality::maybe_of(app, context);
-        let clipper: Rc<dyn CustomClipper<Arc<Path>>> =
+        let clipper: Rc<dyn CustomClipper<Path>> =
             Rc::new(ShapeBorderClipper::new(shape.clone_box(), text_direction));
         PhysicalShape::new(clipper, color)
             .clip_behavior(clip_behavior)

@@ -7,7 +7,8 @@ use waft_embedder::Size;
 use waft_foundation::{App, AppCell, Entity, Handle};
 use waft_painting::EdgeInsetsGeometry;
 use waft_rendering::{
-    AnyRenderObject, BoxConstraints, RenderBox, RenderConstrainedBox, RenderHandle, RenderPadding,
+    AnyRenderObject, BoxConstraints, RenderBox, RenderConstrainedBox, RenderConstrainedBoxBase,
+    RenderHandle, RenderPadding,
 };
 
 use super::*;

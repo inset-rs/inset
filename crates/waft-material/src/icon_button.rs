@@ -35,7 +35,7 @@ use crate::generated::outlined_icon_button_defaults_m3::outlined_icon_button_def
 use crate::generated::outlined_icon_button_defaults_m3e::outlined_icon_button_defaults_m3e;
 use crate::icon_button_theme::IconButtonTheme;
 use crate::ink_well::{InkResponse, InteractiveInkFeatureFactoryRef};
-use crate::material::{Material, destroy_lingering};
+use crate::material::Material;
 use crate::material_state::MaterialStatesController;
 use crate::theme::Theme;
 use crate::theme_data::{MaterialTapTargetSize, StyleVariant, VisualDensity};
@@ -1101,7 +1101,7 @@ impl State for SelectableIconButtonState {
             {
                 app.get_mut(internal).dispose();
                 // `IconButtonM3`'s state still listens to it until its own update below.
-                destroy_lingering(app, internal);
+                app.destroy_lingering(internal);
             }
             self.init_states_controller(app);
         }

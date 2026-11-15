@@ -834,7 +834,7 @@ impl RadioPaintState {
 }
 
 /// Dart's `property?.resolve(states)` for a nullable property of a nullable value.
-fn resolve<T>(
+fn resolve<T: 'static>(
     property: &Option<WidgetStatePropertyRef<Option<T>>>,
     states: &WidgetStates,
 ) -> Option<T> {

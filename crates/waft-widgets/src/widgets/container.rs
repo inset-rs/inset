@@ -4,7 +4,6 @@
 
 use std::any::Any;
 use std::rc::Rc;
-use std::sync::Arc;
 use waft_embedder::{Clip, Matrix4, Offset, Path, Size, TextDirection};
 use waft_foundation::App;
 use waft_painting::{AlignmentGeometry, AnyColor, Decoration, EdgeInsetsGeometry};
@@ -505,13 +504,13 @@ impl DecorationClipper {
     }
 }
 
-impl CustomClipper<Arc<Path>> for DecorationClipper {
-    fn get_clip(&self, size: Size) -> Arc<Path> {
+impl CustomClipper<Path> for DecorationClipper {
+    fn get_clip(&self, _app: &App, size: Size) -> Path {
         self.decoration
             .get_clip_path(Offset::ZERO & size, self.text_direction)
     }
 
-    fn should_reclip(&self, old_clipper: &dyn CustomClipper<Arc<Path>>) -> bool {
+    fn should_reclip(&self, _app: &App, old_clipper: &dyn CustomClipper<Path>) -> bool {
         let Some(old_clipper) = old_clipper.as_any().downcast_ref::<DecorationClipper>() else {
             return true;
         };
@@ -665,8 +664,9 @@ mod tests {
     use waft_painting::{Border, BorderSide, BorderStyle, BoxDecoration};
     use waft_rendering::{
         AnyRenderBox, BoxParentData, RenderAligningShiftedBox, RenderBox, RenderColoredBox,
-        RenderConstrainedBox, RenderDecoratedBox, RenderHandle, RenderLimitedBox, RenderObject,
-        RenderObjectWithChildMixin, RenderPadding, RenderPositionedBox, RenderTransform,
+        RenderConstrainedBox, RenderConstrainedBoxBase, RenderDecoratedBox, RenderHandle,
+        RenderLimitedBox, RenderObject, RenderObjectWithChildMixin, RenderPadding,
+        RenderPositionedBox, RenderTransform,
     };
 
     use super::*;

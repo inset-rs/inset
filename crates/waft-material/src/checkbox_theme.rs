@@ -1,10 +1,8 @@
 //! Flutter counterpart: material_ui's `checkbox_theme.dart`.
 
-use std::rc::Rc;
-
 use waft_embedder::{Color, lerp_double};
 use waft_foundation::App;
-use waft_painting::{AnyBorderSide, BorderSide, EdgeInsets, OutlinedBorder, ShapeBorder};
+use waft_painting::{AnyBorderSide, BorderSide, EdgeInsets, OutlinedBorder};
 use waft_services::MouseCursorRef;
 use waft_widgets::{
     BuildContext, InheritedWidget, IntoWidget, KeyRef, WidgetRef, WidgetStateBorderSide,
@@ -343,37 +341,19 @@ impl CheckboxThemeData {
     }
 }
 
-/// Dart's `==` on a `WidgetStateProperty`, which no override makes more than identity here.
-fn same_property<T: ?Sized>(a: &Option<Rc<T>>, b: &Option<Rc<T>>) -> bool {
-    match (a, b) {
-        (None, None) => true,
-        (Some(a), Some(b)) => Rc::ptr_eq(a, b),
-        _ => false,
-    }
-}
-
-/// Dart's `OutlinedBorder ==`, which is `ShapeBorder`'s.
-fn same_shape(a: &Option<Box<dyn OutlinedBorder>>, b: &Option<Box<dyn OutlinedBorder>>) -> bool {
-    match (a.as_deref(), b.as_deref()) {
-        (None, None) => true,
-        (Some(a), Some(b)) => (a as &dyn ShapeBorder) == (b as &dyn ShapeBorder),
-        _ => false,
-    }
-}
-
 impl PartialEq for CheckboxThemeData {
     fn eq(&self, other: &CheckboxThemeData) -> bool {
         if std::ptr::eq(self, other) {
             return true;
         }
-        same_property(&other.mouse_cursor, &self.mouse_cursor)
-            && same_property(&other.fill_color, &self.fill_color)
-            && same_property(&other.check_color, &self.check_color)
-            && same_property(&other.overlay_color, &self.overlay_color)
+        other.mouse_cursor == self.mouse_cursor
+            && other.fill_color == self.fill_color
+            && other.check_color == self.check_color
+            && other.overlay_color == self.overlay_color
             && other.splash_radius == self.splash_radius
             && other.material_tap_target_size == self.material_tap_target_size
             && other.visual_density == self.visual_density
-            && same_shape(&other.shape, &self.shape)
+            && other.shape == self.shape
             && other.side == self.side
             && other.mark_insets == self.mark_insets
     }
@@ -450,6 +430,7 @@ impl InheritedWidget for CheckboxTheme {
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
+    use std::rc::Rc;
 
     use waft_embedder::{Offset, PointerChange, Radius, Size};
     use waft_painting::{BorderRadiusGeometry, RoundedRectangleBorder};
@@ -468,6 +449,7 @@ mod tests {
         WidgetTester, is_same_color_as, material_app, with_main_thread_stack,
     };
     use crate::theme_data::ThemeData;
+    use waft_painting::ShapeBorder;
 
     #[test]
     fn checkbox_theme_data_copy_with_equality_basics() {

@@ -68,7 +68,7 @@ use crate::floating_action_button_location::{
     FloatingActionButtonLocationRef, K_FLOATING_ACTION_BUTTON_SEGUE,
     K_FLOATING_ACTION_BUTTON_TURN_INTERVAL,
 };
-use crate::material::{Material, destroy_lingering};
+use crate::material::Material;
 use crate::snack_bar::{SnackBar, SnackBarClosedReason};
 use crate::snack_bar_theme::{SnackBarBehavior, SnackBarTheme};
 use crate::theme::Theme;
@@ -1953,11 +1953,11 @@ impl FloatingActionButtonTransitionState {
     fn dispose_animations(self: Handle<Self>, app: &mut App) {
         if let Some(animation) = app.get(self).previous_rotation_animation {
             animation.dispose(app);
-            destroy_lingering(app, animation);
+            app.destroy_lingering(animation);
         }
         if let Some(animation) = app.get(self).current_rotation_animation {
             animation.dispose(app);
-            destroy_lingering(app, animation);
+            app.destroy_lingering(animation);
         }
         self.free_made_animations(app);
     }
@@ -1980,7 +1980,7 @@ impl FloatingActionButtonTransitionState {
             );
         }
         for made in std::mem::take(&mut app.get_mut(self).made_animations) {
-            destroy_lingering(app, made);
+            app.destroy_lingering(made);
         }
     }
 
@@ -1988,7 +1988,7 @@ impl FloatingActionButtonTransitionState {
     fn dispose_curved_animation(app: &mut App, animation: Option<Handle<CurvedAnimation>>) {
         if let Some(animation) = animation {
             animation.dispose(app);
-            destroy_lingering(app, animation);
+            app.destroy_lingering(animation);
         }
     }
 
@@ -4390,7 +4390,7 @@ impl State for ScaffoldState {
             .get(self)
             .dismiss_drawer_action
             .expect("set in init_state");
-        destroy_lingering(app, dismiss_drawer_action);
+        app.destroy_lingering(dismiss_drawer_action);
         self.dispose_restoration(app);
         TickerProviderStateMixin::dispose(self, app);
     }

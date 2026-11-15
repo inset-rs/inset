@@ -2,8 +2,8 @@
 //! the foreground each takes from its surroundings.
 
 use std::{cell::RefCell, rc::Rc, sync::Arc};
-use waft_embedder::valo::{Point, Rect as ValoRect};
-use waft_embedder::{Color, FillRule, Path, PathBuilder, Size, TextDirection};
+use waft_embedder::valo::{Path, Point, Rect as ValoRect};
+use waft_embedder::{Color, FillRule, PathBuilder, Size, TextDirection};
 use waft_foundation::App;
 use waft_painting::{AlignmentGeometry, TextStyle};
 use waft_widgets::*;

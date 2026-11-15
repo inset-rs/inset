@@ -2,7 +2,6 @@
 
 use std::any::Any;
 use std::fmt::Debug;
-use std::sync::Arc;
 
 use waft_embedder::{Canvas, Offset, Path, Rect, Size};
 use waft_foundation::{App, VoidCallback};
@@ -76,7 +75,7 @@ pub trait Decoration: Any + Debug {
     /// The default implementation panics. Subclasses must override this
     /// implementation to describe the clip path that should be applied to the
     /// decoration when it is used in a `Container` with an explicit clip behavior.
-    fn get_clip_path(&self, rect: Rect, text_direction: TextDirection) -> Arc<Path> {
+    fn get_clip_path(&self, rect: Rect, text_direction: TextDirection) -> Path {
         let _ = (rect, text_direction);
         panic!(
             "{} does not expect to be used for clipping.",

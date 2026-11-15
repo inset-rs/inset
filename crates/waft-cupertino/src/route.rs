@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use waft_animation::{
     Animatable, Animation, AnimationController, AnimationStatus, AnimationStatusListener,
-    AnyAnimation, CurvedAnimation, Curves, Tween,
+    AnyAnimation, CurvedAnimation, Curves, ValueTween,
 };
 use waft_embedder::{Canvas, Color, ImageFilter, Offset, Paint, Rect, TextDirection};
 use waft_foundation::{App, CompleterFuture, Handle, Listener, ValueNotifier, VoidCallback};
@@ -69,41 +69,16 @@ pub const K_CUPERTINO_MODAL_BARRIER_COLOR: AnyColor =
 /// The duration of the transition used when a modal popup is shown.
 const K_MODAL_POPUP_TRANSITION_DURATION: Duration = Duration::from_millis(335);
 
-/// Dart's `Tween<Offset>`: a value rather than an arena object, so a driven animation may
-/// outlive the call that built it without a slot to free.
-#[derive(Clone, Copy, Debug)]
-struct OffsetTween {
-    begin: Offset,
-    end: Offset,
-}
-
-impl OffsetTween {
-    const fn new(begin: Offset, end: Offset) -> OffsetTween {
-        OffsetTween { begin, end }
-    }
-}
-
-impl Animatable<Offset> for OffsetTween {
-    fn transform(&self, _app: &App, t: f64) -> Offset {
-        if t == 0.0 {
-            return self.begin;
-        }
-        if t == 1.0 {
-            return self.end;
-        }
-        Offset::lerp(Some(self.begin), Some(self.end), t).expect("both ends are set")
-    }
-}
-
 /// Offset from offscreen to the right to fully on screen.
-const K_RIGHT_MIDDLE_TWEEN: OffsetTween = OffsetTween::new(Offset::new(1.0, 0.0), Offset::ZERO);
+const K_RIGHT_MIDDLE_TWEEN: ValueTween<Offset> =
+    ValueTween::new(Offset::new(1.0, 0.0), Offset::ZERO);
 
 /// Offset from fully on screen to 1/3 offscreen to the left.
-const K_MIDDLE_LEFT_TWEEN: OffsetTween =
-    OffsetTween::new(Offset::ZERO, Offset::new(-1.0 / 3.0, 0.0));
+const K_MIDDLE_LEFT_TWEEN: ValueTween<Offset> =
+    ValueTween::new(Offset::ZERO, Offset::new(-1.0 / 3.0, 0.0));
 
 /// Offset from offscreen below to fully on screen.
-const K_BOTTOM_UP_TWEEN: OffsetTween = OffsetTween::new(Offset::new(0.0, 1.0), Offset::ZERO);
+const K_BOTTOM_UP_TWEEN: ValueTween<Offset> = ValueTween::new(Offset::new(0.0, 1.0), Offset::ZERO);
 
 // ---------------------------------------------------------------------------------------------
 // CupertinoRouteTransitionMixin
@@ -246,7 +221,7 @@ pub trait CupertinoRouteTransitionMixin: PageRoute {
     }
 
     /// Dart's `CupertinoRouteTransitionMixin.transitionDuration`.
-    fn transition_duration(self: Handle<Self>, app: &App) -> Duration {
+    fn transition_duration(self: Handle<Self>, app: &mut App) -> Duration {
         let _ = app;
         Self::K_TRANSITION_DURATION
     }
@@ -611,7 +586,7 @@ macro_rules! cupertino_route_transition_mixin_transition_route_overrides {
 
         fn transition_duration(
             self: ::waft_foundation::Handle<Self>,
-            app: &::waft_foundation::App,
+            app: &mut ::waft_foundation::App,
         ) -> ::std::time::Duration {
             $crate::CupertinoRouteTransitionMixin::transition_duration(self, app)
         }
@@ -1285,6 +1260,9 @@ impl CupertinoPageTransition {
         );
         let delegated_position_animation = animation.as_animation().drive(app, K_MIDDLE_LEFT_TWEEN);
         animation.dispose(app);
+        // The position animation retains the curve, and the `SlideTransition` the position.
+        app.destroy_lingering(animation);
+        app.destroy_lingering(delegated_position_animation);
 
         let text_direction = Directionality::of(app, context);
         let mut transition = SlideTransition::new(delegated_position_animation)
@@ -1344,11 +1322,36 @@ impl CupertinoPageTransitionState {
         ];
         for curve in curves.into_iter().flatten() {
             curve.dispose(app);
+            // The animation driven from it retains it until the transition moves off it.
+            app.destroy_lingering(curve);
         }
         let state = app.get_mut(self);
         state.primary_position_curve = None;
         state.secondary_position_curve = None;
         state.primary_shadow_curve = None;
+    }
+
+    /// Frees the driven animations `setup_animation` made, which Dart's collector frees once
+    /// they are replaced; the transitions built from them retain them until they move off.
+    fn free_animations(self: Handle<Self>, app: &mut App) {
+        let state = app.get_mut(self);
+        let animations = [
+            state
+                .primary_position_animation
+                .take()
+                .map(|animation| animation.id()),
+            state
+                .secondary_position_animation
+                .take()
+                .map(|animation| animation.id()),
+            state
+                .primary_shadow_animation
+                .take()
+                .map(|animation| animation.id()),
+        ];
+        for animation in animations.into_iter().flatten() {
+            app.destroy_lingering(animation);
+        }
     }
 
     fn setup_animation(self: Handle<Self>, app: &mut App) {
@@ -1418,12 +1421,14 @@ impl State for CupertinoPageTransitionState {
             || old_widget.linear_transition != widget.linear_transition;
         if changed {
             self.dispose_curve(app);
+            self.free_animations(app);
             self.setup_animation(app);
         }
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
         self.dispose_curve(app);
+        self.free_animations(app);
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -1540,10 +1545,24 @@ impl CupertinoFullscreenDialogTransitionState {
         let curves = [state.primary_position_curve, state.secondary_position_curve];
         for curve in curves.into_iter().flatten() {
             curve.dispose(app);
+            // The animation driven from it retains it until the transition moves off it.
+            app.destroy_lingering(curve);
         }
         let state = app.get_mut(self);
         state.primary_position_curve = None;
         state.secondary_position_curve = None;
+    }
+
+    /// See [`CupertinoPageTransitionState::free_animations`].
+    fn free_animations(self: Handle<Self>, app: &mut App) {
+        let state = app.get_mut(self);
+        let animations = [
+            state.primary_position_animation.take(),
+            state.secondary_position_animation.take(),
+        ];
+        for animation in animations.into_iter().flatten() {
+            app.destroy_lingering(animation);
+        }
     }
 
     fn setup_animation(self: Handle<Self>, app: &mut App) {
@@ -1601,12 +1620,14 @@ impl State for CupertinoFullscreenDialogTransitionState {
             || old_widget.linear_transition != widget.linear_transition;
         if changed {
             self.dispose_curve(app);
+            self.free_animations(app);
             self.setup_animation(app);
         }
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
         self.dispose_curve(app);
+        self.free_animations(app);
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -2300,7 +2321,7 @@ pub struct CupertinoModalPopupRoute {
 
 impl CupertinoModalPopupRoute {
     /// Offset from offscreen below to fully on screen; Dart's `_offsetTween`.
-    const OFFSET_TWEEN: OffsetTween = OffsetTween::new(Offset::new(0.0, 1.0), Offset::ZERO);
+    const OFFSET_TWEEN: ValueTween<Offset> = ValueTween::new(Offset::new(0.0, 1.0), Offset::ZERO);
 
     /// A route that shows a modal iOS-style popup that slides up from the bottom of the screen;
     /// Dart's optional arguments are the setters.
@@ -2397,7 +2418,7 @@ impl PredictiveBackRoute for CupertinoModalPopupRoute {
 impl TransitionRoute for CupertinoModalPopupRoute {
     waft_widgets::modal_transition_route_overrides!();
 
-    fn transition_duration(self: Handle<Self>, app: &App) -> Duration {
+    fn transition_duration(self: Handle<Self>, app: &mut App) -> Duration {
         let _ = app;
         K_MODAL_POPUP_TRANSITION_DURATION
     }
@@ -2662,12 +2683,13 @@ pub struct CupertinoDialogRoute {
     raw_dialog_route: RawDialogRouteData,
     /// Custom transition builder.
     pub transition_builder: Option<RouteTransitionsBuilder>,
-    // The curve and initial scale values were mostly eyeballed from iOS, however they reuse the
-    // same animation curve that was modeled after native page transitions.
-    dialog_scale_tween: Handle<Tween<f64>>,
 }
 
 impl CupertinoDialogRoute {
+    // The curve and initial scale values were mostly eyeballed from iOS, however they reuse the
+    // same animation curve that was modeled after native page transitions.
+    const DIALOG_SCALE_TWEEN: ValueTween<f64> = ValueTween::new(1.3, 1.0);
+
     /// A dialog route that shows an iOS-style dialog; Dart's optional arguments are the
     /// setters.
     ///
@@ -2687,7 +2709,6 @@ impl CupertinoDialogRoute {
         let route = RouteData::new(app, None, None);
         let transition_route = TransitionRouteData::new(app);
         let modal_route = ModalRouteData::new(app);
-        let dialog_scale_tween = Tween::new(app, Some(1.3), Some(1.0));
         let page_builder: RoutePageBuilder =
             Rc::new(move |app, context, _animation, _secondary_animation| builder(app, context));
         let mut raw_dialog_route = RawDialogRouteData::new(page_builder);
@@ -2703,7 +2724,6 @@ impl CupertinoDialogRoute {
             modal_route,
             raw_dialog_route,
             transition_builder: None,
-            dialog_scale_tween,
         })
     }
 
@@ -2829,10 +2849,13 @@ impl RawDialogRouteLeaf for CupertinoDialogRoute {
         if animation.status(app) == AnimationStatus::Reverse {
             return FadeTransition::new(animation).child(child).into_widget();
         }
-        let scale = animation.drive(app, app.get(self).dialog_scale_tween);
-        FadeTransition::new(animation)
+        let scale = animation.drive(app, CupertinoDialogRoute::DIALOG_SCALE_TWEEN);
+        let transition = FadeTransition::new(animation)
             .child(ScaleTransition::new(scale).child(child))
-            .into_widget()
+            .into_widget();
+        // The `ScaleTransition` retains it.
+        app.destroy_lingering(scale);
+        transition
     }
 }
 
@@ -3014,6 +3037,82 @@ mod tests {
             .expect("the page is a box")
             .local_to_global(app, Offset::ZERO, None)
             .dy()
+    }
+
+    /// The arena objects a frame part way into `push` leaves behind, over a settled page:
+    /// Dart's collector frees what each frame's build replaces, and here the transitions free
+    /// what they make once they hand it on.
+    fn objects_a_mid_push_frame_leaves(
+        push: impl FnOnce(&mut App, BuildContext, Handle<NavigatorState>),
+    ) -> isize {
+        let cell = test_cell();
+        let navigator_key = GlobalKey::new();
+        let page_context: Rc<Cell<Option<BuildContext>>> = Rc::default();
+        build(&cell, {
+            let page_context = Rc::clone(&page_context);
+            navigator(&navigator_key, move |navigator| {
+                navigator.on_generate_route(move |app, _settings| {
+                    Some(Route::as_route(CupertinoPageRoute::new(
+                        app,
+                        context_page(Rc::clone(&page_context)),
+                    )))
+                })
+            })
+        });
+        let mut at = settle(&mut cell.borrow_mut(), Duration::ZERO);
+        {
+            let mut app = cell.borrow_mut();
+            let state = navigator_state(&navigator_key, &mut app);
+            push(&mut app, page_context.get().expect("the page built"), state);
+            for _ in 0..3 {
+                at += Duration::from_millis(20);
+                pump(&mut app, at);
+            }
+        }
+        cell.checkpoint();
+        let before = cell.borrow().debug_object_count() as isize;
+        pump(&mut cell.borrow_mut(), at + Duration::from_millis(20));
+        cell.checkpoint();
+        cell.borrow().debug_object_count() as isize - before
+    }
+
+    /// Not a Dart case: see [`objects_a_mid_push_frame_leaves`].
+    #[test]
+    fn a_frame_of_a_cupertino_page_push_leaves_no_new_arena_objects() {
+        let left = objects_a_mid_push_frame_leaves(|app, _context, state| {
+            let pushed = CupertinoPageRoute::new(app, plain_page());
+            state.push(app, Route::as_route(pushed));
+        });
+        assert_eq!(left, 0);
+    }
+
+    /// Not a Dart case: see [`objects_a_mid_push_frame_leaves`].
+    #[test]
+    fn a_frame_of_a_fullscreen_dialog_push_leaves_no_new_arena_objects() {
+        let left = objects_a_mid_push_frame_leaves(|app, _context, state| {
+            let pushed = CupertinoPageRoute::new(app, plain_page()).fullscreen_dialog(app, true);
+            state.push(app, Route::as_route(pushed));
+        });
+        assert_eq!(left, 0);
+    }
+
+    /// Not a Dart case: see [`objects_a_mid_push_frame_leaves`].
+    #[test]
+    fn a_frame_of_a_cupertino_dialog_leaves_no_new_arena_objects() {
+        let left = objects_a_mid_push_frame_leaves(|app, context, _state| {
+            let _popped = show_cupertino_dialog(
+                app,
+                context,
+                plain_page(),
+                None,
+                None,
+                true,
+                false,
+                None,
+                None,
+            );
+        });
+        assert_eq!(left, 0);
     }
 
     #[test]

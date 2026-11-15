@@ -5,6 +5,7 @@
 //! background to nothing before it calls [`on_dismissed`](Dismissible::on_dismissed). The
 //! state keeps itself alive while either animation runs.
 
+use std::any::Any;
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
 use std::rc::Rc;
@@ -14,13 +15,13 @@ use waft_animation::{
     Animation, AnimationBehavior, AnimationController, AnimationStatus, AnimationStatusListener,
     AnyAnimation, CurveTween, Curves, Interval, Tween,
 };
-use waft_embedder::{Offset, Size, TextDirection};
-use waft_foundation::{App, AsyncApp, Handle, Listener, Task, VoidCallback};
+use waft_embedder::{Offset, Rect, Size, TextDirection};
+use waft_foundation::{App, AsyncApp, Handle, Listenable, Listener, Task, VoidCallback};
 use waft_gestures::{
     DragEndDetails, DragStartBehavior, DragStartDetails, DragUpdateDetails, Velocity,
 };
 use waft_painting::Axis;
-use waft_rendering::HitTestBehavior;
+use waft_rendering::{CustomClipper, HitTestBehavior};
 use waft_scheduler::{Ticker, TickerCallback, TickerProviderObject};
 
 use crate::framework::{
@@ -29,7 +30,7 @@ use crate::framework::{
 use crate::widgets::automatic_keep_alive::{
     AutomaticKeepAliveClientMixin, AutomaticKeepAliveClientMixinData,
 };
-use crate::widgets::basic::{Directionality, KeyedSubtree, Positioned, SizedBox, Stack};
+use crate::widgets::basic::{ClipRect, Directionality, KeyedSubtree, Positioned, SizedBox, Stack};
 use crate::widgets::gesture_detector::GestureDetector;
 use crate::widgets::ticker_provider::{TickerProviderStateMixin, TickerProviderStateMixinData};
 use crate::widgets::transitions::{SizeTransition, SlideTransition};
@@ -435,6 +436,71 @@ impl DismissUpdateDetails {
 impl Default for DismissUpdateDetails {
     fn default() -> DismissUpdateDetails {
         DismissUpdateDetails::new()
+    }
+}
+
+/// Dart's `_DismissibleClipper`.
+struct DismissibleClipper {
+    axis: Axis,
+    move_animation: AnyAnimation<Offset>,
+    reclip: Rc<dyn Listenable>,
+}
+
+impl DismissibleClipper {
+    fn new(axis: Axis, move_animation: AnyAnimation<Offset>) -> DismissibleClipper {
+        DismissibleClipper {
+            axis,
+            move_animation,
+            reclip: Rc::new(move_animation),
+        }
+    }
+}
+
+impl CustomClipper<Rect> for DismissibleClipper {
+    fn reclip(&self) -> Option<&Rc<dyn Listenable>> {
+        Some(&self.reclip)
+    }
+
+    fn get_clip(&self, app: &App, size: Size) -> Rect {
+        match self.axis {
+            Axis::Horizontal => {
+                let offset = self.move_animation.value(app).dx() * size.width();
+                if offset < 0.0 {
+                    return Rect::from_ltrb(
+                        size.width() + offset,
+                        0.0,
+                        size.width(),
+                        size.height(),
+                    );
+                }
+                Rect::from_ltrb(0.0, 0.0, offset, size.height())
+            }
+            Axis::Vertical => {
+                let offset = self.move_animation.value(app).dy() * size.height();
+                if offset < 0.0 {
+                    return Rect::from_ltrb(
+                        0.0,
+                        size.height() + offset,
+                        size.width(),
+                        size.height(),
+                    );
+                }
+                Rect::from_ltrb(0.0, 0.0, size.width(), offset)
+            }
+        }
+    }
+
+    fn should_reclip(&self, app: &App, old_clipper: &dyn CustomClipper<Rect>) -> bool {
+        let old_clipper = old_clipper
+            .as_any()
+            .downcast_ref::<DismissibleClipper>()
+            .expect("compared with a clipper of its own type");
+        old_clipper.axis != self.axis
+            || old_clipper.move_animation.value(app) != self.move_animation.value(app)
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 
@@ -1040,7 +1106,21 @@ impl State for DismissibleState {
         if let Some(background) = background {
             let mut children = Vec::new();
             if !move_animation.is_dismissed(app) {
-                children.push(Positioned::fill(background).into_widget());
+                children.push(
+                    Positioned::fill(
+                        ClipRect::new()
+                            .clipper(DismissibleClipper::new(
+                                if direction_is_x_axis {
+                                    Axis::Horizontal
+                                } else {
+                                    Axis::Vertical
+                                },
+                                move_animation,
+                            ))
+                            .child(background),
+                    )
+                    .into_widget(),
+                );
             }
             children.push(content);
             content = Stack::new().children(children).into_widget();
@@ -1092,7 +1172,7 @@ mod tests {
     use waft_foundation::{AppCell, Completer, ValueKey};
     use waft_gestures::{PointerDownEvent, PointerEvent, PointerMoveEvent, PointerUpEvent};
     use waft_painting::{AxisDirection, EdgeInsetsGeometry};
-    use waft_rendering::AnyRenderObject;
+    use waft_rendering::{AnyRenderObject, RenderBox, RenderClipRect, RenderCustomClip};
     use waft_scheduler::SchedulerBinding;
     use waft_test::{TestPlatform, TestView};
 
@@ -2176,6 +2256,45 @@ mod tests {
         assert_eq!(tester.count("background"), 1);
         let (_, size) = tester.rect_of("background");
         assert_eq!(size.height(), 100.0);
+    }
+
+    // ---- not in dismissible_test.dart: `_DismissibleClipper` ----
+
+    #[test]
+    fn the_background_is_clipped_to_the_part_the_child_has_uncovered() {
+        let results = Results::new();
+        let mut tester = WidgetTester::new();
+        tester.pump_widget(build_test(
+            &results,
+            BuildTest {
+                background: Some("background"),
+                ..BuildTest::default()
+            },
+        ));
+        let start = tester.get_center("0");
+        let mut gesture = tester.start_gesture(start);
+        tester.move_by(&mut gesture, Offset::new(-30.0, 0.0));
+        tester.pump(Duration::ZERO);
+
+        let background = tester.render_object("background");
+        let app = tester.app();
+        let mut clip = None;
+        let mut ancestor = background.parent(&app);
+        while let Some(object) = ancestor {
+            if let Some(clip_rect) = object.downcast::<RenderClipRect>(&app) {
+                clip = Some(clip_rect);
+                break;
+            }
+            ancestor = object.parent(&app);
+        }
+        let clip = clip.expect("the background sits in a ClipRect");
+        let width = clip.size(&app).width();
+        assert_eq!(
+            RenderCustomClip::<Rect>::clip(clip, &app),
+            Rect::from_ltrb(width - 30.0, 0.0, width, 100.0)
+        );
+        drop(app);
+        tester.up(gesture);
     }
 
     #[test]

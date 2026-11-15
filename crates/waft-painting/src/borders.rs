@@ -3,7 +3,6 @@
 use std::any::Any;
 use std::fmt::{self, Debug, Formatter, Result as FmtResult};
 use std::rc::Rc;
-use std::sync::Arc;
 
 use waft_embedder::{Canvas, FillRule, Paint, PaintStyle, Path, PathBuilder, Stroke};
 use waft_embedder::{Color, Offset, Rect, lerp_double};
@@ -332,10 +331,10 @@ pub trait ShapeBorder: Any + Debug {
     }
 
     /// Create a [`Path`] that describes the outer edge of the border.
-    fn get_outer_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Arc<Path>;
+    fn get_outer_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Path;
 
     /// Create a [`Path`] that describes the inner edge of the border.
-    fn get_inner_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Arc<Path>;
+    fn get_inner_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Path;
 
     /// Tests whether the outer boundary of this border contains `position`.
     fn hit_test(
@@ -344,8 +343,7 @@ pub trait ShapeBorder: Any + Debug {
         position: Offset,
         text_direction: Option<TextDirection>,
     ) -> bool {
-        self.get_outer_path(rect, text_direction)
-            .contains(position.into(), FillRule::NonZero)
+        self.get_outer_path(rect, text_direction).contains(position)
     }
 
     /// Paint a canvas with the appropriate shape.
@@ -518,6 +516,13 @@ impl Clone for Box<dyn OutlinedBorder> {
     }
 }
 
+/// Dart's `==` on an `OutlinedBorder`, which is `ShapeBorder`'s.
+impl PartialEq for dyn OutlinedBorder {
+    fn eq(&self, other: &dyn OutlinedBorder) -> bool {
+        self.eq_shape(other)
+    }
+}
+
 /// Dimensions for an [`OutlinedBorder`]: Dart's inherited `dimensions` getter.
 pub fn outlined_border_dimensions(side: BorderSide) -> EdgeInsetsGeometry {
     EdgeInsetsGeometry::all(side.stroke_inset().max(0.0))
@@ -642,7 +647,7 @@ impl ShapeBorder for CompoundBorder {
         Some(Box::new(CompoundBorder::lerp(Some(self), b, t)))
     }
 
-    fn get_inner_path(&self, mut rect: Rect, text_direction: Option<TextDirection>) -> Arc<Path> {
+    fn get_inner_path(&self, mut rect: Rect, text_direction: Option<TextDirection>) -> Path {
         for border in &self.borders[..self.borders.len() - 1] {
             rect = border
                 .dimensions()
@@ -652,7 +657,7 @@ impl ShapeBorder for CompoundBorder {
         self.borders[self.borders.len() - 1].get_inner_path(rect, text_direction)
     }
 
-    fn get_outer_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Arc<Path> {
+    fn get_outer_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Path {
         self.borders[0].get_outer_path(rect, text_direction)
     }
 
@@ -1234,10 +1239,10 @@ mod tests {
         assert_eq!(canvas.build().draw_count(), 4);
     }
 
-    fn rect_path(rect: Rect) -> Arc<Path> {
+    fn rect_path(rect: Rect) -> Path {
         let mut path = PathBuilder::new();
         path.rect(rect.into());
-        path.build()
+        path.build().into()
     }
 
     /// Flutter `shape_border_test.dart` `_LerpBorder`.
@@ -1262,11 +1267,11 @@ mod tests {
             Box::new(LerpBorder::new(Some(t), self.side.scale(t)))
         }
 
-        fn get_outer_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Arc<Path> {
+        fn get_outer_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Path {
             rect_path(rect)
         }
 
-        fn get_inner_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Arc<Path> {
+        fn get_inner_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Path {
             rect_path(rect)
         }
 
@@ -1329,11 +1334,11 @@ mod tests {
             Box::new(LerpBorder::new(Some(t), BorderSide::NONE.scale(t)))
         }
 
-        fn get_outer_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Arc<Path> {
+        fn get_outer_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Path {
             rect_path(rect)
         }
 
-        fn get_inner_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Arc<Path> {
+        fn get_inner_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Path {
             rect_path(rect)
         }
 
@@ -1389,11 +1394,11 @@ mod tests {
             Box::new(LerpBorder::new(Some(t), BorderSide::NONE.scale(t)))
         }
 
-        fn get_outer_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Arc<Path> {
+        fn get_outer_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Path {
             rect_path(rect)
         }
 
-        fn get_inner_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Arc<Path> {
+        fn get_inner_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Path {
             rect_path(rect)
         }
 
@@ -1453,11 +1458,11 @@ mod tests {
             })
         }
 
-        fn get_outer_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Arc<Path> {
+        fn get_outer_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Path {
             rect_path(rect)
         }
 
-        fn get_inner_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Arc<Path> {
+        fn get_inner_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Path {
             rect_path(rect)
         }
 
@@ -1581,11 +1586,11 @@ mod tests {
             Box::new(*self)
         }
 
-        fn get_outer_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Arc<Path> {
+        fn get_outer_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Path {
             rect_path(rect)
         }
 
-        fn get_inner_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Arc<Path> {
+        fn get_inner_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Path {
             rect_path(rect)
         }
 
@@ -1626,11 +1631,11 @@ mod tests {
             Box::new(*self)
         }
 
-        fn get_outer_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Arc<Path> {
+        fn get_outer_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Path {
             rect_path(rect)
         }
 
-        fn get_inner_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Arc<Path> {
+        fn get_inner_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Path {
             rect_path(rect)
         }
 

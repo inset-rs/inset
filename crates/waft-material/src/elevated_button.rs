@@ -900,7 +900,7 @@ mod tests {
         ahem_text(text).into_widget()
     }
 
-    fn all<T: Clone + Debug + 'static>(value: T) -> WidgetStatePropertyRef<Option<T>> {
+    fn all<T: Clone + Debug + PartialEq + 'static>(value: T) -> WidgetStatePropertyRef<Option<T>> {
         Rc::new(MaterialStatePropertyAll::new(Some(value)))
     }
 

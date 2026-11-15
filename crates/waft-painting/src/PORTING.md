@@ -18,6 +18,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - edge_insets.rs → edge_insets.dart
 - fractional_offset.rs → fractional_offset.dart
 - text_scaler.rs → text_scaler.dart
+- notched_shapes.rs → notched_shapes.dart
 - box_border.rs → box_border.dart
 - circle_border.rs → circle_border.dart
 - oval_border.rs → oval_border.dart
@@ -49,10 +50,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Affect: a display-list dump shows an rrect or a path where Flutter's shows the shape.
 
 ## clip.rs → clip.dart
-
-- Change: clipping and hit-testing pass `FillRule::NonZero` alongside the path.
-  Reason: platform — valo `Path` carries no `fillType`, and Dart's default is `nonZero`.
-  Affect: a path with self-crossing subpaths clips and hit-tests as non-zero; there is no even-odd option.
 
 - Change: `clip_r_superellipse_and_paint` records a `clip_path` of valo's superellipse path.
   Reason: platform — valo has no `clip_rsuperellipse` op; the path is the same Impeller geometry as `RSuperellipse.contains`.
@@ -103,12 +100,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - Change: `paint_image` draws with the paint's alpha alone and carries no colour or blend mode over the image.
   Reason: platform — the renderer tints an image by alpha and ignores the paint's colour channels.
   Affect: fading an image works; tinting one does nothing.
-
-## notched_shapes.rs → notched_shapes.dart
-
-- Change: `AutomaticNotchedShape::get_outer_path` returns the host less the guest as `path_combine` writes it, which its users fill, clip and hit-test with the non-zero rule, where Dart's combined path fills with the even-odd rule it carries.
-  Reason: platform — valo `Path` carries no `fillType` (the clip.rs entry), and Skia's `Op` winds the contours it writes for the even-odd rule.
-  Affect: a guest wholly inside the host leaves no hole in it; a guest that crosses the host's edge, as a docked button does, notches it as in Flutter.
 
 ## Deferred
 

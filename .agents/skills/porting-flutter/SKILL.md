@@ -25,6 +25,7 @@ A pattern earns a file under `patterns/` on its second instance. Until then, the
 - Derived fields: [patterns/derived-fields.md](patterns/derived-fields.md)
 - Callback identity: [patterns/callback-identity.md](patterns/callback-identity.md)
 - Futures: [patterns/futures.md](patterns/futures.md)
+- Value tweens: [patterns/value-tweens.md](patterns/value-tweens.md)
 
 ## Rust traps
 

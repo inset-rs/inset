@@ -477,7 +477,7 @@ impl dyn ButtonStyleButton {
     /// Returns null if `value` is null, otherwise `WidgetStatePropertyAll<T>(value)`.
     ///
     /// A convenience method for subclasses.
-    pub fn all_or_null<T: Clone + Debug + 'static>(
+    pub fn all_or_null<T: Clone + Debug + PartialEq + 'static>(
         value: Option<T>,
     ) -> Option<WidgetStatePropertyRef<Option<T>>> {
         value.map(|value| {
@@ -1025,7 +1025,7 @@ impl ButtonStyleLayers {
         widget_value.or(theme_value).or(default_value)
     }
 
-    fn resolve<T>(
+    fn resolve<T: 'static>(
         &self,
         states: &WidgetStates,
         get_property: impl Fn(&ButtonStyle) -> &Option<WidgetStatePropertyRef<Option<T>>>,
@@ -1366,7 +1366,7 @@ mod tests {
         );
     }
 
-    fn all<T: Clone + Debug + 'static>(value: T) -> WidgetStatePropertyRef<Option<T>> {
+    fn all<T: Clone + Debug + PartialEq + 'static>(value: T) -> WidgetStatePropertyRef<Option<T>> {
         Rc::new(WidgetStatePropertyAll::new(Some(value)))
     }
 

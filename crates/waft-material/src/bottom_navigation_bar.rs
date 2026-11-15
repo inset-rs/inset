@@ -31,7 +31,7 @@ use crate::bottom_navigation_bar_theme::BottomNavigationBarTheme;
 use crate::constants::K_BOTTOM_NAVIGATION_BAR_HEIGHT;
 use crate::debug::debug_check_has_material_localizations;
 use crate::ink_well::InkResponse;
-use crate::material::{Material, MaterialType, destroy_lingering};
+use crate::material::{Material, MaterialType};
 use crate::material_localizations::MaterialLocalizations;
 use crate::theme::{K_THEME_ANIMATION_DURATION, Theme};
 use crate::tooltip::Tooltip;
@@ -1798,8 +1798,8 @@ impl Circle {
     /// [`destroy`](Self::destroy) from inside the controller's own status listener: both
     /// stay readable until the next checkpoint.
     fn destroy_lingering(&self, app: &mut App) {
-        destroy_lingering(app, self.animation);
-        destroy_lingering(app, self.controller);
+        app.destroy_lingering(self.animation);
+        app.destroy_lingering(self.controller);
     }
 }
 

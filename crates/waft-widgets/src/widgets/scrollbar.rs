@@ -879,7 +879,11 @@ impl ScrollbarPainter {
             shape.paint_interior(canvas, thumb_rect, &self.paint_thumb(app), text_direction);
         } else {
             let outer_path = shape.get_outer_path(thumb_rect, text_direction);
-            canvas.draw_path(&outer_path, FillRule::NonZero, &self.paint_thumb(app));
+            canvas.draw_path(
+                outer_path.as_valo(),
+                outer_path.fill_type,
+                &self.paint_thumb(app),
+            );
         }
         shape.paint(canvas, thumb_rect, text_direction);
     }
@@ -3094,12 +3098,18 @@ impl RawScrollbarState {
     where
         S::Widget: RawScrollbarLeaf,
     {
-        RawScrollbarState::fadeout_animation_controller(this, app).dispose(app);
+        let fadeout_animation_controller =
+            RawScrollbarState::fadeout_animation_controller(this, app);
+        fadeout_animation_controller.dispose(app);
         RawScrollbarState::cancel_fadeout_timer(this, app);
-        RawScrollbarState::scrollbar_painter(this, app).dispose(app);
+        let scrollbar_painter = RawScrollbarState::scrollbar_painter(this, app);
+        scrollbar_painter.dispose(app);
         if let Some(opacity) = this.raw_scrollbar_state_data(app).fadeout_opacity_animation {
             opacity.dispose(app);
+            app.destroy_lingering(opacity);
         }
+        app.destroy_lingering(scrollbar_painter);
+        app.destroy_lingering(fadeout_animation_controller);
     }
 
     /// Dart's `build`, which a leaf's [`State::build`] calls.
@@ -3919,6 +3929,41 @@ mod tests {
             0.0,
             "the thumb has faded out"
         );
+    }
+
+    /// Dart's collector frees the fade controller, its `CurvedAnimation` and the painter
+    /// `RawScrollbarState` makes once the state is gone; here the state frees them in its
+    /// `dispose`.
+    #[test]
+    fn a_disposed_raw_scrollbar_frees_its_fade_and_painter() {
+        let cell = binding_cell();
+        let (key, _controller) = mount(&cell);
+        let (fade, controller, painter) = {
+            let app = cell.borrow();
+            let state = key
+                .current_state::<RawScrollbarState>(&app)
+                .expect("the scrollbar is mounted");
+            let data = RawScrollbarState::raw_scrollbar_state_data(state, &app);
+            (
+                data.fadeout_opacity_animation.expect("made in init_state"),
+                data.fadeout_animation_controller
+                    .expect("made in init_state"),
+                data.scrollbar_painter.expect("made in init_state"),
+            )
+        };
+
+        {
+            let mut app = cell.borrow_mut();
+            let view = crate::test_harness::platform_view(&app);
+            let root = crate::view::View::new(view, SizedBox::new()).into_widget();
+            crate::binding::WidgetsBinding::instance(&mut app).attach_root_widget(&mut app, root);
+            binding_pump(&mut app, Duration::from_millis(32));
+        }
+        cell.checkpoint();
+        let app = cell.borrow();
+        assert!(!app.contains(fade));
+        assert!(!app.contains(controller));
+        assert!(!app.contains(painter));
     }
 
     #[test]

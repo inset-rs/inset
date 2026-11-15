@@ -15,16 +15,15 @@
 
 use std::any::Any;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use waft_animation::AnyAnimation;
 use waft_embedder::Locale;
 use waft_embedder::{
     BlendMode, Clip, Color, FillRule, FilterQuality, ImageFilter, Matrix4, Offset, Paint,
     PaintStyle, Path, PathBuilder, RRect, RSuperellipse, Rect, Size, Stroke, TextBaseline,
-    rrect_radii_elliptical, rsuperellipse_radii_elliptical, valo, valo::Point,
+    rrect_radii_elliptical, rsuperellipse_radii_elliptical, valo,
 };
-use waft_foundation::{App, Handle, Listenable, Listener};
+use waft_foundation::{App, Handle, Listenable, Listener, RetainedHandleId};
 use waft_gestures::{
     PointerCancelEventListener, PointerDownEventListener, PointerEnterEventListener, PointerEvent,
     PointerExitEventListener, PointerHoverEventListener, PointerMoveEventListener,
@@ -53,7 +52,7 @@ use crate::object::{
     AnyRenderObject, Constraints, EmptyParentData, RenderHandle, RenderObject, RenderObjectData,
     RenderObjectWithChildData, RenderObjectWithChildMixin,
 };
-use crate::painting_context::{PaintingContext, shift_path};
+use crate::painting_context::PaintingContext;
 use crate::pipeline_owner::PipelineOwner;
 use crate::semantics::SemanticsProperties;
 use crate::semantics_annotations::{SemanticsAnnotationsData, SemanticsAnnotationsMixin};
@@ -249,12 +248,157 @@ pub enum HitTestBehavior {
     Translucent,
 }
 
+/// Flutter's `RenderConstrainedBox` fields.
+pub struct RenderConstrainedBoxData {
+    additional_constraints: BoxConstraints,
+}
+
+impl RenderConstrainedBoxData {
+    /// Dart's constructor: `additional_constraints` must be valid.
+    pub fn new(additional_constraints: BoxConstraints) -> RenderConstrainedBoxData {
+        debug_assert!(additional_constraints.debug_assert_is_valid(false));
+        RenderConstrainedBoxData {
+            additional_constraints,
+        }
+    }
+}
+
+/// Flutter's `RenderConstrainedBox` bodies. [`RenderConstrainedBox`] is the plain leaf; a Dart
+/// subclass (`cupertino_ui`'s `_RenderCupertinoSlider`) is a leaf that implements this trait too
+/// and overrides what Dart's subclass overrides.
+///
+/// A leaf calls [`perform_layout`](Self::perform_layout), the intrinsics,
+/// [`compute_dry_baseline`](Self::compute_dry_baseline) and
+/// [`compute_dry_layout`](Self::compute_dry_layout) from its [`RenderObject`] and [`RenderBox`]
+/// impls, where Dart inherits them.
+pub trait RenderConstrainedBoxBase: RenderProxyBoxMixin {
+    /// Base class field access.
+    fn constrained_box_data(self: RenderHandle<Self>, app: &App) -> &RenderConstrainedBoxData;
+
+    /// See [`constrained_box_data`](Self::constrained_box_data).
+    fn constrained_box_data_mut(
+        self: RenderHandle<Self>,
+        app: &mut App,
+    ) -> &mut RenderConstrainedBoxData;
+
+    /// Additional constraints to apply to the child during layout.
+    fn additional_constraints(self: RenderHandle<Self>, app: &App) -> BoxConstraints {
+        self.constrained_box_data(app).additional_constraints
+    }
+
+    /// Sets [`additional_constraints`](Self::additional_constraints).
+    fn set_additional_constraints(self: RenderHandle<Self>, app: &mut App, value: BoxConstraints) {
+        debug_assert!(value.debug_assert_is_valid(false));
+        if self.constrained_box_data(app).additional_constraints == value {
+            return;
+        }
+        self.constrained_box_data_mut(app).additional_constraints = value;
+        self.mark_needs_layout(app);
+    }
+
+    /// Flutter's `computeMinIntrinsicWidth` override.
+    fn compute_min_intrinsic_width(self: RenderHandle<Self>, app: &mut App, height: f64) -> f64 {
+        let additional = self.additional_constraints(app);
+        if additional.has_bounded_width() && additional.has_tight_width() {
+            return additional.min_width;
+        }
+        let width = RenderProxyBoxMixin::compute_min_intrinsic_width(self, app, height);
+        debug_assert!(width.is_finite());
+        if !additional.has_infinite_width() {
+            return additional.constrain_width(width);
+        }
+        width
+    }
+
+    /// Flutter's `computeMaxIntrinsicWidth` override.
+    fn compute_max_intrinsic_width(self: RenderHandle<Self>, app: &mut App, height: f64) -> f64 {
+        let additional = self.additional_constraints(app);
+        if additional.has_bounded_width() && additional.has_tight_width() {
+            return additional.min_width;
+        }
+        let width = RenderProxyBoxMixin::compute_max_intrinsic_width(self, app, height);
+        debug_assert!(width.is_finite());
+        if !additional.has_infinite_width() {
+            return additional.constrain_width(width);
+        }
+        width
+    }
+
+    /// Flutter's `computeMinIntrinsicHeight` override.
+    fn compute_min_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
+        let additional = self.additional_constraints(app);
+        if additional.has_bounded_height() && additional.has_tight_height() {
+            return additional.min_height;
+        }
+        let height = RenderProxyBoxMixin::compute_min_intrinsic_height(self, app, width);
+        debug_assert!(height.is_finite());
+        if !additional.has_infinite_height() {
+            return additional.constrain_height(height);
+        }
+        height
+    }
+
+    /// Flutter's `computeMaxIntrinsicHeight` override.
+    fn compute_max_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
+        let additional = self.additional_constraints(app);
+        if additional.has_bounded_height() && additional.has_tight_height() {
+            return additional.min_height;
+        }
+        let height = RenderProxyBoxMixin::compute_max_intrinsic_height(self, app, width);
+        debug_assert!(height.is_finite());
+        if !additional.has_infinite_height() {
+            return additional.constrain_height(height);
+        }
+        height
+    }
+
+    /// Flutter's `computeDryBaseline` override.
+    fn compute_dry_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        let additional = self.additional_constraints(app);
+        self.child(app).and_then(|child| {
+            child.get_dry_baseline(app, additional.enforce(constraints), baseline)
+        })
+    }
+
+    /// Flutter's `performLayout` override.
+    fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
+        let constraints = self.constraints(app);
+        let additional = self.additional_constraints(app);
+        if let Some(child) = self.child(app) {
+            child.layout(app, additional.enforce(constraints), true);
+            self.set_size(app, child.size(app));
+        } else {
+            self.set_size(app, additional.enforce(constraints).constrain(Size::ZERO));
+        }
+    }
+
+    /// Flutter's `computeDryLayout` override.
+    fn compute_dry_layout(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+    ) -> Size {
+        let additional = self.additional_constraints(app);
+        match self.child(app) {
+            Some(child) => child.get_dry_layout(app, additional.enforce(constraints)),
+            None => additional.enforce(constraints).constrain(Size::ZERO),
+        }
+    }
+}
+
 /// Imposes additional constraints on its child.
+///
+/// Its members are [`RenderConstrainedBoxBase`]'s.
 pub struct RenderConstrainedBox {
     render_object: RenderObjectData,
     render_box: RenderBoxData,
     child: RenderObjectWithChildData<AnyRenderBox>,
-    additional_constraints: BoxConstraints,
+    constrained_box: RenderConstrainedBoxData,
 }
 
 impl RenderConstrainedBox {
@@ -266,37 +410,30 @@ impl RenderConstrainedBox {
         additional_constraints: BoxConstraints,
         child: Option<AnyRenderBox>,
     ) -> RenderHandle<RenderConstrainedBox> {
-        debug_assert!(additional_constraints.debug_assert_is_valid(false));
         let this = RenderHandle::new_box(
             app,
             RenderConstrainedBox {
                 render_object: RenderObjectData::new(),
                 render_box: RenderBoxData::new(),
                 child: RenderObjectWithChildData::new(),
-                additional_constraints,
+                constrained_box: RenderConstrainedBoxData::new(additional_constraints),
             },
         );
         this.set_child(app, child);
         this
     }
+}
 
-    /// Additional constraints to apply to the child during layout.
-    pub fn additional_constraints(self: RenderHandle<Self>, app: &App) -> BoxConstraints {
-        self.get(app).additional_constraints
+impl RenderConstrainedBoxBase for RenderConstrainedBox {
+    fn constrained_box_data(self: RenderHandle<Self>, app: &App) -> &RenderConstrainedBoxData {
+        &self.get(app).constrained_box
     }
 
-    /// Sets [`additional_constraints`](Self::additional_constraints).
-    pub fn set_additional_constraints(
+    fn constrained_box_data_mut(
         self: RenderHandle<Self>,
         app: &mut App,
-        value: BoxConstraints,
-    ) {
-        debug_assert!(value.debug_assert_is_valid(false));
-        if self.get(app).additional_constraints == value {
-            return;
-        }
-        self.get_mut(app).additional_constraints = value;
-        self.mark_needs_layout(app);
+    ) -> &mut RenderConstrainedBoxData {
+        &mut self.get_mut(app).constrained_box
     }
 }
 
@@ -321,14 +458,7 @@ impl RenderObject for RenderConstrainedBox {
     crate::render_object_accessors!();
 
     fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
-        let constraints = self.constraints(app);
-        let additional = self.get(app).additional_constraints;
-        if let Some(child) = self.child(app) {
-            child.layout(app, additional.enforce(constraints), true);
-            self.set_size(app, child.size(app));
-        } else {
-            self.set_size(app, additional.enforce(constraints).constrain(Size::ZERO));
-        }
+        RenderConstrainedBoxBase::perform_layout(self, app);
     }
 
     fn paint(
@@ -377,59 +507,19 @@ impl RenderBox for RenderConstrainedBox {
     }
 
     fn compute_min_intrinsic_width(self: RenderHandle<Self>, app: &mut App, height: f64) -> f64 {
-        let additional = self.get(app).additional_constraints;
-        if additional.has_bounded_width() && additional.has_tight_width() {
-            return additional.min_width;
-        }
-        let width = RenderProxyBoxMixin::compute_min_intrinsic_width(self, app, height);
-        debug_assert!(width.is_finite());
-        if additional.has_infinite_width() {
-            width
-        } else {
-            additional.constrain_width(width)
-        }
+        RenderConstrainedBoxBase::compute_min_intrinsic_width(self, app, height)
     }
 
     fn compute_max_intrinsic_width(self: RenderHandle<Self>, app: &mut App, height: f64) -> f64 {
-        let additional = self.get(app).additional_constraints;
-        if additional.has_bounded_width() && additional.has_tight_width() {
-            return additional.min_width;
-        }
-        let width = RenderProxyBoxMixin::compute_max_intrinsic_width(self, app, height);
-        debug_assert!(width.is_finite());
-        if additional.has_infinite_width() {
-            width
-        } else {
-            additional.constrain_width(width)
-        }
+        RenderConstrainedBoxBase::compute_max_intrinsic_width(self, app, height)
     }
 
     fn compute_min_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
-        let additional = self.get(app).additional_constraints;
-        if additional.has_bounded_height() && additional.has_tight_height() {
-            return additional.min_height;
-        }
-        let height = RenderProxyBoxMixin::compute_min_intrinsic_height(self, app, width);
-        debug_assert!(height.is_finite());
-        if additional.has_infinite_height() {
-            height
-        } else {
-            additional.constrain_height(height)
-        }
+        RenderConstrainedBoxBase::compute_min_intrinsic_height(self, app, width)
     }
 
     fn compute_max_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
-        let additional = self.get(app).additional_constraints;
-        if additional.has_bounded_height() && additional.has_tight_height() {
-            return additional.min_height;
-        }
-        let height = RenderProxyBoxMixin::compute_max_intrinsic_height(self, app, width);
-        debug_assert!(height.is_finite());
-        if additional.has_infinite_height() {
-            height
-        } else {
-            additional.constrain_height(height)
-        }
+        RenderConstrainedBoxBase::compute_max_intrinsic_height(self, app, width)
     }
 
     fn compute_distance_to_actual_baseline(
@@ -446,10 +536,7 @@ impl RenderBox for RenderConstrainedBox {
         constraints: BoxConstraints,
         baseline: TextBaseline,
     ) -> Option<f64> {
-        let additional = self.get(app).additional_constraints;
-        self.child(app).and_then(|child| {
-            child.get_dry_baseline(app, additional.enforce(constraints), baseline)
-        })
+        RenderConstrainedBoxBase::compute_dry_baseline(self, app, constraints, baseline)
     }
 
     fn compute_dry_layout(
@@ -457,11 +544,7 @@ impl RenderBox for RenderConstrainedBox {
         app: &mut App,
         constraints: BoxConstraints,
     ) -> Size {
-        let additional = self.get(app).additional_constraints;
-        match self.child(app) {
-            Some(child) => child.get_dry_layout(app, additional.enforce(constraints)),
-            None => additional.enforce(constraints).constrain(Size::ZERO),
-        }
+        RenderConstrainedBoxBase::compute_dry_layout(self, app, constraints)
     }
 }
 
@@ -1197,6 +1280,9 @@ pub struct RenderAnimatedOpacityData {
     alpha: Option<i32>,
     currently_is_repaint_boundary: Option<bool>,
     opacity: Option<AnyAnimation<f64>>,
+    /// Keeps `opacity` past its owner's `destroy` while this render object reads it, as
+    /// Dart's reference keeps it alive: a build may make the animation and free it at once.
+    retained_opacity: Option<RetainedHandleId>,
 }
 
 impl RenderAnimatedOpacityData {
@@ -1206,6 +1292,7 @@ impl RenderAnimatedOpacityData {
             alpha: None,
             currently_is_repaint_boundary: None,
             opacity: None,
+            retained_opacity: None,
         }
     }
 }
@@ -1286,6 +1373,14 @@ pub trait RenderAnimatedOpacityMixin:
             opacity.remove_listener(app, &self.opacity_listener());
         }
         self.animated_opacity_data_mut(app).opacity = Some(value);
+        let retained = app.retain_id(value.id());
+        if let Some(released) = self
+            .animated_opacity_data_mut(app)
+            .retained_opacity
+            .replace(retained)
+        {
+            app.release_id(released);
+        }
         if self.attached(app) {
             value.add_listener(app, self.opacity_listener());
         }
@@ -3724,7 +3819,9 @@ pub trait CustomClipper<T>: 'static {
 
     /// Returns a description of the clip given that the render object being
     /// clipped is of the given size.
-    fn get_clip(&self, size: Size) -> T;
+    ///
+    /// `app` reaches what a Dart clipper reads directly: an animation's value.
+    fn get_clip(&self, app: &App, size: Size) -> T;
 
     /// Called whenever a new instance of the custom clipper delegate class is
     /// provided to the clip object, or any time that a new clip object is created
@@ -3743,7 +3840,7 @@ pub trait CustomClipper<T>: 'static {
     /// [`should_reclip`](Self::should_reclip) method is never called at all (e.g. if the box
     /// changes size). It is only called with a clipper of this clipper's own type, as Dart's
     /// `covariant` parameter is.
-    fn should_reclip(&self, old_clipper: &dyn CustomClipper<T>) -> bool;
+    fn should_reclip(&self, app: &App, old_clipper: &dyn CustomClipper<T>) -> bool;
 
     /// Downcast support for Dart's `runtimeType` comparison and `covariant` parameter.
     fn as_any(&self) -> &dyn Any;
@@ -3815,13 +3912,13 @@ impl ShapeBorderClipper {
     }
 }
 
-impl CustomClipper<Arc<Path>> for ShapeBorderClipper {
-    fn get_clip(&self, size: Size) -> Arc<Path> {
+impl CustomClipper<Path> for ShapeBorderClipper {
+    fn get_clip(&self, _app: &App, size: Size) -> Path {
         self.shape
             .get_outer_path(Offset::ZERO & size, self.text_direction)
     }
 
-    fn should_reclip(&self, old_clipper: &dyn CustomClipper<Arc<Path>>) -> bool {
+    fn should_reclip(&self, _app: &App, old_clipper: &dyn CustomClipper<Path>) -> bool {
         let Some(old_clipper) = old_clipper.as_any().downcast_ref::<ShapeBorderClipper>() else {
             return true;
         };
@@ -3872,7 +3969,7 @@ pub trait RenderCustomClip<T: Clone + 'static>: RenderProxyBoxMixin {
         let reclip = match (&new_clipper, &old_clipper) {
             (Some(new_clipper), Some(old_clipper)) => {
                 new_clipper.as_any().type_id() != old_clipper.as_any().type_id()
-                    || new_clipper.should_reclip(&**old_clipper)
+                    || new_clipper.should_reclip(app, &**old_clipper)
             }
             _ => true,
         };
@@ -3942,7 +4039,7 @@ pub trait RenderCustomClip<T: Clone + 'static>: RenderProxyBoxMixin {
             return;
         }
         let clip = match self.clipper(app) {
-            Some(clipper) => clipper.get_clip(self.size(app)),
+            Some(clipper) => clipper.get_clip(app, self.size(app)),
             None => self.default_clip(app),
         };
         self.custom_clip_data_mut(app).clip = Some(clip);
@@ -4458,7 +4555,7 @@ pub struct RenderClipOval {
     child: RenderObjectWithChildData<AnyRenderBox>,
     custom_clip: RenderCustomClipData<Rect>,
     cached_rect: Option<Rect>,
-    cached_path: Option<Arc<Path>>,
+    cached_path: Option<Path>,
 }
 
 impl RenderClipOval {
@@ -4489,14 +4586,14 @@ impl RenderClipOval {
         this
     }
 
-    fn get_clip_path(self: RenderHandle<Self>, app: &mut App, rect: Rect) -> Arc<Path> {
+    fn get_clip_path(self: RenderHandle<Self>, app: &mut App, rect: Rect) -> Path {
         if self.get(app).cached_rect != Some(rect) {
             let radius = [(rect.width() / 2.0) as f32, (rect.height() / 2.0) as f32];
             let mut path = PathBuilder::new();
             path.rrect_radii_elliptical(rect, [radius; 4]);
             let this = self.get_mut(app);
             this.cached_rect = Some(rect);
-            this.cached_path = Some(path.build());
+            this.cached_path = Some(path.build().into());
         }
         self.get(app).cached_path.clone().expect("cached above")
     }
@@ -4706,7 +4803,7 @@ pub struct RenderClipPath {
     render_object: RenderObjectData,
     render_box: RenderBoxData,
     child: RenderObjectWithChildData<AnyRenderBox>,
-    custom_clip: RenderCustomClipData<Arc<Path>>,
+    custom_clip: RenderCustomClipData<Path>,
 }
 
 impl RenderClipPath {
@@ -4720,7 +4817,7 @@ impl RenderClipPath {
     /// If `clip_behavior` is [`Clip::None`], no clipping will be applied.
     pub fn new(
         app: &mut App,
-        clipper: Option<Rc<dyn CustomClipper<Arc<Path>>>>,
+        clipper: Option<Rc<dyn CustomClipper<Path>>>,
         clip_behavior: Clip,
         child: Option<AnyRenderBox>,
     ) -> RenderHandle<RenderClipPath> {
@@ -4755,22 +4852,22 @@ impl RenderObjectWithChildMixin for RenderClipPath {
 
 impl RenderProxyBoxMixin for RenderClipPath {}
 
-impl RenderCustomClip<Arc<Path>> for RenderClipPath {
-    fn custom_clip_data(self: RenderHandle<Self>, app: &App) -> &RenderCustomClipData<Arc<Path>> {
+impl RenderCustomClip<Path> for RenderClipPath {
+    fn custom_clip_data(self: RenderHandle<Self>, app: &App) -> &RenderCustomClipData<Path> {
         &self.get(app).custom_clip
     }
 
     fn custom_clip_data_mut(
         self: RenderHandle<Self>,
         app: &mut App,
-    ) -> &mut RenderCustomClipData<Arc<Path>> {
+    ) -> &mut RenderCustomClipData<Path> {
         &mut self.get_mut(app).custom_clip
     }
 
-    fn default_clip(self: RenderHandle<Self>, app: &App) -> Arc<Path> {
+    fn default_clip(self: RenderHandle<Self>, app: &App) -> Path {
         let mut path = PathBuilder::new();
         path.rect((Offset::ZERO & self.size(app)).into());
-        path.build()
+        path.build().into()
     }
 }
 
@@ -4864,8 +4961,7 @@ impl RenderBox for RenderClipPath {
     ) -> bool {
         if self.clipper(app).is_some() {
             self.update_clip(app);
-            let point = Point::new(position.dx() as f32, position.dy() as f32);
-            if !self.clip(app).contains(point, FillRule::NonZero) {
+            if !self.clip(app).contains(position) {
                 return false;
             }
         }
@@ -5090,7 +5186,7 @@ impl RenderObject for RenderClipRSuperellipse {
                     self.as_object().needs_compositing(app),
                     offset,
                     clip.outer_rect(),
-                    clip_path.build(),
+                    clip_path.build().into(),
                     |app, context, offset| RenderProxyBoxMixin::paint(self, app, context, offset),
                     clip_behavior,
                     old,
@@ -5659,7 +5755,7 @@ pub struct RenderPhysicalShape {
     render_object: RenderObjectData,
     render_box: RenderBoxData,
     child: RenderObjectWithChildData<AnyRenderBox>,
-    custom_clip: RenderCustomClipData<Arc<Path>>,
+    custom_clip: RenderCustomClipData<Path>,
     physical_model: RenderPhysicalModelBaseData,
 }
 
@@ -5673,7 +5769,7 @@ impl RenderPhysicalShape {
     pub fn new(
         app: &mut App,
         child: Option<AnyRenderBox>,
-        clipper: Rc<dyn CustomClipper<Arc<Path>>>,
+        clipper: Rc<dyn CustomClipper<Path>>,
         clip_behavior: Clip,
         elevation: f64,
         color: Color,
@@ -5712,26 +5808,26 @@ impl RenderObjectWithChildMixin for RenderPhysicalShape {
 
 impl RenderProxyBoxMixin for RenderPhysicalShape {}
 
-impl RenderCustomClip<Arc<Path>> for RenderPhysicalShape {
-    fn custom_clip_data(self: RenderHandle<Self>, app: &App) -> &RenderCustomClipData<Arc<Path>> {
+impl RenderCustomClip<Path> for RenderPhysicalShape {
+    fn custom_clip_data(self: RenderHandle<Self>, app: &App) -> &RenderCustomClipData<Path> {
         &self.get(app).custom_clip
     }
 
     fn custom_clip_data_mut(
         self: RenderHandle<Self>,
         app: &mut App,
-    ) -> &mut RenderCustomClipData<Arc<Path>> {
+    ) -> &mut RenderCustomClipData<Path> {
         &mut self.get_mut(app).custom_clip
     }
 
-    fn default_clip(self: RenderHandle<Self>, app: &App) -> Arc<Path> {
+    fn default_clip(self: RenderHandle<Self>, app: &App) -> Path {
         let mut path = PathBuilder::new();
         path.rect((Offset::ZERO & self.size(app)).into());
-        path.build()
+        path.build().into()
     }
 }
 
-impl RenderPhysicalModelBase<Arc<Path>> for RenderPhysicalShape {
+impl RenderPhysicalModelBase<Path> for RenderPhysicalShape {
     fn physical_model_data(self: RenderHandle<Self>, app: &App) -> &RenderPhysicalModelBaseData {
         &self.get(app).physical_model
     }
@@ -5778,7 +5874,7 @@ impl RenderObject for RenderPhysicalShape {
 
         self.update_clip(app);
         let clip = self.clip(app);
-        let offset_path = shift_path(&clip, offset);
+        let offset_path = clip.shift(offset);
         let elevation = self.elevation(app);
         let shadow_color = self.shadow_color(app);
         let color = self.color(app);
@@ -5786,8 +5882,8 @@ impl RenderObject for RenderPhysicalShape {
         if cfg!(debug_assertions) && debug_disable_shadows() {
             if elevation > 0.0 {
                 context.canvas().draw_path(
-                    &offset_path,
-                    FillRule::NonZero,
+                    offset_path.as_valo(),
+                    offset_path.fill_type,
                     &Paint {
                         color: shadow_color.into(),
                         style: PaintStyle::Stroke(Stroke::new((elevation * 2.0) as f32)),
@@ -5804,8 +5900,8 @@ impl RenderObject for RenderPhysicalShape {
             #[expect(deprecated, reason = "Dart's paint reads the deprecated `Color.alpha`")]
             let transparent_occluder = color.alpha() != 0xFF;
             canvas.draw_shadow(
-                &offset_path,
-                FillRule::NonZero,
+                offset_path.as_valo(),
+                offset_path.fill_type,
                 shadow_color.into(),
                 elevation as f32,
                 transparent_occluder,
@@ -5816,8 +5912,8 @@ impl RenderObject for RenderPhysicalShape {
         let uses_save_layer = clip_behavior == Clip::AntiAliasWithSaveLayer;
         if !uses_save_layer {
             canvas.draw_path(
-                &offset_path,
-                FillRule::NonZero,
+                offset_path.as_valo(),
+                offset_path.fill_type,
                 &Paint {
                     color: color.into(),
                     ..Paint::default()
@@ -5886,8 +5982,7 @@ impl RenderBox for RenderPhysicalShape {
     ) -> bool {
         if self.clipper(app).is_some() {
             self.update_clip(app);
-            let point = Point::new(position.dx() as f32, position.dy() as f32);
-            if !self.clip(app).contains(point, FillRule::NonZero) {
+            if !self.clip(app).contains(position) {
                 return false;
             }
         }
@@ -9296,7 +9391,7 @@ impl<T: PartialEq + 'static> RenderBox for RenderAnnotatedRegion<T> {
 mod tests {
     use waft_animation::{k_always_complete_animation, k_always_dismissed_animation};
     use waft_embedder::ColorFilter;
-    use waft_embedder::valo::{self, Op};
+    use waft_embedder::valo::{self, Op, Point};
     use waft_foundation::AppCell;
     use waft_foundation::ValueNotifier;
     use waft_gestures::HitTestResult;
@@ -9843,11 +9938,11 @@ mod tests {
     struct LeftHalfClipper;
 
     impl CustomClipper<Rect> for LeftHalfClipper {
-        fn get_clip(&self, size: Size) -> Rect {
+        fn get_clip(&self, _app: &App, size: Size) -> Rect {
             Rect::from_ltwh(0.0, 0.0, size.width() / 2.0, size.height())
         }
 
-        fn should_reclip(&self, _old_clipper: &dyn CustomClipper<Rect>) -> bool {
+        fn should_reclip(&self, _app: &App, _old_clipper: &dyn CustomClipper<Rect>) -> bool {
             false
         }
 
@@ -9857,7 +9952,7 @@ mod tests {
     }
 
     impl CustomClipper<RRect> for LeftHalfClipper {
-        fn get_clip(&self, size: Size) -> RRect {
+        fn get_clip(&self, _app: &App, size: Size) -> RRect {
             RRect::from_rect_xy(
                 Rect::from_ltwh(0.0, 0.0, size.width() / 2.0, size.height()),
                 0.0,
@@ -9865,7 +9960,7 @@ mod tests {
             )
         }
 
-        fn should_reclip(&self, _old_clipper: &dyn CustomClipper<RRect>) -> bool {
+        fn should_reclip(&self, _app: &App, _old_clipper: &dyn CustomClipper<RRect>) -> bool {
             false
         }
 
@@ -9884,11 +9979,11 @@ mod tests {
             Some(&self.reclip)
         }
 
-        fn get_clip(&self, size: Size) -> Rect {
+        fn get_clip(&self, _app: &App, size: Size) -> Rect {
             Offset::ZERO & size
         }
 
-        fn should_reclip(&self, _old_clipper: &dyn CustomClipper<Rect>) -> bool {
+        fn should_reclip(&self, _app: &App, _old_clipper: &dyn CustomClipper<Rect>) -> bool {
             false
         }
 
@@ -10552,17 +10647,17 @@ mod tests {
     #[test]
     fn clip_path_uses_its_clipper_for_hit_tests_and_the_rect_by_default() {
         struct Triangle;
-        impl CustomClipper<Arc<Path>> for Triangle {
-            fn get_clip(&self, size: Size) -> Arc<Path> {
+        impl CustomClipper<Path> for Triangle {
+            fn get_clip(&self, _app: &App, size: Size) -> Path {
                 let mut path = PathBuilder::new();
                 path.move_to(Point::new(0.0, 0.0));
                 path.line_to(Point::new(size.width() as f32, 0.0));
                 path.line_to(Point::new(0.0, size.height() as f32));
                 path.close();
-                path.build()
+                path.build().into()
             }
 
-            fn should_reclip(&self, _old: &dyn CustomClipper<Arc<Path>>) -> bool {
+            fn should_reclip(&self, _app: &App, _old: &dyn CustomClipper<Path>) -> bool {
                 false
             }
 
@@ -10599,10 +10694,57 @@ mod tests {
             false,
         );
         assert!(
-            plain
-                .default_clip(&app)
-                .contains(Point::new(29.0, 19.0), FillRule::NonZero),
+            plain.default_clip(&app).contains(Offset::new(29.0, 19.0)),
             "the default clip is the box's rect"
+        );
+    }
+
+    #[test]
+    fn clip_path_clips_and_hit_tests_with_the_fill_type_of_its_path() {
+        struct Ring;
+        impl CustomClipper<Path> for Ring {
+            fn get_clip(&self, _app: &App, size: Size) -> Path {
+                let mut path = PathBuilder::new();
+                path.rect((Offset::ZERO & size).into());
+                path.rect(Rect::from_ltwh(25.0, 25.0, 50.0, 50.0).into());
+                let mut path = Path::new(path.build());
+                path.fill_type = waft_embedder::PathFillType::EvenOdd;
+                path
+            }
+
+            fn should_reclip(&self, _app: &App, _old: &dyn CustomClipper<Path>) -> bool {
+                false
+            }
+
+            fn as_any(&self) -> &dyn Any {
+                self
+            }
+        }
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let child = opaque_leaf(&mut app);
+        let clip = RenderClipPath::new(
+            &mut app,
+            Some(Rc::new(Ring)),
+            Clip::AntiAlias,
+            Some(child.as_box()),
+        );
+        let root = RenderRepaintBoundary::new(&mut app, Some(clip.as_box()));
+        first_frame(&mut app, root.as_box());
+
+        let ops = picture_ops(&app, root.as_object());
+        let fill_rule = ops
+            .iter()
+            .find_map(|op| match op {
+                Op::ClipPath { fill_rule, .. } => Some(*fill_rule),
+                _ => None,
+            })
+            .expect("the recording clips");
+        assert_eq!(fill_rule, FillRule::EvenOdd);
+        assert!(hit_test(&mut app, clip.as_box(), Offset::new(10.0, 10.0)).0);
+        assert!(
+            !hit_test(&mut app, clip.as_box(), Offset::new(50.0, 50.0)).0,
+            "the hole the even-odd rule leaves"
         );
     }
 
@@ -10644,17 +10786,16 @@ mod tests {
             waft_painting::BorderSide::NONE,
             waft_painting::BorderRadiusGeometry::circular(10.0),
         ));
+        let cell = AppCell::new();
+        let app = cell.borrow();
         let clipper = ShapeBorderClipper::new(square.clone_box(), Some(TextDirection::Ltr));
-        let clip = clipper.get_clip(Size::new(40.0, 40.0));
-        assert!(clip.contains(Point::new(20.0, 20.0), FillRule::NonZero));
-        assert!(
-            !clip.contains(Point::new(0.5, 0.5), FillRule::NonZero),
-            "a rounded corner"
-        );
+        let clip = clipper.get_clip(&app, Size::new(40.0, 40.0));
+        assert!(clip.contains(Offset::new(20.0, 20.0)));
+        assert!(!clip.contains(Offset::new(0.5, 0.5)), "a rounded corner");
         let same = ShapeBorderClipper::new(square.clone_box(), Some(TextDirection::Ltr));
-        assert!(!clipper.should_reclip(&same));
+        assert!(!clipper.should_reclip(&app, &same));
         let other = ShapeBorderClipper::new(square, Some(TextDirection::Rtl));
-        assert!(clipper.should_reclip(&other));
+        assert!(clipper.should_reclip(&app, &other));
     }
 
     /// The shadows a repaint boundary's recording draws: `drawShadow`'s draws.
@@ -10720,14 +10861,14 @@ mod tests {
     /// `_TestPathClipper` of `proxy_box_test.dart`.
     struct TestPathClipper;
 
-    impl CustomClipper<Arc<Path>> for TestPathClipper {
-        fn get_clip(&self, _size: Size) -> Arc<Path> {
+    impl CustomClipper<Path> for TestPathClipper {
+        fn get_clip(&self, _app: &App, _size: Size) -> Path {
             let mut path = PathBuilder::new();
             path.rect(Rect::from_ltwh(50.0, 50.0, 100.0, 100.0).into());
-            path.build()
+            path.build().into()
         }
 
-        fn should_reclip(&self, _old_clipper: &dyn CustomClipper<Arc<Path>>) -> bool {
+        fn should_reclip(&self, _app: &App, _old_clipper: &dyn CustomClipper<Path>) -> bool {
             false
         }
 
@@ -10846,18 +10987,18 @@ mod tests {
     /// A clipper whose path is a rounded rectangle over the whole box, of corner radius 4.
     struct RoundedRectClipper;
 
-    impl CustomClipper<Arc<Path>> for RoundedRectClipper {
-        fn get_clip(&self, size: Size) -> Arc<Path> {
+    impl CustomClipper<Path> for RoundedRectClipper {
+        fn get_clip(&self, _app: &App, size: Size) -> Path {
             let rrect = RRect::from_rect_and_radius(
                 Rect::from_ltwh(0.0, 0.0, size.width(), size.height()),
                 waft_embedder::Radius::circular(4.0),
             );
             let mut path = PathBuilder::new();
             path.rrect_radii_elliptical(rrect.outer_rect(), rrect_radii_elliptical(rrect));
-            path.build()
+            path.build().into()
         }
 
-        fn should_reclip(&self, _old_clipper: &dyn CustomClipper<Arc<Path>>) -> bool {
+        fn should_reclip(&self, _app: &App, _old_clipper: &dyn CustomClipper<Path>) -> bool {
             false
         }
 
@@ -10998,7 +11139,7 @@ mod tests {
         );
     }
 
-    fn circle_clipper() -> Rc<dyn CustomClipper<Arc<Path>>> {
+    fn circle_clipper() -> Rc<dyn CustomClipper<Path>> {
         Rc::new(ShapeBorderClipper::new(
             Box::new(waft_painting::CircleBorder::new(
                 waft_painting::BorderSide::NONE,

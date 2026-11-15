@@ -7,6 +7,7 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
 - text.rs → dart:ui text.dart (the text and font enums, `FontFeature`, `FontVariation`)
 - locale.rs → dart:ui `Locale`
 - `AppLifecycleState`, `AppExitResponse`, `AppExitType` in platform.rs → dart:ui `platform_dispatcher.dart`
+- painting.rs's aliases of Valo's types under dart:ui's names → dart:ui `PathFillType` (valo's `FillRule`: `NonZero`, `EvenOdd`), `StrokeCap` (valo's `Cap`), `Canvas` and `Picture`; `PaintingStyle` (valo's `PaintStyle`) has its entry under painting.rs
 - semantics.rs → lib/ui/semantics.dart (SemanticsAction, SemanticsRole, SemanticsInputType, SemanticsHitTestBehavior, SemanticsValidationResult, StringAttribute, SpellOutStringAttribute, LocaleStringAttribute)
 
 ## painting.rs → dart:ui `Canvas` / `Paint` / `Paragraph` / `TextStyle`
@@ -15,9 +16,17 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
   Reason: platform — valo's display list has no other image filter.
   Affect: the tile-mode blur and the dilate and erode filters cannot be built at all.
 
-- Change: `path_combine` (dart:ui's `Path.combine`) gives a path whose contours are wound for the even-odd rule, and the path does not carry that rule, where Dart's combined path carries `PathFillType.evenOdd`.
-  Reason: platform — valo `Path` carries no fill type; its draws, clips and hit tests take the rule from their caller.
-  Affect: a caller that fills, clips or hit-tests the result with the non-zero rule, as the framework does, fills a hole that Skia wound the same way as the outline around it; a stroked result draws as in Flutter.
+- Change: `PaintingStyle` is valo's `PaintStyle`, whose `Stroke` variant carries the stroke's width, cap, join and miter limit, where a Dart `Paint` keeps `strokeWidth`, `strokeCap`, `strokeJoin` and `strokeMiterLimit` as fields beside `style`.
+  Reason: platform — valo's `Paint` holds the stroke settings only inside its stroke style.
+  Affect: setting a paint's style to fill drops its stroke settings, and switching it back to stroke takes them again, where a Dart paint keeps them across style changes.
+
+- Change: `Path` is a value: its contours are made with a `PathBuilder` and cannot change once built, a clone shares them, and its `fill_type` is a field of each copy.
+  Reason: platform — valo's path is an immutable, shared `Arc<valo::Path>` that its builder makes, where Skia's `SkPath` behind a Dart `Path` is edited in place.
+  Affect: code extends a path by appending it to a new `PathBuilder` (Dart's `addPath`), and setting `fill_type` on one copy leaves the others as they were, where every holder of a Dart `Path` sees its edits.
+
+- Change: `Path`'s `==` compares the contours and the fill type, where dart:ui's `Path` has no `==` and compares by identity.
+  Reason: platform — a scene compares a frame's path clips with the last frame's by what they hold, as the engine's mutator stack compares `SkPath`s, and a value has no identity to compare instead.
+  Affect: two paths built apart with the same contours and fill type are equal, where in Dart they are not.
 
 - Change: `ImageFilter::shader` copies the shader's uniforms and images when it is called, where Dart's filter copies them when the engine first converts it, at the first scene or paint that uses it.
   Reason: language — the filter is a value a scene keeps, and a value cannot keep reading a shader the app goes on changing.

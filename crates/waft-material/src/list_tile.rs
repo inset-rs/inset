@@ -2,6 +2,7 @@
 //! `generated/list_tile_defaults_m3.g.dart` in `crate::generated::list_tile_defaults_m3`.
 #![allow(deprecated)]
 
+use std::any::Any;
 use std::fmt::{self, Debug};
 use std::rc::Rc;
 
@@ -1436,6 +1437,10 @@ impl WidgetStateProperty<Option<Color>> for IndividualOverrides {
             return self.selected_color;
         }
         self.enabled_color
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 

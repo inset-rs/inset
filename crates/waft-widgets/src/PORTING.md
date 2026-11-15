@@ -40,7 +40,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - widgets/desktop_text_selection_toolbar_layout_delegate.rs → desktop_text_selection_toolbar_layout_delegate.dart
 - widgets/text_selection_toolbar_layout_delegate.rs → text_selection_toolbar_layout_delegate.dart
 - widgets/overscroll_indicator.rs → overscroll_indicator.dart
-- widgets/dual_transition_builder.rs → dual_transition_builder.dart
+- widgets/magnifier.rs → magnifier.dart
 - widgets/debug.rs → debug.dart (the checks ported so far)
 - widgets/animated_size.rs → animated_size.dart
 - widgets/lookup_boundary.rs → lookup_boundary.dart
@@ -217,9 +217,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — a struct literal has no constructor body, and a fluent setter cannot see the arguments a later setter will supply.
   Affect: a bad combination panics where the widget is handed to the tree (for those four, during build), and a single-field assert fires at its setter, so a chain Dart's constructor would accept (`Positioned::fill(..).width(..)`) panics at `.width`.
 
-- Change: the semantics flags (`Opacity.alwaysIncludeSemantics`, the deprecated `ignoringSemantics`) and `Transform.filterQuality` are absent, here and in the transitions and implicit animations built on these widgets.
-  Reason: platform — the flags only feed the semantics tree, which is deferred, and `RenderTransform` carries no filter quality.
-  Affect: a transformed subtree is always applied by re-rendering the child, never rasterised through an image filter.
+- Change: the semantics flags (`Opacity.alwaysIncludeSemantics`, the deprecated `ignoringSemantics`) are absent, here and in the transitions and implicit animations built on these widgets.
+  Reason: platform — the flags only feed the semantics tree, which is deferred.
+  Affect: a caller cannot set them; nothing paints differently.
 
 - `BackdropFilter`'s blend modes and anisotropic sigmas follow rendering's `RenderBackdropFilter` entry.
 
@@ -239,9 +239,15 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — Dart's `_WidgetTicker` subclasses `Ticker` to unregister itself, and `dispose` here is an inherent method on a concrete arena struct.
   Affect: a state that churns animation controllers holds one handle per dead ticker until it is itself disposed, and muting a disposed ticker does nothing.
 
+## widgets/dual_transition_builder.rs → dual_transition_builder.dart
+
+- Change: `DualTransitionBuilderState` retains the widget's animation while it listens to it and while its `ReverseAnimation` reverses it, and frees its two proxies and that `ReverseAnimation` in `dispose`, lingering until the next checkpoint.
+  Reason: language — Dart's references keep the animation alive and its collector frees the state's objects with it; the arena frees one its owner destroyed, and a page transition's build makes the `ReverseAnimation` it hands this widget and frees it at once.
+  Affect: the animation stays readable past its owner's `destroy` until the state moves off it, and a handle to one of the state's proxies is stale after the checkpoint that follows its disposal.
+
 ## widgets/transitions.rs → transitions.dart
 
-- Change: the tweens this crate declares are `Clone` values built without the `App`, where `waft-animation`'s are arena objects.
+- Change: the tweens this crate declares are `Clone` values built without the `App`, as `waft-animation`'s `ValueTween` is, where its Flutter-named tweens are arena objects.
   Reason: language — orphan rule: an `Animatable` impl on a handle to a tween would name only foreign types.
   Affect: `drive` drives a clone, so writing `begin` or `end` afterwards does not reach the running animation as it does on a Dart `Tween`.
 
@@ -250,7 +256,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Affect: a route that offers its builder as a closure built per call never matches another route's, so a route below it always receives it; the Cupertino routes offer theirs as functions, so a sheet over a sheet, or a page over a page, receives none, as in Flutter.
 
 - `SizeTransition`'s constructor asserts run on its setters, the mutually exclusive `axis_alignment` / `alignment` on whichever runs second; see basic.rs's assert entry.
-- `MatrixTransition` (so `ScaleTransition` and `RotationTransition`) has no `filterQuality` and `FadeTransition` no `alwaysIncludeSemantics`; see basic.rs's `Transform` entry.
+- `FadeTransition` has no `alwaysIncludeSemantics`; see basic.rs's semantics-flags entry.
 
 ## widgets/icon_theme_data.rs → icon_theme_data.dart, widgets/icon_theme.rs → icon_theme.dart
 
@@ -290,6 +296,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — Dart's `null as T` is a runtime test of `T`'s nullability, which a Rust generic cannot make without specialization.
   Affect: a mapper over an `Option` panics on an unmatched set instead of resolving null, unless the map ends with a `WidgetState::any()` entry.
 
+- Change: `WidgetStatePropertyAll` and `WidgetStateMapper` are properties only of a value type with `PartialEq`, which their `==` (`eq_property`) compares.
+  Reason: language — a Rust generic `==` needs the bound, where every Dart object has an `==`, identity unless overridden.
+  Affect: a property over a type without `PartialEq` cannot be made with `all` or `from_map`; `dyn Widget` and `Icon` have an identity `PartialEq`, Dart's `Widget.==`, for a widget-valued property such as `MenuThemeData::submenu_icon` and for `Switch::thumb_icon`.
+
 - Change: `WidgetStateColor` is an `AnyColor` whose plain value is its empty-state resolution, read back with `color.extension::<WidgetStateColor>()`.
   Reason: language — painting's `Color` is a value, not a subclassable object.
   Affect: a map-built colour read as a plain `Color` gives its empty-state resolution where Dart throws, and panics only when no key matches the empty set.
@@ -302,9 +312,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — `OutlinedBorder` is a trait, so the subclass implements it directly as `WidgetStateMouseCursor` implements `MouseCursor`, and Dart's mapper answers those members only through `noSuchMethod`.
   Affect: a map-built border used as a plain border paints the default rounded rectangle where Dart throws, and another border's `lerp_from` does not see it as a `RoundedRectangleBorder`, which Dart's `is` on the subclass would.
 
-- Change: `clickable()`, `adaptive_clickable()` and `textable()` return a fresh `WidgetStateMouseCursor` per call.
-  Reason: language — no `static const` object holding an `Rc`.
-  Affect: two such cursors are never equal, so a `MouseRegion` handed one per build re-annotates every build where Dart's canonical `const` compares equal; map-built cursors compare by map equality.
+- Change: `clickable()`, `adaptive_clickable()` and `textable()` return a new `WidgetStateMouseCursor` per call that shares one per-thread resolver, and a `resolve_with` cursor compares equal to another holding the same resolver.
+  Reason: language — Rust has no `static const` object holding an `Rc`, so the identity of Dart's one canonical object is the identity of the resolver every call shares.
+  Affect: two calls of one of them compare equal, as Dart's `const` does, but are two objects; a cursor made by `resolve_with` is equal only to itself.
 
 ## framework: notifications → framework.dart (`Notification`, `NotifiableElementMixin`, `_NotificationNode`)
 
@@ -482,6 +492,18 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — Dart keeps the animation in a private field and offers a getter over it, and a `ModalRoute` overrides that getter with a proxy that reads complete while the route is offstage. Where the route behind measures the one ahead, Dart reaches past the override to the field, which library privacy lets it do; an erased route here is reached through a vtable, so the field needs an edge of its own, as `controller_value` already has.
   Affect: a route behind follows the next route's own animation and stays where it is while that route is offstage to be measured, instead of flashing the end of the transition before it plays.
 
+- Change: `ModalRouteBase::build_modal_barrier` keeps the colour and curve tweens and the colour animation it drove and frees the last build's (`replace_barrier_animations`, which an override calls too), and `_ModalScopeState` keeps the `_DismissModalAction` its build made and frees the last build's, and its own at `dispose`; they stay readable until the next checkpoint.
+  Reason: language — no collector frees what each build replaces, and the barrier and the `Actions` built from the old ones let go of them only when the new build replaces them.
+  Affect: a handle to a replaced barrier tween or animation, or to a replaced dismiss action, is stale after the checkpoint that follows the build that replaced it.
+
+- Change: `ModalRoute::build_flexible_transitions` keeps the static `ProxyAnimation` it hands the route's transitions in place of the secondary animation and frees the last build's, lingering until the next checkpoint.
+  Reason: language — the transitions read the proxy across frames, through wrappers such as `ReverseAnimation` that hold their parent without retaining it, and Dart's collector frees it only once the next build has replaced it.
+  Affect: a handle to a replaced proxy is stale after the checkpoint that follows the build that replaced it.
+
+- Change: `TransitionRoute::dispose` frees, for a `ModalRoute`, what its last builds made and still keeps: the tweens and colour animation of `build_modal_barrier` and the proxy of `build_flexible_transitions` (`ModalRouteBase::free_last_build_objects`), where Dart's `ModalRoute` has no `dispose` and its collector frees them with the route.
+  Reason: language — no collector, and `TransitionRoute.dispose` is the route disposal every modal route's own `dispose` reaches, as Dart's `super.dispose()` chain does.
+  Affect: a handle to one of them is stale after the checkpoint that follows the route's disposal; the navigator disposes a route only once its overlay entries have unmounted, so nothing reads them by then.
+
 ## widgets/implicit_animations.rs → implicit_animations.dart
 
 - Change: this file's tweens are value tweens in transitions.rs's shape, and the ones over a nullable Dart value animate an `Option` whose endpoints flatten, so an unset endpoint and one set to `None` are the same thing.
@@ -492,7 +514,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — no garbage collector: a tween a slot's constructor made would hold its arena slot for the life of the `App`.
   Affect: a tween handle a state made is stale once the state is disposed, and a slot that `for_each_tween` skips (Dart's `_AnimatedAlignState` skips one when its factor is null) is never freed.
 
-- `AnimatedScale` and `AnimatedRotation` have no `filterQuality`, and `AnimatedOpacity` no `alwaysIncludeSemantics`; see basic.rs's `Transform` entry.
+- `AnimatedOpacity` has no `alwaysIncludeSemantics`; see basic.rs's semantics-flags entry.
 - `AnimatedContainer`'s colour / decoration exclusion and its other constructor asserts run on the setters, as container.rs records; `width` and `height` fold into `constraints` on assignment, as `Container`'s do.
 
 ## widgets/visibility.rs → indexed_stack.dart (`Visibility`)
@@ -649,6 +671,14 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
   Reason: language — no canonical `const` objects: Dart's `const FadeUpwardsPageTransitionsBuilder()` is one object wherever it is written.
   Affect: two themes or builder maps built with separately made builders compare unequal where Dart's const builders are identical.
 
+- Change: `FadeUpwardsPageTransitionsBuilder::build_transitions` frees the slide and fade animations `_FadeUpwardsPageTransition` drives with `destroy_lingering` once it has made the widget; the `SlideTransition` and `FadeTransition` its build makes retain them.
+  Reason: language — Dart's collector frees what each frame's build replaces, and the transition is a stateless widget with no state to keep them in.
+  Affect: a handle to one of them is stale once the transition that holds it moves to the next frame's.
+
+- Change: `_OpenUpwardsPageTransition`'s layout builder frees the four animations it drives with `destroy_lingering` once the `AnimatedBuilder` closure that reads them on every frame has retained them, and its state frees its two curves when it replaces them and at `dispose`, which the driven animations retain.
+  Reason: language — Dart's collector frees what each layout replaces, and a closure's captures are references it keeps alive.
+  Affect: a handle to one of them is stale once the builder that reads it has gone.
+
 ## widgets/raw_menu_anchor.rs → raw_menu_anchor.dart
 
 - Change: `MenuController` is a leaf of `MenuControllerLeaf`, holding Dart's fields as a `MenuControllerData` bag; a field or parameter Dart types as `MenuController` is the erased `AnyMenuController`, and an app's subclass is a second leaf that overrides `is_open`, `open`, `close` or `close_children` and calls `MenuController::open` (and the others) where Dart writes `super`.
@@ -689,12 +719,6 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
   Reason: language — `background` and `secondary_background` arrive through fluent setters after `new`, so the pair is only complete once the chain ends.
   Affect: a secondary background without a background panics where the dismissible is handed to the tree, not on its first build.
 
-## widgets/magnifier.rs → magnifier.dart
-
-- Change: `_NegativeClip` winds `Rect.largest` the other way from the shape's inner path, instead of filling both with the even-odd rule.
-  Reason: platform — valo `Path` has no fill type and a path clip is always non-zero (`waft-painting`'s `PORTING.md`).
-  Affect: an inner path of one contour cuts the same hole as in Flutter; an inner path of several nested contours cuts a different one.
-
 ## widgets/page_view.rs → page_view.dart
 
 - Change: Dart's `scrollCacheExtent == null || (scrollCacheExtent.value > 0.0) == allowImplicitScrolling` constructor assert runs when the widget is turned into a `WidgetRef` (`into_widget`).
@@ -714,7 +738,6 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - raw_tooltip.rs: the `SemanticsService.tooltip` announcement. Trigger: the semantics tree.
 - form.rs: `Form.onWillPop`, the `WillPopScope` it builds, and the deprecated `Form.onPopInvoked`. Trigger: `WillPopScope` (deferred; Flutter deprecates both).
 - form.rs: the error announcement `FormState._validate` sends through `SemanticsService`. Trigger: the semantics tree.
-- dismissible.rs: `_DismissibleClipper` and its `getApproximateClipRect`. Trigger: `CustomClipper::get_clip` / `should_reclip` taking the `App`.
 - stretch_effect.rs: the shader stretch (`_StretchOverscrollEffect`, `_StretchEffectPainter`, `_StretchEffectShader` and the `ImageFilter.isShaderFilterSupported` branch), so the stretch is always the matrix scale Flutter uses where shader filters are unsupported. Trigger: the next edit of stretch_effect.rs (embedder's `FragmentProgram` and `ImageFilter::shader` exist).
 - snapshot_widget.rs: `SnapshotWidget`'s raster path (`_paintAndDetachToImage`: painting into an `OffsetLayer`, the `supportsRasterization` platform-view check with its `SnapshotMode` branches, `toImageSync`, and `paintSnapshot` with that raster). Trigger: `OffsetLayer.toImageSync`.
 - snapshot_widget.rs: `SnapshotPainter`'s memory-allocation events (`kFlutterMemoryAllocationsEnabled`). Trigger: leak tracking.
@@ -729,7 +752,7 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - focus_manager.rs, focus_scope.rs: `FocusManager`'s semantics action listener (`handleSemanticsAction`). Trigger: the semantics tree.
 - focus_manager.rs, focus_scope.rs: focus-tree diagnostics and the debug focus border. Trigger: diagnostics.
 - focus_scope.rs: `_FocusInheritedScope` keeps the copy of the inherited-notifier element it grew before inherited_notifier.rs was ported. Trigger: the next change to that element.
-- A disposed arena object keeps its slot — `dispose` does Dart's work and frees nothing — across the focus, scroll, draggable-sheet, restoration, action, shortcut, traversal and route objects, the animations, tweens and proxies the transitions (`AnimatedSwitcher`, `AnimatedCrossFade`, `DualTransitionBuilder`, the page transitions) create, the overscroll indicators' glow and stretch controllers (one per overscroll release), and `Dismissible`'s move tween and driven animation. Trigger: an arena-slot lifetime for disposed foundation objects.
+- A disposed arena object keeps its slot — `dispose` does Dart's work and frees nothing — across elements (an unmounted element is never freed), routes with their `AnimationController`s, the `ProxyAnimation` of `TransitionRoute.secondaryAnimation` and `ModalRoute`'s animation proxies (a dialog pushed and popped leaves about 68 such objects), the focus, scroll, draggable-sheet, restoration, action, shortcut and traversal objects, the animations, tweens and proxies `AnimatedCrossFade` creates, the transitions' `AnimationController`s (Material's zoom transitions, Cupertino's sheet), the overscroll indicators' glow controllers, `Dismissible`'s move tween and driven animation, and the `Ticker` of every `AnimationController`, freed or not, which the `TickerProviderStateMixin` that vended it keeps in its set (Dart's `_WidgetTicker.dispose` unregisters it). Trigger: an arena-slot lifetime for disposed foundation objects; for the tickers, `Ticker::dispose` unregistering from its provider.
 - framework/: `ErrorWidget` with its exception reporting, and the build-time diagnostics and duplicate-key checks, `Table`'s checks for duplicate row and cell keys among them. Trigger: diagnostics.
 - framework/: `reassemble`. Trigger: hot reload.
 - binding.rs: the observer callbacks no host reports (memory pressure, pushed routes and route information, the text scale, accessibility features), `scheduleWarmUpFrame`. Trigger: a host that reports those events.

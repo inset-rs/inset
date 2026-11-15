@@ -1,6 +1,6 @@
 //! Flutter counterpart: dart:ui `Canvas` / `Paint` / `Path` / `Picture` /
-//! `Image`. These are valo types under Flutter names; the paragraph types live in
-//! `paragraph.rs`.
+//! `Image`. These are valo types under Flutter names, but for [`Path`], a valo path with the
+//! fill type valo takes beside it; the paragraph types live in `paragraph.rs`.
 //!
 //! Recording uses valo method signatures (`draw_rect`, f32 `Rect`). Convert
 //! framework geometry with [`From`] at the call (`rect.into()`).
@@ -12,6 +12,8 @@ use valo::DisplayList;
 use valo::DisplayListBuilder;
 use valo::Op;
 
+use crate::{Matrix4, Offset, Rect};
+
 /// Flutter `Canvas` — valo records into a display list.
 pub type Canvas = DisplayListBuilder;
 
@@ -21,6 +23,15 @@ pub type Picture = DisplayList;
 
 /// Flutter `StrokeCap` — valo's `Cap`: how a stroke ends at an open contour, `Butt` by default.
 pub type StrokeCap = valo::Cap;
+
+/// Flutter `PathFillType` — valo's `FillRule`: how the interior of a [`Path`] is calculated,
+/// which valo takes beside the path's contours wherever it fills, clips to or hit tests them.
+pub type PathFillType = valo::FillRule;
+
+/// Flutter `PaintingStyle` — valo's `PaintStyle`: whether a [`Paint`] fills a shape or strokes
+/// its outline. Its `Stroke` variant carries the [`Stroke`] (width, cap, join, miter limit) that
+/// a Dart `Paint` keeps in fields of its own.
+pub type PaintingStyle = valo::PaintStyle;
 
 /// The picture's operations in replay order with every embedded list's following its embedding
 /// op, for a test or a diagnostic that asks what a scene draws regardless of how its layers
@@ -41,26 +52,116 @@ fn flatten_into(picture: &Picture, ops: &mut Vec<Op>) {
 }
 
 pub use valo::{
-    Backdrop, BlendMode, BlurStyle, ClipOp, FillRule, Image, MaskBlur, Paint, PaintStyle, Path,
+    Backdrop, BlendMode, BlurStyle, ClipOp, FillRule, Image, MaskBlur, Paint, PaintStyle,
     PathBuilder, PathOperation, Shader, Stroke,
 };
 
+/// A complex, one-dimensional subset of a plane: dart:ui's `Path`.
+///
+/// Its contours are a valo path, built with a [`PathBuilder`] and shared, not copied, by every
+/// clone; its [`fill_type`](Self::fill_type) is what valo is handed with them wherever the path
+/// is filled, clipped to or hit tested. A call that passes [`as_valo`](Self::as_valo) to valo
+/// without the fill type fills the path with whatever rule it names instead.
+///
+/// Two paths are equal when their contours and fill types are, which is how a scene tells a
+/// clip that changed from one that did not.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Path {
+    contours: Arc<valo::Path>,
+    /// Determines how the interior of this path is calculated.
+    ///
+    /// Defaults to the non-zero winding rule, [`PathFillType::NonZero`].
+    pub fill_type: PathFillType,
+}
+
+impl Path {
+    /// The path of `contours`, filled with the non-zero winding rule, as dart:ui's `Path()` is.
+    pub fn new(contours: Arc<valo::Path>) -> Path {
+        Path {
+            contours,
+            fill_type: PathFillType::NonZero,
+        }
+    }
+
+    /// The contours, for valo's calls, which take the fill type beside them.
+    pub fn as_valo(&self) -> &Arc<valo::Path> {
+        &self.contours
+    }
+
+    /// Tests to see if the given point is within the path. (That is, whether the point would be
+    /// in the visible portion of the path if the path was used with [`Canvas::clip_path`].)
+    ///
+    /// The `point` argument is interpreted as an offset from the origin.
+    ///
+    /// Returns true if the point is in the path, and false otherwise.
+    pub fn contains(&self, point: Offset) -> bool {
+        self.contours.contains(point.into(), self.fill_type)
+    }
+
+    /// Computes the bounding rectangle for this path.
+    ///
+    /// A path containing only axis-aligned points on the same straight line will have no area,
+    /// and therefore `Rect::is_empty` will return true for such a path.
+    pub fn get_bounds(&self) -> Rect {
+        let bounds = self.contours.bounds();
+        Rect::from_ltwh(
+            f64::from(bounds.x),
+            f64::from(bounds.y),
+            f64::from(bounds.width),
+            f64::from(bounds.height),
+        )
+    }
+
+    /// Returns a copy of the path with all the segments of every subpath translated by the given
+    /// offset: Skia's `makeTransform` by a translation, so a path built as a rounded rectangle or
+    /// an oval stays one, and a shadow drawn from it keeps its closed form.
+    pub fn shift(&self, offset: Offset) -> Path {
+        if offset == Offset::ZERO {
+            return self.clone();
+        }
+        self.transform(&Matrix4::translation(
+            offset.dx() as f32,
+            offset.dy() as f32,
+        ))
+    }
+
+    /// Returns a copy of the path with all the segments of every sub path transformed by the
+    /// given matrix.
+    pub fn transform(&self, matrix: &Matrix4) -> Path {
+        Path {
+            contours: self.contours.transformed(matrix),
+            fill_type: self.fill_type,
+        }
+    }
+}
+
+impl From<Arc<valo::Path>> for Path {
+    fn from(contours: Arc<valo::Path>) -> Path {
+        Path::new(contours)
+    }
+}
+
 /// Combines the two paths according to the manner specified by the given `operation`: dart:ui's
-/// `Path.combine`, Skia's `Op` on two paths of Dart's default non-zero fill type.
+/// `Path.combine`, Skia's `Op`, which reads each path with its own fill type.
 ///
 /// The resulting path will be constructed from non-overlapping contours. The curve order is
 /// reduced where possible so that cubics may be turned into quadratics, and quadratics maybe
-/// turned into lines.
+/// turned into lines. It fills with the even-odd rule, as Skia's `Op` sets on what it writes.
 ///
 /// Panics where Dart throws its `StateError`: Skia's `Op` gives no path for these two.
-pub fn path_combine(operation: PathOperation, path1: &Path, path2: &Path) -> Arc<Path> {
-    path1
-        .combine(FillRule::NonZero, operation, path2, FillRule::NonZero)
+pub fn path_combine(operation: PathOperation, path1: &Path, path2: &Path) -> Path {
+    let contours = path1
+        .contours
+        .combine(path1.fill_type, operation, &path2.contours, path2.fill_type)
         .unwrap_or_else(|_| {
             panic!(
                 "Path.combine() failed.  This may be due an invalid path; in particular, check for NaN values."
             )
-        })
+        });
+    Path {
+        contours,
+        fill_type: PathFillType::EvenOdd,
+    }
 }
 
 /// The full valo API for hosts and for recording that needs a type the
@@ -586,11 +687,13 @@ impl ImageFilter {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::{
-        ColorFilter, FillRule, FilterQuality, ImageFilter, PathBuilder, PathOperation,
+        ColorFilter, FilterQuality, ImageFilter, Path, PathBuilder, PathFillType, PathOperation,
         path_combine, valo,
     };
-    use crate::{BlendMode, Color, Matrix4, Rect};
+    use crate::{BlendMode, Color, Matrix4, Offset, Rect};
 
     #[test]
     fn a_saturation_of_one_is_the_identity_matrix() {
@@ -629,12 +732,69 @@ mod tests {
         host.rect(Rect::from_ltwh(0.0, 0.0, 100.0, 100.0).into());
         let mut guest = PathBuilder::new();
         guest.rect(Rect::from_ltwh(50.0, -10.0, 100.0, 60.0).into());
-        let notched = path_combine(PathOperation::Difference, &host.build(), &guest.build());
-        let contains = |x: f32, y: f32| notched.contains(valo::Point::new(x, y), FillRule::EvenOdd);
+        let notched = path_combine(
+            PathOperation::Difference,
+            &Path::new(host.build()),
+            &Path::new(guest.build()),
+        );
+        assert_eq!(notched.fill_type, PathFillType::EvenOdd);
+        let contains = |x: f64, y: f64| notched.contains(Offset::new(x, y));
         assert!(contains(25.0, 25.0));
         assert!(!contains(75.0, 25.0), "the guest is cut out");
         assert!(contains(75.0, 75.0));
         assert!(!contains(125.0, 25.0), "nothing of the guest is added");
+    }
+
+    #[test]
+    fn a_combined_path_leaves_the_hole_of_a_guest_wholly_inside() {
+        let mut host = PathBuilder::new();
+        host.rect(Rect::from_ltwh(0.0, 0.0, 100.0, 100.0).into());
+        let mut guest = PathBuilder::new();
+        guest.rect(Rect::from_ltwh(25.0, 25.0, 50.0, 50.0).into());
+        let holed = path_combine(
+            PathOperation::Difference,
+            &Path::new(host.build()),
+            &Path::new(guest.build()),
+        );
+        assert!(holed.contains(Offset::new(10.0, 10.0)));
+        assert!(
+            !holed.contains(Offset::new(50.0, 50.0)),
+            "the guest is a hole"
+        );
+    }
+
+    #[test]
+    fn combining_reads_each_path_with_its_own_fill_type() {
+        let mut ring = PathBuilder::new();
+        ring.rect(Rect::from_ltwh(0.0, 0.0, 100.0, 100.0).into());
+        ring.rect(Rect::from_ltwh(25.0, 25.0, 50.0, 50.0).into());
+        let mut even_odd = Path::new(ring.build());
+        even_odd.fill_type = PathFillType::EvenOdd;
+        let non_zero = Path::new(Arc::clone(even_odd.as_valo()));
+        let mut point = PathBuilder::new();
+        point.rect(Rect::from_ltwh(40.0, 40.0, 20.0, 20.0).into());
+        let point = Path::new(point.build());
+
+        let through_the_hole = path_combine(PathOperation::Intersect, &even_odd, &point);
+        assert!(!through_the_hole.contains(Offset::new(50.0, 50.0)));
+        let over_the_fill = path_combine(PathOperation::Intersect, &non_zero, &point);
+        assert!(over_the_fill.contains(Offset::new(50.0, 50.0)));
+    }
+
+    #[test]
+    fn a_path_keeps_its_fill_type_through_a_shift_and_a_transform() {
+        let mut builder = PathBuilder::new();
+        builder.rect(Rect::from_ltwh(0.0, 0.0, 10.0, 10.0).into());
+        let mut path = Path::new(builder.build());
+        assert_eq!(path.fill_type, PathFillType::NonZero);
+        path.fill_type = PathFillType::EvenOdd;
+        let shifted = path.shift(Offset::new(5.0, 0.0));
+        assert_eq!(shifted.fill_type, PathFillType::EvenOdd);
+        assert!(shifted.contains(Offset::new(12.0, 5.0)));
+        assert!(!shifted.contains(Offset::new(2.0, 5.0)));
+        let scaled = path.transform(&Matrix4::scale(2.0, 2.0));
+        assert_eq!(scaled.fill_type, PathFillType::EvenOdd);
+        assert!(scaled.contains(Offset::new(15.0, 15.0)));
     }
 
     #[test]

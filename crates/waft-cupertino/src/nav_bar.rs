@@ -8,7 +8,7 @@ use std::time::Duration;
 use waft_animation::{
     Animatable, Animation, AnimationBehavior, AnimationController, AnimationStatus,
     AnimationStatusListener, AnimationWithParent, AnyAnimation, Cubic, Curve, CurvedAnimation,
-    Curves, Interval, RectTween, TweenLerp,
+    Curves, Interval, RectTween, ValueCurveTween, ValueTween,
 };
 use waft_embedder::{
     Brightness, Color, ImageFilter, Matrix4, Offset, Rect, Size, SystemUiOverlayStyle,
@@ -1631,7 +1631,7 @@ impl CupertinoSliverNavigationBarState {
 
     fn setup_searchable_animation(self: Handle<Self>, app: &mut App) {
         let controller = self.animation_controller(app).view();
-        let persistent_height_tween = DoubleTween::new(K_NAV_BAR_PERSISTENT_HEIGHT, 0.0);
+        let persistent_height_tween = ValueTween::new(K_NAV_BAR_PERSISTENT_HEIGHT, 0.0);
         let persistent_height_animation = persistent_height_tween.animate(app, controller);
         persistent_height_animation.add_status_listener(
             app,
@@ -1641,7 +1641,7 @@ impl CupertinoSliverNavigationBarState {
             ),
         );
         let large_title_height_tween =
-            DoubleTween::new(app.get(self).scaled_large_title_height, 0.0);
+            ValueTween::new(app.get(self).scaled_large_title_height, 0.0);
         let large_title_height_animation = large_title_height_tween.animate(app, controller);
         let this = app.get_mut(self);
         this.persistent_height_animation = Some(persistent_height_animation);
@@ -3486,7 +3486,9 @@ impl StatelessWidget for ActiveSearchableBottom {
             .clone()
             .unwrap_or_else(|| SizedBox::shrink().into_widget());
         let animation_controller = self.0.animation_controller;
-        let cancel_opacity = DoubleTween::new(0.0, 1.0).animate(app, animation_controller.view());
+        let cancel_opacity = ValueTween::new(0.0, 1.0).animate(app, animation_controller.view());
+        // The `FadeTransition` below retains it.
+        app.destroy_lingering(cancel_opacity);
         let cancel = FadeTransition::new(cancel_opacity).child(CancelButton {
             opacity: 1.0,
             on_pressed: Some(self.0.on_search_field_tap.clone()),
@@ -3608,7 +3610,7 @@ struct NavigationBarTransition {
     animation: AnyAnimation<f64>,
     top_nav_bar: Rc<TransitionableNavigationBar>,
     bottom_nav_bar: Rc<TransitionableNavigationBar>,
-    height_tween: DoubleTween,
+    height_tween: ValueTween<f64>,
 }
 
 impl NavigationBarTransition {
@@ -3618,7 +3620,7 @@ impl NavigationBarTransition {
         top_nav_bar: Rc<TransitionableNavigationBar>,
         bottom_nav_bar: Rc<TransitionableNavigationBar>,
     ) -> NavigationBarTransition {
-        let height_tween = DoubleTween::new(
+        let height_tween = ValueTween::new(
             bottom_nav_bar.render_box(app).size(app).height(),
             top_nav_bar.render_box(app).size(app).height(),
         );
@@ -3682,6 +3684,30 @@ impl StatelessWidget for NavigationBarTransition {
 // ---------------------------------------------------------------------------------------------
 // _NavigationBarComponentsTransition
 
+/// Dart's `animation.drive(child)` in [`NavigationBarComponentsTransition`]'s builds, which
+/// hand each driven animation straight to a transition, or drive it again: the animation is
+/// freed at once with `destroy_lingering`, and the transition, or the animation driven from
+/// it, retains it, as Dart's references keep it alive until the next build replaces it.
+trait DriveHandedOn {
+    fn drive_handed_on<T: 'static>(
+        self,
+        app: &mut App,
+        child: impl Animatable<T> + Clone + 'static,
+    ) -> AnyAnimation<T>;
+}
+
+impl DriveHandedOn for AnyAnimation<f64> {
+    fn drive_handed_on<T: 'static>(
+        self,
+        app: &mut App,
+        child: impl Animatable<T> + Clone + 'static,
+    ) -> AnyAnimation<T> {
+        let driven = self.drive(app, child);
+        app.destroy_lingering(driven);
+        driven
+    }
+}
+
 /// This class helps create widgets that are in transition based on static components from the
 /// bottom and top navigation bars.
 ///
@@ -3744,10 +3770,10 @@ struct NavigationBarComponentsTransition {
 }
 
 /// Dart's `_NavigationBarComponentsTransition.fadeOut`.
-const FADE_OUT: DoubleTween = DoubleTween::new(1.0, 0.0);
+const FADE_OUT: ValueTween<f64> = ValueTween::new(1.0, 0.0);
 
 /// Dart's `_NavigationBarComponentsTransition.fadeIn`.
-const FADE_IN: DoubleTween = DoubleTween::new(0.0, 1.0);
+const FADE_IN: ValueTween<f64> = ValueTween::new(0.0, 1.0);
 
 impl NavigationBarComponentsTransition {
     fn new(
@@ -3888,15 +3914,15 @@ impl NavigationBarComponentsTransition {
             from_box_margin.top,
         );
 
-        let anchor_movement_in_transition_box = OffsetTween::new(
+        let anchor_movement_in_transition_box = ValueTween::new(
             from_origin_in_transition_box,
             from_origin_in_transition_box + translation,
         );
 
         let offset_animation = self
             .animation
-            .drive(app, CurveTween::new(curve))
-            .drive(app, anchor_movement_in_transition_box);
+            .drive_handed_on(app, ValueCurveTween::new(curve))
+            .drive_handed_on(app, anchor_movement_in_transition_box);
         FixedSizeSlidingTransition {
             is_ltr,
             offset_animation,
@@ -3907,16 +3933,16 @@ impl NavigationBarComponentsTransition {
     }
 
     fn fade_in_from(&self, app: &mut App, t: f64, curve: Rc<dyn Curve>) -> AnyAnimation<f64> {
-        self.animation.drive(
+        self.animation.drive_handed_on(
             app,
-            FADE_IN.chain(CurveTween::new(Rc::new(Interval::new(t, 1.0, curve)))),
+            FADE_IN.chain(ValueCurveTween::new(Rc::new(Interval::new(t, 1.0, curve)))),
         )
     }
 
     fn fade_out_by(&self, app: &mut App, t: f64, curve: Rc<dyn Curve>) -> AnyAnimation<f64> {
-        self.animation.drive(
+        self.animation.drive_handed_on(
             app,
-            FADE_OUT.chain(CurveTween::new(Rc::new(Interval::new(0.0, t, curve)))),
+            FADE_OUT.chain(ValueCurveTween::new(Rc::new(Interval::new(0.0, t, curve)))),
         )
     }
 
@@ -3946,8 +3972,9 @@ impl NavigationBarComponentsTransition {
         } else {
             animation_curve
         };
-        let page_transition_animation =
-            self.route_animation(app).drive(app, CurveTween::new(curve));
+        let page_transition_animation = self
+            .route_animation(app)
+            .drive_handed_on(app, ValueCurveTween::new(curve));
 
         let from = self.position_in_transition_box(
             app,
@@ -3964,7 +3991,7 @@ impl NavigationBarComponentsTransition {
         let height = self.bottom_nav_bar_box.size(app).height();
         Some(
             PositionedTransition::new(
-                page_transition_animation.drive(app, position_tween),
+                page_transition_animation.drive_handed_on(app, position_tween),
                 wrap_with_background(
                     self.top_border,
                     bottom_background_color,
@@ -4037,7 +4064,7 @@ impl NavigationBarComponentsTransition {
             Some(from),
             Some(from.shift(Offset::new(self.forward_direction * (-width / 2.0), 0.0))),
         );
-        let rect = self.animation.drive(app, position_tween);
+        let rect = self.animation.drive_handed_on(app, position_tween);
         let opacity = self.fade_out_by(app, 0.2, Curves::ease_out());
 
         Some(
@@ -4072,7 +4099,7 @@ impl NavigationBarComponentsTransition {
         if let (Some(bottom_middle), true) = (bottom_middle.clone(), top_back_label.is_some()) {
             // Move from current position to the top page's back label position.
             let opacity = self.fade_out_by(app, fade_out_by, Curves::ease_out());
-            let style = self.animation.drive(
+            let style = self.animation.drive_handed_on(
                 app,
                 TextStyleTween::new(
                     Some(self.bottom_title_text_style.clone()),
@@ -4142,7 +4169,7 @@ impl NavigationBarComponentsTransition {
                 1.0
             };
             let opacity = self.fade_out_by(app, 0.6, Curves::ease_out());
-            let style = self.animation.drive(
+            let style = self.animation.drive_handed_on(
                 app,
                 TextStyleTween::new(
                     self.bottom_large_title_text_style.clone(),
@@ -4189,7 +4216,7 @@ impl NavigationBarComponentsTransition {
             Some(from),
             Some(from.shift(Offset::new(self.forward_direction * width / 4.0, 0.0))),
         );
-        let rect = self.animation.drive(app, position_tween);
+        let rect = self.animation.drive_handed_on(app, position_tween);
         let opacity = self.fade_out_by(app, 0.4, Curves::ease_out());
 
         // Just shift slightly towards the trailing edge instead of moving to the back label
@@ -4267,12 +4294,12 @@ impl NavigationBarComponentsTransition {
         // The bottom widget animates linearly during a backswipe by a user gesture.
         let rect = if self.user_gesture_in_progress {
             self.route_animation(app)
-                .drive(app, CurveTween::new(Curves::linear()))
-                .drive(app, position_tween)
+                .drive_handed_on(app, ValueCurveTween::new(Curves::linear()))
+                .drive_handed_on(app, position_tween)
         } else {
             self.animation
-                .drive(app, CurveTween::new(animation_curve))
-                .drive(app, position_tween)
+                .drive_handed_on(app, ValueCurveTween::new(animation_curve))
+                .drive_handed_on(app, position_tween)
         };
 
         Some(PositionedTransition::new(rect, ClipRect::new().child(child)).into_widget())
@@ -4291,8 +4318,9 @@ impl NavigationBarComponentsTransition {
         } else {
             animation_curve
         };
-        let page_transition_animation =
-            self.route_animation(app).drive(app, CurveTween::new(curve));
+        let page_transition_animation = self
+            .route_animation(app)
+            .drive_handed_on(app, ValueCurveTween::new(curve));
 
         let to = self.position_in_transition_box(
             app,
@@ -4309,7 +4337,7 @@ impl NavigationBarComponentsTransition {
         let height = self.top_nav_bar_box.size(app).height();
         Some(
             PositionedTransition::new(
-                page_transition_animation.drive(app, position_tween),
+                page_transition_animation.drive_handed_on(app, position_tween),
                 wrap_with_background(
                     self.top_border,
                     top_background_color,
@@ -4378,15 +4406,15 @@ impl NavigationBarComponentsTransition {
             from = to.shift(Offset::new(self.forward_direction * width * 2.0, 0.0));
             let scale = self
                 .route_animation(app)
-                .drive(app, CurveTween::new(effective_scale_curve));
+                .drive_handed_on(app, ValueCurveTween::new(effective_scale_curve));
             child = ScaleTransition::new(scale).child(child).into_widget();
         }
 
         let position_tween = RelativeRectTween::new(Some(from), Some(to));
         let rect = self
             .route_animation(app)
-            .drive(app, CurveTween::new(effective_position_curve))
-            .drive(app, position_tween);
+            .drive_handed_on(app, ValueCurveTween::new(effective_position_curve))
+            .drive_handed_on(app, position_tween);
 
         // Fades faster going back from the first page with a back chevron.
         let fade_start = if bottom_back_chevron.is_none() && !forward {
@@ -4394,9 +4422,9 @@ impl NavigationBarComponentsTransition {
         } else {
             0.4
         };
-        let opacity = self.route_animation(app).drive(
+        let opacity = self.route_animation(app).drive_handed_on(
             app,
-            CurveTween::new(Rc::new(Interval::new(fade_start, 1.0, Curves::linear()))),
+            ValueCurveTween::new(Rc::new(Interval::new(fade_start, 1.0, Curves::linear()))),
         );
 
         Some(
@@ -4427,7 +4455,10 @@ impl NavigationBarComponentsTransition {
         let mid_click_opacity = match top_back_label_opacity {
             Some(render) if render.opacity(app).value(app) < 1.0 => {
                 let end = render.opacity(app).value(app);
-                Some(self.animation.drive(app, DoubleTween::new(0.0, end)))
+                Some(
+                    self.animation
+                        .drive_handed_on(app, ValueTween::new(0.0, end)),
+                )
             }
             _ => None,
         };
@@ -4446,7 +4477,7 @@ impl NavigationBarComponentsTransition {
                 Some(opacity) => opacity,
                 None => self.fade_in_from(app, 0.4, Curves::ease_in()),
             };
-            let style = self.animation.drive(
+            let style = self.animation.drive_handed_on(
                 app,
                 TextStyleTween::new(
                     self.bottom_large_title_text_style.clone(),
@@ -4481,7 +4512,7 @@ impl NavigationBarComponentsTransition {
                 Some(opacity) => opacity,
                 None => self.fade_in_from(app, 0.3, Curves::ease_in()),
             };
-            let style = self.animation.drive(
+            let style = self.animation.drive_handed_on(
                 app,
                 TextStyleTween::new(
                     Some(self.bottom_title_text_style.clone()),
@@ -4533,7 +4564,7 @@ impl NavigationBarComponentsTransition {
 
         let to_size = to_box.size(app);
         // Shift in from the trailing edge of the screen.
-        let anchor_movement_in_transition_box = OffsetTween::new(
+        let anchor_movement_in_transition_box = ValueTween::new(
             Offset::new(
                 // the "width / 2" here makes the middle widget's horizontal center on the
                 // trailing edge of the top nav bar.
@@ -4543,7 +4574,9 @@ impl NavigationBarComponentsTransition {
             to_anchor_in_transition_box,
         );
 
-        let offset_animation = self.animation.drive(app, anchor_movement_in_transition_box);
+        let offset_animation = self
+            .animation
+            .drive_handed_on(app, anchor_movement_in_transition_box);
         let opacity = self.fade_in_from(app, 0.25, Curves::ease_in());
         Some(
             FixedSizeSlidingTransition {
@@ -4610,12 +4643,12 @@ impl NavigationBarComponentsTransition {
         // The large title animates linearly during a backswipe by a user gesture.
         let rect = if self.user_gesture_in_progress {
             self.route_animation(app)
-                .drive(app, CurveTween::new(Curves::linear()))
-                .drive(app, position_tween)
+                .drive_handed_on(app, ValueCurveTween::new(Curves::linear()))
+                .drive_handed_on(app, position_tween)
         } else {
             self.animation
-                .drive(app, CurveTween::new(Rc::clone(&animation_curve)))
-                .drive(app, position_tween)
+                .drive_handed_on(app, ValueCurveTween::new(Rc::clone(&animation_curve)))
+                .drive_handed_on(app, position_tween)
         };
         let opacity = self.fade_in_from(app, 0.0, animation_curve);
 
@@ -4673,12 +4706,12 @@ impl NavigationBarComponentsTransition {
         // The bottom widget animates linearly during a backswipe by a user gesture.
         let rect = if self.user_gesture_in_progress {
             self.route_animation(app)
-                .drive(app, CurveTween::new(Curves::linear()))
-                .drive(app, position_tween)
+                .drive_handed_on(app, ValueCurveTween::new(Curves::linear()))
+                .drive_handed_on(app, position_tween)
         } else {
             self.animation
-                .drive(app, CurveTween::new(animation_curve))
-                .drive(app, position_tween)
+                .drive_handed_on(app, ValueCurveTween::new(animation_curve))
+                .drive_handed_on(app, position_tween)
         };
 
         Some(PositionedTransition::new(rect, ClipRect::new().child(child)).into_widget())
@@ -4800,79 +4833,6 @@ fn hero_nav_bar(app: &mut App, hero_context: BuildContext) -> Rc<TransitionableN
             .expect("a nav bar Hero's child is a TransitionableNavigationBar")
             .clone(),
     )
-}
-
-/// Dart's `Tween<double>` as a value; the driven animations outlive the build that creates them,
-/// so an arena tween's slot could never be freed. See `PORTING.md`.
-#[derive(Clone, Copy, Debug)]
-struct DoubleTween {
-    begin: f64,
-    end: f64,
-}
-
-impl DoubleTween {
-    const fn new(begin: f64, end: f64) -> DoubleTween {
-        DoubleTween { begin, end }
-    }
-}
-
-impl Animatable<f64> for DoubleTween {
-    fn transform(&self, _app: &App, t: f64) -> f64 {
-        if t == 0.0 {
-            return self.begin;
-        }
-        if t == 1.0 {
-            return self.end;
-        }
-        f64::lerp(&self.begin, &self.end, t)
-    }
-}
-
-/// Dart's `Tween<Offset>` as a value, for the reason [`DoubleTween`] gives.
-#[derive(Clone, Copy, Debug)]
-struct OffsetTween {
-    begin: Offset,
-    end: Offset,
-}
-
-impl OffsetTween {
-    const fn new(begin: Offset, end: Offset) -> OffsetTween {
-        OffsetTween { begin, end }
-    }
-}
-
-impl Animatable<Offset> for OffsetTween {
-    fn transform(&self, _app: &App, t: f64) -> Offset {
-        if t == 0.0 {
-            return self.begin;
-        }
-        if t == 1.0 {
-            return self.end;
-        }
-        Offset::lerp(Some(self.begin), Some(self.end), t).expect("both ends are set")
-    }
-}
-
-/// Dart's `CurveTween` as a value, for the reason [`DoubleTween`] gives.
-#[derive(Clone)]
-struct CurveTween {
-    curve: Rc<dyn Curve>,
-}
-
-impl CurveTween {
-    fn new(curve: Rc<dyn Curve>) -> CurveTween {
-        CurveTween { curve }
-    }
-}
-
-impl Animatable<f64> for CurveTween {
-    fn transform(&self, _app: &App, t: f64) -> f64 {
-        if t == 0.0 || t == 1.0 {
-            debug_assert_eq!(self.curve.transform(t).round(), t);
-            return t;
-        }
-        self.curve.transform(t)
-    }
 }
 
 /// Dart's `widget != oldWidget` on two optional widgets, which compares object identity.
@@ -5478,6 +5438,89 @@ mod tests {
                 && shown.contains(&"Second".to_string()),
             "the transition carries both routes' components: {shown:?}"
         );
+    }
+
+    /// Not a Dart case: Dart's collector frees what a navigation bar transition drives once
+    /// the flight that shows it ends; here the transition frees it at once and the components
+    /// it is handed to retain it, so it lives exactly as long as they do.
+    #[test]
+    fn a_navigation_bar_transition_frees_what_it_drove_with_the_components_it_drove() {
+        let cell = mount_app(|cupertino_app| {
+            cupertino_app.on_generate_route(move |app, settings| {
+                let second = settings.name.as_deref() == Some("/second");
+                let route =
+                    CupertinoPageRoute::new(app, scaffold_page(CupertinoNavigationBar::new));
+                let route = route.title(app, if second { "Second" } else { "Home" }.to_string());
+                Some(Route::as_route(route))
+            })
+        });
+        {
+            let mut app = cell.borrow_mut();
+            let root = root_element(&mut app);
+            let navigator = elements(&app, root)
+                .into_iter()
+                .find_map(|element| element.state_handle::<NavigatorState>(&app))
+                .expect("the app has a navigator");
+            navigator.push_named(&mut app, "/second", None);
+            pump(&mut app, Duration::from_millis(1220));
+            pump(&mut app, Duration::from_millis(1340));
+            pump(&mut app, Duration::from_millis(1360));
+        }
+        cell.checkpoint();
+
+        let driven: Vec<waft_foundation::HandleId> = {
+            let mut app = cell.borrow_mut();
+            let root = root_element(&mut app);
+            let transition = elements(&app, root)
+                .into_iter()
+                .find(|element| {
+                    downcast_widget::<NavigationBarTransition>(&**element.widget(&app)).is_some()
+                })
+                .expect("the flight shows the navigation bar transition");
+            elements(&app, transition)
+                .into_iter()
+                .filter_map(|element| {
+                    let widget = element.widget(&app);
+                    downcast_widget::<FadeTransition>(&**widget)
+                        .map(|fade| fade.opacity.id())
+                        .or_else(|| {
+                            downcast_widget::<PositionedTransition>(&**widget)
+                                .map(|positioned| positioned.rect.id())
+                        })
+                })
+                .collect()
+        };
+        assert!(!driven.is_empty(), "the components are animated");
+        {
+            let app = cell.borrow();
+            for id in &driven {
+                assert!(app.contains(*id), "{id:?} lives while its component does");
+            }
+        }
+
+        // Far enough into the flight that no component's fade starts or ends in the frame
+        // measured, which would add or drop an opacity layer.
+        pump(&mut cell.borrow_mut(), Duration::from_millis(1500));
+        cell.checkpoint();
+        let before = cell.borrow().debug_object_count();
+        pump(&mut cell.borrow_mut(), Duration::from_millis(1520));
+        cell.checkpoint();
+        assert_eq!(
+            cell.borrow().debug_object_count(),
+            before,
+            "a frame of the flight leaves no new arena objects"
+        );
+
+        settle(&mut cell.borrow_mut());
+        cell.checkpoint();
+        let mut app = cell.borrow_mut();
+        assert!(
+            !has_widget::<NavigationBarTransition>(&mut app),
+            "the flight has ended"
+        );
+        for id in driven {
+            assert!(!app.contains(id), "{id:?} is freed with its component");
+        }
     }
 
     #[test]

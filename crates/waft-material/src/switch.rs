@@ -877,7 +877,7 @@ impl MaterialSwitchState {
 }
 
 /// `property?.resolve(states)` for a nullable property of a nullable value.
-fn resolve<T>(
+fn resolve<T: 'static>(
     property: &Option<WidgetStatePropertyRef<Option<T>>>,
     states: &WidgetStates,
 ) -> Option<T> {
@@ -1353,15 +1353,6 @@ struct SwitchPainter {
     pressed_thumb_extension: f64,
 }
 
-/// Dart's `Icon?` setters compare by identity: an `Icon` does not override `==`.
-fn same_icon(a: &Option<Rc<Icon>>, b: &Option<Rc<Icon>>) -> bool {
-    match (a, b) {
-        (None, None) => true,
-        (Some(a), Some(b)) => Rc::ptr_eq(a, b),
-        _ => false,
-    }
-}
-
 /// A `late` painter field a setter writes before the first paint, read as Dart's `!`.
 macro_rules! painter_field {
     ($field:ident, $setter:ident, $ty:ty) => {
@@ -1475,7 +1466,7 @@ impl SwitchPainter {
     }
 
     fn set_active_icon(self: Handle<Self>, app: &mut App, value: Option<Rc<Icon>>) {
-        if same_icon(&value, &app.get(self).active_icon) {
+        if value == app.get(self).active_icon {
             return;
         }
         app.get_mut(self).active_icon = value;
@@ -1487,7 +1478,7 @@ impl SwitchPainter {
     }
 
     fn set_inactive_icon(self: Handle<Self>, app: &mut App, value: Option<Rc<Icon>>) {
-        if same_icon(&value, &app.get(self).inactive_icon) {
+        if value == app.get(self).inactive_icon {
             return;
         }
         app.get_mut(self).inactive_icon = value;

@@ -11,7 +11,6 @@
 use std::any::Any;
 use std::fmt::{self, Debug};
 use std::rc::Rc;
-use std::sync::Arc;
 
 use waft_embedder::{Canvas, Paint, Path, Rect};
 use waft_painting::{BorderSide, EdgeInsetsGeometry, ShapeBorder, TextDirection};
@@ -220,19 +219,11 @@ macro_rules! state_input_border {
                 self.border.lerp_to(b, t)
             }
 
-            fn get_outer_path(
-                &self,
-                rect: Rect,
-                text_direction: Option<TextDirection>,
-            ) -> Arc<Path> {
+            fn get_outer_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Path {
                 self.border.get_outer_path(rect, text_direction)
             }
 
-            fn get_inner_path(
-                &self,
-                rect: Rect,
-                text_direction: Option<TextDirection>,
-            ) -> Arc<Path> {
+            fn get_inner_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Path {
                 self.border.get_inner_path(rect, text_direction)
             }
 
@@ -397,6 +388,17 @@ impl WidgetStateProperty<Box<dyn InputBorder>> for MaterialStateOutlineInputBord
     fn resolve(&self, states: &WidgetStates) -> Box<dyn InputBorder> {
         (self.resolve)(states)
     }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn eq_property(&self, other: &dyn WidgetStateProperty<Box<dyn InputBorder>>) -> bool {
+        other
+            .as_any()
+            .downcast_ref::<Self>()
+            .is_some_and(|other| self.eq_subclass(other))
+    }
 }
 
 state_input_border!(
@@ -470,6 +472,17 @@ impl MaterialStateUnderlineInputBorder {
 impl WidgetStateProperty<Box<dyn InputBorder>> for MaterialStateUnderlineInputBorder {
     fn resolve(&self, states: &WidgetStates) -> Box<dyn InputBorder> {
         (self.resolve)(states)
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn eq_property(&self, other: &dyn WidgetStateProperty<Box<dyn InputBorder>>) -> bool {
+        other
+            .as_any()
+            .downcast_ref::<Self>()
+            .is_some_and(|other| self.eq_subclass(other))
     }
 }
 
@@ -561,6 +574,27 @@ impl WidgetStateProperty<Box<dyn InputBorder>> for WidgetStateInputBorder {
             InputBorderSubclass::ResolveWith(resolve) => resolve(states),
             InputBorderSubclass::Mapper(mapper) => mapper.resolve(states),
         }
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_mapper(&self) -> Option<&WidgetStateMapper<Box<dyn InputBorder>>> {
+        match &self.subclass {
+            InputBorderSubclass::Mapper(mapper) => Some(mapper.as_ref()),
+            InputBorderSubclass::ResolveWith(_) => None,
+        }
+    }
+
+    fn eq_property(&self, other: &dyn WidgetStateProperty<Box<dyn InputBorder>>) -> bool {
+        if let InputBorderSubclass::Mapper(mapper) = &self.subclass {
+            return mapper.eq_property(other);
+        }
+        other
+            .as_any()
+            .downcast_ref::<Self>()
+            .is_some_and(|other| self.eq_subclass(other))
     }
 }
 

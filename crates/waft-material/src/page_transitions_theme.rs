@@ -13,13 +13,15 @@ use std::time::Duration;
 use indexmap::IndexMap;
 use waft_animation::{
     Animatable, Animation, AnimationStatus, AnimationStatusListener, AnyAnimation, Cubic, Curve,
-    Curves, Interval, ReverseAnimation, TweenLerp, TweenSequence, TweenSequenceItem,
-    k_always_complete_animation,
+    Curves, Interval, ReverseAnimation, TweenSequence, TweenSequenceItem, ValueCurveTween,
+    ValueTween, k_always_complete_animation,
 };
 use waft_cupertino::CupertinoPageTransitionsBuilder;
 use waft_embedder::valo::Sampling;
 use waft_embedder::{Color, Image, Matrix4, Offset, Paint, Rect, Size, TargetPlatform};
-use waft_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, K_IS_WEB, Listener};
+use waft_foundation::{
+    App, ChangeNotifier, ChangeNotifierData, Handle, HandleId, K_IS_WEB, Listener,
+};
 use waft_painting::ClipContext;
 use waft_rendering::{LayerHandle, OpacityLayer, PaintingContext, TransformLayer};
 use waft_widgets::{
@@ -78,7 +80,7 @@ impl ZoomPageTransition {
         vec![
             TweenSequenceItem::new(
                 Arc::new(
-                    DoubleTween::new(0.0, 0.4).chain(CurveTween::new(Rc::new(Cubic::new(
+                    ValueTween::new(0.0, 0.4).chain(ValueCurveTween::new(Rc::new(Cubic::new(
                         0.05, 0.0, 0.133333, 0.06,
                     )))),
                 ),
@@ -86,7 +88,7 @@ impl ZoomPageTransition {
             ),
             TweenSequenceItem::new(
                 Arc::new(
-                    DoubleTween::new(0.4, 1.0).chain(CurveTween::new(Rc::new(Cubic::new(
+                    ValueTween::new(0.4, 1.0).chain(ValueCurveTween::new(Rc::new(Cubic::new(
                         0.208333, 0.82, 0.25, 1.0,
                     )))),
                 ),
@@ -175,7 +177,7 @@ pub(crate) struct ZoomEnterTransitionState {
 
 impl ZoomEnterTransitionState {
     fn fade_in_transition() -> impl Animatable<f64> + Clone + 'static {
-        DoubleTween::new(0.0, 1.00).chain(CurveTween::new(Rc::new(Interval::new(
+        ValueTween::new(0.0, 1.00).chain(ValueCurveTween::new(Rc::new(Interval::new(
             0.125,
             0.250,
             Curves::linear(),
@@ -183,15 +185,15 @@ impl ZoomEnterTransitionState {
     }
 
     fn scale_down_transition() -> impl Animatable<f64> + Clone + 'static {
-        DoubleTween::new(1.10, 1.00).chain(ZoomPageTransition::scale_curve_sequence())
+        ValueTween::new(1.10, 1.00).chain(ZoomPageTransition::scale_curve_sequence())
     }
 
     fn scale_up_transition() -> impl Animatable<f64> + Clone + 'static {
-        DoubleTween::new(0.85, 1.00).chain(ZoomPageTransition::scale_curve_sequence())
+        ValueTween::new(0.85, 1.00).chain(ZoomPageTransition::scale_curve_sequence())
     }
 
     fn scrim_opacity_tween() -> impl Animatable<f64> + Clone + 'static {
-        DoubleTween::new(0.0, 0.60).chain(CurveTween::new(Rc::new(Interval::new(
+        ValueTween::new(0.0, 0.60).chain(ValueCurveTween::new(Rc::new(Interval::new(
             0.2075,
             0.4175,
             Curves::linear(),
@@ -201,16 +203,21 @@ impl ZoomEnterTransitionState {
     fn update_animations(self: Handle<Self>, app: &mut App) {
         let widget = self.widget(app);
         let (reverse, animation) = (widget.reverse, widget.animation);
+        let mut driven = Vec::new();
         let fade_transition = if reverse {
             k_always_complete_animation(app)
         } else {
-            ZoomEnterTransitionState::fade_in_transition().animate(app, animation)
+            let fade = ZoomEnterTransitionState::fade_in_transition().animate(app, animation);
+            driven.push(fade.id());
+            fade
         };
         let scale_transition = if reverse {
             ZoomEnterTransitionState::scale_down_transition().animate(app, animation)
         } else {
             ZoomEnterTransitionState::scale_up_transition().animate(app, animation)
         };
+        driven.push(scale_transition.id());
+        self.replace_driven_transitions(app, driven);
         let base = self.zoom_transition_base_data_mut(app);
         base.fade_transition = Some(fade_transition);
         base.scale_transition = Some(scale_transition);
@@ -236,6 +243,14 @@ impl ZoomEnterTransitionState {
 
     fn delegate(self: Handle<Self>, app: &App) -> Handle<ZoomEnterTransitionPainter> {
         app.get(self).delegate.expect("created in init_state")
+    }
+
+    /// Dart's `delegate.dispose()`, then frees it once the snapshot that paints with it has
+    /// moved to the next one.
+    fn dispose_delegate(self: Handle<Self>, app: &mut App) {
+        let delegate = self.delegate(app);
+        delegate.dispose(app);
+        app.destroy_lingering(delegate);
     }
 }
 
@@ -282,7 +297,7 @@ impl State for ZoomEnterTransitionState {
                 &AnimationStatusListener::handle_method(self, Self::on_animation_status_change),
             );
             self.update_animations(app);
-            self.delegate(app).dispose(app);
+            self.dispose_delegate(app);
             let delegate = self.new_delegate(app);
             app.get_mut(self).delegate = Some(delegate);
         }
@@ -298,7 +313,7 @@ impl State for ZoomEnterTransitionState {
             app,
             &AnimationStatusListener::handle_method(self, Self::on_animation_status_change),
         );
-        self.delegate(app).dispose(app);
+        self.dispose_delegate(app);
         ZoomTransitionBase::dispose(self, app);
     }
 
@@ -340,7 +355,7 @@ struct ZoomExitTransitionState {
 
 impl ZoomExitTransitionState {
     fn fade_out_transition() -> impl Animatable<f64> + Clone + 'static {
-        DoubleTween::new(1.0, 0.0).chain(CurveTween::new(Rc::new(Interval::new(
+        ValueTween::new(1.0, 0.0).chain(ValueCurveTween::new(Rc::new(Interval::new(
             0.0825,
             0.2075,
             Curves::linear(),
@@ -348,18 +363,21 @@ impl ZoomExitTransitionState {
     }
 
     fn scale_up_transition() -> impl Animatable<f64> + Clone + 'static {
-        DoubleTween::new(1.00, 1.05).chain(ZoomPageTransition::scale_curve_sequence())
+        ValueTween::new(1.00, 1.05).chain(ZoomPageTransition::scale_curve_sequence())
     }
 
     fn scale_down_transition() -> impl Animatable<f64> + Clone + 'static {
-        DoubleTween::new(1.00, 0.90).chain(ZoomPageTransition::scale_curve_sequence())
+        ValueTween::new(1.00, 0.90).chain(ZoomPageTransition::scale_curve_sequence())
     }
 
     fn update_animations(self: Handle<Self>, app: &mut App) {
         let widget = self.widget(app);
         let (reverse, animation) = (widget.reverse, widget.animation);
+        let mut driven = Vec::new();
         let fade_transition = if reverse {
-            ZoomExitTransitionState::fade_out_transition().animate(app, animation)
+            let fade = ZoomExitTransitionState::fade_out_transition().animate(app, animation);
+            driven.push(fade.id());
+            fade
         } else {
             k_always_complete_animation(app)
         };
@@ -368,6 +386,8 @@ impl ZoomExitTransitionState {
         } else {
             ZoomExitTransitionState::scale_up_transition().animate(app, animation)
         };
+        driven.push(scale_transition.id());
+        self.replace_driven_transitions(app, driven);
         let base = self.zoom_transition_base_data_mut(app);
         base.fade_transition = Some(fade_transition);
         base.scale_transition = Some(scale_transition);
@@ -392,6 +412,13 @@ impl ZoomExitTransitionState {
 
     fn delegate(self: Handle<Self>, app: &App) -> Handle<ZoomExitTransitionPainter> {
         app.get(self).delegate.expect("created in init_state")
+    }
+
+    /// See [`ZoomEnterTransitionState::dispose_delegate`].
+    fn dispose_delegate(self: Handle<Self>, app: &mut App) {
+        let delegate = self.delegate(app);
+        delegate.dispose(app);
+        app.destroy_lingering(delegate);
     }
 }
 
@@ -438,7 +465,7 @@ impl State for ZoomExitTransitionState {
                 &AnimationStatusListener::handle_method(self, Self::on_animation_status_change),
             );
             self.update_animations(app);
-            self.delegate(app).dispose(app);
+            self.dispose_delegate(app);
             let delegate = self.new_delegate(app);
             app.get_mut(self).delegate = Some(delegate);
         }
@@ -454,7 +481,7 @@ impl State for ZoomExitTransitionState {
             app,
             &AnimationStatusListener::handle_method(self, Self::on_animation_status_change),
         );
-        self.delegate(app).dispose(app);
+        self.dispose_delegate(app);
         ZoomTransitionBase::dispose(self, app);
     }
 
@@ -491,14 +518,14 @@ pub(crate) struct FadeForwardsPageTransition {
 impl FadeForwardsPageTransition {
     // The new page slides in from right to left.
     fn forward_translation_tween() -> impl Animatable<Offset> + Clone + 'static {
-        OffsetTween::new(Offset::new(0.25, 0.0), Offset::ZERO).chain(CurveTween::new(
+        ValueTween::new(Offset::new(0.25, 0.0), Offset::ZERO).chain(ValueCurveTween::new(
             FadeForwardsPageTransitionsBuilder::transition_curve(),
         ))
     }
 
     // The old page slides back from left to right.
     fn backward_translation_tween() -> impl Animatable<Offset> + Clone + 'static {
-        OffsetTween::new(Offset::ZERO, Offset::new(0.25, 0.0)).chain(CurveTween::new(
+        ValueTween::new(Offset::ZERO, Offset::new(0.25, 0.0)).chain(ValueCurveTween::new(
             FadeForwardsPageTransitionsBuilder::transition_curve(),
         ))
     }
@@ -514,20 +541,24 @@ impl StatelessWidget for FadeForwardsPageTransition {
                     .animate(app, animation);
                 let position =
                     FadeForwardsPageTransition::forward_translation_tween().animate(app, animation);
-                FadeTransition::new(opacity)
+                let transition = FadeTransition::new(opacity)
                     .child(SlideTransition::new(position).child(FadeForwardsSnapshot {
                         animation,
                         allow_snapshotting,
                         child: child.cloned(),
                     }))
-                    .into_widget()
+                    .into_widget();
+                // The transitions that read them retain them.
+                app.destroy_lingering(opacity);
+                app.destroy_lingering(position);
+                transition
             },
             move |app, _context, animation, child| {
                 let opacity = FadeForwardsPageTransitionsBuilder::fade_out_transition()
                     .animate(app, animation);
                 let position = FadeForwardsPageTransition::backward_translation_tween()
                     .animate(app, animation);
-                IgnorePointer::new()
+                let transition = IgnorePointer::new()
                     .ignoring(animation.status(app) == AnimationStatus::Forward)
                     .child(FadeTransition::new(opacity).child(
                         SlideTransition::new(position).child(FadeForwardsSnapshot {
@@ -536,7 +567,11 @@ impl StatelessWidget for FadeForwardsPageTransition {
                             child: child.cloned(),
                         }),
                     ))
-                    .into_widget()
+                    .into_widget();
+                // The transitions that read them retain them.
+                app.destroy_lingering(opacity);
+                app.destroy_lingering(position);
+                transition
             },
         );
         transition.child = Some(
@@ -776,21 +811,21 @@ impl FadeForwardsPageTransitionsBuilder {
 
     // The previous page slides from right to left as the current page appears.
     fn secondary_backward_translation_tween() -> impl Animatable<Offset> + Clone + 'static {
-        OffsetTween::new(Offset::ZERO, Offset::new(-0.25, 0.0)).chain(CurveTween::new(
+        ValueTween::new(Offset::ZERO, Offset::new(-0.25, 0.0)).chain(ValueCurveTween::new(
             FadeForwardsPageTransitionsBuilder::transition_curve(),
         ))
     }
 
     // The previous page slides from left to right as the current page disappears.
     fn secondary_forward_translation_tween() -> impl Animatable<Offset> + Clone + 'static {
-        OffsetTween::new(Offset::new(-0.25, 0.0), Offset::ZERO).chain(CurveTween::new(
+        ValueTween::new(Offset::new(-0.25, 0.0), Offset::ZERO).chain(ValueCurveTween::new(
             FadeForwardsPageTransitionsBuilder::transition_curve(),
         ))
     }
 
     // The fade in transition when the new page appears.
     fn fade_in_transition() -> impl Animatable<f64> + Clone + 'static {
-        DoubleTween::new(0.0, 1.0).chain(CurveTween::new(Rc::new(Interval::new(
+        ValueTween::new(0.0, 1.0).chain(ValueCurveTween::new(Rc::new(Interval::new(
             0.0,
             0.75,
             Curves::linear(),
@@ -799,7 +834,7 @@ impl FadeForwardsPageTransitionsBuilder {
 
     // The fade out transition of the old page when the new page appears.
     fn fade_out_transition() -> impl Animatable<f64> + Clone + 'static {
-        DoubleTween::new(1.0, 0.0).chain(CurveTween::new(Rc::new(Interval::new(
+        ValueTween::new(1.0, 0.0).chain(ValueCurveTween::new(Rc::new(Interval::new(
             0.0,
             0.25,
             Curves::linear(),
@@ -827,13 +862,17 @@ impl FadeForwardsPageTransitionsBuilder {
                 let position =
                     FadeForwardsPageTransitionsBuilder::secondary_forward_translation_tween()
                         .animate(app, animation);
-                FadeTransition::new(opacity)
+                let transition = FadeTransition::new(opacity)
                     .child(SlideTransition::new(position).child(FadeForwardsSnapshot {
                         animation,
                         allow_snapshotting,
                         child: child.cloned(),
                     }))
-                    .into_widget()
+                    .into_widget();
+                // The transitions that read them retain them.
+                app.destroy_lingering(opacity);
+                app.destroy_lingering(position);
+                transition
             },
             move |app, _context, animation, child| {
                 let opacity = FadeForwardsPageTransitionsBuilder::fade_out_transition()
@@ -841,17 +880,23 @@ impl FadeForwardsPageTransitionsBuilder {
                 let position =
                     FadeForwardsPageTransitionsBuilder::secondary_backward_translation_tween()
                         .animate(app, animation);
-                FadeTransition::new(opacity)
+                let transition = FadeTransition::new(opacity)
                     .child(SlideTransition::new(position).child(FadeForwardsSnapshot {
                         animation,
                         allow_snapshotting,
                         child: child.cloned(),
                     }))
-                    .into_widget()
+                    .into_widget();
+                // The transitions that read them retain them.
+                app.destroy_lingering(opacity);
+                app.destroy_lingering(position);
+                transition
             },
         );
         builder.child = child;
         let builder = builder.into_widget();
+        // The `DualTransitionBuilder` that follows it retains it.
+        app.destroy_lingering(reversed);
 
         let is_opaque = AnyModalRoute::opaque_of(app, context).unwrap_or(true);
 
@@ -1058,6 +1103,8 @@ impl ZoomPageTransitionsBuilder {
             },
         );
         builder.child = child;
+        // The `DualTransitionBuilder` that follows it retains it.
+        app.destroy_lingering(reversed);
         builder.into_widget()
     }
 }
@@ -1433,6 +1480,10 @@ struct ZoomTransitionBaseData {
 
     fade_transition: Option<AnyAnimation<f64>>,
     scale_transition: Option<AnyAnimation<f64>>,
+
+    /// The transitions the last `_updateAnimations` drove, which Dart's collector frees once
+    /// the next one replaces them; the state frees them then, and at `dispose`.
+    driven_transitions: Vec<HandleId>,
 }
 
 impl ZoomTransitionBaseData {
@@ -1441,6 +1492,7 @@ impl ZoomTransitionBaseData {
             controller: None,
             fade_transition: None,
             scale_transition: None,
+            driven_transitions: Vec::new(),
         }
     }
 }
@@ -1501,9 +1553,23 @@ trait ZoomTransitionBase: State {
             .set_allow_snapshotting(app, allow_snapshotting);
     }
 
+    /// Keeps `driven`, the transitions this `_updateAnimations` drove, and frees the last
+    /// ones; they linger until the next checkpoint, for the painter that listens to them to
+    /// let go.
+    fn replace_driven_transitions(self: Handle<Self>, app: &mut App, driven: Vec<HandleId>) {
+        let replaced = std::mem::replace(
+            &mut self.zoom_transition_base_data_mut(app).driven_transitions,
+            driven,
+        );
+        for replaced in replaced {
+            app.destroy_lingering(replaced);
+        }
+    }
+
     /// Dart's `_ZoomTransitionBase.dispose`, which the state's `dispose` runs last.
     fn dispose(self: Handle<Self>, app: &mut App) {
         self.controller(app).dispose(app);
+        self.replace_driven_transitions(app, Vec::new());
     }
 }
 
@@ -1833,79 +1899,6 @@ impl SnapshotPainter for ZoomExitTransitionPainter {
     }
 }
 
-/// Dart's `Tween<double>` as a value; Dart's tweens here are `static final`, and an arena tween
-/// made per build would hold its slot for the life of the `App`.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct DoubleTween {
-    begin: f64,
-    end: f64,
-}
-
-impl DoubleTween {
-    pub(crate) const fn new(begin: f64, end: f64) -> DoubleTween {
-        DoubleTween { begin, end }
-    }
-}
-
-impl Animatable<f64> for DoubleTween {
-    fn transform(&self, _app: &App, t: f64) -> f64 {
-        if t == 0.0 {
-            return self.begin;
-        }
-        if t == 1.0 {
-            return self.end;
-        }
-        f64::lerp(&self.begin, &self.end, t)
-    }
-}
-
-/// Dart's `Tween<Offset>` as a value, for the reason [`DoubleTween`] gives.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct OffsetTween {
-    begin: Offset,
-    end: Offset,
-}
-
-impl OffsetTween {
-    pub(crate) const fn new(begin: Offset, end: Offset) -> OffsetTween {
-        OffsetTween { begin, end }
-    }
-}
-
-impl Animatable<Offset> for OffsetTween {
-    fn transform(&self, _app: &App, t: f64) -> Offset {
-        if t == 0.0 {
-            return self.begin;
-        }
-        if t == 1.0 {
-            return self.end;
-        }
-        Offset::lerp(Some(self.begin), Some(self.end), t).expect("both ends are set")
-    }
-}
-
-/// Dart's `CurveTween` as a value, for the reason [`DoubleTween`] gives.
-#[derive(Clone)]
-pub(crate) struct CurveTween {
-    curve: Rc<dyn Curve>,
-}
-
-impl CurveTween {
-    pub(crate) fn new(curve: Rc<dyn Curve>) -> CurveTween {
-        CurveTween { curve }
-    }
-}
-
-impl Animatable<f64> for CurveTween {
-    fn transform(&self, _app: &App, t: f64) -> f64 {
-        if t == 0.0 || t == 1.0 {
-            debug_assert_eq!(self.curve.transform(t).round(), t);
-            return t;
-        }
-        self.curve.transform(t)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use waft_animation::{AnimationBehavior, AnimationController};
@@ -2173,8 +2166,8 @@ mod tests {
     /// 100ms controller, around a `SizedBox`; answers the controller.
     fn delegated_fade_forwards(
         tester: &mut WidgetTester,
-        animation: DoubleTween,
-        secondary_animation: DoubleTween,
+        animation: ValueTween<f64>,
+        secondary_animation: ValueTween<f64>,
     ) -> Handle<AnimationController> {
         let controller = AnimationController::create(
             &mut tester.cell.borrow_mut(),
@@ -2232,8 +2225,8 @@ mod tests {
             let mut tester = tester_on(TargetPlatform::Android);
             let controller = delegated_fade_forwards(
                 &mut tester,
-                DoubleTween::new(1.0, 0.0),
-                DoubleTween::new(0.0, 1.0),
+                ValueTween::new(1.0, 0.0),
+                ValueTween::new(0.0, 1.0),
             );
 
             // Since secondary animation is forward, transition will be reverse between duration
@@ -2254,8 +2247,8 @@ mod tests {
             let mut tester = tester_on(TargetPlatform::Android);
             let controller = delegated_fade_forwards(
                 &mut tester,
-                DoubleTween::new(0.0, 1.0),
-                DoubleTween::new(1.0, 0.0),
+                ValueTween::new(0.0, 1.0),
+                ValueTween::new(1.0, 0.0),
             );
 
             // Since secondary animation is reverse, transition will be forward between duration
@@ -2327,6 +2320,117 @@ mod tests {
 
             // Check that ColoredBox is not used for non-opaque route
             assert!(no_light_green_box(&tester));
+        });
+    }
+
+    /// Not a Dart case: Dart's collector frees the transitions and the painter a zoom state's
+    /// `_updateAnimations` replaces; here the state frees them.
+    #[test]
+    fn a_zoom_transition_given_a_new_animation_leaves_no_new_arena_objects() {
+        with_main_thread_stack(|| {
+            let mut tester = tester_on(TargetPlatform::Android);
+            let [first, second] = [0.25, 0.5].map(|value| {
+                tester
+                    .cell
+                    .borrow_mut()
+                    .create(waft_animation::AlwaysStoppedAnimation::new(value))
+                    .as_animation()
+            });
+            let zoom = |animation: AnyAnimation<f64>, reverse: bool| -> WidgetRef {
+                waft_widgets::Directionality::new(
+                    waft_embedder::TextDirection::Ltr,
+                    waft_widgets::Column::new().children([
+                        ZoomEnterTransition {
+                            animation,
+                            child: Some(SizedBox::new().into_widget()),
+                            allow_snapshotting: true,
+                            reverse,
+                            background_color: Colors::BLACK,
+                        }
+                        .into_widget(),
+                        ZoomExitTransition {
+                            animation,
+                            allow_snapshotting: true,
+                            reverse,
+                            child: Some(SizedBox::new().into_widget()),
+                        }
+                        .into_widget(),
+                    ]),
+                )
+                .into_widget()
+            };
+            for reverse in [false, true] {
+                tester.pump_widget(zoom(first, reverse));
+                tester.pump_widget(zoom(second, reverse));
+                let before = tester.cell.borrow().debug_object_count();
+                tester.pump_widget(zoom(first, reverse));
+                tester.pump_widget(zoom(second, reverse));
+                assert_eq!(
+                    tester.cell.borrow().debug_object_count(),
+                    before,
+                    "{reverse}"
+                );
+            }
+        });
+    }
+
+    /// The arena objects the frame `at` into a push, and the one `at` into the pop that
+    /// follows, leave behind with `builder`: Dart's collector frees what each frame's build
+    /// replaces, and here the transitions free what they make once they hand it on. `at` lies
+    /// between the bounds of the intervals the transitions fade over, so the frame adds and
+    /// drops no layer.
+    fn objects_a_mid_transition_frame_leaves(
+        platform: TargetPlatform,
+        builder: impl PageTransitionsBuilder,
+        at: Duration,
+    ) -> [isize; 2] {
+        let mut tester = tester_on(platform);
+        pump_app(&mut tester, theme_with(platform, builder), |app| {
+            app.routes(push_routes())
+        });
+        let objects_a_frame_leaves = |tester: &mut WidgetTester| {
+            tester.pump(Duration::ZERO);
+            tester.pump(at);
+            let before = tester.cell.borrow().debug_object_count() as isize;
+            tester.pump(Duration::from_millis(16));
+            tester.cell.borrow().debug_object_count() as isize - before
+        };
+        tap_text(&mut tester, "push");
+        let push = objects_a_frame_leaves(&mut tester);
+        tester.pump_and_settle();
+        let page_b = *tester.find_onstage_text("page b").first().expect("page b");
+        Navigator::pop(&mut tester.cell.borrow_mut(), page_b, None);
+        let pop = objects_a_frame_leaves(&mut tester);
+        [push, pop]
+    }
+
+    /// Not a Dart case: see [`objects_a_mid_transition_frame_leaves`].
+    #[test]
+    fn a_frame_of_a_zoom_push_or_pop_leaves_no_new_arena_objects() {
+        with_main_thread_stack(|| {
+            assert_eq!(
+                objects_a_mid_transition_frame_leaves(
+                    TargetPlatform::Android,
+                    ZoomPageTransitionsBuilder::new(),
+                    Duration::from_millis(100),
+                ),
+                [0, 0]
+            );
+        });
+    }
+
+    /// Not a Dart case: see [`objects_a_mid_transition_frame_leaves`].
+    #[test]
+    fn a_frame_of_a_fade_forwards_push_or_pop_leaves_no_new_arena_objects() {
+        with_main_thread_stack(|| {
+            assert_eq!(
+                objects_a_mid_transition_frame_leaves(
+                    TargetPlatform::Android,
+                    FadeForwardsPageTransitionsBuilder::new(),
+                    Duration::from_millis(200),
+                ),
+                [0, 0]
+            );
         });
     }
 

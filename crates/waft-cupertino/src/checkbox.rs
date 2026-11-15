@@ -879,11 +879,8 @@ impl CheckboxPainter {
         if shape.prefer_paint_interior() {
             shape.paint_interior(canvas, outer, &gradient_paint, None);
         } else {
-            canvas.draw_path(
-                &shape.get_outer_path(outer, None),
-                FillRule::NonZero,
-                &gradient_paint,
-            );
+            let path = shape.get_outer_path(outer, None);
+            canvas.draw_path(path.as_valo(), path.fill_type, &gradient_paint);
         }
     }
 
@@ -915,11 +912,8 @@ impl CheckboxPainter {
         } else if self.shape(app).prefer_paint_interior() {
             self.shape(app).paint_interior(canvas, outer, paint, None);
         } else {
-            canvas.draw_path(
-                &self.shape(app).get_outer_path(outer, None),
-                FillRule::NonZero,
-                paint,
-            );
+            let path = self.shape(app).get_outer_path(outer, None);
+            canvas.draw_path(path.as_valo(), path.fill_type, paint);
         }
         if let Some(side) = side {
             self.shape(app)
@@ -1035,11 +1029,8 @@ impl ToggleablePainter for CheckboxPainter {
             if shape.prefer_paint_interior() {
                 shape.paint_interior(canvas, outer, &pressed_paint, None);
             } else {
-                canvas.draw_path(
-                    &shape.get_outer_path(outer, None),
-                    FillRule::NonZero,
-                    &pressed_paint,
-                );
+                let path = shape.get_outer_path(outer, None);
+                canvas.draw_path(path.as_valo(), path.fill_type, &pressed_paint);
             }
         }
         if self.is_focused(app) {
@@ -1067,10 +1058,10 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use waft_embedder::valo::{GradientStop, Matrix, Op, Shader, SpreadMode};
+    use waft_embedder::valo::{GradientStop, Matrix, Op, Path, Shader, SpreadMode};
     use waft_embedder::{
-        KeyData, KeyEventDeviceType, KeyEventType, Path, PointerChange, PointerData,
-        PointerDataPacket, PointerDeviceKind, RRect,
+        KeyData, KeyEventDeviceType, KeyEventType, PointerChange, PointerData, PointerDataPacket,
+        PointerDeviceKind, RRect,
     };
     use waft_foundation::AppCell;
     use waft_gestures::GestureBinding;

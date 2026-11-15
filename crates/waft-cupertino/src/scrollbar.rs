@@ -287,7 +287,9 @@ impl State for CupertinoScrollbarState {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        self.thickness_animation_controller(app).dispose(app);
+        let thickness_animation_controller = self.thickness_animation_controller(app);
+        thickness_animation_controller.dispose(app);
+        app.destroy_lingering(thickness_animation_controller);
         RawScrollbarState::dispose(self, app);
         TickerProviderStateMixin::dispose(self, app);
     }
@@ -455,5 +457,41 @@ mod tests {
             Some(CupertinoScrollbar::DEFAULT_RADIUS_WHILE_DRAGGING),
             "and takes the dragging radius"
         );
+    }
+
+    /// Dart's collector frees the thickness controller `_CupertinoScrollbarState` makes once
+    /// the state is gone; here the state frees it in its `dispose`.
+    #[test]
+    fn a_disposed_cupertino_scrollbar_frees_its_thickness_controller() {
+        let cell = test_cell();
+        let key = GlobalKey::new();
+        let controller = ScrollController::default(&mut cell.borrow_mut());
+        let list = ListView::new()
+            .controller(controller.as_controller())
+            .children((0..40).map(|_| SizedBox::new().height(ITEM_EXTENT).into_widget()));
+        let scrollbar = CupertinoScrollbar::new(list)
+            .key(key.clone().into())
+            .controller(controller.as_controller());
+        build(
+            &cell,
+            Directionality::new(TextDirection::Ltr, scrollbar).into_widget(),
+        );
+        let thickness = {
+            let app = cell.borrow();
+            let state = key
+                .current_state::<CupertinoScrollbarState>(&app)
+                .expect("the scrollbar is mounted");
+            state.thickness_animation_controller(&app)
+        };
+
+        {
+            let mut app = cell.borrow_mut();
+            let view = app.platform().views()[0].clone();
+            let root = waft_widgets::View::new(view, SizedBox::new()).into_widget();
+            waft_widgets::WidgetsBinding::instance(&mut app).attach_root_widget(&mut app, root);
+            pump(&mut app, Duration::from_millis(16));
+        }
+        cell.checkpoint();
+        assert!(!cell.borrow().contains(thickness));
     }
 }

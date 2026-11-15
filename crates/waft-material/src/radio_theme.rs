@@ -1,7 +1,5 @@
 //! Flutter counterpart: material_ui's `radio_theme.dart`.
 
-use std::rc::Rc;
-
 use waft_embedder::{Color, lerp_double};
 use waft_foundation::App;
 use waft_painting::{AnyBorderSide, BorderSide};
@@ -283,29 +281,20 @@ fn pick<T>(
     }
 }
 
-/// Dart's `==` on a `WidgetStateProperty`, which no override makes more than identity here.
-fn same_property<T: ?Sized>(a: &Option<Rc<T>>, b: &Option<Rc<T>>) -> bool {
-    match (a, b) {
-        (None, None) => true,
-        (Some(a), Some(b)) => Rc::ptr_eq(a, b),
-        _ => false,
-    }
-}
-
 impl PartialEq for RadioThemeData {
     fn eq(&self, other: &RadioThemeData) -> bool {
         if std::ptr::eq(self, other) {
             return true;
         }
-        same_property(&other.mouse_cursor, &self.mouse_cursor)
-            && same_property(&other.fill_color, &self.fill_color)
-            && same_property(&other.overlay_color, &self.overlay_color)
+        other.mouse_cursor == self.mouse_cursor
+            && other.fill_color == self.fill_color
+            && other.overlay_color == self.overlay_color
             && other.splash_radius == self.splash_radius
             && other.material_tap_target_size == self.material_tap_target_size
             && other.visual_density == self.visual_density
-            && same_property(&other.background_color, &self.background_color)
+            && other.background_color == self.background_color
             && other.side == self.side
-            && same_property(&other.inner_radius, &self.inner_radius)
+            && other.inner_radius == self.inner_radius
     }
 }
 
@@ -379,6 +368,8 @@ impl InheritedWidget for RadioTheme {
 #[cfg(test)]
 #[allow(deprecated)]
 mod tests {
+    use std::rc::Rc;
+
     use waft_embedder::Size;
     use waft_services::SystemMouseCursors;
     use waft_widgets::{FocusHighlightStrategy, SizedBox, WidgetState, WidgetStatePropertyAll};

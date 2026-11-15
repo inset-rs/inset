@@ -23,7 +23,7 @@ use waft_widgets::{
 use crate::banner_theme::{MaterialBannerTheme, MaterialBannerThemeData};
 use crate::divider::Divider;
 use crate::generated::banner_defaults_m3::banner_defaults_m3;
-use crate::material::{Material, destroy_lingering};
+use crate::material::Material;
 use crate::scaffold::ScaffoldMessenger;
 use crate::theme::Theme;
 
@@ -470,7 +470,7 @@ impl MaterialBannerState {
     fn dispose_curved_animation(app: &mut App, animation: Option<Handle<CurvedAnimation>>) {
         if let Some(animation) = animation {
             animation.dispose(app);
-            destroy_lingering(app, animation);
+            app.destroy_lingering(animation);
         }
     }
 
@@ -478,8 +478,8 @@ impl MaterialBannerState {
     /// the animation lets go when it rebuilds, before the entries go at the next checkpoint.
     fn free_slide_out_animation(self: Handle<Self>, app: &mut App) {
         if let Some((tween, animation)) = app.get_mut(self).slide_out_animation.take() {
-            destroy_lingering(app, animation.id());
-            destroy_lingering(app, tween);
+            app.destroy_lingering(animation.id());
+            app.destroy_lingering(tween);
         }
     }
 

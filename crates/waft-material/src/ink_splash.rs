@@ -23,7 +23,7 @@ use crate::ink_well::{
 };
 use crate::material::{
     AnyMaterialInkController, InkFeature, InkFeatureData, InkFeatureLeaf, InkFeatureLeafData,
-    InkFeatureObject, Material, RectCallback, destroy_lingering,
+    InkFeatureObject, Material, RectCallback,
 };
 
 const K_UNCONFIRMED_SPLASH_DURATION: Duration = Duration::from_secs(1);
@@ -323,16 +323,16 @@ impl InkFeatureLeaf for InkSplash {
             .take()
             .expect("disposed once");
         alpha_controller.dispose(app);
-        destroy_lingering(app, radius_controller);
-        destroy_lingering(app, alpha_controller);
+        app.destroy_lingering(radius_controller);
+        app.destroy_lingering(alpha_controller);
         let splash = app.get_mut(self);
         let radius_tween = splash.radius_tween.take();
         let alpha_tween = splash.alpha_tween.take();
         if let Some(radius_tween) = radius_tween {
-            destroy_lingering(app, radius_tween);
+            app.destroy_lingering(radius_tween);
         }
         if let Some(alpha_tween) = alpha_tween {
-            destroy_lingering(app, alpha_tween);
+            app.destroy_lingering(alpha_tween);
         }
         let splash = app.get_mut(self);
         let driven = [
@@ -340,7 +340,7 @@ impl InkFeatureLeaf for InkSplash {
             splash.alpha.take().map(|alpha| alpha.id()),
         ];
         for animation in driven.into_iter().flatten() {
-            destroy_lingering(app, animation);
+            app.destroy_lingering(animation);
         }
         InkFeature::dispose(self, app);
     }
