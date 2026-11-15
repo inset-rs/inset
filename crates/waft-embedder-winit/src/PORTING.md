@@ -8,8 +8,6 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 - lifecycle.rs, os/macos/app_lifecycle.rs → the macOS embedder's lifecycle states (`FlutterEngine`)
 - os/macos/app_delegate.rs, quitting → the macOS embedder's `FlutterAppDelegate`, which asks the framework before the app quits
 - launch.rs, os/macos/event_loop.rs → a Flutter macOS app's launch, which comes forward or stays behind as macOS launched it
-- launch.rs, main_loop/ → the engine's start (`Shell` adds the implicit view with empty metrics): where the system's window is the screen, the app starts with the screen view at no size, and its window and surface come after
-- platform.rs, views.rs, main_loop/windows.rs → the embedders' implicit view, here the screen view, which the framework never hears added or removed: the app has it from its start, and has no handle to close its window
 - views.rs, main_loop/views.rs, main_loop/windows.rs → the embedder API's `AddView`, `SendWindowMetricsEvent` and `RemoveView`, which a window's code calls for its view as the window opens, resizes or changes screen, and closes
 - platform.rs, app_requests.rs, main_loop/views.rs → the embedder API's `AddView`, `SendWindowMetricsEvent`, `RemoveView`, `SendPointerEvent` and `SendViewFocusEvent` for a view the app adds on a composition layer of its own, through the view embedder macOS gives, served on a turn of the loop by the calls a window's code makes for its view
 - main_loop/windows.rs → the engine's window close request, which goes to the framework and closes nothing until the framework closes the window
@@ -21,7 +19,7 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 
 ## lib.rs / main_loop/
 
-- Change: the app's metrics, sight and removal of a view are refused for a view it did not add, the screen view or a window's, and the first refusal is printed, where Flutter's embedder API takes them for any view.
+- Change: the app's metrics, sight and removal of a view are refused for a view it did not add, a window's, and the first refusal is printed, where Flutter's embedder API takes them for any view.
   Reason: platform — a window's view takes its size, its sight and its end from its window, which the host holds.
   Affect: an app that resizes or removes a window's view sees nothing change.
 
@@ -40,10 +38,6 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 - Change: on macOS a panic inside a call from AppKit aborts the process once the panic hook has printed it.
   Reason: platform — a panic cannot unwind through AppKit's frames.
   Affect: such a panic ends the process rather than coming out of `run`.
-
-- Change: on iOS the views keep their surfaces for the app's life, and their frames are held in the background, where Flutter's iOS embedder lets its surface go when the app enters the background and makes it again as it comes to the foreground.
-  Reason: platform — winit gives the surfaces at `can_create_surfaces` and takes them at `destroy_surfaces`, which it calls on iOS at launch alone, and reports the background as every window occluded.
-  Affect: an app in the background draws nothing but keeps its surface's memory, and one that is inactive but in sight, under the Control Center, goes on drawing, as Flutter's does.
 
 ## frame_scheduler.rs / vsync_source.rs / vsync_waiter.rs / os/macos/vsync_waiter.rs
 
@@ -65,7 +59,7 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — `NSScreen` answers the rate itself from macOS 12, with no display link to make.
   Affect: a screen that varies its rate reports the fastest, and before macOS 12 a screen reports none.
 
-- Change: on Windows, Linux and iOS the screens are winit's monitors, listed through the app's first window, numbered in the order first seen, with no visible frame of their own and no notice when they change, where Flutter's Windows embedder lists `HMONITOR`s again at `WM_DISPLAYCHANGE` and its iOS embedder reports the main screen alone.
+- Change: on Windows and Linux the screens are winit's monitors, listed through the app's first window, numbered in the order first seen, with no visible frame of their own and no notice when they change, where Flutter's Windows embedder lists `HMONITOR`s again at `WM_DISPLAYCHANGE`.
   Reason: platform — winit lists monitors only through a window or inside its own calls, gives them no number, knows no taskbar, and reports no monitor coming or going.
   Affect: an app there has no screens until its first window opens, which it hears as that view coming; a visible frame includes the taskbar; a monitor plugged in shows in the list the next time it is read, and a window moved onto it is reported as a metrics change.
 
@@ -119,26 +113,18 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — winit has one cursor per window where Flutter's engine maps cursor kinds per embedder.
   Affect: a `MouseRegion` cursor shows on hover, the device id is ignored (one mouse), and an unsupported kind is silently the arrow.
 
-## clipboard/, os/macos/pasteboard/, os/ios/pasteboard/
+## clipboard/, os/macos/pasteboard/
 
 - Change: on macOS the clipboard is the general pasteboard, its items in every type it carries, given or promised, files and promised files, a promised file written at the receiver's URL as its producer makes its bytes and removed when it fails, a sensitive copy marked concealed, one for this device only written for this host only, and one that expires cleared by the embedder; elsewhere it is plain text through arboard, every other form refused.
   Reason: platform — Flutter's desktop engines carry plain text over the platform channel, and winit owns no clipboard, so the embedder reaches each system's itself.
   Affect: on macOS an app copies and pastes images, HTML and files with other apps, and on Windows and Linux text alone.
 
-- Change: on iOS the clipboard is UIKit's general pasteboard, its items in every type it carries, a copy with every form given written whole, and one with a promised form or file written as item providers, a promised file written by its producer into a temporary file the provider hands over, one for this device only written local only, and one that expires carrying its expiration date.
-  Reason: platform — Flutter's iOS engine carries plain text over the platform channel, and arboard has no iOS code.
-  Affect: an iOS app copies and pastes images, HTML and files with other apps, and its expired copy is cleared by the system after the app has quit too.
-
-- Change: on iOS listing the pasteboard reads only its types, and a read loads the form through the item's provider, off the main thread.
-  Reason: platform — iOS shows its paste alert when an app reads another app's content, and the app's own promised form is produced on the main thread.
-  Affect: the alert shows when the app reads, never when it lists, and a read of the app's own promise never stalls it.
-
 - Change: on Windows and Linux a sensitive copy is kept out of the clipboard's history, and on Windows out of its monitoring, a copy for this device only is kept off Windows' cloud clipboard, and one that expires is cleared by the main loop, which wakes for it as it wakes for the app's timers.
   Reason: platform — arboard carries those of the options the systems have, and neither system has an expiry of its own.
   Affect: a password copied stays out of Windows' clipboard history, and a copy whose app quits before its time stays on the clipboard.
 
-- Change: the app hears the clipboard changed when it becomes active and when one of its windows takes the focus, if another writer moved the system's count of changes (on Linux, changed the text), when iOS says the pasteboard changed, and when a copy of its own expired and was cleared.
-  Reason: platform — no desktop system tells an application that another one wrote the clipboard, and iOS tells only an app that is active.
+- Change: the app hears the clipboard changed when it becomes active and when one of its windows takes the focus, if another writer moved the system's count of changes (on Linux, changed the text), and when a copy of its own expired and was cleared.
+  Reason: platform — no desktop system tells an application that another one wrote the clipboard.
   Affect: a toolbar's Paste button follows a copy made in another app once the user comes back to this one.
 
 - Change: on macOS a promised form is produced while the paste waits, on the main thread, for up to ten seconds.
@@ -155,75 +141,7 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — Flutter's engine finds platform fonts itself; valo needs a `FontSource`.
   Affect: text uses installed fonts, the Cupertino system-font names resolve to SF, and an uninstalled family falls back to whatever the OS picks for the character.
 
-## os/apple/composition/ → the macOS and iOS embedders' platform views (`FlutterSurfaceManager`, `FlutterMutatorView`, `FlutterPlatformViewsController`)
-
-- Change: each composition layer is a Core Animation layer beneath the framework's layer, showing its producer's buffer directly, on macOS and iOS alike.
-  Reason: platform — Core Animation composites the buffers it's given, so a producer's frame needs no copy and no framework frame.
-  Affect: framework content can sit above a composition layer but not beneath it.
-
-- Change: on macOS each view draws into a `CAMetalLayer` Waft makes as the content of a composition layer of the view's own, which its window places to fill the window's view as that view's bounds and scale change, with the composition layers the view's scenes place beneath it, where Flutter's macOS embedder shows buffers it draws itself in layers it adds to its view's layer.
-  Reason: platform — wgpu presents a frame through a `CAMetalLayer`'s drawables, not as a buffer the host hands Core Animation, and a view on a layer of its own draws alike wherever that layer is placed.
-  Affect: a picture that has not caught up with its window's new size shows stretched over the window, where Flutter's shows at its own size until the next frame.
-
-- Change: a composition layer's Core Animation layers take every transform and clip above it, a path's included.
-  Reason: platform — Core Animation turns a layer by any transform and masks it by any path.
-  Affect: a turned, rounded or path-clipped composition layer shows exactly where the framework places it.
-
-- Change: a composition layer's buffer and its children sit in one Core Animation layer placed by a transform, the children beneath the buffer, and a present shows its buffer and places its children in one transaction; on macOS the app may place a composition layer in a `CALayer` of its own (`MacOs::place_layer_in`), such as the root of a `CAContext` another process shows.
-  Reason: platform — a program whose picture is itself a composition layer in another app's window shows its own layers as that picture's children, and Core Animation moves, clips and scales a layer's sublayers with it.
-  Affect: a child moves, is cut and shrinks with its parent, and shows through its parent's clear pixels.
-
-- Change: a buffer is released once the system says it's no longer in use, checked at the layer's next present and when the layer goes.
-  Reason: platform — Core Animation gives no signal when it lets go of a buffer.
-  Affect: a producer never waits for a buffer to come back, but draws into another when none is known free, as Flutter's `FlutterSurfaceManager` does.
-
-- Change: a composition layer answers what it shows now (`CompositionLayer::current_picture`) with the buffer presented to it last, or, while a player's or a camera's layer is its content, with what that source's own output beside the layer has for now, the frame read last staying the answer until a newer comes; a view's `CAMetalLayer` and an app's own system layer answer nothing.
-  Reason: platform — Core Animation hands nothing back of what an `AVPlayerLayer`, an `AVCaptureVideoPreviewLayer` or a `CAMetalLayer` shows, so only an output the source feeds beside it can.
-  Affect: a picture of a window shows its videos and camera previews, a paused video's frame among them, each a `CoreVideoFrame` lent as a reader's frames are.
-
-## media.rs, os/apple/media/ → `video_player_avfoundation` and `camera_avfoundation`
-
-- Change: a player is an `AVPlayer` whose state and position are read from it on the main thread when the app asks, its changes told by key-value observing, its end-of-item, time-jumped and rate notifications and each seek's completion, where Flutter's plugin copies events over an event channel and polls the position on a timer.
-  Reason: platform — AVFoundation changes a player's state on the main queue, where the app reads it, keeps its current time for the app to read, tells when that time jumps and why its rate fell to zero, and completes each seek.
-  Affect: the app's player hears its state change at once on load, play, pause, a wait for data and end, a seek's landing and a loop, and nothing as it plays on; before macOS 12 and iOS 15, which tell no reason for a fall of the rate, a pause the app did not ask for has none.
-
-- Change: a player shown on a composition layer makes an `AVPlayerLayer` its content (`MacOs::show_system_layer` for an app's own system layer), with an `AVPlayerItemVideoOutput` added to its item beside it, which the layer reads its current picture from, and one given a frame reader adds an `AVPlayerItemVideoOutput` of BGRA `IOSurface`-backed pixel buffers to its item, which the reader reads, where Flutter's plugin copies every frame into a texture.
-  Reason: platform — Core Animation clips and scales a layer with the one it is the content of, and a pixel buffer backed by an `IOSurface` reaches the GPU with no copy.
-  Affect: a video moves, clips and shrinks with the framework's frame, and a frame reader hands out the frame for the moment the picture reaches the screen, keeping none for later.
-
-- Change: a player's audio and text tracks are the options of its asset's audible and legible media selection groups, selected with the item's `selectMediaOption:inMediaSelectionGroup:`, and media without such a group, such as an MP3, lists that kind from its item's tracks, enabling the one selected, beside the item's video tracks, where Flutter's plugin lists no tracks.
-  Reason: platform — AVFoundation offers a choice of audio and subtitles through selection groups, and plays the tracks outside any group while they are enabled.
-  Affect: a stream lists its renditions under ids that stay for the player's run, a file lists its own tracks, and a stream's video track is listed again under a new id each time it switches variant.
-
-- Change: a player's tags are its asset's common metadata, read once AVFoundation has loaded them, its artwork named by the image format its bytes start with, and its subtitles come from an `AVPlayerItemLegibleOutput` at its `SourceAndRulesOnly` styling that keeps AVPlayer from drawing them, its attributed strings and their Core Media markup made into cues, a field the markup gives no value for left unsaid, where Flutter's plugin reads neither.
-  Reason: platform — Apple's legible output gives every subtitle AVPlayer would draw as text with markup, with the media's own styling alone at that resolution, as WebKit asks for it.
-  Affect: the app gets subtitles placed where Core Media places them in the media's own style, to draw in the user's caption style, and the cues go at a seek or a change of text track until the next arrive.
-
-- Change: on macOS and iOS the user's caption settings are Media Accessibility's, the style read from the user's domain each time the app asks and the change future resolved at its settings-changed notice, a setting applying always where Apple's behaviour is `UseValue` in a style the user customized, as WebKit has it, its colours matched to sRGB with their opacities apart, and its font the family of the one it gives for the default style; Flutter reads none.
-  Reason: platform — Media Accessibility gives each caption setting with whether content may override it, and tells when the user changes one.
-  Affect: the app draws subtitles in the user's caption style and follows its changes, a style the user never customized giving way to the media's own, and a style whose font is the system's hidden one leaves the family to the framework.
-
-- Change: a frame reader is made empty and reads the output of the source it was given to last, a player item's video output or a capture session's video data output, which that source makes and adds when it is given the reader, a camera as it starts.
-  Reason: platform — AVFoundation has no one output that a player and a camera both feed, as Android's `ImageReader` is fed by a decoder and a camera alike.
-  Affect: one reader serves a player or a camera, it reads nothing until it is given to one, and a reader the host did not make reads nothing, which the host says once.
-
-- Change: the cameras are the devices of one discovery session the host keeps, whose `devices` it key-value observes to tell the app the list changed, where Flutter's plugin makes a discovery session for each `availableCameras` and observes none.
-  Reason: platform — Apple's header gives key-value observing a discovery session's `devices` as the way to hear its list change, and gives `AVCaptureDeviceWasConnectedNotification` and `AVCaptureDeviceWasDisconnectedNotification` for `AVCaptureDevice.devices`, which it deprecated.
-  Affect: on a Mac, an app hears the cameras change as one is plugged in or out.
-
-- Change: a camera opens once the user lets the app use the cameras, lists its device's own formats, and runs as an `AVCaptureSession` given its camera, format and outputs at once and started on a serial queue of its own, its start answering once it runs, is interrupted or fails, asking for the microphone first where a recording wants sound, with its preview a layer that is a composition layer's content and one video data output, added for a preview or a reader, that both read.
-  Reason: platform — AVFoundation configures a session's inputs and outputs together, each output is AVFoundation's own, and Apple's documentation of `AVCaptureSession` starts a session on a serial queue, since `startRunning` blocks until it runs or fails.
-  Affect: the app's thread goes on while a camera starts, a session reports running, interrupted or ended as AVFoundation tells it, photos arrive as JPEG at the size asked for, and recordings as QuickTime movies.
-
-- Change: the first session in the process on a camera sets the format it picked and keeps the camera locked while any session in the process runs it, and a later session runs in that format; where another process holds the lock, a session runs in the format the camera has.
-  Reason: platform — a camera has one active format for every session using it, two sessions in one process share one camera, and Apple gives locking a camera as the way to keep its settings unchanged.
-  Affect: a second session on a camera reports the first one's format, and other apps cannot change the camera's settings while the app runs it.
-
-- Change: an interrupted session takes the reason iOS gives, any but the background and system pressure read as another app having the camera, and on macOS none.
-  Reason: platform — Apple marks the interruption notice's reason key unavailable on macOS, and documents the notice for another application taking the hardware a session needs.
-  Affect: on a Mac an interruption has no reason.
-
-## video_frames.rs, os/apple/media/video_frame.rs, os/apple/gpu_interop.rs → the macOS embedder's `FlutterExternalTexture` (`copyPixelBuffer`, `CVMetalTextureCache`)
+## video_frames.rs, `waft-embedder-apple`'s media/video_frame.rs and gpu_interop.rs → the macOS embedder's `FlutterExternalTexture` (`copyPixelBuffer`, `CVMetalTextureCache`)
 
 - Change: at each vsync a view asks each reader its scene draws for the frame of the display link's target time, when the picture reaches the screen, and draws its last scene again when a new one came, where Flutter's engine draws a texture's frame when its plugin calls `markTextureFrameAvailable`.
   Reason: platform — AVFoundation tells no player's frame as it comes; a display link asks the video output for the frame of each refresh's `targetTimestamp`, as `frame_for` does, so a frame shows at its moment of the video, in step with the sound.
@@ -267,7 +185,7 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — AppKit offers a window only the drags that hold a type it is registered for.
   Affect: a drag holding only a link, rich text or a promised file reaches the app, and a promised file is written when its URI list is read.
 
-## system_requests.rs / launch.rs / os/macos/app_delegate.rs / os/ios/open_requests.rs → the macOS embedder's `FlutterAppDelegate`, iOS's `FlutterAppDelegate` and `FlutterSceneDelegate`
+## system_requests.rs / launch.rs / os/macos/app_delegate.rs → the macOS embedder's `FlutterAppDelegate`
 
 - Change: the files and links the system asks the app to open reach the client as `EmbedderClient::open_requested`, and a reopen, such as a click on the Dock icon, the handler the app sets through `WinitPlatform::macos`, where a Flutter app answers them in its own application delegate: macOS's `application:openURLs:`, a file URL as a path and any other as a link, at launch and while the app runs.
   Reason: platform — the embedder's own application delegate answers AppKit, as winit leaves the delegate to it, so an app writes none.
@@ -276,10 +194,6 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 - Change: on Windows and Linux the embedder reads no launch arguments: the app reads its own command line, as a Flutter app does in `main`, and hands what it decides are files to `App::open_requested`.
   Reason: platform — the system starts the app with strings on its command line, and which of them are files the app chose when it registered its file types; Windows and Linux start a new process with what it opens, so a running app hears a later launch only through `waft-single-instance`.
   Affect: an app's own words on its command line, such as a subcommand, are never taken for files to open.
-
-- Change: on iOS a link or a file opened with the app comes through the application delegate's `application:openURL:options:`, where Flutter's scene-based apps hear `scene:openURLContexts:`; the launch's URL is read from the launch options when the application finishes launching, and a delegate of the embedder's is set then. A file URL's security-scoped access starts as it arrives and is kept for the app's life, as a picked document's is.
-  Reason: platform — winit gives `UIApplicationMain` no delegate class and runs no scenes, so the scene delegate's calls never come; the application delegate's are what UIKit sends an app without scenes.
-  Affect: an app opened with a file or a link on iOS hears it as on every other system; once winit runs scenes, the delegate's calls move to the scene's.
 
 ## menus/, popup_menus.rs, main_loop/menus.rs, os/macos/menus/, os/windows/menus/, os/linux/status_notifier_items/ → the macOS embedder's `FlutterMenuPlugin`, and the system menus Flutter does not reach
 
@@ -315,7 +229,7 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — the desktop draws a StatusNotifierItem's menu and decides when to open it, and Linux's toolkits draw their own menus at a point.
   Affect: a click reaches the app as the desktop reports it, `Activate`, `SecondaryActivate`, `ContextMenu` or a vertical scroll, at the desktop's position, which Wayland often leaves at zero.
 
-## file_dialogs.rs, os/*/file_dialogs.rs → `file_selector`'s macOS, Windows, Linux and iOS implementations
+## file_dialogs.rs, os/*/file_dialogs.rs → `file_selector`'s macOS, Windows and Linux implementations
 
 - Change: on macOS the dialogs are `NSOpenPanel` and `NSSavePanel`, begun without blocking, as a sheet on the parent view's window where there is one, as `file_selector_macos` shows them; a type's extensions and MIME types become the uniform types the panel enables, with no label, since a label needs an accessory view.
   Reason: platform — a sheet keeps the dialog with its window and the app's loop running.
@@ -328,10 +242,6 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 - Change: on Linux the dialogs are the desktop portal's `FileChooser` over the session bus, asked from a thread of its own that waits for the portal's `Response`, answering its `file://` URIs as paths; the dialogs are `None` where the bus has no portal, running or activatable. A dialog is modal to its parent on X11 only, since naming a Wayland window would need it exported, which winit does not.
   Reason: platform — the portal is the desktop's own dialog, on GNOME, KDE and in a Flatpak alike, without linking GTK or Qt.
   Affect: the dialog is the desktop's, and on Wayland it stands apart from its window.
-
-- Change: on iOS the dialogs are `UIDocumentPickerViewController`, presented by the parent view's view controller or the screen view's, opening in place; each picked URL's security-scoped access starts when it is answered and is kept for the app's life, since a path carries no lifetime to end it by. A save makes an empty file under the suggested name in a folder of its own in the temporary folder and has the picker export it, answering the file where the user put it.
-  Reason: platform — iOS has no dialog that answers a file yet to be written, and a picked document outside the sandbox is reached only while its access lasts.
-  Affect: a picked path stays readable and writable until the app quits; an app picking without end would run out of the kernel's sandbox extensions.
 
 ## os/*/opener.rs, os/linux/portal.rs → `url_launcher`'s and Electron's `shell` implementations
 
@@ -347,11 +257,7 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
   Reason: platform — the portal is the desktop's own way, in a Flatpak too, and reveals a file the way its file manager does.
   Affect: the user may be asked to choose an app, and a choice cancelled answers a failure.
 
-- Change: on iOS the opener is `UIApplication`'s `openURL:options:completionHandler:` for a link, its `false` being no app, and `UIDocumentInteractionController`'s Open In menu for a file, presented from the first window's view controller, its `false` being no app; revealing fails, and `can_open_link` asks `canOpenURL:` only for a scheme the app's `LSApplicationQueriesSchemes` declares, `None` for another.
-  Reason: platform — iOS shares a file with another app only through a controller the user chooses the app in, and answers `canOpenURL:` falsely for a scheme the app did not declare.
-  Affect: opening a file on iOS shows the user the apps that take it.
-
-## notifications.rs, os/*/notifications → `flutter_local_notifications`' macOS, iOS, Windows and Linux implementations
+## notifications.rs, os/*/notifications, `waft-embedder-apple`'s notifications/ → `flutter_local_notifications`' macOS, iOS, Windows and Linux implementations
 
 - Change: on macOS and iOS the notifications are `UNUserNotificationCenter`'s, and they are `None` for a process outside an application bundle, as `cargo run` starts one: a notification is a request under the app's id, its actions a category named after the actions themselves, its reply a `UNTextInputNotificationAction` sent with a button of its label, its image an attachment of a PNG file the embedder writes, and a click comes to the center's delegate, set before the loop runs.
   Reason: platform — UserNotifications raises an exception, which aborts the process, when a process without a bundle touches the center, and it reports the click that launched the app only to a delegate set before the launch finishes.
@@ -423,7 +329,7 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 
 ## Deferred
 
-- The lifecycle state on iOS, Windows and Linux, where the framework hears none. Trigger: an app there that must pause in the background.
+- The lifecycle state on Windows and Linux, where the framework hears none. Trigger: an app there that must pause in the background.
 - The fallback languages Flutter's Windows and Linux embedders add after the user's: Windows's own (`MUI_UI_FALLBACK`), and GLib's, such as `en` after `en_US`, and `C`. Trigger: an app whose locale resolution needs a fallback the user did not set.
 - Hearing the user's languages change on Windows (`WM_SETTINGCHANGE`), which winit does not report and Flutter's Windows embedder does not hear either. Trigger: an app there that must follow a change without a restart.
 - Letting a logout or shutdown go on once the app agrees, through `NSTerminateLater`: the delegate cancels it at once, as Flutter's does, so an Waft app stops every logout. Trigger: an app that must not stop a logout it agrees to; AppKit's loop while it waits needs an experiment first.

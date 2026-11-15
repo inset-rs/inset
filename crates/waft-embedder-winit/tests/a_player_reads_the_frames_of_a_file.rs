@@ -17,16 +17,16 @@
 // Serving the main run loop needs `unsafe`, which the crate denies; this test alone allows it.
 #![allow(unsafe_code)]
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[cfg(target_os = "macos")]
 fn main() {
     player::reads_the_frames_of_a_file();
     println!("a_player_reads_the_frames_of_a_file: ok");
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+#[cfg(not(target_os = "macos"))]
 fn main() {}
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[cfg(target_os = "macos")]
 mod player {
     use std::path::PathBuf;
     use std::sync::Arc;

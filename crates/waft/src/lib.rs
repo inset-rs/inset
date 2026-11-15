@@ -33,7 +33,7 @@ pub use waft_embedder::{
 pub use waft_embedder_default::AndroidApp;
 #[cfg(not(all(target_arch = "wasm32", target_os = "wasi")))]
 pub use waft_embedder_default::DefaultEmbedder;
-#[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
 pub use waft_embedder_default::{LinuxSettings, WindowsSettings};
 /// Change-notifier callback used by buttons. The pointer widget is [`waft_widgets::Listener`].
 pub use waft_foundation::Listener;

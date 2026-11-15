@@ -3,13 +3,14 @@
 //! its configuration asks beyond winit's attributes (`window_chrome`), how a frame reaches the
 //! display (`frame_presentation`, `display_links`) and how a wait on a screen's vsync is served
 //! (`vsync_waiter`), the pointer (`pointer`), composition layers, a window's view's own among them,
-//! in its view's layer (`composition`, over the compositor iOS shares, `apple/composition`),
+//! in its view's layer (`composition`, over the compositor iOS shares, `waft-embedder-apple`'s `composition`),
 //! whether a window is visible, for the app (`visibility`), the menus: the menu bar, pop-up menus,
-//! the Dock icon's menu and the status items (`menus`), work off the main thread (`work_queue`),
+//! the Dock icon's menu and the status items (`menus`), work off the main thread
+//! (`waft-embedder-apple`'s `work_queue`),
 //! what AppKit asks of the application through its delegate, how it quits and hiding it
 //! (`app_delegate`), what it says of the application's activation and visibility
 //! (`app_lifecycle`), and what it says changed about the screens and the user's languages
-//! (`system_changes`). Notifications are the center iOS shares (`apple/notifications`).
+//! (`system_changes`). Notifications are the center iOS shares (`waft-embedder-apple`'s `notifications`).
 //!
 //! A panic must not unwind from the embedder into AppKit, whose frames were never built to be
 //! unwound: it aborts the process once the panic hook has printed it, as one does in winit's own
@@ -17,7 +18,7 @@
 //! on a panic by itself: the delegate methods the embedder adds, and dispatch2's wrapper of work on
 //! a queue. A method `define_class!` makes is `extern "C-unwind"`, so its body runs through
 //! [`abort_on_panic`]. Work on Grand Central Dispatch's worker threads is the one exception
-//! (`work_queue`).
+//! (`waft-embedder-apple`'s `work_queue`).
 
 // AppKit's selectors and view hierarchy need `unsafe`; this module and its children are
 // the one place in the embedder that writes it.
@@ -41,11 +42,9 @@ mod trackpad_touches;
 mod visibility;
 mod vsync_waiter;
 mod window_chrome;
-mod work_queue;
 
-use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::process;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
@@ -59,15 +58,23 @@ use waft_embedder::{
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
 
-use super::apple::{image_io_decoders, notifications};
 use super::capabilities::{
     ApplicationIdentity, GpuInterop, ImageDecoding, OperatingSystem, StandardStreams,
-    SystemImageCodecs, SystemMedia, SystemNotifications, WindowGeometry,
+    SystemImageCodecs, SystemMedia, SystemNotifications, WindowGeometry, WorkQueue,
 };
 use crate::notifications::NotificationActivations;
+use waft_embedder_apple::{abort_on_panic, image_io_decoders, notifications};
 
 /// macOS, as AppKit answers. A type only: never made, its answers are associated functions.
 pub(crate) enum AppKit {}
+
+/// On Grand Central Dispatch's worker pool, which iOS shares (`waft-embedder-apple`'s
+/// `work_queue`).
+impl WorkQueue for AppKit {
+    fn run_off_main(work: Box<dyn FnOnce() + Send>) {
+        waft_embedder_apple::work_queue::run_off_main(work);
+    }
+}
 
 impl OperatingSystem for AppKit {
     const TARGET_PLATFORM: TargetPlatform = TargetPlatform::MacOS;
@@ -82,38 +89,38 @@ impl ApplicationIdentity for AppKit {}
 /// shares.
 impl SystemMedia for AppKit {
     fn players() -> Option<Rc<dyn Players>> {
-        super::apple::media::players()
+        waft_embedder_apple::media::players()
     }
 
     fn media_assets() -> Option<Rc<dyn MediaAssets>> {
-        super::apple::media::media_assets()
+        waft_embedder_apple::media::media_assets()
     }
 
     fn cameras() -> Option<Rc<dyn Cameras>> {
-        super::apple::media::cameras()
+        waft_embedder_apple::media::cameras()
     }
 
     fn video_frame_readers() -> Option<Rc<dyn VideoFrameReaders>> {
-        super::apple::media::video_frame_readers()
+        waft_embedder_apple::media::video_frame_readers()
     }
 
     /// Media Accessibility's.
     fn caption_settings() -> Option<Rc<dyn CaptionSettings>> {
-        super::apple::caption_appearance::caption_settings()
+        waft_embedder_apple::caption_appearance::caption_settings()
     }
 }
 
 /// Image I/O's, which iOS shares.
 impl SystemImageCodecs for AppKit {
     fn image_codecs() -> Option<Rc<dyn ImageCodecs>> {
-        super::apple::image_codecs::image_codecs()
+        waft_embedder_apple::image_codecs::image_codecs()
     }
 }
 
-/// Metal's texture over the buffer's `IOSurface`, which iOS shares (`apple/gpu_interop`).
+/// Metal's texture over the buffer's `IOSurface`, which iOS shares (`waft-embedder-apple`'s `gpu_interop`).
 impl GpuInterop for AppKit {
     fn import_texture(buffer: &dyn HardwareBuffer, device: &wgpu::Device) -> Option<wgpu::Texture> {
-        super::apple::gpu_interop::import_texture(buffer, device)
+        waft_embedder_apple::gpu_interop::import_texture(buffer, device)
     }
 }
 
@@ -123,10 +130,10 @@ impl ImageDecoding for AppKit {
     }
 }
 
-/// `UNUserNotificationCenter`'s, for an app that runs from its bundle (`apple/notifications`).
+/// `UNUserNotificationCenter`'s, for an app that runs from its bundle (`waft-embedder-apple`'s `notifications`).
 impl SystemNotifications for AppKit {
     fn hear_notification_activations(activations: NotificationActivations) {
-        notifications::hear_activations(activations);
+        notifications::hear_activations(Arc::new(move |activation| activations.send(activation)));
     }
 
     fn notifications(_activations: NotificationActivations) -> Option<Rc<dyn Notifications>> {
@@ -149,10 +156,4 @@ fn ns_view(window: &dyn Window) -> Option<Retained<NSView>> {
 
 fn ns_window(window: &dyn Window) -> Option<Retained<NSWindow>> {
     ns_view(window)?.window()
-}
-
-/// Runs `body`, the body of a method AppKit calls, and aborts the process if it panics, once the
-/// panic hook has printed the panic.
-fn abort_on_panic<R>(body: impl FnOnce() -> R) -> R {
-    catch_unwind(AssertUnwindSafe(body)).unwrap_or_else(|_| process::abort())
 }

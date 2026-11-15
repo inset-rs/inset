@@ -1,7 +1,7 @@
 //! The system clipboard as the framework's `Clipboard`, and when the app hears it changed.
 //!
-//! Each system's clipboard is its own (`os/`): macOS's pasteboard and iOS's carry every form the
-//! framework's clipboard has (`os/macos/pasteboard`, `os/ios/pasteboard`); elsewhere winit has no
+//! Each system's clipboard is its own (`os/`): macOS's pasteboard carries every form the
+//! framework's clipboard has (`os/macos/pasteboard`); elsewhere winit has no
 //! clipboard, and arboard's plain text is all the embedder reaches (`text`), every other form
 //! refused.
 //!
@@ -14,7 +14,7 @@
 //! seen: the app made them. A copy that expires on a system without an expiry of its own is
 //! cleared by the main loop, which wakes for it as it wakes for the app's timers.
 
-#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+#[cfg(not(target_os = "macos"))]
 mod text;
 
 use std::task::{Context, Poll, Waker};
@@ -22,7 +22,7 @@ use std::time::Instant;
 
 use waft_embedder::{Clipboard, DataTransferItem};
 
-#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+#[cfg(not(target_os = "macos"))]
 pub(crate) use text::{ChangeProbe, TextClipboard};
 
 /// What a system's clipboard says of its changes, and the expiry the embedder keeps for it.

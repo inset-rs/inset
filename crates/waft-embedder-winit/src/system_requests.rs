@@ -7,8 +7,7 @@
 //! quitting, which goes to the framework instead, through the client (`app_exit.rs`).
 //!
 //! macOS asks to open through its application delegate, at launch and while the app runs
-//! (`application:openURLs:`), and iOS through the application's delegate
-//! (`application:openURL:options:`). Windows and Linux start the app with what it opens on its
+//! (`application:openURLs:`). Windows and Linux start the app with what it opens on its
 //! command line, which is the app's own to read: the system gives only strings there, and which of
 //! them are files the app decided when it registered its file types.
 //!
@@ -27,8 +26,8 @@ pub(crate) enum SystemRequest {
     /// Open these files and links: documents opened from the system's file browser or dropped on
     /// the application's icon, or links whose scheme is the app's.
     #[cfg_attr(
-        not(any(target_os = "macos", target_os = "ios")),
-        allow(dead_code, reason = "only macOS and iOS ask to open")
+        not(target_os = "macos"),
+        allow(dead_code, reason = "only macOS asks to open")
     )]
     Open {
         files: Vec<PathBuf>,

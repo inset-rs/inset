@@ -17,7 +17,7 @@ use crate::os::System;
 use crate::os::capabilities::{FramePresentation, TrackpadTouches, WindowVisibility};
 use crate::screens::screen_of;
 use crate::view_focus;
-use crate::views::{Holder, SCREEN_VIEW};
+use crate::views::Holder;
 use crate::windows::{OpenWindow, OpenedWindow, RequestedWindow, WindowObservers, window_metrics};
 
 use super::{MainLoop, MainLoopEvent};
@@ -98,29 +98,6 @@ impl<C: EmbedderClient> MainLoop<C> {
     fn send_visibility_notice(&self, id: WindowId) -> Box<dyn Fn()> {
         let proxy = self.proxy.clone();
         Box::new(move || proxy.send(MainLoopEvent::WindowVisibility(id)))
-    }
-
-    /// Opens the screen view's window, at winit's first call: the first moment winit lets a
-    /// window be made. The screen view draws into the layer the window placed for it, and the
-    /// app, started with the view at no size, hears its new metrics.
-    pub(super) fn open_screen_window(&mut self, event_loop: &dyn ActiveEventLoop) {
-        let Some(screen) = self.screen_window.take() else {
-            return;
-        };
-        let OpenedWindow {
-            open,
-            view_layer,
-            hold,
-        } = self
-            .view_maker
-            .open_screen_window(event_loop, screen)
-            .expect("open the screen view's window");
-        self.views().place_screen_view(view_layer);
-        self.windows()
-            .add(open.clone(), hold, WindowObservers::default());
-        self.set_view_metrics(event_loop, SCREEN_VIEW, window_metrics(&*open.window));
-        self.set_view_in_sight(SCREEN_VIEW, is_in_sight(&open));
-        self.read_theme_of(&*open.window);
     }
 
     /// Closes a window: it is freed, and its view removed.
@@ -231,8 +208,8 @@ impl<C: EmbedderClient> MainLoop<C> {
     /// and a window seen again is when a picture its surface refused while occluded is presented
     /// (wgpu issue 8309, `rasterizer.rs`).
     pub(super) fn on_occluded(&mut self, id: WindowId, occluded: bool) {
-        if let Some(handle) = self.windows().by_window(id).and_then(|open| open.handle) {
-            handle.set_occluded(occluded);
+        if let Some(open) = self.windows().by_window(id) {
+            open.handle.set_occluded(occluded);
         }
         self.sync_window_state(id);
         if !occluded {
@@ -247,21 +224,15 @@ impl<C: EmbedderClient> MainLoop<C> {
             return;
         };
         self.set_view_in_sight(open.view.id(), is_in_sight(&open));
-        let Some(handle) = &open.handle else {
-            return;
-        };
-        if handle.refresh_state() {
+        if open.handle.refresh_state() {
             self.client.window_changed(open.view.id());
         }
     }
 
-    /// Tells the app that the window of `open` changed, once it answers its state as it is now;
-    /// nothing for the screen view's window, which the app may not manage.
+    /// Tells the app that the window of `open` changed, once it answers its state as it is now.
     fn report_window_changed(&mut self, open: &OpenWindow) {
-        if let Some(handle) = &open.handle {
-            handle.refresh_state();
-            self.client.window_changed(open.view.id());
-        }
+        open.handle.refresh_state();
+        self.client.window_changed(open.view.id());
     }
 }
 
@@ -279,11 +250,7 @@ fn metrics_on_screen_of(open: &OpenWindow) -> ViewMetrics {
 }
 
 /// Whether the window of `open` is in sight: neither minimized nor occluded, as the app's handle
-/// on it answers. The screen view's window, which the app has no handle on, as the system answers
-/// where it can be asked.
+/// on it answers.
 fn is_in_sight(open: &OpenWindow) -> bool {
-    match &open.handle {
-        Some(handle) => !handle.is_minimized() && !handle.is_occluded(),
-        None => System::is_occluded(&*open.window) != Some(true),
-    }
+    !open.handle.is_minimized() && !open.handle.is_occluded()
 }

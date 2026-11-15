@@ -3,8 +3,9 @@
 //! The attribute keeps your function as the app's setup and adds the entry point beside it,
 //! which starts the default embedder and the shell. Which entry depends on the target:
 //!
-//! - desktop and iOS: `main`, which on Windows first attaches the app to the console of the
-//!   process that started it, since the binary is a GUI program (`cargo waft new`'s `main.rs`)
+//! - desktop: `main`, which on Windows first attaches the app to the console of the process that
+//!   started it, since the binary is a GUI program (`cargo waft new`'s `main.rs`)
+//! - iOS: `main`, which hands the process to UIKit
 //! - web: an exported `main`, called once the page has the module
 //! - Android: `android_main`, called once a process by Waft's Android host with the `AndroidApp`
 //!
@@ -64,7 +65,7 @@ pub fn main(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         // A GUI program on Windows has no console of its own: what it writes goes to the
         // terminal it was run from.
-        #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
+        #[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
         pub fn main() {
             ::waft::DefaultEmbedder::attach_to_parent_console();
             let mut linux = ::waft::LinuxSettings::default();
@@ -75,6 +76,14 @@ pub fn main(attr: TokenStream, item: TokenStream) -> TokenStream {
             ::waft::DefaultEmbedder::default()
                 .linux(linux)
                 .windows(windows)
+                .run(|platform| ::waft::Shell::new(platform, #setup_name));
+        }
+
+        // UIKit's application, which the host hands the process to: each scene's window is a
+        // view, which the system sizes.
+        #[cfg(target_os = "ios")]
+        pub fn main() {
+            ::waft::DefaultEmbedder::default()
                 .run(|platform| ::waft::Shell::new(platform, #setup_name));
         }
 

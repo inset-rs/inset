@@ -179,7 +179,7 @@ mod tests {
 
     /// Frames whose buffers the view's device takes, as the systems whose buffers the host imports
     /// hand them out.
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    #[cfg(target_os = "macos")]
     mod taken {
         use waft_embedder::HardwareBuffer;
         use waft_embedder::HardwareBufferUsage;

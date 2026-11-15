@@ -6,7 +6,7 @@ use std::task::{Context, Poll, Wake, Waker};
 use std::thread::{self, Thread};
 use std::time::{Duration, Instant};
 
-use crate::os::apple::app_futures::LocalFuture;
+use waft_embedder_apple::app_futures::LocalFuture;
 
 /// Waits on this thread for `future`, up to `limit`; none once the limit has passed.
 ///

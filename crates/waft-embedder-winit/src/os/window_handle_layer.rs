@@ -2,7 +2,7 @@
 //! the window's handle, as from any raw window handle, and the system sizes it with the window,
 //! unless the system's share of its compositor for that window makes it itself, as Windows makes it
 //! on a DirectComposition visual; the composition layers the view's scenes place go where that
-//! share puts them ([`WindowComposition`]): beneath the window's content on iOS, Wayland and
+//! share puts them ([`WindowComposition`]): beneath the window's content on Wayland and
 //! Windows, nowhere on a system without a compositor (`absent`).
 
 use std::sync::Arc;

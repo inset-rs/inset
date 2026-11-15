@@ -12,16 +12,16 @@
 // test alone allows it.
 #![allow(unsafe_code)]
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[cfg(target_os = "macos")]
 fn main() {
     asset::reads_its_length_tracks_and_pictures();
     println!("an_asset_reads_its_length_tracks_and_pictures: ok");
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+#[cfg(not(target_os = "macos"))]
 fn main() {}
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[cfg(target_os = "macos")]
 mod asset {
     use std::future::Future;
     use std::path::PathBuf;

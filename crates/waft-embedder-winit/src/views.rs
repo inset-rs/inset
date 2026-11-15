@@ -10,9 +10,6 @@
 //! holds a view as it adds it, and the registry keeps who: the app's asking to resize a view a
 //! window's code holds, to say whether it is in sight, or to remove it, is refused.
 //!
-//! The screen view, where there is one, is Flutter's implicit view: the app has it from the start,
-//! at no size and on no layer, and it draws into its window's layer once the window opens.
-//!
 //! Every call borrows the registry for itself alone and answers copies, so a caller may call the
 //! client with what it got, and the client may reach the registry through the platform meanwhile.
 
@@ -25,13 +22,13 @@ use waft_embedder::{View, ViewId, ViewMetrics};
 use crate::os::ViewLayer;
 use crate::view::WinitView;
 
-/// The screen view's id, as in Flutter: every other view is numbered after it.
-pub(crate) const SCREEN_VIEW: ViewId = ViewId(0);
+/// Flutter's implicit view's id, which a desktop app has none of: its views are numbered after it.
+const IMPLICIT_VIEW: ViewId = ViewId(0);
 
 /// Who holds a view, as it says when it adds the view: the view's metrics, sight and end are its.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Holder {
-    /// A window's code, for its window's view, the screen view's included.
+    /// A window's code, for its window's view.
     Window,
     /// The app, for a view it adds on a layer of its own.
     App,
@@ -60,7 +57,7 @@ impl Default for Views {
     fn default() -> Views {
         Views {
             views: RefCell::default(),
-            next_id: Cell::new(SCREEN_VIEW.0 + 1),
+            next_id: Cell::new(IMPLICIT_VIEW.0 + 1),
             surfaces_given: Cell::new(false),
             refusal_reported: Cell::new(false),
         }
@@ -75,12 +72,6 @@ impl Views {
         id
     }
 
-    /// The screen view is the app's from its start, at no size and on no layer, as Flutter's engine
-    /// adds its implicit view with empty metrics.
-    pub(crate) fn add_screen_view(&self, view: Rc<WinitView>) {
-        self.insert(view, Holder::Window);
-    }
-
     /// `view` draws into `layer` at `metrics` from now on, and is one of the app's views, held by
     /// `holder`: the view's own part of Flutter's `AddView`.
     pub(crate) fn add(
@@ -92,14 +83,6 @@ impl Views {
     ) {
         self.draw_into(&view, layer, metrics);
         self.insert(view, holder);
-    }
-
-    /// The screen view draws into `layer` from now on, at the metrics it has: its window opened.
-    pub(crate) fn place_screen_view(&self, layer: ViewLayer) {
-        let view = self
-            .get(SCREEN_VIEW)
-            .expect("the screen view was added as the app started");
-        self.draw_into(&view, layer, view.metrics());
     }
 
     /// The view numbered `id` is the app's no more, and lets go of its layer, while the framework

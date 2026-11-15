@@ -3,7 +3,7 @@
 //! decoder or a program in a launcher would. It starts with three buffers and never waits for one
 //! to come back: the host learns that the compositor has let go of a buffer only at the layer's
 //! next present, so when none is free the producer makes another, as Flutter's surface manager
-//! does (the Apple host's `os/apple/composition` says why). It counts what happened so a run can
+//! does (`waft-embedder-apple`'s `composition` says why). It counts what happened so a run can
 //! be judged from its output: among it, how often the buffer on screen was in use by the system's
 //! compositor at a refresh, which it is only while the compositor really shows the layer.
 
