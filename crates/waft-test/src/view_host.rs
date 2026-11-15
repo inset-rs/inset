@@ -5,8 +5,9 @@
 use std::cell::RefCell;
 
 use waft_embedder::{
-    Matrix4, Rect, Size, SystemMouseCursorKind, SystemUiOverlayStyle, TextEditingValue,
-    TextInputConfiguration, TextInputHost, ViewFocusDirection, ViewFocusState, ViewHost,
+    Matrix4, Rect, SelectionRect, Size, SystemMouseCursorKind, SystemUiOverlayStyle,
+    TextEditingValue, TextInputConfiguration, TextInputHost, ViewFocusDirection, ViewFocusState,
+    ViewHost,
 };
 
 /// A view's host that records what the view asks of the system, as `flutter_test`'s
@@ -82,6 +83,7 @@ pub enum TextInputCall {
     SetComposingRect(Rect),
     SetCaretRect(Rect),
     SetClientGeometry(Size, Matrix4),
+    SetSelectionRects(Vec<SelectionRect>),
 }
 
 /// A text input that records each call, edits nothing itself and provides no commands of its own.
@@ -119,5 +121,9 @@ impl TextInputHost for RecordingTextInput {
 
     fn set_client_geometry(&self, size: Size, transform: &Matrix4) {
         self.record(TextInputCall::SetClientGeometry(size, *transform));
+    }
+
+    fn set_selection_rects(&self, selection_rects: &[SelectionRect]) {
+        self.record(TextInputCall::SetSelectionRects(selection_rects.to_vec()));
     }
 }

@@ -27,6 +27,20 @@ Embedder implementation references: Flutter's iOS embedding under `flutter/engin
   Reason: simplification — the animation follows the keyboard's frames at the display link's ticks, a step of its own.
   Affect: a view lays out for the keyboard's end as the keyboard starts to move, rather than moving with it.
 
+## text_input/ → `FlutterTextInputPlugin` and `FlutterTextInputView`
+
+- Change: the field sits in the view's `UIView` at the editable's origin, where Flutter's sits in an input hider beside it, and the view's `UIView` takes the first responder back when the framework closes a connection.
+  Reason: architecture — a view's `UIView` is the responder the hardware keyboard's presses reach between fields (`ui_view.rs`), and the field's place in it is the one UIKit's autocorrection highlight needs on iOS 17.
+  Affect: none an app sees.
+
+- Change: UIKit's `UITextInputStringTokenizer` answers the field's tokenizer questions, where Flutter's own takes line boundaries from the selection rects.
+  Reason: simplification — the line granularity serves the iOS 16 Scribble highlight and caret movement by line, which the floating cursor and Scribble need first.
+  Affect: a keyboard asking for the line around a position in a multiline field gets the string tokenizer's answer, which knows of no wrapping.
+
+- Change: a connection the framework replaces without closing it keeps the field of the one it replaces.
+  Reason: architecture — the framework's `TextInput::attach` starts the host as `show` and `update_config` do, so the host sees a new connection only after a closed one; Flutter's `setClient` names each.
+  Affect: a text field that takes another's connection before the other closes it gets the keyboard's state the other left, its suggestions and autocorrection among them.
+
 ## keys.rs → `FlutterEmbedderKeyResponder`
 
 - Change: the modifier keys are not synchronized with the press's flags, and Caps Lock's tap is not synthesized.
@@ -61,7 +75,10 @@ Embedder implementation references: Flutter's iOS embedding under `flutter/engin
 
 ## Deferred
 
-- Text input: `FlutterTextInputPlugin`'s `UITextInput` view. Trigger: the next step of this host; until it lands a text field opens no keyboard.
+- The text field's Scribble and its focus, the floating cursor, dictation and text placeholders, and the edit menu interaction. Trigger: an app used with the Apple Pencil's handwriting, the space bar's trackpad, dictation, or the system's edit menu.
+- Autofill groups, their password view and `finishAutofillContext`. Trigger: a sign-in form that saves and fills passwords.
+- The autocorrection prompt's rect before iOS 17 (`showAutocorrectionPromptRect`). Trigger: an app supporting iOS 15 or 16 that wants the highlight drawn under the corrected word.
+- The text input delta model, and the field's accessibility. Trigger: a client that asks for deltas; VoiceOver.
 - The iPad's pointer, hover and scrolling (`hoverEvent:`, `discreteScrollEvent:`). Trigger: an iPad app used with a trackpad.
 - A scene the app asks for (`Platform::request_view`). Trigger: iPad windows, which the scene registry is shaped for.
 - Video frames read at the display link's ticks for a reader a scene draws. Trigger: an app that draws a player's frames itself rather than its layer.

@@ -8,10 +8,10 @@ What is there:
 - Drawing: each view draws with valo into a `CAMetalLayer` of its own, with the composition layers its scenes place beneath it, at a display link's ticks, at the screen's highest rate; a resize draws its new layout before UIKit commits it.
 - Metrics: the view's bounds and safe area in physical pixels, the docked keyboard as `view_insets`, the user's appearance and languages.
 - Input: touches and the Apple Pencil as pointers; a hardware keyboard's presses as `KeyData`, handed back to UIKit where the framework leaves them.
+- Text input: the system's keyboards, their autocorrection, suggestions and marked text, through a `UITextInput` field per connection, configured from the field's configuration as Flutter's iOS embedding configures its own.
 - The general pasteboard, document pickers, opening links and files, the files and links the app is opened with, notifications, AVFoundation's players, media assets and cameras, Image I/O's codecs, `IOSurface` buffers.
 
 What is not, and how an app sees it:
 
-- No text input: a text field opens no keyboard (`ViewHost::text_input` is `None`).
 - No window the app asks for: `Platform::request_view` answers `Unsupported`.
-- No iPad pointer, hover or scrolling; the keyboard's inset is set at once rather than moving with the keyboard; a reader's video frames are not drawn into a scene. `src/PORTING.md` lists these.
+- No iPad pointer, hover or scrolling; the keyboard's inset is set at once rather than moving with the keyboard; a reader's video frames are not drawn into a scene; no Scribble, floating cursor, dictation placeholders or autofill groups in a text field. `src/PORTING.md` lists these.

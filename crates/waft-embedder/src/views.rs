@@ -2,8 +2,8 @@
 //! window; this stable handle exposes its identity and current configuration.
 
 use crate::{
-    Matrix4, Rect, ScreenId, Size, SystemMouseCursorKind, SystemUiOverlayStyle, TextEditingValue,
-    TextInputConfiguration,
+    Matrix4, Rect, ScreenId, SelectionRect, Size, SystemMouseCursorKind, SystemUiOverlayStyle,
+    TextEditingValue, TextInputConfiguration,
 };
 
 /// Opaque id for one [`View`] (`FlutterView.viewId`).
@@ -293,6 +293,16 @@ pub trait TextInputHost {
 
     /// Flutter `TextInput.setEditableSizeAndTransform`.
     fn set_client_geometry(&self, size: Size, transform: &Matrix4);
+
+    /// Flutter `TextInput.setSelectionRects`: the bounds of each grapheme of the field's text in
+    /// sight, in the field's coordinates, which [`set_client_geometry`](Self::set_client_geometry)
+    /// takes to the view's. Flutter's framework sends them on iOS alone, while stylus handwriting is
+    /// enabled, for the system's text input to place its caret, its candidates and its menus.
+    ///
+    /// The default drops them, for a host whose input methods take no geometry beyond the caret.
+    fn set_selection_rects(&self, selection_rects: &[SelectionRect]) {
+        let _ = selection_rects;
+    }
 
     /// Whether this text input turns editing keys into edits before the framework sees
     /// them: backspace and delete, caret movement, the line and document ends.

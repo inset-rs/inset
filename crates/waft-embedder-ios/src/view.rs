@@ -32,6 +32,7 @@ use crate::keyboard_inset::{KeyboardChange, ScreenRect};
 use crate::lifecycle::SceneState;
 use crate::metrics::Geometry;
 use crate::picture::ViewPicture;
+use crate::text_input::IosTextInput;
 use crate::ui_view::WaftView;
 use crate::view_controller::WaftViewController;
 
@@ -56,6 +57,8 @@ pub(crate) struct IosView {
     /// Whether the latest picture is on the screen: not while the scene is disconnected or in the
     /// background, and not when the surface refused it.
     on_screen: Cell<bool>,
+    /// The keyboards' way into the view's text fields (`text_input/`).
+    text_input: IosTextInput,
 }
 
 /// A connected scene's window and what shows the view in it.
@@ -80,6 +83,7 @@ impl IosView {
             picture: RefCell::new(ViewPicture::new(gpu)),
             latest: RefCell::new(None),
             on_screen: Cell::new(false),
+            text_input: IosTextInput::new(id),
         })
     }
 
@@ -109,6 +113,7 @@ impl IosView {
             view: view.clone(),
         });
         self.state.set(SceneState::Background);
+        self.text_input.attach(&view);
         window.makeKeyAndVisible();
         view.becomeFirstResponder();
         self.laid_out();
@@ -117,6 +122,7 @@ impl IosView {
     /// The scene disconnected: its window goes, and what the picture was drawn into with it, and
     /// the view keeps its last picture, owed to the scene that connects again.
     pub(crate) fn detach(&self) {
+        self.text_input.detach();
         if let Some(gone) = self.window.borrow_mut().take() {
             gone.window.setHidden(true);
         }
@@ -303,12 +309,11 @@ impl View for IosView {
     }
 }
 
-/// The view is its own host. iOS shows no cursor a view picks, and a phone has no focus to move
-/// to a view; Back is no key on iOS. The view takes no text yet: the system's keyboard has no way
-/// into a field.
+/// The view is its own host, which takes text through the system's keyboards. iOS shows no cursor
+/// a view picks, and a phone has no focus to move to a view; Back is no key on iOS.
 impl ViewHost for IosView {
     fn text_input(&self) -> Option<&dyn TextInputHost> {
-        None
+        Some(&self.text_input)
     }
 
     fn activate_system_cursor(&self, _device: i64, _kind: SystemMouseCursorKind) {}

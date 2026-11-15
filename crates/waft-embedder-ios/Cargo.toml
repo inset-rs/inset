@@ -14,6 +14,8 @@ default = ["image-apple", "image-software", "image-worker"]
 image-apple = ["waft-embedder-apple/image-apple"]
 image-software = ["dep:valo-codec-software"]
 image-worker = ["valo-codec/worker"]
+# The text field without the host, for the tests that run in the simulator.
+test-support = []
 
 [dependencies]
 waft-embedder.workspace = true
@@ -40,7 +42,21 @@ objc2-quartz-core = { version = "0.3", features = ["CABase", "CADisplayLink", "C
 objc2-uniform-type-identifiers = { version = "0.3", features = ["UTType", "UTCoreTypes"] }
 # The application and its scenes, each scene's window, view controller and view, touches and
 # presses, the keyboard's notices, the pasteboard, document pickers and opening.
-objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "bitflags", "block2", "objc2-core-foundation", "objc2-quartz-core", "objc2-uniform-type-identifiers", "UIApplication", "UICommand", "UIDocumentInteractionController", "UIDocumentPickerViewController", "UIEvent", "UIGeometry", "UIInterface", "UIKey", "UIKeyConstants", "UIOpenURLContext", "UIOrientation", "UIPasteboard", "UIPress", "UIPressesEvent", "UIResponder", "UIScene", "UISceneDefinitions", "UISceneOptions", "UISceneSession", "UIScreen", "UITouch", "UITraitCollection", "UIView", "UIViewController", "UIWindow", "UIWindowScene"] }
+objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "bitflags", "block2", "objc2-core-foundation", "objc2-quartz-core", "objc2-uniform-type-identifiers", "NSText", "UIApplication", "UICommand", "UIDocumentInteractionController", "UIDocumentPickerViewController", "UIEvent", "UIGeometry", "UIInputViewController", "UIInterface", "UIKey", "UIKeyConstants", "UIOpenURLContext", "UIOrientation", "UIPasteboard", "UIPress", "UIPressesEvent", "UIResponder", "UIScene", "UISceneDefinitions", "UISceneOptions", "UISceneSession", "UIScreen", "UITextInput", "UITextInputTraits", "UITouch", "UITraitCollection", "UIView", "UIViewController", "UIWindow", "UIWindowScene"] }
+
+# Each test is a program of its own, without the test harness, which runs every test on a thread
+# it spawns, where UIKit's objects cannot be made: it runs in the simulator, `xcrun simctl spawn
+# <device> <test binary>`, and on any other target is a program that does nothing.
+[[test]]
+name = "a_field_hands_the_framework_each_edit"
+harness = false
+
+[dev-dependencies]
+waft-embedder-ios = { path = ".", features = ["test-support"] }
+
+[target.'cfg(target_os = "ios")'.dev-dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSRange"] }
 
 # UIKit's classes, delegates and notices, Core Animation's display link and the pasteboard's
 # blocks need `unsafe`, which the workspace forbids; here it is denied instead, and the modules
