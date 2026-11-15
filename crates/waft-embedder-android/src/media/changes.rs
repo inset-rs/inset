@@ -55,6 +55,7 @@ impl Changes {
     }
 
     /// Whether `other` tells the same changes.
+    #[cfg(target_os = "android")]
     pub(super) fn is(&self, other: &Changes) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
     }

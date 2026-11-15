@@ -16,3 +16,6 @@ waft-painting.workspace = true
 waft-scheduler.workspace = true
 waft-shell.workspace = true
 waft-widgets.workspace = true
+
+[lints]
+workspace = true

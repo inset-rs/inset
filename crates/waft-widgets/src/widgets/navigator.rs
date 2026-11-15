@@ -5537,11 +5537,11 @@ impl HistoryProperty {
                 if restoration_enabled {
                     let id = entry.restoration_id(app);
                     debug_assert!(id.is_some());
-                    new_routes_for_current_page = Vec::new();
+                    new_routes_for_current_page.clear();
                     old_routes_for_current_page = old_map.get(&id).cloned().unwrap_or_default();
                 } else {
-                    new_routes_for_current_page = Vec::new();
-                    old_routes_for_current_page = Vec::new();
+                    new_routes_for_current_page.clear();
+                    old_routes_for_current_page.clear();
                 }
                 continue;
             }

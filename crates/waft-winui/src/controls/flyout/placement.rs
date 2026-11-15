@@ -359,131 +359,6 @@ pub(super) fn calculate_placement(
     )
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn place(
-        mode: FlyoutPlacementMode,
-        direction: TextDirection,
-        target: Rect,
-        size: Size,
-    ) -> Rect {
-        calculate_placement(
-            mode,
-            direction,
-            target,
-            size,
-            Size::new(96.0, 40.0),
-            Size::new(456.0, 758.0),
-            Rect::from_ltwh(0.0, 0.0, 500.0, 400.0),
-            true,
-        )
-    }
-
-    #[test]
-    fn top_falls_back_to_bottom_before_horizontal_sides() {
-        assert_eq!(
-            place(
-                FlyoutPlacementMode::Top,
-                TextDirection::Ltr,
-                Rect::from_ltwh(200.0, 10.0, 100.0, 30.0),
-                Size::new(120.0, 80.0)
-            ),
-            Rect::from_ltwh(190.0, 44.0, 120.0, 80.0),
-        );
-    }
-
-    #[test]
-    fn rtl_changes_left_side_to_right_without_changing_vertical_alignment() {
-        assert_eq!(
-            place(
-                FlyoutPlacementMode::LeftEdgeAlignedBottom,
-                TextDirection::Rtl,
-                Rect::from_ltwh(200.0, 200.0, 100.0, 30.0),
-                Size::new(120.0, 80.0)
-            ),
-            Rect::from_ltwh(304.0, 150.0, 120.0, 80.0),
-        );
-    }
-
-    #[test]
-    fn full_placement_uses_container_and_presenter_maximum() {
-        assert_eq!(
-            place(
-                FlyoutPlacementMode::Full,
-                TextDirection::Ltr,
-                Rect::ZERO,
-                Size::new(120.0, 80.0)
-            ),
-            Rect::from_ltwh(22.0, 0.0, 456.0, 400.0),
-        );
-    }
-
-    #[test]
-    fn equal_cross_axis_space_does_not_count_as_fitting() {
-        assert_eq!(
-            align_within_limits(
-                25.0,
-                10.0,
-                100.0,
-                0.0,
-                100.0,
-                PreferredJustification::Center
-            ),
-            (false, 0.0)
-        );
-    }
-
-    #[test]
-    fn no_side_fits_so_resize_uses_more_space_on_the_original_axis() {
-        let result = place(
-            FlyoutPlacementMode::Top,
-            TextDirection::Ltr,
-            Rect::from_ltwh(200.0, 60.0, 100.0, 30.0),
-            Size::new(450.0, 350.0),
-        );
-        assert_eq!(result, Rect::from_ltwh(25.0, 94.0, 450.0, 310.0));
-    }
-
-    #[test]
-    fn menu_points_exclude_the_opener_in_both_directions() {
-        let available = Rect::from_ltwh(0.0, 0.0, 600.0, 400.0);
-        let size = Size::new(200.0, 80.0);
-        for direction in [TextDirection::Ltr, TextDirection::Rtl] {
-            let x = if direction == TextDirection::Ltr {
-                400.0
-            } else {
-                460.0
-            };
-            for (top, kind, expected_top) in [
-                (180.0, PointPlacementKind::Menu, 212.0),
-                (180.0, PointPlacementKind::TouchMenu, 100.0),
-                (4.0, PointPlacementKind::TouchMenu, 36.0),
-            ] {
-                let result = calculate_point_placement(
-                    FlyoutPlacementMode::Bottom,
-                    direction,
-                    Offset::new(x, top + 32.0),
-                    size,
-                    Rect::from_ltwh(400.0, top, 60.0, 32.0),
-                    available,
-                    kind,
-                );
-                assert_eq!(result.top, expected_top);
-                assert_eq!(
-                    result.left,
-                    if direction == TextDirection::Ltr {
-                        x
-                    } else {
-                        x - 200.0
-                    }
-                );
-            }
-        }
-    }
-}
-
 /// Point placement differs for ordinary flyouts and menus opened by touch.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) enum PointPlacementKind {
@@ -665,4 +540,129 @@ pub(super) fn calculate_submenu_placement(
         target.top
     };
     Rect::from_ltwh(x, y, width, height)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn place(
+        mode: FlyoutPlacementMode,
+        direction: TextDirection,
+        target: Rect,
+        size: Size,
+    ) -> Rect {
+        calculate_placement(
+            mode,
+            direction,
+            target,
+            size,
+            Size::new(96.0, 40.0),
+            Size::new(456.0, 758.0),
+            Rect::from_ltwh(0.0, 0.0, 500.0, 400.0),
+            true,
+        )
+    }
+
+    #[test]
+    fn top_falls_back_to_bottom_before_horizontal_sides() {
+        assert_eq!(
+            place(
+                FlyoutPlacementMode::Top,
+                TextDirection::Ltr,
+                Rect::from_ltwh(200.0, 10.0, 100.0, 30.0),
+                Size::new(120.0, 80.0)
+            ),
+            Rect::from_ltwh(190.0, 44.0, 120.0, 80.0),
+        );
+    }
+
+    #[test]
+    fn rtl_changes_left_side_to_right_without_changing_vertical_alignment() {
+        assert_eq!(
+            place(
+                FlyoutPlacementMode::LeftEdgeAlignedBottom,
+                TextDirection::Rtl,
+                Rect::from_ltwh(200.0, 200.0, 100.0, 30.0),
+                Size::new(120.0, 80.0)
+            ),
+            Rect::from_ltwh(304.0, 150.0, 120.0, 80.0),
+        );
+    }
+
+    #[test]
+    fn full_placement_uses_container_and_presenter_maximum() {
+        assert_eq!(
+            place(
+                FlyoutPlacementMode::Full,
+                TextDirection::Ltr,
+                Rect::ZERO,
+                Size::new(120.0, 80.0)
+            ),
+            Rect::from_ltwh(22.0, 0.0, 456.0, 400.0),
+        );
+    }
+
+    #[test]
+    fn equal_cross_axis_space_does_not_count_as_fitting() {
+        assert_eq!(
+            align_within_limits(
+                25.0,
+                10.0,
+                100.0,
+                0.0,
+                100.0,
+                PreferredJustification::Center
+            ),
+            (false, 0.0)
+        );
+    }
+
+    #[test]
+    fn no_side_fits_so_resize_uses_more_space_on_the_original_axis() {
+        let result = place(
+            FlyoutPlacementMode::Top,
+            TextDirection::Ltr,
+            Rect::from_ltwh(200.0, 60.0, 100.0, 30.0),
+            Size::new(450.0, 350.0),
+        );
+        assert_eq!(result, Rect::from_ltwh(25.0, 94.0, 450.0, 310.0));
+    }
+
+    #[test]
+    fn menu_points_exclude_the_opener_in_both_directions() {
+        let available = Rect::from_ltwh(0.0, 0.0, 600.0, 400.0);
+        let size = Size::new(200.0, 80.0);
+        for direction in [TextDirection::Ltr, TextDirection::Rtl] {
+            let x = if direction == TextDirection::Ltr {
+                400.0
+            } else {
+                460.0
+            };
+            for (top, kind, expected_top) in [
+                (180.0, PointPlacementKind::Menu, 212.0),
+                (180.0, PointPlacementKind::TouchMenu, 100.0),
+                (4.0, PointPlacementKind::TouchMenu, 36.0),
+            ] {
+                let result = calculate_point_placement(
+                    FlyoutPlacementMode::Bottom,
+                    direction,
+                    Offset::new(x, top + 32.0),
+                    size,
+                    Rect::from_ltwh(400.0, top, 60.0, 32.0),
+                    available,
+                    kind,
+                );
+                assert_eq!(result.top, expected_top);
+                assert_eq!(
+                    result.left,
+                    if direction == TextDirection::Ltr {
+                        x
+                    } else {
+                        x - 200.0
+                    }
+                );
+            }
+        }
+    }
 }
