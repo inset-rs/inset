@@ -10,6 +10,7 @@ use std::rc::Rc;
 use indexmap::IndexMap;
 use waft_foundation::{
     App, ChangeNotifier, ChangeNotifierData, Handle, HandleId, ListenableObject, Listener,
+    OptionRetained, Ref, Retained,
 };
 pub use waft_services::RestorationBucket;
 use waft_services::{RestorationData, RestorationManager};
@@ -117,7 +118,7 @@ impl RestorationScope {
     pub fn maybe_of(app: &mut App, context: BuildContext) -> Option<Handle<RestorationBucket>> {
         context
             .depend_on_inherited_widget_of_exact_type::<UnmanagedRestorationScope>(app)
-            .and_then(|scope| scope.bucket)
+            .and_then(|scope| scope.bucket.handle())
     }
 
     /// Returns the [`RestorationBucket`] inserted into the widget tree by the closest ancestor
@@ -208,7 +209,7 @@ impl State for RestorationScopeState {
 
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
         // `bucket` is provided by the RestorationMixin.
-        let bucket = self.bucket(app);
+        let bucket = self.restoration_mixin_data(app).bucket.clone();
         let child = self.widget(app).child.clone();
         UnmanagedRestorationScope::new(child)
             .bucket(bucket)
@@ -252,7 +253,7 @@ pub struct UnmanagedRestorationScope {
     /// The [`RestorationBucket`] that this widget will insert into the widget tree.
     ///
     /// Descendant widgets may obtain this bucket via [`RestorationScope::of`].
-    pub bucket: Option<Handle<RestorationBucket>>,
+    pub bucket: Option<Ref<RestorationBucket>>,
     /// The widget below this widget in the tree.
     pub child: WidgetRef,
 }
@@ -278,10 +279,7 @@ impl UnmanagedRestorationScope {
 
     /// Dart `UnmanagedRestorationScope(bucket:)`; `None` turns off state restoration for the
     /// subtree.
-    pub fn bucket(
-        mut self,
-        bucket: Option<Handle<RestorationBucket>>,
-    ) -> UnmanagedRestorationScope {
+    pub fn bucket(mut self, bucket: Option<Ref<RestorationBucket>>) -> UnmanagedRestorationScope {
         self.bucket = bucket;
         self
     }
@@ -401,8 +399,8 @@ pub struct RootRestorationScopeState {
     state: StateData<RootRestorationScope>,
     ok_to_render_blank_container: Option<bool>,
     root_bucket_valid: bool,
-    root_bucket: Option<Handle<RestorationBucket>>,
-    ancestor_bucket: Option<Handle<RestorationBucket>>,
+    root_bucket: Option<Ref<RestorationBucket>>,
+    ancestor_bucket: Option<Ref<RestorationBucket>>,
     is_loading_root_bucket: bool,
 }
 
@@ -425,7 +423,11 @@ impl RootRestorationScopeState {
         if self.is_waiting_for_root_bucket(app) && !app.get(self).is_loading_root_bucket {
             app.get_mut(self).is_loading_root_bucket = true;
             let manager = RestorationManager::instance(app);
-            let bucket = manager.root_bucket(app);
+            let bucket = manager.root_bucket(app).map(|bucket| {
+                bucket
+                    .upgrade(app)
+                    .expect("the manager keeps its root bucket")
+            });
             app.get_mut(self).is_loading_root_bucket = false;
             if self.mounted(app) {
                 manager.add_listener(
@@ -463,7 +465,11 @@ impl State for RootRestorationScopeState {
 
     fn did_change_dependencies(self: Handle<Self>, app: &mut App) {
         let context = self.context(app);
-        let ancestor_bucket = RestorationScope::maybe_of(app, context);
+        let ancestor_bucket = RestorationScope::maybe_of(app, context).map(|bucket| {
+            bucket
+                .upgrade(app)
+                .expect("a scope's bucket is kept by its widget")
+        });
         app.get_mut(self).ancestor_bucket = ancestor_bucket;
         self.load_root_bucket_if_necessary(app);
         if app.get(self).ok_to_render_blank_container.is_none() {
@@ -497,7 +503,10 @@ impl State for RootRestorationScopeState {
         }
 
         let this = app.get(self);
-        let bucket = this.ancestor_bucket.or(this.root_bucket);
+        let bucket = this
+            .ancestor_bucket
+            .clone()
+            .or_else(|| this.root_bucket.clone());
         let restoration_id = self.widget(app).restoration_id.clone();
         let child = self.widget(app).child.clone();
         UnmanagedRestorationScope::new(RestorationScope::new(restoration_id, child))
@@ -806,6 +815,22 @@ pub struct AnyRestorableProperty {
     vtable: &'static RestorablePropertyVTable,
 }
 
+impl From<AnyRestorableProperty> for HandleId {
+    fn from(handle: AnyRestorableProperty) -> HandleId {
+        handle.id
+    }
+}
+
+/// A field Dart types as the erased object, kept: AnyRestorableProperty with its count.
+pub type RestorablePropertyRef = Retained<AnyRestorableProperty>;
+
+/// A kept object erases to a [`RestorablePropertyRef`] with [`Retained::erase`]: Dart's upcast.
+impl<T: RestorableProperty> From<Handle<T>> for AnyRestorableProperty {
+    fn from(handle: Handle<T>) -> AnyRestorableProperty {
+        handle.as_property()
+    }
+}
+
 impl PartialEq for AnyRestorableProperty {
     fn eq(&self, other: &AnyRestorableProperty) -> bool {
         self.id == other.id
@@ -830,6 +855,14 @@ impl AnyRestorableProperty {
     /// The arena id behind this handle.
     pub fn id(self) -> HandleId {
         self.id
+    }
+
+    /// A [`RestorablePropertyRef`] while something still keeps the property; see
+    /// [`Handle::upgrade`].
+    pub fn upgrade(self, app: &App) -> Option<RestorablePropertyRef> {
+        self.id
+            .upgrade(app)
+            .map(|retained| retained.into_map(|_| self))
     }
 
     /// Dart's `property as T`: the typed handle when this property is a `T`, else `None`.
@@ -916,12 +949,12 @@ impl AnyRestorableProperty {
 /// Dart's private members of `RestorationMixin`; a [`State`] using the mixin carries this bag
 /// under the field `restoration`.
 pub struct RestorationMixinData {
-    bucket: Option<Handle<RestorationBucket>>,
+    bucket: Option<Ref<RestorationBucket>>,
     // Maps properties to their listeners.
-    properties: IndexMap<AnyRestorableProperty, Listener>,
-    debug_properties_waiting_for_reregistration: Option<Vec<AnyRestorableProperty>>,
+    properties: IndexMap<RestorablePropertyRef, Listener>,
+    debug_properties_waiting_for_reregistration: Option<Vec<RestorablePropertyRef>>,
     first_restore_pending: bool,
-    current_parent: Option<Handle<RestorationBucket>>,
+    current_parent: Option<Ref<RestorationBucket>>,
 }
 
 impl RestorationMixinData {
@@ -1084,7 +1117,7 @@ pub trait RestorationMixin: State + Sized + 'static {
     /// [`UnmanagedRestorationScope`]. That allows descendants to claim child buckets from this
     /// bucket for their own restoration needs.
     fn bucket(self: Handle<Self>, app: &App) -> Option<Handle<RestorationBucket>> {
-        self.restoration_mixin_data(app).bucket
+        self.restoration_mixin_data(app).bucket.handle()
     }
 
     /// Called to initialize or restore the [`RestorableProperty`]s used by the [`State`] object.
@@ -1212,9 +1245,12 @@ pub trait RestorationMixin: State + Sized + 'static {
                 self.update_property(app, property);
             });
             property.add_listener(app, listener.clone());
+            let kept = property
+                .upgrade(app)
+                .expect("a registered property is kept by its state");
             self.restoration_mixin_data_mut(app)
                 .properties
-                .insert(property, listener);
+                .insert(kept, listener);
         }
 
         debug_assert!(
@@ -1237,7 +1273,7 @@ pub trait RestorationMixin: State + Sized + 'static {
                 .debug_properties_waiting_for_reregistration
                 .as_mut()
         {
-            waiting.retain(|other| *other != property);
+            waiting.retain(|other| **other != property);
         }
     }
 
@@ -1258,7 +1294,7 @@ pub trait RestorationMixin: State + Sized + 'static {
             .restoration_id(app)
             .expect("a registered property has an ID")
             .to_string();
-        if let Some(bucket) = self.restoration_mixin_data(app).bucket {
+        if let Some(bucket) = self.restoration_mixin_data(app).bucket.handle() {
             bucket.remove(app, &restoration_id);
         }
         self.unregister(app, property);
@@ -1286,7 +1322,7 @@ pub trait RestorationMixin: State + Sized + 'static {
         }
 
         let old_bucket = self.bucket(app);
-        let current_parent = self.restoration_mixin_data(app).current_parent;
+        let current_parent = self.restoration_mixin_data(app).current_parent.handle();
         let did_replace_bucket = self.update_bucket_if_necessary(app, current_parent, false);
         if did_replace_bucket {
             debug_assert!(old_bucket != self.bucket(app));
@@ -1318,7 +1354,7 @@ pub trait RestorationMixin: State + Sized + 'static {
         }
         let context = self.context(app);
         let potential_new_parent = RestorationScope::maybe_of(app, context);
-        potential_new_parent != self.restoration_mixin_data(app).current_parent
+        potential_new_parent != self.restoration_mixin_data(app).current_parent.handle()
             && potential_new_parent.is_some_and(|parent| parent.is_replacing(app))
     }
 
@@ -1329,7 +1365,12 @@ pub trait RestorationMixin: State + Sized + 'static {
         let needs_restore = self.restore_pending(app);
         let context = self.context(app);
         let current_parent = RestorationScope::maybe_of(app, context);
-        self.restoration_mixin_data_mut(app).current_parent = current_parent;
+        let kept_parent = current_parent.map(|parent| {
+            parent
+                .upgrade(app)
+                .expect("a scope's bucket is kept by its widget")
+        });
+        self.restoration_mixin_data_mut(app).current_parent = kept_parent;
 
         let did_replace_bucket =
             self.update_bucket_if_necessary(app, current_parent, needs_restore);
@@ -1351,14 +1392,14 @@ pub trait RestorationMixin: State + Sized + 'static {
             .restoration_mixin_data(app)
             .properties
             .iter()
-            .map(|(property, listener)| (*property, listener.clone()))
+            .map(|(property, listener)| (property.handle(), listener.clone()))
             .collect();
         for (property, listener) in properties {
             if !property.disposed(app) {
                 property.remove_listener(app, &listener);
             }
         }
-        if let Some(bucket) = self.restoration_mixin_data(app).bucket {
+        if let Some(bucket) = self.restoration_mixin_data(app).bucket.handle() {
             bucket.dispose(app);
         }
         self.restoration_mixin_data_mut(app).bucket = None;
@@ -1387,11 +1428,11 @@ pub trait RestorationMixin: State + Sized + 'static {
         old_bucket: Option<Handle<RestorationBucket>>,
     ) {
         if cfg!(debug_assertions) {
-            let registered: Vec<AnyRestorableProperty> = self
+            let registered: Vec<RestorablePropertyRef> = self
                 .restoration_mixin_data(app)
                 .properties
                 .keys()
-                .copied()
+                .cloned()
                 .collect();
             self.restoration_mixin_data_mut(app)
                 .debug_properties_waiting_for_reregistration = Some(registered);
@@ -1441,17 +1482,22 @@ pub trait RestorationMixin: State + Sized + 'static {
             let debug_owner: Option<Rc<dyn Debug>> = cfg!(debug_assertions)
                 .then(|| Rc::new(self.as_restoration_mixin()) as Rc<dyn Debug>);
             let new_bucket = parent.claim_child(app, &restoration_id, debug_owner);
+            let new_handle = new_bucket.handle();
             let did_replace =
                 self.set_new_bucket_if_necessary(app, Some(new_bucket), restore_pending);
-            debug_assert!(self.bucket(app) == Some(new_bucket));
+            debug_assert!(self.bucket(app) == Some(new_handle));
             return did_replace;
         }
 
         // We have an existing bucket, make sure it has the right parent and id.
         debug_assert!(!restore_pending);
-        let bucket = self.bucket(app).expect("checked just above");
+        let bucket = self
+            .restoration_mixin_data(app)
+            .bucket
+            .clone()
+            .expect("checked just above");
         bucket.rename(app, &restoration_id);
-        parent.adopt_child(app, bucket);
+        parent.adopt_child(app, &bucket);
         false
     }
 
@@ -1461,10 +1507,10 @@ pub trait RestorationMixin: State + Sized + 'static {
     fn set_new_bucket_if_necessary(
         self: Handle<Self>,
         app: &mut App,
-        new_bucket: Option<Handle<RestorationBucket>>,
+        new_bucket: Option<Ref<RestorationBucket>>,
         restore_pending: bool,
     ) -> bool {
-        if new_bucket == self.bucket(app) {
+        if new_bucket.handle() == self.bucket(app) {
             return false;
         }
         let old_bucket = self.bucket(app);
@@ -1476,7 +1522,7 @@ pub trait RestorationMixin: State + Sized + 'static {
                     .restoration_mixin_data(app)
                     .properties
                     .keys()
-                    .copied()
+                    .map(Retained::handle)
                     .collect();
                 for property in properties {
                     self.update_property(app, property);
@@ -1517,7 +1563,7 @@ pub trait RestorationMixin: State + Sized + 'static {
                 .debug_properties_waiting_for_reregistration
                 .as_mut()
         {
-            waiting.retain(|other| *other != property);
+            waiting.retain(|other| **other != property);
         }
         property.remove_listener(app, &listener);
         property.unregister(app);
@@ -1616,6 +1662,7 @@ mod tests {
     use std::cell::RefCell;
     use std::time::Duration;
     use waft_foundation::AppCell;
+    use waft_foundation::Ref;
 
     use waft_embedder::Restoration;
     use waft_services::{RestorationMap, RestorationUpdate};
@@ -1736,13 +1783,13 @@ mod tests {
     struct CounterState {
         state: StateData<Counter>,
         restoration: RestorationMixinData,
-        count: Option<Handle<RestorableInt>>,
+        count: Option<Ref<RestorableInt>>,
         restores: usize,
     }
 
     impl CounterState {
         fn count(self: Handle<Self>, app: &App) -> Handle<RestorableInt> {
-            app.get(self).count.expect("restore_state ran")
+            app.get(self).count.handle().expect("restore_state ran")
         }
     }
 
@@ -1760,12 +1807,13 @@ mod tests {
             _initial_restore: bool,
         ) {
             app.get_mut(self).restores += 1;
-            let count = match app.get(self).count {
+            let count = match app.get(self).count.handle() {
                 Some(count) => count,
                 None => {
                     let count = RestorableInt::new(app, 0);
+                    let handle = count.handle();
                     app.get_mut(self).count = Some(count);
-                    count
+                    handle
                 }
             };
             self.register_for_restoration(app, count.as_property(), "count");

@@ -43,7 +43,11 @@ fn control_focus(f: &Fixture, text: &str) -> AnyFocusNode {
                 if let Some(detector) =
                     downcast_widget::<FocusableActionDetector>(element.widget(&app).as_ref())
                 {
-                    return detector.focus_node.expect("control owns a focus node");
+                    return detector
+                        .focus_node
+                        .as_ref()
+                        .expect("control owns a focus node")
+                        .handle();
                 }
                 ancestor = element.parent(&app);
             }

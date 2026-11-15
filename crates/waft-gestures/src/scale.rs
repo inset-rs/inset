@@ -25,6 +25,7 @@ use crate::recognizer::{
 use crate::team::GestureArenaTeam;
 use crate::velocity::Velocity;
 use crate::velocity_tracker::VelocityTracker;
+use waft_foundation::Ref;
 
 /// The default conversion factor when treating mouse scrolling as scaling.
 ///
@@ -480,7 +481,7 @@ impl ScaleGestureRecognizer {
     /// Dart's defaults: `dragStartBehavior` [`DragStartBehavior::Down`],
     /// `trackpadScrollCausesScale` false, `trackpadScrollToScaleFactor`
     /// [`K_DEFAULT_TRACKPAD_SCROLL_TO_SCALE_FACTOR`].
-    pub fn new(app: &mut App) -> Handle<ScaleGestureRecognizer> {
+    pub fn new(app: &mut App) -> Ref<ScaleGestureRecognizer> {
         app.create(ScaleGestureRecognizer {
             recognizer: GestureRecognizerData::new(),
             one_sequence: OneSequenceData::new(),
@@ -519,11 +520,11 @@ impl ScaleGestureRecognizer {
     ///
     /// If none, events from all device kinds will be tracked and recognized.
     pub fn supported_devices(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         devices: impl IntoIterator<Item = PointerDeviceKind>,
-    ) -> Handle<ScaleGestureRecognizer> {
-        app.get_mut(self).recognizer.supported_devices = Some(devices.into_iter().collect());
+    ) -> Ref<ScaleGestureRecognizer> {
+        app.get_mut(&self).recognizer.supported_devices = Some(devices.into_iter().collect());
         self
     }
 
@@ -564,11 +565,11 @@ impl ScaleGestureRecognizer {
 
     /// The team that this recognizer belongs to, if any.
     pub fn team(self: Handle<Self>, app: &App) -> Option<Handle<GestureArenaTeam>> {
-        app.get(self).one_sequence.team
+        app.get(self).one_sequence.team.as_deref().copied()
     }
 
     /// The [`team`](Self::team) can only be set once.
-    pub fn set_team(self: Handle<Self>, app: &mut App, value: Handle<GestureArenaTeam>) {
+    pub fn set_team(self: Handle<Self>, app: &mut App, value: Ref<GestureArenaTeam>) {
         debug_assert!(app.get(self).one_sequence.entries.is_empty());
         debug_assert!(app.get(self).one_sequence.tracked_pointers.is_empty());
         debug_assert!(app.get(self).one_sequence.team.is_none());
@@ -1425,7 +1426,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let scale = ScaleGestureRecognizer::new(&mut app);
         let tap = TapGestureRecognizer::new(&mut app);
-        let r = record(&mut app, scale);
+        let r = record(&mut app, *scale);
         let did_tap = Rc::new(Cell::new(false));
         let tapped = Rc::clone(&did_tap);
         tap.set_on_tap(
@@ -1659,7 +1660,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let scale = ScaleGestureRecognizer::new(&mut app)
             .supported_devices(&mut app, [PointerDeviceKind::Touch]);
-        let r = record(&mut app, scale);
+        let r = record(&mut app, *scale);
 
         let mut mouse_pointer = TestPointer::with_kind(1, PointerDeviceKind::Mouse);
         let down = mouse_pointer.down(Offset::ZERO);
@@ -1791,7 +1792,7 @@ mod tests {
         assert_eq!(log.take(), ["scale-end"]);
 
         scale.dispose(&mut app);
-        DragGestureRecognizer::dispose(drag, &mut app);
+        DragGestureRecognizer::dispose(*drag, &mut app);
     }
 
     #[test]
@@ -1800,7 +1801,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let scale = ScaleGestureRecognizer::new(&mut app);
         let drag = HorizontalDragGestureRecognizer::new(&mut app);
-        let r = record(&mut app, scale);
+        let r = record(&mut app, *scale);
 
         let mut pointer1 = TestPointer::with_kind(2, PointerDeviceKind::Trackpad);
         let start = pointer1.pan_zoom_start(Offset::ZERO);
@@ -1887,7 +1888,7 @@ mod tests {
         assert!(r.did_end_scale.replace(false));
 
         scale.dispose(&mut app);
-        DragGestureRecognizer::dispose(drag, &mut app);
+        DragGestureRecognizer::dispose(*drag, &mut app);
     }
 
     #[test]
@@ -1897,7 +1898,7 @@ mod tests {
         let scale = ScaleGestureRecognizer::new(&mut app);
         scale.set_drag_start_behavior(&mut app, DragStartBehavior::Start);
         scale.set_trackpad_scroll_causes_scale(&mut app, true);
-        let r = record(&mut app, scale);
+        let r = record(&mut app, *scale);
         // Flutter's test listens for the start and the end only.
         scale.set_on_update(&mut app, None);
 

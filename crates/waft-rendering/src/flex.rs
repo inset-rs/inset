@@ -1927,7 +1927,7 @@ mod tests {
     use std::any::Any;
     use waft_foundation::AppCell;
 
-    use waft_foundation::Handle;
+    use waft_foundation::Ref;
     use waft_gestures::{HitTestEntry, HitTestResult};
 
     use super::*;
@@ -1998,7 +1998,7 @@ mod tests {
         app: &mut App,
         root: AnyRenderBox,
         constraints: BoxConstraints,
-    ) -> Handle<PipelineOwner> {
+    ) -> Ref<PipelineOwner> {
         let owner = PipelineOwner::new(app, None, None);
         owner.set_root_node(app, Some(root.as_object()));
         root.layout(app, constraints, false);
@@ -2493,7 +2493,7 @@ mod tests {
         app: &mut App,
         root: AnyRenderBox,
         constraints: BoxConstraints,
-    ) -> Handle<PipelineOwner> {
+    ) -> Ref<PipelineOwner> {
         let owner = PipelineOwner::new(app, None, None);
         owner.set_root_node(app, Some(root.as_object()));
         root.as_object().schedule_initial_layout(app);

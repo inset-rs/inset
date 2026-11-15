@@ -57,7 +57,7 @@ pub fn size_under_center(
                         Rc::new(move |app, context, _, _| builder(app, context)),
                     )
                     .settings(app, RouteSettingsRef::Settings(settings.clone()));
-                    PageRoute::as_page_route(route)
+                    route.into_erased()
                 })
                 .home(ThemeScope::new(Theme::Light, Center::new().child(control)))
                 .into_widget()

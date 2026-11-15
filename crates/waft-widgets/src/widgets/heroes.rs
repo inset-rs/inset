@@ -5,6 +5,7 @@
 //!
 //! [`PageRoute`]: crate::PageRoute
 
+use crate::widgets::pages::PageRouteRef;
 use std::any::{Any, TypeId};
 use std::fmt::{self, Debug};
 use std::hash::{Hash, Hasher};
@@ -12,12 +13,12 @@ use std::rc::Rc;
 
 use indexmap::IndexMap;
 use waft_animation::{
-    Animatable, Animation, AnimationStatus, AnimationStatusListener, AnyAnimation, Curve,
-    CurveTween, CurvedAnimation, Curves, Interval, ProxyAnimation, RectTween, ReverseAnimation,
-    Tween, k_always_complete_animation,
+    Animatable, Animation, AnimationRef, AnimationStatus, AnimationStatusListener, AnyAnimation,
+    Curve, CurveTween, CurvedAnimation, Curves, Drive, Interval, ProxyAnimation, RectTween,
+    ReverseAnimation, Tween, k_always_complete_animation,
 };
 use waft_embedder::{Offset, Rect, Size};
-use waft_foundation::{App, Handle, ListenableObject, Listener};
+use waft_foundation::{App, Handle, ListenableObject, Listener, OptionRetained, Retained};
 use waft_painting::transform_rect;
 use waft_scheduler::{FrameCallback, SchedulerBinding};
 
@@ -33,10 +34,10 @@ use crate::widgets::navigator::{
     AnyRoute, Navigator, NavigatorObserver, NavigatorObserverData, NavigatorState,
 };
 use crate::widgets::overlay::{OverlayEntry, OverlayState};
-use crate::widgets::pages::AnyPageRoute;
 use crate::widgets::routes::AnyModalRoute;
 use crate::widgets::ticker_provider::TickerMode;
 use crate::widgets::transitions::{AnimatedBuilder, FadeTransition};
+use waft_foundation::Ref;
 
 // ---------------------------------------------------------------------------------------------
 // Tween<Rect?>
@@ -74,17 +75,17 @@ pub trait RectTweenObject: 'static {
     }
 }
 
-impl RectTweenObject for Handle<RectTween> {
+impl RectTweenObject for Ref<RectTween> {
     fn begin(&self, app: &App) -> Option<Rect> {
-        app.get(*self).begin
+        app.get(self).begin
     }
 
     fn end(&self, app: &App) -> Option<Rect> {
-        app.get(*self).end
+        app.get(self).end
     }
 
     fn lerp(&self, app: &App, t: f64) -> Option<Rect> {
-        RectTween::lerp(*self, app, t)
+        RectTween::lerp(self.handle(), app, t)
     }
 }
 
@@ -137,7 +138,7 @@ pub type HeroFlightShuttleBuilder = Rc<
     dyn Fn(
         &mut App,
         BuildContext,
-        AnyAnimation<f64>,
+        AnimationRef<f64>,
         HeroFlightDirection,
         BuildContext,
         BuildContext,
@@ -596,9 +597,7 @@ impl HeroState {
     ///
     /// This method can be safely called even when this [`Hero`] is currently not in a flight.
     pub fn end_flight(self: Handle<Self>, app: &mut App, keep_placeholder: bool) {
-        // Dart reads `_placeholderSize` on a defunct state too; an unmounted state's arena slot
-        // is gone, so the containment check stands in for that read.
-        if keep_placeholder || !app.contains(self) || app.get(self).placeholder_size.is_none() {
+        if keep_placeholder || app.get(self).placeholder_size.is_none() {
             return;
         }
 
@@ -668,20 +667,16 @@ impl State for HeroState {
 struct HeroFlightManifest {
     r#type: HeroFlightDirection,
     overlay: Handle<OverlayState>,
-    from_route: AnyPageRoute,
-    to_route: AnyPageRoute,
-    from_hero: Handle<HeroState>,
-    to_hero: Handle<HeroState>,
+    from_route: PageRouteRef,
+    to_route: PageRouteRef,
+    from_hero: Ref<HeroState>,
+    to_hero: Ref<HeroState>,
     create_rect_tween: Option<CreateRectTween>,
     shuttle_builder: HeroFlightShuttleBuilder,
     is_user_gesture_transition: bool,
     is_diverted: bool,
 
-    // Dart's `tag` getter reads `fromHero.widget.tag`; a manifest outlives an unmounted hero's
-    // arena slot, so the tag — which the constructor asserts the two heroes share — is captured.
-    tag: HeroTagRef,
-
-    animation: Option<Handle<CurvedAnimation>>,
+    animation: Option<Ref<CurvedAnimation>>,
     // Dart's three `late final` fields, computed on first read and cached.
     from_hero_location: Option<Rect>,
     to_hero_location: Option<Rect>,
@@ -694,17 +689,22 @@ impl HeroFlightManifest {
         app: &mut App,
         r#type: HeroFlightDirection,
         overlay: Handle<OverlayState>,
-        from_route: AnyPageRoute,
-        to_route: AnyPageRoute,
+        from_route: PageRouteRef,
+        to_route: PageRouteRef,
         from_hero: Handle<HeroState>,
         to_hero: Handle<HeroState>,
         create_rect_tween: Option<CreateRectTween>,
         shuttle_builder: HeroFlightShuttleBuilder,
         is_user_gesture_transition: bool,
         is_diverted: bool,
-    ) -> Handle<HeroFlightManifest> {
-        let tag = Rc::clone(&from_hero.widget(app).tag);
-        debug_assert!(*tag == *to_hero.widget(app).tag);
+    ) -> Ref<HeroFlightManifest> {
+        debug_assert!(*from_hero.widget(app).tag == *to_hero.widget(app).tag);
+        let from_hero = from_hero
+            .upgrade(app)
+            .expect("a hero found in a route's subtree is kept by its element");
+        let to_hero = to_hero
+            .upgrade(app)
+            .expect("a hero found in a route's subtree is kept by its element");
         app.create(HeroFlightManifest {
             r#type,
             overlay,
@@ -716,7 +716,6 @@ impl HeroFlightManifest {
             shuttle_builder,
             is_user_gesture_transition,
             is_diverted,
-            tag,
             animation: None,
             from_hero_location: None,
             to_hero_location: None,
@@ -725,21 +724,22 @@ impl HeroFlightManifest {
     }
 
     fn tag(self: Handle<Self>, app: &App) -> HeroTagRef {
-        Rc::clone(&app.get(self).tag)
+        let from_hero = app.get(self).from_hero.handle();
+        Rc::clone(&from_hero.widget(app).tag)
     }
 
-    fn animation(self: Handle<Self>, app: &mut App) -> AnyAnimation<f64> {
-        if let Some(animation) = app.get(self).animation {
-            return animation.as_animation();
+    fn animation(self: Handle<Self>, app: &mut App) -> AnimationRef<f64> {
+        if let Some(animation) = &app.get(self).animation {
+            return animation.erase();
         }
         let (curve, reverse_curve, parent) = match app.get(self).r#type {
             HeroFlightDirection::Push => {
-                let to_route = app.get(self).to_route;
+                let to_route = app.get(self).to_route.handle();
                 let parent = to_route
                     .as_modal_route()
                     .animation(app)
                     .expect("an installed route has an animation");
-                let to_hero = app.get(self).to_hero;
+                let to_hero = app.get(self).to_hero.handle();
                 let widget = to_hero.widget(app);
                 let curve = Rc::clone(&widget.curve);
                 let reverse_curve = widget
@@ -749,12 +749,12 @@ impl HeroFlightManifest {
                 (curve, reverse_curve, parent)
             }
             HeroFlightDirection::Pop => {
-                let from_route = app.get(self).from_route;
+                let from_route = app.get(self).from_route.handle();
                 let parent = from_route
                     .as_modal_route()
                     .animation(app)
                     .expect("an installed route has an animation");
-                let from_hero = app.get(self).from_hero;
+                let from_hero = app.get(self).from_hero.handle();
                 let widget = from_hero.widget(app);
                 let curve = Rc::clone(&widget.curve);
                 let reverse_curve = widget
@@ -765,10 +765,14 @@ impl HeroFlightManifest {
             }
         };
 
+        let parent = parent
+            .upgrade(app)
+            .expect("an installed route keeps its animation");
         let reverse_curve = (!app.get(self).is_diverted).then_some(reverse_curve);
         let animation = CurvedAnimation::create(app, parent, curve, reverse_curve);
+        let erased = animation.erase();
         app.get_mut(self).animation = Some(animation);
-        animation.as_animation()
+        erased
     }
 
     fn create_hero_rect_tween(
@@ -777,7 +781,7 @@ impl HeroFlightManifest {
         begin: Option<Rect>,
         end: Option<Rect>,
     ) -> Rc<dyn RectTweenObject> {
-        let to_hero = app.get(self).to_hero;
+        let to_hero = app.get(self).to_hero.handle();
         let create_rect_tween = to_hero
             .widget(app)
             .create_rect_tween
@@ -858,7 +862,7 @@ impl HeroFlightManifest {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        if let Some(animation) = app.get(self).animation {
+        if let Some(animation) = app.get(self).animation.handle() {
             animation.dispose(app);
         }
     }
@@ -874,17 +878,17 @@ struct HeroFlight {
     hero_rect_tween: Option<Rc<dyn RectTweenObject>>,
     shuttle: Option<WidgetRef>,
 
-    hero_opacity: AnyAnimation<f64>,
-    proxy_animation: Handle<ProxyAnimation>,
+    hero_opacity: AnimationRef<f64>,
+    proxy_animation: Ref<ProxyAnimation>,
     // The manifest will be available once `start` is called, throughout the flight's lifecycle.
-    manifest: Option<Handle<HeroFlightManifest>>,
+    manifest: Option<Ref<HeroFlightManifest>>,
 
-    overlay_entry: Option<Handle<OverlayEntry>>,
+    overlay_entry: Option<Ref<OverlayEntry>>,
     aborted: bool,
 
     // Dart's `static final Animatable<double> _reverseTween`; a tween needs an App to live in,
     // so each flight mints its own.
-    reverse_tween: Handle<Tween<f64>>,
+    reverse_tween: Ref<Tween<f64>>,
 
     scheduled_perform_animation_update: bool,
     // The `navigator` Dart's local `delayedPerformAnimationUpdate` closure captures.
@@ -892,9 +896,10 @@ struct HeroFlight {
 }
 
 impl HeroFlight {
-    fn create(app: &mut App, on_flight_ended: OnFlightEnded) -> Handle<HeroFlight> {
+    fn create(app: &mut App, on_flight_ended: OnFlightEnded) -> Ref<HeroFlight> {
         let hero_opacity = k_always_complete_animation(app);
         let proxy_animation = ProxyAnimation::new(app, None);
+        let proxy = proxy_animation.handle();
         let reverse_tween = Tween::new(app, Some(1.0), Some(0.0));
         let this = app.create(HeroFlight {
             on_flight_ended,
@@ -909,19 +914,22 @@ impl HeroFlight {
             scheduled_perform_animation_update: false,
             scheduled_gesture_navigator: None,
         });
-        proxy_animation.add_status_listener(
+        proxy.add_status_listener(
             app,
-            AnimationStatusListener::handle_method(this, HeroFlight::handle_animation_update),
+            AnimationStatusListener::handle_method(*this, HeroFlight::handle_animation_update),
         );
         this
     }
 
     fn manifest(self: Handle<Self>, app: &App) -> Handle<HeroFlightManifest> {
-        app.get(self).manifest.expect("the flight has started")
+        app.get(self)
+            .manifest
+            .handle()
+            .expect("the flight has started")
     }
 
-    fn set_manifest(self: Handle<Self>, app: &mut App, value: Handle<HeroFlightManifest>) {
-        if let Some(manifest) = app.get(self).manifest {
+    fn set_manifest(self: Handle<Self>, app: &mut App, value: Ref<HeroFlightManifest>) {
+        if let Some(manifest) = app.get(self).manifest.handle() {
             manifest.dispose(app);
         }
         app.get_mut(self).manifest = Some(value);
@@ -957,47 +965,50 @@ impl HeroFlight {
         }
         debug_assert!(app.get(self).shuttle.is_some());
 
-        let proxy_animation = app.get(self).proxy_animation;
+        let proxy_animation: AnimationRef<f64> = app.get(self).proxy_animation.erase();
         let shuttle = app
             .get(self)
             .shuttle
             .clone()
             .expect("built just above if it was missing");
-        AnimatedBuilder::new(Rc::new(proxy_animation), move |app, _context, child| {
-            let rect = self
-                .hero_rect_tween(app)
-                .evaluate(app, proxy_animation.as_animation())
-                .expect("the hero rect tween has both ends");
-            let mut fade = FadeTransition::new(app.get(self).hero_opacity);
-            if let Some(child) = child {
-                fade = fade.child(child.clone());
-            }
-            Positioned::from_rect(rect, IgnorePointer::new().child(fade)).into_widget()
-        })
+        AnimatedBuilder::new(
+            Rc::new(proxy_animation.clone()),
+            move |app, _context, child| {
+                let rect = self
+                    .hero_rect_tween(app)
+                    .evaluate(app, *proxy_animation)
+                    .expect("the hero rect tween has both ends");
+                let mut fade = FadeTransition::new(app.get(self).hero_opacity.clone());
+                if let Some(child) = child {
+                    fade = fade.child(child.clone());
+                }
+                Positioned::from_rect(rect, IgnorePointer::new().child(fade)).into_widget()
+            },
+        )
         .child(shuttle)
         .into_widget()
     }
 
     fn perform_animation_update(self: Handle<Self>, app: &mut App, status: AnimationStatus) {
         if !status.is_animating() {
-            let proxy_animation = app.get(self).proxy_animation;
+            let proxy_animation = app.get(self).proxy_animation.handle();
             proxy_animation.set_parent(app, None);
 
             debug_assert!(app.get(self).overlay_entry.is_some());
             let overlay_entry = app
-                .get(self)
+                .get_mut(self)
                 .overlay_entry
+                .take()
                 .expect("a started flight has an overlay entry");
             overlay_entry.remove(app);
             overlay_entry.dispose(app);
-            app.get_mut(self).overlay_entry = None;
             // We want to keep the hero underneath the current page hidden. If the status is
             // completed, `to_hero` will be the one on top and we keep `from_hero` hidden. If it
             // is dismissed, the animation is triggered but canceled before it finishes. In this
             // case, we keep `to_hero` hidden instead.
             let manifest = self.manifest(app);
-            let from_hero = app.get(manifest).from_hero;
-            let to_hero = app.get(manifest).to_hero;
+            let from_hero = app.get(manifest).from_hero.handle();
+            let to_hero = app.get(manifest).to_hero.handle();
             from_hero.end_flight(app, status.is_completed());
             to_hero.end_flight(app, status.is_dismissed());
             let on_flight_ended = Rc::clone(&app.get(self).on_flight_ended);
@@ -1061,11 +1072,10 @@ impl HeroFlight {
 
     /// Releases resources.
     fn dispose(self: Handle<Self>, app: &mut App) {
-        if let Some(overlay_entry) = app.get(self).overlay_entry {
+        if let Some(overlay_entry) = app.get_mut(self).overlay_entry.take() {
             overlay_entry.remove(app);
             overlay_entry.dispose(app);
-            app.get_mut(self).overlay_entry = None;
-            let proxy_animation = app.get(self).proxy_animation;
+            let proxy_animation = app.get(self).proxy_animation.handle();
             proxy_animation.set_parent(app, None);
             Animation::remove_listener(
                 proxy_animation,
@@ -1077,14 +1087,14 @@ impl HeroFlight {
                 &AnimationStatusListener::handle_method(self, HeroFlight::handle_animation_update),
             );
         }
-        if let Some(manifest) = app.get(self).manifest {
+        if let Some(manifest) = app.get(self).manifest.handle() {
             manifest.dispose(app);
         }
     }
 
     fn on_tick(self: Handle<Self>, app: &mut App) {
         let manifest = self.manifest(app);
-        let to_hero = app.get(manifest).to_hero;
+        let to_hero = app.get(manifest).to_hero.handle();
         let to_hero_box = (!app.get(self).aborted && to_hero.mounted(app))
             .then(|| to_hero.context(app).find_render_object(app))
             .flatten()
@@ -1130,10 +1140,10 @@ impl HeroFlight {
         } else if app.get(self).hero_opacity.status(app).is_completed() {
             // The `to_hero` no longer exists or it's no longer the flight's destination.
             // Continue flying while fading out.
-            let proxy_animation = app.get(self).proxy_animation;
+            let proxy_animation = app.get(self).proxy_animation.clone();
             let curve = Interval::new(proxy_animation.value(app), 1.0, Curves::linear());
             let curve_tween = CurveTween::new(app, Rc::new(curve));
-            let reverse_tween = app.get(self).reverse_tween;
+            let reverse_tween = app.get(self).reverse_tween.clone();
             let hero_opacity = proxy_animation.drive(app, reverse_tween.chain(curve_tween));
             app.get_mut(self).hero_opacity = hero_opacity;
         }
@@ -1143,16 +1153,16 @@ impl HeroFlight {
     }
 
     /// The simple case: we're either starting a push or a pop animation.
-    fn start(self: Handle<Self>, app: &mut App, initial_manifest: Handle<HeroFlightManifest>) {
+    fn start(self: Handle<Self>, app: &mut App, initial_manifest: Ref<HeroFlightManifest>) {
         debug_assert!(!app.get(self).aborted);
         if cfg!(debug_assertions) {
             let initial = initial_manifest.animation(app);
-            let r#type = app.get(initial_manifest).r#type;
+            let r#type = app.get(&initial_manifest).r#type;
             assert!(match r#type {
                 HeroFlightDirection::Pop =>
                 // During user gesture transitions, the animation controller isn't driving the
                 // reverse transition, so the status is not important.
-                    app.get(initial_manifest).is_user_gesture_transition
+                    app.get(&initial_manifest).is_user_gesture_transition
                         || initial.status(app) == AnimationStatus::Reverse,
                 HeroFlightDirection::Push =>
                     initial.value(app) == 0.0 && initial.status(app) == AnimationStatus::Forward,
@@ -1162,11 +1172,11 @@ impl HeroFlight {
         self.set_manifest(app, initial_manifest);
 
         let manifest = self.manifest(app);
-        let proxy_animation = app.get(self).proxy_animation;
+        let proxy_animation = app.get(self).proxy_animation.handle();
         let animation = manifest.animation(app);
         let should_include_child_in_placeholder = match app.get(manifest).r#type {
             HeroFlightDirection::Pop => {
-                let parent = app.create(ReverseAnimation::new(animation)).as_animation();
+                let parent = ReverseAnimation::new(app, animation).into_erased();
                 proxy_animation.set_parent(app, Some(parent));
                 false
             }
@@ -1180,8 +1190,8 @@ impl HeroFlight {
         let end = manifest.to_hero_location(app);
         let hero_rect_tween = manifest.create_hero_rect_tween(app, Some(begin), Some(end));
         app.get_mut(self).hero_rect_tween = Some(hero_rect_tween);
-        let from_hero = app.get(manifest).from_hero;
-        let to_hero = app.get(manifest).to_hero;
+        let from_hero = app.get(manifest).from_hero.handle();
+        let to_hero = app.get(manifest).to_hero.handle();
         from_hero.start_flight(app, should_include_child_in_placeholder);
         to_hero.start_flight(app, false);
         let overlay_entry = OverlayEntry::new(
@@ -1191,7 +1201,7 @@ impl HeroFlight {
             false,
             false,
         );
-        app.get_mut(self).overlay_entry = Some(overlay_entry);
+        app.get_mut(self).overlay_entry = Some(overlay_entry.clone());
         app.get(manifest)
             .overlay
             .insert(app, overlay_entry, None, None);
@@ -1204,49 +1214,47 @@ impl HeroFlight {
 
     /// While this flight's hero was in transition a push or a pop occurred for routes with the
     /// same hero. Redirect the in-flight hero to the new `to_route`.
-    fn divert(self: Handle<Self>, app: &mut App, new_manifest: Handle<HeroFlightManifest>) {
+    fn divert(self: Handle<Self>, app: &mut App, new_manifest: Ref<HeroFlightManifest>) {
         let manifest = self.manifest(app);
         debug_assert!(*manifest.tag(app) == *new_manifest.tag(app));
-        let proxy_animation = app.get(self).proxy_animation;
+        let proxy_animation = app.get(self).proxy_animation.handle();
         if app.get(manifest).r#type == HeroFlightDirection::Push
-            && app.get(new_manifest).r#type == HeroFlightDirection::Pop
+            && app.get(&new_manifest).r#type == HeroFlightDirection::Pop
         {
             // A push flight was interrupted by a pop.
             let new_animation = new_manifest.animation(app);
             debug_assert!(new_animation.status(app) == AnimationStatus::Reverse);
-            debug_assert!(app.get(manifest).from_hero == app.get(new_manifest).to_hero);
-            debug_assert!(app.get(manifest).to_hero == app.get(new_manifest).from_hero);
-            debug_assert!(app.get(manifest).from_route == app.get(new_manifest).to_route);
-            debug_assert!(app.get(manifest).to_route == app.get(new_manifest).from_route);
+            debug_assert!(app.get(manifest).from_hero == app.get(&new_manifest).to_hero);
+            debug_assert!(app.get(manifest).to_hero == app.get(&new_manifest).from_hero);
+            debug_assert!(app.get(manifest).from_route == app.get(&new_manifest).to_route);
+            debug_assert!(app.get(manifest).to_route == app.get(&new_manifest).from_route);
 
             // The same hero rect tween is used in reverse, rather than creating a new one with
             // `create_hero_rect_tween(hero_rect.end, hero_rect.begin)`. That's because tweens like
             // `MaterialRectArcTween` may create a different path for swapped begin and end
             // parameters. We want the pop flight path to be the same (in reverse) as the push
             // flight path.
-            let parent = app
-                .create(ReverseAnimation::new(new_animation))
-                .as_animation();
+            let parent = ReverseAnimation::new(app, new_animation).into_erased();
             proxy_animation.set_parent(app, Some(parent));
             let parent_tween = self.hero_rect_tween(app);
             app.get_mut(self).hero_rect_tween = Some(Rc::new(ReverseRectTween {
                 parent: parent_tween,
             }));
         } else if app.get(manifest).r#type == HeroFlightDirection::Pop
-            && app.get(new_manifest).r#type == HeroFlightDirection::Push
+            && app.get(&new_manifest).r#type == HeroFlightDirection::Push
         {
             // A pop flight was interrupted by a push.
             let new_animation = new_manifest.animation(app);
             debug_assert!(new_animation.status(app) == AnimationStatus::Forward);
-            debug_assert!(app.get(manifest).to_hero == app.get(new_manifest).from_hero);
-            debug_assert!(app.get(manifest).to_route == app.get(new_manifest).from_route);
+            debug_assert!(app.get(manifest).to_hero == app.get(&new_manifest).from_hero);
+            debug_assert!(app.get(manifest).to_route == app.get(&new_manifest).from_route);
 
             let value = manifest.animation(app).value(app);
             let tween = Tween::new(app, Some(value), Some(1.0));
             let parent = new_animation.drive(app, tween);
             proxy_animation.set_parent(app, Some(parent));
-            let from_hero = app.get(manifest).from_hero;
-            let new_to_hero = app.get(new_manifest).to_hero;
+            let from_hero = app.get(manifest).from_hero.handle();
+            let new_to_hero = app.get(&new_manifest).to_hero.handle();
             if from_hero != new_to_hero {
                 from_hero.end_flight(app, true);
                 new_to_hero.start_flight(app, false);
@@ -1268,8 +1276,8 @@ impl HeroFlight {
             // A push or a pop flight is heading to a new route, i.e.
             // manifest.type == push && newManifest.type == push ||
             // manifest.type == pop && newManifest.type == pop
-            debug_assert!(app.get(manifest).from_hero != app.get(new_manifest).from_hero);
-            debug_assert!(app.get(manifest).to_hero != app.get(new_manifest).to_hero);
+            debug_assert!(app.get(manifest).from_hero != app.get(&new_manifest).from_hero);
+            debug_assert!(app.get(manifest).to_hero != app.get(&new_manifest).to_hero);
 
             let hero_rect_tween = self.hero_rect_tween(app);
             let begin = hero_rect_tween.evaluate(app, proxy_animation.as_animation());
@@ -1279,25 +1287,23 @@ impl HeroFlight {
             app.get_mut(self).shuttle = None;
 
             let new_animation = new_manifest.animation(app);
-            if app.get(new_manifest).r#type == HeroFlightDirection::Pop {
-                let parent = app
-                    .create(ReverseAnimation::new(new_animation))
-                    .as_animation();
+            if app.get(&new_manifest).r#type == HeroFlightDirection::Pop {
+                let parent = ReverseAnimation::new(app, new_animation).into_erased();
                 proxy_animation.set_parent(app, Some(parent));
             } else {
                 proxy_animation.set_parent(app, Some(new_animation));
             }
 
-            let from_hero = app.get(manifest).from_hero;
-            let to_hero = app.get(manifest).to_hero;
+            let from_hero = app.get(manifest).from_hero.handle();
+            let to_hero = app.get(manifest).to_hero.handle();
             from_hero.end_flight(app, true);
             to_hero.end_flight(app, true);
 
             // Let the heroes in each of the routes rebuild with their placeholders.
-            let new_from_hero = app.get(new_manifest).from_hero;
-            let new_to_hero = app.get(new_manifest).to_hero;
+            let new_from_hero = app.get(&new_manifest).from_hero.handle();
+            let new_to_hero = app.get(&new_manifest).to_hero.handle();
             let should_include_child_in_placeholder =
-                app.get(new_manifest).r#type == HeroFlightDirection::Push;
+                app.get(&new_manifest).r#type == HeroFlightDirection::Push;
             new_from_hero.start_flight(app, should_include_child_in_placeholder);
             new_to_hero.start_flight(app, false);
 
@@ -1305,6 +1311,7 @@ impl HeroFlight {
             // old shuttle.
             app.get(self)
                 .overlay_entry
+                .handle()
                 .expect("a started flight has an overlay entry")
                 .mark_needs_build(app);
         }
@@ -1330,12 +1337,12 @@ pub struct HeroController {
     /// If `None`, the controller uses a linear `RectTween`.
     pub create_rect_tween: Option<CreateRectTween>,
     // All of the heroes that are currently in the overlay and in motion. Indexed by the hero tag.
-    flights: IndexMap<HeroTagRef, Handle<HeroFlight>>,
+    flights: IndexMap<HeroTagRef, Ref<HeroFlight>>,
 }
 
 impl HeroController {
     /// Creates a hero controller; Dart's optional named argument is the setter.
-    pub fn new(app: &mut App) -> Handle<HeroController> {
+    pub fn new(app: &mut App) -> Ref<HeroController> {
         app.create(HeroController {
             navigator_observer: NavigatorObserverData::new(),
             create_rect_tween: None,
@@ -1345,11 +1352,11 @@ impl HeroController {
 
     /// Dart `HeroController(createRectTween:)`.
     pub fn create_rect_tween(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         create_rect_tween: CreateRectTween,
-    ) -> Handle<Self> {
-        app.get_mut(self).create_rect_tween = Some(create_rect_tween);
+    ) -> Ref<Self> {
+        app.get_mut(&self).create_rect_tween = Some(create_rect_tween);
         self
     }
 
@@ -1425,6 +1432,12 @@ impl HeroController {
             && to_route.as_modal_route().maintain_state(app)
             && has_valid_size
         {
+            let from_route = from_route
+                .upgrade(app)
+                .expect("a route in transition is kept by its navigator");
+            let to_route = to_route
+                .upgrade(app)
+                .expect("a route in transition is kept by its navigator");
             self.start_hero_transition(
                 app,
                 from_route,
@@ -1441,6 +1454,17 @@ impl HeroController {
             // the `to` route will go back onstage.
             let offstage = new_route_animation.value(app) == 0.0;
             to_route.as_modal_route().set_offstage(app, offstage);
+            // The callback keeps both routes and this controller until the frame ends, as
+            // Dart's closure does.
+            let from_route = from_route
+                .upgrade(app)
+                .expect("a route in transition is kept by its navigator");
+            let to_route = to_route
+                .upgrade(app)
+                .expect("a route in transition is kept by its navigator");
+            let this = self
+                .upgrade(app)
+                .expect("an observing hero controller is kept by its navigator");
             SchedulerBinding::add_post_frame_callback(
                 app,
                 FrameCallback::new(move |app, _| {
@@ -1449,10 +1473,10 @@ impl HeroController {
                     {
                         return;
                     }
-                    self.start_hero_transition(
+                    this.start_hero_transition(
                         app,
-                        from_route,
-                        to_route,
+                        from_route.clone(),
+                        to_route.clone(),
                         flight_type,
                         is_user_gesture_transition,
                     );
@@ -1468,8 +1492,8 @@ impl HeroController {
     fn start_hero_transition(
         self: Handle<Self>,
         app: &mut App,
-        from: AnyPageRoute,
-        to: AnyPageRoute,
+        from: PageRouteRef,
+        to: PageRouteRef,
         flight_type: Option<HeroFlightDirection>,
         is_user_gesture_transition: bool,
     ) {
@@ -1507,7 +1531,7 @@ impl HeroController {
 
         for (tag, from_hero) in from_heroes {
             let to_hero = to_heroes.get(&tag).copied();
-            let existing_flight = app.get(self).flights.get(&tag).copied();
+            let existing_flight = app.get(self).flights.get(&tag).cloned();
             let manifest = match (to_hero, flight_type) {
                 (Some(to_hero), Some(flight_type)) => {
                     let shuttle_builder = to_hero
@@ -1523,8 +1547,8 @@ impl HeroController {
                         app,
                         flight_type,
                         overlay,
-                        from,
-                        to,
+                        from.clone(),
+                        to.clone(),
                         from_hero,
                         to_hero,
                         create_rect_tween,
@@ -1582,7 +1606,7 @@ impl HeroController {
     fn default_hero_flight_shuttle_builder(
         app: &mut App,
         _flight_context: BuildContext,
-        animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
         flight_direction: HeroFlightDirection,
         from_hero_context: BuildContext,
         to_hero_context: BuildContext,
@@ -1604,15 +1628,15 @@ impl HeroController {
         let from_hero_padding = from_media_query_data.padding;
         let to_hero_padding = to_media_query_data.padding;
 
-        AnimatedBuilder::new(Rc::new(animation), move |app, _context, _child| {
+        AnimatedBuilder::new(Rc::new(animation.clone()), move |app, _context, _child| {
             let padding = match flight_direction {
                 HeroFlightDirection::Push => {
                     EdgeInsetsTween::new(Some(from_hero_padding), Some(to_hero_padding))
-                        .evaluate(app, animation)
+                        .evaluate(app, *animation)
                 }
                 HeroFlightDirection::Pop => {
                     EdgeInsetsTween::new(Some(to_hero_padding), Some(from_hero_padding))
-                        .evaluate(app, animation)
+                        .evaluate(app, *animation)
                 }
             };
             MediaQuery::new(
@@ -1626,7 +1650,12 @@ impl HeroController {
 
     /// Releases resources.
     pub fn dispose(self: Handle<Self>, app: &mut App) {
-        let flights: Vec<Handle<HeroFlight>> = app.get(self).flights.values().copied().collect();
+        let flights: Vec<Handle<HeroFlight>> = app
+            .get(self)
+            .flights
+            .values()
+            .map(Retained::handle)
+            .collect();
         for flight in flights {
             flight.dispose(app);
         }
@@ -1689,7 +1718,7 @@ impl NavigatorObserver for HeroController {
             .get(self)
             .flights
             .values()
-            .copied()
+            .map(Retained::handle)
             .filter(|flight| is_invalid_flight(app, *flight))
             .collect();
 
@@ -1774,7 +1803,7 @@ mod tests {
     use crate::binding::run_app;
     use crate::test_harness::pump_every_view;
     use crate::widgets::basic::{Align, Directionality, Padding};
-    use crate::widgets::navigator::{HeroControllerScope, Route, RouteSettings};
+    use crate::widgets::navigator::{HeroControllerScope, RouteSettings};
     use crate::widgets::pages::PageRouteBuilder;
     use crate::widgets::routes::RoutePageBuilder;
 
@@ -1833,7 +1862,7 @@ mod tests {
         })
     }
 
-    fn hero_route(app: &mut App, name: &str, page: RoutePageBuilder) -> Handle<PageRouteBuilder> {
+    fn hero_route(app: &mut App, name: &str, page: RoutePageBuilder) -> Ref<PageRouteBuilder> {
         PageRouteBuilder::new(app, page)
             .settings(app, RouteSettings::new().name(name.to_string()).into())
     }
@@ -1841,7 +1870,7 @@ mod tests {
     /// A navigator hosting `controller`, under the `Directionality` the overlay's theater needs.
     fn hero_navigator(
         key: &GlobalKey,
-        controller: Handle<HeroController>,
+        controller: Ref<HeroController>,
         first_page: RoutePageBuilder,
     ) -> WidgetRef {
         Directionality::new(
@@ -1849,7 +1878,9 @@ mod tests {
             HeroControllerScope::new(
                 controller,
                 Navigator::new().key(key.clone().into()).on_generate_route(
-                    move |app, _settings| Some(hero_route(app, "/", first_page.clone()).as_route()),
+                    move |app, _settings| {
+                        Some(hero_route(app, "/", first_page.clone()).into_erased())
+                    },
                 ),
             ),
         )
@@ -1886,7 +1917,11 @@ mod tests {
     fn only_flight(app: &App, controller: Handle<HeroController>) -> Handle<HeroFlight> {
         let flights = &app.get(controller).flights;
         assert_eq!(flights.len(), 1, "one flight per matching tag");
-        *flights.values().next().expect("checked just above")
+        flights
+            .values()
+            .next()
+            .expect("checked just above")
+            .handle()
     }
 
     // ---- the tests ----
@@ -1900,7 +1935,11 @@ mod tests {
         drop(app);
         mount(
             &cell,
-            hero_navigator(&key, controller, hero_page(10.0, 20.0, 40.0, 30.0, true)),
+            hero_navigator(
+                &key,
+                controller.clone(),
+                hero_page(10.0, 20.0, 40.0, 30.0, true),
+            ),
         );
         let mut app = cell.borrow_mut();
         let navigator = navigator_state(&key, &mut app);
@@ -1912,14 +1951,17 @@ mod tests {
             "second",
             hero_page(150.0, 100.0, 80.0, 60.0, true),
         );
-        navigator.push(&mut app, second.as_route());
+        navigator.push(&mut app, second.into_erased());
 
         // The observer's post-frame callback measures the destination and starts the flight.
         let mut at = at + Duration::from_millis(20);
         pump_every_view(&mut app, at);
-        let flight = only_flight(&app, controller);
+        let flight = only_flight(&app, *controller);
         let manifest = flight.manifest(&app);
-        let (from_hero, to_hero) = (app.get(manifest).from_hero, app.get(manifest).to_hero);
+        let (from_hero, to_hero) = (
+            app.get(manifest).from_hero.handle(),
+            app.get(manifest).to_hero.handle(),
+        );
         assert_eq!(
             app.get(manifest).r#type,
             HeroFlightDirection::Push,
@@ -1981,7 +2023,7 @@ mod tests {
 
         settle(&mut app, at);
         assert!(
-            app.get(controller).flights.is_empty(),
+            app.get(&controller).flights.is_empty(),
             "the finished flight is removed from the controller"
         );
         assert_eq!(
@@ -2008,7 +2050,11 @@ mod tests {
         drop(app);
         mount(
             &cell,
-            hero_navigator(&key, controller, hero_page(10.0, 20.0, 40.0, 30.0, true)),
+            hero_navigator(
+                &key,
+                controller.clone(),
+                hero_page(10.0, 20.0, 40.0, 30.0, true),
+            ),
         );
         let mut app = cell.borrow_mut();
         let navigator = navigator_state(&key, &mut app);
@@ -2019,24 +2065,24 @@ mod tests {
             "second",
             hero_page(150.0, 100.0, 80.0, 60.0, true),
         );
-        navigator.push(&mut app, second.as_route());
+        navigator.push(&mut app, second.into_erased());
         let at = settle(&mut app, at + Duration::from_millis(20));
         assert!(
-            app.get(controller).flights.is_empty(),
+            app.get(&controller).flights.is_empty(),
             "the push flight is over"
         );
 
         navigator.pop(&mut app, None);
         let mut at = at + Duration::from_millis(20);
         pump_every_view(&mut app, at);
-        let flight = only_flight(&app, controller);
+        let flight = only_flight(&app, *controller);
         let manifest = flight.manifest(&app);
         assert_eq!(
             app.get(manifest).r#type,
             HeroFlightDirection::Pop,
             "a pop flies backwards"
         );
-        let to_hero = app.get(manifest).to_hero;
+        let to_hero = app.get(manifest).to_hero.handle();
 
         at += Duration::from_millis(20);
         pump_every_view(&mut app, at);
@@ -2057,7 +2103,7 @@ mod tests {
         }
 
         settle(&mut app, at);
-        assert!(app.get(controller).flights.is_empty());
+        assert!(app.get(&controller).flights.is_empty());
         assert!(
             app.get(to_hero).placeholder_size.is_none(),
             "the hero that stays on screen shows its child again"
@@ -2073,7 +2119,11 @@ mod tests {
         drop(app);
         mount(
             &cell,
-            hero_navigator(&key, controller, hero_page(10.0, 20.0, 40.0, 30.0, false)),
+            hero_navigator(
+                &key,
+                controller.clone(),
+                hero_page(10.0, 20.0, 40.0, 30.0, false),
+            ),
         );
         let mut app = cell.borrow_mut();
         let navigator = navigator_state(&key, &mut app);
@@ -2085,11 +2135,11 @@ mod tests {
             "second",
             hero_page(150.0, 100.0, 80.0, 60.0, true),
         );
-        navigator.push(&mut app, second.as_route());
+        navigator.push(&mut app, second.into_erased());
         let at = at + Duration::from_millis(20);
         pump_every_view(&mut app, at);
         assert!(
-            app.get(controller).flights.is_empty(),
+            app.get(&controller).flights.is_empty(),
             "the source hero is behind a disabled HeroMode, so no pair matches"
         );
 
@@ -2119,7 +2169,11 @@ mod tests {
         drop(app);
         mount(
             &cell,
-            hero_navigator(&key, controller, hero_page(10.0, 20.0, 40.0, 30.0, true)),
+            hero_navigator(
+                &key,
+                controller.clone(),
+                hero_page(10.0, 20.0, 40.0, 30.0, true),
+            ),
         );
         let mut app = cell.borrow_mut();
         let navigator = navigator_state(&key, &mut app);
@@ -2137,7 +2191,7 @@ mod tests {
                 .into_widget()
         });
         let second = hero_route(&mut app, "second", page);
-        navigator.push(&mut app, second.as_route());
+        navigator.push(&mut app, second.into_erased());
         let mut at = at + Duration::from_millis(20);
         pump_every_view(&mut app, at);
         at += Duration::from_millis(20);
@@ -2146,9 +2200,9 @@ mod tests {
         assert_eq!(built.get(), 1, "the shuttle is built once and then reused");
         // `Positioned` sizes the shuttle to the flight's rect, so the shuttle's own 11x13 only
         // shows up as the child the overlay entry built.
-        assert!(!app.get(controller).flights.is_empty());
+        assert!(!app.get(&controller).flights.is_empty());
         settle(&mut app, at);
-        assert!(app.get(controller).flights.is_empty());
+        assert!(app.get(&controller).flights.is_empty());
     }
 
     #[test]

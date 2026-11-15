@@ -5,9 +5,11 @@ use std::marker::PhantomData;
 use std::rc::Rc;
 
 use waft_embedder::{Color, Offset, Rect, Size};
-use waft_foundation::{App, Handle, Listener, RetainedHandle};
+use waft_foundation::{App, Handle, Listener, Ref};
 
-use crate::animation::{Animation, AnimationStatus, AnimationStatusListener, AnyAnimation};
+use crate::animation::{
+    Animation, AnimationRef, AnimationStatus, AnimationStatusListener, AnyAnimation,
+};
 use crate::curves::Curve;
 
 /// An object that can produce a value of type `T` given an `Animation<double>`
@@ -39,20 +41,21 @@ pub trait Animatable<T> {
         self.transform(app, animation.value(app))
     }
 
-    /// Returns a new [`AnyAnimation`] that is driven by the given animation but
-    /// that takes on values determined by this object.
-    fn animate(self, app: &mut App, parent: AnyAnimation<f64>) -> AnyAnimation<T>
+    /// Returns a new animation that is driven by the given animation but
+    /// that takes on values determined by this object. The new animation keeps
+    /// `parent`; whoever keeps the result keeps both.
+    #[track_caller]
+    fn animate(self, app: &mut App, parent: AnimationRef<f64>) -> AnimationRef<T>
     where
         Self: Sized + Clone + 'static,
         T: 'static,
     {
-        let parent = app.retain(parent);
         app.create(AnimatedEvaluation {
             parent,
             evaluatable: self,
             _value: PhantomData,
         })
-        .as_animation()
+        .into_erased()
     }
 
     /// Returns a new [`Animatable`] whose value is determined by first
@@ -100,22 +103,25 @@ impl<T> Debug for CallbackAnimatable<T> {
 /// Dart's `_AnimatedEvaluation<T>` — the animation returned by
 /// [`Animatable::animate`].
 struct AnimatedEvaluation<T, A> {
-    parent: RetainedHandle<AnyAnimation<f64>>,
+    parent: AnimationRef<f64>,
     evaluatable: A,
     _value: PhantomData<fn() -> T>,
 }
 
 impl<T: 'static, A: Animatable<T> + Clone + 'static> Animation<T> for AnimatedEvaluation<T, A> {
     fn add_listener(self: Handle<Self>, app: &mut App, listener: Listener) {
-        app.get(self).parent.add_listener(app, listener);
+        app.get(self).parent.handle().add_listener(app, listener);
     }
 
     fn remove_listener(self: Handle<Self>, app: &mut App, listener: &Listener) {
-        app.get(self).parent.remove_listener(app, listener);
+        app.get(self).parent.handle().remove_listener(app, listener);
     }
 
     fn add_status_listener(self: Handle<Self>, app: &mut App, listener: AnimationStatusListener) {
-        app.get(self).parent.add_status_listener(app, listener);
+        app.get(self)
+            .parent
+            .handle()
+            .add_status_listener(app, listener);
     }
 
     fn remove_status_listener(
@@ -123,7 +129,10 @@ impl<T: 'static, A: Animatable<T> + Clone + 'static> Animation<T> for AnimatedEv
         app: &mut App,
         listener: &AnimationStatusListener,
     ) {
-        app.get(self).parent.remove_status_listener(app, listener);
+        app.get(self)
+            .parent
+            .handle()
+            .remove_status_listener(app, listener);
     }
 
     fn status(self: Handle<Self>, app: &App) -> AnimationStatus {
@@ -131,7 +140,7 @@ impl<T: 'static, A: Animatable<T> + Clone + 'static> Animation<T> for AnimatedEv
     }
 
     fn value(self: Handle<Self>, app: &App) -> T {
-        let parent = app.get(self).parent.get();
+        let parent = app.get(self).parent.handle();
         let evaluatable = app.get(self).evaluatable.clone();
         evaluatable.evaluate(app, parent)
     }
@@ -211,7 +220,8 @@ impl<T: 'static> Tween<T> {
     ///
     /// [`begin`]: Tween::begin
     /// [`end`]: Tween::end
-    pub fn new(app: &mut App, begin: Option<T>, end: Option<T>) -> Handle<Tween<T>> {
+    #[track_caller]
+    pub fn new(app: &mut App, begin: Option<T>, end: Option<T>) -> Ref<Tween<T>> {
         app.create(Tween { begin, end })
     }
 
@@ -267,9 +277,9 @@ impl<T: TweenLerp + 'static> Tween<T> {
     }
 }
 
-impl<T: TweenLerp + 'static> Animatable<T> for Handle<Tween<T>> {
+impl<T: TweenLerp + 'static> Animatable<T> for Ref<Tween<T>> {
     fn transform(&self, app: &App, t: f64) -> T {
-        let this = *self;
+        let this = self.handle();
         let tween = app.get(this);
         tween_transform(&tween.begin, &tween.end, t, |t| this.lerp(app, t))
     }
@@ -279,24 +289,25 @@ impl<T: TweenLerp + 'static> Animatable<T> for Handle<Tween<T>> {
 ///
 /// [`parent`]: ReverseTween::parent
 pub struct ReverseTween<T: 'static> {
-    parent: Handle<Tween<T>>,
+    parent: Ref<Tween<T>>,
 }
 
 impl<T: TweenLerp + 'static> ReverseTween<T> {
     /// Construct a [`Tween`] that evaluates its parent in reverse.
-    pub fn new(app: &mut App, parent: Handle<Tween<T>>) -> Handle<ReverseTween<T>> {
+    #[track_caller]
+    pub fn new(app: &mut App, parent: Ref<Tween<T>>) -> Ref<ReverseTween<T>> {
         app.create(ReverseTween { parent })
     }
 
     /// This tween's value is the same as the parent's value evaluated in reverse.
     pub fn parent(self: Handle<Self>, app: &App) -> Handle<Tween<T>> {
-        app.get(self).parent
+        app.get(self).parent.handle()
     }
 }
 
-impl<T: TweenLerp + 'static> Animatable<T> for Handle<ReverseTween<T>> {
+impl<T: TweenLerp + 'static> Animatable<T> for Ref<ReverseTween<T>> {
     fn transform(&self, app: &App, t: f64) -> T {
-        let this = *self;
+        let this = self.handle();
         this.parent(app).lerp(app, 1.0 - t)
     }
 }
@@ -315,7 +326,8 @@ impl ColorTween {
     ///
     /// The begin and end properties may be null; the null value is treated as
     /// transparent.
-    pub fn new(app: &mut App, begin: Option<Color>, end: Option<Color>) -> Handle<ColorTween> {
+    #[track_caller]
+    pub fn new(app: &mut App, begin: Option<Color>, end: Option<Color>) -> Ref<ColorTween> {
         app.create(ColorTween { begin, end })
     }
 
@@ -346,9 +358,9 @@ impl ColorTween {
     }
 }
 
-impl Animatable<Option<Color>> for Handle<ColorTween> {
+impl Animatable<Option<Color>> for Ref<ColorTween> {
     fn transform(&self, app: &App, t: f64) -> Option<Color> {
-        let this = *self;
+        let this = self.handle();
         if t == 0.0 {
             return this.begin(app);
         }
@@ -370,7 +382,8 @@ pub struct SizeTween {
 
 impl SizeTween {
     /// Creates a [`Size`] tween.
-    pub fn new(app: &mut App, begin: Option<Size>, end: Option<Size>) -> Handle<SizeTween> {
+    #[track_caller]
+    pub fn new(app: &mut App, begin: Option<Size>, end: Option<Size>) -> Ref<SizeTween> {
         app.create(SizeTween { begin, end })
     }
 
@@ -381,9 +394,9 @@ impl SizeTween {
     }
 }
 
-impl Animatable<Option<Size>> for Handle<SizeTween> {
+impl Animatable<Option<Size>> for Ref<SizeTween> {
     fn transform(&self, app: &App, t: f64) -> Option<Size> {
-        let this = *self;
+        let this = self.handle();
         let tween = app.get(this);
         if t == 0.0 {
             return tween.begin;
@@ -406,7 +419,8 @@ pub struct RectTween {
 
 impl RectTween {
     /// Creates a [`Rect`] tween.
-    pub fn new(app: &mut App, begin: Option<Rect>, end: Option<Rect>) -> Handle<RectTween> {
+    #[track_caller]
+    pub fn new(app: &mut App, begin: Option<Rect>, end: Option<Rect>) -> Ref<RectTween> {
         app.create(RectTween { begin, end })
     }
 
@@ -417,9 +431,9 @@ impl RectTween {
     }
 }
 
-impl Animatable<Option<Rect>> for Handle<RectTween> {
+impl Animatable<Option<Rect>> for Ref<RectTween> {
     fn transform(&self, app: &App, t: f64) -> Option<Rect> {
-        let this = *self;
+        let this = self.handle();
         let tween = app.get(this);
         if t == 0.0 {
             return tween.begin;
@@ -442,7 +456,8 @@ pub struct IntTween {
 
 impl IntTween {
     /// Creates an int tween.
-    pub fn new(app: &mut App, begin: Option<i64>, end: Option<i64>) -> Handle<IntTween> {
+    #[track_caller]
+    pub fn new(app: &mut App, begin: Option<i64>, end: Option<i64>) -> Ref<IntTween> {
         app.create(IntTween { begin, end })
     }
 
@@ -455,9 +470,9 @@ impl IntTween {
     }
 }
 
-impl Animatable<i64> for Handle<IntTween> {
+impl Animatable<i64> for Ref<IntTween> {
     fn transform(&self, app: &App, t: f64) -> i64 {
-        let this = *self;
+        let this = self.handle();
         let tween = app.get(this);
         tween_transform(&tween.begin, &tween.end, t, |t| this.lerp(app, t))
     }
@@ -474,7 +489,8 @@ pub struct StepTween {
 
 impl StepTween {
     /// Creates an [`i64`] tween that floors.
-    pub fn new(app: &mut App, begin: Option<i64>, end: Option<i64>) -> Handle<StepTween> {
+    #[track_caller]
+    pub fn new(app: &mut App, begin: Option<i64>, end: Option<i64>) -> Ref<StepTween> {
         app.create(StepTween { begin, end })
     }
 
@@ -487,9 +503,9 @@ impl StepTween {
     }
 }
 
-impl Animatable<i64> for Handle<StepTween> {
+impl Animatable<i64> for Ref<StepTween> {
     fn transform(&self, app: &App, t: f64) -> i64 {
-        let this = *self;
+        let this = self.handle();
         let tween = app.get(this);
         tween_transform(&tween.begin, &tween.end, t, |t| this.lerp(app, t))
     }
@@ -504,7 +520,8 @@ pub struct ConstantTween<T> {
 
 impl<T: Clone + 'static> ConstantTween<T> {
     /// Create a tween whose begin and end values equal `value`.
-    pub fn new(app: &mut App, value: T) -> Handle<ConstantTween<T>> {
+    #[track_caller]
+    pub fn new(app: &mut App, value: T) -> Ref<ConstantTween<T>> {
         app.create(ConstantTween {
             tween: Tween {
                 begin: Some(value.clone()),
@@ -514,9 +531,9 @@ impl<T: Clone + 'static> ConstantTween<T> {
     }
 }
 
-impl<T: Clone + 'static> Animatable<T> for Handle<ConstantTween<T>> {
+impl<T: Clone + 'static> Animatable<T> for Ref<ConstantTween<T>> {
     fn transform(&self, app: &App, _t: f64) -> T {
-        app.get(*self)
+        app.get(self)
             .tween
             .begin
             .clone()
@@ -533,7 +550,8 @@ pub struct CurveTween {
 
 impl CurveTween {
     /// Creates a curve tween.
-    pub fn new(app: &mut App, curve: Rc<dyn Curve>) -> Handle<CurveTween> {
+    #[track_caller]
+    pub fn new(app: &mut App, curve: Rc<dyn Curve>) -> Ref<CurveTween> {
         app.create(CurveTween { curve })
     }
 
@@ -548,9 +566,9 @@ impl CurveTween {
     }
 }
 
-impl Animatable<f64> for Handle<CurveTween> {
+impl Animatable<f64> for Ref<CurveTween> {
     fn transform(&self, app: &App, t: f64) -> f64 {
-        let curve = &app.get(*self).curve;
+        let curve = &app.get(self).curve;
         if t == 0.0 || t == 1.0 {
             debug_assert_eq!(curve.transform(t).round(), t);
             return t;
@@ -655,7 +673,6 @@ impl Animatable<f64> for ValueCurveTween {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::animation::Animation;
     use crate::animations::AlwaysStoppedAnimation;
     use crate::curves::SawTooth;
     use waft_foundation::AppCell;
@@ -665,8 +682,8 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let tween = Tween::new(&mut app, Some(0.0), Some(1.0));
-        let parent = app.create(AlwaysStoppedAnimation::new(1.0)).as_animation();
-        let driven = tween.animate(&mut app, parent);
+        let parent: AnimationRef<f64> = app.create(AlwaysStoppedAnimation::new(1.0)).into_erased();
+        let driven = tween.clone().animate(&mut app, parent);
 
         assert_eq!(driven.value(&app), 1.0);
         tween.set_end(&mut app, Some(0.4));

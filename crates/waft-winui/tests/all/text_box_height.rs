@@ -43,7 +43,7 @@ impl Fixture {
         {
             let mut app = cell.borrow_mut();
             PaintingBinding::instance(&mut app).install_platform_fonts(&mut app);
-            let controller = TextEditingController::new(&mut app).as_controller();
+            let controller = TextEditingController::new(&mut app).into_erased();
             let text_box = wrap(TextBox::new(controller).accepts_return(true));
             // The overlay holds the focused editor's selection overlay.
             let home = Overlay::wrap(
@@ -64,10 +64,10 @@ impl Fixture {
         };
         fixture.pump();
         let node = fixture.find(|app, element| {
-            downcast_widget::<EditableText>(element.widget(app).as_ref()).map(|w| w.focus_node)
+            downcast_widget::<EditableText>(element.widget(app).as_ref())
+                .map(|w| w.focus_node.clone())
         });
-        node.as_node()
-            .request_focus(&mut fixture.cell.borrow_mut(), None);
+        node.request_focus(&mut fixture.cell.borrow_mut(), None);
         fixture.pump();
         fixture
     }

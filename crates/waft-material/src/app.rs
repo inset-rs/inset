@@ -15,18 +15,18 @@ use waft_embedder::{
     Brightness, Clip, Color, FontWeight, Locale, SystemUiOverlayStyle, TargetPlatform,
     TextDecoration, TextDecorationStyle,
 };
-use waft_foundation::{App, Handle};
+use waft_foundation::{App, Handle, Ref};
 use waft_painting::{Axis, TextStyle, axis_direction_to_axis};
 use waft_services::SystemChrome;
 use waft_widgets::{
-    AndroidOverscrollIndicator, AnyAction, AnyNavigatorObserver, AnyRoute, BuildContext, Builder,
-    DefaultSelectionStyle, GenerateAppTitle, GlobalKey, GlowingOverscrollIndicator, HeroController,
-    HeroControllerScope, InitialRouteListFactory, IntoWidget, KeyRef, LocaleListResolutionCallback,
+    ActionRef, AndroidOverscrollIndicator, BuildContext, Builder, DefaultSelectionStyle,
+    GenerateAppTitle, GlobalKey, GlowingOverscrollIndicator, HeroController, HeroControllerScope,
+    InitialRouteListFactory, IntoWidget, KeyRef, LocaleListResolutionCallback,
     LocaleResolutionCallback, LocalizationsDelegateRef, MediaQuery, NavigationNotification,
-    NotificationListenerCallback, PageRoute, RouteFactory, RouteSettings, RouteSettingsRef,
-    ScrollBehavior, ScrollBehaviorRef, ScrollConfiguration, ScrollableDetails, ShortcutMap,
-    SizedBox, State, StateData, StatefulWidget, StretchingOverscrollIndicator, TransitionBuilder,
-    View, WidgetBuilder, WidgetRef, WidgetsApp,
+    NavigatorObserverRef, NotificationListenerCallback, RouteFactory, RouteRef, RouteSettings,
+    RouteSettingsRef, ScrollBehavior, ScrollBehaviorRef, ScrollConfiguration, ScrollableDetails,
+    ShortcutMap, SizedBox, State, StateData, StatefulWidget, StretchingOverscrollIndicator,
+    TransitionBuilder, View, WidgetBuilder, WidgetRef, WidgetsApp,
 };
 
 use waft_cupertino::DefaultCupertinoLocalizations;
@@ -207,7 +207,7 @@ pub struct MaterialApp {
     pub on_navigation_notification: Option<NotificationListenerCallback<NavigationNotification>>,
 
     /// See [`WidgetsApp::navigator_observers`].
-    pub navigator_observers: Vec<AnyNavigatorObserver>,
+    pub navigator_observers: Vec<NavigatorObserverRef>,
 
     /// See [`WidgetsApp::builder`].
     ///
@@ -421,7 +421,7 @@ pub struct MaterialApp {
     pub shortcuts: Option<ShortcutMap>,
 
     /// See [`WidgetsApp::actions`].
-    pub actions: Option<HashMap<TypeId, AnyAction>>,
+    pub actions: Option<HashMap<TypeId, ActionRef>>,
 
     /// See [`WidgetsApp::restoration_scope_id`].
     pub restoration_scope_id: Option<String>,
@@ -570,7 +570,7 @@ impl MaterialApp {
     /// Dart `MaterialApp(onGenerateRoute:)`.
     pub fn on_generate_route(
         mut self,
-        on_generate_route: impl Fn(&mut App, &RouteSettings) -> Option<AnyRoute> + 'static,
+        on_generate_route: impl Fn(&mut App, &RouteSettings) -> Option<RouteRef> + 'static,
     ) -> MaterialApp {
         self.on_generate_route = Some(Rc::new(on_generate_route));
         self
@@ -579,7 +579,7 @@ impl MaterialApp {
     /// Dart `MaterialApp(onGenerateInitialRoutes:)`.
     pub fn on_generate_initial_routes(
         mut self,
-        on_generate_initial_routes: impl Fn(&mut App, &str) -> Vec<AnyRoute> + 'static,
+        on_generate_initial_routes: impl Fn(&mut App, &str) -> Vec<RouteRef> + 'static,
     ) -> MaterialApp {
         self.on_generate_initial_routes = Some(Rc::new(on_generate_initial_routes));
         self
@@ -588,7 +588,7 @@ impl MaterialApp {
     /// Dart `MaterialApp(onUnknownRoute:)`.
     pub fn on_unknown_route(
         mut self,
-        on_unknown_route: impl Fn(&mut App, &RouteSettings) -> Option<AnyRoute> + 'static,
+        on_unknown_route: impl Fn(&mut App, &RouteSettings) -> Option<RouteRef> + 'static,
     ) -> MaterialApp {
         self.on_unknown_route = Some(Rc::new(on_unknown_route));
         self
@@ -606,7 +606,7 @@ impl MaterialApp {
     /// Dart `MaterialApp(navigatorObservers:)`.
     pub fn navigator_observers(
         mut self,
-        navigator_observers: impl IntoIterator<Item = AnyNavigatorObserver>,
+        navigator_observers: impl IntoIterator<Item = NavigatorObserverRef>,
     ) -> MaterialApp {
         self.navigator_observers = navigator_observers.into_iter().collect();
         self
@@ -785,7 +785,7 @@ impl MaterialApp {
     }
 
     /// Dart `MaterialApp(actions:)`.
-    pub fn actions(mut self, actions: HashMap<TypeId, AnyAction>) -> MaterialApp {
+    pub fn actions(mut self, actions: HashMap<TypeId, ActionRef>) -> MaterialApp {
         self.actions = Some(actions);
         self
     }
@@ -817,7 +817,7 @@ impl MaterialApp {
     /// The [`HeroController`] used for Material page transitions.
     ///
     /// Used by the [`MaterialApp`].
-    pub fn create_material_hero_controller(app: &mut App) -> Handle<HeroController> {
+    pub fn create_material_hero_controller(app: &mut App) -> Ref<HeroController> {
         HeroController::new(app).create_rect_tween(
             app,
             Rc::new(|_app, begin, end| Rc::new(MaterialRectArcTween::new(begin, end))),
@@ -915,7 +915,7 @@ impl ScrollBehavior for MaterialScrollBehavior {
                 TargetPlatform::Linux | TargetPlatform::MacOS | TargetPlatform::Windows => {
                     debug_assert!(details.controller.is_some());
                     let mut scrollbar = Scrollbar::new(child);
-                    if let Some(controller) = details.controller {
+                    if let Some(controller) = details.controller.clone() {
                         scrollbar = scrollbar.controller(controller);
                     }
                     scrollbar.into_widget()
@@ -967,13 +967,14 @@ impl ScrollBehavior for MaterialScrollBehavior {
 /// Dart's `_MaterialAppState`.
 pub struct MaterialAppState {
     state: StateData<MaterialApp>,
-    hero_controller: Option<Handle<HeroController>>,
+    hero_controller: Option<Ref<HeroController>>,
 }
 
 impl MaterialAppState {
-    fn hero_controller(self: Handle<Self>, app: &App) -> Handle<HeroController> {
+    fn hero_controller(self: Handle<Self>, app: &App) -> Ref<HeroController> {
         app.get(self)
             .hero_controller
+            .clone()
             .expect("init_state creates the controller")
     }
 
@@ -1125,7 +1126,7 @@ impl MaterialAppState {
             .page_route_builder(|app, settings, builder| {
                 let route = MaterialPageRoute::new(app, builder)
                     .settings(app, RouteSettingsRef::Settings(settings.clone()));
-                PageRoute::as_page_route(route)
+                route.into_erased()
             })
             .routes(widget.routes.clone())
             .builder(move |app, context, child| self.material_builder(app, context, child))
@@ -1237,8 +1238,8 @@ mod tests {
         AnyElement, Center, CheckedModeBanner, FocusNodeLeaf, FocusScope, FocusScopeNode, ListView,
         Localizations, MediaQuery, MediaQueryData, Navigator, NavigatorState,
         NeverScrollableScrollPhysics, PageRouteBuilder, RouteResult, ScrollController,
-        ScrollControllerLeaf, ScrollPhysicsRef, ScrollViewKeyboardDismissBehavior, Text,
-        UnconstrainedBox, WidgetsBinding, WidgetsLocalizations, downcast_widget,
+        ScrollPhysicsRef, ScrollViewKeyboardDismissBehavior, Text, UnconstrainedBox,
+        WidgetsBinding, WidgetsLocalizations, downcast_widget,
     };
 
     use super::*;
@@ -2035,7 +2036,7 @@ mod tests {
                         Rc::new(move |_app, _context, _animation, _secondary| {
                             Text::new(text).into_widget()
                         });
-                    waft_widgets::Route::as_route(PageRouteBuilder::new(app, page_builder))
+                    PageRouteBuilder::new(app, page_builder).into_erased()
                 }
             };
             pump(&mut tester, |_| {
@@ -2083,7 +2084,7 @@ mod tests {
         let begin = Some(Rect::from_ltrb(0.0, 0.0, 10.0, 10.0));
         let end = Some(Rect::from_ltrb(0.0, 0.0, 20.0, 20.0));
         let create_rect_tween = app
-            .get(controller)
+            .get(&controller)
             .create_rect_tween
             .clone()
             .expect("the controller has a rect tween factory");
@@ -2514,8 +2515,9 @@ mod tests {
                 let mut tester = tester_on(platform);
                 let context = scroll_view_context(&mut tester, Axis::Vertical);
                 let mut app = tester.cell.borrow_mut();
-                let controller = ScrollController::default(&mut app).as_controller();
-                let details = ScrollableDetails::vertical(false).controller(controller);
+                let controller = ScrollController::default(&mut app)
+                    .into_erased::<waft_widgets::AnyScrollController>();
+                let details = ScrollableDetails::vertical(false).controller(controller.clone());
                 let child: WidgetRef = SizedBox::new().into_widget();
                 let built = MaterialScrollBehavior::new().build_scrollbar(
                     &mut app,
@@ -2741,12 +2743,12 @@ mod tests {
             tester.pump_widget(
                 FocusScope::new(MaterialApp::new().home(Text::new("Home")))
                     .autofocus(true)
-                    .node(focus_scope_node)
+                    .node(focus_scope_node.clone())
                     .into_widget(),
             );
 
             assert_eq!(tester.find_onstage_text("Home").len(), 1);
-            FocusNodeLeaf::dispose(focus_scope_node, &mut tester.cell.borrow_mut());
+            FocusNodeLeaf::dispose(focus_scope_node.handle(), &mut tester.cell.borrow_mut());
         });
     }
 

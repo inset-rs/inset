@@ -412,6 +412,7 @@ impl TableElement {
             forgotten_children: HashSet::new(),
             slots: HashMap::new(),
         })
+        .into_tree_node(app)
     }
 
     /// Dart's `_TableSlot(column, row)` as an element slot.
@@ -953,6 +954,9 @@ mod tests {
         assert_eq!((table.columns(&app), table.rows(&app)), (4, 2));
         assert_eq!(cell(&app, table, 0, 0), a1);
         assert_ne!(cell(&app, table, 2, 1), g1);
+        drop(app);
+        app_cell.checkpoint();
+        let app = app_cell.borrow();
         assert!(
             !app.contains(g1.as_object().id()),
             "the old cell left the tree"
@@ -1034,6 +1038,9 @@ mod tests {
             ),
         );
         assert_eq!(table.rows(&app), 1);
+        drop(app);
+        app_cell.checkpoint();
+        let app = app_cell.borrow();
         assert!(
             !app.contains(keyed_cell.as_object().id()),
             "the keyed row's cell left the tree"

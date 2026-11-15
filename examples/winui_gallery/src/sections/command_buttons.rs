@@ -1,7 +1,7 @@
 //! Split-button and menu examples with independent actions and retained menu settings.
 
 use crate::{Feature, column, example, row, section};
-use waft_foundation::{App, Handle, Listener};
+use waft_foundation::{App, Handle, Listener, OptionRetained, Ref};
 use waft_widgets::*;
 use waft_winui::*;
 
@@ -27,7 +27,7 @@ struct CommandDemoState {
     state: StateData<CommandDemo>,
 
     /// Persistent menu shared by this page's opening buttons.
-    menu: Option<Handle<MenuFlyout>>,
+    menu: Option<Ref<MenuFlyout>>,
 
     /// Current toggle-split value.
     checked: bool,
@@ -65,7 +65,7 @@ impl CommandDemoState {
     /// Rebuilds owner-managed toggle and radio values while the menu remains open.
     fn refresh_menu(self: Handle<Self>, app: &mut App) {
         let items = self.items(app);
-        app.get(self).menu.unwrap().items(app, items);
+        app.get(self).menu.handle().unwrap().items(app, items);
     }
 
     /// Commands, separators, disabled entries and nested collections in one menu.
@@ -121,12 +121,12 @@ impl State for CommandDemoState {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        app.get(self).menu.unwrap().dispose(app);
+        app.get(self).menu.handle().unwrap().dispose(app);
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
         let resources = ThemeResources::of(app, context);
-        let flyout = app.get(self).menu.unwrap().as_flyout(app);
+        let flyout = app.get(self).menu.clone().unwrap().as_flyout(app).clone();
         let checked = app.get(self).checked;
         let click = Listener::new(move |app| self.set_state(app, |state| state.activations += 1));
         let feature = self.widget(app).feature;
@@ -134,10 +134,10 @@ impl State for CommandDemoState {
             Feature::SplitButton => row(
                 vec![
                     SplitButton::text("Save", click)
-                        .flyout(flyout)
+                        .flyout(flyout.clone())
                         .into_widget(),
                     SplitButton::text("Disabled", Listener::new(|_| {}))
-                        .flyout(flyout)
+                        .flyout(flyout.clone())
                         .is_enabled(false)
                         .into_widget(),
                 ],
@@ -149,17 +149,17 @@ impl State for CommandDemoState {
                         self.set_state(app, |state| state.checked = value);
                     })
                     .click(click)
-                    .flyout(flyout)
+                    .flyout(flyout.clone())
                     .into_widget(),
                     ToggleSplitButton::text("Disabled", true, |_, _| {})
-                        .flyout(flyout)
+                        .flyout(flyout.clone())
                         .is_enabled(false)
                         .into_widget(),
                 ],
                 16.0,
             ),
             _ => DropDownButton::text("Commands")
-                .flyout(flyout)
+                .flyout(flyout.clone())
                 .into_widget(),
         };
         let description = if feature == Feature::MenuFlyout {

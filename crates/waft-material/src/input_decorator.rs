@@ -13,14 +13,15 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use waft_animation::{
-    Animatable, Animation, AnimationBehavior, AnimationController, AnimationWithParent,
-    AnyAnimation, ColorTween, Curve, CurvedAnimation, Curves, Tween,
+    Animatable, Animation, AnimationBehavior, AnimationController, AnimationRef,
+    AnimationWithParent, ColorTween, Curve, CurvedAnimation, Curves, Drive, Tween,
 };
 use waft_embedder::{
     Brightness, Canvas, Color, Matrix4, Offset, Paint, PaintStyle, Size, TextBaseline, lerp_double,
 };
 use waft_foundation::{
     App, ChangeNotifier, ChangeNotifierData, Handle, Listenable, Listener, MergingListenable,
+    OptionRetained, Ref,
 };
 use waft_painting::{
     AnyBorderSide, AnyColor, AnyTextStyle, BorderSide, EdgeInsets, EdgeInsetsDirectional,
@@ -104,7 +105,7 @@ struct InputBorderGap {
 }
 
 impl InputBorderGap {
-    fn new(app: &mut App) -> Handle<InputBorderGap> {
+    fn new(app: &mut App) -> Ref<InputBorderGap> {
         app.create(InputBorderGap {
             change_notifier: ChangeNotifierData::default(),
             start: None,
@@ -198,21 +199,21 @@ impl Animatable<Box<dyn InputBorder>> for InputBorderTween {
 // Passes the _InputBorderGap parameters along to an InputBorder's paint method.
 struct InputBorderPainter {
     repaint: Rc<dyn Listenable>,
-    border_animation: AnyAnimation<f64>,
+    border_animation: AnimationRef<f64>,
     border: Rc<InputBorderTween>,
-    gap_animation: AnyAnimation<f64>,
-    gap: Handle<InputBorderGap>,
+    gap_animation: AnimationRef<f64>,
+    gap: Ref<InputBorderGap>,
     text_direction: TextDirection,
     fill_color: Color,
-    hover_color_tween: Handle<ColorTween>,
-    hover_animation: AnyAnimation<f64>,
+    hover_color_tween: Ref<ColorTween>,
+    hover_animation: AnimationRef<f64>,
 }
 
 impl InputBorderPainter {
     fn blended_color(&self, app: &App) -> Color {
         Color::alpha_blend(
             self.hover_color_tween
-                .evaluate(app, self.hover_animation)
+                .evaluate(app, self.hover_animation.handle())
                 .expect("both colours are given"),
             self.fill_color,
         )
@@ -225,7 +226,7 @@ impl CustomPainter for InputBorderPainter {
     }
 
     fn paint(&self, app: &mut App, canvas: &mut Canvas, size: Size) {
-        let border_value = self.border.evaluate(app, self.border_animation);
+        let border_value = self.border.evaluate(app, self.border_animation.handle());
         let canvas_rect = Offset::ZERO & size;
         let blended_fill_color = self.blended_color(app);
         // Dart's `alpha`, deprecated there too.
@@ -286,8 +287,8 @@ impl Debug for InputBorderPainter {
 #[derive(Debug)]
 struct BorderContainer {
     border: Box<dyn InputBorder>,
-    gap: Handle<InputBorderGap>,
-    gap_animation: AnyAnimation<f64>,
+    gap: Ref<InputBorderGap>,
+    gap_animation: AnimationRef<f64>,
     fill_color: Color,
     hover_color: Color,
     is_hovering: bool,
@@ -319,48 +320,55 @@ impl StatefulWidget for BorderContainer {
 struct BorderContainerState {
     state: StateData<BorderContainer>,
     ticker_provider: TickerProviderStateMixinData,
-    controller: Option<Handle<AnimationController>>,
-    hover_color_controller: Option<Handle<AnimationController>>,
-    border_animation: Option<Handle<CurvedAnimation>>,
+    controller: Option<Ref<AnimationController>>,
+    hover_color_controller: Option<Ref<AnimationController>>,
+    border_animation: Option<Ref<CurvedAnimation>>,
     border: Option<Rc<InputBorderTween>>,
-    hover_animation: Option<Handle<CurvedAnimation>>,
-    hover_color_tween: Option<Handle<ColorTween>>,
+    hover_animation: Option<Ref<CurvedAnimation>>,
+    hover_color_tween: Option<Ref<ColorTween>>,
 }
 
 impl BorderContainerState {
     const K_HOVER_DURATION: Duration = Duration::from_millis(15);
 
-    fn controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
-        app.get(self).controller.expect("created in init_state")
+    fn controller(self: Handle<Self>, app: &App) -> Ref<AnimationController> {
+        app.get(self)
+            .controller
+            .clone()
+            .expect("created in init_state")
     }
 
-    fn hover_color_controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
+    fn hover_color_controller(self: Handle<Self>, app: &App) -> Ref<AnimationController> {
         app.get(self)
             .hover_color_controller
+            .clone()
             .expect("created in init_state")
     }
 
-    fn border_animation(self: Handle<Self>, app: &App) -> Handle<CurvedAnimation> {
+    fn border_animation(self: Handle<Self>, app: &App) -> Ref<CurvedAnimation> {
         app.get(self)
             .border_animation
+            .clone()
             .expect("created in init_state")
     }
 
-    fn hover_animation(self: Handle<Self>, app: &App) -> Handle<CurvedAnimation> {
+    fn hover_animation(self: Handle<Self>, app: &App) -> Ref<CurvedAnimation> {
         app.get(self)
             .hover_animation
+            .clone()
             .expect("created in init_state")
     }
 
-    fn hover_color_tween(self: Handle<Self>, app: &App) -> Handle<ColorTween> {
+    fn hover_color_tween(self: Handle<Self>, app: &App) -> Ref<ColorTween> {
         app.get(self)
             .hover_color_tween
+            .clone()
             .expect("created in init_state")
     }
 
     /// Dart's `ColorTween(begin: hoverColor.withAlpha(0), end: hoverColor)`: animate between
     /// transparent [`BorderContainer::hover_color`] and [`BorderContainer::hover_color`].
-    fn new_hover_color_tween(app: &mut App, hover_color: Color) -> Handle<ColorTween> {
+    fn new_hover_color_tween(app: &mut App, hover_color: Color) -> Ref<ColorTween> {
         ColorTween::new(app, Some(hover_color.with_alpha(0)), Some(hover_color))
     }
 }
@@ -380,7 +388,7 @@ impl TickerProviderStateMixin for BorderContainerState {
 
 /// Dart's `vsync: this`.
 impl TickerProviderObject for BorderContainerState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         TickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -416,13 +424,13 @@ impl State for BorderContainerState {
         );
         let border_animation = CurvedAnimation::create(
             app,
-            controller.view(),
+            controller.erase(),
             k_transition_curve(),
             Some(Rc::new(k_transition_curve().flipped())),
         );
         let border_tween = Rc::new(InputBorderTween::new(border.clone(), border));
         let hover_animation =
-            CurvedAnimation::create(app, hover_color_controller.view(), Curves::linear(), None);
+            CurvedAnimation::create(app, hover_color_controller.erase(), Curves::linear(), None);
 
         // Animate between transparent [widget.hoverColor] and [widget.hoverColor].
         let hover_color_tween = BorderContainerState::new_hover_color_tween(app, hover_color);
@@ -444,23 +452,11 @@ impl State for BorderContainerState {
         let hover_color_controller = self.hover_color_controller(app);
         let border_animation = self.border_animation(app);
         let hover_animation = self.hover_animation(app);
-        let hover_color_tween = self.hover_color_tween(app);
         controller.dispose(app);
         hover_color_controller.dispose(app);
         border_animation.dispose(app);
         hover_animation.dispose(app);
         TickerProviderStateMixin::dispose(self, app);
-        let state = app.get_mut(self);
-        state.controller = None;
-        state.hover_color_controller = None;
-        state.border_animation = None;
-        state.hover_animation = None;
-        state.hover_color_tween = None;
-        app.destroy(border_animation);
-        app.destroy(hover_animation);
-        app.destroy(controller);
-        app.destroy(hover_color_controller);
-        app.destroy(hover_color_tween);
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &BorderContainer) {
@@ -479,10 +475,8 @@ impl State for BorderContainerState {
         }
         if hover_color != old_widget.hover_color {
             // Animate between transparent [widget.hoverColor] and [widget.hoverColor].
-            let old_tween = self.hover_color_tween(app);
             let hover_color_tween = BorderContainerState::new_hover_color_tween(app, hover_color);
             app.get_mut(self).hover_color_tween = Some(hover_color_tween);
-            app.destroy(old_tween);
         }
         if is_hovering != old_widget.is_hovering {
             let hover_color_controller = self.hover_color_controller(app);
@@ -495,19 +489,19 @@ impl State for BorderContainerState {
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
-        let border_animation = self.border_animation(app).as_animation();
+        let border_animation: AnimationRef<f64> = self.border_animation(app).erase();
         let hover_color_controller = self.hover_color_controller(app);
         let widget = self.widget(app);
-        let gap = widget.gap;
-        let gap_animation = widget.gap_animation;
+        let gap = widget.gap.clone();
+        let gap_animation = widget.gap_animation.clone();
         let fill_color = widget.fill_color;
         let border = app.get(self).border.clone().expect("created in init_state");
         let hover_color_tween = self.hover_color_tween(app);
-        let hover_animation = self.hover_animation(app).as_animation();
+        let hover_animation: AnimationRef<f64> = self.hover_animation(app).erase();
         let text_direction = Directionality::of(app, context);
         let repaint: Rc<dyn Listenable> = Rc::new(MergingListenable::new(vec![
-            Some(Rc::new(border_animation) as Rc<dyn Listenable>),
-            Some(Rc::new(gap) as Rc<dyn Listenable>),
+            Some(Rc::new(border_animation.clone()) as Rc<dyn Listenable>),
+            Some(Rc::new(gap.clone()) as Rc<dyn Listenable>),
             Some(Rc::new(hover_color_controller) as Rc<dyn Listenable>),
         ]));
         CustomPaint::new()
@@ -564,8 +558,6 @@ impl StatefulWidget for HelperError {
             controller: None,
             helper: None,
             error: None,
-            fade_out_tween: None,
-            fade_out: None,
         }
     }
 }
@@ -575,23 +567,24 @@ struct HelperErrorState {
     state: StateData<HelperError>,
     single_ticker_provider: SingleTickerProviderStateMixinData,
     /// Created in `init_state`, because an arena object needs the [`App`].
-    controller: Option<Handle<AnimationController>>,
+    controller: Option<Ref<AnimationController>>,
     helper: Option<WidgetRef>,
     error: Option<WidgetRef>,
-    /// Dart's `Tween<double>(begin: 1.0, end: 0.0).animate(_controller)`, which `_buildHelper`
-    /// and `build` make anew each time; made once here, as the arena has no collector to free
-    /// one per build.
-    fade_out_tween: Option<Handle<Tween<f64>>>,
-    fade_out: Option<AnyAnimation<f64>>,
 }
 
 impl HelperErrorState {
-    fn controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
-        app.get(self).controller.expect("created in init_state")
+    fn controller(self: Handle<Self>, app: &App) -> Ref<AnimationController> {
+        app.get(self)
+            .controller
+            .clone()
+            .expect("created in init_state")
     }
 
-    fn fade_out(self: Handle<Self>, app: &App) -> AnyAnimation<f64> {
-        app.get(self).fade_out.expect("created in init_state")
+    /// Dart's `Tween<double>(begin: 1.0, end: 0.0).animate(_controller)`.
+    fn fade_out(self: Handle<Self>, app: &mut App) -> AnimationRef<f64> {
+        let controller = self.controller(app);
+        let tween = Tween::new(app, Some(1.0), Some(0.0));
+        controller.drive(app, tween)
     }
 
     fn has_helper(self: Handle<Self>, app: &App) -> bool {
@@ -683,7 +676,7 @@ impl HelperErrorState {
             // .evaluate(_controller.view)`.
             let begin = Offset::new(0.0, -0.25);
             let translation = begin + (Offset::ZERO - begin) * controller.value(app);
-            FadeTransition::new(controller.view())
+            FadeTransition::new(controller.erase())
                 .child(FractionalTranslation::new(translation).child(child))
                 .into_widget()
         })
@@ -709,7 +702,7 @@ impl SingleTickerProviderStateMixin for HelperErrorState {
 
 /// Dart's `vsync: this`.
 impl TickerProviderObject for HelperErrorState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -729,14 +722,7 @@ impl State for HelperErrorState {
             AnimationBehavior::Normal,
             self,
         );
-        let fade_out_tween = Tween::new(app, Some(1.0), Some(0.0));
-        let fade_out = controller.drive(app, fade_out_tween);
-        {
-            let state = app.get_mut(self);
-            state.controller = Some(controller);
-            state.fade_out_tween = Some(fade_out_tween);
-            state.fade_out = Some(fade_out);
-        }
+        app.get_mut(self).controller = Some(controller.clone());
         if self.has_error(app) {
             let error = self.build_error(app);
             app.get_mut(self).error = Some(error);
@@ -756,17 +742,6 @@ impl State for HelperErrorState {
         let controller = self.controller(app);
         controller.dispose(app);
         SingleTickerProviderStateMixin::dispose(self, app);
-        let state = app.get_mut(self);
-        state.controller = None;
-        let fade_out = state.fade_out.take();
-        let fade_out_tween = state.fade_out_tween.take();
-        app.destroy(controller);
-        if let Some(fade_out) = fade_out {
-            app.destroy(fade_out.id());
-        }
-        if let Some(fade_out_tween) = fade_out_tween {
-            app.destroy(fade_out_tween);
-        }
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old: &HelperError) {
@@ -857,7 +832,7 @@ impl State for HelperErrorState {
 
         if self.has_helper(app) {
             let helper = self.build_helper(app);
-            let mut error_transition = FadeTransition::new(controller.view());
+            let mut error_transition = FadeTransition::new(controller.erase());
             if let Some(error) = app.get(self).error.clone() {
                 error_transition = error_transition.child(error);
             }
@@ -997,7 +972,7 @@ struct Decoration {
     floating_label_progress: f64,
     floating_label_alignment: FloatingLabelAlignment,
     border: Box<dyn InputBorder>,
-    border_gap: Handle<InputBorderGap>,
+    border_gap: Ref<InputBorderGap>,
     align_label_with_hint: bool,
     is_dense: Option<bool>,
     is_empty: bool,
@@ -2900,7 +2875,6 @@ impl StatefulWidget for InputDecorator {
             border_gap: None,
             effective_decoration: None,
             curved_animation: None,
-            retired_curved_animations: Vec::new(),
         }
     }
 }
@@ -2927,37 +2901,41 @@ impl Debug for InputDecorator {
 pub struct InputDecoratorState {
     state: StateData<InputDecorator>,
     ticker_provider: TickerProviderStateMixinData,
-    floating_label_controller: Option<Handle<AnimationController>>,
-    floating_label_animation: Option<Handle<CurvedAnimation>>,
-    shaking_label_controller: Option<Handle<AnimationController>>,
-    border_gap: Option<Handle<InputBorderGap>>,
+    floating_label_controller: Option<Ref<AnimationController>>,
+    floating_label_animation: Option<Ref<CurvedAnimation>>,
+    shaking_label_controller: Option<Ref<AnimationController>>,
+    border_gap: Option<Ref<InputBorderGap>>,
     effective_decoration: Option<InputDecoration>,
-    curved_animation: Option<Handle<CurvedAnimation>>,
-    /// The curved animations `build_transition` replaced, freed with the state.
-    retired_curved_animations: Vec<Handle<CurvedAnimation>>,
+    curved_animation: Option<Ref<CurvedAnimation>>,
 }
 
 impl InputDecoratorState {
-    fn floating_label_controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
+    fn floating_label_controller(self: Handle<Self>, app: &App) -> Ref<AnimationController> {
         app.get(self)
             .floating_label_controller
+            .clone()
             .expect("created in init_state")
     }
 
-    fn floating_label_animation(self: Handle<Self>, app: &App) -> Handle<CurvedAnimation> {
+    fn floating_label_animation(self: Handle<Self>, app: &App) -> Ref<CurvedAnimation> {
         app.get(self)
             .floating_label_animation
+            .clone()
             .expect("created in init_state")
     }
 
-    fn shaking_label_controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
+    fn shaking_label_controller(self: Handle<Self>, app: &App) -> Ref<AnimationController> {
         app.get(self)
             .shaking_label_controller
+            .clone()
             .expect("created in init_state")
     }
 
-    fn border_gap(self: Handle<Self>, app: &App) -> Handle<InputBorderGap> {
-        app.get(self).border_gap.expect("created in init_state")
+    fn border_gap(self: Handle<Self>, app: &App) -> Ref<InputBorderGap> {
+        app.get(self)
+            .border_gap
+            .clone()
+            .expect("created in init_state")
     }
 
     fn handle_change(self: Handle<Self>, app: &mut App) {
@@ -3441,22 +3419,19 @@ impl InputDecoratorState {
         self: Handle<Self>,
         app: &mut App,
         child: &WidgetRef,
-        animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
     ) -> WidgetRef {
-        let current = app.get(self).curved_animation;
-        if current.is_none_or(|curved| curved.parent(app) != animation) {
+        let current = app.get(self).curved_animation.handle();
+        if current.is_none_or(|curved| curved.parent(app) != animation.handle()) {
             if let Some(curved) = current {
                 curved.dispose(app);
-                // The outgoing hint's FadeTransition still reads it until the switcher drops
-                // that hint, which Dart's collector waits for.
-                app.get_mut(self).retired_curved_animations.push(curved);
             }
             let curved = CurvedAnimation::create(app, animation, k_transition_curve(), None);
             app.get_mut(self).curved_animation = Some(curved);
         }
 
-        let curved = app.get(self).curved_animation.expect("made above");
-        FadeTransition::new(curved.as_animation())
+        let curved = app.get(self).curved_animation.clone().expect("made above");
+        FadeTransition::new(curved.erase())
             .child(child.clone())
             .into_widget()
     }
@@ -3492,7 +3467,7 @@ impl TickerProviderStateMixin for InputDecoratorState {
 
 /// Dart's `vsync: this`.
 impl TickerProviderObject for InputDecoratorState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         TickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -3519,7 +3494,7 @@ impl State for InputDecoratorState {
             .add_listener(app, Listener::handle_method(self, Self::handle_change));
         let floating_label_animation = CurvedAnimation::create(
             app,
-            floating_label_controller.view(),
+            floating_label_controller.erase(),
             k_transition_curve(),
             Some(Rc::new(k_transition_curve().flipped())),
         );
@@ -3566,32 +3541,17 @@ impl State for InputDecoratorState {
         let floating_label_animation = self.floating_label_animation(app);
         let shaking_label_controller = self.shaking_label_controller(app);
         let border_gap = self.border_gap(app);
-        let curved_animation = app.get(self).curved_animation;
+        let curved_animation = app.get(self).curved_animation.handle();
         floating_label_controller.dispose(app);
         floating_label_animation.dispose(app);
         shaking_label_controller.dispose(app);
-        app.get_mut(border_gap).change_notifier_data_mut().dispose();
+        app.get_mut(&border_gap)
+            .change_notifier_data_mut()
+            .dispose();
         if let Some(curved_animation) = curved_animation {
             curved_animation.dispose(app);
         }
         TickerProviderStateMixin::dispose(self, app);
-        let state = app.get_mut(self);
-        state.floating_label_controller = None;
-        state.floating_label_animation = None;
-        state.shaking_label_controller = None;
-        state.border_gap = None;
-        state.curved_animation = None;
-        let retired_curved_animations = std::mem::take(&mut state.retired_curved_animations);
-        app.destroy(floating_label_animation);
-        app.destroy(floating_label_controller);
-        app.destroy(shaking_label_controller);
-        app.destroy(border_gap);
-        if let Some(curved_animation) = curved_animation {
-            app.destroy(curved_animation);
-        }
-        for retired in retired_curved_animations {
-            app.destroy(retired);
-        }
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old: &InputDecorator) {
@@ -3732,7 +3692,7 @@ impl State for InputDecoratorState {
         let container = BorderContainer {
             border: border.clone(),
             gap: self.border_gap(app),
-            gap_animation: self.floating_label_animation(app).as_animation(),
+            gap_animation: self.floating_label_animation(app).erase(),
             fill_color,
             hover_color,
             is_hovering,
@@ -3766,7 +3726,7 @@ impl State for InputDecoratorState {
             });
             let shaking_label_controller = self.shaking_label_controller(app);
             label = Some(
-                MatrixTransition::new(shaking_label_controller.view(), |value: f64| {
+                MatrixTransition::new(shaking_label_controller.erase(), |value: f64| {
                     let shake_offset = if value <= 0.25 {
                         -value
                     } else if value < 0.75 {
@@ -8947,7 +8907,9 @@ mod tests {
         pub(super) fn get_border(tester: &WidgetTester) -> Option<Box<dyn InputBorder>> {
             find_border_painter(tester)?;
             Some(with_border_painter(tester, |app, painter| {
-                painter.border.evaluate(app, painter.border_animation)
+                painter
+                    .border
+                    .evaluate(app, painter.border_animation.handle())
             }))
         }
 
@@ -11498,7 +11460,7 @@ mod tests {
                     downcast_widget::<FadeTransition>(&**element.widget(&app)).is_some()
                 })
                 .expect("a FadeTransition above the hint");
-            let opacity = tester.widget(fade, |fade: &FadeTransition| fade.opacity);
+            let opacity = tester.widget(fade, |fade: &FadeTransition| fade.opacity.clone());
             let app = tester.cell.borrow();
             opacity.value(&app)
         }
@@ -14467,7 +14429,7 @@ mod tests {
                     downcast_widget::<FadeTransition>(&**element.widget(&app)).is_some()
                 })
                 .expect("a FadeTransition above the hint");
-            let opacity = tester.widget(fade, |fade: &FadeTransition| fade.opacity);
+            let opacity = tester.widget(fade, |fade: &FadeTransition| fade.opacity.clone());
             opacity.value(&tester.cell.borrow())
         }
 
@@ -14997,7 +14959,7 @@ mod tests {
                         .is_some()
                 })
                 .expect("a FadeTransition above the text");
-            let opacity = tester.widget(fade, |fade: &FadeTransition| fade.opacity);
+            let opacity = tester.widget(fade, |fade: &FadeTransition| fade.opacity.clone());
             opacity.value(&tester.cell.borrow())
         }
 
@@ -17525,7 +17487,7 @@ mod tests {
                     downcast_widget::<FadeTransition>(&**ancestor.widget(&app)).is_some()
                 })
                 .expect("a FadeTransition above the text");
-            let opacity = tester.widget(fade, |fade: &FadeTransition| fade.opacity);
+            let opacity = tester.widget(fade, |fade: &FadeTransition| fade.opacity.clone());
             opacity.value(&tester.cell.borrow())
         }
 

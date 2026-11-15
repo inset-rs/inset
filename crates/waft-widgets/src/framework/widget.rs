@@ -1101,7 +1101,8 @@ impl Debug for GlobalObjectKeyValue {
 ///  * The discussion at `Widget.key` for more information about how widgets use keys.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ObjectKey {
-    /// The object whose identity is used by this key's `==`.
+    /// The object whose identity is used by this key's `==`. The key names it without keeping
+    /// it.
     pub value: Option<HandleId>,
 }
 

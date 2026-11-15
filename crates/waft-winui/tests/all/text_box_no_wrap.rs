@@ -50,7 +50,7 @@ impl Fixture {
         {
             let mut app = cell.borrow_mut();
             PaintingBinding::instance(&mut app).install_platform_fonts(&mut app);
-            let controller = TextEditingController::new(&mut app).as_controller();
+            let controller = TextEditingController::new(&mut app).into_erased();
             let text_box = TextBox::new(controller)
                 .key(key.clone().into())
                 .accepts_return(true)
@@ -94,10 +94,10 @@ impl Fixture {
 
     fn focus(&mut self) {
         let node = self.find(|app, element| {
-            downcast_widget::<EditableText>(element.widget(app).as_ref()).map(|w| w.focus_node)
+            downcast_widget::<EditableText>(element.widget(app).as_ref())
+                .map(|w| w.focus_node.clone())
         });
-        node.as_node()
-            .request_focus(&mut self.cell.borrow_mut(), None);
+        node.request_focus(&mut self.cell.borrow_mut(), None);
         self.pump();
     }
 
@@ -268,7 +268,11 @@ fn a_short_text_fills_the_box_and_a_tap_anywhere_lands_in_it() {
     f.pump();
     assert!(
         {
-            let node = f.editable_state().widget(&f.cell.borrow()).focus_node;
+            let node = f
+                .editable_state()
+                .widget(&f.cell.borrow())
+                .focus_node
+                .clone();
             node.has_focus(&mut f.cell.borrow_mut())
         },
         "a tap at the box's right edge focuses it"

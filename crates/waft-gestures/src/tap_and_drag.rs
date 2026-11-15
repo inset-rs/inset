@@ -29,6 +29,7 @@ use crate::recognizer::{
 };
 use crate::team::GestureArenaTeam;
 use crate::velocity::Velocity;
+use waft_foundation::Ref;
 
 /// The possible states of a [`BaseTapAndDragGestureRecognizer`].
 ///
@@ -1876,7 +1877,7 @@ macro_rules! tap_and_drag_gesture_recognizer_leaf {
     ($name:ident, $description:literal) => {
         impl $name {
             /// Create a gesture recognizer.
-            pub fn new(app: &mut App) -> Handle<$name> {
+            pub fn new(app: &mut App) -> Ref<$name> {
                 app.create($name {
                     recognizer: GestureRecognizerData::new(),
                     one_sequence: OneSequenceData::new(),
@@ -1936,11 +1937,11 @@ macro_rules! tap_and_drag_gesture_recognizer_leaf {
 
             /// The team that this recognizer belongs to, if any.
             pub fn team(self: Handle<Self>, app: &App) -> Option<Handle<GestureArenaTeam>> {
-                app.get(self).one_sequence.team
+                app.get(self).one_sequence.team.as_deref().copied()
             }
 
             /// The [`team`](Self::team) can only be set once.
-            pub fn set_team(self: Handle<Self>, app: &mut App, value: Handle<GestureArenaTeam>) {
+            pub fn set_team(self: Handle<Self>, app: &mut App, value: Ref<GestureArenaTeam>) {
                 debug_assert!(app.get(self).one_sequence.entries.is_empty());
                 debug_assert!(app.get(self).one_sequence.tracked_pointers.is_empty());
                 debug_assert!(app.get(self).one_sequence.team.is_none());
@@ -2374,7 +2375,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let tap_and_drag = TapAndPanGestureRecognizer::new(&mut app);
         let events = Rc::new(RefCell::new(Vec::new()));
-        wire_pan(tap_and_drag, &mut app, &events);
+        wire_pan(*tap_and_drag, &mut app, &events);
 
         let down1 = down(1, Offset::new(10.0, 10.0));
         let up1 = up(1, Offset::new(11.0, 9.0));
@@ -2407,7 +2408,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let tap_and_drag = TapAndPanGestureRecognizer::new(&mut app);
         let events = Rc::new(RefCell::new(Vec::new()));
-        wire_pan(tap_and_drag, &mut app, &events);
+        wire_pan(*tap_and_drag, &mut app, &events);
 
         let down1 = down(1, Offset::new(10.0, 10.0));
         let up1 = up(1, Offset::new(11.0, 9.0));
@@ -2440,7 +2441,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let tap_and_drag = TapAndPanGestureRecognizer::new(&mut app);
         let events = Rc::new(RefCell::new(Vec::new()));
-        wire_pan(tap_and_drag, &mut app, &events);
+        wire_pan(*tap_and_drag, &mut app, &events);
 
         let mut pointer = TestPointer::new(5);
         let down_event = pointer.down(Offset::new(10.0, 10.0));
@@ -2467,7 +2468,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let tap_and_drag = TapAndHorizontalDragGestureRecognizer::new(&mut app);
         let events = Rc::new(RefCell::new(Vec::new()));
-        wire_horizontal(tap_and_drag, &mut app, &events);
+        wire_horizontal(*tap_and_drag, &mut app, &events);
 
         let vertical = VerticalDragGestureRecognizer::new(&mut app);
         let vertical_events = Rc::clone(&events);
@@ -2526,6 +2527,6 @@ mod tests {
         );
 
         tap_and_drag.dispose(&mut app);
-        DragGestureRecognizer::dispose(vertical, &mut app);
+        DragGestureRecognizer::dispose(*vertical, &mut app);
     }
 }

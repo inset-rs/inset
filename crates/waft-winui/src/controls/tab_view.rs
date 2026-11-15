@@ -18,7 +18,7 @@ use std::{
 };
 use waft_animation::Curves;
 use waft_embedder::{FontWeight, TextDirection};
-use waft_foundation::{App, Handle, Listenable, Listener, ValueKey};
+use waft_foundation::{App, Handle, Listenable, Listener, OptionRetained, Ref, ValueKey};
 use waft_painting::{Alignment, Axis, EdgeInsetsGeometry};
 use waft_rendering::{BoxConstraints, StackFit};
 use waft_scheduler::{FrameCallback, SchedulerBinding};
@@ -234,13 +234,13 @@ struct TabContainer {
     key: GlobalKey,
 
     /// Owns keyboard focus for the header surface.
-    tab_focus: AnyFocusNode,
+    tab_focus: FocusNodeRef,
 
     /// Owns keyboard focus for the close button.
-    close_focus: AnyFocusNode,
+    close_focus: FocusNodeRef,
 
     /// Retains traversal history for this tab’s page.
-    content_focus: Handle<FocusScopeNode>,
+    content_focus: Ref<FocusScopeNode>,
 }
 
 impl TabContainer {
@@ -250,8 +250,8 @@ impl TabContainer {
         content_focus.set_traversal_edge_behavior(app, TraversalEdgeBehavior::ParentScope);
         Self {
             key: GlobalKey::labeled(format!("Tab {id}")),
-            tab_focus: FocusNode::new(app).as_node(),
-            close_focus: FocusNode::new(app).as_node(),
+            tab_focus: FocusNode::new(app).into_erased(),
+            close_focus: FocusNode::new(app).into_erased(),
             content_focus,
         }
     }
@@ -259,12 +259,11 @@ impl TabContainer {
     /// Releases caller-owned focus nodes after their widgets have detached.
     fn dispose(self, app: &mut App) {
         for node in [
-            self.tab_focus,
-            self.close_focus,
+            self.tab_focus.handle(),
+            self.close_focus.handle(),
             self.content_focus.as_node(),
         ] {
             node.dispose(app);
-            app.destroy(node.id());
         }
     }
 }
@@ -281,13 +280,13 @@ pub struct TabViewState {
     visited: HashSet<String>,
 
     /// Controller for the native horizontal list viewport.
-    scroll: Option<Handle<ScrollViewportController>>,
+    scroll: Option<Ref<ScrollViewportController>>,
 
     /// Updates scroll-button state when the viewport moves.
     scroll_listener: Option<Listener>,
 
     /// Owned focus node for the add-tab button.
-    add_focus: Option<AnyFocusNode>,
+    add_focus: Option<FocusNodeRef>,
 
     /// Stable identity of the currently hovered tab.
     hovered: Option<String>,
@@ -506,10 +505,10 @@ impl TabViewState {
                     });
                     if let Some(index) = next {
                         let id = self.widget(app).tab_items[index].id.clone();
-                        let focus = app.get(self).containers[&id].tab_focus;
+                        let focus = app.get(self).containers[&id].tab_focus.handle();
                         self.bring_tab_into_view(app, index, Some(focus));
                     } else if self.widget(app).is_add_tab_button_visible
-                        && let Some(focus) = app.get(self).add_focus
+                        && let Some(focus) = app.get(self).add_focus.handle()
                     {
                         focus.request_focus(app, None);
                     }
@@ -560,18 +559,18 @@ impl TabViewState {
             .filter(|(_, item)| item.is_enabled && item.is_visible)
         {
             let container = app.get(self).containers[&item.id].clone();
-            order.push((Some(index), container.tab_focus));
+            order.push((Some(index), container.tab_focus.handle()));
             let show_close = item.is_closable
                 && (widget.close_button_overlay_mode
                     != TabViewCloseButtonOverlayMode::OnPointerOver
                     || widget.selected_index == Some(index)
                     || app.get(self).hovered.as_ref() == Some(&item.id));
             if show_close {
-                order.push((Some(index), container.close_focus));
+                order.push((Some(index), container.close_focus.handle()));
             }
         }
         if widget.is_add_tab_button_visible {
-            order.push((None, app.get(self).add_focus.unwrap()));
+            order.push((None, app.get(self).add_focus.handle().unwrap()));
         }
         let Some(primary) = primary_focus(app) else {
             return false;
@@ -720,7 +719,7 @@ impl TabViewState {
                     .filter(|item| item.is_visible)
                     .map(|item| widths.get(&item.id).copied().unwrap_or(estimate))
                     .sum::<f64>();
-                let scroll = app.get(self).scroll.unwrap();
+                let scroll = app.get(self).scroll.clone().unwrap();
                 let moved = scroll.change_view(app, target, true);
                 if moved && attempt < self.widget(app).tab_items.len() {
                     self.bring_step(app, index, focus, epoch, attempt + 1);
@@ -742,9 +741,9 @@ impl State for TabViewState {
             }
         });
         scroll.add_listener(app, listener.clone());
-        app.get_mut(self).scroll = Some(scroll);
+        app.get_mut(self).scroll = Some(scroll.clone());
         app.get_mut(self).scroll_listener = Some(listener);
-        app.get_mut(self).add_focus = Some(FocusNode::new(app).as_node());
+        app.get_mut(self).add_focus = Some(FocusNode::new(app).into_erased());
         self.sync_items(app);
         if let Some(index) = self.selected_index(app) {
             self.bring_tab_into_view(app, index, None);
@@ -872,18 +871,16 @@ impl State for TabViewState {
 
     fn dispose(self: Handle<Self>, app: &mut App) {
         self.dispose_drag(app);
-        let scroll = app.get(self).scroll.unwrap();
+        let scroll = app.get(self).scroll.clone().unwrap();
         if let Some(listener) = app.get_mut(self).scroll_listener.take() {
             scroll.remove_listener(app, &listener);
         }
         scroll.dispose(app);
-        app.destroy(scroll);
         for (_, container) in std::mem::take(&mut app.get_mut(self).containers) {
             container.dispose(app);
         }
         if let Some(node) = app.get_mut(self).add_focus.take() {
             node.dispose(app);
-            app.destroy(node.id());
         }
     }
 
@@ -957,7 +954,7 @@ impl TabViewState {
                 + 8.0
         };
         let strip_width = required.min(available);
-        let scroll = app.get(self).scroll.unwrap();
+        let scroll = app.get(self).scroll.clone().unwrap();
         let show_scroll = if equal {
             required > available
         } else {
@@ -999,8 +996,8 @@ impl TabViewState {
                 close_overlay_mode: source.close_button_overlay_mode,
                 bottom_border: bottom,
                 separator_visible,
-                focus_node: container.tab_focus,
-                close_focus_node: container.close_focus,
+                focus_node: container.tab_focus.clone(),
+                close_focus_node: container.close_focus.clone(),
                 select: Listener::new(move |app| self.select(app, index)),
                 close: Listener::new(move |app| self.request_close(app, index)),
                 hover_changed: Rc::new(move |app, hovered| {
@@ -1145,7 +1142,7 @@ impl TabViewState {
                     .font_size(theme.tab_view_item_add_button_font_size),
                 click,
             )
-            .focus_node(app.get(self).add_focus.unwrap())
+            .focus_node(app.get(self).add_focus.clone().unwrap())
             .template(add_button_template);
             strip_children.push(
                 GridCell::new(
@@ -1201,13 +1198,15 @@ impl TabViewState {
             .filter(|(_, item)| app.get(self).visited.contains(&item.id))
             .map(|(index, item)| {
                 let selected = widget.selected_index == Some(index);
-                let scope = app.get(self).containers[&item.id].content_focus;
+                let scope = app.get(self).containers[&item.id].content_focus.clone();
                 Offstage::new()
                     .offstage(!selected)
                     .child(TickerMode::new(
                         selected,
-                        ExcludeFocus::new(FocusScope::new(item.content.clone()).node(scope))
-                            .excluding(!selected),
+                        ExcludeFocus::new(
+                            FocusScope::new(item.content.clone()).node(scope.clone()),
+                        )
+                        .excluding(!selected),
                     ))
                     .key(ValueKey::new(item.id.clone()).into())
                     .into_widget()

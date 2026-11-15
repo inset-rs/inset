@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use waft_animation::{Curve, Curves};
 use waft_foundation::{
-    App, ChangeNotifier, ChangeNotifierData, CompleterFuture, Handle, HandleId, Listenable,
-    ListenableObject, Listener,
+    App, ChangeNotifier, ChangeNotifierData, CompleterFuture, Handle, HandleId, ListenableHandle,
+    ListenableObject, Listener, Ref, Retained,
 };
 
 /// The direction of a scroll, relative to the positive scroll offset.
@@ -303,6 +303,16 @@ pub struct AnyViewportOffset {
 }
 
 impl AnyViewportOffset {
+    /// Dart's `addListener` on a `ViewportOffset`.
+    pub fn add_listener(self, app: &mut App, listener: Listener) {
+        (self.vtable.add_listener)(app, self.id, listener)
+    }
+
+    /// Dart's `removeListener` on a `ViewportOffset`.
+    pub fn remove_listener(self, app: &mut App, listener: &Listener) {
+        (self.vtable.remove_listener)(app, self.id, listener)
+    }
+
     /// See [`ViewportOffset::pixels`].
     pub fn pixels(self, app: &App) -> f64 {
         (self.vtable.pixels)(app, self.id)
@@ -392,13 +402,29 @@ impl Debug for AnyViewportOffset {
     }
 }
 
-impl Listenable for AnyViewportOffset {
-    fn add_listener(&self, app: &mut App, listener: Listener) {
+impl ListenableHandle for AnyViewportOffset {
+    fn add_listener_to(self, app: &mut App, listener: Listener) {
         (self.vtable.add_listener)(app, self.id, listener)
     }
 
-    fn remove_listener(&self, app: &mut App, listener: &Listener) {
+    fn remove_listener_from(self, app: &mut App, listener: &Listener) {
         (self.vtable.remove_listener)(app, self.id, listener)
+    }
+}
+
+impl From<AnyViewportOffset> for HandleId {
+    fn from(offset: AnyViewportOffset) -> HandleId {
+        offset.id
+    }
+}
+
+/// A field Dart types as `ViewportOffset`, kept: a viewport keeps the scroll position it shows.
+pub type ViewportOffsetRef = Retained<AnyViewportOffset>;
+
+/// A kept viewport offset erases to a [`ViewportOffsetRef`] with [`Retained::erase`].
+impl<T: ViewportOffset> From<Handle<T>> for AnyViewportOffset {
+    fn from(offset: Handle<T>) -> AnyViewportOffset {
+        offset.as_viewport_offset()
     }
 }
 
@@ -417,7 +443,7 @@ impl FixedViewportOffset {
     /// Creates a viewport offset with the given [`pixels`](ViewportOffset::pixels) value.
     ///
     /// Dart's `ViewportOffset.fixed`.
-    pub fn new(app: &mut App, value: f64) -> Handle<FixedViewportOffset> {
+    pub fn new(app: &mut App, value: f64) -> Ref<FixedViewportOffset> {
         app.create(FixedViewportOffset {
             change_notifier: ChangeNotifierData::new(),
             pixels: value,
@@ -427,7 +453,7 @@ impl FixedViewportOffset {
     /// Creates a viewport offset with a [`pixels`](ViewportOffset::pixels) value of 0.0.
     ///
     /// Dart's `ViewportOffset.zero`.
-    pub fn zero(app: &mut App) -> Handle<FixedViewportOffset> {
+    pub fn zero(app: &mut App) -> Ref<FixedViewportOffset> {
         FixedViewportOffset::new(app, 0.0)
     }
 }

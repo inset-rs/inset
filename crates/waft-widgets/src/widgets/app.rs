@@ -12,7 +12,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use waft_embedder::{AppLifecycleState, Clip, Color, Locale, TargetPlatform, ViewId, ViewRef};
-use waft_foundation::{App, Handle, K_IS_WEB, Listenable};
+use waft_foundation::{App, Handle, K_IS_WEB, Listenable, OptionRetained, Ref};
 use waft_painting::{AxisDirection, TextStyle};
 use waft_scheduler::SchedulerBinding;
 use waft_services::{KeyEvent, LogicalKeyboardKey};
@@ -23,7 +23,7 @@ use crate::framework::{
 };
 use crate::view::View;
 use crate::widgets::actions::{
-    Action, Actions, ActivateIntent, AnyAction, ButtonActivateIntent, DismissIntent,
+    ActionRef, Actions, ActivateIntent, AnyAction, ButtonActivateIntent, DismissIntent,
     DoNothingAction, DoNothingAndStopPropagationIntent, DoNothingIntent, PrioritizedAction,
     PrioritizedIntents, VoidCallbackAction, VoidCallbackIntent,
 };
@@ -33,19 +33,19 @@ use crate::widgets::default_text_editing_shortcuts::{DefaultTextEditingShortcuts
 use crate::widgets::focus_manager::{KeyEventResult, TraversalEdgeBehavior};
 use crate::widgets::focus_scope::{Focus, FocusScope};
 use crate::widgets::focus_traversal::{
-    DirectionalFocusAction, DirectionalFocusIntent, FocusTraversalGroup, FocusTraversalPolicy,
-    NextFocusAction, NextFocusIntent, PreviousFocusAction, PreviousFocusIntent,
-    ReadingOrderTraversalPolicy, RequestFocusAction, RequestFocusIntent, TraversalDirection,
+    DirectionalFocusAction, DirectionalFocusIntent, FocusTraversalGroup, NextFocusAction,
+    NextFocusIntent, PreviousFocusAction, PreviousFocusIntent, ReadingOrderTraversalPolicy,
+    RequestFocusAction, RequestFocusIntent, TraversalDirection,
 };
 use crate::widgets::localizations::{
     Localizations, LocalizationsDelegateRef, LocalizationsResolver,
 };
 use crate::widgets::navigator::{
-    AnyNavigatorObserver, AnyRoute, NavigationNotification, Navigator, NavigatorState,
-    RouteFactory, RouteSettings,
+    NavigationNotification, Navigator, NavigatorObserverRef, NavigatorState, RouteFactory,
+    RouteRef, RouteSettings,
 };
 use crate::widgets::notification_listener::{NotificationListener, NotificationListenerCallback};
-use crate::widgets::pages::AnyPageRoute;
+use crate::widgets::pages::{AnyPageRoute, PageRouteRef};
 use crate::widgets::raw_tooltip::RawTooltip;
 use crate::widgets::restoration::RootRestorationScope;
 use crate::widgets::scrollable_helpers::{ScrollAction, ScrollIncrementType, ScrollIntent};
@@ -271,12 +271,12 @@ pub type GenerateAppTitle = Rc<dyn Fn(&mut App, BuildContext) -> String>;
 /// The signature of [`WidgetsApp::page_route_builder`].
 ///
 /// Creates a `PageRoute` using the given [`RouteSettings`] and [`WidgetBuilder`].
-pub type PageRouteFactory = Rc<dyn Fn(&mut App, &RouteSettings, WidgetBuilder) -> AnyPageRoute>;
+pub type PageRouteFactory = Rc<dyn Fn(&mut App, &RouteSettings, WidgetBuilder) -> PageRouteRef>;
 
 /// The signature of [`WidgetsApp::on_generate_initial_routes`].
 ///
 /// Creates a series of one or more initial routes.
-pub type InitialRouteListFactory = Rc<dyn Fn(&mut App, &str) -> Vec<AnyRoute>>;
+pub type InitialRouteListFactory = Rc<dyn Fn(&mut App, &str) -> Vec<RouteRef>>;
 
 /// Dart's `WidgetsApp.showPerformanceOverlayOverride`.
 static SHOW_PERFORMANCE_OVERLAY_OVERRIDE: AtomicBool = AtomicBool::new(false);
@@ -506,7 +506,7 @@ pub struct WidgetsApp {
     /// [`on_unknown_route`](Self::on_unknown_route)); if they are not,
     /// [`navigator_observers`](Self::navigator_observers) must be the empty list and
     /// [`builder`](Self::builder) must not be `None`.
-    pub navigator_observers: Vec<AnyNavigatorObserver>,
+    pub navigator_observers: Vec<NavigatorObserverRef>,
 
     /// A builder for inserting widgets above the [`Navigator`] but below the
     /// other widgets created by the [`WidgetsApp`] widget, or for replacing the
@@ -726,7 +726,7 @@ pub struct WidgetsApp {
     ///    shortcuts for the application.
     ///  * The [`Shortcuts`] widget, which defines a keyboard mapping.
     ///  * The [`Actions`] widget, which defines the mapping from intent to action.
-    pub actions: Option<HashMap<TypeId, AnyAction>>,
+    pub actions: Option<HashMap<TypeId, ActionRef>>,
 
     /// The identifier to use for state restoration of this app.
     ///
@@ -841,7 +841,7 @@ impl WidgetsApp {
     /// Dart `WidgetsApp(onGenerateRoute:)`.
     pub fn on_generate_route(
         mut self,
-        on_generate_route: impl Fn(&mut App, &RouteSettings) -> Option<AnyRoute> + 'static,
+        on_generate_route: impl Fn(&mut App, &RouteSettings) -> Option<RouteRef> + 'static,
     ) -> WidgetsApp {
         self.on_generate_route = Some(Rc::new(on_generate_route));
         self
@@ -850,7 +850,7 @@ impl WidgetsApp {
     /// Dart `WidgetsApp(onGenerateInitialRoutes:)`.
     pub fn on_generate_initial_routes(
         mut self,
-        on_generate_initial_routes: impl Fn(&mut App, &str) -> Vec<AnyRoute> + 'static,
+        on_generate_initial_routes: impl Fn(&mut App, &str) -> Vec<RouteRef> + 'static,
     ) -> WidgetsApp {
         self.on_generate_initial_routes = Some(Rc::new(on_generate_initial_routes));
         self
@@ -859,7 +859,7 @@ impl WidgetsApp {
     /// Dart `WidgetsApp(pageRouteBuilder:)`.
     pub fn page_route_builder(
         mut self,
-        page_route_builder: impl Fn(&mut App, &RouteSettings, WidgetBuilder) -> AnyPageRoute + 'static,
+        page_route_builder: impl Fn(&mut App, &RouteSettings, WidgetBuilder) -> PageRouteRef + 'static,
     ) -> WidgetsApp {
         self.page_route_builder = Some(Rc::new(page_route_builder));
         self
@@ -883,7 +883,7 @@ impl WidgetsApp {
     /// Dart `WidgetsApp(onUnknownRoute:)`.
     pub fn on_unknown_route(
         mut self,
-        on_unknown_route: impl Fn(&mut App, &RouteSettings) -> Option<AnyRoute> + 'static,
+        on_unknown_route: impl Fn(&mut App, &RouteSettings) -> Option<RouteRef> + 'static,
     ) -> WidgetsApp {
         self.on_unknown_route = Some(Rc::new(on_unknown_route));
         self
@@ -907,7 +907,7 @@ impl WidgetsApp {
     /// Dart `WidgetsApp(navigatorObservers:)`.
     pub fn navigator_observers(
         mut self,
-        navigator_observers: impl IntoIterator<Item = AnyNavigatorObserver>,
+        navigator_observers: impl IntoIterator<Item = NavigatorObserverRef>,
     ) -> WidgetsApp {
         self.navigator_observers = navigator_observers.into_iter().collect();
         self
@@ -1021,7 +1021,7 @@ impl WidgetsApp {
     }
 
     /// Dart `WidgetsApp(actions:)`.
-    pub fn actions(mut self, actions: HashMap<TypeId, AnyAction>) -> WidgetsApp {
+    pub fn actions(mut self, actions: HashMap<TypeId, ActionRef>) -> WidgetsApp {
         self.actions = Some(actions);
         self
     }
@@ -1083,7 +1083,7 @@ impl WidgetsApp {
     }
 
     /// The default value of [`actions`](Self::actions).
-    pub fn default_actions(app: &mut App) -> HashMap<TypeId, AnyAction> {
+    pub fn default_actions(app: &mut App) -> HashMap<TypeId, ActionRef> {
         let do_nothing = DoNothingAction::new(app);
         let do_nothing_and_stop_propagation = DoNothingAction::new(app);
         do_nothing_and_stop_propagation.set_consumes_key(app, false);
@@ -1095,38 +1095,32 @@ impl WidgetsApp {
         let prioritized = PrioritizedAction::new(app);
         let void_callback = VoidCallbackAction::new(app);
         HashMap::from([
-            (
-                TypeId::of::<DoNothingIntent>(),
-                Action::as_action(do_nothing),
-            ),
+            (TypeId::of::<DoNothingIntent>(), do_nothing.into_erased()),
             (
                 TypeId::of::<DoNothingAndStopPropagationIntent>(),
-                Action::as_action(do_nothing_and_stop_propagation),
+                do_nothing_and_stop_propagation.into_erased(),
             ),
             (
                 TypeId::of::<RequestFocusIntent>(),
-                Action::as_action(request_focus),
+                request_focus.into_erased(),
             ),
-            (
-                TypeId::of::<NextFocusIntent>(),
-                Action::as_action(next_focus),
-            ),
+            (TypeId::of::<NextFocusIntent>(), next_focus.into_erased()),
             (
                 TypeId::of::<PreviousFocusIntent>(),
-                Action::as_action(previous_focus),
+                previous_focus.into_erased(),
             ),
             (
                 TypeId::of::<DirectionalFocusIntent>(),
-                Action::as_action(directional_focus),
+                directional_focus.into_erased(),
             ),
-            (TypeId::of::<ScrollIntent>(), Action::as_action(scroll)),
+            (TypeId::of::<ScrollIntent>(), scroll.into_erased()),
             (
                 TypeId::of::<PrioritizedIntents>(),
-                Action::as_action(prioritized),
+                prioritized.into_erased(),
             ),
             (
                 TypeId::of::<VoidCallbackIntent>(),
-                Action::as_action(void_callback),
+                void_callback.into_erased(),
             ),
         ])
     }
@@ -1300,7 +1294,7 @@ fn default_apple_os_shortcuts() -> ShortcutMap {
 pub struct WidgetsAppState {
     state: StateData<WidgetsApp>,
     navigator: Option<GlobalKey>,
-    localizations_resolver: Option<Handle<LocalizationsResolver>>,
+    localizations_resolver: Option<Ref<LocalizationsResolver>>,
     observer: Option<WidgetsBindingObserverRef>,
     app_lifecycle_state: Option<AppLifecycleState>,
 }
@@ -1390,7 +1384,7 @@ impl WidgetsAppState {
         self: Handle<Self>,
         app: &mut App,
         settings: &RouteSettings,
-    ) -> Option<AnyRoute> {
+    ) -> Option<RouteRef> {
         let widget = self.widget(app);
         let name = settings.name.clone();
         let page_content_builder: Option<WidgetBuilder> = match name.as_deref() {
@@ -1414,7 +1408,7 @@ impl WidgetsAppState {
                  pageRouteBuilder set if the home or routes properties are set.",
             );
             let route = page_route_builder(app, settings, page_content_builder);
-            return Some(route.as_route());
+            return Some(route.into_map(AnyPageRoute::as_route));
         }
         let on_generate_route = self.widget(app).on_generate_route.clone();
         if let Some(on_generate_route) = on_generate_route {
@@ -1427,7 +1421,7 @@ impl WidgetsAppState {
         self: Handle<Self>,
         app: &mut App,
         settings: &RouteSettings,
-    ) -> Option<AnyRoute> {
+    ) -> Option<RouteRef> {
         let on_unknown_route = self
             .widget(app)
             .on_unknown_route
@@ -1458,6 +1452,7 @@ impl WidgetsAppState {
     fn localizations_resolver(self: Handle<Self>, app: &App) -> Handle<LocalizationsResolver> {
         app.get(self)
             .localizations_resolver
+            .handle()
             .expect("init_state creates the resolver")
     }
 
@@ -1703,10 +1698,14 @@ impl State for WidgetsAppState {
             }
         };
 
-        let resolver = self.localizations_resolver(app);
+        let resolver = app
+            .get(self)
+            .localizations_resolver
+            .clone()
+            .expect("init_state creates the resolver");
         let localized = title.unwrap_or(result);
         let localizations = ListenableBuilder::new(
-            Rc::new(resolver) as Rc<dyn Listenable>,
+            Rc::new(resolver.clone()) as Rc<dyn Listenable>,
             move |app, _context, _child| {
                 let locale = resolver.locale(app);
                 let delegates = resolver.localizations_delegates(app);
@@ -1724,12 +1723,12 @@ impl State for WidgetsAppState {
                 let scroll = ScrollAction::new(app);
                 actions.insert(
                     TypeId::of::<ScrollIntent>(),
-                    AnyAction::overridable(app, Action::as_action(scroll), context),
+                    AnyAction::overridable(app, scroll.into_erased(), context),
                 );
                 actions
             }
         };
-        let policy = ReadingOrderTraversalPolicy::new(app).as_policy();
+        let policy = ReadingOrderTraversalPolicy::new(app).into_erased();
         let shortcuts = match self.widget(app).shortcuts.clone() {
             Some(shortcuts) => shortcuts,
             None => WidgetsApp::default_shortcuts(app),
@@ -1866,7 +1865,7 @@ mod tests {
     use crate::widgets::focus_scope::Focus;
     use crate::widgets::localizations::WidgetsLocalizations;
     use crate::widgets::navigator::RouteSettingsRef;
-    use crate::widgets::pages::{PageRoute, PageRouteBuilder};
+    use crate::widgets::pages::PageRouteBuilder;
     use crate::widgets::routes::RoutePageBuilder;
 
     /// The `color` every test app is given.
@@ -1918,12 +1917,12 @@ mod tests {
     }
 
     /// The `pageRouteBuilder` a test app hands to [`WidgetsApp`].
-    fn page_route(app: &mut App, settings: &RouteSettings, builder: WidgetBuilder) -> AnyPageRoute {
+    fn page_route(app: &mut App, settings: &RouteSettings, builder: WidgetBuilder) -> PageRouteRef {
         let page_builder: RoutePageBuilder =
             Rc::new(move |app, context, _animation, _secondary| builder(app, context));
         let route = PageRouteBuilder::new(app, page_builder)
             .settings(app, RouteSettingsRef::Settings(settings.clone()));
-        PageRoute::as_page_route(route)
+        route.into_erased()
     }
 
     fn widgets_app() -> WidgetsApp {
@@ -2123,7 +2122,8 @@ mod tests {
             &settings,
             Rc::new(|_app, _context| SizedBox::shrink().into_widget()),
         );
-        Navigator::of(&mut app, context, false).push(&mut app, route.as_route());
+        Navigator::of(&mut app, context, false)
+            .push(&mut app, route.into_map(AnyPageRoute::as_route));
         settle(&mut app);
 
         assert!(
@@ -2255,7 +2255,8 @@ mod tests {
             &settings,
             Rc::new(|_app, _context| SizedBox::shrink().into_widget()),
         );
-        Navigator::of(&mut app, context, false).push(&mut app, route.as_route());
+        Navigator::of(&mut app, context, false)
+            .push(&mut app, route.into_map(AnyPageRoute::as_route));
         settle(&mut app);
         assert_eq!(framework_handles_backs(&view).last(), Some(&true));
 
@@ -2307,7 +2308,8 @@ mod tests {
             &settings,
             Rc::new(|_app, _context| SizedBox::shrink().into_widget()),
         );
-        Navigator::of(&mut app, second, false).push(&mut app, route.as_route());
+        Navigator::of(&mut app, second, false)
+            .push(&mut app, route.into_map(AnyPageRoute::as_route));
         settle(&mut app);
         assert_eq!(framework_handles_backs(&views[0]).last(), Some(&false));
         assert_eq!(framework_handles_backs(&views[1]).last(), Some(&true));
@@ -2417,8 +2419,11 @@ mod tests {
             .find(|node| node.debug_label(&app).as_deref() == Some("target"))
             .expect("the focus node");
         let actions = WidgetsApp::default_actions(&mut app);
-        let action = actions[&TypeId::of::<RequestFocusIntent>()];
-        action.invoke(&mut app, &RequestFocusIntent::new(node), None);
+        let action = actions[&TypeId::of::<RequestFocusIntent>()].handle();
+        let kept_node = node
+            .upgrade(&app)
+            .expect("the node is kept by its Focus widget");
+        action.invoke(&mut app, &RequestFocusIntent::new(kept_node), None);
         app.drain_microtasks();
         assert_eq!(primary_focus(&mut app), Some(node));
     }

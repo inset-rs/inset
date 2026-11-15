@@ -13,7 +13,7 @@ use waft_embedder::{
     Paint, Radius, Rect, Size, TargetPlatform, TextAffinity, TextAlign, TextBaseline, TextBox,
     TextDirection, TextHeightBehavior, TextPosition, TextRange, TextSelection, clamp_double,
 };
-use waft_foundation::{App, Handle, Listenable, Listener, ValueListenable, ValueNotifier};
+use waft_foundation::{App, Handle, Listener, ValueNotifier};
 use waft_gestures::TapDownDetails;
 use waft_painting::{
     ClipContext, InlineSpanRef, PaintingBinding, PlaceholderDimensions, TextPainter, TextScaler,
@@ -35,7 +35,9 @@ use crate::relayout_when_system_fonts_change::{
     RelayoutWhenSystemFontsChangeData, RelayoutWhenSystemFontsChangeMixin,
 };
 use crate::text_boundary::WordBoundary;
-use crate::viewport_offset::AnyViewportOffset;
+use crate::viewport_offset::{AnyViewportOffset, ViewportOffsetRef};
+use waft_foundation::ListenableObject;
+use waft_foundation::Ref;
 
 const K_CARET_GAP: f64 = 1.0;
 const K_CARET_HEIGHT_OFFSET: f64 = 2.0;
@@ -193,18 +195,18 @@ pub struct RenderEditable {
     placeholder_dimensions: Option<Vec<PlaceholderDimensions>>,
     system_fonts: RelayoutWhenSystemFontsChangeData,
     fonts_override: Option<Handle<FontCollection>>,
-    show_cursor: Handle<ValueNotifier<bool>>,
+    show_cursor: Ref<ValueNotifier<bool>>,
     #[allow(dead_code)]
     dispose_show_cursor: bool,
     has_focus: bool,
-    start_handle_layer_link: Handle<LayerLink>,
-    end_handle_layer_link: Handle<LayerLink>,
+    start_handle_layer_link: Ref<LayerLink>,
+    end_handle_layer_link: Ref<LayerLink>,
     max_lines: Option<i32>,
     min_lines: Option<i32>,
     expands: bool,
     selection_color: Option<Color>,
     selection: Option<TextSelection>,
-    offset: AnyViewportOffset,
+    offset: ViewportOffsetRef,
     /// Whether [`handle_event`](RenderObject::handle_event) will propagate pointer
     /// events to selection handlers.
     pub ignore_pointer: bool,
@@ -234,8 +236,8 @@ pub struct RenderEditable {
     last_tap_down_position: Option<Offset>,
     last_secondary_tap_down_position: Option<Offset>,
     layout_generation: u64,
-    selection_start_in_viewport: Handle<ValueNotifier<bool>>,
-    selection_end_in_viewport: Handle<ValueNotifier<bool>>,
+    selection_start_in_viewport: Ref<ValueNotifier<bool>>,
+    selection_end_in_viewport: Ref<ValueNotifier<bool>>,
 }
 
 impl RenderEditable {
@@ -246,9 +248,9 @@ impl RenderEditable {
     pub fn new(
         app: &mut App,
         text_direction: TextDirection,
-        start_handle_layer_link: Handle<LayerLink>,
-        end_handle_layer_link: Handle<LayerLink>,
-        offset: AnyViewportOffset,
+        start_handle_layer_link: Ref<LayerLink>,
+        end_handle_layer_link: Ref<LayerLink>,
+        offset: ViewportOffsetRef,
         text_selection_delegate: AnyTextSelectionDelegate,
     ) -> RenderHandle<Self> {
         let show_cursor = app.create(ValueNotifier::new(false));
@@ -436,26 +438,28 @@ impl RenderEditable {
 
     /// Whether to paint the cursor.
     pub fn show_cursor(self: RenderHandle<Self>, app: &App) -> Handle<ValueNotifier<bool>> {
-        self.get(app).show_cursor
+        self.get(app).show_cursor.handle()
     }
 
     /// Sets [`show_cursor`](Self::show_cursor).
     pub fn set_show_cursor(
         self: RenderHandle<Self>,
         app: &mut App,
-        value: Handle<ValueNotifier<bool>>,
+        value: Ref<ValueNotifier<bool>>,
     ) {
-        let old = self.get(app).show_cursor;
-        if old == value {
+        let old = self.get(app).show_cursor.handle();
+        if old == *value {
             return;
         }
         if self.attached(app) {
             old.remove_listener(app, &self.mark_needs_paint_listener());
         }
-        self.get_mut(app).show_cursor = value;
+        let new = *value;
+        // The old notifier goes when this local does, after the listener moved off it.
+        let _old = std::mem::replace(&mut self.get_mut(app).show_cursor, value);
         self.get_mut(app).dispose_show_cursor = false;
         if self.attached(app) {
-            value.add_listener(app, self.mark_needs_paint_listener());
+            new.add_listener(app, self.mark_needs_paint_listener());
         }
         self.mark_needs_paint(app);
     }
@@ -475,14 +479,14 @@ impl RenderEditable {
 
     /// The [`LayerLink`] of start selection handle.
     pub fn start_handle_layer_link(self: RenderHandle<Self>, app: &App) -> Handle<LayerLink> {
-        self.get(app).start_handle_layer_link
+        self.get(app).start_handle_layer_link.handle()
     }
 
     /// Sets [`start_handle_layer_link`](Self::start_handle_layer_link).
     pub fn set_start_handle_layer_link(
         self: RenderHandle<Self>,
         app: &mut App,
-        value: Handle<LayerLink>,
+        value: Ref<LayerLink>,
     ) {
         if self.get(app).start_handle_layer_link == value {
             return;
@@ -493,14 +497,14 @@ impl RenderEditable {
 
     /// The [`LayerLink`] of end selection handle.
     pub fn end_handle_layer_link(self: RenderHandle<Self>, app: &App) -> Handle<LayerLink> {
-        self.get(app).end_handle_layer_link
+        self.get(app).end_handle_layer_link.handle()
     }
 
     /// Sets [`end_handle_layer_link`](Self::end_handle_layer_link).
     pub fn set_end_handle_layer_link(
         self: RenderHandle<Self>,
         app: &mut App,
-        value: Handle<LayerLink>,
+        value: Ref<LayerLink>,
     ) {
         if self.get(app).end_handle_layer_link == value {
             return;
@@ -602,21 +606,23 @@ impl RenderEditable {
 
     /// The offset at which the text should be painted.
     pub fn offset(self: RenderHandle<Self>, app: &App) -> AnyViewportOffset {
-        self.get(app).offset
+        self.get(app).offset.handle()
     }
 
     /// Sets [`offset`](Self::offset).
-    pub fn set_offset(self: RenderHandle<Self>, app: &mut App, value: AnyViewportOffset) {
-        let old = self.get(app).offset;
-        if old == value {
+    pub fn set_offset(self: RenderHandle<Self>, app: &mut App, value: ViewportOffsetRef) {
+        let old = self.offset(app);
+        if old == *value {
             return;
         }
         if self.attached(app) {
             old.remove_listener(app, &self.mark_needs_paint_listener());
         }
-        self.get_mut(app).offset = value;
+        let new = *value;
+        // The old offset goes when this local does, after the listener moved off it.
+        let _old = std::mem::replace(&mut self.get_mut(app).offset, value);
         if self.attached(app) {
-            value.add_listener(app, self.mark_needs_paint_listener());
+            new.add_listener(app, self.mark_needs_paint_listener());
         }
         self.mark_needs_layout(app);
     }
@@ -951,7 +957,7 @@ impl RenderEditable {
         self: RenderHandle<Self>,
         app: &App,
     ) -> Handle<ValueNotifier<bool>> {
-        self.get(app).selection_start_in_viewport
+        self.get(app).selection_start_in_viewport.handle()
     }
 
     /// Track whether the end of the selection is currently in the visible
@@ -960,7 +966,7 @@ impl RenderEditable {
         self: RenderHandle<Self>,
         app: &App,
     ) -> Handle<ValueNotifier<bool>> {
-        self.get(app).selection_end_in_viewport
+        self.get(app).selection_end_in_viewport.handle()
     }
 
     fn update_selection_extents_visibility(
@@ -971,8 +977,8 @@ impl RenderEditable {
         let Some(selection) = self.selection(app) else {
             return;
         };
-        let start_notifier = self.get(app).selection_start_in_viewport;
-        let end_notifier = self.get(app).selection_end_in_viewport;
+        let start_notifier = self.get(app).selection_start_in_viewport.handle();
+        let end_notifier = self.get(app).selection_end_in_viewport.handle();
         if !selection.is_valid() {
             start_notifier.set_value(app, false);
             end_notifier.set_value(app, false);
@@ -1689,7 +1695,7 @@ impl RenderEditable {
         let Some(selection) = self.get(app).selection else {
             return;
         };
-        let show_cursor = self.get(app).show_cursor;
+        let show_cursor = self.get(app).show_cursor.handle();
         if !selection.is_collapsed() || !*show_cursor.value(app) {
             return;
         }
@@ -1901,16 +1907,16 @@ impl RenderObject for RenderEditable {
     fn did_attach(self: RenderHandle<Self>, app: &mut App, owner: Handle<PipelineOwner>) {
         RelayoutWhenSystemFontsChangeMixin::attach_system_fonts(self, app);
         ContainerRenderObjectMixin::did_attach(self, app, owner);
-        let offset = self.get(app).offset;
+        let offset = self.get(app).offset.handle();
         offset.add_listener(app, self.mark_needs_paint_listener());
-        let show_cursor = self.get(app).show_cursor;
+        let show_cursor = self.get(app).show_cursor.handle();
         show_cursor.add_listener(app, self.mark_needs_paint_listener());
     }
 
     fn did_detach(self: RenderHandle<Self>, app: &mut App) {
-        let offset = self.get(app).offset;
+        let offset = self.get(app).offset.handle();
         offset.remove_listener(app, &self.mark_needs_paint_listener());
-        let show_cursor = self.get(app).show_cursor;
+        let show_cursor = self.get(app).show_cursor.handle();
         show_cursor.remove_listener(app, &self.mark_needs_paint_listener());
         RelayoutWhenSystemFontsChangeMixin::detach_system_fonts(self, app);
         ContainerRenderObjectMixin::did_detach(self, app);
@@ -1919,8 +1925,8 @@ impl RenderObject for RenderEditable {
     fn dispose(self: RenderHandle<Self>, app: &mut App) {
         LayerHandle::set_layer(app, |app| &mut self.get_mut(app).leader_layer_handler, None);
         LayerHandle::set_layer(app, |app| &mut self.get_mut(app).clip_rect_layer, None);
-        let start_in_viewport = self.get(app).selection_start_in_viewport;
-        let end_in_viewport = self.get(app).selection_end_in_viewport;
+        let start_in_viewport = self.get(app).selection_start_in_viewport.handle();
+        let end_in_viewport = self.get(app).selection_end_in_viewport.handle();
         app.get_mut(start_in_viewport).dispose();
         app.get_mut(end_in_viewport).dispose();
         crate::object::RenderObjectBase::dispose(self, app);
@@ -1978,7 +1984,7 @@ impl RenderObject for RenderEditable {
         self.get_mut(app).layout_generation += 1;
         let viewport_extent = self.viewport_extent(app);
         let max_scroll = self.get(app).max_scroll_extent;
-        let offset = self.get(app).offset;
+        let offset = self.get(app).offset.handle();
         offset.apply_viewport_dimension(app, viewport_extent);
         offset.apply_content_dimensions(app, 0.0, max_scroll);
     }
@@ -2162,7 +2168,10 @@ impl RenderEditable {
         let start_point = clamp(start.point);
         let (start_link, end_link) = {
             let this = self.get(app);
-            (this.start_handle_layer_link, this.end_handle_layer_link)
+            (
+                this.start_handle_layer_link.clone(),
+                this.end_handle_layer_link.clone(),
+            )
         };
         let start_layer = LeaderLayer::new(app, start_link);
         start_layer.set_offset(app, start_point + offset);
@@ -2213,7 +2222,7 @@ mod tests {
 
     use valo::{Font, FontAttrs};
     use waft_embedder::{FontSource, TextAffinity};
-    use waft_foundation::{AppCell, Task, ValueListenable};
+    use waft_foundation::{AppCell, Task};
     use waft_painting::{PaintingBinding, TextSpan, TextStyle};
     use waft_scheduler::SchedulerBinding;
     use waft_services::{TextEditingValue, TextSelectionDelegate};
@@ -2222,7 +2231,7 @@ mod tests {
     use crate::layer::{ContainerLayer, ErasedLayer, OffsetLayer};
     use crate::pipeline_owner::PipelineOwner;
     use crate::proxy_box::RenderRepaintBoundary;
-    use crate::viewport_offset::{FixedViewportOffset, ViewportOffset};
+    use crate::viewport_offset::FixedViewportOffset;
 
     #[derive(Default)]
     struct TestDelegate {
@@ -2287,7 +2296,7 @@ mod tests {
         });
         let start = LayerLink::new(app);
         let end = LayerLink::new(app);
-        let offset = FixedViewportOffset::zero(app).as_viewport_offset();
+        let offset = FixedViewportOffset::zero(app).erase();
         let editable = RenderEditable::new(
             app,
             TextDirection::Ltr,
@@ -2511,7 +2520,7 @@ mod tests {
         });
         let start = LayerLink::new(&mut app);
         let end = LayerLink::new(&mut app);
-        let offset = FixedViewportOffset::zero(&mut app).as_viewport_offset();
+        let offset = FixedViewportOffset::zero(&mut app).erase();
         let editable = RenderEditable::new(
             &mut app,
             TextDirection::Ltr,

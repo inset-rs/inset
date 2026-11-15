@@ -7,16 +7,16 @@ use std::fmt::{self, Debug};
 use std::rc::Rc;
 use std::time::Duration;
 
-use waft_animation::AnyAnimation;
+use waft_animation::AnimationRef;
 use waft_cupertino::CupertinoPageTransitionsBuilder;
 use waft_embedder::{Color, TargetPlatform};
-use waft_foundation::{App, Handle};
+use waft_foundation::{App, Handle, Ref};
 use waft_scheduler::TickerFuture;
 use waft_widgets::{
     AnyRoute, AnyTransitionRoute, BuildContext, DelegatedTransitionBuilder, IntoWidget, KeyRef,
     LocalHistoryRoute, LocalHistoryRouteData, ModalRoute, ModalRouteData, OverlayRoute,
     OverlayRouteData, Page, PageRef, PageRoute, PageRouteData, PageTransitionsBuilderRef,
-    PopInvokedWithResultCallback, PredictiveBackRoute, Route, RouteData, RouteResult,
+    PopInvokedWithResultCallback, PredictiveBackRoute, Route, RouteData, RouteRef, RouteResult,
     RouteSettingsRef, Semantics, State, TransitionRoute, TransitionRouteData,
     TraversalEdgeBehavior, WidgetBuilder, WidgetRef,
 };
@@ -66,7 +66,7 @@ impl MaterialPageRoute {
     ///
     /// Dart's defaults: `maintain_state` true, `fullscreen_dialog` false, `allow_snapshotting`
     /// true, `include_route_semantics` true, `barrier_dismissible` false.
-    pub fn new(app: &mut App, builder: WidgetBuilder) -> Handle<MaterialPageRoute> {
+    pub fn new(app: &mut App, builder: WidgetBuilder) -> Ref<MaterialPageRoute> {
         let route = RouteData::new(app, None, None);
         let transition_route = TransitionRouteData::new(app);
         let modal_route = ModalRouteData::new(app);
@@ -81,85 +81,81 @@ impl MaterialPageRoute {
             maintain_state: true,
             include_route_semantics: true,
         });
-        debug_assert!(TransitionRoute::opaque(this, app));
+        debug_assert!(TransitionRoute::opaque(this.handle(), app));
         this
     }
 
     /// Dart `MaterialPageRoute(settings:)`.
-    pub fn settings(self: Handle<Self>, app: &mut App, settings: RouteSettingsRef) -> Handle<Self> {
+    pub fn settings(self: Ref<Self>, app: &mut App, settings: RouteSettingsRef) -> Ref<Self> {
         self.route_data_mut(app).set_settings(settings);
         self
     }
 
     /// Dart `MaterialPageRoute(requestFocus:)`.
-    pub fn request_focus(self: Handle<Self>, app: &mut App, request_focus: bool) -> Handle<Self> {
+    pub fn request_focus(self: Ref<Self>, app: &mut App, request_focus: bool) -> Ref<Self> {
         self.route_data_mut(app)
             .set_request_focus(Some(request_focus));
         self
     }
 
     /// Dart `MaterialPageRoute(maintainState:)`.
-    pub fn maintain_state(self: Handle<Self>, app: &mut App, maintain_state: bool) -> Handle<Self> {
-        app.get_mut(self).maintain_state = maintain_state;
+    pub fn maintain_state(self: Ref<Self>, app: &mut App, maintain_state: bool) -> Ref<Self> {
+        app.get_mut(&self).maintain_state = maintain_state;
         self
     }
 
     /// Dart `MaterialPageRoute(fullscreenDialog:)`.
-    pub fn fullscreen_dialog(
-        self: Handle<Self>,
-        app: &mut App,
-        fullscreen_dialog: bool,
-    ) -> Handle<Self> {
+    pub fn fullscreen_dialog(self: Ref<Self>, app: &mut App, fullscreen_dialog: bool) -> Ref<Self> {
         self.page_route_data_mut(app).fullscreen_dialog = fullscreen_dialog;
         self
     }
 
     /// Dart `MaterialPageRoute(allowSnapshotting:)`.
     pub fn allow_snapshotting(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         allow_snapshotting: bool,
-    ) -> Handle<Self> {
+    ) -> Ref<Self> {
         self.page_route_data_mut(app).allow_snapshotting = allow_snapshotting;
         self
     }
 
     /// Dart `MaterialPageRoute(includeRouteSemantics:)`.
     pub fn include_route_semantics(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         include_route_semantics: bool,
-    ) -> Handle<Self> {
-        app.get_mut(self).include_route_semantics = include_route_semantics;
+    ) -> Ref<Self> {
+        app.get_mut(&self).include_route_semantics = include_route_semantics;
         self
     }
 
     /// Dart `MaterialPageRoute(barrierDismissible:)`.
     pub fn barrier_dismissible(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         barrier_dismissible: bool,
-    ) -> Handle<Self> {
+    ) -> Ref<Self> {
         self.page_route_data_mut(app).barrier_dismissible = barrier_dismissible;
         self
     }
 
     /// Dart `MaterialPageRoute(traversalEdgeBehavior:)`.
     pub fn traversal_edge_behavior(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         traversal_edge_behavior: TraversalEdgeBehavior,
-    ) -> Handle<Self> {
+    ) -> Ref<Self> {
         self.modal_route_data_mut(app).traversal_edge_behavior = Some(traversal_edge_behavior);
         self
     }
 
     /// Dart `MaterialPageRoute(directionalTraversalEdgeBehavior:)`.
     pub fn directional_traversal_edge_behavior(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         directional_traversal_edge_behavior: TraversalEdgeBehavior,
-    ) -> Handle<Self> {
+    ) -> Ref<Self> {
         self.modal_route_data_mut(app)
             .directional_traversal_edge_behavior = Some(directional_traversal_edge_behavior);
         self
@@ -362,8 +358,8 @@ pub trait MaterialRouteTransitionMixin: PageRoute {
         self: Handle<Self>,
         app: &mut App,
         context: BuildContext,
-        animation: AnyAnimation<f64>,
-        secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        secondary_animation: AnimationRef<f64>,
     ) -> WidgetRef {
         let _ = (animation, secondary_animation);
         let result = self.build_content(app, context);
@@ -382,8 +378,8 @@ pub trait MaterialRouteTransitionMixin: PageRoute {
         self: Handle<Self>,
         app: &mut App,
         context: BuildContext,
-        animation: AnyAnimation<f64>,
-        secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        secondary_animation: AnimationRef<f64>,
         child: WidgetRef,
     ) -> WidgetRef {
         let theme = Theme::of(app, context).page_transitions_theme.clone();
@@ -458,8 +454,8 @@ fn get_page_transition_builder(
 fn material_delegated_transition(
     app: &mut App,
     context: BuildContext,
-    animation: AnyAnimation<f64>,
-    secondary_animation: AnyAnimation<f64>,
+    animation: AnimationRef<f64>,
+    secondary_animation: AnimationRef<f64>,
     allow_snapshotting: bool,
     child: Option<&WidgetRef>,
 ) -> Option<WidgetRef> {
@@ -712,8 +708,8 @@ macro_rules! material_route_transition_mixin_modal_route_overrides {
             self: ::waft_foundation::Handle<Self>,
             app: &mut ::waft_foundation::App,
             context: ::waft_widgets::BuildContext,
-            animation: ::waft_animation::AnyAnimation<f64>,
-            secondary_animation: ::waft_animation::AnyAnimation<f64>,
+            animation: ::waft_animation::AnimationRef<f64>,
+            secondary_animation: ::waft_animation::AnimationRef<f64>,
         ) -> ::waft_widgets::WidgetRef {
             $crate::MaterialRouteTransitionMixin::build_page(
                 self,
@@ -728,8 +724,8 @@ macro_rules! material_route_transition_mixin_modal_route_overrides {
             self: ::waft_foundation::Handle<Self>,
             app: &mut ::waft_foundation::App,
             context: ::waft_widgets::BuildContext,
-            animation: ::waft_animation::AnyAnimation<f64>,
-            secondary_animation: ::waft_animation::AnyAnimation<f64>,
+            animation: ::waft_animation::AnimationRef<f64>,
+            secondary_animation: ::waft_animation::AnimationRef<f64>,
             child: ::waft_widgets::WidgetRef,
         ) -> ::waft_widgets::WidgetRef {
             $crate::MaterialRouteTransitionMixin::build_transitions(
@@ -923,13 +919,9 @@ impl Page for MaterialPage {
         }
     }
 
-    fn create_route(&self, app: &mut App, context: BuildContext, this: &PageRef) -> AnyRoute {
+    fn create_route(&self, app: &mut App, context: BuildContext, this: &PageRef) -> RouteRef {
         let _ = context;
-        Route::as_route(PageBasedMaterialPageRoute::new(
-            app,
-            Rc::clone(this),
-            self.allow_snapshotting,
-        ))
+        PageBasedMaterialPageRoute::new(app, Rc::clone(this), self.allow_snapshotting).into_erased()
     }
 }
 
@@ -951,7 +943,7 @@ impl PageBasedMaterialPageRoute {
         app: &mut App,
         page: PageRef,
         allow_snapshotting: bool,
-    ) -> Handle<PageBasedMaterialPageRoute> {
+    ) -> Ref<PageBasedMaterialPageRoute> {
         let route = RouteData::new(app, Some(RouteSettingsRef::Page(page)), None);
         let transition_route = TransitionRouteData::new(app);
         let modal_route = ModalRouteData::new(app);
@@ -965,7 +957,7 @@ impl PageBasedMaterialPageRoute {
             modal_route,
             page_route,
         });
-        debug_assert!(TransitionRoute::opaque(this, app));
+        debug_assert!(TransitionRoute::opaque(this.handle(), app));
         this
     }
 
@@ -1118,7 +1110,7 @@ mod tests {
         !tester.find_onstage_text(text).is_empty()
     }
 
-    fn push(tester: &WidgetTester, route: impl FnOnce(&mut App) -> AnyRoute) {
+    fn push(tester: &WidgetTester, route: impl FnOnce(&mut App) -> RouteRef) {
         let navigator = navigator(tester);
         let mut app = tester.cell.borrow_mut();
         let route = route(&mut app);
@@ -1207,7 +1199,7 @@ mod tests {
                 push(&tester, |app| {
                     let route = MaterialPageRoute::new(app, material_text("Page 2"))
                         .fullscreen_dialog(app, true);
-                    Route::as_route(route)
+                    route.into_erased()
                 });
 
                 tester.pump(Duration::ZERO);
@@ -1334,7 +1326,7 @@ mod tests {
                 push(&tester, |app| {
                     let route = MaterialPageRoute::new(app, scaffold_text("Page 2"))
                         .fullscreen_dialog(app, true);
-                    Route::as_route(route)
+                    route.into_erased()
                 });
                 tester.pump_and_settle();
 
@@ -1379,14 +1371,14 @@ mod tests {
                                     app_bar_page("Page 1")
                                 }),
                             );
-                            return Some(Route::as_route(route));
+                            return Some(route.erase());
                         }
                         let route = MaterialPageRoute::new(
                             app,
                             Rc::new(|_app, _context| app_bar_page("Page 2")),
                         )
                         .fullscreen_dialog(app, true);
-                        Some(Route::as_route(route))
+                        Some(route.erase())
                     })
                 });
 
@@ -1426,10 +1418,11 @@ mod tests {
                 let title_initial_top_left = top_left(&tester, "Title");
 
                 push(&tester, |app| {
-                    Route::as_route(CupertinoPageRoute::new(
+                    (CupertinoPageRoute::new(
                         app,
                         Rc::new(|_app, _context| SizedBox::expand().into_widget()),
                     ))
+                    .into_erased()
                 });
 
                 tester.pump(Duration::ZERO);
@@ -1538,7 +1531,7 @@ mod tests {
             push(&tester, |app| {
                 let route = MaterialPageRoute::new(app, scaffold_text("route"))
                     .barrier_dismissible(app, true);
-                Route::as_route(route)
+                route.into_erased()
             });
             tester.pump_and_settle();
             assert_eq!(tester.find_onstage_text("route").len(), 1);
@@ -1569,7 +1562,7 @@ mod tests {
                         }),
                     )
                     .maintain_state(app, !first);
-                    Some(Route::as_route(route))
+                    Some(route.erase())
                 })
             });
             navigator(&tester).push_named(&mut tester.cell.borrow_mut(), "/second", None);
@@ -1598,8 +1591,8 @@ mod tests {
             let pushed: Rc<std::cell::Cell<Option<Handle<MaterialPageRoute>>>> = Rc::default();
             push(&tester, |app| {
                 let route = MaterialPageRoute::new(app, material_text("second"));
-                pushed.set(Some(route));
-                Route::as_route(route)
+                pushed.set(Some(route.handle()));
+                route.into_erased()
             });
             tester.pump_and_settle();
 
@@ -1728,8 +1721,8 @@ mod tests {
                 let pushed: Rc<std::cell::Cell<Option<Handle<MaterialPageRoute>>>> = Rc::default();
                 push(&tester, |app| {
                     let route = MaterialPageRoute::new(app, material_text("next"));
-                    pushed.set(Some(route));
-                    Route::as_route(route)
+                    pushed.set(Some(route.handle()));
+                    route.into_erased()
                 });
                 let route = pushed.get().expect("pushed");
                 let mut app = tester.cell.borrow_mut();
@@ -1906,7 +1899,7 @@ mod tests {
                     }),
                 )
                 .settings(app, RouteSettingsRef::Settings(settings.clone()));
-                Some(Route::as_route(route))
+                Some(route.erase())
             })
         });
     }
@@ -1986,7 +1979,7 @@ mod tests {
         render.local_to_global(&tester.cell.borrow(), Offset::ZERO, None)
     }
 
-    fn route_scaffold(app: &mut App) -> AnyRoute {
+    fn route_scaffold(app: &mut App) -> RouteRef {
         let route = MaterialPageRoute::new(
             app,
             Rc::new(|_app, _context| {
@@ -1995,7 +1988,7 @@ mod tests {
                     .into_widget()
             }),
         );
-        Route::as_route(route)
+        route.into_erased()
     }
 
     #[test]
@@ -2015,7 +2008,7 @@ mod tests {
                                 Some(Listener::new(move |app| {
                                     let context = push_key.current_context(app).expect("mounted");
                                     let route = route_scaffold(app);
-                                    Navigator::push(app, context, route);
+                                    Navigator::push(app, context, route.clone());
                                 })),
                                 Some(Text::new("push")),
                             ))),
@@ -2075,7 +2068,7 @@ mod tests {
                     let mut app = tester.cell.borrow_mut();
                     let context = scaffold_key.current_context(&app).expect("mounted");
                     let route = route_scaffold(&mut app);
-                    Navigator::push(&mut app, context, route);
+                    Navigator::push(&mut app, context, route.clone());
                 }
 
                 tester.pump_and_settle();
@@ -2134,7 +2127,7 @@ mod tests {
                     .into_widget()
             }),
         );
-        Navigator::push(&mut app, context, Route::as_route(route));
+        Navigator::push(&mut app, context, route.erase());
     }
 
     fn tap_key(tester: &mut WidgetTester, key: &GlobalKey) {
@@ -2361,10 +2354,11 @@ mod tests {
                 false,
             );
             push(&tester, |app| {
-                Route::as_route(MaterialPageRoute::new(
+                (MaterialPageRoute::new(
                     app,
                     Rc::new(|_app, _context| Text::new(PAGE_TWO_TEXT).into_widget()),
                 ))
+                .into_erased()
             });
             tester.pump(Duration::ZERO);
             tester.pump(Duration::from_millis(100));
@@ -2384,13 +2378,12 @@ mod tests {
 
             // Navigate to page two again with requestFocus set to false.
             push(&tester, |app| {
-                Route::as_route(
-                    MaterialPageRoute::new(
-                        app,
-                        Rc::new(|_app, _context| Text::new(PAGE_TWO_TEXT).into_widget()),
-                    )
-                    .request_focus(app, false),
+                (MaterialPageRoute::new(
+                    app,
+                    Rc::new(|_app, _context| Text::new(PAGE_TWO_TEXT).into_widget()),
                 )
+                .request_focus(app, false))
+                .into_erased()
             });
             tester.pump(Duration::ZERO);
             tester.pump(Duration::from_millis(100));

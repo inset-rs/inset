@@ -13,6 +13,8 @@ use crate::mouse_tracker::MouseTracker;
 use crate::object::RenderHandle;
 use crate::pipeline_owner::{PipelineManifold, PipelineOwner};
 use crate::view::{RenderView, ViewConfiguration};
+use waft_foundation::OptionRetained;
+use waft_foundation::Ref;
 
 /// The object side of Flutter's `WidgetsBinding` overrides of `RendererBinding.drawFrame`:
 /// the widget layer builds before the renderer's frame and finalizes its tree after it.
@@ -72,11 +74,11 @@ impl PipelineManifold for BindingPipelineManifold {
 #[derive(Default)]
 pub struct RendererBinding {
     overrides: Option<Rc<dyn RendererBindingOverrides>>,
-    root_pipeline_owner: Option<Handle<PipelineOwner>>,
+    root_pipeline_owner: Option<Ref<PipelineOwner>>,
     /// The render view [`init_render_view`](Self::init_render_view) made, which it answers again.
     test_render_view: Option<RenderHandle<RenderView>>,
     render_views: Vec<(ViewId, RenderHandle<RenderView>)>,
-    mouse_tracker: Option<Handle<MouseTracker>>,
+    mouse_tracker: Option<Ref<MouseTracker>>,
     debug_mouse_tracker_update_scheduled: bool,
     first_frame_deferred_count: u32,
     first_frame_sent: bool,
@@ -88,7 +90,7 @@ impl RendererBinding {
         let this: Handle<RendererBinding> = app.singleton();
         if app.get(this).root_pipeline_owner.is_none() {
             let root_pipeline_owner = this.create_root_pipeline_owner(app);
-            app.get_mut(this).root_pipeline_owner = Some(root_pipeline_owner);
+            app.get_mut(this).root_pipeline_owner = Some(root_pipeline_owner.clone());
             root_pipeline_owner.attach(app, Rc::new(BindingPipelineManifold));
             SchedulerBinding::add_persistent_frame_callback(
                 app,
@@ -109,6 +111,7 @@ impl RendererBinding {
     pub fn mouse_tracker(self: Handle<Self>, app: &App) -> Handle<MouseTracker> {
         app.get(self)
             .mouse_tracker
+            .handle()
             .expect("RendererBinding::instance must run first")
     }
 
@@ -119,9 +122,9 @@ impl RendererBinding {
     pub fn init_mouse_tracker(
         self: Handle<Self>,
         app: &mut App,
-        tracker: Option<Handle<MouseTracker>>,
+        tracker: Option<Ref<MouseTracker>>,
     ) {
-        if let Some(previous) = app.get(self).mouse_tracker {
+        if let Some(previous) = app.get(self).mouse_tracker.handle() {
             previous.dispose(app);
         }
         let tracker = tracker.unwrap_or_else(|| {
@@ -145,6 +148,7 @@ impl RendererBinding {
     pub fn root_pipeline_owner(self: Handle<Self>, app: &App) -> Handle<PipelineOwner> {
         app.get(self)
             .root_pipeline_owner
+            .handle()
             .expect("RendererBinding::instance must run first")
     }
 
@@ -152,7 +156,7 @@ impl RendererBinding {
     ///
     /// When a test's render view is its root node ([`init_render_view`](Self::init_render_view)),
     /// that view is marked to be composited after a paint that had work.
-    fn create_root_pipeline_owner(self: Handle<Self>, app: &mut App) -> Handle<PipelineOwner> {
+    fn create_root_pipeline_owner(self: Handle<Self>, app: &mut App) -> Ref<PipelineOwner> {
         PipelineOwner::new(
             app,
             Some(Listener::new(|app| {

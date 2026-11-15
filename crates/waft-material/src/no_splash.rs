@@ -3,14 +3,13 @@
 use std::rc::Rc;
 
 use waft_embedder::{Canvas, Color, Matrix4, Offset, TextDirection};
-use waft_foundation::{App, Handle, Listener};
+use waft_foundation::{App, Handle, Listener, Ref};
 use waft_painting::{BorderRadius, ShapeBorderRef};
 use waft_rendering::AnyRenderBox;
 
 use crate::ink_well::{
-    AnyInteractiveInkFeature, InteractiveInkFeatureData, InteractiveInkFeatureFactory,
-    InteractiveInkFeatureFactoryRef, InteractiveInkFeatureLeaf, InteractiveInkFeatureLeafData,
-    InteractiveInkFeatureObject,
+    InteractiveInkFeatureData, InteractiveInkFeatureFactory, InteractiveInkFeatureFactoryRef,
+    InteractiveInkFeatureLeaf, InteractiveInkFeatureLeafData, InteractiveInkFeatureRef,
 };
 use crate::material::{
     AnyMaterialInkController, InkFeatureData, InkFeatureLeaf, InkFeatureLeafData, RectCallback,
@@ -35,9 +34,8 @@ impl InteractiveInkFeatureFactory for NoSplashFactory {
         _custom_border: Option<ShapeBorderRef>,
         _radius: Option<f64>,
         on_removed: Option<Listener>,
-    ) -> AnyInteractiveInkFeature {
-        NoSplash::new(app, controller, reference_box, color, on_removed)
-            .as_interactive_ink_feature()
+    ) -> InteractiveInkFeatureRef {
+        NoSplash::new(app, controller, reference_box, color, on_removed).into_erased()
     }
 }
 
@@ -67,7 +65,7 @@ impl NoSplash {
         reference_box: AnyRenderBox,
         color: Color,
         on_removed: Option<Listener>,
-    ) -> Handle<NoSplash> {
+    ) -> Ref<NoSplash> {
         let ink_feature = InkFeatureData::new(app, controller, reference_box, on_removed);
         app.create(NoSplash {
             ink_feature,

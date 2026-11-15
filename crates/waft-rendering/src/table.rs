@@ -1683,7 +1683,7 @@ impl RenderBox for RenderTable {
 mod tests {
     use waft_embedder::valo::Op;
     use waft_embedder::{Color, Radius};
-    use waft_foundation::{AppCell, Handle};
+    use waft_foundation::{AppCell, Handle, Ref};
     use waft_painting::{AlignmentGeometry, BorderRadius, BorderStyle};
 
     use super::*;
@@ -1704,7 +1704,7 @@ mod tests {
     /// `rendering_tester.dart`'s `layout`: attach `root` under a repaint boundary, lay it out
     /// with `constraints`, and paint it. The default constraints are an 800 by 600 screen.
     struct Laid {
-        owner: Handle<PipelineOwner>,
+        owner: Ref<PipelineOwner>,
         boundary: RenderHandle<RenderRepaintBoundary>,
     }
 
@@ -1718,7 +1718,7 @@ mod tests {
         boundary
             .as_object()
             .schedule_initial_paint(app, paint_root.as_container_layer());
-        pump_frame(app, owner);
+        pump_frame(app, *owner);
         Laid { owner, boundary }
     }
 
@@ -1826,7 +1826,7 @@ mod tests {
 
         let tall = sized_box(&mut app, 100.0, 200.0);
         table.set_child(&mut app, 2, 4, Some(tall));
-        pump_frame(&mut app, laid.owner);
+        pump_frame(&mut app, *laid.owner);
         assert_eq!(table.size(&app), Size::new(100.0, 200.0));
 
         let first = sized_box(&mut app, 10.0, 30.0);
@@ -1835,7 +1835,7 @@ mod tests {
         table.set_child(&mut app, 0, 0, Some(first));
         table.set_child(&mut app, 1, 0, Some(second));
         table.set_child(&mut app, 2, 0, Some(third));
-        pump_frame(&mut app, laid.owner);
+        pump_frame(&mut app, *laid.owner);
         assert_eq!(table.size(&app), Size::new(130.0, 230.0));
         assert_eq!(
             table.get(&app).column_lefts.as_deref(),
@@ -1891,7 +1891,7 @@ mod tests {
                 cells.push(Some(*child));
             }
             table.set_flat_children(&mut app, 3, cells);
-            pump_frame(&mut app, laid.owner);
+            pump_frame(&mut app, *laid.owner);
         }
         assert_eq!(table.columns(&app), 3);
         assert_eq!(table.rows(&app), 2);
@@ -1927,7 +1927,7 @@ mod tests {
         ] {
             let children = (0..cells).map(|_| Some(positioned_box(&mut app))).collect();
             table.set_flat_children(&mut app, columns, children);
-            pump_frame(&mut app, laid.owner);
+            pump_frame(&mut app, *laid.owner);
             assert_eq!(
                 paths_painted(&app, &laid),
                 paths,
@@ -1955,7 +1955,7 @@ mod tests {
         let laid = layout(&mut app, table.as_box(), screen());
         let children = (0..4).map(|_| Some(positioned_box(&mut app))).collect();
         table.set_flat_children(&mut app, 2, children);
-        pump_frame(&mut app, laid.owner);
+        pump_frame(&mut app, *laid.owner);
         assert_eq!(paths_painted(&app, &laid), 3);
     }
 

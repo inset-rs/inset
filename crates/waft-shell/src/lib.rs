@@ -361,7 +361,7 @@ impl EmbedderClient for Shell {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
     use std::rc::Rc;
     use std::time::Duration;
 
@@ -556,7 +556,7 @@ mod tests {
 
     #[test]
     fn a_change_of_the_clipboard_reaches_the_services_bindings_listenable() {
-        use waft_foundation::{Listenable, Listener};
+        use waft_foundation::{ListenableObject, Listener};
         use waft_services::ServicesBinding;
 
         let heard = Rc::new(Cell::new(0));
@@ -887,6 +887,9 @@ mod tests {
 
         let ticks = Rc::new(Cell::new(Vec::new()));
         let heard = Rc::clone(&ticks);
+        // The ticker runs for as long as something keeps it.
+        let ticker = Rc::new(RefCell::new(None));
+        let kept = Rc::clone(&ticker);
         let mut shell = Shell::new(Rc::new(TestPlatform::new()), move |app| {
             let on_tick = FrameCallback::new(move |_app, elapsed| {
                 let mut ticks = heard.take();
@@ -895,6 +898,7 @@ mod tests {
             });
             let ticker = Ticker::new(app, on_tick, None);
             ticker.start(app);
+            *kept.borrow_mut() = Some(ticker);
         });
         for frame in frames {
             shell.frame(&[IMPLICIT_VIEW_ID], *frame);
@@ -977,7 +981,7 @@ mod tests {
             count: Rc::clone(&count),
         });
         let binding = RendererBinding::instance(&mut shell.app());
-        binding.set_overrides(&mut shell.app(), Rc::new(counting));
+        binding.set_overrides(&mut shell.app(), Rc::new(counting.handle()));
 
         shell.view_added(ViewId(1));
         assert_eq!(count.get(), 1, "a view added");

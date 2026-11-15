@@ -13,7 +13,9 @@ use waft_embedder::{
     TextDecoration, TextDecorationStyle, TextDirection, TextInputAction, TextInputType,
     TextSelection,
 };
-use waft_foundation::{App, Handle, Listenable, Listener, ValueNotifier, VoidCallback};
+use waft_foundation::{
+    App, Handle, Listenable, Listener, OptionRetained, Ref, ValueNotifier, VoidCallback,
+};
 use waft_gestures::{
     DragStartBehavior, GestureTapCallback, HitTestResult, PointerDownEvent, PointerUpEvent,
     TapDragEndDetails, TapDragUpDetails,
@@ -27,16 +29,16 @@ use waft_services::{
     LengthLimitingTextInputFormatter, MaxLengthEnforcement, TextInputFormatterRef,
 };
 use waft_widgets::{
-    Align, AnyTextEditingController, AutomaticKeepAliveClientMixin,
-    AutomaticKeepAliveClientMixinData, BuildContext, Container, ContentInsertionConfiguration,
-    Directionality, EditableText, EditableTextContextMenuBuilder, EditableTextState, Expanded,
-    FocusNode, FocusNodeLeaf, GestureDetector, GlobalKey, IgnorePointer, IntoWidget, KeyRef,
+    Align, AutomaticKeepAliveClientMixin, AutomaticKeepAliveClientMixinData, BuildContext,
+    Container, ContentInsertionConfiguration, Directionality, EditableText,
+    EditableTextContextMenuBuilder, EditableTextState, Expanded, FocusNode, FocusNodeLeaf,
+    FocusNodeRef, GestureDetector, GlobalKey, IgnorePointer, IntoWidget, KeyRef,
     MagnifierController, MagnifierInfo, MediaQuery, Padding, RepaintBoundary, RestorableListenable,
     RestorableProperty, RestorableTextEditingController, RestorationBucket, RestorationMixin,
-    RestorationMixinData, Row, ScrollController, ScrollPhysicsRef, Semantics, SizedBox,
+    RestorationMixinData, Row, ScrollControllerRef, ScrollPhysicsRef, Semantics, SizedBox,
     SpellCheckConfiguration, Stack, State, StateData, StatefulWidget, SystemContextMenu, Text,
-    TextEditingControllerLeaf, TextFieldTapRegion, TextMagnifierConfiguration,
-    TextSelectionControls, TextSelectionGestureDetectorBuilder,
+    TextEditingControllerLeaf, TextEditingControllerRef, TextFieldTapRegion,
+    TextMagnifierConfiguration, TextSelectionControls, TextSelectionGestureDetectorBuilder,
     TextSelectionGestureDetectorBuilderBase, TextSelectionGestureDetectorBuilderData,
     TextSelectionGestureDetectorBuilderDelegate, ToolbarOptions, UndoHistoryController,
     UnfocusDisposition, UnmanagedRestorationScope, Visibility, WidgetRef,
@@ -102,11 +104,11 @@ pub struct CupertinoTextField {
     /// Controls the text being edited.
     ///
     /// If null, this widget will create its own [`TextEditingController`].
-    pub controller: Option<AnyTextEditingController>,
+    pub controller: Option<TextEditingControllerRef>,
     /// {@macro flutter.widgets.Focus.focusNode}
-    pub focus_node: Option<Handle<FocusNode>>,
+    pub focus_node: Option<FocusNodeRef>,
     /// {@macro flutter.widgets.undoHistory.controller}
-    pub undo_controller: Option<Handle<UndoHistoryController>>,
+    pub undo_controller: Option<Ref<UndoHistoryController>>,
     /// Controls the [`BoxDecoration`] of the box behind the text input.
     ///
     /// Defaults to having a rounded rectangle grey border and can be null to have
@@ -224,7 +226,7 @@ pub struct CupertinoTextField {
     /// {@macro flutter.widgets.editableText.selectionControls}
     pub selection_controls: Option<Rc<dyn TextSelectionControls>>,
     /// {@macro flutter.widgets.editableText.scrollController}
-    pub scroll_controller: Option<Handle<ScrollController>>,
+    pub scroll_controller: Option<ScrollControllerRef>,
     /// {@macro flutter.widgets.editableText.scrollPhysics}
     pub scroll_physics: Option<ScrollPhysicsRef>,
     /// {@macro flutter.material.textfield.onTap}
@@ -350,13 +352,13 @@ impl CupertinoTextField {
     }
 
     /// Dart `CupertinoTextField(controller:)`.
-    pub fn controller(mut self, controller: AnyTextEditingController) -> CupertinoTextField {
+    pub fn controller(mut self, controller: TextEditingControllerRef) -> CupertinoTextField {
         self.controller = Some(controller);
         self
     }
 
     /// Dart `CupertinoTextField(focusNode:)`.
-    pub fn focus_node(mut self, focus_node: Handle<FocusNode>) -> CupertinoTextField {
+    pub fn focus_node(mut self, focus_node: FocusNodeRef) -> CupertinoTextField {
         self.focus_node = Some(focus_node);
         self
     }
@@ -364,7 +366,7 @@ impl CupertinoTextField {
     /// Dart `CupertinoTextField(undoController:)`.
     pub fn undo_controller(
         mut self,
-        undo_controller: Handle<UndoHistoryController>,
+        undo_controller: Ref<UndoHistoryController>,
     ) -> CupertinoTextField {
         self.undo_controller = Some(undo_controller);
         self
@@ -766,7 +768,7 @@ impl CupertinoTextField {
     /// Dart `CupertinoTextField(scrollController:)`.
     pub fn scroll_controller(
         mut self,
-        scroll_controller: Handle<ScrollController>,
+        scroll_controller: ScrollControllerRef,
     ) -> CupertinoTextField {
         self.scroll_controller = Some(scroll_controller);
         self
@@ -907,8 +909,8 @@ impl CupertinoTextField {
                 .with_magnifier_builder(Rc::new(
                     |app: &mut App,
                      _context: BuildContext,
-                     controller: Handle<MagnifierController>,
-                     magnifier_info: Handle<ValueNotifier<MagnifierInfo>>| {
+                     controller: Ref<MagnifierController>,
+                     magnifier_info: Ref<ValueNotifier<MagnifierInfo>>| {
                         match app.platform().target_platform() {
                             TargetPlatform::Android | TargetPlatform::IOS => Some(
                                 CupertinoTextMagnifier::new(controller, magnifier_info)
@@ -1037,29 +1039,34 @@ pub struct CupertinoTextFieldState {
     automatic_keep_alive_client: AutomaticKeepAliveClientMixinData,
     clear_global_key: GlobalKey,
     editable_text_key: GlobalKey,
-    controller: Option<Handle<RestorableTextEditingController>>,
-    focus_node: Option<Handle<FocusNode>>,
-    listening_controller: Option<AnyTextEditingController>,
+    controller: Option<Ref<RestorableTextEditingController>>,
+    focus_node: Option<Ref<FocusNode>>,
+    listening_controller: Option<TextEditingControllerRef>,
     selection_gesture_detector_builder:
-        Option<Handle<CupertinoTextFieldSelectionGestureDetectorBuilder>>,
+        Option<Ref<CupertinoTextFieldSelectionGestureDetectorBuilder>>,
 }
 
 impl CupertinoTextFieldState {
-    fn effective_controller(self: Handle<Self>, app: &App) -> AnyTextEditingController {
-        if let Some(controller) = self.widget(app).controller {
+    fn effective_controller(self: Handle<Self>, app: &App) -> TextEditingControllerRef {
+        if let Some(controller) = self.widget(app).controller.clone() {
             return controller;
         }
         let restorable = app
             .get(self)
             .controller
+            .handle()
             .expect("a local controller exists when the widget does not supply one");
-        RestorableListenable::value(restorable, app).as_controller()
+        RestorableListenable::value(restorable, app)
+            .upgrade(app)
+            .expect("the restorable controller keeps its value")
+            .into_erased()
     }
 
-    fn effective_focus_node(self: Handle<Self>, app: &App) -> Handle<FocusNode> {
+    fn effective_focus_node(self: Handle<Self>, app: &App) -> FocusNodeRef {
         self.widget(app)
             .focus_node
-            .or(app.get(self).focus_node)
+            .clone()
+            .or_else(|| app.get(self).focus_node.as_ref().map(Ref::erase))
             .expect("init_state creates a local focus node")
     }
 
@@ -1073,6 +1080,7 @@ impl CupertinoTextFieldState {
         let controller = app
             .get(self)
             .controller
+            .handle()
             .expect("register_controller needs a local controller");
         self.register_for_restoration(app, controller.as_property(), "controller");
     }
@@ -1087,20 +1095,20 @@ impl CupertinoTextFieldState {
             None => RestorableTextEditingController::new(app),
             Some(value) => RestorableTextEditingController::from_value(app, value),
         };
-        app.get_mut(self).controller = Some(controller);
+        app.get_mut(self).controller = Some(controller.clone());
         if !self.restore_pending(app) {
             self.register_controller(app);
         }
     }
 
     fn listen_to_controller(self: Handle<Self>, app: &mut App) {
-        if let Some(restorable) = app.get(self).controller
+        if let Some(restorable) = app.get(self).controller.handle()
             && !RestorableProperty::is_registered(restorable, app)
         {
             return;
         }
         let controller = self.effective_controller(app);
-        if app.get(self).listening_controller == Some(controller) {
+        if app.get(self).listening_controller.handle() == Some(controller.handle()) {
             return;
         }
         self.unlisten_controller(app);
@@ -1112,7 +1120,7 @@ impl CupertinoTextFieldState {
     }
 
     fn unlisten_controller(self: Handle<Self>, app: &mut App) {
-        if let Some(controller) = app.get(self).listening_controller {
+        if let Some(controller) = app.get(self).listening_controller.clone() {
             controller.remove_listener(
                 app,
                 &Listener::handle_method(self, Self::handle_controller_changed),
@@ -1315,7 +1323,7 @@ impl AutomaticKeepAliveClientMixin for CupertinoTextFieldState {
     }
 
     fn want_keep_alive(self: Handle<Self>, app: &App) -> bool {
-        let Some(controller) = app.get(self).controller else {
+        let Some(controller) = app.get(self).controller.handle() else {
             return false;
         };
         RestorableProperty::is_registered(controller, app)
@@ -1366,18 +1374,22 @@ impl State for CupertinoTextFieldState {
         if self.widget(app).controller.is_none() && old_widget.controller.is_some() {
             let value = old_widget
                 .controller
+                .as_ref()
                 .map(|controller| controller.value(app).clone());
             self.create_local_controller(app, value);
         } else if self.widget(app).controller.is_some()
             && old_widget.controller.is_none()
-            && let Some(controller) = app.get(self).controller
+            && let Some(controller) = app.get(self).controller.handle()
         {
             self.unregister_from_restoration(app, controller.as_property());
             RestorableProperty::dispose(controller, app);
             app.get_mut(self).controller = None;
         }
-        if self.widget(app).focus_node != old_widget.focus_node {
-            let old_focus = old_widget.focus_node.or(app.get(self).focus_node);
+        if self.widget(app).focus_node.handle() != old_widget.focus_node.handle() {
+            let old_focus = old_widget
+                .focus_node
+                .clone()
+                .or_else(|| app.get(self).focus_node.as_ref().map(Ref::erase));
             if let Some(old_focus) = old_focus {
                 old_focus.remove_listener(
                     app,
@@ -1385,7 +1397,7 @@ impl State for CupertinoTextFieldState {
                 );
             }
             if self.widget(app).focus_node.is_some() {
-                if let Some(local) = app.get(self).focus_node {
+                if let Some(local) = app.get(self).focus_node.handle() {
                     local.dispose(app);
                     app.get_mut(self).focus_node = None;
                 }
@@ -1415,16 +1427,12 @@ impl State for CupertinoTextFieldState {
             app,
             &Listener::handle_method(self, Self::handle_focus_changed),
         );
-        if let Some(focus) = app.get(self).focus_node {
+        if let Some(focus) = app.get(self).focus_node.handle() {
             focus.dispose(app);
         }
-        if let Some(controller) = app.get(self).controller {
+        if let Some(controller) = app.get(self).controller.handle() {
             RestorableProperty::dispose(controller, app);
         }
-        if let Some(builder) = app.get(self).selection_gesture_detector_builder {
-            app.destroy(builder);
-        }
-        app.get_mut(self).selection_gesture_detector_builder = None;
         self.dispose_restoration(app);
     }
 
@@ -1683,7 +1691,7 @@ impl State for CupertinoTextFieldState {
         if let Some(select_all_on_focus) = self.widget(app).select_all_on_focus {
             editable = editable.select_all_on_focus(select_all_on_focus);
         }
-        if let Some(scroll_controller) = self.widget(app).scroll_controller {
+        if let Some(scroll_controller) = self.widget(app).scroll_controller.clone() {
             editable = editable.scroll_controller(scroll_controller);
         }
         if let Some(scroll_physics) = self.widget(app).scroll_physics.clone() {
@@ -1709,7 +1717,7 @@ impl State for CupertinoTextFieldState {
                 .clone()
                 .unwrap_or_else(CupertinoTextField::ios_magnifier_configuration),
         );
-        if let Some(undo_controller) = self.widget(app).undo_controller {
+        if let Some(undo_controller) = self.widget(app).undo_controller.clone() {
             editable = editable.undo_controller(undo_controller);
         }
         if let Some(enable_inline_prediction) = self.widget(app).enable_inline_prediction {
@@ -1748,7 +1756,7 @@ impl State for CupertinoTextFieldState {
             editable = editable.selection_controls(selection_controls);
         }
 
-        let bucket = self.bucket(app);
+        let bucket = self.bucket(app).and_then(|bucket| bucket.upgrade(app));
         let padded_editable = Padding::new(self.widget(app).padding).child(
             RepaintBoundary::new().child(UnmanagedRestorationScope::new(editable).bucket(bucket)),
         );
@@ -1770,6 +1778,7 @@ impl State for CupertinoTextFieldState {
         let builder = app
             .get(self)
             .selection_gesture_detector_builder
+            .handle()
             .expect("created in initState");
         let gestured = TextSelectionGestureDetectorBuilder::build_gesture_detector(
             builder,
@@ -2136,7 +2145,7 @@ mod tests {
         render_box.local_to_global(app, local, None)
     }
 
-    fn mount_field(text: &str) -> (Rc<AppCell>, Handle<TextEditingController>, GlobalKey) {
+    fn mount_field(text: &str) -> (Rc<AppCell>, Ref<TextEditingController>, GlobalKey) {
         let cell = test_cell();
         let mut app = cell.borrow_mut();
         install_fonts(&mut app);
@@ -2151,7 +2160,7 @@ mod tests {
                 .home(
                     CupertinoTextField::new()
                         .key(key_ref)
-                        .controller(controller.as_controller()),
+                        .controller(controller.clone().into_erased()),
                 )
                 .into_widget(),
         );
@@ -2225,7 +2234,7 @@ mod tests {
     /// `mount_field` gives the field the whole view, so there is no outside to tap.
     fn mount_field_with_room_below(
         text: &str,
-    ) -> (Rc<AppCell>, Handle<TextEditingController>, GlobalKey) {
+    ) -> (Rc<AppCell>, Ref<TextEditingController>, GlobalKey) {
         let cell = test_cell();
         let mut app = cell.borrow_mut();
         install_fonts(&mut app);
@@ -2244,7 +2253,7 @@ mod tests {
                             .child(
                                 CupertinoTextField::new()
                                     .key(key_ref)
-                                    .controller(controller.as_controller()),
+                                    .controller(controller.clone().into_erased()),
                             )
                             .into_widget(),
                         // Something for a click below the field to land on, the way the gallery's

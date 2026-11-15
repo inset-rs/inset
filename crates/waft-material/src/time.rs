@@ -7,7 +7,7 @@
 use std::cmp::Ordering;
 use std::fmt;
 
-use waft_foundation::{App, ChangeNotifier, ChangeNotifierData, DateTime, Handle};
+use waft_foundation::{App, ChangeNotifier, ChangeNotifierData, DateTime, Handle, Ref};
 use waft_services::RestorationData;
 use waft_widgets::{
     BuildContext, MediaQuery, RestorableProperty, RestorablePropertyData, RestorableValue,
@@ -230,7 +230,7 @@ impl RestorableTimeOfDay {
     ///
     /// If no restoration data is available to restore the value in this property from, the
     /// property will be initialized with the provided `default_value`.
-    pub fn new(app: &mut App, default_value: TimeOfDay) -> Handle<RestorableTimeOfDay> {
+    pub fn new(app: &mut App, default_value: TimeOfDay) -> Ref<RestorableTimeOfDay> {
         app.create(RestorableTimeOfDay {
             change_notifier: ChangeNotifierData::new(),
             property: RestorablePropertyData::new(),
@@ -604,12 +604,12 @@ mod tests {
     struct RestorableWidgetState {
         state: StateData<RestorableWidget>,
         restoration: RestorationMixinData,
-        time_of_day: Option<Handle<RestorableTimeOfDay>>,
+        time_of_day: Option<Ref<RestorableTimeOfDay>>,
     }
 
     impl RestorableWidgetState {
-        fn time_of_day(self: Handle<Self>, app: &App) -> Handle<RestorableTimeOfDay> {
-            app.get(self).time_of_day.expect("init_state ran")
+        fn time_of_day(self: Handle<Self>, app: &App) -> Ref<RestorableTimeOfDay> {
+            app.get(self).time_of_day.clone().expect("init_state ran")
         }
 
         fn set_properties(self: Handle<Self>, app: &mut App, callback: impl FnOnce(&mut App)) {
@@ -651,7 +651,7 @@ mod tests {
 
         fn dispose(self: Handle<Self>, app: &mut App) {
             let time_of_day = self.time_of_day(app);
-            RestorableProperty::dispose(time_of_day, app);
+            RestorableProperty::dispose(time_of_day.handle(), app);
             self.dispose_restoration(app);
         }
 
@@ -678,7 +678,7 @@ mod tests {
     }
 
     fn value(app: &App, state: Handle<RestorableWidgetState>) -> TimeOfDay {
-        *RestorableValue::value(state.time_of_day(app), app)
+        *RestorableValue::value(state.time_of_day(app).handle(), app)
     }
 
     // time_test.dart 'RestorableTimeOfDay tests: value is not accessible when not registered'.
@@ -688,7 +688,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let property = RestorableTimeOfDay::new(&mut app, TimeOfDay::new(20, 4));
-        RestorableValue::value(property, &app);
+        RestorableValue::value(property.handle(), &app);
     }
 
     // time_test.dart 'RestorableTimeOfDay tests: work when not in restoration scope'.
@@ -808,7 +808,7 @@ mod tests {
         });
         pump(app, Duration::ZERO);
         assert_eq!(
-            RestorableProperty::to_primitives(state.time_of_day(app), app),
+            RestorableProperty::to_primitives(state.time_of_day(app).handle(), app),
             RestorationData::List(vec![RestorationData::Int(7), RestorationData::Int(2)])
         );
         assert!(!restoration.puts.borrow().is_empty());

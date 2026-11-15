@@ -16,7 +16,7 @@ use waft_embedder::{
     BlurStyle, Brightness, Canvas, Clip, Color, FillRule, Offset, Paint, PaintStyle, Path,
     PathBuilder, RRect, Radius, Rect, Size, Stroke, clamp_double, rrect_radii_elliptical,
 };
-use waft_foundation::{App, Handle, Listener};
+use waft_foundation::{App, Handle, Listener, OptionRetained, Ref};
 use waft_gestures::DragEndDetails;
 use waft_painting::{BoxShadow, ClipContext, EdgeInsetsGeometry, draw_rrect};
 use waft_rendering::{
@@ -616,7 +616,7 @@ impl StatefulWidget for CupertinoTextSelectionToolbarContent {
 
 struct CupertinoTextSelectionToolbarContentState {
     state: StateData<CupertinoTextSelectionToolbarContent>,
-    controller: Option<Handle<AnimationController>>,
+    controller: Option<Ref<AnimationController>>,
     next_page: Option<i32>,
     page: i32,
     toolbar_items_key: GlobalKey,
@@ -627,6 +627,7 @@ impl CupertinoTextSelectionToolbarContentState {
     fn controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
         app.get(self)
             .controller
+            .handle()
             .expect("the controller is created in initState")
     }
 
@@ -729,7 +730,7 @@ impl SingleTickerProviderStateMixin for CupertinoTextSelectionToolbarContentStat
 }
 
 impl TickerProviderObject for CupertinoTextSelectionToolbarContentState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -777,8 +778,6 @@ impl State for CupertinoTextSelectionToolbarContentState {
         let controller = self.controller(app);
         controller.dispose(app);
         SingleTickerProviderStateMixin::dispose(self, app);
-        app.get_mut(self).controller = None;
-        app.destroy(controller);
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -834,7 +833,12 @@ impl State for CupertinoTextSelectionToolbarContentState {
         );
         let page = app.get(self).page;
         let toolbar_items_key = app.get(self).toolbar_items_key.clone();
-        let opacity = self.controller(app).view();
+        let opacity = app
+            .get(self)
+            .controller
+            .as_ref()
+            .expect("the controller is created in initState")
+            .erase();
         let this = self;
         let divider_color = K_TOOLBAR_DIVIDER_COLOR
             .resolve_from(app, context)
@@ -1048,6 +1052,7 @@ impl CupertinoTextSelectionToolbarItemsElement {
             back_button_slot: Rc::new(CupertinoTextSelectionToolbarItemsSlot::BackButton),
             next_button_slot: Rc::new(CupertinoTextSelectionToolbarItemsSlot::NextButton),
         })
+        .into_tree_node(app)
     }
 
     fn toolbar_items_slot(

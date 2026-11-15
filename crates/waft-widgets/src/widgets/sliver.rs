@@ -1355,6 +1355,7 @@ where
             did_underflow: false,
             marker: std::marker::PhantomData,
         })
+        .into_tree_node(app)
     }
 
     /// The render object this element manages the children of.
@@ -2120,6 +2121,7 @@ impl ParentDataWidget for KeepAlive {
 mod tests {
     use waft_embedder::TextDirection;
     use waft_foundation::AppCell;
+    use waft_foundation::Ref;
     use waft_foundation::ValueKey;
     use waft_rendering::{
         ContainerRenderObjectMixin, FixedViewportOffset, RenderSliverList, ScrollCacheExtent,
@@ -2139,10 +2141,10 @@ mod tests {
         SizedBox::new().key(key(value)).height(40.0).into_widget()
     }
 
-    fn viewport_over(sliver: WidgetRef, offset: Handle<FixedViewportOffset>) -> WidgetRef {
+    fn viewport_over(sliver: WidgetRef, offset: &Ref<FixedViewportOffset>) -> WidgetRef {
         Directionality::new(
             TextDirection::Ltr,
-            Viewport::new(offset.as_viewport_offset())
+            Viewport::new(offset.erase())
                 .scroll_cache_extent(ScrollCacheExtent::Pixels(0.0))
                 .slivers(vec![sliver]),
         )
@@ -2192,14 +2194,14 @@ mod tests {
                 .add_repaint_boundaries(false)
                 .into_widget()
         };
-        let harness = Harness::mount(&mut app, viewport_over(ordered([0, 1, 2]), offset));
+        let harness = Harness::mount(&mut app, viewport_over(ordered([0, 1, 2]), &offset));
         harness.pump(&mut app);
 
         let list: RenderHandle<RenderSliverList> = first_sliver(&harness, &app);
         let before = children_of(list, &app);
         assert_eq!(before.len(), 3);
 
-        harness.set_child(&mut app, viewport_over(ordered([2, 0, 1]), offset));
+        harness.set_child(&mut app, viewport_over(ordered([2, 0, 1]), &offset));
         harness.pump(&mut app);
 
         let after = children_of(list, &app);
@@ -2224,7 +2226,7 @@ mod tests {
             .add_repaint_boundaries(false)
             .add_semantic_indexes(false)
             .into_widget();
-        let harness = Harness::mount(&mut app, viewport_over(sliver, offset));
+        let harness = Harness::mount(&mut app, viewport_over(sliver, &offset));
         harness.pump(&mut app);
 
         let list: RenderHandle<RenderSliverList> = first_sliver(&harness, &app);
@@ -2255,7 +2257,7 @@ mod tests {
         )
         .item_count(8)
         .into_widget();
-        let harness = Harness::mount(&mut app, viewport_over(sliver, offset));
+        let harness = Harness::mount(&mut app, viewport_over(sliver, &offset));
         harness.pump(&mut app);
 
         let list: RenderHandle<RenderSliverFixedExtentList> = first_sliver(&harness, &app);
@@ -2281,7 +2283,7 @@ mod tests {
         .item_count(30)
         .add_repaint_boundaries(false)
         .into_widget();
-        let harness = Harness::mount(&mut app, viewport_over(sliver, offset));
+        let harness = Harness::mount(&mut app, viewport_over(sliver, &offset));
         harness.pump(&mut app);
 
         let grid: RenderHandle<RenderSliverGrid> = first_sliver(&harness, &app);
@@ -2322,7 +2324,7 @@ mod tests {
             .add_repaint_boundaries(false)
             .add_semantic_indexes(false)
             .into_widget();
-        let harness = Harness::mount(&mut app, viewport_over(sliver, offset));
+        let harness = Harness::mount(&mut app, viewport_over(sliver, &offset));
         harness.pump(&mut app);
 
         let grid: RenderHandle<RenderSliverGrid> = first_sliver(&harness, &app);

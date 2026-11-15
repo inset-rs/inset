@@ -16,7 +16,7 @@ use std::{
 };
 use waft_animation::{AnimationBehavior, AnimationController, Curves};
 use waft_embedder::{Color, FontWeight, Offset, Rect, TextDirection};
-use waft_foundation::{App, Handle, Listener};
+use waft_foundation::{App, Handle, Listener, OptionRetained, Ref};
 use waft_painting::{Alignment, EdgeInsets, EdgeInsetsGeometry};
 use waft_rendering::{BoxConstraints, CrossAxisAlignment, MainAxisSize, StackFit};
 use waft_scheduler::{
@@ -289,7 +289,7 @@ struct NavigationContainer {
     /// Global identity preserving state in caller-supplied item content.
     key: GlobalKey,
     /// Focus shared with the item's native input presenter.
-    focus: AnyFocusNode,
+    focus: FocusNodeRef,
     /// Exact source indicator geometry, including while its opacity is zero.
     indicator_key: GlobalKey,
     /// Source compositor CenterPoint.X survives completion and is retained per owner.
@@ -325,9 +325,9 @@ pub struct NavigationViewState {
     /// Last pane mode applied by the layout callback.
     pane_mode: NavigationViewPaneDisplayMode,
     /// Independent native scrolling for main and footer groups.
-    scrolls: Vec<Handle<ScrollViewportController>>,
+    scrolls: Vec<Ref<ScrollViewportController>>,
     /// Native focus scope retained when the search presenter moves between pane modes.
-    search_focus: Option<Handle<FocusScopeNode>>,
+    search_focus: Option<Ref<FocusScopeNode>>,
     /// Natural heights of the main, footer and pane-footer content.
     group_heights: [f64; 3],
     /// Top-level source order and attached natural width cache.
@@ -347,7 +347,7 @@ pub struct NavigationViewState {
     /// Keeps the outgoing owner visible while the destination receives its first layout.
     pending_indicator: Option<NavigationIndicatorOwner>,
     /// Shared native clock for both actual item visuals.
-    indicator_controller: Option<Handle<AnimationController>>,
+    indicator_controller: Option<Ref<AnimationController>>,
     /// Native ticker ownership for the selection storyboard.
     indicator_ticker: SingleTickerProviderStateMixinData,
     /// Invalidates geometry/completion callbacks when selection changes again.
@@ -429,7 +429,7 @@ impl SingleTickerProviderStateMixin for NavigationViewState {
 }
 
 impl TickerProviderObject for NavigationViewState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -534,7 +534,6 @@ impl NavigationViewState {
                 app,
                 FrameCallback::new(move |app, _| {
                     entry.focus.dispose(app);
-                    app.destroy(entry.focus.id());
                 }),
                 View::maybe_id_of(app, self.context(app)),
             );
@@ -543,7 +542,7 @@ impl NavigationViewState {
             if !app.get(self).containers.contains_key(&id) {
                 let entry = NavigationContainer {
                     key: GlobalKey::labeled(id.clone()),
-                    focus: FocusNode::new(app).as_node(),
+                    focus: FocusNode::new(app).into_erased(),
                     indicator_key: GlobalKey::labeled(format!("Indicator {id}")),
                     indicator_pivot_x: Rc::new(Cell::new(0.0)),
                     indicator_pivot_step: Cell::new(None),
@@ -922,7 +921,7 @@ impl NavigationViewState {
             });
             if app.get(self).indicator_transition.is_some() {
                 self.schedule_indicator_pivots(app);
-                let controller = app.get(self).indicator_controller.unwrap();
+                let controller = app.get(self).indicator_controller.handle().unwrap();
                 controller.set_value(app, 0.0);
                 controller.animate_to(app, 1.0, None, Curves::linear());
             }
@@ -1159,10 +1158,10 @@ impl NavigationViewState {
             is_top_level_item,
             depth,
             compact_pane_length: self.widget(app).compact_pane_length,
-            focus_node: container.focus,
+            focus_node: container.focus.clone(),
             is_keyboard_focused: false,
             indicator_key: container.indicator_key.clone(),
-            indicator_controller: app.get(self).indicator_controller.unwrap(),
+            indicator_controller: app.get(self).indicator_controller.clone().unwrap(),
             indicator_animation: app.get(self).indicator_transition.as_ref().and_then(
                 |(from, to, top)| {
                     (item.id == from.id || item.id == to.id).then(|| {
@@ -1424,7 +1423,7 @@ impl NavigationViewState {
                 .children([
                     SizedBox::new()
                         .height(main_space)
-                        .child(ScrollBarViewport::new(scrolls[0], main.clone()))
+                        .child(ScrollBarViewport::new(scrolls[0].clone(), main.clone()))
                         .into_widget(),
                     SizedBox::new()
                         .height(line_height)
@@ -1439,7 +1438,7 @@ impl NavigationViewState {
                         .into_widget(),
                     SizedBox::new()
                         .height(footer_space)
-                        .child(ScrollBarViewport::new(scrolls[1], footer.clone()))
+                        .child(ScrollBarViewport::new(scrolls[1].clone(), footer.clone()))
                         .into_widget(),
                 ])
                 .into_widget()
@@ -1485,9 +1484,9 @@ impl NavigationViewState {
         let Some(child) = self.widget(app).auto_suggest_box.clone() else {
             return SizedBox::shrink().into_widget();
         };
-        let scope = app.get(self).search_focus.unwrap();
+        let scope = app.get(self).search_focus.clone().unwrap();
         let editor = FocusScope::new(self.slot(app, "search", child))
-            .node(scope)
+            .node(scope.clone())
             .descendants_are_focusable(!compact);
         let padding = if top {
             r.top_navigation_view_auto_suggest_box_margin
@@ -1510,6 +1509,7 @@ impl NavigationViewState {
                 FluentSymbol::Search,
                 Listener::new(move |app| {
                     self.set_pane_open(app, true, true);
+                    let scope = scope.clone();
                     self.after_frame(app, move |app| {
                         if let Some(node) =
                             scope.as_node().traversal_descendants(app).first().copied()
@@ -2262,12 +2262,13 @@ impl State for NavigationViewState {
             AnimationBehavior::Normal,
             self,
         );
-        app.get_mut(self).indicator_controller = Some(controller);
+        app.get_mut(self).indicator_controller = Some(controller.clone());
+        let handle = controller.handle();
         controller.add_listener(
             app,
             Listener::new(move |app| {
                 self.update_indicator_pivots(app);
-                if controller.value(app) >= 1.0 && app.get(self).indicator_transition.is_some() {
+                if handle.value(app) >= 1.0 && app.get(self).indicator_transition.is_some() {
                     self.set_state(app, |state| state.indicator_transition = None);
                 }
             }),
@@ -2371,26 +2372,15 @@ impl State for NavigationViewState {
         let controller = app.get_mut(self).indicator_controller.take().unwrap();
         controller.dispose(app);
         SingleTickerProviderStateMixin::dispose(self, app);
-        SchedulerBinding::add_post_frame_callback(
-            app,
-            FrameCallback::new(move |app, _| {
-                app.destroy(controller);
-            }),
-            // Disposed, the state is in no view any more.
-            None,
-        );
 
         if let Some(scope) = app.get_mut(self).search_focus.take() {
             scope.as_node().dispose(app);
-            app.destroy(scope);
         }
         for scroll in std::mem::take(&mut app.get_mut(self).scrolls) {
             scroll.dispose(app);
-            app.destroy(scroll);
         }
         for (_, container) in std::mem::take(&mut app.get_mut(self).containers) {
             container.focus.dispose(app);
-            app.destroy(container.focus.id());
         }
     }
 

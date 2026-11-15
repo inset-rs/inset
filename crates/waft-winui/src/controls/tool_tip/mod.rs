@@ -5,7 +5,7 @@ mod positioning;
 use crate::{Brush, ControlBorder, ThemeResources, control_text_style};
 use std::{any::Any, cell::Cell, fmt, rc::Rc, time::Duration};
 use waft_embedder::{Color, FontWeight, Offset, PointerDeviceKind, Rect, Size, TextDirection};
-use waft_foundation::{App, Handle, Listener, Timer, ValueKey};
+use waft_foundation::{App, Handle, Listener, OptionRetained, Ref, Timer, ValueKey};
 use waft_gestures::{GestureBinding, PointerEvent, PointerRoute};
 use waft_painting::transform_rect;
 use waft_rendering::{
@@ -281,7 +281,7 @@ struct ServiceMetadata {
 /// The overlay lifecycle of a ToolTipService owner.
 pub struct ToolTipServiceState {
     state: StateData<ToolTipService>,
-    portal: Option<Handle<OverlayPortalController>>,
+    portal: Option<Ref<OverlayPortalController>>,
     open_timer: Option<Timer>,
     close_timer: Option<Timer>,
     pointer_route: Option<PointerRoute>,
@@ -400,7 +400,7 @@ impl ToolTipServiceState {
             s.epoch += 1;
         });
         let epoch = app.get(self).epoch;
-        app.get(self).portal.unwrap().show(app);
+        app.get(self).portal.handle().unwrap().show(app);
         SchedulerBinding::add_post_frame_callback(
             app,
             FrameCallback::new(move |app, _| {
@@ -455,7 +455,7 @@ impl ToolTipServiceState {
                     return;
                 }
                 app.get_mut(self).close_timer = None;
-                app.get(self).portal.unwrap().hide(app);
+                app.get(self).portal.handle().unwrap().hide(app);
                 self.set_state(app, |s| s.open = false);
                 if let Some(callback) = self.widget(app).tool_tip.closed.clone() {
                     callback.call(app);
@@ -644,7 +644,6 @@ impl State for ToolTipServiceState {
         if let Some(handler) = app.get_mut(self).key_handler.take() {
             HardwareKeyboard::instance(app).remove_handler(app, &handler);
         }
-        app.destroy(app.get(self).portal.unwrap());
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -677,7 +676,7 @@ impl State for ToolTipServiceState {
             .child(child);
         let rtl = Directionality::maybe_of(app, context) == Some(TextDirection::Rtl);
         OverlayPortal::overlay_child_layout_builder(
-            app.get(self).portal.unwrap(),
+            app.get(self).portal.clone().unwrap(),
             move |app, _, info| {
                 let widget = self.widget(app).clone();
                 let owner_rect = transform_rect(

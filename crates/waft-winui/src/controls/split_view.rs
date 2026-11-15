@@ -7,7 +7,7 @@ use crate::{
 };
 use std::{any::Any, fmt, rc::Rc, time::Duration};
 use waft_embedder::{Color, Offset, Path, PathBuilder, PathFillType, Rect, Size};
-use waft_foundation::{App, Handle, Listener};
+use waft_foundation::{App, Handle, Listener, OptionRetained, Ref};
 use waft_painting::{Alignment, EdgeInsets, transform_point};
 use waft_rendering::{BoxConstraints, CustomClipper, StackFit};
 use waft_scheduler::{FrameCallback, SchedulerBinding, Ticker};
@@ -352,13 +352,13 @@ impl fmt::Debug for SplitView {
 pub struct SplitViewState {
     state: StateData<SplitView>,
     single_ticker_provider: SingleTickerProviderStateMixinData,
-    ticker: Option<Handle<Ticker>>,
-    pane_focus: Option<Handle<FocusScopeNode>>,
-    content_focus: Option<Handle<FocusScopeNode>>,
+    ticker: Option<Ref<Ticker>>,
+    pane_focus: Option<Ref<FocusScopeNode>>,
+    content_focus: Option<Ref<FocusScopeNode>>,
     /// The focus target saved on overlay opening and consumed when restoring focus.
     previous_focus: Option<AnyFocusNode>,
     /// Hosts the outer dismiss layer above the application's content.
-    portal: Option<Handle<OverlayPortalController>>,
+    portal: Option<Ref<OverlayPortalController>>,
     /// The source state of the currently evaluated transition.
     from: DisplayModeState,
     /// Elapsed time within the current transition.
@@ -493,6 +493,7 @@ impl SplitViewState {
             } else {
                 app.get(self)
                     .content_focus
+                    .clone()
                     .unwrap()
                     .as_node()
                     .next_focus(app);
@@ -505,7 +506,7 @@ impl SplitViewState {
         if !self.widget(app).display_mode.light_dismissible() || !self.widget(app).is_pane_open {
             return;
         }
-        let pane = app.get(self).pane_focus.unwrap();
+        let pane = app.get(self).pane_focus.clone().unwrap();
         if app.get(self).previous_focus.is_none() {
             app.get_mut(self).previous_focus = primary_focus(app);
         }
@@ -544,7 +545,7 @@ impl SplitViewState {
         }
         self.set_state(app, |s| s.elapsed = elapsed);
         if elapsed >= app.get(self).duration {
-            app.get(self).ticker.unwrap().stop(app, false);
+            app.get(self).ticker.handle().unwrap().stop(app, false);
             let epoch = app.get(self).epoch;
             SchedulerBinding::add_post_frame_callback(
                 app,
@@ -566,7 +567,7 @@ impl SplitViewState {
                 if !app.contains(self) || !self.mounted(app) {
                     return;
                 }
-                let portal = app.get(self).portal.unwrap();
+                let portal = app.get(self).portal.clone().unwrap();
                 let show = self.widget(app).is_pane_open
                     && self.widget(app).display_mode.light_dismissible();
                 if show != portal.is_showing(app) {
@@ -630,9 +631,9 @@ impl State for SplitViewState {
             FrameCallback::new(move |app, elapsed| self.tick(app, elapsed)),
         );
         let s = app.get_mut(self);
-        s.pane_focus = Some(pane);
-        s.content_focus = Some(content);
-        s.portal = Some(portal);
+        s.pane_focus = Some(pane.clone());
+        s.content_focus = Some(content.clone());
+        s.portal = Some(portal.clone());
         s.ticker = Some(ticker);
         self.update_portal(app);
         SchedulerBinding::add_post_frame_callback(
@@ -684,7 +685,7 @@ impl State for SplitViewState {
                     .expect("set when a transition starts"),
             )
         };
-        let ticker = app.get(self).ticker.unwrap();
+        let ticker = app.get(self).ticker.clone().unwrap();
         ticker.stop(app, false);
         let duration = if lengths_changed {
             Duration::ZERO
@@ -765,20 +766,17 @@ impl State for SplitViewState {
         // OnUnloaded tears down dismissal; focus restoration belongs to closing or changing mode,
         // not to a subtree whose focus attachments have already been detached.
         app.get_mut(self).previous_focus = None;
-        app.get(self).ticker.unwrap().dispose(app);
-        let pane = app.get(self).pane_focus.unwrap();
-        let content = app.get(self).content_focus.unwrap();
+        app.get(self).ticker.handle().unwrap().dispose(app);
+        let pane = app.get(self).pane_focus.clone().unwrap();
+        let content = app.get(self).content_focus.clone().unwrap();
         pane.as_node().dispose(app);
         content.as_node().dispose(app);
-        app.destroy(pane);
-        app.destroy(content);
-        app.destroy(app.get(self).portal.unwrap());
         SingleTickerProviderStateMixin::dispose(self, app);
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
         let widget = self.widget(app).clone();
-        let pane = app.get(self).pane_focus.unwrap();
+        let pane = app.get(self).pane_focus.clone().unwrap();
         pane.set_traversal_edge_behavior(
             app,
             if widget.is_pane_open && widget.display_mode.light_dismissible() {
@@ -826,7 +824,7 @@ impl State for SplitViewState {
             return body;
         }
         OverlayPortal::overlay_child_layout_builder(
-            app.get(self).portal.unwrap(),
+            app.get(self).portal.clone().unwrap(),
             move |_app, _, info| {
                 let size = info.child_size();
                 let transform = info.child_paint_transform();
@@ -881,8 +879,8 @@ impl SplitViewState {
                 state.initial_visuals.expect("set when a transition starts"),
             )
         };
-        let pane_focus = state.pane_focus.unwrap();
-        let content_focus = state.content_focus.unwrap();
+        let pane_focus = state.pane_focus.clone().unwrap();
+        let content_focus = state.content_focus.clone().unwrap();
         let pane_child = widget
             .pane
             .unwrap_or_else(|| SizedBox::shrink().into_widget());

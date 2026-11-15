@@ -11,7 +11,7 @@ use crate::*;
 use crate::FocusState;
 use std::{rc::Rc, time::Duration};
 use waft_embedder::{Offset, PointerDeviceKind, Rect};
-use waft_foundation::{App, Handle, Listener, Timer};
+use waft_foundation::{App, Handle, Listener, OptionRetained, Ref, Timer};
 use waft_rendering::HitTestBehavior;
 use waft_services::{HardwareKeyboard, KeyEvent, LogicalKeyboardKey};
 use waft_widgets::*;
@@ -41,7 +41,7 @@ pub(super) struct MenuItemState {
     state: StateData<MenuItemWidget>,
 
     /// This item's keyboard focus identity.
-    focus: Option<AnyFocusNode>,
+    focus: Option<FocusNodeRef>,
 
     /// Pointer-over visual state.
     hovered: bool,
@@ -65,7 +65,7 @@ pub(super) struct MenuItemState {
     focused: bool,
 
     /// Retained child collection, created only for SubItem.
-    submenu: Option<Handle<MenuFlyout>>,
+    submenu: Option<Ref<MenuFlyout>>,
 
     /// Source delayed opening timer.
     open_timer: Option<Timer>,
@@ -114,7 +114,7 @@ impl MenuItemState {
 
     /// The focus identity used by MenuFlyoutPresenter::CycleFocus.
     pub(super) fn focus_node(self: Handle<Self>, app: &App) -> AnyFocusNode {
-        app.get(self).focus.unwrap()
+        app.get(self).focus.handle().unwrap()
     }
 
     /// `Focus(FocusState)` on this item as MenuFlyoutPresenter::CycleFocus calls it: focus moves and the item scrolls into view.
@@ -282,7 +282,7 @@ impl MenuItemState {
         if !self.is_focusable(app) {
             return;
         }
-        let Some(menu) = app.get(self).submenu else {
+        let Some(menu) = app.get(self).submenu.handle() else {
             return;
         };
         if menu.is_open(app) {
@@ -300,7 +300,7 @@ impl MenuItemState {
     pub(super) fn close_submenu(self: Handle<Self>, app: &mut App) {
         self.cancel_open(app);
         self.cancel_close(app);
-        if let Some(menu) = app.get(self).submenu
+        if let Some(menu) = app.get(self).submenu.handle()
             && menu.is_open(app)
         {
             menu.hide(app);
@@ -314,13 +314,13 @@ impl MenuItemState {
 
     /// Source pointer-exit checks retain the child while crossing into its visible bounds.
     pub(super) fn pointer_left_presenter(self: Handle<Self>, app: &mut App, point: Offset) {
-        let Some(menu) = app.get(self).submenu else {
+        let Some(menu) = app.get(self).submenu.handle() else {
             return;
         };
         if !menu.is_open(app) {
             return;
         }
-        let child = menu.as_flyout(app).presenter_bounds(app);
+        let child = menu.as_flyout(app).handle().presenter_bounds(app);
         let owner = self
             .context(app)
             .find_render_object(app)
@@ -359,7 +359,7 @@ impl MenuItemState {
             },
             focused: state.focused && shows_focus_visual,
             submenu_open: state.close_timer.is_none()
-                && state.submenu.is_some_and(|menu| menu.is_open(app)),
+                && state.submenu.handle().is_some_and(|menu| menu.is_open(app)),
         };
         template::item_template(app, context, &widget.item, widget.settings, visual)
     }
@@ -371,19 +371,19 @@ impl State for MenuItemState {
 
     fn init_state(self: Handle<Self>, app: &mut App) {
         let widget = self.widget(app).clone();
-        let focus = FocusNode::new(app).as_node();
+        let focus: FocusNodeRef = FocusNode::new(app).into_erased();
         focus.set_on_key_event(
             app,
             Some(Rc::new(move |app, _, event| self.on_key(app, event))),
         );
-        app.get_mut(self).focus = Some(focus);
+        app.get_mut(self).focus = Some(focus.clone());
         app.get_mut(widget.presenter)
             .containers
             .insert(widget.index, self);
         if let MenuFlyoutItemKind::SubItem { items } = widget.item.kind {
             let root = widget.menu.root(app);
             let menu = MenuFlyout::create(app, items, Some(root));
-            app.get_mut(menu).owner_item = Some(self);
+            app.get_mut(&menu).owner_item = Some(self);
             app.get_mut(self).submenu = Some(menu);
         }
     }
@@ -402,7 +402,7 @@ impl State for MenuItemState {
             self.clear_press(app);
             self.close_submenu(app);
         }
-        match (app.get(self).submenu, &widget.item.kind) {
+        match (app.get(self).submenu.handle(), &widget.item.kind) {
             (Some(menu), MenuFlyoutItemKind::SubItem { items }) => menu.items(app, items.clone()),
             (Some(menu), _) => {
                 menu.dispose(app);
@@ -411,7 +411,7 @@ impl State for MenuItemState {
             (None, MenuFlyoutItemKind::SubItem { items }) => {
                 let root = widget.menu.root(app);
                 let menu = MenuFlyout::create(app, items.clone(), Some(root));
-                app.get_mut(menu).owner_item = Some(self);
+                app.get_mut(&menu).owner_item = Some(self);
                 app.get_mut(self).submenu = Some(menu);
             }
             _ => {}
@@ -423,7 +423,7 @@ impl State for MenuItemState {
         if let Some(timer) = app.get_mut(self).close_timer.take() {
             timer.cancel(app);
         }
-        if let Some(menu) = app.get(self).submenu {
+        if let Some(menu) = app.get(self).submenu.handle() {
             menu.dispose(app);
         }
         let widget = self.widget(app);
@@ -434,7 +434,6 @@ impl State for MenuItemState {
         }
         let focus = self.focus_node(app);
         focus.dispose(app);
-        app.destroy(focus.id());
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -442,11 +441,12 @@ impl State for MenuItemState {
         if matches!(widget.item.kind, MenuFlyoutItemKind::Separator) {
             return template::separator(app, context);
         }
-        let focus = self.focus_node(app);
-        let template = if let Some(submenu) = app.get(self).submenu {
-            ListenableBuilder::new(Rc::new(submenu.as_flyout(app)), move |app, context, _| {
-                self.template(app, context)
-            })
+        let focus = app.get(self).focus.clone().expect("created in init_state");
+        let template = if let Some(submenu) = app.get(self).submenu.clone() {
+            ListenableBuilder::new(
+                Rc::new(app.get(&submenu).flyout.clone()),
+                move |app, context, _| self.template(app, context),
+            )
             .into_widget()
         } else {
             self.template(app, context)

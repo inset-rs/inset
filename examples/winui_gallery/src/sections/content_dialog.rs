@@ -1,7 +1,7 @@
 //! Command buttons, results, initial focus and cancelable closing of ContentDialog.
 
 use crate::{column, example, label, section};
-use waft_foundation::{App, Handle, Listener};
+use waft_foundation::{App, Handle, Listener, Ref};
 use waft_widgets::*;
 use waft_winui::*;
 
@@ -20,13 +20,13 @@ struct ContentDialogDemoState {
     state: StateData<ContentDialogDemo>,
 
     /// Save, don't save or cancel.
-    save: Option<Handle<ContentDialog>>,
+    save: Option<Ref<ContentDialog>>,
 
     /// A name to create, which the primary button refuses while it is empty.
-    create: Option<Handle<ContentDialog>>,
+    create: Option<Ref<ContentDialog>>,
 
     /// The create dialog's name field.
-    name: Option<Handle<TextEditingController>>,
+    name: Option<Ref<TextEditingController>>,
 
     /// Most recent result or refusal.
     event: String,
@@ -62,11 +62,12 @@ impl State for ContentDialogDemoState {
             .close_button_text(app, "Cancel")
             .default_button(app, ContentDialogButton::Primary);
         let name = TextEditingController::new(app);
+        let closing_name = name.clone();
         let create = ContentDialog::new(app)
             .title(app, Text::new("New collection"))
             .content(
                 app,
-                TextBox::new(name.as_controller())
+                TextBox::new(name.erase())
                     .header(Text::new("Name"))
                     .placeholder_text("Photos"),
             )
@@ -76,7 +77,7 @@ impl State for ContentDialogDemoState {
             .closing(app, move |app, args| {
                 args.set_cancel(
                     args.result() == ContentDialogResult::Primary
-                        && name.text_value(app).is_empty(),
+                        && closing_name.text_value(app).is_empty(),
                 );
                 if args.cancel() {
                     self.set_state(app, |state| {
@@ -84,7 +85,7 @@ impl State for ContentDialogDemoState {
                     });
                 }
             });
-        for dialog in [save, create] {
+        for dialog in [save.clone(), create.clone()] {
             dialog.closed(app, move |app, args| {
                 self.set_state(app, |state| {
                     state.event = format!("Closed: {:?}", args.result)
@@ -105,8 +106,7 @@ impl State for ContentDialogDemoState {
             dialog.dispose(app);
         }
         if let Some(name) = name {
-            app.get_mut(name).dispose();
-            app.destroy(name);
+            app.get_mut(&name).dispose();
         }
     }
 
@@ -115,8 +115,8 @@ impl State for ContentDialogDemoState {
         let (save, create, event) = {
             let state = app.get(self);
             (
-                state.save.unwrap(),
-                state.create.unwrap(),
+                state.save.clone().unwrap(),
+                state.create.clone().unwrap(),
                 state.event.clone(),
             )
         };
@@ -129,7 +129,10 @@ impl State for ContentDialogDemoState {
                     &resources,
                     Button::text(
                         "Show dialog",
-                        Listener::new(move |app| self.show(app, save)),
+                        Listener::new({
+                            let save = save.clone();
+                            move |app| self.show(app, save.handle())
+                        }),
                     )
                     .into_widget(),
                 ),
@@ -139,7 +142,10 @@ impl State for ContentDialogDemoState {
                     &resources,
                     Button::text(
                         "Create a collection",
-                        Listener::new(move |app| self.show(app, create)),
+                        Listener::new({
+                            let create = create.clone();
+                            move |app| self.show(app, create.handle())
+                        }),
                     )
                     .into_widget(),
                 ),

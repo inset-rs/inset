@@ -23,6 +23,7 @@ use crate::framework::{
 };
 use crate::widgets::editable_text::EditableText;
 use crate::widgets::routes::AnyModalRoute;
+use waft_foundation::Ref;
 
 /// Enable if you want verbose logging about tap region changes.
 const K_DEBUG_TAP_REGION: bool = false;
@@ -230,7 +231,7 @@ pub struct RenderTapRegionSurface {
     child: RenderObjectWithChildData<AnyRenderBox>,
     registered_regions: HashSet<RenderHandle<RenderTapRegion>>,
     group_id_to_regions: HashMap<TapRegionGroupId, HashSet<RenderHandle<RenderTapRegion>>>,
-    dummy_tap: Handle<DummyTapRecognizer>,
+    dummy_tap: Ref<DummyTapRecognizer>,
 }
 
 impl RenderTapRegionSurface {
@@ -411,7 +412,7 @@ impl RenderTapRegionSurface {
         // the propagation of the event through the gesture recognizer by adding it
         // to the recognizer and immediately resolving it.
         if consume_outside_taps && let PointerEvent::Down(event) = event {
-            let dummy = DummyTapRecognizerMember(self.get(app).dummy_tap);
+            let dummy = DummyTapRecognizerMember(self.get(app).dummy_tap.handle());
             GestureBinding::instance(app)
                 .gesture_arena(app)
                 .add(app, event.pointer, dummy)

@@ -4,7 +4,7 @@ use std::fmt::{self, Debug};
 use std::rc::Rc;
 
 use waft_embedder::{Offset, Rect, Size, clamp_double};
-use waft_foundation::{App, Handle, Listenable, Listener, Task};
+use waft_foundation::{App, Handle, Listenable, Listener, OptionRetained, Ref, Task};
 use waft_rendering::TextSelectionPoint;
 use waft_services::{AnyTextSelectionDelegate, SelectionChangedCause};
 use waft_widgets::{
@@ -57,7 +57,7 @@ impl TextSelectionControls for CupertinoDesktopTextSelectionControls {
         selection_midpoint: Offset,
         endpoints: &[TextSelectionPoint],
         delegate: AnyTextSelectionDelegate,
-        clipboard_status: Option<Handle<ClipboardStatusNotifier>>,
+        clipboard_status: Option<Ref<ClipboardStatusNotifier>>,
         last_secondary_tap_down_position: Option<Offset>,
     ) -> WidgetRef {
         let handle_cut = self.can_cut(app, delegate).then(|| {
@@ -141,7 +141,7 @@ impl TextSelectionControls for CupertinoDesktopTextSelectionHandleControls {
         selection_midpoint: Offset,
         endpoints: &[TextSelectionPoint],
         delegate: AnyTextSelectionDelegate,
-        clipboard_status: Option<Handle<ClipboardStatusNotifier>>,
+        clipboard_status: Option<Ref<ClipboardStatusNotifier>>,
         last_secondary_tap_down_position: Option<Offset>,
     ) -> WidgetRef {
         TextSelectionHandleControls::build_toolbar(
@@ -251,7 +251,7 @@ pub fn cupertino_desktop_text_selection_controls() -> Rc<dyn TextSelectionContro
 #[allow(dead_code)]
 struct CupertinoDesktopTextSelectionControlsToolbar {
     key: Option<KeyRef>,
-    clipboard_status: Option<Handle<ClipboardStatusNotifier>>,
+    clipboard_status: Option<Ref<ClipboardStatusNotifier>>,
     endpoints: Vec<TextSelectionPoint>,
     global_editable_region: Rect,
     handle_copy: Option<Listener>,
@@ -299,7 +299,7 @@ impl State for CupertinoDesktopTextSelectionControlsToolbarState {
     waft_widgets::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
-        if let Some(clipboard_status) = self.widget(app).clipboard_status {
+        if let Some(clipboard_status) = self.widget(app).clipboard_status.clone() {
             clipboard_status.add_listener(
                 app,
                 Listener::handle_method(self, Self::on_changed_clipboard_status),
@@ -312,14 +312,14 @@ impl State for CupertinoDesktopTextSelectionControlsToolbarState {
         app: &mut App,
         old_widget: &CupertinoDesktopTextSelectionControlsToolbar,
     ) {
-        if old_widget.clipboard_status != self.widget(app).clipboard_status {
-            if let Some(clipboard_status) = old_widget.clipboard_status {
+        if old_widget.clipboard_status.handle() != self.widget(app).clipboard_status.handle() {
+            if let Some(clipboard_status) = old_widget.clipboard_status.clone() {
                 clipboard_status.remove_listener(
                     app,
                     &Listener::handle_method(self, Self::on_changed_clipboard_status),
                 );
             }
-            if let Some(clipboard_status) = self.widget(app).clipboard_status {
+            if let Some(clipboard_status) = self.widget(app).clipboard_status.clone() {
                 clipboard_status.add_listener(
                     app,
                     Listener::handle_method(self, Self::on_changed_clipboard_status),
@@ -329,7 +329,7 @@ impl State for CupertinoDesktopTextSelectionControlsToolbarState {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        if let Some(clipboard_status) = self.widget(app).clipboard_status {
+        if let Some(clipboard_status) = self.widget(app).clipboard_status.clone() {
             clipboard_status.remove_listener(
                 app,
                 &Listener::handle_method(self, Self::on_changed_clipboard_status),
@@ -339,7 +339,7 @@ impl State for CupertinoDesktopTextSelectionControlsToolbarState {
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
         let handle_paste = self.widget(app).handle_paste.clone();
-        let clipboard_status = self.widget(app).clipboard_status;
+        let clipboard_status = self.widget(app).clipboard_status.handle();
         if handle_paste.is_some()
             && clipboard_status.is_some_and(|status| status.value(app) == ClipboardStatus::Unknown)
         {

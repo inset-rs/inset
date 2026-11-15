@@ -6,13 +6,14 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use waft_embedder::{Offset, ViewId};
-use waft_foundation::{App, Handle, HandleId, Listener, RetainedHandleId};
+use waft_foundation::{App, Handle, HandleId, Listener, OptionRetained};
 use waft_gestures::*;
 use waft_painting::Axis;
 use waft_rendering::{BoxHitTestEntry, HitTestBehavior, RenderMetaData};
 use waft_services::HapticFeedback;
 
 use crate::*;
+use waft_foundation::Ref;
 
 /// Signature for determining whether a drag target will accept the given data.
 pub type DragTargetWillAccept<T> = Rc<dyn Fn(&mut App, Option<Rc<T>>) -> bool>;
@@ -437,7 +438,7 @@ pub trait DraggableWidget: StatefulWidget<State = DraggableState<Self>> + Clone 
         &self,
         app: &mut App,
         on_start: GestureMultiDragStartCallback,
-    ) -> AnyGestureRecognizer {
+    ) -> RecognizerRef {
         let draggable = self.draggable();
         macro_rules! create {
             ($ty:ty) => {{
@@ -446,7 +447,7 @@ pub trait DraggableWidget: StatefulWidget<State = DraggableState<Self>> + Clone 
                     recognizer.set_allowed_buttons_filter(app, filter);
                 }
                 recognizer.set_on_start(app, Some(on_start));
-                recognizer.as_recognizer()
+                recognizer.into_erased()
             }};
         }
         match draggable.affinity {
@@ -643,7 +644,7 @@ impl<T: 'static> DraggableWidget for LongPressDraggable<T> {
         &self,
         app: &mut App,
         on_start: GestureMultiDragStartCallback,
-    ) -> AnyGestureRecognizer {
+    ) -> RecognizerRef {
         let recognizer = DelayedMultiDragGestureRecognizer::new(app);
         recognizer.set_delay(app, self.delay);
         if let Some(filter) = self.draggable.allowed_buttons_filter.clone() {
@@ -660,7 +661,7 @@ impl<T: 'static> DraggableWidget for LongPressDraggable<T> {
                 result
             })),
         );
-        recognizer.as_recognizer()
+        recognizer.into_erased()
     }
 }
 
@@ -682,7 +683,7 @@ pub struct DraggableState<W: DraggableWidget> {
     state: StateData<W>,
 
     /// Stays alive after unmount until every drag listening to pointer events has ended.
-    recognizer: Option<AnyGestureRecognizer>,
+    recognizer: Option<RecognizerRef>,
 
     /// Number of active drag avatars retaining this state and recognizer.
     active_count: usize,
@@ -723,7 +724,11 @@ impl<W: DraggableWidget> DraggableState<W> {
         {
             return;
         }
-        app.get(self).recognizer.unwrap().add_pointer(app, &event);
+        app.get(self)
+            .recognizer
+            .handle()
+            .unwrap()
+            .add_pointer(app, &event);
     }
 
     fn start_drag(self: Handle<Self>, app: &mut App, position: Offset) -> Option<Rc<dyn Drag>> {
@@ -737,7 +742,9 @@ impl<W: DraggableWidget> DraggableState<W> {
         let context = self.context(app);
         let start = (widget.drag_anchor_strategy)(app, &widget, context, position);
         self.set_state(app, |state| state.active_count += 1);
-        let retained = app.retain(self);
+        let retained = self
+            .upgrade(app)
+            .expect("a dragged draggable's state is kept by its element");
         let overlay = Overlay::of(app, context, widget.root_overlay);
         let view_id = View::of(app, context).id();
         let avatar = DragAvatar::new(
@@ -821,6 +828,7 @@ impl<W: DraggableWidget> State for DraggableState<W> {
         let settings = MediaQuery::maybe_gesture_settings_of(app, context);
         app.get(self)
             .recognizer
+            .handle()
             .unwrap()
             .set_gesture_settings(app, settings);
     }
@@ -1018,10 +1026,10 @@ pub struct DragTargetState<T: 'static> {
     state: StateData<DragTarget<T>>,
 
     /// Avatars whose data this target accepted on entry.
-    candidate_avatars: Vec<Handle<DragAvatar>>,
+    candidate_avatars: Vec<Ref<DragAvatar>>,
 
     /// Avatars whose data this target rejected on entry.
-    rejected_avatars: Vec<Handle<DragAvatar>>,
+    rejected_avatars: Vec<Ref<DragAvatar>>,
 }
 
 /// Erases the target's data type while retaining its normal mounted-state checks.
@@ -1041,16 +1049,13 @@ trait DragTargetHandler {
 
 /// Keeps a target alive while hit testing and active drags hold its metadata.
 struct DragTargetMetadata {
-    /// Erased target callbacks stored in the render metadata.
+    /// Erased target callbacks stored in the render metadata, which keep the target's state.
     handler: Rc<dyn DragTargetHandler>,
-
-    /// Keeps the target state alive while metadata is held by a drag.
-    _retained: RetainedHandleId,
 }
 
-impl<T: 'static> DragTargetHandler for Handle<DragTargetState<T>> {
+impl<T: 'static> DragTargetHandler for Ref<DragTargetState<T>> {
     fn id(&self) -> HandleId {
-        (*self).into()
+        self.into()
     }
 
     fn is_expected_data_type(&self, data: &Option<Rc<dyn Any>>) -> bool {
@@ -1058,8 +1063,18 @@ impl<T: 'static> DragTargetHandler for Handle<DragTargetState<T>> {
     }
 
     fn did_enter(&self, app: &mut App, avatar: Handle<DragAvatar>) -> bool {
-        debug_assert!(!app.get(*self).candidate_avatars.contains(&avatar));
-        debug_assert!(!app.get(*self).rejected_avatars.contains(&avatar));
+        debug_assert!(
+            !app.get(self)
+                .candidate_avatars
+                .iter()
+                .any(|kept| **kept == avatar)
+        );
+        debug_assert!(
+            !app.get(self)
+                .rejected_avatars
+                .iter()
+                .any(|kept| **kept == avatar)
+        );
         let data = app
             .get(avatar)
             .data
@@ -1082,11 +1097,14 @@ impl<T: 'static> DragTargetHandler for Handle<DragTargetState<T>> {
                 )
             }),
         };
+        let kept = avatar
+            .upgrade(app)
+            .expect("an entering avatar is kept by its overlay entry");
         self.set_state(app, |state| {
             if accepted {
-                state.candidate_avatars.push(avatar)
+                state.candidate_avatars.push(kept)
             } else {
-                state.rejected_avatars.push(avatar)
+                state.rejected_avatars.push(kept)
             }
         });
         accepted
@@ -1099,10 +1117,10 @@ impl<T: 'static> DragTargetHandler for Handle<DragTargetState<T>> {
         self.set_state(app, |state| {
             state
                 .candidate_avatars
-                .retain(|candidate| *candidate != avatar);
+                .retain(|candidate| **candidate != avatar);
             state
                 .rejected_avatars
-                .retain(|candidate| *candidate != avatar);
+                .retain(|candidate| **candidate != avatar);
         });
         if let Some(callback) = self.widget(app).on_leave.clone() {
             let data = app
@@ -1115,14 +1133,19 @@ impl<T: 'static> DragTargetHandler for Handle<DragTargetState<T>> {
     }
 
     fn did_drop(&self, app: &mut App, avatar: Handle<DragAvatar>) {
-        debug_assert!(app.get(*self).candidate_avatars.contains(&avatar));
+        debug_assert!(
+            app.get(self)
+                .candidate_avatars
+                .iter()
+                .any(|kept| **kept == avatar)
+        );
         if !self.mounted(app) {
             return;
         }
         self.set_state(app, |state| {
             state
                 .candidate_avatars
-                .retain(|candidate| *candidate != avatar)
+                .retain(|candidate| **candidate != avatar)
         });
         if let Some(data) = app.get(avatar).data.clone() {
             let data = data.downcast::<T>().unwrap();
@@ -1169,7 +1192,7 @@ impl<T: 'static> State for DragTargetState<T> {
             .candidate_avatars
             .iter()
             .map(|avatar| {
-                app.get(*avatar)
+                app.get(avatar)
                     .data
                     .clone()
                     .map(|data| data.downcast::<T>().unwrap())
@@ -1178,14 +1201,16 @@ impl<T: 'static> State for DragTargetState<T> {
         let rejected = state
             .rejected_avatars
             .iter()
-            .map(|avatar| app.get(*avatar).data.clone())
+            .map(|avatar| app.get(avatar).data.clone())
             .collect();
         let builder = self.widget(app).builder.clone();
         let child = builder(app, context, candidates, rejected);
         MetaData::new()
             .meta_data(Rc::new(DragTargetMetadata {
-                handler: Rc::new(self),
-                _retained: app.retain_id(self.id()),
+                handler: Rc::new(
+                    self.upgrade(app)
+                        .expect("a building state is kept by its element"),
+                ),
             }))
             .behavior(self.widget(app).hit_test_behavior)
             .child(child)
@@ -1254,7 +1279,7 @@ struct DragAvatar {
     overlay_offset: Offset,
 
     /// Overlay entry retained until the drag finishes.
-    entry: Option<Handle<OverlayEntry>>,
+    entry: Option<Ref<OverlayEntry>>,
 }
 
 impl DragAvatar {
@@ -1274,7 +1299,7 @@ impl DragAvatar {
         view_id: ViewId,
         on_drag_update: DragUpdateCallback,
         on_drag_end: OnDragEnd,
-    ) -> Handle<Self> {
+    ) -> Ref<Self> {
         let avatar = app.create(Self {
             data,
             axis,
@@ -1294,18 +1319,18 @@ impl DragAvatar {
             overlay_offset: Offset::ZERO,
             entry: None,
         });
-        let retained = app.retain(avatar);
+        // Dart's `_entry` builds with a tear-off of the avatar, which keeps it while the entry is
+        // in the overlay: the ring the entry and this builder make is cut when `finish_drag`
+        // takes the entry.
+        let kept = avatar.clone();
         let entry = OverlayEntry::new(
             app,
-            Rc::new(move |app, context| {
-                let _keep_alive = &retained;
-                avatar.build(app, context)
-            }),
+            Rc::new(move |app, context| kept.build(app, context)),
             false,
             false,
             false,
         );
-        app.get_mut(avatar).entry = Some(entry);
+        app.get_mut(&avatar).entry = Some(entry.clone());
         overlay_state.insert(app, entry, None, None);
         avatar.update_drag(app, initial_position);
         avatar
@@ -1330,7 +1355,7 @@ impl DragAvatar {
                 .unwrap();
             app.get_mut(self).overlay_offset =
                 render_box.global_to_local(app, global_position, None) - anchor;
-            app.get(self).entry.unwrap().mark_needs_build(app);
+            app.get(self).entry.handle().unwrap().mark_needs_build(app);
         }
         let mut result = HitTestResult::new();
         GestureBinding::instance(app).hit_test_in_view(
@@ -1415,7 +1440,6 @@ impl DragAvatar {
         entry.dispose(app);
         let callback = app.get(self).on_drag_end.clone();
         callback(app, velocity, app.get(self).last_offset.unwrap(), accepted);
-        app.destroy(self);
     }
 
     /// Positions feedback in overlay coordinates.

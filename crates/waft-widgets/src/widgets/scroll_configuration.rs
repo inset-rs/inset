@@ -259,7 +259,7 @@ impl ScrollBehaviorBase {
             TargetPlatform::Linux | TargetPlatform::MacOS | TargetPlatform::Windows => {
                 debug_assert!(details.controller.is_some());
                 let mut scrollbar = RawScrollbar::new(child);
-                if let Some(controller) = details.controller {
+                if let Some(controller) = details.controller.clone() {
                     scrollbar = scrollbar.controller(controller);
                 }
                 scrollbar.into_widget()
@@ -870,9 +870,7 @@ mod tests {
             let context = descendant(&harness, &app, 0);
             let behavior = ScrollConfiguration::of(&mut app, context);
             let controller = crate::widgets::scroll_controller::ScrollController::default(&mut app);
-            let details = ScrollableDetails::vertical(false).controller(
-                crate::widgets::scroll_controller::ScrollControllerLeaf::as_controller(controller),
-            );
+            let details = ScrollableDetails::vertical(false).controller(controller.erase());
 
             let child = SizedBox::shrink().into_widget();
             let scrollbar = behavior.build_scrollbar(&mut app, context, child.clone(), &details);

@@ -18,6 +18,7 @@ use crate::recognizer::{
     OneSequenceGestureRecognizer, OneSequenceLeafData, RecognizerLeaf, RecognizerLeafData,
 };
 use crate::team::GestureArenaTeam;
+use waft_foundation::Ref;
 
 enum ForceState {
     /// No pointer has touched down and the detector is ready for a pointer down to occur.
@@ -163,7 +164,7 @@ impl ForcePressGestureRecognizer {
     /// The [`interpolation`](Self::interpolation) callback must always return a value in the range 0.0
     /// to 1.0 for values of `pressure` that are between `pressure_min` and
     /// `pressure_max`.
-    pub fn new(app: &mut App) -> Handle<ForcePressGestureRecognizer> {
+    pub fn new(app: &mut App) -> Ref<ForcePressGestureRecognizer> {
         // Dart: `assert(peakPressure > startPressure)` on the constructor defaults.
         #[allow(clippy::assertions_on_constants)]
         {
@@ -189,11 +190,11 @@ impl ForcePressGestureRecognizer {
     ///
     /// If none, events from all device kinds will be tracked and recognized.
     pub fn supported_devices(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         devices: impl IntoIterator<Item = PointerDeviceKind>,
-    ) -> Handle<ForcePressGestureRecognizer> {
-        app.get_mut(self).recognizer.supported_devices = Some(devices.into_iter().collect());
+    ) -> Ref<ForcePressGestureRecognizer> {
+        app.get_mut(&self).recognizer.supported_devices = Some(devices.into_iter().collect());
         self
     }
 
@@ -234,11 +235,11 @@ impl ForcePressGestureRecognizer {
 
     /// The team that this recognizer belongs to, if any.
     pub fn team(self: Handle<Self>, app: &App) -> Option<Handle<GestureArenaTeam>> {
-        app.get(self).one_sequence.team
+        app.get(self).one_sequence.team.as_deref().copied()
     }
 
     /// The [`team`](Self::team) can only be set once.
-    pub fn set_team(self: Handle<Self>, app: &mut App, value: Handle<GestureArenaTeam>) {
+    pub fn set_team(self: Handle<Self>, app: &mut App, value: Ref<GestureArenaTeam>) {
         debug_assert!(app.get(self).one_sequence.entries.is_empty());
         debug_assert!(app.get(self).one_sequence.tracked_pointers.is_empty());
         debug_assert!(app.get(self).one_sequence.team.is_none());

@@ -15,7 +15,7 @@
 
 use std::rc::Rc;
 
-use waft_animation::{AnyAnimation, Tween};
+use waft_animation::{AnimationRef, Drive, Tween};
 use waft_cupertino::{
     CupertinoColors, CupertinoDynamicColor, CupertinoListTile, CupertinoListTileChevron,
 };
@@ -119,7 +119,7 @@ fn swatch(subject: &Subject, side: f64, app: &mut App, context: BuildContext) ->
     // doc requires: each bakes a radius from its own side, 7.92 against 48.4. The rect tween
     // moves the box; this moves the corner with it.
     .flight_shuttle_builder(Rc::new(
-        move |app: &mut App, _context, animation: AnyAnimation<f64>, _direction, _from, _to| {
+        move |app: &mut App, _context, animation: AnimationRef<f64>, _direction, _from, _to| {
             // Small at 0 and large at 1 in BOTH directions, with no match on the direction: the
             // flight animation is the detail route's either way, so 0 is always the list end.
             let tween = Tween::new(app, Some(SMALL * CORNER), Some(LARGE * CORNER));
@@ -128,13 +128,16 @@ fn swatch(subject: &Subject, side: f64, app: &mut App, context: BuildContext) ->
             // A builder rather than a value read once: the flight builds its shuttle ONCE and
             // then only repositions it, so anything that has to change during the flight has to
             // watch the animation itself.
-            AnimatedBuilder::new(Rc::new(radius), move |app: &mut App, _context, _child| {
-                // No size: the overlay gives the shuttle the flight rect's tight constraints, so
-                // the box is already the right size on every tick and only the corner is ours.
-                Container::new()
-                    .decoration(box_decoration(color.clone(), radius.value(app)))
-                    .into_widget()
-            })
+            AnimatedBuilder::new(
+                Rc::new(radius.clone()),
+                move |app: &mut App, _context, _child| {
+                    // No size: the overlay gives the shuttle the flight rect's tight constraints, so
+                    // the box is already the right size on every tick and only the corner is ours.
+                    Container::new()
+                        .decoration(box_decoration(color.clone(), radius.value(app)))
+                        .into_widget()
+                },
+            )
             .into_widget()
         },
     ))

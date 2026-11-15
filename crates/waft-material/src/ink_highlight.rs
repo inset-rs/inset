@@ -7,11 +7,11 @@ use std::time::Duration;
 
 use waft_animation::{
     AnimationBehavior, AnimationController, AnimationLocalListenersMixin,
-    AnimationLocalStatusListenersMixin, AnimationStatus, AnimationStatusListener, AnyAnimation,
-    IntTween,
+    AnimationLocalStatusListenersMixin, AnimationRef, AnimationStatus, AnimationStatusListener,
+    Drive, IntTween,
 };
 use waft_embedder::{Canvas, Color, Matrix4, Offset, Paint, Rect, TextDirection};
-use waft_foundation::{App, Handle, Listener};
+use waft_foundation::{App, Handle, Listener, OptionRetained, Ref};
 use waft_painting::{BorderRadius, BoxShape, ShapeBorderRef, draw_rrect, get_as_translation};
 use waft_rendering::AnyRenderBox;
 
@@ -21,7 +21,7 @@ use crate::ink_well::{
 };
 use crate::material::{
     AnyMaterialInkController, InkFeature, InkFeatureData, InkFeatureLeaf, InkFeatureLeafData,
-    InkFeatureObject, Material, RectCallback,
+    Material, RectCallback,
 };
 
 const K_DEFAULT_HIGHLIGHT_FADE_DURATION: Duration = Duration::from_millis(200);
@@ -52,9 +52,8 @@ pub struct InkHighlight {
     border_radius: BorderRadius,
     rect_callback: Option<RectCallback>,
     text_direction: TextDirection,
-    alpha: Option<AnyAnimation<i64>>,
-    alpha_controller: Option<Handle<AnimationController>>,
-    alpha_tween: Option<Handle<IntTween>>,
+    alpha: Option<AnimationRef<i64>>,
+    alpha_controller: Option<Ref<AnimationController>>,
     active: bool,
 }
 
@@ -89,7 +88,7 @@ impl InkHighlight {
         rect_callback: Option<RectCallback>,
         on_removed: Option<Listener>,
         fade_duration: Duration,
-    ) -> Handle<InkHighlight> {
+    ) -> Ref<InkHighlight> {
         let ink_feature = InkFeatureData::new(app, controller, reference_box, on_removed);
         let this = app.create(InkHighlight {
             ink_feature,
@@ -101,9 +100,9 @@ impl InkHighlight {
             text_direction,
             alpha: None,
             alpha_controller: None,
-            alpha_tween: None,
             active: true,
         });
+        let handle = this.handle();
         let vsync = controller.vsync(app);
         let alpha_controller = AnimationController::create(
             app,
@@ -119,23 +118,25 @@ impl InkHighlight {
         alpha_controller.add_status_listener(
             app,
             AnimationStatusListener::new(move |status, app| {
-                this.handle_alpha_status_changed(app, status)
+                handle.handle_alpha_status_changed(app, status)
             }),
         );
         alpha_controller.forward(app, None);
         let alpha_tween = IntTween::new(app, Some(0), Some(i64::from(color.alpha())));
         let alpha = alpha_controller.drive(app, alpha_tween);
-        let highlight = app.get_mut(this);
+        let highlight = app.get_mut(handle);
         highlight.alpha_controller = Some(alpha_controller);
-        highlight.alpha_tween = Some(alpha_tween);
         highlight.alpha = Some(alpha);
 
-        controller.add_ink_feature(app, this.as_ink_feature());
+        controller.add_ink_feature(app, this.erase());
         this
     }
 
     fn alpha_controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
-        app.get(self).alpha_controller.expect("created in new")
+        app.get(self)
+            .alpha_controller
+            .handle()
+            .expect("created in new")
     }
 
     /// Whether this part of the material is being visually emphasized.
@@ -159,7 +160,12 @@ impl InkHighlight {
     /// transparent one draws nothing a test can record.
     #[cfg(test)]
     pub(crate) fn debug_paint_color(self: Handle<Self>, app: &App) -> Color {
-        let alpha = app.get(self).alpha.expect("created in new").value(app);
+        let alpha = app
+            .get(self)
+            .alpha
+            .as_ref()
+            .expect("created in new")
+            .value(app);
         InteractiveInkFeature::color(self, app).with_alpha(alpha as i32)
     }
 
@@ -232,18 +238,16 @@ impl InkFeatureLeaf for InkHighlight {
     fn dispose(self: Handle<Self>, app: &mut App) {
         let alpha_controller = self.alpha_controller(app);
         alpha_controller.dispose(app);
-        app.destroy_lingering(alpha_controller);
-        if let Some(alpha_tween) = app.get_mut(self).alpha_tween.take() {
-            app.destroy_lingering(alpha_tween);
-        }
-        if let Some(alpha) = app.get_mut(self).alpha.take() {
-            app.destroy_lingering(alpha);
-        }
         InkFeature::dispose(self, app);
     }
 
     fn paint_feature(self: Handle<Self>, app: &mut App, canvas: &mut Canvas, transform: &Matrix4) {
-        let alpha = app.get(self).alpha.expect("created in new").value(app);
+        let alpha = app
+            .get(self)
+            .alpha
+            .as_ref()
+            .expect("created in new")
+            .value(app);
         let color = InteractiveInkFeature::color(self, app);
         let paint = Paint::from_color(color.with_alpha(alpha as i32).into());
         let origin_offset = get_as_translation(*transform);

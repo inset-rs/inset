@@ -13,6 +13,7 @@ use crate::events::{PointerCancelEvent, PointerEvent};
 use crate::hit_test::{HitTestEntry, HitTestResult, HitTestTarget, HitTestable};
 use crate::pointer_router::PointerRouter;
 use crate::pointer_signal_resolver::PointerSignalResolver;
+use waft_foundation::Ref;
 
 /// What Flutter's `RendererBinding` mixin adds on top of `GestureBinding`: it overrides
 /// `hitTestInView` to walk the render trees before this binding adds itself, and the start of
@@ -77,6 +78,30 @@ impl<T: GestureBindingOverridesObject> GestureBindingOverrides for Handle<T> {
     }
 }
 
+impl<T: GestureBindingOverridesObject> HitTestable for Ref<T> {
+    fn hit_test_in_view(
+        &self,
+        app: &mut App,
+        result: &mut HitTestResult,
+        position: Offset,
+        view_id: ViewId,
+    ) {
+        T::hit_test_in_view(self.handle(), app, result, position, view_id);
+    }
+}
+
+/// An override object the gesture binding keeps, for one nothing else keeps.
+impl<T: GestureBindingOverridesObject> GestureBindingOverrides for Ref<T> {
+    fn will_dispatch_event(
+        &self,
+        app: &mut App,
+        event: &PointerEvent,
+        hit_test_result: Option<&HitTestResult>,
+    ) {
+        T::will_dispatch_event(self.handle(), app, event, hit_test_result);
+    }
+}
+
 /// A binding for the gesture subsystem.
 ///
 /// Dart's `GestureBinding.instance` is [`GestureBinding::instance`], the App's
@@ -85,9 +110,9 @@ impl<T: GestureBindingOverridesObject> GestureBindingOverrides for Handle<T> {
 pub struct GestureBinding {
     pending_pointer_events: VecDeque<PointerEvent>,
     /// Filled on first [`GestureBinding::instance`]. `Default` cannot mint Handles.
-    pointer_router: Option<Handle<PointerRouter>>,
-    gesture_arena: Option<Handle<GestureArenaManager>>,
-    pointer_signal_resolver: Option<Handle<PointerSignalResolver>>,
+    pointer_router: Option<Ref<PointerRouter>>,
+    gesture_arena: Option<Ref<GestureArenaManager>>,
+    pointer_signal_resolver: Option<Ref<PointerSignalResolver>>,
     /// The path each pressed pointer was hit-tested to, its targets retained.
     hit_tests: HashMap<i64, HitTestResult>,
     /// Flutter's `hitTestInView` override point: the renderer binding registers itself here.
@@ -116,6 +141,8 @@ impl GestureBinding {
     pub fn pointer_router(self: Handle<Self>, app: &App) -> Handle<PointerRouter> {
         app.get(self)
             .pointer_router
+            .as_deref()
+            .copied()
             .expect("GestureBinding::instance must run first")
     }
 
@@ -124,6 +151,8 @@ impl GestureBinding {
     pub fn gesture_arena(self: Handle<Self>, app: &App) -> Handle<GestureArenaManager> {
         app.get(self)
             .gesture_arena
+            .as_deref()
+            .copied()
             .expect("GestureBinding::instance must run first")
     }
 
@@ -133,6 +162,8 @@ impl GestureBinding {
     pub fn pointer_signal_resolver(self: Handle<Self>, app: &App) -> Handle<PointerSignalResolver> {
         app.get(self)
             .pointer_signal_resolver
+            .as_deref()
+            .copied()
             .expect("GestureBinding::instance must run first")
     }
 

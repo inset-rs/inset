@@ -16,14 +16,14 @@
 use std::any::Any;
 use std::rc::Rc;
 
-use waft_animation::AnyAnimation;
+use waft_animation::{AnimationRef, AnyAnimation};
 use waft_embedder::Locale;
 use waft_embedder::{
     BlendMode, Clip, Color, FillRule, FilterQuality, ImageFilter, Matrix4, Offset, Paint,
     PaintStyle, Path, PathBuilder, RRect, RSuperellipse, Rect, Size, Stroke, TextBaseline,
     rrect_radii_elliptical, rsuperellipse_radii_elliptical, valo,
 };
-use waft_foundation::{App, Handle, Listenable, Listener, RetainedHandleId};
+use waft_foundation::{App, Handle, Listenable, Listener, OptionRetained};
 use waft_gestures::{
     PointerCancelEventListener, PointerDownEventListener, PointerEnterEventListener, PointerEvent,
     PointerExitEventListener, PointerHoverEventListener, PointerMoveEventListener,
@@ -57,6 +57,7 @@ use crate::pipeline_owner::PipelineOwner;
 use crate::semantics::SemanticsProperties;
 use crate::semantics_annotations::{SemanticsAnnotationsData, SemanticsAnnotationsMixin};
 use crate::view::RenderView;
+use waft_foundation::Ref;
 
 /// A base class for render boxes that resemble their children.
 ///
@@ -764,7 +765,7 @@ pub struct RenderLeaderLayer {
     render_object: RenderObjectData,
     render_box: RenderBoxData,
     child: RenderObjectWithChildData<AnyRenderBox>,
-    link: Handle<LayerLink>,
+    link: Ref<LayerLink>,
     /// The size of the last layout, which `link.leader_size` reports.
     previous_layout_size: Option<Size>,
 }
@@ -772,7 +773,7 @@ pub struct RenderLeaderLayer {
 impl RenderLeaderLayer {
     pub fn new(
         app: &mut App,
-        link: Handle<LayerLink>,
+        link: Ref<LayerLink>,
         child: Option<AnyRenderBox>,
     ) -> RenderHandle<Self> {
         let this = RenderHandle::new_box(
@@ -792,20 +793,21 @@ impl RenderLeaderLayer {
     /// The link object that connects this [`RenderLeaderLayer`] with one or more
     /// [`RenderFollowerLayer`]s.
     pub fn link(self: RenderHandle<Self>, app: &App) -> Handle<LayerLink> {
-        self.get(app).link
+        self.get(app).link.handle()
     }
 
     /// Sets [`link`](Self::link).
-    pub fn set_link(self: RenderHandle<Self>, app: &mut App, value: Handle<LayerLink>) {
-        let link = self.get(app).link;
-        if link == value {
+    pub fn set_link(self: RenderHandle<Self>, app: &mut App, value: Ref<LayerLink>) {
+        let link = self.link(app);
+        if link == *value {
             return;
         }
         let old = app.get_mut(link);
         old.leader_size = None;
+        let new = *value;
         self.get_mut(app).link = value;
         if let Some(size) = self.get(app).previous_layout_size {
-            app.get_mut(value).leader_size = Some(size);
+            app.get_mut(new).leader_size = Some(size);
         }
         self.mark_needs_paint(app);
     }
@@ -839,7 +841,7 @@ impl RenderObject for RenderLeaderLayer {
         RenderProxyBoxMixin::perform_layout(self, app);
         let size = self.size(app);
         self.get_mut(app).previous_layout_size = Some(size);
-        let link = self.get(app).link;
+        let link = self.link(app);
         app.get_mut(link).leader_size = Some(size);
     }
 
@@ -849,7 +851,7 @@ impl RenderObject for RenderLeaderLayer {
         context: &mut PaintingContext,
         offset: Offset,
     ) {
-        let link = self.get(app).link;
+        let link = self.get(app).link.clone();
         let layer = match self.as_object().layer_as::<LeaderLayer>(app) {
             None => {
                 let layer = LeaderLayer::new(app, link);
@@ -961,7 +963,7 @@ pub struct RenderFollowerLayer {
     render_object: RenderObjectData,
     render_box: RenderBoxData,
     child: RenderObjectWithChildData<AnyRenderBox>,
-    link: Handle<LayerLink>,
+    link: Ref<LayerLink>,
     show_when_unlinked: bool,
     offset: Offset,
     leader_anchor: Alignment,
@@ -971,7 +973,7 @@ pub struct RenderFollowerLayer {
 impl RenderFollowerLayer {
     pub fn new(
         app: &mut App,
-        link: Handle<LayerLink>,
+        link: Ref<LayerLink>,
         show_when_unlinked: bool,
         offset: Offset,
         leader_anchor: Alignment,
@@ -997,11 +999,11 @@ impl RenderFollowerLayer {
 
     /// The link object that connects this [`RenderFollowerLayer`] with a [`RenderLeaderLayer`].
     pub fn link(self: RenderHandle<Self>, app: &App) -> Handle<LayerLink> {
-        self.get(app).link
+        self.get(app).link.handle()
     }
 
     /// Sets [`link`](Self::link).
-    pub fn set_link(self: RenderHandle<Self>, app: &mut App, value: Handle<LayerLink>) {
+    pub fn set_link(self: RenderHandle<Self>, app: &mut App, value: Ref<LayerLink>) {
         if self.get(app).link == value {
             return;
         }
@@ -1126,8 +1128,8 @@ impl RenderObject for RenderFollowerLayer {
         context: &mut PaintingContext,
         offset: Offset,
     ) {
-        let link = self.get(app).link;
-        let leader_size = app.get(link).leader_size;
+        let link = self.get(app).link.clone();
+        let leader_size = app.get(&link).leader_size;
         debug_assert!(
             leader_size.is_some()
                 || link.leader(app).is_none()
@@ -1214,7 +1216,7 @@ impl RenderBox for RenderFollowerLayer {
         result: &mut BoxHitTestResult<'_>,
         position: Offset,
     ) -> bool {
-        let link = self.get(app).link;
+        let link = self.get(app).link.handle();
         if link.leader(app).is_none() && !self.get(app).show_when_unlinked {
             return false;
         }
@@ -1279,10 +1281,7 @@ impl RenderBox for RenderFollowerLayer {
 pub struct RenderAnimatedOpacityData {
     alpha: Option<i32>,
     currently_is_repaint_boundary: Option<bool>,
-    opacity: Option<AnyAnimation<f64>>,
-    /// Keeps `opacity` past its owner's `destroy` while this render object reads it, as
-    /// Dart's reference keeps it alive: a build may make the animation and free it at once.
-    retained_opacity: Option<RetainedHandleId>,
+    opacity: Option<AnimationRef<f64>>,
 }
 
 impl RenderAnimatedOpacityData {
@@ -1292,7 +1291,6 @@ impl RenderAnimatedOpacityData {
             alpha: None,
             currently_is_repaint_boundary: None,
             opacity: None,
-            retained_opacity: None,
         }
     }
 }
@@ -1359,30 +1357,25 @@ pub trait RenderAnimatedOpacityMixin:
     fn opacity(self: RenderHandle<Self>, app: &App) -> AnyAnimation<f64> {
         self.animated_opacity_data(app)
             .opacity
+            .handle()
             .expect("set by the constructor")
     }
 
     /// Sets [`opacity`](Self::opacity).
-    fn set_opacity(self: RenderHandle<Self>, app: &mut App, value: AnyAnimation<f64>) {
-        if self.animated_opacity_data(app).opacity == Some(value) {
+    fn set_opacity(self: RenderHandle<Self>, app: &mut App, value: AnimationRef<f64>) {
+        if self.animated_opacity_data(app).opacity.as_ref() == Some(&value) {
             return;
         }
         if self.attached(app)
-            && let Some(opacity) = self.animated_opacity_data(app).opacity
+            && let Some(opacity) = self.animated_opacity_data(app).opacity.handle()
         {
             opacity.remove_listener(app, &self.opacity_listener());
         }
-        self.animated_opacity_data_mut(app).opacity = Some(value);
-        let retained = app.retain_id(value.id());
-        if let Some(released) = self
-            .animated_opacity_data_mut(app)
-            .retained_opacity
-            .replace(retained)
-        {
-            app.release_id(released);
-        }
+        let new = *value;
+        // The old animation goes when this local does, after the listener moved off it.
+        let _old = self.animated_opacity_data_mut(app).opacity.replace(value);
         if self.attached(app) {
-            value.add_listener(app, self.opacity_listener());
+            new.add_listener(app, self.opacity_listener());
         }
         self.update_opacity(app);
     }
@@ -1460,7 +1453,7 @@ impl RenderAnimatedOpacity {
     /// Creates a partially transparent render object.
     pub fn new(
         app: &mut App,
-        opacity: AnyAnimation<f64>,
+        opacity: AnimationRef<f64>,
         child: Option<AnyRenderBox>,
     ) -> RenderHandle<Self> {
         let this = RenderHandle::new_box(
@@ -9392,7 +9385,7 @@ mod tests {
     use waft_embedder::ColorFilter;
     use waft_embedder::valo::{self, Op, Point};
     use waft_foundation::AppCell;
-    use waft_foundation::ValueNotifier;
+    use waft_foundation::{Ref, ValueNotifier};
     use waft_gestures::HitTestResult;
     use waft_painting::BoxDecoration;
 
@@ -9486,7 +9479,7 @@ mod tests {
     }
 
     /// The test binding's first frame: attach, lay the root out, schedule and flush paint.
-    fn first_frame(app: &mut App, root: AnyRenderBox) -> Handle<PipelineOwner> {
+    fn first_frame(app: &mut App, root: AnyRenderBox) -> Ref<PipelineOwner> {
         let owner = PipelineOwner::new(app, None, None);
         owner.set_root_node(app, Some(root.as_object()));
         root.layout(app, BoxConstraints::tight(Size::new(100.0, 100.0)), false);
@@ -9716,13 +9709,13 @@ mod tests {
         assert!(layer.as_layer().attached(&app), "this time it painted");
 
         opacity.set_opacity(&mut app, 0.0);
-        pump_frame(&mut app, owner);
+        pump_frame(&mut app, *owner);
         assert!(inner.as_object().debug_layer(&app).is_none());
         let layer = boundary.as_object().debug_layer(&app).expect("kept");
         assert!(!layer.as_layer().attached(&app), "this time it did not");
 
         opacity.set_opacity(&mut app, 0.5);
-        pump_frame(&mut app, owner);
+        pump_frame(&mut app, *owner);
         let layer = boundary.as_object().debug_layer(&app).expect("kept");
         assert!(layer.as_layer().attached(&app), "this time it did again");
     }
@@ -9742,7 +9735,7 @@ mod tests {
         fade.set_opacity(&mut app, complete);
         assert!(fade.as_object().is_repaint_boundary(&app));
         assert!(fade.as_object().debug_needs_paint(&app));
-        pump_frame(&mut app, owner);
+        pump_frame(&mut app, *owner);
         let layer = fade.as_object().debug_layer(&app).expect("a boundary now");
         let opacity = app
             .handle::<OpacityLayer>(layer.id())
@@ -9839,7 +9832,7 @@ mod tests {
             None,
         );
         let root = RenderRepaintBoundary::new(&mut app, Some(decorated.as_box()));
-        first_frame(&mut app, root.as_box());
+        let _owner = first_frame(&mut app, root.as_box());
         let ops = scene_ops(&mut app, root.as_object());
         assert!(
             ops.iter()
@@ -10004,7 +9997,7 @@ mod tests {
             Some(child.as_box()),
         );
         let root = RenderRepaintBoundary::new(&mut app, Some(clip.as_box()));
-        first_frame(&mut app, root.as_box());
+        let _owner = first_frame(&mut app, root.as_box());
 
         let ops = picture_ops(&app, root.as_object());
         let clip_path = ops
@@ -10033,7 +10026,7 @@ mod tests {
         let child = red_box(&mut app);
         let clip = RenderClipRect::new(&mut app, None, Clip::None, Some(child.as_box()));
         let root = RenderRepaintBoundary::new(&mut app, Some(clip.as_box()));
-        first_frame(&mut app, root.as_box());
+        let _owner = first_frame(&mut app, root.as_box());
 
         assert!(
             !picture_has_clip(&app, root.as_object()),
@@ -10059,7 +10052,7 @@ mod tests {
             Some(child.as_box()),
         );
         let root = RenderRepaintBoundary::new(&mut app, Some(clip.as_box()));
-        first_frame(&mut app, root.as_box());
+        let _owner = first_frame(&mut app, root.as_box());
 
         let bounds = Rect::from_ltwh(0.0, 0.0, 100.0, 100.0);
         let ops = picture_ops(&app, root.as_object());
@@ -10109,7 +10102,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let reclip = app.create(ValueNotifier::new(0));
         let clipper: Rc<dyn CustomClipper<Rect>> = Rc::new(NotifyingClipper {
-            reclip: Rc::new(reclip),
+            reclip: Rc::new(reclip.clone()),
         });
         let child = red_box(&mut app);
         let clip = RenderClipRect::new(
@@ -10128,7 +10121,7 @@ mod tests {
             "the clipper's notification dropped the cached clip"
         );
         assert!(clip.as_object().debug_needs_paint(&app));
-        pump_frame(&mut app, owner);
+        pump_frame(&mut app, *owner);
         assert!(clip.custom_clip_data(&app).clip.is_some());
 
         clip.layout(
@@ -10158,7 +10151,7 @@ mod tests {
             Some(child.as_box()),
         );
         let root = RenderRepaintBoundary::new(&mut app, Some(transform.as_box()));
-        first_frame(&mut app, root.as_box());
+        let _owner = first_frame(&mut app, root.as_box());
 
         let ops = picture_ops(&app, root.as_object());
         let pushed = ops.iter().find_map(|op| match op {
@@ -10185,7 +10178,7 @@ mod tests {
             Some(child.as_box()),
         );
         let root = RenderRepaintBoundary::new(&mut app, Some(transform.as_box()));
-        first_frame(&mut app, root.as_box());
+        let _owner = first_frame(&mut app, root.as_box());
 
         assert!(
             !picture_ops(&app, root.as_object())
@@ -10296,7 +10289,7 @@ mod tests {
             Some(child.as_box()),
         );
         let root = RenderRepaintBoundary::new(&mut app, Some(translated.as_box()));
-        first_frame(&mut app, root.as_box());
+        let _owner = first_frame(&mut app, root.as_box());
 
         assert_eq!(
             drawn_rects(&app, root.as_object()),
@@ -10390,7 +10383,7 @@ mod tests {
         assert!(!offstage.as_object().paints_child(&app, child.as_object()));
 
         offstage.set_offstage(&mut app, false);
-        pump_frame(&mut app, owner);
+        pump_frame(&mut app, *owner);
         assert_eq!(
             drawn_rects(&app, root.as_object()),
             [fill(Rect::from_ltwh(0.0, 0.0, 100.0, 100.0), RED)]
@@ -10405,7 +10398,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let colored = red_box(&mut app);
         let root = RenderRepaintBoundary::new(&mut app, Some(colored.as_box()));
-        first_frame(&mut app, root.as_box());
+        let _owner = first_frame(&mut app, root.as_box());
 
         assert_eq!(
             drawn_rects(&app, root.as_object()),
@@ -10425,7 +10418,7 @@ mod tests {
         let child = red_box(&mut app);
         let colored = RenderColoredBox::new(&mut app, BLUE, true, Some(child.as_box()));
         let root = RenderRepaintBoundary::new(&mut app, Some(colored.as_box()));
-        first_frame(&mut app, root.as_box());
+        let _owner = first_frame(&mut app, root.as_box());
 
         let bounds = Rect::from_ltwh(0.0, 0.0, 100.0, 100.0);
         assert_eq!(
@@ -10552,7 +10545,7 @@ mod tests {
 
         let key = BackdropKey::new();
         filter.set_backdrop_key(&mut app, Some(key));
-        pump_frame(&mut app, owner);
+        pump_frame(&mut app, *owner);
         let ops = scene_ops(&mut app, root.as_object());
         assert!(
             ops.iter().any(|op| matches!(
@@ -10569,7 +10562,7 @@ mod tests {
         );
 
         filter.set_enabled(&mut app, false);
-        pump_frame(&mut app, owner);
+        pump_frame(&mut app, *owner);
         let ops = scene_ops(&mut app, root.as_object());
         assert!(
             !ops.iter().any(|op| matches!(
@@ -10601,7 +10594,7 @@ mod tests {
             Some(child.as_box()),
         );
         let root = RenderRepaintBoundary::new(&mut app, Some(filter.as_box()));
-        first_frame(&mut app, root.as_box());
+        let _owner = first_frame(&mut app, root.as_box());
         let ops = scene_ops(&mut app, root.as_object());
         let composed = valo::ImageFilter::compose(
             valo::ImageFilter::Color(saturation.to_valo()),
@@ -10626,7 +10619,7 @@ mod tests {
         let child = opaque_leaf(&mut app);
         let oval = RenderClipOval::new(&mut app, None, Clip::AntiAlias, Some(child.as_box()));
         let root = RenderRepaintBoundary::new(&mut app, Some(oval.as_box()));
-        first_frame(&mut app, root.as_box());
+        let _owner = first_frame(&mut app, root.as_box());
         let hit = |app: &mut App, x: f64, y: f64| {
             let mut result = HitTestResult::new();
             oval.as_box().hit_test(
@@ -10674,7 +10667,7 @@ mod tests {
             Some(child.as_box()),
         );
         let root = RenderRepaintBoundary::new(&mut app, Some(clip.as_box()));
-        first_frame(&mut app, root.as_box());
+        let _owner = first_frame(&mut app, root.as_box());
         let hit = |app: &mut App, x: f64, y: f64| {
             let mut result = HitTestResult::new();
             clip.as_box().hit_test(
@@ -10729,7 +10722,7 @@ mod tests {
             Some(child.as_box()),
         );
         let root = RenderRepaintBoundary::new(&mut app, Some(clip.as_box()));
-        first_frame(&mut app, root.as_box());
+        let _owner = first_frame(&mut app, root.as_box());
 
         let ops = picture_ops(&app, root.as_object());
         let fill_rule = ops
@@ -10761,7 +10754,7 @@ mod tests {
             Some(child.as_box()),
         );
         let root = RenderRepaintBoundary::new(&mut app, Some(clip.as_box()));
-        first_frame(&mut app, root.as_box());
+        let _owner = first_frame(&mut app, root.as_box());
         clip.update_clip(&mut app);
         assert_eq!(clip.clip(&app).tl_radius_x, 12.0);
         assert_eq!(
@@ -10834,11 +10827,11 @@ mod tests {
         assert!(!model.as_object().needs_compositing(&app));
 
         model.set_elevation(&mut app, 1.0);
-        pump_frame(&mut app, owner);
+        pump_frame(&mut app, *owner);
         assert!(!model.as_object().needs_compositing(&app));
 
         model.set_elevation(&mut app, 0.0);
-        pump_frame(&mut app, owner);
+        pump_frame(&mut app, *owner);
         assert!(!model.as_object().needs_compositing(&app));
     }
 
@@ -10854,7 +10847,7 @@ mod tests {
         assert_eq!(shadow_count(&app, root.as_object()), 0);
 
         model.set_elevation(&mut app, 1.0);
-        pump_frame(&mut app, owner);
+        pump_frame(&mut app, *owner);
         assert_eq!(shadow_count(&app, root.as_object()), 1);
     }
 
@@ -10890,7 +10883,7 @@ mod tests {
         // Mark for repaint otherwise pump_frame is a noop.
         clip.as_object().mark_needs_paint(app);
         assert!(clip.as_object().debug_needs_paint(app));
-        pump_frame(app, owner);
+        pump_frame(app, *owner);
         assert!(!clip.as_object().debug_needs_paint(app));
         assert!(clip.as_object().layer_as::<L>(app) == Some(layer));
     }
@@ -10948,7 +10941,7 @@ mod tests {
             Color::new(0xFF000000),
         );
         let root = RenderRepaintBoundary::new(&mut app, Some(model.as_box()));
-        first_frame_in_view(&mut app, root.as_box(), 3.0);
+        let _owner = first_frame_in_view(&mut app, root.as_box(), 3.0);
         let ops = picture_ops(&app, root.as_object());
         let shadow = ops
             .iter()
@@ -11031,7 +11024,7 @@ mod tests {
             Some(shape.as_box()),
         );
         let root = RenderRepaintBoundary::new(&mut app, Some(padding.as_box()));
-        first_frame_in_view(&mut app, root.as_box(), 1.0);
+        let _owner = first_frame_in_view(&mut app, root.as_box(), 1.0);
         let ops = picture_ops(&app, root.as_object());
         let round_rect = ops
             .iter()
@@ -11056,7 +11049,7 @@ mod tests {
         app: &mut App,
         root: AnyRenderBox,
         device_pixel_ratio: f64,
-    ) -> Handle<PipelineOwner> {
+    ) -> Ref<PipelineOwner> {
         let constraints = BoxConstraints::tight(Size::new(100.0, 100.0));
         let view = RenderView::new(
             app,
@@ -11108,7 +11101,7 @@ mod tests {
             Color::new(0xFF000000),
         );
         let root = RenderRepaintBoundary::new(&mut app, Some(model.as_box()));
-        first_frame(&mut app, root.as_box());
+        let _owner = first_frame(&mut app, root.as_box());
         let ops = picture_ops(&app, root.as_object());
         assert!(
             fills_only_with_draw_paint_inside_a_save_layer(&ops, BLUE),
@@ -11131,7 +11124,7 @@ mod tests {
             Color::new(0xFF000000),
         );
         let root = RenderRepaintBoundary::new(&mut app, Some(shape.as_box()));
-        first_frame(&mut app, root.as_box());
+        let _owner = first_frame(&mut app, root.as_box());
         let ops = picture_ops(&app, root.as_object());
         assert!(
             fills_only_with_draw_paint_inside_a_save_layer(&ops, BLUE),
@@ -11168,7 +11161,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let shape = physical_shape(&mut app);
         let root = RenderRepaintBoundary::new(&mut app, Some(shape.as_box()));
-        first_frame(&mut app, root.as_box());
+        let _owner = first_frame(&mut app, root.as_box());
         assert!(!shape.as_object().debug_needs_paint(&app));
 
         // Same shape, no repaint.
@@ -11196,10 +11189,10 @@ mod tests {
         let owner = first_frame(&mut app, root.as_box());
         assert!(!shape.as_object().needs_compositing(&app));
         shape.set_elevation(&mut app, 1.0);
-        pump_frame(&mut app, owner);
+        pump_frame(&mut app, *owner);
         assert!(!shape.as_object().needs_compositing(&app));
         shape.set_elevation(&mut app, 0.0);
-        pump_frame(&mut app, owner);
+        pump_frame(&mut app, *owner);
         assert!(!shape.as_object().needs_compositing(&app));
     }
 

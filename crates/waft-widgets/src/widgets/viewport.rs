@@ -9,9 +9,9 @@ use waft_embedder::Clip;
 use waft_foundation::{App, Handle};
 use waft_painting::{AxisDirection, text_direction_to_axis_direction};
 use waft_rendering::{
-    AnyRenderObject, AnyRenderSliver, AnyViewportOffset, CacheExtentStyle, ErasedRenderObject,
-    RenderBox, RenderHandle, RenderShrinkWrappingViewport, RenderViewport, RenderViewportBase,
-    ScrollCacheExtent, SliverPaintOrder,
+    AnyRenderObject, AnyRenderSliver, CacheExtentStyle, ErasedRenderObject, RenderBox,
+    RenderHandle, RenderShrinkWrappingViewport, RenderViewport, RenderViewportBase,
+    ScrollCacheExtent, SliverPaintOrder, ViewportOffsetRef,
 };
 
 use crate::framework::{
@@ -82,7 +82,7 @@ pub struct Viewport {
     /// changes, which changes the content that is displayed.
     ///
     /// Typically a `ScrollPosition`.
-    pub offset: AnyViewportOffset,
+    pub offset: ViewportOffsetRef,
     /// The first child in the `GrowthDirection::Forward` growth direction.
     ///
     /// Children after the center will be placed in the [`axis_direction`](Self::axis_direction)
@@ -121,7 +121,7 @@ impl Viewport {
     /// The viewport listens to the [`offset`](Self::offset), which means you do not need to
     /// rebuild this widget when the offset changes.
     #[expect(deprecated, reason = "the deprecated fields have Dart's defaults")]
-    pub fn new(offset: AnyViewportOffset) -> Viewport {
+    pub fn new(offset: ViewportOffsetRef) -> Viewport {
         Viewport {
             key: None,
             axis_direction: AxisDirection::Down,
@@ -280,7 +280,8 @@ impl RenderObjectWidget for Viewport {
 
     fn create_render_object(&self, app: &mut App, context: BuildContext) -> AnyRenderObject {
         let cross_axis_direction = self.resolved_cross_axis_direction(app, context);
-        let viewport = RenderViewport::new(app, cross_axis_direction, self.offset, None, None);
+        let viewport =
+            RenderViewport::new(app, cross_axis_direction, self.offset.clone(), None, None);
         viewport.set_axis_direction(app, self.axis_direction);
         viewport.set_anchor(app, self.anchor);
         viewport.set_scroll_cache_extent(app, self.effective_scroll_cache_extent());
@@ -299,7 +300,7 @@ impl RenderObjectWidget for Viewport {
         render_object.set_axis_direction(app, self.axis_direction);
         render_object.set_cross_axis_direction(app, cross_axis_direction);
         render_object.set_anchor(app, self.anchor);
-        render_object.set_offset(app, self.offset);
+        render_object.set_offset(app, self.offset.clone());
         render_object.set_scroll_cache_extent(app, self.effective_scroll_cache_extent());
         render_object.set_paint_order(app, self.paint_order);
         render_object.set_clip_behavior(app, self.clip_behavior);
@@ -337,6 +338,7 @@ impl ViewportElement {
             doing_mount_or_update: false,
             center_slot_index: None,
         })
+        .into_tree_node(app)
     }
 
     /// The viewport this element manages.
@@ -584,7 +586,7 @@ pub struct ShrinkWrappingViewport {
     /// Which part of the content inside the viewport should be visible.
     ///
     /// Typically a `ScrollPosition`.
-    pub offset: AnyViewportOffset,
+    pub offset: ViewportOffsetRef,
     /// The order in which to paint the slivers.
     ///
     /// Defaults to [`SliverPaintOrder::FirstIsTop`].
@@ -611,7 +613,7 @@ impl ShrinkWrappingViewport {
     /// The viewport listens to the [`offset`](Self::offset), which means you do not need to
     /// rebuild this widget when the offset changes.
     #[expect(deprecated, reason = "the deprecated fields have Dart's defaults")]
-    pub fn new(offset: AnyViewportOffset) -> ShrinkWrappingViewport {
+    pub fn new(offset: ViewportOffsetRef) -> ShrinkWrappingViewport {
         ShrinkWrappingViewport {
             key: None,
             axis_direction: AxisDirection::Down,
@@ -728,7 +730,7 @@ impl RenderObjectWidget for ShrinkWrappingViewport {
     fn create_render_object(&self, app: &mut App, context: BuildContext) -> AnyRenderObject {
         let cross_axis_direction = self.resolved_cross_axis_direction(app, context);
         let viewport =
-            RenderShrinkWrappingViewport::new(app, cross_axis_direction, self.offset, None);
+            RenderShrinkWrappingViewport::new(app, cross_axis_direction, self.offset.clone(), None);
         viewport.set_axis_direction(app, self.axis_direction);
         viewport.set_paint_order(app, self.paint_order);
         viewport.set_clip_behavior(app, self.clip_behavior);
@@ -745,7 +747,7 @@ impl RenderObjectWidget for ShrinkWrappingViewport {
         let cross_axis_direction = self.resolved_cross_axis_direction(app, context);
         render_object.set_axis_direction(app, self.axis_direction);
         render_object.set_cross_axis_direction(app, cross_axis_direction);
-        render_object.set_offset(app, self.offset);
+        render_object.set_offset(app, self.offset.clone());
         render_object.set_paint_order(app, self.paint_order);
         render_object.set_clip_behavior(app, self.clip_behavior);
         render_object.set_scroll_cache_extent(app, self.effective_scroll_cache_extent());
@@ -763,6 +765,7 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
     use waft_foundation::AppCell;
+    use waft_foundation::Ref;
 
     use waft_embedder::TextDirection;
     use waft_rendering::{
@@ -789,10 +792,10 @@ mod tests {
         .into_widget()
     }
 
-    fn viewport_tree(offset: Handle<FixedViewportOffset>, built: &Built) -> WidgetRef {
+    fn viewport_tree(offset: &Ref<FixedViewportOffset>, built: &Built) -> WidgetRef {
         Directionality::new(
             TextDirection::Ltr,
-            Viewport::new(offset.as_viewport_offset())
+            Viewport::new(offset.erase())
                 .scroll_cache_extent(ScrollCacheExtent::Pixels(0.0))
                 .slivers(vec![
                     SliverToBoxAdapter::new()
@@ -850,7 +853,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let offset = FixedViewportOffset::zero(&mut app);
         let built: Built = Rc::default();
-        let harness = Harness::mount(&mut app, viewport_tree(offset, &built));
+        let harness = Harness::mount(&mut app, viewport_tree(&offset, &built));
         harness.pump(&mut app);
 
         let viewport = render_viewport(&harness, &app);
@@ -878,14 +881,12 @@ mod tests {
         let built: Built = Rc::default();
         let tree = Directionality::new(
             TextDirection::Ltr,
-            Center::new().child(
-                ShrinkWrappingViewport::new(offset.as_viewport_offset()).slivers(vec![
+            Center::new().child(ShrinkWrappingViewport::new(offset.erase()).slivers(vec![
                     SliverToBoxAdapter::new()
                         .child(SizedBox::new().height(50.0))
                         .into_widget(),
                     item_list(&built, 2),
-                ]),
-            ),
+                ])),
         )
         .into_widget();
         let harness = Harness::mount(&mut app, tree);

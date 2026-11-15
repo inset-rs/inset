@@ -4,7 +4,7 @@ use std::{
     cell::{Cell, RefCell},
     rc::Rc,
 };
-use waft_foundation::{App, Handle, Listener};
+use waft_foundation::{App, Handle, Listener, OptionRetained, Ref};
 use waft_painting::Alignment;
 use waft_rendering::MainAxisSize;
 use waft_widgets::*;
@@ -28,10 +28,10 @@ struct Page {
 
 struct PageState {
     state: StateData<Page>,
-    host: Option<Handle<RetainedFlyoutHost>>,
+    host: Option<Ref<RetainedFlyoutHost>>,
     first: bool,
     dark: bool,
-    opener: Option<AnyFocusNode>,
+    opener: Option<FocusNodeRef>,
 }
 
 impl StatefulWidget for Page {
@@ -66,20 +66,19 @@ impl State for PageState {
             }),
         );
         app.get_mut(self).host = Some(host);
-        app.get_mut(self).opener = Some(FocusNode::new(app).as_node());
+        app.get_mut(self).opener = Some(FocusNode::new(app).into_erased());
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        app.get(self).host.unwrap().dispose(app);
-        let opener = app.get(self).opener.unwrap();
+        app.get(self).host.handle().unwrap().dispose(app);
+        let opener = app.get(self).opener.handle().unwrap();
         opener.dispose(app);
-        app.destroy(opener.id());
     }
 
     fn build(self: Handle<Self>, app: &mut App, _: BuildContext) -> WidgetRef {
         self.widget(app).probe.page.set(Some(self));
-        let host = app.get(self).host.unwrap();
-        let opener = app.get(self).opener.unwrap();
+        let host = app.get(self).host.handle().unwrap();
+        let opener = app.get(self).opener.clone().unwrap();
         let probe = self.widget(app).probe.clone();
         let target = |name: &'static str| {
             let probe = probe.clone();
@@ -89,7 +88,7 @@ impl State for PageState {
                     name,
                     Listener::new(move |app| host.show_at(app, context, true)),
                 )
-                .focus_node(opener)
+                .focus_node(opener.clone())
                 .into_widget()
             }))
             .key(waft_foundation::ValueKey::new(name).into())
@@ -135,7 +134,7 @@ struct Content {
 struct ContentState {
     state: StateData<Content>,
     count: usize,
-    focus: Option<AnyFocusNode>,
+    focus: Option<FocusNodeRef>,
 }
 
 impl StatefulWidget for Content {
@@ -156,15 +155,14 @@ impl State for ContentState {
     waft_widgets::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
-        app.get_mut(self).focus = Some(FocusNode::new(app).as_node());
+        app.get_mut(self).focus = Some(FocusNode::new(app).into_erased());
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
         let probe = self.widget(app).probe.clone();
         probe.disposed.set(probe.disposed.get() + 1);
-        let focus = app.get(self).focus.unwrap();
+        let focus = app.get(self).focus.handle().unwrap();
         focus.dispose(app);
-        app.destroy(focus.id());
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -178,7 +176,7 @@ impl State for ContentState {
                 self.set_state(app, |state| state.count += 1);
             }),
         )
-        .focus_node(app.get(self).focus.unwrap())
+        .focus_node(app.get(self).focus.clone().unwrap())
         .into_widget()
     }
 }
@@ -204,7 +202,11 @@ fn fixture() -> (Fixture, Probe) {
             app,
             WidgetsApp::new(AccentPalette::default().base)
                 .debug_show_checked_mode_banner(false)
-                .builder(move |_, _, _| Overlay::new().initial_entries([entry]).into_widget())
+                .builder(move |_, _, _| {
+                    Overlay::new()
+                        .initial_entries([entry.clone()])
+                        .into_widget()
+                })
                 .into_widget(),
         );
     });
@@ -231,7 +233,13 @@ fn child_state_survives_closing_and_removing_its_original_target() {
     f.find("Child count: 1");
     assert_eq!(probe.content.get(), Some(original));
     assert_eq!(probe.created.get(), 1);
-    let host = f.cell.borrow().get(probe.page.get().unwrap()).host.unwrap();
+    let host = f
+        .cell
+        .borrow()
+        .get(probe.page.get().unwrap())
+        .host
+        .handle()
+        .unwrap();
     host.dispose(&mut f.cell.borrow_mut());
     f.pump();
     assert_eq!(probe.disposed.get(), 1);
@@ -245,7 +253,7 @@ fn removing_an_open_target_hides_without_disposing_content() {
     page.set_state(&mut f.cell.borrow_mut(), |state| state.first = false);
     f.pump();
     let app = f.cell.borrow();
-    let host = app.get(page).host.unwrap();
+    let host = app.get(page).host.handle().unwrap();
     assert!(!host.is_open(&app));
     drop(app);
     assert_eq!(probe.disposed.get(), 0);
@@ -258,12 +266,12 @@ fn removing_an_open_target_hides_without_disposing_content() {
 fn focus_returns_to_opener_and_target_theme_updates_reach_retained_content() {
     let (mut f, probe) = fixture();
     let page = probe.page.get().unwrap();
-    let opener = f.cell.borrow().get(page).opener.unwrap();
+    let opener = f.cell.borrow().get(page).opener.handle().unwrap();
     opener.request_focus(&mut f.cell.borrow_mut(), None);
     f.pump();
     f.tap("First target");
     let content = probe.content.get().unwrap();
-    let expected_focus = f.cell.borrow().get(content).focus;
+    let expected_focus = f.cell.borrow().get(content).focus.handle();
     assert_eq!(primary_focus(&mut f.cell.borrow_mut()), expected_focus);
     page.set_state(&mut f.cell.borrow_mut(), |state| state.dark = true);
     f.pump();
@@ -278,8 +286,8 @@ fn focus_returns_to_opener_and_target_theme_updates_reach_retained_content() {
 fn a_non_focus_taking_open_preserves_current_focus() {
     let (mut f, probe) = fixture();
     let page = probe.page.get().unwrap();
-    let opener = f.cell.borrow().get(page).opener.unwrap();
-    let host = f.cell.borrow().get(page).host.unwrap();
+    let opener = f.cell.borrow().get(page).opener.handle().unwrap();
+    let host = f.cell.borrow().get(page).host.handle().unwrap();
     opener.request_focus(&mut f.cell.borrow_mut(), None);
     f.pump();
     host.show_at(
@@ -298,7 +306,13 @@ fn a_non_focus_taking_open_preserves_current_focus() {
 fn root_teardown_disposes_retained_content_once() {
     let (mut f, probe) = fixture();
     f.tap("First target");
-    let host = f.cell.borrow().get(probe.page.get().unwrap()).host.unwrap();
+    let host = f
+        .cell
+        .borrow()
+        .get(probe.page.get().unwrap())
+        .host
+        .clone()
+        .unwrap();
     run_app(&mut f.cell.borrow_mut(), SizedBox::shrink().into_widget());
     f.cell.elapse(std::time::Duration::ZERO);
     f.pump();
@@ -312,8 +326,8 @@ fn root_teardown_disposes_retained_content_once() {
 fn disposing_before_the_first_frame_cancels_content_creation_and_focus_work() {
     let (mut f, probe) = fixture();
     let page = probe.page.get().unwrap();
-    let host = f.cell.borrow().get(page).host.unwrap();
-    let opener = f.cell.borrow().get(page).opener.unwrap();
+    let host = f.cell.borrow().get(page).host.handle().unwrap();
+    let opener = f.cell.borrow().get(page).opener.handle().unwrap();
     opener.request_focus(&mut f.cell.borrow_mut(), None);
     f.pump();
     host.show_at(

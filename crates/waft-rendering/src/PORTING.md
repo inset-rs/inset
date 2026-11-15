@@ -55,27 +55,19 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — no subclassing of the gesture crate's result and entry types.
   Affect: a box hit test only runs inside a live `HitTestResult`; `handle_event` receives the `BoxHitTestEntry`.
 
-- Change: a render object named by a pressed pointer's hit-test path, or by the mouse tracker, outlives its `dispose` until they let go.
-  Reason: language — Dart keeps it alive by holding it; here the holder retains it (`App::retain`).
-  Affect: a `Listener` rebuilt mid-press still receives its release; a region that just left the tree still receives its exit.
-
 ## painting_context.rs → object.dart (PaintingContext), layer.rs → layer.dart
 
 - Change: a `LayerHandle` dropped without being cleared keeps its layer.
   Reason: language — the handle lives inside an arena object, so its setter takes the `App` (`LayerHandle::set_layer`) and its drop has none.
   Affect: that layer's entry lives until the `App` drops, where Dart's collector would take it.
 
-- Change: `Layer.dispose` ends in `App::destroy`.
-  Reason: language — no GC.
-  Affect: a handle to a disposed layer is stale and `app.get` panics on it; `AnyLayer::debug_disposed` answers true, and a composition callback for it is a no-op.
+- Change: `Layer.dispose` ends in `App::release_tree_node`.
+  Reason: language — no GC; a layer is a tree node, kept by the tree code from its constructor to its disposal.
+  Affect: a bare handle to a disposed layer that no `Ref` keeps is stale after the next checkpoint and `app.get` panics on it, where Dart's reference still reads it; `AnyLayer::debug_disposed` answers true for it.
 
 - Change: annotation search is the non-generic `AnnotationSearch` in place of `AnnotationResult<S>`.
   Reason: language — a generic method cannot sit in a vtable.
   Affect: an annotated region's value is an `Rc<dyn Any>` found only by its exact type, and a `find_annotations` override asks `result.accepts(..)` before adding.
-
-- Change: `LeaderLayer` / `FollowerLayer` hold the `LayerLink` as a `RetainedHandle`.
-  Reason: language — Dart's GC keeps a link alive while a detached layer still names it.
-  Affect: the link's entry lingers until those layers are disposed, past the `dispose` of the state that owns it.
 
 ## composition_layer_view.rs, layer.rs (`EmbeddedLayer`) → platform views (`PlatformViewLayer`, `RenderAndroidView` and kin)
 
@@ -130,10 +122,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - Change: `RenderPhysicalModel` and `RenderPhysicalShape` draw their shadow at the device pixel ratio of the view they paint into, read from their pipeline owner's root `RenderView`, and at 1 outside a view, where the engine reads the implicit view's.
   Reason: platform — a canvas belongs to no view and the embedder holds no implicit view whose metrics it could read, so Valo's `draw_shadow` takes the ratio from its caller.
   Affect: a physical model in a second view with another pixel ratio draws its shadow at that view's ratio, where Flutter's uses the implicit view's.
-
-- Change: `RenderAnimatedOpacity` (`RenderAnimatedOpacityMixin`) retains its opacity animation while it reads it, and gives it back when `set_opacity` replaces it.
-  Reason: language — Dart's reference keeps the animation alive; the arena frees one its owner destroyed, and a build may make the animation and free it at once.
-  Affect: a `FadeTransition`'s animation stays readable past its owner's `destroy` until the render object moves off it or is freed.
 
 ## shifted_box.rs → shifted_box.dart (RenderConstraintsTransformBox)
 

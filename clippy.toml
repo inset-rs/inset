@@ -1,0 +1,2 @@
+# `Retained` hashes and compares by the object's id alone; its count's interior mutability never reaches a key.
+ignore-interior-mutability = ["waft_foundation::Retained", "waft_foundation::handle_map::Retained"]

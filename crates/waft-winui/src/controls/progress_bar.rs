@@ -4,7 +4,7 @@ use crate::*;
 use std::{any::Any, time::Duration};
 use waft_animation::{Cubic, Curve};
 use waft_embedder::{Color, Rect, Size};
-use waft_foundation::{App, Handle};
+use waft_foundation::{App, Handle, OptionRetained, Ref};
 use waft_painting::EdgeInsetsGeometry;
 use waft_rendering::CustomClipper;
 use waft_scheduler::{FrameCallback, Ticker};
@@ -300,7 +300,7 @@ pub struct ProgressBarState {
     single_ticker_provider: SingleTickerProviderStateMixinData,
 
     /// Clock shared by the source tracks.
-    ticker: Option<Handle<Ticker>>,
+    ticker: Option<Ref<Ticker>>,
 
     /// State whose visual values were captured at transition start.
     from: ProgressState,
@@ -385,7 +385,7 @@ impl ProgressBarState {
         color: Color,
         second: f64,
     ) {
-        let ticker = app.get(self).ticker.unwrap();
+        let ticker = app.get(self).ticker.clone().unwrap();
         ticker.stop(app, false);
         let state = app.get_mut(self);
         state.from = from;
@@ -403,7 +403,7 @@ impl ProgressBarState {
         self.set_state(app, |state| state.elapsed = elapsed);
         let target = self.widget(app).visual_state();
         if target != ProgressState::Indeterminate && elapsed >= Duration::from_millis(750) {
-            app.get(self).ticker.unwrap().stop(app, false);
+            app.get(self).ticker.handle().unwrap().stop(app, false);
         }
     }
 
@@ -436,7 +436,7 @@ impl State for ProgressBarState {
             app,
             FrameCallback::new(move |app, elapsed| self.tick(app, elapsed)),
         );
-        app.get_mut(self).ticker = Some(ticker);
+        app.get_mut(self).ticker = Some(ticker.clone());
         if self.widget(app).is_indeterminate && self.widget(app).is_visible {
             ticker.start(app);
         }
@@ -478,7 +478,7 @@ impl State for ProgressBarState {
 
     /// Releases the storyboard clock before disposing its ticker provider.
     fn dispose(self: Handle<Self>, app: &mut App) {
-        app.get(self).ticker.unwrap().dispose(app);
+        app.get(self).ticker.handle().unwrap().dispose(app);
         SingleTickerProviderStateMixin::dispose(self, app);
     }
 

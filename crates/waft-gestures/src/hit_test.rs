@@ -5,7 +5,7 @@ use std::fmt::{self, Debug};
 use std::rc::Rc;
 
 use waft_embedder::{Matrix4, Offset, ViewId};
-use waft_foundation::{App, HandleId, RetainedHandleId};
+use waft_foundation::{AnyRef, App, HandleId};
 
 use crate::events::PointerEvent;
 
@@ -135,9 +135,9 @@ impl TransformPart {
 /// `BoxHitTestResult`).
 pub struct HitTestResult {
     path: Vec<HitTestEntry>,
-    /// The retained handles that keep the path's targets while the result outlives its turn;
+    /// The references that keep the path's targets while the result outlives its turn;
     /// empty until [`retain_targets`](Self::retain_targets).
-    retained: Vec<RetainedHandleId>,
+    retained: Vec<AnyRef>,
     // A stack of transform parts.
     //
     // The transform part stack leading from global to the current object is stored
@@ -165,9 +165,9 @@ impl HitTestResult {
         }
     }
 
-    /// Retains every object on the path, for a result kept past this turn (Dart keeps them alive
-    /// by holding the path). The retained handles live in the result: dropping it releases them
-    /// at the next checkpoint, [`release_targets`](Self::release_targets) releases them now.
+    /// Keeps every object on the path, for a result kept past this turn (Dart keeps them alive
+    /// by holding the path). The references live in the result: dropping it, or
+    /// [`release_targets`](Self::release_targets), lets go of them.
     pub fn retain_targets(&mut self, app: &mut App) {
         if !self.retained.is_empty() {
             return;
@@ -176,16 +176,14 @@ impl HitTestResult {
             .path
             .iter()
             .filter_map(|entry| entry.target.retained_handle())
-            .map(|id| app.retain_id(id))
+            .filter_map(|id| id.upgrade(app))
             .collect();
     }
 
-    /// Releases what [`retain_targets`](Self::retain_targets) retained, without waiting for the
-    /// checkpoint.
+    /// Lets go of what [`retain_targets`](Self::retain_targets) kept.
     pub fn release_targets(&mut self, app: &mut App) {
-        for handle in self.retained.drain(..) {
-            app.release_id(handle);
-        }
+        let _ = app;
+        self.retained.clear();
     }
 
     /// An unmodifiable list of [`HitTestEntry`] objects recorded during the hit test.

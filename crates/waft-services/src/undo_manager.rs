@@ -242,11 +242,11 @@ mod tests {
         UndoManager::handle_platform_undo(&mut app, UndoDirection::Undo);
         UndoManager::handle_platform_undo(&mut app, UndoDirection::Redo);
         assert_eq!(
-            app.get(client).directions,
+            app.get(&client).directions,
             [UndoDirection::Undo, UndoDirection::Redo]
         );
-        assert_eq!(app.get(client).undos, 1);
-        assert_eq!(app.get(client).redos, 1);
+        assert_eq!(app.get(&client).undos, 1);
+        assert_eq!(app.get(&client).redos, 1);
 
         UndoManager::set_client(&mut app, None);
         assert!(UndoManager::client(&mut app).is_none());

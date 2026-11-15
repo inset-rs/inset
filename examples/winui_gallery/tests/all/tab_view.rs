@@ -189,7 +189,7 @@ fn fixture(count: usize) -> (Fixture, Probe) {
             WidgetsApp::new(AccentPalette::default().base)
                 .debug_show_checked_mode_banner(false)
                 .builder(move |_, _, _| {
-                    FocusScope::new(Overlay::new().initial_entries([entry]))
+                    FocusScope::new(Overlay::new().initial_entries([entry.clone()]))
                         .autofocus(true)
                         .into_widget()
                 })
@@ -482,7 +482,11 @@ fn cross_strip_drop_is_owner_managed_and_completes_source_drag() {
             app,
             WidgetsApp::new(AccentPalette::default().base)
                 .debug_show_checked_mode_banner(false)
-                .builder(move |_, _, _| Overlay::new().initial_entries([entry]).into_widget())
+                .builder(move |_, _, _| {
+                    Overlay::new()
+                        .initial_entries([entry.clone()])
+                        .into_widget()
+                })
                 .into_widget(),
         );
     });

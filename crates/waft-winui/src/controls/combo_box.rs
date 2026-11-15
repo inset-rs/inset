@@ -31,7 +31,7 @@ use std::{
     time::Duration,
 };
 use waft_embedder::{Color, FontWeight, Offset, Rect, Size, TextAffinity, TextSelection};
-use waft_foundation::{App, Handle, Listenable, Listener, ValueKey};
+use waft_foundation::{App, Handle, Listenable, Listener, OptionRetained, Ref, ValueKey};
 use waft_gestures::{GestureBinding, K_PRIMARY_BUTTON, PointerEvent};
 use waft_painting::{
     Alignment, EdgeInsetsGeometry, PaintingBinding, TextPainter, TextSpan, transform_rect,
@@ -513,25 +513,25 @@ pub struct ComboBoxState {
     state: StateData<ComboBox>,
 
     /// Focus anywhere in the box, its text box or its drop-down: what `HasFocus` asks.
-    scope_focus: Option<Handle<FocusNode>>,
+    scope_focus: Option<Ref<FocusNode>>,
 
     /// The ComboBox's own focus, which `Focus` gives it.
-    focus: Option<Handle<FocusNode>>,
+    focus: Option<Ref<FocusNode>>,
 
     /// `EditableText`'s text.
-    text: Option<Handle<TextEditingController>>,
+    text: Option<Ref<TextEditingController>>,
 
     /// `EditableText`'s focus.
-    text_focus: Option<Handle<FocusNode>>,
+    text_focus: Option<Ref<FocusNode>>,
 
     /// Shows `Popup`.
-    popup: Option<Handle<OverlayPortalController>>,
+    popup: Option<Ref<OverlayPortalController>>,
 
     /// The items' focus, by id, owned here so that the box can focus an item it scrolls to.
-    item_focus: HashMap<String, Handle<FocusNode>>,
+    item_focus: HashMap<String, Ref<FocusNode>>,
 
     /// The drop-down's scroll position, made at each opening where the opening starts.
-    scroll: Option<Handle<ScrollViewportController>>,
+    scroll: Option<Ref<ScrollViewportController>>,
 
     /// Identifies `Background`, the drop-down's anchor.
     background_key: GlobalKey,
@@ -637,23 +637,38 @@ pub struct ComboBoxState {
 
 impl ComboBoxState {
     fn scope_focus(self: Handle<Self>, app: &App) -> Handle<FocusNode> {
-        app.get(self).scope_focus.expect("an initialized ComboBox")
+        app.get(self)
+            .scope_focus
+            .handle()
+            .expect("an initialized ComboBox")
     }
 
     fn box_focus(self: Handle<Self>, app: &App) -> Handle<FocusNode> {
-        app.get(self).focus.expect("an initialized ComboBox")
+        app.get(self)
+            .focus
+            .handle()
+            .expect("an initialized ComboBox")
     }
 
     fn text(self: Handle<Self>, app: &App) -> Handle<TextEditingController> {
-        app.get(self).text.expect("an initialized ComboBox")
+        app.get(self)
+            .text
+            .handle()
+            .expect("an initialized ComboBox")
     }
 
     fn text_focus(self: Handle<Self>, app: &App) -> Handle<FocusNode> {
-        app.get(self).text_focus.expect("an initialized ComboBox")
+        app.get(self)
+            .text_focus
+            .handle()
+            .expect("an initialized ComboBox")
     }
 
     fn popup(self: Handle<Self>, app: &App) -> Handle<OverlayPortalController> {
-        app.get(self).popup.expect("an initialized ComboBox")
+        app.get(self)
+            .popup
+            .handle()
+            .expect("an initialized ComboBox")
     }
 
     fn alive(self: Handle<Self>, app: &App) -> bool {
@@ -997,7 +1012,7 @@ impl ComboBoxState {
     fn retire_scroll(
         self: Handle<Self>,
         app: &mut App,
-        scroll: Option<Handle<ScrollViewportController>>,
+        scroll: Option<Ref<ScrollViewportController>>,
     ) {
         let Some(scroll) = scroll else {
             return;
@@ -1007,10 +1022,7 @@ impl ComboBoxState {
             app,
             view,
             FrameCallback::new(move |app, _| {
-                if app.contains(scroll) {
-                    scroll.dispose(app);
-                    app.destroy(scroll);
-                }
+                scroll.dispose(app);
             }),
         );
     }
@@ -1124,7 +1136,7 @@ impl ComboBoxState {
     fn request_item_focus(
         self: Handle<Self>,
         app: &mut App,
-        node: Handle<FocusNode>,
+        node: Ref<FocusNode>,
         epoch: u64,
         attempt: u32,
     ) {
@@ -1135,21 +1147,23 @@ impl ComboBoxState {
         if attempt < 3 {
             self.after_frame(app, move |app| {
                 if app.get(self).open && app.get(self).open_epoch == epoch {
-                    self.request_item_focus(app, node, epoch, attempt + 1);
+                    self.request_item_focus(app, node.clone(), epoch, attempt + 1);
                 }
             });
         }
     }
 
     /// The focus of the item `id`, made the first time it is asked for.
-    fn item_focus_node(self: Handle<Self>, app: &mut App, id: &str) -> Handle<FocusNode> {
+    fn item_focus_node(self: Handle<Self>, app: &mut App, id: &str) -> Ref<FocusNode> {
         if let Some(node) = app.get(self).item_focus.get(id) {
-            return *node;
+            return node.clone();
         }
         let node = FocusNode::new(app);
         // The items are reached with the arrow keys, never by Tab.
         node.as_node().set_skip_traversal(app, true);
-        app.get_mut(self).item_focus.insert(id.to_owned(), node);
+        app.get_mut(self)
+            .item_focus
+            .insert(id.to_owned(), node.clone());
         node
     }
 
@@ -1920,20 +1934,20 @@ impl ComboBoxState {
         } else {
             return;
         };
-        let scroll = app.get(self).scroll.unwrap();
+        let scroll = app.get(self).scroll.clone().unwrap();
         scroll.change_view(app, target, true);
     }
 
     /// Scrolls the drop-down by `delta` at once.
     fn scroll_by(self: Handle<Self>, app: &mut App, delta: f64) {
-        if let Some(scroll) = app.get(self).scroll {
+        if let Some(scroll) = app.get(self).scroll.handle() {
             scroll.scroll_by(app, delta, true);
         }
     }
 
     /// The drop-down list's scroll metrics, once it is laid out.
     fn scroll_metrics(self: Handle<Self>, app: &App) -> Option<ScrollViewportMetrics> {
-        let scroll = app.get(self).scroll?;
+        let scroll = app.get(self).scroll.handle()?;
         let metrics = scroll.metrics(app);
         (metrics.viewport_length > 0.0).then_some(metrics)
     }
@@ -2240,10 +2254,7 @@ impl ComboBoxState {
                 app,
                 view,
                 FrameCallback::new(move |app, _| {
-                    if app.contains(node) {
-                        node.dispose(app);
-                        app.destroy(node);
-                    }
+                    node.dispose(app);
                 }),
             );
         }
@@ -2307,9 +2318,9 @@ impl State for ComboBoxState {
         let popup = OverlayPortalController::new(app, Some("ComboBox Popup".into()));
         let state = app.get_mut(self);
         state.scope_focus = Some(scope_focus);
-        state.focus = Some(focus);
+        state.focus = Some(focus.clone());
         state.text = Some(text);
-        state.text_focus = Some(text_focus);
+        state.text_focus = Some(text_focus.clone());
         state.popup = Some(popup);
         self.sync_items(app);
         if self.is_editable(app) {
@@ -2375,14 +2386,11 @@ impl State for ComboBoxState {
         );
         for node in [scope_focus, focus, text_focus].into_iter().chain(items) {
             node.dispose(app);
-            app.destroy(node);
         }
-        app.get_mut(text).dispose();
-        app.destroy(text);
-        app.destroy(popup);
+        app.get_mut(&text).dispose();
+        drop(popup);
         if let Some(scroll) = scroll {
             scroll.dispose(app);
-            app.destroy(scroll);
         }
     }
 
@@ -2431,7 +2439,13 @@ impl State for ComboBoxState {
             ])
             .children(cells);
         let root = Focus::new(layout_root)
-            .focus_node(self.scope_focus(app).as_node())
+            .focus_node(
+                app.get(self)
+                    .scope_focus
+                    .as_ref()
+                    .expect("an initialized ComboBox")
+                    .erase(),
+            )
             .can_request_focus(false)
             .skip_traversal(true)
             .on_key_event(Rc::new(move |app, _, event| self.on_key(app, event)))
@@ -2503,7 +2517,10 @@ impl ComboBoxState {
         )
         .key(app.get(self).background_key.clone().into());
         let popup = OverlayPortal::overlay_child_layout_builder(
-            self.popup(app),
+            app.get(self)
+                .popup
+                .clone()
+                .expect("an initialized ComboBox"),
             move |app, context, info| self.popup_overlay(app, context, info),
         )
         .overlay_location(OverlayChildLocation::RootOverlay)
@@ -2670,7 +2687,13 @@ impl ComboBoxState {
                     .child(target),
             );
         Focus::new(target)
-            .focus_node(self.box_focus(app).as_node())
+            .focus_node(
+                app.get(self)
+                    .focus
+                    .as_ref()
+                    .expect("an initialized ComboBox")
+                    .erase(),
+            )
             .can_request_focus(widget.is_enabled)
             // An editable box is reached by Tab in its text box.
             .skip_traversal(widget.is_editable || !widget.is_enabled)
@@ -2803,18 +2826,30 @@ impl ComboBoxState {
     fn editable_text(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
         let widget = self.widget(app).clone();
         let r = ThemeResources::of(app, context);
-        let mut config = TextBox::new(self.text(app).as_controller())
-            .focus_node(self.text_focus(app))
-            .placeholder_text(widget.placeholder_text.clone())
-            .is_enabled(widget.is_enabled)
-            .padding(r.combo_box_editable_text_padding)
-            .border_brush(Brush::Solid(Color::new(0)))
-            .foreground(
-                widget
-                    .placeholder_foreground
-                    .unwrap_or(r.combo_box_place_holder_foreground),
-            )
-            .text_changed(move |app, _| self.text_edited(app));
+        let mut config = TextBox::new(
+            app.get(self)
+                .text
+                .as_ref()
+                .expect("an initialized ComboBox")
+                .erase(),
+        )
+        .focus_node(
+            app.get(self)
+                .text_focus
+                .as_ref()
+                .expect("an initialized ComboBox")
+                .erase(),
+        )
+        .placeholder_text(widget.placeholder_text.clone())
+        .is_enabled(widget.is_enabled)
+        .padding(r.combo_box_editable_text_padding)
+        .border_brush(Brush::Solid(Color::new(0)))
+        .foreground(
+            widget
+                .placeholder_foreground
+                .unwrap_or(r.combo_box_place_holder_foreground),
+        )
+        .text_changed(move |app, _| self.text_edited(app));
         if let Some(color) = widget.placeholder_foreground {
             config = config.placeholder_foreground(color);
         }
@@ -2959,7 +2994,7 @@ impl ComboBoxState {
     ) -> WidgetRef {
         let resources = ThemeResources::of(app, context);
         let r = &resources;
-        let Some(scroll) = app.get(self).scroll else {
+        let Some(scroll) = app.get(self).scroll.clone() else {
             return SizedBox::shrink().into_widget();
         };
         let overlay = r.overlay_corner_radius;

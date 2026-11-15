@@ -180,9 +180,6 @@ Ported against: 34b89b2086d4
 - Change: `ShapeBorderTween` is a value, not an arena object.
   Reason: language — the orphan rule forbids `impl Animatable for Handle<ShapeBorderTween>` outside waft-animation.
   Affect: a driven animation holds a clone; writing `begin`/`end` afterwards does not reach it.
-- Change: an ink feature's `dispose` destroys the feature and the controllers, tweens and driven animations it made; they stay readable until the next checkpoint.
-  Reason: language — no collector, and a feature is disposed inside its own controller's status listener.
-  Affect: a handle to a disposed feature is stale after the next checkpoint.
 
 ## ink_well.rs → ink_well.dart
 - Change: `InkSplash::splash_factory()`, `InkRipple::splash_factory()`, `InkSparkle::splash_factory()`, `InkSparkle::constant_turbulence_seed_splash_factory()` and `NoSplash::splash_factory()` are functions handing out clones of one per-thread `Rc<dyn InteractiveInkFeatureFactory>`.
@@ -261,9 +258,9 @@ Ported against: 34b89b2086d4
 - Change: `FabTopOffsetY`, `FabEndOffsetX`, `FabMiniOffsetAdjustment` and the other mixins are traits with provided methods; a location forwards `get_offset_x`/`get_offset_y`/`is_mini` to the mixins it uses, and its `get_offset` to `StandardFabLocation::get_offset`.
   Reason: language — Rust has no mixin application.
   Affect: a custom location writes those forwarding methods itself.
-- Change: the scaling animator's rotation and threshold tweens and the no-animation animator's `AlwaysStoppedAnimation` are one object per `App`, made on first use; the other objects the scaling animator makes for the animations it returns are made on every call and never freed.
-  Reason: language — no collector: Dart's frees them once the scaffold drops the returned animations, and nothing here knows what a returned animation is built from.
-  Affect: each `update_animations` of a scaffold with the scaling animator (its first build, and each change of `floating_action_button_animator`) leaves two `CurveTween`s, four driven animations, two `ReverseAnimation`s and the two returned `AnimationSwap`s in the arena for the life of the `App`; a custom animator's objects likewise.
+- Change: the scaling animator's rotation and threshold tweens and the no-animation animator's `AlwaysStoppedAnimation` are one object per `App`, made on first use.
+  Reason: language — a Rust static cannot hold an arena object, so the `App` holds them.
+  Affect: they live as long as the `App`.
 
 ## scaffold.rs → scaffold.dart
 - Change: `ScaffoldFeatureController`s are shared as `Rc` and compared with `Rc::ptr_eq`; the controlled widget is kept as its `WidgetRef`.
@@ -281,12 +278,9 @@ Ported against: 34b89b2086d4
 - Change: `Scaffold::of` and `Scaffold::geometry_of` panic with Dart's message.
   Reason: language — no `FlutterError.reportError` hook to report and continue.
   Affect: a debug build stops there.
-- Change: `_FloatingActionButtonTransitionState` frees the tweens, driven animations, `AnimationMin`s, `CurvedAnimation`s and `TrainHoppingAnimation`s it made when it replaces or disposes them, first removing its `_onProgressChanged` listener from the replaced scale animations; they stay readable until the next checkpoint.
-  Reason: language — no collector, and a replaced `AnimationMin` still subscribed to the move controller would call into freed objects.
-  Affect: geometry listeners get one notification per tick of the button's animations, where in Dart each replaced set of animations keeps calling `_onProgressChanged` and adds one more; the animator's own objects are not freed (floating_action_button_location.rs entry).
-- Change: `ScaffoldState` makes one `_DismissDrawerAction` in `init_state` and frees it in `dispose`, and the scaffold's `Builder` gives it its context on every build; Dart's build makes a new action each time.
-  Reason: language — no collector frees the action each build replaces.
-  Affect: the scaffold's `Actions` holds the same action across builds, so widgets that found `DismissIntent` through it are not rebuilt when the scaffold rebuilds, as Dart's new action makes them.
+- Change: `_FloatingActionButtonTransitionState` removes its `_onProgressChanged` listener from the scale animations it replaces.
+  Reason: language — in Dart the move animation's listener keeps a replaced `AnimationMin` alive and calling, where a tear-off here does not keep its receiver, so the replaced animation would call only until the checkpoint that frees it.
+  Affect: geometry listeners get one notification per tick of the button's animations, where in Dart each replaced set of animations keeps calling `_onProgressChanged` and adds one more.
 
 ## snack_bar.rs → snack_bar.dart
 - Change: the height transitions are `ListenableBuilder`s that read the curved animation's value when they build, where Dart uses `ValueListenableBuilder<double>`.
@@ -297,9 +291,6 @@ Ported against: 34b89b2086d4
   Affect: `style.foreground_color` is not itself a `WidgetStateColor`; the resolved colours are the same.
 
 ## bottom_sheet.rs → bottom_sheet.dart, bottom_sheet_theme.rs → bottom_sheet_theme.dart
-- Change: `ModalBottomSheetRoute::build_modal_barrier` frees the colour and curve tweens and the colour animation the last build drove, as `ModalRoute`'s does (waft-widgets routes.rs entry).
-  Reason: language — no collector frees what each build of the barrier replaces.
-  Affect: a handle to a replaced barrier tween or animation is stale after the next checkpoint, and the route's disposal frees the last build's (waft-widgets routes.rs entry).
 - Change: `BottomSheet::drag_handle_color` and `BottomSheetThemeData::drag_handle_color` are `AnyColor`s, both resolved by state with `resolve_as`; the theme's `lerp` gives a plain colour.
   Reason: language — a Dart `Color` field can hold a `WidgetStateColor` subclass, which a plain `Color` cannot.
   Affect: a caller passes a `Color` (through `Into`) or `WidgetStateColor::into_any()`.
@@ -342,12 +333,6 @@ Ported against: 34b89b2086d4
 - Change: while the zoom or fade-forwards transition snapshots a page, the page is painted live through the painter's transform and opacity layers; the zoom painters' `paint_snapshot` waits for a raster.
   Reason: platform — `OffsetLayer.toImageSync` is deferred (waft-widgets' snapshot_widget.rs entry).
   Affect: animations inside a page keep running during the transition, and each fading page keeps an opacity layer over live content.
-- Change: the zoom transition states free the transitions and the painter their `_updateAnimations` replaced, and theirs at `dispose`; the predictive back shared-element state frees the bounce parent and position animation its `_updateAnimations` replaced, with the curved animations its `_updateCurvedAnimations` replaced, and theirs and its three proxies at `dispose`. They stay readable until the next checkpoint.
-  Reason: language — no collector frees an object the state replaced while the painter or a proxy still lets go of it in the same frame.
-  Affect: a handle to a replaced transition is stale after the frame that replaced it.
-- Change: the builds of `ZoomPageTransition`, `FadeForwardsPageTransition` and both builders' `_snapshotAwareDelegatedTransition` free the `ReverseAnimation` and the driven fades and slides they make with `destroy_lingering` as soon as they hand them on; the `DualTransitionBuilder`, `FadeTransition` and `SlideTransition` that hold them retain them.
-  Reason: language — Dart's collector frees what each frame's build replaces, and a stateless build has no state to keep them in.
-  Affect: a handle to one of them is stale once the widget that holds it moves to the next frame's.
 
 ## app.rs → app.dart
 - Change: the overlay style `MaterialApp` sets from its chosen theme's brightness is set for the view it is built in (`View::maybe_of`), and for none outside a view.
@@ -441,13 +426,7 @@ Ported against: 34b89b2086d4
 - Change: `_InputBorderTween` turns `ShapeBorder::lerp`'s result back into an input border only when it is one of this crate's input borders; otherwise it takes `begin` before the midpoint and `end` from it.
   Reason: language — a `dyn ShapeBorder` cannot be cast to the `InputBorder` trait, which painting cannot name (Dart's `as InputBorder`).
   Affect: a decorator whose border changes between borders of an `InputBorder` type from another crate switches halfway instead of animating.
-- Change: `_InputDecoratorState` keeps each `CurvedAnimation` that `_buildTransition` replaces until the state is disposed, after calling its `dispose`.
-  Reason: language — there is no collector, and the outgoing hint's `FadeTransition` still reads the replaced animation until the `AnimatedSwitcher` drops it.
-  Affect: each hint switch with `maintain_hint_size` false keeps one `CurvedAnimation` in the arena for the decorator's life.
 
-- Change: `_HelperErrorState` makes the helper's fade-out animation once, in `init_state`, where Dart makes a new one on each build.
-  Reason: language — no collector frees the animation each build would replace.
-  Affect: the helper's `FadeTransition` keeps one animation for the state's life.
 ## text_selection_toolbar_text_button.rs → text_selection_toolbar_text_button.dart, text_selection_toolbar.rs → text_selection_toolbar.dart
 - Change: `TextSelectionToolbarTextButton` treats the colour scheme's `on_surface` as the default when it equals `ThemeData::new(app)`'s (light) or `ThemeData::dark(app, None)`'s (dark) by value, where Dart asks `identical`; the toolbar's container does the same with `surface`.
   Reason: language — dart:ui `Color` is a value here and has no identity.
@@ -491,9 +470,6 @@ Ported against: 34b89b2086d4
 - Change: `_IndicatorInkWell` is a widget holding an `InkResponse` (with `override_get_rect_callback`) that it builds.
   Reason: language — a Rust struct cannot extend `InkResponse` (ink_well.rs entry).
   Affect: a type lookup finds an `InkResponse` element under each destination's private ink well.
-- Change: `_CurvedAnimationBuilderState` keeps each build's `CurveTween` and the animation it drives until the build after next, and frees the last two in `dispose`.
-  Reason: language — no collector, and the widgets the last build made still listen to its animation until they update to this build's.
-  Affect: a destination whose labels show only when selected holds up to two curved animations in the arena at once.
 
 ## navigation_rail.rs → navigation_rail.dart
 - Change: `_IndicatorInkWell` is the `InkResponse` its constructor makes, with its `getRectCallback` filled through `override_get_rect_callback`.
@@ -502,12 +478,6 @@ Ported against: 34b89b2086d4
 - Change: Dart's `NavigationRail` constructor asserts that relate two arguments (`minExtendedWidth >= minWidth`, `extended` only with `labelType` none) run when the rail is turned into a `WidgetRef` (`into_widget`).
   Reason: language — a fluent chain has no point at which it has seen every argument.
   Affect: a bad combination panics where the rail is handed to the tree, not on its first build.
-- Change: `_NavigationRailState` keeps the controllers and the extended `CurvedAnimation` that a change in the number of destinations replaces, after disposing them, until the state is disposed.
-  Reason: language — no collector, and the destinations and the widgets that read `NavigationRail::extended_animation` still unsubscribe from them after the reset.
-  Affect: each change in the number of destinations keeps the old controllers and one `CurvedAnimation` in the arena for the rail's life.
-- Change: `_RailDestinationState` makes each label fade (`drive(CurveTween(curve: Interval(..)))`) once per parent animation and interval and keeps it until disposed, where Dart makes a new one on each build.
-  Reason: language — no collector frees the animation each build would replace.
-  Affect: the label's `FadeTransition` keeps one animation across builds (at most three per destination, plus those of earlier parents after a reset).
 
 ## bottom_navigation_bar.rs → bottom_navigation_bar.dart, bottom_navigation_bar_theme.rs → bottom_navigation_bar_theme.dart
 - Change: `BottomNavigationBar::selected_item_color` and `fixed_color` hold what the caller gave; `effective_selected_item_color()` and `effective_fixed_color()` give Dart's `selectedItemColor ?? fixedColor`.
@@ -516,20 +486,14 @@ Ported against: 34b89b2086d4
 - Change: Dart's `BottomNavigationBar` constructor asserts that relate two arguments (`currentIndex` among the items, every item labelled, `selectedItemColor` and `fixedColor` not both given) run when the bar is turned into a `WidgetRef` (`into_widget`).
   Reason: language — a fluent chain has no point at which it has seen every argument.
   Affect: a bad combination panics where the bar is handed to the tree, not where it is made.
-- Change: `BottomNavigationBarState` makes its three `ColorTween`s and the flex `Tween` once, in `init_state`, and sets the colour tweens' ends on each build; Dart's build makes new colour tweens each time, and its `_flexTween` is a static.
-  Reason: language — no collector frees the tweens each build would replace, and a Rust static cannot hold an arena object.
-  Affect: the tiles of every build share one tween of each kind, so a tile widget kept from an earlier build reads the latest build's colours.
-- Change: the label that fades out when `show_selected_labels` is false uses one `Tween(1.0, 0.0)` driven animation per item, made with the state's animations in `_resetState`; Dart's `_Label` makes a new one on every build.
-  Reason: language — no collector frees the animation each build would replace (the input_decorator.rs `_HelperErrorState` entry).
-  Affect: the label's `FadeTransition` keeps one opacity animation across rebuilds; the opacity values are the same.
+- Change: `BottomNavigationBarState` makes its flex `Tween` once, in `init_state`, where Dart's `_flexTween` is a static.
+  Reason: language — a Rust static cannot hold an arena object.
+  Affect: the flex tween lives as long as the state.
 - Change: `BottomNavigationBarThemeData::mouse_cursor` takes a `WidgetStateProperty<Option<MouseCursorRef>>`; a `WidgetStateMouseCursor` cannot be given to it as it is.
   Reason: language — Rust generics are invariant, where Dart's `WidgetStateMouseCursor` is a `WidgetStateProperty<MouseCursor?>`.
   Affect: a caller wraps the cursor in `resolve_with(|states| Some(cursor.resolve(states)))`.
 
 ## tabs.rs → tabs.dart
-- Change: a `TabBar` never frees the `_ChangeAnimation`s, `_DragAnimation`s and `ReverseAnimation`s each build makes for its styled tabs.
-  Reason: language — no collector, and Dart's removal of their listeners is skipped once the controller's animation is gone (a disposed or replaced `TabController`), which leaves them subscribed to that animation.
-  Affect: each `TabBar` build keeps up to five small animations in the arena for the app's life.
 - Change: `_TabsDefaultsM2` turns the indicator white when the scheme's `secondary` has `Colors::BLUE`'s value in a light theme, whatever made it.
   Reason: language — a `ColorScheme` colour is a plain `Color` here, where Dart's `secondary == Colors.blue` is true only for the `MaterialColor` itself (`Color.==` compares runtime types), as `ColorScheme.fromSwatch` gives it.
   Affect: a Material 2 light theme whose scheme's secondary is a plain `Color(0xFF2196F3)` gets a white default indicator where Flutter keeps it blue.
@@ -562,23 +526,11 @@ Ported against: 34b89b2086d4
 - Change: `_MenuAnchorState` is a base trait whose fields are a bag that `MenuAnchorState` and the menu bar's state carry, and `_MenuBarAnchor` holds the `MenuAnchor` it extends; `_MenuAnchorScope` holds the state erased.
   Reason: language — a Rust struct cannot extend another.
   Affect: a menu bar's anchor does not downcast to a `MenuAnchor`, where Dart's `is MenuAnchor` is true; a type lookup misses it in both.
-- Change: `MenuAnchor` and `SubmenuButton` free the internal `MenuController` they replace in `did_update_widget`, and the anchor frees the item fades `_resolveMenuItems` replaces; each stays readable until the next checkpoint.
-  Reason: language — no collector, and the anchor below still detaches from the replaced controller, and the fades still listen to the replaced animations, until they rebuild.
-  Affect: a handle to a replaced internal controller is stale after the next checkpoint.
-- Change: each anchor state makes the `DismissMenuAction` Dart's `_Submenu` makes on every build once, on its first overlay build, gives it the current controller on every build and frees it in `dispose`; the menu bar's `DismissMenuAction`, which Dart makes once with the controller of its first build, keeps that controller readable after its owner frees it.
-  Reason: language — no collector frees the action each build replaces, nor keeps a freed controller alive for the action that holds it.
-  Affect: the menu's `Actions` holds the same action across builds, so widgets that found `DismissIntent` through it are not rebuilt when the menu rebuilds, as Dart's new action makes them.
 - Change: `_MenuLayout` fits the menu into the whole overlay, with no avoid bounds and no display-feature sub-screens.
   Reason: platform — `DisplayFeatureSubScreen` needs `MediaQuery.displayFeatures`, which no host reports (Deferred).
   Affect: on a folded or hinged display the menu can straddle the hinge instead of keeping to the sub-screen nearest its anchor.
 
 ## dropdown_menu.rs → dropdown_menu.dart
-- Change: `_DropdownMenuState` makes the arrow-key and enter `CallbackAction`s and the `DismissMenuAction` once, in `init_state`, where Dart's `build` makes new ones each time; it gives the dismiss action the current menu controller on each build and frees them all in `dispose`.
-  Reason: language — no collector frees the actions each build would replace.
-  Affect: the `Actions` above the menu holds the same actions across builds, so widgets that found those intents through it are not rebuilt when the menu rebuilds, as Dart's new actions make them.
-- Change: the state frees the `MenuController` it made when `menu_controller` changes, and the highlighted item's `WidgetStatesController` when a build replaces it; each stays readable until the next checkpoint.
-  Reason: language — no collector, and the anchor and the item built with them still detach or remove their listeners when they update.
-  Affect: a handle to a replaced internal controller is stale after the next checkpoint.
 - Change: `DropdownMenu::dropdown_menu_entries` is an `Rc<[DropdownMenuEntry<T>]>` that `did_update_widget` compares by pointer, so entries handed as a new list on each build count as changed on each build.
   Reason: language — Dart compares the list by identity and canonicalizes a `const` list, so a build that writes `const <DropdownMenuEntry>[…]` hands the same list every time; Rust has no constant heap values.
   Affect: a menu whose parent builds its entries anew on each build clears its highlight and filtered entries on each rebuild, where Dart's `const` entries keep them; a caller that keeps the `Rc` keeps them.

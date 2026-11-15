@@ -189,7 +189,7 @@ mod tests {
         let notifier = app.create(ValueNotifier::new(1));
         let seen = Rc::new(RefCell::new(Vec::new()));
         let child: WidgetRef = SizedBox::shrink().into_widget();
-        let widget = ValueListenableBuilder::new(Rc::new(notifier), {
+        let widget = ValueListenableBuilder::new(Rc::new(notifier.clone()), {
             let seen = Rc::clone(&seen);
             let child = child.clone();
             move |_app, _context, value: &i32, passed| {

@@ -208,7 +208,7 @@ pub(crate) struct NavigationViewItemPresenter {
     /// Whether a descendant owns selection.
     pub is_child_selected: bool,
     /// Owner-managed focus node used for hierarchy traversal.
-    pub focus_node: AnyFocusNode,
+    pub focus_node: FocusNodeRef,
     /// Inline depth; reset to zero when children enter a flyout.
     pub depth: usize,
     /// Supplies TemplateSettings.SmallerIconWidth.
@@ -222,7 +222,7 @@ pub(crate) struct NavigationViewItemPresenter {
     pub indicator_key: GlobalKey,
 
     /// Shared source clock, retained by the parent for the lifetime of this visual.
-    pub indicator_controller: waft_foundation::Handle<waft_animation::AnimationController>,
+    pub indicator_controller: waft_foundation::Ref<waft_animation::AnimationController>,
 
     /// Local compositor animation of this actual indicator visual.
     pub indicator_animation: Option<NavigationIndicatorTransition>,
@@ -248,7 +248,7 @@ impl StatelessWidget for NavigationViewItemPresenter {
                 .into_widget()
         })
         .is_enabled(self.item.is_enabled)
-        .focus_node(self.focus_node)
+        .focus_node(self.focus_node.clone())
         .into_widget();
         let tooltip = self.item.tool_tip.clone().or_else(|| {
             (self.is_closed_compact && self.position == NavigationViewItemPosition::Left)
@@ -535,7 +535,7 @@ impl NavigationViewItemPresenter {
                 });
             let visible = self.is_selected || (self.is_child_selected && !self.is_expanded);
             let indicator = NavigationIndicatorTransition::build(
-                self.indicator_controller,
+                self.indicator_controller.clone(),
                 self.indicator_animation.clone(),
                 self.indicator_opacity
                     .unwrap_or(if visible { 1.0 } else { 0.0 }),

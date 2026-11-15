@@ -1485,7 +1485,7 @@ mod tests {
                 TextSpan::new().text("Tap ").into_span(),
                 TextSpan::new()
                     .text("here")
-                    .recognizer(recognizer.as_recognizer())
+                    .recognizer(recognizer.erase())
                     .into_span(),
                 TextSpan::new().text(" please").into_span(),
             ])
@@ -1529,7 +1529,7 @@ mod tests {
                 TextSpan::new().text("plain ").into_span(),
                 TextSpan::new()
                     .text("link")
-                    .recognizer(recognizer.as_recognizer())
+                    .recognizer(recognizer.erase())
                     .into_span(),
                 TextSpan::new()
                     .text(" forbidden")

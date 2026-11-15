@@ -776,13 +776,13 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let none = MaterialStatesController::new(&mut app, None);
-        assert_eq!(*app.get(none).value(), WidgetStates::new());
+        assert_eq!(*app.get(&none).value(), WidgetStates::new());
         let empty = MaterialStatesController::new(&mut app, Some(WidgetStates::new()));
-        assert_eq!(*app.get(empty).value(), WidgetStates::new());
+        assert_eq!(*app.get(&empty).value(), WidgetStates::new());
         let selected =
             MaterialStatesController::new(&mut app, Some(states([MaterialState::Selected])));
         assert_eq!(
-            *app.get(selected).value(),
+            *app.get(&selected).value(),
             states([MaterialState::Selected])
         );
     }
@@ -803,7 +803,7 @@ mod tests {
 
         let expect = |app: &waft_foundation::App, expected: &[MaterialState], expected_count| {
             assert_eq!(
-                *app.get(controller).value(),
+                *app.get(&controller).value(),
                 states(expected.iter().copied())
             );
             assert_eq!(count.get(), expected_count);
@@ -864,16 +864,16 @@ mod tests {
 
         controller.update(&mut app, MaterialState::Selected, true);
         assert_eq!(
-            *app.get(controller).value(),
+            *app.get(&controller).value(),
             states([MaterialState::Selected])
         );
         assert_eq!(count.get(), 0);
 
         controller.update(&mut app, MaterialState::Selected, false);
-        assert_eq!(*app.get(controller).value(), WidgetStates::new());
+        assert_eq!(*app.get(&controller).value(), WidgetStates::new());
         assert_eq!(count.get(), 1);
 
-        app.get_mut(controller).dispose();
-        assert!(!app.get(controller).change_notifier_data().has_listeners());
+        app.get_mut(&controller).dispose();
+        assert!(!app.get(&controller).change_notifier_data().has_listeners());
     }
 }

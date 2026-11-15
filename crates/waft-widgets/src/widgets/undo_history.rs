@@ -9,17 +9,19 @@ use std::time::Duration;
 
 use waft_embedder::TargetPlatform;
 use waft_foundation::{
-    App, ChangeNotifier, ChangeNotifierData, Handle, Listenable, Listener, Timer, ValueListenable,
-    ValueNotifier,
+    App, ChangeNotifier, ChangeNotifierData, Handle, Listener, OptionRetained, Timer,
+    ValueListenable, ValueNotifier,
 };
 use waft_services::{UndoDirection, UndoManager, UndoManagerClient};
 
 use crate::framework::{
     BuildContext, IntoWidget, KeyRef, State, StateData, StatefulWidget, WidgetRef,
 };
-use crate::widgets::actions::{Action, Actions, AnyAction, CallbackAction};
-use crate::widgets::focus_manager::{FocusNode, FocusNodeLeaf};
+use crate::widgets::actions::{Actions, AnyAction, CallbackAction};
+use crate::widgets::focus_manager::FocusNodeRef;
 use crate::widgets::text_editing_intents::{RedoTextIntent, UndoTextIntent};
+use waft_foundation::ListenableObject;
+use waft_foundation::Ref;
 
 /// Called when an undo or redo causes a state change.
 pub type UndoHistoryOnTriggered<T> = Rc<dyn Fn(&mut App, T)>;
@@ -43,11 +45,11 @@ pub type UndoStackModifier<T> = Rc<dyn Fn(T) -> T>;
 /// The [`child`](Self::child) must manage focus on the [`focus_node`](Self::focus_node). For
 /// example, using a `TextField` or `Focus` widget.
 ///
-/// The [`value`](Self::value) is any [`ValueListenable`] handle, which Dart types as a
-/// `ValueNotifier<T>`: a `Handle<ValueNotifier<T>>`, or an `AnyTextEditingController`.
+/// The [`value`](Self::value) is any kept [`ValueListenable`], which Dart types as a
+/// `ValueNotifier<T>`: a `Ref<ValueNotifier<T>>`, or a `TextEditingControllerRef`.
 pub struct UndoHistory<
     T: Clone + PartialEq + 'static,
-    V: ValueListenable<T> + Copy + PartialEq + 'static = Handle<ValueNotifier<T>>,
+    V: ValueListenable<T> + Clone + PartialEq + 'static = Ref<ValueNotifier<T>>,
 > {
     /// See [`Widget::key`](crate::Widget::key).
     pub key: Option<KeyRef>,
@@ -69,7 +71,7 @@ pub struct UndoHistory<
     pub on_triggered: UndoHistoryOnTriggered<T>,
     /// The [`FocusNode`] that will be used to listen for focus to set the initial
     /// undo state for the element.
-    pub focus_node: Handle<FocusNode>,
+    pub focus_node: FocusNodeRef,
     /// Called right before a new entry is pushed to the undo stack.
     ///
     /// The value returned from this method will be pushed to the stack instead
@@ -80,19 +82,19 @@ pub struct UndoHistory<
     /// Controls the undo state.
     ///
     /// If null, this widget will create its own [`UndoHistoryController`].
-    pub controller: Option<Handle<UndoHistoryController>>,
+    pub controller: Option<Ref<UndoHistoryController>>,
     /// The child widget of [`UndoHistory`].
     pub child: WidgetRef,
 }
 
-impl<T: Clone + PartialEq + 'static, V: ValueListenable<T> + Copy + PartialEq + 'static>
+impl<T: Clone + PartialEq + 'static, V: ValueListenable<T> + Clone + PartialEq + 'static>
     UndoHistory<T, V>
 {
     /// Creates an instance of [`UndoHistory`].
     pub fn new<K>(
         value: V,
         on_triggered: impl Fn(&mut App, T) + 'static,
-        focus_node: Handle<FocusNode>,
+        focus_node: FocusNodeRef,
         child: impl IntoWidget<K>,
     ) -> UndoHistory<T, V> {
         UndoHistory {
@@ -132,13 +134,13 @@ impl<T: Clone + PartialEq + 'static, V: ValueListenable<T> + Copy + PartialEq + 
     }
 
     /// Dart `UndoHistory(controller:)`.
-    pub fn controller(mut self, controller: Handle<UndoHistoryController>) -> UndoHistory<T, V> {
+    pub fn controller(mut self, controller: Ref<UndoHistoryController>) -> UndoHistory<T, V> {
         self.controller = Some(controller);
         self
     }
 }
 
-impl<T: Clone + PartialEq + 'static, V: ValueListenable<T> + Copy + PartialEq + 'static> Debug
+impl<T: Clone + PartialEq + 'static, V: ValueListenable<T> + Clone + PartialEq + 'static> Debug
     for UndoHistory<T, V>
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -148,7 +150,7 @@ impl<T: Clone + PartialEq + 'static, V: ValueListenable<T> + Copy + PartialEq + 
     }
 }
 
-impl<T: Clone + PartialEq + 'static, V: ValueListenable<T> + Copy + PartialEq + 'static>
+impl<T: Clone + PartialEq + 'static, V: ValueListenable<T> + Clone + PartialEq + 'static>
     StatefulWidget for UndoHistory<T, V>
 {
     type State = UndoHistoryState<T, V>;
@@ -177,7 +179,7 @@ impl<T: Clone + PartialEq + 'static, V: ValueListenable<T> + Copy + PartialEq + 
 /// and redo UI implementations.
 pub struct UndoHistoryState<
     T: Clone + PartialEq + 'static,
-    V: ValueListenable<T> + Copy + PartialEq + 'static = Handle<ValueNotifier<T>>,
+    V: ValueListenable<T> + Clone + PartialEq + 'static = Ref<ValueNotifier<T>>,
 > {
     state: StateData<UndoHistory<T, V>>,
     stack: UndoStack<T>,
@@ -188,7 +190,7 @@ pub struct UndoHistoryState<
     // of the same value in a row onto the undo stack. For example, push gets
     // called both in initState and when the EditableText receives focus.
     last_value: Option<T>,
-    controller: Option<Handle<UndoHistoryController>>,
+    controller: Option<Ref<UndoHistoryController>>,
 }
 
 /// Dart's `try`/`finally` around `_duringTrigger`. Holds the flag by `Rc`, never
@@ -212,19 +214,20 @@ impl Drop for DuringTriggerGuard {
     }
 }
 
-impl<T: Clone + PartialEq + 'static, V: ValueListenable<T> + Copy + PartialEq + 'static>
+impl<T: Clone + PartialEq + 'static, V: ValueListenable<T> + Clone + PartialEq + 'static>
     UndoHistoryState<T, V>
 {
     fn effective_controller(self: Handle<Self>, app: &mut App) -> Handle<UndoHistoryController> {
-        if let Some(controller) = self.widget(app).controller {
+        if let Some(controller) = self.widget(app).controller.handle() {
             return controller;
         }
-        if let Some(controller) = app.get(self).controller {
+        if let Some(controller) = app.get(self).controller.handle() {
             return controller;
         }
         let controller = UndoHistoryController::new(app);
+        let handle = controller.handle();
         app.get_mut(self).controller = Some(controller);
-        controller
+        handle
     }
 
     /// Reverts the value on the stack to the previous value.
@@ -314,8 +317,7 @@ impl<T: Clone + PartialEq + 'static, V: ValueListenable<T> + Copy + PartialEq + 
     }
 
     fn push(self: Handle<Self>, app: &mut App) {
-        let value = self.widget(app).value;
-        let current = value.value(app).clone();
+        let current = self.widget(app).value.value(app).clone();
         if app.get(self).last_value.as_ref() == Some(&current) {
             return;
         }
@@ -346,7 +348,7 @@ impl<T: Clone + PartialEq + 'static, V: ValueListenable<T> + Copy + PartialEq + 
     }
 
     fn handle_focus(self: Handle<Self>, app: &mut App) {
-        let focus_node = self.widget(app).focus_node;
+        let focus_node = self.widget(app).focus_node.handle();
         if !focus_node.has_focus(app) {
             if UndoManager::client(app) == Some(self.as_undo_manager_client()) {
                 UndoManager::set_client(app, None);
@@ -385,7 +387,7 @@ impl<T: Clone + PartialEq + 'static, V: ValueListenable<T> + Copy + PartialEq + 
     }
 }
 
-impl<T: Clone + PartialEq + 'static, V: ValueListenable<T> + Copy + PartialEq + 'static>
+impl<T: Clone + PartialEq + 'static, V: ValueListenable<T> + Clone + PartialEq + 'static>
     UndoManagerClient for UndoHistoryState<T, V>
 {
     fn handle_platform_undo(self: Handle<Self>, app: &mut App, direction: UndoDirection) {
@@ -412,7 +414,7 @@ impl<T: Clone + PartialEq + 'static, V: ValueListenable<T> + Copy + PartialEq + 
     }
 }
 
-impl<T: Clone + PartialEq + 'static, V: ValueListenable<T> + Copy + PartialEq + 'static> State
+impl<T: Clone + PartialEq + 'static, V: ValueListenable<T> + Clone + PartialEq + 'static> State
     for UndoHistoryState<T, V>
 {
     type Widget = UndoHistory<T, V>;
@@ -420,10 +422,10 @@ impl<T: Clone + PartialEq + 'static, V: ValueListenable<T> + Copy + PartialEq + 
 
     fn init_state(self: Handle<Self>, app: &mut App) {
         self.push(app);
-        let value = self.widget(app).value;
+        let value = self.widget(app).value.clone();
         value.add_listener(app, Listener::handle_method(self, Self::push));
         self.handle_focus(app);
-        let focus_node = self.widget(app).focus_node;
+        let focus_node = self.widget(app).focus_node.handle();
         focus_node.add_listener(app, Listener::handle_method(self, Self::handle_focus));
         let controller = self.effective_controller(app);
         controller
@@ -436,7 +438,7 @@ impl<T: Clone + PartialEq + 'static, V: ValueListenable<T> + Copy + PartialEq + 
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &UndoHistory<T, V>) {
-        let value = self.widget(app).value;
+        let value = self.widget(app).value.clone();
         if value != old_widget.value {
             app.get_mut(self).stack.clear();
             old_widget
@@ -444,8 +446,8 @@ impl<T: Clone + PartialEq + 'static, V: ValueListenable<T> + Copy + PartialEq + 
                 .remove_listener(app, &Listener::handle_method(self, Self::push));
             value.add_listener(app, Listener::handle_method(self, Self::push));
         }
-        let focus_node = self.widget(app).focus_node;
-        if focus_node != old_widget.focus_node {
+        let focus_node = self.widget(app).focus_node.handle();
+        if focus_node != old_widget.focus_node.handle() {
             old_widget
                 .focus_node
                 .remove_listener(app, &Listener::handle_method(self, Self::handle_focus));
@@ -460,7 +462,7 @@ impl<T: Clone + PartialEq + 'static, V: ValueListenable<T> + Copy + PartialEq + 
             controller
                 .on_redo(app)
                 .remove_listener(app, &Listener::handle_method(self, Self::redo));
-            if let Some(controller) = app.get(self).controller {
+            if let Some(controller) = app.get(self).controller.handle() {
                 controller.dispose(app);
             }
             app.get_mut(self).controller = None;
@@ -480,9 +482,9 @@ impl<T: Clone + PartialEq + 'static, V: ValueListenable<T> + Copy + PartialEq + 
             UndoManager::set_client(app, None);
         }
 
-        let value = self.widget(app).value;
+        let value = self.widget(app).value.clone();
         value.remove_listener(app, &Listener::handle_method(self, Self::push));
-        let focus_node = self.widget(app).focus_node;
+        let focus_node = self.widget(app).focus_node.handle();
         focus_node.remove_listener(app, &Listener::handle_method(self, Self::handle_focus));
         let controller = self.effective_controller(app);
         controller
@@ -492,7 +494,7 @@ impl<T: Clone + PartialEq + 'static, V: ValueListenable<T> + Copy + PartialEq + 
         controller
             .on_redo(app)
             .remove_listener(app, &Listener::handle_method(self, Self::redo));
-        if let Some(controller) = app.get(self).controller {
+        if let Some(controller) = app.get(self).controller.handle() {
             controller.dispose(app);
         }
         if let Some(timer) = app.get(self).throttle_timer {
@@ -522,8 +524,8 @@ impl<T: Clone + PartialEq + 'static, V: ValueListenable<T> + Copy + PartialEq + 
                 }
             }),
         );
-        let undo = AnyAction::overridable(app, Action::as_action(undo_default), context);
-        let redo = AnyAction::overridable(app, Action::as_action(redo_default), context);
+        let undo = AnyAction::overridable(app, undo_default.into_erased(), context);
+        let redo = AnyAction::overridable(app, redo_default.into_erased(), context);
         Actions::new(
             HashMap::from([
                 (TypeId::of::<UndoTextIntent>(), undo),
@@ -596,8 +598,8 @@ impl Default for UndoHistoryValue {
 pub struct UndoHistoryController {
     change_notifier: ChangeNotifierData,
     value: UndoHistoryValue,
-    on_undo: Handle<ChangeNotifierData>,
-    on_redo: Handle<ChangeNotifierData>,
+    on_undo: Ref<ChangeNotifierData>,
+    on_redo: Ref<ChangeNotifierData>,
 }
 
 impl Debug for UndoHistoryController {
@@ -610,12 +612,12 @@ impl Debug for UndoHistoryController {
 
 impl UndoHistoryController {
     /// Creates a controller for an `UndoHistory` widget.
-    pub fn new(app: &mut App) -> Handle<UndoHistoryController> {
+    pub fn new(app: &mut App) -> Ref<UndoHistoryController> {
         Self::from_value(app, UndoHistoryValue::EMPTY)
     }
 
     /// Dart `UndoHistoryController(value:)`.
-    pub fn from_value(app: &mut App, value: UndoHistoryValue) -> Handle<UndoHistoryController> {
+    pub fn from_value(app: &mut App, value: UndoHistoryValue) -> Ref<UndoHistoryController> {
         let on_undo = app.create(ChangeNotifierData::new());
         let on_redo = app.create(ChangeNotifierData::new());
         app.create(UndoHistoryController {
@@ -642,12 +644,12 @@ impl UndoHistoryController {
 
     /// Notifies listeners that [`undo`](Self::undo) has been called.
     pub fn on_undo(self: Handle<Self>, app: &App) -> Handle<ChangeNotifierData> {
-        app.get(self).on_undo
+        app.get(self).on_undo.handle()
     }
 
     /// Notifies listeners that [`redo`](Self::redo) has been called.
     pub fn on_redo(self: Handle<Self>, app: &App) -> Handle<ChangeNotifierData> {
-        app.get(self).on_redo
+        app.get(self).on_redo.handle()
     }
 
     /// Reverts the value on the stack to the previous value.
@@ -807,10 +809,12 @@ impl<T: Debug> Debug for UndoStack<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::widgets::focus_manager::FocusNode;
     use std::cell::Cell;
     use std::rc::Rc;
     use std::time::Duration;
-    use waft_foundation::{AppCell, Listenable, Listener, ValueListenable};
+    use waft_foundation::ListenableObject;
+    use waft_foundation::{AppCell, Listener, ValueListenable};
 
     use crate::framework::GlobalKey;
     use crate::test_harness::Harness;
@@ -879,12 +883,13 @@ mod tests {
         let value = app.create(ValueNotifier::new(0i32));
         let focus_node = FocusNode::new(&mut app);
         let key = GlobalKey::new();
+        let notifier = *value;
         let widget = UndoHistory::new(
-            value,
+            value.clone(),
             move |app, next| {
-                value.set_value(app, next);
+                notifier.set_value(app, next);
             },
-            focus_node,
+            focus_node.into_erased(),
             SizedBox::shrink(),
         )
         .key(key.clone().into());

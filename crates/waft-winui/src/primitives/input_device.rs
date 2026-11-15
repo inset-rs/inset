@@ -2,8 +2,8 @@
 
 use std::rc::Rc;
 use waft_embedder::PointerDeviceKind;
-use waft_foundation::{App, Handle};
-use waft_foundation::{Listenable, Listener};
+use waft_foundation::Listener;
+use waft_foundation::{App, Handle, ListenableObject};
 use waft_gestures::{GestureBinding, PointerEvent, PointerRoute};
 use waft_widgets::{AnyFocusNode, FocusManager, KeyEventResult};
 

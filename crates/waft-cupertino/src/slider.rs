@@ -13,7 +13,7 @@ use waft_embedder::{
     Color, Matrix4, Offset, Paint, RRect, Rect, Size, TargetPlatform, TextBaseline, TextDirection,
     clamp_double, lerp_double,
 };
-use waft_foundation::{App, Handle, K_IS_WEB, Listener, ValueChanged};
+use waft_foundation::{App, Handle, K_IS_WEB, Listener, Ref, ValueChanged};
 use waft_gestures::{
     DragEndDetails, DragGestureRecognizer, DragStartDetails, DragUpdateDetails,
     HorizontalDragGestureRecognizer, PointerEnterEventListener, PointerEvent,
@@ -341,7 +341,7 @@ impl TickerProviderStateMixin for CupertinoSliderState {
 
 /// Dart's `vsync: this`.
 impl TickerProviderObject for CupertinoSliderState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         TickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -499,8 +499,8 @@ struct RenderCupertinoSlider {
     on_change_start: Option<ValueChanged<f64>>,
     on_change_end: Option<ValueChanged<f64>>,
     text_direction: TextDirection,
-    position: Handle<AnimationController>,
-    drag: Handle<HorizontalDragGestureRecognizer>,
+    position: Ref<AnimationController>,
+    drag: Ref<HorizontalDragGestureRecognizer>,
     current_drag_value: f64,
     last_update_timestamp: Option<Duration>,
     cursor: MouseCursorRef,
@@ -563,8 +563,8 @@ impl RenderCupertinoSlider {
                 on_change_start,
                 on_change_end,
                 text_direction,
-                position,
-                drag,
+                position: position.clone(),
+                drag: drag.clone(),
                 current_drag_value: 0.0,
                 last_update_timestamp: None,
                 cursor,
@@ -612,7 +612,7 @@ impl RenderCupertinoSlider {
             return;
         }
         self.get_mut(app).value = new_value;
-        let position = self.get(app).position;
+        let position = self.get(app).position.handle();
         if self.divisions(app).is_some() {
             position.animate_to(app, new_value, None, Curves::fast_out_slow_in());
         } else {
@@ -915,7 +915,7 @@ impl RenderObject for RenderCupertinoSlider {
     }
 
     fn dispose(self: RenderHandle<Self>, app: &mut App) {
-        let (drag, position) = (self.get(app).drag, self.get(app).position);
+        let (drag, position) = (self.get(app).drag.handle(), self.get(app).position.handle());
         RecognizerLeaf::dispose(drag, app);
         position.dispose(app);
         RenderObjectBase::dispose(self, app);

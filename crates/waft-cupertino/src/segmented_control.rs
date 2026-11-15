@@ -11,7 +11,7 @@ use indexmap::IndexMap;
 use waft_animation::{Animatable, Animation, AnimationBehavior, AnimationController, ColorTween};
 use waft_embedder::{Color, Offset, Paint, PaintStyle, RSuperellipse, Radius, Rect, Size, Stroke};
 use waft_embedder::{TextBaseline, TextDirection};
-use waft_foundation::{App, Handle, K_IS_WEB, Listener, ValueChanged};
+use waft_foundation::{App, Handle, K_IS_WEB, Listener, OptionRetained, Ref, ValueChanged};
 use waft_painting::{AnyColor, Axis, ClipContext, EdgeInsetsGeometry, draw_rsuperellipse};
 use waft_rendering::{
     AnyRenderBox, AnyRenderObject, BaselineOffset, BoxConstraints, BoxHitTestResult, BoxParentData,
@@ -23,7 +23,7 @@ use waft_rendering::{
 use waft_scheduler::{Ticker, TickerCallback, TickerProviderObject};
 use waft_services::{MouseCursor, SystemMouseCursors};
 use waft_widgets::{
-    Action, Actions, AnyAction, AnyFocusNode, AnyRadioGroupRegistry, BuildContext, Center,
+    ActionRef, Actions, AnyFocusNode, AnyRadioGroupRegistry, BuildContext, Center,
     DefaultTextStyle, Directionality, Focus, FocusNode, FocusNodeLeaf, GestureDetector, GlobalKey,
     IconTheme, IconThemeData, IntoWidget, KeyEventResult, KeyRef, MouseRegion,
     MultiChildRenderObjectWidget, Padding, RadioClient, RadioClientData, RadioGroup,
@@ -334,12 +334,15 @@ impl<T: Copy + Eq + Hash + Debug + 'static> StatefulWidget for SegmentButton<T> 
 pub struct SegmentButtonState<T: Copy + Eq + Hash + Debug + 'static> {
     state: StateData<SegmentButton<T>>,
     radio_client: RadioClientData<T>,
-    focus_node: Option<Handle<FocusNode>>,
+    focus_node: Option<Ref<FocusNode>>,
 }
 
 impl<T: Copy + Eq + Hash + Debug + 'static> SegmentButtonState<T> {
     fn node(self: Handle<Self>, app: &App) -> Handle<FocusNode> {
-        app.get(self).focus_node.expect("created in init_state")
+        app.get(self)
+            .focus_node
+            .handle()
+            .expect("created in init_state")
     }
 
     /// Dart's `_SegmentButtonState.requestFocus`.
@@ -408,7 +411,12 @@ impl<T: Copy + Eq + Hash + Debug + 'static> State for SegmentButtonState<T> {
     }
 
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
-        let node = self.node(app).as_node();
+        let node = app
+            .get(self)
+            .focus_node
+            .as_ref()
+            .expect("created in init_state")
+            .erase();
         let enabled = self.widget(app).enabled;
         let child = self.widget(app).child.clone();
         Focus::new(child)
@@ -426,13 +434,13 @@ pub struct SegmentedControlState<T: Copy + Eq + Hash + Debug + 'static> {
     pressed_key: Option<T>,
     /// Dart builds a `VoidCallbackAction` inline in `build`; an action is an arena object, so
     /// this one is created once (see `PORTING.md`).
-    action_map: HashMap<std::any::TypeId, AnyAction>,
-    selection_controllers: Vec<Handle<AnimationController>>,
-    child_tweens: Vec<Handle<ColorTween>>,
+    action_map: HashMap<std::any::TypeId, ActionRef>,
+    selection_controllers: Vec<Ref<AnimationController>>,
+    child_tweens: Vec<Ref<ColorTween>>,
     segment_keys: HashMap<T, GlobalKey>,
-    forward_background_color_tween: Option<Handle<ColorTween>>,
-    reverse_background_color_tween: Option<Handle<ColorTween>>,
-    text_color_tween: Option<Handle<ColorTween>>,
+    forward_background_color_tween: Option<Ref<ColorTween>>,
+    reverse_background_color_tween: Option<Ref<ColorTween>>,
+    text_color_tween: Option<Ref<ColorTween>>,
     selected_color: Option<AnyColor>,
     unselected_color: Option<AnyColor>,
     border_color: Option<AnyColor>,
@@ -444,10 +452,7 @@ pub struct SegmentedControlState<T: Copy + Eq + Hash + Debug + 'static> {
 
 impl<T: Copy + Eq + Hash + Debug + 'static> SegmentedControlState<T> {
     /// Dart's `createAnimationController`.
-    fn create_animation_controller(
-        self: Handle<Self>,
-        app: &mut App,
-    ) -> Handle<AnimationController> {
+    fn create_animation_controller(self: Handle<Self>, app: &mut App) -> Ref<AnimationController> {
         let controller = AnimationController::create(
             app,
             Some(0.0),
@@ -572,13 +577,13 @@ impl<T: Copy + Eq + Hash + Debug + 'static> SegmentedControlState<T> {
     fn tween(
         self: Handle<Self>,
         app: &mut App,
-        slot: fn(&mut SegmentedControlState<T>) -> &mut Option<Handle<ColorTween>>,
-    ) -> Handle<ColorTween> {
-        if let Some(tween) = *slot(app.get_mut(self)) {
+        slot: fn(&mut SegmentedControlState<T>) -> &mut Option<Ref<ColorTween>>,
+    ) -> Ref<ColorTween> {
+        if let Some(tween) = slot(app.get_mut(self)).clone() {
             return tween;
         }
         let tween = ColorTween::new(app, None, None);
-        *slot(app.get_mut(self)) = Some(tween);
+        *slot(app.get_mut(self)) = Some(tween.clone());
         tween
     }
 
@@ -590,7 +595,6 @@ impl<T: Copy + Eq + Hash + Debug + 'static> SegmentedControlState<T> {
         );
         for controller in std::mem::take(&mut app.get_mut(self).selection_controllers) {
             controller.dispose(app);
-            app.destroy(controller);
         }
         app.get_mut(self).child_tweens.clear();
 
@@ -602,10 +606,12 @@ impl<T: Copy + Eq + Hash + Debug + 'static> SegmentedControlState<T> {
                 controller.set_value(app, 1.0);
                 app.get(self)
                     .reverse_background_color_tween
+                    .clone()
                     .expect("update_colors ran first")
             } else {
                 app.get(self)
                     .forward_background_color_tween
+                    .clone()
                     .expect("update_colors ran first")
             };
             let this = app.get_mut(self);
@@ -660,9 +666,13 @@ impl<T: Copy + Eq + Hash + Debug + 'static> SegmentedControlState<T> {
         if self.widget(app).disabled_children.contains(&current_key) {
             return app.get(self).disabled_text_color.clone();
         }
-        let controller = app.get(self).selection_controllers[index];
+        let controller = app.get(self).selection_controllers[index].handle();
         if controller.is_animating(app) {
-            let tween = app.get(self).text_color_tween.expect("update_colors ran");
+            let tween = app
+                .get(self)
+                .text_color_tween
+                .clone()
+                .expect("update_colors ran");
             return tween
                 .transform(app, controller.value(app))
                 .map(AnyColor::new);
@@ -687,9 +697,9 @@ impl<T: Copy + Eq + Hash + Debug + 'static> SegmentedControlState<T> {
                 app.get(self).unselected_disabled_color.clone()
             };
         }
-        let controller = app.get(self).selection_controllers[index];
+        let controller = app.get(self).selection_controllers[index].handle();
         if controller.is_animating(app) {
-            let tween = app.get(self).child_tweens[index];
+            let tween = app.get(self).child_tweens[index].clone();
             return tween
                 .transform(app, controller.value(app))
                 .map(AnyColor::new);
@@ -718,7 +728,7 @@ impl<T: Copy + Eq + Hash + Debug + 'static> TickerProviderStateMixin for Segment
 }
 
 impl<T: Copy + Eq + Hash + Debug + 'static> TickerProviderObject for SegmentedControlState<T> {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         TickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -731,7 +741,7 @@ impl<T: Copy + Eq + Hash + Debug + 'static> State for SegmentedControlState<T> {
         let void_callback = VoidCallbackAction::new(app);
         app.get_mut(self).action_map.insert(
             std::any::TypeId::of::<VoidCallbackIntent>(),
-            Action::as_action(void_callback),
+            void_callback.into_erased(),
         );
     }
 
@@ -755,11 +765,12 @@ impl<T: Copy + Eq + Hash + Debug + 'static> State for SegmentedControlState<T> {
         if old_group_value != self.widget(app).group_value {
             let keys: Vec<T> = self.widget(app).children.keys().copied().collect();
             for (index, key) in keys.into_iter().enumerate() {
-                let controller = app.get(self).selection_controllers[index];
+                let controller = app.get(self).selection_controllers[index].handle();
                 if self.widget(app).group_value == Some(key) {
                     let tween = app
                         .get(self)
                         .forward_background_color_tween
+                        .clone()
                         .expect("update_colors ran");
                     app.get_mut(self).child_tweens[index] = tween;
                     controller.forward(app, None);
@@ -767,6 +778,7 @@ impl<T: Copy + Eq + Hash + Debug + 'static> State for SegmentedControlState<T> {
                     let tween = app
                         .get(self)
                         .reverse_background_color_tween
+                        .clone()
                         .expect("update_colors ran");
                     app.get_mut(self).child_tweens[index] = tween;
                     controller.reverse(app, None);
@@ -780,24 +792,10 @@ impl<T: Copy + Eq + Hash + Debug + 'static> State for SegmentedControlState<T> {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        for action in std::mem::take(&mut app.get_mut(self).action_map).into_values() {
-            app.destroy(action.id());
-        }
         for controller in std::mem::take(&mut app.get_mut(self).selection_controllers) {
             controller.dispose(app);
-            app.destroy(controller);
         }
         TickerProviderStateMixin::dispose(self, app);
-        let this = app.get_mut(self);
-        this.child_tweens.clear();
-        let tweens = [
-            this.forward_background_color_tween.take(),
-            this.reverse_background_color_tween.take(),
-            this.text_color_tween.take(),
-        ];
-        for tween in tweens.into_iter().flatten() {
-            app.destroy(tween);
-        }
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {

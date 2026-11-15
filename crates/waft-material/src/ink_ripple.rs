@@ -8,22 +8,22 @@ use std::time::Duration;
 
 use waft_animation::{
     Animatable, AnimationBehavior, AnimationController, AnimationLocalListenersMixin,
-    AnimationLocalStatusListenersMixin, AnimationStatus, AnimationStatusListener, AnyAnimation,
-    CurveTween, Curves, IntTween, Interval, Tween,
+    AnimationLocalStatusListenersMixin, AnimationRef, AnimationStatus, AnimationStatusListener,
+    CurveTween, Curves, Drive, IntTween, Interval, Tween,
 };
 use waft_embedder::{Canvas, Color, Matrix4, Offset, Paint, TextDirection};
-use waft_foundation::{App, Handle, Listener};
+use waft_foundation::{App, Handle, Listener, OptionRetained, Ref};
 use waft_painting::{BorderRadius, ShapeBorderRef};
 use waft_rendering::AnyRenderBox;
 
 use crate::ink_well::{
-    AnyInteractiveInkFeature, InteractiveInkFeature, InteractiveInkFeatureData,
-    InteractiveInkFeatureFactory, InteractiveInkFeatureFactoryRef, InteractiveInkFeatureLeaf,
-    InteractiveInkFeatureLeafData, InteractiveInkFeatureObject,
+    InteractiveInkFeature, InteractiveInkFeatureData, InteractiveInkFeatureFactory,
+    InteractiveInkFeatureFactoryRef, InteractiveInkFeatureLeaf, InteractiveInkFeatureLeafData,
+    InteractiveInkFeatureRef,
 };
 use crate::material::{
     AnyMaterialInkController, InkFeature, InkFeatureData, InkFeatureLeaf, InkFeatureLeafData,
-    InkFeatureObject, RectCallback,
+    RectCallback,
 };
 
 const K_UNCONFIRMED_RIPPLE_DURATION: Duration = Duration::from_secs(1);
@@ -85,7 +85,7 @@ impl InteractiveInkFeatureFactory for InkRippleFactory {
         custom_border: Option<ShapeBorderRef>,
         radius: Option<f64>,
         on_removed: Option<Listener>,
-    ) -> AnyInteractiveInkFeature {
+    ) -> InteractiveInkFeatureRef {
         InkRipple::new(
             app,
             controller,
@@ -100,7 +100,7 @@ impl InteractiveInkFeatureFactory for InkRippleFactory {
             radius,
             on_removed,
         )
-        .as_interactive_ink_feature()
+        .into_erased()
     }
 }
 
@@ -134,14 +134,12 @@ pub struct InkRipple {
     border_radius: BorderRadius,
     clip_callback: Option<RectCallback>,
     text_direction: TextDirection,
-    radius: Option<AnyAnimation<f64>>,
-    radius_controller: Option<Handle<AnimationController>>,
-    fade_in: Option<AnyAnimation<i64>>,
-    fade_in_controller: Option<Handle<AnimationController>>,
-    fade_out: Option<AnyAnimation<i64>>,
-    fade_out_controller: Option<Handle<AnimationController>>,
-    /// The tweens and driven animations this ripple made, which its dispose frees.
-    owned: Vec<waft_foundation::HandleId>,
+    radius: Option<AnimationRef<f64>>,
+    radius_controller: Option<Ref<AnimationController>>,
+    fade_in: Option<AnimationRef<i64>>,
+    fade_in_controller: Option<Ref<AnimationController>>,
+    fade_out: Option<AnimationRef<i64>>,
+    fade_out_controller: Option<Ref<AnimationController>>,
 }
 
 impl InkRipple {
@@ -173,7 +171,7 @@ impl InkRipple {
         custom_border: Option<ShapeBorderRef>,
         radius: Option<f64>,
         on_removed: Option<Listener>,
-    ) -> Handle<InkRipple> {
+    ) -> Ref<InkRipple> {
         let target_radius = radius.unwrap_or_else(|| {
             get_target_radius(
                 app,
@@ -197,8 +195,8 @@ impl InkRipple {
             fade_in_controller: None,
             fade_out: None,
             fade_out_controller: None,
-            owned: Vec::new(),
         });
+        let handle = this.handle();
         let vsync = controller.vsync(app);
         let create_controller = |app: &mut App, duration: Duration| {
             AnimationController::create(
@@ -237,7 +235,7 @@ impl InkRipple {
         fade_out_controller.add_status_listener(
             app,
             AnimationStatusListener::new(move |status, app| {
-                this.handle_alpha_status_changed(app, status)
+                handle.handle_alpha_status_changed(app, status)
             }),
         );
         let fade_out_tween = IntTween::new(app, Some(i64::from(color.alpha())), Some(0));
@@ -245,25 +243,15 @@ impl InkRipple {
         let fade_out =
             fade_out_controller.drive(app, fade_out_tween.chain(fade_out_interval_tween));
 
-        let ripple = app.get_mut(this);
+        let ripple = app.get_mut(handle);
         ripple.fade_in_controller = Some(fade_in_controller);
         ripple.fade_in = Some(fade_in);
         ripple.radius_controller = Some(radius_controller);
         ripple.radius = Some(radius);
         ripple.fade_out_controller = Some(fade_out_controller);
         ripple.fade_out = Some(fade_out);
-        ripple.owned = vec![
-            fade_in.id(),
-            radius.id(),
-            fade_out.id(),
-            fade_in_tween.id(),
-            radius_tween.id(),
-            ease_curve_tween.id(),
-            fade_out_tween.id(),
-            fade_out_interval_tween.id(),
-        ];
 
-        controller.add_ink_feature(app, this.as_ink_feature());
+        controller.add_ink_feature(app, this.erase());
         this
     }
 
@@ -280,13 +268,13 @@ impl InkRipple {
 
     /// Dart's `static final Animatable<double> _easeCurveTween`; one per ripple, in the
     /// arena of the ripple's app.
-    fn ease_curve_tween(app: &mut App) -> Handle<CurveTween> {
+    fn ease_curve_tween(app: &mut App) -> Ref<CurveTween> {
         CurveTween::new(app, Curves::ease())
     }
 
     /// Dart's `static final Animatable<double> _fadeOutIntervalTween`; one per ripple, in the
     /// arena of the ripple's app.
-    fn fade_out_interval_tween(app: &mut App) -> Handle<CurveTween> {
+    fn fade_out_interval_tween(app: &mut App) -> Ref<CurveTween> {
         CurveTween::new(
             app,
             Rc::new(Interval::new(
@@ -301,11 +289,19 @@ impl InkRipple {
     /// the ripple's circle with now.
     pub(crate) fn circle(self: Handle<Self>, app: &mut App) -> (i64, Offset, f64) {
         let ripple = app.get(self);
-        let fade_in_controller = InkRipple::controller(ripple.fade_in_controller);
+        let fade_in_controller = InkRipple::controller(&ripple.fade_in_controller);
         let alpha = if fade_in_controller.is_animating(app) {
-            app.get(self).fade_in.expect("created in new").value(app)
+            app.get(self)
+                .fade_in
+                .as_ref()
+                .expect("created in new")
+                .value(app)
         } else {
-            app.get(self).fade_out.expect("created in new").value(app)
+            app.get(self)
+                .fade_out
+                .as_ref()
+                .expect("created in new")
+                .value(app)
         };
         let ripple = app.get(self);
         let rect = ripple
@@ -321,15 +317,15 @@ impl InkRipple {
                     .size(app)
                     .center(Offset::ZERO),
             }),
-            Curves::ease().transform(InkRipple::controller(ripple.radius_controller).value(app)),
+            Curves::ease().transform(InkRipple::controller(&ripple.radius_controller).value(app)),
         )
         .expect("both ends are given");
-        let radius = ripple.radius.expect("created in new").value(app);
+        let radius = ripple.radius.as_ref().expect("created in new").value(app);
         (alpha, center, radius)
     }
 
-    fn controller(field: Option<Handle<AnimationController>>) -> Handle<AnimationController> {
-        field.expect("created in new")
+    fn controller(field: &Option<Ref<AnimationController>>) -> Handle<AnimationController> {
+        field.handle().expect("created in new")
     }
 
     fn handle_alpha_status_changed(self: Handle<Self>, app: &mut App, status: AnimationStatus) {
@@ -362,9 +358,9 @@ impl InteractiveInkFeatureLeafData for InkRipple {
 impl InteractiveInkFeatureLeaf for InkRipple {
     fn confirm(self: Handle<Self>, app: &mut App) {
         let ripple = app.get(self);
-        let radius_controller = InkRipple::controller(ripple.radius_controller);
-        let fade_in_controller = InkRipple::controller(ripple.fade_in_controller);
-        let fade_out_controller = InkRipple::controller(ripple.fade_out_controller);
+        let radius_controller = InkRipple::controller(&ripple.radius_controller);
+        let fade_in_controller = InkRipple::controller(&ripple.fade_in_controller);
+        let fade_out_controller = InkRipple::controller(&ripple.fade_out_controller);
         app.get_mut(radius_controller).duration = Some(K_RADIUS_DURATION);
         radius_controller.forward(app, None);
         // This confirm may have been preceded by a cancel.
@@ -374,8 +370,8 @@ impl InteractiveInkFeatureLeaf for InkRipple {
 
     fn cancel(self: Handle<Self>, app: &mut App) {
         let ripple = app.get(self);
-        let fade_in_controller = InkRipple::controller(ripple.fade_in_controller);
-        let fade_out_controller = InkRipple::controller(ripple.fade_out_controller);
+        let fade_in_controller = InkRipple::controller(&ripple.fade_in_controller);
+        let fade_out_controller = InkRipple::controller(&ripple.fade_out_controller);
         fade_in_controller.stop(app, true);
         // Watch out: setting _fadeOutController's value to 1.0 will
         // trigger a call to _handleAlphaStatusChanged() which will
@@ -392,18 +388,12 @@ impl InkFeatureLeaf for InkRipple {
     fn dispose(self: Handle<Self>, app: &mut App) {
         let ripple = app.get(self);
         let controllers = [
-            InkRipple::controller(ripple.radius_controller),
-            InkRipple::controller(ripple.fade_in_controller),
-            InkRipple::controller(ripple.fade_out_controller),
+            InkRipple::controller(&ripple.radius_controller),
+            InkRipple::controller(&ripple.fade_in_controller),
+            InkRipple::controller(&ripple.fade_out_controller),
         ];
         for controller in controllers {
             controller.dispose(app);
-        }
-        for controller in controllers {
-            app.destroy_lingering(controller);
-        }
-        for owned in std::mem::take(&mut app.get_mut(self).owned) {
-            app.destroy_lingering(owned);
         }
         InkFeature::dispose(self, app);
     }
@@ -440,6 +430,7 @@ mod tests {
     };
 
     use super::*;
+
     use crate::ink_well::{InkResponse, InkWell};
     use crate::material::{Material, RenderInkFeatures};
     use crate::test_support::{Drawn, WidgetTester, with_main_thread_stack};
@@ -690,7 +681,7 @@ mod tests {
             custom_border: Option<ShapeBorderRef>,
             radius: Option<f64>,
             on_removed: Option<Listener>,
-        ) -> AnyInteractiveInkFeature {
+        ) -> InteractiveInkFeatureRef {
             InkRipple::new(
                 app,
                 controller,
@@ -705,7 +696,7 @@ mod tests {
                 radius,
                 on_removed,
             )
-            .as_interactive_ink_feature()
+            .into_erased()
         }
     }
 

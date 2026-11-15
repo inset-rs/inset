@@ -12,7 +12,10 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use waft_embedder::{Canvas, Color, Matrix4, Offset, Paint, RRect, Rect, TextDirection};
-use waft_foundation::{App, Handle, HandleId, Listenable, Listener, Timer, ValueChanged};
+use waft_foundation::{
+    App, Handle, HandleId, Listenable, ListenableObject, Listener, OptionRetained, Ref, Retained,
+    Timer, ValueChanged,
+};
 use waft_gestures::{
     GestureLongPressCallback, GestureLongPressUpCallback, GestureTapCallback,
     GestureTapCancelCallback, GestureTapDownCallback, GestureTapUpCallback, PointerEnterEvent,
@@ -22,13 +25,13 @@ use waft_painting::{BorderRadius, BoxShape, ShapeBorder, ShapeBorderRef, get_as_
 use waft_rendering::{AnyRenderBox, HitTestBehavior};
 use waft_services::MouseCursorRef;
 use waft_widgets::{
-    Action, Actions, ActivateIntent, AnyAction, AnyFocusNode, AutomaticKeepAliveClientMixin,
+    ActionRef, Actions, ActivateIntent, AutomaticKeepAliveClientMixin,
     AutomaticKeepAliveClientMixinData, BuildContext, ButtonActivateIntent, CallbackAction,
     DefaultSelectionStyle, Directionality, Feedback, Focus, FocusHighlightMode, FocusManager,
-    GestureDetector, HighlightModeListener, InheritedWidget, IntoWidget, KeyRef, MediaQuery,
-    MouseRegion, NavigationMode, Semantics, State, StateData, StatefulWidget, StatelessWidget,
-    WidgetRef, WidgetState, WidgetStateMouseCursor, WidgetStateProperty, WidgetStatePropertyRef,
-    WidgetStates, debug_check_has_directionality,
+    FocusNodeRef, GestureDetector, HighlightModeListener, InheritedWidget, IntoWidget, KeyRef,
+    MediaQuery, MouseRegion, NavigationMode, Semantics, State, StateData, StatefulWidget,
+    StatelessWidget, WidgetRef, WidgetState, WidgetStateMouseCursor, WidgetStateProperty,
+    WidgetStatePropertyRef, WidgetStates, debug_check_has_directionality,
 };
 
 use crate::debug::debug_check_has_material;
@@ -109,6 +112,21 @@ pub trait InteractiveInkFeatureObject: Sized + 'static {
     /// This feature as the erased [`AnyInteractiveInkFeature`] — what to pass where a Dart API
     /// takes an `InteractiveInkFeature`.
     fn as_interactive_ink_feature(self: Handle<Self>) -> AnyInteractiveInkFeature;
+}
+
+/// What a field Dart types as `InteractiveInkFeature` holds: an ink response's splashes.
+pub type InteractiveInkFeatureRef = Retained<AnyInteractiveInkFeature>;
+
+impl<F: InteractiveInkFeatureLeaf> From<Handle<F>> for AnyInteractiveInkFeature {
+    fn from(feature: Handle<F>) -> AnyInteractiveInkFeature {
+        feature.as_interactive_ink_feature()
+    }
+}
+
+impl From<AnyInteractiveInkFeature> for HandleId {
+    fn from(feature: AnyInteractiveInkFeature) -> HandleId {
+        feature.id
+    }
 }
 
 impl<F: InteractiveInkFeatureLeaf> InteractiveInkFeatureObject for F {
@@ -412,7 +430,7 @@ pub trait InteractiveInkFeatureFactory: fmt::Debug {
         custom_border: Option<ShapeBorderRef>,
         radius: Option<f64>,
         on_removed: Option<Listener>,
-    ) -> AnyInteractiveInkFeature;
+    ) -> InteractiveInkFeatureRef;
 }
 
 /// A field Dart types as `InteractiveInkFeatureFactory`; equal by identity, as Dart's `const`
@@ -853,7 +871,7 @@ pub struct InkResponse {
     pub autofocus: bool,
 
     /// An optional focus node to use as the focus node for this widget.
-    pub focus_node: Option<AnyFocusNode>,
+    pub focus_node: Option<FocusNodeRef>,
 
     /// If true, this widget may request the primary focus.
     pub can_request_focus: bool,
@@ -867,7 +885,7 @@ pub struct InkResponse {
     /// They can also update the controller's `WidgetStatesController::value`
     /// however, this may only be done when it's safe to call
     /// `State::set_state`, like in an event handler.
-    pub states_controller: Option<Handle<MaterialStatesController>>,
+    pub states_controller: Option<Ref<MaterialStatesController>>,
 
     /// The duration of the animation that animates the hover effect.
     ///
@@ -1005,8 +1023,8 @@ macro_rules! ink_response_shared_setters {
             splash_color: Color,
             splash_factory: InteractiveInkFeatureFactoryRef,
             on_focus_change: ValueChanged<bool>,
-            focus_node: AnyFocusNode,
-            states_controller: Handle<MaterialStatesController>,
+            focus_node: FocusNodeRef,
+            states_controller: Ref<MaterialStatesController>,
             hover_duration: Duration,
         );
         ink_response_value_setters!(
@@ -1171,12 +1189,12 @@ enum HighlightType {
 struct InkResponseState {
     state: StateData<InkResponseStateWidget>,
     automatic_keep_alive_client: AutomaticKeepAliveClientMixinData,
-    splashes: Option<HashSet<AnyInteractiveInkFeature>>,
-    current_splash: Option<AnyInteractiveInkFeature>,
+    splashes: Option<HashSet<InteractiveInkFeatureRef>>,
+    current_splash: Option<InteractiveInkFeatureRef>,
     hovering: bool,
-    highlights: HashMap<HighlightType, Option<Handle<InkHighlight>>>,
-    action_map: HashMap<TypeId, AnyAction>,
-    internal_states_controller: Option<Handle<MaterialStatesController>>,
+    highlights: HashMap<HighlightType, Option<Ref<InkHighlight>>>,
+    action_map: HashMap<TypeId, ActionRef>,
+    internal_states_controller: Option<Ref<MaterialStatesController>>,
     active_children: Vec<Handle<InkResponseState>>,
     activation_timer: Option<Timer>,
     has_focus: bool,
@@ -1268,7 +1286,8 @@ impl InkResponseState {
         self.widget(app)
             .response
             .states_controller
-            .or(app.get(self).internal_states_controller)
+            .handle()
+            .or(app.get(self).internal_states_controller.handle())
             .expect("created in init_states_controller")
     }
 
@@ -1312,14 +1331,17 @@ impl InkResponseState {
         value: bool,
         call_on_hover: bool,
     ) {
-        let highlight = app.get(self).highlights.get(&r#type).copied().flatten();
+        let highlight = app
+            .get(self)
+            .highlights
+            .get(&r#type)
+            .and_then(|highlight| highlight.handle());
         let handle_ink_removal = Listener::new(move |app| {
             debug_assert!(
                 app.get(self)
                     .highlights
                     .get(&r#type)
-                    .copied()
-                    .flatten()
+                    .and_then(|highlight| highlight.handle())
                     .is_some()
             );
             app.get_mut(self).highlights.insert(r#type, None);
@@ -1415,8 +1437,7 @@ impl InkResponseState {
                     .get(self)
                     .highlights
                     .get(&r#type)
-                    .copied()
-                    .flatten()
+                    .and_then(|highlight| highlight.handle())
                     .is_some_and(|highlight| highlight.active(app))
         );
 
@@ -1445,17 +1466,22 @@ impl InkResponseState {
             .highlights
             .values()
             .flatten()
-            .copied()
+            .map(Retained::handle)
             .collect();
         for highlight in highlights {
             InteractiveInkFeature::set_custom_border(highlight, app, custom_border.clone());
         }
-        if let Some(current_splash) = app.get(self).current_splash {
+        if let Some(current_splash) = app.get(self).current_splash.handle() {
             current_splash.set_custom_border(app, custom_border.clone());
         }
 
-        let splashes: Vec<AnyInteractiveInkFeature> =
-            app.get(self).splashes.iter().flatten().copied().collect();
+        let splashes: Vec<AnyInteractiveInkFeature> = app
+            .get(self)
+            .splashes
+            .iter()
+            .flatten()
+            .map(Retained::handle)
+            .collect();
         for ink_feature in splashes {
             ink_feature.set_custom_border(app, custom_border.clone());
         }
@@ -1465,7 +1491,7 @@ impl InkResponseState {
         self: Handle<Self>,
         app: &mut App,
         global_position: Offset,
-    ) -> AnyInteractiveInkFeature {
+    ) -> InteractiveInkFeatureRef {
         let context = self.context(app);
         let ink_controller = Material::of(app, context);
         let reference_box = context
@@ -1499,7 +1525,7 @@ impl InkResponseState {
                     if let Some(splash) = splash {
                         splashes.remove(&splash);
                     }
-                    if app.get(self).current_splash == splash {
+                    if app.get(self).current_splash.handle() == splash {
                         app.get_mut(self).current_splash = None;
                     }
                     self.update_keep_alive(app);
@@ -1526,7 +1552,7 @@ impl InkResponseState {
             response.radius,
             Some(on_removed),
         );
-        splash.set(Some(created));
+        splash.set(Some(created.handle()));
         created
     }
 
@@ -1666,8 +1692,8 @@ impl InkResponseState {
         app.get_mut(self)
             .splashes
             .get_or_insert_with(HashSet::new)
-            .insert(splash);
-        if let Some(current_splash) = app.get(self).current_splash {
+            .insert(splash.clone());
+        if let Some(current_splash) = app.get(self).current_splash.handle() {
             current_splash.cancel(app);
         }
         app.get_mut(self).current_splash = Some(splash);
@@ -1876,10 +1902,10 @@ impl State for InkResponseState {
             }),
         );
         let action_map = &mut app.get_mut(self).action_map;
-        action_map.insert(TypeId::of::<ActivateIntent>(), activate.as_action());
+        action_map.insert(TypeId::of::<ActivateIntent>(), activate.into_erased());
         action_map.insert(
             TypeId::of::<ButtonActivateIntent>(),
-            button_activate.as_action(),
+            button_activate.into_erased(),
         );
         self.init_states_controller(app);
         let listener: HighlightModeListener =
@@ -1892,7 +1918,7 @@ impl State for InkResponseState {
         let widget = &self.widget(app).response;
         let old = &old_widget.response;
         if widget.states_controller != old.states_controller {
-            if let Some(old_states_controller) = old.states_controller {
+            if let Some(old_states_controller) = old.states_controller.clone() {
                 old_states_controller.remove_listener(
                     app,
                     &Listener::handle_method(self, Self::handle_states_controller_change),
@@ -1901,8 +1927,7 @@ impl State for InkResponseState {
             if self.widget(app).response.states_controller.is_some()
                 && let Some(internal) = app.get_mut(self).internal_states_controller.take()
             {
-                app.get_mut(internal).dispose();
-                app.destroy(internal);
+                app.get_mut(&internal).dispose();
             }
             self.init_states_controller(app);
         }
@@ -1915,8 +1940,7 @@ impl State for InkResponseState {
                 .get(self)
                 .highlights
                 .get(&HighlightType::Hover)
-                .copied()
-                .flatten()
+                .and_then(|highlight| highlight.handle())
             {
                 InkFeatureLeaf::dispose(hover_highlight, app);
                 let hovering = app.get(self).hovering;
@@ -1926,8 +1950,7 @@ impl State for InkResponseState {
                 .get(self)
                 .highlights
                 .get(&HighlightType::Focus)
-                .copied()
-                .flatten()
+                .and_then(|highlight| highlight.handle())
             {
                 InkFeatureLeaf::dispose(focus_highlight, app);
                 // Do not call updateFocusHighlights() here because it is called below
@@ -1952,8 +1975,7 @@ impl State for InkResponseState {
                     .get(self)
                     .highlights
                     .get(&HighlightType::Hover)
-                    .copied()
-                    .flatten()
+                    .and_then(|highlight| highlight.handle())
                 {
                     InkFeatureLeaf::dispose(hover_highlight, app);
                 }
@@ -1975,14 +1997,10 @@ impl State for InkResponseState {
             &Listener::handle_method(self, Self::handle_states_controller_change),
         );
         if let Some(internal) = app.get_mut(self).internal_states_controller.take() {
-            app.get_mut(internal).dispose();
-            app.destroy(internal);
+            app.get_mut(&internal).dispose();
         }
         if let Some(timer) = app.get_mut(self).activation_timer.take() {
             timer.cancel(app);
-        }
-        for action in std::mem::take(&mut app.get_mut(self).action_map).into_values() {
-            app.destroy(action.id());
         }
     }
 
@@ -1996,7 +2014,12 @@ impl State for InkResponseState {
         debug_assert!(app.get(self).current_splash.is_none());
         let highlights: Vec<HighlightType> = app.get(self).highlights.keys().copied().collect();
         for highlight in highlights {
-            if let Some(ink) = app.get(self).highlights.get(&highlight).copied().flatten() {
+            if let Some(ink) = app
+                .get(self)
+                .highlights
+                .get(&highlight)
+                .and_then(|highlight| highlight.handle())
+            {
                 InkFeatureLeaf::dispose(ink, app);
             }
             app.get_mut(self).highlights.insert(highlight, None);
@@ -2061,7 +2084,7 @@ impl State for InkResponseState {
             .get(self)
             .highlights
             .iter()
-            .map(|(r#type, highlight)| (*r#type, *highlight))
+            .map(|(r#type, highlight)| (*r#type, highlight.handle()))
             .collect();
         for (r#type, highlight) in highlights {
             if let Some(highlight) = highlight {
@@ -2073,7 +2096,7 @@ impl State for InkResponseState {
             }
         }
 
-        if let Some(current_splash) = app.get(self).current_splash {
+        if let Some(current_splash) = app.get(self).current_splash.handle() {
             let states = self.states(app);
             let color = response
                 .overlay_color
@@ -2294,9 +2317,9 @@ mod tests {
     use waft_embedder::{Rect, TargetPlatform, valo};
     use waft_gestures::{K_SECONDARY_BUTTON, K_TERTIARY_BUTTON};
     use waft_widgets::{
-        Align, Builder, Center, FocusHighlightStrategy, FocusNode, FocusNodeLeaf, GlobalKey,
-        MediaQueryData, Overlay, OverlayEntry, OverlayPortal, OverlayPortalController, Padding,
-        Positioned, RepaintBoundary, Row, SizedBox, WidgetStatesController,
+        Align, Builder, Center, FocusHighlightStrategy, FocusNode, GlobalKey, MediaQueryData,
+        Overlay, OverlayEntry, OverlayPortal, OverlayPortalController, Padding, Positioned,
+        RepaintBoundary, Row, SizedBox, WidgetStatesController,
     };
 
     use super::*;
@@ -2418,8 +2441,8 @@ mod tests {
         mouse
     }
 
-    fn focus_node(tester: &WidgetTester) -> AnyFocusNode {
-        FocusNode::new(&mut tester.cell.borrow_mut()).as_node()
+    fn focus_node(tester: &WidgetTester) -> FocusNodeRef {
+        FocusNode::new(&mut tester.cell.borrow_mut()).into_erased()
     }
 
     #[test]
@@ -2624,7 +2647,7 @@ mod tests {
             set_highlight_strategy(&tester, FocusHighlightStrategy::AlwaysTraditional);
             let focus_node = focus_node(&tester);
             tester.pump_widget(material_ltr(centered_square(
-                colored_ink_well().focus_node(focus_node),
+                colored_ink_well().focus_node(focus_node.clone()),
             )));
             tester.pump_and_settle();
             assert!(rects(&ink_drawn(&tester)).is_empty());
@@ -2641,7 +2664,7 @@ mod tests {
             set_highlight_strategy(&tester, FocusHighlightStrategy::AlwaysTraditional);
             let focus_node = focus_node(&tester);
             tester.pump_widget(material_ltr(centered_square(
-                overlay_ink_well().focus_node(focus_node),
+                overlay_ink_well().focus_node(focus_node.clone()),
             )));
             tester.pump_and_settle();
             assert!(rects(&ink_drawn(&tester)).is_empty());
@@ -2686,7 +2709,7 @@ mod tests {
     const SELECTED_PRESSED_COLOR: u32 = 0xff00ffff;
 
     /// The boilerplate of `Ink well overlayColor resolution respects WidgetState.selected`.
-    fn selected_boilerplate(tester: &WidgetTester, focus_node: Option<AnyFocusNode>) -> WidgetRef {
+    fn selected_boilerplate(tester: &WidgetTester, focus_node: Option<FocusNodeRef>) -> WidgetRef {
         let states = WidgetStates::from([WidgetState::Selected]);
         let states_controller =
             WidgetStatesController::new(&mut tester.cell.borrow_mut(), Some(states));
@@ -2724,7 +2747,7 @@ mod tests {
             let mut tester = tester();
             set_highlight_strategy(&tester, FocusHighlightStrategy::AlwaysTraditional);
             let focus_node = focus_node(&tester);
-            let widget = selected_boilerplate(&tester, Some(focus_node));
+            let widget = selected_boilerplate(&tester, Some(focus_node.clone()));
             tester.pump_widget(widget);
             tester.pump_and_settle();
             assert!(rects(&ink_drawn(&tester)).is_empty());
@@ -2837,7 +2860,7 @@ mod tests {
                     .child(
                         SizedBox::square(Some(100.0)).child(
                             InkResponse::new()
-                                .focus_node(focus_node)
+                                .focus_node(focus_node.clone())
                                 .radius(20.0)
                                 .focus_color(Color::new(0xff0000ff))
                                 .on_tap(Listener::new(|_app| {})),
@@ -2865,7 +2888,7 @@ mod tests {
             let focus_node = focus_node(&tester);
             tester.pump_widget(material_ltr(centered_square(
                 InkWell::new()
-                    .focus_node(focus_node)
+                    .focus_node(focus_node.clone())
                     .border_radius(BorderRadius::all(waft_embedder::Radius::circular(10.0)))
                     .focus_color(Color::new(0xff0000ff))
                     .on_tap(Listener::new(|_app| {})),
@@ -2907,7 +2930,7 @@ mod tests {
             set_highlight_strategy(&tester, FocusHighlightStrategy::AlwaysTouch);
             let focus_node = focus_node(&tester);
             tester.pump_widget(material_ltr(centered_square(
-                colored_ink_well().focus_node(focus_node),
+                colored_ink_well().focus_node(focus_node.clone()),
             )));
             tester.pump_and_settle();
             assert!(rects(&ink_drawn(&tester)).is_empty());
@@ -3035,7 +3058,9 @@ mod tests {
         set_highlight_strategy(&tester, FocusHighlightStrategy::AlwaysTouch);
         let focus_node = focus_node(&tester);
         let frame = |ink_well: InkWell| {
-            let child = ltr(ink_well.focus_node(focus_node).child(SizedBox::new()));
+            let child = ltr(ink_well
+                .focus_node(focus_node.clone())
+                .child(SizedBox::new()));
             let child = match navigation_mode {
                 Some(mode) => waft_widgets::MediaQuery::new(
                     MediaQueryData::default().navigation_mode(mode),
@@ -3235,7 +3260,7 @@ mod tests {
         with_main_thread_stack(|| {
             let mut tester = tester();
             let tap_count = Rc::new(Cell::new(0));
-            let build_frame = |states_controller: Option<Handle<MaterialStatesController>>| {
+            let build_frame = |states_controller: Option<Ref<MaterialStatesController>>| {
                 let mut ink_well = InkWell::new()
                     .on_tap({
                         let tap_count = Rc::clone(&tap_count);
@@ -3254,15 +3279,18 @@ mod tests {
                 &mut tester.cell.borrow_mut(),
                 Listener::new({
                     let pressed_count = Rc::clone(&pressed_count);
-                    move |app| {
-                        if app.get(controller).value().contains(&WidgetState::Pressed) {
-                            pressed_count.set(pressed_count.get() + 1);
+                    {
+                        let controller = controller.clone();
+                        move |app| {
+                            if app.get(&controller).value().contains(&WidgetState::Pressed) {
+                                pressed_count.set(pressed_count.get() + 1);
+                            }
                         }
                     }
                 }),
             );
 
-            tester.pump_widget(build_frame(Some(controller)));
+            tester.pump_widget(build_frame(Some(controller.clone())));
             tester.tap(center_of_view(), 1);
             tester.pump_and_settle();
             assert_eq!(tap_count.get(), 1);
@@ -3274,7 +3302,7 @@ mod tests {
             assert_eq!(tap_count.get(), 2);
             assert_eq!(pressed_count.get(), 1);
 
-            tester.pump_widget(build_frame(Some(controller)));
+            tester.pump_widget(build_frame(Some(controller.clone())));
             tester.tap(center_of_view(), 1);
             tester.pump_and_settle();
             assert_eq!(tap_count.get(), 3);
@@ -3472,7 +3500,7 @@ mod tests {
                     InkWell::new()
                         .autofocus(true)
                         .on_tap(Listener::new(|_app| {}))
-                        .states_controller(controller)
+                        .states_controller(controller.clone())
                         .child(Builder::new({
                             let inner = Rc::clone(&inner);
                             move |_app, context| {
@@ -3497,7 +3525,7 @@ mod tests {
                 tester
                     .cell
                     .borrow()
-                    .get(controller)
+                    .get(&controller)
                     .value()
                     .contains(&WidgetState::Pressed)
             );
@@ -3507,7 +3535,7 @@ mod tests {
                 !tester
                     .cell
                     .borrow()
-                    .get(controller)
+                    .get(&controller)
                     .value()
                     .contains(&WidgetState::Pressed)
             );
@@ -3695,7 +3723,7 @@ mod tests {
             let focus_node = focus_node(&tester);
             tester.pump_widget(material_ltr(top_left_mouse_square(
                 InkWell::new()
-                    .focus_node(focus_node)
+                    .focus_node(focus_node.clone())
                     .border_radius(BorderRadius::all(waft_embedder::Radius::circular(10.0)))
                     .custom_border(circle_border())
                     .hover_color(Color::new(0xff00ff00))
@@ -3767,7 +3795,7 @@ mod tests {
             let boilerplate = |radius: f64| {
                 material_ltr(centered_square(
                     InkResponse::new()
-                        .focus_node(focus_node)
+                        .focus_node(focus_node.clone())
                         .radius(radius)
                         .focus_color(Color::new(0xff0000ff))
                         .on_tap(Listener::new(|_app| {})),
@@ -3797,7 +3825,7 @@ mod tests {
             let boilerplate = |shape: BoxShape| {
                 material_ltr(centered_square(
                     InkResponse::new()
-                        .focus_node(focus_node)
+                        .focus_node(focus_node.clone())
                         .highlight_shape(shape)
                         .border_radius(BorderRadius::all(waft_embedder::Radius::circular(10.0)))
                         .focus_color(Color::new(0xff0000ff))
@@ -3834,7 +3862,7 @@ mod tests {
             let boilerplate = |radius: f64| {
                 material_ltr(centered_square(
                     InkWell::new()
-                        .focus_node(focus_node)
+                        .focus_node(focus_node.clone())
                         .border_radius(BorderRadius::all(waft_embedder::Radius::circular(radius)))
                         .focus_color(Color::new(0xff0000ff))
                         .on_tap(Listener::new(|_app| {})),
@@ -3870,7 +3898,7 @@ mod tests {
             let boilerplate = |radius: f64| {
                 material_ltr(top_left_mouse_square(
                     InkWell::new()
-                        .focus_node(focus_node)
+                        .focus_node(focus_node.clone())
                         .custom_border(rounded(radius))
                         .hover_color(Color::new(0xff00ff00))
                         .on_tap(Listener::new(|_app| {})),
@@ -3905,7 +3933,7 @@ mod tests {
                     tester,
                     material_ltr(top_left_mouse_square(
                         InkWell::new()
-                            .focus_node(focus_node)
+                            .focus_node(focus_node.clone())
                             .custom_border(rounded(radius))
                             .on_tap(Listener::new(|_app| {})),
                     )),
@@ -4324,17 +4352,20 @@ mod tests {
                                 // features aren't clipped by it.
                                 Material::new()
                                     .color(Colors::BLACK)
-                                    .child(OverlayPortal::new(controller, |_app, _context| {
-                                        Positioned::new(
-                                            InkWell::new()
-                                                .splash_color(Colors::RED.primary())
-                                                .on_tap(Listener::new(|_app| {}))
-                                                .child(SizedBox::square(Some(100.0))),
-                                        )
-                                        .right(0.0)
-                                        .bottom(0.0)
-                                        .into_widget()
-                                    })),
+                                    .child(OverlayPortal::new(
+                                        controller.clone(),
+                                        |_app, _context| {
+                                            Positioned::new(
+                                                InkWell::new()
+                                                    .splash_color(Colors::RED.primary())
+                                                    .on_tap(Listener::new(|_app| {}))
+                                                    .child(SizedBox::square(Some(100.0))),
+                                            )
+                                            .right(0.0)
+                                            .bottom(0.0)
+                                            .into_widget()
+                                        },
+                                    )),
                             ),
                         )
                         .into_widget()
@@ -4347,8 +4378,9 @@ mod tests {
                 Center::new()
                     .child(
                         RepaintBoundary::new().child(
-                            SizedBox::square(Some(200.0))
-                                .child(ltr(Overlay::new().initial_entries([overlay_entry]))),
+                            SizedBox::square(Some(200.0)).child(ltr(
+                                Overlay::new().initial_entries([overlay_entry.clone()])
+                            )),
                         ),
                     )
                     .into_widget(),

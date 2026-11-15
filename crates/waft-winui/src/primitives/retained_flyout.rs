@@ -4,7 +4,7 @@ use crate::ThemeResources;
 use crate::ThemeScope;
 use std::{fmt, rc::Rc};
 use waft_embedder::{Offset, Rect, TextDirection, ViewId};
-use waft_foundation::{App, Handle, Listener};
+use waft_foundation::{App, Handle, Listener, Ref};
 use waft_painting::transform_rect;
 use waft_scheduler::{FrameCallback, SchedulerBinding};
 use waft_widgets::*;
@@ -18,7 +18,7 @@ pub struct RetainedFlyoutHost {
     builder: WidgetBuilder,
 
     /// Root entry, created on the first opening.
-    entry: Option<Handle<OverlayEntry>>,
+    entry: Option<Ref<OverlayEntry>>,
 
     /// Overlay in which the retained entry lives.
     overlay: Option<Handle<OverlayState>>,
@@ -83,7 +83,7 @@ impl fmt::Debug for RetainedFlyoutHost {
 
 impl RetainedFlyoutHost {
     /// Creates a host; content is built lazily when first shown.
-    pub fn new(app: &mut App, builder: WidgetBuilder) -> Handle<Self> {
+    pub fn new(app: &mut App, builder: WidgetBuilder) -> Ref<Self> {
         app.create(Self {
             builder,
             entry: None,
@@ -115,7 +115,7 @@ impl RetainedFlyoutHost {
     /// Bounds of the current target in the root overlay's coordinate system.
     pub fn target_bounds(self: Handle<Self>, app: &App) -> Option<Rect> {
         let target = app.get(self).target?;
-        if !app.contains(target) || !target.mounted(app) {
+        if !target.mounted(app) {
             return None;
         }
         let target_box = target.context(app).find_render_object(app)?.as_box()?;
@@ -193,10 +193,14 @@ impl RetainedFlyoutHost {
                 .retain(|host| *host != self);
         }
         let previous_focus = app.get(self).return_focus.or_else(|| primary_focus(app));
-        let already_owns_focus = app
-            .get(self)
-            .state
-            .is_some_and(|state| app.get(state).focus.unwrap().as_node().has_focus(app));
+        let already_owns_focus = app.get(self).state.is_some_and(|state| {
+            app.get(state)
+                .focus
+                .clone()
+                .unwrap()
+                .as_node()
+                .has_focus(app)
+        });
         let host = app.get_mut(self);
         host.target = Some(target);
         host.resources = Some(resources);
@@ -212,9 +216,9 @@ impl RetainedFlyoutHost {
         }
 
         if let Some(state) = app.get(self).state {
-            let entry = app.get(self).entry.unwrap();
+            let entry = app.get(self).entry.clone().unwrap();
             // Keep this entry's key while moving all other entries below it.
-            overlay.rearrange(app, vec![entry], Some(entry), None);
+            overlay.rearrange(app, vec![entry.clone()], Some(entry.handle()), None);
             state.set_state(app, |_| {});
             state.focus_after_frame(app);
         } else if app.get(self).entry.is_none() {
@@ -225,7 +229,7 @@ impl RetainedFlyoutHost {
                 true,
                 false,
             );
-            app.get_mut(self).entry = Some(entry);
+            app.get_mut(self).entry = Some(entry.clone());
             app.get_mut(self).overlay = Some(overlay);
             overlay.insert(app, entry, None, None);
         }
@@ -416,7 +420,7 @@ struct RetainedFlyoutState {
     state: StateData<RetainedFlyoutRoot>,
 
     /// Focus scope owned by this retained subtree.
-    focus: Option<Handle<FocusScopeNode>>,
+    focus: Option<Ref<FocusScopeNode>>,
 }
 
 impl StatefulWidget for RetainedFlyoutRoot {
@@ -438,8 +442,7 @@ impl RetainedFlyoutState {
         SchedulerBinding::add_post_frame_callback(
             app,
             FrameCallback::new(move |app, _| {
-                if !app.contains(self)
-                    || !self.mounted(app)
+                if !self.mounted(app)
                     || !app.contains(host)
                     || app.get(host).disposed
                     || !app.get(host).open
@@ -448,7 +451,7 @@ impl RetainedFlyoutState {
                     return;
                 }
                 if app.get(host).take_focus {
-                    let scope = app.get(self).focus.unwrap().as_node();
+                    let scope = app.get(self).focus.clone().unwrap().as_node();
                     let first = scope
                         .traversal_descendants(app)
                         .into_iter()
@@ -467,7 +470,13 @@ impl RetainedFlyoutState {
     fn restore_focus(self: Handle<Self>, app: &mut App) {
         let host = self.widget(app).host;
         let previous = app.get(host).previous_focus;
-        if app.get(self).focus.unwrap().as_node().has_focus(app)
+        if app
+            .get(self)
+            .focus
+            .clone()
+            .unwrap()
+            .as_node()
+            .has_focus(app)
             && let Some(previous) = previous.filter(|node| {
                 app.contains(node.id())
                     && !app.is_disposed(node.id())
@@ -494,9 +503,8 @@ impl State for RetainedFlyoutState {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        let focus = app.get(self).focus.unwrap();
+        let focus = app.get(self).focus.clone().unwrap();
         focus.as_node().dispose(app);
-        app.destroy(focus);
         let host = self.widget(app).host;
         if app.contains(host) {
             app.get_mut(host).state = None;
@@ -523,7 +531,7 @@ impl State for RetainedFlyoutState {
                 Builder::new(move |app, context| builder(app, context)),
             ),
         );
-        let mut scope = FocusScope::new(themed_content).node(app.get(self).focus.unwrap());
+        let mut scope = FocusScope::new(themed_content).node(app.get(self).focus.clone().unwrap());
         if let Some(handler) = on_key_event {
             scope = scope.on_key_event(handler);
         }

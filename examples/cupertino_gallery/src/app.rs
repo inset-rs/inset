@@ -10,10 +10,10 @@ use std::time::Duration;
 
 use waft_cupertino::{CupertinoApp, CupertinoPageRoute, install_cupertino_icon_font};
 use waft_embedder::WindowConfig;
-use waft_foundation::{App, Handle, Listener, Timer};
+use waft_foundation::{App, Listener, Ref, Timer};
 use waft_widgets::{
-    AnyRoute, BuildContext, GlobalKey, IntoWidget, Navigator, NavigatorState, Route,
-    RouteSettingsRef, WidgetBuilder, run_app_with,
+    BuildContext, GlobalKey, IntoWidget, Navigator, NavigatorState, RouteRef, RouteSettingsRef,
+    WidgetBuilder, run_app_with,
 };
 
 use crate::catalog::Entry;
@@ -39,7 +39,7 @@ pub fn gallery() -> CupertinoApp {
                 });
                 page_route(app, builder, INDEX_TITLE)
                     .settings(app, RouteSettingsRef::Settings(settings.clone()))
-                    .as_route()
+                    .into_erased()
             })
         })
 }
@@ -81,35 +81,35 @@ pub fn run_gallery(app: &mut App, opening: Option<Entry>) {
 }
 
 /// The route one catalog entry's screen is pushed as.
-pub fn entry_route(app: &mut App, entry: Entry) -> AnyRoute {
+pub fn entry_route(app: &mut App, entry: Entry) -> RouteRef {
     let builder: WidgetBuilder =
         Rc::new(move |app: &mut App, context: BuildContext| entry.body(app, context));
-    page_route(app, builder, entry.title()).as_route()
+    page_route(app, builder, entry.title()).into_erased()
 }
 
 /// The route one of an entry's own sub-screens is pushed as.
-pub fn sub_route(app: &mut App, entry: Entry, index: usize) -> AnyRoute {
+pub fn sub_route(app: &mut App, entry: Entry, index: usize) -> RouteRef {
     let builder: WidgetBuilder =
         Rc::new(move |app: &mut App, context: BuildContext| entry.sub_body(index, app, context));
-    page_route(app, builder, entry.sub_title(index)).as_route()
+    page_route(app, builder, entry.sub_title(index)).into_erased()
 }
 
 /// A screen's route.
 ///
 /// The title is what the bar shows in the middle and what the NEXT screen's back button reads,
 /// so it is set here rather than on each screen's bar.
-fn page_route(app: &mut App, builder: WidgetBuilder, title: &str) -> Handle<CupertinoPageRoute> {
+fn page_route(app: &mut App, builder: WidgetBuilder, title: &str) -> Ref<CupertinoPageRoute> {
     CupertinoPageRoute::new(app, builder).title(app, title.to_owned())
 }
 
 /// Opens an entry's screen, from a row on the index.
 pub fn open_entry(app: &mut App, context: BuildContext, entry: Entry) {
     let route = entry_route(app, entry);
-    Navigator::push(app, context, route);
+    drop(Navigator::push(app, context, route));
 }
 
 /// Opens one of an entry's sub-screens, from a row on that entry's own screen.
 pub fn open_sub_page(app: &mut App, context: BuildContext, entry: Entry, index: usize) {
     let route = sub_route(app, entry, index);
-    Navigator::push(app, context, route);
+    drop(Navigator::push(app, context, route));
 }

@@ -5,6 +5,8 @@ use std::rc::Rc;
 
 use indexmap::{IndexMap, IndexSet};
 pub use waft_embedder::{RestorationData, RestorationMap, RestorationUpdate};
+use waft_foundation::OptionRetained;
+use waft_foundation::Ref;
 use waft_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle};
 use waft_scheduler::{FrameCallback, SchedulerBinding};
 
@@ -91,7 +93,7 @@ use waft_scheduler::{FrameCallback, SchedulerBinding};
 pub struct RestorationManager {
     change_notifier: ChangeNotifierData,
     // May be `None` to indicate that restoration is turned off.
-    root_bucket: Option<Handle<RestorationBucket>>,
+    root_bucket: Option<Ref<RestorationBucket>>,
     // Dart's `Completer` for the outstanding request to the engine; the host answers
     // within the call, so only the fact that a request is in flight remains.
     pending_root_bucket: bool,
@@ -99,7 +101,7 @@ pub struct RestorationManager {
     is_replacing: bool,
     debug_doing_update: bool,
     serialization_scheduled: bool,
-    buckets_needing_serialization: IndexSet<Handle<RestorationBucket>>,
+    buckets_needing_serialization: IndexSet<Ref<RestorationBucket>>,
 }
 
 impl ChangeNotifier for RestorationManager {
@@ -143,13 +145,13 @@ impl RestorationManager {
     /// Returns `None` if state restoration is currently turned off.
     pub fn root_bucket(self: Handle<Self>, app: &mut App) -> Option<Handle<RestorationBucket>> {
         if app.get(self).root_bucket_is_valid {
-            return app.get(self).root_bucket;
+            return app.get(self).root_bucket.handle();
         }
         if !app.get(self).pending_root_bucket {
             app.get_mut(self).pending_root_bucket = true;
             self.get_root_bucket_from_engine(app);
         }
-        app.get(self).root_bucket
+        app.get(self).root_bucket.handle()
     }
 
     /// Returns true for the frame after the root bucket has been replaced with a
@@ -223,14 +225,14 @@ impl RestorationManager {
             );
         }
 
-        let old_root = app.get(self).root_bucket;
         let new_root = enabled.then(|| RestorationBucket::root(app, self, data));
+        let changed = new_root != app.get(self).root_bucket;
         let this = app.get_mut(self);
-        this.root_bucket = new_root;
+        let old_root = std::mem::replace(&mut this.root_bucket, new_root);
         this.root_bucket_is_valid = true;
         this.pending_root_bucket = false;
 
-        if new_root != old_root {
+        if changed {
             self.notify_listeners(app);
             if let Some(old_root) = old_root {
                 old_root.dispose(app);
@@ -262,6 +264,9 @@ impl RestorationManager {
     ) {
         debug_assert!(app.get(bucket).manager == Some(self));
         debug_assert!(!app.get(self).debug_doing_update);
+        let bucket = bucket
+            .upgrade(app)
+            .expect("a bucket that schedules its serialization is kept by its owner");
         app.get_mut(self)
             .buckets_needing_serialization
             .insert(bucket);
@@ -310,6 +315,7 @@ impl RestorationManager {
         let root = app
             .get(self)
             .root_bucket
+            .handle()
             .expect("a bucket that scheduled serialization is in the root bucket's hierarchy");
         let data = root.with_raw_data(app, |data| data.clone());
         self.send_to_engine(app, data);
@@ -347,7 +353,7 @@ impl RestorationManager {
 
     /// Discards any resources used by the manager, and the root bucket with them.
     pub fn dispose(self: Handle<Self>, app: &mut App) {
-        if let Some(root_bucket) = app.get(self).root_bucket {
+        if let Some(root_bucket) = app.get(self).root_bucket.handle() {
             root_bucket.dispose(app);
         }
         app.get_mut(self).change_notifier.dispose();
@@ -453,10 +459,10 @@ pub struct RestorationBucket {
     restoration_id: String,
     // The restoration IDs and associated buckets of children that have been
     // claimed via `claim_child`.
-    claimed_children: IndexMap<String, Handle<RestorationBucket>>,
+    claimed_children: IndexMap<String, Ref<RestorationBucket>>,
     // Newly created child buckets whose restoration ID is still in use, see
     // comment in `claim_child` for details.
-    children_to_add: IndexMap<String, Vec<Handle<RestorationBucket>>>,
+    children_to_add: IndexMap<String, Vec<Ref<RestorationBucket>>>,
     needs_serialization: bool,
     debug_owner: Option<Rc<dyn Debug>>,
 }
@@ -492,7 +498,7 @@ impl RestorationBucket {
         app: &mut App,
         restoration_id: &str,
         debug_owner: Option<Rc<dyn Debug>>,
-    ) -> Handle<RestorationBucket> {
+    ) -> Ref<RestorationBucket> {
         let bucket = RestorationBucket::new(restoration_id, RestorationMap::new(), debug_owner);
         app.create(bucket)
     }
@@ -523,7 +529,7 @@ impl RestorationBucket {
         app: &mut App,
         manager: Handle<RestorationManager>,
         raw_data: Option<RestorationMap>,
-    ) -> Handle<RestorationBucket> {
+    ) -> Ref<RestorationBucket> {
         let debug_owner: Option<Rc<dyn Debug>> =
             cfg!(debug_assertions).then(|| Rc::new(manager) as Rc<dyn Debug>);
         let mut bucket = RestorationBucket::new("root", raw_data.unwrap_or_default(), debug_owner);
@@ -546,7 +552,7 @@ impl RestorationBucket {
         restoration_id: &str,
         parent: Handle<RestorationBucket>,
         debug_owner: Option<Rc<dyn Debug>>,
-    ) -> Handle<RestorationBucket> {
+    ) -> Ref<RestorationBucket> {
         debug_assert!(parent.with_raw_children(app, |children| {
             children.contains_key(&data_key(restoration_id))
         }));
@@ -790,7 +796,7 @@ impl RestorationBucket {
         app: &mut App,
         restoration_id: &str,
         debug_owner: Option<Rc<dyn Debug>>,
-    ) -> Handle<RestorationBucket> {
+    ) -> Ref<RestorationBucket> {
         debug_assert!(self.debug_assert_not_disposed(app));
         // There are three cases to consider:
         // 1. Claiming an ID that has already been claimed.
@@ -812,7 +818,7 @@ impl RestorationBucket {
         });
         if claimed || !stored {
             let child = RestorationBucket::empty(app, restoration_id, debug_owner);
-            self.adopt_child(app, child);
+            self.adopt_child(app, &child);
             return child;
         }
 
@@ -820,7 +826,7 @@ impl RestorationBucket {
         let child = RestorationBucket::child(app, restoration_id, self, debug_owner);
         app.get_mut(self)
             .claimed_children
-            .insert(restoration_id.to_string(), child);
+            .insert(restoration_id.to_string(), child.clone());
         child
     }
 
@@ -837,14 +843,16 @@ impl RestorationBucket {
     /// mode.
     ///
     /// No-op if the provided bucket is already a child of this bucket.
-    pub fn adopt_child(self: Handle<Self>, app: &mut App, child: Handle<RestorationBucket>) {
+    pub fn adopt_child(self: Handle<Self>, app: &mut App, child: &Ref<RestorationBucket>) {
         debug_assert!(self.debug_assert_not_disposed(app));
+        let kept = child.clone();
+        let child = *kept;
         if app.get(child).parent != Some(self) {
             if let Some(old_parent) = app.get(child).parent {
                 old_parent.remove_child_data(app, child);
             }
             app.get_mut(child).parent = Some(self);
-            self.add_child_data(app, child);
+            self.add_child_data(app, kept);
             if app.get(child).manager != app.get(self).manager {
                 self.recursively_update_manager(app, child);
             }
@@ -926,7 +934,7 @@ impl RestorationBucket {
             debug_assert!(!buckets.is_empty());
             error.push(format!(" * \"{restoration_id}\" was claimed by:"));
             for bucket in buckets {
-                error.push(format!("   * {}", owner_description(app.get(*bucket))));
+                error.push(format!("   * {}", owner_description(app.get(bucket))));
             }
             let owner = this
                 .claimed_children
@@ -934,7 +942,7 @@ impl RestorationBucket {
                 .expect("a pending child implies a current owner of the same ID");
             error.push(format!(
                 "   * {} (current owner)",
-                owner_description(app.get(*owner))
+                owner_description(app.get(owner))
             ));
         }
         panic!("{}", error.join("\n"));
@@ -943,7 +951,8 @@ impl RestorationBucket {
     fn remove_child_data(self: Handle<Self>, app: &mut App, child: Handle<RestorationBucket>) {
         debug_assert!(app.get(child).parent == Some(self));
         let child_id = app.get(child).restoration_id.clone();
-        if app.get_mut(self).claimed_children.shift_remove(&child_id) == Some(child) {
+        let removed = app.get_mut(self).claimed_children.shift_remove(&child_id);
+        if removed.handle() == Some(child) {
             child.reclaim_raw_data(app);
             let pending_child = app
                 .get_mut(self)
@@ -966,7 +975,7 @@ impl RestorationBucket {
         let Some(pending) = app.get_mut(self).children_to_add.get_mut(&child_id) else {
             return;
         };
-        if let Some(index) = pending.iter().position(|bucket| *bucket == child) {
+        if let Some(index) = pending.iter().position(|bucket| **bucket == child) {
             pending.remove(index);
         }
         if pending.is_empty() {
@@ -974,9 +983,9 @@ impl RestorationBucket {
         }
     }
 
-    fn add_child_data(self: Handle<Self>, app: &mut App, child: Handle<RestorationBucket>) {
-        debug_assert!(app.get(child).parent == Some(self));
-        let child_id = app.get(child).restoration_id.clone();
+    fn add_child_data(self: Handle<Self>, app: &mut App, child: Ref<RestorationBucket>) {
+        debug_assert!(app.get(&child).parent == Some(self));
+        let child_id = app.get(&child).restoration_id.clone();
         if app.get(self).claimed_children.contains_key(&child_id) {
             // Delay addition until the end of the frame in the hopes that the current
             // owner of the child with the same ID will have given up that child by
@@ -993,19 +1002,17 @@ impl RestorationBucket {
         self.mark_needs_serialization(app);
     }
 
-    fn finalize_add_child_data(
-        self: Handle<Self>,
-        app: &mut App,
-        child: Handle<RestorationBucket>,
-    ) {
-        let child_id = app.get(child).restoration_id.clone();
+    fn finalize_add_child_data(self: Handle<Self>, app: &mut App, child: Ref<RestorationBucket>) {
+        let child_id = app.get(&child).restoration_id.clone();
         debug_assert!(!app.get(self).claimed_children.contains_key(&child_id));
         debug_assert!(
             self.with_raw_children(app, |children| !children.contains_key(&data_key(&child_id)))
         );
+        let child_handle = *child;
         app.get_mut(self)
             .claimed_children
             .insert(child_id.clone(), child);
+        let child = child_handle;
         let data = match std::mem::replace(&mut app.get_mut(child).raw_data, RawData::InParent) {
             RawData::Own(data) => data,
             RawData::InParent => unreachable!("a bucket being stored owns its map"),
@@ -1042,8 +1049,13 @@ impl RestorationBucket {
         let children: Vec<Handle<RestorationBucket>> = this
             .claimed_children
             .values()
-            .copied()
-            .chain(this.children_to_add.values().flatten().copied())
+            .map(|child| child.handle())
+            .chain(
+                this.children_to_add
+                    .values()
+                    .flatten()
+                    .map(|child| child.handle()),
+            )
             .collect();
         for child in children {
             visitor(app, child);
@@ -1072,7 +1084,10 @@ impl RestorationBucket {
         }
         app.get_mut(self).restoration_id = new_restoration_id.to_string();
         if let Some(parent) = app.get(self).parent {
-            parent.add_child_data(app, self);
+            let kept = self
+                .upgrade(app)
+                .expect("a bucket being renamed is kept by its owner");
+            parent.add_child_data(app, kept);
         }
     }
 
@@ -1098,12 +1113,12 @@ impl RestorationBucket {
         }
         app.get_mut(self).parent = None;
         self.update_manager(app, None);
-        app.destroy(self);
+        app.mark_disposed(self);
     }
 
     fn debug_assert_not_disposed(self: Handle<Self>, app: &App) -> bool {
         assert!(
-            app.contains(self),
+            app.contains(self) && !app.is_disposed(self),
             "A RestorationBucket was used after being disposed.\n\
              Once you have called dispose() on a RestorationBucket, it can no longer be used."
         );
@@ -1352,7 +1367,7 @@ mod tests {
             .expect("restoration is still enabled");
         assert_ne!(new_root, root);
         assert!(
-            !fixture.cell.borrow().contains(root),
+            fixture.cell.borrow().is_disposed(root),
             "the old root was disposed"
         );
 
@@ -1851,7 +1866,7 @@ mod tests {
         let (mut fixture, root) = Fixture::restored(raw_data_set());
         let child = root.claim_child(&mut fixture.cell.borrow_mut(), "child1", owner("owner1"));
 
-        root.adopt_child(&mut fixture.cell.borrow_mut(), child);
+        root.adopt_child(&mut fixture.cell.borrow_mut(), &child);
         assert!(fixture.serialized().is_none());
     }
 
@@ -1865,7 +1880,7 @@ mod tests {
         );
         assert!(!child.is_replacing(&fixture.cell.borrow()));
 
-        root.adopt_child(&mut fixture.cell.borrow_mut(), child);
+        root.adopt_child(&mut fixture.cell.borrow_mut(), &child);
         child.write(&mut fixture.cell.borrow_mut(), "value", 22i64);
 
         let data = fixture
@@ -1895,7 +1910,7 @@ mod tests {
             Some(&"bar".into())
         );
 
-        root.adopt_child(&mut fixture.cell.borrow_mut(), child_of_child);
+        root.adopt_child(&mut fixture.cell.borrow_mut(), &child_of_child);
 
         let data = fixture
             .serialized()
@@ -1916,7 +1931,7 @@ mod tests {
             child.claim_child(&mut fixture.cell.borrow_mut(), "child1", owner("owner2"));
         child_of_child.write(&mut fixture.cell.borrow_mut(), "foo", "bar");
 
-        root.adopt_child(&mut fixture.cell.borrow_mut(), child_of_child);
+        root.adopt_child(&mut fixture.cell.borrow_mut(), &child_of_child);
 
         let error = catch_unwind(AssertUnwindSafe(|| fixture.serialized())).unwrap_err();
         assert!(
@@ -1934,7 +1949,7 @@ mod tests {
         child_of_child.write(&mut fixture.cell.borrow_mut(), "foo", "bar");
         fixture.serialize();
 
-        root.adopt_child(&mut fixture.cell.borrow_mut(), child_of_child);
+        root.adopt_child(&mut fixture.cell.borrow_mut(), &child_of_child);
         child.dispose(&mut fixture.cell.borrow_mut());
 
         let data = fixture
@@ -1955,7 +1970,7 @@ mod tests {
             "a bucket outside the hierarchy has no manager to schedule with"
         );
 
-        root.adopt_child(&mut fixture.cell.borrow_mut(), detached);
+        root.adopt_child(&mut fixture.cell.borrow_mut(), &detached);
 
         let data = fixture
             .serialized()
@@ -1984,14 +1999,14 @@ mod tests {
     fn disposing_the_manager_disposes_the_root_bucket() {
         let (fixture, root) = Fixture::restored(raw_data_set());
         fixture.manager.dispose(&mut fixture.cell.borrow_mut());
-        assert!(!fixture.cell.borrow().contains(root));
+        assert!(fixture.cell.borrow().is_disposed(root));
     }
 
     #[test]
     fn a_bucket_reports_the_owner_it_was_claimed_with() {
         let (fixture, root) = Fixture::restored(raw_data_set());
         let child = root.claim_child(&mut fixture.cell.borrow_mut(), "child1", owner("owner1"));
-        let described = format!("{:?}", fixture.cell.borrow().get(child));
+        let described = format!("{:?}", fixture.cell.borrow().get(&child));
         if cfg!(debug_assertions) {
             assert_eq!(
                 described,

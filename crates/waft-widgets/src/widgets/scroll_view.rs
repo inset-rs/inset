@@ -12,9 +12,9 @@ use waft_foundation::App;
 use waft_gestures::DragStartBehavior;
 use waft_painting::{Axis, AxisDirection, EdgeInsetsGeometry};
 use waft_rendering::{
-    AnyViewportOffset, HitTestBehavior, ItemExtentBuilder, ScrollCacheExtent, SliverGridDelegate,
+    HitTestBehavior, ItemExtentBuilder, ScrollCacheExtent, SliverGridDelegate,
     SliverGridDelegateWithFixedCrossAxisCount, SliverGridDelegateWithMaxCrossAxisExtent,
-    SliverPaintOrder,
+    SliverPaintOrder, ViewportOffsetRef,
 };
 
 use crate::framework::{
@@ -29,7 +29,7 @@ use crate::widgets::media_query::MediaQuery;
 use crate::widgets::notification_listener::NotificationListener;
 use crate::widgets::primary_scroll_controller::PrimaryScrollController;
 use crate::widgets::scroll_configuration::{ScrollBehaviorRef, ScrollConfiguration};
-use crate::widgets::scroll_controller::AnyScrollController;
+use crate::widgets::scroll_controller::ScrollControllerRef;
 use crate::widgets::scroll_delegate::{
     ChildIndexGetter, NullableIndexedWidgetBuilder, SliverChildBuilderDelegate,
     SliverChildDelegateRef, SliverChildListDelegate,
@@ -87,7 +87,7 @@ pub struct ScrollViewData {
     /// view is scrolled.
     ///
     /// Must be `None` if [`primary`](Self::primary) is true.
-    pub controller: Option<AnyScrollController>,
+    pub controller: Option<ScrollControllerRef>,
 
     /// Whether this is the primary scroll view associated with the parent
     /// [`PrimaryScrollController`].
@@ -296,7 +296,7 @@ macro_rules! scroll_view_setters {
         }
 
         /// Dart `controller:`.
-        pub fn controller(mut self, controller: $crate::AnyScrollController) -> $name {
+        pub fn controller(mut self, controller: $crate::ScrollControllerRef) -> $name {
             debug_assert!(
                 !self.scroll_view.primary.unwrap_or(false),
                 "Primary ScrollViews obtain their ScrollController via inheritance from a \
@@ -467,7 +467,7 @@ pub trait ScrollView: Clone + Debug + Sized + 'static {
         &self,
         app: &mut App,
         context: BuildContext,
-        offset: AnyViewportOffset,
+        offset: ViewportOffsetRef,
         axis_direction: AxisDirection,
         slivers: Vec<WidgetRef>,
     ) -> WidgetRef {
@@ -499,7 +499,7 @@ impl ScrollViewBase {
         view: &V,
         app: &mut App,
         context: BuildContext,
-        offset: AnyViewportOffset,
+        offset: ViewportOffsetRef,
         axis_direction: AxisDirection,
         slivers: Vec<WidgetRef>,
     ) -> WidgetRef {
@@ -562,6 +562,7 @@ impl ScrollViewBase {
             .drag_start_behavior(data.drag_start_behavior)
             .hit_test_behavior(data.hit_test_behavior)
             .clip_behavior(data.clip_behavior);
+        let has_scroll_controller = scroll_controller.is_some();
         if let Some(controller) = scroll_controller {
             scrollable = scrollable.controller(controller);
         }
@@ -575,7 +576,7 @@ impl ScrollViewBase {
             scrollable = scrollable.restoration_id(restoration_id);
         }
 
-        let scrollable_result = if effective_primary && scroll_controller.is_some() {
+        let scrollable_result = if effective_primary && has_scroll_controller {
             // Further descendant scroll views will not inherit the same
             // `PrimaryScrollController`.
             PrimaryScrollController::none(scrollable).into_widget()
@@ -1761,7 +1762,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let controller = ScrollController::default(&mut app);
         let list = ListView::new()
-            .controller(controller.as_controller())
+            .controller(controller.erase())
             .children(boxes(ITEM_COUNT));
         drop(app);
         binding_mount(&cell, wrap(list));
@@ -1802,7 +1803,7 @@ mod tests {
             );
         }
         let list = ListView::new()
-            .controller(controller.as_controller())
+            .controller(controller.erase())
             .children(children);
         drop(app);
         binding_mount(&cell, wrap(list));

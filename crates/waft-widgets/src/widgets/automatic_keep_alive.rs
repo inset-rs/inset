@@ -4,7 +4,9 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
 
-use waft_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, Listenable, Listener};
+use waft_foundation::{
+    App, ChangeNotifier, ChangeNotifierData, Handle, Listenable, ListenableObject, Listener,
+};
 use waft_scheduler::{FrameCallback, SchedulerBinding, SchedulerPhase};
 
 use crate::framework::{
@@ -14,6 +16,7 @@ use crate::framework::{
 use crate::view::View;
 use crate::widgets::notification_listener::NotificationListener;
 use crate::widgets::sliver::KeepAlive;
+use waft_foundation::Ref;
 
 /// Allows subtrees to request to be kept alive in lazy lists.
 ///
@@ -80,7 +83,7 @@ impl StatefulWidget for AutomaticKeepAlive {
 /// Dart's `_AutomaticKeepAliveState`.
 pub struct AutomaticKeepAliveState {
     state: StateData<AutomaticKeepAlive>,
-    handles: Option<HashMap<Handle<KeepAliveHandle>, Listener>>,
+    handles: Option<HashMap<Ref<KeepAliveHandle>, Listener>>,
     // In order to apply parent data out of turn, the child of the KeepAlive
     // widget must be the same across frames.
     child: Option<WidgetRef>,
@@ -99,15 +102,15 @@ impl AutomaticKeepAliveState {
     }
 
     fn add_client(self: Handle<Self>, app: &mut App, notification: &KeepAliveNotification) -> bool {
-        let handle = notification.handle;
-        let callback = self.create_callback(handle);
+        let handle = notification.handle.clone();
+        let callback = self.create_callback(handle.handle());
         {
             let handles = app.get_mut(self).handles.get_or_insert_with(HashMap::new);
             debug_assert!(
                 !handles.contains_key(&handle),
                 "the same handle cannot be used in two KeepAliveNotifications without triggering it first"
             );
-            handles.insert(handle, callback.clone());
+            handles.insert(handle.clone(), callback.clone());
         }
         Listenable::add_listener(&handle, app, callback);
         if !app.get(self).keeping_alive {
@@ -211,7 +214,7 @@ impl AutomaticKeepAliveState {
                 .expect("a client was registered")
                 .remove(&handle)
                 .expect("the firing handle is still registered");
-            Listenable::remove_listener(&handle, app, &callback);
+            ListenableObject::remove_listener(handle, app, &callback);
             if app
                 .get(self)
                 .handles
@@ -382,12 +385,12 @@ pub struct KeepAliveNotification {
     /// See also:
     ///
     ///  * [`KeepAliveHandle`], a convenience class for use with this property.
-    pub handle: Handle<KeepAliveHandle>,
+    pub handle: Ref<KeepAliveHandle>,
 }
 
 impl KeepAliveNotification {
     /// Creates a notification to indicate that a subtree must be kept alive.
-    pub fn new(handle: Handle<KeepAliveHandle>) -> KeepAliveNotification {
+    pub fn new(handle: Ref<KeepAliveHandle>) -> KeepAliveNotification {
         KeepAliveNotification { handle }
     }
 }
@@ -412,7 +415,7 @@ pub struct KeepAliveHandle {
 
 impl KeepAliveHandle {
     /// A handle that has not been triggered.
-    pub fn new(app: &mut App) -> Handle<KeepAliveHandle> {
+    pub fn new(app: &mut App) -> Ref<KeepAliveHandle> {
         app.create(KeepAliveHandle {
             change_notifier: ChangeNotifierData::new(),
         })
@@ -422,7 +425,6 @@ impl KeepAliveHandle {
     pub fn dispose(self: Handle<Self>, app: &mut App) {
         self.notify_listeners(app);
         app.get_mut(self).change_notifier.dispose();
-        app.destroy(self);
     }
 }
 
@@ -446,7 +448,7 @@ impl Debug for KeepAliveHandle {
 #[derive(Default)]
 pub struct AutomaticKeepAliveClientMixinData {
     /// Dart's `_keepAliveHandle`.
-    pub keep_alive_handle: Option<Handle<KeepAliveHandle>>,
+    pub keep_alive_handle: Option<Ref<KeepAliveHandle>>,
 }
 
 impl AutomaticKeepAliveClientMixinData {
@@ -578,7 +580,7 @@ trait AutomaticKeepAliveClientMixinPrivate: AutomaticKeepAliveClientMixin {
         );
         let handle = KeepAliveHandle::new(app);
         self.automatic_keep_alive_client_data_mut(app)
-            .keep_alive_handle = Some(handle);
+            .keep_alive_handle = Some(handle.clone());
         KeepAliveNotification::new(handle).dispatch(app, Some(self.context(app)));
     }
 

@@ -35,7 +35,7 @@ use std::{
 };
 use view_model::{MovePlan, NodeSelectionState, NodeTree, Rows, SelectionChange};
 use waft_embedder::{Offset, Rect, Size, TextDirection};
-use waft_foundation::{App, Handle, ValueKey};
+use waft_foundation::{App, Handle, OptionRetained, Ref, ValueKey};
 use waft_painting::EdgeInsetsGeometry;
 use waft_scheduler::{FrameCallback, Ticker};
 use waft_services::{HardwareKeyboard, KeyEvent, LogicalKeyboardKey};
@@ -438,7 +438,7 @@ pub struct TreeViewState {
     single_ticker_provider: SingleTickerProviderStateMixinData,
 
     /// The clock of edge scrolling.
-    ticker: Option<Handle<Ticker>>,
+    ticker: Option<Ref<Ticker>>,
 
     /// The nodes, with the expansions and moves the tree asked for.
     tree: Rc<NodeTree>,
@@ -453,7 +453,7 @@ pub struct TreeViewState {
     requested_selection: Option<Vec<String>>,
 
     /// The rows' focus, by node, owned here so that the tree can focus a row it scrolls to.
-    item_focus: HashMap<String, Handle<FocusNode>>,
+    item_focus: HashMap<String, Ref<FocusNode>>,
 
     /// Identifies each row's container, where the row is laid out.
     row_keys: HashMap<String, GlobalKey>,
@@ -481,7 +481,7 @@ pub struct TreeViewState {
     pressed_part: Option<(String, PressedPart, i64)>,
 
     /// The list's scroll position.
-    scroll: Option<Handle<ScrollViewportController>>,
+    scroll: Option<Ref<ScrollViewportController>>,
 
     /// The application's values are being applied, during a build: callbacks to the application
     /// wait for the frame's end.
@@ -539,7 +539,7 @@ fn is_directional(key: LogicalKeyboardKey) -> bool {
 
 impl TreeViewState {
     fn alive(self: Handle<Self>, app: &App) -> bool {
-        app.contains(self) && self.mounted(app)
+        self.mounted(app)
     }
 
     fn view(self: Handle<Self>, app: &App) -> Option<waft_embedder::ViewId> {
@@ -575,7 +575,10 @@ impl TreeViewState {
     }
 
     fn scroll(self: Handle<Self>, app: &App) -> Handle<ScrollViewportController> {
-        app.get(self).scroll.expect("an initialized TreeView")
+        app.get(self)
+            .scroll
+            .handle()
+            .expect("an initialized TreeView")
     }
 
     // MARK: The application's values
@@ -615,10 +618,7 @@ impl TreeViewState {
                 app,
                 view,
                 FrameCallback::new(move |app, _| {
-                    if app.contains(node) {
-                        node.dispose(app);
-                        app.destroy(node);
-                    }
+                    node.dispose(app);
                 }),
             );
         }
@@ -839,12 +839,14 @@ impl TreeViewState {
     // MARK: Focus
 
     /// The focus of the node's row, made the first time it is asked for.
-    fn item_focus_node(self: Handle<Self>, app: &mut App, id: &str) -> Handle<FocusNode> {
+    fn item_focus_node(self: Handle<Self>, app: &mut App, id: &str) -> Ref<FocusNode> {
         if let Some(node) = app.get(self).item_focus.get(id) {
-            return *node;
+            return node.clone();
         }
         let node = FocusNode::new(app);
-        app.get_mut(self).item_focus.insert(id.to_owned(), node);
+        app.get_mut(self)
+            .item_focus
+            .insert(id.to_owned(), node.clone());
         node
     }
 
@@ -881,7 +883,7 @@ impl TreeViewState {
         self: Handle<Self>,
         app: &mut App,
         id: String,
-        node: Handle<FocusNode>,
+        node: Ref<FocusNode>,
         epoch: u64,
         attempt: u32,
     ) {
@@ -895,7 +897,7 @@ impl TreeViewState {
         if attempt < 3 {
             self.after_frame(app, move |app| {
                 if app.get(self).focus_epoch == epoch {
-                    self.request_item_focus(app, id.clone(), node, epoch, attempt + 1);
+                    self.request_item_focus(app, id.clone(), node.clone(), epoch, attempt + 1);
                 }
             });
         }
@@ -1518,7 +1520,11 @@ impl TreeViewState {
     /// `ListControl`: TreeViewList's `ScrollViewer` around the lazy list of rows. Without a bound
     /// on its height, the list is as tall as its rows.
     fn list(self: Handle<Self>, app: &mut App, shrink_wrap: bool) -> WidgetRef {
-        let scroll = self.scroll(app);
+        let scroll = app
+            .get(self)
+            .scroll
+            .clone()
+            .expect("an initialized TreeView");
         let ids = app.get(self).rows.ids().to_vec();
         let tab_stop = self.tab_stop(app);
         let list = ListView::builder(move |app, _, index| {
@@ -1554,7 +1560,7 @@ impl State for TreeViewState {
             app,
             FrameCallback::new(move |app, elapsed| self.edge_scroll_tick(app, elapsed)),
         );
-        app.get_mut(self).ticker = Some(ticker);
+        app.get_mut(self).ticker = Some(ticker.clone());
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, _old: &TreeView) {
@@ -1593,12 +1599,10 @@ impl State for TreeViewState {
         let nodes: Vec<_> = state.item_focus.drain().map(|(_, node)| node).collect();
         for node in nodes {
             node.dispose(app);
-            app.destroy(node);
         }
         ticker.dispose(app);
         SingleTickerProviderStateMixin::dispose(self, app);
         scroll.dispose(app);
-        app.destroy(scroll);
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {

@@ -4,16 +4,20 @@
 //! `MediaQuery.displayFeatures`.
 
 use std::any::{Any, TypeId};
+use std::cell::OnceCell;
 use std::fmt::{self, Debug};
 use std::rc::Rc;
 use std::time::Duration;
 
 use waft_animation::{
-    Animatable, Animation, AnimationController, AnimationStatus, AnimationStatusListener,
-    AnyAnimation, CurvedAnimation, Curves, ValueTween,
+    Animatable, Animation, AnimationController, AnimationRef, AnimationStatus,
+    AnimationStatusListener, CurvedAnimation, Curves, Drive, ValueTween,
+    WeakAnimationStatusListener,
 };
 use waft_embedder::{Canvas, Color, ImageFilter, Offset, Paint, Rect, TextDirection};
-use waft_foundation::{App, CompleterFuture, Handle, Listener, ValueNotifier, VoidCallback};
+use waft_foundation::{
+    App, CompleterFuture, Handle, Listener, OptionRetained, Ref, ValueNotifier, VoidCallback,
+};
 use waft_gestures::{
     DragEndDetails, DragGestureRecognizer, DragStartDetails, DragUpdateDetails,
     HorizontalDragGestureRecognizer, PointerDownEvent, RecognizerLeaf,
@@ -32,9 +36,9 @@ use waft_widgets::{
     OverlayRoute, OverlayRouteData, Page, PageRef, PageRoute, PageRouteData,
     PageTransitionsBuilder, PopInvokedWithResultCallback, PopupRoute, Positioned,
     PredictiveBackRoute, RawDialogRoute, RawDialogRouteData, RawDialogRouteLeaf, Route, RouteData,
-    RoutePageBuilder, RouteResult, RouteSettingsRef, RouteTransitionsBuilder, ScaleTransition,
-    Semantics, SlideTransition, Stack, State, StateData, StatefulWidget, TransitionRoute,
-    TransitionRouteData, WidgetBuilder, WidgetRef,
+    RoutePageBuilder, RouteRef, RouteResult, RouteSettingsRef, RouteTransitionsBuilder,
+    ScaleTransition, Semantics, SlideTransition, Stack, State, StateData, StatefulWidget,
+    TransitionRoute, TransitionRouteData, WidgetBuilder, WidgetRef,
 };
 
 use crate::colors::{CupertinoColors, CupertinoDynamicColor};
@@ -88,7 +92,7 @@ const K_BOTTOM_UP_TWEEN: ValueTween<Offset> = ValueTween::new(Offset::new(0.0, 1
 /// The fields Dart's `CupertinoRouteTransitionMixin` declares; every route that mixes it in
 /// carries this bag under the field `cupertino_route_transition`.
 pub struct CupertinoRouteTransitionMixinData {
-    previous_title: Option<Handle<ValueNotifier<Option<String>>>>,
+    previous_title: Option<Ref<ValueNotifier<Option<String>>>>,
 }
 
 impl CupertinoRouteTransitionMixinData {
@@ -194,12 +198,17 @@ pub trait CupertinoRouteTransitionMixin: PageRoute {
     fn previous_title(self: Handle<Self>, app: &App) -> Handle<ValueNotifier<Option<String>>> {
         self.cupertino_route_transition_data(app)
             .previous_title
+            .handle()
             .expect("Cannot read the previousTitle for a route that has not yet been installed")
     }
 
     /// Dart's `CupertinoRouteTransitionMixin.dispose`.
     fn dispose(self: Handle<Self>, app: &mut App) {
-        if let Some(previous_title) = self.cupertino_route_transition_data(app).previous_title {
+        if let Some(previous_title) = self
+            .cupertino_route_transition_data(app)
+            .previous_title
+            .handle()
+        {
             app.get_mut(previous_title).dispose();
         }
         TransitionRoute::dispose(self, app);
@@ -212,7 +221,11 @@ pub trait CupertinoRouteTransitionMixin: PageRoute {
                 previous_route.interface::<Rc<dyn CupertinoRouteTransition>>()
             })
             .and_then(|previous_route| previous_route.title(app));
-        match self.cupertino_route_transition_data(app).previous_title {
+        match self
+            .cupertino_route_transition_data(app)
+            .previous_title
+            .handle()
+        {
             None => {
                 let previous_title = app.create(ValueNotifier::new(previous_title_string));
                 self.cupertino_route_transition_data_mut(app).previous_title = Some(previous_title);
@@ -280,8 +293,8 @@ pub trait CupertinoRouteTransitionMixin: PageRoute {
         self: Handle<Self>,
         app: &mut App,
         context: BuildContext,
-        animation: AnyAnimation<f64>,
-        secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        secondary_animation: AnimationRef<f64>,
     ) -> WidgetRef {
         let _ = (animation, secondary_animation);
         let child = self.build_content(app, context);
@@ -300,8 +313,8 @@ pub trait CupertinoRouteTransitionMixin: PageRoute {
         self: Handle<Self>,
         app: &mut App,
         context: BuildContext,
-        animation: AnyAnimation<f64>,
-        secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        secondary_animation: AnimationRef<f64>,
         child: WidgetRef,
     ) -> WidgetRef {
         build_page_transitions(
@@ -356,7 +369,7 @@ impl<T: CupertinoRouteTransitionMixin> CupertinoRouteTransition for Handle<T> {
 
 /// Called by [`CupertinoBackGestureDetector`] when a pop ("back") drag start gesture is
 /// detected. The returned controller handles all of the subsequent drag events.
-fn start_pop_gesture(route: AnyPageRoute, app: &mut App) -> Handle<CupertinoBackGestureController> {
+fn start_pop_gesture(route: AnyPageRoute, app: &mut App) -> Ref<CupertinoBackGestureController> {
     let transition_route = route.as_modal_route().as_transition_route();
     debug_assert!(transition_route.pop_gesture_enabled(app));
 
@@ -364,13 +377,19 @@ fn start_pop_gesture(route: AnyPageRoute, app: &mut App) -> Handle<CupertinoBack
     let navigator = route.navigator(app).expect("an installed route");
     let controller = transition_route
         .controller(app)
+        .and_then(|controller| controller.upgrade(app))
         .expect("an installed route has a controller");
+    // Dart's closures keep the route for as long as the gesture lasts.
+    let kept_route = transition_route
+        .upgrade(app)
+        .expect("the navigator keeps an installed route");
+    let kept_for_is_active = kept_route.clone();
     CupertinoBackGestureController::new(
         app,
         navigator,
         controller,
-        Rc::new(move |app| route.is_current(app)),
-        Rc::new(move |app| route.is_active(app)),
+        Rc::new(move |app| kept_route.as_route().is_current(app)),
+        Rc::new(move |app| kept_for_is_active.as_route().is_active(app)),
     )
 }
 
@@ -391,8 +410,8 @@ pub fn build_page_transitions(
     route: AnyPageRoute,
     app: &mut App,
     context: BuildContext,
-    animation: AnyAnimation<f64>,
-    secondary_animation: AnyAnimation<f64>,
+    animation: AnimationRef<f64>,
+    secondary_animation: AnimationRef<f64>,
     child: WidgetRef,
 ) -> WidgetRef {
     // Check if the route has an animation that's currently participating in a back swipe
@@ -644,8 +663,8 @@ macro_rules! cupertino_route_transition_mixin_modal_route_overrides {
             self: ::waft_foundation::Handle<Self>,
             app: &mut ::waft_foundation::App,
             context: ::waft_widgets::BuildContext,
-            animation: ::waft_animation::AnyAnimation<f64>,
-            secondary_animation: ::waft_animation::AnyAnimation<f64>,
+            animation: ::waft_animation::AnimationRef<f64>,
+            secondary_animation: ::waft_animation::AnimationRef<f64>,
         ) -> ::waft_widgets::WidgetRef {
             $crate::CupertinoRouteTransitionMixin::build_page(
                 self,
@@ -660,8 +679,8 @@ macro_rules! cupertino_route_transition_mixin_modal_route_overrides {
             self: ::waft_foundation::Handle<Self>,
             app: &mut ::waft_foundation::App,
             context: ::waft_widgets::BuildContext,
-            animation: ::waft_animation::AnyAnimation<f64>,
-            secondary_animation: ::waft_animation::AnyAnimation<f64>,
+            animation: ::waft_animation::AnimationRef<f64>,
+            secondary_animation: ::waft_animation::AnimationRef<f64>,
             child: ::waft_widgets::WidgetRef,
         ) -> ::waft_widgets::WidgetRef {
             $crate::CupertinoRouteTransitionMixin::build_transitions(
@@ -722,7 +741,7 @@ impl CupertinoPageRoute {
     ///
     /// Dart's defaults: `maintain_state` true, `fullscreen_dialog` false, `allow_snapshotting`
     /// true, `include_route_semantics` true, `barrier_dismissible` false.
-    pub fn new(app: &mut App, builder: WidgetBuilder) -> Handle<CupertinoPageRoute> {
+    pub fn new(app: &mut App, builder: WidgetBuilder) -> Ref<CupertinoPageRoute> {
         let route = RouteData::new(app, None, None);
         let transition_route = TransitionRouteData::new(app);
         let modal_route = ModalRouteData::new(app);
@@ -739,71 +758,67 @@ impl CupertinoPageRoute {
             maintain_state: true,
             include_route_semantics: true,
         });
-        debug_assert!(TransitionRoute::opaque(this, app));
+        debug_assert!(TransitionRoute::opaque(this.handle(), app));
         this
     }
 
     /// Dart `CupertinoPageRoute(title:)`.
-    pub fn title(self: Handle<Self>, app: &mut App, title: String) -> Handle<Self> {
-        app.get_mut(self).title = Some(title);
+    pub fn title(self: Ref<Self>, app: &mut App, title: String) -> Ref<Self> {
+        app.get_mut(&self).title = Some(title);
         self
     }
 
     /// Dart `CupertinoPageRoute(settings:)`.
-    pub fn settings(self: Handle<Self>, app: &mut App, settings: RouteSettingsRef) -> Handle<Self> {
+    pub fn settings(self: Ref<Self>, app: &mut App, settings: RouteSettingsRef) -> Ref<Self> {
         self.route_data_mut(app).set_settings(settings);
         self
     }
 
     /// Dart `CupertinoPageRoute(requestFocus:)`.
-    pub fn request_focus(self: Handle<Self>, app: &mut App, request_focus: bool) -> Handle<Self> {
+    pub fn request_focus(self: Ref<Self>, app: &mut App, request_focus: bool) -> Ref<Self> {
         self.route_data_mut(app)
             .set_request_focus(Some(request_focus));
         self
     }
 
     /// Dart `CupertinoPageRoute(maintainState:)`.
-    pub fn maintain_state(self: Handle<Self>, app: &mut App, maintain_state: bool) -> Handle<Self> {
-        app.get_mut(self).maintain_state = maintain_state;
+    pub fn maintain_state(self: Ref<Self>, app: &mut App, maintain_state: bool) -> Ref<Self> {
+        app.get_mut(&self).maintain_state = maintain_state;
         self
     }
 
     /// Dart `CupertinoPageRoute(fullscreenDialog:)`.
-    pub fn fullscreen_dialog(
-        self: Handle<Self>,
-        app: &mut App,
-        fullscreen_dialog: bool,
-    ) -> Handle<Self> {
+    pub fn fullscreen_dialog(self: Ref<Self>, app: &mut App, fullscreen_dialog: bool) -> Ref<Self> {
         self.page_route_data_mut(app).fullscreen_dialog = fullscreen_dialog;
         self
     }
 
     /// Dart `CupertinoPageRoute(allowSnapshotting:)`.
     pub fn allow_snapshotting(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         allow_snapshotting: bool,
-    ) -> Handle<Self> {
+    ) -> Ref<Self> {
         self.page_route_data_mut(app).allow_snapshotting = allow_snapshotting;
         self
     }
 
     /// Dart `CupertinoPageRoute(includeRouteSemantics:)`.
     pub fn include_route_semantics(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         include_route_semantics: bool,
-    ) -> Handle<Self> {
-        app.get_mut(self).include_route_semantics = include_route_semantics;
+    ) -> Ref<Self> {
+        app.get_mut(&self).include_route_semantics = include_route_semantics;
         self
     }
 
     /// Dart `CupertinoPageRoute(barrierDismissible:)`.
     pub fn barrier_dismissible(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         barrier_dismissible: bool,
-    ) -> Handle<Self> {
+    ) -> Ref<Self> {
         self.page_route_data_mut(app).barrier_dismissible = barrier_dismissible;
         self
     }
@@ -892,7 +907,7 @@ impl PageBasedCupertinoPageRoute {
         app: &mut App,
         page: PageRef,
         allow_snapshotting: bool,
-    ) -> Handle<PageBasedCupertinoPageRoute> {
+    ) -> Ref<PageBasedCupertinoPageRoute> {
         let route = RouteData::new(app, Some(RouteSettingsRef::Page(page)), None);
         let transition_route = TransitionRouteData::new(app);
         let modal_route = ModalRouteData::new(app);
@@ -907,7 +922,7 @@ impl PageBasedCupertinoPageRoute {
             page_route,
             cupertino_route_transition: CupertinoRouteTransitionMixinData::new(),
         });
-        debug_assert!(TransitionRoute::opaque(this, app));
+        debug_assert!(TransitionRoute::opaque(this.handle(), app));
         this
     }
 
@@ -1183,13 +1198,10 @@ impl Page for CupertinoPage {
         }
     }
 
-    fn create_route(&self, app: &mut App, context: BuildContext, this: &PageRef) -> AnyRoute {
+    fn create_route(&self, app: &mut App, context: BuildContext, this: &PageRef) -> RouteRef {
         let _ = context;
-        Route::as_route(PageBasedCupertinoPageRoute::new(
-            app,
-            Rc::clone(this),
-            self.allow_snapshotting,
-        ))
+        PageBasedCupertinoPageRoute::new(app, Rc::clone(this), self.allow_snapshotting)
+            .into_erased()
     }
 }
 
@@ -1206,11 +1218,11 @@ pub struct CupertinoPageTransition {
     pub key: Option<KeyRef>,
 
     /// A linear route animation from 0.0 to 1.0 when this screen is being pushed.
-    pub primary_route_animation: AnyAnimation<f64>,
+    pub primary_route_animation: AnimationRef<f64>,
 
     /// A linear route animation from 0.0 to 1.0 when another screen is being pushed on top of
     /// this one.
-    pub secondary_route_animation: AnyAnimation<f64>,
+    pub secondary_route_animation: AnimationRef<f64>,
 
     /// The widget below this widget in the tree.
     pub child: WidgetRef,
@@ -1224,8 +1236,8 @@ pub struct CupertinoPageTransition {
 impl CupertinoPageTransition {
     /// Creates an iOS-style page transition.
     pub fn new<K>(
-        primary_route_animation: AnyAnimation<f64>,
-        secondary_route_animation: AnyAnimation<f64>,
+        primary_route_animation: AnimationRef<f64>,
+        secondary_route_animation: AnimationRef<f64>,
         child: impl IntoWidget<K>,
         linear_transition: bool,
     ) -> CupertinoPageTransition {
@@ -1248,8 +1260,8 @@ impl CupertinoPageTransition {
     pub fn delegated_transition(
         app: &mut App,
         context: BuildContext,
-        animation: AnyAnimation<f64>,
-        secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        secondary_animation: AnimationRef<f64>,
         allow_snapshotting: bool,
         child: Option<&WidgetRef>,
     ) -> Option<WidgetRef> {
@@ -1260,11 +1272,8 @@ impl CupertinoPageTransition {
             Curves::linear_to_ease_out(),
             Some(Curves::ease_in_to_linear()),
         );
-        let delegated_position_animation = animation.as_animation().drive(app, K_MIDDLE_LEFT_TWEEN);
+        let delegated_position_animation = animation.drive(app, K_MIDDLE_LEFT_TWEEN);
         animation.dispose(app);
-        // The position animation retains the curve, and the `SlideTransition` the position.
-        app.destroy_lingering(animation);
-        app.destroy_lingering(delegated_position_animation);
 
         let text_direction = Directionality::of(app, context);
         let mut transition = SlideTransition::new(delegated_position_animation)
@@ -1301,81 +1310,52 @@ impl StatefulWidget for CupertinoPageTransition {
 pub struct CupertinoPageTransitionState {
     state: StateData<CupertinoPageTransition>,
     // When this page is coming in to cover another page.
-    primary_position_animation: Option<AnyAnimation<Offset>>,
+    primary_position_animation: Option<AnimationRef<Offset>>,
     // When this page is becoming covered by another page.
-    secondary_position_animation: Option<AnyAnimation<Offset>>,
+    secondary_position_animation: Option<AnimationRef<Offset>>,
     // Shadow of page which is coming in to cover another page.
-    primary_shadow_animation: Option<AnyAnimation<DecorationRef>>,
+    primary_shadow_animation: Option<AnimationRef<DecorationRef>>,
     // Curve of primary page which is coming in to cover another page.
-    primary_position_curve: Option<Handle<CurvedAnimation>>,
+    primary_position_curve: Option<Ref<CurvedAnimation>>,
     // Curve of secondary page which is becoming covered by another page.
-    secondary_position_curve: Option<Handle<CurvedAnimation>>,
+    secondary_position_curve: Option<Ref<CurvedAnimation>>,
     // Curve of primary page's shadow.
-    primary_shadow_curve: Option<Handle<CurvedAnimation>>,
+    primary_shadow_curve: Option<Ref<CurvedAnimation>>,
 }
 
 impl CupertinoPageTransitionState {
     fn dispose_curve(self: Handle<Self>, app: &mut App) {
-        let state = app.get(self);
+        let state = app.get_mut(self);
         let curves = [
-            state.primary_position_curve,
-            state.secondary_position_curve,
-            state.primary_shadow_curve,
+            state.primary_position_curve.take(),
+            state.secondary_position_curve.take(),
+            state.primary_shadow_curve.take(),
         ];
         for curve in curves.into_iter().flatten() {
             curve.dispose(app);
-            // The animation driven from it retains it until the transition moves off it.
-            app.destroy_lingering(curve);
-        }
-        let state = app.get_mut(self);
-        state.primary_position_curve = None;
-        state.secondary_position_curve = None;
-        state.primary_shadow_curve = None;
-    }
-
-    /// Frees the driven animations `setup_animation` made, which Dart's collector frees once
-    /// they are replaced; the transitions built from them retain them until they move off.
-    fn free_animations(self: Handle<Self>, app: &mut App) {
-        let state = app.get_mut(self);
-        let animations = [
-            state
-                .primary_position_animation
-                .take()
-                .map(|animation| animation.id()),
-            state
-                .secondary_position_animation
-                .take()
-                .map(|animation| animation.id()),
-            state
-                .primary_shadow_animation
-                .take()
-                .map(|animation| animation.id()),
-        ];
-        for animation in animations.into_iter().flatten() {
-            app.destroy_lingering(animation);
         }
     }
 
     fn setup_animation(self: Handle<Self>, app: &mut App) {
         let widget = self.widget(app);
-        let primary_route_animation = widget.primary_route_animation;
-        let secondary_route_animation = widget.secondary_route_animation;
+        let primary_route_animation = widget.primary_route_animation.clone();
+        let secondary_route_animation = widget.secondary_route_animation.clone();
         if !widget.linear_transition {
             let primary_position_curve = CurvedAnimation::create(
                 app,
-                primary_route_animation,
+                primary_route_animation.clone(),
                 Curves::fast_ease_in_to_slow_ease_out(),
                 Some(Rc::new(Curves::fast_ease_in_to_slow_ease_out().flipped())),
             );
             let secondary_position_curve = CurvedAnimation::create(
                 app,
-                secondary_route_animation,
+                secondary_route_animation.clone(),
                 Curves::linear_to_ease_out(),
                 Some(Curves::ease_in_to_linear()),
             );
             let primary_shadow_curve = CurvedAnimation::create(
                 app,
-                primary_route_animation,
+                primary_route_animation.clone(),
                 Curves::linear_to_ease_out(),
                 None,
             );
@@ -1384,20 +1364,20 @@ impl CupertinoPageTransitionState {
             state.secondary_position_curve = Some(secondary_position_curve);
             state.primary_shadow_curve = Some(primary_shadow_curve);
         }
-        let primary_position_parent = match app.get(self).primary_position_curve {
-            Some(curve) => curve.as_animation(),
-            None => primary_route_animation,
+        let primary_position_parent = match &app.get(self).primary_position_curve {
+            Some(curve) => curve.erase(),
+            None => primary_route_animation.clone(),
         };
         let primary_position_animation = primary_position_parent.drive(app, K_RIGHT_MIDDLE_TWEEN);
-        let secondary_position_parent = match app.get(self).secondary_position_curve {
-            Some(curve) => curve.as_animation(),
-            None => secondary_route_animation,
+        let secondary_position_parent = match &app.get(self).secondary_position_curve {
+            Some(curve) => curve.erase(),
+            None => secondary_route_animation.clone(),
         };
         let secondary_position_animation =
             secondary_position_parent.drive(app, K_MIDDLE_LEFT_TWEEN);
-        let primary_shadow_parent = match app.get(self).primary_shadow_curve {
-            Some(curve) => curve.as_animation(),
-            None => primary_route_animation,
+        let primary_shadow_parent = match &app.get(self).primary_shadow_curve {
+            Some(curve) => curve.erase(),
+            None => primary_route_animation.clone(),
         };
         let primary_shadow_animation =
             primary_shadow_parent.drive(app, CupertinoEdgeShadowDecoration::k_tween());
@@ -1423,14 +1403,12 @@ impl State for CupertinoPageTransitionState {
             || old_widget.linear_transition != widget.linear_transition;
         if changed {
             self.dispose_curve(app);
-            self.free_animations(app);
             self.setup_animation(app);
         }
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
         self.dispose_curve(app);
-        self.free_animations(app);
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -1438,12 +1416,15 @@ impl State for CupertinoPageTransitionState {
         let state = app.get(self);
         let secondary_position_animation = state
             .secondary_position_animation
+            .clone()
             .expect("init_state ran first");
         let primary_position_animation = state
             .primary_position_animation
+            .clone()
             .expect("init_state ran first");
         let primary_shadow_animation = state
             .primary_shadow_animation
+            .clone()
             .expect("init_state ran first");
         let child = self.widget(app).child.clone();
         SlideTransition::new(secondary_position_animation)
@@ -1471,11 +1452,11 @@ pub struct CupertinoFullscreenDialogTransition {
     pub key: Option<KeyRef>,
 
     /// A linear route animation from 0.0 to 1.0 when this screen is being pushed.
-    pub primary_route_animation: AnyAnimation<f64>,
+    pub primary_route_animation: AnimationRef<f64>,
 
     /// A linear route animation from 0.0 to 1.0 when another screen is being pushed on top of
     /// this one.
-    pub secondary_route_animation: AnyAnimation<f64>,
+    pub secondary_route_animation: AnimationRef<f64>,
 
     /// The widget below this widget in the tree.
     pub child: WidgetRef,
@@ -1489,8 +1470,8 @@ pub struct CupertinoFullscreenDialogTransition {
 impl CupertinoFullscreenDialogTransition {
     /// Creates an iOS-style transition used for summoning fullscreen dialogs.
     pub fn new<K>(
-        primary_route_animation: AnyAnimation<f64>,
-        secondary_route_animation: AnyAnimation<f64>,
+        primary_route_animation: AnimationRef<f64>,
+        secondary_route_animation: AnimationRef<f64>,
         child: impl IntoWidget<K>,
         linear_transition: bool,
     ) -> CupertinoFullscreenDialogTransition {
@@ -1532,45 +1513,31 @@ impl StatefulWidget for CupertinoFullscreenDialogTransition {
 pub struct CupertinoFullscreenDialogTransitionState {
     state: StateData<CupertinoFullscreenDialogTransition>,
     /// When this page is coming in to cover another page.
-    primary_position_animation: Option<AnyAnimation<Offset>>,
+    primary_position_animation: Option<AnimationRef<Offset>>,
     /// When this page is becoming covered by another page.
-    secondary_position_animation: Option<AnyAnimation<Offset>>,
+    secondary_position_animation: Option<AnimationRef<Offset>>,
     /// Curve of primary page which is coming in to cover another page.
-    primary_position_curve: Option<Handle<CurvedAnimation>>,
+    primary_position_curve: Option<Ref<CurvedAnimation>>,
     /// Curve of secondary page which is becoming covered by another page.
-    secondary_position_curve: Option<Handle<CurvedAnimation>>,
+    secondary_position_curve: Option<Ref<CurvedAnimation>>,
 }
 
 impl CupertinoFullscreenDialogTransitionState {
     fn dispose_curve(self: Handle<Self>, app: &mut App) {
-        let state = app.get(self);
-        let curves = [state.primary_position_curve, state.secondary_position_curve];
+        let state = app.get_mut(self);
+        let curves = [
+            state.primary_position_curve.take(),
+            state.secondary_position_curve.take(),
+        ];
         for curve in curves.into_iter().flatten() {
             curve.dispose(app);
-            // The animation driven from it retains it until the transition moves off it.
-            app.destroy_lingering(curve);
-        }
-        let state = app.get_mut(self);
-        state.primary_position_curve = None;
-        state.secondary_position_curve = None;
-    }
-
-    /// See [`CupertinoPageTransitionState::free_animations`].
-    fn free_animations(self: Handle<Self>, app: &mut App) {
-        let state = app.get_mut(self);
-        let animations = [
-            state.primary_position_animation.take(),
-            state.secondary_position_animation.take(),
-        ];
-        for animation in animations.into_iter().flatten() {
-            app.destroy_lingering(animation);
         }
     }
 
     fn setup_animation(self: Handle<Self>, app: &mut App) {
         let widget = self.widget(app);
-        let primary_route_animation = widget.primary_route_animation;
-        let secondary_route_animation = widget.secondary_route_animation;
+        let primary_route_animation = widget.primary_route_animation.clone();
+        let secondary_route_animation = widget.secondary_route_animation.clone();
         let linear_transition = widget.linear_transition;
         let primary_position_curve = CurvedAnimation::create(
             app,
@@ -1580,10 +1547,8 @@ impl CupertinoFullscreenDialogTransitionState {
             // curve, which iOS does not use.
             Some(Rc::new(Curves::linear_to_ease_out().flipped())),
         );
-        app.get_mut(self).primary_position_curve = Some(primary_position_curve);
-        let primary_position_animation = primary_position_curve
-            .as_animation()
-            .drive(app, K_BOTTOM_UP_TWEEN);
+        app.get_mut(self).primary_position_curve = Some(primary_position_curve.clone());
+        let primary_position_animation = primary_position_curve.drive(app, K_BOTTOM_UP_TWEEN);
         let secondary_parent = if linear_transition {
             secondary_route_animation
         } else {
@@ -1593,8 +1558,8 @@ impl CupertinoFullscreenDialogTransitionState {
                 Curves::linear_to_ease_out(),
                 Some(Curves::ease_in_to_linear()),
             );
-            app.get_mut(self).secondary_position_curve = Some(secondary_position_curve);
-            secondary_position_curve.as_animation()
+            app.get_mut(self).secondary_position_curve = Some(secondary_position_curve.clone());
+            secondary_position_curve.into_erased()
         };
         let secondary_position_animation = secondary_parent.drive(app, K_MIDDLE_LEFT_TWEEN);
         let state = app.get_mut(self);
@@ -1622,14 +1587,12 @@ impl State for CupertinoFullscreenDialogTransitionState {
             || old_widget.linear_transition != widget.linear_transition;
         if changed {
             self.dispose_curve(app);
-            self.free_animations(app);
             self.setup_animation(app);
         }
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
         self.dispose_curve(app);
-        self.free_animations(app);
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -1637,9 +1600,11 @@ impl State for CupertinoFullscreenDialogTransitionState {
         let state = app.get(self);
         let secondary_position_animation = state
             .secondary_position_animation
+            .clone()
             .expect("init_state ran first");
         let primary_position_animation = state
             .primary_position_animation
+            .clone()
             .expect("init_state ran first");
         let child = self.widget(app).child.clone();
         SlideTransition::new(secondary_position_animation)
@@ -1657,7 +1622,7 @@ impl State for CupertinoFullscreenDialogTransitionState {
 type RouteFlagGetter = Rc<dyn Fn(&App) -> bool>;
 
 /// Dart's `ValueGetter<_CupertinoBackGestureController<T>>`.
-type StartPopGestureCallback = Rc<dyn Fn(&mut App) -> Handle<CupertinoBackGestureController>>;
+type StartPopGestureCallback = Rc<dyn Fn(&mut App) -> Ref<CupertinoBackGestureController>>;
 
 /// Dart's `ValueGetter<bool>` reading a route through the arena.
 type BackGestureEnabledCallback = Rc<dyn Fn(&mut App) -> bool>;
@@ -1698,13 +1663,16 @@ impl StatefulWidget for CupertinoBackGestureDetector {
 /// Dart's `_CupertinoBackGestureDetectorState`.
 struct CupertinoBackGestureDetectorState {
     state: StateData<CupertinoBackGestureDetector>,
-    back_gesture_controller: Option<Handle<CupertinoBackGestureController>>,
-    recognizer: Option<Handle<HorizontalDragGestureRecognizer>>,
+    back_gesture_controller: Option<Ref<CupertinoBackGestureController>>,
+    recognizer: Option<Ref<HorizontalDragGestureRecognizer>>,
 }
 
 impl CupertinoBackGestureDetectorState {
     fn recognizer(self: Handle<Self>, app: &App) -> Handle<HorizontalDragGestureRecognizer> {
-        app.get(self).recognizer.expect("init_state ran first")
+        app.get(self)
+            .recognizer
+            .handle()
+            .expect("init_state ran first")
     }
 
     fn handle_drag_start(self: Handle<Self>, app: &mut App, _details: DragStartDetails) {
@@ -1720,6 +1688,7 @@ impl CupertinoBackGestureDetectorState {
         let controller = app
             .get(self)
             .back_gesture_controller
+            .handle()
             .expect("a drag start ran first");
         let width = self
             .context(app)
@@ -1738,6 +1707,7 @@ impl CupertinoBackGestureDetectorState {
         let controller = app
             .get(self)
             .back_gesture_controller
+            .handle()
             .expect("a drag start ran first");
         let width = self
             .context(app)
@@ -1754,7 +1724,7 @@ impl CupertinoBackGestureDetectorState {
         debug_assert!(self.mounted(app));
         // This can be called even if start is not called, paired with the "down" event that we
         // don't consider here.
-        if let Some(controller) = app.get(self).back_gesture_controller {
+        if let Some(controller) = app.get(self).back_gesture_controller.handle() {
             controller.drag_end(app, 0.0);
         }
         app.get_mut(self).back_gesture_controller = None;
@@ -1815,12 +1785,14 @@ impl State for CupertinoBackGestureDetectorState {
         // If this is disposed during a drag, call navigator.didStopUserGesture.
         if app.get(self).back_gesture_controller.is_some() {
             // The callback keeps the disposed state, as Dart's closure keeps `this`.
-            let this = app.retain(self);
+            let this = self
+                .upgrade(app)
+                .expect("the tree keeps the state while it disposes");
             SchedulerBinding::add_post_frame_callback(
                 app,
                 FrameCallback::new(move |app, _timestamp| {
-                    let state = this.get();
-                    if let Some(controller) = app.get(state).back_gesture_controller {
+                    let state = this.handle();
+                    if let Some(controller) = app.get(state).back_gesture_controller.handle() {
                         let navigator = app.get(controller).navigator;
                         if navigator.mounted(app) {
                             navigator.did_stop_user_gesture(app);
@@ -1872,7 +1844,7 @@ impl State for CupertinoBackGestureDetectorState {
 /// This object works entirely in logical coordinates (0.0 is new page dismissed, 1.0 is new
 /// page on top).
 struct CupertinoBackGestureController {
-    controller: Handle<AnimationController>,
+    controller: Ref<AnimationController>,
     navigator: Handle<NavigatorState>,
     get_is_active: RouteFlagGetter,
     get_is_current: RouteFlagGetter,
@@ -1883,10 +1855,10 @@ impl CupertinoBackGestureController {
     fn new(
         app: &mut App,
         navigator: Handle<NavigatorState>,
-        controller: Handle<AnimationController>,
+        controller: Ref<AnimationController>,
         get_is_current: RouteFlagGetter,
         get_is_active: RouteFlagGetter,
-    ) -> Handle<CupertinoBackGestureController> {
+    ) -> Ref<CupertinoBackGestureController> {
         let this = app.create(CupertinoBackGestureController {
             controller,
             navigator,
@@ -1900,7 +1872,7 @@ impl CupertinoBackGestureController {
     /// The drag gesture has changed by `delta`. The total range of the drag should be 0.0 to
     /// 1.0.
     fn drag_update(self: Handle<Self>, app: &mut App, delta: f64) {
-        let controller = app.get(self).controller;
+        let controller = app.get(self).controller.handle();
         let value = controller.value(app);
         controller.set_value(app, value - delta);
     }
@@ -1912,7 +1884,7 @@ impl CupertinoBackGestureController {
         //
         // This curve has been determined through rigorously eyeballing native iOS animations.
         let animation_curve = Curves::fast_ease_in_to_slow_ease_out();
-        let controller = app.get(self).controller;
+        let controller = app.get(self).controller.handle();
         let is_current = (Rc::clone(&app.get(self).get_is_current))(app);
         let animate_forward = if !is_current {
             // If the page has already been navigated away from, then the animation direction
@@ -1960,33 +1932,41 @@ impl CupertinoBackGestureController {
             // Keep the userGestureInProgress in true state so we don't change the curve of the
             // page transition mid-flight since CupertinoPageTransition depends on
             // userGestureInProgress.
-            Animation::add_status_listener(
-                controller,
-                app,
-                AnimationStatusListener::handle_method(
-                    self,
-                    CupertinoBackGestureController::handle_animation_status,
-                ),
-            );
+            let navigator = app.get(self).navigator;
+            stop_user_gesture_when_the_animation_ends(app, navigator, controller);
         } else {
             let navigator = app.get(self).navigator;
             navigator.did_stop_user_gesture(app);
         }
     }
+}
 
-    fn handle_animation_status(self: Handle<Self>, app: &mut App, _status: AnimationStatus) {
-        let navigator = app.get(self).navigator;
-        navigator.did_stop_user_gesture(app);
-        let controller = app.get(self).controller;
-        Animation::remove_status_listener(
-            controller,
-            app,
-            &AnimationStatusListener::handle_method(
-                self,
-                CupertinoBackGestureController::handle_animation_status,
-            ),
-        );
-    }
+/// Dart's `animationStatusCallback` in `_CupertinoBackGestureController.dragEnd` and
+/// `_CupertinoDragGestureController.dragEnd`: the first status change of `controller` ends the
+/// user gesture on `navigator`, and the listener removes itself.
+///
+/// The listener names itself through a cell of its own weak handle, so nothing points back at it
+/// strongly: it lives in the controller's list and goes with it. The weak handle is returned for
+/// the tests.
+pub(crate) fn stop_user_gesture_when_the_animation_ends(
+    app: &mut App,
+    navigator: Handle<NavigatorState>,
+    controller: Handle<AnimationController>,
+) -> WeakAnimationStatusListener {
+    let me: Rc<OnceCell<WeakAnimationStatusListener>> = Rc::default();
+    let listener = AnimationStatusListener::new({
+        let me = Rc::clone(&me);
+        move |_status, app| {
+            navigator.did_stop_user_gesture(app);
+            if let Some(listener) = me.get().and_then(WeakAnimationStatusListener::upgrade) {
+                Animation::remove_status_listener(controller, app, &listener);
+            }
+        }
+    });
+    let weak = listener.downgrade();
+    let _ = me.set(weak.clone());
+    Animation::add_status_listener(controller, app, listener);
+    weak
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2327,7 +2307,7 @@ impl CupertinoModalPopupRoute {
     /// Dart's defaults: `barrier_label` "Dismiss", `barrier_color`
     /// [`K_CUPERTINO_MODAL_BARRIER_COLOR`], `barrier_dismissible` true, `semantics_dismissible`
     /// false.
-    pub fn new(app: &mut App, builder: WidgetBuilder) -> Handle<CupertinoModalPopupRoute> {
+    pub fn new(app: &mut App, builder: WidgetBuilder) -> Ref<CupertinoModalPopupRoute> {
         let route = RouteData::new(app, None, None);
         let transition_route = TransitionRouteData::new(app);
         let modal_route = ModalRouteData::new(app);
@@ -2346,55 +2326,55 @@ impl CupertinoModalPopupRoute {
     }
 
     /// Dart `CupertinoModalPopupRoute(barrierLabel:)`.
-    pub fn barrier_label(self: Handle<Self>, app: &mut App, barrier_label: String) -> Handle<Self> {
-        app.get_mut(self).barrier_label = barrier_label;
+    pub fn barrier_label(self: Ref<Self>, app: &mut App, barrier_label: String) -> Ref<Self> {
+        app.get_mut(&self).barrier_label = barrier_label;
         self
     }
 
     /// Dart `CupertinoModalPopupRoute(barrierColor:)`.
     pub fn barrier_color(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         barrier_color: Option<AnyColor>,
-    ) -> Handle<Self> {
-        app.get_mut(self).barrier_color = barrier_color;
+    ) -> Ref<Self> {
+        app.get_mut(&self).barrier_color = barrier_color;
         self
     }
 
     /// Dart `CupertinoModalPopupRoute(barrierDismissible:)`.
     pub fn barrier_dismissible(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         barrier_dismissible: bool,
-    ) -> Handle<Self> {
-        app.get_mut(self).barrier_dismissible = barrier_dismissible;
+    ) -> Ref<Self> {
+        app.get_mut(&self).barrier_dismissible = barrier_dismissible;
         self
     }
 
     /// Dart `CupertinoModalPopupRoute(semanticsDismissible:)`.
     pub fn semantics_dismissible(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         semantics_dismissible: bool,
-    ) -> Handle<Self> {
-        app.get_mut(self).semantics_dismissible = semantics_dismissible;
+    ) -> Ref<Self> {
+        app.get_mut(&self).semantics_dismissible = semantics_dismissible;
         self
     }
 
     /// Dart `CupertinoModalPopupRoute(filter:)`.
-    pub fn filter(self: Handle<Self>, app: &mut App, filter: ImageFilter) -> Handle<Self> {
+    pub fn filter(self: Ref<Self>, app: &mut App, filter: ImageFilter) -> Ref<Self> {
         self.modal_route_data_mut(app).filter = Some(ImageFilterConfig::new(filter));
         self
     }
 
     /// Dart `CupertinoModalPopupRoute(settings:)`.
-    pub fn settings(self: Handle<Self>, app: &mut App, settings: RouteSettingsRef) -> Handle<Self> {
+    pub fn settings(self: Ref<Self>, app: &mut App, settings: RouteSettingsRef) -> Ref<Self> {
         self.route_data_mut(app).set_settings(settings);
         self
     }
 
     /// Dart `CupertinoModalPopupRoute(requestFocus:)`.
-    pub fn request_focus(self: Handle<Self>, app: &mut App, request_focus: bool) -> Handle<Self> {
+    pub fn request_focus(self: Ref<Self>, app: &mut App, request_focus: bool) -> Ref<Self> {
         self.route_data_mut(app)
             .set_request_focus(Some(request_focus));
         self
@@ -2472,8 +2452,8 @@ impl ModalRoute for CupertinoModalPopupRoute {
         self: Handle<Self>,
         app: &mut App,
         context: BuildContext,
-        animation: AnyAnimation<f64>,
-        secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        secondary_animation: AnimationRef<f64>,
     ) -> WidgetRef {
         let _ = (context, animation, secondary_animation);
         let builder = Rc::clone(&app.get(self).builder);
@@ -2488,12 +2468,12 @@ impl ModalRoute for CupertinoModalPopupRoute {
         self: Handle<Self>,
         app: &mut App,
         context: BuildContext,
-        animation: AnyAnimation<f64>,
-        secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        secondary_animation: AnimationRef<f64>,
         child: WidgetRef,
     ) -> WidgetRef {
         let _ = (context, secondary_animation);
-        let translation = CupertinoModalPopupRoute::OFFSET_TWEEN.evaluate(app, animation);
+        let translation = CupertinoModalPopupRoute::OFFSET_TWEEN.evaluate(app, animation.handle());
         Align::new()
             .alignment(AlignmentGeometry::BOTTOM_CENTER)
             .child(FractionalTranslation::new(translation).child(child))
@@ -2554,21 +2534,21 @@ pub fn show_cupertino_modal_popup(
     request_focus: Option<bool>,
 ) -> CompleterFuture<RouteResult> {
     let resolved_barrier_color = CupertinoDynamicColor::resolve(&barrier_color, app, context);
-    let route = CupertinoModalPopupRoute::new(app, builder)
+    let mut route = CupertinoModalPopupRoute::new(app, builder)
         .barrier_color(app, Some(resolved_barrier_color))
         .barrier_dismissible(app, barrier_dismissible)
         .semantics_dismissible(app, semantics_dismissible);
     if let Some(filter) = filter {
-        route.filter(app, filter);
+        route = route.filter(app, filter);
     }
     if let Some(route_settings) = route_settings {
-        route.settings(app, route_settings);
+        route = route.settings(app, route_settings);
     }
     if let Some(request_focus) = request_focus {
-        route.request_focus(app, request_focus);
+        route = route.request_focus(app, request_focus);
     }
     let navigator = Navigator::of(app, context, use_root_navigator);
-    navigator.push(app, Route::as_route(route))
+    navigator.push(app, route.into_erased())
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2583,8 +2563,8 @@ pub fn show_cupertino_modal_popup(
 fn build_cupertino_dialog_transitions(
     _app: &mut App,
     _context: BuildContext,
-    _animation: AnyAnimation<f64>,
-    _secondary_animation: AnyAnimation<f64>,
+    _animation: AnimationRef<f64>,
+    _secondary_animation: AnimationRef<f64>,
     child: WidgetRef,
 ) -> WidgetRef {
     child
@@ -2629,22 +2609,22 @@ pub fn show_cupertino_dialog(
     route_settings: Option<RouteSettingsRef>,
     request_focus: Option<bool>,
 ) -> CompleterFuture<RouteResult> {
-    let route = CupertinoDialogRoute::new(app, builder, context)
+    let mut route = CupertinoDialogRoute::new(app, builder, context)
         .barrier_dismissible(app, barrier_dismissible);
     if let Some(barrier_label) = barrier_label {
-        route.barrier_label(app, barrier_label);
+        route = route.barrier_label(app, barrier_label);
     }
     if let Some(barrier_color) = barrier_color {
-        route.barrier_color(app, Some(barrier_color));
+        route = route.barrier_color(app, Some(barrier_color));
     }
     if let Some(route_settings) = route_settings {
-        route.settings(app, route_settings);
+        route = route.settings(app, route_settings);
     }
     if let Some(request_focus) = request_focus {
-        route.request_focus(app, request_focus);
+        route = route.request_focus(app, request_focus);
     }
     let navigator = Navigator::of(app, context, use_root_navigator);
-    navigator.push(app, Route::as_route(route))
+    navigator.push(app, route.into_erased())
 }
 
 /// A dialog route that shows an iOS-style dialog.
@@ -2699,7 +2679,7 @@ impl CupertinoDialogRoute {
         app: &mut App,
         builder: WidgetBuilder,
         context: BuildContext,
-    ) -> Handle<CupertinoDialogRoute> {
+    ) -> Ref<CupertinoDialogRoute> {
         let barrier_label =
             <dyn CupertinoLocalizations>::of(app, context).modal_barrier_dismiss_label();
         let barrier_color =
@@ -2727,36 +2707,36 @@ impl CupertinoDialogRoute {
 
     /// Dart `CupertinoDialogRoute(barrierDismissible:)`.
     pub fn barrier_dismissible(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         barrier_dismissible: bool,
-    ) -> Handle<Self> {
+    ) -> Ref<Self> {
         self.raw_dialog_route_data_mut(app).barrier_dismissible = barrier_dismissible;
         self
     }
 
     /// Dart `CupertinoDialogRoute(barrierColor:)`.
     pub fn barrier_color(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         barrier_color: Option<Color>,
-    ) -> Handle<Self> {
+    ) -> Ref<Self> {
         self.raw_dialog_route_data_mut(app).barrier_color = barrier_color;
         self
     }
 
     /// Dart `CupertinoDialogRoute(barrierLabel:)`.
-    pub fn barrier_label(self: Handle<Self>, app: &mut App, barrier_label: String) -> Handle<Self> {
+    pub fn barrier_label(self: Ref<Self>, app: &mut App, barrier_label: String) -> Ref<Self> {
         self.raw_dialog_route_data_mut(app).barrier_label = Some(barrier_label);
         self
     }
 
     /// Dart `CupertinoDialogRoute(transitionDuration:)`.
     pub fn transition_duration(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         transition_duration: Duration,
-    ) -> Handle<Self> {
+    ) -> Ref<Self> {
         self.raw_dialog_route_data_mut(app).transition_duration = transition_duration;
         self
     }
@@ -2764,24 +2744,24 @@ impl CupertinoDialogRoute {
     /// Dart `CupertinoDialogRoute(transitionBuilder:)`, which Dart also hands to
     /// `RawDialogRoute` in place of the jump-cut fallback.
     pub fn transition_builder(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         transition_builder: RouteTransitionsBuilder,
-    ) -> Handle<Self> {
+    ) -> Ref<Self> {
         self.raw_dialog_route_data_mut(app).transition_builder =
             Some(Rc::clone(&transition_builder));
-        app.get_mut(self).transition_builder = Some(transition_builder);
+        app.get_mut(&self).transition_builder = Some(transition_builder);
         self
     }
 
     /// Dart `CupertinoDialogRoute(settings:)`.
-    pub fn settings(self: Handle<Self>, app: &mut App, settings: RouteSettingsRef) -> Handle<Self> {
+    pub fn settings(self: Ref<Self>, app: &mut App, settings: RouteSettingsRef) -> Ref<Self> {
         self.route_data_mut(app).set_settings(settings);
         self
     }
 
     /// Dart `CupertinoDialogRoute(requestFocus:)`.
-    pub fn request_focus(self: Handle<Self>, app: &mut App, request_focus: bool) -> Handle<Self> {
+    pub fn request_focus(self: Ref<Self>, app: &mut App, request_focus: bool) -> Ref<Self> {
         self.route_data_mut(app)
             .set_request_focus(Some(request_focus));
         self
@@ -2829,8 +2809,8 @@ impl RawDialogRouteLeaf for CupertinoDialogRoute {
         self: Handle<Self>,
         app: &mut App,
         context: BuildContext,
-        animation: AnyAnimation<f64>,
-        secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        secondary_animation: AnimationRef<f64>,
         child: WidgetRef,
     ) -> WidgetRef {
         if app.get(self).transition_builder.is_some() {
@@ -2848,12 +2828,9 @@ impl RawDialogRouteLeaf for CupertinoDialogRoute {
             return FadeTransition::new(animation).child(child).into_widget();
         }
         let scale = animation.drive(app, CupertinoDialogRoute::DIALOG_SCALE_TWEEN);
-        let transition = FadeTransition::new(animation)
+        FadeTransition::new(animation)
             .child(ScaleTransition::new(scale).child(child))
-            .into_widget();
-        // The `ScaleTransition` retains it.
-        app.destroy_lingering(scale);
-        transition
+            .into_widget()
     }
 }
 
@@ -2906,8 +2883,8 @@ impl PageTransitionsBuilder for CupertinoPageTransitionsBuilder {
         app: &mut App,
         route: AnyPageRoute,
         context: BuildContext,
-        animation: AnyAnimation<f64>,
-        secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        secondary_animation: AnimationRef<f64>,
         child: WidgetRef,
     ) -> WidgetRef {
         build_page_transitions(route, app, context, animation, secondary_animation, child)
@@ -3050,10 +3027,10 @@ mod tests {
             let page_context = Rc::clone(&page_context);
             navigator(&navigator_key, move |navigator| {
                 navigator.on_generate_route(move |app, _settings| {
-                    Some(Route::as_route(CupertinoPageRoute::new(
-                        app,
-                        context_page(Rc::clone(&page_context)),
-                    )))
+                    Some(
+                        CupertinoPageRoute::new(app, context_page(Rc::clone(&page_context)))
+                            .into_erased(),
+                    )
                 })
             })
         });
@@ -3074,12 +3051,61 @@ mod tests {
         cell.borrow().debug_object_count() as isize - before
     }
 
+    /// Not a Dart case: a controller disposed before its status changes takes the back
+    /// gesture's listener with it, as the closure Dart makes goes with its controller.
+    #[test]
+    fn the_back_gestures_status_listener_goes_with_a_controller_disposed_first() {
+        use waft_animation::AnimationBehavior;
+        use waft_scheduler::{Ticker, TickerCallback, TickerProvider};
+
+        struct Vsync;
+        impl TickerProvider for Vsync {
+            fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
+                Ticker::new(app, on_tick, None)
+            }
+        }
+
+        let cell = test_cell();
+        let navigator_key = GlobalKey::new();
+        build(
+            &cell,
+            navigator(&navigator_key, |navigator| {
+                navigator.on_generate_route(|app, _settings| {
+                    Some(CupertinoPageRoute::new(app, plain_page()).into_erased())
+                })
+            }),
+        );
+        let mut app = cell.borrow_mut();
+        let state = navigator_state(&navigator_key, &mut app);
+        let controller = AnimationController::create(
+            &mut app,
+            None,
+            Some(Duration::from_millis(100)),
+            None,
+            0.0,
+            1.0,
+            AnimationBehavior::Normal,
+            Vsync,
+        );
+        let listener =
+            stop_user_gesture_when_the_animation_ends(&mut app, state, controller.handle());
+        assert!(
+            listener.upgrade().is_some(),
+            "the controller's list holds it"
+        );
+        controller.dispose(&mut app);
+        drop(controller);
+        drop(app);
+        cell.checkpoint();
+        assert!(listener.upgrade().is_none(), "nothing else holds it");
+    }
+
     /// Not a Dart case: see [`objects_a_mid_push_frame_leaves`].
     #[test]
     fn a_frame_of_a_cupertino_page_push_leaves_no_new_arena_objects() {
         let left = objects_a_mid_push_frame_leaves(|app, _context, state| {
             let pushed = CupertinoPageRoute::new(app, plain_page());
-            state.push(app, Route::as_route(pushed));
+            state.push(app, pushed.clone().into_erased());
         });
         assert_eq!(left, 0);
     }
@@ -3089,7 +3115,7 @@ mod tests {
     fn a_frame_of_a_fullscreen_dialog_push_leaves_no_new_arena_objects() {
         let left = objects_a_mid_push_frame_leaves(|app, _context, state| {
             let pushed = CupertinoPageRoute::new(app, plain_page()).fullscreen_dialog(app, true);
-            state.push(app, Route::as_route(pushed));
+            state.push(app, pushed.clone().into_erased());
         });
         assert_eq!(left, 0);
     }
@@ -3123,7 +3149,7 @@ mod tests {
             &cell,
             navigator(&navigator_key, |navigator| {
                 navigator.on_generate_route(|app, _settings| {
-                    Some(Route::as_route(CupertinoPageRoute::new(app, plain_page())))
+                    Some(CupertinoPageRoute::new(app, plain_page()).into_erased())
                 })
             }),
         );
@@ -3133,7 +3159,7 @@ mod tests {
 
         let page_key = GlobalKey::new();
         let pushed = CupertinoPageRoute::new(&mut app, keyed_page(&page_key));
-        state.push(&mut app, Route::as_route(pushed));
+        state.push(&mut app, pushed.clone().into_erased());
         let mut at = at;
         for _ in 0..4 {
             at += Duration::from_millis(20);
@@ -3151,12 +3177,13 @@ mod tests {
             0.0,
             "the slide ends with the page fully on screen"
         );
-        let animation = TransitionRoute::animation(pushed, &app).expect("an installed route");
+        let animation =
+            TransitionRoute::animation(pushed.handle(), &app).expect("an installed route");
         assert_eq!(animation.value(&app), 1.0);
 
         state.pop(&mut app, None);
         settle(&mut app, at);
-        assert!(!Route::is_active(pushed, &app), "the route popped");
+        assert!(!Route::is_active(pushed.handle(), &app), "the route popped");
     }
 
     #[test]
@@ -3221,7 +3248,7 @@ mod tests {
             &cell,
             navigator(&navigator_key, |navigator| {
                 navigator.on_generate_route(|app, _settings| {
-                    Some(Route::as_route(CupertinoPageRoute::new(app, plain_page())))
+                    Some(CupertinoPageRoute::new(app, plain_page()).into_erased())
                 })
             }),
         );
@@ -3231,7 +3258,7 @@ mod tests {
 
         let page_key = GlobalKey::new();
         let pushed = CupertinoPageRoute::new(&mut app, keyed_page(&page_key));
-        state.push(&mut app, Route::as_route(pushed));
+        state.push(&mut app, pushed.clone().into_erased());
         let at = settle(&mut app, at);
         assert_eq!(page_left(&page_key, &mut app), 0.0);
 
@@ -3259,7 +3286,7 @@ mod tests {
         );
         settle(&mut app, at + Duration::from_millis(48));
         assert!(
-            !Route::is_active(pushed, &app),
+            !Route::is_active(pushed.handle(), &app),
             "the fling popped the route"
         );
     }
@@ -3274,7 +3301,7 @@ mod tests {
             &cell,
             navigator(&navigator_key, |navigator| {
                 navigator.on_generate_route(|app, _settings| {
-                    Some(Route::as_route(CupertinoPageRoute::new(app, plain_page())))
+                    Some(CupertinoPageRoute::new(app, plain_page()).into_erased())
                 })
             }),
         );
@@ -3284,7 +3311,7 @@ mod tests {
 
         let page_key = GlobalKey::new();
         let pushed = CupertinoPageRoute::new(&mut app, keyed_page(&page_key));
-        state.push(&mut app, Route::as_route(pushed));
+        state.push(&mut app, pushed.clone().into_erased());
         let at = settle(&mut app, at);
 
         send(&mut app, PointerChange::Down, 5.0, 150.0, Duration::ZERO);
@@ -3310,7 +3337,10 @@ mod tests {
         );
         settle(&mut app, at + Duration::from_millis(240));
 
-        assert!(Route::is_active(pushed, &app), "the short drag did not pop");
+        assert!(
+            Route::is_active(pushed.handle(), &app),
+            "the short drag did not pop"
+        );
         assert_eq!(
             page_left(&page_key, &mut app),
             0.0,
@@ -3329,10 +3359,10 @@ mod tests {
             let page_context = Rc::clone(&page_context);
             navigator(&navigator_key, move |navigator| {
                 navigator.on_generate_route(move |app, _settings| {
-                    Some(Route::as_route(CupertinoPageRoute::new(
-                        app,
-                        context_page(Rc::clone(&page_context)),
-                    )))
+                    Some(
+                        CupertinoPageRoute::new(app, context_page(Rc::clone(&page_context)))
+                            .into_erased(),
+                    )
                 })
             })
         });
@@ -3394,10 +3424,10 @@ mod tests {
             let page_context = Rc::clone(&page_context);
             navigator(&navigator_key, move |navigator| {
                 navigator.on_generate_route(move |app, _settings| {
-                    Some(Route::as_route(CupertinoPageRoute::new(
-                        app,
-                        context_page(Rc::clone(&page_context)),
-                    )))
+                    Some(
+                        CupertinoPageRoute::new(app, context_page(Rc::clone(&page_context)))
+                            .into_erased(),
+                    )
                 })
             })
         });
@@ -3426,7 +3456,8 @@ mod tests {
         let opacity = dialog_context
             .find_ancestor_widget_of_exact_type::<FadeTransition>(&app)
             .expect("the dialog is wrapped in a FadeTransition")
-            .opacity;
+            .opacity
+            .clone();
         let value = opacity.value(&app);
         assert!(
             value > 0.0 && value < 1.0,
@@ -3450,8 +3481,8 @@ mod tests {
             navigator(&navigator_key, move |navigator| {
                 navigator.on_generate_route(move |app, _settings| {
                     let route = CupertinoPageRoute::new(app, plain_page());
-                    first.set(Some(route));
-                    Some(Route::as_route(route))
+                    first.set(Some(route.handle()));
+                    Some(route.into_erased())
                 })
             })
         });
@@ -3466,20 +3497,20 @@ mod tests {
 
         let dialog =
             CupertinoPageRoute::new(&mut app, plain_page()).fullscreen_dialog(&mut app, true);
-        state.push(&mut app, Route::as_route(dialog));
+        state.push(&mut app, dialog.clone().into_erased());
         let at = settle(&mut app, at);
         assert!(
-            !PredictiveBackRoute::pop_gesture_enabled(dialog, &mut app),
+            !PredictiveBackRoute::pop_gesture_enabled(dialog.handle(), &mut app),
             "a fullscreen dialog is not dismissible by back swipe"
         );
 
         state.pop(&mut app, None);
         let at = settle(&mut app, at);
         let second = CupertinoPageRoute::new(&mut app, plain_page());
-        state.push(&mut app, Route::as_route(second));
+        state.push(&mut app, second.clone().into_erased());
         settle(&mut app, at);
         assert!(
-            PredictiveBackRoute::pop_gesture_enabled(second, &mut app),
+            PredictiveBackRoute::pop_gesture_enabled(second.handle(), &mut app),
             "a plain second page route can be swiped back"
         );
     }
@@ -3492,13 +3523,13 @@ mod tests {
         app: &mut App,
         page: WidgetBuilder,
         fullscreen_dialog: bool,
-    ) -> Handle<waft_widgets::PageRouteBuilder> {
+    ) -> Ref<waft_widgets::PageRouteBuilder> {
         let route = waft_widgets::PageRouteBuilder::new(
             app,
             Rc::new(move |app, context, _animation, _secondary_animation| page(app, context)),
         )
         .fullscreen_dialog(app, fullscreen_dialog);
-        let page_route = PageRoute::as_page_route(route);
+        let page_route = PageRoute::as_page_route(route.handle());
         route.transitions_builder(
             app,
             Rc::new(move |app, context, animation, secondary_animation, child| {
@@ -3511,8 +3542,7 @@ mod tests {
                     child,
                 )
             }),
-        );
-        route
+        )
     }
 
     /// route_test.dart's "builds a CupertinoPageTransition", with the builder in place of
@@ -3529,7 +3559,7 @@ mod tests {
                 let first = first.clone();
                 move |navigator| {
                     navigator.on_generate_route(move |app, _settings| {
-                        Some(builder_route(app, keyed_page(&first), false).as_route())
+                        Some(builder_route(app, keyed_page(&first), false).into_erased())
                     })
                 }
             }),
@@ -3542,7 +3572,7 @@ mod tests {
                 .is_some()
         );
 
-        let pushed = builder_route(&mut app, keyed_page(&second), false).as_route();
+        let pushed = builder_route(&mut app, keyed_page(&second), false).into_erased();
         navigator_state(&key, &mut app).push(&mut app, pushed);
         let at = settle(&mut app, Duration::ZERO);
         let second_context = second.current_context(&app).expect("the page is mounted");
@@ -3554,7 +3584,7 @@ mod tests {
         assert_eq!(page_left(&second, &mut app), 0.0, "the page slid in");
 
         let dialog_key = GlobalKey::new();
-        let dialog = builder_route(&mut app, keyed_page(&dialog_key), true).as_route();
+        let dialog = builder_route(&mut app, keyed_page(&dialog_key), true).into_erased();
         navigator_state(&key, &mut app).push(&mut app, dialog);
         settle(&mut app, at);
         let dialog_context = dialog_key

@@ -21,7 +21,7 @@ use waft_rendering::{
 };
 use waft_services::MouseCursorRef;
 use waft_widgets::{
-    AnyFocusNode, BuildContext, Center, ConstrainedBox, IconTheme, IconThemeData, IntoWidget,
+    BuildContext, Center, ConstrainedBox, FocusNodeRef, IconTheme, IconThemeData, IntoWidget,
     KeyRef, Padding, RenderObjectWidget, Semantics, SingleChildRenderObjectWidget, State,
     StateData, StatefulWidget, WidgetRef, WidgetState, WidgetStateMouseCursor, WidgetStateProperty,
     WidgetStates,
@@ -259,7 +259,7 @@ pub struct RawMaterialButton {
     /// An optional focus node to use as the focus node for this widget.
     ///
     /// See `Focus::focus_node`.
-    pub focus_node: Option<AnyFocusNode>,
+    pub focus_node: Option<FocusNodeRef>,
 
     /// True if this widget will be selected as the initial focus when no other node in its
     /// scope is currently focused.
@@ -464,7 +464,7 @@ impl RawMaterialButton {
     }
 
     /// Dart `RawMaterialButton(focusNode:)`.
-    pub fn focus_node(mut self, focus_node: AnyFocusNode) -> RawMaterialButton {
+    pub fn focus_node(mut self, focus_node: FocusNodeRef) -> RawMaterialButton {
         self.focus_node = Some(focus_node);
         self
     }
@@ -660,7 +660,7 @@ impl State for RawMaterialButtonState {
                     icon_theme_data,
                     Padding::new(padding).child(center),
                 ));
-        if let Some(focus_node) = widget.focus_node {
+        if let Some(focus_node) = widget.focus_node.clone() {
             ink_well = ink_well.focus_node(focus_node);
         }
         if let Some(splash_color) = widget.splash_color {
@@ -993,8 +993,8 @@ mod tests {
     use waft_services::SystemMouseCursors;
     use waft_widgets::{
         Actions, ActivateIntent, Builder, ColoredBox, Column, CrossAxisAlignment, Directionality,
-        FocusHighlightStrategy, FocusManager, FocusNode, FocusNodeLeaf, FocusScope, GlobalKey,
-        MouseRegion, SizedBox,
+        FocusHighlightStrategy, FocusManager, FocusNode, FocusScope, GlobalKey, MouseRegion,
+        SizedBox,
     };
 
     use super::*;
@@ -1030,8 +1030,8 @@ mod tests {
         FocusManager::instance(&mut app).set_highlight_strategy(&mut app, strategy);
     }
 
-    fn focus_node(tester: &WidgetTester) -> AnyFocusNode {
-        FocusNode::new(&mut tester.cell.borrow_mut()).as_node()
+    fn focus_node(tester: &WidgetTester) -> FocusNodeRef {
+        FocusNode::new(&mut tester.cell.borrow_mut()).into_erased()
     }
 
     /// Dart's `Text(text)` as its tests lay it out, in the Ahem font whose glyphs are 14
@@ -1169,7 +1169,7 @@ mod tests {
                         move |_app| pressed.set(true)
                     })))
                     .splash_color(Color::new(0xff00ff00))
-                    .focus_node(focus_node)
+                    .focus_node(focus_node.clone())
                     .child(Builder::new({
                         let inner = Rc::clone(&inner);
                         move |_app, context| {
@@ -1375,7 +1375,7 @@ mod tests {
                 &tester,
                 Center::new().child(
                     RawMaterialButton::new(noop())
-                        .focus_node(focus_node)
+                        .focus_node(focus_node.clone())
                         .focus_color(focus_color)
                         .child(red_square()),
                 ),
@@ -1399,7 +1399,7 @@ mod tests {
                 Center::new().child(
                     RawMaterialButton::new(noop())
                         .autofocus(true)
-                        .focus_node(focus_node)
+                        .focus_node(focus_node.clone())
                         .child(red_square()),
                 ),
             ));
@@ -1411,7 +1411,7 @@ mod tests {
                 &tester,
                 Center::new().child(
                     RawMaterialButton::new(None)
-                        .focus_node(focus_node)
+                        .focus_node(focus_node.clone())
                         .child(red_square()),
                 ),
             ));
@@ -1434,12 +1434,12 @@ mod tests {
                         Column::new().children([
                             RawMaterialButton::new(noop())
                                 .autofocus(true)
-                                .focus_node(focus_node1)
+                                .focus_node(focus_node1.clone())
                                 .child(red_square())
                                 .into_widget(),
                             RawMaterialButton::new(None)
                                 .autofocus(true)
-                                .focus_node(focus_node2)
+                                .focus_node(focus_node2.clone())
                                 .child(red_square())
                                 .into_widget(),
                         ]),

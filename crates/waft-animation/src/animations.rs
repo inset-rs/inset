@@ -2,16 +2,17 @@
 
 use std::rc::Rc;
 
-use waft_foundation::{App, Handle, ListenableObject, Listener, RetainedHandle, RetainedHandleId};
+use waft_foundation::{App, Handle, ListenableObject, Listener, Ref};
 
-use crate::animation::{Animation, AnimationStatus, AnimationStatusListener, AnyAnimation};
+use crate::animation::{
+    Animation, AnimationRef, AnimationStatus, AnimationStatusListener, AnyAnimation,
+};
 use crate::curves::Curve;
 use crate::listener_helpers::{
     AnimationEagerListenerMixin, AnimationLazyListenerData, AnimationLazyListenerMixin,
     AnimationLocalListenersData, AnimationLocalListenersMixin, AnimationLocalStatusListenersData,
     AnimationLocalStatusListenersMixin,
 };
-use crate::tween::Animatable;
 
 /// Dart's `_AlwaysCompleteAnimation`. Private like the original; reach it
 /// through [`k_always_complete_animation`].
@@ -50,9 +51,18 @@ impl Animation<f64> for AlwaysCompleteAnimation {
 ///
 /// Dart's `kAlwaysCompleteAnimation` is a `const` — every mention is one
 /// canonical object — and ours is the App's singleton of the same type, so
-/// every call returns the same identity, as Dart's mentions do.
-pub fn k_always_complete_animation(app: &mut App) -> AnyAnimation<f64> {
-    app.singleton::<AlwaysCompleteAnimation>().as_animation()
+/// every call returns the same identity, as Dart's mentions do. The App keeps
+/// it; the returned reference is one more keeper, for a field that holds it.
+pub fn k_always_complete_animation(app: &mut App) -> AnimationRef<f64> {
+    singleton_animation::<AlwaysCompleteAnimation>(app)
+}
+
+/// The App's singleton `A`, as an animation a field can keep.
+fn singleton_animation<A: Animation<f64> + Default>(app: &mut App) -> AnimationRef<f64> {
+    app.singleton::<A>()
+        .upgrade(app)
+        .expect("the App keeps its singletons")
+        .into_erased()
 }
 
 /// Dart's `_AlwaysDismissedAnimation`. Private like the original; reach it
@@ -92,8 +102,8 @@ impl Animation<f64> for AlwaysDismissedAnimation {
 ///
 /// See [`k_always_complete_animation`] for how the identity matches Dart's
 /// `const`.
-pub fn k_always_dismissed_animation(app: &mut App) -> AnyAnimation<f64> {
-    app.singleton::<AlwaysDismissedAnimation>().as_animation()
+pub fn k_always_dismissed_animation(app: &mut App) -> AnimationRef<f64> {
+    singleton_animation::<AlwaysDismissedAnimation>(app)
 }
 
 /// An animation that is always stopped at a given value.
@@ -219,10 +229,7 @@ pub trait AnimationWithParent<T: 'static>: Sized + 'static {
 pub struct ProxyAnimation {
     status: Option<AnimationStatus>,
     value: Option<f64>,
-    parent: Option<AnyAnimation<f64>>,
-    /// Keeps `parent` past its owner's `destroy` while this proxy follows it, as Dart's
-    /// reference keeps it alive: a build may hand a proxy an animation it frees at once.
-    retained_parent: Option<RetainedHandleId>,
+    parent: Option<AnimationRef<f64>>,
 
     // Dart mixes in `AnimationLazyListenerMixin`,
     // `AnimationLocalListenersMixin` and `AnimationLocalStatusListenersMixin`;
@@ -237,13 +244,12 @@ impl ProxyAnimation {
     ///
     /// If the animation argument is `None`, the proxy animation has the status
     /// [`AnimationStatus::Dismissed`] and a value of 0.0.
-    pub fn new(app: &mut App, animation: Option<AnyAnimation<f64>>) -> Handle<ProxyAnimation> {
-        let retained_parent = animation.map(|animation| app.retain_id(animation.id()));
+    #[track_caller]
+    pub fn new(app: &mut App, animation: Option<AnimationRef<f64>>) -> Ref<ProxyAnimation> {
         let mut result = ProxyAnimation {
             status: None,
             value: None,
             parent: animation,
-            retained_parent,
             lazy_listener: AnimationLazyListenerData::new(),
             local_listeners: AnimationLocalListenersData::new(),
             local_status_listeners: AnimationLocalStatusListenersData::new(),
@@ -255,36 +261,26 @@ impl ProxyAnimation {
         app.create(result)
     }
 
-    /// Chains a `Tween` (or any [`Animatable`]) to this proxy.
-    ///
-    /// Dart inherits `drive` from `Animation<double>`. A `Handle<ProxyAnimation>`
-    /// is not a subtype, so the method is inherent and forwards to
-    /// [`as_animation`](Animation::as_animation).
-    pub fn drive<U: 'static>(
-        self: Handle<Self>,
-        app: &mut App,
-        child: impl Animatable<U> + Clone + 'static,
-    ) -> AnyAnimation<U> {
-        self.as_animation().drive(app, child)
-    }
-
     /// The animation whose value this animation will proxy.
     ///
     /// This value is mutable ([`set_parent`](ProxyAnimation::set_parent)).
     /// When mutated, the listeners on the proxy animation will be
     /// transparently updated to be listening to the new parent animation.
+    ///
+    /// The bare handle, which the proxy keeps alive while it is the parent; a
+    /// caller that keeps it takes [`AnyAnimation::upgrade`].
     pub fn parent(self: Handle<Self>, app: &App) -> Option<AnyAnimation<f64>> {
-        app.get(self).parent
+        app.get(self).parent.as_deref().copied()
     }
 
     /// Changes the animation whose value this animation proxies.
     ///
     /// Dart's `parent` setter, `animations.dart:200`.
-    pub fn set_parent(self: Handle<Self>, app: &mut App, value: Option<AnyAnimation<f64>>) {
+    pub fn set_parent(self: Handle<Self>, app: &mut App, value: Option<AnimationRef<f64>>) {
         if value == app.get(self).parent {
             return;
         }
-        if let Some(parent) = app.get(self).parent {
+        if let Some(parent) = self.parent(app) {
             let (status, current) = (parent.status(app), parent.value(app));
             let proxy = app.get_mut(self);
             proxy.status = Some(status);
@@ -293,13 +289,9 @@ impl ProxyAnimation {
                 self.did_stop_listening(app);
             }
         }
-        app.get_mut(self).parent = value;
-        let retained = value.map(|value| app.retain_id(value.id()));
-        if let Some(released) = std::mem::replace(&mut app.get_mut(self).retained_parent, retained)
-        {
-            app.release_id(released);
-        }
-        if let Some(parent) = app.get(self).parent {
+        // The old parent goes when this local does, after the listeners have moved off it.
+        let _old_parent = std::mem::replace(&mut app.get_mut(self).parent, value);
+        if let Some(parent) = self.parent(app) {
             if self.is_listening(app) {
                 self.did_start_listening(app);
             }
@@ -327,7 +319,7 @@ impl AnimationLazyListenerMixin for ProxyAnimation {
     }
 
     fn did_start_listening(self: Handle<Self>, app: &mut App) {
-        if let Some(parent) = app.get(self).parent {
+        if let Some(parent) = self.parent(app) {
             // Dart: `_parent!.addListener(notifyListeners)` — a tear-off.
             // `handle_method` gives the rebuilt listener the same identity, so
             // `did_stop_listening` removes without a stored handle.
@@ -346,7 +338,7 @@ impl AnimationLazyListenerMixin for ProxyAnimation {
     }
 
     fn did_stop_listening(self: Handle<Self>, app: &mut App) {
-        if let Some(parent) = app.get(self).parent {
+        if let Some(parent) = self.parent(app) {
             parent.remove_listener(
                 app,
                 &Listener::handle_method(self, ProxyAnimation::notify_listeners),
@@ -446,7 +438,7 @@ impl Animation<f64> for ProxyAnimation {
     }
 
     fn status(self: Handle<Self>, app: &App) -> AnimationStatus {
-        match app.get(self).parent {
+        match self.parent(app) {
             Some(parent) => parent.status(app),
             None => app
                 .get(self)
@@ -456,7 +448,7 @@ impl Animation<f64> for ProxyAnimation {
     }
 
     fn value(self: Handle<Self>, app: &App) -> f64 {
-        match app.get(self).parent {
+        match self.parent(app) {
             Some(parent) => parent.value(app),
             None => app
                 .get(self)
@@ -477,7 +469,7 @@ impl Animation<f64> for ProxyAnimation {
 pub struct ReverseAnimation {
     // Dart: `final Animation<double> parent` — private with a getter so it
     // cannot be rebound away from the animation the subscriptions target.
-    parent: AnyAnimation<f64>,
+    parent: AnimationRef<f64>,
 
     // `AnimationLazyListenerMixin` and `AnimationLocalStatusListenersMixin`
     // state.
@@ -486,18 +478,19 @@ pub struct ReverseAnimation {
 }
 
 impl ReverseAnimation {
-    /// Creates a reverse animation.
-    pub fn new(parent: AnyAnimation<f64>) -> ReverseAnimation {
-        ReverseAnimation {
+    /// Creates a reverse animation, which keeps `parent`.
+    #[track_caller]
+    pub fn new(app: &mut App, parent: AnimationRef<f64>) -> Ref<ReverseAnimation> {
+        app.create(ReverseAnimation {
             parent,
             lazy_listener: AnimationLazyListenerData::new(),
             local_status_listeners: AnimationLocalStatusListenersData::new(),
-        }
+        })
     }
 
     /// The animation whose value and direction this animation is reversing.
     pub fn parent(&self) -> AnyAnimation<f64> {
-        self.parent
+        self.parent.handle()
     }
 
     fn status_change_handler(self: Handle<Self>, app: &mut App, status: AnimationStatus) {
@@ -524,7 +517,7 @@ impl AnimationLazyListenerMixin for ReverseAnimation {
     }
 
     fn did_start_listening(self: Handle<Self>, app: &mut App) {
-        let parent = app.get(self).parent;
+        let parent = app.get(self).parent();
         parent.add_status_listener(
             app,
             AnimationStatusListener::handle_method(self, ReverseAnimation::status_change_handler),
@@ -532,7 +525,7 @@ impl AnimationLazyListenerMixin for ReverseAnimation {
     }
 
     fn did_stop_listening(self: Handle<Self>, app: &mut App) {
-        let parent = app.get(self).parent;
+        let parent = app.get(self).parent();
         parent.remove_status_listener(
             app,
             &AnimationStatusListener::handle_method(self, ReverseAnimation::status_change_handler),
@@ -571,12 +564,12 @@ impl AnimationLocalStatusListenersMixin for ReverseAnimation {
 impl Animation<f64> for ReverseAnimation {
     fn add_listener(self: Handle<Self>, app: &mut App, listener: Listener) {
         AnimationLazyListenerMixin::did_register_listener(self, app);
-        let parent = app.get(self).parent;
+        let parent = app.get(self).parent();
         parent.add_listener(app, listener);
     }
 
     fn remove_listener(self: Handle<Self>, app: &mut App, listener: &Listener) {
-        let parent = app.get(self).parent;
+        let parent = app.get(self).parent();
         parent.remove_listener(app, listener);
         AnimationLazyListenerMixin::did_unregister_listener(self, app);
     }
@@ -594,11 +587,11 @@ impl Animation<f64> for ReverseAnimation {
     }
 
     fn status(self: Handle<Self>, app: &App) -> AnimationStatus {
-        Self::reverse_status(app.get(self).parent.status(app))
+        Self::reverse_status(app.get(self).parent().status(app))
     }
 
     fn value(self: Handle<Self>, app: &App) -> f64 {
-        1.0 - app.get(self).parent.value(app)
+        1.0 - app.get(self).parent().value(app)
     }
 }
 
@@ -619,7 +612,7 @@ pub struct CurvedAnimation {
     // Dart: `final Animation<double> parent` — private with the
     // `AnimationWithParent::parent` getter, so it cannot be rebound away from
     // the animation the constructor subscribed to.
-    parent: RetainedHandle<AnyAnimation<f64>>,
+    parent: AnimationRef<f64>,
 
     /// The curve to use in the forward direction.
     pub curve: Rc<dyn Curve>,
@@ -653,15 +646,15 @@ impl CurvedAnimation {
     /// tear-off of the object under construction — so creation goes through
     /// the [`App`]: the entity exists first, then the constructor body runs in
     /// Dart's statement order.
+    #[track_caller]
     pub fn create(
         app: &mut App,
-        parent: AnyAnimation<f64>,
+        parent: AnimationRef<f64>,
         curve: Rc<dyn Curve>,
         reverse_curve: Option<Rc<dyn Curve>>,
-    ) -> Handle<CurvedAnimation> {
-        let retained_parent = app.retain(parent);
+    ) -> Ref<CurvedAnimation> {
         let this = app.create(CurvedAnimation {
-            parent: retained_parent,
+            parent: parent.clone(),
             curve,
             reverse_curve,
             curve_direction: None,
@@ -671,7 +664,7 @@ impl CurvedAnimation {
         this.update_curve_direction(app, status);
         parent.add_status_listener(
             app,
-            AnimationStatusListener::handle_method(this, CurvedAnimation::update_curve_direction),
+            AnimationStatusListener::handle_method(*this, CurvedAnimation::update_curve_direction),
         );
         this
     }
@@ -697,7 +690,8 @@ impl CurvedAnimation {
     /// Cleans up any listeners added by this CurvedAnimation.
     pub fn dispose(self: Handle<Self>, app: &mut App) {
         app.get_mut(self).is_disposed = true;
-        let parent = app.get(self).parent.get();
+        app.mark_disposed(self);
+        let parent = app.get(self).parent.handle();
         parent.remove_status_listener(
             app,
             &AnimationStatusListener::handle_method(self, CurvedAnimation::update_curve_direction),
@@ -707,7 +701,7 @@ impl CurvedAnimation {
 
 impl AnimationWithParent<f64> for CurvedAnimation {
     fn parent(self: Handle<Self>, app: &App) -> AnyAnimation<f64> {
-        app.get(self).parent.get()
+        app.get(self).parent.handle()
     }
 }
 
@@ -797,8 +791,8 @@ enum TrainHoppingMode {
 /// [`on_switched_train`]: TrainHoppingAnimation::on_switched_train
 /// [`dispose`]: TrainHoppingAnimation::dispose
 pub struct TrainHoppingAnimation {
-    current_train: Option<AnyAnimation<f64>>,
-    next_train: Option<AnyAnimation<f64>>,
+    current_train: Option<AnimationRef<f64>>,
+    next_train: Option<AnimationRef<f64>>,
     mode: Option<TrainHoppingMode>,
 
     /// Called when this animation switches to be driven by the second
@@ -825,16 +819,17 @@ impl TrainHoppingAnimation {
     /// If the next train is `None`, then this object will just proxy the first
     /// animation and never hop. Dart's constructor registers tear-offs of the
     /// object under construction, so creation goes through the [`App`].
+    #[track_caller]
     pub fn create(
         app: &mut App,
-        current_train: AnyAnimation<f64>,
-        next_train: Option<AnyAnimation<f64>>,
+        current_train: AnimationRef<f64>,
+        next_train: Option<AnimationRef<f64>>,
         on_switched_train: Option<Listener>,
-    ) -> Handle<TrainHoppingAnimation> {
+    ) -> Ref<TrainHoppingAnimation> {
         let mut current_train = current_train;
         let mut next_train = next_train;
         let mut mode = None;
-        if let Some(next) = next_train {
+        if let Some(next) = next_train.clone() {
             if current_train.value(app) == next.value(app) {
                 current_train = next;
                 next_train = None;
@@ -846,8 +841,8 @@ impl TrainHoppingAnimation {
             }
         }
         let this = app.create(TrainHoppingAnimation {
-            current_train: Some(current_train),
-            next_train,
+            current_train: Some(current_train.clone()),
+            next_train: next_train.clone(),
             mode,
             on_switched_train,
             last_status: None,
@@ -857,19 +852,19 @@ impl TrainHoppingAnimation {
         });
         current_train.add_status_listener(
             app,
-            AnimationStatusListener::handle_method(this, Self::status_change_handler),
+            AnimationStatusListener::handle_method(*this, Self::status_change_handler),
         );
         current_train.add_listener(
             app,
-            Listener::handle_method(this, Self::value_change_handler),
+            Listener::handle_method(*this, Self::value_change_handler),
         );
         if let Some(next) = next_train {
             next.add_listener(
                 app,
-                Listener::handle_method(this, Self::value_change_handler),
+                Listener::handle_method(*this, Self::value_change_handler),
             );
         }
-        debug_assert!(app.get(this).mode.is_some() || app.get(this).next_train.is_none());
+        debug_assert!(app.get(&this).mode.is_some() || app.get(&this).next_train.is_none());
         this
     }
 
@@ -880,7 +875,7 @@ impl TrainHoppingAnimation {
     ///
     /// [`on_switched_train`]: TrainHoppingAnimation::on_switched_train
     pub fn current_train(&self) -> Option<AnyAnimation<f64>> {
-        self.current_train
+        self.current_train.as_deref().copied()
     }
 
     fn status_change_handler(self: Handle<Self>, app: &mut App, status: AnimationStatus) {
@@ -898,8 +893,8 @@ impl TrainHoppingAnimation {
         if app.get(self).next_train.is_some() {
             debug_assert!(app.get(self).mode.is_some());
             let animation = app.get(self);
-            let current = animation.current_train.unwrap();
-            let next = animation.next_train.unwrap();
+            let current = animation.current_train.as_deref().copied().unwrap();
+            let next = animation.next_train.as_deref().copied().unwrap();
             hop = match animation.mode.unwrap() {
                 TrainHoppingMode::Minimize => next.value(app) <= current.value(app),
                 TrainHoppingMode::Maximize => next.value(app) >= current.value(app),
@@ -914,8 +909,10 @@ impl TrainHoppingAnimation {
                     &Listener::handle_method(self, Self::value_change_handler),
                 );
                 let animation = app.get_mut(self);
-                animation.current_train = animation.next_train.take();
-                let new_current = app.get(self).current_train.unwrap();
+                // The old train goes when this local does, after its listeners are removed.
+                let _old_train =
+                    std::mem::replace(&mut animation.current_train, animation.next_train.take());
+                let new_current = app.get(self).current_train().unwrap();
                 new_current.add_status_listener(
                     app,
                     AnimationStatusListener::handle_method(self, Self::status_change_handler),
@@ -941,7 +938,7 @@ impl TrainHoppingAnimation {
         debug_assert!(app.get(self).current_train.is_some());
         let current = app
             .get(self)
-            .current_train
+            .current_train()
             .expect("a disposed TrainHoppingAnimation has no current train");
         current.remove_status_listener(
             app,
@@ -951,14 +948,14 @@ impl TrainHoppingAnimation {
             app,
             &Listener::handle_method(self, Self::value_change_handler),
         );
-        app.get_mut(self).current_train = None;
-        if let Some(next) = app.get(self).next_train {
+        let _current_train = app.get_mut(self).current_train.take();
+        if let Some(next) = app.get(self).next_train.as_deref().copied() {
             next.remove_listener(
                 app,
                 &Listener::handle_method(self, Self::value_change_handler),
             );
         }
-        app.get_mut(self).next_train = None;
+        let _next_train = app.get_mut(self).next_train.take();
         self.clear_listeners(app);
         self.clear_status_listeners(app);
         AnimationEagerListenerMixin::dispose(self, app);
@@ -1040,14 +1037,14 @@ impl Animation<f64> for TrainHoppingAnimation {
 
     fn status(self: Handle<Self>, app: &App) -> AnimationStatus {
         app.get(self)
-            .current_train
+            .current_train()
             .expect("a disposed TrainHoppingAnimation has no current train")
             .status(app)
     }
 
     fn value(self: Handle<Self>, app: &App) -> f64 {
         app.get(self)
-            .current_train
+            .current_train()
             .expect("a disposed TrainHoppingAnimation has no current train")
             .value(app)
     }
@@ -1217,8 +1214,8 @@ where
 /// The value of this animation is the [`f64`] that represents the mean value
 /// of the values of the `left` and `right` animations.
 pub struct AnimationMean {
-    first: AnyAnimation<f64>,
-    next: AnyAnimation<f64>,
+    first: AnimationRef<f64>,
+    next: AnimationRef<f64>,
     last_status: Option<AnimationStatus>,
     last_value: Option<f64>,
     lazy_listener: AnimationLazyListenerData,
@@ -1227,9 +1224,14 @@ pub struct AnimationMean {
 }
 
 impl AnimationMean {
-    /// Creates an animation that tracks the mean of two other animations.
-    pub fn new(left: AnyAnimation<f64>, right: AnyAnimation<f64>) -> AnimationMean {
-        AnimationMean {
+    /// Creates an animation that tracks the mean of two other animations, which it keeps.
+    #[track_caller]
+    pub fn new(
+        app: &mut App,
+        left: AnimationRef<f64>,
+        right: AnimationRef<f64>,
+    ) -> Ref<AnimationMean> {
+        app.create(AnimationMean {
             first: left,
             next: right,
             last_status: None,
@@ -1237,7 +1239,7 @@ impl AnimationMean {
             lazy_listener: AnimationLazyListenerData::new(),
             local_listeners: AnimationLocalListenersData::new(),
             local_status_listeners: AnimationLocalStatusListenersData::new(),
-        }
+        })
     }
 }
 
@@ -1306,11 +1308,11 @@ impl AnimationLocalStatusListenersMixin for AnimationMean {
 
 impl CompoundAnimation<f64> for AnimationMean {
     fn first(self: Handle<Self>, app: &App) -> AnyAnimation<f64> {
-        app.get(self).first
+        app.get(self).first.handle()
     }
 
     fn next(self: Handle<Self>, app: &App) -> AnyAnimation<f64> {
-        app.get(self).next
+        app.get(self).next.handle()
     }
 
     fn last_status(self: Handle<Self>, app: &App) -> Option<AnimationStatus> {
@@ -1408,8 +1410,8 @@ fn dart_min(a: f64, b: f64) -> f64 {
 /// Rust has no `num` supertype, so this is `f64`-only until a non-double use
 /// appears.
 pub struct AnimationMax {
-    first: AnyAnimation<f64>,
-    next: AnyAnimation<f64>,
+    first: AnimationRef<f64>,
+    next: AnimationRef<f64>,
     last_status: Option<AnimationStatus>,
     last_value: Option<f64>,
     lazy_listener: AnimationLazyListenerData,
@@ -1422,8 +1424,13 @@ impl AnimationMax {
     ///
     /// Either argument can be an [`AnimationMax`] itself to combine multiple
     /// animations.
-    pub fn new(first: AnyAnimation<f64>, next: AnyAnimation<f64>) -> AnimationMax {
-        AnimationMax {
+    #[track_caller]
+    pub fn new(
+        app: &mut App,
+        first: AnimationRef<f64>,
+        next: AnimationRef<f64>,
+    ) -> Ref<AnimationMax> {
+        app.create(AnimationMax {
             first,
             next,
             last_status: None,
@@ -1431,7 +1438,7 @@ impl AnimationMax {
             lazy_listener: AnimationLazyListenerData::new(),
             local_listeners: AnimationLocalListenersData::new(),
             local_status_listeners: AnimationLocalStatusListenersData::new(),
-        }
+        })
     }
 }
 
@@ -1500,11 +1507,11 @@ impl AnimationLocalStatusListenersMixin for AnimationMax {
 
 impl CompoundAnimation<f64> for AnimationMax {
     fn first(self: Handle<Self>, app: &App) -> AnyAnimation<f64> {
-        app.get(self).first
+        app.get(self).first.handle()
     }
 
     fn next(self: Handle<Self>, app: &App) -> AnyAnimation<f64> {
-        app.get(self).next
+        app.get(self).next.handle()
     }
 
     fn last_status(self: Handle<Self>, app: &App) -> Option<AnimationStatus> {
@@ -1565,8 +1572,8 @@ impl Animation<f64> for AnimationMax {
 /// Rust has no `num` supertype, so this is `f64`-only until a non-double use
 /// appears.
 pub struct AnimationMin {
-    first: AnyAnimation<f64>,
-    next: AnyAnimation<f64>,
+    first: AnimationRef<f64>,
+    next: AnimationRef<f64>,
     last_status: Option<AnimationStatus>,
     last_value: Option<f64>,
     lazy_listener: AnimationLazyListenerData,
@@ -1579,8 +1586,13 @@ impl AnimationMin {
     ///
     /// Either argument can be an [`AnimationMin`] itself to combine multiple
     /// animations.
-    pub fn new(first: AnyAnimation<f64>, next: AnyAnimation<f64>) -> AnimationMin {
-        AnimationMin {
+    #[track_caller]
+    pub fn new(
+        app: &mut App,
+        first: AnimationRef<f64>,
+        next: AnimationRef<f64>,
+    ) -> Ref<AnimationMin> {
+        app.create(AnimationMin {
             first,
             next,
             last_status: None,
@@ -1588,7 +1600,7 @@ impl AnimationMin {
             lazy_listener: AnimationLazyListenerData::new(),
             local_listeners: AnimationLocalListenersData::new(),
             local_status_listeners: AnimationLocalStatusListenersData::new(),
-        }
+        })
     }
 }
 
@@ -1657,11 +1669,11 @@ impl AnimationLocalStatusListenersMixin for AnimationMin {
 
 impl CompoundAnimation<f64> for AnimationMin {
     fn first(self: Handle<Self>, app: &App) -> AnyAnimation<f64> {
-        app.get(self).first
+        app.get(self).first.handle()
     }
 
     fn next(self: Handle<Self>, app: &App) -> AnyAnimation<f64> {
-        app.get(self).next
+        app.get(self).next.handle()
     }
 
     fn last_status(self: Handle<Self>, app: &App) -> Option<AnimationStatus> {
@@ -1722,26 +1734,31 @@ mod tests {
     use super::*;
     use crate::curves::Curves;
 
-    /// Dart's final parent references outlive dispose until the driven animation is released.
+    /// Dart's final parent references outlive dispose until the driven animation is dropped.
     #[test]
-    fn driven_animation_retains_disposed_curve_and_its_parent() {
+    fn driven_animation_keeps_disposed_curve_and_its_parent() {
+        use crate::tween::Animatable;
+
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let parent = app.create(AlwaysStoppedAnimation::new(0.5));
-        let curve =
-            CurvedAnimation::create(&mut app, parent.as_animation(), Curves::linear(), None);
+        let parent_ref = app.create(AlwaysStoppedAnimation::new(0.5));
+        let parent = *parent_ref;
+        let curve_ref =
+            CurvedAnimation::create(&mut app, parent_ref.into_erased(), Curves::linear(), None);
+        let curve = *curve_ref;
         let driven = crate::tween::CallbackAnimatable::from_callback(|value| value * 10.0)
-            .animate(&mut app, curve.as_animation());
+            .animate(&mut app, curve_ref.into_erased());
         let listener = Listener::new(|_| {});
         driven.add_listener(&mut app, listener.clone());
         curve.dispose(&mut app);
-        app.destroy(curve);
-        app.destroy(parent);
+        drop(app);
+        cell.checkpoint();
+        let mut app = cell.borrow_mut();
         assert_eq!(driven.value(&app), 5.0);
         driven.remove_listener(&mut app, &listener);
         assert!(app.contains(curve));
         assert!(app.contains(parent));
-        app.destroy(driven.id());
+        drop(driven);
         drop(app);
         cell.checkpoint();
         let app = cell.borrow();
@@ -1787,7 +1804,7 @@ mod tests {
     fn an_always_stopped_animation_is_forward_at_its_value() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let half = app.create(AlwaysStoppedAnimation::new(0.5)).as_animation();
+        let half: AnimationRef<f64> = app.create(AlwaysStoppedAnimation::new(0.5)).into_erased();
 
         assert_eq!(half.value(&app), 0.5);
         assert_eq!(half.status(&app), AnimationStatus::Forward);
@@ -1799,7 +1816,7 @@ mod tests {
     fn a_parentless_proxy_is_dismissed_at_zero() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let animation = ProxyAnimation::new(&mut app, None).as_animation();
+        let animation: AnimationRef<f64> = ProxyAnimation::new(&mut app, None).into_erased();
 
         assert_eq!(animation.value(&app), 0.0);
         assert_eq!(animation.status(&app), AnimationStatus::Dismissed);
@@ -1813,7 +1830,7 @@ mod tests {
     fn set_parent_generates_value_changed() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let half = app.create(AlwaysStoppedAnimation::new(0.5)).as_animation();
+        let half: AnimationRef<f64> = app.create(AlwaysStoppedAnimation::new(0.5)).into_erased();
         let did_receive_callback = Rc::new(Cell::new(false));
 
         let animation = ProxyAnimation::new(&mut app, None);
@@ -1836,7 +1853,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let inner = ProxyAnimation::new(&mut app, None);
-        let outer = ProxyAnimation::new(&mut app, Some(inner.as_animation()));
+        let outer = ProxyAnimation::new(&mut app, Some(inner.erase()));
 
         let notified = Rc::new(Cell::new(0));
         outer.as_animation().add_listener(
@@ -1849,7 +1866,7 @@ mod tests {
 
         // The inner proxy's own notification reaches the outer proxy's
         // listener through the tear-off the outer registered on it.
-        let target = app.create(AlwaysStoppedAnimation::new(0.6)).as_animation();
+        let target: AnimationRef<f64> = app.create(AlwaysStoppedAnimation::new(0.6)).into_erased();
         inner.set_parent(&mut app, Some(target));
 
         assert_eq!(notified.get(), 1);
@@ -1861,7 +1878,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let inner = ProxyAnimation::new(&mut app, None);
-        let outer = ProxyAnimation::new(&mut app, Some(inner.as_animation()));
+        let outer = ProxyAnimation::new(&mut app, Some(inner.erase()));
 
         let listener = Listener::new(|_app| {});
         outer
@@ -1907,6 +1924,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let animation = ProxyAnimation::new(&mut app, None);
+        let animation_handle = animation.as_animation();
 
         let observed = Rc::new(Cell::new(f64::NAN));
         animation.as_animation().add_listener(
@@ -1917,12 +1935,12 @@ mod tests {
                     // Mid-notification, from inside set_parent: the parent is
                     // already assigned, so the value reads through it — as in
                     // Dart, where the setter notifies after `_parent = value`.
-                    observed.set(animation.as_animation().value(app));
+                    observed.set(animation_handle.value(app));
                 }
             }),
         );
 
-        let half = app.create(AlwaysStoppedAnimation::new(0.5)).as_animation();
+        let half: AnimationRef<f64> = app.create(AlwaysStoppedAnimation::new(0.5)).into_erased();
         animation.set_parent(&mut app, Some(half));
         assert_eq!(observed.get(), 0.5);
     }
@@ -1931,8 +1949,8 @@ mod tests {
     fn setting_the_same_parent_is_a_no_op() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let half = app.create(AlwaysStoppedAnimation::new(0.5)).as_animation();
-        let animation = ProxyAnimation::new(&mut app, Some(half));
+        let half: AnimationRef<f64> = app.create(AlwaysStoppedAnimation::new(0.5)).into_erased();
+        let animation = ProxyAnimation::new(&mut app, Some(half.clone()));
 
         let notified = Rc::new(Cell::new(0));
         animation.as_animation().add_listener(
@@ -1951,8 +1969,9 @@ mod tests {
     fn a_reverse_animation_flips_value_and_status() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let stopped = app.create(AlwaysStoppedAnimation::new(0.25)).as_animation();
-        let reverse = app.create(ReverseAnimation::new(stopped)).as_animation();
+        let stopped: AnimationRef<f64> =
+            app.create(AlwaysStoppedAnimation::new(0.25)).into_erased();
+        let reverse: AnimationRef<f64> = ReverseAnimation::new(&mut app, stopped).into_erased();
 
         assert_eq!(reverse.value(&app), 0.75);
         assert_eq!(reverse.status(&app), AnimationStatus::Reverse);
@@ -1966,7 +1985,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let driver = ProxyAnimation::new(&mut app, None);
-        let animation = app.create(ReverseAnimation::new(driver.as_animation()));
+        let animation = ReverseAnimation::new(&mut app, driver.erase());
 
         let did_receive_callback = Rc::new(Cell::new(false));
         let listener = Listener::new({
@@ -1978,7 +1997,7 @@ mod tests {
             .add_listener(&mut app, listener.clone());
 
         assert!(!did_receive_callback.get());
-        let target = app.create(AlwaysStoppedAnimation::new(0.6)).as_animation();
+        let target: AnimationRef<f64> = app.create(AlwaysStoppedAnimation::new(0.6)).into_erased();
         driver.set_parent(&mut app, Some(target));
         assert!(did_receive_callback.get());
         did_receive_callback.set(false);
@@ -1987,7 +2006,7 @@ mod tests {
             .as_animation()
             .remove_listener(&mut app, &listener);
         assert!(!did_receive_callback.get());
-        let target = app.create(AlwaysStoppedAnimation::new(0.7)).as_animation();
+        let target: AnimationRef<f64> = app.create(AlwaysStoppedAnimation::new(0.7)).into_erased();
         driver.set_parent(&mut app, Some(target));
         assert!(!did_receive_callback.get());
     }
@@ -1998,7 +2017,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let driver = ProxyAnimation::new(&mut app, None); // Dismissed
-        let reverse = app.create(ReverseAnimation::new(driver.as_animation()));
+        let reverse = ReverseAnimation::new(&mut app, driver.erase());
 
         let statuses = Rc::new(RefCell::new(Vec::new()));
         let listener = AnimationStatusListener::new({
@@ -2035,7 +2054,7 @@ mod tests {
     fn a_curved_animation_applies_the_curve() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let half = app.create(AlwaysStoppedAnimation::new(0.5)).as_animation();
+        let half: AnimationRef<f64> = app.create(AlwaysStoppedAnimation::new(0.5)).into_erased();
         let curved = CurvedAnimation::create(&mut app, half, Curves::ease(), None);
 
         assert_eq!(
@@ -2051,8 +2070,9 @@ mod tests {
         let mut app = cell.borrow_mut();
         // A parent with status Reverse: a ReverseAnimation over an
         // always-Forward stopped animation at 0.25, so its value is 0.75.
-        let stopped = app.create(AlwaysStoppedAnimation::new(0.25)).as_animation();
-        let parent = app.create(ReverseAnimation::new(stopped)).as_animation();
+        let stopped: AnimationRef<f64> =
+            app.create(AlwaysStoppedAnimation::new(0.25)).into_erased();
+        let parent: AnimationRef<f64> = ReverseAnimation::new(&mut app, stopped).into_erased();
         let curved =
             CurvedAnimation::create(&mut app, parent, Curves::ease(), Some(Curves::ease_out()));
 
@@ -2082,7 +2102,7 @@ mod tests {
 
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let zero = app.create(AlwaysStoppedAnimation::new(0.0)).as_animation();
+        let zero: AnimationRef<f64> = app.create(AlwaysStoppedAnimation::new(0.0)).into_erased();
         let curved = CurvedAnimation::create(&mut app, zero, Rc::new(BogusCurve), None);
         let _ = curved.as_animation().value(&app);
     }
@@ -2094,12 +2114,12 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let driver = ProxyAnimation::new(&mut app, None);
-        let curved = CurvedAnimation::create(&mut app, driver.as_animation(), Curves::ease(), None);
+        let curved = CurvedAnimation::create(&mut app, driver.erase(), Curves::ease(), None);
         assert!(!driver.local_status_listeners_data(&app).is_empty());
 
         curved.dispose(&mut app);
         assert!(driver.local_status_listeners_data(&app).is_empty());
-        assert!(app.get(curved).is_disposed);
+        assert!(app.get(&curved).is_disposed);
     }
 
     // animations_test.dart:97 — 'TrainHoppingAnimation', with ProxyAnimations
@@ -2108,16 +2128,16 @@ mod tests {
     fn a_train_hopping_animation_hops_when_the_next_train_crosses() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let half = app.create(AlwaysStoppedAnimation::new(0.5)).as_animation();
-        let low = app.create(AlwaysStoppedAnimation::new(0.3)).as_animation();
+        let half: AnimationRef<f64> = app.create(AlwaysStoppedAnimation::new(0.5)).into_erased();
+        let low: AnimationRef<f64> = app.create(AlwaysStoppedAnimation::new(0.3)).into_erased();
         let train_a = ProxyAnimation::new(&mut app, Some(half));
         let train_b = ProxyAnimation::new(&mut app, Some(low));
 
         let switched = Rc::new(Cell::new(false));
         let train = TrainHoppingAnimation::create(
             &mut app,
-            train_a.as_animation(),
-            Some(train_b.as_animation()),
+            train_a.erase(),
+            Some(train_b.erase()),
             Some(Listener::new({
                 let switched = Rc::clone(&switched);
                 move |_app| switched.set(true)
@@ -2128,11 +2148,14 @@ mod tests {
         assert!(!switched.get());
 
         // Drive the next train past the current one: 0.3 → 0.75.
-        let high = app.create(AlwaysStoppedAnimation::new(0.75)).as_animation();
+        let high: AnimationRef<f64> = app.create(AlwaysStoppedAnimation::new(0.75)).into_erased();
         train_b.set_parent(&mut app, Some(high));
 
         assert!(switched.get(), "the hop fired the callback");
-        assert_eq!(app.get(train).current_train(), Some(train_b.as_animation()));
+        assert_eq!(
+            app.get(&train).current_train(),
+            Some(train_b.as_animation())
+        );
         assert_eq!(train.as_animation().value(&app), 0.75);
     }
 
@@ -2140,10 +2163,11 @@ mod tests {
     fn trains_starting_at_the_same_value_hop_immediately_without_the_callback() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let a = app.create(AlwaysStoppedAnimation::new(0.5)).as_animation();
-        let b = app.create(AlwaysStoppedAnimation::new(0.5)).as_animation();
+        let a: AnimationRef<f64> = app.create(AlwaysStoppedAnimation::new(0.5)).into_erased();
+        let b: AnimationRef<f64> = app.create(AlwaysStoppedAnimation::new(0.5)).into_erased();
 
         let switched = Rc::new(Cell::new(false));
+        let b_handle = b.handle();
         let train = TrainHoppingAnimation::create(
             &mut app,
             a,
@@ -2154,7 +2178,7 @@ mod tests {
             })),
         );
 
-        assert_eq!(app.get(train).current_train(), Some(b));
+        assert_eq!(app.get(&train).current_train(), Some(b_handle));
         assert!(!switched.get(), "Dart never calls onSwitchedTrain here");
     }
 
@@ -2162,17 +2186,13 @@ mod tests {
     fn a_disposed_train_hopping_animation_releases_both_trains() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let half = app.create(AlwaysStoppedAnimation::new(0.5)).as_animation();
-        let low = app.create(AlwaysStoppedAnimation::new(0.3)).as_animation();
+        let half: AnimationRef<f64> = app.create(AlwaysStoppedAnimation::new(0.5)).into_erased();
+        let low: AnimationRef<f64> = app.create(AlwaysStoppedAnimation::new(0.3)).into_erased();
         let train_a = ProxyAnimation::new(&mut app, Some(half));
         let train_b = ProxyAnimation::new(&mut app, Some(low));
 
-        let train = TrainHoppingAnimation::create(
-            &mut app,
-            train_a.as_animation(),
-            Some(train_b.as_animation()),
-            None,
-        );
+        let train =
+            TrainHoppingAnimation::create(&mut app, train_a.erase(), Some(train_b.erase()), None);
         assert!(!train_a.local_listeners_data(&app).is_empty());
         assert!(!train_a.local_status_listeners_data(&app).is_empty());
         assert!(!train_b.local_listeners_data(&app).is_empty());
@@ -2181,7 +2201,7 @@ mod tests {
         assert!(train_a.local_listeners_data(&app).is_empty());
         assert!(train_a.local_status_listeners_data(&app).is_empty());
         assert!(train_b.local_listeners_data(&app).is_empty());
-        assert!(app.get(train).current_train().is_none());
+        assert!(app.get(&train).current_train().is_none());
     }
 
     // animations_test.dart:161 — 'AnimationMean control test': Dart's values,
@@ -2191,28 +2211,26 @@ mod tests {
     fn animation_mean_control_test() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let half = app.create(AlwaysStoppedAnimation::new(0.5)).as_animation();
+        let half: AnimationRef<f64> = app.create(AlwaysStoppedAnimation::new(0.5)).into_erased();
         let left = ProxyAnimation::new(&mut app, Some(half));
         let right = ProxyAnimation::new(&mut app, None); // 0.0
 
-        let mean = app.create(AnimationMean::new(
-            left.as_animation(),
-            right.as_animation(),
-        ));
-        let mean_handle = mean.as_animation();
+        let mean = AnimationMean::new(&mut app, left.erase(), right.erase());
+        let mean_handle: AnimationRef<f64> = mean.erase();
         assert_eq!(mean_handle.value(&app), 0.25);
 
         let log = Rc::new(RefCell::new(Vec::new()));
+        let mean_animation = mean.as_animation();
         let log_value = Listener::new({
             let log = Rc::clone(&log);
             move |app: &mut App| {
-                let value = mean.as_animation().value(app);
+                let value = mean_animation.value(app);
                 log.borrow_mut().push(value);
             }
         });
         mean_handle.add_listener(&mut app, log_value.clone());
 
-        let one = app.create(AlwaysStoppedAnimation::new(1.0)).as_animation();
+        let one: AnimationRef<f64> = app.create(AlwaysStoppedAnimation::new(1.0)).into_erased();
         right.set_parent(&mut app, Some(one));
 
         assert_eq!(mean_handle.value(&app), 0.75);
@@ -2221,7 +2239,7 @@ mod tests {
 
         mean_handle.remove_listener(&mut app, &log_value);
 
-        let zero = app.create(AlwaysStoppedAnimation::new(0.0)).as_animation();
+        let zero: AnimationRef<f64> = app.create(AlwaysStoppedAnimation::new(0.0)).into_erased();
         left.set_parent(&mut app, Some(zero));
 
         assert_eq!(mean_handle.value(&app), 0.50);
@@ -2241,8 +2259,8 @@ mod tests {
         let driver = ProxyAnimation::new(&mut app, None); // Dismissed, 0.0
         let falling = Tween::new(&mut app, Some(1.0), Some(-1.0));
         let rising = Tween::new(&mut app, Some(-1.0), Some(1.0));
-        let current = falling.animate(&mut app, driver.as_animation());
-        let next = rising.animate(&mut app, driver.as_animation());
+        let current = falling.animate(&mut app, driver.erase());
+        let next = rising.animate(&mut app, driver.erase());
 
         let animation = TrainHoppingAnimation::create(&mut app, current, Some(next), None);
 
@@ -2258,7 +2276,7 @@ mod tests {
 
         // Dart: `controller.forward()` — status Forward; the trains cross at
         // t = 0.5, which hops to the rising train.
-        let half = app.create(AlwaysStoppedAnimation::new(0.5)).as_animation();
+        let half: AnimationRef<f64> = app.create(AlwaysStoppedAnimation::new(0.5)).into_erased();
         driver.set_parent(&mut app, Some(half));
         assert_eq!(*status_log.borrow(), vec![AnimationStatus::Forward]);
         status_log.borrow_mut().clear();
@@ -2285,20 +2303,17 @@ mod tests {
         let mut app = cell.borrow_mut();
         // Forward at 0.5, and Reverse at 0.5 (a ReverseAnimation over 0.5
         // keeps the value while flipping the direction).
-        let forward_half = app.create(AlwaysStoppedAnimation::new(0.5)).as_animation();
-        let reverse_half = {
-            let stopped = app.create(AlwaysStoppedAnimation::new(0.5)).as_animation();
-            app.create(ReverseAnimation::new(stopped)).as_animation()
+        let forward_half: AnimationRef<f64> =
+            app.create(AlwaysStoppedAnimation::new(0.5)).into_erased();
+        let reverse_half: AnimationRef<f64> = {
+            let stopped = app.create(AlwaysStoppedAnimation::new(0.5)).into_erased();
+            ReverseAnimation::new(&mut app, stopped).into_erased()
         };
 
-        let parent = ProxyAnimation::new(&mut app, Some(forward_half));
-        let curved = CurvedAnimation::create(
-            &mut app,
-            parent.as_animation(),
-            forward_curve,
-            Some(reverse_curve),
-        );
-        let curved_handle = curved.as_animation();
+        let parent = ProxyAnimation::new(&mut app, Some(forward_half.clone()));
+        let curved =
+            CurvedAnimation::create(&mut app, parent.erase(), forward_curve, Some(reverse_curve));
+        let curved_handle: AnimationRef<f64> = curved.erase();
 
         // Forward at 0.5: the forward interval maps it to 1.0.
         assert_eq!(curved_handle.value(&app), 1.0);
@@ -2310,9 +2325,9 @@ mod tests {
         parent.set_parent(&mut app, Some(reverse_half));
         assert_eq!(curved_handle.value(&app), 0.0);
 
-        assert!(!app.get(curved).is_disposed);
+        assert!(!app.get(&curved).is_disposed);
         curved.dispose(&mut app);
-        assert!(app.get(curved).is_disposed);
+        assert!(app.get(&curved).is_disposed);
 
         // Dismissed, then Forward at 0.5 again: were it still listening the
         // direction would reset and the forward curve would give 1.0; frozen
@@ -2327,11 +2342,12 @@ mod tests {
     fn animation_max_and_min_pick_their_extremes() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let low = app.create(AlwaysStoppedAnimation::new(0.25)).as_animation();
-        let high = app.create(AlwaysStoppedAnimation::new(0.75)).as_animation();
+        let low: AnimationRef<f64> = app.create(AlwaysStoppedAnimation::new(0.25)).into_erased();
+        let high: AnimationRef<f64> = app.create(AlwaysStoppedAnimation::new(0.75)).into_erased();
 
-        let max = app.create(AnimationMax::new(low, high)).as_animation();
-        let min = app.create(AnimationMin::new(low, high)).as_animation();
+        let max: AnimationRef<f64> =
+            AnimationMax::new(&mut app, low.clone(), high.clone()).into_erased();
+        let min: AnimationRef<f64> = AnimationMin::new(&mut app, low, high).into_erased();
 
         assert_eq!(max.value(&app), 0.75);
         assert_eq!(min.value(&app), 0.25);

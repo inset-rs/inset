@@ -6,7 +6,7 @@
 //! `AppCell` and `AsyncApp`. Microtasks and task continuations run only through
 //! [`AppCell::checkpoint`], with nothing borrowed.
 
-use std::cell::{Ref, RefCell, RefMut};
+use std::cell::{Ref as CellRef, RefCell, RefMut};
 use std::rc::{Rc, Weak};
 use std::time::Duration;
 
@@ -42,7 +42,7 @@ impl AppCell {
     /// # Panics
     ///
     /// While [`borrow_mut`](Self::borrow_mut) is held.
-    pub fn borrow(&self) -> Ref<'_, App> {
+    pub fn borrow(&self) -> CellRef<'_, App> {
         self.app.borrow()
     }
 
@@ -76,9 +76,10 @@ impl AppCell {
         // Taken for a moment and let go: nothing may hold the `App` while tasks run, since
         // each task borrows it through its own `AsyncApp`.
         let executor = self.borrow().executor_handle();
+        self.borrow_mut().begin_checkpoint();
         let mut rounds = 0usize;
         loop {
-            self.borrow_mut().release_dropped_retained_handles();
+            self.borrow_mut().free_dropped_objects();
             self.borrow_mut().flush_entity_effects();
             let had_microtasks = self.borrow().has_pending_microtasks();
             if had_microtasks {
@@ -86,6 +87,8 @@ impl AppCell {
             }
             let polled = executor.poll_ready_tasks();
             if !had_microtasks && polled == 0 {
+                // What the entity effects let go of goes with this checkpoint too.
+                self.borrow_mut().free_dropped_objects();
                 break;
             }
             rounds += 1;
@@ -385,7 +388,8 @@ mod tests {
     #[test]
     fn a_task_reaches_the_app_through_update() {
         let cell = AppCell::new();
-        let handle = cell.borrow_mut().create(3u32);
+        let handle_ref = cell.borrow_mut().create(3u32);
+        let handle = *handle_ref;
         cell.borrow().spawn(async move |cx| {
             cx.update(|app| *app.get_mut(handle) += 4);
         });
@@ -514,7 +518,8 @@ mod tests {
         let token = Rc::new(());
         let queued = token.clone();
         cell.borrow().spawn(async move |_cx| drop(queued));
-        let completer = cell.borrow_mut().create(Completer::<()>::new());
+        let completer_ref = cell.borrow_mut().create(Completer::<()>::new());
+        let completer = *completer_ref;
         let future = cell.borrow().get(completer).future();
         let pending = token.clone();
         cell.borrow().spawn(async move |_cx| {

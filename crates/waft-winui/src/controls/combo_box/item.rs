@@ -5,7 +5,7 @@ use crate::*;
 use std::{fmt, rc::Rc, time::Duration};
 use waft_animation::{Cubic, Curve};
 use waft_embedder::{Color, FontWeight};
-use waft_foundation::{App, Handle};
+use waft_foundation::{App, Handle, OptionRetained, Ref};
 use waft_painting::{Alignment, EdgeInsetsGeometry};
 use waft_rendering::HitTestBehavior;
 use waft_scheduler::{FrameCallback, Ticker};
@@ -167,7 +167,7 @@ pub(super) struct ComboBoxItemContainer {
     pub(super) shows_focus_visual: bool,
 
     /// The item's focus, owned by the box so that it can focus items it scrolls to.
-    pub(super) focus_node: Handle<FocusNode>,
+    pub(super) focus_node: Ref<FocusNode>,
 
     /// `OnSelectorItemClicked`, then closing the drop-down.
     pub(super) clicked: ItemClicked,
@@ -211,7 +211,7 @@ pub(super) struct ComboBoxItemContainerState {
     single_ticker_provider: SingleTickerProviderStateMixinData,
 
     /// Clock of `PillTransform`'s `ScaleY` animation.
-    ticker: Option<Handle<Ticker>>,
+    ticker: Option<Ref<Ticker>>,
 
     /// How long the item has been in `SelectedPressed`.
     pressed_for: Duration,
@@ -272,7 +272,7 @@ impl ComboBoxItemContainerState {
     /// Starts `SelectedPressed`'s storyboard on entering the state and stops it on leaving,
     /// which returns `PillTransform` to its base value at once.
     fn sync_storyboard(self: Handle<Self>, app: &mut App) {
-        let Some(ticker) = app.get(self).ticker else {
+        let Some(ticker) = app.get(self).ticker.clone() else {
             return;
         };
         let pressed = self.common_state(app) == ComboBoxItemCommonState::SelectedPressed;
@@ -290,7 +290,7 @@ impl ComboBoxItemContainerState {
         let duration =
             ThemeResources::of(app, self.context(app)).combo_box_item_scale_animation_duration;
         if elapsed >= duration {
-            app.get(self).ticker.unwrap().stop(app, false);
+            app.get(self).ticker.handle().unwrap().stop(app, false);
         }
     }
 
@@ -403,7 +403,7 @@ impl State for ComboBoxItemContainerState {
             app,
             FrameCallback::new(move |app, elapsed| self.tick(app, elapsed)),
         );
-        app.get_mut(self).ticker = Some(ticker);
+        app.get_mut(self).ticker = Some(ticker.clone());
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, _old: &ComboBoxItemContainer) {
@@ -422,7 +422,7 @@ impl State for ComboBoxItemContainerState {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        app.get(self).ticker.unwrap().dispose(app);
+        app.get(self).ticker.handle().unwrap().dispose(app);
         SingleTickerProviderStateMixin::dispose(self, app);
     }
 
@@ -463,7 +463,7 @@ impl State for ComboBoxItemContainerState {
         let focus_changed = widget.focus_changed.clone();
         // A disabled item takes no focus; the items are reached by the arrow keys, never by Tab.
         let control = Focus::new(gesture)
-            .focus_node(widget.focus_node.as_node())
+            .focus_node(widget.focus_node.erase())
             .can_request_focus(widget.item.is_enabled)
             .skip_traversal(true)
             .on_focus_change(move |app, focused| {

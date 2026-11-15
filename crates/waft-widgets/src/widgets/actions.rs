@@ -10,7 +10,9 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Debug};
 use std::rc::Rc;
 
-use waft_foundation::{App, Handle, HandleId, Listener, ValueChanged};
+use waft_foundation::{
+    App, Handle, HandleId, Listener, OptionRetained, Ref, Retained, ValueChanged,
+};
 use waft_scheduler::{FrameCallback, SchedulerBinding, SchedulerPhase};
 use waft_services::{MouseCursor, MouseCursorRef};
 
@@ -21,7 +23,7 @@ use crate::framework::{
 use crate::view::View;
 use crate::widgets::basic::MouseRegion;
 use crate::widgets::focus_manager::{
-    AnyFocusNode, FocusHighlightMode, FocusManager, HighlightModeListener, KeyEventResult,
+    FocusHighlightMode, FocusManager, FocusNodeRef, HighlightModeListener, KeyEventResult,
     primary_focus,
 };
 use crate::widgets::focus_scope::Focus;
@@ -131,7 +133,7 @@ pub type ActionListenerCallback = Rc<dyn Fn(&mut App, AnyAction)>;
 /// `action`.
 pub struct ActionData {
     listeners: Vec<ActionListenerCallback>,
-    current_calling_action: Option<AnyAction>,
+    current_calling_action: Option<ActionRef>,
 }
 
 impl ActionData {
@@ -200,11 +202,13 @@ macro_rules! context_action_overrides {
             self: ::waft_foundation::Handle<Self>,
             app: &mut ::waft_foundation::App,
             context: $crate::BuildContext,
-        ) -> $crate::AnyAction {
-            let default_action = $crate::Action::as_action(self);
-            let overridable =
-                $crate::OverridableContextAction::<Self::Intent>::new(app, default_action, context);
-            $crate::Action::as_action(overridable)
+        ) -> $crate::ActionRef {
+            let default_action: $crate::ActionRef = self
+                .upgrade(app)
+                .expect("the default action is kept by its caller")
+                .into_erased();
+            $crate::OverridableContextAction::<Self::Intent>::new(app, default_action, context)
+                .into_erased()
         }
     };
 }
@@ -287,12 +291,12 @@ pub trait Action: Sized + 'static {
     /// Invoking the calling action's methods, or accessing its properties, is allowed and does
     /// not introduce infinite loops or infinite recursions.
     fn calling_action(self: Handle<Self>, app: &App) -> Option<AnyAction> {
-        self.action_data(app).current_calling_action
+        self.action_data(app).current_calling_action.handle()
     }
 
     /// Sets [`calling_action`](Self::calling_action); overridden by the overridable actions so
     /// that the default action sees it too.
-    fn update_calling_action(self: Handle<Self>, app: &mut App, value: Option<AnyAction>) {
+    fn update_calling_action(self: Handle<Self>, app: &mut App, value: Option<ActionRef>) {
         self.action_data_mut(app).current_calling_action = value;
     }
 
@@ -440,10 +444,12 @@ pub trait Action: Sized + 'static {
         self: Handle<Self>,
         app: &mut App,
         context: BuildContext,
-    ) -> AnyAction {
-        let default_action = self.as_action();
-        let overridable = OverridableAction::<Self::Intent>::new(app, default_action, context);
-        Action::as_action(overridable)
+    ) -> ActionRef {
+        let default_action: ActionRef = self
+            .upgrade(app)
+            .expect("the default action is kept by its caller")
+            .into_erased();
+        OverridableAction::<Self::Intent>::new(app, default_action, context).into_erased()
     }
 }
 
@@ -506,7 +512,7 @@ struct ActionVTable {
     type_name: fn() -> &'static str,
     intent_type: fn() -> TypeId,
     calling_action: fn(&App, HandleId) -> Option<AnyAction>,
-    update_calling_action: fn(&mut App, HandleId, Option<AnyAction>),
+    update_calling_action: fn(&mut App, HandleId, Option<ActionRef>),
     is_enabled: fn(&mut App, HandleId, &dyn Intent, Option<BuildContext>) -> bool,
     is_action_enabled: fn(&mut App, HandleId) -> bool,
     consumes_key: fn(&mut App, HandleId, &dyn Intent) -> bool,
@@ -515,7 +521,7 @@ struct ActionVTable {
     add_action_listener: fn(&mut App, HandleId, ActionListenerCallback),
     remove_action_listener: fn(&mut App, HandleId, &ActionListenerCallback),
     notify_action_listeners: fn(&mut App, HandleId),
-    make_overridable_action: fn(&mut App, HandleId, BuildContext) -> AnyAction,
+    make_overridable_action: fn(&mut App, HandleId, BuildContext) -> ActionRef,
 }
 
 /// The typed handle for an erased id. Free: nothing is looked up; `get` checks the slot.
@@ -602,6 +608,22 @@ pub struct AnyAction {
     vtable: &'static ActionVTable,
 }
 
+impl From<AnyAction> for HandleId {
+    fn from(handle: AnyAction) -> HandleId {
+        handle.id
+    }
+}
+
+/// A field Dart types as the erased object, kept: AnyAction with its count.
+pub type ActionRef = Retained<AnyAction>;
+
+/// A kept object erases to a [`ActionRef`] with [`Retained::erase`]: Dart's upcast.
+impl<T: Action> From<Handle<T>> for AnyAction {
+    fn from(handle: Handle<T>) -> AnyAction {
+        handle.as_action()
+    }
+}
+
 impl PartialEq for AnyAction {
     fn eq(&self, other: &AnyAction) -> bool {
         self.id == other.id
@@ -664,9 +686,9 @@ impl AnyAction {
     /// Dart's `Action.overridable`.
     pub fn overridable(
         app: &mut App,
-        default_action: AnyAction,
+        default_action: ActionRef,
         context: BuildContext,
-    ) -> AnyAction {
+    ) -> ActionRef {
         default_action.make_overridable_action(app, context)
     }
 
@@ -680,6 +702,13 @@ impl AnyAction {
         app.handle::<T>(self.id)
     }
 
+    /// An [`ActionRef`] while something still keeps the action; see [`Handle::upgrade`].
+    pub fn upgrade(self, app: &App) -> Option<ActionRef> {
+        self.id
+            .upgrade(app)
+            .map(|retained| retained.into_map(|_| self))
+    }
+
     /// See [`Action::intent_type`].
     pub fn intent_type(self) -> TypeId {
         (self.vtable.intent_type)()
@@ -691,7 +720,7 @@ impl AnyAction {
     }
 
     /// See [`Action::update_calling_action`].
-    pub fn update_calling_action(self, app: &mut App, value: Option<AnyAction>) {
+    pub fn update_calling_action(self, app: &mut App, value: Option<ActionRef>) {
         (self.vtable.update_calling_action)(app, self.id, value);
     }
 
@@ -753,7 +782,7 @@ impl AnyAction {
     }
 
     /// See [`Action::make_overridable_action`].
-    fn make_overridable_action(self, app: &mut App, context: BuildContext) -> AnyAction {
+    fn make_overridable_action(self, app: &mut App, context: BuildContext) -> ActionRef {
         (self.vtable.make_overridable_action)(app, self.id, context)
     }
 }
@@ -781,7 +810,7 @@ pub struct ActionListener {
     pub listener: ActionListenerCallback,
 
     /// The [`Action`] that the callback will be registered with.
-    pub action: AnyAction,
+    pub action: ActionRef,
 
     /// The widget below this widget in the tree.
     pub child: WidgetRef,
@@ -791,7 +820,7 @@ impl ActionListener {
     /// Creates an [`ActionListener`].
     pub fn new<K>(
         listener: ActionListenerCallback,
-        action: AnyAction,
+        action: ActionRef,
         child: impl IntoWidget<K>,
     ) -> ActionListener {
         ActionListener {
@@ -842,24 +871,25 @@ impl State for ActionListenerState {
 
     fn init_state(self: Handle<Self>, app: &mut App) {
         let widget = self.widget(app);
-        let (action, listener) = (widget.action, Rc::clone(&widget.listener));
+        let (action, listener) = (widget.action.handle(), Rc::clone(&widget.listener));
         action.add_action_listener(app, listener);
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &ActionListener) {
         let widget = self.widget(app);
-        let (action, listener) = (widget.action, Rc::clone(&widget.listener));
-        if old_widget.action == action && Rc::ptr_eq(&old_widget.listener, &listener) {
+        let (action, listener) = (widget.action.handle(), Rc::clone(&widget.listener));
+        if old_widget.action.handle() == action && Rc::ptr_eq(&old_widget.listener, &listener) {
             return;
         }
-        let (old_action, old_listener) = (old_widget.action, Rc::clone(&old_widget.listener));
+        let (old_action, old_listener) =
+            (old_widget.action.handle(), Rc::clone(&old_widget.listener));
         old_action.remove_action_listener(app, &old_listener);
         action.add_action_listener(app, listener);
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
         let widget = self.widget(app);
-        let (action, listener) = (widget.action, Rc::clone(&widget.listener));
+        let (action, listener) = (widget.action.handle(), Rc::clone(&widget.listener));
         action.remove_action_listener(app, &listener);
     }
 
@@ -902,7 +932,7 @@ impl<T: Intent> CallbackAction<T> {
     /// A constructor for a [`CallbackAction`].
     ///
     /// The given callback is used as the implementation of [`Action::invoke`].
-    pub fn new(app: &mut App, on_invoke: OnInvokeCallback<T>) -> Handle<CallbackAction<T>> {
+    pub fn new(app: &mut App, on_invoke: OnInvokeCallback<T>) -> Ref<CallbackAction<T>> {
         app.create(CallbackAction {
             action: ActionData::new(),
             on_invoke,
@@ -1049,7 +1079,7 @@ pub struct Actions {
     ///
     /// For performance reasons, it is recommended that a pre-built map is passed in here
     /// instead of defining it inline in the build function.
-    pub actions: HashMap<TypeId, AnyAction>,
+    pub actions: HashMap<TypeId, ActionRef>,
 
     /// The widget below this widget in the tree.
     pub child: WidgetRef,
@@ -1057,7 +1087,7 @@ pub struct Actions {
 
 impl Actions {
     /// Creates an [`Actions`] widget.
-    pub fn new<K>(actions: HashMap<TypeId, AnyAction>, child: impl IntoWidget<K>) -> Actions {
+    pub fn new<K>(actions: HashMap<TypeId, ActionRef>, child: impl IntoWidget<K>) -> Actions {
         Actions {
             key: None,
             dispatcher: None,
@@ -1144,11 +1174,14 @@ impl Actions {
     pub fn handler(app: &mut App, context: BuildContext, intent: IntentRef) -> Option<Listener> {
         let action = Actions::maybe_find(app, context, intent.intent_type())?;
         if action.is_enabled(app, &*intent, Some(context)) {
+            let action = action
+                .upgrade(app)
+                .expect("the action is kept by its Actions widget");
             return Some(Listener::new(move |app| {
                 // Could be that the action was enabled when the closure was created, but is now
                 // no longer enabled, so check again.
                 if action.is_enabled(app, &*intent, Some(context)) {
-                    Actions::of(app, context).invoke_action(app, action, &*intent, Some(context));
+                    Actions::of(app, context).invoke_action(app, *action, &*intent, Some(context));
                 }
             }));
         }
@@ -1235,7 +1268,7 @@ impl Actions {
         Actions::scope_of(app, element)
             .actions
             .get(&intent_type)
-            .copied()
+            .map(Retained::handle)
     }
 
     /// Returns the [`ActionDispatcher`] associated with the [`Actions`] widget that most tightly
@@ -1358,7 +1391,7 @@ impl StatefulWidget for Actions {
 pub struct ActionsState {
     state: StateData<Actions>,
     /// The set of actions that this [`Actions`] widget is currently listening to.
-    listened_actions: HashSet<AnyAction>,
+    listened_actions: HashSet<ActionRef>,
     /// Dart's `_handleActionChanged` tear-off, kept so that it can be removed again.
     action_changed: Option<ActionListenerCallback>,
     /// Used to tell the marker to rebuild its dependencies when the state of an action in the
@@ -1373,12 +1406,17 @@ impl ActionsState {
     }
 
     fn update_action_listeners(self: Handle<Self>, app: &mut App) {
-        let widget_actions: HashSet<AnyAction> =
-            self.widget(app).actions.values().copied().collect();
+        let widget_actions: HashSet<ActionRef> =
+            self.widget(app).actions.values().cloned().collect();
         let listened = app.get(self).listened_actions.clone();
-        let removed_actions: Vec<AnyAction> =
-            listened.difference(&widget_actions).copied().collect();
-        let added_actions: Vec<AnyAction> = widget_actions.difference(&listened).copied().collect();
+        let removed_actions: Vec<AnyAction> = listened
+            .difference(&widget_actions)
+            .map(Retained::handle)
+            .collect();
+        let added_actions: Vec<AnyAction> = widget_actions
+            .difference(&listened)
+            .map(Retained::handle)
+            .collect();
 
         let handler = self.action_changed(app);
         for action in removed_actions {
@@ -1440,7 +1478,7 @@ impl State for ActionsState {
 #[derive(Debug)]
 struct ActionsScope {
     dispatcher: Option<ActionDispatcherRef>,
-    actions: HashMap<TypeId, AnyAction>,
+    actions: HashMap<TypeId, ActionRef>,
     rebuild_key: u64,
     child: WidgetRef,
 }
@@ -1495,7 +1533,7 @@ pub struct FocusableActionDetector {
     pub enabled: bool,
 
     /// An optional focus node to use as the focus node for this widget.
-    pub focus_node: Option<AnyFocusNode>,
+    pub focus_node: Option<FocusNodeRef>,
 
     /// True if this widget will be selected as the initial focus when no other node in its
     /// scope is currently focused.
@@ -1509,7 +1547,7 @@ pub struct FocusableActionDetector {
 
     /// A map of [`Intent`] types to [`Action`] objects that defines which actions this widget
     /// knows about.
-    pub actions: Option<HashMap<TypeId, AnyAction>>,
+    pub actions: Option<HashMap<TypeId, ActionRef>>,
 
     /// The map of shortcuts that describes the mapping between a key sequence defined by a
     /// `ShortcutActivator` and the [`Intent`] that will be emitted when that key sequence is
@@ -1580,7 +1618,7 @@ impl FocusableActionDetector {
     }
 
     /// Dart `FocusableActionDetector(focusNode:)`.
-    pub fn focus_node(mut self, focus_node: AnyFocusNode) -> FocusableActionDetector {
+    pub fn focus_node(mut self, focus_node: FocusNodeRef) -> FocusableActionDetector {
         self.focus_node = Some(focus_node);
         self
     }
@@ -1610,7 +1648,7 @@ impl FocusableActionDetector {
     }
 
     /// Dart `FocusableActionDetector(actions:)`.
-    pub fn actions(mut self, actions: HashMap<TypeId, AnyAction>) -> FocusableActionDetector {
+    pub fn actions(mut self, actions: HashMap<TypeId, ActionRef>) -> FocusableActionDetector {
         self.actions = Some(actions);
         self
     }
@@ -1910,7 +1948,7 @@ impl State for FocusableActionDetectorState {
             child,
             enabled,
         ) = (
-            widget.focus_node,
+            widget.focus_node.clone(),
             widget.autofocus,
             widget.descendants_are_focusable,
             widget.descendants_are_traversable,
@@ -1996,7 +2034,7 @@ pub struct VoidCallbackAction {
 
 impl VoidCallbackAction {
     /// Creates a [`VoidCallbackAction`].
-    pub fn new(app: &mut App) -> Handle<VoidCallbackAction> {
+    pub fn new(app: &mut App) -> Ref<VoidCallbackAction> {
         app.create(VoidCallbackAction {
             action: ActionData::new(),
         })
@@ -2102,7 +2140,7 @@ impl DoNothingAction {
     /// Creates a [`DoNothingAction`].
     ///
     /// Dart's optional `consumesKey` argument defaults to true.
-    pub fn new(app: &mut App) -> Handle<DoNothingAction> {
+    pub fn new(app: &mut App) -> Ref<DoNothingAction> {
         app.create(DoNothingAction {
             action: ActionData::new(),
             consumes_key: true,
@@ -2259,13 +2297,13 @@ impl Intent for PrioritizedIntents {
 /// [`ContextAction::invoke`].
 pub struct PrioritizedAction {
     action: ActionData,
-    selected_action: Option<AnyAction>,
+    selected_action: Option<ActionRef>,
     selected_intent: Option<IntentRef>,
 }
 
 impl PrioritizedAction {
     /// Creates a [`PrioritizedAction`].
-    pub fn new(app: &mut App) -> Handle<PrioritizedAction> {
+    pub fn new(app: &mut App) -> Ref<PrioritizedAction> {
         app.create(PrioritizedAction {
             action: ActionData::new(),
             selected_action: None,
@@ -2299,6 +2337,9 @@ impl ContextAction for PrioritizedAction {
             if let Some(candidate_action) = candidate_action
                 && candidate_action.is_enabled(app, &**candidate_intent, context)
             {
+                let candidate_action = candidate_action
+                    .upgrade(app)
+                    .expect("the action is kept by its Actions widget");
                 let this = app.get_mut(self);
                 this.selected_action = Some(candidate_action);
                 this.selected_intent = Some(Rc::clone(candidate_intent));
@@ -2317,6 +2358,7 @@ impl ContextAction for PrioritizedAction {
         let selected_action = app
             .get(self)
             .selected_action
+            .handle()
             .expect("isEnabled selected an action");
         let selected_intent = app
             .get(self)
@@ -2336,7 +2378,7 @@ impl ContextAction for PrioritizedAction {
 struct OverridableActionData {
     /// The default action to invoke if an enabled override [`Action`] can't be found using
     /// [`lookup_context`](Self::lookup_context).
-    default_action: AnyAction,
+    default_action: ActionRef,
     /// The [`BuildContext`] used to find the override of this [`Action`].
     lookup_context: BuildContext,
     // When these are true, this action throws when the override calls this action's method and
@@ -2348,7 +2390,7 @@ struct OverridableActionData {
 }
 
 impl OverridableActionData {
-    fn new(default_action: AnyAction, lookup_context: BuildContext) -> OverridableActionData {
+    fn new(default_action: ActionRef, lookup_context: BuildContext) -> OverridableActionData {
         OverridableActionData {
             default_action,
             lookup_context,
@@ -2395,9 +2437,9 @@ trait OverridableActionMixin: ContextAction {
     }
 
     /// Dart's `_OverridableActionMixin._updateCallingAction`.
-    fn update_calling_action(self: Handle<Self>, app: &mut App, value: Option<AnyAction>) {
-        self.action_data_mut(app).current_calling_action = value;
-        let default_action = self.overridable_data(app).default_action;
+    fn update_calling_action(self: Handle<Self>, app: &mut App, value: Option<ActionRef>) {
+        self.action_data_mut(app).current_calling_action = value.clone();
+        let default_action = self.overridable_data(app).default_action.handle();
         default_action.update_calling_action(app, value);
     }
 
@@ -2414,7 +2456,7 @@ trait OverridableActionMixin: ContextAction {
             self.overridable_data_mut(app)
                 .debug_assert_mutually_recursive = true;
         }
-        let default_action = self.overridable_data(app).default_action;
+        let default_action = self.overridable_data(app).default_action.clone();
         override_action.update_calling_action(app, Some(default_action));
         let return_value = override_action.invoke(app, intent.as_intent(), context);
         override_action.update_calling_action(app, None);
@@ -2436,7 +2478,7 @@ trait OverridableActionMixin: ContextAction {
         let override_action = self.get_override_action(app, intent_type, false);
         match override_action {
             None => {
-                let calling = self.action_data(app).current_calling_action;
+                let calling = self.action_data(app).current_calling_action.handle();
                 self.invoke_default_action(app, intent, calling, context)
             }
             Some(override_action) => self.invoke_override(app, override_action, intent, context),
@@ -2458,7 +2500,7 @@ trait OverridableActionMixin: ContextAction {
             self.overridable_data_mut(app)
                 .debug_assert_is_action_enabled_mutually_recursive = true;
         }
-        let default_action = self.overridable_data(app).default_action;
+        let default_action = self.overridable_data(app).default_action.clone();
         override_action.update_calling_action(app, Some(default_action));
         let is_override_enabled = override_action.is_action_enabled(app);
         override_action.update_calling_action(app, None);
@@ -2501,13 +2543,13 @@ trait OverridableActionMixin: ContextAction {
 
         let erased = intent.as_intent();
         let override_action = self.get_override_action(app, erased.intent_type(), false);
-        let default_action = self.overridable_data(app).default_action;
+        let default_action = self.overridable_data(app).default_action.clone();
         if let Some(override_action) = override_action {
-            override_action.update_calling_action(app, Some(default_action));
+            override_action.update_calling_action(app, Some(default_action.clone()));
         }
         let return_value =
             override_action
-                .unwrap_or(default_action)
+                .unwrap_or(*default_action)
                 .is_enabled(app, intent.as_intent(), context);
         if let Some(override_action) = override_action {
             override_action.update_calling_action(app, None);
@@ -2532,12 +2574,12 @@ trait OverridableActionMixin: ContextAction {
         }
         let erased = intent.as_intent();
         let override_action = self.get_override_action(app, erased.intent_type(), false);
-        let default_action = self.overridable_data(app).default_action;
+        let default_action = self.overridable_data(app).default_action.clone();
         if let Some(override_action) = override_action {
-            override_action.update_calling_action(app, Some(default_action));
+            override_action.update_calling_action(app, Some(default_action.clone()));
         }
         let is_enabled = override_action
-            .unwrap_or(default_action)
+            .unwrap_or(*default_action)
             .consumes_key(app, intent.as_intent());
         if let Some(override_action) = override_action {
             override_action.update_calling_action(app, None);
@@ -2562,9 +2604,9 @@ impl<T: ActionIntent + ?Sized> OverridableAction<T> {
     /// [`AnyAction::overridable`].
     pub fn new(
         app: &mut App,
-        default_action: AnyAction,
+        default_action: ActionRef,
         lookup_context: BuildContext,
-    ) -> Handle<OverridableAction<T>> {
+    ) -> Ref<OverridableAction<T>> {
         app.create(OverridableAction::<T> {
             action: ActionData::new(),
             overridable: OverridableActionData::new(default_action, lookup_context),
@@ -2593,13 +2635,12 @@ impl<T: ActionIntent + ?Sized> Action for OverridableAction<T> {
         self: Handle<Self>,
         app: &mut App,
         context: BuildContext,
-    ) -> AnyAction {
-        let default_action = self.overridable_data(app).default_action;
-        let overridable = OverridableAction::<T>::new(app, default_action, context);
-        Action::as_action(overridable)
+    ) -> ActionRef {
+        let default_action = self.overridable_data(app).default_action.clone();
+        OverridableAction::<T>::new(app, default_action, context).into_erased()
     }
 
-    fn update_calling_action(self: Handle<Self>, app: &mut App, value: Option<AnyAction>) {
+    fn update_calling_action(self: Handle<Self>, app: &mut App, value: Option<ActionRef>) {
         OverridableActionMixin::update_calling_action(self, app, value);
     }
 
@@ -2648,7 +2689,7 @@ impl<T: ActionIntent + ?Sized> OverridableActionMixin for OverridableAction<T> {
         _from_action: Option<AnyAction>,
         _context: Option<BuildContext>,
     ) -> Option<Rc<dyn Any>> {
-        let default_action = self.overridable_data(app).default_action;
+        let default_action = self.overridable_data(app).default_action.handle();
         default_action.invoke(app, intent.as_intent(), None)
     }
 }
@@ -2665,9 +2706,9 @@ impl<T: ActionIntent + ?Sized> OverridableContextAction<T> {
     /// [`AnyAction::overridable`].
     pub fn new(
         app: &mut App,
-        default_action: AnyAction,
+        default_action: ActionRef,
         lookup_context: BuildContext,
-    ) -> Handle<OverridableContextAction<T>> {
+    ) -> Ref<OverridableContextAction<T>> {
         app.create(OverridableContextAction::<T> {
             action: ActionData::new(),
             overridable: OverridableActionData::new(default_action, lookup_context),
@@ -2696,13 +2737,12 @@ impl<T: ActionIntent + ?Sized> Action for OverridableContextAction<T> {
         self: Handle<Self>,
         app: &mut App,
         context: BuildContext,
-    ) -> AnyAction {
-        let default_action = self.overridable_data(app).default_action;
-        let overridable = OverridableContextAction::<T>::new(app, default_action, context);
-        Action::as_action(overridable)
+    ) -> ActionRef {
+        let default_action = self.overridable_data(app).default_action.clone();
+        OverridableContextAction::<T>::new(app, default_action, context).into_erased()
     }
 
-    fn update_calling_action(self: Handle<Self>, app: &mut App, value: Option<AnyAction>) {
+    fn update_calling_action(self: Handle<Self>, app: &mut App, value: Option<ActionRef>) {
         OverridableActionMixin::update_calling_action(self, app, value);
     }
 
@@ -2760,11 +2800,11 @@ impl<T: ActionIntent + ?Sized> OverridableActionMixin for OverridableContextActi
                 .debug_assert_mutually_recursive = true;
         }
 
-        let default_action = self.overridable_data(app).default_action;
+        let default_action = self.overridable_data(app).default_action.clone();
         let invoke_context = context.expect("an overridable context action is invoked with one");
         let wrapped_default =
             ContextActionToActionAdapter::<T>::new(app, invoke_context, default_action);
-        override_action.update_calling_action(app, Some(Action::as_action(wrapped_default)));
+        override_action.update_calling_action(app, Some(wrapped_default.into_erased()));
         let return_value = override_action.invoke(app, intent.as_intent(), context);
         override_action.update_calling_action(app, None);
 
@@ -2782,7 +2822,7 @@ impl<T: ActionIntent + ?Sized> OverridableActionMixin for OverridableContextActi
         _from_action: Option<AnyAction>,
         context: Option<BuildContext>,
     ) -> Option<Rc<dyn Any>> {
-        let default_action = self.overridable_data(app).default_action;
+        let default_action = self.overridable_data(app).default_action.handle();
         default_action.invoke(app, intent.as_intent(), context)
     }
 }
@@ -2792,7 +2832,7 @@ impl<T: ActionIntent + ?Sized> OverridableActionMixin for OverridableContextActi
 struct ContextActionToActionAdapter<T: ActionIntent + ?Sized> {
     action: ActionData,
     invoke_context: BuildContext,
-    wrapped: AnyAction,
+    wrapped: ActionRef,
     intent: std::marker::PhantomData<fn(&T)>,
 }
 
@@ -2800,8 +2840,8 @@ impl<T: ActionIntent + ?Sized> ContextActionToActionAdapter<T> {
     fn new(
         app: &mut App,
         invoke_context: BuildContext,
-        wrapped: AnyAction,
-    ) -> Handle<ContextActionToActionAdapter<T>> {
+        wrapped: ActionRef,
+    ) -> Ref<ContextActionToActionAdapter<T>> {
         app.create(ContextActionToActionAdapter::<T> {
             action: ActionData::new(),
             invoke_context,
@@ -2815,8 +2855,8 @@ impl<T: ActionIntent + ?Sized> Action for ContextActionToActionAdapter<T> {
     type Intent = T;
     crate::action_accessors!();
 
-    fn update_calling_action(self: Handle<Self>, app: &mut App, value: Option<AnyAction>) {
-        let wrapped = app.get(self).wrapped;
+    fn update_calling_action(self: Handle<Self>, app: &mut App, value: Option<ActionRef>) {
+        let wrapped = app.get(self).wrapped.handle();
         wrapped.update_calling_action(app, value);
     }
 
@@ -2827,7 +2867,7 @@ impl<T: ActionIntent + ?Sized> Action for ContextActionToActionAdapter<T> {
     fn is_enabled(self: Handle<Self>, app: &mut App, intent: &T) -> bool {
         let (wrapped, invoke_context) = {
             let this = app.get(self);
-            (this.wrapped, this.invoke_context)
+            (this.wrapped.handle(), this.invoke_context)
         };
         wrapped.is_enabled(app, intent.as_intent(), Some(invoke_context))
     }
@@ -2837,7 +2877,7 @@ impl<T: ActionIntent + ?Sized> Action for ContextActionToActionAdapter<T> {
     }
 
     fn consumes_key(self: Handle<Self>, app: &mut App, intent: &T) -> bool {
-        let wrapped = app.get(self).wrapped;
+        let wrapped = app.get(self).wrapped.handle();
         wrapped.consumes_key(app, intent.as_intent())
     }
 
@@ -2845,7 +2885,7 @@ impl<T: ActionIntent + ?Sized> Action for ContextActionToActionAdapter<T> {
         self.action_data_mut(app)
             .listeners
             .push(Rc::clone(&listener));
-        let wrapped = app.get(self).wrapped;
+        let wrapped = app.get(self).wrapped.handle();
         wrapped.add_action_listener(app, listener);
     }
 
@@ -2861,7 +2901,7 @@ impl<T: ActionIntent + ?Sized> Action for ContextActionToActionAdapter<T> {
         {
             listeners.remove(index);
         }
-        let wrapped = app.get(self).wrapped;
+        let wrapped = app.get(self).wrapped.handle();
         wrapped.remove_action_listener(app, listener);
     }
 
@@ -2872,7 +2912,7 @@ impl<T: ActionIntent + ?Sized> Action for ContextActionToActionAdapter<T> {
     fn invoke(self: Handle<Self>, app: &mut App, intent: &T) -> Option<Rc<dyn Any>> {
         let (wrapped, invoke_context) = {
             let this = app.get(self);
-            (this.wrapped, this.invoke_context)
+            (this.wrapped.handle(), this.invoke_context)
         };
         wrapped.invoke(app, intent.as_intent(), Some(invoke_context))
     }
@@ -2924,7 +2964,7 @@ mod tests {
             app: &mut App,
             log: &Rc<RefCell<Vec<String>>>,
             name: &'static str,
-        ) -> Handle<CountAction> {
+        ) -> Ref<CountAction> {
             app.create(CountAction {
                 action: ActionData::new(),
                 log: Rc::clone(log),
@@ -2957,7 +2997,7 @@ mod tests {
         }
     }
 
-    fn map(intent_type: TypeId, action: AnyAction) -> HashMap<TypeId, AnyAction> {
+    fn map(intent_type: TypeId, action: ActionRef) -> HashMap<TypeId, ActionRef> {
         HashMap::from([(intent_type, action)])
     }
 
@@ -2987,9 +3027,9 @@ mod tests {
         mount(
             &cell,
             Actions::new(
-                map(TypeId::of::<CountIntent>(), Action::as_action(outer)),
+                map(TypeId::of::<CountIntent>(), outer.erase()),
                 Actions::new(
-                    map(TypeId::of::<CountIntent>(), Action::as_action(inner)),
+                    map(TypeId::of::<CountIntent>(), inner.erase()),
                     probe(&captured),
                 ),
             )
@@ -3022,9 +3062,9 @@ mod tests {
         mount(
             &cell,
             Actions::new(
-                map(TypeId::of::<CountIntent>(), Action::as_action(outer)),
+                map(TypeId::of::<CountIntent>(), outer.erase()),
                 Actions::new(
-                    map(TypeId::of::<OtherIntent>(), Action::as_action(unrelated)),
+                    map(TypeId::of::<OtherIntent>(), unrelated.erase()),
                     probe(&captured),
                 ),
             )
@@ -3049,7 +3089,7 @@ mod tests {
         mount(
             &cell,
             Actions::new(
-                map(TypeId::of::<CountIntent>(), Action::as_action(action)),
+                map(TypeId::of::<CountIntent>(), action.erase()),
                 probe(&captured),
             )
             .into_widget(),
@@ -3059,7 +3099,7 @@ mod tests {
 
         assert_eq!(
             Actions::maybe_find(&mut app, context, TypeId::of::<CountIntent>()),
-            Some(Action::as_action(action))
+            Some(Action::as_action(*action))
         );
         assert_eq!(
             Actions::maybe_find(&mut app, context, TypeId::of::<OtherIntent>()),
@@ -3091,10 +3131,7 @@ mod tests {
         mount(
             &cell,
             Actions::new(
-                map(
-                    TypeId::of::<CountIntent>(),
-                    Action::as_action(override_action),
-                ),
+                map(TypeId::of::<CountIntent>(), override_action.erase()),
                 Builder::new(move |_app, context| {
                     outer_sink.set(Some(context));
                     probe(&inner_sink)
@@ -3105,8 +3142,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let lookup_context = outer_context.get().expect("the builder ran");
 
-        let overridable =
-            AnyAction::overridable(&mut app, Action::as_action(default_action), lookup_context);
+        let overridable = AnyAction::overridable(&mut app, default_action.erase(), lookup_context);
         let intent = CountIntent { amount: 1 };
         overridable.invoke(&mut app, &intent, Some(lookup_context));
         assert_eq!(*log.borrow(), ["override:1"]);
@@ -3121,8 +3157,7 @@ mod tests {
         mount(&cell, probe(&captured));
         let mut app = cell.borrow_mut();
         let lookup_context = captured.get().expect("the builder ran");
-        let overridable =
-            AnyAction::overridable(&mut app, Action::as_action(default_action), lookup_context);
+        let overridable = AnyAction::overridable(&mut app, default_action.erase(), lookup_context);
         overridable.invoke(&mut app, &intent, Some(lookup_context));
         assert_eq!(*log.borrow(), ["default:1"]);
     }
@@ -3199,7 +3234,7 @@ mod tests {
         let detector = |enabled: bool, sink: Rc<RefCell<Vec<bool>>>| {
             FocusableActionDetector::new(SizedBox::expand())
                 .enabled(enabled)
-                .focus_node(node.as_node())
+                .focus_node(node.erase())
                 .autofocus(true)
                 .on_show_focus_highlight(move |_app, show| sink.borrow_mut().push(show))
                 .into_widget()

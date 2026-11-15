@@ -4,7 +4,9 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use waft_embedder::{BlurStyle, Clip, Color, Offset, Radius, Size, TargetPlatform, clamp_double};
-use waft_foundation::{App, Handle, Listenable, Listener, Timer, ValueListenable, ValueNotifier};
+use waft_foundation::{
+    App, Handle, Listenable, Listener, Ref, Timer, ValueListenable, ValueNotifier,
+};
 use waft_painting::{BorderRadius, BorderSide, BoxShadow, RoundedRectangleBorder};
 use waft_widgets::{
     AnimatedPositioned, BuildContext, ColoredBox, IntoWidget, KeyRef, MagnifierBuilder,
@@ -41,7 +43,7 @@ pub struct TextMagnifier {
     /// As the value of the [`magnifier_info`](Self::magnifier_info) changes, the position of the
     /// loupe is adjusted automatically, according to the rules described in the
     /// [`TextMagnifier`] class description.
-    pub magnifier_info: Handle<ValueNotifier<MagnifierInfo>>,
+    pub magnifier_info: Ref<ValueNotifier<MagnifierInfo>>,
 }
 
 impl TextMagnifier {
@@ -49,7 +51,7 @@ impl TextMagnifier {
     ///
     /// The `magnifier_info` must be provided, and must be updated with new values
     /// as the user's touch changes.
-    pub fn new(magnifier_info: Handle<ValueNotifier<MagnifierInfo>>) -> TextMagnifier {
+    pub fn new(magnifier_info: Ref<ValueNotifier<MagnifierInfo>>) -> TextMagnifier {
         TextMagnifier {
             key: None,
             magnifier_info,
@@ -73,8 +75,8 @@ impl TextMagnifier {
             static MAGNIFIER_BUILDER: MagnifierBuilder = Rc::new(
                 |app: &mut App,
                  _context: BuildContext,
-                 controller: Handle<MagnifierController>,
-                 magnifier_info: Handle<ValueNotifier<MagnifierInfo>>| {
+                 controller: Ref<MagnifierController>,
+                 magnifier_info: Ref<ValueNotifier<MagnifierInfo>>| {
                     match app.platform().target_platform() {
                         TargetPlatform::IOS => Some(
                             CupertinoTextMagnifier::new(controller, magnifier_info).into_widget(),
@@ -143,7 +145,7 @@ impl TextMagnifierState {
     }
 
     fn determine_magnifier_position_and_focal_point(self: Handle<Self>, app: &mut App) {
-        let magnifier_info = self.widget(app).magnifier_info;
+        let magnifier_info = self.widget(app).magnifier_info.clone();
         let selection_info = *magnifier_info.value(app);
         let context = self.context(app);
         let screen_rect = Offset::ZERO & MediaQuery::size_of(app, context);
@@ -256,7 +258,7 @@ impl State for TextMagnifierState {
     waft_widgets::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
-        let magnifier_info = self.widget(app).magnifier_info;
+        let magnifier_info = self.widget(app).magnifier_info.clone();
         magnifier_info.add_listener(
             app,
             Listener::handle_method(self, Self::determine_magnifier_position_and_focal_point),
@@ -264,7 +266,7 @@ impl State for TextMagnifierState {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        let magnifier_info = self.widget(app).magnifier_info;
+        let magnifier_info = self.widget(app).magnifier_info.clone();
         magnifier_info.remove_listener(
             app,
             &Listener::handle_method(self, Self::determine_magnifier_position_and_focal_point),
@@ -279,7 +281,7 @@ impl State for TextMagnifierState {
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &TextMagnifier) {
-        let magnifier_info = self.widget(app).magnifier_info;
+        let magnifier_info = self.widget(app).magnifier_info.clone();
         if old_widget.magnifier_info != magnifier_info {
             old_widget.magnifier_info.remove_listener(
                 app,
@@ -566,19 +568,17 @@ mod tests {
         tester: &mut WidgetTester,
         context: BuildContext,
         magnifier_info: MagnifierInfo,
-    ) -> (
-        Handle<MagnifierController>,
-        Handle<ValueNotifier<MagnifierInfo>>,
-    ) {
+    ) -> (Ref<MagnifierController>, Ref<ValueNotifier<MagnifierInfo>>) {
         let (controller, notifier) = {
             let mut app = tester.cell.borrow_mut();
             let notifier = app.create(ValueNotifier::new(magnifier_info));
             let controller = MagnifierController::new(&mut app);
+            let shown = notifier.clone();
             controller.show(
                 &mut app,
                 context,
                 Rc::new(move |_app: &mut App, _context: BuildContext| {
-                    TextMagnifier::new(notifier).into_widget()
+                    TextMagnifier::new(shown.clone()).into_widget()
                 }),
                 None,
             );

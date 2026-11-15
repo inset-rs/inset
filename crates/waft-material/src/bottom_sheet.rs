@@ -6,16 +6,16 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use waft_animation::{
-    Animatable, Animation, AnimationBehavior, AnimationController, AnimationStatus, AnimationStyle,
-    AnyAnimation, ColorTween, Curve, CurveTween, CurvedAnimation, Curves, ProxyAnimation, Split,
-    k_always_dismissed_animation,
+    Animatable, Animation, AnimationBehavior, AnimationController, AnimationRef, AnimationStatus,
+    AnimationStyle, AnyAnimation, ColorTween, Curve, CurveTween, CurvedAnimation, Curves, Drive,
+    ProxyAnimation, Split, k_always_dismissed_animation,
 };
 use waft_embedder::{
     Clip, Color, Offset, SemanticsHitTestBehavior, Size, TargetPlatform, TextBaseline,
 };
 use waft_foundation::{
-    App, CompleterFuture, Handle, Listenable, PRECISION_ERROR_TOLERANCE, ValueChanged,
-    ValueNotifier, VoidCallback,
+    App, CompleterFuture, Handle, Listenable, OptionRetained, PRECISION_ERROR_TOLERANCE, Ref,
+    ValueChanged, ValueNotifier, VoidCallback,
 };
 use waft_gestures::{
     DragEndDetails, DragGestureRecognizer, DragStartDetails, DragUpdateDetails,
@@ -116,7 +116,7 @@ pub struct BottomSheet {
     ///
     /// The BottomSheet widget will manipulate the position of this animation, it
     /// is not just a passive observer.
-    pub animation_controller: Option<Handle<AnimationController>>,
+    pub animation_controller: Option<Ref<AnimationController>>,
 
     /// Called when the bottom sheet begins to close.
     ///
@@ -284,7 +284,7 @@ impl BottomSheet {
     /// Dart `BottomSheet(animationController:)`.
     pub fn animation_controller(
         mut self,
-        animation_controller: Handle<AnimationController>,
+        animation_controller: Ref<AnimationController>,
     ) -> BottomSheet {
         self.animation_controller = Some(animation_controller);
         self
@@ -379,7 +379,7 @@ impl BottomSheet {
         app: &mut App,
         vsync: impl waft_scheduler::TickerProvider,
         sheet_animation_style: Option<&AnimationStyle>,
-    ) -> Handle<AnimationController> {
+    ) -> Ref<AnimationController> {
         AnimationController::create(
             app,
             None,
@@ -464,6 +464,7 @@ impl BottomSheetState {
     fn animation_controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
         self.widget(app)
             .animation_controller
+            .handle()
             .expect("the sheet has an animation controller")
     }
 
@@ -1182,28 +1183,34 @@ impl StatefulWidget for ModalBottomSheet {
 struct ModalBottomSheetState {
     state: StateData<ModalBottomSheet>,
     /// Dart's `late final _sheetAnimation`, set in `init_state`.
-    sheet_animation: Option<Handle<ProxyAnimation>>,
+    sheet_animation: Option<Ref<ProxyAnimation>>,
     /// Dart's `late final _curvedSheetAnimation`, set in `init_state`.
-    curved_sheet_animation: Option<Handle<CurvedAnimation>>,
+    curved_sheet_animation: Option<Ref<CurvedAnimation>>,
     // The CurvedAnimation created for the most recent drag end, tracked so it can
     // be disposed when it is replaced or the state is disposed.
-    drag_end_curved_animation: Option<Handle<CurvedAnimation>>,
+    drag_end_curved_animation: Option<Ref<CurvedAnimation>>,
 }
 
 impl ModalBottomSheetState {
     fn sheet_animation(self: Handle<Self>, app: &App) -> Handle<ProxyAnimation> {
-        app.get(self).sheet_animation.expect("set in init_state")
+        app.get(self)
+            .sheet_animation
+            .handle()
+            .expect("set in init_state")
     }
 
     fn curved_sheet_animation(self: Handle<Self>, app: &App) -> Handle<CurvedAnimation> {
         app.get(self)
             .curved_sheet_animation
+            .handle()
             .expect("set in init_state")
     }
 
     /// Dart's `widget.route.animation!`.
-    fn route_animation(self: Handle<Self>, app: &App) -> AnyAnimation<f64> {
-        ModalRoute::animation(self.widget(app).route, app).expect("an installed route")
+    fn route_animation(self: Handle<Self>, app: &App) -> AnimationRef<f64> {
+        ModalRoute::animation(self.widget(app).route, app)
+            .and_then(|animation| animation.upgrade(app))
+            .expect("an installed route")
     }
 
     fn get_route_label(app: &App, localizations: &dyn MaterialLocalizations) -> String {
@@ -1231,7 +1238,6 @@ impl ModalBottomSheetState {
         if let Some(drag_end_curved_animation) = app.get_mut(self).drag_end_curved_animation.take()
         {
             drag_end_curved_animation.dispose(app);
-            app.destroy_lingering(drag_end_curved_animation);
         }
     }
 
@@ -1247,7 +1253,7 @@ impl ModalBottomSheetState {
         // Rebind the animation using CurvedAnimation and Split so the
         // remaining transition continues smoothly from the exact point
         // where the drag gesture ended.
-        let old_drag_end_curved_animation = app.get(self).drag_end_curved_animation;
+        let old_drag_end_curved_animation = app.get(self).drag_end_curved_animation.handle();
         let animation_style = self.widget(app).animation_style.clone();
         let curve = animation_style
             .as_ref()
@@ -1267,14 +1273,13 @@ impl ModalBottomSheetState {
                 reverse_curve,
             ))),
         );
-        app.get_mut(self).drag_end_curved_animation = Some(drag_end_curved_animation);
+        app.get_mut(self).drag_end_curved_animation = Some(drag_end_curved_animation.clone());
         self.sheet_animation(app)
-            .set_parent(app, Some(drag_end_curved_animation.as_animation()));
+            .set_parent(app, Some(drag_end_curved_animation.erase()));
         // Dispose the previous drag-end CurvedAnimation only after detaching it
         // from [_sheetAnimation], so it is never disposed while still in use.
         if let Some(old_drag_end_curved_animation) = old_drag_end_curved_animation {
             old_drag_end_curved_animation.dispose(app);
-            app.destroy_lingering(old_drag_end_curved_animation);
         }
     }
 }
@@ -1300,7 +1305,7 @@ impl State for ModalBottomSheetState {
                     .unwrap_or_else(k_modal_bottom_sheet_curve),
             ),
         );
-        let sheet_animation = ProxyAnimation::new(app, Some(curved_sheet_animation.as_animation()));
+        let sheet_animation = ProxyAnimation::new(app, Some(curved_sheet_animation.erase()));
         let this = app.get_mut(self);
         this.curved_sheet_animation = Some(curved_sheet_animation);
         this.sheet_animation = Some(sheet_animation);
@@ -1338,12 +1343,9 @@ impl State for ModalBottomSheetState {
             .set_parent(app, Some(always_dismissed));
         let curved_sheet_animation = self.curved_sheet_animation(app);
         curved_sheet_animation.dispose(app);
-        app.destroy_lingering(curved_sheet_animation);
-        if let Some(drag_end_curved_animation) = app.get(self).drag_end_curved_animation {
+        if let Some(drag_end_curved_animation) = app.get(self).drag_end_curved_animation.handle() {
             drag_end_curved_animation.dispose(app);
-            app.destroy_lingering(drag_end_curved_animation);
         }
-        app.destroy_lingering(self.sheet_animation(app));
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -1368,7 +1370,7 @@ impl State for ModalBottomSheetState {
         .on_drag_end(move |app, details, is_closing| {
             self.handle_drag_end(app, details, is_closing)
         });
-        bottom_sheet.animation_controller = app.get(route).animation_controller;
+        bottom_sheet.animation_controller = app.get(route).animation_controller.clone();
         bottom_sheet.background_color = widget.background_color;
         bottom_sheet.elevation = widget.elevation;
         bottom_sheet.shape = widget.shape.clone();
@@ -1379,7 +1381,13 @@ impl State for ModalBottomSheetState {
             widget.scroll_control_disabled_max_height_ratio;
 
         let sheet_animation = self.sheet_animation(app);
-        let listenable: Rc<dyn Listenable> = Rc::new(sheet_animation.as_animation());
+        let listenable: Rc<dyn Listenable> = Rc::new(
+            app.get(self)
+                .sheet_animation
+                .as_ref()
+                .expect("set in init_state")
+                .erase::<AnyAnimation<f64>>(),
+        );
         ListenableBuilder::new(listenable, move |app, _context, child| {
             let animation_value = sheet_animation.value(app);
             Semantics::new()
@@ -1590,7 +1598,7 @@ pub struct ModalBottomSheetRoute {
     ///
     /// The BottomSheet widget will manipulate the position of this animation, it
     /// is not just a passive observer.
-    pub transition_animation_controller: Option<Handle<AnimationController>>,
+    pub transition_animation_controller: Option<Ref<AnimationController>>,
 
     /// Whether to avoid system intrusions on the top, left, and right.
     ///
@@ -1640,11 +1648,11 @@ pub struct ModalBottomSheetRoute {
     ///  * [`ModalBarrier`], which uses this field as onTapHint when it has an onTap action.
     pub barrier_on_tap_hint: Option<String>,
 
-    clip_details_notifier: Handle<ValueNotifier<EdgeInsets>>,
+    clip_details_notifier: Ref<ValueNotifier<EdgeInsets>>,
 
     barrier_label: Option<String>,
 
-    animation_controller: Option<Handle<AnimationController>>,
+    animation_controller: Option<Ref<AnimationController>>,
 }
 
 impl ModalBottomSheetRoute {
@@ -1653,7 +1661,7 @@ impl ModalBottomSheetRoute {
         app: &mut App,
         builder: WidgetBuilder,
         is_scroll_controlled: bool,
-    ) -> Handle<ModalBottomSheetRoute> {
+    ) -> Ref<ModalBottomSheetRoute> {
         let route = RouteData::new(app, None, None);
         let transition_route = TransitionRouteData::new(app);
         let modal_route = ModalRouteData::new(app);
@@ -1690,123 +1698,107 @@ impl ModalBottomSheetRoute {
 
     /// Dart `ModalBottomSheetRoute(capturedThemes:)`.
     pub fn captured_themes(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         captured_themes: CapturedThemes,
-    ) -> Handle<Self> {
-        app.get_mut(self).captured_themes = Some(captured_themes);
+    ) -> Ref<Self> {
+        app.get_mut(&self).captured_themes = Some(captured_themes);
         self
     }
 
     /// Dart `ModalBottomSheetRoute(barrierLabel:)`.
-    pub fn barrier_label(self: Handle<Self>, app: &mut App, barrier_label: String) -> Handle<Self> {
-        app.get_mut(self).barrier_label = Some(barrier_label);
+    pub fn barrier_label(self: Ref<Self>, app: &mut App, barrier_label: String) -> Ref<Self> {
+        app.get_mut(&self).barrier_label = Some(barrier_label);
         self
     }
 
     /// Dart `ModalBottomSheetRoute(barrierOnTapHint:)`.
     pub fn barrier_on_tap_hint(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         barrier_on_tap_hint: String,
-    ) -> Handle<Self> {
-        app.get_mut(self).barrier_on_tap_hint = Some(barrier_on_tap_hint);
+    ) -> Ref<Self> {
+        app.get_mut(&self).barrier_on_tap_hint = Some(barrier_on_tap_hint);
         self
     }
 
     /// Dart `ModalBottomSheetRoute(backgroundColor:)`.
-    pub fn background_color(
-        self: Handle<Self>,
-        app: &mut App,
-        background_color: Color,
-    ) -> Handle<Self> {
-        app.get_mut(self).background_color = Some(background_color);
+    pub fn background_color(self: Ref<Self>, app: &mut App, background_color: Color) -> Ref<Self> {
+        app.get_mut(&self).background_color = Some(background_color);
         self
     }
 
     /// Dart `ModalBottomSheetRoute(elevation:)`.
-    pub fn elevation(self: Handle<Self>, app: &mut App, elevation: f64) -> Handle<Self> {
-        app.get_mut(self).elevation = Some(elevation);
+    pub fn elevation(self: Ref<Self>, app: &mut App, elevation: f64) -> Ref<Self> {
+        app.get_mut(&self).elevation = Some(elevation);
         self
     }
 
     /// Dart `ModalBottomSheetRoute(shape:)`.
-    pub fn shape(
-        self: Handle<Self>,
-        app: &mut App,
-        shape: impl Into<ShapeBorderRef>,
-    ) -> Handle<Self> {
-        app.get_mut(self).shape = Some(shape.into());
+    pub fn shape(self: Ref<Self>, app: &mut App, shape: impl Into<ShapeBorderRef>) -> Ref<Self> {
+        app.get_mut(&self).shape = Some(shape.into());
         self
     }
 
     /// Dart `ModalBottomSheetRoute(clipBehavior:)`.
-    pub fn clip_behavior(self: Handle<Self>, app: &mut App, clip_behavior: Clip) -> Handle<Self> {
-        app.get_mut(self).clip_behavior = Some(clip_behavior);
+    pub fn clip_behavior(self: Ref<Self>, app: &mut App, clip_behavior: Clip) -> Ref<Self> {
+        app.get_mut(&self).clip_behavior = Some(clip_behavior);
         self
     }
 
     /// Dart `ModalBottomSheetRoute(constraints:)`.
-    pub fn constraints(
-        self: Handle<Self>,
-        app: &mut App,
-        constraints: BoxConstraints,
-    ) -> Handle<Self> {
-        app.get_mut(self).constraints = Some(constraints);
+    pub fn constraints(self: Ref<Self>, app: &mut App, constraints: BoxConstraints) -> Ref<Self> {
+        app.get_mut(&self).constraints = Some(constraints);
         self
     }
 
     /// Dart `ModalBottomSheetRoute(modalBarrierColor:)`.
     pub fn modal_barrier_color(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         modal_barrier_color: Color,
-    ) -> Handle<Self> {
-        app.get_mut(self).modal_barrier_color = Some(modal_barrier_color);
+    ) -> Ref<Self> {
+        app.get_mut(&self).modal_barrier_color = Some(modal_barrier_color);
         self
     }
 
     /// Dart `ModalBottomSheetRoute(isDismissible:)`.
-    pub fn is_dismissible(self: Handle<Self>, app: &mut App, is_dismissible: bool) -> Handle<Self> {
-        app.get_mut(self).is_dismissible = is_dismissible;
+    pub fn is_dismissible(self: Ref<Self>, app: &mut App, is_dismissible: bool) -> Ref<Self> {
+        app.get_mut(&self).is_dismissible = is_dismissible;
         self
     }
 
     /// Dart `ModalBottomSheetRoute(enableDrag:)`.
-    pub fn enable_drag(self: Handle<Self>, app: &mut App, enable_drag: bool) -> Handle<Self> {
-        app.get_mut(self).enable_drag = enable_drag;
+    pub fn enable_drag(self: Ref<Self>, app: &mut App, enable_drag: bool) -> Ref<Self> {
+        app.get_mut(&self).enable_drag = enable_drag;
         self
     }
 
     /// Dart `ModalBottomSheetRoute(showDragHandle:)`.
-    pub fn show_drag_handle(
-        self: Handle<Self>,
-        app: &mut App,
-        show_drag_handle: bool,
-    ) -> Handle<Self> {
-        app.get_mut(self).show_drag_handle = Some(show_drag_handle);
+    pub fn show_drag_handle(self: Ref<Self>, app: &mut App, show_drag_handle: bool) -> Ref<Self> {
+        app.get_mut(&self).show_drag_handle = Some(show_drag_handle);
         self
     }
 
     /// Dart `ModalBottomSheetRoute(scrollControlDisabledMaxHeightRatio:)`.
     pub fn scroll_control_disabled_max_height_ratio(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         scroll_control_disabled_max_height_ratio: f64,
-    ) -> Handle<Self> {
-        app.get_mut(self).scroll_control_disabled_max_height_ratio =
+    ) -> Ref<Self> {
+        app.get_mut(&self).scroll_control_disabled_max_height_ratio =
             scroll_control_disabled_max_height_ratio;
         self
     }
 
     /// Dart `ModalBottomSheetRoute(settings:)`.
-    pub fn settings(self: Handle<Self>, app: &mut App, settings: RouteSettingsRef) -> Handle<Self> {
+    pub fn settings(self: Ref<Self>, app: &mut App, settings: RouteSettingsRef) -> Ref<Self> {
         self.route_data_mut(app).set_settings(settings);
         self
     }
 
     /// Dart `ModalBottomSheetRoute(requestFocus:)`.
-    pub fn request_focus(self: Handle<Self>, app: &mut App, request_focus: bool) -> Handle<Self> {
+    pub fn request_focus(self: Ref<Self>, app: &mut App, request_focus: bool) -> Ref<Self> {
         self.route_data_mut(app)
             .set_request_focus(Some(request_focus));
         self
@@ -1814,27 +1806,27 @@ impl ModalBottomSheetRoute {
 
     /// Dart `ModalBottomSheetRoute(transitionAnimationController:)`.
     pub fn transition_animation_controller(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
-        transition_animation_controller: Handle<AnimationController>,
-    ) -> Handle<Self> {
-        app.get_mut(self).transition_animation_controller = Some(transition_animation_controller);
+        transition_animation_controller: Ref<AnimationController>,
+    ) -> Ref<Self> {
+        app.get_mut(&self).transition_animation_controller = Some(transition_animation_controller);
         self
     }
 
     /// Dart `ModalBottomSheetRoute(useSafeArea:)`.
-    pub fn use_safe_area(self: Handle<Self>, app: &mut App, use_safe_area: bool) -> Handle<Self> {
-        app.get_mut(self).use_safe_area = use_safe_area;
+    pub fn use_safe_area(self: Ref<Self>, app: &mut App, use_safe_area: bool) -> Ref<Self> {
+        app.get_mut(&self).use_safe_area = use_safe_area;
         self
     }
 
     /// Dart `ModalBottomSheetRoute(sheetAnimationStyle:)`.
     pub fn sheet_animation_style(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         sheet_animation_style: AnimationStyle,
-    ) -> Handle<Self> {
-        app.get_mut(self).sheet_animation_style = Some(sheet_animation_style);
+    ) -> Ref<Self> {
+        app.get_mut(&self).sheet_animation_style = Some(sheet_animation_style);
         self
     }
 
@@ -1847,8 +1839,8 @@ impl ModalBottomSheetRoute {
         app: &mut App,
         new_clip_details: EdgeInsets,
     ) -> bool {
-        let clip_details_notifier = app.get(self).clip_details_notifier;
-        if *app.get(clip_details_notifier).value() == new_clip_details {
+        let clip_details_notifier = app.get(self).clip_details_notifier.clone();
+        if *app.get(&clip_details_notifier).value() == new_clip_details {
             return false;
         }
         clip_details_notifier.set_value(app, new_clip_details);
@@ -1943,8 +1935,8 @@ impl Route for ModalBottomSheetRoute {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        let clip_details_notifier = app.get(self).clip_details_notifier;
-        app.get_mut(clip_details_notifier).dispose();
+        let clip_details_notifier = app.get(self).clip_details_notifier.clone();
+        app.get_mut(&clip_details_notifier).dispose();
         TransitionRoute::dispose(self, app)
     }
 }
@@ -1964,6 +1956,7 @@ impl TransitionRoute for ModalBottomSheetRoute {
         let route = app.get(self);
         route
             .transition_animation_controller
+            .as_ref()
             .and_then(|controller| app.get(controller).duration)
             .or(route
                 .sheet_animation_style
@@ -1976,9 +1969,11 @@ impl TransitionRoute for ModalBottomSheetRoute {
         let route = app.get(self);
         route
             .transition_animation_controller
+            .as_ref()
             .and_then(|controller| app.get(controller).reverse_duration)
             .or(route
                 .transition_animation_controller
+                .as_ref()
                 .and_then(|controller| app.get(controller).duration))
             .or(route
                 .sheet_animation_style
@@ -1995,13 +1990,10 @@ impl TransitionRoute for ModalBottomSheetRoute {
         PopupRoute::allow_snapshotting(self, app)
     }
 
-    fn create_animation_controller(
-        self: Handle<Self>,
-        app: &mut App,
-    ) -> Handle<AnimationController> {
+    fn create_animation_controller(self: Handle<Self>, app: &mut App) -> Ref<AnimationController> {
         debug_assert!(app.get(self).animation_controller.is_none());
         let animation_controller = if let Some(transition_animation_controller) =
-            app.get(self).transition_animation_controller
+            app.get(self).transition_animation_controller.clone()
         {
             self.transition_route_data_mut(app)
                 .will_dispose_animation_controller = false;
@@ -2014,7 +2006,7 @@ impl TransitionRoute for ModalBottomSheetRoute {
             let sheet_animation_style = app.get(self).sheet_animation_style.clone();
             BottomSheet::create_animation_controller(app, navigator, sheet_animation_style.as_ref())
         };
-        app.get_mut(self).animation_controller = Some(animation_controller);
+        app.get_mut(self).animation_controller = Some(animation_controller.clone());
         animation_controller
     }
 }
@@ -2046,8 +2038,8 @@ impl ModalRoute for ModalBottomSheetRoute {
         self: Handle<Self>,
         app: &mut App,
         context: BuildContext,
-        animation: AnyAnimation<f64>,
-        secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        secondary_animation: AnimationRef<f64>,
     ) -> WidgetRef {
         let _ = (animation, secondary_animation);
         let content = Builder::new(move |app, context| {
@@ -2110,24 +2102,21 @@ impl ModalRoute for ModalBottomSheetRoute {
         let dismissible = ModalRoute::barrier_dismissible(self, app);
         let semantics_label = ModalRoute::barrier_label(self, app);
         let semantics_dismissible = ModalRoute::semantics_dismissible(self, app);
-        let clip_details_notifier = app.get(self).clip_details_notifier;
+        let clip_details_notifier = app.get(self).clip_details_notifier.clone();
         let barrier_on_tap_hint = app.get(self).barrier_on_tap_hint.clone();
         if barrier_color.a != 0.0 && !ModalRoute::offstage(self, app) {
             // changedInternalState is called if barrierColor or offstage updates
             let transparent = barrier_color.with_values(Some(0.0), None, None, None, None);
             debug_assert!(barrier_color != transparent);
-            let animation = TransitionRoute::animation(self, app).expect("an installed route");
+            let animation = TransitionRoute::animation(self, app)
+                .and_then(|animation| animation.upgrade(app))
+                .expect("an installed route");
             // changedInternalState is called if barrierColor updates
             let color_tween = ColorTween::new(app, Some(transparent), Some(barrier_color));
             // changedInternalState is called if barrierCurve updates
             let curve = ModalRoute::barrier_curve(self, app);
             let curve_tween = CurveTween::new(app, curve);
             let color = animation.drive(app, color_tween.chain(curve_tween));
-            waft_widgets::ModalRouteBase::replace_barrier_animations(
-                self,
-                app,
-                vec![color_tween.into(), curve_tween.into(), color.id()],
-            );
             let mut barrier = AnimatedModalBarrier::new(color)
                 // changedInternalState is called if barrierDismissible updates
                 .dismissible(dismissible)
@@ -2138,7 +2127,6 @@ impl ModalRoute for ModalBottomSheetRoute {
             barrier.semantics_on_tap_hint = barrier_on_tap_hint;
             barrier.into_widget()
         } else {
-            waft_widgets::ModalRouteBase::replace_barrier_animations(self, app, Vec::new());
             let mut barrier = ModalBarrier::new()
                 // changedInternalState is called if barrierDismissible updates
                 .dismissible(dismissible)
@@ -2266,7 +2254,7 @@ pub fn show_modal_bottom_sheet(
     show_drag_handle: Option<bool>,
     use_safe_area: bool,
     route_settings: Option<RouteSettingsRef>,
-    transition_animation_controller: Option<Handle<AnimationController>>,
+    transition_animation_controller: Option<Ref<AnimationController>>,
     sheet_animation_style: Option<AnimationStyle>,
     request_focus: Option<bool>,
 ) -> CompleterFuture<RouteResult> {
@@ -2294,7 +2282,8 @@ pub fn show_modal_bottom_sheet(
         .is_dismissible(app, is_dismissible)
         .enable_drag(app, enable_drag)
         .use_safe_area(app, use_safe_area);
-    let this = app.get_mut(route);
+    let mut route = route;
+    let this = app.get_mut(&route);
     this.background_color = background_color;
     this.elevation = elevation;
     this.shape = shape;
@@ -2305,12 +2294,12 @@ pub fn show_modal_bottom_sheet(
     this.transition_animation_controller = transition_animation_controller;
     this.sheet_animation_style = sheet_animation_style;
     if let Some(route_settings) = route_settings {
-        route.settings(app, route_settings);
+        route = route.settings(app, route_settings);
     }
     if let Some(request_focus) = request_focus {
-        route.request_focus(app, request_focus);
+        route = route.request_focus(app, request_focus);
     }
-    navigator.push(app, Route::as_route(route))
+    navigator.push(app, route.into_erased())
 }
 
 /// Shows a Material Design bottom sheet in the nearest [`Scaffold`] ancestor. To
@@ -2388,7 +2377,7 @@ pub fn show_bottom_sheet(
     constraints: Option<BoxConstraints>,
     enable_drag: Option<bool>,
     show_drag_handle: Option<bool>,
-    transition_animation_controller: Option<Handle<AnimationController>>,
+    transition_animation_controller: Option<Ref<AnimationController>>,
     sheet_animation_style: Option<AnimationStyle>,
 ) -> Rc<PersistentBottomSheetController> {
     debug_assert!(debug_check_has_scaffold(app, context));
@@ -2539,7 +2528,7 @@ mod tests {
         show_drag_handle: Option<bool>,
         use_safe_area: bool,
         route_settings: Option<RouteSettingsRef>,
-        transition_animation_controller: Option<Handle<AnimationController>>,
+        transition_animation_controller: Option<Ref<AnimationController>>,
         sheet_animation_style: Option<AnimationStyle>,
         request_focus: Option<bool>,
     }
@@ -2618,7 +2607,7 @@ mod tests {
         constraints: Option<BoxConstraints>,
         enable_drag: Option<bool>,
         show_drag_handle: Option<bool>,
-        transition_animation_controller: Option<Handle<AnimationController>>,
+        transition_animation_controller: Option<Ref<AnimationController>>,
         sheet_animation_style: Option<AnimationStyle>,
     }
 
@@ -3133,13 +3122,13 @@ mod tests {
             &self,
             app: &mut App,
             on_tick: waft_scheduler::TickerCallback,
-        ) -> Handle<waft_scheduler::Ticker> {
+        ) -> Ref<waft_scheduler::Ticker> {
             waft_scheduler::Ticker::new(app, on_tick, None)
         }
     }
 
     /// `AnimationController(vsync: const TestVSync(), duration: 2s, reverseDuration: 2s)`.
-    fn two_second_controller(tester: &WidgetTester) -> Handle<AnimationController> {
+    fn two_second_controller(tester: &WidgetTester) -> Ref<AnimationController> {
         AnimationController::create(
             &mut tester.cell.borrow_mut(),
             None,
@@ -3262,10 +3251,7 @@ mod tests {
                             outer.0.set(Some(context));
                             Container::new().into_widget()
                         });
-                    Some(Route::as_route(waft_widgets::PageRouteBuilder::new(
-                        app,
-                        page_builder,
-                    )))
+                    Some((waft_widgets::PageRouteBuilder::new(app, page_builder)).into_erased())
                 }),
             )
             .into_widget(),
@@ -3670,9 +3656,9 @@ mod tests {
         });
     }
 
-    /// Not a Dart case: Dart's collector frees the tweens and the colour animation each build
-    /// of the sheet's barrier replaces; here the route keeps the last ones and frees what they
-    /// replace.
+    /// Not a Dart case: what Dart's collector does with the tweens and the colour animation
+    /// each build of the sheet's barrier replaces; each is freed once the next build replaces
+    /// it.
     #[test]
     fn rebuilding_a_modal_bottom_sheet_barrier_leaves_no_new_arena_objects() {
         with_main_thread_stack(|| {
@@ -3774,7 +3760,7 @@ mod tests {
         // Opening animation will start after tapping
         Modal {
             // The default duration and reverseDuration is 1 second
-            transition_animation_controller: Some(controller),
+            transition_animation_controller: Some(controller.clone()),
             ..Modal::default()
         }
         .show(&tester, saved.get(), sheet_builder("BottomSheet"));
@@ -3834,10 +3820,10 @@ mod tests {
             tester.pump_widget(app_with_scaffold(m3(&tester), &scaffold_key));
 
             tester.pump(Duration::ZERO);
-            assert!(!is_listening(&tester, controller));
+            assert!(!is_listening(&tester, controller.handle()));
 
             Persistent {
-                transition_animation_controller: Some(controller),
+                transition_animation_controller: Some(controller.clone()),
                 ..Persistent::default()
             }
             .show(
@@ -3852,13 +3838,13 @@ mod tests {
             );
 
             tester.pump_and_settle();
-            assert!(is_listening(&tester, controller));
+            assert!(is_listening(&tester, controller.handle()));
             assert_eq!(found(&tester, "BottomSheet"), 1);
 
             // Swipe the bottom sheet to dismiss it.
             drag_text(&mut tester, "BottomSheet", Offset::new(0.0, 150.0));
             tester.pump_and_settle(); // Bottom sheet dismiss animation.
-            assert!(!is_listening(&tester, controller));
+            assert!(!is_listening(&tester, controller.handle()));
             assert_eq!(found(&tester, "BottomSheet"), 0);
 
             controller.dispose(&mut tester.cell.borrow_mut());
@@ -3900,7 +3886,7 @@ mod tests {
                 None,
                 None,
                 // The default duration and reverseDuration is 1 second
-                Some(controller),
+                Some(controller.clone()),
                 None,
             );
             tester.pump(Duration::ZERO);
@@ -4049,7 +4035,7 @@ mod tests {
                     Rc::new(|_app, _context| Container::new().into_widget()),
                     false,
                 );
-                navigator.push(&mut app, Route::as_route(route));
+                navigator.push(&mut app, route.erase());
             }
             tester.pump_and_settle();
             assert_eq!(tester.find_by_type::<BottomSheet>().len(), 1);
@@ -4058,9 +4044,9 @@ mod tests {
 
     /// Dart's `TextField(focusNode: focusNode)` for what the focus cases read of it: a `Focus`
     /// on `focus_node`, which is the node Dart's `getTextFieldFocusNode` finds.
-    fn focusable(focus_node: waft_widgets::AnyFocusNode) -> WidgetRef {
+    fn focusable(focus_node: waft_widgets::FocusNodeRef) -> WidgetRef {
         waft_widgets::Focus::new(SizedBox::new().height(48.0))
-            .focus_node(focus_node)
+            .focus_node(focus_node.clone())
             .into_widget()
     }
 
@@ -4087,7 +4073,7 @@ mod tests {
         if let Some(request_focus) = request_focus {
             route = route.request_focus(&mut app, request_focus);
         }
-        drop(navigator.push(&mut app, Route::as_route(route)));
+        drop(navigator.push(&mut app, route.erase()));
     }
 
     /// The height of the stand-in for Dart's two-item `BottomNavigationBar`.
@@ -4120,10 +4106,7 @@ mod tests {
                         ))
                         .into_widget()
                 });
-            Some(Route::as_route(waft_widgets::PageRouteBuilder::new(
-                app,
-                page_builder,
-            )))
+            Some((waft_widgets::PageRouteBuilder::new(app, page_builder)).into_erased())
         });
         material_app(
             m3(tester),
@@ -4184,23 +4167,27 @@ mod tests {
         with_main_thread_stack(|| {
             let mut tester = tester();
             let saved = Saved::default();
-            let focus_node = waft_widgets::FocusNode::new(&mut tester.cell.borrow_mut()).as_node();
+            let focus_node = waft_widgets::FocusNode::new(&mut tester.cell.borrow_mut())
+                .into_erased::<waft_widgets::AnyFocusNode>();
             tester.pump_widget(material_app(
                 m3(&tester),
                 Material::new()
-                    .child(saved.builder(move || focusable(focus_node)))
+                    .child(saved.builder({
+                        let focus_node = focus_node.clone();
+                        move || focusable(focus_node.clone())
+                    }))
                     .into_widget(),
             ));
             tester.pump(Duration::ZERO);
 
             // Initially, there is no bottom sheet and the text field has no focus.
             assert!(tester.find_by_type::<BottomSheet>().is_empty());
-            assert!(!has_focus(&tester, focus_node));
+            assert!(!has_focus(&tester, focus_node.handle()));
 
             // Request focus on the text field.
             focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
             tester.pump(Duration::ZERO);
-            assert!(has_focus(&tester, focus_node));
+            assert!(has_focus(&tester, focus_node.handle()));
 
             // Bring up bottom sheet.
             push_container_sheet(&tester, saved.get(), None);
@@ -4208,7 +4195,7 @@ mod tests {
 
             // The bottom sheet is showing and the text field has lost focus.
             assert_eq!(tester.find_by_type::<BottomSheet>().len(), 1);
-            assert!(!has_focus(&tester, focus_node));
+            assert!(!has_focus(&tester, focus_node.handle()));
 
             // Dismiss the bottom sheet.
             pop(&tester, saved.get());
@@ -4216,7 +4203,7 @@ mod tests {
 
             // The bottom sheet is dismissed and the focus is shifted back to the text field.
             assert!(tester.find_by_type::<BottomSheet>().is_empty());
-            assert!(has_focus(&tester, focus_node));
+            assert!(has_focus(&tester, focus_node.handle()));
 
             // Bring up bottom sheet again with requestFocus to false.
             push_container_sheet(&tester, saved.get(), Some(false));
@@ -4224,7 +4211,7 @@ mod tests {
 
             // The bottom sheet is showing and the text field still has focus.
             assert_eq!(tester.find_by_type::<BottomSheet>().len(), 1);
-            assert!(has_focus(&tester, focus_node));
+            assert!(has_focus(&tester, focus_node.handle()));
         });
     }
 
@@ -4235,16 +4222,20 @@ mod tests {
         with_main_thread_stack(|| {
             let mut tester = tester();
             let saved = Saved::default();
-            let focus_node = waft_widgets::FocusNode::new(&mut tester.cell.borrow_mut()).as_node();
+            let focus_node = waft_widgets::FocusNode::new(&mut tester.cell.borrow_mut())
+                .into_erased::<waft_widgets::AnyFocusNode>();
             tester.pump_widget(material_app(
                 m3(&tester),
                 Scaffold::new()
-                    .body(saved.builder(move || focusable(focus_node)))
+                    .body(saved.builder({
+                        let focus_node = focus_node.clone();
+                        move || focusable(focus_node.clone())
+                    }))
                     .into_widget(),
             ));
             focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
             tester.pump(Duration::ZERO);
-            assert!(has_focus(&tester, focus_node));
+            assert!(has_focus(&tester, focus_node.handle()));
 
             let sheet_scope_has_focus = |tester: &WidgetTester| {
                 let sheet_text = only(tester.find_ahem_text("BottomSheet"));
@@ -4263,11 +4254,11 @@ mod tests {
             );
             tester.pump_and_settle();
             assert!(sheet_scope_has_focus(&tester));
-            assert!(!has_focus(&tester, focus_node));
+            assert!(!has_focus(&tester, focus_node.handle()));
 
             pop(&tester, saved.get());
             tester.pump_and_settle();
-            assert!(has_focus(&tester, focus_node));
+            assert!(has_focus(&tester, focus_node.handle()));
 
             drop(
                 Modal {
@@ -4278,7 +4269,7 @@ mod tests {
             );
             tester.pump_and_settle();
             assert!(!sheet_scope_has_focus(&tester));
-            assert!(has_focus(&tester, focus_node));
+            assert!(has_focus(&tester, focus_node.handle()));
         });
     }
 
@@ -5926,7 +5917,7 @@ mod tests {
             let sheet = || {
                 SizedBox::new()
                     .height(100.0)
-                    .child(crate::text_field::TextField::new().focus_node(focus_node))
+                    .child(crate::text_field::TextField::new().focus_node(focus_node.erase()))
                     .into_widget()
             };
             let app = |keyboard_height: f64| {
@@ -6518,9 +6509,9 @@ mod tests {
         });
     }
 
-    /// Dart's collector frees the curved animations and the proxy `_ModalBottomSheetState`
-    /// makes, and the drag-end curve each drag replaces; here the state frees each when it
-    /// disposes it.
+    /// Not a Dart case: what Dart's collector does with the curved animations and the proxy
+    /// `_ModalBottomSheetState` makes, and with the drag-end curve each drag replaces; each is
+    /// freed once nothing holds it.
     #[test]
     fn a_modal_bottom_sheet_frees_its_animations_as_it_disposes_them() {
         with_main_thread_stack(|| {
@@ -6544,7 +6535,9 @@ mod tests {
                     .borrow()
                     .get(state)
                     .drag_end_curved_animation
+                    .as_ref()
                     .expect("a drag ended")
+                    .handle()
             };
             let (curved, proxy) = {
                 let state = state(&tester);

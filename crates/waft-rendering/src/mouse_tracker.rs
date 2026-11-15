@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use indexmap::IndexMap;
 use waft_embedder::{Matrix4, Offset, PointerDeviceKind, ViewId};
-use waft_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, RetainedHandle};
+use waft_foundation::{AnyRef, App, ChangeNotifier, ChangeNotifierData, Handle, Ref};
 use waft_gestures::{
     HitTestEntry, HitTestResult, PointerEnterEvent, PointerEvent, PointerExitEvent,
 };
@@ -85,8 +85,8 @@ impl Hash for TrackedAnnotation {
 
 // Various states of a connected mouse device used by [MouseTracker].
 struct MouseState {
-    /// The retained handles that keep the annotations' render objects past a rebuild.
-    retained: Vec<RetainedHandle<AnyRenderObject>>,
+    /// The references that keep the annotations' render objects past a rebuild.
+    retained: Vec<AnyRef>,
     // The list of annotations that contains this device.
     //
     // It uses [IndexMap] to keep the insertion order.
@@ -107,8 +107,8 @@ impl MouseState {
     fn replace_annotations(
         &mut self,
         value: Annotations,
-        retained: Vec<RetainedHandle<AnyRenderObject>>,
-    ) -> (Annotations, Vec<RetainedHandle<AnyRenderObject>>) {
+        retained: Vec<AnyRef>,
+    ) -> (Annotations, Vec<AnyRef>) {
         (
             std::mem::replace(&mut self.annotations, value),
             std::mem::replace(&mut self.retained, retained),
@@ -250,7 +250,7 @@ impl MouseTracker {
     /// The `hit_test_in_view` is used to find the render objects on a given
     /// position in the specific view. It is typically provided by the
     /// `RendererBinding`.
-    pub fn new(app: &mut App, hit_test_in_view: MouseTrackerHitTest) -> Handle<MouseTracker> {
+    pub fn new(app: &mut App, hit_test_in_view: MouseTrackerHitTest) -> Ref<MouseTracker> {
         app.create(MouseTracker {
             change_notifier: ChangeNotifierData::new(),
             hit_test_in_view,
@@ -263,30 +263,17 @@ impl MouseTracker {
     /// Discards any resources used by the object. After this is called, the
     /// object is not in a usable state and should be discarded.
     pub fn dispose(self: Handle<Self>, app: &mut App) {
-        let states = std::mem::take(&mut app.get_mut(self).mouse_states);
-        for state in states.into_values() {
-            MouseTracker::release_annotations(app, state.retained);
-        }
         app.get_mut(self).change_notifier.dispose();
     }
 
     /// The remembered annotations keep their render objects past a rebuild, as Dart's map holds
     /// the annotation objects: an exit is still delivered to a region that just left the tree.
-    fn retain_annotations(
-        app: &mut App,
-        annotations: &Annotations,
-    ) -> Vec<RetainedHandle<AnyRenderObject>> {
+    fn retain_annotations(app: &mut App, annotations: &Annotations) -> Vec<AnyRef> {
         annotations
             .keys()
             .filter_map(TrackedAnnotation::render_object)
-            .map(|target| app.retain(target))
+            .filter_map(|target| target.id().upgrade(app))
             .collect()
-    }
-
-    fn release_annotations(app: &mut App, retained: Vec<RetainedHandle<AnyRenderObject>>) {
-        for handle in retained {
-            app.release(handle);
-        }
     }
 
     // Whether an observed event might update a device.
@@ -480,7 +467,7 @@ impl MouseTracker {
                         event.clone(),
                     ),
                 );
-                MouseTracker::release_annotations(app, last_retained);
+                drop(last_retained);
             });
         });
     }
@@ -524,7 +511,7 @@ impl MouseTracker {
                         last_event,
                     ),
                 );
-                MouseTracker::release_annotations(app, last_retained);
+                drop(last_retained);
             }
         });
     }
@@ -684,7 +671,7 @@ mod tests {
     /// A laid-out tree: a 200×200 root holding a mouse region padded 50 on each side, so the
     /// region covers (50..150, 50..150). Returns the root and the region.
     struct RegionTree {
-        owner: Handle<PipelineOwner>,
+        owner: Ref<PipelineOwner>,
         root: crate::RenderHandle<RenderRepaintBoundary>,
         padding: crate::RenderHandle<RenderPadding>,
         region: crate::RenderHandle<RenderMouseRegion>,
@@ -714,7 +701,7 @@ mod tests {
     fn tracker_for(
         app: &mut App,
         root: crate::RenderHandle<RenderRepaintBoundary>,
-    ) -> Handle<MouseTracker> {
+    ) -> Ref<MouseTracker> {
         MouseTracker::new(
             app,
             Rc::new(move |app: &mut App, position: Offset, _view_id: ViewId| {
@@ -867,7 +854,7 @@ mod tests {
         let region = RenderMouseRegion::new(&mut app, true, None);
         assert!(region.valid_for_mouse_tracker(&app));
         let owner = PipelineOwner::new(&mut app, None, None);
-        region.as_object().attach(&mut app, owner);
+        region.as_object().attach(&mut app, *owner);
         assert!(region.valid_for_mouse_tracker(&app));
         region.as_object().detach(&mut app);
         assert!(!region.valid_for_mouse_tracker(&app));

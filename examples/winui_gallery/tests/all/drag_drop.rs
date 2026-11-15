@@ -121,7 +121,11 @@ fn fixture_with_delayed(delayed: bool) -> (Fixture, Probe) {
             app,
             WidgetsApp::new(waft_embedder::Color::new(0xff000000))
                 .debug_show_checked_mode_banner(false)
-                .builder(move |_, _, _| Overlay::new().initial_entries([entry]).into_widget())
+                .builder(move |_, _, _| {
+                    Overlay::new()
+                        .initial_entries([entry.clone()])
+                        .into_widget()
+                })
                 .into_widget(),
         );
     });

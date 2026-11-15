@@ -28,13 +28,13 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — a Rust future cannot hold the `App` across an `await`; it borrows the cell per step, as gpui does.
   Affect: everything after an `await` lands at a later checkpoint, and dropping a `Task` does not cancel it.
 
-- Change: `App::retain(handle)` returns a `RetainedHandle<T>` (and `retain_id` a `RetainedHandleId`) that keeps an object alive past its `destroy`.
-  Reason: language — Dart keeps an object alive while anything references it; the arena frees it, and a cached hit-test path or the mouse tracker may still name it.
-  Affect: a `Listener` rebuilt mid-press still receives its release, and a retained entry lingers until its holder lets go.
+- Change: an object lives while a `Ref` keeps it (`App::create` returns the first, `Clone` makes more, `Handle::upgrade` makes one from a bare handle) and is freed at the checkpoint after the last one drops; an element, a state, a render object or a layer is kept by the tree code from `Retained::into_tree_node` to `App::release_tree_node`. `dispose` frees nothing, and the last drop runs no `dispose`. A debug build counts the arena's objects with `App::debug_object_count`, and by type with `App::debug_object_counts_by_type`.
+  Reason: language — there is no collector, so a count per object and a free deferred to the checkpoint stand in for Dart's references, and a test for leaks needs a count where Flutter's leak tracking watches the collector.
+  Affect: an object nothing keeps can still be read until the next checkpoint and panics after it, naming its type, where it was created and the checkpoint that freed it; a ring of `Ref`s is never freed, where Dart's collector frees an unreachable ring; a release build has no count.
 
-- Change: `App::destroy_lingering(handle)` destroys an object that stays readable until the next checkpoint, and a debug build counts the arena's objects with `App::debug_object_count`, and by type with `App::debug_object_counts_by_type`.
-  Reason: language — Dart's collector keeps a dropped object alive while code that still names it runs, and a test for leaks needs a count where Flutter's leak tracking watches the collector.
-  Affect: an object an owner replaces in a build can be freed in that build while the widgets built from it let go of it later in the frame; a release build has no count.
+- Change: a tear-off (`Listener::handle_method`, `AnimationStatusListener::handle_method`, `FrameCallback::handle_method`, `PointerRoute::handle_method`) does not keep its receiver, and is skipped once the receiver is freed; a debug build reports the skipped receiver once, with its type and creation site.
+  Reason: language — the tear-off names its receiver by a bare handle so that a listener list never keeps its listener alive, where Dart's tear-off keeps its receiver until it is removed.
+  Affect: an object dropped while still listening is freed and its listener stops being called, where Dart would keep the object and keep calling it.
 
 - Change: `App` holds the host `Platform`: `AppCell::new` uses an inert one and `AppCell::with_platform` installs a live one before user code.
   Reason: platform — dart:ui is host-bound; there is no isolate global to hang it on.
@@ -89,16 +89,16 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Affect: an equivalent-looking closure built at the removal site removes nothing and the listener keeps firing; keep the `Listener` that was added, or rebuild the `handle_method` tear-off.
 
 - Change: `remove_listener` on a `Handle` whose entry is gone is a no-op.
-  Reason: language — Dart allows `removeListener` on a disposed `ChangeNotifier`, whose object the collector still holds; here the entry may already be destroyed, and a stale `app.get_mut` panics.
+  Reason: language — Dart allows `removeListener` on a disposed `ChangeNotifier`, whose object the collector still holds; here a remover that names it by a bare handle may find it freed, and a stale `app.get_mut` panics.
   Affect: a state that unmounts after its listenable (a route's `TickerMode`, during a hero flight's pop) removes its listener without panicking; a handle that was never valid is ignored too.
 
 - Change: a panicking listener ends the notification, and `dispose` also clears the reentrant-removal count.
   Reason: language — Rust has no catchable exception for ordinary control flow, so a panic skips the compaction Dart's `catch` always reaches.
   Affect: a panicking listener skips every listener after it; Flutter still calls them.
 
-- Change: a `Listenable` held as a value is an `Rc<dyn Listenable>`, and `Listenable::retain` keeps the arena objects it notifies from past their owners' `destroy` (a `Handle` or an animation its own entry, a `MergingListenable` its children's), for a listener to remove itself after the owner let go.
-  Reason: language — no collector: Dart's listener keeps the object it listens to alive by referencing it.
-  Affect: an `AnimatedWidget` whose owner destroys the animation it handed down (the expansion tile's per-build `icon_turns`) still removes its listener from it, and the object is freed once the widget moves off it; a listenable that is no arena object retains nothing.
+- Change: a `Listenable` held as a value is an `Rc<dyn Listenable>`, and an arena object is one as a `Retained` (a `Ref`, or an erased reference such as an animation's), never as a bare `Handle`.
+  Reason: language — no collector: Dart's reference to a listenable keeps it alive, and a bare handle keeps nothing.
+  Affect: whatever holds the `Rc` keeps the object it listens to, so an `AnimatedWidget` whose owner let go of the animation it handed down still removes its listener from it.
 
 ## Deferred
 

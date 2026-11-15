@@ -8,7 +8,7 @@ use waft_painting::Axis;
 
 use crate::framework::{BuildContext, InheritedWidget, IntoWidget, KeyRef, WidgetRef};
 use crate::widgets::scroll_configuration::ScrollConfiguration;
-use crate::widgets::scroll_controller::AnyScrollController;
+use crate::widgets::scroll_controller::ScrollControllerRef;
 
 /// Dart's `_kMobilePlatforms`, a function because a `HashSet` has no `const` constructor.
 fn k_mobile_platforms() -> HashSet<TargetPlatform> {
@@ -59,7 +59,7 @@ pub struct PrimaryScrollController {
     ///
     ///  * `ScrollView.controller`, which discusses the purpose of specifying a
     ///    scroll controller.
-    pub controller: Option<AnyScrollController>,
+    pub controller: Option<ScrollControllerRef>,
 
     /// The [`Axis`] this controller is configured for scroll views to
     /// automatically inherit.
@@ -98,7 +98,7 @@ pub struct PrimaryScrollController {
 impl PrimaryScrollController {
     /// Creates a widget that associates a `ScrollController` with a subtree.
     pub fn new<K>(
-        controller: AnyScrollController,
+        controller: ScrollControllerRef,
         child: impl IntoWidget<K>,
     ) -> PrimaryScrollController {
         PrimaryScrollController {
@@ -178,10 +178,10 @@ impl PrimaryScrollController {
     ///
     /// * [`PrimaryScrollController::of`], which is similar to this method, but
     ///   panics if no [`PrimaryScrollController`] ancestor is found.
-    pub fn maybe_of(app: &mut App, context: BuildContext) -> Option<AnyScrollController> {
+    pub fn maybe_of(app: &mut App, context: BuildContext) -> Option<ScrollControllerRef> {
         context
             .depend_on_inherited_widget_of_exact_type::<PrimaryScrollController>(app)
-            .and_then(|result| result.controller)
+            .and_then(|result| result.controller.clone())
     }
 
     /// Returns the `ScrollController` most closely associated with the given
@@ -198,7 +198,7 @@ impl PrimaryScrollController {
     ///
     /// * [`PrimaryScrollController::maybe_of`], which is similar to this method, but
     ///   returns `None` if no [`PrimaryScrollController`] ancestor is found.
-    pub fn of(app: &mut App, context: BuildContext) -> AnyScrollController {
+    pub fn of(app: &mut App, context: BuildContext) -> ScrollControllerRef {
         PrimaryScrollController::maybe_of(app, context).expect(
             "PrimaryScrollController.of() was called with a context that does not contain a \
              PrimaryScrollController widget.\n\
@@ -230,7 +230,7 @@ mod tests {
     use crate::framework::{AnyElement, Element, IntoWidget};
     use crate::test_harness::Harness;
     use crate::widgets::basic::SizedBox;
-    use crate::widgets::scroll_controller::{ScrollController, ScrollControllerLeaf};
+    use crate::widgets::scroll_controller::ScrollController;
     use waft_foundation::AppCell;
 
     /// The element under the test root at `depth` levels down.
@@ -255,18 +255,17 @@ mod tests {
         let controller = ScrollController::default(&mut app);
         let harness = mount(
             &mut app,
-            PrimaryScrollController::new(controller.as_controller(), SizedBox::shrink())
-                .into_widget(),
+            PrimaryScrollController::new(controller.erase(), SizedBox::shrink()).into_widget(),
         );
 
         let inner = descendant(&harness, &app, 1);
         assert_eq!(
             PrimaryScrollController::of(&mut app, inner),
-            controller.as_controller()
+            controller.erase()
         );
         assert_eq!(
             PrimaryScrollController::maybe_of(&mut app, inner),
-            Some(controller.as_controller())
+            Some(controller.erase())
         );
     }
 
@@ -278,7 +277,7 @@ mod tests {
         let harness = mount(
             &mut app,
             PrimaryScrollController::new(
-                controller.as_controller(),
+                controller.erase(),
                 PrimaryScrollController::none(SizedBox::shrink()),
             )
             .into_widget(),
@@ -295,8 +294,7 @@ mod tests {
         let controller = ScrollController::default(&mut app);
         let harness = mount(
             &mut app,
-            PrimaryScrollController::new(controller.as_controller(), SizedBox::shrink())
-                .into_widget(),
+            PrimaryScrollController::new(controller.erase(), SizedBox::shrink()).into_widget(),
         );
 
         let inner = descendant(&harness, &app, 1);

@@ -14,10 +14,11 @@ use crate::framework::{BuildContext, State};
 use crate::widgets::actions::{Action, ActionData, ContextAction, Intent};
 use crate::widgets::primary_scroll_controller::PrimaryScrollController;
 use crate::widgets::scroll_context::ScrollContext;
-use crate::widgets::scroll_controller::AnyScrollController;
+use crate::widgets::scroll_controller::ScrollControllerRef;
 use crate::widgets::scroll_metrics::ScrollMetrics;
 use crate::widgets::scroll_physics::ScrollPhysicsRef;
 use crate::widgets::scrollable::{Scrollable, ScrollableState};
+use waft_foundation::Ref;
 
 /// Describes the aspects of a `Scrollable` widget to inform inherited widgets
 /// like [`crate::ScrollBehavior`] for decorating or enumerate the properties of combined
@@ -31,7 +32,7 @@ pub struct ScrollableDetails {
     pub direction: AxisDirection,
 
     /// An object that can be used to control the position to which the widget is scrolled.
-    pub controller: Option<AnyScrollController>,
+    pub controller: Option<ScrollControllerRef>,
 
     /// How the widgets should respond to user input.
     pub physics: Option<ScrollPhysicsRef>,
@@ -75,7 +76,7 @@ impl ScrollableDetails {
     }
 
     /// Dart `ScrollableDetails(controller:)`.
-    pub fn controller(mut self, controller: AnyScrollController) -> ScrollableDetails {
+    pub fn controller(mut self, controller: ScrollControllerRef) -> ScrollableDetails {
         self.controller = Some(controller);
         self
     }
@@ -177,7 +178,7 @@ impl EdgeDraggingAutoScroller {
         scrollable: Handle<ScrollableState>,
         on_scroll_view_scrolled: Option<Listener>,
         velocity_scalar: f64,
-    ) -> Handle<EdgeDraggingAutoScroller> {
+    ) -> Ref<EdgeDraggingAutoScroller> {
         app.create(EdgeDraggingAutoScroller {
             scrollable,
             on_scroll_view_scrolled,
@@ -337,9 +338,12 @@ impl EdgeDraggingAutoScroller {
         let velocity_scalar = app.get(self).velocity_scalar;
         let duration = Duration::from_millis((1000.0 / velocity_scalar).round() as u64);
         let animated = position.animate_to(app, new_offset, duration, Curves::linear());
-        let retained = app.retain(self);
+        // Dart's closure keeps the auto scroller until the animation it awaits ends.
+        let kept = self
+            .upgrade(app)
+            .expect("an auto scroller that scrolls is kept by its owner");
         app.spawn(async move |cx| {
-            let _retained = retained;
+            let _kept = kept;
             animated.await;
             let scrolling = cx.update(|app| {
                 if let Some(on_scroll_view_scrolled) = app.get(self).on_scroll_view_scrolled.clone()
@@ -482,7 +486,7 @@ pub struct ScrollAction {
 
 impl ScrollAction {
     /// Creates a [`ScrollAction`].
-    pub fn new(app: &mut App) -> Handle<ScrollAction> {
+    pub fn new(app: &mut App) -> Ref<ScrollAction> {
         app.create(ScrollAction {
             action: ActionData::new(),
         })
@@ -639,12 +643,12 @@ mod tests {
     use crate::widgets::media_query::{MediaQuery, MediaQueryData};
     use crate::widgets::scroll_physics::NeverScrollableScrollPhysics;
     use crate::widgets::scrollable::ViewportBuilder;
-    use waft_rendering::AnyViewportOffset;
+    use waft_rendering::ViewportOffsetRef;
 
     /// A leaf whose render object is a `RenderViewport` over 800 logical pixels of content.
     #[derive(Debug)]
     struct TestViewport {
-        offset: AnyViewportOffset,
+        offset: ViewportOffsetRef,
     }
 
     impl RenderObjectWidget for TestViewport {
@@ -660,7 +664,7 @@ mod tests {
             RenderViewport::new(
                 app,
                 AxisDirection::Right,
-                self.offset,
+                self.offset.clone(),
                 Some(vec![RenderSliver::as_sliver(sliver)]),
                 None,
             )
@@ -673,7 +677,7 @@ mod tests {
             _context: BuildContext,
             render_object: RenderHandle<RenderViewport>,
         ) {
-            RenderViewportBase::set_offset(render_object, app, self.offset);
+            RenderViewportBase::set_offset(render_object, app, self.offset.clone());
         }
     }
 
@@ -691,15 +695,15 @@ mod tests {
             let sink = Rc::clone(&sink);
             let probe = Builder::new(move |_app, context| {
                 sink.set(Some(context));
-                TestViewport { offset }.into_widget()
+                TestViewport {
+                    offset: offset.clone(),
+                }
+                .into_widget()
             });
             probe.into_widget()
         });
         let action = ScrollAction::new(app);
-        let actions = HashMap::from([(
-            TypeId::of::<ScrollIntent>(),
-            Action::as_action(action) as AnyAction,
-        )]);
+        let actions = HashMap::from([(TypeId::of::<ScrollIntent>(), action.erase::<AnyAction>())]);
         let scrollable = configure(Scrollable::new(viewport));
         let tree: WidgetRef =
             MediaQuery::new(MediaQueryData::new(), Actions::new(actions, scrollable)).into_widget();
@@ -724,7 +728,7 @@ mod tests {
 
     /// A drag over the mounted scrollable, the way `ReorderableList` drives an auto scroller.
     struct AutoScrollDrag {
-        scroller: Handle<EdgeDraggingAutoScroller>,
+        scroller: Ref<EdgeDraggingAutoScroller>,
         /// How many scrolls `on_scroll_view_scrolled` reported.
         scrolls: Rc<Cell<usize>>,
         /// Cleared when the drag ends; the callback re-submits the target only while set.
@@ -756,7 +760,7 @@ mod tests {
         });
         // 50 pixels per second: a 10 pixel overdrag scrolls 10 pixels in 20 milliseconds.
         let scroller = EdgeDraggingAutoScroller::new(app, state, Some(on_scrolled), 50.0);
-        scroller_slot.set(Some(scroller));
+        scroller_slot.set(Some(*scroller));
         AutoScrollDrag {
             scroller,
             scrolls,
@@ -955,7 +959,7 @@ mod tests {
         harness.pump(&mut app);
         let context = captured.get().expect("the builder ran");
         assert!(!ContextAction::is_enabled(
-            action,
+            *action,
             &mut app,
             &ScrollIntent::new(AxisDirection::Down),
             Some(context)

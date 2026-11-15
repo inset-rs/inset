@@ -3,9 +3,8 @@
 use crate::*;
 use std::{fmt, rc::Rc};
 use waft_embedder::{Color, FontWeight, PointerDeviceKind};
-use waft_foundation::{App, Handle, Listener};
+use waft_foundation::{App, Handle, Listener, OptionRetained, Ref};
 use waft_painting::{Alignment, EdgeInsetsGeometry};
-use waft_scheduler::{FrameCallback, SchedulerBinding};
 use waft_services::{HardwareKeyboard, KeyEvent, LogicalKeyboardKey};
 use waft_widgets::*;
 
@@ -19,7 +18,7 @@ pub struct SplitButton {
     pub click: Listener,
 
     /// Flyout opened by SecondaryButton, F4 or Alt+Down.
-    pub flyout: Option<Handle<Flyout>>,
+    pub flyout: Option<Ref<Flyout>>,
 
     /// Enables both actions and keyboard focus.
     pub is_enabled: bool,
@@ -28,7 +27,7 @@ pub struct SplitButton {
     pub is_tab_stop: bool,
 
     /// Optional caller-owned focus identity for the whole control.
-    pub focus_node: Option<AnyFocusNode>,
+    pub focus_node: Option<FocusNodeRef>,
 
     /// Identity across parent rebuilds.
     pub key: Option<KeyRef>,
@@ -63,7 +62,7 @@ impl SplitButton {
     }
 
     /// Sets the associated flyout without changing its ownership.
-    pub fn flyout(mut self, flyout: Handle<Flyout>) -> Self {
+    pub fn flyout(mut self, flyout: Ref<Flyout>) -> Self {
         self.flyout = Some(flyout);
         self
     }
@@ -81,7 +80,7 @@ impl SplitButton {
     }
 
     /// Supplies a caller-owned focus node.
-    pub fn focus_node(mut self, node: AnyFocusNode) -> Self {
+    pub fn focus_node(mut self, node: FocusNodeRef) -> Self {
         self.focus_node = Some(node);
         self
     }
@@ -112,7 +111,7 @@ pub(crate) struct SplitButtonState {
     state: StateData<SplitButtonPresenter>,
 
     /// Focus identity for the whole control, while internal buttons are not tab stops.
-    focus: Option<AnyFocusNode>,
+    focus: Option<FocusNodeRef>,
 
     /// Whether this state must dispose the focus node.
     owns_focus: bool,
@@ -202,7 +201,11 @@ impl SplitButtonState {
         let state = app.get(self);
         if !widget.is_enabled {
             Disabled
-        } else if widget.flyout.is_some_and(|flyout| flyout.is_open(app)) {
+        } else if widget
+            .flyout
+            .handle()
+            .is_some_and(|flyout| flyout.is_open(app))
+        {
             FlyoutOpen
         } else if state.last_pointer == PointerDeviceKind::Touch || state.key_down {
             if state.primary_pressed || state.secondary_pressed || state.key_down {
@@ -225,7 +228,7 @@ impl SplitButtonState {
 
     /// SplitButton::OpenFlyout uses this per-opening override and Auto show mode.
     fn open_flyout(self: Handle<Self>, app: &mut App) {
-        if let Some(flyout) = self.widget(app).flyout {
+        if let Some(flyout) = self.widget(app).flyout.handle() {
             flyout.show_at_with_options(
                 app,
                 app.get(self).target.unwrap(),
@@ -297,8 +300,10 @@ impl SplitButtonState {
 
     /// Creates or attaches the whole-control focus node.
     fn attach_focus(self: Handle<Self>, app: &mut App) {
-        let external = self.widget(app).focus_node;
-        let node = external.unwrap_or_else(|| FocusNode::new(app).as_node());
+        let external = self.widget(app).focus_node.clone();
+        let node = external
+            .clone()
+            .unwrap_or_else(|| FocusNode::new(app).into_erased());
         node.set_skip_traversal(app, !self.widget(app).is_tab_stop);
         node.set_on_key_event(
             app,
@@ -585,34 +590,25 @@ impl State for SplitButtonState {
             app.get_mut(self).primary_pressed = false;
             app.get_mut(self).secondary_pressed = false;
         }
-        if old.focus_node != self.widget(app).focus_node {
-            let node = app.get(self).focus.unwrap();
+        if old.focus_node.handle() != self.widget(app).focus_node.handle() {
+            let node = app.get(self).focus.clone().unwrap();
             node.set_on_key_event(app, None);
             if app.get(self).owns_focus {
                 node.dispose(app);
-                SchedulerBinding::add_post_frame_callback(
-                    app,
-                    FrameCallback::new(move |app, _| {
-                        if app.contains(node.id()) {
-                            app.destroy(node.id());
-                        }
-                    }),
-                    View::maybe_id_of(app, self.context(app)),
-                );
             }
             self.attach_focus(app);
         }
         app.get(self)
             .focus
+            .handle()
             .unwrap()
             .set_skip_traversal(app, !self.widget(app).is_tab_stop);
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        let node = app.get(self).focus.unwrap();
+        let node = app.get(self).focus.clone().unwrap();
         if app.get(self).owns_focus {
             node.dispose(app);
-            app.destroy(node.id());
         } else {
             node.set_on_key_event(app, None);
         }
@@ -620,7 +616,7 @@ impl State for SplitButtonState {
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
         let widget = self.widget(app).clone();
-        let content = if let Some(flyout) = widget.flyout {
+        let content = if let Some(flyout) = widget.flyout.clone() {
             ListenableBuilder::new(Rc::new(flyout), move |app, context, _| {
                 self.template(app, context)
             })
@@ -629,7 +625,7 @@ impl State for SplitButtonState {
             self.template(app, context)
         };
         let content = FocusableActionDetector::new(content)
-            .focus_node(app.get(self).focus.unwrap())
+            .focus_node(app.get(self).focus.clone().unwrap())
             .enabled(widget.is_enabled)
             .on_focus_change(move |app, focused| {
                 let value = focused && crate::FocusState::current(app).shows_focus_visual();

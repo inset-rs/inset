@@ -7,7 +7,7 @@
 //! the abstract signature is an `Option`, so an implementation applies its own default as
 //! Dart's override does. A shape's `paint` takes the `App`: the animations and the parent box
 //! live there, and the `Tween` and `ColorTween` Dart makes on each paint are arena objects
-//! that [`evaluate_tween`] and [`evaluate_color_tween`] make, evaluate and free.
+//! that [`evaluate_tween`] and [`evaluate_color_tween`] make and evaluate.
 
 use std::any::Any;
 use std::fmt::Debug;
@@ -38,9 +38,7 @@ pub(crate) fn evaluate_color_tween(
     animation: AnyAnimation<f64>,
 ) -> Option<Color> {
     let tween = ColorTween::new(app, begin, end);
-    let value = tween.evaluate(app, animation);
-    app.destroy(tween);
-    value
+    tween.evaluate(app, animation)
 }
 
 /// Dart's `Tween<double>(begin: begin, end: end).evaluate(animation)`.
@@ -51,9 +49,7 @@ pub(crate) fn evaluate_tween(
     animation: AnyAnimation<f64>,
 ) -> f64 {
     let tween = Tween::new(app, Some(begin), Some(end));
-    let value = tween.evaluate(app, animation);
-    app.destroy(tween);
-    value
+    tween.evaluate(app, animation)
 }
 
 /// Dart's `canvas.drawShadow(path, color, elevation, transparentOccluder)`, with the device

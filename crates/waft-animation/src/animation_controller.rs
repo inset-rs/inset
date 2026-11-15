@@ -5,7 +5,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use waft_embedder::{clamp_double, lerp_double};
-use waft_foundation::{App, Handle, ListenableObject, Listener};
+use waft_foundation::{App, Handle, ListenableObject, Listener, Ref};
 use waft_physics::{Simulation, SpringDescription, SpringSimulation, SpringType, Tolerance};
 use waft_scheduler::{FrameCallback, Ticker, TickerFuture, TickerProvider};
 
@@ -15,7 +15,6 @@ use crate::listener_helpers::{
     AnimationEagerListenerMixin, AnimationLocalListenersData, AnimationLocalListenersMixin,
     AnimationLocalStatusListenersData, AnimationLocalStatusListenersMixin,
 };
-use crate::tween::Animatable;
 
 /// Dart's private `_AnimationDirection`: the direction in which an animation
 /// is running.
@@ -106,7 +105,7 @@ pub struct AnimationController {
     /// this is `None`.
     pub reverse_duration: Option<Duration>,
 
-    ticker: Option<Handle<Ticker>>,
+    ticker: Option<Ref<Ticker>>,
     simulation: Option<Rc<dyn Simulation>>,
     value: f64,
     last_elapsed_duration: Option<Duration>,
@@ -137,6 +136,7 @@ impl AnimationController {
     /// Dart's constructor registers the `_tick` tear-off with the vended
     /// ticker, so creation goes through the [`App`].
     #[allow(clippy::too_many_arguments)]
+    #[track_caller]
     pub fn create(
         app: &mut App,
         value: Option<f64>,
@@ -146,7 +146,7 @@ impl AnimationController {
         upper_bound: f64,
         animation_behavior: AnimationBehavior,
         vsync: impl TickerProvider,
-    ) -> Handle<AnimationController> {
+    ) -> Ref<AnimationController> {
         debug_assert!(upper_bound >= lower_bound);
         let this = app.create(AnimationController {
             lower_bound,
@@ -167,9 +167,9 @@ impl AnimationController {
         });
         let ticker = vsync.create_ticker(
             app,
-            FrameCallback::handle_method(this, AnimationController::tick),
+            FrameCallback::handle_method(*this, AnimationController::tick),
         );
-        app.get_mut(this).ticker = Some(ticker);
+        app.get_mut(&this).ticker = Some(ticker);
         this.internal_set_value(app, value.unwrap_or(lower_bound));
         this
     }
@@ -178,6 +178,7 @@ impl AnimationController {
     /// value.
     ///
     /// Dart's defaults: `value` 0.0, `animation_behavior` `Preserve`.
+    #[track_caller]
     pub fn create_unbounded(
         app: &mut App,
         value: f64,
@@ -185,7 +186,7 @@ impl AnimationController {
         reverse_duration: Option<Duration>,
         animation_behavior: AnimationBehavior,
         vsync: impl TickerProvider,
-    ) -> Handle<AnimationController> {
+    ) -> Ref<AnimationController> {
         let this = app.create(AnimationController {
             lower_bound: f64::NEG_INFINITY,
             upper_bound: f64::INFINITY,
@@ -205,9 +206,9 @@ impl AnimationController {
         });
         let ticker = vsync.create_ticker(
             app,
-            FrameCallback::handle_method(this, AnimationController::tick),
+            FrameCallback::handle_method(*this, AnimationController::tick),
         );
-        app.get_mut(this).ticker = Some(ticker);
+        app.get_mut(&this).ticker = Some(ticker);
         this.internal_set_value(app, value);
         this
     }
@@ -359,7 +360,7 @@ impl AnimationController {
         self.drain_pending_direction(app);
         let controller = app.get_mut(self);
         controller.value = clamp_double(x, controller.lower_bound, controller.upper_bound);
-        let ticker = controller.ticker.expect("started after dispose");
+        let ticker = *controller.ticker.as_deref().expect("started after dispose");
         let result = ticker.start(app);
         let controller = app.get_mut(self);
         controller.status = if controller.direction == AnimationDirection::Forward {
@@ -507,7 +508,7 @@ impl Animation<f64> for AnimationController {
     // (`animation_controller.dart:449`): a muted or off-screen controller is
     // animating even while its status says otherwise.
     fn is_animating(self: Handle<Self>, app: &App) -> bool {
-        match app.get(self).ticker {
+        match app.get(self).ticker.as_deref().copied() {
             Some(ticker) => ticker.is_active(app),
             None => false,
         }
@@ -682,28 +683,18 @@ impl AnimationController {
         self.as_animation()
     }
 
-    /// Chains a `Tween` (or any [`Animatable`]) to this controller.
-    ///
-    /// Dart inherits `drive` from `Animation<double>`. A
-    /// `Handle<AnimationController>` is not a subtype, so the method is
-    /// inherent and forwards to [`view`](AnimationController::view).
-    pub fn drive<U: 'static>(
-        self: Handle<Self>,
-        app: &mut App,
-        child: impl Animatable<U> + Clone + 'static,
-    ) -> AnyAnimation<U> {
-        self.view().drive(app, child)
-    }
-
     /// Recreates the [`Ticker`] with the new `TickerProvider`.
     pub fn resync(self: Handle<Self>, app: &mut App, vsync: impl TickerProvider) {
-        let old_ticker = app.get(self).ticker.expect("resync after dispose");
         let ticker = vsync.create_ticker(
             app,
             FrameCallback::handle_method(self, AnimationController::tick),
         );
-        app.get_mut(self).ticker = Some(ticker);
-        ticker.absorb_ticker(app, old_ticker);
+        let old_ticker = app
+            .get_mut(self)
+            .ticker
+            .replace(ticker.clone())
+            .expect("resync after dispose");
+        ticker.absorb_ticker(app, *old_ticker);
     }
 
     /// Stops the animation controller and sets the current value of the
@@ -982,7 +973,7 @@ impl AnimationController {
         let controller = app.get_mut(self);
         controller.simulation = None;
         controller.last_elapsed_duration = None;
-        let ticker = controller.ticker.unwrap();
+        let ticker = *controller.ticker.as_deref().unwrap();
         ticker.stop(app, canceled);
     }
 
@@ -993,6 +984,7 @@ impl AnimationController {
             app.get(self).ticker.is_some(),
             "AnimationController::dispose() called more than once."
         );
+        app.mark_disposed(self);
         let ticker = app.get_mut(self).ticker.take().unwrap();
         ticker.dispose(app);
         self.clear_status_listeners(app);
@@ -1050,7 +1042,7 @@ mod tests {
     struct TestVSync;
 
     impl TickerProvider for TestVSync {
-        fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+        fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
             Ticker::new(app, on_tick, None)
         }
     }
@@ -1063,7 +1055,7 @@ mod tests {
         app.drain_microtasks();
     }
 
-    fn controller_with_duration(app: &mut App, ms: u64) -> Handle<AnimationController> {
+    fn controller_with_duration(app: &mut App, ms: u64) -> Ref<AnimationController> {
         AnimationController::create(
             app,
             None,
@@ -1255,13 +1247,14 @@ mod tests {
         let controller = controller_with_duration(&mut app, 100);
 
         let observed = Rc::new(RefCell::new(Vec::new()));
+        let view = controller.view();
         controller.view().add_status_listener(
             &mut app,
             AnimationStatusListener::new({
                 let observed = Rc::clone(&observed);
                 move |status, app: &mut App| {
                     if status == AnimationStatus::Reverse {
-                        let value = controller.view().value(app);
+                        let value = view.value(app);
                         observed.borrow_mut().push(value);
                     }
                 }

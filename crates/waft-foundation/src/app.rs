@@ -19,7 +19,7 @@ use crate::change_notifier::Listener;
 use crate::entity::EntityMap;
 use crate::executor::{ExecutorHandle, ForegroundExecutor, Task};
 use crate::handle_map::HandleMap;
-pub use crate::handle_map::{RetainedHandle, RetainedHandleId};
+pub use crate::handle_map::{AnyRef, OptionRetained, Ref, Retained};
 use crate::timers::{Timer, Timers};
 
 /// Drain budget for one [`App::drain_microtasks`]: two callbacks scheduling
@@ -31,19 +31,22 @@ new_key_type! {
     /// Untyped [`Handle`]. For a reference that may point at more than one type;
     /// [`App::handle`] narrows it.
     ///
-    /// Destroy bumps the generation, so a leftover id does not silently name the next occupant.
+    /// A free bumps the generation, so a leftover id does not silently name the next occupant.
     pub struct HandleId;
 }
 
-/// A Dart object, as far as Rust ownership is concerned.
+/// A Dart object, as far as Rust ownership is concerned, named without keeping it.
 ///
 /// Flutter objects form cycles — an element names its widget and its render object, a notifier
 /// names its listeners, a listener often names the notifier. Dart allows that because the GC
-/// owns the objects. Here the object lives in [`App`]; what you store is this id.
+/// owns the objects. Here the object lives in [`App`] while a [`Ref`] keeps it (or the tree code,
+/// for a tree node); this is the id that names it.
 ///
-/// `Copy` and owns nothing. A parent–child edge is a field, not an `Rc`. Do not add a refcount:
-/// that would drop `Copy` and is the `Entity` design, reserved for user stores. Stale is
-/// detected by generation, not by keeping the entry alive.
+/// `Copy` and owns nothing: the method receiver, the form layout and paint walk with, and what a
+/// field holds when it points back at what holds its object (a parent, an owner). Valid while
+/// something keeps the object: one on the stack is good until the next checkpoint, and one kept
+/// past it is a [`Ref`] or is checked with [`upgrade`](Handle::upgrade) or [`App::contains`].
+/// Stale is detected by generation.
 ///
 /// Point access, not a lease: [`App::get`] / [`App::get_mut`] for one field, then drop the borrow
 /// before any call that can run framework code. Holding the object out of the arena for a whole
@@ -77,6 +80,25 @@ impl<T> Handle<T> {
 
     pub fn id(self) -> HandleId {
         self.id
+    }
+}
+
+impl<T: 'static> Handle<T> {
+    /// A [`Ref`] while something still keeps the object, `None` once it is freed or its last
+    /// keeper has let go: GPUI's `WeakEntity::upgrade`.
+    ///
+    /// # Panics
+    ///
+    /// If the entry holds another type.
+    pub fn upgrade(self, app: &App) -> Option<Ref<T>> {
+        app.handles.upgrade(self)
+    }
+}
+
+impl HandleId {
+    /// An [`AnyRef`] while something still keeps the object; see [`Handle::upgrade`].
+    pub fn upgrade(self, app: &App) -> Option<AnyRef> {
+        app.handles.upgrade_id(self)
     }
 }
 
@@ -131,7 +153,13 @@ pub struct App {
     this: Weak<AppCell>,
     handles: HandleMap,
     pub(crate) entities: EntityMap,
-    singletons: HashMap<std::any::TypeId, HandleId>,
+    /// The App is what keeps a singleton.
+    singletons: HashMap<std::any::TypeId, AnyRef>,
+    /// The receivers of the skipped tear-offs already reported, so each is reported once.
+    #[cfg(debug_assertions)]
+    skipped_tear_off_receivers: std::collections::HashSet<HandleId>,
+    #[cfg(debug_assertions)]
+    skipped_tear_offs: Vec<String>,
     microtasks: VecDeque<Listener>,
     timers: Timers,
     executor: ForegroundExecutor,
@@ -256,6 +284,10 @@ impl App {
             handles: HandleMap::new(),
             entities: EntityMap::new(),
             singletons: HashMap::new(),
+            #[cfg(debug_assertions)]
+            skipped_tear_off_receivers: std::collections::HashSet::new(),
+            #[cfg(debug_assertions)]
+            skipped_tear_offs: Vec::new(),
             microtasks: VecDeque::new(),
             timers: Timers::default(),
             executor,
@@ -368,14 +400,17 @@ impl App {
         }
     }
 
-    /// One `T` per App (`SchedulerBinding.instance`, `kAlwaysCompleteAnimation`). Do not destroy it — the stored id goes stale and the next call panics.
+    /// One `T` per App (`SchedulerBinding.instance`, `kAlwaysCompleteAnimation`), kept by the
+    /// App for its whole life.
+    #[track_caller]
     pub fn singleton<T: 'static + Default>(&mut self) -> Handle<T> {
-        if let Some(&id) = self.singletons.get(&std::any::TypeId::of::<T>()) {
-            return Handle::new(id);
+        if let Some(existing) = self.existing_singleton() {
+            return existing;
         }
-        let handle = self.create(T::default());
+        let singleton = self.create(T::default());
+        let handle = *singleton;
         self.singletons
-            .insert(std::any::TypeId::of::<T>(), handle.id());
+            .insert(std::any::TypeId::of::<T>(), singleton.to_any());
         handle
     }
 
@@ -384,7 +419,7 @@ impl App {
     pub fn existing_singleton<T: 'static>(&self) -> Option<Handle<T>> {
         self.singletons
             .get(&std::any::TypeId::of::<T>())
-            .map(|&id| Handle::new(id))
+            .map(|singleton| Handle::new(singleton.handle()))
     }
 
     /// Dart's `scheduleMicrotask`: queues `callback` to run after the current
@@ -477,33 +512,73 @@ impl App {
         }
     }
 
-    pub fn create<T: 'static>(&mut self, state: T) -> Handle<T> {
+    /// Puts `state` in the arena and answers the one [`Ref`] that keeps it: Dart's constructor
+    /// call. The object is freed at the checkpoint after the last `Ref` to it is dropped.
+    ///
+    /// A tree node (an element, a state, a render object, a layer) is handed to the tree code at
+    /// once with [`Retained::into_tree_node`].
+    #[track_caller]
+    pub fn create<T: 'static>(&mut self, state: T) -> Ref<T> {
         self.handles.create(state)
     }
 
-    /// Dart's `dispose`: see [`HandleMap::destroy`].
-    pub fn destroy(&mut self, handle: impl Into<HandleId>) {
-        self.handles.destroy(handle.into());
+    /// See [`Retained::into_tree_node`].
+    pub(crate) fn adopt_tree_node(&mut self, id: HandleId, keep: Rc<crate::handle_map::Keep>) {
+        self.handles.adopt_tree_node(id, keep);
     }
 
-    /// [`destroy`](Self::destroy), with the entry kept readable until the next checkpoint.
+    /// The tree code is done with a node, at one of the four places Flutter's lifecycle ends one:
+    /// an element unmounted, a state disposed with its element, a render object or a layer
+    /// disposed. Marks it disposed and gives up the tree's part of its count, so it is freed at
+    /// the next checkpoint unless a [`Ref`] still keeps it.
     ///
-    /// Dart's collector keeps an object alive while the code that let go of it still runs: an
-    /// ink feature disposes the controller whose status listener is running, and a build drops
-    /// the action or animation its last build made while the widgets that use it have yet to
-    /// move off it.
-    pub fn destroy_lingering<T: Copy + Into<HandleId>>(&mut self, handle: T) {
-        let retained = self.retain(handle);
-        self.destroy(handle);
-        drop(retained);
+    /// # Panics
+    ///
+    /// If the object is not a tree node ([`Retained::into_tree_node`]), or was released already.
+    pub fn release_tree_node(&mut self, node: impl Into<HandleId>) {
+        self.handles.release_tree_node(node.into());
     }
 
-    /// Whether the entry exists: live, or destroyed but still retained.
+    /// Whether the entry exists: kept, or let go and waiting for the next checkpoint.
     pub fn contains(&self, handle: impl Into<HandleId>) -> bool {
         self.handles.contains(handle.into())
     }
 
-    /// How many objects the arena holds, live or destroyed but still retained: what Flutter's
+    /// Records that Dart's `dispose` has run on the object. The object stays readable for as
+    /// long as something keeps it; this is a fact for tooling and for [`is_disposed`].
+    ///
+    /// [`is_disposed`]: Self::is_disposed
+    pub fn mark_disposed(&mut self, handle: impl Into<HandleId>) {
+        self.handles.mark_disposed(handle.into());
+    }
+
+    /// Whether a tear-off's receiver is still in the arena; a tear-off ([`Listener::handle_method`]
+    /// and its twins) runs only when it is. One whose receiver was freed without removing it is
+    /// skipped, as GPUI ends an observer when its receiver is gone; a debug build reports it once
+    /// per receiver, with the receiver's type and creation site.
+    pub fn tear_off_receiver_is_live(&mut self, receiver: impl Into<HandleId>) -> bool {
+        let receiver = receiver.into();
+        let live = self.handles.contains(receiver);
+        #[cfg(debug_assertions)]
+        if !live && self.skipped_tear_off_receivers.insert(receiver) {
+            let message = format!(
+                "waft: a listener whose receiver was freed without removing it was skipped: {}",
+                self.handles.debug_describe(receiver)
+            );
+            eprintln!("{message}");
+            self.skipped_tear_offs.push(message);
+        }
+        live
+    }
+
+    /// The skipped tear-offs reported since the last call, for a test that turns them into a
+    /// failure.
+    #[cfg(debug_assertions)]
+    pub fn debug_take_skipped_tear_offs(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.skipped_tear_offs)
+    }
+
+    /// How many objects the arena holds, kept or waiting for the next checkpoint: what Flutter's
     /// leak tracking counts, for a test that a frame leaves nothing behind.
     #[cfg(debug_assertions)]
     pub fn debug_object_count(&self) -> usize {
@@ -517,51 +592,41 @@ impl App {
         self.handles.debug_entry_counts_by_type()
     }
 
-    /// A [`RetainedHandle`] that keeps the object past its owner's `destroy`; see
-    /// [`HandleMap::retain`]. `T` is the Copy handle to keep (`Handle<U>` or an erased handle).
-    pub fn retain<T: Copy + Into<HandleId>>(&mut self, handle: T) -> RetainedHandle<T> {
-        self.handles.retain(handle)
+    /// A checkpoint begins: the frees from here on are dated by it in the stale-read message.
+    pub(crate) fn begin_checkpoint(&mut self) {
+        self.handles.begin_checkpoint();
     }
 
-    /// A [`RetainedHandleId`] when the holder has only the id; see [`HandleMap::retain_id`].
-    pub fn retain_id(&mut self, id: HandleId) -> RetainedHandleId {
-        self.handles.retain_id(id)
+    /// Frees the objects whose last keeper went since the last sweep.
+    pub(crate) fn free_dropped_objects(&mut self) {
+        self.handles.free_dropped();
     }
 
-    /// Gives a [`RetainedHandle`] back now; a dropped one is released at the next checkpoint.
-    pub fn release<T>(&mut self, handle: RetainedHandle<T>) {
-        self.handles.release(handle);
-    }
-
-    /// See [`release`](Self::release).
-    pub fn release_id(&mut self, handle: RetainedHandleId) {
-        self.handles.release_id(handle);
-    }
-
-    pub(crate) fn release_dropped_retained_handles(&mut self) {
-        self.handles.release_dropped_retained_handles();
-    }
-
-    /// Whether the owner destroyed the object while a [`RetainedHandle`] still keeps it.
+    /// Whether Dart's `dispose` has run on the object ([`mark_disposed`], or the tree's
+    /// [`release_tree_node`]). `false` for a freed one.
+    ///
+    /// [`mark_disposed`]: Self::mark_disposed
+    /// [`release_tree_node`]: Self::release_tree_node
     pub fn is_disposed(&self, handle: impl Into<HandleId>) -> bool {
         self.handles.is_disposed(handle.into())
     }
 
-    /// Narrow a [`HandleId`]. `None` if stale or the wrong type. [`get`](App::get) panics instead.
+    /// Narrow a [`HandleId`]. `None` if freed or the wrong type. [`get`](App::get) panics instead.
     pub fn handle<T: 'static>(&self, handle: impl Into<HandleId>) -> Option<Handle<T>> {
         self.handles.handle(handle.into())
     }
 
     /// # Panics
     ///
-    /// If the handle is stale.
-    pub fn get<T: 'static>(&self, handle: Handle<T>) -> &T {
-        self.handles.get(handle)
+    /// If the object is freed; the message names its type, where it was created and the
+    /// checkpoint that freed it, while a debug build remembers them.
+    pub fn get<T: 'static>(&self, handle: impl ToHandle<T>) -> &T {
+        self.handles.get(handle.to_handle())
     }
 
     /// See [`get`](App::get).
-    pub fn get_mut<T: 'static>(&mut self, handle: Handle<T>) -> &mut T {
-        self.handles.get_mut(handle)
+    pub fn get_mut<T: 'static>(&mut self, handle: impl ToHandle<T>) -> &mut T {
+        self.handles.get_mut(handle.to_handle())
     }
 
     /// Two live entries at once, for an object that works on another (a render object shaping
@@ -572,10 +637,35 @@ impl App {
     /// If either handle is stale, or both name the same entry.
     pub fn get_disjoint_mut<A: 'static, B: 'static>(
         &mut self,
-        a: Handle<A>,
-        b: Handle<B>,
+        a: impl ToHandle<A>,
+        b: impl ToHandle<B>,
     ) -> (&mut A, &mut B) {
-        self.handles.get_disjoint_mut(a, b)
+        self.handles.get_disjoint_mut(a.to_handle(), b.to_handle())
+    }
+}
+
+/// What [`App::get`] reads through: a bare [`Handle`], or a borrowed [`Ref`], which reads without
+/// giving up its count. A `Ref` by value is not one, so a read never drops the last keeper.
+pub trait ToHandle<T> {
+    /// The handle to read through.
+    fn to_handle(self) -> Handle<T>;
+}
+
+impl<T> ToHandle<T> for Handle<T> {
+    fn to_handle(self) -> Handle<T> {
+        self
+    }
+}
+
+impl<T> ToHandle<T> for &Handle<T> {
+    fn to_handle(self) -> Handle<T> {
+        *self
+    }
+}
+
+impl<T> ToHandle<T> for &Ref<T> {
+    fn to_handle(self) -> Handle<T> {
+        self.handle()
     }
 }
 
@@ -594,7 +684,8 @@ mod tests {
     fn state_survives_a_round_trip_through_a_handle() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let counter = app.create(Counter(1));
+        let counter_ref = app.create(Counter(1));
+        let counter = *counter_ref;
 
         assert_eq!(app.get(counter), &Counter(1));
         app.get_mut(counter).0 = 7;
@@ -605,22 +696,24 @@ mod tests {
     fn handles_of_different_types_share_one_arena() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let counter = app.create(Counter(1));
-        let label = app.create(Label("hello"));
+        let counter_ref = app.create(Counter(1));
+        let counter = *counter_ref;
+        let label_ref = app.create(Label("hello"));
+        let label = *label_ref;
 
         assert_eq!(app.get(counter), &Counter(1));
         assert_eq!(app.get(label), &Label("hello"));
     }
 
     #[test]
-    fn a_destroyed_entry_is_reused_but_its_handle_is_not() {
+    fn a_freed_entry_is_reused_but_its_handle_is_not() {
         let cell = AppCell::new();
-        let mut app = cell.borrow_mut();
-        let first = app.create(Counter(1));
-        let first_id = first.id();
-        app.destroy(first);
+        let first_id = cell.borrow_mut().create(Counter(1)).id();
+        cell.checkpoint();
 
-        let second = app.create(Counter(2));
+        let mut app = cell.borrow_mut();
+        let second_ref = app.create(Counter(2));
+        let second = *second_ref;
         // slotmap: version in high 32 bits, index in low 32. Without reuse this test is vacuous.
         let entry_index = |id: HandleId| slotmap::Key::data(&id).as_ffi() & 0xffff_ffff;
         assert_eq!(
@@ -634,12 +727,14 @@ mod tests {
     }
 
     #[test]
-    fn a_lingering_destroy_keeps_the_object_readable_until_the_checkpoint() {
+    #[cfg(debug_assertions)]
+    fn a_dropped_ref_keeps_the_object_readable_until_the_checkpoint() {
         let cell = AppCell::new();
-        let counter = cell.borrow_mut().create(Counter(3));
+        let counter_ref = cell.borrow_mut().create(Counter(3));
+        let counter = *counter_ref;
         let before = cell.borrow().debug_object_count();
 
-        cell.borrow_mut().destroy_lingering(counter);
+        drop(counter_ref);
         {
             let app = cell.borrow();
             assert_eq!(app.get(counter), &Counter(3), "still readable");
@@ -654,24 +749,24 @@ mod tests {
     #[should_panic(expected = "stale handle")]
     fn reading_through_a_stale_handle_panics() {
         let cell = AppCell::new();
-        let mut app = cell.borrow_mut();
-        let counter = app.create(Counter(1));
-        app.destroy(counter);
-        app.get(counter);
+        let counter = *cell.borrow_mut().create(Counter(1));
+        cell.checkpoint();
+        cell.borrow().get(counter);
     }
 
     #[test]
     fn the_checked_path_from_an_untyped_id_answers_none_rather_than_panicking() {
         let cell = AppCell::new();
-        let mut app = cell.borrow_mut();
-        let counter = app.create(Counter(1));
+        let counter_ref = cell.borrow_mut().create(Counter(1));
+        let counter = *counter_ref;
         let id = counter.id();
 
-        assert_eq!(app.handle::<Counter>(id), Some(counter));
-        assert_eq!(app.handle::<Label>(id), None, "wrong type");
+        assert_eq!(cell.borrow().handle::<Counter>(id), Some(counter));
+        assert_eq!(cell.borrow().handle::<Label>(id), None, "wrong type");
 
-        app.destroy(counter);
-        assert_eq!(app.handle::<Counter>(id), None, "stale");
+        drop(counter_ref);
+        cell.checkpoint();
+        assert_eq!(cell.borrow().handle::<Counter>(id), None, "stale");
     }
 
     #[test]
@@ -697,7 +792,8 @@ mod tests {
     fn a_handle_is_copy_so_an_edge_can_be_a_plain_field() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let counter = app.create(Counter(1));
+        let counter_ref = app.create(Counter(1));
+        let counter = *counter_ref;
 
         struct Edge {
             target: Handle<Counter>,
@@ -713,7 +809,8 @@ mod tests {
     fn a_microtask_runs_on_drain_not_inline() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let counter = app.create(Counter(0));
+        let counter_ref = app.create(Counter(0));
+        let counter = *counter_ref;
         app.schedule_microtask(crate::Listener::new(move |app| {
             app.get_mut(counter).0 = 1;
         }));
@@ -728,7 +825,8 @@ mod tests {
     fn a_microtask_scheduled_during_drain_runs_in_the_same_drain() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let counter = app.create(Counter(0));
+        let counter_ref = app.create(Counter(0));
+        let counter = *counter_ref;
         app.schedule_microtask(crate::Listener::new(move |app| {
             app.get_mut(counter).0 = 1;
             app.schedule_microtask(crate::Listener::new(move |app| {
@@ -743,7 +841,8 @@ mod tests {
     fn timers_fire_in_due_order_after_microtasks() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let log = app.create(Vec::<&'static str>::new());
+        let log_ref = app.create(Vec::<&'static str>::new());
+        let log = *log_ref;
         app.schedule_microtask(crate::Listener::new(move |app| {
             app.get_mut(log).push("micro");
         }));
@@ -782,7 +881,8 @@ mod tests {
     fn cancel_prevents_a_timer_from_firing() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let counter = app.create(Counter(0));
+        let counter_ref = app.create(Counter(0));
+        let counter = *counter_ref;
         let timer = Timer::new(
             &mut app,
             Duration::from_millis(10),
@@ -802,8 +902,10 @@ mod tests {
     fn get_disjoint_mut_borrows_two_entries_at_once() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let a = app.create(1u32);
-        let b = app.create(String::from("x"));
+        let a_ref = app.create(1u32);
+        let a = *a_ref;
+        let b_ref = app.create(String::from("x"));
+        let b = *b_ref;
         let (a_value, b_value) = app.get_disjoint_mut(a, b);
         *a_value += 1;
         b_value.push('y');
@@ -816,7 +918,8 @@ mod tests {
     fn get_disjoint_mut_rejects_the_same_entry_twice() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let a = app.create(1u32);
+        let a_ref = app.create(1u32);
+        let a = *a_ref;
         let _ = app.get_disjoint_mut(a, a);
     }
 
@@ -824,7 +927,8 @@ mod tests {
     fn from_id_reads_like_the_minted_handle() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let minted = app.create(Counter(7));
+        let minted_ref = app.create(Counter(7));
+        let minted = *minted_ref;
         let rebuilt = Handle::<Counter>::from_id(minted.id());
         assert_eq!(rebuilt, minted);
         assert_eq!(app.get(rebuilt).0, 7);
@@ -834,11 +938,9 @@ mod tests {
     #[should_panic(expected = "stale handle")]
     fn from_id_defers_the_stale_check_to_get() {
         let cell = AppCell::new();
-        let mut app = cell.borrow_mut();
-        let minted = app.create(Counter(0));
-        let id = minted.id();
-        app.destroy(minted);
+        let id = cell.borrow_mut().create(Counter(0)).id();
+        cell.checkpoint();
         let rebuilt = Handle::<Counter>::from_id(id);
-        app.get(rebuilt);
+        cell.borrow().get(rebuilt);
     }
 }

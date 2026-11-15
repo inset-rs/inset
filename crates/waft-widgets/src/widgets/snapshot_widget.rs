@@ -16,7 +16,7 @@ use waft_embedder::valo::Sampling;
 use waft_embedder::{Image, Matrix4, Offset, Paint, Rect, Size, TextBaseline};
 use waft_foundation::{
     App, ChangeNotifier, ChangeNotifierData, Handle, HandleId, Listenable, ListenableObject,
-    Listener,
+    Listener, Retained,
 };
 use waft_painting::ClipContext;
 use waft_rendering::{
@@ -29,6 +29,7 @@ use crate::framework::{
     BuildContext, KeyRef, RenderObjectWidget, SingleChildRenderObjectWidget, WidgetRef,
 };
 use crate::widgets::media_query::MediaQuery;
+use waft_foundation::Ref;
 
 /// Controls how the [`SnapshotWidget`] paints its child.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -75,7 +76,7 @@ impl SnapshotController {
     ///
     /// By default, [`allow_snapshotting`](Self::allow_snapshotting) is `false`: Dart's
     /// `SnapshotController({bool allowSnapshotting = false})`.
-    pub fn new(app: &mut App, allow_snapshotting: bool) -> Handle<SnapshotController> {
+    pub fn new(app: &mut App, allow_snapshotting: bool) -> Ref<SnapshotController> {
         app.create(SnapshotController {
             change_notifier: ChangeNotifierData::new(),
             allow_snapshotting,
@@ -162,7 +163,7 @@ pub struct SnapshotWidget {
     pub key: Option<KeyRef>,
 
     /// The controller that determines when to display the children as a snapshot.
-    pub controller: Handle<SnapshotController>,
+    pub controller: Ref<SnapshotController>,
 
     /// Configuration that controls how the snapshot widget decides to paint its children.
     ///
@@ -183,7 +184,7 @@ pub struct SnapshotWidget {
     /// `None` is Dart's default, `const _DefaultSnapshotPainter()`: one painter per app,
     /// reached through [`effective_painter`](Self::effective_painter), which paints the child
     /// exactly as it would paint itself.
-    pub painter: Option<AnySnapshotPainter>,
+    pub painter: Option<SnapshotPainterRef>,
 
     /// The widget below this widget in the tree.
     pub child: Option<WidgetRef>,
@@ -194,7 +195,7 @@ impl SnapshotWidget {
     ///
     /// The [`controller`](Self::controller) and [`child`](Self::child) arguments are required;
     /// Dart's `child` is required but nullable.
-    pub fn new(controller: Handle<SnapshotController>, child: Option<WidgetRef>) -> SnapshotWidget {
+    pub fn new(controller: Ref<SnapshotController>, child: Option<WidgetRef>) -> SnapshotWidget {
         SnapshotWidget {
             key: None,
             controller,
@@ -218,7 +219,7 @@ impl SnapshotWidget {
     }
 
     /// Dart `SnapshotWidget(painter:)`.
-    pub fn painter(mut self, painter: AnySnapshotPainter) -> SnapshotWidget {
+    pub fn painter(mut self, painter: SnapshotPainterRef) -> SnapshotWidget {
         self.painter = Some(painter);
         self
     }
@@ -230,10 +231,12 @@ impl SnapshotWidget {
     }
 
     /// Dart's `painter` field: the given painter, or the app's one default painter.
-    pub fn effective_painter(&self, app: &mut App) -> AnySnapshotPainter {
-        self.painter.unwrap_or_else(|| {
+    pub fn effective_painter(&self, app: &mut App) -> SnapshotPainterRef {
+        self.painter.clone().unwrap_or_else(|| {
             app.singleton::<DefaultSnapshotPainter>()
-                .as_snapshot_painter()
+                .upgrade(app)
+                .expect("the app keeps its singletons")
+                .into_erased()
         })
     }
 }
@@ -251,7 +254,7 @@ impl RenderObjectWidget for SnapshotWidget {
         RenderSnapshotWidget::new(
             app,
             device_pixel_ratio,
-            self.controller,
+            self.controller.clone(),
             self.mode,
             painter,
             self.autoresize,
@@ -265,7 +268,7 @@ impl RenderObjectWidget for SnapshotWidget {
         context: BuildContext,
         render_object: RenderHandle<RenderSnapshotWidget>,
     ) {
-        render_object.set_controller(app, self.controller);
+        render_object.set_controller(app, self.controller.clone());
         render_object.set_mode(app, self.mode);
         let device_pixel_ratio = MediaQuery::device_pixel_ratio_of(app, context);
         render_object.set_device_pixel_ratio(app, device_pixel_ratio);
@@ -290,8 +293,8 @@ pub struct RenderSnapshotWidget {
     render_box: RenderBoxData,
     child: RenderObjectWithChildData<AnyRenderBox>,
     device_pixel_ratio: f64,
-    painter: AnySnapshotPainter,
-    controller: Handle<SnapshotController>,
+    painter: SnapshotPainterRef,
+    controller: Ref<SnapshotController>,
     mode: SnapshotMode,
     autoresize: bool,
     /// Always `None` until `OffsetLayer.toImageSync` lands (see the module docs).
@@ -308,9 +311,9 @@ impl RenderSnapshotWidget {
     fn new(
         app: &mut App,
         device_pixel_ratio: f64,
-        controller: Handle<SnapshotController>,
+        controller: Ref<SnapshotController>,
         mode: SnapshotMode,
-        painter: AnySnapshotPainter,
+        painter: SnapshotPainterRef,
         autoresize: bool,
     ) -> RenderHandle<RenderSnapshotWidget> {
         RenderHandle::new_box(
@@ -352,12 +355,12 @@ impl RenderSnapshotWidget {
 
     /// The painter used to paint the child snapshot or child widgets.
     pub fn painter(self: RenderHandle<Self>, app: &App) -> AnySnapshotPainter {
-        self.get(app).painter
+        self.get(app).painter.handle()
     }
 
     /// Sets [`painter`](Self::painter).
-    pub fn set_painter(self: RenderHandle<Self>, app: &mut App, value: AnySnapshotPainter) {
-        if value == self.painter(app) {
+    pub fn set_painter(self: RenderHandle<Self>, app: &mut App, value: SnapshotPainterRef) {
+        if value.handle() == self.painter(app) {
             return;
         }
         let old_painter = self.painter(app);
@@ -377,16 +380,12 @@ impl RenderSnapshotWidget {
     /// A controller that determines whether to paint the child normally or to
     /// paint a snapshotted version of that child.
     pub fn controller(self: RenderHandle<Self>, app: &App) -> Handle<SnapshotController> {
-        self.get(app).controller
+        self.get(app).controller.handle()
     }
 
     /// Sets [`controller`](Self::controller).
-    pub fn set_controller(
-        self: RenderHandle<Self>,
-        app: &mut App,
-        value: Handle<SnapshotController>,
-    ) {
-        if value == self.controller(app) {
+    pub fn set_controller(self: RenderHandle<Self>, app: &mut App, value: Ref<SnapshotController>) {
+        if value.handle() == self.controller(app) {
             return;
         }
         self.controller(app)
@@ -821,6 +820,22 @@ pub struct AnySnapshotPainter {
     vtable: &'static SnapshotPainterVTable,
 }
 
+impl From<AnySnapshotPainter> for HandleId {
+    fn from(handle: AnySnapshotPainter) -> HandleId {
+        handle.id
+    }
+}
+
+/// A field Dart types as the erased object, kept: AnySnapshotPainter with its count.
+pub type SnapshotPainterRef = Retained<AnySnapshotPainter>;
+
+/// A kept object erases to a [`SnapshotPainterRef`] with [`Retained::erase`]: Dart's upcast.
+impl<T: SnapshotPainter> From<Handle<T>> for AnySnapshotPainter {
+    fn from(handle: Handle<T>) -> AnySnapshotPainter {
+        handle.as_snapshot_painter()
+    }
+}
+
 impl AnySnapshotPainter {
     /// The arena id behind this handle.
     pub fn id(self) -> HandleId {
@@ -969,6 +984,7 @@ mod tests {
     use std::cell::{Cell, RefCell};
     use std::marker::PhantomData;
     use std::rc::Rc;
+    use waft_foundation::Ref;
 
     use waft_embedder::{Canvas, Color};
     use waft_foundation::AppCell;
@@ -1008,7 +1024,7 @@ mod tests {
     type TestPainter2 = TestPainterOf<Second>;
 
     impl<M: 'static> TestPainterOf<M> {
-        fn new(app: &mut App) -> Handle<TestPainterOf<M>> {
+        fn new(app: &mut App) -> Ref<TestPainterOf<M>> {
             app.create(TestPainterOf {
                 change_notifier: ChangeNotifierData::new(),
                 count: 0,
@@ -1200,13 +1216,14 @@ mod tests {
             StatefulBuilder::new({
                 let (device_pixel_ratio, local_set_state) =
                     (Rc::clone(&device_pixel_ratio), Rc::clone(&local_set_state));
+                let painter = painter.clone();
                 move |_app, _context, set_state| {
                     *local_set_state.borrow_mut() = Some(set_state);
                     Center::new()
                         .child(test_dependencies(
                             device_pixel_ratio.get(),
-                            SnapshotWidget::new(controller, sized_box(100.0, 100.0))
-                                .painter(painter.as_snapshot_painter()),
+                            SnapshotWidget::new(controller.clone(), sized_box(100.0, 100.0))
+                                .painter(painter.erase()),
                         ))
                         .into_widget()
                 }
@@ -1214,14 +1231,14 @@ mod tests {
             .into_widget(),
         );
         harness.pump(&mut app);
-        assert_eq!(app.get(painter).count, 1);
+        assert_eq!(app.get(&painter).count, 1);
 
         let set_state = local_set_state.borrow().clone().expect("the builder ran");
         set_state(&mut app, &mut |_app| device_pixel_ratio.set(2.0));
         harness.pump(&mut app);
 
         // Not repainted as dpr was not used.
-        assert_eq!(app.get(painter).count, 1);
+        assert_eq!(app.get(&painter).count, 1);
     }
 
     #[test]
@@ -1234,7 +1251,7 @@ mod tests {
             &mut app,
             RepaintBoundary::new()
                 .child(centered(SnapshotWidget::new(
-                    controller,
+                    controller.clone(),
                     Some(child.into_widget()),
                 )))
                 .into_widget(),
@@ -1263,8 +1280,8 @@ mod tests {
         let harness = Harness::mount(
             &mut app,
             centered(
-                SnapshotWidget::new(controller, Some(SizedBox::new().into_widget()))
-                    .painter(painter1.as_snapshot_painter()),
+                SnapshotWidget::new(controller.clone(), Some(SizedBox::new().into_widget()))
+                    .painter(painter1.erase()),
             ),
         );
         harness.pump(&mut app);
@@ -1272,8 +1289,8 @@ mod tests {
         harness.set_child(
             &mut app,
             centered(
-                SnapshotWidget::new(controller, Some(SizedBox::new().into_widget()))
-                    .painter(painter2.as_snapshot_painter()),
+                SnapshotWidget::new(controller.clone(), Some(SizedBox::new().into_widget()))
+                    .painter(painter2.erase()),
             ),
         );
         harness.pump(&mut app);
@@ -1288,13 +1305,13 @@ mod tests {
         let harness = Harness::mount(
             &mut app,
             centered(
-                SnapshotWidget::new(controller, Some(SizedBox::new().into_widget()))
-                    .painter(painter.as_snapshot_painter()),
+                SnapshotWidget::new(controller.clone(), Some(SizedBox::new().into_widget()))
+                    .painter(painter.erase()),
             ),
         );
         harness.pump(&mut app);
 
-        assert_eq!(app.get(painter).count, 0, "an empty box paints nothing");
+        assert_eq!(app.get(&painter).count, 0, "an empty box paints nothing");
     }
 
     #[test]
@@ -1306,25 +1323,25 @@ mod tests {
         let harness = Harness::mount(
             &mut app,
             centered(
-                SnapshotWidget::new(controller, sized_box(100.0, 100.0))
-                    .painter(painter.as_snapshot_painter()),
+                SnapshotWidget::new(controller.clone(), sized_box(100.0, 100.0))
+                    .painter(painter.erase()),
             ),
         );
         harness.pump(&mut app);
-        assert_eq!(app.get(painter).count, 1);
+        assert_eq!(app.get(&painter).count, 1);
 
         controller.clear(&mut app);
         harness.pump(&mut app);
-        assert_eq!(app.get(painter).count, 2);
+        assert_eq!(app.get(&painter).count, 2);
 
         controller.set_allow_snapshotting(&mut app, true);
         harness.pump(&mut app);
-        assert_eq!(app.get(painter).count, 3);
+        assert_eq!(app.get(&painter).count, 3);
 
         controller.set_allow_snapshotting(&mut app, true);
         harness.pump(&mut app);
         assert_eq!(
-            app.get(painter).count,
+            app.get(&painter).count,
             3,
             "an unchanged value does not notify"
         );
@@ -1339,15 +1356,15 @@ mod tests {
         let harness = Harness::mount(
             &mut app,
             centered(
-                SnapshotWidget::new(controller, sized_box(100.0, 100.0))
-                    .painter(painter.as_snapshot_painter()),
+                SnapshotWidget::new(controller.clone(), sized_box(100.0, 100.0))
+                    .painter(painter.erase()),
             ),
         );
         harness.pump(&mut app);
 
-        assert_eq!(app.get(painter).count, 1);
+        assert_eq!(app.get(&painter).count, 1);
         assert!(
-            app.get(painter).last_image.is_none(),
+            app.get(&painter).last_image.is_none(),
             "no raster is taken until `toImageSync` lands"
         );
     }
@@ -1361,27 +1378,31 @@ mod tests {
         let harness = Harness::mount(
             &mut app,
             centered(
-                SnapshotWidget::new(controller, sized_box(100.0, 100.0))
-                    .painter(painter.as_snapshot_painter()),
+                SnapshotWidget::new(controller.clone(), sized_box(100.0, 100.0))
+                    .painter(painter.erase()),
             ),
         );
         harness.pump(&mut app);
-        assert_eq!(app.get(painter).added_listener_count, 1);
-        assert_eq!(app.get(painter).count, 1);
+        assert_eq!(app.get(&painter).added_listener_count, 1);
+        assert_eq!(app.get(&painter).count, 1);
 
         painter.notify_listeners(&mut app);
         harness.pump(&mut app);
-        assert_eq!(app.get(painter).count, 2, "a painter notification repaints");
+        assert_eq!(
+            app.get(&painter).count,
+            2,
+            "a painter notification repaints"
+        );
 
         harness.set_child(&mut app, SizedBox::new().into_widget());
         harness.pump(&mut app);
         assert_eq!(
-            app.get(painter).removed_listener_count,
+            app.get(&painter).removed_listener_count,
             2,
             "detach and dispose each remove the listener"
         );
-        assert!(!app.get(painter).change_notifier.has_listeners());
-        assert!(!app.get(controller).change_notifier.has_listeners());
+        assert!(!app.get(&painter).change_notifier.has_listeners());
+        assert!(!app.get(&controller).change_notifier.has_listeners());
     }
 
     #[test]
@@ -1392,28 +1413,28 @@ mod tests {
         let painter1 = TestPainter::new(&mut app);
         let painter2 = TestPainter::new(&mut app);
         let painter3 = TestPainter::new(&mut app);
-        app.get_mut(painter3).should_repaint_value = true;
-        let tree = |painter: Handle<TestPainter>| {
+        app.get_mut(&painter3).should_repaint_value = true;
+        let tree = |painter: Ref<TestPainter>| {
             centered(
-                SnapshotWidget::new(controller, sized_box(100.0, 100.0))
-                    .painter(painter.as_snapshot_painter()),
+                SnapshotWidget::new(controller.clone(), sized_box(100.0, 100.0))
+                    .painter(painter.erase()),
             )
         };
-        let harness = Harness::mount(&mut app, tree(painter1));
+        let harness = Harness::mount(&mut app, tree(painter1.clone()));
         harness.pump(&mut app);
-        assert_eq!(app.get(painter1).count, 1);
+        assert_eq!(app.get(&painter1).count, 1);
 
-        harness.set_child(&mut app, tree(painter2));
+        harness.set_child(&mut app, tree(painter2.clone()));
         harness.pump(&mut app);
-        assert_eq!(app.get(painter1).removed_listener_count, 1);
-        assert_eq!(app.get(painter2).added_listener_count, 1);
-        assert_eq!(app.get(painter2).count, 0, "should_repaint is false");
+        assert_eq!(app.get(&painter1).removed_listener_count, 1);
+        assert_eq!(app.get(&painter2).added_listener_count, 1);
+        assert_eq!(app.get(&painter2).count, 0, "should_repaint is false");
 
-        harness.set_child(&mut app, tree(painter3));
+        harness.set_child(&mut app, tree(painter3.clone()));
         harness.pump(&mut app);
-        assert_eq!(app.get(painter2).removed_listener_count, 1);
-        assert_eq!(app.get(painter3).added_listener_count, 1);
-        assert_eq!(app.get(painter3).count, 1, "should_repaint is true");
+        assert_eq!(app.get(&painter2).removed_listener_count, 1);
+        assert_eq!(app.get(&painter3).added_listener_count, 1);
+        assert_eq!(app.get(&painter3).count, 1, "should_repaint is true");
     }
 
     #[test]
@@ -1426,8 +1447,8 @@ mod tests {
         let harness = Harness::mount(
             &mut app,
             centered(
-                SnapshotWidget::new(controller, sized_box(100.0, 100.0))
-                    .painter(painter1.as_snapshot_painter()),
+                SnapshotWidget::new(controller.clone(), sized_box(100.0, 100.0))
+                    .painter(painter1.erase()),
             ),
         );
         harness.pump(&mut app);
@@ -1435,12 +1456,12 @@ mod tests {
         harness.set_child(
             &mut app,
             centered(
-                SnapshotWidget::new(controller, sized_box(100.0, 100.0))
-                    .painter(painter2.as_snapshot_painter()),
+                SnapshotWidget::new(controller.clone(), sized_box(100.0, 100.0))
+                    .painter(painter2.erase()),
             ),
         );
         harness.pump(&mut app);
-        assert_eq!(app.get(painter2).count, 1);
+        assert_eq!(app.get(&painter2).count, 1);
     }
 
     #[test]
@@ -1451,31 +1472,30 @@ mod tests {
         let controller2 = SnapshotController::new(&mut app, false);
         let controller3 = SnapshotController::new(&mut app, true);
         let painter = TestPainter::new(&mut app);
-        let tree = |controller: Handle<SnapshotController>| {
+        let tree = |controller: Ref<SnapshotController>| {
             centered(
-                SnapshotWidget::new(controller, sized_box(100.0, 100.0))
-                    .painter(painter.as_snapshot_painter()),
+                SnapshotWidget::new(controller, sized_box(100.0, 100.0)).painter(painter.erase()),
             )
         };
-        let harness = Harness::mount(&mut app, tree(controller1));
+        let harness = Harness::mount(&mut app, tree(controller1.clone()));
         harness.pump(&mut app);
-        assert_eq!(app.get(painter).count, 1);
+        assert_eq!(app.get(&painter).count, 1);
 
-        harness.set_child(&mut app, tree(controller2));
+        harness.set_child(&mut app, tree(controller2.clone()));
         harness.pump(&mut app);
-        assert_eq!(app.get(painter).count, 1);
-        assert!(!app.get(controller1).change_notifier.has_listeners());
-        assert!(app.get(controller2).change_notifier.has_listeners());
+        assert_eq!(app.get(&painter).count, 1);
+        assert!(!app.get(&controller1).change_notifier.has_listeners());
+        assert!(app.get(&controller2).change_notifier.has_listeners());
 
-        harness.set_child(&mut app, tree(controller3));
+        harness.set_child(&mut app, tree(controller3.clone()));
         harness.pump(&mut app);
-        assert_eq!(app.get(painter).count, 2);
-        assert!(!app.get(controller2).change_notifier.has_listeners());
+        assert_eq!(app.get(&painter).count, 2);
+        assert!(!app.get(&controller2).change_notifier.has_listeners());
 
         controller3.clear(&mut app);
         harness.pump(&mut app);
         assert_eq!(
-            app.get(painter).count,
+            app.get(&painter).count,
             3,
             "the new controller is listened to"
         );
@@ -1489,27 +1509,31 @@ mod tests {
         let painter = TestPainter::new(&mut app);
         let tree = |mode: SnapshotMode, autoresize: bool| {
             centered(
-                SnapshotWidget::new(controller, sized_box(100.0, 100.0))
+                SnapshotWidget::new(controller.clone(), sized_box(100.0, 100.0))
                     .mode(mode)
                     .autoresize(autoresize)
-                    .painter(painter.as_snapshot_painter()),
+                    .painter(painter.erase()),
             )
         };
         let harness = Harness::mount(&mut app, tree(SnapshotMode::Normal, false));
         harness.pump(&mut app);
-        assert_eq!(app.get(painter).count, 1);
+        assert_eq!(app.get(&painter).count, 1);
 
         harness.set_child(&mut app, tree(SnapshotMode::Permissive, false));
         harness.pump(&mut app);
-        assert_eq!(app.get(painter).count, 2);
+        assert_eq!(app.get(&painter).count, 2);
 
         harness.set_child(&mut app, tree(SnapshotMode::Permissive, true));
         harness.pump(&mut app);
-        assert_eq!(app.get(painter).count, 3);
+        assert_eq!(app.get(&painter).count, 3);
 
         harness.set_child(&mut app, tree(SnapshotMode::Permissive, true));
         harness.pump(&mut app);
-        assert_eq!(app.get(painter).count, 3, "unchanged values do not repaint");
+        assert_eq!(
+            app.get(&painter).count,
+            3,
+            "unchanged values do not repaint"
+        );
     }
 
     #[test]
@@ -1523,7 +1547,10 @@ mod tests {
             .child(SizedBox::new().width(100.0).height(100.0));
         let harness = Harness::mount(
             &mut app,
-            centered(SnapshotWidget::new(controller, Some(child.into_widget()))),
+            centered(SnapshotWidget::new(
+                controller.clone(),
+                Some(child.into_widget()),
+            )),
         );
         harness.pump(&mut app);
         assert_eq!(child_paints.get(), 1);
@@ -1554,14 +1581,14 @@ mod tests {
         let harness = Harness::mount(
             &mut app,
             centered(
-                SnapshotWidget::new(controller, Some(child.into_widget()))
-                    .painter(painter.as_snapshot_painter()),
+                SnapshotWidget::new(controller.clone(), Some(child.into_widget()))
+                    .painter(painter.erase()),
             ),
         );
         harness.pump(&mut app);
         assert_eq!(child_paints.get(), 1);
-        let transform = app.get(painter).transform_handle.layer().expect("pushed");
-        let opacity = app.get(painter).opacity_handle.layer().expect("pushed");
+        let transform = app.get(&painter).transform_handle.layer().expect("pushed");
+        let opacity = app.get(&painter).opacity_handle.layer().expect("pushed");
         let found = layers(&app, &harness);
         let transform_at = found.iter().position(|layer| layer.id() == transform.id());
         let opacity_at = found.iter().position(|layer| layer.id() == opacity.id());
@@ -1571,12 +1598,12 @@ mod tests {
         harness.pump(&mut app);
         assert_eq!(child_paints.get(), 2);
         assert_eq!(
-            app.get(painter).transform_handle.layer(),
+            app.get(&painter).transform_handle.layer(),
             Some(transform),
             "reused"
         );
         assert_eq!(
-            app.get(painter).opacity_handle.layer(),
+            app.get(&painter).opacity_handle.layer(),
             Some(opacity),
             "reused"
         );

@@ -5,9 +5,9 @@ use std::f64::consts::PI;
 use std::rc::Rc;
 use std::time::Duration;
 
-use waft_animation::{Animation, AnimationBehavior, AnimationController, AnyAnimation};
+use waft_animation::{AnimationBehavior, AnimationController, AnimationRef};
 use waft_embedder::{Canvas, Color, Offset, Paint, RRect, Radius, Size, clamp_double};
-use waft_foundation::{App, Handle, Listenable};
+use waft_foundation::{App, Handle, Listenable, OptionRetained, Ref};
 use waft_painting::{AnyColor, BorderRadius, draw_rrect};
 use waft_rendering::{BoxConstraints, CustomPainter};
 use waft_scheduler::{Ticker, TickerCallback, TickerProviderObject};
@@ -140,12 +140,15 @@ impl StatefulWidget for CupertinoActivityIndicator {
 pub struct CupertinoActivityIndicatorState {
     state: StateData<CupertinoActivityIndicator>,
     single_ticker_provider: SingleTickerProviderStateMixinData,
-    controller: Option<Handle<AnimationController>>,
+    controller: Option<Ref<AnimationController>>,
 }
 
 impl CupertinoActivityIndicatorState {
     fn controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
-        app.get(self).controller.expect("created in init_state")
+        app.get(self)
+            .controller
+            .handle()
+            .expect("created in init_state")
     }
 }
 
@@ -167,7 +170,7 @@ impl SingleTickerProviderStateMixin for CupertinoActivityIndicatorState {
 
 /// Dart's `vsync: this`.
 impl TickerProviderObject for CupertinoActivityIndicatorState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -187,7 +190,7 @@ impl State for CupertinoActivityIndicatorState {
             AnimationBehavior::Normal,
             self,
         );
-        app.get_mut(self).controller = Some(controller);
+        app.get_mut(self).controller = Some(controller.clone());
 
         if self.widget(app).animating {
             controller.repeat(app, None, None, false, None, None);
@@ -217,8 +220,6 @@ impl State for CupertinoActivityIndicatorState {
         let controller = self.controller(app);
         controller.dispose(app);
         SingleTickerProviderStateMixin::dispose(self, app);
-        app.get_mut(self).controller = None;
-        app.destroy(controller);
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -228,7 +229,12 @@ impl State for CupertinoActivityIndicatorState {
             Some(color) => color.color(),
             None => CupertinoDynamicColor::resolve(&K_ACTIVE_TICK_COLOR, app, context).color(),
         };
-        let position = self.controller(app).as_animation();
+        let position: AnimationRef<f64> = app
+            .get(self)
+            .controller
+            .as_ref()
+            .expect("created in init_state")
+            .erase();
         SizedBox::square(Some(radius * 2.0))
             .child(
                 CustomPaint::new().painter(CupertinoActivityIndicatorPainter::new(
@@ -253,7 +259,7 @@ const PARTIALLY_REVEALED_ALPHA: i32 = 147;
 
 /// Dart's `_CupertinoActivityIndicatorPainter`.
 struct CupertinoActivityIndicatorPainter {
-    position: AnyAnimation<f64>,
+    position: AnimationRef<f64>,
     active_color: Color,
     #[expect(
         dead_code,
@@ -270,13 +276,13 @@ struct CupertinoActivityIndicatorPainter {
 
 impl CupertinoActivityIndicatorPainter {
     fn new(
-        position: AnyAnimation<f64>,
+        position: AnimationRef<f64>,
         active_color: Color,
         radius: f64,
         progress: f64,
     ) -> CupertinoActivityIndicatorPainter {
         CupertinoActivityIndicatorPainter {
-            repaint: Rc::new(position) as Rc<dyn Listenable>,
+            repaint: Rc::new(position.clone()) as Rc<dyn Listenable>,
             position,
             active_color,
             radius,

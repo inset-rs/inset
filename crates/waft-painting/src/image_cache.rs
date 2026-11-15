@@ -16,6 +16,7 @@ use waft_scheduler::{FrameCallback, SchedulerBinding};
 use crate::image_stream::{
     ImageStreamCompleter, ImageStreamCompleterHandle, ImageStreamListener, WeakImageStreamListener,
 };
+use waft_foundation::Ref;
 
 /// What identifies an image in the cache. Flutter's answer from `ImageProvider.obtainKey`.
 ///
@@ -87,7 +88,7 @@ impl<K: PartialEq + Hash + Debug + 'static> KeyValue for K {
     }
 }
 
-/// An image held without subscribing to animation frames.
+/// An image held without subscribing to animation frames; `handle` keeps the completer.
 struct CachedImage {
     completer: Handle<ImageStreamCompleter>,
     size_bytes: Option<usize>,
@@ -188,27 +189,33 @@ impl ImageCache {
         self: Handle<Self>,
         app: &mut App,
         key: ImageCacheKey,
-        load: impl FnOnce(&mut App) -> Handle<ImageStreamCompleter>,
-    ) -> Handle<ImageStreamCompleter> {
+        load: impl FnOnce(&mut App) -> Ref<ImageStreamCompleter>,
+    ) -> Ref<ImageStreamCompleter> {
+        // Every completer the cache tracks is kept by an entry's keep-alive handle.
+        let kept = |app: &App, completer: Handle<ImageStreamCompleter>| {
+            completer
+                .upgrade(app)
+                .expect("the cache keeps the completers it tracks")
+        };
         if let Some(image) = app.get(self).pending_images.get(&key) {
-            return image.completer;
+            return kept(app, image.completer);
         }
         if let Some(image) = app.get_mut(self).cache.shift_remove(&key) {
             let completer = image.completer;
             self.track_live_image(app, key.clone(), completer, image.size_bytes);
             app.get_mut(self).cache.insert(key, image);
-            return completer;
+            return kept(app, completer);
         }
         if let Some(image) = app.get(self).live_images.get(&key) {
             let completer = image.image.completer;
             let size = image.image.size_bytes;
             let image = CachedImage::new(app, completer, size);
             self.touch(app, key, image);
-            return completer;
+            return kept(app, completer);
         }
         let completer = load(app);
-        self.track_live_image(app, key.clone(), completer, None);
-        self.watch_for_completion(app, key, completer);
+        self.track_live_image(app, key.clone(), *completer, None);
+        self.watch_for_completion(app, key, *completer);
         completer
     }
 
@@ -652,7 +659,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let cache = ImageCache::instance(&mut app);
         let completer = cache.put_if_absent(&mut app, key("live"), ImageStreamCompleter::new);
-        let retained = app.retain(completer);
+        let retained = completer.clone();
         let listener = ImageStreamListener::new(Rc::new(|_, _, _| {}));
         completer.add_listener(&mut app, listener.clone());
         completer.set_image(&mut app, an_image([2, 2]));
@@ -662,20 +669,19 @@ mod tests {
         assert_eq!(cache.live_image_count(&app), 1);
         assert_eq!(
             cache.put_if_absent(&mut app, key("live"), |_| panic!("must reuse live image")),
-            completer
+            completer.clone()
         );
         finish_frame(&mut app);
-        assert!(!app.is_disposed(completer));
+        assert!(!app.is_disposed(&completer));
         completer.remove_listener(&mut app, &listener);
         assert_eq!(cache.live_image_count(&app), 0);
         finish_frame(&mut app);
-        assert!(app.is_disposed(completer));
+        assert!(app.is_disposed(&completer));
         assert!(completer.current_image(&app).is_none());
-        drop(app);
+        let handle = *completer;
+        drop((app, completer, retained));
         cell.checkpoint();
-        let mut app = cell.borrow_mut();
-        app.release(retained);
-        assert!(!app.contains(completer));
+        assert!(!cell.borrow().contains(handle));
     }
 
     #[test]
@@ -687,12 +693,12 @@ mod tests {
         completer.set_image(&mut app, an_image([2, 2]));
         finish_frame(&mut app);
         assert_eq!(completer.listener_count(&app), 0);
-        assert!(!app.is_disposed(completer));
+        assert!(!app.is_disposed(&completer));
         assert!(cache.status_for_key(&app, &key("held")).keep_alive);
         assert!(!cache.status_for_key(&app, &key("held")).live);
         assert_eq!(
             cache.put_if_absent(&mut app, key("held"), |_| panic!("must reuse cached image")),
-            completer
+            completer.clone()
         );
         let listener = ImageStreamListener::new(Rc::new(|_, _, _| {}));
         completer.add_listener(&mut app, listener.clone());
@@ -700,7 +706,7 @@ mod tests {
         completer.remove_listener(&mut app, &listener);
         cache.clear(&mut app);
         finish_frame(&mut app);
-        assert!(app.is_disposed(completer));
+        assert!(app.is_disposed(&completer));
     }
 
     #[test]
@@ -717,7 +723,7 @@ mod tests {
         assert!(cache.contains_key(&app, &key("small")));
         assert!(!cache.contains_key(&app, &key("large")));
         finish_frame(&mut app);
-        assert!(app.is_disposed(large));
+        assert!(app.is_disposed(&large));
     }
 
     #[test]
@@ -757,12 +763,12 @@ mod tests {
                 result.set(Some(new));
             })),
         );
-        cache.put_if_absent(&mut app, key("same"), |_| old);
+        cache.put_if_absent(&mut app, key("same"), |_| old.clone());
         old.set_image(&mut app, an_image([2, 2]));
         assert_eq!(cache.pending_image_count(&app), 1);
         assert_eq!(
             cache.put_if_absent(&mut app, key("same"), |_| panic!("pending replacement")),
-            replacement.get().unwrap()
+            replacement.take().unwrap()
         );
         assert_eq!(cache.current_size(&app), 0);
     }
@@ -778,7 +784,7 @@ mod tests {
         assert_eq!(cache.pending_image_count(&app), 0);
         assert_eq!(cache.live_image_count(&app), 0);
         finish_frame(&mut app);
-        assert!(app.is_disposed(completer));
+        assert!(app.is_disposed(&completer));
     }
 
     #[test]
@@ -826,7 +832,7 @@ mod tests {
         );
         let listener = ImageStreamListener::new(Rc::new(|_, _, _| {}));
         old.add_listener(&mut app, listener.clone());
-        cache.put_if_absent(&mut app, key("same"), |_| old);
+        cache.put_if_absent(&mut app, key("same"), |_| old.clone());
         old.set_image(&mut app, an_image([2, 2]));
         old.remove_listener(&mut app, &listener);
         assert!(cache.status_for_key(&app, &key("same")).live);

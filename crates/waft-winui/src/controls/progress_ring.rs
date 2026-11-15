@@ -8,7 +8,7 @@ use std::{f64::consts::TAU, time::Duration};
 use waft_animation::{Cubic, Curve};
 use waft_embedder::valo::{Cap, Point};
 use waft_embedder::{Canvas, Color, Paint, PaintStyle, PathBuilder, Size, Stroke};
-use waft_foundation::{App, Handle};
+use waft_foundation::{App, Handle, OptionRetained, Ref};
 use waft_rendering::{BoxConstraints, CustomPainter};
 use waft_scheduler::{FrameCallback, Ticker};
 use waft_widgets::*;
@@ -255,7 +255,7 @@ pub struct ProgressRingState {
     single_ticker_provider: SingleTickerProviderStateMixinData,
 
     /// The clock both generated visuals are driven by.
-    ticker: Option<Handle<Ticker>>,
+    ticker: Option<Ref<Ticker>>,
 
     /// Time since the current segment started playing.
     elapsed: Duration,
@@ -320,7 +320,7 @@ impl ProgressRingState {
     /// `ProgressRing::UpdateStates`: the player runs while the ring is active, and stops
     /// otherwise.
     fn update_states(self: Handle<Self>, app: &mut App) {
-        let ticker = app.get(self).ticker.unwrap();
+        let ticker = app.get(self).ticker.clone().unwrap();
         // AnimatedVisualPlayer replaces the previous playback before starting a segment.
         ticker.stop(app, false);
         app.get_mut(self).elapsed = Duration::ZERO;
@@ -354,7 +354,7 @@ impl ProgressRingState {
     fn tick(self: Handle<Self>, app: &mut App, elapsed: Duration) {
         self.set_state(app, |state| state.elapsed = elapsed);
         if !self.widget(app).is_indeterminate && self.progress(app) >= app.get(self).to {
-            app.get(self).ticker.unwrap().stop(app, false);
+            app.get(self).ticker.handle().unwrap().stop(app, false);
         }
     }
 }
@@ -369,7 +369,7 @@ impl State for ProgressRingState {
             app,
             FrameCallback::new(move |app, elapsed| self.tick(app, elapsed)),
         );
-        app.get_mut(self).ticker = Some(ticker);
+        app.get_mut(self).ticker = Some(ticker.clone());
         self.update_states(app);
     }
 
@@ -392,7 +392,7 @@ impl State for ProgressRingState {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        app.get(self).ticker.unwrap().dispose(app);
+        app.get(self).ticker.handle().unwrap().dispose(app);
         SingleTickerProviderStateMixin::dispose(self, app);
     }
 

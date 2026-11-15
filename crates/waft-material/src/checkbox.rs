@@ -7,13 +7,15 @@
 use std::fmt::{self, Debug};
 use std::time::Duration;
 
-use waft_animation::{Animation, AnimationStatus};
+use waft_animation::AnimationStatus;
 use waft_cupertino::CupertinoCheckbox;
 use waft_embedder::{
     Canvas, Color, FillRule, Offset, Paint, PaintStyle, PathBuilder, Radius, Rect, Size, Stroke,
     TargetPlatform, clamp_double,
 };
-use waft_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, ValueChanged};
+use waft_foundation::{
+    App, ChangeNotifier, ChangeNotifierData, Handle, OptionRetained, Ref, ValueChanged,
+};
 use waft_painting::{
     AnyBorderSide, BorderRadiusGeometry, BorderSide, EdgeInsets, OutlinedBorder, OutlinedBorderRef,
     RoundedRectangleBorder, ShapeBorder,
@@ -21,7 +23,7 @@ use waft_painting::{
 use waft_scheduler::{Ticker, TickerCallback, TickerProviderObject};
 use waft_services::MouseCursorRef;
 use waft_widgets::{
-    AnyFocusNode, BuildContext, IntoWidget, KeyRef, Semantics, State, StateData, StatefulWidget,
+    BuildContext, FocusNodeRef, IntoWidget, KeyRef, Semantics, State, StateData, StatefulWidget,
     TickerProviderStateMixin, TickerProviderStateMixinData, ToggleablePainter,
     ToggleablePainterData, ToggleablePainterRef, ToggleableStateMixin, ToggleableStateMixinData,
     WidgetRef, WidgetState, WidgetStateBorderSide, WidgetStateMouseCursor, WidgetStateProperty,
@@ -212,7 +214,7 @@ pub struct Checkbox {
     /// that is also null, then [`K_RADIAL_REACTION_RADIUS`] is used.
     pub splash_radius: Option<f64>,
     /// An optional focus node to use as the focus node for this widget.
-    pub focus_node: Option<AnyFocusNode>,
+    pub focus_node: Option<FocusNodeRef>,
     /// True if this widget will be selected as the initial focus when no other node in its
     /// scope is currently focused.
     pub autofocus: bool,
@@ -440,7 +442,7 @@ impl Checkbox {
     }
 
     /// Dart `Checkbox(focusNode:)`.
-    pub fn focus_node(mut self, focus_node: AnyFocusNode) -> Checkbox {
+    pub fn focus_node(mut self, focus_node: FocusNodeRef) -> Checkbox {
         self.focus_node = Some(focus_node);
         self
     }
@@ -528,13 +530,16 @@ pub struct CheckboxState {
     toggleable: ToggleableStateMixinData,
     /// Dart's `final _CheckboxPainter _painter = _CheckboxPainter()`, created in `init_state`
     /// because a painter is an arena object and a state is created without the `App`.
-    painter: Option<Handle<CheckboxPainter>>,
+    painter: Option<Ref<CheckboxPainter>>,
     previous_value: Option<bool>,
 }
 
 impl CheckboxState {
     fn painter(self: Handle<Self>, app: &App) -> Handle<CheckboxPainter> {
-        app.get(self).painter.expect("created in init_state")
+        app.get(self)
+            .painter
+            .handle()
+            .expect("created in init_state")
     }
 
     /// Dart's `_widgetFillColor`.
@@ -595,7 +600,7 @@ impl CheckboxState {
         checkbox.active_color = widget.active_color;
         checkbox.check_color = widget.check_color;
         checkbox.focus_color = widget.focus_color;
-        checkbox.focus_node = widget.focus_node;
+        checkbox.focus_node = widget.focus_node.clone();
         checkbox.side = widget.side.clone();
         checkbox.shape = widget.shape.clone();
         checkbox.semantic_label = widget.semantic_label.clone();
@@ -618,7 +623,7 @@ impl TickerProviderStateMixin for CheckboxState {
 
 /// Dart's `with TickerProviderStateMixin`.
 impl TickerProviderObject for CheckboxState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         TickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -674,8 +679,6 @@ impl State for CheckboxState {
     fn dispose(self: Handle<Self>, app: &mut App) {
         let painter = self.painter(app);
         ToggleablePainter::dispose(painter, app);
-        app.get_mut(self).painter = None;
-        app.destroy(painter);
         ToggleableStateMixin::dispose(self, app);
         TickerProviderStateMixin::dispose(self, app);
     }
@@ -848,11 +851,16 @@ impl State for CheckboxState {
             .expect("the defaults give a shape");
 
         let states = self.states(app);
-        let painter = self.painter(app);
-        painter.set_position(app, self.position(app).as_animation());
-        painter.set_reaction(app, self.reaction(app).as_animation());
-        painter.set_reaction_focus_fade(app, self.reaction_focus_fade(app).as_animation());
-        painter.set_reaction_hover_fade(app, self.reaction_hover_fade(app).as_animation());
+        let painter_ref = app
+            .get(self)
+            .painter
+            .clone()
+            .expect("created in init_state");
+        let painter = painter_ref.handle();
+        painter.set_position(app, self.position(app).erase());
+        painter.set_reaction(app, self.reaction(app).erase());
+        painter.set_reaction_focus_fade(app, self.reaction_focus_fade(app).erase());
+        painter.set_reaction_hover_fade(app, self.reaction_hover_fade(app).erase());
         painter.set_inactive_reaction_color(app, effective_inactive_pressed_overlay_color);
         painter.set_reaction_color(app, effective_active_pressed_overlay_color);
         painter.set_hover_color(app, effective_hover_overlay_color);
@@ -886,7 +894,7 @@ impl State for CheckboxState {
                 widget.autofocus,
                 Some(effective_mouse_cursor),
                 size,
-                ToggleablePainterRef::new(painter),
+                ToggleablePainterRef::new(painter_ref),
             ))
             .into_widget()
     }
@@ -919,7 +927,7 @@ struct CheckboxPainter {
 }
 
 impl CheckboxPainter {
-    fn new(app: &mut App) -> Handle<CheckboxPainter> {
+    fn new(app: &mut App) -> Ref<CheckboxPainter> {
         app.create(CheckboxPainter {
             change_notifier: ChangeNotifierData::new(),
             toggleable_painter: ToggleablePainterData::new(),
@@ -1425,6 +1433,7 @@ impl CheckboxThemeDataGetters for CheckboxDefaultsM2 {
 pub(crate) mod tests {
     use std::rc::Rc;
     use std::sync::Arc;
+    use waft_widgets::AnyFocusNode;
 
     use waft_embedder::valo::{Op, Path};
     use waft_embedder::{PointerChange, RRect};
@@ -1434,8 +1443,8 @@ pub(crate) mod tests {
     };
     use waft_services::{LogicalKeyboardKey, PhysicalKeyboardKey, SystemMouseCursors};
     use waft_widgets::{
-        AnyElement, Center, Container, FocusHighlightStrategy, FocusNode, FocusNodeLeaf,
-        MouseRegion, StatefulBuilder,
+        AnyElement, Center, Container, FocusHighlightStrategy, FocusNode, MouseRegion,
+        StatefulBuilder,
     };
 
     use super::*;
@@ -1740,8 +1749,8 @@ pub(crate) mod tests {
         mouse
     }
 
-    fn focus_node(tester: &WidgetTester) -> AnyFocusNode {
-        FocusNode::new(&mut tester.cell.borrow_mut()).as_node()
+    fn focus_node(tester: &WidgetTester) -> FocusNodeRef {
+        FocusNode::new(&mut tester.cell.borrow_mut()).into_erased::<waft_widgets::AnyFocusNode>()
     }
 
     fn has_primary_focus(tester: &WidgetTester, node: AnyFocusNode) -> bool {
@@ -1932,13 +1941,13 @@ pub(crate) mod tests {
         theme: fn(&App) -> ThemeData,
         value: Option<bool>,
         enabled: bool,
-        node: AnyFocusNode,
+        node: FocusNodeRef,
     ) {
         pump_checkbox(tester, theme, move |_| {
             Checkbox::new(value, if enabled { ignore() } else { None })
                 .focus_color(orange())
                 .autofocus(true)
-                .focus_node(node)
+                .focus_node(node.clone())
                 .into_widget()
         });
         tester.pump_and_settle();
@@ -1951,8 +1960,8 @@ pub(crate) mod tests {
             let node = focus_node(&tester);
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
 
-            focus_frame(&mut tester, m2, Some(true), true, node);
-            assert!(has_primary_focus(&tester, node));
+            focus_frame(&mut tester, m2, Some(true), true, node.clone());
+            assert!(has_primary_focus(&tester, node.handle()));
             assert_paints(
                 &tester,
                 &[
@@ -1963,8 +1972,8 @@ pub(crate) mod tests {
             );
 
             // Check the false value.
-            focus_frame(&mut tester, m2, Some(false), true, node);
-            assert!(has_primary_focus(&tester, node));
+            focus_frame(&mut tester, m2, Some(false), true, node.clone());
+            assert!(has_primary_focus(&tester, node.handle()));
             assert_paints(
                 &tester,
                 &[
@@ -1978,8 +1987,8 @@ pub(crate) mod tests {
             );
 
             // Check what happens when disabled.
-            focus_frame(&mut tester, m2, Some(false), false, node);
-            assert!(!has_primary_focus(&tester, node));
+            focus_frame(&mut tester, m2, Some(false), false, node.clone());
+            assert!(!has_primary_focus(&tester, node.handle()));
             assert_paints(
                 &tester,
                 &[Paints::RingAt(
@@ -1999,8 +2008,8 @@ pub(crate) mod tests {
             let node = focus_node(&tester);
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
 
-            focus_frame(&mut tester, m3, Some(true), true, node);
-            assert!(has_primary_focus(&tester, node));
+            focus_frame(&mut tester, m3, Some(true), true, node.clone());
+            assert!(has_primary_focus(&tester, node.handle()));
             assert_paints(
                 &tester,
                 &[
@@ -2011,8 +2020,8 @@ pub(crate) mod tests {
             );
 
             // Check the false value.
-            focus_frame(&mut tester, m3, Some(false), true, node);
-            assert!(has_primary_focus(&tester, node));
+            focus_frame(&mut tester, m3, Some(false), true, node.clone());
+            assert!(has_primary_focus(&tester, node.handle()));
             assert_paints(
                 &tester,
                 &[
@@ -2026,8 +2035,8 @@ pub(crate) mod tests {
             );
 
             // Check what happens when disabled.
-            focus_frame(&mut tester, m3, Some(false), false, node);
-            assert!(!has_primary_focus(&tester, node));
+            focus_frame(&mut tester, m3, Some(false), false, node.clone());
+            assert!(!has_primary_focus(&tester, node.handle()));
             assert_paints(
                 &tester,
                 &[Paints::RingAt(
@@ -2398,15 +2407,18 @@ pub(crate) mod tests {
                 }
                 Some(Colors::TRANSPARENT)
             });
-            pump_checkbox(&mut tester, m3, move |_| {
-                Checkbox::new(Some(true), ignore())
-                    .focus_node(node)
-                    .autofocus(true)
-                    .fill_color(fill_color)
-                    .into_widget()
+            pump_checkbox(&mut tester, m3, {
+                let node = node.clone();
+                move |_| {
+                    Checkbox::new(Some(true), ignore())
+                        .focus_node(node.clone())
+                        .autofocus(true)
+                        .fill_color(fill_color)
+                        .into_widget()
+                }
             });
             tester.pump_and_settle();
-            assert!(has_primary_focus(&tester, node));
+            assert!(has_primary_focus(&tester, node.handle()));
             assert_paints(&tester, &[Paints::Rrect(FOCUSED_FILL_COLOR)]);
 
             // Start hovering
@@ -2462,11 +2474,11 @@ pub(crate) mod tests {
         configure: impl FnOnce(Checkbox) -> Checkbox,
         active: bool,
         focused: bool,
-        node: AnyFocusNode,
+        node: FocusNodeRef,
     ) {
         let checkbox = configure(
             Checkbox::new(Some(active), ignore())
-                .focus_node(node)
+                .focus_node(node.clone())
                 .autofocus(focused),
         );
         let root = {
@@ -2507,28 +2519,56 @@ pub(crate) mod tests {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             let data = theme(&tester.cell.borrow());
 
-            overlay_frame(&mut tester, theme, |checkbox| checkbox, false, false, node);
+            overlay_frame(
+                &mut tester,
+                theme,
+                |checkbox| checkbox,
+                false,
+                false,
+                node.clone(),
+            );
             let gesture1 = press(&mut tester, 1);
             tester.pump_and_settle();
             // Default inactive pressed Checkbox should have overlay color from default
             // fillColor
             assert_paints(&tester, &[Paints::Circle(inactive_pressed(&data))]);
 
-            overlay_frame(&mut tester, theme, |checkbox| checkbox, true, false, node);
+            overlay_frame(
+                &mut tester,
+                theme,
+                |checkbox| checkbox,
+                true,
+                false,
+                node.clone(),
+            );
             let gesture2 = press(&mut tester, 2);
             tester.pump_and_settle();
             // Default active pressed Checkbox should have overlay color from default fillColor
             assert_paints(&tester, &[Paints::Circle(active_pressed(&data))]);
 
             reset(&mut tester);
-            overlay_frame(&mut tester, theme, |checkbox| checkbox, false, true, node);
+            overlay_frame(
+                &mut tester,
+                theme,
+                |checkbox| checkbox,
+                false,
+                true,
+                node.clone(),
+            );
             tester.pump_and_settle();
-            assert!(has_primary_focus(&tester, node));
+            assert!(has_primary_focus(&tester, node.handle()));
             // Focused Checkbox should use default focused overlay color
             assert_paints(&tester, &[Paints::Circle(focused(&data))]);
 
             reset(&mut tester);
-            overlay_frame(&mut tester, theme, |checkbox| checkbox, false, false, node);
+            overlay_frame(
+                &mut tester,
+                theme,
+                |checkbox| checkbox,
+                false,
+                false,
+                node.clone(),
+            );
             let gesture3 = hover(&mut tester);
             tester.pump_and_settle();
             // Hovered Checkbox should use default hovered overlay color
@@ -2624,7 +2664,7 @@ pub(crate) mod tests {
                         },
                         active,
                         focused,
-                        node,
+                        node.clone(),
                     );
                 };
 
@@ -2677,7 +2717,7 @@ pub(crate) mod tests {
             reset(&mut tester);
             frame(&mut tester, false, true, true);
             tester.pump_and_settle();
-            assert!(has_primary_focus(&tester, node));
+            assert!(has_primary_focus(&tester, node.handle()));
             // Focused Checkbox should use overlay color over focusColor
             assert_paints(
                 &tester,
@@ -2943,11 +2983,14 @@ pub(crate) mod tests {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             let value = Rc::new(std::cell::Cell::new(Some(true)));
             let frame = |tester: &mut WidgetTester, auto_focus: bool| {
-                let host = stateful(Rc::clone(&value), move |checkbox| {
-                    checkbox
-                        .is_error(true)
-                        .autofocus(auto_focus)
-                        .focus_node(node)
+                let host = stateful(Rc::clone(&value), {
+                    let node = node.clone();
+                    move |checkbox| {
+                        checkbox
+                            .is_error(true)
+                            .autofocus(auto_focus)
+                            .focus_node(node.clone())
+                    }
                 });
                 pump_checkbox(tester, m3, |_| host);
                 tester.pump_and_settle();
@@ -2955,7 +2998,7 @@ pub(crate) mod tests {
 
             // Focused
             frame(&mut tester, true);
-            assert!(has_primary_focus(&tester, node));
+            assert!(has_primary_focus(&tester, node.handle()));
             assert_paints(
                 &tester,
                 &[
@@ -2968,7 +3011,7 @@ pub(crate) mod tests {
             // Default color
             reset(&mut tester);
             frame(&mut tester, false);
-            assert!(!has_primary_focus(&tester, node));
+            assert!(!has_primary_focus(&tester, node.handle()));
             assert_paints(
                 &tester,
                 &[Paints::Rrect(colors.error), Paints::Path(colors.on_error)],
@@ -3010,25 +3053,28 @@ pub(crate) mod tests {
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             let value = Rc::new(std::cell::Cell::new(Some(false)));
             let frame = |tester: &mut WidgetTester, auto_focus: bool| {
-                let host = stateful(Rc::clone(&value), move |checkbox| {
-                    checkbox
-                        .is_error(true)
-                        .side(WidgetStateBorderSide::resolve_with(|states| {
-                            if states.contains(&WidgetState::Error) {
-                                return Some(BorderSide {
-                                    color: BORDER_COLOR,
-                                    width: 4.0,
+                let host = stateful(Rc::clone(&value), {
+                    let node = node.clone();
+                    move |checkbox| {
+                        checkbox
+                            .is_error(true)
+                            .side(WidgetStateBorderSide::resolve_with(|states| {
+                                if states.contains(&WidgetState::Error) {
+                                    return Some(BorderSide {
+                                        color: BORDER_COLOR,
+                                        width: 4.0,
+                                        ..BorderSide::default()
+                                    });
+                                }
+                                Some(BorderSide {
+                                    color: Colors::RED.primary(),
+                                    width: 2.0,
                                     ..BorderSide::default()
-                                });
-                            }
-                            Some(BorderSide {
-                                color: Colors::RED.primary(),
-                                width: 2.0,
-                                ..BorderSide::default()
-                            })
-                        }))
-                        .autofocus(auto_focus)
-                        .focus_node(node)
+                                })
+                            }))
+                            .autofocus(auto_focus)
+                            .focus_node(node.clone())
+                    }
                 });
                 pump_checkbox(tester, m3, |_| host);
                 tester.pump_and_settle();
@@ -3049,13 +3095,13 @@ pub(crate) mod tests {
 
             // Focused
             frame(&mut tester, true);
-            assert!(has_primary_focus(&tester, node));
+            assert!(has_primary_focus(&tester, node.handle()));
             expect_border(&tester);
 
             // Default color
             reset(&mut tester);
             frame(&mut tester, false);
-            assert!(!has_primary_focus(&tester, node));
+            assert!(!has_primary_focus(&tester, node.handle()));
             expect_border(&tester);
 
             // Start hovering

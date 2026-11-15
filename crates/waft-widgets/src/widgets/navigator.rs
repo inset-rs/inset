@@ -12,7 +12,8 @@ use std::time::Duration;
 
 use waft_embedder::{Clip, RestorationData, RestorationMap};
 use waft_foundation::{
-    App, Completer, CompleterFuture, Handle, HandleId, ListenableObject, Listener, ValueNotifier,
+    App, Completer, CompleterFuture, Handle, HandleId, ListenableObject, Listener, OptionRetained,
+    Retained, ValueNotifier,
 };
 use waft_gestures::GestureBinding;
 use waft_rendering::RenderAbsorbPointer;
@@ -28,7 +29,9 @@ use crate::framework::{
 };
 use crate::view::View;
 use crate::widgets::basic::AbsorbPointer;
-use crate::widgets::focus_manager::{FocusNode, FocusNodeLeaf, TraversalEdgeBehavior};
+use crate::widgets::focus_manager::{
+    FocusNode, FocusNodeLeaf, FocusNodeRef, TraversalEdgeBehavior,
+};
 use crate::widgets::focus_scope::Focus;
 use crate::widgets::focus_traversal::FocusTraversalGroup;
 use crate::widgets::heroes::HeroController;
@@ -40,6 +43,7 @@ use crate::widgets::restoration::{
 };
 use crate::widgets::restoration_properties::{RestorableInt, RestorableValue};
 use crate::widgets::ticker_provider::{TickerProviderStateMixin, TickerProviderStateMixinData};
+use waft_foundation::Ref;
 
 /// Duration for delay before refocusing in android so that the focus won't be interrupted.
 #[expect(dead_code, reason = "read by the accessibility refocus, which waits")]
@@ -53,12 +57,12 @@ pub type RouteResult = Option<Rc<dyn Any>>;
 /// Creates a route for the given route settings.
 ///
 /// Used by [`Navigator::on_generate_route`].
-pub type RouteFactory = Rc<dyn Fn(&mut App, &RouteSettings) -> Option<AnyRoute>>;
+pub type RouteFactory = Rc<dyn Fn(&mut App, &RouteSettings) -> Option<RouteRef>>;
 
 /// Creates a series of one or more routes.
 ///
 /// Used by [`Navigator::on_generate_initial_routes`].
-pub type RouteListFactory = Rc<dyn Fn(&mut App, Handle<NavigatorState>, &str) -> Vec<AnyRoute>>;
+pub type RouteListFactory = Rc<dyn Fn(&mut App, Handle<NavigatorState>, &str) -> Vec<RouteRef>>;
 
 /// Creates a [`Route`] that is to be added to a [`Navigator`].
 ///
@@ -68,7 +72,7 @@ pub type RouteListFactory = Rc<dyn Fn(&mut App, Handle<NavigatorState>, &str) ->
 /// Used by the restorable methods of the [`Navigator`] that add anonymous routes (e.g.
 /// [`NavigatorState::restorable_push`]).
 pub type RestorableRouteBuilder =
-    Rc<dyn Fn(&mut App, BuildContext, Option<Rc<dyn Any>>) -> AnyRoute>;
+    Rc<dyn Fn(&mut App, BuildContext, Option<Rc<dyn Any>>) -> RouteRef>;
 
 /// Signature for the [`NavigatorState::pop_until`] predicate argument.
 pub type RoutePredicate = Rc<dyn Fn(&mut App, AnyRoute) -> bool>;
@@ -231,7 +235,7 @@ pub trait Page: Debug + 'static {
     ///
     /// The created route must have its settings set to this page: `this` is the shared
     /// reference the navigator holds, which Dart writes as `this`.
-    fn create_route(&self, app: &mut App, context: BuildContext, this: &PageRef) -> AnyRoute;
+    fn create_route(&self, app: &mut App, context: BuildContext, this: &PageRef) -> RouteRef;
 }
 
 /// What a [`Route`]'s settings hold: plain [`RouteSettings`], or the [`Page`] that created the
@@ -319,7 +323,7 @@ pub struct RouteData {
     request_focus: Option<bool>,
     navigator: Option<Handle<NavigatorState>>,
     settings: RouteSettingsRef,
-    restoration_scope_id: Handle<ValueNotifier<Option<String>>>,
+    restoration_scope_id: Ref<ValueNotifier<Option<String>>>,
     pop_completer: Completer<RouteResult>,
     dispose_completer: Completer<RouteResult>,
 }
@@ -683,7 +687,11 @@ pub trait RouteBase: Route {
     /// Dart's `Route.didPush`.
     fn did_push(self: Handle<Self>, app: &mut App) -> TickerFuture {
         let future = TickerFuture::complete();
-        let route = self.as_route();
+        // The completion keeps the route, as Dart's closure over `this` does.
+        let route: RouteRef = self
+            .upgrade(app)
+            .expect("a pushed route is kept by its entry")
+            .into_erased();
         future.when_complete(
             app,
             Listener::new(move |app| {
@@ -709,7 +717,10 @@ pub trait RouteBase: Route {
         // triggered by other operations will finish before focusing the navigator. Second,
         // `navigator.focus_node` might acquire more focused children in `install`
         // asynchronously.
-        let route = self.as_route();
+        let route: RouteRef = self
+            .upgrade(app)
+            .expect("an added route is kept by its entry")
+            .into_erased();
         let future = TickerFuture::complete();
         future.when_complete(
             app,
@@ -818,7 +829,7 @@ pub trait RouteBase: Route {
     /// Dart's `Route.dispose`.
     fn dispose(self: Handle<Self>, app: &mut App) {
         self.route_data_mut(app).navigator = None;
-        let notifier = self.route_data(app).restoration_scope_id;
+        let notifier = self.route_data(app).restoration_scope_id.handle();
         app.get_mut(notifier).dispose();
         let dispose_completer = self.route_data(app).dispose_completer.clone();
         dispose_completer.complete(app, None);
@@ -911,6 +922,22 @@ pub struct AnyRoute {
     vtable: &'static RouteVTable,
 }
 
+impl From<AnyRoute> for HandleId {
+    fn from(handle: AnyRoute) -> HandleId {
+        handle.id
+    }
+}
+
+/// A field Dart types as the erased object, kept: AnyRoute with its count.
+pub type RouteRef = Retained<AnyRoute>;
+
+/// A kept object erases to a [`RouteRef`] with [`Retained::erase`]: Dart's upcast.
+impl<T: Route> From<Handle<T>> for AnyRoute {
+    fn from(handle: Handle<T>) -> AnyRoute {
+        handle.as_route()
+    }
+}
+
 impl PartialEq for AnyRoute {
     fn eq(&self, other: &AnyRoute) -> bool {
         self.id == other.id
@@ -935,6 +962,13 @@ impl AnyRoute {
     /// The arena id behind this handle.
     pub fn id(self) -> HandleId {
         self.id
+    }
+
+    /// A [`RouteRef`] while something still keeps the route; see [`Handle::upgrade`].
+    pub fn upgrade(self, app: &App) -> Option<RouteRef> {
+        self.id
+            .upgrade(app)
+            .map(|retained| retained.into_map(|_| self))
     }
 
     /// Dart's `route as T`: the typed handle when this route is a `T`, else `None`.
@@ -1031,7 +1065,7 @@ impl AnyRoute {
     /// If the restoration scope ID changes (e.g. because restoration is enabled or disabled)
     /// during the life of the route, the notifier notifies its listeners.
     pub fn restoration_scope_id(self, app: &App) -> Handle<ValueNotifier<Option<String>>> {
-        self.data(app).restoration_scope_id
+        self.data(app).restoration_scope_id.handle()
     }
 
     fn update_settings(self, app: &mut App, new_settings: RouteSettingsRef) {
@@ -1044,7 +1078,7 @@ impl AnyRoute {
     }
 
     fn update_restoration_id(self, app: &mut App, restoration_id: Option<String>) {
-        let notifier = self.data(app).restoration_scope_id;
+        let notifier = self.data(app).restoration_scope_id.handle();
         notifier.set_value(app, restoration_id);
     }
 
@@ -1160,7 +1194,7 @@ impl AnyRoute {
         };
         match navigator.last_route_entry_where_or_null(app, RouteEntry::is_present_predicate) {
             None => false,
-            Some(entry) => app.get(entry).route == self,
+            Some(entry) => app.get(entry).route.handle() == self,
         }
     }
 
@@ -1174,7 +1208,7 @@ impl AnyRoute {
         };
         match navigator.first_route_entry_where_or_null(app, RouteEntry::is_present_predicate) {
             None => false,
-            Some(entry) => app.get(entry).route == self,
+            Some(entry) => app.get(entry).route.handle() == self,
         }
     }
 
@@ -1184,7 +1218,7 @@ impl AnyRoute {
             return false;
         };
         for entry in navigator.history_entries(app) {
-            if app.get(entry).route == self {
+            if app.get(entry).route.handle() == self {
                 return false;
             }
             if RouteEntry::is_present_predicate(app, entry) {
@@ -1204,7 +1238,9 @@ impl AnyRoute {
             return false;
         };
         navigator
-            .first_route_entry_where_or_null(app, move |app, entry| app.get(entry).route == self)
+            .first_route_entry_where_or_null(app, move |app, entry| {
+                app.get(entry).route.handle() == self
+            })
             .is_some_and(|entry| RouteEntry::is_present_predicate(app, entry))
     }
 }
@@ -1404,6 +1440,22 @@ pub struct AnyNavigatorObserver {
     vtable: &'static NavigatorObserverVTable,
 }
 
+impl From<AnyNavigatorObserver> for HandleId {
+    fn from(handle: AnyNavigatorObserver) -> HandleId {
+        handle.id
+    }
+}
+
+/// A field Dart types as the erased object, kept: AnyNavigatorObserver with its count.
+pub type NavigatorObserverRef = Retained<AnyNavigatorObserver>;
+
+/// A kept object erases to a [`NavigatorObserverRef`] with [`Retained::erase`]: Dart's upcast.
+impl<T: NavigatorObserver> From<Handle<T>> for AnyNavigatorObserver {
+    fn from(handle: Handle<T>) -> AnyNavigatorObserver {
+        handle.as_observer()
+    }
+}
+
 impl PartialEq for AnyNavigatorObserver {
     fn eq(&self, other: &AnyNavigatorObserver) -> bool {
         self.id == other.id
@@ -1511,7 +1563,7 @@ pub struct HeroControllerScope {
     /// See [`Widget::key`](crate::Widget::key).
     pub key: Option<KeyRef>,
     /// The hero controller that is hosted inside this widget.
-    pub controller: Option<Handle<HeroController>>,
+    pub controller: Option<Ref<HeroController>>,
     /// The widget below this widget in the tree.
     pub child: WidgetRef,
 }
@@ -1519,7 +1571,7 @@ pub struct HeroControllerScope {
 impl HeroControllerScope {
     /// Creates a widget to host the input `controller`.
     pub fn new<K>(
-        controller: Handle<HeroController>,
+        controller: Ref<HeroController>,
         child: impl IntoWidget<K>,
     ) -> HeroControllerScope {
         HeroControllerScope {
@@ -1552,7 +1604,7 @@ impl HeroControllerScope {
     pub fn maybe_of(app: &mut App, context: BuildContext) -> Option<Handle<HeroController>> {
         context
             .depend_on_inherited_widget_of_exact_type::<HeroControllerScope>(app)
-            .and_then(|host| host.controller)
+            .and_then(|host| host.controller.handle())
     }
 
     /// Retrieves the [`HeroController`] from the closest [`HeroControllerScope`] ancestor.
@@ -1955,7 +2007,7 @@ pub struct Navigator {
     /// must return a non-`None` [`Route`].
     pub on_unknown_route: Option<RouteFactory>,
     /// A list of observers for this navigator.
-    pub observers: Vec<AnyNavigatorObserver>,
+    pub observers: Vec<NavigatorObserverRef>,
     /// Restoration ID to save and restore the state of the navigator, including its history.
     ///
     /// If a restoration ID is provided, the navigator will persist its internal state (including
@@ -2047,7 +2099,7 @@ impl Navigator {
     /// Dart `Navigator(onGenerateRoute:)`.
     pub fn on_generate_route(
         mut self,
-        on_generate_route: impl Fn(&mut App, &RouteSettings) -> Option<AnyRoute> + 'static,
+        on_generate_route: impl Fn(&mut App, &RouteSettings) -> Option<RouteRef> + 'static,
     ) -> Navigator {
         self.on_generate_route = Some(Rc::new(on_generate_route));
         self
@@ -2056,7 +2108,7 @@ impl Navigator {
     /// Dart `Navigator(onUnknownRoute:)`.
     pub fn on_unknown_route(
         mut self,
-        on_unknown_route: impl Fn(&mut App, &RouteSettings) -> Option<AnyRoute> + 'static,
+        on_unknown_route: impl Fn(&mut App, &RouteSettings) -> Option<RouteRef> + 'static,
     ) -> Navigator {
         self.on_unknown_route = Some(Rc::new(on_unknown_route));
         self
@@ -2065,7 +2117,7 @@ impl Navigator {
     /// Dart `Navigator(observers:)`.
     pub fn observers(
         mut self,
-        observers: impl IntoIterator<Item = AnyNavigatorObserver>,
+        observers: impl IntoIterator<Item = NavigatorObserverRef>,
     ) -> Navigator {
         self.observers = observers.into_iter().collect();
         self
@@ -2095,7 +2147,7 @@ impl Navigator {
     /// Dart `Navigator(onGenerateInitialRoutes:)`.
     pub fn on_generate_initial_routes(
         mut self,
-        on_generate_initial_routes: impl Fn(&mut App, Handle<NavigatorState>, &str) -> Vec<AnyRoute>
+        on_generate_initial_routes: impl Fn(&mut App, Handle<NavigatorState>, &str) -> Vec<RouteRef>
         + 'static,
     ) -> Navigator {
         self.on_generate_initial_routes = Rc::new(on_generate_initial_routes);
@@ -2280,7 +2332,7 @@ impl Navigator {
     pub fn push(
         app: &mut App,
         context: BuildContext,
-        route: AnyRoute,
+        route: RouteRef,
     ) -> CompleterFuture<RouteResult> {
         Navigator::of(app, context, false).push(app, route)
     }
@@ -2301,7 +2353,7 @@ impl Navigator {
     pub fn push_replacement(
         app: &mut App,
         context: BuildContext,
-        new_route: AnyRoute,
+        new_route: RouteRef,
         result: RouteResult,
     ) -> CompleterFuture<RouteResult> {
         Navigator::of(app, context, false).push_replacement(app, new_route, result)
@@ -2328,7 +2380,7 @@ impl Navigator {
     pub fn push_and_remove_until(
         app: &mut App,
         context: BuildContext,
-        new_route: AnyRoute,
+        new_route: RouteRef,
         predicate: RoutePredicate,
     ) -> CompleterFuture<RouteResult> {
         Navigator::of(app, context, false).push_and_remove_until(app, new_route, predicate)
@@ -2352,7 +2404,7 @@ impl Navigator {
 
     /// Replaces a route on the navigator that most tightly encloses the given context with a new
     /// route.
-    pub fn replace(app: &mut App, context: BuildContext, old_route: AnyRoute, new_route: AnyRoute) {
+    pub fn replace(app: &mut App, context: BuildContext, old_route: AnyRoute, new_route: RouteRef) {
         Navigator::of(app, context, false).replace(app, old_route, new_route);
     }
 
@@ -2378,7 +2430,7 @@ impl Navigator {
         app: &mut App,
         context: BuildContext,
         anchor_route: AnyRoute,
-        new_route: AnyRoute,
+        new_route: RouteRef,
     ) {
         Navigator::of(app, context, false).replace_route_below(app, anchor_route, new_route);
     }
@@ -2473,8 +2525,8 @@ impl Navigator {
         app: &mut App,
         navigator: Handle<NavigatorState>,
         initial_route_name: &str,
-    ) -> Vec<AnyRoute> {
-        let mut result: Vec<Option<AnyRoute>> = Vec::new();
+    ) -> Vec<RouteRef> {
+        let mut result: Vec<Option<RouteRef>> = Vec::new();
         if initial_route_name.starts_with('/') && initial_route_name.len() > 1 {
             let initial_route_name = &initial_route_name[1..]; // strip leading '/'
             debug_assert_eq!(Navigator::DEFAULT_ROUTE_NAME, "/");
@@ -2600,16 +2652,17 @@ pub enum RouteLifecycle {
 ///
 /// This is also the [`RouteTransitionRecord`] a [`TransitionDelegate`] receives.
 pub struct RouteEntry {
-    route: AnyRoute,
+    route: RouteRef,
     restoration_information: Option<Rc<RestorationInformation>>,
     page_based: bool,
     current_state: RouteLifecycle,
     /// Last argument to `Route::did_change_previous`; `None` is Dart's `notAnnounced`.
-    last_announced_previous_route: Option<Option<AnyRoute>>,
-    /// Last argument to `Route::did_pop_next`; `None` is Dart's `notAnnounced`.
+    last_announced_previous_route: Option<Option<RouteRef>>,
+    /// Last argument to `Route::did_pop_next`; `None` is Dart's `notAnnounced`. Named without
+    /// keeping it, as Dart's `WeakReference`.
     last_announced_popped_next_route: Option<Option<AnyRoute>>,
     /// Last argument to `Route::did_change_next`; `None` is Dart's `notAnnounced`.
-    last_announced_next_route: Option<Option<AnyRoute>>,
+    last_announced_next_route: Option<Option<RouteRef>>,
     /// Whether the route is being removed by an imperative API call.
     imperative_removal: bool,
     pending_result: RouteResult,
@@ -2618,6 +2671,24 @@ pub struct RouteEntry {
 }
 
 impl RouteEntry {
+    fn last_announced_previous_route(&self) -> Option<Option<AnyRoute>> {
+        self.last_announced_previous_route
+            .as_ref()
+            .map(OptionRetained::handle)
+    }
+
+    /// Dart's `lastAnnouncedPoppedNextRoute.target`: a freed route reads as `null`.
+    fn last_announced_popped_next_route(&self, app: &App) -> Option<Option<AnyRoute>> {
+        self.last_announced_popped_next_route
+            .map(|route| route.filter(|route| app.contains(*route)))
+    }
+
+    fn last_announced_next_route(&self) -> Option<Option<AnyRoute>> {
+        self.last_announced_next_route
+            .as_ref()
+            .map(OptionRetained::handle)
+    }
+
     /// The maximum number of `did_pop` attempts a `mark_for_pop` makes on a route that handles
     /// pops internally.
     pub const K_DEBUG_POP_ATTEMPT_LIMIT: usize = 100;
@@ -2627,11 +2698,11 @@ impl RouteEntry {
     /// [`PushReplace`](RouteLifecycle::PushReplace) or [`Replace`](RouteLifecycle::Replace).
     fn new(
         app: &mut App,
-        route: AnyRoute,
+        route: RouteRef,
         initial_state: RouteLifecycle,
         page_based: bool,
         restoration_information: Option<Rc<RestorationInformation>>,
-    ) -> Handle<RouteEntry> {
+    ) -> Ref<RouteEntry> {
         debug_assert!(!page_based || route.is_page_based(app));
         debug_assert!(matches!(
             initial_state,
@@ -2697,11 +2768,11 @@ impl RouteEntry {
         self: Handle<Self>,
         app: &mut App,
         navigator: Handle<NavigatorState>,
-        previous_present: Option<AnyRoute>,
+        previous_present: Option<RouteRef>,
     ) {
         debug_assert!(app.get(self).current_state == RouteLifecycle::Add);
         app.get_mut(self).current_state = RouteLifecycle::Adding;
-        let route = app.get(self).route;
+        let route = app.get(self).route.clone();
         app.get_mut(navigator)
             .observed_route_additions
             .push_back(NavigatorObservation::Push {
@@ -2716,14 +2787,14 @@ impl RouteEntry {
         navigator: Handle<NavigatorState>,
         is_new_first: bool,
         previous: Option<AnyRoute>,
-        previous_present: Option<AnyRoute>,
+        previous_present: Option<RouteRef>,
     ) {
         let previous_state = app.get(self).current_state;
         debug_assert!(matches!(
             previous_state,
             RouteLifecycle::Push | RouteLifecycle::PushReplace | RouteLifecycle::Replace
         ));
-        let route = app.get(self).route;
+        let route = app.get(self).route.handle();
         debug_assert!(
             !route.installed(app),
             "The pushed route has already been used. When pushing a route, a new Route object \
@@ -2761,10 +2832,11 @@ impl RouteEntry {
             previous_state,
             RouteLifecycle::Replace | RouteLifecycle::PushReplace
         ) {
+            let primary_route = app.get(self).route.clone();
             app.get_mut(navigator).observed_route_additions.push_back(
                 NavigatorObservation::Replace {
-                    primary_route: route,
-                    secondary_route: previous_present,
+                    primary_route,
+                    secondary_route: previous_present.clone(),
                 },
             );
             if let Some(previous_present) = previous_present
@@ -2775,17 +2847,18 @@ impl RouteEntry {
             }
         } else {
             debug_assert!(previous_state == RouteLifecycle::Push);
+            let primary_route = app.get(self).route.clone();
             app.get_mut(navigator)
                 .observed_route_additions
                 .push_back(NavigatorObservation::Push {
-                    primary_route: route,
+                    primary_route,
                     secondary_route: previous_present,
                 });
         }
     }
 
     fn handle_did_pop_next(self: Handle<Self>, app: &mut App, popped_route: AnyRoute) {
-        let route = app.get(self).route;
+        let route = app.get(self).route.handle();
         route.did_pop_next(app, popped_route);
         app.get_mut(self).last_announced_popped_next_route = Some(Some(popped_route));
     }
@@ -2797,7 +2870,7 @@ impl RouteEntry {
         navigator: Handle<NavigatorState>,
         _previous_present: Option<AnyRoute>,
     ) -> bool {
-        let route = app.get(self).route;
+        let route = app.get(self).route.handle();
         debug_assert!(route.is_installed_in(app, navigator));
         app.get_mut(self).current_state = RouteLifecycle::Popping;
         if route.data(app).pop_completer.is_completed() {
@@ -2825,7 +2898,7 @@ impl RouteEntry {
     }
 
     fn handle_complete(self: Handle<Self>, app: &mut App) {
-        let route = app.get(self).route;
+        let route = app.get(self).route.handle();
         let pending_result = app.get(self).pending_result.clone();
         route.did_complete(app, pending_result);
         app.get_mut(self).pending_result = None;
@@ -2838,9 +2911,9 @@ impl RouteEntry {
         self: Handle<Self>,
         app: &mut App,
         navigator: Handle<NavigatorState>,
-        previous_present: Option<AnyRoute>,
+        previous_present: Option<RouteRef>,
     ) {
-        let route = app.get(self).route;
+        let route = app.get(self).route.handle();
         if route.is_installed_in(app, navigator) {
             app.get_mut(self).current_state = RouteLifecycle::Removing;
         } else {
@@ -2849,9 +2922,10 @@ impl RouteEntry {
             app.get_mut(self).current_state = RouteLifecycle::Dispose;
         }
         if app.get(self).report_removal_to_observer {
+            let primary_route = app.get(self).route.clone();
             app.get_mut(navigator).observed_route_deletions.push_back(
                 NavigatorObservation::Remove {
-                    primary_route: route,
+                    primary_route,
                     secondary_route: previous_present,
                 },
             );
@@ -2864,7 +2938,7 @@ impl RouteEntry {
         navigator: Handle<NavigatorState>,
         is_new_first: bool,
     ) {
-        let route = app.get(self).route;
+        let route = app.get(self).route.handle();
         debug_assert!(!route.installed(app));
         route.set_navigator(app, Some(navigator));
         route.install(app);
@@ -2911,7 +2985,7 @@ impl RouteEntry {
     fn forced_dispose(self: Handle<Self>, app: &mut App) {
         debug_assert!(app.get(self).current_state < RouteLifecycle::Disposed);
         app.get_mut(self).current_state = RouteLifecycle::Disposed;
-        let route = app.get(self).route;
+        let route = app.get(self).route.handle();
         route.dispose(app);
     }
 
@@ -2921,7 +2995,7 @@ impl RouteEntry {
         debug_assert!(app.get(self).current_state < RouteLifecycle::Disposing);
         app.get_mut(self).current_state = RouteLifecycle::Disposing;
 
-        let route = app.get(self).route;
+        let route = app.get(self).route.handle();
         let mounted_entries: Vec<Handle<OverlayEntry>> = route
             .overlay_entries(app)
             .into_iter()
@@ -2934,9 +3008,12 @@ impl RouteEntry {
         }
 
         let navigator = route.navigator(app).expect("an installed route");
+        let kept = self
+            .upgrade(app)
+            .expect("a disposing entry is kept by its navigator");
         app.get_mut(navigator)
             .entry_waiting_for_subtree_disposal
-            .insert(self);
+            .insert(kept);
         let remaining = Rc::new(std::cell::Cell::new(mounted_entries.len()));
         for overlay_entry in mounted_entries {
             let slot: Rc<std::cell::RefCell<Option<Listener>>> =
@@ -2948,7 +3025,9 @@ impl RouteEntry {
                     debug_assert!(remaining.get() > 0);
                     debug_assert!(!overlay_entry.mounted(app));
                     remaining.set(remaining.get() - 1);
-                    let registered = slot.borrow().clone();
+                    // Taken, not cloned: the slot holding this listener would otherwise keep
+                    // it, and the listener the slot, after the entry lets it go.
+                    let registered = slot.borrow_mut().take();
                     if let Some(registered) = registered {
                         overlay_entry.remove_listener(app, &registered);
                     }
@@ -3003,12 +3082,12 @@ impl RouteEntry {
         next_route: Option<AnyRoute>,
     ) -> bool {
         let entry = app.get(self);
-        debug_assert!(entry.last_announced_next_route != Some(next_route));
+        debug_assert!(entry.last_announced_next_route() != Some(next_route));
         // We do not announce when `next_route` is null and the last announced popped next route
         // is the same as the last announced next route: the route was already told that it is
         // the topmost by `did_pop_next`.
         !(next_route.is_none()
-            && entry.last_announced_popped_next_route == entry.last_announced_next_route)
+            && entry.last_announced_popped_next_route(app) == entry.last_announced_next_route())
     }
 
     fn is_present_predicate(app: &App, entry: Handle<RouteEntry>) -> bool {
@@ -3035,7 +3114,7 @@ impl RouteEntry {
     fn set_restoration_enabled(self: Handle<Self>, app: &mut App, value: bool) {
         debug_assert!(!value || self.restoration_id(app).is_some());
         let id = value.then(|| self.restoration_id(app)).flatten();
-        let route = app.get(self).route;
+        let route = app.get(self).route.handle();
         route.update_restoration_id(app, id);
     }
 
@@ -3046,7 +3125,7 @@ impl RouteEntry {
 
 impl RouteTransitionRecord for RouteEntry {
     fn route(self: Handle<Self>, app: &App) -> AnyRoute {
-        app.get(self).route
+        app.get(self).route.handle()
     }
 
     fn is_waiting_for_entering_decision(self: Handle<Self>, app: &App) -> bool {
@@ -3086,7 +3165,7 @@ impl RouteTransitionRecord for RouteEntry {
              does not require an explicit decision on how to transition out."
         );
         // Remove state that prevents a pop, e.g. LocalHistoryEntry.
-        let route = app.get(self).route;
+        let route = app.get(self).route.handle();
         let mut attempt = 0;
         while route.will_handle_pop_internally(app) {
             if cfg!(debug_assertions) {
@@ -3118,45 +3197,44 @@ impl RouteTransitionRecord for RouteEntry {
 }
 
 /// Dart's `_NavigatorObservation` family: what an observer is told once the history has settled.
-#[derive(Clone, Copy)]
 enum NavigatorObservation {
     Push {
-        primary_route: AnyRoute,
-        secondary_route: Option<AnyRoute>,
+        primary_route: RouteRef,
+        secondary_route: Option<RouteRef>,
     },
     Pop {
-        primary_route: AnyRoute,
-        secondary_route: Option<AnyRoute>,
+        primary_route: RouteRef,
+        secondary_route: Option<RouteRef>,
     },
     Remove {
-        primary_route: AnyRoute,
-        secondary_route: Option<AnyRoute>,
+        primary_route: RouteRef,
+        secondary_route: Option<RouteRef>,
     },
     Replace {
-        primary_route: AnyRoute,
-        secondary_route: Option<AnyRoute>,
+        primary_route: RouteRef,
+        secondary_route: Option<RouteRef>,
     },
 }
 
 impl NavigatorObservation {
-    fn notify(self, app: &mut App, observer: AnyNavigatorObserver) {
+    fn notify(&self, app: &mut App, observer: AnyNavigatorObserver) {
         match self {
             NavigatorObservation::Push {
                 primary_route,
                 secondary_route,
-            } => observer.did_push(app, primary_route, secondary_route),
+            } => observer.did_push(app, **primary_route, secondary_route.handle()),
             NavigatorObservation::Pop {
                 primary_route,
                 secondary_route,
-            } => observer.did_pop(app, primary_route, secondary_route),
+            } => observer.did_pop(app, **primary_route, secondary_route.handle()),
             NavigatorObservation::Remove {
                 primary_route,
                 secondary_route,
-            } => observer.did_remove(app, primary_route, secondary_route),
+            } => observer.did_remove(app, **primary_route, secondary_route.handle()),
             NavigatorObservation::Replace {
                 primary_route,
                 secondary_route,
-            } => observer.did_replace(app, Some(primary_route), secondary_route),
+            } => observer.did_replace(app, Some(**primary_route), secondary_route.handle()),
         }
     }
 }
@@ -3164,11 +3242,11 @@ impl NavigatorObservation {
 /// Dart's `_History`: the navigator's route entries, as a `ChangeNotifier`.
 pub struct History {
     change_notifier: waft_foundation::ChangeNotifierData,
-    value: Vec<Handle<RouteEntry>>,
+    value: Vec<Ref<RouteEntry>>,
 }
 
 impl History {
-    fn new(app: &mut App) -> Handle<History> {
+    fn new(app: &mut App) -> Ref<History> {
         app.create(History {
             change_notifier: waft_foundation::ChangeNotifierData::new(),
             value: Vec::new(),
@@ -3176,7 +3254,7 @@ impl History {
     }
 
     fn entries(self: Handle<Self>, app: &App) -> Vec<Handle<RouteEntry>> {
-        app.get(self).value.clone()
+        app.get(self).value.iter().map(Retained::handle).collect()
     }
 
     fn len(self: Handle<Self>, app: &App) -> usize {
@@ -3188,7 +3266,7 @@ impl History {
     }
 
     fn at(self: Handle<Self>, app: &App, index: usize) -> Handle<RouteEntry> {
-        app.get(self).value[index]
+        app.get(self).value[index].handle()
     }
 
     fn index_where(
@@ -3199,15 +3277,15 @@ impl History {
         app.get(self)
             .value
             .iter()
-            .position(|entry| test(app, *entry))
+            .position(|entry| test(app, entry.handle()))
     }
 
-    fn add(self: Handle<Self>, app: &mut App, element: Handle<RouteEntry>) {
+    fn add(self: Handle<Self>, app: &mut App, element: Ref<RouteEntry>) {
         app.get_mut(self).value.push(element);
         self.notify_listeners(app);
     }
 
-    fn add_all(self: Handle<Self>, app: &mut App, elements: Vec<Handle<RouteEntry>>) {
+    fn add_all(self: Handle<Self>, app: &mut App, elements: Vec<Ref<RouteEntry>>) {
         if elements.is_empty() {
             return;
         }
@@ -3223,18 +3301,18 @@ impl History {
         }
     }
 
-    fn insert(self: Handle<Self>, app: &mut App, index: usize, element: Handle<RouteEntry>) {
+    fn insert(self: Handle<Self>, app: &mut App, index: usize, element: Ref<RouteEntry>) {
         app.get_mut(self).value.insert(index, element);
         self.notify_listeners(app);
     }
 
-    fn remove_at(self: Handle<Self>, app: &mut App, index: usize) -> Handle<RouteEntry> {
+    fn remove_at(self: Handle<Self>, app: &mut App, index: usize) -> Ref<RouteEntry> {
         let entry = app.get_mut(self).value.remove(index);
         self.notify_listeners(app);
         entry
     }
 
-    fn remove_last(self: Handle<Self>, app: &mut App) -> Handle<RouteEntry> {
+    fn remove_last(self: Handle<Self>, app: &mut App) -> Ref<RouteEntry> {
         let entry = app.get_mut(self).value.pop().expect("a non-empty history");
         self.notify_listeners(app);
         entry
@@ -3268,24 +3346,24 @@ pub struct NavigatorState {
     ticker_provider: TickerProviderStateMixinData,
     restoration: RestorationMixinData,
     overlay_key: Option<GlobalKey>,
-    history: Option<Handle<History>>,
+    history: Option<Ref<History>>,
     /// The [`RouteEntry`]s that are waiting for their subtrees to be disposed.
-    entry_waiting_for_subtree_disposal: HashSet<Handle<RouteEntry>>,
-    serializable_history: Option<Handle<HistoryProperty>>,
+    entry_waiting_for_subtree_disposal: HashSet<Ref<RouteEntry>>,
+    serializable_history: Option<Ref<HistoryProperty>>,
     observed_route_additions: VecDeque<NavigatorObservation>,
     observed_route_deletions: VecDeque<NavigatorObservation>,
-    focus_node: Option<Handle<FocusNode>>,
+    focus_node: Option<Ref<FocusNode>>,
     /// Used to prevent re-entrant calls to push, pop, and friends.
     debug_locked: bool,
-    hero_controller_from_scope: Option<Handle<HeroController>>,
-    effective_observers: Vec<AnyNavigatorObserver>,
-    raw_next_pageless_restoration_scope_id: Option<Handle<RestorableInt>>,
-    last_topmost_route: Option<Handle<RouteEntry>>,
+    hero_controller_from_scope: Option<Ref<HeroController>>,
+    effective_observers: Vec<NavigatorObserverRef>,
+    raw_next_pageless_restoration_scope_id: Option<Ref<RestorableInt>>,
+    last_topmost_route: Option<Ref<RouteEntry>>,
     last_announced_route_name: Option<String>,
     debug_updating_page: bool,
     flushing_history: bool,
     user_gestures_in_progress_count: i64,
-    user_gesture_in_progress_notifier: Option<Handle<ValueNotifier<bool>>>,
+    user_gesture_in_progress_notifier: Option<Ref<ValueNotifier<bool>>>,
     active_pointers: HashSet<i64>,
 }
 
@@ -3320,7 +3398,10 @@ impl NavigatorState {
     ///
     /// The navigator will attempt to focus this node when the top-most route changes.
     pub fn focus_node(self: Handle<Self>, app: &App) -> Handle<FocusNode> {
-        app.get(self).focus_node.expect("init_state has run")
+        app.get(self)
+            .focus_node
+            .handle()
+            .expect("init_state has run")
     }
 
     /// True if the state's [`user_gesture_in_progress_notifier`](Self::user_gesture_in_progress_notifier)
@@ -3337,16 +3418,18 @@ impl NavigatorState {
     ) -> Handle<ValueNotifier<bool>> {
         app.get(self)
             .user_gesture_in_progress_notifier
+            .handle()
             .expect("init_state has run")
     }
 
     fn history(self: Handle<Self>, app: &App) -> Handle<History> {
-        app.get(self).history.expect("init_state has run")
+        app.get(self).history.handle().expect("init_state has run")
     }
 
     fn serializable_history(self: Handle<Self>, app: &App) -> Handle<HistoryProperty> {
         app.get(self)
             .serializable_history
+            .handle()
             .expect("init_state has run")
     }
 
@@ -3389,7 +3472,7 @@ impl NavigatorState {
         match last_entry {
             None => false,
             Some(entry) => {
-                let route = app.get(entry).route;
+                let route = app.get(entry).route.handle();
                 route.pop_disposition(app) == RoutePopDisposition::DoNotPop
             }
         }
@@ -3412,6 +3495,7 @@ impl NavigatorState {
         let property = app
             .get(self)
             .raw_next_pageless_restoration_scope_id
+            .handle()
             .expect("init_state has run");
         let value = *property.value(app);
         property.set_value(app, value + 1);
@@ -3419,7 +3503,7 @@ impl NavigatorState {
     }
 
     fn forced_dispose_all_route_entries(self: Handle<Self>, app: &mut App) {
-        let waiting: Vec<Handle<RouteEntry>> = app
+        let waiting: Vec<Ref<RouteEntry>> = app
             .get_mut(self)
             .entry_waiting_for_subtree_disposal
             .drain()
@@ -3430,12 +3514,12 @@ impl NavigatorState {
         let history = self.history(app);
         while !history.is_empty(app) {
             let entry = history.remove_last(app);
-            NavigatorState::dispose_route_entry(app, entry, false);
+            NavigatorState::dispose_route_entry(app, *entry, false);
         }
     }
 
     fn dispose_route_entry(app: &mut App, entry: Handle<RouteEntry>, graceful: bool) {
-        let route = app.get(entry).route;
+        let route = app.get(entry).route.handle();
         for overlay_entry in route.overlay_entries(app) {
             overlay_entry.remove(app);
         }
@@ -3451,25 +3535,30 @@ impl NavigatorState {
         app: &mut App,
         new_hero_controller: Option<Handle<HeroController>>,
     ) {
-        if app.get(self).hero_controller_from_scope == new_hero_controller {
+        if app.get(self).hero_controller_from_scope.handle() == new_hero_controller {
             return;
         }
         if let Some(controller) = new_hero_controller {
             controller.as_observer().set_navigator(app, Some(self));
         }
-        if let Some(previous) = app.get(self).hero_controller_from_scope
+        if let Some(previous) = app.get(self).hero_controller_from_scope.handle()
             && previous.as_observer().navigator(app) == Some(self)
         {
             previous.as_observer().set_navigator(app, None);
         }
-        app.get_mut(self).hero_controller_from_scope = new_hero_controller;
+        let kept = new_hero_controller.map(|controller| {
+            controller
+                .upgrade(app)
+                .expect("a scope's hero controller is kept by its widget")
+        });
+        app.get_mut(self).hero_controller_from_scope = kept;
         self.update_effective_observers(app);
     }
 
     fn update_effective_observers(self: Handle<Self>, app: &mut App) {
         let mut observers = self.widget(app).observers.clone();
-        if let Some(controller) = app.get(self).hero_controller_from_scope {
-            observers.push(controller.as_observer());
+        if let Some(controller) = &app.get(self).hero_controller_from_scope {
+            observers.push(controller.erase());
         }
         app.get_mut(self).effective_observers = observers;
     }
@@ -3496,10 +3585,15 @@ impl NavigatorState {
         key.current_state::<OverlayState>(app)
     }
 
-    fn all_route_overlay_entries(self: Handle<Self>, app: &App) -> Vec<Handle<OverlayEntry>> {
+    fn all_route_overlay_entries(self: Handle<Self>, app: &App) -> Vec<Ref<OverlayEntry>> {
         let mut entries = Vec::new();
         for entry in self.history_entries(app) {
-            entries.extend(app.get(entry).route.overlay_entries(app));
+            let route = app.get(entry).route.handle();
+            entries.extend(route.overlay_entries(app).into_iter().map(|overlay_entry| {
+                overlay_entry
+                    .upgrade(app)
+                    .expect("a route keeps its overlay entries")
+            }));
         }
         entries
     }
@@ -3588,6 +3682,9 @@ impl NavigatorState {
         let mut new_pages_top: i64 = self.widget(app).pages.len() as i64 - 1;
         let mut old_entries_top: i64 = history.len(app) as i64 - 1;
 
+        // The diff names entries bare; these keep the entries it makes until the history is
+        // rebuilt from its result.
+        let mut created: Vec<Ref<RouteEntry>> = Vec::new();
         let mut new_history: Vec<Handle<RouteEntry>> = Vec::new();
         let mut page_route_to_pageless_routes: HashMap<
             Option<Handle<RouteEntry>>,
@@ -3617,7 +3714,7 @@ impl NavigatorState {
                 break;
             }
             previous_old_page_route_entry = Some(old_entry);
-            let route = app.get(old_entry).route;
+            let route = app.get(old_entry).route.handle();
             route.update_settings(app, RouteSettingsRef::Page(new_page));
             new_history.push(old_entry);
             new_pages_bottom += 1;
@@ -3712,13 +3809,14 @@ impl NavigatorState {
                     let new_entry =
                         RouteEntry::new(app, route, RouteLifecycle::Staging, true, None);
                     needs_explicit_decision = true;
-                    new_history.push(new_entry);
+                    new_history.push(*new_entry);
+                    created.push(new_entry);
                 }
                 Some(index) => {
                     // Removes the key from the keyToOldEntry map so it will not be reused.
                     let (_, matching_entry) = page_key_to_old_entry.remove(index);
                     debug_assert!(matching_entry.can_update_from(app, &next_page));
-                    let route = app.get(matching_entry).route;
+                    let route = app.get(matching_entry).route.handle();
                     route.update_settings(app, RouteSettingsRef::Page(next_page));
                     new_history.push(matching_entry);
                 }
@@ -3805,7 +3903,7 @@ impl NavigatorState {
             previous_old_page_route_entry = Some(old_entry);
             let new_page = self.widget(app).pages[new_pages_bottom as usize].clone();
             debug_assert!(old_entry.can_update_from(app, &new_page));
-            let route = app.get(old_entry).route;
+            let route = app.get(old_entry).route.handle();
             route.update_settings(app, RouteSettingsRef::Page(new_page));
             new_history.push(old_entry);
             old_entries_bottom += 1;
@@ -3827,17 +3925,33 @@ impl NavigatorState {
         } else {
             new_history
         };
+        // The old entries stay kept while the history is rebuilt.
+        let previous: Vec<Ref<RouteEntry>> = app.get(history).value.clone();
         history.clear(app);
+        let kept = |app: &App, entries: Vec<Handle<RouteEntry>>| -> Vec<Ref<RouteEntry>> {
+            entries
+                .into_iter()
+                .map(|entry| {
+                    entry
+                        .upgrade(app)
+                        .expect("an entry of the diff is kept by the old history or the diff")
+                })
+                .collect()
+        };
         // Adds the leading pageless routes if there is any.
         if let Some(pageless) = page_route_to_pageless_routes.get(&None).cloned() {
+            let pageless = kept(app, pageless);
             history.add_all(app, pageless);
         }
         for result in results {
-            history.add(app, result);
+            let entry = kept(app, vec![result]);
+            history.add_all(app, entry);
             if let Some(pageless) = page_route_to_pageless_routes.get(&Some(result)).cloned() {
+                let pageless = kept(app, pageless);
                 history.add_all(app, pageless);
             }
         }
+        drop((previous, created));
         app.get_mut(self).debug_updating_page = false;
         app.get_mut(self).debug_locked = true;
         self.flush_history_updates(app, true);
@@ -3870,7 +3984,7 @@ impl NavigatorState {
         let mut popped_route: Option<AnyRoute> = None;
         // Whether we've seen the route that would get did_pop_next.
         let mut seen_top_active_route = false;
-        let mut to_be_disposed: Vec<Handle<RouteEntry>> = Vec::new();
+        let mut to_be_disposed: Vec<Ref<RouteEntry>> = Vec::new();
         while index >= 0 {
             loop {
                 let current = entry.expect("the history has an entry at this index");
@@ -3879,7 +3993,7 @@ impl NavigatorState {
                         debug_assert!(rearrange_overlay);
                         let previous_present = self
                             .get_route_before(app, index - 1, RouteEntry::is_present_predicate)
-                            .map(|entry| app.get(entry).route);
+                            .map(|entry| app.get(entry).route.clone());
                         current.handle_add(app, self, previous_present);
                         debug_assert!(app.get(current).current_state == RouteLifecycle::Adding);
                         continue;
@@ -3895,10 +4009,10 @@ impl NavigatorState {
                     | RouteLifecycle::PushReplace
                     | RouteLifecycle::Replace => {
                         debug_assert!(rearrange_overlay);
-                        let previous_route = previous.map(|entry| app.get(entry).route);
+                        let previous_route = previous.map(|entry| app.get(entry).route.handle());
                         let previous_present = self
                             .get_route_before(app, index - 1, RouteEntry::is_present_predicate)
-                            .map(|entry| app.get(entry).route);
+                            .map(|entry| app.get(entry).route.clone());
                         current.handle_push(
                             app,
                             self,
@@ -3935,7 +4049,7 @@ impl NavigatorState {
                     RouteLifecycle::Pop => {
                         let previous_present = self
                             .get_route_before(app, index, RouteEntry::will_be_present_predicate)
-                            .map(|entry| app.get(entry).route);
+                            .map(|entry| app.get(entry).route.handle());
                         if !current.handle_pop(app, self, previous_present) {
                             debug_assert!(app.get(current).current_state == RouteLifecycle::Idle);
                             continue;
@@ -3944,12 +4058,12 @@ impl NavigatorState {
                             if let Some(popped) = popped_route {
                                 current.handle_did_pop_next(app, popped);
                             }
-                            popped_route = Some(app.get(current).route);
+                            popped_route = Some(app.get(current).route.handle());
                         }
-                        let route = app.get(current).route;
+                        let route = app.get(current).route.clone();
                         let previous_present = self
                             .get_route_before(app, index, RouteEntry::will_be_present_predicate)
-                            .map(|entry| app.get(entry).route);
+                            .map(|entry| app.get(entry).route.clone());
                         app.get_mut(self).observed_route_deletions.push_back(
                             NavigatorObservation::Pop {
                                 primary_route: route,
@@ -3981,7 +4095,7 @@ impl NavigatorState {
                         }
                         let previous_present = self
                             .get_route_before(app, index, RouteEntry::will_be_present_predicate)
-                            .map(|entry| app.get(entry).route);
+                            .map(|entry| app.get(entry).route.clone());
                         current.handle_removal(app, self, previous_present);
                         debug_assert!(app.get(current).current_state >= RouteLifecycle::Removing);
                         continue;
@@ -4022,19 +4136,24 @@ impl NavigatorState {
         // Announces route name changes.
         let last_entry = self.last_route_entry_where_or_null(app, RouteEntry::is_present_predicate);
         if let Some(last_entry) = last_entry
-            && app.get(self).last_topmost_route != Some(last_entry)
+            && app.get(self).last_topmost_route.handle() != Some(last_entry)
         {
-            let top_route = app.get(last_entry).route;
+            let top_route = app.get(last_entry).route.handle();
             let previous_top_route = app
                 .get(self)
                 .last_topmost_route
-                .filter(|entry| app.contains(*entry))
-                .map(|entry| app.get(entry).route);
+                .as_ref()
+                .map(|entry| app.get(entry).route.handle());
             for observer in app.get(self).effective_observers.clone() {
                 observer.did_change_top(app, top_route, previous_top_route);
             }
         }
-        app.get_mut(self).last_topmost_route = last_entry;
+        let last_topmost_route = last_entry.map(|entry| {
+            entry
+                .upgrade(app)
+                .expect("an entry in the history is kept by it")
+        });
+        app.get_mut(self).last_topmost_route = last_topmost_route;
 
         if self.widget(app).reports_route_update_to_engine {
             let route_name = last_entry.and_then(|entry| {
@@ -4054,7 +4173,7 @@ impl NavigatorState {
 
         // Lastly, removes the overlay entries of all marked entries and disposes them.
         for entry in to_be_disposed {
-            NavigatorState::dispose_route_entry(app, entry, true);
+            NavigatorState::dispose_route_entry(app, *entry, true);
         }
         if rearrange_overlay && let Some(overlay) = self.overlay(app) {
             let entries = self.all_route_overlay_entries(app);
@@ -4076,12 +4195,12 @@ impl NavigatorState {
         }
         while let Some(observation) = app.get_mut(self).observed_route_additions.pop_back() {
             for observer in app.get(self).effective_observers.clone() {
-                observation.notify(app, observer);
+                observation.notify(app, *observer);
             }
         }
         while let Some(observation) = app.get_mut(self).observed_route_deletions.pop_front() {
             for observer in app.get(self).effective_observers.clone() {
-                observation.notify(app, observer);
+                observation.notify(app, *observer);
             }
         }
     }
@@ -4100,12 +4219,11 @@ impl NavigatorState {
                 index + 1,
                 RouteEntry::suitable_for_transition_animation_predicate,
             );
-            let next_route = next.map(|entry| app.get(entry).route);
-
-            if Some(next_route) != app.get(entry).last_announced_next_route {
-                if entry.should_announce_change_to_next(app, next_route) {
-                    let route = app.get(entry).route;
-                    route.did_change_next(app, next_route);
+            let next_route = next.map(|entry| app.get(entry).route.clone());
+            if Some(next_route.handle()) != app.get(entry).last_announced_next_route() {
+                if entry.should_announce_change_to_next(app, next_route.handle()) {
+                    let route = app.get(entry).route.handle();
+                    route.did_change_next(app, next_route.handle());
                 }
                 app.get_mut(entry).last_announced_next_route = Some(next_route);
             }
@@ -4114,10 +4232,10 @@ impl NavigatorState {
                 index - 1,
                 RouteEntry::suitable_for_transition_animation_predicate,
             );
-            let previous_route = previous.map(|entry| app.get(entry).route);
-            if Some(previous_route) != app.get(entry).last_announced_previous_route {
-                let route = app.get(entry).route;
-                route.did_change_previous(app, previous_route);
+            let previous_route = previous.map(|entry| app.get(entry).route.clone());
+            if Some(previous_route.handle()) != app.get(entry).last_announced_previous_route() {
+                let route = app.get(entry).route.handle();
+                route.did_change_previous(app, previous_route.handle());
                 app.get_mut(entry).last_announced_previous_route = Some(previous_route);
             }
             index -= 1;
@@ -4130,7 +4248,7 @@ impl NavigatorState {
         name: &str,
         arguments: Option<Rc<dyn Any>>,
         allow_null: bool,
-    ) -> Option<AnyRoute> {
+    ) -> Option<RouteRef> {
         debug_assert!(!app.get(self).debug_locked);
         let on_generate_route = self.widget(app).on_generate_route.clone();
         let Some(on_generate_route) = on_generate_route else {
@@ -4204,8 +4322,9 @@ impl NavigatorState {
             restoration_scope_id,
         });
         let entry = information.to_route_entry(app, self, RouteLifecycle::Push);
+        let pushed = entry.handle();
         self.push_entry(app, entry);
-        entry.restoration_id(app).expect("a restorable entry")
+        pushed.restoration_id(app).expect("a restorable entry")
     }
 
     /// Replace the current route of the navigator by pushing the route named `route_name` and
@@ -4238,8 +4357,9 @@ impl NavigatorState {
             restoration_scope_id,
         });
         let entry = information.to_route_entry(app, self, RouteLifecycle::PushReplace);
+        let pushed = entry.handle();
         self.push_replacement_entry(app, entry, result);
-        entry.restoration_id(app).expect("a restorable entry")
+        pushed.restoration_id(app).expect("a restorable entry")
     }
 
     /// Pop the current route off the navigator and push a named route in its place.
@@ -4297,8 +4417,9 @@ impl NavigatorState {
             restoration_scope_id,
         });
         let entry = information.to_route_entry(app, self, RouteLifecycle::Push);
+        let pushed = entry.handle();
         self.push_entry_and_remove_until(app, entry, predicate);
-        entry.restoration_id(app).expect("a restorable entry")
+        pushed.restoration_id(app).expect("a restorable entry")
     }
 
     /// Push the given route onto the navigator.
@@ -4308,11 +4429,12 @@ impl NavigatorState {
     pub fn push(
         self: Handle<Self>,
         app: &mut App,
-        route: AnyRoute,
+        route: RouteRef,
     ) -> CompleterFuture<RouteResult> {
+        let popped = route.popped(app);
         let entry = RouteEntry::new(app, route, RouteLifecycle::Push, false, None);
         self.push_entry(app, entry);
-        route.popped(app)
+        popped
     }
 
     /// Push a new route onto the navigator and return its restoration ID.
@@ -4331,19 +4453,21 @@ impl NavigatorState {
             restoration_scope_id,
         });
         let entry = information.to_route_entry(app, self, RouteLifecycle::Push);
+        let pushed = entry.handle();
         self.push_entry(app, entry);
-        entry.restoration_id(app).expect("a restorable entry")
+        pushed.restoration_id(app).expect("a restorable entry")
     }
 
-    fn push_entry(self: Handle<Self>, app: &mut App, entry: Handle<RouteEntry>) {
+    fn push_entry(self: Handle<Self>, app: &mut App, kept: Ref<RouteEntry>) {
+        let entry = kept.handle();
         debug_assert!(!app.get(self).debug_locked);
         app.get_mut(self).debug_locked = true;
         debug_assert!(!app.get(entry).route.installed(app));
         debug_assert!(app.get(entry).current_state == RouteLifecycle::Push);
-        self.history(app).add(app, entry);
+        self.history(app).add(app, kept);
         self.flush_history_updates(app, true);
         app.get_mut(self).debug_locked = false;
-        let route = app.get(entry).route;
+        let route = app.get(entry).route.handle();
         self.after_navigation(app, Some(route));
     }
 
@@ -4358,13 +4482,14 @@ impl NavigatorState {
     pub fn push_replacement(
         self: Handle<Self>,
         app: &mut App,
-        new_route: AnyRoute,
+        new_route: RouteRef,
         result: RouteResult,
     ) -> CompleterFuture<RouteResult> {
         debug_assert!(!new_route.installed(app));
+        let popped = new_route.popped(app);
         let entry = RouteEntry::new(app, new_route, RouteLifecycle::PushReplace, false, None);
         self.push_replacement_entry(app, entry, result);
-        new_route.popped(app)
+        popped
     }
 
     /// The restorable version of [`push_replacement`](Self::push_replacement).
@@ -4382,16 +4507,18 @@ impl NavigatorState {
             restoration_scope_id,
         });
         let entry = information.to_route_entry(app, self, RouteLifecycle::PushReplace);
+        let pushed = entry.handle();
         self.push_replacement_entry(app, entry, result);
-        entry.restoration_id(app).expect("a restorable entry")
+        pushed.restoration_id(app).expect("a restorable entry")
     }
 
     fn push_replacement_entry(
         self: Handle<Self>,
         app: &mut App,
-        entry: Handle<RouteEntry>,
+        kept: Ref<RouteEntry>,
         result: RouteResult,
     ) {
+        let entry = kept.handle();
         debug_assert!(!app.get(self).debug_locked);
         app.get_mut(self).debug_locked = true;
         debug_assert!(!app.get(entry).route.installed(app));
@@ -4406,10 +4533,10 @@ impl NavigatorState {
             .last_route_entry_where_or_null(app, RouteEntry::is_present_predicate)
             .expect("asserted above");
         last_present.complete(app, result, true, true);
-        self.history(app).add(app, entry);
+        self.history(app).add(app, kept);
         self.flush_history_updates(app, true);
         app.get_mut(self).debug_locked = false;
-        let route = app.get(entry).route;
+        let route = app.get(entry).route.handle();
         self.after_navigation(app, Some(route));
     }
 
@@ -4418,14 +4545,15 @@ impl NavigatorState {
     pub fn push_and_remove_until(
         self: Handle<Self>,
         app: &mut App,
-        new_route: AnyRoute,
+        new_route: RouteRef,
         predicate: RoutePredicate,
     ) -> CompleterFuture<RouteResult> {
         debug_assert!(!new_route.installed(app));
         debug_assert!(new_route.overlay_entries(app).is_empty());
+        let popped = new_route.popped(app);
         let entry = RouteEntry::new(app, new_route, RouteLifecycle::Push, false, None);
         self.push_entry_and_remove_until(app, entry, predicate);
-        new_route.popped(app)
+        popped
     }
 
     /// The restorable version of [`push_and_remove_until`](Self::push_and_remove_until).
@@ -4443,16 +4571,18 @@ impl NavigatorState {
             restoration_scope_id,
         });
         let entry = information.to_route_entry(app, self, RouteLifecycle::Push);
+        let pushed = entry.handle();
         self.push_entry_and_remove_until(app, entry, predicate);
-        entry.restoration_id(app).expect("a restorable entry")
+        pushed.restoration_id(app).expect("a restorable entry")
     }
 
     fn push_entry_and_remove_until(
         self: Handle<Self>,
         app: &mut App,
-        entry: Handle<RouteEntry>,
+        kept: Ref<RouteEntry>,
         predicate: RoutePredicate,
     ) {
+        let entry = kept.handle();
         debug_assert!(!app.get(self).debug_locked);
         app.get_mut(self).debug_locked = true;
         debug_assert!(!app.get(entry).route.installed(app));
@@ -4460,10 +4590,10 @@ impl NavigatorState {
         debug_assert!(app.get(entry).current_state == RouteLifecycle::Push);
         let history = self.history(app);
         let mut index: i64 = history.len(app) as i64 - 1;
-        history.add(app, entry);
+        history.add(app, kept);
         while index >= 0 {
             let candidate = history.at(app, index as usize);
-            let route = app.get(candidate).route;
+            let route = app.get(candidate).route.handle();
             if predicate(app, route) {
                 break;
             }
@@ -4474,12 +4604,12 @@ impl NavigatorState {
         }
         self.flush_history_updates(app, true);
         app.get_mut(self).debug_locked = false;
-        let route = app.get(entry).route;
+        let route = app.get(entry).route.handle();
         self.after_navigation(app, Some(route));
     }
 
     /// Replaces a route on the navigator with a new route.
-    pub fn replace(self: Handle<Self>, app: &mut App, old_route: AnyRoute, new_route: AnyRoute) {
+    pub fn replace(self: Handle<Self>, app: &mut App, old_route: AnyRoute, new_route: RouteRef) {
         debug_assert!(!app.get(self).debug_locked);
         debug_assert!(old_route.is_installed_in(app, self));
         let entry = RouteEntry::new(app, new_route, RouteLifecycle::Replace, false, None);
@@ -4502,18 +4632,20 @@ impl NavigatorState {
             restoration_scope_id,
         });
         let entry = information.to_route_entry(app, self, RouteLifecycle::Replace);
+        let pushed = entry.handle();
         self.replace_entry(app, entry, old_route);
-        entry.restoration_id(app).expect("a restorable entry")
+        pushed.restoration_id(app).expect("a restorable entry")
     }
 
     fn replace_entry(
         self: Handle<Self>,
         app: &mut App,
-        entry: Handle<RouteEntry>,
+        kept: Ref<RouteEntry>,
         old_route: AnyRoute,
     ) {
+        let entry = kept.handle();
         debug_assert!(!app.get(self).debug_locked);
-        if old_route == app.get(entry).route {
+        if old_route == app.get(entry).route.handle() {
             return;
         }
         app.get_mut(self).debug_locked = true;
@@ -4521,19 +4653,19 @@ impl NavigatorState {
         debug_assert!(!app.get(entry).route.installed(app));
         let history = self.history(app);
         let index = history
-            .index_where(app, |app, other| app.get(other).route == old_route)
+            .index_where(app, |app, other| app.get(other).route.handle() == old_route)
             .expect("This Navigator does not contain the specified old_route.");
         debug_assert!(
             history.at(app, index).is_present(app),
             "The specified old_route has already been removed from the Navigator."
         );
         let was_current = old_route.is_current(app);
-        history.insert(app, index + 1, entry);
+        history.insert(app, index + 1, kept);
         history.at(app, index).complete(app, None, true, true);
         self.flush_history_updates(app, true);
         app.get_mut(self).debug_locked = false;
         if was_current {
-            let route = app.get(entry).route;
+            let route = app.get(entry).route.handle();
             self.after_navigation(app, Some(route));
         }
     }
@@ -4544,7 +4676,7 @@ impl NavigatorState {
         self: Handle<Self>,
         app: &mut App,
         anchor_route: AnyRoute,
-        new_route: AnyRoute,
+        new_route: RouteRef,
     ) {
         debug_assert!(!new_route.installed(app));
         debug_assert!(anchor_route.is_installed_in(app, self));
@@ -4568,21 +4700,24 @@ impl NavigatorState {
             restoration_scope_id,
         });
         let entry = information.to_route_entry(app, self, RouteLifecycle::Replace);
+        let pushed = entry.handle();
         self.replace_entry_below(app, entry, anchor_route);
-        entry.restoration_id(app).expect("a restorable entry")
+        pushed.restoration_id(app).expect("a restorable entry")
     }
 
     fn replace_entry_below(
         self: Handle<Self>,
         app: &mut App,
-        entry: Handle<RouteEntry>,
+        entry: Ref<RouteEntry>,
         anchor_route: AnyRoute,
     ) {
         debug_assert!(!app.get(self).debug_locked);
         app.get_mut(self).debug_locked = true;
         let history = self.history(app);
         let anchor_index = history
-            .index_where(app, |app, other| app.get(other).route == anchor_route)
+            .index_where(app, |app, other| {
+                app.get(other).route.handle() == anchor_route
+            })
             .expect("This Navigator does not contain the specified anchor_route.");
         debug_assert!(
             history.at(app, anchor_index).is_present(app),
@@ -4637,7 +4772,7 @@ impl NavigatorState {
 
         // Dart awaits the deprecated `willPop`; there is no event loop here, so it answers
         // within the call.
-        let route = app.get(last_entry).route;
+        let route = app.get(last_entry).route.handle();
         if route.will_pop(app) == RoutePopDisposition::DoNotPop {
             return true;
         }
@@ -4677,7 +4812,7 @@ impl NavigatorState {
         if app.get(entry).page_based
             && let Some(on_pop_page) = on_pop_page
         {
-            let route = app.get(entry).route;
+            let route = app.get(entry).route.handle();
             if on_pop_page(app, route, result.clone()) {
                 if app.get(entry).current_state <= RouteLifecycle::Idle {
                     debug_assert!(route.data(app).pop_completer.is_completed());
@@ -4693,7 +4828,7 @@ impl NavigatorState {
             self.flush_history_updates(app, false);
         }
         app.get_mut(self).debug_locked = false;
-        let route = app.get(entry).route;
+        let route = app.get(entry).route.handle();
         self.after_navigation(app, Some(route));
     }
 
@@ -4702,7 +4837,7 @@ impl NavigatorState {
         let mut candidate =
             self.last_route_entry_where_or_null(app, RouteEntry::is_present_predicate);
         while let Some(entry) = candidate {
-            let route = app.get(entry).route;
+            let route = app.get(entry).route.handle();
             if predicate(app, route) {
                 return;
             }
@@ -4722,7 +4857,7 @@ impl NavigatorState {
         let mut candidate =
             self.last_route_entry_where_or_null(app, RouteEntry::is_present_predicate);
         while let Some(entry) = candidate {
-            let route = app.get(entry).route;
+            let route = app.get(entry).route.handle();
             if predicate(app, route) {
                 return;
             }
@@ -4733,7 +4868,7 @@ impl NavigatorState {
 
             let pops_with_result = match next {
                 Some(next) => {
-                    let next_route = app.get(next).route;
+                    let next_route = app.get(next).route.handle();
                     !route.will_handle_pop_internally(app) && predicate(app, next_route)
                 }
                 None => false,
@@ -4755,7 +4890,9 @@ impl NavigatorState {
         debug_assert!(route.is_installed_in(app, self));
         let was_current = route.is_current(app);
         let entry = self
-            .first_route_entry_where_or_null(app, move |app, entry| app.get(entry).route == route)
+            .first_route_entry_where_or_null(app, move |app, entry| {
+                app.get(entry).route.handle() == route
+            })
             .expect("This Navigator does not contain the specified route.");
         entry.complete(app, result, false, true);
         self.flush_history_updates(app, false);
@@ -4763,7 +4900,7 @@ impl NavigatorState {
         if was_current {
             let route = self
                 .last_route_entry_where_or_null(app, RouteEntry::is_present_predicate)
-                .map(|entry| app.get(entry).route);
+                .map(|entry| app.get(entry).route.handle());
             self.after_navigation(app, route);
         }
     }
@@ -4781,7 +4918,9 @@ impl NavigatorState {
         debug_assert!(anchor_route.is_installed_in(app, self));
         let history = self.history(app);
         let anchor_index = history
-            .index_where(app, move |app, entry| app.get(entry).route == anchor_route)
+            .index_where(app, move |app, entry| {
+                app.get(entry).route.handle() == anchor_route
+            })
             .expect("This Navigator does not contain the specified anchor_route.");
         debug_assert!(
             history.at(app, anchor_index).is_present(app),
@@ -4822,12 +4961,14 @@ impl NavigatorState {
             history
                 .entries(app)
                 .iter()
-                .filter(|entry| app.get(**entry).route == route)
+                .filter(|entry| app.get(**entry).route.handle() == route)
                 .count()
                 == 1
         );
         let index = history
-            .index_where(app, move |app, entry| app.get(entry).route == route)
+            .index_where(app, move |app, entry| {
+                app.get(entry).route.handle() == route
+            })
             .expect("This Navigator does not contain the specified route.");
         let entry = history.at(app, index);
 
@@ -4836,7 +4977,8 @@ impl NavigatorState {
         if app.get(entry).page_based && app.get(entry).current_state < RouteLifecycle::Pop {
             let previous_present = self
                 .get_route_before(app, index as i64 - 1, RouteEntry::will_be_present_predicate)
-                .map(|entry| app.get(entry).route);
+                .map(|entry| app.get(entry).route.clone());
+            let route = app.get(entry).route.clone();
             app.get_mut(self)
                 .observed_route_deletions
                 .push_back(NavigatorObservation::Pop {
@@ -4861,7 +5003,7 @@ impl NavigatorState {
         self.first_route_entry_where_or_null(app, move |app, entry| {
             entry.restoration_id(app).as_deref() == Some(id.as_str())
         })
-        .map(|entry| app.get(entry).route)
+        .map(|entry| app.get(entry).route.handle())
     }
 
     fn set_user_gestures_in_progress(self: Handle<Self>, app: &mut App, value: i64) {
@@ -4883,7 +5025,10 @@ impl NavigatorState {
                 history.len(app) as i64 - 1,
                 RouteEntry::will_be_present_predicate,
             );
-            let route = app.get(history.at(app, route_index as usize)).route;
+            let route = app
+                .get(history.at(app, route_index as usize))
+                .route
+                .handle();
             let mut previous_route = None;
             if !route.will_handle_pop_internally(app) && route_index > 0 {
                 previous_route = Some(
@@ -4895,7 +5040,8 @@ impl NavigatorState {
                         )
                         .expect("a route below the one being moved"),
                     )
-                    .route,
+                    .route
+                    .handle(),
                 );
             }
             for observer in app.get(self).effective_observers.clone() {
@@ -4966,7 +5112,7 @@ impl TickerProviderStateMixin for NavigatorState {
 }
 
 impl TickerProviderObject for NavigatorState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         TickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -4987,6 +5133,7 @@ impl RestorationMixin for NavigatorState {
         let raw_id = app
             .get(self)
             .raw_next_pageless_restoration_scope_id
+            .handle()
             .expect("init_state has run");
         self.register_for_restoration(app, raw_id.as_property(), "id");
         let serializable = self.serializable_history(app);
@@ -5010,8 +5157,9 @@ impl RestorationMixin for NavigatorState {
                  settings to the Page in the Page::create_route method."
             );
             let entry = RouteEntry::new(app, route, RouteLifecycle::Add, true, None);
+            let page_entry = entry.handle();
             history.add(app, entry);
-            let restored = serializable.restore_entries_for_page(app, Some(entry), self);
+            let restored = serializable.restore_entries_for_page(app, Some(page_entry), self);
             history.add_all(app, restored);
         }
 
@@ -5118,13 +5266,13 @@ impl State for NavigatorState {
             .get_element_for_inherited_widget_of_exact_type::<HeroControllerScope>(app)
             .and_then(|element| {
                 crate::framework::downcast_widget::<HeroControllerScope>(&**element.widget(app))
-                    .and_then(|scope| scope.controller)
+                    .and_then(|scope| scope.controller.handle())
             });
         self.update_hero_controller(app, hero_controller);
 
         // `SystemNavigator.selectSingleEntryHistory` and the accessibility focus listener wait;
         // see PORTING.md.
-        history.add_listener(
+        self.history(app).add_listener(
             app,
             Listener::handle_method(self, NavigatorState::handle_history_changed),
         );
@@ -5136,7 +5284,7 @@ impl State for NavigatorState {
         let controller = HeroControllerScope::maybe_of(app, context);
         self.update_hero_controller(app, controller);
         for entry in self.history_entries(app) {
-            let route = app.get(entry).route;
+            let route = app.get(entry).route.handle();
             if route.navigator(app) == Some(self) {
                 route.changed_external_state(app);
             }
@@ -5174,7 +5322,7 @@ impl State for NavigatorState {
         }
 
         for entry in self.history_entries(app) {
-            let route = app.get(entry).route;
+            let route = app.get(entry).route.handle();
             if route.navigator(app) == Some(self) {
                 route.changed_external_state(app);
             }
@@ -5207,6 +5355,7 @@ impl State for NavigatorState {
         let raw_id = app
             .get(self)
             .raw_next_pageless_restoration_scope_id
+            .handle()
             .expect("init_state has run");
         RestorableProperty::dispose(raw_id, app);
         let serializable = self.serializable_history(app);
@@ -5239,10 +5388,24 @@ impl State for NavigatorState {
             None => self.all_route_overlay_entries(app),
             Some(_) => Vec::new(),
         };
-        let bucket = self.bucket(app);
+        let bucket = self.bucket(app).map(|bucket| {
+            bucket
+                .upgrade(app)
+                .expect("the restoration mixin keeps its bucket")
+        });
         let clip_behavior = self.widget(app).clip_behavior;
-        let focus_node = self.focus_node(app).as_node();
-        let policy = FocusTraversalGroup::maybe_of(app, context);
+        let focus_node: FocusNodeRef = app
+            .get(self)
+            .focus_node
+            .as_ref()
+            .expect("init_state has run")
+            .erase();
+        let policy = FocusTraversalGroup::maybe_of(app, context).map(|policy| {
+            HandleId::from(policy)
+                .upgrade(app)
+                .expect("a group's policy is kept by its widget")
+                .into_map(|_| policy)
+        });
 
         let overlay = Overlay::new()
             .key(overlay_key)
@@ -5262,23 +5425,23 @@ impl State for NavigatorState {
         let absorb = AbsorbPointer::new().absorbing(false).child(group);
         // The callbacks keep the state, as Dart's tear-offs keep `this`: a pointer that went
         // down before the navigator was disposed still ends on it.
-        let this = Rc::new(app.retain(self));
-        let on_up = Rc::clone(&this);
-        let on_cancel = Rc::clone(&this);
+        let this = self
+            .upgrade(app)
+            .expect("a building state is kept by its element");
+        let on_up = this.clone();
+        let on_cancel = this.clone();
         let listener = crate::widgets::basic::Listener::new()
             .on_pointer_down(Rc::new(
                 move |app, event: waft_gestures::PointerDownEvent| {
-                    this.get().handle_pointer_down(app, event.pointer);
+                    this.handle_pointer_down(app, event.pointer);
                 },
             ))
             .on_pointer_up(Rc::new(move |app, event: waft_gestures::PointerUpEvent| {
-                on_up.get().handle_pointer_up_or_cancel(app, event.pointer);
+                on_up.handle_pointer_up_or_cancel(app, event.pointer);
             }))
             .on_pointer_cancel(Rc::new(
                 move |app, event: waft_gestures::PointerCancelEvent| {
-                    on_cancel
-                        .get()
-                        .handle_pointer_up_or_cancel(app, event.pointer);
+                    on_cancel.handle_pointer_up_or_cancel(app, event.pointer);
                 },
             ))
             .child(absorb);
@@ -5429,7 +5592,7 @@ impl RestorationInformation {
         }
     }
 
-    fn create_route(&self, app: &mut App, navigator: Handle<NavigatorState>) -> AnyRoute {
+    fn create_route(&self, app: &mut App, navigator: Handle<NavigatorState>) -> RouteRef {
         match self {
             RestorationInformation::Named {
                 name, arguments, ..
@@ -5456,7 +5619,7 @@ impl RestorationInformation {
         app: &mut App,
         navigator: Handle<NavigatorState>,
         initial_state: RouteLifecycle,
-    ) -> Handle<RouteEntry> {
+    ) -> Ref<RouteEntry> {
         let route = self.create_route(app, navigator);
         RouteEntry::new(app, route, initial_state, false, Some(Rc::clone(self)))
     }
@@ -5485,7 +5648,7 @@ pub struct HistoryProperty {
 }
 
 impl HistoryProperty {
-    fn new(app: &mut App) -> Handle<HistoryProperty> {
+    fn new(app: &mut App) -> Ref<HistoryProperty> {
         app.create(HistoryProperty {
             change_notifier: waft_foundation::ChangeNotifierData::new(),
             property: RestorablePropertyData::new(),
@@ -5628,7 +5791,7 @@ impl HistoryProperty {
         app: &mut App,
         page: Option<Handle<RouteEntry>>,
         navigator: Handle<NavigatorState>,
-    ) -> Vec<Handle<RouteEntry>> {
+    ) -> Vec<Ref<RouteEntry>> {
         debug_assert!(RestorableProperty::is_registered(self, app));
         debug_assert!(page.is_none_or(|page| app.get(page).page_based));
         let mut result = Vec::new();
@@ -5750,16 +5913,13 @@ pub struct RestorableRouteFuture {
     /// A callback that is invoked when the route added by
     /// [`on_present`](Self::on_present) completes.
     pub on_complete: Option<RouteCompletionCallback>,
-    route: Option<AnyRoute>,
+    route: Option<RouteRef>,
     disposed: bool,
 }
 
 impl RestorableRouteFuture {
     /// Creates a [`RestorableRouteFuture`]; Dart's optional arguments are the setters.
-    pub fn new(
-        app: &mut App,
-        on_present: RoutePresentationCallback,
-    ) -> Handle<RestorableRouteFuture> {
+    pub fn new(app: &mut App, on_present: RoutePresentationCallback) -> Ref<RestorableRouteFuture> {
         app.create(RestorableRouteFuture {
             change_notifier: waft_foundation::ChangeNotifierData::new(),
             property: RestorablePropertyData::new(),
@@ -5811,7 +5971,7 @@ impl RestorableRouteFuture {
 
     /// The route the [`on_present`](Self::on_present) callback added to the navigator.
     pub fn route(self: Handle<Self>, app: &App) -> Option<AnyRoute> {
-        app.get(self).route
+        app.get(self).route.handle()
     }
 
     fn navigator(self: Handle<Self>, app: &mut App) -> Handle<NavigatorState> {
@@ -5826,17 +5986,22 @@ impl RestorableRouteFuture {
         let route = navigator
             .get_route_by_id(app, id)
             .expect("the restorable method's route is in the navigator");
-        app.get_mut(self).route = Some(route);
+        app.get_mut(self).route = Some(
+            route
+                .upgrade(app)
+                .expect("a route in the navigator is kept by it"),
+        );
         let notifier = route.restoration_scope_id(app);
         notifier.add_listener(
             app,
             Listener::handle_method(self, RestorableRouteFuture::notify),
         );
         route.popped(app).then(app, move |app, result| {
-            if app.get(self).disposed {
+            // The route's future names this property bare: the property keeps the route.
+            if !app.contains(self) || app.get(self).disposed {
                 return;
             }
-            if let Some(route) = app.get(self).route {
+            if let Some(route) = app.get(self).route.handle() {
                 let notifier = route.restoration_scope_id(app);
                 notifier.remove_listener(
                     app,
@@ -5894,7 +6059,7 @@ impl RestorableProperty for RestorableRouteFuture {
     }
 
     fn to_primitives(self: Handle<Self>, app: &App) -> RestorationData {
-        let route = app.get(self).route.expect("a presented route");
+        let route = app.get(self).route.handle().expect("a presented route");
         debug_assert!(RestorableProperty::enabled(self, app));
         let notifier = route.restoration_scope_id(app);
         match app.get(notifier).value() {
@@ -5904,7 +6069,7 @@ impl RestorableProperty for RestorableRouteFuture {
     }
 
     fn enabled(self: Handle<Self>, app: &App) -> bool {
-        match app.get(self).route {
+        match app.get(self).route.handle() {
             None => false,
             Some(route) => {
                 let notifier = route.restoration_scope_id(app);
@@ -5914,7 +6079,7 @@ impl RestorableProperty for RestorableRouteFuture {
     }
 
     fn did_dispose(self: Handle<Self>, app: &mut App) {
-        if let Some(route) = app.get(self).route {
+        if let Some(route) = app.get(self).route.handle() {
             let notifier = route.restoration_scope_id(app);
             notifier.remove_listener(
                 app,
@@ -6084,10 +6249,10 @@ mod tests {
             self.restoration_id.as_deref()
         }
 
-        fn create_route(&self, app: &mut App, _context: BuildContext, this: &PageRef) -> AnyRoute {
+        fn create_route(&self, app: &mut App, _context: BuildContext, this: &PageRef) -> RouteRef {
             PageRouteBuilder::new(app, corner_page())
                 .settings(app, RouteSettingsRef::Page(Rc::clone(this)))
-                .as_route()
+                .into_erased()
         }
     }
 
@@ -6269,13 +6434,13 @@ mod tests {
                 TextDirection::Ltr,
                 Navigator::new()
                     .key(key.clone().into())
-                    .observers(vec![observer.as_observer()])
+                    .observers(vec![observer.erase()])
                     .on_generate_route(|app, settings| {
                         let name = settings.name.clone().unwrap_or_default();
                         Some(
                             PageRouteBuilder::new(app, corner_page())
                                 .settings(app, RouteSettings::new().name(name).into())
-                                .as_route(),
+                                .into_erased(),
                         )
                     }),
             )
@@ -6285,7 +6450,7 @@ mod tests {
         let navigator_state = state(&key, &mut app);
         let at = settle(&mut app, Duration::ZERO);
         assert_eq!(
-            app.get(observer).log.borrow().as_slice(),
+            app.get(&observer).log.borrow().as_slice(),
             ["push / over none"]
         );
 
@@ -6297,7 +6462,7 @@ mod tests {
         settle(&mut app, at);
 
         assert_eq!(
-            app.get(observer).log.borrow().as_slice(),
+            app.get(&observer).log.borrow().as_slice(),
             [
                 "push / over none",
                 "push second over /",
@@ -6328,7 +6493,7 @@ mod tests {
                             Some(
                                 PageRouteBuilder::new(app, corner_page())
                                     .settings(app, RouteSettings::new().name(name).into())
-                                    .as_route(),
+                                    .into_erased(),
                             )
                         }),
                 ),
@@ -6369,7 +6534,7 @@ mod tests {
                             Some(
                                 PageRouteBuilder::new(app, corner_page())
                                     .settings(app, RouteSettings::new().name(name).into())
-                                    .as_route(),
+                                    .into_erased(),
                             )
                         }),
                 ),
@@ -6394,8 +6559,9 @@ mod tests {
                 Navigator::new().key(key.clone().into()).on_generate_route({
                     let pushed = Rc::clone(&pushed);
                     move |app, _settings| {
-                        let route = PageRouteBuilder::new(app, corner_page()).as_route();
-                        pushed.set(Some(route));
+                        let route: RouteRef =
+                            PageRouteBuilder::new(app, corner_page()).into_erased();
+                        pushed.set(Some(route.handle()));
                         Some(route)
                     }
                 }),
@@ -6411,8 +6577,8 @@ mod tests {
         assert!(first.is_active(&app));
         assert!(!first.has_active_route_below(&app));
 
-        let second = PageRouteBuilder::new(&mut app, corner_page()).as_route();
-        navigator_state.push(&mut app, second);
+        let second: RouteRef = PageRouteBuilder::new(&mut app, corner_page()).into_erased();
+        navigator_state.push(&mut app, second.clone());
         settle(&mut app, at);
         assert!(first.is_first(&app));
         assert!(!first.is_current(&app));
@@ -6428,7 +6594,7 @@ mod tests {
             Navigator::new()
                 .key(key.clone().into())
                 .on_generate_route(|app, _settings| {
-                    Some(PageRouteBuilder::new(app, corner_page()).as_route())
+                    Some(PageRouteBuilder::new(app, corner_page()).into_erased())
                 }),
         )
         .into_widget()
@@ -6445,7 +6611,7 @@ mod tests {
         let navigator_state = state(&key, &mut app);
         let at = settle(&mut app, Duration::ZERO);
 
-        let second = PageRouteBuilder::new(&mut app, corner_page()).as_route();
+        let second: RouteRef = PageRouteBuilder::new(&mut app, corner_page()).into_erased();
         let popped = navigator_state.push(&mut app, second);
         let at = settle(&mut app, at);
         assert!(!popped.is_completed(), "the route is still up");
@@ -6479,8 +6645,8 @@ mod tests {
         let navigator_state = state(&key, &mut app);
         let at = settle(&mut app, Duration::ZERO);
 
-        let route_a = PageRouteBuilder::new(&mut app, corner_page()).as_route();
-        let page_value = navigator_state.push(&mut app, route_a);
+        let route_a: RouteRef = PageRouteBuilder::new(&mut app, corner_page()).into_erased();
+        let page_value = navigator_state.push(&mut app, route_a.clone());
         let at = settle(&mut app, at);
         let awaited: Rc<Cell<Option<&'static str>>> = Rc::default();
         app.spawn({
@@ -6499,7 +6665,7 @@ mod tests {
         );
 
         let mut app = cell.borrow_mut();
-        navigator_state.remove_route(&mut app, route_a, Some(Rc::new("B")));
+        navigator_state.remove_route(&mut app, *route_a, Some(Rc::new("B")));
         settle(&mut app, at);
         assert_eq!(
             awaited.get(),

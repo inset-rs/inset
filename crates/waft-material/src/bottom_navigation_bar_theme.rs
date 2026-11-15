@@ -702,7 +702,7 @@ mod tests {
     }
 
     fn fade_opacity(tester: &WidgetTester, element: waft_widgets::AnyElement) -> f64 {
-        let opacity = tester.widget(element, |fade: &FadeTransition| fade.opacity);
+        let opacity = tester.widget(element, |fade: &FadeTransition| fade.opacity.clone());
         opacity.value(&tester.cell.borrow())
     }
 

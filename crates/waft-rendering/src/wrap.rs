@@ -1149,7 +1149,7 @@ impl RenderBox for RenderWrap {
 #[cfg(test)]
 mod tests {
     use waft_embedder::valo::Op;
-    use waft_foundation::AppCell;
+    use waft_foundation::{AppCell, Ref};
 
     use super::*;
     use crate::layer::{ContainerLayer, ErasedLayer, OffsetLayer, PictureLayer};
@@ -1319,7 +1319,7 @@ mod tests {
         app: &mut App,
         root: AnyRenderBox,
         constraints: BoxConstraints,
-    ) -> Handle<PipelineOwner> {
+    ) -> Ref<PipelineOwner> {
         let owner = PipelineOwner::new(app, None, None);
         owner.set_root_node(app, Some(root.as_object()));
         root.layout(app, constraints, false);

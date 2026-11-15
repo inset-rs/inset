@@ -9,7 +9,9 @@ use crate::*;
 use layout::{FlyoutLayout, FlyoutLayoutSettings};
 use std::{collections::HashMap, fmt, rc::Rc};
 use waft_embedder::{FontWeight, Offset, Rect, Size};
-use waft_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, HandleId, Listener};
+use waft_foundation::{
+    App, ChangeNotifier, ChangeNotifierData, Handle, HandleId, Listener, OptionRetained, Ref,
+};
 use waft_gestures::{GestureBinding, PointerEvent, PointerRoute};
 use waft_painting::{Axis, EdgeInsetsGeometry, transform_point, transform_rect};
 use waft_rendering::BoxConstraints;
@@ -186,7 +188,7 @@ pub struct Flyout {
     pub(crate) on_closed: Option<Listener>,
 
     /// Native retained content owner, initialized with this object's presenter builder.
-    host: Option<Handle<RetainedFlyoutHost>>,
+    host: Option<Ref<RetainedFlyoutHost>>,
 
     /// Notifies compound buttons when the open state changes.
     notifier: ChangeNotifierData,
@@ -246,8 +248,8 @@ impl ChangeNotifier for Flyout {
 
 impl Flyout {
     /// Creates a source Flyout backed by the approved retained overlay adapter.
-    pub fn new<K>(app: &mut App, content: impl IntoWidget<K>) -> Handle<Self> {
-        let this = app.create(Self {
+    pub fn new<K>(app: &mut App, content: impl IntoWidget<K>) -> Ref<Self> {
+        let flyout = app.create(Self {
             content: content.into_widget(),
             placement: FlyoutPlacementMode::Top,
             show_mode: FlyoutShowMode::Standard,
@@ -279,11 +281,12 @@ impl Flyout {
             pointer_route: None,
             disposed: false,
         });
+        let this = flyout.handle();
         let host = RetainedFlyoutHost::new(
             app,
             Rc::new(move |app, context| this.build_presenter(app, context)),
         );
-        app.get_mut(host).on_key_event = Some(Rc::new(move |app, _, event| {
+        app.get_mut(&host).on_key_event = Some(Rc::new(move |app, _, event| {
             if matches!(event, KeyEvent::Down(_))
                 && event.logical_key() == LogicalKeyboardKey::ESCAPE
             {
@@ -293,14 +296,14 @@ impl Flyout {
                 KeyEventResult::Ignored
             }
         }));
-        app.get_mut(host).on_dispose = Some(Listener::new(move |app| this.dispose(app)));
-        app.get_mut(host).opened = Some(Listener::new(move |app| this.on_opened(app)));
-        app.get_mut(host).closed = Some(Listener::new(move |app| this.on_closed(app)));
-        app.get_mut(host).target_removed = Some(Listener::new(move |app| {
+        app.get_mut(&host).on_dispose = Some(Listener::new(move |app| this.dispose(app)));
+        app.get_mut(&host).opened = Some(Listener::new(move |app| this.on_opened(app)));
+        app.get_mut(&host).closed = Some(Listener::new(move |app| this.on_closed(app)));
+        app.get_mut(&host).target_removed = Some(Listener::new(move |app| {
             this.hide(app);
         }));
-        app.get_mut(this).host = Some(host);
-        this
+        app.get_mut(this).host = Some(host.clone());
+        flyout
     }
 
     /// MenuFlyout's point-positioning policy depends on the input that opened it.
@@ -314,35 +317,27 @@ impl Flyout {
 
     /// Supplies the menu header that receives focus after its popup closes.
     pub(crate) fn return_focus_to(self: Handle<Self>, app: &mut App, node: AnyFocusNode) {
-        let host = app.get(self).host.unwrap();
+        let host = app.get(self).host.handle().unwrap();
         app.get_mut(host).return_focus = Some(node);
     }
 
     /// Sets Content and updates the retained presenter.
-    pub fn content<K>(
-        self: Handle<Self>,
-        app: &mut App,
-        content: impl IntoWidget<K>,
-    ) -> Handle<Self> {
-        app.get_mut(self).content = content.into_widget();
+    pub fn content<K>(self: Ref<Self>, app: &mut App, content: impl IntoWidget<K>) -> Ref<Self> {
+        app.get_mut(&self).content = content.into_widget();
         self.invalidate(app);
         self
     }
 
     /// Sets Placement.
-    pub fn placement(
-        self: Handle<Self>,
-        app: &mut App,
-        placement: FlyoutPlacementMode,
-    ) -> Handle<Self> {
-        app.get_mut(self).placement = placement;
+    pub fn placement(self: Ref<Self>, app: &mut App, placement: FlyoutPlacementMode) -> Ref<Self> {
+        app.get_mut(&self).placement = placement;
         self.invalidate(app);
         self
     }
 
     /// Sets ShowMode.
-    pub fn show_mode(self: Handle<Self>, app: &mut App, mode: FlyoutShowMode) -> Handle<Self> {
-        app.get_mut(self).show_mode = mode.effective();
+    pub fn show_mode(self: Ref<Self>, app: &mut App, mode: FlyoutShowMode) -> Ref<Self> {
+        app.get_mut(&self).show_mode = mode.effective();
         self.update_pointer_route(app);
         self.invalidate(app);
         self
@@ -350,11 +345,11 @@ impl Flyout {
 
     /// Sets the presenter style callback.
     pub fn flyout_presenter_style(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         builder: FlyoutPresenterBuilder,
-    ) -> Handle<Self> {
-        app.get_mut(self).flyout_presenter_style = Some(builder);
+    ) -> Ref<Self> {
+        app.get_mut(&self).flyout_presenter_style = Some(builder);
         self.invalidate(app);
         self
     }
@@ -453,7 +448,7 @@ impl Flyout {
         if app.get(self).disposed || app.get(self).phase != Phase::Opening {
             return;
         }
-        let host = app.get(self).host.unwrap();
+        let host = app.get(self).host.handle().unwrap();
         host.show_at(
             app,
             target,
@@ -486,7 +481,7 @@ impl Flyout {
             child.hide(app);
         }
         self.remove_pointer_route(app);
-        let host = app.get(self).host.unwrap();
+        let host = app.get(self).host.handle().unwrap();
         if host.is_open(app) {
             app.get_mut(self).phase = Phase::Closing;
             host.hide(app);
@@ -509,7 +504,7 @@ impl Flyout {
         self.remove_pointer_route(app);
         app.get_mut(self).disposed = true;
         app.get_mut(self).phase = Phase::Closed;
-        app.get(self).host.unwrap().dispose(app);
+        app.get(self).host.handle().unwrap().dispose(app);
         let metadata = app.singleton::<FlyoutMetadata>();
         app.get_mut(metadata).open.retain(|_, value| *value != self);
         app.get_mut(metadata)
@@ -520,7 +515,7 @@ impl Flyout {
 
     /// Updates derived presenter content without broadcasting an open-state change.
     pub(crate) fn rebuild_content(self: Handle<Self>, app: &mut App) {
-        app.get(self).host.unwrap().rebuild(app);
+        app.get(self).host.handle().unwrap().rebuild(app);
     }
 
     /// Visible container bounds for pointer-distance and submenu-exit checks.
@@ -568,7 +563,7 @@ impl Flyout {
         let metadata = app.singleton::<FlyoutMetadata>();
         let mut current = Some(self.root(app));
         while let Some(flyout) = current {
-            app.get(flyout).host.unwrap().rebuild(app);
+            app.get(flyout).host.handle().unwrap().rebuild(app);
             current = app.get(metadata).open.get(&flyout.id()).copied();
         }
     }
@@ -607,7 +602,7 @@ impl Flyout {
         if let Some(closed) = app.get(self).closed.clone() {
             closed.call(app);
         }
-        if !app.contains(self) || app.get(self).disposed {
+        if app.get(self).disposed {
             return;
         }
 
@@ -685,7 +680,7 @@ impl Flyout {
         FlyoutScope {
             flyout: self,
             child: LayoutBuilder::new(move |app, context, constraints| {
-                let host = app.get(self).host.unwrap();
+                let host = app.get(self).host.handle().unwrap();
                 if let Some(bounds) = host.target_bounds(app) {
                     app.get_mut(self).last_target_bounds = bounds;
                 }
@@ -834,10 +829,10 @@ struct FlyoutPresenterState {
     state: StateData<FlyoutPresenter>,
 
     /// Horizontal scrolling lifetime.
-    horizontal: Option<Handle<ScrollViewportController>>,
+    horizontal: Option<Ref<ScrollViewportController>>,
 
     /// Vertical scrolling lifetime.
-    vertical: Option<Handle<ScrollViewportController>>,
+    vertical: Option<Ref<ScrollViewportController>>,
 }
 
 impl StatefulWidget for FlyoutPresenter {
@@ -862,14 +857,14 @@ impl State for FlyoutPresenterState {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        app.get(self).horizontal.unwrap().dispose(app);
-        app.get(self).vertical.unwrap().dispose(app);
+        app.get(self).horizontal.handle().unwrap().dispose(app);
+        app.get(self).vertical.handle().unwrap().dispose(app);
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
         let resources = ThemeResources::of(app, context);
-        let horizontal = app.get(self).horizontal.unwrap();
-        let vertical = app.get(self).vertical.unwrap();
+        let horizontal = app.get(self).horizontal.clone().unwrap();
+        let vertical = app.get(self).vertical.clone().unwrap();
         let widget = self.widget(app).clone();
         ControlBorder::new(
             Brush::Acrylic(resources.flyout_presenter_background),
@@ -880,9 +875,9 @@ impl State for FlyoutPresenterState {
         .child(
             LayoutBuilder::new(move |_, _, constraints| {
                 ScrollBarViewport::new(
-                    vertical,
+                    vertical.clone(),
                     ScrollBarViewport::new(
-                        horizontal,
+                        horizontal.clone(),
                         ConstrainedBox::new(
                             BoxConstraints::new()
                                 .min_width(constraints.min_width)

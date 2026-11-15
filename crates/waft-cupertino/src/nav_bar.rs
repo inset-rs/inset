@@ -6,15 +6,18 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use waft_animation::{
-    Animatable, Animation, AnimationBehavior, AnimationController, AnimationStatus,
-    AnimationStatusListener, AnimationWithParent, AnyAnimation, Cubic, Curve, CurvedAnimation,
-    Curves, Interval, RectTween, ValueCurveTween, ValueTween,
+    Animatable, Animation, AnimationBehavior, AnimationController, AnimationRef, AnimationStatus,
+    AnimationStatusListener, AnimationWithParent, Cubic, Curve, CurvedAnimation, Curves, Drive,
+    Interval, RectTween, ValueCurveTween, ValueTween,
 };
 use waft_embedder::{
     Brightness, Color, ImageFilter, Matrix4, Offset, Rect, Size, SystemUiOverlayStyle,
     TextBaseline, TextDirection, clamp_double,
 };
-use waft_foundation::{App, Handle, Listenable, Listener, ValueChanged, ValueListenable};
+use waft_foundation::{
+    App, Handle, HandleId, ListenableObject, Listener, OptionRetained, Ref, ValueChanged,
+    ValueListenable,
+};
 use waft_painting::{
     Alignment, AlignmentGeometry, AnyColor, AxisDirection, Border, BorderSide, BorderStyle,
     BoxDecoration, EdgeInsetsDirectional, EdgeInsetsGeometry, TextOverflow, TextScaler, TextSpan,
@@ -207,7 +210,7 @@ struct FixedSizeSlidingTransition {
     /// the origin is set to the top right corner of the render boxes. In other words, this
     /// parameter describes the offset from the top right corner of the stack, to the top right
     /// corner of the child widget, and the x-axis runs right to left.
-    offset_animation: AnyAnimation<Offset>,
+    offset_animation: AnimationRef<Offset>,
 
     /// The fixed width to impose on `child`.
     width: f64,
@@ -220,7 +223,7 @@ struct FixedSizeSlidingTransition {
 
 impl AnimatedWidget for FixedSizeSlidingTransition {
     fn listenable(&self) -> Rc<dyn waft_foundation::Listenable> {
-        Rc::new(self.offset_animation)
+        Rc::new(self.offset_animation.clone())
     }
 
     fn build(&self, app: &mut App, _context: BuildContext) -> WidgetRef {
@@ -1550,10 +1553,10 @@ pub struct CupertinoSliverNavigationBarState {
     keys: Rc<NavigationBarStaticComponentsKeys>,
     scrollable_state: Option<Handle<ScrollableState>>,
     effective_middle: Option<WidgetRef>,
-    animation_controller: Option<Handle<AnimationController>>,
-    search_animation: Option<Handle<CurvedAnimation>>,
-    persistent_height_animation: Option<AnyAnimation<f64>>,
-    large_title_height_animation: Option<AnyAnimation<f64>>,
+    animation_controller: Option<Ref<AnimationController>>,
+    search_animation: Option<Ref<CurvedAnimation>>,
+    persistent_height_animation: Option<AnimationRef<f64>>,
+    large_title_height_animation: Option<AnimationRef<f64>>,
     scaled_search_field_height: f64,
     scaled_large_title_height: f64,
     search_is_active: bool,
@@ -1565,6 +1568,7 @@ impl CupertinoSliverNavigationBarState {
     fn animation_controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
         app.get(self)
             .animation_controller
+            .handle()
             .expect("init_state created the controller")
     }
 
@@ -1630,9 +1634,14 @@ impl CupertinoSliverNavigationBarState {
     }
 
     fn setup_searchable_animation(self: Handle<Self>, app: &mut App) {
-        let controller = self.animation_controller(app).view();
+        let controller: AnimationRef<f64> = app
+            .get(self)
+            .animation_controller
+            .as_ref()
+            .expect("init_state created the controller")
+            .erase();
         let persistent_height_tween = ValueTween::new(K_NAV_BAR_PERSISTENT_HEIGHT, 0.0);
-        let persistent_height_animation = persistent_height_tween.animate(app, controller);
+        let persistent_height_animation = persistent_height_tween.animate(app, controller.clone());
         persistent_height_animation.add_status_listener(
             app,
             AnimationStatusListener::handle_method(
@@ -1743,7 +1752,7 @@ impl TickerProviderStateMixin for CupertinoSliverNavigationBarState {
 }
 
 impl TickerProviderObject for CupertinoSliverNavigationBarState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         TickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -1763,10 +1772,10 @@ impl State for CupertinoSliverNavigationBarState {
             AnimationBehavior::Normal,
             self,
         );
-        app.get_mut(self).animation_controller = Some(animation_controller);
+        app.get_mut(self).animation_controller = Some(animation_controller.clone());
         let search_animation = CurvedAnimation::create(
             app,
-            animation_controller.view(),
+            animation_controller.erase(),
             k_nav_bar_search_curve(),
             None,
         );
@@ -1811,7 +1820,7 @@ impl State for CupertinoSliverNavigationBarState {
                 .is_scrolling_notifier(app)
                 .remove_listener(app, &listener);
         }
-        if let Some(search_animation) = app.get(self).search_animation {
+        if let Some(search_animation) = app.get(self).search_animation.handle() {
             search_animation.dispose(app);
         }
         self.animation_controller(app).dispose(app);
@@ -1823,13 +1832,18 @@ impl State for CupertinoSliverNavigationBarState {
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
-        let controller = self.animation_controller(app);
+        let controller = app
+            .get(self)
+            .animation_controller
+            .clone()
+            .expect("init_state created the controller");
         let search_is_active = app.get(self).search_is_active;
         let effective_middle = app.get(self).effective_middle.clone();
         let scaled_search_field_height = app.get(self).scaled_search_field_height;
         let persistent_height_animation = app
             .get(self)
             .persistent_height_animation
+            .clone()
             .expect("did_change_dependencies set up the animations");
         let widget = self.widget(app);
         let searchable = widget.searchable;
@@ -1852,8 +1866,8 @@ impl State for CupertinoSliverNavigationBarState {
         let widget = self.widget(app);
         let user_bottom = if searchable {
             let searchable_bottom = SearchableBottom {
-                animation_controller: controller,
-                animation: persistent_height_animation,
+                animation_controller: controller.clone(),
+                animation: persistent_height_animation.clone(),
                 search_field,
                 search_field_height: scaled_search_field_height,
                 on_search_field_tap: Listener::handle_method(
@@ -1911,19 +1925,22 @@ impl State for CupertinoSliverNavigationBarState {
         let background_color_source = widget.background_color.clone();
         let bottom_height = self.bottom_height(app);
         let keys = Rc::clone(&app.get(self).keys);
-        let search_animation = app
+        let search_animation: AnimationRef<f64> = app
             .get(self)
             .search_animation
-            .expect("init_state created the curve");
+            .as_ref()
+            .expect("init_state created the curve")
+            .erase();
         let large_title_height_animation = app
             .get(self)
             .large_title_height_animation
+            .clone()
             .expect("did_change_dependencies set up the animations");
 
         MediaQuery::with_no_text_scaling(
             None,
             AnimatedBuilder::new(
-                Rc::new(search_animation.as_animation()),
+                Rc::new(search_animation.clone()),
                 move |app: &mut App, context: BuildContext, _child: Option<&WidgetRef>| {
                     let theme = CupertinoTheme::of(app, context);
                     let delegate = LargeTitleNavigationBarSliverDelegate {
@@ -1952,7 +1969,7 @@ impl State for CupertinoSliverNavigationBarState {
                         enable_background_filter_blur,
                         bottom_mode,
                         bottom_height,
-                        controller,
+                        controller: controller.clone(),
                         searchable,
                     };
                     SliverPersistentHeader::new(Rc::new(delegate))
@@ -1994,7 +2011,7 @@ struct LargeTitleNavigationBarSliverDelegate {
     enable_background_filter_blur: bool,
     bottom_mode: NavigationBarBottomMode,
     bottom_height: f64,
-    controller: Handle<AnimationController>,
+    controller: Ref<AnimationController>,
     searchable: bool,
 }
 
@@ -2091,7 +2108,10 @@ impl SliverPersistentHeaderDelegate for LargeTitleNavigationBarSliverDelegate {
                                 // Fade the large title as the search field animates from its
                                 // expanded to its collapsed state.
                                 if show_large_title
-                                    && !Animation::is_forward_or_completed(self.controller, app)
+                                    && !Animation::is_forward_or_completed(
+                                        self.controller.handle(),
+                                        app,
+                                    )
                                 {
                                     1.0
                                 } else {
@@ -2232,7 +2252,7 @@ impl SliverPersistentHeaderDelegate for LargeTitleNavigationBarSliverDelegate {
             || self.enable_background_filter_blur != old_delegate.enable_background_filter_blur
             || self.bottom_mode != old_delegate.bottom_mode
             || self.bottom_height != old_delegate.bottom_height
-            || self.controller != old_delegate.controller
+            || self.controller.handle() != old_delegate.controller.handle()
             || self.searchable != old_delegate.searchable
     }
 
@@ -3344,8 +3364,12 @@ impl StatelessWidget for BackLabel {
             // There is no timing issue because the previousTitle Listenable changes
             // happen during route modifications before the ValueListenableBuilder
             // is built.
-            let previous_title: Rc<dyn ValueListenable<Option<String>>> =
-                Rc::new(cupertino_route.previous_title(app));
+            let previous_title: Rc<dyn ValueListenable<Option<String>>> = Rc::new(
+                cupertino_route
+                    .previous_title(app)
+                    .upgrade(app)
+                    .expect("the route keeps its previous title"),
+            );
             return ValueListenableBuilder::new(previous_title, |app, context, title, _child| {
                 BackLabel::build_previous_title_widget(app, context, title.clone())
             })
@@ -3391,9 +3415,9 @@ impl StatelessWidget for CancelButton {
 /// The parameters both searchable bottoms carry.
 #[derive(Debug)]
 struct SearchableBottom {
-    animation_controller: Handle<AnimationController>,
+    animation_controller: Ref<AnimationController>,
     search_field: Option<WidgetRef>,
-    animation: AnyAnimation<f64>,
+    animation: AnimationRef<f64>,
     search_field_height: f64,
     on_search_field_tap: Listener,
 }
@@ -3425,14 +3449,15 @@ impl StatelessWidget for InactiveSearchableBottom {
                 ),
             )
             .into_widget();
-        let animation_controller = self.0.animation_controller;
+        let animation_controller = self.0.animation_controller.clone();
         AnimatedBuilder::new(
-            Rc::new(self.0.animation),
+            Rc::new(self.0.animation.clone()),
             move |_app: &mut App, _context: BuildContext, child: Option<&WidgetRef>| {
                 let child = child.cloned();
+                let animation_controller = animation_controller.clone();
                 LayoutBuilder::new(
                     move |app: &mut App, _context, constraints: AnyBoxConstraints| {
-                        let value = AnimationController::value(animation_controller, app);
+                        let value = animation_controller.value(app);
                         let mut leading = SizedBox::new().width(
                             constraints.max_width - (K_SEARCH_FIELD_CANCEL_BUTTON_WIDTH * value),
                         );
@@ -3485,10 +3510,8 @@ impl StatelessWidget for ActiveSearchableBottom {
             .search_field
             .clone()
             .unwrap_or_else(|| SizedBox::shrink().into_widget());
-        let animation_controller = self.0.animation_controller;
-        let cancel_opacity = ValueTween::new(0.0, 1.0).animate(app, animation_controller.view());
-        // The `FadeTransition` below retains it.
-        app.destroy_lingering(cancel_opacity);
+        let animation_controller = self.0.animation_controller.clone();
+        let cancel_opacity = ValueTween::new(0.0, 1.0).animate(app, animation_controller.erase());
         let cancel = FadeTransition::new(cancel_opacity).child(CancelButton {
             opacity: 1.0,
             on_pressed: Some(self.0.on_search_field_tap.clone()),
@@ -3511,9 +3534,9 @@ impl StatelessWidget for ActiveSearchableBottom {
                     )
                     .into_widget(),
                     AnimatedBuilder::new(
-                        Rc::new(self.0.animation),
+                        Rc::new(self.0.animation.clone()),
                         move |app: &mut App, _context: BuildContext, child: Option<&WidgetRef>| {
-                            let value = AnimationController::value(animation_controller, app);
+                            let value = animation_controller.value(app);
                             let mut sized =
                                 SizedBox::new().width(value * K_SEARCH_FIELD_CANCEL_BUTTON_WIDTH);
                             if let Some(child) = child.cloned() {
@@ -3607,7 +3630,7 @@ impl StatelessWidget for TransitionableNavigationBar {
 /// will become part of the transitional navigation bar as well.
 #[derive(Debug)]
 struct NavigationBarTransition {
-    animation: AnyAnimation<f64>,
+    animation: AnimationRef<f64>,
     top_nav_bar: Rc<TransitionableNavigationBar>,
     bottom_nav_bar: Rc<TransitionableNavigationBar>,
     height_tween: ValueTween<f64>,
@@ -3616,7 +3639,7 @@ struct NavigationBarTransition {
 impl NavigationBarTransition {
     fn new(
         app: &mut App,
-        animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
         top_nav_bar: Rc<TransitionableNavigationBar>,
         bottom_nav_bar: Rc<TransitionableNavigationBar>,
     ) -> NavigationBarTransition {
@@ -3638,7 +3661,7 @@ impl StatelessWidget for NavigationBarTransition {
         let directionality = Directionality::of(app, context);
         let components_transition = NavigationBarComponentsTransition::new(
             app,
-            self.animation,
+            self.animation.clone(),
             Rc::clone(&self.bottom_nav_bar),
             Rc::clone(&self.top_nav_bar),
             directionality,
@@ -3684,30 +3707,6 @@ impl StatelessWidget for NavigationBarTransition {
 // ---------------------------------------------------------------------------------------------
 // _NavigationBarComponentsTransition
 
-/// Dart's `animation.drive(child)` in [`NavigationBarComponentsTransition`]'s builds, which
-/// hand each driven animation straight to a transition, or drive it again: the animation is
-/// freed at once with `destroy_lingering`, and the transition, or the animation driven from
-/// it, retains it, as Dart's references keep it alive until the next build replaces it.
-trait DriveHandedOn {
-    fn drive_handed_on<T: 'static>(
-        self,
-        app: &mut App,
-        child: impl Animatable<T> + Clone + 'static,
-    ) -> AnyAnimation<T>;
-}
-
-impl DriveHandedOn for AnyAnimation<f64> {
-    fn drive_handed_on<T: 'static>(
-        self,
-        app: &mut App,
-        child: impl Animatable<T> + Clone + 'static,
-    ) -> AnyAnimation<T> {
-        let driven = self.drive(app, child);
-        app.destroy_lingering(driven);
-        driven
-    }
-}
-
 /// This class helps create widgets that are in transition based on static components from the
 /// bottom and top navigation bars.
 ///
@@ -3728,7 +3727,7 @@ impl DriveHandedOn for AnyAnimation<f64> {
 /// transitions, it would cause global key duplications. Instead, only the keyed subtrees'
 /// children are returned.
 struct NavigationBarComponentsTransition {
-    animation: AnyAnimation<f64>,
+    animation: AnimationRef<f64>,
     bottom_components: Rc<NavigationBarStaticComponentsKeys>,
     top_components: Rc<NavigationBarStaticComponentsKeys>,
 
@@ -3778,7 +3777,7 @@ const FADE_IN: ValueTween<f64> = ValueTween::new(0.0, 1.0);
 impl NavigationBarComponentsTransition {
     fn new(
         app: &mut App,
-        animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
         bottom_nav_bar: Rc<TransitionableNavigationBar>,
         top_nav_bar: Rc<TransitionableNavigationBar>,
         directionality: TextDirection,
@@ -3921,8 +3920,8 @@ impl NavigationBarComponentsTransition {
 
         let offset_animation = self
             .animation
-            .drive_handed_on(app, ValueCurveTween::new(curve))
-            .drive_handed_on(app, anchor_movement_in_transition_box);
+            .drive(app, ValueCurveTween::new(curve))
+            .drive(app, anchor_movement_in_transition_box);
         FixedSizeSlidingTransition {
             is_ltr,
             offset_animation,
@@ -3932,28 +3931,32 @@ impl NavigationBarComponentsTransition {
         }
     }
 
-    fn fade_in_from(&self, app: &mut App, t: f64, curve: Rc<dyn Curve>) -> AnyAnimation<f64> {
-        self.animation.drive_handed_on(
+    fn fade_in_from(&self, app: &mut App, t: f64, curve: Rc<dyn Curve>) -> AnimationRef<f64> {
+        self.animation.drive(
             app,
             FADE_IN.chain(ValueCurveTween::new(Rc::new(Interval::new(t, 1.0, curve)))),
         )
     }
 
-    fn fade_out_by(&self, app: &mut App, t: f64, curve: Rc<dyn Curve>) -> AnyAnimation<f64> {
-        self.animation.drive_handed_on(
+    fn fade_out_by(&self, app: &mut App, t: f64, curve: Rc<dyn Curve>) -> AnimationRef<f64> {
+        self.animation.drive(
             app,
             FADE_OUT.chain(ValueCurveTween::new(Rc::new(Interval::new(0.0, t, curve)))),
         )
     }
 
     /// The parent of the hero animation, which is the route animation.
-    fn route_animation(&self, app: &App) -> AnyAnimation<f64> {
+    fn route_animation(&self, app: &App) -> AnimationRef<f64> {
         // The hero animation is a `CurvedAnimation`.
         let curved = self
             .animation
             .downcast::<CurvedAnimation>(app)
             .expect("the hero flight drives a CurvedAnimation");
-        AnimationWithParent::parent(curved, app)
+        let parent = AnimationWithParent::parent(curved, app);
+        HandleId::from(parent)
+            .upgrade(app)
+            .expect("the hero animation keeps its parent")
+            .into_map(|_| parent)
     }
 
     fn bottom_nav_bar_background(&self, app: &mut App) -> Option<WidgetRef> {
@@ -3974,7 +3977,7 @@ impl NavigationBarComponentsTransition {
         };
         let page_transition_animation = self
             .route_animation(app)
-            .drive_handed_on(app, ValueCurveTween::new(curve));
+            .drive(app, ValueCurveTween::new(curve));
 
         let from = self.position_in_transition_box(
             app,
@@ -3991,7 +3994,7 @@ impl NavigationBarComponentsTransition {
         let height = self.bottom_nav_bar_box.size(app).height();
         Some(
             PositionedTransition::new(
-                page_transition_animation.drive_handed_on(app, position_tween),
+                page_transition_animation.drive(app, position_tween),
                 wrap_with_background(
                     self.top_border,
                     bottom_background_color,
@@ -4064,7 +4067,7 @@ impl NavigationBarComponentsTransition {
             Some(from),
             Some(from.shift(Offset::new(self.forward_direction * (-width / 2.0), 0.0))),
         );
-        let rect = self.animation.drive_handed_on(app, position_tween);
+        let rect = self.animation.drive(app, position_tween);
         let opacity = self.fade_out_by(app, 0.2, Curves::ease_out());
 
         Some(
@@ -4099,7 +4102,7 @@ impl NavigationBarComponentsTransition {
         if let (Some(bottom_middle), true) = (bottom_middle.clone(), top_back_label.is_some()) {
             // Move from current position to the top page's back label position.
             let opacity = self.fade_out_by(app, fade_out_by, Curves::ease_out());
-            let style = self.animation.drive_handed_on(
+            let style = self.animation.drive(
                 app,
                 TextStyleTween::new(
                     Some(self.bottom_title_text_style.clone()),
@@ -4169,7 +4172,7 @@ impl NavigationBarComponentsTransition {
                 1.0
             };
             let opacity = self.fade_out_by(app, 0.6, Curves::ease_out());
-            let style = self.animation.drive_handed_on(
+            let style = self.animation.drive(
                 app,
                 TextStyleTween::new(
                     self.bottom_large_title_text_style.clone(),
@@ -4216,7 +4219,7 @@ impl NavigationBarComponentsTransition {
             Some(from),
             Some(from.shift(Offset::new(self.forward_direction * width / 4.0, 0.0))),
         );
-        let rect = self.animation.drive_handed_on(app, position_tween);
+        let rect = self.animation.drive(app, position_tween);
         let opacity = self.fade_out_by(app, 0.4, Curves::ease_out());
 
         // Just shift slightly towards the trailing edge instead of moving to the back label
@@ -4294,12 +4297,12 @@ impl NavigationBarComponentsTransition {
         // The bottom widget animates linearly during a backswipe by a user gesture.
         let rect = if self.user_gesture_in_progress {
             self.route_animation(app)
-                .drive_handed_on(app, ValueCurveTween::new(Curves::linear()))
-                .drive_handed_on(app, position_tween)
+                .drive(app, ValueCurveTween::new(Curves::linear()))
+                .drive(app, position_tween)
         } else {
             self.animation
-                .drive_handed_on(app, ValueCurveTween::new(animation_curve))
-                .drive_handed_on(app, position_tween)
+                .drive(app, ValueCurveTween::new(animation_curve))
+                .drive(app, position_tween)
         };
 
         Some(PositionedTransition::new(rect, ClipRect::new().child(child)).into_widget())
@@ -4320,7 +4323,7 @@ impl NavigationBarComponentsTransition {
         };
         let page_transition_animation = self
             .route_animation(app)
-            .drive_handed_on(app, ValueCurveTween::new(curve));
+            .drive(app, ValueCurveTween::new(curve));
 
         let to = self.position_in_transition_box(
             app,
@@ -4337,7 +4340,7 @@ impl NavigationBarComponentsTransition {
         let height = self.top_nav_bar_box.size(app).height();
         Some(
             PositionedTransition::new(
-                page_transition_animation.drive_handed_on(app, position_tween),
+                page_transition_animation.drive(app, position_tween),
                 wrap_with_background(
                     self.top_border,
                     top_background_color,
@@ -4406,15 +4409,15 @@ impl NavigationBarComponentsTransition {
             from = to.shift(Offset::new(self.forward_direction * width * 2.0, 0.0));
             let scale = self
                 .route_animation(app)
-                .drive_handed_on(app, ValueCurveTween::new(effective_scale_curve));
+                .drive(app, ValueCurveTween::new(effective_scale_curve));
             child = ScaleTransition::new(scale).child(child).into_widget();
         }
 
         let position_tween = RelativeRectTween::new(Some(from), Some(to));
         let rect = self
             .route_animation(app)
-            .drive_handed_on(app, ValueCurveTween::new(effective_position_curve))
-            .drive_handed_on(app, position_tween);
+            .drive(app, ValueCurveTween::new(effective_position_curve))
+            .drive(app, position_tween);
 
         // Fades faster going back from the first page with a back chevron.
         let fade_start = if bottom_back_chevron.is_none() && !forward {
@@ -4422,7 +4425,7 @@ impl NavigationBarComponentsTransition {
         } else {
             0.4
         };
-        let opacity = self.route_animation(app).drive_handed_on(
+        let opacity = self.route_animation(app).drive(
             app,
             ValueCurveTween::new(Rc::new(Interval::new(fade_start, 1.0, Curves::linear()))),
         );
@@ -4455,10 +4458,7 @@ impl NavigationBarComponentsTransition {
         let mid_click_opacity = match top_back_label_opacity {
             Some(render) if render.opacity(app).value(app) < 1.0 => {
                 let end = render.opacity(app).value(app);
-                Some(
-                    self.animation
-                        .drive_handed_on(app, ValueTween::new(0.0, end)),
-                )
+                Some(self.animation.drive(app, ValueTween::new(0.0, end)))
             }
             _ => None,
         };
@@ -4477,7 +4477,7 @@ impl NavigationBarComponentsTransition {
                 Some(opacity) => opacity,
                 None => self.fade_in_from(app, 0.4, Curves::ease_in()),
             };
-            let style = self.animation.drive_handed_on(
+            let style = self.animation.drive(
                 app,
                 TextStyleTween::new(
                     self.bottom_large_title_text_style.clone(),
@@ -4512,7 +4512,7 @@ impl NavigationBarComponentsTransition {
                 Some(opacity) => opacity,
                 None => self.fade_in_from(app, 0.3, Curves::ease_in()),
             };
-            let style = self.animation.drive_handed_on(
+            let style = self.animation.drive(
                 app,
                 TextStyleTween::new(
                     Some(self.bottom_title_text_style.clone()),
@@ -4574,9 +4574,7 @@ impl NavigationBarComponentsTransition {
             to_anchor_in_transition_box,
         );
 
-        let offset_animation = self
-            .animation
-            .drive_handed_on(app, anchor_movement_in_transition_box);
+        let offset_animation = self.animation.drive(app, anchor_movement_in_transition_box);
         let opacity = self.fade_in_from(app, 0.25, Curves::ease_in());
         Some(
             FixedSizeSlidingTransition {
@@ -4643,12 +4641,12 @@ impl NavigationBarComponentsTransition {
         // The large title animates linearly during a backswipe by a user gesture.
         let rect = if self.user_gesture_in_progress {
             self.route_animation(app)
-                .drive_handed_on(app, ValueCurveTween::new(Curves::linear()))
-                .drive_handed_on(app, position_tween)
+                .drive(app, ValueCurveTween::new(Curves::linear()))
+                .drive(app, position_tween)
         } else {
             self.animation
-                .drive_handed_on(app, ValueCurveTween::new(Rc::clone(&animation_curve)))
-                .drive_handed_on(app, position_tween)
+                .drive(app, ValueCurveTween::new(Rc::clone(&animation_curve)))
+                .drive(app, position_tween)
         };
         let opacity = self.fade_in_from(app, 0.0, animation_curve);
 
@@ -4706,12 +4704,12 @@ impl NavigationBarComponentsTransition {
         // The bottom widget animates linearly during a backswipe by a user gesture.
         let rect = if self.user_gesture_in_progress {
             self.route_animation(app)
-                .drive_handed_on(app, ValueCurveTween::new(Curves::linear()))
-                .drive_handed_on(app, position_tween)
+                .drive(app, ValueCurveTween::new(Curves::linear()))
+                .drive(app, position_tween)
         } else {
             self.animation
-                .drive_handed_on(app, ValueCurveTween::new(animation_curve))
-                .drive_handed_on(app, position_tween)
+                .drive(app, ValueCurveTween::new(animation_curve))
+                .drive(app, position_tween)
         };
 
         Some(PositionedTransition::new(rect, ClipRect::new().child(child)).into_widget())
@@ -4792,7 +4790,7 @@ fn nav_bar_hero_launch_pad_builder(
 fn nav_bar_hero_flight_shuttle_builder(
     app: &mut App,
     _flight_context: BuildContext,
-    animation: AnyAnimation<f64>,
+    animation: AnimationRef<f64>,
     flight_direction: HeroFlightDirection,
     from_hero_context: BuildContext,
     to_hero_context: BuildContext,
@@ -4856,7 +4854,7 @@ mod tests {
     use waft_scheduler::SchedulerBinding;
     use waft_widgets::{
         AnyElement, CustomScrollView, DefaultWidgetsLocalizations, FixedScrollMetrics,
-        Localizations, MediaQueryData, NavigatorState, Notification, PreferredSize, Route,
+        Localizations, MediaQueryData, NavigatorState, Notification, PreferredSize,
         ScrollController, ScrollControllerLeaf, ScrollMetrics, SliverToBoxAdapter, WidgetBuilder,
         WidgetsBinding,
     };
@@ -5123,7 +5121,7 @@ mod tests {
                 let route =
                     CupertinoPageRoute::new(app, scaffold_page(CupertinoNavigationBar::new));
                 let route = route.title(app, if second { "Second" } else { "Start" }.to_string());
-                Some(Route::as_route(route))
+                Some(route.clone().into_erased())
             })
         });
         let mut app = cell.borrow_mut();
@@ -5158,7 +5156,7 @@ mod tests {
                     }),
                 );
                 let route = route.title(app, if second { "Second" } else { "Home" }.to_string());
-                Some(Route::as_route(route))
+                Some(route.clone().into_erased())
             })
         });
         let mut app = cell.borrow_mut();
@@ -5220,7 +5218,7 @@ mod tests {
                             .automatically_imply_middle(false)
                     }),
                 );
-                Some(Route::as_route(route.title(app, "Home".to_string())))
+                Some(route.title(app, "Home".to_string()).into_erased())
             })
         });
         let mut app = cell.borrow_mut();
@@ -5334,7 +5332,7 @@ mod tests {
         let mut app = cell.borrow_mut();
         let controller = ScrollController::default(&mut app);
         let scroll_view = CustomScrollView::new()
-            .controller(controller.as_controller())
+            .controller(controller.clone().into_erased())
             .slivers([
                 CupertinoSliverNavigationBar::new()
                     .large_title(Text::new("Large"))
@@ -5412,7 +5410,7 @@ mod tests {
                 let route =
                     CupertinoPageRoute::new(app, scaffold_page(CupertinoNavigationBar::new));
                 let route = route.title(app, if second { "Second" } else { "Home" }.to_string());
-                Some(Route::as_route(route))
+                Some(route.clone().into_erased())
             })
         });
         let mut app = cell.borrow_mut();
@@ -5440,9 +5438,9 @@ mod tests {
         );
     }
 
-    /// Not a Dart case: Dart's collector frees what a navigation bar transition drives once
-    /// the flight that shows it ends; here the transition frees it at once and the components
-    /// it is handed to retain it, so it lives exactly as long as they do.
+    /// Not a Dart case: see [`a_frame_of_a_navigation_bar_transition_leaves_no_new_arena_objects`].
+    /// What a navigation bar transition drives is kept by the components it is handed to, so
+    /// it lives exactly as long as they do.
     #[test]
     fn a_navigation_bar_transition_frees_what_it_drove_with_the_components_it_drove() {
         let cell = mount_app(|cupertino_app| {
@@ -5451,7 +5449,7 @@ mod tests {
                 let route =
                     CupertinoPageRoute::new(app, scaffold_page(CupertinoNavigationBar::new));
                 let route = route.title(app, if second { "Second" } else { "Home" }.to_string());
-                Some(Route::as_route(route))
+                Some(route.clone().into_erased())
             })
         });
         {
@@ -5521,6 +5519,45 @@ mod tests {
         for id in driven {
             assert!(!app.contains(id), "{id:?} is freed with its component");
         }
+    }
+
+    /// Not a Dart case: Dart's collector frees what each frame of a navigation bar transition
+    /// builds and replaces; here the frame's replaced animations are freed at the checkpoint.
+    #[test]
+    fn a_frame_of_a_navigation_bar_transition_leaves_no_new_arena_objects() {
+        let cell = mount_app(|cupertino_app| {
+            cupertino_app.on_generate_route(move |app, settings| {
+                let second = settings.name.as_deref() == Some("/second");
+                let route =
+                    CupertinoPageRoute::new(app, scaffold_page(CupertinoNavigationBar::new));
+                let route = route.title(app, if second { "Second" } else { "Home" }.to_string());
+                Some(route.into_erased())
+            })
+        });
+        {
+            let mut app = cell.borrow_mut();
+            let root = root_element(&mut app);
+            let navigator = elements(&app, root)
+                .into_iter()
+                .find_map(|element| element.state_handle::<NavigatorState>(&app))
+                .expect("the app has a navigator");
+            navigator.push_named(&mut app, "/second", None);
+            pump(&mut app, Duration::from_millis(1220));
+            pump(&mut app, Duration::from_millis(1340));
+            pump(&mut app, Duration::from_millis(1360));
+            assert!(
+                has_widget::<NavigationBarTransition>(&mut app),
+                "the flight is on"
+            );
+        }
+        // Far enough into the flight that no component's fade starts or ends in the frame
+        // measured, which would add or drop an opacity layer.
+        pump(&mut cell.borrow_mut(), Duration::from_millis(1500));
+        cell.checkpoint();
+        let before = cell.borrow().debug_object_count();
+        pump(&mut cell.borrow_mut(), Duration::from_millis(1520));
+        cell.checkpoint();
+        assert_eq!(cell.borrow().debug_object_count(), before);
     }
 
     #[test]

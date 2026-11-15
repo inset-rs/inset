@@ -129,9 +129,10 @@ mod tests {
     use std::cell::Cell;
     use std::time::Duration;
     use waft_foundation::AppCell;
+    use waft_foundation::Ref;
 
     use waft_animation::{
-        AnimationBehavior, AnimationController, AnimationStatus, AnyAnimation, Curves,
+        AnimationBehavior, AnimationController, AnimationRef, AnimationStatus, AnyAnimation, Curves,
     };
     use waft_scheduler::{Ticker, TickerCallback, TickerProvider};
 
@@ -143,7 +144,7 @@ mod tests {
     struct TestVSync;
 
     impl TickerProvider for TestVSync {
-        fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+        fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
             Ticker::new(app, on_tick, None)
         }
     }
@@ -151,13 +152,13 @@ mod tests {
     /// A widget whose width says what the animation's status is.
     #[derive(Debug)]
     struct StatusWidth {
-        animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
         builds: Rc<Cell<u32>>,
     }
 
     impl StatusTransitionWidget for StatusWidth {
         fn animation(&self) -> AnyAnimation<f64> {
-            self.animation
+            self.animation.handle()
         }
 
         fn build(&self, app: &mut App, _context: BuildContext) -> WidgetRef {
@@ -199,7 +200,7 @@ mod tests {
         let harness = Harness::mount(
             &mut app,
             StatusWidth {
-                animation: controller.view(),
+                animation: controller.erase(),
                 builds: Rc::clone(&builds),
             }
             .into_widget(),

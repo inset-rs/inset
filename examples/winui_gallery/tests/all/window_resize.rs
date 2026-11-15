@@ -113,7 +113,11 @@ fn real_window_resize_relayouts_navigation_overlay() {
             &mut app,
             WidgetsApp::new(AccentPalette::default().base)
                 .debug_show_checked_mode_banner(false)
-                .builder(move |_, _, _| Overlay::new().initial_entries([entry]).into_widget())
+                .builder(move |_, _, _| {
+                    Overlay::new()
+                        .initial_entries([entry.clone()])
+                        .into_widget()
+                })
                 .into_widget(),
         );
     }

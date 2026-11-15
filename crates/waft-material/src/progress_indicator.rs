@@ -11,12 +11,11 @@
 use std::any::Any;
 use std::f64::consts::PI;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::time::Duration;
 
 use waft_animation::{
-    Animatable, AnimationBehavior, AnimationController, AnyAnimation, Cubic, Curve, Curves,
-    Interval, SawTooth, TweenSequence, TweenSequenceItem, ValueCurveTween, ValueTween,
+    Animatable, AnimationBehavior, AnimationController, AnimationRef, AnyAnimation, Cubic, Curve,
+    Curves, Interval, SawTooth, TweenSequence, TweenSequenceItem, ValueCurveTween, ValueTween,
 };
 use waft_cupertino::CupertinoActivityIndicator;
 use waft_embedder::StrokeCap;
@@ -24,7 +23,7 @@ use waft_embedder::{
     Canvas, Color, FillRule, Offset, Paint, PaintStyle, PathBuilder, Rect, SemanticsRole, Size,
     Stroke, TargetPlatform, TextDirection, clamp_double,
 };
-use waft_foundation::{App, Handle};
+use waft_foundation::{App, Handle, Ref};
 use waft_painting::{BorderRadiusGeometry, EdgeInsets, EdgeInsetsGeometry, draw_arc, draw_rrect};
 use waft_rendering::{BoxConstraints, CustomPainter};
 use waft_scheduler::{Ticker, TickerCallback, TickerProviderObject};
@@ -111,7 +110,7 @@ pub struct ProgressIndicatorData {
     /// If null, the progress indicator is rendered with [`color`](Self::color). If that is
     /// null, then it will use the ambient `ProgressIndicatorThemeData::color`. If that
     /// is also null then it defaults to the current theme's `ColorScheme::primary`.
-    pub value_color: Option<AnyAnimation<Option<Color>>>,
+    pub value_color: Option<AnimationRef<Option<Color>>>,
 
     /// The `SemanticsProperties.label` for this progress indicator.
     ///
@@ -178,6 +177,7 @@ impl ProgressIndicatorData {
         default_color: Option<Color>,
     ) -> Color {
         if let Some(color) = self
+            .clone()
             .value_color
             .and_then(|value_color| value_color.value(app))
             .or(color)
@@ -228,7 +228,7 @@ macro_rules! progress_indicator_setters {
         }
 
         #[doc = concat!("Dart `", stringify!($name), "(valueColor:)`.")]
-        pub fn value_color(mut self, value_color: AnyAnimation<Option<Color>>) -> $name {
+        pub fn value_color(mut self, value_color: AnimationRef<Option<Color>>) -> $name {
             self.$($bag).+.value_color = Some(value_color);
             self
         }
@@ -652,7 +652,7 @@ pub struct LinearProgressIndicator {
     ///
     ///  * [`LinearProgressIndicator::DEFAULT_ANIMATION_DURATION`], default duration
     ///    for one full cycle of the indeterminate animation.
-    pub controller: Option<Handle<AnimationController>>,
+    pub controller: Option<Ref<AnimationController>>,
 }
 
 impl LinearProgressIndicator {
@@ -726,10 +726,7 @@ impl LinearProgressIndicator {
     }
 
     /// Dart `LinearProgressIndicator(controller:)`.
-    pub fn controller(
-        mut self,
-        controller: Handle<AnimationController>,
-    ) -> LinearProgressIndicator {
+    pub fn controller(mut self, controller: Ref<AnimationController>) -> LinearProgressIndicator {
         debug_assert!(
             self.progress_indicator.value.is_none(),
             "{K_VALUE_CONTROLLER_ASSERTION}"
@@ -765,31 +762,37 @@ impl StatefulWidget for LinearProgressIndicator {
 pub struct LinearProgressIndicatorState {
     state: StateData<LinearProgressIndicator>,
     single_ticker_provider: SingleTickerProviderStateMixinData,
-    internal_controller: Option<Handle<AnimationController>>,
+    internal_controller: Option<Ref<AnimationController>>,
 }
 
 impl LinearProgressIndicatorState {
     fn internal_controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
+        self.internal_controller_ref(app).handle()
+    }
+
+    fn internal_controller_ref(self: Handle<Self>, app: &App) -> Ref<AnimationController> {
         app.get(self)
             .internal_controller
+            .clone()
             .expect("created in init_state")
     }
 
-    fn controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
+    fn controller(self: Handle<Self>, app: &App) -> Ref<AnimationController> {
         let context = self.context(app);
         self.widget(app)
             .controller
+            .clone()
             .or_else(|| {
                 context
                     .get_inherited_widget_of_exact_type::<ProgressIndicatorTheme>(app)
-                    .and_then(|theme| theme.data.controller)
+                    .and_then(|theme| theme.data.controller.clone())
             })
             .or_else(|| {
                 context
                     .find_ancestor_widget_of_exact_type::<Theme>(app)
-                    .and_then(|theme| theme.data.progress_indicator_theme.controller)
+                    .and_then(|theme| theme.data.progress_indicator_theme.controller.clone())
             })
-            .unwrap_or_else(|| self.internal_controller(app))
+            .unwrap_or_else(|| self.internal_controller_ref(app))
     }
 
     fn update_controller_animating_status(self: Handle<Self>, app: &mut App) {
@@ -921,7 +924,7 @@ impl SingleTickerProviderStateMixin for LinearProgressIndicatorState {
 
 /// Dart's `vsync: this`.
 impl TickerProviderObject for LinearProgressIndicatorState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -941,7 +944,7 @@ impl State for LinearProgressIndicatorState {
             AnimationBehavior::Normal,
             self,
         );
-        app.get_mut(self).internal_controller = Some(internal_controller);
+        app.get_mut(self).internal_controller = Some(internal_controller.clone());
         self.update_controller_animating_status(app);
     }
 
@@ -957,8 +960,6 @@ impl State for LinearProgressIndicatorState {
         let internal_controller = self.internal_controller(app);
         internal_controller.dispose(app);
         SingleTickerProviderStateMixin::dispose(self, app);
-        app.get_mut(self).internal_controller = None;
-        app.destroy(internal_controller);
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -975,7 +976,7 @@ impl State for LinearProgressIndicatorState {
         }
 
         AnimatedBuilder::new(
-            Rc::new(self.controller(app).view()),
+            Rc::new(self.controller(app).erase::<AnyAnimation<f64>>()),
             move |app, context, _child| {
                 let animation_value = self.controller(app).value(app);
                 self.build_indicator(app, context, animation_value, text_direction)
@@ -1311,7 +1312,7 @@ pub struct CircularProgressIndicator {
     ///
     ///  * [`CircularProgressIndicator::DEFAULT_ANIMATION_DURATION`], default duration
     ///    for one full cycle of the indeterminate animation.
-    pub controller: Option<Handle<AnimationController>>,
+    pub controller: Option<Ref<AnimationController>>,
 }
 
 impl CircularProgressIndicator {
@@ -1439,10 +1440,7 @@ impl CircularProgressIndicator {
     }
 
     /// Dart `CircularProgressIndicator(controller:)`.
-    pub fn controller(
-        mut self,
-        controller: Handle<AnimationController>,
-    ) -> CircularProgressIndicator {
+    pub fn controller(mut self, controller: Ref<AnimationController>) -> CircularProgressIndicator {
         debug_assert!(
             self.progress_indicator.value.is_none(),
             "{K_VALUE_CONTROLLER_ASSERTION}"
@@ -1518,7 +1516,7 @@ fn rotation_tween() -> impl Animatable<f64> {
 /// `_RefreshProgressIndicatorState` inherits, under the field `circular_state`.
 #[derive(Debug, Default)]
 struct CircularProgressIndicatorStateData {
-    internal_controller: Option<Handle<AnimationController>>,
+    internal_controller: Option<Ref<AnimationController>>,
 }
 
 /// Dart's `_CircularProgressIndicatorState` as a base class: its bodies, and the override
@@ -1548,7 +1546,7 @@ trait CircularProgressIndicatorStateBase:
             AnimationBehavior::Normal,
             self,
         );
-        self.circular_state_data_mut(app).internal_controller = Some(internal_controller);
+        self.circular_state_data_mut(app).internal_controller = Some(internal_controller.clone());
         self.update_controller_animating_status(app);
     }
 
@@ -1560,31 +1558,35 @@ trait CircularProgressIndicatorStateBase:
         let internal_controller = self.internal_controller(app);
         internal_controller.dispose(app);
         SingleTickerProviderStateMixin::dispose(self, app);
-        self.circular_state_data_mut(app).internal_controller = None;
-        app.destroy(internal_controller);
     }
 
     fn internal_controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
+        self.internal_controller_ref(app).handle()
+    }
+
+    fn internal_controller_ref(self: Handle<Self>, app: &App) -> Ref<AnimationController> {
         self.circular_state_data(app)
             .internal_controller
+            .clone()
             .expect("created in init_state")
     }
 
-    fn controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
+    fn controller(self: Handle<Self>, app: &App) -> Ref<AnimationController> {
         let context = self.context(app);
         self.circular_widget(app)
             .controller
+            .clone()
             .or_else(|| {
                 context
                     .get_inherited_widget_of_exact_type::<ProgressIndicatorTheme>(app)
-                    .and_then(|theme| theme.data.controller)
+                    .and_then(|theme| theme.data.controller.clone())
             })
             .or_else(|| {
                 context
                     .find_ancestor_widget_of_exact_type::<Theme>(app)
-                    .and_then(|theme| theme.data.progress_indicator_theme.controller)
+                    .and_then(|theme| theme.data.progress_indicator_theme.controller.clone())
             })
-            .unwrap_or_else(|| self.internal_controller(app))
+            .unwrap_or_else(|| self.internal_controller_ref(app))
     }
 
     fn update_controller_animating_status(self: Handle<Self>, app: &mut App) {
@@ -1723,7 +1725,7 @@ trait CircularProgressIndicatorStateBase:
 
     fn build_animation(self: Handle<Self>, app: &mut App) -> WidgetRef {
         AnimatedBuilder::new(
-            Rc::new(self.controller(app).view()),
+            Rc::new(self.controller(app).erase::<AnyAnimation<f64>>()),
             move |app, context, _child| {
                 let value = self.controller(app).value(app);
                 self.build_material_indicator(
@@ -1816,7 +1818,7 @@ impl SingleTickerProviderStateMixin for CircularProgressIndicatorState {
 
 /// Dart's `vsync: this`.
 impl TickerProviderObject for CircularProgressIndicatorState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -2062,12 +2064,12 @@ impl StatefulWidget for RefreshProgressIndicator {
             additional_rotation_tween: TweenSequence::new(vec![
                 // Makes arrow to expand a little bit earlier, to match the Android look.
                 TweenSequenceItem::new(
-                    Arc::new(ValueTween::new(-0.1, -0.2)),
+                    Rc::new(ValueTween::new(-0.1, -0.2)),
                     RefreshProgressIndicatorState::STROKE_HEAD_INTERVAL,
                 ),
                 // Additional rotation after the arrow expanded
                 TweenSequenceItem::new(
-                    Arc::new(ValueTween::new(-0.2, 1.35)),
+                    Rc::new(ValueTween::new(-0.2, 1.35)),
                     1.0 - RefreshProgressIndicatorState::STROKE_HEAD_INTERVAL,
                 ),
             ]),
@@ -2135,7 +2137,7 @@ impl CircularProgressIndicatorStateBase for RefreshProgressIndicatorState {
 
     fn build_animation(self: Handle<Self>, app: &mut App) -> WidgetRef {
         AnimatedBuilder::new(
-            Rc::new(self.controller(app).view()),
+            Rc::new(self.controller(app).erase::<AnyAnimation<f64>>()),
             move |app, context, _child| {
                 let value = self.controller(app).value(app);
                 self.build_material_indicator(
@@ -2282,7 +2284,7 @@ impl SingleTickerProviderStateMixin for RefreshProgressIndicatorState {
 
 /// Dart's `vsync: this`.
 impl TickerProviderObject for RefreshProgressIndicatorState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -2482,7 +2484,7 @@ impl ProgressIndicatorThemeDataGetters for LinearProgressIndicatorDefaultsM3Year
 pub(crate) mod tests {
     //! Ported from `test/progress_indicator_test.dart`.
 
-    use waft_animation::{AlwaysStoppedAnimation, Animation};
+    use waft_animation::AlwaysStoppedAnimation;
     use waft_embedder::valo::{self, Op};
     use waft_embedder::{RRect, Radius};
     use waft_painting::BorderRadius;
@@ -2841,7 +2843,7 @@ pub(crate) mod tests {
         tester.global_rect(tester.render_box_of(element)).size()
     }
 
-    pub(crate) fn controller_at(tester: &WidgetTester, value: f64) -> Handle<AnimationController> {
+    pub(crate) fn controller_at(tester: &WidgetTester, value: f64) -> Ref<AnimationController> {
         AnimationController::create(
             &mut tester.cell.borrow_mut(),
             Some(value),
@@ -2854,9 +2856,9 @@ pub(crate) mod tests {
         )
     }
 
-    fn always(app: &mut App, color: Option<Color>) -> AnyAnimation<Option<Color>> {
+    fn always(app: &mut App, color: Option<Color>) -> AnimationRef<Option<Color>> {
         app.create(AlwaysStoppedAnimation::new(color))
-            .as_animation()
+            .into_erased::<AnyAnimation<Option<Color>>>()
     }
 
     #[test]
@@ -3056,7 +3058,7 @@ pub(crate) mod tests {
                                 .value(0.25)
                                 .background_color(Colors::BLACK)
                                 .color(Colors::BLUE.primary())
-                                .value_color(value_color),
+                                .value_color(value_color.clone()),
                         ),
                     ),
                 )
@@ -3157,7 +3159,7 @@ pub(crate) mod tests {
                             200.0,
                             LinearProgressIndicator::new()
                                 .value(0.25)
-                                .value_color(value_color)
+                                .value_color(value_color.clone())
                                 .background_color(Colors::BLACK),
                         ),
                     ),
@@ -3369,7 +3371,7 @@ pub(crate) mod tests {
                 MaterialApp::new()
                     .home(Material::new().child(centered_width(
                         200.0,
-                        LinearProgressIndicator::new().controller(controller),
+                        LinearProgressIndicator::new().controller(controller.clone()),
                     )))
                     .into_widget()
             });
@@ -3396,7 +3398,7 @@ pub(crate) mod tests {
                     theme(app),
                     CircularProgressIndicator::new()
                         .color(red)
-                        .value_color(value_color),
+                        .value_color(value_color.clone()),
                 )
             });
             let ops = painted_by::<CircularProgressIndicator>(&tester);
@@ -3478,7 +3480,7 @@ pub(crate) mod tests {
                     theme(app),
                     RefreshProgressIndicator::new()
                         .color(red)
-                        .value_color(value_color),
+                        .value_color(value_color.clone()),
                 )
             });
             let ops = painted_by::<RefreshProgressIndicator>(&tester);
@@ -3791,7 +3793,7 @@ pub(crate) mod tests {
                     .home(themed(
                         theme(app),
                         ProgressIndicatorTheme::new(
-                            theme_data,
+                            theme_data.clone(),
                             Builder::new(move |_app, context| {
                                 builder_context.set(Some(context));
                                 LinearProgressIndicator::new().value(0.5).into_widget()
@@ -4318,11 +4320,14 @@ pub(crate) mod tests {
                 MaterialApp::new()
                     .home(Material::new().child(Center::new().child(
                         SizedBox::square(Some(200.0)).child(AnimatedBuilder::new(
-                            Rc::new(controller.view()),
-                            move |_app, _context, _child| {
-                                CircularProgressIndicator::new()
-                                    .controller(controller)
-                                    .into_widget()
+                            Rc::new(controller.erase::<AnyAnimation<f64>>()),
+                            {
+                                let controller = controller.clone();
+                                move |_app, _context, _child| {
+                                    CircularProgressIndicator::new()
+                                        .controller(controller.clone())
+                                        .into_widget()
+                                }
                             },
                         )),
                     )))

@@ -5,30 +5,30 @@ use std::any::Any;
 use std::fmt::{self, Debug};
 use std::rc::Rc;
 use std::time::Duration;
-
 use waft_animation::{
-    Animation, AnimationStyle, AnimationWithParent, AnyAnimation, Curve, CurvedAnimation, Curves,
+    AnimationRef, AnimationStyle, AnimationWithParent, Curve, CurvedAnimation, Curves,
 };
+
 use waft_cupertino::{CupertinoAlertDialog, show_cupertino_dialog};
 use waft_embedder::{Brightness, Clip, Color, SemanticsHitTestBehavior, SemanticsRole};
 use waft_embedder::{TargetPlatform, TextAlign, lerp_double};
-use waft_foundation::{App, CompleterFuture, Handle};
+use waft_foundation::{App, CompleterFuture, Handle, OptionRetained, Ref};
 use waft_painting::{
     AlignmentGeometry, EdgeInsets, EdgeInsetsGeometry, K_DEFAULT_FONT_SIZE, RoundedRectangleBorder,
     ShapeBorderRef, TextStyle, VerticalDirection,
 };
 use waft_rendering::{BoxConstraints, CrossAxisAlignment, MainAxisAlignment, MainAxisSize};
 use waft_widgets::{
-    Align, AnimatedPadding, AnyRoute, AnyScrollController, BuildContext, Builder, CapturedThemes,
-    Column, ConstrainedBox, DefaultTextStyle, Directionality, FadeTransition, Flexible,
+    Align, AnimatedPadding, AnyRoute, BuildContext, Builder, CapturedThemes, Column,
+    ConstrainedBox, DefaultTextStyle, Directionality, FadeTransition, Flexible,
     HeroControllerScope, IconTheme, IconThemeData, InheritedTheme, IntoWidget, IntrinsicWidth,
     KeyRef, ListBody, LocalHistoryRoute, LocalHistoryRouteData, MediaQuery, ModalRoute,
     ModalRouteData, Navigator, OverflowBar, OverflowBarAlignment, OverlayRoute, OverlayRouteData,
     Padding, Page, PageRef, PageRouteBuilder, PopScope, PopupRoute, PredictiveBackRoute,
     RawDialogRoute, RawDialogRouteBuilder, RawDialogRouteData, RawDialogRouteLeaf, Route,
-    RouteData, RoutePageBuilder, RouteResult, RouteSettingsRef, SafeArea, Semantics,
-    SingleChildScrollView, State, StatelessWidget, TransitionRoute, TransitionRouteData,
-    TraversalEdgeBehavior, WidgetBuilder, WidgetRef, show_raw_dialog,
+    RouteData, RoutePageBuilder, RouteRef, RouteResult, RouteSettingsRef, SafeArea,
+    ScrollControllerRef, Semantics, SingleChildScrollView, State, StatelessWidget, TransitionRoute,
+    TransitionRouteData, TraversalEdgeBehavior, WidgetBuilder, WidgetRef, show_raw_dialog,
 };
 
 use crate::colors::Colors;
@@ -439,8 +439,8 @@ impl StatelessWidget for Dialog {
 /// fields.
 #[derive(Debug)]
 struct AdaptiveAlertDialog {
-    scroll_controller: Option<AnyScrollController>,
-    action_scroll_controller: Option<AnyScrollController>,
+    scroll_controller: Option<ScrollControllerRef>,
+    action_scroll_controller: Option<ScrollControllerRef>,
     inset_animation_duration: Duration,
     inset_animation_curve: Rc<dyn Curve>,
 }
@@ -940,7 +940,7 @@ impl AlertDialog {
 
     /// Dart `AlertDialog.adaptive(scrollController:)`; a dialog made by
     /// [`new`](Self::new) ignores it.
-    pub fn scroll_controller(mut self, scroll_controller: AnyScrollController) -> AlertDialog {
+    pub fn scroll_controller(mut self, scroll_controller: ScrollControllerRef) -> AlertDialog {
         if let Some(adaptive) = &mut self.adaptive {
             adaptive.scroll_controller = Some(scroll_controller);
         }
@@ -951,7 +951,7 @@ impl AlertDialog {
     /// [`new`](Self::new) ignores it.
     pub fn action_scroll_controller(
         mut self,
-        action_scroll_controller: AnyScrollController,
+        action_scroll_controller: ScrollControllerRef,
     ) -> AlertDialog {
         if let Some(adaptive) = &mut self.adaptive {
             adaptive.action_scroll_controller = Some(action_scroll_controller);
@@ -1270,8 +1270,8 @@ impl AlertDialog {
                     .inset_animation_curve(Rc::clone(&adaptive.inset_animation_curve));
                 dialog.title = self.title.clone();
                 dialog.content = self.content.clone();
-                dialog.scroll_controller = adaptive.scroll_controller;
-                dialog.action_scroll_controller = adaptive.action_scroll_controller;
+                dialog.scroll_controller = adaptive.scroll_controller.clone();
+                dialog.action_scroll_controller = adaptive.action_scroll_controller.clone();
                 return dialog.into_widget();
             }
         }
@@ -1787,8 +1787,8 @@ impl StatelessWidget for SimpleDialog {
 fn build_material_dialog_transitions(
     _app: &mut App,
     _context: BuildContext,
-    _animation: AnyAnimation<f64>,
-    _secondary_animation: AnyAnimation<f64>,
+    _animation: AnimationRef<f64>,
+    _secondary_animation: AnimationRef<f64>,
     child: WidgetRef,
 ) -> WidgetRef {
     child
@@ -1934,7 +1934,7 @@ impl Page for DialogContentPage {
         self
     }
 
-    fn create_route(&self, app: &mut App, _context: BuildContext, this: &PageRef) -> AnyRoute {
+    fn create_route(&self, app: &mut App, _context: BuildContext, this: &PageRef) -> RouteRef {
         let child = self.child.clone();
         let page_builder: RoutePageBuilder =
             Rc::new(move |_app, _context, _animation, _secondary_animation| child.clone());
@@ -1942,7 +1942,7 @@ impl Page for DialogContentPage {
             .settings(app, RouteSettingsRef::Page(Rc::clone(this)))
             .transition_duration(app, Duration::ZERO)
             .reverse_transition_duration(app, Duration::ZERO)
-            .as_route()
+            .into_erased()
     }
 }
 
@@ -2040,7 +2040,7 @@ pub fn show_dialog(
             .or(DialogTheme::of(app, context).barrier_color)
             .or(Theme::of(app, context).dialog_theme.barrier_color)
             .unwrap_or(Colors::BLACK54);
-        let route = DialogRoute::new(app, route_context, Rc::clone(&route_builder_builder))
+        let mut route = DialogRoute::new(app, route_context, Rc::clone(&route_builder_builder))
             .barrier_color(app, barrier_color)
             .barrier_dismissible(app, barrier_dismissible)
             .use_safe_area(app, use_safe_area)
@@ -2051,18 +2051,18 @@ pub fn show_dialog(
             )
             .fullscreen_dialog(app, fullscreen_dialog);
         if let Some(barrier_label) = barrier_label.clone() {
-            route.barrier_label(app, barrier_label);
+            route = route.barrier_label(app, barrier_label);
         }
         if let Some(route_settings) = route_settings_for_route.clone() {
-            route.settings(app, route_settings);
+            route = route.settings(app, route_settings);
         }
         if let Some(request_focus) = request_focus {
-            route.request_focus(app, request_focus);
+            route = route.request_focus(app, request_focus);
         }
         if let Some(animation_style) = animation_style.clone() {
-            route.animation_style(app, animation_style);
+            route = route.animation_style(app, animation_style);
         }
-        route.as_route()
+        route.into_erased()
     });
     let window_builder: WidgetBuilder = Rc::new(move |app, _route_context| {
         // Wrap the build dialog with the theme, text direction, and media
@@ -2260,7 +2260,7 @@ pub struct DialogRoute {
     builder: WidgetBuilder,
     themes: Option<Rc<CapturedThemes>>,
     use_safe_area: bool,
-    curved_animation: Option<Handle<CurvedAnimation>>,
+    curved_animation: Option<Ref<CurvedAnimation>>,
     animation_style: Option<AnimationStyle>,
 }
 
@@ -2271,11 +2271,7 @@ impl DialogRoute {
     /// Dart's defaults: `barrier_color` `Colors::BLACK54`, `barrier_dismissible` true,
     /// `barrier_label` the context's `MaterialLocalizations::modal_barrier_dismiss_label`,
     /// `use_safe_area` true, and a transition of 150 ms.
-    pub fn new(
-        app: &mut App,
-        context: BuildContext,
-        builder: WidgetBuilder,
-    ) -> Handle<DialogRoute> {
+    pub fn new(app: &mut App, context: BuildContext, builder: WidgetBuilder) -> Ref<DialogRoute> {
         let barrier_label =
             <dyn MaterialLocalizations>::of(app, context).modal_barrier_dismiss_label();
         let route = RouteData::new(app, None, None);
@@ -2303,49 +2299,49 @@ impl DialogRoute {
     }
 
     /// Dart `DialogRoute(themes:)`.
-    pub fn themes(self: Handle<Self>, app: &mut App, themes: Rc<CapturedThemes>) -> Handle<Self> {
-        app.get_mut(self).themes = Some(themes);
+    pub fn themes(self: Ref<Self>, app: &mut App, themes: Rc<CapturedThemes>) -> Ref<Self> {
+        app.get_mut(&self).themes = Some(themes);
         self.build_page_builder(app);
         self
     }
 
     /// Dart `DialogRoute(barrierColor:)`.
-    pub fn barrier_color(self: Handle<Self>, app: &mut App, barrier_color: Color) -> Handle<Self> {
+    pub fn barrier_color(self: Ref<Self>, app: &mut App, barrier_color: Color) -> Ref<Self> {
         self.raw_dialog_route_data_mut(app).barrier_color = Some(barrier_color);
         self
     }
 
     /// Dart `DialogRoute(barrierDismissible:)`.
     pub fn barrier_dismissible(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         barrier_dismissible: bool,
-    ) -> Handle<Self> {
+    ) -> Ref<Self> {
         self.raw_dialog_route_data_mut(app).barrier_dismissible = barrier_dismissible;
         self
     }
 
     /// Dart `DialogRoute(barrierLabel:)`.
-    pub fn barrier_label(self: Handle<Self>, app: &mut App, barrier_label: String) -> Handle<Self> {
+    pub fn barrier_label(self: Ref<Self>, app: &mut App, barrier_label: String) -> Ref<Self> {
         self.raw_dialog_route_data_mut(app).barrier_label = Some(barrier_label);
         self
     }
 
     /// Dart `DialogRoute(useSafeArea:)`.
-    pub fn use_safe_area(self: Handle<Self>, app: &mut App, use_safe_area: bool) -> Handle<Self> {
-        app.get_mut(self).use_safe_area = use_safe_area;
+    pub fn use_safe_area(self: Ref<Self>, app: &mut App, use_safe_area: bool) -> Ref<Self> {
+        app.get_mut(&self).use_safe_area = use_safe_area;
         self.build_page_builder(app);
         self
     }
 
     /// Dart `DialogRoute(settings:)`.
-    pub fn settings(self: Handle<Self>, app: &mut App, settings: RouteSettingsRef) -> Handle<Self> {
+    pub fn settings(self: Ref<Self>, app: &mut App, settings: RouteSettingsRef) -> Ref<Self> {
         self.route_data_mut(app).set_settings(settings);
         self
     }
 
     /// Dart `DialogRoute(requestFocus:)`.
-    pub fn request_focus(self: Handle<Self>, app: &mut App, request_focus: bool) -> Handle<Self> {
+    pub fn request_focus(self: Ref<Self>, app: &mut App, request_focus: bool) -> Ref<Self> {
         self.route_data_mut(app)
             .set_request_focus(Some(request_focus));
         self
@@ -2353,34 +2349,30 @@ impl DialogRoute {
 
     /// Dart `DialogRoute(traversalEdgeBehavior:)`.
     pub fn traversal_edge_behavior(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         behavior: TraversalEdgeBehavior,
-    ) -> Handle<Self> {
+    ) -> Ref<Self> {
         self.modal_route_data_mut(app).traversal_edge_behavior = Some(behavior);
         self
     }
 
     /// Dart `DialogRoute(fullscreenDialog:)`.
-    pub fn fullscreen_dialog(
-        self: Handle<Self>,
-        app: &mut App,
-        fullscreen_dialog: bool,
-    ) -> Handle<Self> {
+    pub fn fullscreen_dialog(self: Ref<Self>, app: &mut App, fullscreen_dialog: bool) -> Ref<Self> {
         self.raw_dialog_route_data_mut(app).fullscreen_dialog = fullscreen_dialog;
         self
     }
 
     /// Dart `DialogRoute(animationStyle:)`, which also sets the transition's duration.
     pub fn animation_style(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         animation_style: AnimationStyle,
-    ) -> Handle<Self> {
+    ) -> Ref<Self> {
         self.raw_dialog_route_data_mut(app).transition_duration = animation_style
             .duration
             .unwrap_or(Duration::from_millis(150));
-        app.get_mut(self).animation_style = Some(animation_style);
+        app.get_mut(&self).animation_style = Some(animation_style);
         self
     }
 
@@ -2395,12 +2387,11 @@ impl DialogRoute {
         self.raw_dialog_route_data_mut(app).page_builder = page_builder;
     }
 
-    fn set_animation(self: Handle<Self>, app: &mut App, animation: AnyAnimation<f64>) {
-        let current = app.get(self).curved_animation;
-        if current.map(|curved| curved.parent(app)) != Some(animation) {
+    fn set_animation(self: Handle<Self>, app: &mut App, animation: AnimationRef<f64>) {
+        let current = app.get(self).curved_animation.handle();
+        if current.map(|curved| curved.parent(app)) != Some(animation.handle()) {
             if let Some(curved) = current {
                 curved.dispose(app);
-                app.destroy_lingering(curved);
             }
             let style = app.get(self).animation_style.clone();
             let curve = style
@@ -2494,9 +2485,8 @@ impl Route for DialogRoute {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        if let Some(curved) = app.get(self).curved_animation {
+        if let Some(curved) = app.get(self).curved_animation.handle() {
             curved.dispose(app);
-            app.destroy_lingering(curved);
         }
         TransitionRoute::dispose(self, app)
     }
@@ -2531,16 +2521,17 @@ impl RawDialogRouteLeaf for DialogRoute {
         self: Handle<Self>,
         app: &mut App,
         context: BuildContext,
-        animation: AnyAnimation<f64>,
-        secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        secondary_animation: AnimationRef<f64>,
         child: WidgetRef,
     ) -> WidgetRef {
-        self.set_animation(app, animation);
+        self.set_animation(app, animation.clone());
         let curved = app
             .get(self)
             .curved_animation
+            .clone()
             .expect("set_animation made it");
-        FadeTransition::new(curved.as_animation())
+        FadeTransition::new(curved.erase())
             .child(RawDialogRoute::build_transitions(
                 self,
                 app,
@@ -2908,10 +2899,9 @@ pub(crate) mod tests {
     }
 
     /// Not a Dart case: what Flutter's leak tracking checks, that opening and closing a dialog
-    /// leaves nothing in the arena. Until the ownership migration is done, what it still
-    /// leaves is written in.
+    /// leaves nothing in the arena.
     #[test]
-    fn opening_and_closing_a_dialog_leaves_only_the_known_leak() {
+    fn opening_and_closing_a_dialog_leaves_nothing_behind() {
         with_main_thread_stack(|| {
             let mut tester = tester();
             pump_with_dialog(
@@ -2919,32 +2909,13 @@ pub(crate) mod tests {
                 m3,
                 AlertDialog::new().content(Text::new("Body")),
             );
-            // What the cycle leaves today; each step of the ownership migration
-            // (experiments/2026-11-15-waft-ownership) brings these down to none.
-            tester.assert_leaves_behind(
-                &[
-                    ("waft_animation::animation_controller::AnimationController", 1),
-                    ("waft_animation::animations::ProxyAnimation", 3),
-                    ("waft_foundation::change_notifier::ValueNotifier<bool>", 1),
-                    ("waft_foundation::change_notifier::ValueNotifier<core::option::Option<alloc::string::String>>", 1),
-                    ("waft_foundation::change_notifier::ValueNotifier<core::option::Option<waft_foundation::app::Handle<waft_widgets::widgets::overlay::OverlayEntryWidgetState>>>", 2),
-                    ("waft_material::dialog::DialogRoute", 1),
-                    ("waft_scheduler::ticker::Ticker", 6),
-                    ("waft_widgets::widgets::focus_manager::FocusAttachment", 1),
-                    ("waft_widgets::widgets::focus_manager::FocusScopeNode", 1),
-                    ("waft_widgets::widgets::navigator::RouteEntry", 1),
-                    ("waft_widgets::widgets::overlay::OverlayEntry", 2),
-                    ("waft_widgets::widgets::page_storage::PageStorageBucket", 1),
-                    ("waft_widgets::widgets::scroll_controller::ScrollController", 1),
-                ],
-                |tester| {
-                    open(tester);
-                    let body = only(tester.find_onstage_text("Body"));
-                    Navigator::pop(&mut tester.cell.borrow_mut(), body, None);
-                    tester.pump_and_settle();
-                    assert_eq!(shows(tester, "Body"), 0);
-                },
-            );
+            tester.assert_leaves_behind(&[], |tester| {
+                open(tester);
+                let body = only(tester.find_onstage_text("Body"));
+                Navigator::pop(&mut tester.cell.borrow_mut(), body, None);
+                tester.pump_and_settle();
+                assert_eq!(shows(tester, "Body"), 0);
+            });
         });
     }
 
@@ -4216,7 +4187,7 @@ pub(crate) mod tests {
             let page = Rc::clone(&page);
             let page_builder: RoutePageBuilder =
                 Rc::new(move |app, context, _animation, _secondary_animation| page(app, context));
-            Some(PageRouteBuilder::new(app, page_builder).as_route())
+            Some(PageRouteBuilder::new(app, page_builder).into_erased())
         })
     }
 
@@ -4608,7 +4579,7 @@ pub(crate) mod tests {
                 });
                 crate::app::MaterialApp::new()
                     .theme(m3(&app))
-                    .navigator_observers([waft_widgets::NavigatorObserver::as_observer(observer)])
+                    .navigator_observers([observer.erase::<waft_widgets::AnyNavigatorObserver>()])
                     .home(Material::new().child(
                         Center::new().child(ElevatedButton::new(None, Some(Text::new("Go")))),
                     ))
@@ -4741,12 +4712,11 @@ pub(crate) mod tests {
         waft_widgets::AnyFocusNode,
         waft_widgets::AnyFocusNode,
     ) {
-        use waft_widgets::FocusNodeLeaf;
         let (ok_node, cancel_node) = {
             let mut app = tester.cell.borrow_mut();
             (
-                waft_widgets::FocusNode::new(&mut app).as_node(),
-                waft_widgets::FocusNode::new(&mut app).as_node(),
+                waft_widgets::FocusNode::new(&mut app).into_erased::<waft_widgets::AnyFocusNode>(),
+                waft_widgets::FocusNode::new(&mut app).into_erased::<waft_widgets::AnyFocusNode>(),
             )
         };
         let pressed = || Some(waft_foundation::Listener::new(|_app| {}));
@@ -4754,13 +4724,13 @@ pub(crate) mod tests {
             .content(Text::new("Test dialog"))
             .actions([
                 TextButton::new(pressed(), Some(Text::new("OK")))
-                    .focus_node(ok_node)
+                    .focus_node(ok_node.clone())
                     .into_widget(),
                 TextButton::new(pressed(), Some(Text::new("Cancel")))
-                    .focus_node(cancel_node)
+                    .focus_node(cancel_node.clone())
                     .into_widget(),
             ]);
-        (dialog, ok_node, cancel_node)
+        (dialog, ok_node.handle(), cancel_node.handle())
     }
 
     fn focus_of(tester: &WidgetTester, node: waft_widgets::AnyFocusNode) -> bool {
@@ -5027,25 +4997,28 @@ pub(crate) mod tests {
             let focus_node = waft_widgets::FocusNode::new(&mut tester.cell.borrow_mut());
             let dialog_text = "Dialog Text";
             let saved = Rc::clone(&saved_context);
-            pump_app(&mut tester, m3, move |_app| {
-                Material::new()
-                    .child(Builder::new(move |_app, context| {
-                        saved.set(Some(context));
-                        crate::text_field::TextField::new()
-                            .focus_node(focus_node)
-                            .into_widget()
-                    }))
-                    .into_widget()
+            pump_app(&mut tester, m3, {
+                let focus_node = focus_node.clone();
+                move |_app| {
+                    Material::new()
+                        .child(Builder::new(move |_app, context| {
+                            saved.set(Some(context));
+                            crate::text_field::TextField::new()
+                                .focus_node(focus_node.erase())
+                                .into_widget()
+                        }))
+                        .into_widget()
+                }
             });
             tester.pump(Duration::ZERO);
 
             // Initially, there is no dialog and the text field has no focus.
             assert_eq!(shows(&tester, dialog_text), 0);
-            assert!(!has_focus_of(&tester, focus_node));
+            assert!(!has_focus_of(&tester, focus_node.handle()));
 
             // Request focus on the text field.
-            request_focus_of(&mut tester, focus_node);
-            assert!(has_focus_of(&tester, focus_node));
+            request_focus_of(&mut tester, focus_node.handle());
+            assert!(has_focus_of(&tester, focus_node.handle()));
 
             // Bring up dialog.
             let navigator =
@@ -5057,13 +5030,13 @@ pub(crate) mod tests {
                     seen(&saved_context),
                     Rc::new(move |_app, _context| Text::new(dialog_text).into_widget()),
                 );
-                drop(navigator.push(&mut app, route.as_route()));
+                drop(navigator.push(&mut app, route.erase()));
             }
             tester.pump(Duration::ZERO);
 
             // The dialog is showing and the text field has lost focus.
             assert_eq!(shows(&tester, dialog_text), 1);
-            assert!(!has_focus_of(&tester, focus_node));
+            assert!(!has_focus_of(&tester, focus_node.handle()));
 
             // Dismiss the dialog.
             navigator.pop(&mut tester.cell.borrow_mut(), None);
@@ -5071,7 +5044,7 @@ pub(crate) mod tests {
 
             // The dialog is dismissed and the focus is shifted back to the text field.
             assert_eq!(shows(&tester, dialog_text), 0);
-            assert!(has_focus_of(&tester, focus_node));
+            assert!(has_focus_of(&tester, focus_node.handle()));
 
             // Bring up dialog again with requestFocus to false.
             {
@@ -5081,14 +5054,14 @@ pub(crate) mod tests {
                     Rc::new(move |_app, _context| Text::new(dialog_text).into_widget()),
                     false,
                 );
-                route.request_focus(&mut app, false);
-                drop(navigator.push(&mut app, Route::as_route(route)));
+                route.clone().request_focus(&mut app, false);
+                drop(navigator.push(&mut app, route.erase()));
             }
             tester.pump(Duration::ZERO);
 
             // The dialog is showing and the text field still has focus.
             assert_eq!(shows(&tester, dialog_text), 1);
-            assert!(has_focus_of(&tester, focus_node));
+            assert!(has_focus_of(&tester, focus_node.handle()));
         });
     }
 
@@ -5098,20 +5071,20 @@ pub(crate) mod tests {
             let mut tester = tester();
             let navigator_key = GlobalKey::new();
             let focus_node = waft_widgets::FocusNode::new(&mut tester.cell.borrow_mut());
-            let root = {
-                let app = tester.cell.borrow();
-                crate::app::MaterialApp::new()
-                    .theme(m3(&app))
-                    .navigator_key(navigator_key.clone())
-                    .home(
-                        crate::scaffold::Scaffold::new()
-                            .body(crate::text_field::TextField::new().focus_node(focus_node)),
-                    )
-                    .into_widget()
-            };
+            let root =
+                {
+                    let app = tester.cell.borrow();
+                    crate::app::MaterialApp::new()
+                        .theme(m3(&app))
+                        .navigator_key(navigator_key.clone())
+                        .home(crate::scaffold::Scaffold::new().body(
+                            crate::text_field::TextField::new().focus_node(focus_node.erase()),
+                        ))
+                        .into_widget()
+                };
             tester.pump_widget(root);
-            request_focus_of(&mut tester, focus_node);
-            assert!(has_focus_of(&tester, focus_node));
+            request_focus_of(&mut tester, focus_node.handle());
+            assert!(has_focus_of(&tester, focus_node.handle()));
 
             let dialog_scope_has_focus = |tester: &WidgetTester| {
                 use waft_widgets::FocusNodeLeaf;
@@ -5134,7 +5107,7 @@ pub(crate) mod tests {
             drop(show.on(&tester, navigator_context(&tester), Rc::clone(&dialog)));
             tester.pump_and_settle();
             assert!(dialog_scope_has_focus(&tester));
-            assert!(!has_focus_of(&tester, focus_node));
+            assert!(!has_focus_of(&tester, focus_node.handle()));
 
             {
                 let mut app = tester.cell.borrow_mut();
@@ -5144,7 +5117,7 @@ pub(crate) mod tests {
                     .pop(&mut app, None);
             }
             tester.pump_and_settle();
-            assert!(has_focus_of(&tester, focus_node));
+            assert!(has_focus_of(&tester, focus_node.handle()));
 
             let show = Show {
                 request_focus: Some(false),
@@ -5153,7 +5126,7 @@ pub(crate) mod tests {
             drop(show.on(&tester, navigator_context(&tester), dialog));
             tester.pump_and_settle();
             assert!(!dialog_scope_has_focus(&tester));
-            assert!(has_focus_of(&tester, focus_node));
+            assert!(has_focus_of(&tester, focus_node.handle()));
         });
     }
 
@@ -5291,9 +5264,7 @@ pub(crate) mod tests {
                                     });
                                 let route = RawDialogRoute::new(app, page_builder)
                                     .fullscreen_dialog(app, true);
-                                drop(
-                                    Navigator::of(app, context, false).push(app, route.as_route()),
-                                );
+                                drop(Navigator::of(app, context, false).push(app, route.erase()));
                             })),
                             Some(Text::new("X")),
                         )
@@ -5769,12 +5740,10 @@ pub(crate) mod tests {
             let app = tester.cell.borrow();
             crate::app::MaterialApp::new()
                 .theme(m3(&app))
-                .navigator_observers([waft_widgets::NavigatorObserver::as_observer(root_observer)])
+                .navigator_observers([root_observer.erase::<waft_widgets::AnyNavigatorObserver>()])
                 .home(
                     Navigator::new()
-                        .observers([waft_widgets::NavigatorObserver::as_observer(
-                            nested_observer,
-                        )])
+                        .observers([nested_observer.erase::<waft_widgets::AnyNavigatorObserver>()])
                         .on_generate_route(move |app, _settings| {
                             let route = crate::page::MaterialPageRoute::new(
                                 app,
@@ -5800,7 +5769,7 @@ pub(crate) mod tests {
                                     .into_widget()
                                 }),
                             );
-                            Some(Route::as_route(route))
+                            Some(route.erase())
                         }),
                 )
                 .into_widget()
@@ -5814,8 +5783,8 @@ pub(crate) mod tests {
 
         let app = tester.cell.borrow();
         (
-            app.get(root_observer).dialog_count.get(),
-            app.get(nested_observer).dialog_count.get(),
+            app.get(&root_observer).dialog_count.get(),
+            app.get(&nested_observer).dialog_count.get(),
         )
     }
 
@@ -5868,8 +5837,8 @@ pub(crate) mod tests {
         });
     }
 
-    /// Dart's collector frees the `CurvedAnimation` a `DialogRoute` makes for its fade once
-    /// the route is gone; here the route frees it in its `dispose`.
+    /// Not a Dart case: what Dart's collector does with the `CurvedAnimation` a `DialogRoute`
+    /// makes for its fade, freed once the route is gone.
     #[test]
     fn a_disposed_dialog_route_frees_its_fade() {
         with_main_thread_stack(|| {
@@ -5893,19 +5862,22 @@ pub(crate) mod tests {
                     seen(&saved_context),
                     Rc::new(move |_app, _context| Text::new("Dialog").into_widget()),
                 );
-                drop(navigator.push(&mut app, route.as_route()));
+                drop(navigator.push(&mut app, route.erase()));
                 route
             };
             tester.pump_and_settle();
             let fade = tester
                 .cell
                 .borrow()
-                .get(route)
+                .get(&route)
                 .curved_animation
-                .expect("the route built its transitions");
+                .as_ref()
+                .expect("the route built its transitions")
+                .handle();
 
             navigator.pop(&mut tester.cell.borrow_mut(), None);
             tester.pump_and_settle();
+            drop(route);
             tester.cell.checkpoint();
             assert!(!tester.cell.borrow().contains(fade));
         });

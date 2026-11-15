@@ -64,7 +64,7 @@ pub fn run_feature(app: &mut App, feature: Feature) {
                     Rc::new(move |app, context, _, _| builder(app, context)),
                 )
                 .settings(app, RouteSettingsRef::Settings(settings.clone()));
-                PageRoute::as_page_route(route)
+                route.into_erased()
             })
             .home(Gallery {
                 initial_feature: feature,

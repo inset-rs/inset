@@ -154,10 +154,6 @@ The key constants and the four tables are machine-written from the Dart, as Flut
   Reason: platform — the host answers a `Platform` call in place; there is no channel reply to await.
   Affect: the root bucket is there for the first frame that asks for it, and listeners still fire from `handle_restoration_update_from_engine` as in Dart.
 
-- Change: `dispose` destroys the bucket's arena slot.
-  Reason: language — the arena owns the object, and no collector keeps a disposed bucket alive.
-  Affect: using a bucket after `dispose` panics in a release build too, where Dart only asserts in debug.
-
 - Change: `RestorationBucket::root` takes the raw map by value and the hierarchy owns it from then on.
   Reason: language — a Rust value has one owner, so the caller cannot keep watching the map it handed over.
   Affect: a child bucket's writes are no longer visible through the caller's map; read the data back through the buckets or from what `Restoration::put` receives.

@@ -7,14 +7,15 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use waft_animation::{
-    Animatable, Animation, AnimationBehavior, AnimationController, AnimationStatusListener,
-    AnyAnimation, ColorTween, Curve, CurvedAnimation, Curves, Tween, TweenLerp,
+    Animatable, Animation, AnimationBehavior, AnimationController, AnimationRef,
+    AnimationStatusListener, AnyAnimation, ColorTween, Curve, CurvedAnimation, Curves, Drive,
+    Tween, TweenLerp,
 };
 use waft_embedder::{
     Clip, Color, FilterQuality, Matrix4, Offset, Rect, TextAlign, TextHeightBehavior, compose,
     decompose,
 };
-use waft_foundation::{App, Handle, Listener};
+use waft_foundation::{App, Handle, Listener, OptionRetained};
 use waft_painting::{
     Alignment, AlignmentGeometry, AnyColor, Border, BorderRadius, BoxDecoration, BoxShape,
     DecorationRef, EdgeInsets, EdgeInsetsGeometry, ShapeBorderRef, TextOverflow, TextStyle,
@@ -37,6 +38,7 @@ use crate::widgets::ticker_provider::{
 use crate::widgets::transitions::{
     FadeTransition, RotationTransition, ScaleTransition, SlideTransition,
 };
+use waft_foundation::Ref;
 
 /// An interpolation between two [`BoxConstraints`].
 ///
@@ -47,7 +49,7 @@ use crate::widgets::transitions::{
 ///
 /// Unlike the tweens in `waft_animation`, this one is a value rather than an arena object:
 /// the orphan rule leaves no local type in `impl Animatable<BoxConstraints> for
-/// Handle<BoxConstraintsTween>`. A driven animation therefore holds a clone, and writing
+/// Ref<BoxConstraintsTween>`. A driven animation therefore holds a clone, and writing
 /// [`begin`](Self::begin) or [`end`](Self::end) afterwards does not reach it.
 #[derive(Clone, Debug)]
 pub struct BoxConstraintsTween {
@@ -95,7 +97,7 @@ impl Animatable<BoxConstraints> for BoxConstraintsTween {
 ///
 /// Unlike the tweens in `waft_animation`, this one is a value rather than an arena object:
 /// the orphan rule leaves no local type in `impl Animatable<DecorationRef> for
-/// Handle<DecorationTween>`. A driven animation therefore holds a clone, and writing
+/// Ref<DecorationTween>`. A driven animation therefore holds a clone, and writing
 /// [`begin`](Self::begin) or [`end`](Self::end) afterwards does not reach it.
 #[derive(Clone, Debug)]
 pub struct DecorationTween {
@@ -148,7 +150,7 @@ impl Animatable<DecorationRef> for DecorationTween {
 ///
 /// Unlike the tweens in `waft_animation`, this one is a value rather than an arena object:
 /// the orphan rule leaves no local type in `impl Animatable<EdgeInsets> for
-/// Handle<EdgeInsetsTween>`. A driven animation therefore holds a clone, and writing
+/// Ref<EdgeInsetsTween>`. A driven animation therefore holds a clone, and writing
 /// [`begin`](Self::begin) or [`end`](Self::end) afterwards does not reach it.
 ///
 /// See also:
@@ -655,7 +657,7 @@ impl TweenValue for Option<ShapeBorderRef> {
 
 /// A tween in one of a state's slots: Dart's `Tween<T>` parameter of a [`TweenVisitor`].
 ///
-/// Implemented both by `Handle<Tween<T>>`, the arena tween of `waft_animation`, and by the
+/// Implemented both by `Ref<Tween<T>>`, the arena tween of `waft_animation`, and by the
 /// tween values this file defines ([`EdgeInsetsTween`] and the rest).
 pub trait TweenSlot: Animatable<<Self as TweenSlot>::Value> + Clone + 'static {
     /// The `T` of Dart's `Tween<T>`.
@@ -672,37 +674,25 @@ pub trait TweenSlot: Animatable<<Self as TweenSlot>::Value> + Clone + 'static {
 
     /// Dart's `end` setter.
     fn set_end(&mut self, app: &mut App, end: Option<Self::Value>);
-
-    /// Releases what this tween holds in the arena.
-    ///
-    /// Dart leaves its tweens to the collector; a slot filled with an arena tween frees it
-    /// when the state is disposed.
-    fn dispose(&self, app: &mut App) {
-        let _ = app;
-    }
 }
 
-impl<T: TweenLerp + TweenValue> TweenSlot for Handle<Tween<T>> {
+impl<T: TweenLerp + TweenValue> TweenSlot for Ref<Tween<T>> {
     type Value = T;
 
     fn begin(&self, app: &App) -> Option<T> {
-        Tween::begin(*self, app).cloned()
+        Tween::begin(self.handle(), app).cloned()
     }
 
     fn set_begin(&mut self, app: &mut App, begin: Option<T>) {
-        Tween::set_begin(*self, app, begin);
+        Tween::set_begin(self.handle(), app, begin);
     }
 
     fn end(&self, app: &App) -> Option<T> {
-        Tween::end(*self, app).cloned()
+        Tween::end(self.handle(), app).cloned()
     }
 
     fn set_end(&mut self, app: &mut App, end: Option<T>) {
-        Tween::set_end(*self, app, end);
-    }
-
-    fn dispose(&self, app: &mut App) {
-        app.destroy(*self);
+        Tween::set_end(self.handle(), app, end);
     }
 }
 
@@ -768,27 +758,23 @@ tween_slot_for_nullable_value!(BorderRadiusTween, BorderRadius);
 
 /// `ColorTween` is Dart's `Tween<Color?>`: an unset endpoint and a null one are the same, as
 /// in [`tween_slot_for_nullable_value!`].
-impl TweenSlot for Handle<ColorTween> {
+impl TweenSlot for Ref<ColorTween> {
     type Value = Option<Color>;
 
     fn begin(&self, app: &App) -> Option<Option<Color>> {
-        ColorTween::begin(*self, app).map(Some)
+        ColorTween::begin(self.handle(), app).map(Some)
     }
 
     fn set_begin(&mut self, app: &mut App, begin: Option<Option<Color>>) {
-        ColorTween::set_begin(*self, app, begin.flatten());
+        ColorTween::set_begin(self.handle(), app, begin.flatten());
     }
 
     fn end(&self, app: &App) -> Option<Option<Color>> {
-        ColorTween::end(*self, app).map(Some)
+        ColorTween::end(self.handle(), app).map(Some)
     }
 
     fn set_end(&mut self, app: &mut App, end: Option<Option<Color>>) {
-        ColorTween::set_end(*self, app, end.flatten());
-    }
-
-    fn dispose(&self, app: &mut App) {
-        app.destroy(*self);
+        ColorTween::set_end(self.handle(), app, end.flatten());
     }
 }
 tween_slot_for_nullable_value!(BorderTween, Border);
@@ -906,31 +892,13 @@ impl TweenVisitor for RetargetTweens {
     }
 }
 
-/// Empties every slot at `dispose`, freeing the arena tweens the constructors made.
-struct DisposeTweens;
-
-impl TweenVisitor for DisposeTweens {
-    fn visit<W: TweenSlot>(
-        &mut self,
-        app: &mut App,
-        tween: Option<W>,
-        _target: Option<W::Value>,
-        _constructor: TweenConstructor<W>,
-    ) -> Option<W> {
-        if let Some(tween) = tween {
-            tween.dispose(app);
-        }
-        None
-    }
-}
-
 /// The fields of Dart's `ImplicitlyAnimatedWidgetState`, which its subclasses carry.
 ///
 /// Both are created in `init_state`, because a state is created without the [`App`].
 #[derive(Default)]
 pub struct ImplicitlyAnimatedWidgetStateData {
-    controller: Option<Handle<AnimationController>>,
-    animation: Option<Handle<CurvedAnimation>>,
+    controller: Option<Ref<AnimationController>>,
+    animation: Option<Ref<CurvedAnimation>>,
 }
 
 impl ImplicitlyAnimatedWidgetStateData {
@@ -997,6 +965,7 @@ where
     fn controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
         self.implicitly_animated_widget_state_data(app)
             .controller
+            .handle()
             .expect("created in init_state")
     }
 
@@ -1019,7 +988,7 @@ where
             self,
         );
         self.implicitly_animated_widget_state_data_mut(app)
-            .controller = Some(controller);
+            .controller = Some(controller.clone());
         controller.add_status_listener(
             app,
             AnimationStatusListener::new(move |status, app| {
@@ -1046,9 +1015,7 @@ where
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &Self::Widget) {
         let curve = Rc::clone(&self.widget(app).implicitly_animated_widget_data().curve);
         if !Rc::ptr_eq(&curve, &old_widget.implicitly_animated_widget_data().curve) {
-            let animation = curved_animation(self, app);
-            animation.dispose(app);
-            app.destroy(animation);
+            curved_animation(self, app).dispose(app);
             let animation = create_curve(self, app);
             self.implicitly_animated_widget_state_data_mut(app)
                 .animation = Some(animation);
@@ -1070,13 +1037,7 @@ where
         animation.dispose(app);
         let controller = self.controller(app);
         controller.dispose(app);
-        self.for_each_tween(app, &mut DisposeTweens);
         SingleTickerProviderStateMixin::dispose(self, app);
-        let data = self.implicitly_animated_widget_state_data_mut(app);
-        data.animation = None;
-        data.controller = None;
-        app.destroy(animation);
-        app.destroy(controller);
     }
 
     /// Visits each tween controlled by this state with the specified `visitor`.
@@ -1147,16 +1108,22 @@ where
 {
     this.implicitly_animated_widget_state_data(app)
         .animation
+        .handle()
         .expect("created in init_state")
 }
 
 /// Dart's private `_createCurve`.
-fn create_curve<S>(this: Handle<S>, app: &mut App) -> Handle<CurvedAnimation>
+fn create_curve<S>(this: Handle<S>, app: &mut App) -> Ref<CurvedAnimation>
 where
     S: ImplicitlyAnimatedWidgetState,
     S::Widget: ImplicitlyAnimatedWidget,
 {
-    let parent = this.controller(app).view();
+    let parent = this
+        .implicitly_animated_widget_state_data(app)
+        .controller
+        .as_ref()
+        .expect("created in init_state")
+        .erase();
     let curve = Rc::clone(&this.widget(app).implicitly_animated_widget_data().curve);
     CurvedAnimation::create(app, parent, curve, None)
 }
@@ -1502,7 +1469,7 @@ impl SingleTickerProviderStateMixin for AnimatedContainerState {
 }
 
 impl TickerProviderObject for AnimatedContainerState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -1713,7 +1680,7 @@ impl SingleTickerProviderStateMixin for AnimatedPaddingState {
 }
 
 impl TickerProviderObject for AnimatedPaddingState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -1887,8 +1854,8 @@ pub struct AnimatedAlignState {
     single_ticker_provider: SingleTickerProviderStateMixinData,
     implicitly_animated_widget_state: ImplicitlyAnimatedWidgetStateData,
     alignment: Option<AlignmentGeometryTween>,
-    height_factor_tween: Option<Handle<Tween<f64>>>,
-    width_factor_tween: Option<Handle<Tween<f64>>>,
+    height_factor_tween: Option<Ref<Tween<f64>>>,
+    width_factor_tween: Option<Ref<Tween<f64>>>,
 }
 
 impl SingleTickerProviderStateMixin for AnimatedAlignState {
@@ -1908,7 +1875,7 @@ impl SingleTickerProviderStateMixin for AnimatedAlignState {
 }
 
 impl TickerProviderObject for AnimatedAlignState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -1924,14 +1891,14 @@ impl ImplicitlyAnimatedWidgetState for AnimatedAlignState {
         });
         if self.widget(app).height_factor.is_some() {
             let (tween, target) = (
-                app.get(self).height_factor_tween,
+                app.get(self).height_factor_tween.clone(),
                 self.widget(app).height_factor,
             );
             app.get_mut(self).height_factor_tween = visitor.visit(app, tween, target, double_tween);
         }
         if self.widget(app).width_factor.is_some() {
             let (tween, target) = (
-                app.get(self).width_factor_tween,
+                app.get(self).width_factor_tween.clone(),
                 self.widget(app).width_factor,
             );
             app.get_mut(self).width_factor_tween = visitor.visit(app, tween, target, double_tween);
@@ -1968,8 +1935,10 @@ impl State for AnimatedAlignState {
             .alignment
             .clone()
             .expect("for_each_tween made the tween");
-        let (height_factor_tween, width_factor_tween) =
-            (state.height_factor_tween, state.width_factor_tween);
+        let (height_factor_tween, width_factor_tween) = (
+            state.height_factor_tween.clone(),
+            state.width_factor_tween.clone(),
+        );
         let child = self.widget(app).child.clone();
         let alignment = alignment
             .evaluate(app, animation)
@@ -2171,12 +2140,12 @@ pub struct AnimatedPositionedState {
     state: StateData<AnimatedPositioned>,
     single_ticker_provider: SingleTickerProviderStateMixinData,
     implicitly_animated_widget_state: ImplicitlyAnimatedWidgetStateData,
-    left: Option<Handle<Tween<f64>>>,
-    top: Option<Handle<Tween<f64>>>,
-    right: Option<Handle<Tween<f64>>>,
-    bottom: Option<Handle<Tween<f64>>>,
-    width: Option<Handle<Tween<f64>>>,
-    height: Option<Handle<Tween<f64>>>,
+    left: Option<Ref<Tween<f64>>>,
+    top: Option<Ref<Tween<f64>>>,
+    right: Option<Ref<Tween<f64>>>,
+    bottom: Option<Ref<Tween<f64>>>,
+    width: Option<Ref<Tween<f64>>>,
+    height: Option<Ref<Tween<f64>>>,
 }
 
 impl SingleTickerProviderStateMixin for AnimatedPositionedState {
@@ -2196,7 +2165,7 @@ impl SingleTickerProviderStateMixin for AnimatedPositionedState {
 }
 
 impl TickerProviderObject for AnimatedPositionedState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -2205,17 +2174,17 @@ impl ImplicitlyAnimatedWidgetState for AnimatedPositionedState {
     crate::implicitly_animated_widget_state_accessors!();
 
     fn for_each_tween<V: TweenVisitor>(self: Handle<Self>, app: &mut App, visitor: &mut V) {
-        let (tween, target) = (app.get(self).left, self.widget(app).left);
+        let (tween, target) = (app.get(self).left.clone(), self.widget(app).left);
         app.get_mut(self).left = visitor.visit(app, tween, target, double_tween);
-        let (tween, target) = (app.get(self).top, self.widget(app).top);
+        let (tween, target) = (app.get(self).top.clone(), self.widget(app).top);
         app.get_mut(self).top = visitor.visit(app, tween, target, double_tween);
-        let (tween, target) = (app.get(self).right, self.widget(app).right);
+        let (tween, target) = (app.get(self).right.clone(), self.widget(app).right);
         app.get_mut(self).right = visitor.visit(app, tween, target, double_tween);
-        let (tween, target) = (app.get(self).bottom, self.widget(app).bottom);
+        let (tween, target) = (app.get(self).bottom.clone(), self.widget(app).bottom);
         app.get_mut(self).bottom = visitor.visit(app, tween, target, double_tween);
-        let (tween, target) = (app.get(self).width, self.widget(app).width);
+        let (tween, target) = (app.get(self).width.clone(), self.widget(app).width);
         app.get_mut(self).width = visitor.visit(app, tween, target, double_tween);
-        let (tween, target) = (app.get(self).height, self.widget(app).height);
+        let (tween, target) = (app.get(self).height.clone(), self.widget(app).height);
         app.get_mut(self).height = visitor.visit(app, tween, target, double_tween);
     }
 }
@@ -2245,8 +2214,12 @@ impl State for AnimatedPositionedState {
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
         let animation = self.animation(app);
         let state = app.get(self);
-        let (left, top, right) = (state.left, state.top, state.right);
-        let (bottom, width, height) = (state.bottom, state.width, state.height);
+        let (left, top, right) = (state.left.clone(), state.top.clone(), state.right.clone());
+        let (bottom, width, height) = (
+            state.bottom.clone(),
+            state.width.clone(),
+            state.height.clone(),
+        );
         let mut positioned = Positioned::new(self.widget(app).child.clone());
         if let Some(left) = left {
             positioned = positioned.left(left.evaluate(app, animation));
@@ -2424,12 +2397,12 @@ pub struct AnimatedPositionedDirectionalState {
     state: StateData<AnimatedPositionedDirectional>,
     single_ticker_provider: SingleTickerProviderStateMixinData,
     implicitly_animated_widget_state: ImplicitlyAnimatedWidgetStateData,
-    start: Option<Handle<Tween<f64>>>,
-    top: Option<Handle<Tween<f64>>>,
-    end: Option<Handle<Tween<f64>>>,
-    bottom: Option<Handle<Tween<f64>>>,
-    width: Option<Handle<Tween<f64>>>,
-    height: Option<Handle<Tween<f64>>>,
+    start: Option<Ref<Tween<f64>>>,
+    top: Option<Ref<Tween<f64>>>,
+    end: Option<Ref<Tween<f64>>>,
+    bottom: Option<Ref<Tween<f64>>>,
+    width: Option<Ref<Tween<f64>>>,
+    height: Option<Ref<Tween<f64>>>,
 }
 
 impl SingleTickerProviderStateMixin for AnimatedPositionedDirectionalState {
@@ -2449,7 +2422,7 @@ impl SingleTickerProviderStateMixin for AnimatedPositionedDirectionalState {
 }
 
 impl TickerProviderObject for AnimatedPositionedDirectionalState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -2458,17 +2431,17 @@ impl ImplicitlyAnimatedWidgetState for AnimatedPositionedDirectionalState {
     crate::implicitly_animated_widget_state_accessors!();
 
     fn for_each_tween<V: TweenVisitor>(self: Handle<Self>, app: &mut App, visitor: &mut V) {
-        let (tween, target) = (app.get(self).start, self.widget(app).start);
+        let (tween, target) = (app.get(self).start.clone(), self.widget(app).start);
         app.get_mut(self).start = visitor.visit(app, tween, target, double_tween);
-        let (tween, target) = (app.get(self).top, self.widget(app).top);
+        let (tween, target) = (app.get(self).top.clone(), self.widget(app).top);
         app.get_mut(self).top = visitor.visit(app, tween, target, double_tween);
-        let (tween, target) = (app.get(self).end, self.widget(app).end);
+        let (tween, target) = (app.get(self).end.clone(), self.widget(app).end);
         app.get_mut(self).end = visitor.visit(app, tween, target, double_tween);
-        let (tween, target) = (app.get(self).bottom, self.widget(app).bottom);
+        let (tween, target) = (app.get(self).bottom.clone(), self.widget(app).bottom);
         app.get_mut(self).bottom = visitor.visit(app, tween, target, double_tween);
-        let (tween, target) = (app.get(self).width, self.widget(app).width);
+        let (tween, target) = (app.get(self).width.clone(), self.widget(app).width);
         app.get_mut(self).width = visitor.visit(app, tween, target, double_tween);
-        let (tween, target) = (app.get(self).height, self.widget(app).height);
+        let (tween, target) = (app.get(self).height.clone(), self.widget(app).height);
         app.get_mut(self).height = visitor.visit(app, tween, target, double_tween);
     }
 }
@@ -2502,8 +2475,12 @@ impl State for AnimatedPositionedDirectionalState {
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
         let animation = self.animation(app);
         let state = app.get(self);
-        let (start, top, end) = (state.start, state.top, state.end);
-        let (bottom, width, height) = (state.bottom, state.width, state.height);
+        let (start, top, end) = (state.start.clone(), state.top.clone(), state.end.clone());
+        let (bottom, width, height) = (
+            state.bottom.clone(),
+            state.width.clone(),
+            state.height.clone(),
+        );
         let text_direction = Directionality::of(app, context);
         let start = start.map(|start| start.evaluate(app, animation));
         let end = end.map(|end| end.evaluate(app, animation));
@@ -2618,8 +2595,8 @@ pub struct AnimatedScaleState {
     state: StateData<AnimatedScale>,
     single_ticker_provider: SingleTickerProviderStateMixinData,
     implicitly_animated_widget_state: ImplicitlyAnimatedWidgetStateData,
-    scale: Option<Handle<Tween<f64>>>,
-    scale_animation: Option<AnyAnimation<f64>>,
+    scale: Option<Ref<Tween<f64>>>,
+    scale_animation: Option<AnimationRef<f64>>,
 }
 
 impl SingleTickerProviderStateMixin for AnimatedScaleState {
@@ -2639,7 +2616,7 @@ impl SingleTickerProviderStateMixin for AnimatedScaleState {
 }
 
 impl TickerProviderObject for AnimatedScaleState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -2648,13 +2625,20 @@ impl ImplicitlyAnimatedWidgetState for AnimatedScaleState {
     crate::implicitly_animated_widget_state_accessors!();
 
     fn for_each_tween<V: TweenVisitor>(self: Handle<Self>, app: &mut App, visitor: &mut V) {
-        let (tween, target) = (app.get(self).scale, Some(self.widget(app).scale));
+        let (tween, target) = (app.get(self).scale.clone(), Some(self.widget(app).scale));
         app.get_mut(self).scale = visitor.visit(app, tween, target, double_tween);
     }
 
     fn did_update_tweens(self: Handle<Self>, app: &mut App) {
-        let scale = app.get(self).scale.expect("for_each_tween made the tween");
-        let animation = self.animation(app);
+        let scale = app
+            .get(self)
+            .scale
+            .clone()
+            .expect("for_each_tween made the tween");
+        let animation = self
+            .animation(app)
+            .upgrade(app)
+            .expect("the state keeps its animation");
         let scale_animation = animation.drive(app, scale);
         app.get_mut(self).scale_animation = Some(scale_animation);
     }
@@ -2684,6 +2668,7 @@ impl State for AnimatedScaleState {
         let scale = app
             .get(self)
             .scale_animation
+            .clone()
             .expect("did_update_tweens drove the animation");
         let widget = self.widget(app);
         let (alignment, filter_quality, child) = (
@@ -2796,8 +2781,8 @@ pub struct AnimatedRotationState {
     state: StateData<AnimatedRotation>,
     single_ticker_provider: SingleTickerProviderStateMixinData,
     implicitly_animated_widget_state: ImplicitlyAnimatedWidgetStateData,
-    turns: Option<Handle<Tween<f64>>>,
-    turns_animation: Option<AnyAnimation<f64>>,
+    turns: Option<Ref<Tween<f64>>>,
+    turns_animation: Option<AnimationRef<f64>>,
 }
 
 impl SingleTickerProviderStateMixin for AnimatedRotationState {
@@ -2817,7 +2802,7 @@ impl SingleTickerProviderStateMixin for AnimatedRotationState {
 }
 
 impl TickerProviderObject for AnimatedRotationState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -2826,13 +2811,20 @@ impl ImplicitlyAnimatedWidgetState for AnimatedRotationState {
     crate::implicitly_animated_widget_state_accessors!();
 
     fn for_each_tween<V: TweenVisitor>(self: Handle<Self>, app: &mut App, visitor: &mut V) {
-        let (tween, target) = (app.get(self).turns, Some(self.widget(app).turns));
+        let (tween, target) = (app.get(self).turns.clone(), Some(self.widget(app).turns));
         app.get_mut(self).turns = visitor.visit(app, tween, target, double_tween);
     }
 
     fn did_update_tweens(self: Handle<Self>, app: &mut App) {
-        let turns = app.get(self).turns.expect("for_each_tween made the tween");
-        let animation = self.animation(app);
+        let turns = app
+            .get(self)
+            .turns
+            .clone()
+            .expect("for_each_tween made the tween");
+        let animation = self
+            .animation(app)
+            .upgrade(app)
+            .expect("the state keeps its animation");
         let turns_animation = animation.drive(app, turns);
         app.get_mut(self).turns_animation = Some(turns_animation);
     }
@@ -2862,6 +2854,7 @@ impl State for AnimatedRotationState {
         let turns = app
             .get(self)
             .turns_animation
+            .clone()
             .expect("did_update_tweens drove the animation");
         let widget = self.widget(app);
         let (alignment, filter_quality, child) = (
@@ -2953,8 +2946,8 @@ pub struct AnimatedSlideState {
     state: StateData<AnimatedSlide>,
     single_ticker_provider: SingleTickerProviderStateMixinData,
     implicitly_animated_widget_state: ImplicitlyAnimatedWidgetStateData,
-    offset: Option<Handle<Tween<Offset>>>,
-    offset_animation: Option<AnyAnimation<Offset>>,
+    offset: Option<Ref<Tween<Offset>>>,
+    offset_animation: Option<AnimationRef<Offset>>,
 }
 
 impl SingleTickerProviderStateMixin for AnimatedSlideState {
@@ -2974,7 +2967,7 @@ impl SingleTickerProviderStateMixin for AnimatedSlideState {
 }
 
 impl TickerProviderObject for AnimatedSlideState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -2983,13 +2976,20 @@ impl ImplicitlyAnimatedWidgetState for AnimatedSlideState {
     crate::implicitly_animated_widget_state_accessors!();
 
     fn for_each_tween<V: TweenVisitor>(self: Handle<Self>, app: &mut App, visitor: &mut V) {
-        let (tween, target) = (app.get(self).offset, Some(self.widget(app).offset));
+        let (tween, target) = (app.get(self).offset.clone(), Some(self.widget(app).offset));
         app.get_mut(self).offset = visitor.visit(app, tween, target, offset_tween);
     }
 
     fn did_update_tweens(self: Handle<Self>, app: &mut App) {
-        let offset = app.get(self).offset.expect("for_each_tween made the tween");
-        let animation = self.animation(app);
+        let offset = app
+            .get(self)
+            .offset
+            .clone()
+            .expect("for_each_tween made the tween");
+        let animation = self
+            .animation(app)
+            .upgrade(app)
+            .expect("the state keeps its animation");
         let offset_animation = animation.drive(app, offset);
         app.get_mut(self).offset_animation = Some(offset_animation);
     }
@@ -3019,6 +3019,7 @@ impl State for AnimatedSlideState {
         let position = app
             .get(self)
             .offset_animation
+            .clone()
             .expect("did_update_tweens drove the animation");
         let child = self.widget(app).child.clone();
         let mut transition = SlideTransition::new(position);
@@ -3115,8 +3116,8 @@ pub struct AnimatedOpacityState {
     state: StateData<AnimatedOpacity>,
     single_ticker_provider: SingleTickerProviderStateMixinData,
     implicitly_animated_widget_state: ImplicitlyAnimatedWidgetStateData,
-    opacity: Option<Handle<Tween<f64>>>,
-    opacity_animation: Option<AnyAnimation<f64>>,
+    opacity: Option<Ref<Tween<f64>>>,
+    opacity_animation: Option<AnimationRef<f64>>,
 }
 
 impl SingleTickerProviderStateMixin for AnimatedOpacityState {
@@ -3136,7 +3137,7 @@ impl SingleTickerProviderStateMixin for AnimatedOpacityState {
 }
 
 impl TickerProviderObject for AnimatedOpacityState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -3145,7 +3146,10 @@ impl ImplicitlyAnimatedWidgetState for AnimatedOpacityState {
     crate::implicitly_animated_widget_state_accessors!();
 
     fn for_each_tween<V: TweenVisitor>(self: Handle<Self>, app: &mut App, visitor: &mut V) {
-        let (tween, target) = (app.get(self).opacity, Some(self.widget(app).opacity));
+        let (tween, target) = (
+            app.get(self).opacity.clone(),
+            Some(self.widget(app).opacity),
+        );
         app.get_mut(self).opacity = visitor.visit(app, tween, target, double_tween);
     }
 
@@ -3153,8 +3157,12 @@ impl ImplicitlyAnimatedWidgetState for AnimatedOpacityState {
         let opacity = app
             .get(self)
             .opacity
+            .clone()
             .expect("for_each_tween made the tween");
-        let animation = self.animation(app);
+        let animation = self
+            .animation(app)
+            .upgrade(app)
+            .expect("the state keeps its animation");
         let opacity_animation = animation.drive(app, opacity);
         app.get_mut(self).opacity_animation = Some(opacity_animation);
     }
@@ -3184,6 +3192,7 @@ impl State for AnimatedOpacityState {
         let opacity = app
             .get(self)
             .opacity_animation
+            .clone()
             .expect("did_update_tweens drove the animation");
         let child = self.widget(app).child.clone();
         let mut transition = FadeTransition::new(opacity);
@@ -3366,7 +3375,7 @@ impl SingleTickerProviderStateMixin for AnimatedDefaultTextStyleState {
 }
 
 impl TickerProviderObject for AnimatedDefaultTextStyleState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -3584,9 +3593,9 @@ pub struct AnimatedPhysicalModelState {
     single_ticker_provider: SingleTickerProviderStateMixinData,
     implicitly_animated_widget_state: ImplicitlyAnimatedWidgetStateData,
     border_radius: Option<BorderRadiusTween>,
-    elevation: Option<Handle<Tween<f64>>>,
-    color: Option<Handle<ColorTween>>,
-    shadow_color: Option<Handle<ColorTween>>,
+    elevation: Option<Ref<Tween<f64>>>,
+    color: Option<Ref<ColorTween>>,
+    shadow_color: Option<Ref<ColorTween>>,
 }
 
 impl SingleTickerProviderStateMixin for AnimatedPhysicalModelState {
@@ -3606,7 +3615,7 @@ impl SingleTickerProviderStateMixin for AnimatedPhysicalModelState {
 }
 
 impl TickerProviderObject for AnimatedPhysicalModelState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -3621,12 +3630,15 @@ impl ImplicitlyAnimatedWidgetState for AnimatedPhysicalModelState {
             visitor.visit(app, tween, Some(Some(target)), |_app, value| {
                 BorderRadiusTween::new(*value, None)
             });
-        let (tween, target) = (app.get(self).elevation, Some(self.widget(app).elevation));
+        let (tween, target) = (
+            app.get(self).elevation.clone(),
+            Some(self.widget(app).elevation),
+        );
         app.get_mut(self).elevation = visitor.visit(app, tween, target, double_tween);
-        let (tween, target) = (app.get(self).color, self.widget(app).color.color());
+        let (tween, target) = (app.get(self).color.clone(), self.widget(app).color.color());
         app.get_mut(self).color = visitor.visit(app, tween, Some(Some(target)), color_tween);
         let (tween, target) = (
-            app.get(self).shadow_color,
+            app.get(self).shadow_color.clone(),
             self.widget(app).shadow_color.color(),
         );
         app.get_mut(self).shadow_color = visitor.visit(app, tween, Some(Some(target)), color_tween);
@@ -3662,9 +3674,15 @@ impl State for AnimatedPhysicalModelState {
             .border_radius
             .clone()
             .expect("for_each_tween made the tween");
-        let elevation = state.elevation.expect("for_each_tween made the tween");
-        let color = state.color.expect("for_each_tween made the tween");
-        let shadow_color = state.shadow_color.expect("for_each_tween made the tween");
+        let elevation = state
+            .elevation
+            .clone()
+            .expect("for_each_tween made the tween");
+        let color = state.color.clone().expect("for_each_tween made the tween");
+        let shadow_color = state
+            .shadow_color
+            .clone()
+            .expect("for_each_tween made the tween");
         let widget = self.widget(app);
         let (shape, clip_behavior, child) =
             (widget.shape, widget.clip_behavior, widget.child.clone());
@@ -3806,8 +3824,8 @@ pub struct AnimatedFractionallySizedBoxState {
     single_ticker_provider: SingleTickerProviderStateMixinData,
     implicitly_animated_widget_state: ImplicitlyAnimatedWidgetStateData,
     alignment: Option<AlignmentGeometryTween>,
-    height_factor_tween: Option<Handle<Tween<f64>>>,
-    width_factor_tween: Option<Handle<Tween<f64>>>,
+    height_factor_tween: Option<Ref<Tween<f64>>>,
+    width_factor_tween: Option<Ref<Tween<f64>>>,
 }
 
 impl SingleTickerProviderStateMixin for AnimatedFractionallySizedBoxState {
@@ -3827,7 +3845,7 @@ impl SingleTickerProviderStateMixin for AnimatedFractionallySizedBoxState {
 }
 
 impl TickerProviderObject for AnimatedFractionallySizedBoxState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -3843,14 +3861,14 @@ impl ImplicitlyAnimatedWidgetState for AnimatedFractionallySizedBoxState {
         });
         if self.widget(app).height_factor.is_some() {
             let (tween, target) = (
-                app.get(self).height_factor_tween,
+                app.get(self).height_factor_tween.clone(),
                 self.widget(app).height_factor,
             );
             app.get_mut(self).height_factor_tween = visitor.visit(app, tween, target, double_tween);
         }
         if self.widget(app).width_factor.is_some() {
             let (tween, target) = (
-                app.get(self).width_factor_tween,
+                app.get(self).width_factor_tween.clone(),
                 self.widget(app).width_factor,
             );
             app.get_mut(self).width_factor_tween = visitor.visit(app, tween, target, double_tween);
@@ -3891,8 +3909,10 @@ impl State for AnimatedFractionallySizedBoxState {
             .alignment
             .clone()
             .expect("for_each_tween made the tween");
-        let (height_factor_tween, width_factor_tween) =
-            (state.height_factor_tween, state.width_factor_tween);
+        let (height_factor_tween, width_factor_tween) = (
+            state.height_factor_tween.clone(),
+            state.width_factor_tween.clone(),
+        );
         let child = self.widget(app).child.clone();
         let alignment = alignment
             .evaluate(app, animation)
@@ -3913,17 +3933,17 @@ impl State for AnimatedFractionallySizedBoxState {
 
 /// Dart's `(dynamic value) => Tween<double>(begin: value as double)`, which every state that
 /// animates a number passes to the visitor.
-fn double_tween(app: &mut App, value: &f64) -> Handle<Tween<f64>> {
+fn double_tween(app: &mut App, value: &f64) -> Ref<Tween<f64>> {
     Tween::new(app, Some(*value), None)
 }
 
 /// Dart's `(dynamic value) => ColorTween(begin: value as Color)`.
-fn color_tween(app: &mut App, value: &Option<Color>) -> Handle<ColorTween> {
+fn color_tween(app: &mut App, value: &Option<Color>) -> Ref<ColorTween> {
     ColorTween::new(app, *value, None)
 }
 
 /// Dart's `(dynamic value) => Tween<Offset>(begin: value as Offset)`.
-fn offset_tween(app: &mut App, value: &Offset) -> Handle<Tween<Offset>> {
+fn offset_tween(app: &mut App, value: &Offset) -> Ref<Tween<Offset>> {
     Tween::new(app, Some(*value), None)
 }
 
@@ -4192,7 +4212,7 @@ mod tests {
     }
 
     #[test]
-    fn dispose_frees_the_arena_tweens_the_constructors_made() {
+    fn unmounting_frees_the_arena_tweens_the_constructors_made() {
         let cell = binding_cell();
         let key = GlobalKey::new();
         binding_mount(&cell, opacity_tree(&key, 0.5));
@@ -4203,6 +4223,7 @@ mod tests {
         let tween = app
             .get(state)
             .opacity
+            .handle()
             .expect("for_each_tween made the tween");
         assert!(app.contains(tween));
 
@@ -4211,7 +4232,12 @@ mod tests {
             SizedBox::square(Some(10.0)).into_widget(),
             Duration::ZERO,
         );
-        assert!(!app.contains(tween), "dispose freed the arena tween");
+        drop(app);
+        cell.checkpoint();
+        assert!(
+            !cell.borrow().contains(tween),
+            "the last keeper of the arena tween is gone"
+        );
     }
 
     #[test]

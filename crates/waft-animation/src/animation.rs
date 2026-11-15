@@ -3,9 +3,9 @@
 use std::any::{TypeId, type_name};
 use std::fmt::{self, Debug};
 use std::hash::{Hash, Hasher};
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
-use waft_foundation::{App, Handle, HandleId, Listener};
+use waft_foundation::{App, Handle, HandleId, ListenableHandle, Listener, Ref, Retained};
 
 use crate::tween::Animatable;
 
@@ -94,6 +94,9 @@ impl AnimationStatusListener {
     ///
     /// The function is receiver-first, `(Handle<T>, &mut App, AnimationStatus)`,
     /// so a method on `Handle<T>` can be named directly.
+    ///
+    /// Like [`Listener::handle_method`], it does not keep its receiver, and is skipped once the
+    /// receiver is freed.
     pub fn handle_method<T: 'static, F>(this: Handle<T>, f: F) -> AnimationStatusListener
     where
         F: Fn(Handle<T>, &mut App, AnimationStatus) + 'static,
@@ -106,7 +109,11 @@ impl AnimationStatusListener {
             )
         };
         AnimationStatusListener {
-            callback: Rc::new(move |status, app: &mut App| f(this, app, status)),
+            callback: Rc::new(move |status, app: &mut App| {
+                if app.tear_off_receiver_is_live(this) {
+                    f(this, app, status);
+                }
+            }),
             identity: StatusListenerIdentity::HandleMethod(this.id(), TypeId::of::<F>()),
         }
     }
@@ -114,6 +121,35 @@ impl AnimationStatusListener {
     /// Calls the closure.
     pub fn call(&self, status: AnimationStatus, app: &mut App) {
         (self.callback)(status, app);
+    }
+
+    /// A reference to this listener that does not keep its closure alive, for a closure that
+    /// removes itself: Dart's `late AnimationStatusListener l; l = (status) { ...;
+    /// animation.removeStatusListener(l); };` names itself, and a closure holding its own
+    /// listener strongly would keep itself alive after the animation lets it go.
+    pub fn downgrade(&self) -> WeakAnimationStatusListener {
+        WeakAnimationStatusListener {
+            callback: Rc::downgrade(&self.callback),
+            identity: self.identity,
+        }
+    }
+}
+
+/// An [`AnimationStatusListener`] that does not keep its closure alive; see
+/// [`AnimationStatusListener::downgrade`].
+#[derive(Clone)]
+pub struct WeakAnimationStatusListener {
+    callback: Weak<StatusCallback>,
+    identity: StatusListenerIdentity,
+}
+
+impl WeakAnimationStatusListener {
+    /// The listener, equal to the one it was made from, while something still holds that one.
+    pub fn upgrade(&self) -> Option<AnimationStatusListener> {
+        Some(AnimationStatusListener {
+            callback: self.callback.upgrade()?,
+            identity: self.identity,
+        })
     }
 }
 
@@ -158,8 +194,9 @@ impl Debug for AnimationStatusListener {
 ///
 /// This is what a concrete animation implements — Dart's
 /// `class X extends Animation<T>`. A field or parameter Dart types as
-/// `Animation<T>` holds the erased [`AnyAnimation<T>`] instead; get one from
-/// [`as_animation`](Animation::as_animation).
+/// `Animation<T>` holds the erased [`AnimationRef<T>`] instead; get one from a
+/// [`Ref`] with [`Retained::erase`], and the bare [`AnyAnimation<T>`]
+/// that names it without keeping it from [`as_animation`](Animation::as_animation).
 ///
 /// The members take `self: Handle<Self>` rather than `&self`, for the reason
 /// recorded on the `listener_helpers` traits: a `&self` receiver would borrow
@@ -247,9 +284,11 @@ pub trait Animation<T: 'static>: Sized + 'static {
 /// Erased [`Animation`]: one identity and a static vtable, the fat pointer
 /// rustc cannot build for an arena id. No lease.
 ///
-/// This is what a field or parameter Dart types as `Animation<T>` becomes. The
-/// concrete animation stays in the [`App`] under its own type; the handle
-/// carries its id plus a static dispatch table, so holding or copying one
+/// Like [`Handle`], it names the animation without keeping it: what a call that
+/// only uses an animation takes. A field or parameter Dart types as
+/// `Animation<T>` keeps it and holds an [`AnimationRef<T>`], which derefs to
+/// this. The concrete animation stays in the [`App`] under its own type; the
+/// handle carries its id plus a static dispatch table, so holding or copying one
 /// borrows nothing, and the same object stays reachable through its typed
 /// [`Handle`] for concrete-only members.
 ///
@@ -322,6 +361,14 @@ impl<T: 'static> AnyAnimation<T> {
         app.handle::<A>(self.id)
     }
 
+    /// An [`AnimationRef`] while something still keeps the animation; see
+    /// [`Handle::upgrade`].
+    pub fn upgrade(self, app: &App) -> Option<AnimationRef<T>> {
+        self.id
+            .upgrade(app)
+            .map(|retained| retained.into_map(|_| self))
+    }
+
     /// Calls the listener every time the value of the animation changes.
     ///
     /// Listeners can be removed with [`remove_listener`](AnyAnimation::remove_listener).
@@ -385,34 +432,62 @@ impl<T: 'static> AnyAnimation<T> {
     }
 }
 
-impl AnyAnimation<f64> {
-    /// Chains a `Tween` (or any [`Animatable`]) to this animation.
-    ///
-    /// Dart's `Animation<U> drive<U>(Animatable<U> child)` is a generic
-    /// virtual method; no dispatch table can hold a generic, so ours is
-    /// inherent on the erased handle and cannot be overridden. Flutter defines
-    /// no override either — `animation.dart:325` forwards to
-    /// `child.animate(this)`, as this does.
-    pub fn drive<U: 'static>(
-        self,
-        app: &mut App,
-        child: impl Animatable<U> + Clone + 'static,
-    ) -> AnyAnimation<U> {
-        child.animate(app, self)
+/// A field or parameter Dart types as `Animation<T>`: the erased animation, kept. It derefs to
+/// the [`AnyAnimation<T>`], so every member is callable on it, and it is a
+/// [`Listenable`](waft_foundation::Listenable) that keeps what it listens to.
+pub type AnimationRef<T> = Retained<AnyAnimation<T>>;
+
+/// A kept animation erases to an [`AnimationRef`] with [`Retained::erase`]: Dart's upcast to
+/// `Animation<T>`.
+impl<T: 'static, A: Animation<T>> From<Handle<A>> for AnyAnimation<T> {
+    fn from(animation: Handle<A>) -> AnyAnimation<T> {
+        animation.as_animation()
     }
 }
 
-impl<T: 'static> waft_foundation::Listenable for AnyAnimation<T> {
-    fn add_listener(&self, app: &mut App, listener: Listener) {
-        AnyAnimation::add_listener(*self, app, listener);
+/// Dart's `Animation<double>.drive`, on a kept animation, since the animation it makes keeps
+/// this one.
+///
+/// Dart's `Animation<U> drive<U>(Animatable<U> child)` is a generic virtual method; no dispatch
+/// table can hold a generic, so ours is a trait over the references and cannot be overridden.
+/// Flutter defines no override either — `animation.dart:325` forwards to `child.animate(this)`,
+/// as this does.
+pub trait Drive {
+    /// Chains a `Tween` (or any [`Animatable`]) to this animation.
+    fn drive<U: 'static>(
+        &self,
+        app: &mut App,
+        child: impl Animatable<U> + Clone + 'static,
+    ) -> AnimationRef<U>;
+}
+
+impl<A: Animation<f64>> Drive for Ref<A> {
+    fn drive<U: 'static>(
+        &self,
+        app: &mut App,
+        child: impl Animatable<U> + Clone + 'static,
+    ) -> AnimationRef<U> {
+        child.animate(app, self.erase())
+    }
+}
+
+impl Drive for AnimationRef<f64> {
+    fn drive<U: 'static>(
+        &self,
+        app: &mut App,
+        child: impl Animatable<U> + Clone + 'static,
+    ) -> AnimationRef<U> {
+        child.animate(app, self.clone())
+    }
+}
+
+impl<T: 'static> ListenableHandle for AnyAnimation<T> {
+    fn add_listener_to(self, app: &mut App, listener: Listener) {
+        AnyAnimation::add_listener(self, app, listener);
     }
 
-    fn remove_listener(&self, app: &mut App, listener: &Listener) {
-        AnyAnimation::remove_listener(*self, app, listener);
-    }
-
-    fn retain(&self, app: &mut App) -> Vec<waft_foundation::RetainedHandleId> {
-        vec![app.retain_id(self.id)]
+    fn remove_listener_from(self, app: &mut App, listener: &Listener) {
+        AnyAnimation::remove_listener(self, app, listener);
     }
 }
 
@@ -456,6 +531,15 @@ mod tests {
     use waft_foundation::AppCell;
 
     use super::*;
+
+    #[test]
+    fn a_weak_status_listener_upgrades_to_an_equal_listener_only_while_one_is_held() {
+        let listener = AnimationStatusListener::new(|_, _| {});
+        let weak = listener.downgrade();
+        assert!(weak.upgrade().is_some_and(|upgraded| upgraded == listener));
+        drop(listener);
+        assert!(weak.upgrade().is_none());
+    }
 
     #[test]
     fn the_derived_status_getters_match_flutter() {
@@ -514,8 +598,10 @@ mod tests {
 
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let a = app.create(Host);
-        let b = app.create(Host);
+        let a_ref = app.create(Host);
+        let a = *a_ref;
+        let b_ref = app.create(Host);
+        let b = *b_ref;
 
         assert_eq!(
             AnimationStatusListener::handle_method(a, hook),
@@ -568,7 +654,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let node = app.create(OverridingNode);
-        let animation = node.as_animation();
+        let animation: AnimationRef<f64> = node.erase();
 
         assert_eq!(animation.status(&app), AnimationStatus::Forward);
         assert_eq!(animation.value(&app), 0.25);
@@ -586,8 +672,12 @@ mod tests {
         let first = app.create(OverridingNode);
         let second = app.create(OverridingNode);
 
-        assert_eq!(first.as_animation(), first.as_animation());
-        assert_ne!(first.as_animation(), second.as_animation());
+        assert_eq!(first.erase::<AnyAnimation<f64>>(), first.erase());
+        assert_eq!(
+            first.erase::<AnyAnimation<f64>>().handle(),
+            first.as_animation()
+        );
+        assert_ne!(first.erase::<AnyAnimation<f64>>(), second.erase());
     }
 
     /// A node whose `value` reads its slot.
@@ -620,8 +710,9 @@ mod tests {
     fn an_erased_handle_does_not_consume_the_typed_one() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let counter = app.create(Counter(1));
-        let erased = counter.as_animation();
+        let counter_ref = app.create(Counter(1));
+        let counter = *counter_ref;
+        let erased: AnimationRef<f64> = counter_ref.erase();
 
         // The concrete member stays reachable after erasing — the failure that
         // killed the owned `Box<dyn>` shape.
@@ -633,13 +724,29 @@ mod tests {
     /// at the first member that reads the slot.
     #[test]
     #[should_panic(expected = "stale handle")]
-    fn an_erased_handle_to_a_destroyed_animation_panics_on_slot_access() {
+    fn an_erased_handle_to_a_freed_animation_panics_on_slot_access() {
         let cell = AppCell::new();
-        let mut app = cell.borrow_mut();
-        let counter = app.create(Counter(1));
-        let animation = counter.as_animation();
-        app.destroy(counter);
-        animation.value(&app);
+        let animation = cell.borrow_mut().create(Counter(1)).as_animation();
+        cell.checkpoint();
+        animation.value(&cell.borrow());
+    }
+
+    /// An erased kept animation keeps the object as the typed `Ref` does: they share one count.
+    #[test]
+    fn an_animation_ref_keeps_the_object_its_typed_ref_made() {
+        let cell = AppCell::new();
+        let counter = cell.borrow_mut().create(Counter(1));
+        let handle = *counter;
+        let erased: AnimationRef<f64> = counter.into_erased();
+        cell.checkpoint();
+        assert!(cell.borrow().contains(handle), "the erased ref keeps it");
+        assert_eq!(
+            handle.as_animation().upgrade(&cell.borrow()),
+            Some(erased.clone())
+        );
+        drop(erased);
+        cell.checkpoint();
+        assert!(!cell.borrow().contains(handle));
     }
 
     #[test]

@@ -14,24 +14,25 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use waft_animation::{
-    Animation, AnimationBehavior, AnimationController, AnyAnimation, CurvedAnimation, Curves,
+    AnimationBehavior, AnimationController, AnimationRef, AnyAnimation, CurvedAnimation, Curves,
 };
 use waft_embedder::{Canvas, Color, Offset, Paint, Size};
-use waft_foundation::{App, ChangeNotifier, Handle, HandleId, Listenable, Listener, ValueChanged};
+use waft_foundation::{
+    App, ChangeNotifier, Handle, HandleId, Listenable, Listener, OptionRetained, ValueChanged,
+};
 use waft_gestures::{TapDownDetails, TapUpDetails};
 use waft_rendering::CustomPainter;
 use waft_scheduler::TickerProviderObject;
 use waft_services::{MouseCursorRef, SystemMouseCursors};
 
 use crate::framework::{BuildContext, IntoWidget, State, WidgetRef};
-use crate::widgets::actions::{
-    Action, ActivateIntent, AnyAction, CallbackAction, FocusableActionDetector,
-};
+use crate::widgets::actions::{ActionRef, ActivateIntent, CallbackAction, FocusableActionDetector};
 use crate::widgets::basic::{CustomPaint, Semantics};
-use crate::widgets::focus_manager::AnyFocusNode;
+use crate::widgets::focus_manager::FocusNodeRef;
 use crate::widgets::gesture_detector::GestureDetector;
 use crate::widgets::ticker_provider::TickerProviderStateMixin;
 use crate::widgets::widget_state::{WidgetState, WidgetStatePropertyRef, WidgetStates};
+use waft_foundation::Ref;
 
 // Duration of the animation that moves the toggle from one state to another.
 const K_TOGGLE_DURATION: Duration = Duration::from_millis(200);
@@ -49,15 +50,15 @@ const K_REACTION_ANIMATION_DURATION: Duration = Duration::from_millis(100);
 /// [`ToggleableStateMixin::init_state`] (Dart's `late` fields and `late final _actionMap`).
 #[derive(Default)]
 pub struct ToggleableStateMixinData {
-    position_controller: Option<Handle<AnimationController>>,
-    position: Option<Handle<CurvedAnimation>>,
-    reaction_controller: Option<Handle<AnimationController>>,
-    reaction: Option<Handle<CurvedAnimation>>,
-    reaction_hover_fade: Option<Handle<CurvedAnimation>>,
-    reaction_hover_fade_controller: Option<Handle<AnimationController>>,
-    reaction_focus_fade: Option<Handle<CurvedAnimation>>,
-    reaction_focus_fade_controller: Option<Handle<AnimationController>>,
-    action_map: HashMap<TypeId, AnyAction>,
+    position_controller: Option<Ref<AnimationController>>,
+    position: Option<Ref<CurvedAnimation>>,
+    reaction_controller: Option<Ref<AnimationController>>,
+    reaction: Option<Ref<CurvedAnimation>>,
+    reaction_hover_fade: Option<Ref<CurvedAnimation>>,
+    reaction_hover_fade_controller: Option<Ref<AnimationController>>,
+    reaction_focus_fade: Option<Ref<CurvedAnimation>>,
+    reaction_focus_fade_controller: Option<Ref<AnimationController>>,
+    action_map: HashMap<TypeId, ActionRef>,
     down_position: Option<Offset>,
     focused: bool,
     hovering: bool,
@@ -111,6 +112,7 @@ pub trait ToggleableStateMixin: TickerProviderStateMixin + TickerProviderObject 
     fn position_controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
         self.toggleable_data(app)
             .position_controller
+            .handle()
             .expect("created in init_state")
     }
 
@@ -122,9 +124,10 @@ pub trait ToggleableStateMixin: TickerProviderStateMixin + TickerProviderObject 
     /// 1.0. When the control is changing from inactive to active (or vice versa),
     /// [`value`](Self::value) is the target value and this animation gradually updates from
     /// 0.0 to 1.0 (or vice versa).
-    fn position(self: Handle<Self>, app: &App) -> Handle<CurvedAnimation> {
+    fn position(self: Handle<Self>, app: &App) -> &Ref<CurvedAnimation> {
         self.toggleable_data(app)
             .position
+            .as_ref()
             .expect("created in init_state")
     }
 
@@ -138,6 +141,7 @@ pub trait ToggleableStateMixin: TickerProviderStateMixin + TickerProviderObject 
     fn reaction_controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
         self.toggleable_data(app)
             .reaction_controller
+            .handle()
             .expect("created in init_state")
     }
 
@@ -148,9 +152,10 @@ pub trait ToggleableStateMixin: TickerProviderStateMixin + TickerProviderObject 
     ///
     /// To paint the actual radial reaction, [`ToggleablePainter::paint_radial_reaction`] may
     /// be used.
-    fn reaction(self: Handle<Self>, app: &App) -> Handle<CurvedAnimation> {
+    fn reaction(self: Handle<Self>, app: &App) -> &Ref<CurvedAnimation> {
         self.toggleable_data(app)
             .reaction
+            .as_ref()
             .expect("created in init_state")
     }
 
@@ -161,9 +166,10 @@ pub trait ToggleableStateMixin: TickerProviderStateMixin + TickerProviderObject 
     ///
     /// To paint the actual radial reaction, [`ToggleablePainter::paint_radial_reaction`] may
     /// be used.
-    fn reaction_hover_fade(self: Handle<Self>, app: &App) -> Handle<CurvedAnimation> {
+    fn reaction_hover_fade(self: Handle<Self>, app: &App) -> &Ref<CurvedAnimation> {
         self.toggleable_data(app)
             .reaction_hover_fade
+            .as_ref()
             .expect("created in init_state")
     }
 
@@ -174,9 +180,10 @@ pub trait ToggleableStateMixin: TickerProviderStateMixin + TickerProviderObject 
     ///
     /// To paint the actual radial reaction, [`ToggleablePainter::paint_radial_reaction`] may
     /// be used.
-    fn reaction_focus_fade(self: Handle<Self>, app: &App) -> Handle<CurvedAnimation> {
+    fn reaction_focus_fade(self: Handle<Self>, app: &App) -> &Ref<CurvedAnimation> {
         self.toggleable_data(app)
             .reaction_focus_fade
+            .as_ref()
             .expect("created in init_state")
     }
 
@@ -246,7 +253,7 @@ pub trait ToggleableStateMixin: TickerProviderStateMixin + TickerProviderObject 
         );
         let position = CurvedAnimation::create(
             app,
-            position_controller.as_animation(),
+            position_controller.erase(),
             Curves::ease_in(),
             Some(Curves::ease_out()),
         );
@@ -265,7 +272,7 @@ pub trait ToggleableStateMixin: TickerProviderStateMixin + TickerProviderObject 
         );
         let reaction = CurvedAnimation::create(
             app,
-            reaction_controller.as_animation(),
+            reaction_controller.erase(),
             Curves::fast_out_slow_in(),
             None,
         );
@@ -289,7 +296,7 @@ pub trait ToggleableStateMixin: TickerProviderStateMixin + TickerProviderObject 
         );
         let reaction_hover_fade = CurvedAnimation::create(
             app,
-            reaction_hover_fade_controller.as_animation(),
+            reaction_hover_fade_controller.erase(),
             Curves::fast_out_slow_in(),
             None,
         );
@@ -305,7 +312,7 @@ pub trait ToggleableStateMixin: TickerProviderStateMixin + TickerProviderObject 
         );
         let reaction_focus_fade = CurvedAnimation::create(
             app,
-            reaction_focus_fade_controller.as_animation(),
+            reaction_focus_fade_controller.erase(),
             Curves::fast_out_slow_in(),
             None,
         );
@@ -326,7 +333,7 @@ pub trait ToggleableStateMixin: TickerProviderStateMixin + TickerProviderObject 
         data.reaction_focus_fade_controller = Some(reaction_focus_fade_controller);
         data.reaction_focus_fade = Some(reaction_focus_fade);
         data.action_map
-            .insert(TypeId::of::<ActivateIntent>(), activate.as_action());
+            .insert(TypeId::of::<ActivateIntent>(), activate.erase());
     }
 
     /// Runs the [`position`](Self::position) animation to transition the Toggleable's
@@ -356,29 +363,22 @@ pub trait ToggleableStateMixin: TickerProviderStateMixin + TickerProviderObject 
     /// The mixin's part of `State::dispose`; the state calls it where Dart's `super.dispose()`
     /// reaches the mixin, then [`TickerProviderStateMixin::dispose`].
     fn dispose(self: Handle<Self>, app: &mut App) {
-        let data = std::mem::take(self.toggleable_data_mut(app));
+        let data = self.toggleable_data(app);
         let pairs = [
-            (data.position_controller, data.position),
-            (data.reaction_controller, data.reaction),
+            (data.position_controller.handle(), data.position.handle()),
+            (data.reaction_controller.handle(), data.reaction.handle()),
             (
-                data.reaction_hover_fade_controller,
-                data.reaction_hover_fade,
+                data.reaction_hover_fade_controller.handle(),
+                data.reaction_hover_fade.handle(),
             ),
             (
-                data.reaction_focus_fade_controller,
-                data.reaction_focus_fade,
+                data.reaction_focus_fade_controller.handle(),
+                data.reaction_focus_fade.handle(),
             ),
         ];
         for (controller, animation) in pairs {
-            let controller = controller.expect("created in init_state");
-            let animation = animation.expect("created in init_state");
-            controller.dispose(app);
-            animation.dispose(app);
-            app.destroy(animation);
-            app.destroy(controller);
-        }
-        for action in data.action_map.into_values() {
-            app.destroy(action.id());
+            controller.expect("created in init_state").dispose(app);
+            animation.expect("created in init_state").dispose(app);
         }
     }
 
@@ -444,7 +444,7 @@ pub trait ToggleableStateMixin: TickerProviderStateMixin + TickerProviderObject 
     fn build_toggleable(
         self: Handle<Self>,
         app: &mut App,
-        focus_node: Option<AnyFocusNode>,
+        focus_node: Option<FocusNodeRef>,
         on_focus_change: Option<ValueChanged<bool>>,
         autofocus: bool,
         mouse_cursor: Option<WidgetStatePropertyRef<MouseCursorRef>>,
@@ -486,7 +486,7 @@ pub trait ToggleableStateMixin: TickerProviderStateMixin + TickerProviderObject 
     fn build_toggleable_with_child(
         self: Handle<Self>,
         app: &mut App,
-        focus_node: Option<AnyFocusNode>,
+        focus_node: Option<FocusNodeRef>,
         on_focus_change: Option<ValueChanged<bool>>,
         autofocus: bool,
         mouse_cursor: Option<WidgetStatePropertyRef<MouseCursorRef>>,
@@ -580,6 +580,7 @@ trait ToggleableStateMixinPrivate: ToggleableStateMixin {
             let controller = self
                 .toggleable_data(app)
                 .reaction_focus_fade_controller
+                .handle()
                 .expect("created in init_state");
             if focused {
                 controller.forward(app, None);
@@ -596,6 +597,7 @@ trait ToggleableStateMixinPrivate: ToggleableStateMixin {
             let controller = self
                 .toggleable_data(app)
                 .reaction_hover_fade_controller
+                .handle()
                 .expect("created in init_state");
             if hovering {
                 controller.forward(app, None);
@@ -614,11 +616,11 @@ struct ToggleableStateVTable {
     context: fn(&App, HandleId) -> BuildContext,
     mounted: fn(&App, HandleId) -> bool,
     position_controller: fn(&App, HandleId) -> Handle<AnimationController>,
-    position: fn(&App, HandleId) -> Handle<CurvedAnimation>,
+    position: fn(&App, HandleId) -> &Ref<CurvedAnimation>,
     reaction_controller: fn(&App, HandleId) -> Handle<AnimationController>,
-    reaction: fn(&App, HandleId) -> Handle<CurvedAnimation>,
-    reaction_hover_fade: fn(&App, HandleId) -> Handle<CurvedAnimation>,
-    reaction_focus_fade: fn(&App, HandleId) -> Handle<CurvedAnimation>,
+    reaction: fn(&App, HandleId) -> &Ref<CurvedAnimation>,
+    reaction_hover_fade: fn(&App, HandleId) -> &Ref<CurvedAnimation>,
+    reaction_focus_fade: fn(&App, HandleId) -> &Ref<CurvedAnimation>,
     reaction_animation_duration: fn(&App, HandleId) -> Option<Duration>,
     is_interactive: fn(&App, HandleId) -> bool,
     on_changed: fn(&App, HandleId) -> Option<ValueChanged<Option<bool>>>,
@@ -631,7 +633,7 @@ struct ToggleableStateVTable {
     build_toggleable_with_child: fn(
         &mut App,
         HandleId,
-        Option<AnyFocusNode>,
+        Option<FocusNodeRef>,
         Option<ValueChanged<bool>>,
         bool,
         Option<WidgetStatePropertyRef<MouseCursorRef>>,
@@ -744,7 +746,7 @@ impl AnyToggleableState {
     }
 
     /// See [`ToggleableStateMixin::position`].
-    pub fn position(self, app: &App) -> Handle<CurvedAnimation> {
+    pub fn position(self, app: &App) -> &Ref<CurvedAnimation> {
         (self.vtable.position)(app, self.id)
     }
 
@@ -754,17 +756,17 @@ impl AnyToggleableState {
     }
 
     /// See [`ToggleableStateMixin::reaction`].
-    pub fn reaction(self, app: &App) -> Handle<CurvedAnimation> {
+    pub fn reaction(self, app: &App) -> &Ref<CurvedAnimation> {
         (self.vtable.reaction)(app, self.id)
     }
 
     /// See [`ToggleableStateMixin::reaction_hover_fade`].
-    pub fn reaction_hover_fade(self, app: &App) -> Handle<CurvedAnimation> {
+    pub fn reaction_hover_fade(self, app: &App) -> &Ref<CurvedAnimation> {
         (self.vtable.reaction_hover_fade)(app, self.id)
     }
 
     /// See [`ToggleableStateMixin::reaction_focus_fade`].
-    pub fn reaction_focus_fade(self, app: &App) -> Handle<CurvedAnimation> {
+    pub fn reaction_focus_fade(self, app: &App) -> &Ref<CurvedAnimation> {
         (self.vtable.reaction_focus_fade)(app, self.id)
     }
 
@@ -813,7 +815,7 @@ impl AnyToggleableState {
     pub fn build_toggleable(
         self,
         app: &mut App,
-        focus_node: Option<AnyFocusNode>,
+        focus_node: Option<FocusNodeRef>,
         on_focus_change: Option<ValueChanged<bool>>,
         autofocus: bool,
         mouse_cursor: Option<WidgetStatePropertyRef<MouseCursorRef>>,
@@ -834,7 +836,7 @@ impl AnyToggleableState {
     pub fn build_toggleable_with_child(
         self,
         app: &mut App,
-        focus_node: Option<AnyFocusNode>,
+        focus_node: Option<FocusNodeRef>,
         on_focus_change: Option<ValueChanged<bool>>,
         autofocus: bool,
         mouse_cursor: Option<WidgetStatePropertyRef<MouseCursorRef>>,
@@ -857,10 +859,10 @@ impl AnyToggleableState {
 /// [`ToggleablePainter`]'s getters panic on a field no setter has written.
 #[derive(Default)]
 pub struct ToggleablePainterData {
-    position: Option<AnyAnimation<f64>>,
-    reaction: Option<AnyAnimation<f64>>,
-    reaction_focus_fade: Option<AnyAnimation<f64>>,
-    reaction_hover_fade: Option<AnyAnimation<f64>>,
+    position: Option<AnimationRef<f64>>,
+    reaction: Option<AnimationRef<f64>>,
+    reaction_focus_fade: Option<AnimationRef<f64>>,
+    reaction_hover_fade: Option<AnimationRef<f64>>,
     active_color: Option<Color>,
     inactive_color: Option<Color>,
     inactive_reaction_color: Option<Color>,
@@ -910,13 +912,14 @@ pub trait ToggleablePainter: ChangeNotifier {
     fn position(self: Handle<Self>, app: &App) -> AnyAnimation<f64> {
         self.toggleable_painter_data(app)
             .position
+            .handle()
             .expect("set before painting")
     }
 
     /// Sets [`position`](Self::position).
-    fn set_position(self: Handle<Self>, app: &mut App, value: AnyAnimation<f64>) {
-        let old = self.toggleable_painter_data(app).position;
-        if old == Some(value) {
+    fn set_position(self: Handle<Self>, app: &mut App, value: AnimationRef<f64>) {
+        let old = self.toggleable_painter_data(app).position.handle();
+        if old == Some(value.handle()) {
             return;
         }
         let notify = Listener::handle_method(self, Handle::<Self>::notify_listeners);
@@ -934,13 +937,14 @@ pub trait ToggleablePainter: ChangeNotifier {
     fn reaction(self: Handle<Self>, app: &App) -> AnyAnimation<f64> {
         self.toggleable_painter_data(app)
             .reaction
+            .handle()
             .expect("set before painting")
     }
 
     /// Sets [`reaction`](Self::reaction).
-    fn set_reaction(self: Handle<Self>, app: &mut App, value: AnyAnimation<f64>) {
-        let old = self.toggleable_painter_data(app).reaction;
-        if old == Some(value) {
+    fn set_reaction(self: Handle<Self>, app: &mut App, value: AnimationRef<f64>) {
+        let old = self.toggleable_painter_data(app).reaction.handle();
+        if old == Some(value.handle()) {
             return;
         }
         let notify = Listener::handle_method(self, Handle::<Self>::notify_listeners);
@@ -958,13 +962,17 @@ pub trait ToggleablePainter: ChangeNotifier {
     fn reaction_focus_fade(self: Handle<Self>, app: &App) -> AnyAnimation<f64> {
         self.toggleable_painter_data(app)
             .reaction_focus_fade
+            .handle()
             .expect("set before painting")
     }
 
     /// Sets [`reaction_focus_fade`](Self::reaction_focus_fade).
-    fn set_reaction_focus_fade(self: Handle<Self>, app: &mut App, value: AnyAnimation<f64>) {
-        let old = self.toggleable_painter_data(app).reaction_focus_fade;
-        if old == Some(value) {
+    fn set_reaction_focus_fade(self: Handle<Self>, app: &mut App, value: AnimationRef<f64>) {
+        let old = self
+            .toggleable_painter_data(app)
+            .reaction_focus_fade
+            .handle();
+        if old == Some(value.handle()) {
             return;
         }
         let notify = Listener::handle_method(self, Handle::<Self>::notify_listeners);
@@ -982,13 +990,17 @@ pub trait ToggleablePainter: ChangeNotifier {
     fn reaction_hover_fade(self: Handle<Self>, app: &App) -> AnyAnimation<f64> {
         self.toggleable_painter_data(app)
             .reaction_hover_fade
+            .handle()
             .expect("set before painting")
     }
 
     /// Sets [`reaction_hover_fade`](Self::reaction_hover_fade).
-    fn set_reaction_hover_fade(self: Handle<Self>, app: &mut App, value: AnyAnimation<f64>) {
-        let old = self.toggleable_painter_data(app).reaction_hover_fade;
-        if old == Some(value) {
+    fn set_reaction_hover_fade(self: Handle<Self>, app: &mut App, value: AnimationRef<f64>) {
+        let old = self
+            .toggleable_painter_data(app)
+            .reaction_hover_fade
+            .handle();
+        if old == Some(value.handle()) {
             return;
         }
         let notify = Listener::handle_method(self, Handle::<Self>::notify_listeners);
@@ -1255,10 +1267,10 @@ pub trait ToggleablePainter: ChangeNotifier {
         let notify = Listener::handle_method(self, Handle::<Self>::notify_listeners);
         let data = self.toggleable_painter_data(app);
         let animations = [
-            data.position,
-            data.reaction,
-            data.reaction_focus_fade,
-            data.reaction_hover_fade,
+            data.position.handle(),
+            data.reaction.handle(),
+            data.reaction_focus_fade.handle(),
+            data.reaction_hover_fade.handle(),
         ];
         for animation in animations.into_iter().flatten() {
             animation.remove_listener(app, &notify);
@@ -1271,22 +1283,22 @@ pub trait ToggleablePainter: ChangeNotifier {
 /// arena object, so the value the widget carries is its handle plus the [`Listenable`] the
 /// render object subscribes to (Dart's painter is its own `repaint`).
 pub struct ToggleablePainterRef<P: ToggleablePainter> {
-    painter: Handle<P>,
+    painter: Ref<P>,
     repaint: Rc<dyn Listenable>,
 }
 
 impl<P: ToggleablePainter> ToggleablePainterRef<P> {
     /// Wraps a [`ToggleablePainter`] as a [`CustomPainter`].
-    pub fn new(painter: Handle<P>) -> ToggleablePainterRef<P> {
+    pub fn new(painter: Ref<P>) -> ToggleablePainterRef<P> {
         ToggleablePainterRef {
+            repaint: Rc::new(painter.clone()),
             painter,
-            repaint: Rc::new(painter),
         }
     }
 
     /// The painter itself.
     pub fn painter(&self) -> Handle<P> {
-        self.painter
+        self.painter.handle()
     }
 }
 
@@ -1296,7 +1308,7 @@ impl<P: ToggleablePainter> CustomPainter for ToggleablePainterRef<P> {
     }
 
     fn paint(&self, app: &mut App, canvas: &mut Canvas, size: Size) {
-        ToggleablePainter::paint(self.painter, app, canvas, size);
+        ToggleablePainter::paint(self.painter.handle(), app, canvas, size);
     }
 
     fn should_repaint(&self, _app: &App, _old_delegate: &dyn CustomPainter) -> bool {

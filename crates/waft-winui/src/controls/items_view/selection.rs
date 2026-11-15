@@ -4,7 +4,7 @@
 
 use super::selection_model::SelectionModel;
 use super::selector::{ItemsViewSelectionMode, Selector};
-use waft_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle};
+use waft_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, Ref};
 
 /// The selection and the current item of an `ItemsView`.
 ///
@@ -21,7 +21,7 @@ pub struct ItemsViewSelection {
 
 impl ItemsViewSelection {
     /// Creates an empty selection for `ItemsView`'s default `Single` mode.
-    pub fn new(app: &mut App) -> Handle<Self> {
+    pub fn new(app: &mut App) -> Ref<Self> {
         let mut model = SelectionModel::default();
         let (selector, _) = Selector::for_mode(ItemsViewSelectionMode::Single, &mut model);
         app.create(Self {

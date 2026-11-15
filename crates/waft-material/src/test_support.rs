@@ -110,7 +110,7 @@ impl waft_scheduler::TickerProvider for TestVSync {
         &self,
         app: &mut App,
         on_tick: waft_scheduler::TickerCallback,
-    ) -> waft_foundation::Handle<waft_scheduler::Ticker> {
+    ) -> waft_foundation::Ref<waft_scheduler::Ticker> {
         waft_scheduler::Ticker::new(app, on_tick, None)
     }
 }

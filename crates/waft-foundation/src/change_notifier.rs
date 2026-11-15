@@ -6,7 +6,7 @@ use std::fmt::{self, Debug};
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
-use crate::app::{App, Handle, HandleId, RetainedHandleId};
+use crate::app::{App, Handle, HandleId, Retained};
 
 /// A closure registered with a [`Listenable`].
 ///
@@ -16,6 +16,10 @@ use crate::app::{App, Handle, HandleId, RetainedHandleId};
 /// [`Listenable::remove_listener`] matches identity: [`Listener::new`] equals
 /// only its clones; [`Listener::handle_method`] equals any other built from the
 /// same handle and function.
+///
+/// A closure owns what it captures, as a Dart closure does: one that captures a [`Ref`] to the
+/// object it is registered on keeps that object until it is removed. A tear-off
+/// ([`handle_method`](Listener::handle_method)) does not keep its receiver.
 #[derive(Clone)]
 pub struct Listener {
     callback: Rc<dyn Fn(&mut App)>,
@@ -47,6 +51,11 @@ impl Listener {
     /// has no canonical identity. Two captureless closure literals also never
     /// match — each has a unique type, as in Dart where only tear-offs
     /// canonicalize.
+    ///
+    /// The listener names its receiver without keeping it, so the most common ring in Flutter
+    /// (a parent's listener list holding a tear-off of the child that keeps the parent) holds
+    /// nothing. Once the receiver is freed the listener is skipped
+    /// ([`App::tear_off_receiver_is_live`]).
     pub fn handle_method<T: 'static, F>(this: Handle<T>, f: F) -> Listener
     where
         F: Fn(Handle<T>, &mut App) + 'static,
@@ -59,7 +68,11 @@ impl Listener {
             )
         };
         Listener {
-            callback: Rc::new(move |app: &mut App| f(this, app)),
+            callback: Rc::new(move |app: &mut App| {
+                if app.tear_off_receiver_is_live(this) {
+                    f(this, app);
+                }
+            }),
             identity: ListenerIdentity::HandleMethod(this.id(), TypeId::of::<F>()),
         }
     }
@@ -136,16 +149,6 @@ pub trait Listenable {
     /// Remove a previously registered closure from the list of closures that the
     /// object notifies.
     fn remove_listener(&self, app: &mut App, listener: &Listener);
-
-    /// Keeps the arena objects this listenable notifies from past their owners' `destroy`, for
-    /// a listener that removes itself only after the owner let go: in Dart the object lingers
-    /// while the listener references it. Give each one back with [`App::release_id`].
-    ///
-    /// The default keeps nothing, for a listenable that is no arena object.
-    fn retain(&self, app: &mut App) -> Vec<RetainedHandleId> {
-        let _ = app;
-        Vec::new()
-    }
 }
 
 /// A [`Listenable`] that triggers when any of the given [`Listenable`]s
@@ -179,14 +182,6 @@ impl Listenable for MergingListenable {
         for child in self.children.iter().flatten() {
             child.remove_listener(app, listener);
         }
-    }
-
-    fn retain(&self, app: &mut App) -> Vec<RetainedHandleId> {
-        self.children
-            .iter()
-            .flatten()
-            .flat_map(|child| child.retain(app))
-            .collect()
     }
 }
 
@@ -578,17 +573,38 @@ impl<T: ChangeNotifier> ListenableObject for T {
     }
 }
 
-impl<T: ListenableObject> Listenable for Handle<T> {
+/// A Copy handle to an object that keeps listeners: what a [`Retained`] of it is a
+/// [`Listenable`] through. [`Handle<T>`] is one for a [`ListenableObject`]; an erased handle (an
+/// animation's) implements it for its type.
+///
+/// The [`Listenable`] is the [`Retained`], not the bare handle, so an `Rc<dyn Listenable>` keeps
+/// the object it listens to. The methods are named apart from [`ListenableObject`]'s so a
+/// `handle.add_listener(..)` call is never ambiguous.
+pub trait ListenableHandle: Copy + 'static {
+    /// See [`Listenable::add_listener`].
+    fn add_listener_to(self, app: &mut App, listener: Listener);
+
+    /// See [`Listenable::remove_listener`].
+    fn remove_listener_from(self, app: &mut App, listener: &Listener);
+}
+
+impl<T: ListenableObject> ListenableHandle for Handle<T> {
+    fn add_listener_to(self, app: &mut App, listener: Listener) {
+        T::add_listener(self, app, listener);
+    }
+
+    fn remove_listener_from(self, app: &mut App, listener: &Listener) {
+        T::remove_listener(self, app, listener);
+    }
+}
+
+impl<H: ListenableHandle> Listenable for Retained<H> {
     fn add_listener(&self, app: &mut App, listener: Listener) {
-        T::add_listener(*self, app, listener);
+        self.handle().add_listener_to(app, listener);
     }
 
     fn remove_listener(&self, app: &mut App, listener: &Listener) {
-        T::remove_listener(*self, app, listener);
-    }
-
-    fn retain(&self, app: &mut App) -> Vec<RetainedHandleId> {
-        vec![app.retain_id(self.id())]
+        self.handle().remove_listener_from(app, listener);
     }
 }
 
@@ -683,7 +699,7 @@ impl<T> ValueNotifier<T> {
         }
     }
 
-    /// The wrapped value. Prefer [`ValueListenable::value`] on the handle when
+    /// The wrapped value. Prefer [`ValueListenable::value`] on the [`Ref`] when
     /// you do not already have a borrow of the slot.
     pub fn value(&self) -> &T {
         &self.value
@@ -705,6 +721,13 @@ impl<T: 'static> ChangeNotifier for ValueNotifier<T> {
     }
 }
 
+impl<T: 'static> Handle<ValueNotifier<T>> {
+    /// The current value, read through the bare handle.
+    pub fn value(self, app: &App) -> &T {
+        app.get(self).value()
+    }
+}
+
 impl<T: PartialEq + 'static> Handle<ValueNotifier<T>> {
     /// Replaces the current value, notifying listeners when it differs.
     ///
@@ -719,9 +742,22 @@ impl<T: PartialEq + 'static> Handle<ValueNotifier<T>> {
     }
 }
 
-impl<T: 'static> ValueListenable<T> for Handle<ValueNotifier<T>> {
+/// A Copy handle to an object with a current value: what a [`Retained`] of it is a
+/// [`ValueListenable`] through, as [`ListenableHandle`] is for [`Listenable`].
+pub trait ValueListenableHandle<T>: ListenableHandle {
+    /// See [`ValueListenable::value`].
+    fn value_of(self, app: &App) -> &T;
+}
+
+impl<T: 'static> ValueListenableHandle<T> for Handle<ValueNotifier<T>> {
+    fn value_of(self, app: &App) -> &T {
+        app.get(self).value()
+    }
+}
+
+impl<T, H: ValueListenableHandle<T>> ValueListenable<T> for Retained<H> {
     fn value<'a>(&'a self, app: &'a App) -> &'a T {
-        app.get(*self).value()
+        self.handle().value_of(app)
     }
 }
 
@@ -783,7 +819,8 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let log = Log::default();
-        let host = app.create(TestNotifier::default());
+        let host_ref = app.create(TestNotifier::default());
+        let host = *host_ref;
 
         let listener = recording(&log, "listener");
         add(&mut app, host, listener.clone());
@@ -840,7 +877,8 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let log = Log::default();
-        let host = app.create(TestNotifier::default());
+        let host_ref = app.create(TestNotifier::default());
+        let host = *host_ref;
 
         let listener1 = recording(&log, "listener1");
         let listener3 = recording(&log, "listener3");
@@ -879,7 +917,8 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let log = Log::default();
-        let host = app.create(TestNotifier::default());
+        let host_ref = app.create(TestNotifier::default());
+        let host = *host_ref;
 
         let listener2 = recording(&log, "listener2");
         let listener3 = recording(&log, "listener3");
@@ -907,7 +946,8 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let log = Log::default();
-        let host = app.create(TestNotifier::default());
+        let host_ref = app.create(TestNotifier::default());
+        let host = *host_ref;
 
         let listener1 = recording(&log, "listener1");
         let self_removing_slot: Rc<RefCell<Option<Listener>>> = Rc::new(RefCell::new(None));
@@ -939,7 +979,8 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let log = Log::default();
-        let host = app.create(TestNotifier::default());
+        let host_ref = app.create(TestNotifier::default());
+        let host = *host_ref;
 
         let self_removing_slot: Rc<RefCell<Option<Listener>>> = Rc::new(RefCell::new(None));
         let self_removing = {
@@ -978,8 +1019,10 @@ mod tests {
 
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let a = app.create(Host);
-        let b = app.create(Host);
+        let a_ref = app.create(Host);
+        let a = *a_ref;
+        let b_ref = app.create(Host);
+        let b = *b_ref;
 
         assert_eq!(
             Listener::handle_method(a, hook),
@@ -1008,9 +1051,34 @@ mod tests {
 
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let host = app.create(Host);
+        let host_ref = app.create(Host);
+        let host = *host_ref;
         Listener::handle_method(host, hook).call(&mut app);
         assert_eq!(CALLED_WITH.with(Cell::get), Some(host.id()));
+    }
+
+    /// A listener dropped with its receiver, never removed, is what Dart would leak: here the
+    /// receiver is freed and the notifier skips the tear-off, reporting it once.
+    #[test]
+    #[cfg(debug_assertions)]
+    fn a_tear_off_whose_receiver_was_freed_is_skipped_and_reported_once() {
+        struct Host;
+        fn hook(_this: Handle<Host>, _app: &mut App) {
+            panic!("a freed receiver's tear-off ran");
+        }
+
+        let cell = AppCell::new();
+        let notifier = cell.borrow_mut().create(ChangeNotifierData::new());
+        let host = *cell.borrow_mut().create(Host);
+        notifier.add_listener(&mut cell.borrow_mut(), Listener::handle_method(host, hook));
+        cell.checkpoint();
+        assert!(!cell.borrow().contains(host), "nothing kept the receiver");
+
+        notifier.notify_listeners(&mut cell.borrow_mut());
+        notifier.notify_listeners(&mut cell.borrow_mut());
+        let skipped = cell.borrow_mut().debug_take_skipped_tear_offs();
+        assert_eq!(skipped.len(), 1, "{skipped:?}");
+        assert!(skipped[0].contains("Host"), "{skipped:?}");
     }
 
     /// `remove_at` shifts in place while survivors fill more than half the
@@ -1021,7 +1089,8 @@ mod tests {
             let cell = AppCell::new();
             let mut app = cell.borrow_mut();
             let log = Log::default();
-            let host = app.create(TestNotifier::default());
+            let host_ref = app.create(TestNotifier::default());
+            let host = *host_ref;
 
             let names = ["0", "1", "2", "3", "4", "5", "6", "7"];
             let listeners: Vec<Listener> = names.iter().map(|name| recording(&log, name)).collect();
@@ -1054,7 +1123,8 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let log = Log::default();
-        let host = app.create(TestNotifier::default());
+        let host_ref = app.create(TestNotifier::default());
+        let host = *host_ref;
 
         let listener = recording(&log, "a");
         add(&mut app, host, listener.clone());
@@ -1080,7 +1150,8 @@ mod tests {
     fn notifying_after_dispose_panics_in_debug() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let host = app.create(TestNotifier::default());
+        let host_ref = app.create(TestNotifier::default());
+        let host = *host_ref;
         app.get_mut(host).change_notifier.dispose();
         notify(&mut app, host);
     }
@@ -1099,7 +1170,8 @@ mod tests {
     fn has_listeners_is_false_after_dispose() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let counter = app.create(ValueNotifier::new(0i32));
+        let counter_ref = app.create(ValueNotifier::new(0i32));
+        let counter = *counter_ref;
         counter.add_listener(&mut app, recording(&Log::default(), "a"));
         assert!(app.get(counter).change_notifier.has_listeners());
         app.get_mut(counter).dispose();
@@ -1112,7 +1184,8 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let log = Log::default();
-        let notifier = app.create(ValueNotifier::new(2.0));
+        let notifier_ref = app.create(ValueNotifier::new(2.0));
+        let notifier = *notifier_ref;
 
         notifier.add_listener(&mut app, {
             let log = Rc::clone(&log);
@@ -1134,7 +1207,8 @@ mod tests {
     fn has_listeners() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let notifier = app.create(ValueNotifier::new(true));
+        let notifier_ref = app.create(ValueNotifier::new(true));
+        let notifier = *notifier_ref;
         assert!(!app.get(notifier).change_notifier.has_listeners());
 
         let test1 = recording(&Log::default(), "test1");
@@ -1180,7 +1254,8 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let log = Log::default();
-        let counter = app.create(ValueNotifier::new(0i32));
+        let counter_ref = app.create(ValueNotifier::new(0i32));
+        let counter = *counter_ref;
 
         let listener1 = {
             let log = Rc::clone(&log);
@@ -1212,7 +1287,8 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let log = Log::default();
-        let host = app.create(TestNotifier::default());
+        let host_ref = app.create(TestNotifier::default());
+        let host = *host_ref;
 
         let names = [
             "listener0",
@@ -1288,7 +1364,8 @@ mod tests {
     fn dispose_during_notify_panics_and_does_not_finish_the_callback() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let host = app.create(TestNotifier::default());
+        let host_ref = app.create(TestNotifier::default());
+        let host = *host_ref;
         let finished = Rc::new(Cell::new(false));
         let finished_flag = Rc::clone(&finished);
         add(
@@ -1317,7 +1394,8 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let log = Log::default();
-        let on_undo = app.create(ChangeNotifierData::new());
+        let on_undo_ref = app.create(ChangeNotifierData::new());
+        let on_undo = *on_undo_ref;
 
         on_undo.add_listener(&mut app, recording(&log, "undo"));
         on_undo.notify_listeners(&mut app);
@@ -1330,7 +1408,8 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let log = Log::default();
-        let host = app.create(TestNotifier::default());
+        let host_ref = app.create(TestNotifier::default());
+        let host = *host_ref;
 
         let l0 = recording(&log, "l0");
         let l2 = recording(&log, "l2");
@@ -1395,8 +1474,10 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let log = Log::default();
-        let host = app.create(TestNotifier::default());
-        let inner_host = app.create(TestNotifier::default());
+        let host_ref = app.create(TestNotifier::default());
+        let host = *host_ref;
+        let inner_host_ref = app.create(TestNotifier::default());
+        let inner_host = *inner_host_ref;
 
         let doomed = recording(&log, "doomed");
         add(
@@ -1457,7 +1538,8 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let log = Log::default();
-        let host = app.create(TestNotifier::default());
+        let host_ref = app.create(TestNotifier::default());
+        let host = *host_ref;
 
         let doomed = recording(&log, "doomed");
         let saboteur = {
@@ -1495,7 +1577,8 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let log = Log::default();
-        let host = app.create(TestNotifier::default());
+        let host_ref = app.create(TestNotifier::default());
+        let host = *host_ref;
 
         let doomed = recording(&log, "doomed");
         let saboteur = {

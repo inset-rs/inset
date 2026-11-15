@@ -10,6 +10,7 @@ use waft_embedder::Matrix4;
 use waft_foundation::{App, Handle, HandleId};
 
 use crate::events::PointerEvent;
+use waft_foundation::Ref;
 
 type RouteCallback = dyn Fn(&mut App, PointerEvent);
 
@@ -44,6 +45,9 @@ impl PointerRoute {
     ///
     /// Pass the function by name. Rebuild at the removal site with the same
     /// handle and function.
+    ///
+    /// Like [`Listener::handle_method`](waft_foundation::Listener::handle_method), it does not
+    /// keep its receiver, and is skipped once the receiver is freed.
     pub fn handle_method<T: 'static, F>(this: Handle<T>, f: F) -> PointerRoute
     where
         F: Fn(Handle<T>, &mut App, PointerEvent) + 'static,
@@ -56,7 +60,11 @@ impl PointerRoute {
             )
         };
         PointerRoute {
-            callback: Rc::new(move |app: &mut App, event| f(this, app, event)),
+            callback: Rc::new(move |app: &mut App, event| {
+                if app.tear_off_receiver_is_live(this) {
+                    f(this, app, event);
+                }
+            }),
             identity: RouteIdentity::HandleMethod(this.id(), TypeId::of::<F>()),
         }
     }
@@ -111,7 +119,7 @@ pub struct PointerRouter {
 
 impl PointerRouter {
     /// Creates an empty router.
-    pub fn new(app: &mut App) -> Handle<PointerRouter> {
+    pub fn new(app: &mut App) -> Ref<PointerRouter> {
         app.create(PointerRouter {
             route_map: IndexMap::new(),
             global_routes: IndexMap::new(),
@@ -299,16 +307,17 @@ mod tests {
         });
 
         let router = PointerRouter::new(&mut app);
+        let router_handle = *router;
         let to_remove = callback.clone();
         router.add_route(
             &mut app,
             2,
             PointerRoute::new(move |app, _event| {
-                router.remove_route(app, 2, &to_remove);
+                router_handle.remove_route(app, 2, &to_remove);
             }),
             None,
         );
-        router.add_route(&mut app, 2, callback, None);
+        router_handle.add_route(&mut app, 2, callback, None);
         router.route(&mut app, down(2));
         assert!(!ran.get());
     }
@@ -323,12 +332,13 @@ mod tests {
         let second_flag = Rc::clone(&second_ran);
 
         let router = PointerRouter::new(&mut app);
+        let router_handle = *router;
         router.add_global_route(
             &mut app,
             PointerRoute::new(move |app, _event| {
                 first_flag.set(true);
                 let second_flag = Rc::clone(&second_flag);
-                router.add_global_route(
+                router_handle.add_global_route(
                     app,
                     PointerRoute::new(move |_app, _event| {
                         second_flag.set(true);
@@ -355,11 +365,12 @@ mod tests {
         });
 
         let router = PointerRouter::new(&mut app);
+        let router_handle = *router;
         let to_remove = callback.clone();
         router.add_global_route(
             &mut app,
             PointerRoute::new(move |app, _event| {
-                router.remove_global_route(app, &to_remove);
+                router_handle.remove_global_route(app, &to_remove);
             }),
             None,
         );
@@ -378,9 +389,31 @@ mod tests {
         }
         let flag = app.create(Flag(Cell::new(false)));
         let router = PointerRouter::new(&mut app);
-        router.add_route(&mut app, 1, PointerRoute::handle_method(flag, mark), None);
-        router.remove_route(&mut app, 1, &PointerRoute::handle_method(flag, mark));
+        router.add_route(&mut app, 1, PointerRoute::handle_method(*flag, mark), None);
+        router.remove_route(&mut app, 1, &PointerRoute::handle_method(*flag, mark));
         router.route(&mut app, down(1));
-        assert!(!app.get(flag).0.get());
+        assert!(!app.get(&flag).0.get());
+    }
+
+    /// A recognizer dropped without `dispose` leaves its route behind: the router skips it, as
+    /// the other tear-offs are skipped, rather than reading a freed receiver.
+    #[test]
+    fn a_route_whose_receiver_was_freed_is_skipped() {
+        struct Flag;
+        fn mark(_this: Handle<Flag>, _app: &mut App, _event: PointerEvent) {
+            panic!("a freed receiver's route ran");
+        }
+        let cell = AppCell::new();
+        let router = PointerRouter::new(&mut cell.borrow_mut());
+        let flag = *cell.borrow_mut().create(Flag);
+        router.add_route(
+            &mut cell.borrow_mut(),
+            1,
+            PointerRoute::handle_method(flag, mark),
+            None,
+        );
+        cell.checkpoint();
+        assert!(!cell.borrow().contains(flag), "nothing kept the receiver");
+        router.route(&mut cell.borrow_mut(), down(1));
     }
 }

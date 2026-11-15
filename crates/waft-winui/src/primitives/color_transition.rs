@@ -3,7 +3,7 @@
 use std::{fmt, rc::Rc, time::Duration};
 use waft_animation::{AnimationBehavior, AnimationController, ColorTween, Curves};
 use waft_embedder::Color;
-use waft_foundation::{App, Handle, Listener};
+use waft_foundation::{App, Handle, Listener, OptionRetained, Ref};
 use waft_scheduler::{Ticker, TickerCallback, TickerProviderObject};
 use waft_widgets::*;
 
@@ -44,8 +44,8 @@ impl fmt::Debug for ColorTransition {
 pub struct ColorTransitionState {
     state: StateData<ColorTransition>,
     single_ticker_provider: SingleTickerProviderStateMixinData,
-    controller: Option<Handle<AnimationController>>,
-    tween: Option<Handle<ColorTween>>,
+    controller: Option<Ref<AnimationController>>,
+    tween: Option<Ref<ColorTween>>,
     /// The colour on screen when the current transition started.
     from: Color,
 }
@@ -79,20 +79,23 @@ impl SingleTickerProviderStateMixin for ColorTransitionState {
 }
 
 impl TickerProviderObject for ColorTransitionState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
 
 impl ColorTransitionState {
     fn controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
-        app.get(self).controller.expect("created in init_state")
+        app.get(self)
+            .controller
+            .handle()
+            .expect("created in init_state")
     }
 
     /// The colour at this frame of the transition.
     fn current(self: Handle<Self>, app: &App) -> Color {
         let controller = self.controller(app);
-        let tween = app.get(self).tween.expect("created in init_state");
+        let tween = app.get(self).tween.handle().expect("created in init_state");
         tween
             .lerp(app, controller.value(app))
             .unwrap_or(self.widget(app).color)
@@ -133,10 +136,7 @@ impl State for ColorTransitionState {
         let from = self.current(app);
         let tween = ColorTween::new(app, Some(from), Some(color));
         let controller = self.controller(app);
-        let old = app.get_mut(self).tween.replace(tween);
-        if let Some(old) = old {
-            app.destroy(old.id());
-        }
+        app.get_mut(self).tween = Some(tween);
         app.get_mut(self).from = from;
         controller.set_value(app, 0.0);
         controller.animate_to(app, 1.0, None, Curves::linear());
@@ -149,9 +149,6 @@ impl State for ColorTransitionState {
     fn dispose(self: Handle<Self>, app: &mut App) {
         let controller = self.controller(app);
         controller.dispose(app);
-        if let Some(tween) = app.get_mut(self).tween.take() {
-            app.destroy(tween.id());
-        }
         SingleTickerProviderStateMixin::dispose(self, app);
     }
 

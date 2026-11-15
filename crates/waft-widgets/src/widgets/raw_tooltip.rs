@@ -8,11 +8,11 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use waft_animation::{
-    Animation, AnimationBehavior, AnimationController, AnimationStatus, AnimationStatusListener,
-    AnimationStyle, AnyAnimation, Curve, CurvedAnimation, Curves,
+    Animation, AnimationBehavior, AnimationController, AnimationRef, AnimationStatus,
+    AnimationStatusListener, AnimationStyle, Curve, CurvedAnimation, Curves,
 };
 use waft_embedder::{Matrix4, Offset, PointerDeviceKind, Size, TextBaseline};
-use waft_foundation::{App, Handle, Listener, Timer};
+use waft_foundation::{App, Handle, Listener, OptionRetained, Timer};
 use waft_gestures::{
     GestureBinding, LongPressGestureRecognizer, PointerDownEvent, PointerEnterEvent,
     PointerEnterEventListener, PointerEvent, PointerExitEvent, PointerExitEventListener,
@@ -44,6 +44,7 @@ use crate::widgets::overlay::{OverlayChildLayoutInfo, OverlayPortal, OverlayPort
 use crate::widgets::ticker_provider::{
     SingleTickerProviderStateMixin, SingleTickerProviderStateMixinData,
 };
+use waft_foundation::Ref;
 
 /// Dart's `_kDefaultAnimationStyle`; a function so its curve is the one shared
 /// `Curves::fast_out_slow_in()`, which `AnimationStyle`'s `==` compares by identity.
@@ -63,7 +64,7 @@ fn default_animation_style() -> AnimationStyle {
 /// the tooltip overlay child show/hide animation, for example to fade the
 /// tooltip in and out.
 pub type TooltipComponentBuilder =
-    Rc<dyn Fn(&mut App, BuildContext, AnyAnimation<f64>) -> WidgetRef>;
+    Rc<dyn Fn(&mut App, BuildContext, AnimationRef<f64>) -> WidgetRef>;
 
 /// Signature for computing the position of a tooltip.
 ///
@@ -712,7 +713,7 @@ impl RawTooltip {
     /// required.
     pub fn new<K>(
         semantics_tooltip: Option<String>,
-        tooltip_builder: impl Fn(&mut App, BuildContext, AnyAnimation<f64>) -> WidgetRef + 'static,
+        tooltip_builder: impl Fn(&mut App, BuildContext, AnimationRef<f64>) -> WidgetRef + 'static,
         child: impl IntoWidget<K>,
     ) -> RawTooltip {
         RawTooltip {
@@ -865,14 +866,14 @@ pub struct RawTooltipState {
     state: StateData<RawTooltip>,
     single_ticker_provider: SingleTickerProviderStateMixinData,
     /// Created in `init_state`, because a state is created without the [`App`].
-    overlay_controller: Option<Handle<OverlayPortalController>>,
+    overlay_controller: Option<Ref<OverlayPortalController>>,
 
     timer: Option<Timer>,
-    backing_controller: Option<Handle<AnimationController>>,
-    backing_overlay_animation: Option<Handle<CurvedAnimation>>,
+    backing_controller: Option<Ref<AnimationController>>,
+    backing_overlay_animation: Option<Ref<CurvedAnimation>>,
 
-    long_press_recognizer: Option<Handle<LongPressGestureRecognizer>>,
-    tap_recognizer: Option<Handle<TapGestureRecognizer>>,
+    long_press_recognizer: Option<Ref<LongPressGestureRecognizer>>,
+    tap_recognizer: Option<Ref<TapGestureRecognizer>>,
 
     // The ids of mouse devices that are keeping the tooltip from being dismissed.
     //
@@ -888,6 +889,7 @@ impl RawTooltipState {
     fn overlay_controller(self: Handle<Self>, app: &App) -> Handle<OverlayPortalController> {
         app.get(self)
             .overlay_controller
+            .handle()
             .expect("created in init_state")
     }
 
@@ -921,7 +923,7 @@ impl RawTooltipState {
     }
 
     fn controller(self: Handle<Self>, app: &mut App) -> Handle<AnimationController> {
-        if let Some(controller) = app.get(self).backing_controller {
+        if let Some(controller) = app.get(self).backing_controller.handle() {
             return controller;
         }
         let show_duration = self.show_duration(app);
@@ -940,20 +942,28 @@ impl RawTooltipState {
             app,
             AnimationStatusListener::handle_method(self, Self::handle_status_changed),
         );
+        let handle = controller.handle();
         app.get_mut(self).backing_controller = Some(controller);
-        controller
+        handle
     }
 
     fn overlay_animation(self: Handle<Self>, app: &mut App) -> Handle<CurvedAnimation> {
-        if let Some(overlay_animation) = app.get(self).backing_overlay_animation {
+        if let Some(overlay_animation) = app.get(self).backing_overlay_animation.handle() {
             return overlay_animation;
         }
-        let parent = self.controller(app).view();
+        self.controller(app);
+        let parent: AnimationRef<f64> = app
+            .get(self)
+            .backing_controller
+            .as_ref()
+            .expect("made above")
+            .erase();
         let show_curve = self.show_curve(app);
         let hide_curve = self.hide_curve(app);
         let overlay_animation = CurvedAnimation::create(app, parent, show_curve, hide_curve);
+        let handle = overlay_animation.handle();
         app.get_mut(self).backing_overlay_animation = Some(overlay_animation);
-        overlay_animation
+        handle
     }
 
     fn handle_status_changed(self: Handle<Self>, app: &mut App, status: AnimationStatus) {
@@ -985,8 +995,12 @@ impl RawTooltipState {
         fn show(this: Handle<RawTooltipState>, app: &mut App, touch_delay: Option<Duration>) {
             debug_assert!(this.mounted(app));
 
-            let controller = this.controller(app);
-            controller.forward(app, None);
+            this.controller(app).forward(app, None);
+            let controller = app
+                .get(this)
+                .backing_controller
+                .clone()
+                .expect("made above");
             if let Some(timer) = app.get(this).timer {
                 timer.cancel(app);
             }
@@ -1009,6 +1023,7 @@ impl RawTooltipState {
                 || app
                     .get(self)
                     .backing_controller
+                    .as_ref()
                     .is_none_or(|controller| controller.status(app) != AnimationStatus::Reverse),
             "timer must not be active when the tooltip is animating out"
         );
@@ -1039,6 +1054,7 @@ impl RawTooltipState {
                 || app
                     .get(self)
                     .backing_controller
+                    .as_ref()
                     .is_none_or(|controller| controller.status(app) != AnimationStatus::Reverse),
             "timer must not be active when the tooltip is animating out"
         );
@@ -1051,6 +1067,7 @@ impl RawTooltipState {
         if app
             .get(self)
             .backing_controller
+            .as_ref()
             .is_some_and(|controller| controller.is_forward_or_completed(app))
         {
             let controller = self.controller(app);
@@ -1083,13 +1100,14 @@ impl RawTooltipState {
         ];
         match self.widget(app).trigger_mode {
             TooltipTriggerMode::LongPress => {
-                let recognizer = match app.get(self).long_press_recognizer {
+                let recognizer = match app.get(self).long_press_recognizer.handle() {
                     Some(recognizer) => recognizer,
                     None => {
                         let recognizer = LongPressGestureRecognizer::new(app)
                             .supported_devices(app, trigger_mode_device_kinds);
+                        let handle = recognizer.handle();
                         app.get_mut(self).long_press_recognizer = Some(recognizer);
-                        recognizer
+                        handle
                     }
                 };
                 recognizer.set_on_long_press_cancel(
@@ -1107,13 +1125,14 @@ impl RawTooltipState {
                 recognizer.add_pointer(app, event);
             }
             TooltipTriggerMode::Tap => {
-                let recognizer = match app.get(self).tap_recognizer {
+                let recognizer = match app.get(self).tap_recognizer.handle() {
                     Some(recognizer) => recognizer,
                     None => {
                         let recognizer = TapGestureRecognizer::new(app)
                             .supported_devices(app, trigger_mode_device_kinds);
+                        let handle = recognizer.handle();
                         app.get_mut(self).tap_recognizer = Some(recognizer);
-                        recognizer
+                        handle
                     }
                 };
                 recognizer.set_on_tap_cancel(
@@ -1134,10 +1153,12 @@ impl RawTooltipState {
         let tap_primary_pointer = app
             .get(self)
             .tap_recognizer
+            .as_ref()
             .and_then(|recognizer| app.get(recognizer).primary().primary_pointer());
         let long_press_primary_pointer = app
             .get(self)
             .long_press_recognizer
+            .as_ref()
             .and_then(|recognizer| app.get(recognizer).primary().primary_pointer());
         if tap_primary_pointer == pointer || long_press_primary_pointer == pointer {
             // This is a pointer of interest specified by the trigger mode, since it's
@@ -1295,7 +1316,13 @@ impl RawTooltipState {
 
         // Keep the tooltip visible while the overlay child is hovered.
         let tooltip_builder = Rc::clone(&self.widget(app).tooltip_builder);
-        let overlay_animation = self.overlay_animation(app).as_animation();
+        self.overlay_animation(app);
+        let overlay_animation: AnimationRef<f64> = app
+            .get(self)
+            .backing_overlay_animation
+            .as_ref()
+            .expect("made above")
+            .erase();
         let tooltip = IgnorePointer::new()
             .ignoring(self.widget(app).ignore_pointer)
             .child(ExclusiveMouseRegion::new(
@@ -1348,7 +1375,7 @@ impl SingleTickerProviderStateMixin for RawTooltipState {
 
 /// Dart's `vsync: this`.
 impl TickerProviderObject for RawTooltipState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -1372,14 +1399,14 @@ impl State for RawTooltipState {
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &RawTooltip) {
         if self.widget(app).animation_style != old_widget.animation_style {
-            if let Some(controller) = app.get(self).backing_controller {
+            if let Some(controller) = app.get(self).backing_controller.handle() {
                 let show_duration = self.show_duration(app);
                 let hide_duration = self.hide_duration(app);
                 let controller = app.get_mut(controller);
                 controller.duration = Some(show_duration);
                 controller.reverse_duration = Some(hide_duration);
             }
-            if let Some(overlay_animation) = app.get(self).backing_overlay_animation {
+            if let Some(overlay_animation) = app.get(self).backing_overlay_animation.handle() {
                 let show_curve = self.show_curve(app);
                 let hide_curve = self.hide_curve(app);
                 let overlay_animation = app.get_mut(overlay_animation);
@@ -1415,24 +1442,13 @@ impl State for RawTooltipState {
         if let Some(timer) = app.get_mut(self).timer.take() {
             timer.cancel(app);
         }
-        let backing_controller = app.get_mut(self).backing_controller.take();
-        let backing_overlay_animation = app.get_mut(self).backing_overlay_animation.take();
-        if let Some(controller) = backing_controller {
+        if let Some(controller) = app.get(self).backing_controller.handle() {
             controller.dispose(app);
         }
-        if let Some(overlay_animation) = backing_overlay_animation {
+        if let Some(overlay_animation) = app.get(self).backing_overlay_animation.handle() {
             overlay_animation.dispose(app);
         }
         SingleTickerProviderStateMixin::dispose(self, app);
-        if let Some(controller) = backing_controller {
-            app.destroy(controller);
-        }
-        if let Some(overlay_animation) = backing_overlay_animation {
-            app.destroy(overlay_animation);
-        }
-        if let Some(overlay_controller) = app.get_mut(self).overlay_controller.take() {
-            app.destroy(overlay_controller);
-        }
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -1471,7 +1487,10 @@ impl State for RawTooltipState {
         );
 
         OverlayPortal::overlay_child_layout_builder(
-            self.overlay_controller(app),
+            app.get(self)
+                .overlay_controller
+                .clone()
+                .expect("created in init_state"),
             move |app, context, layout_info| self.build_tooltip_overlay(app, context, layout_info),
         )
         .child(result)
@@ -1559,6 +1578,7 @@ fn same_position_delegate(
 #[cfg(test)]
 mod tests {
     use std::cell::{Cell, RefCell};
+    use waft_foundation::Ref;
 
     use waft_embedder::{
         Color, KeyData, KeyEventDeviceType, KeyEventType, Rect, TargetPlatform, TextDirection,
@@ -1584,7 +1604,7 @@ mod tests {
     use crate::widgets::gesture_detector::GestureDetector;
     use crate::widgets::navigator::{RouteSettings, RouteSettingsRef};
     use crate::widgets::overlay::{Overlay, OverlayEntry};
-    use crate::widgets::pages::{AnyPageRoute, PageRoute, PageRouteBuilder};
+    use crate::widgets::pages::{PageRouteBuilder, PageRouteRef};
     use crate::widgets::routes::RoutePageBuilder;
     use crate::widgets::text::Text;
     use crate::widgets::transitions::FadeTransition;
@@ -1606,7 +1626,7 @@ mod tests {
         /// What the overlay's one entry builds: the tree `pump_widget` was last given.
         home: Rc<RefCell<Rc<dyn Fn() -> WidgetRef>>>,
         /// The entry `pump_widget` mounted, until `pump_root` replaces the tree.
-        entry: Option<Handle<OverlayEntry>>,
+        entry: Option<Ref<OverlayEntry>>,
     }
 
     impl Tester {
@@ -1636,7 +1656,7 @@ mod tests {
         /// tree in place.
         fn pump_widget(&mut self, child: impl Fn() -> WidgetRef + 'static) {
             *self.home.borrow_mut() = Rc::new(child);
-            if let Some(entry) = self.entry {
+            if let Some(entry) = &self.entry {
                 entry.mark_needs_build(&mut self.cell.borrow_mut());
                 self.pump(Duration::ZERO);
                 return;
@@ -1653,8 +1673,11 @@ mod tests {
                 false,
             );
             self.pump_root(
-                Directionality::new(TextDirection::Ltr, Overlay::new().initial_entries([entry]))
-                    .into_widget(),
+                Directionality::new(
+                    TextDirection::Ltr,
+                    Overlay::new().initial_entries([entry.clone()]),
+                )
+                .into_widget(),
             );
             self.entry = Some(entry);
         }
@@ -1903,12 +1926,12 @@ mod tests {
     }
 
     /// The tests' `pageRouteBuilder`: a `PageRouteBuilder` whose page is the builder's.
-    fn page_route(app: &mut App, settings: &RouteSettings, builder: WidgetBuilder) -> AnyPageRoute {
+    fn page_route(app: &mut App, settings: &RouteSettings, builder: WidgetBuilder) -> PageRouteRef {
         let page_builder: RoutePageBuilder =
             Rc::new(move |app, context, _animation, _secondary| builder(app, context));
         let route = PageRouteBuilder::new(app, page_builder)
             .settings(app, RouteSettingsRef::Settings(settings.clone()));
-        PageRoute::as_page_route(route)
+        route.erase()
     }
 
     fn sized_box(width: f64, height: f64) -> SizedBox {
@@ -2673,7 +2696,7 @@ mod tests {
         let (message1, message2) = (GlobalKey::new(), GlobalKey::new());
         let message = |key: &GlobalKey, text: &'static str| {
             let key = key.clone();
-            move |_app: &mut App, _context: BuildContext, _animation: AnyAnimation<f64>| {
+            move |_app: &mut App, _context: BuildContext, _animation: AnimationRef<f64>| {
                 Text::new(text).key(key.clone().into()).into_widget()
             }
         };
@@ -3584,7 +3607,7 @@ mod tests {
         tester: Tester,
         tooltip_key: GlobalKey,
         tip_key: GlobalKey,
-        tooltip_animation: Rc<RefCell<Option<AnyAnimation<f64>>>>,
+        tooltip_animation: Rc<RefCell<Option<AnimationRef<f64>>>>,
     }
 
     impl AnimationStyleCase {
@@ -3636,6 +3659,7 @@ mod tests {
             let animation = self
                 .tooltip_animation
                 .borrow()
+                .clone()
                 .expect("the tooltip was built");
             animation.value(&self.tester.cell.borrow())
         }

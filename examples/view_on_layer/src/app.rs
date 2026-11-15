@@ -14,7 +14,7 @@ use waft_embedder::{
     ViewFocusDirection, ViewFocusState, ViewHost, ViewMetrics, ViewRef, WindowConfig, WindowRef,
 };
 use waft_embedder_winit::{LinuxSettings, WinitEmbedder, WinitPlatform};
-use waft_foundation::{App, Handle, Listener, ValueListenable, ValueNotifier};
+use waft_foundation::{App, Handle, Listener, Ref, ValueListenable, ValueNotifier};
 use waft_gestures::PointerEvent;
 use waft_painting::{BoxDecoration, TextStyle};
 use waft_rendering::HitTestBehavior;
@@ -61,7 +61,7 @@ pub(crate) fn run() {
                 let windows =
                     MultiViewApp::new(move |_app, view| match view.initial_data().as_deref() {
                         None => Some(Home.into_widget()),
-                        Some(COUNTER) => Some(click_counter(clicks)),
+                        Some(COUNTER) => Some(click_counter(clicks.clone())),
                         Some(_) => None,
                     })
                     .on_close_requested(Rc::new(quit));
@@ -341,8 +341,8 @@ fn forwarded_presses(forwarding: Rc<Forwarding>) -> WidgetRef {
 }
 
 /// What the counter's view shows: how many clicks it took, which the window forwards.
-fn click_counter(clicks: Handle<ValueNotifier<u32>>) -> WidgetRef {
-    let count: Rc<dyn ValueListenable<u32>> = Rc::new(clicks);
+fn click_counter(clicks: Ref<ValueNotifier<u32>>) -> WidgetRef {
+    let count: Rc<dyn ValueListenable<u32>> = Rc::new(clicks.clone());
     let label = ValueListenableBuilder::new(count, |_app, _context, count, _child| {
         Text::new(format!("A view the app added: {count} clicks forwarded"))
             .style(TextStyle::new().font_size(17.0).color(ADDED_TEXT))

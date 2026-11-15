@@ -6,14 +6,14 @@ use std::{
     cell::{Cell, RefCell},
     rc::Rc,
 };
-use waft_foundation::{Handle, Listener};
+use waft_foundation::{Listener, Ref};
 use waft_painting::Alignment;
 use waft_widgets::*;
 use waft_winui::*;
 
 #[derive(Clone, Default)]
 struct Probe {
-    flyout: Rc<Cell<Option<Handle<Flyout>>>>,
+    flyout: Rc<RefCell<Option<Ref<Flyout>>>>,
     target: Rc<Cell<Option<BuildContext>>>,
     events: Rc<RefCell<Vec<&'static str>>>,
     outside: Rc<Cell<usize>>,
@@ -31,27 +31,28 @@ fn themed_fixture(mode: FlyoutShowMode, theme: Theme) -> (Fixture, Probe) {
         winui_gallery::install_fonts(app);
         let flyout = Flyout::new(app, Button::text("Popup action", Listener::new(|_| {})))
             .show_mode(app, mode);
-        shared.flyout.set(Some(flyout));
+        *shared.flyout.borrow_mut() = Some(flyout.clone());
         let events = shared.events.clone();
-        app.get_mut(flyout).opening =
+        app.get_mut(&flyout).opening =
             Some(Listener::new(move |_| events.borrow_mut().push("opening")));
         let events = shared.events.clone();
-        app.get_mut(flyout).opened =
+        app.get_mut(&flyout).opened =
             Some(Listener::new(move |_| events.borrow_mut().push("opened")));
         let events = shared.events.clone();
         let cancel = shared.cancel.clone();
-        app.get_mut(flyout).closing = Some(Rc::new(move |_, args| {
+        app.get_mut(&flyout).closing = Some(Rc::new(move |_, args| {
             events.borrow_mut().push("closing");
             args.cancel = cancel.get();
         }));
         let events = shared.events.clone();
-        app.get_mut(flyout).closed =
+        app.get_mut(&flyout).closed =
             Some(Listener::new(move |_| events.borrow_mut().push("closed")));
         let entry = OverlayEntry::new(
             app,
             Rc::new(move |_, _| {
                 let outside = shared.outside.clone();
                 let target = shared.target.clone();
+                let flyout = flyout.clone();
                 ThemeScope::new(
                     theme,
                     Stack::new().children([
@@ -60,7 +61,7 @@ fn themed_fixture(mode: FlyoutShowMode, theme: Theme) -> (Fixture, Probe) {
                             .child(FlyoutTarget::new(Builder::new(move |_, context| {
                                 target.set(Some(context));
                                 DropDownButton::text("Open flyout")
-                                    .flyout(flyout)
+                                    .flyout(flyout.clone())
                                     .into_widget()
                             })))
                             .into_widget(),
@@ -83,7 +84,11 @@ fn themed_fixture(mode: FlyoutShowMode, theme: Theme) -> (Fixture, Probe) {
             app,
             WidgetsApp::new(AccentPalette::default().base)
                 .debug_show_checked_mode_banner(false)
-                .builder(move |_, _, _| Overlay::new().initial_entries([entry]).into_widget())
+                .builder(move |_, _, _| {
+                    Overlay::new()
+                        .initial_entries([entry.clone()])
+                        .into_widget()
+                })
                 .into_widget(),
         );
     });
@@ -99,7 +104,14 @@ fn standard_dismissal_consumes_outside_tap_and_orders_events() {
     f.capture("flyout_standard");
     f.tap("Outside action");
     assert_eq!(probe.outside.get(), 0);
-    assert!(!probe.flyout.get().unwrap().is_open(&f.cell.borrow()));
+    assert!(
+        !probe
+            .flyout
+            .borrow()
+            .clone()
+            .unwrap()
+            .is_open(&f.cell.borrow())
+    );
     assert_eq!(
         &*probe.events.borrow(),
         &["opening", "opened", "closing", "closed"]
@@ -112,7 +124,14 @@ fn transient_dismissal_allows_outside_action() {
     f.tap("Open flyout");
     f.tap("Outside action");
     assert_eq!(probe.outside.get(), 1);
-    assert!(!probe.flyout.get().unwrap().is_open(&f.cell.borrow()));
+    assert!(
+        !probe
+            .flyout
+            .borrow()
+            .clone()
+            .unwrap()
+            .is_open(&f.cell.borrow())
+    );
 }
 
 #[test]
@@ -121,26 +140,35 @@ fn closing_handler_can_keep_presenter_open() {
     probe.cancel.set(true);
     f.tap("Open flyout");
     f.tap("Outside action");
-    assert!(probe.flyout.get().unwrap().is_open(&f.cell.borrow()));
+    assert!(
+        probe
+            .flyout
+            .borrow()
+            .clone()
+            .unwrap()
+            .is_open(&f.cell.borrow())
+    );
     assert_eq!(&*probe.events.borrow(), &["opening", "opened", "closing"]);
 }
 
 #[test]
 fn nested_presenter_is_inside_parent_but_parent_is_outside_child() {
     let (mut f, probe) = fixture(FlyoutShowMode::Standard);
-    let parent = probe.flyout.get().unwrap();
+    let parent = probe.flyout.borrow().clone().unwrap();
     let child = {
         let mut app = f.cell.borrow_mut();
         let child = Flyout::new(
             &mut app,
             Button::text("Nested action", Listener::new(|_| {})),
         );
-        parent.content(
+        let nested = child.clone();
+        parent.clone().content(
             &mut app,
             FlyoutTarget::new(Builder::new(move |_, context| {
+                let nested = nested.clone();
                 Button::text(
                     "Open nested",
-                    Listener::new(move |app| child.show_at(app, context)),
+                    Listener::new(move |app| nested.show_at(app, context)),
                 )
                 .into_widget()
             })),
@@ -163,7 +191,7 @@ fn nested_presenter_is_inside_parent_but_parent_is_outside_child() {
 fn opening_another_flyout_waits_for_closed_event() {
     let (mut f, probe) = fixture(FlyoutShowMode::Standard);
     f.tap("Open flyout");
-    let first = probe.flyout.get().unwrap();
+    let first = probe.flyout.borrow().clone().unwrap();
     let second = {
         let mut app = f.cell.borrow_mut();
         let second = Flyout::new(
@@ -171,7 +199,7 @@ fn opening_another_flyout_waits_for_closed_event() {
             Button::text("Second popup", Listener::new(|_| {})),
         );
         let events = probe.events.clone();
-        app.get_mut(second).opening = Some(Listener::new(move |_| {
+        app.get_mut(&second).opening = Some(Listener::new(move |_| {
             events.borrow_mut().push("second opening")
         }));
         second.show_at(&mut app, probe.target.get().unwrap());
@@ -192,13 +220,14 @@ fn opening_another_flyout_waits_for_closed_event() {
 fn closed_callback_can_replace_a_staged_request() {
     let (mut f, probe) = fixture(FlyoutShowMode::Standard);
     f.tap("Open flyout");
-    let first = probe.flyout.get().unwrap();
+    let first = probe.flyout.borrow().clone().unwrap();
     let (second, third) = {
         let mut app = f.cell.borrow_mut();
         let second = Flyout::new(&mut app, Text::new("Superseded"));
         let third = Flyout::new(&mut app, Text::new("Latest request"));
         let target = probe.target.get().unwrap();
-        app.get_mut(first).closed = Some(Listener::new(move |app| third.show_at(app, target)));
+        let latest = third.clone();
+        app.get_mut(&first).closed = Some(Listener::new(move |app| latest.show_at(app, target)));
         second.show_at(&mut app, target);
         (second, third)
     };
@@ -213,7 +242,7 @@ fn canceling_close_keeps_the_staged_request_until_a_later_close() {
     let (mut f, probe) = fixture(FlyoutShowMode::Standard);
     f.tap("Open flyout");
     probe.cancel.set(true);
-    let first = probe.flyout.get().unwrap();
+    let first = probe.flyout.borrow().clone().unwrap();
     let second = {
         let mut app = f.cell.borrow_mut();
         let second = Flyout::new(&mut app, Text::new("Waiting request"));
@@ -269,16 +298,18 @@ fn gallery_pages_open_retained_content() {
 #[test]
 fn standard_outside_dismissal_closes_only_the_topmost_flyout() {
     let (mut f, probe) = fixture(FlyoutShowMode::Standard);
-    let parent = probe.flyout.get().unwrap();
+    let parent = probe.flyout.borrow().clone().unwrap();
     let child = {
         let mut app = f.cell.borrow_mut();
         let child = Flyout::new(&mut app, Text::new("Nested content"));
-        parent.content(
+        let nested = child.clone();
+        parent.clone().content(
             &mut app,
             FlyoutTarget::new(Builder::new(move |_, context| {
+                let nested = nested.clone();
                 Button::text(
                     "Open child",
-                    Listener::new(move |app| child.show_at(app, context)),
+                    Listener::new(move |app| nested.show_at(app, context)),
                 )
                 .into_widget()
             })),
@@ -300,7 +331,7 @@ fn popup_shadow_leaves_transparent_content_clear_and_follows_theme() {
     let mut samples = Vec::new();
     for theme in [Theme::Light, Theme::Dark] {
         let (mut f, probe) = themed_fixture(FlyoutShowMode::Standard, theme);
-        let flyout = probe.flyout.get().unwrap();
+        let flyout = probe.flyout.borrow().clone().unwrap();
         flyout.flyout_presenter_style(
             &mut f.cell.borrow_mut(),
             Rc::new(|_, _, _| {

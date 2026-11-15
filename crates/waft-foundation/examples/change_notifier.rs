@@ -9,8 +9,7 @@
 
 use waft_foundation::AppCell;
 use waft_foundation::{
-    App, ChangeNotifier, ChangeNotifierData, Handle, Listenable, Listener, ValueListenable,
-    ValueNotifier,
+    App, ChangeNotifier, ChangeNotifierData, Handle, Listenable, Listener, Ref, ValueNotifier,
 };
 
 /// Dart: `class Counter with ChangeNotifier`.
@@ -51,15 +50,15 @@ impl CounterHandle for Handle<Counter> {
     }
 }
 
-/// A listener that is a method on another object (Dart's `addListener(rebuild)`).
+/// A listener that is a method on another object (Dart's `addListener(rebuild)`). It keeps the
+/// counter it shows: a field Dart types as `Counter` is a `Ref`.
 struct Label {
-    counter: Handle<Counter>,
+    counter: Ref<Counter>,
     shown: i32,
 }
 
 fn rebuild(this: Handle<Label>, app: &mut App) {
-    let counter = app.get(this).counter;
-    let count = app.get(counter).count;
+    let count = app.get(&app.get(this).counter).count;
     app.get_mut(this).shown = count;
     println!("  label.shown = {count}");
 }
@@ -76,11 +75,18 @@ fn mixin_counter() {
     let cell = AppCell::new();
     let mut app = cell.borrow_mut();
     let counter = app.create(Counter::new());
-    let label = app.create(Label { counter, shown: 0 });
+    let label = app.create(Label {
+        counter: counter.clone(),
+        shown: 0,
+    });
+    let label = *label;
 
-    // Closure listener: keep the handle; a second `Listener::new` would not match.
+    // Closure listener: keep the listener; a second `Listener::new` would not match. It is
+    // registered on the counter, so it names the counter by its bare handle: a `Ref` captured
+    // here would keep the counter until the listener is removed.
+    let counter_handle = *counter;
     let on_print = Listener::new(move |app| {
-        println!("  print       = {}", app.get(counter).count);
+        println!("  print       = {}", app.get(counter_handle).count);
     });
     counter.add_listener(&mut app, on_print.clone());
 
@@ -104,8 +110,9 @@ fn value_notifier() {
     let mut app = cell.borrow_mut();
     let count = app.create(ValueNotifier::new(0i32));
 
+    let count_handle = *count;
     let on_print = Listener::new(move |app| {
-        println!("  value       = {}", *count.value(app));
+        println!("  value       = {}", *app.get(count_handle).value());
     });
     count.add_listener(&mut app, on_print);
 

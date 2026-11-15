@@ -16,7 +16,9 @@ use waft_embedder::{
     Canvas, ClipOp, Color, Offset, Paint, PaintStyle, RRect, Radius, Rect, Size, Stroke,
     TargetPlatform, TextDirection, lerp_double, rrect_radii_elliptical,
 };
-use waft_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, K_IS_WEB, ValueChanged};
+use waft_foundation::{
+    App, ChangeNotifier, ChangeNotifierData, Handle, K_IS_WEB, OptionRetained, Ref, ValueChanged,
+};
 use waft_gestures::{
     DragEndDetails, DragStartBehavior, DragStartDetails, DragUpdateDetails, TapDownDetails,
 };
@@ -28,7 +30,7 @@ use waft_painting::{
 use waft_scheduler::{Ticker, TickerCallback, TickerProviderObject};
 use waft_services::{HapticFeedback, MouseCursor, MouseCursorRef, SystemMouseCursors};
 use waft_widgets::{
-    AnyFocusNode, BuildContext, Directionality, GestureDetector, Icon, IconTheme, IconThemeData,
+    BuildContext, Directionality, FocusNodeRef, GestureDetector, Icon, IconTheme, IconThemeData,
     IntoWidget, KeyRef, MediaQuery, Opacity, Semantics, State, StateData, StatefulWidget,
     TickerProviderStateMixin, TickerProviderStateMixinData, ToggleablePainter,
     ToggleablePainterData, ToggleablePainterRef, ToggleableStateMixin, ToggleableStateMixinData,
@@ -257,7 +259,7 @@ pub struct CupertinoSwitch {
     /// If one is not supplied, then one will be automatically allocated, owned, and managed
     /// by this widget. The widget will be focusable even if a `focus_node` is not supplied.
     /// If supplied, the given `focus_node` will be _hosted_ by this widget, but not owned.
-    pub focus_node: Option<AnyFocusNode>,
+    pub focus_node: Option<FocusNodeRef>,
     /// Handler called when the focus changes.
     ///
     /// Called with true if this widget's node gains focus, and false if it loses focus.
@@ -408,7 +410,7 @@ impl CupertinoSwitch {
     }
 
     /// Dart `CupertinoSwitch(focusNode:)`.
-    pub fn focus_node(mut self, focus_node: AnyFocusNode) -> CupertinoSwitch {
+    pub fn focus_node(mut self, focus_node: FocusNodeRef) -> CupertinoSwitch {
         self.focus_node = Some(focus_node);
         self
     }
@@ -488,7 +490,7 @@ pub struct CupertinoSwitchState {
     toggleable: ToggleableStateMixinData,
     /// Dart's `final _SwitchPainter _painter = _SwitchPainter()`, created in `init_state`
     /// because a painter is an arena object and a state is created without the `App`.
-    painter: Option<Handle<SwitchPainter>>,
+    painter: Option<Ref<SwitchPainter>>,
     // The global position where the user first touched the screen. This value to
     // calculate the initial drag delta.
     drag_start_position: Offset,
@@ -503,7 +505,10 @@ pub struct CupertinoSwitchState {
 
 impl CupertinoSwitchState {
     fn painter(self: Handle<Self>, app: &App) -> Handle<SwitchPainter> {
-        app.get(self).painter.expect("created in init_state")
+        app.get(self)
+            .painter
+            .handle()
+            .expect("created in init_state")
     }
 
     /// Dart's `_widgetThumbColor`.
@@ -714,7 +719,7 @@ impl TickerProviderStateMixin for CupertinoSwitchState {
 
 /// Dart's `vsync: this`.
 impl TickerProviderObject for CupertinoSwitchState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         TickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -756,7 +761,8 @@ impl State for CupertinoSwitchState {
         app.get_mut(position_controller).duration = Some(Duration::from_millis(200));
         let reaction_controller = self.reaction_controller(app);
         app.get_mut(reaction_controller).duration = Some(Duration::from_millis(300));
-        let position = app.get_mut(self.position(app));
+        let position = self.position(app).handle();
+        let position = app.get_mut(position);
         position.curve = Curves::ease();
         position.reverse_curve = Some(Rc::new(Curves::ease().flipped()) as Rc<dyn Curve>);
     }
@@ -774,8 +780,6 @@ impl State for CupertinoSwitchState {
     fn dispose(self: Handle<Self>, app: &mut App) {
         let painter = self.painter(app);
         painter.dispose(app);
-        app.get_mut(self).painter = None;
-        app.destroy(painter);
         ToggleableStateMixin::dispose(self, app);
         TickerProviderStateMixin::dispose(self, app);
     }
@@ -938,11 +942,16 @@ impl State for CupertinoSwitchState {
         let icon_theme = IconTheme::of(app, context);
         let states = self.states(app);
 
-        let painter = self.painter(app);
-        painter.set_position(app, self.position(app).as_animation());
-        painter.set_reaction(app, self.reaction(app).as_animation());
-        painter.set_reaction_focus_fade(app, self.reaction_focus_fade(app).as_animation());
-        painter.set_reaction_hover_fade(app, self.reaction_hover_fade(app).as_animation());
+        let painter_ref = app
+            .get(self)
+            .painter
+            .clone()
+            .expect("created in init_state");
+        let painter = painter_ref.handle();
+        painter.set_position(app, self.position(app).erase());
+        painter.set_reaction(app, self.reaction(app).erase());
+        painter.set_reaction_focus_fade(app, self.reaction_focus_fade(app).erase());
+        painter.set_reaction_hover_fade(app, self.reaction_hover_fade(app).erase());
         painter.set_focus_color(app, focus_color);
         painter.set_down_position(app, self.down_position(app));
         painter.set_is_focused(app, Some(states.contains(&WidgetState::Focused)));
@@ -968,7 +977,11 @@ impl State for CupertinoSwitchState {
         painter.set_inactive_icon(app, effective_inactive_icon);
         painter.set_icon_theme(app, Some(icon_theme));
         painter.set_surface_color(app, theme.scaffold_background_color().color());
-        painter.set_position_controller(app, self.position_controller(app));
+        let position_controller = self
+            .position_controller(app)
+            .upgrade(app)
+            .expect("created in init_state");
+        painter.set_position_controller(app, position_controller);
 
         let opacity = if ToggleableStateMixin::on_changed(self, app).is_none() {
             K_DISABLED_OPACITY
@@ -977,12 +990,12 @@ impl State for CupertinoSwitchState {
         };
         let toggleable = self.build_toggleable(
             app,
-            widget.focus_node,
+            widget.focus_node.clone(),
             widget.on_focus_change.clone(),
             widget.autofocus,
             Some(effective_mouse_cursor),
             K_SWITCH_SIZE,
-            ToggleablePainterRef::new(painter),
+            ToggleablePainterRef::new(painter_ref),
         );
         // The detector's `excludeFromSemantics` waits with accessibility.
         let detector = GestureDetector::new()
@@ -1011,8 +1024,8 @@ impl State for CupertinoSwitchState {
 struct SwitchPainter {
     change_notifier: ChangeNotifierData,
     toggleable_painter: ToggleablePainterData,
-    position_controller: Option<Handle<AnimationController>>,
-    color_animation: Option<Handle<CurvedAnimation>>,
+    position_controller: Option<Ref<AnimationController>>,
+    color_animation: Option<Ref<CurvedAnimation>>,
     active_icon: Option<Rc<Icon>>,
     inactive_icon: Option<Rc<Icon>>,
     icon_theme: Option<IconThemeData>,
@@ -1052,7 +1065,7 @@ fn same_icon(a: &Option<Rc<Icon>>, b: &Option<Rc<Icon>>) -> bool {
 }
 
 impl SwitchPainter {
-    fn new(app: &mut App) -> Handle<SwitchPainter> {
+    fn new(app: &mut App) -> Ref<SwitchPainter> {
         app.create(SwitchPainter {
             change_notifier: ChangeNotifierData::new(),
             toggleable_painter: ToggleablePainterData::new(),
@@ -1089,25 +1102,21 @@ impl SwitchPainter {
     fn position_controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
         app.get(self)
             .position_controller
+            .handle()
             .expect("set before painting")
     }
 
-    fn set_position_controller(
-        self: Handle<Self>,
-        app: &mut App,
-        value: Handle<AnimationController>,
-    ) {
-        if app.get(self).position_controller == Some(value) {
+    fn set_position_controller(self: Handle<Self>, app: &mut App, value: Ref<AnimationController>) {
+        if app.get(self).position_controller.handle() == Some(value.handle()) {
             return;
         }
-        app.get_mut(self).position_controller = Some(value);
+        app.get_mut(self).position_controller = Some(value.clone());
         if let Some(color_animation) = app.get_mut(self).color_animation.take() {
             color_animation.dispose(app);
-            app.destroy(color_animation);
         }
         let color_animation = CurvedAnimation::create(
             app,
-            value.as_animation(),
+            value.erase(),
             Curves::ease_out(),
             Some(Curves::ease_in()),
         );
@@ -1692,7 +1701,6 @@ impl SwitchPainter {
         let color_animation = painter.color_animation.take();
         if let Some(color_animation) = color_animation {
             color_animation.dispose(app);
-            app.destroy(color_animation);
         }
         ToggleablePainter::dispose(self, app);
     }
@@ -1762,6 +1770,7 @@ impl ToggleablePainter for SwitchPainter {
         let color_value = app
             .get(self)
             .color_animation
+            .handle()
             .expect("set with the position controller")
             .value(app);
         let track_color = Color::lerp(
@@ -1877,12 +1886,13 @@ mod tests {
     use waft_test::TestPlatform;
     use waft_widgets::{
         Actions, ActivateIntent, Center, FocusHighlightStrategy, FocusManager, FocusNode,
-        FocusNodeLeaf, GlobalKey, MediaQueryData, SizedBox, UnfocusDisposition,
+        GlobalKey, MediaQueryData, SizedBox, UnfocusDisposition,
     };
 
     use super::*;
     use crate::icons::{CupertinoIcons, install_cupertino_icon_font};
     use crate::test_support::{build, pump, test_view};
+    use waft_widgets::AnyFocusNode;
 
     /// The haptics a test platform played, in order.
     #[derive(Default)]
@@ -1904,7 +1914,7 @@ mod tests {
         text_direction: TextDirection,
         media: Option<MediaQueryData>,
         theme: Option<crate::theme::CupertinoThemeData>,
-        focus_node: Option<AnyFocusNode>,
+        focus_node: Option<FocusNodeRef>,
         accept: Accept,
         configure: Rc<dyn Fn(CupertinoSwitch) -> CupertinoSwitch>,
         changes: Rc<RefCell<Vec<bool>>>,
@@ -1955,7 +1965,7 @@ mod tests {
             });
             let mut switch = CupertinoSwitch::new(app.get(self).value, on_changed)
                 .key(app.get(self).switch_key.clone().into());
-            if let Some(focus_node) = self.widget(app).focus_node {
+            if let Some(focus_node) = self.widget(app).focus_node.clone() {
                 switch = switch.focus_node(focus_node);
             }
             let switch = (self.widget(app).configure)(switch);
@@ -1975,7 +1985,7 @@ mod tests {
     struct Fixture {
         cell: Rc<AppCell>,
         host: Handle<HostState>,
-        focus_node: Option<AnyFocusNode>,
+        focus_node: Option<FocusNodeRef>,
         /// Where the last pointer event was, for the next one's delta.
         last_position: Offset,
         haptics: Rc<RecordedHaptics>,
@@ -2056,7 +2066,7 @@ mod tests {
             install_cupertino_icon_font(&mut cell.borrow_mut());
             let focus_node = self
                 .focusable
-                .then(|| FocusNode::new(&mut cell.borrow_mut()).as_node());
+                .then(|| FocusNode::new(&mut cell.borrow_mut()).into_erased());
             let changes: Rc<RefCell<Vec<bool>>> = Rc::default();
             let host_key = GlobalKey::new();
             build(
@@ -2067,7 +2077,7 @@ mod tests {
                     text_direction: self.text_direction,
                     media: self.media,
                     theme: self.theme,
-                    focus_node,
+                    focus_node: focus_node.clone(),
                     accept: self.accept,
                     configure: self.configure,
                     changes: Rc::clone(&changes),
@@ -2146,7 +2156,9 @@ mod tests {
 
         /// The test view is 2x: logical coordinates double into the packet.
         fn node(&self) -> AnyFocusNode {
-            self.focus_node.expect("mounted with Setup::focus_node")
+            self.focus_node
+                .handle()
+                .expect("mounted with Setup::focus_node")
         }
 
         fn send(&mut self, change: PointerChange, kind: PointerDeviceKind, at: Offset) {
@@ -2927,8 +2939,15 @@ mod tests {
     fn unmounting_the_switch_disposes_its_painter_and_animations() {
         let fixture = Setup::new().mount();
         let state = fixture.state();
-        let painter = fixture.cell.borrow().get(state).painter.expect("created");
+        let painter = fixture
+            .cell
+            .borrow()
+            .get(state)
+            .painter
+            .handle()
+            .expect("created");
         build(&fixture.cell, SizedBox::shrink().into_widget());
+        fixture.cell.checkpoint();
         let app = fixture.cell.borrow();
         assert!(!app.contains(painter));
     }

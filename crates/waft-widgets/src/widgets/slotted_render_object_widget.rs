@@ -300,6 +300,7 @@ where
             slot_objects: Vec::new(),
             debug_previous_slots: None,
         })
+        .into_tree_node(app)
         .as_element()
     }
 

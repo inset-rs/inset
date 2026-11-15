@@ -13,7 +13,7 @@ use std::marker::PhantomData;
 use std::rc::Rc;
 
 use waft_embedder::{Offset, PointerDeviceKind};
-use waft_foundation::{App, Handle};
+use waft_foundation::{App, Handle, Ref};
 use waft_gestures::{
     AnyGestureRecognizer, DeviceGestureSettings, DragGestureRecognizer, DragStartBehavior,
     GestureDragCancelCallback, GestureDragDownCallback, GestureDragEndCallback,
@@ -25,7 +25,7 @@ use waft_gestures::{
     GestureTapDownCallback, GestureTapMoveCallback, GestureTapUpCallback,
     HorizontalDragGestureRecognizer, K_DEFAULT_TRACKPAD_SCROLL_TO_SCALE_FACTOR,
     LongPressGestureRecognizer, MultitouchDragStrategy, PanGestureRecognizer, PointerDownEvent,
-    PointerPanZoomStartEvent, ScaleGestureRecognizer, TapGestureRecognizer,
+    PointerPanZoomStartEvent, RecognizerRef, ScaleGestureRecognizer, TapGestureRecognizer,
     VerticalDragGestureRecognizer,
 };
 use waft_rendering::HitTestBehavior;
@@ -44,7 +44,7 @@ use crate::widgets::scroll_configuration::ScrollConfiguration;
 /// Used by [`RawGestureDetector::gestures`].
 pub trait GestureRecognizerFactory<T: GestureRecognizerLeaf>: 'static {
     /// Must return an instance of T.
-    fn constructor(&self, app: &mut App) -> Handle<T>;
+    fn constructor(&self, app: &mut App) -> Ref<T>;
 
     /// Must configure the given instance (which will have been created by
     /// [`constructor`](Self::constructor)).
@@ -66,7 +66,7 @@ pub trait GestureRecognizerFactory<T: GestureRecognizerLeaf>: 'static {
 }
 
 /// Signature for closures that implement [`GestureRecognizerFactory::constructor`].
-pub type GestureRecognizerFactoryConstructor<T> = Rc<dyn Fn(&mut App) -> Handle<T>>;
+pub type GestureRecognizerFactoryConstructor<T> = Rc<dyn Fn(&mut App) -> Ref<T>>;
 
 /// Signature for closures that implement [`GestureRecognizerFactory::initializer`].
 pub type GestureRecognizerFactoryInitializer<T> = Rc<dyn Fn(&mut App, Handle<T>)>;
@@ -82,7 +82,7 @@ pub struct GestureRecognizerFactoryWithHandlers<T> {
 impl<T: GestureRecognizerLeaf> GestureRecognizerFactoryWithHandlers<T> {
     /// Creates a gesture recognizer factory with the given callbacks.
     pub fn new(
-        constructor: impl Fn(&mut App) -> Handle<T> + 'static,
+        constructor: impl Fn(&mut App) -> Ref<T> + 'static,
         initializer: impl Fn(&mut App, Handle<T>) + 'static,
     ) -> GestureRecognizerFactoryWithHandlers<T> {
         GestureRecognizerFactoryWithHandlers {
@@ -95,7 +95,7 @@ impl<T: GestureRecognizerLeaf> GestureRecognizerFactoryWithHandlers<T> {
 impl<T: GestureRecognizerLeaf> GestureRecognizerFactory<T>
     for GestureRecognizerFactoryWithHandlers<T>
 {
-    fn constructor(&self, app: &mut App) -> Handle<T> {
+    fn constructor(&self, app: &mut App) -> Ref<T> {
         (self.constructor)(app)
     }
 
@@ -113,7 +113,7 @@ pub trait AnyGestureRecognizerFactory: Debug {
     fn debug_assert_type_matches(&self, type_id: TypeId) -> bool;
 
     /// See [`GestureRecognizerFactory::constructor`].
-    fn constructor(&self, app: &mut App) -> AnyGestureRecognizer;
+    fn constructor(&self, app: &mut App) -> RecognizerRef;
 
     /// See [`GestureRecognizerFactory::initializer`].
     fn initializer(&self, app: &mut App, instance: AnyGestureRecognizer);
@@ -145,8 +145,8 @@ impl<T: GestureRecognizerLeaf, F: GestureRecognizerFactory<T>> AnyGestureRecogni
         true
     }
 
-    fn constructor(&self, app: &mut App) -> AnyGestureRecognizer {
-        self.factory.constructor(app).as_recognizer()
+    fn constructor(&self, app: &mut App) -> RecognizerRef {
+        self.factory.constructor(app).into_erased()
     }
 
     fn initializer(&self, app: &mut App, instance: AnyGestureRecognizer) {
@@ -1902,23 +1902,23 @@ impl StatefulWidget for RawGestureDetector {
     }
 }
 
-/// Dart's `Map<Type, GestureRecognizer>`: the live recognizers, in the order of the
+/// Dart's `Map<Type, GestureRecognizer>`: the recognizers the state keeps, in the order of the
 /// factories that made them.
-type Recognizers = Vec<(TypeId, AnyGestureRecognizer)>;
+type Recognizers = Vec<(TypeId, RecognizerRef)>;
 
 /// Dart's `map[type]`.
 fn recognizer_of_type(
-    recognizers: &[(TypeId, AnyGestureRecognizer)],
+    recognizers: &[(TypeId, RecognizerRef)],
     type_id: TypeId,
-) -> Option<AnyGestureRecognizer> {
+) -> Option<RecognizerRef> {
     recognizers
         .iter()
         .find(|(candidate, _)| *candidate == type_id)
-        .map(|(_, recognizer)| *recognizer)
+        .map(|(_, recognizer)| recognizer.clone())
 }
 
 /// Dart's `map.containsKey(type)`.
-fn contains_type(recognizers: &[(TypeId, AnyGestureRecognizer)], type_id: TypeId) -> bool {
+fn contains_type(recognizers: &[(TypeId, RecognizerRef)], type_id: TypeId) -> bool {
     recognizer_of_type(recognizers, type_id).is_some()
 }
 
@@ -1978,7 +1978,8 @@ impl RawGestureDetectorState {
                 Some(existing) => existing,
                 None => factory.constructor(app),
             };
-            self.recognizers_mut(app).push((*type_id, recognizer));
+            self.recognizers_mut(app)
+                .push((*type_id, recognizer.clone()));
             debug_assert!(
                 recognizer.type_id() == *type_id,
                 "GestureRecognizerFactory of type {type_id:?} created a GestureRecognizer of \
@@ -1986,7 +1987,7 @@ impl RawGestureDetectorState {
                  the class that it returns from its constructor method.",
                 recognizer.type_id()
             );
-            factory.initializer(app, recognizer);
+            factory.initializer(app, recognizer.handle());
         }
         for (type_id, old_recognizer) in &old_recognizers {
             if !contains_type(self.recognizers(app), *type_id) {
@@ -2022,7 +2023,7 @@ impl RawGestureDetectorState {
     }
 
     /// Dart's `_recognizers!`.
-    fn recognizers(self: Handle<Self>, app: &App) -> &[(TypeId, AnyGestureRecognizer)] {
+    fn recognizers(self: Handle<Self>, app: &App) -> &[(TypeId, RecognizerRef)] {
         app.get(self)
             .recognizers
             .as_deref()
@@ -2041,7 +2042,7 @@ impl RawGestureDetectorState {
     fn recognizer_handles(self: Handle<Self>, app: &App) -> Vec<AnyGestureRecognizer> {
         self.recognizers(app)
             .iter()
-            .map(|(_, recognizer)| *recognizer)
+            .map(|(_, recognizer)| recognizer.handle())
             .collect()
     }
 }
@@ -2420,6 +2421,9 @@ mod tests {
             app.is_disposed(pressed_listener.id()),
             "disposed by the rebuild"
         );
+        drop(app);
+        cell.checkpoint();
+        let mut app = cell.borrow_mut();
         assert!(
             app.contains(pressed_listener.id()),
             "kept by the cached path"
@@ -2432,6 +2436,9 @@ mod tests {
             PointerDeviceKind::Touch,
         );
         assert_eq!(ups.get(), 1, "the release reached the pressed listener");
+        drop(app);
+        cell.checkpoint();
+        let app = cell.borrow();
         assert!(
             !app.contains(pressed_listener.id()),
             "vacated with the path"
@@ -2448,7 +2455,7 @@ mod tests {
         let downs = Rc::new(Cell::new(0));
         let on_down = Rc::clone(&downs);
         let target = crate::widgets::basic::Transform::new(Matrix4::translation(40.0, 30.0)).child(
-            CompositedTransformTarget::new(link).child(Sized {
+            CompositedTransformTarget::new(link.clone()).child(Sized {
                 size: Size::new(10.0, 10.0),
             }),
         );
@@ -2711,6 +2718,9 @@ mod tests {
 
         harness.set_child(&mut app, RawGestureDetector::new().into_widget());
         harness.pump(&mut app);
+        drop(app);
+        cell.checkpoint();
+        let mut app = cell.borrow_mut();
         assert!(
             !app.contains(recognizer),
             "a type no longer listed is disposed"
@@ -2828,6 +2838,9 @@ mod tests {
             .expect("attached");
         pipeline.flush_layout(&mut app);
         armed.set(false);
+        drop(app);
+        cell.checkpoint();
+        let mut app = cell.borrow_mut();
 
         assert!(
             !app.contains(tap_recognizer),
@@ -2891,13 +2904,13 @@ mod tests {
             .into_widget(),
         );
         harness.pump(&mut app);
+        drop(app);
+        cell.checkpoint();
+        let app = cell.borrow();
         for recognizer in recognizers {
             assert!(!app.contains(recognizer), "dispose freed the recognizer");
         }
-        assert!(
-            !app.contains(state),
-            "the state slot is freed after dispose"
-        );
+        assert!(!app.contains(state), "the state is freed with its element");
     }
 
     // ---- the vertical drag, pan and scale callbacks ----

@@ -1,7 +1,10 @@
 //! MenuFlyout templates, checked values and source keyboard navigation.
 
-use std::{cell::Cell, rc::Rc};
-use waft_foundation::{Handle, Listener};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
+use waft_foundation::{Listener, Ref};
 use waft_painting::Alignment;
 use waft_services::{
     HardwareKeyboard, KeyDownEvent, KeyEvent, KeyUpEvent, LogicalKeyboardKey, PhysicalKeyboardKey,
@@ -12,7 +15,7 @@ use waft_winui_test_support::Fixture;
 
 #[derive(Default)]
 struct Probe {
-    menu: Cell<Option<Handle<MenuFlyout>>>,
+    menu: RefCell<Option<Ref<MenuFlyout>>>,
     calls: Cell<usize>,
     checked: Cell<bool>,
     radio: Cell<usize>,
@@ -39,7 +42,12 @@ fn items(probe: Rc<Probe>) -> Vec<MenuFlyoutItem> {
         .is_enabled(false),
         MenuFlyoutItem::toggle("Autosave", probe.checked.get(), move |app, checked| {
             toggle.checked.set(checked);
-            toggle.menu.get().unwrap().items(app, items(toggle.clone()));
+            toggle
+                .menu
+                .borrow()
+                .clone()
+                .unwrap()
+                .items(app, items(toggle.clone()));
         })
         .prevent_dismiss_on_pointer(true),
         MenuFlyoutItem::radio(
@@ -47,7 +55,12 @@ fn items(probe: Rc<Probe>) -> Vec<MenuFlyoutItem> {
             probe.radio.get() == 0,
             Listener::new(move |app| {
                 first.radio.set(0);
-                first.menu.get().unwrap().items(app, items(first.clone()));
+                first
+                    .menu
+                    .borrow()
+                    .clone()
+                    .unwrap()
+                    .items(app, items(first.clone()));
             }),
         )
         .prevent_dismiss_on_pointer(true),
@@ -56,7 +69,12 @@ fn items(probe: Rc<Probe>) -> Vec<MenuFlyoutItem> {
             probe.radio.get() == 1,
             Listener::new(move |app| {
                 second.radio.set(1);
-                second.menu.get().unwrap().items(app, items(second.clone()));
+                second
+                    .menu
+                    .borrow()
+                    .clone()
+                    .unwrap()
+                    .items(app, items(second.clone()));
             }),
         )
         .prevent_dismiss_on_pointer(true),
@@ -82,9 +100,10 @@ fn fixture() -> (Fixture, Rc<Probe>) {
     let fixture = Fixture::with_root([600, 600], move |app| {
         winui_gallery::install_fonts(app);
         let menu = MenuFlyout::new(app, items(shared.clone()));
-        shared.menu.set(Some(menu));
+        *shared.menu.borrow_mut() = Some(menu.clone());
         let flyout = menu
             .as_flyout(app)
+            .clone()
             .placement(app, FlyoutPlacementMode::BottomEdgeAlignedLeft);
         let entry = OverlayEntry::new(
             app,
@@ -93,7 +112,7 @@ fn fixture() -> (Fixture, Rc<Probe>) {
                     Theme::Light,
                     Align::new()
                         .alignment(Alignment::TOP_LEFT.into())
-                        .child(DropDownButton::text("Commands").flyout(flyout)),
+                        .child(DropDownButton::text("Commands").flyout(flyout.clone())),
                 )
                 .into_widget()
             }),
@@ -106,7 +125,7 @@ fn fixture() -> (Fixture, Rc<Probe>) {
             WidgetsApp::new(AccentPalette::default().base)
                 .debug_show_checked_mode_banner(false)
                 .builder(move |_, _, _| {
-                    FocusScope::new(Overlay::new().initial_entries([entry]))
+                    FocusScope::new(Overlay::new().initial_entries([entry.clone()]))
                         .autofocus(true)
                         .into_widget()
                 })
@@ -149,7 +168,14 @@ fn command_invocation_closes_the_menu() {
     f.capture("menu_flyout_touch");
     f.tap("Open document");
     assert_eq!(probe.calls.get(), 1);
-    assert!(!probe.menu.get().unwrap().is_open(&f.cell.borrow()));
+    assert!(
+        !probe
+            .menu
+            .borrow()
+            .clone()
+            .unwrap()
+            .is_open(&f.cell.borrow())
+    );
 }
 
 #[test]
@@ -160,7 +186,14 @@ fn checked_items_update_without_closing_when_requested() {
     assert!(probe.checked.get());
     f.tap("Grid view");
     assert_eq!(probe.radio.get(), 1);
-    assert!(probe.menu.get().unwrap().is_open(&f.cell.borrow()));
+    assert!(
+        probe
+            .menu
+            .borrow()
+            .clone()
+            .unwrap()
+            .is_open(&f.cell.borrow())
+    );
     f.capture("menu_flyout_checked");
 }
 

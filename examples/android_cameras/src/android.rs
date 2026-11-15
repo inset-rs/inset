@@ -9,7 +9,7 @@ use waft_embedder::image_codecs::{PixelBuffer, PixelLayout};
 use waft_embedder::{
     Camera, CameraFormat, CameraOutputs, Color, Image, Size, TextDirection, VideoFrameReader,
 };
-use waft_foundation::{App, AsyncApp, Entity, Handle, Listenable, Listener};
+use waft_foundation::{App, AsyncApp, Entity, Listenable, Listener, OptionRetained, Ref};
 use waft_painting::{BoxDecoration, BoxFit, EdgeInsetsGeometry, ImageInfo, TextStyle};
 use waft_widgets::{
     BuildContext, CameraPreview, CameraSession, Center, Column, CrossAxisAlignment, DecoratedBox,
@@ -37,7 +37,7 @@ struct Shown {
     /// The camera shown, among `cameras`.
     index: usize,
     status: String,
-    session: Option<Handle<CameraSession>>,
+    session: Option<Ref<CameraSession>>,
     reader: Option<Arc<dyn VideoFrameReader>>,
     /// The reader's newest frame, drawn, and how many it handed out.
     frame: Option<Image>,
@@ -85,7 +85,7 @@ pub(crate) fn run(app: &mut App) {
 
 /// Opens the camera `index` and starts it, in place of the one running.
 fn start_camera(app: &mut App, shown: &Entity<Shown>, index: usize) {
-    if let Some(session) = shown.read(app).session {
+    if let Some(session) = shown.read(app).session.handle() {
         session.dispose(app);
     }
     let Some(camera) = shown.read(app).cameras.get(index).cloned() else {
@@ -154,8 +154,9 @@ async fn run_camera(cx: &AsyncApp, shown: &Entity<Shown>, camera: &Camera) -> St
         Err(error) => return format!("{} did not start: {error}", camera.name),
     };
     cx.update(|app| {
-        log_states(app, session);
-        change(app, shown, |shown| shown.session = Some(session));
+        log_states(app, &session);
+        let kept = session.clone();
+        change(app, shown, |shown| shown.session = Some(kept));
         let shooting = shown.clone();
         let _first = app.schedule_timer(
             FIRST_PHOTO,
@@ -164,7 +165,7 @@ async fn run_camera(cx: &AsyncApp, shown: &Entity<Shown>, camera: &Camera) -> St
         format!(
             "{} runs in {}, its preview turned {}, what it captures {}",
             camera.name,
-            described(CameraSession::format(session, app)),
+            described(CameraSession::format(session.handle(), app)),
             session.video_rotation_angle_for_horizon_level_preview(app),
             session.video_rotation_angle_for_horizon_level_capture(app),
         )
@@ -267,7 +268,7 @@ fn middle_pixel(pixels: &PixelBuffer) -> &[u8] {
 
 /// Takes a photo with the camera running, and shows it decoded.
 fn take_photo(app: &mut App, shown: &Entity<Shown>) {
-    let Some(session) = shown.read(app).session else {
+    let Some(session) = shown.read(app).session.handle() else {
         return;
     };
     let taking = session.take_photo(app);
@@ -322,12 +323,14 @@ fn take_photo(app: &mut App, shown: &Entity<Shown>) {
 }
 
 /// Logs `session`'s state now and each time it changes.
-fn log_states(app: &mut App, session: Handle<CameraSession>) {
+fn log_states(app: &mut App, session: &Ref<CameraSession>) {
     crate::log::info(&format!("state: {:?}", session.state(app)));
-    let listenable: std::rc::Rc<dyn Listenable> = std::rc::Rc::new(session);
+    // The listener is kept by the session, so it names the session without keeping it.
+    let handle = session.handle();
+    let listenable: std::rc::Rc<dyn Listenable> = std::rc::Rc::new(session.clone());
     listenable.add_listener(
         app,
-        Listener::new(move |app| crate::log::info(&format!("state: {:?}", session.state(app)))),
+        Listener::new(move |app| crate::log::info(&format!("state: {:?}", handle.state(app)))),
     );
 }
 
@@ -406,9 +409,9 @@ impl StatelessWidget for Screen {
             })
             .collect::<Vec<_>>()
             .join("\n");
-        let live = match shown.session {
+        let live = match &shown.session {
             Some(session) => Center::new()
-                .child(CameraPreview::new(session))
+                .child(CameraPreview::new(session.clone()))
                 .into_widget(),
             None => SizedBox::expand().into_widget(),
         };

@@ -6,7 +6,9 @@ use std::fmt::{self, Debug, Display};
 use std::rc::Rc;
 
 use waft_embedder::{Clip, Matrix4, Offset, Size, TextDirection};
-use waft_foundation::{App, Handle, ListenableObject, Listener, ValueNotifier};
+use waft_foundation::{
+    App, Handle, ListenableObject, Listener, OptionRetained, Retained, ValueNotifier,
+};
 use waft_painting::{Alignment, AlignmentGeometry};
 use waft_rendering::{
     AnyRenderBox, AnyRenderObject, BoxConstraints, BoxHitTestResult, ClipRectLayer, Constraints,
@@ -36,6 +38,7 @@ use crate::widgets::media_query::MediaQuery;
 use crate::widgets::ticker_provider::{
     TickerMode, TickerProviderStateMixin, TickerProviderStateMixinData,
 };
+use waft_foundation::Ref;
 
 /// The signature of the widget builder callback used in
 /// [`OverlayPortal::overlay_child_layout_builder`].
@@ -115,7 +118,7 @@ pub struct OverlayEntry {
     can_size_overlay: bool,
     /// The currently mounted [`OverlayEntryWidgetState`] built using this [`OverlayEntry`].
     overlay_entry_state_notifier:
-        Option<Handle<ValueNotifier<Option<Handle<OverlayEntryWidgetState>>>>>,
+        Option<Ref<ValueNotifier<Option<Handle<OverlayEntryWidgetState>>>>>,
     overlay: Option<Handle<OverlayState>>,
     key: GlobalKey,
     disposed_by_owner: bool,
@@ -135,7 +138,7 @@ impl OverlayEntry {
         opaque: bool,
         maintain_state: bool,
         can_size_overlay: bool,
-    ) -> Handle<OverlayEntry> {
+    ) -> Ref<OverlayEntry> {
         let notifier = app.create(ValueNotifier::new(None));
         app.create(OverlayEntry {
             builder,
@@ -216,6 +219,7 @@ impl OverlayEntry {
     pub fn mounted(self: Handle<Self>, app: &App) -> bool {
         app.get(self)
             .overlay_entry_state_notifier
+            .as_ref()
             .is_some_and(|notifier| app.get(notifier).value().is_some())
     }
 
@@ -237,7 +241,7 @@ impl OverlayEntry {
             return;
         }
 
-        app.get_mut(overlay).entries.retain(|entry| *entry != self);
+        app.get_mut(overlay).entries.retain(|entry| **entry != self);
         if SchedulerBinding::scheduler_phase(app) == SchedulerPhase::PersistentCallbacks {
             SchedulerBinding::add_post_frame_callback(
                 app,
@@ -269,7 +273,7 @@ impl OverlayEntry {
 
     fn dispose_notifier(self: Handle<Self>, app: &mut App) {
         if let Some(notifier) = app.get_mut(self).overlay_entry_state_notifier.take() {
-            app.get_mut(notifier).dispose();
+            app.get_mut(&notifier).dispose();
         }
     }
 
@@ -301,13 +305,13 @@ impl OverlayEntry {
 impl ListenableObject for OverlayEntry {
     fn add_listener(self: Handle<Self>, app: &mut App, listener: Listener) {
         debug_assert!(!app.get(self).disposed_by_owner);
-        if let Some(notifier) = app.get(self).overlay_entry_state_notifier {
+        if let Some(notifier) = app.get(self).overlay_entry_state_notifier.handle() {
             notifier.add_listener(app, listener);
         }
     }
 
     fn remove_listener(self: Handle<Self>, app: &mut App, listener: &Listener) {
-        if let Some(notifier) = app.get(self).overlay_entry_state_notifier {
+        if let Some(notifier) = app.get(self).overlay_entry_state_notifier.handle() {
             notifier.remove_listener(app, listener);
         }
     }
@@ -333,7 +337,7 @@ impl Debug for OverlayEntry {
 #[derive(Debug)]
 struct OverlayEntryWidget {
     key: KeyRef,
-    entry: Handle<OverlayEntry>,
+    entry: Ref<OverlayEntry>,
     overlay_state: Handle<OverlayState>,
     ticker_enabled: bool,
 }
@@ -368,7 +372,7 @@ struct OverlayEntryWidgetState {
     // cause this widget to rebuild, the list will be read by RenderTheater as part of its
     // render child model. This would ideally be in a RenderObject but there may not be
     // RenderObjects between RenderTheater and the render subtree OverlayEntry builds.
-    sorted_theater_siblings: Option<Vec<Handle<OverlayEntryLocation>>>,
+    sorted_theater_siblings: Option<Vec<Ref<OverlayEntryLocation>>>,
 }
 
 impl OverlayEntryWidgetState {
@@ -379,9 +383,9 @@ impl OverlayEntryWidgetState {
     // Worst-case O(N), N being the number of children added to the top spot in the same
     // frame. This can be a bit expensive when there's a lot of global key reparenting in the
     // same frame but N is usually a small number.
-    fn add(self: Handle<Self>, app: &mut App, child: Handle<OverlayEntryLocation>) {
+    fn add(self: Handle<Self>, app: &mut App, child: Ref<OverlayEntryLocation>) {
         debug_assert!(self.mounted(app));
-        let z_order_index = app.get(child).z_order_index;
+        let z_order_index = app.get(&child).z_order_index;
         let existing = app
             .get(self)
             .sorted_theater_siblings
@@ -390,7 +394,7 @@ impl OverlayEntryWidgetState {
         debug_assert!(!existing.contains(&child));
         let mut insert_position = existing.len();
         while insert_position > 0
-            && app.get(existing[insert_position - 1]).z_order_index > z_order_index
+            && app.get(&existing[insert_position - 1]).z_order_index > z_order_index
         {
             insert_position -= 1;
         }
@@ -404,7 +408,7 @@ impl OverlayEntryWidgetState {
         let children = app.get_mut(self).sorted_theater_siblings.as_mut();
         debug_assert!(children.is_some());
         let Some(children) = children else { return };
-        let position = children.iter().position(|other| *other == child);
+        let position = children.iter().position(|other| **other == child);
         debug_assert!(position.is_some(), "the child was in the collection");
         if let Some(position) = position {
             children.remove(position);
@@ -430,7 +434,7 @@ impl OverlayEntryWidgetState {
         };
         let mut boxes: Vec<RenderHandle<RenderDeferredLayoutBox>> = children
             .iter()
-            .filter_map(|candidate| app.get(*candidate).overlay_child_render_box)
+            .filter_map(|candidate| app.get(candidate).overlay_child_render_box)
             .collect();
         if reversed {
             boxes.reverse();
@@ -450,10 +454,11 @@ impl State for OverlayEntryWidgetState {
     crate::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
-        let entry = self.widget(app).entry;
+        let entry = self.widget(app).entry.handle();
         let notifier = app
             .get(entry)
             .overlay_entry_state_notifier
+            .handle()
             .expect("a live OverlayEntry");
         notifier.set_value(app, Some(self));
         let context = self.context(app);
@@ -480,8 +485,8 @@ impl State for OverlayEntryWidgetState {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        let entry = self.widget(app).entry;
-        if let Some(notifier) = app.get(entry).overlay_entry_state_notifier {
+        let entry = self.widget(app).entry.handle();
+        if let Some(notifier) = app.get(entry).overlay_entry_state_notifier.handle() {
             notifier.set_value(app, None);
         }
         entry.did_unmount(app);
@@ -490,7 +495,7 @@ impl State for OverlayEntryWidgetState {
 
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
         let widget = self.widget(app);
-        let (ticker_enabled, entry) = (widget.ticker_enabled, widget.entry);
+        let (ticker_enabled, entry) = (widget.ticker_enabled, widget.entry.handle());
         let theater = self.theater(app);
         let builder = Rc::clone(&app.get(entry).builder);
         TickerMode::new(
@@ -543,7 +548,7 @@ pub struct Overlay {
     /// [`OverlayState::insert_all`].
     ///
     /// To remove an entry from an [`Overlay`], use [`OverlayEntry::remove`].
-    pub initial_entries: Vec<Handle<OverlayEntry>>,
+    pub initial_entries: Vec<Ref<OverlayEntry>>,
     /// How to clip the entries that overflow the overlay.
     ///
     /// Defaults to [`Clip::HardEdge`].
@@ -578,7 +583,7 @@ impl Overlay {
     /// Dart `Overlay(initialEntries:)`.
     pub fn initial_entries(
         mut self,
-        entries: impl IntoIterator<Item = Handle<OverlayEntry>>,
+        entries: impl IntoIterator<Item = Ref<OverlayEntry>>,
     ) -> Overlay {
         self.initial_entries = entries.into_iter().collect();
         self
@@ -683,7 +688,7 @@ impl StatefulWidget for Overlay {
 pub struct OverlayState {
     state: StateData<Overlay>,
     ticker_provider: TickerProviderStateMixinData,
-    entries: Vec<Handle<OverlayEntry>>,
+    entries: Vec<Ref<OverlayEntry>>,
 }
 
 impl OverlayState {
@@ -698,13 +703,13 @@ impl OverlayState {
         if let Some(below) = below {
             return entries
                 .iter()
-                .position(|entry| *entry == below)
+                .position(|entry| **entry == below)
                 .expect("`below` is in this Overlay");
         }
         if let Some(above) = above {
             return entries
                 .iter()
-                .position(|entry| *entry == above)
+                .position(|entry| **entry == above)
                 .expect("`above` is in this Overlay")
                 + 1;
         }
@@ -718,7 +723,7 @@ impl OverlayState {
         );
         let current_overlay = app.get(entry).overlay;
         assert!(
-            !app.get(self).entries.contains(&entry),
+            !app.get(self).entries.iter().any(|kept| **kept == entry),
             "The specified entry is already present in the target Overlay. Consider calling \
              remove on the OverlayEntry before inserting it to a different Overlay."
         );
@@ -740,13 +745,13 @@ impl OverlayState {
     pub fn insert(
         self: Handle<Self>,
         app: &mut App,
-        entry: Handle<OverlayEntry>,
+        entry: Ref<OverlayEntry>,
         below: Option<Handle<OverlayEntry>>,
         above: Option<Handle<OverlayEntry>>,
     ) {
         debug_assert!(self.debug_verify_insert_position(app, above, below, None));
-        debug_assert!(self.debug_can_insert_entry(app, entry));
-        app.get_mut(entry).overlay = Some(self);
+        debug_assert!(self.debug_can_insert_entry(app, *entry));
+        app.get_mut(&entry).overlay = Some(self);
         let index = self.insertion_index(app, below, above);
         self.set_state(app, |state| state.entries.insert(index, entry));
     }
@@ -761,22 +766,22 @@ impl OverlayState {
     pub fn insert_all(
         self: Handle<Self>,
         app: &mut App,
-        entries: Vec<Handle<OverlayEntry>>,
+        entries: Vec<Ref<OverlayEntry>>,
         below: Option<Handle<OverlayEntry>>,
         above: Option<Handle<OverlayEntry>>,
     ) {
         debug_assert!(self.debug_verify_insert_position(app, above, below, None));
         if cfg!(debug_assertions) {
             for entry in &entries {
-                assert!(self.debug_can_insert_entry(app, *entry));
+                assert!(self.debug_can_insert_entry(app, **entry));
             }
         }
         if entries.is_empty() {
             return;
         }
         for entry in &entries {
-            debug_assert!(app.get(*entry).overlay.is_none());
-            app.get_mut(*entry).overlay = Some(self);
+            debug_assert!(app.get(entry).overlay.is_none());
+            app.get_mut(entry).overlay = Some(self);
         }
         let index = self.insertion_index(app, below, above);
         self.set_state(app, move |state| {
@@ -789,7 +794,7 @@ impl OverlayState {
         app: &App,
         above: Option<Handle<OverlayEntry>>,
         below: Option<Handle<OverlayEntry>>,
-        new_entries: Option<&[Handle<OverlayEntry>]>,
+        new_entries: Option<&[Ref<OverlayEntry>]>,
     ) -> bool {
         assert!(
             above.is_none() || below.is_none(),
@@ -797,8 +802,8 @@ impl OverlayState {
         );
         let present = |entry: Handle<OverlayEntry>| {
             app.get(entry).overlay == Some(self)
-                && app.get(self).entries.contains(&entry)
-                && new_entries.is_none_or(|entries| entries.contains(&entry))
+                && app.get(self).entries.iter().any(|kept| **kept == entry)
+                && new_entries.is_none_or(|entries| entries.iter().any(|kept| **kept == entry))
         };
         assert!(
             above.is_none_or(present),
@@ -829,14 +834,14 @@ impl OverlayState {
     pub fn rearrange(
         self: Handle<Self>,
         app: &mut App,
-        new_entries: Vec<Handle<OverlayEntry>>,
+        new_entries: Vec<Ref<OverlayEntry>>,
         below: Option<Handle<OverlayEntry>>,
         above: Option<Handle<OverlayEntry>>,
     ) {
         debug_assert!(self.debug_verify_insert_position(app, above, below, Some(&new_entries)));
         debug_assert!(
             new_entries.iter().all(|entry| {
-                let overlay = app.get(*entry).overlay;
+                let overlay = app.get(entry).overlay;
                 overlay.is_none() || overlay == Some(self)
             }),
             "One or more of the specified entries are already present in another Overlay."
@@ -855,16 +860,16 @@ impl OverlayState {
         if app.get(self).entries == new_entries {
             return;
         }
-        let old: Vec<Handle<OverlayEntry>> = app
+        let old: Vec<Ref<OverlayEntry>> = app
             .get(self)
             .entries
             .iter()
-            .copied()
             .filter(|entry| !new_entries.contains(entry))
+            .cloned()
             .collect();
         for entry in &new_entries {
-            if app.get(*entry).overlay.is_none() {
-                app.get_mut(*entry).overlay = Some(self);
+            if app.get(entry).overlay.is_none() {
+                app.get_mut(entry).overlay = Some(self);
             }
         }
         let index = {
@@ -872,12 +877,12 @@ impl OverlayState {
             if let Some(below) = below {
                 entries
                     .iter()
-                    .position(|entry| *entry == below)
+                    .position(|entry| **entry == below)
                     .expect("`below` is in `new_entries`")
             } else if let Some(above) = above {
                 entries
                     .iter()
-                    .position(|entry| *entry == above)
+                    .position(|entry| **entry == above)
                     .expect("`above` is in `new_entries`")
                     + 1
             } else {
@@ -908,11 +913,11 @@ impl OverlayState {
     /// always returns false in release mode.
     pub fn debug_is_visible(self: Handle<Self>, app: &App, entry: Handle<OverlayEntry>) -> bool {
         let mut result = false;
-        debug_assert!(app.get(self).entries.contains(&entry));
+        debug_assert!(app.get(self).entries.iter().any(|kept| **kept == entry));
         if cfg!(debug_assertions) {
             let entries = app.get(self).entries.clone();
             for index in (1..entries.len()).rev() {
-                let candidate = entries[index];
+                let candidate = entries[index].handle();
                 if candidate == entry {
                     result = true;
                     break;
@@ -946,7 +951,7 @@ impl TickerProviderStateMixin for OverlayState {
 }
 
 impl TickerProviderObject for OverlayState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         TickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -975,7 +980,8 @@ impl State for OverlayState {
         let mut onstage = true;
         let mut onstage_count = 0usize;
         for entry in app.get(self).entries.clone().into_iter().rev() {
-            let key: KeyRef = app.get(entry).key.clone().into();
+            let key: KeyRef = app.get(&entry).key.clone().into();
+            let (opaque, maintain_state) = (app.get(&entry).opaque, app.get(&entry).maintain_state);
             if onstage {
                 onstage_count += 1;
                 children.push(
@@ -987,10 +993,10 @@ impl State for OverlayState {
                     }
                     .into_widget(),
                 );
-                if app.get(entry).opaque {
+                if opaque {
                     onstage = false;
                 }
-            } else if app.get(entry).maintain_state {
+            } else if maintain_state {
                 children.push(
                     OverlayEntryWidget {
                         key,
@@ -1066,13 +1072,13 @@ impl StatefulWidget for WrappingOverlay {
 /// Dart's `_WrappingOverlayState`.
 pub struct WrappingOverlayState {
     state: StateData<WrappingOverlay>,
-    entry: Option<Handle<OverlayEntry>>,
+    entry: Option<Ref<OverlayEntry>>,
 }
 
 impl WrappingOverlayState {
     /// Dart's `late final _entry`, created on its first use.
-    fn entry(self: Handle<Self>, app: &mut App) -> Handle<OverlayEntry> {
-        if let Some(entry) = app.get(self).entry {
+    fn entry(self: Handle<Self>, app: &mut App) -> Ref<OverlayEntry> {
+        if let Some(entry) = app.get(self).entry.clone() {
             return entry;
         }
         let entry = OverlayEntry::new(
@@ -1082,7 +1088,7 @@ impl WrappingOverlayState {
             false,
             true,
         );
-        app.get_mut(self).entry = Some(entry);
+        app.get_mut(self).entry = Some(entry.clone());
         entry
     }
 }
@@ -1210,6 +1216,7 @@ impl TheaterElement {
             render_object_element: RenderObjectElementData::default(),
             multi_child: MultiChildRenderObjectElementData::default(),
         })
+        .into_tree_node(app)
     }
 
     /// The [`OverlayEntry`] of the `OverlayEntryWidget` at the given slot's index.
@@ -1219,6 +1226,7 @@ impl TheaterElement {
         downcast_widget::<OverlayEntryWidget>(&*widget.children[index])
             .expect("a Theater's children are _OverlayEntryWidgets")
             .entry
+            .handle()
     }
 }
 
@@ -1334,7 +1342,10 @@ impl Element for TheaterElement {
             child,
             slot.clone(),
         );
-        let entry = self.entry_at_slot(app, slot.as_ref());
+        let entry = self
+            .entry_at_slot(app, slot.as_ref())
+            .upgrade(app)
+            .expect("an entry in the overlay is kept by it");
         child
             .parent_data_of_mut::<TheaterParentData>(app)
             .overlay_entry = Some(entry);
@@ -1357,7 +1368,7 @@ impl Element for TheaterElement {
         if cfg!(debug_assertions) {
             let entry_at_new_slot = self.entry_at_slot(app, new_slot.as_ref());
             let parent_data = child.parent_data_of::<TheaterParentData>(app);
-            assert!(parent_data.overlay_entry == Some(entry_at_new_slot));
+            assert!(parent_data.overlay_entry.handle() == Some(entry_at_new_slot));
         }
     }
 
@@ -1376,7 +1387,7 @@ impl Element for TheaterElement {
 pub struct TheaterParentData {
     stack: StackParentData,
     /// The [`OverlayEntry`] that directly created this child.
-    overlay_entry: Option<Handle<OverlayEntry>>,
+    overlay_entry: Option<Ref<OverlayEntry>>,
 }
 
 impl TheaterParentData {
@@ -1418,7 +1429,10 @@ impl TheaterParentData {
     }
 
     fn child_model(&self, app: &App) -> Option<Handle<OverlayEntryWidgetState>> {
-        let notifier = app.get(self.overlay_entry?).overlay_entry_state_notifier?;
+        let notifier = app
+            .get(self.overlay_entry.as_ref()?)
+            .overlay_entry_state_notifier
+            .handle()?;
         Some((*app.get(notifier).value()).expect("the entry is mounted"))
     }
 
@@ -1606,9 +1620,9 @@ impl TheaterChildren {
                     self.candidate = model.and_then(|model| {
                         let list = app.get(model).sorted_theater_siblings.as_ref()?;
                         if self.reversed {
-                            list.last().copied()
+                            list.last().map(Retained::handle)
                         } else {
-                            list.first().copied()
+                            list.first().map(Retained::handle)
                         }
                     });
                     self.phase = TheaterChildrenPhase::Portals;
@@ -1619,12 +1633,13 @@ impl TheaterChildren {
                         self.candidate = (|| {
                             let model = app.get(candidate).child_model;
                             let list = app.get(model).sorted_theater_siblings.as_ref()?;
-                            let index = list.iter().position(|value| *value == candidate)?;
-                            if self.reversed {
-                                index.checked_sub(1).and_then(|i| list.get(i).copied())
+                            let index = list.iter().position(|value| **value == candidate)?;
+                            let next = if self.reversed {
+                                index.checked_sub(1).and_then(|i| list.get(i))
                             } else {
-                                list.get(index + 1).copied()
-                            }
+                                list.get(index + 1)
+                            };
+                            next.map(Retained::handle)
                         })();
                         if let Some(render_box) = render_box {
                             return Some(render_box.as_box());
@@ -1944,6 +1959,7 @@ impl RenderTheater {
             let parent_data = current.as_object().parent_data_of::<TheaterParentData>(app);
             let can_size = parent_data
                 .overlay_entry
+                .as_ref()
                 .is_some_and(|entry| app.get(entry).can_size_overlay);
             if can_size && !parent_data.stack.is_positioned() {
                 return current;
@@ -2277,7 +2293,7 @@ pub struct OverlayPortalController {
 
 impl OverlayPortalController {
     /// Creates an [`OverlayPortalController`], optionally with a `debug_label`.
-    pub fn new(app: &mut App, debug_label: Option<String>) -> Handle<OverlayPortalController> {
+    pub fn new(app: &mut App, debug_label: Option<String>) -> Ref<OverlayPortalController> {
         app.create(OverlayPortalController {
             attach_target: None,
             z_order_index: None,
@@ -2441,7 +2457,7 @@ pub struct OverlayPortal {
     /// See [`Widget::key`].
     pub key: Option<KeyRef>,
     /// The controller to show, hide and bring to top the overlay child.
-    pub controller: Handle<OverlayPortalController>,
+    pub controller: Ref<OverlayPortalController>,
     /// A [`WidgetBuilder`] used to build a widget below this widget in the tree, that renders
     /// on the closest [`Overlay`].
     ///
@@ -2474,7 +2490,7 @@ impl OverlayPortal {
     /// attaches the widget returned by `overlay_child_builder` to. Defaults to
     /// [`OverlayChildLocation::NearestOverlay`].
     pub fn new(
-        controller: Handle<OverlayPortalController>,
+        controller: Ref<OverlayPortalController>,
         overlay_child_builder: impl Fn(&mut App, BuildContext) -> WidgetRef + 'static,
     ) -> OverlayPortal {
         OverlayPortal {
@@ -2496,7 +2512,7 @@ impl OverlayPortal {
                 OverlayChildLocation::RootOverlay instead. This feature was deprecated \
                 after v3.33.0-0.0.pre.")]
     pub fn targets_root_overlay(
-        controller: Handle<OverlayPortalController>,
+        controller: Ref<OverlayPortalController>,
         overlay_child_builder: impl Fn(&mut App, BuildContext) -> WidgetRef + 'static,
     ) -> OverlayPortal {
         OverlayPortal {
@@ -2527,7 +2543,7 @@ impl OverlayPortal {
     /// attaches the widget returned by `overlay_child_builder` to. Defaults to
     /// [`OverlayChildLocation::NearestOverlay`].
     pub fn overlay_child_layout_builder(
-        controller: Handle<OverlayPortalController>,
+        controller: Ref<OverlayPortalController>,
         overlay_child_builder: impl Fn(&mut App, BuildContext, OverlayChildLayoutInfo) -> WidgetRef
         + 'static,
     ) -> OverlayPortal {
@@ -2597,7 +2613,7 @@ pub struct OverlayPortalState {
     // Avoid invalidating the cache if possible, since the framework uses identity to compare
     // slots, and OverlayEntryLocation is mutable. Changing slots can be relatively slow.
     child_model_may_have_changed: bool,
-    location_cache: Option<Handle<OverlayEntryLocation>>,
+    location_cache: Option<Ref<OverlayEntryLocation>>,
 }
 
 impl OverlayPortalState {
@@ -2615,29 +2631,29 @@ impl OverlayPortalState {
         app: &mut App,
         z_order_index: i64,
         overlay_location: OverlayChildLocation,
-    ) -> Handle<OverlayEntryLocation> {
-        let cached_location = app.get(self).location_cache;
+    ) -> Ref<OverlayEntryLocation> {
+        let cached_location = app.get(self).location_cache.clone();
         let context = self.context(app);
         let target_root_overlay = overlay_location == OverlayChildLocation::RootOverlay;
         // Dart's `late final marker`: reading it depends on an inherited widget, which the
         // valid-cache path must not do.
         let mut marker = None;
-        let is_cache_valid = cached_location.is_some_and(|cached| {
+        let is_cache_valid = cached_location.as_ref().is_some_and(|cached| {
             !app.get(self).child_model_may_have_changed || {
                 let found = RenderTheaterMarker::of(app, context, target_root_overlay);
                 marker = Some(found);
-                OverlayPortalState::is_the_same_location(app, cached, &found)
+                OverlayPortalState::is_the_same_location(app, **cached, &found)
             }
         });
         app.get_mut(self).child_model_may_have_changed = false;
         if is_cache_valid {
             let cached = cached_location.expect("a valid cache holds a location");
-            debug_assert!(app.get(cached).z_order_index == z_order_index);
+            debug_assert!(app.get(&cached).z_order_index == z_order_index);
             debug_assert!(cached.debug_is_location_valid(app));
             return cached;
         }
         // Otherwise invalidate the cache and create a new location.
-        if let Some(cached) = cached_location {
+        if let Some(cached) = &cached_location {
             cached.debug_mark_location_invalid(app);
         }
         let marker = match marker {
@@ -2650,7 +2666,7 @@ impl OverlayPortalState {
             marker.overlay_entry_widget_state,
             marker.theater,
         );
-        app.get_mut(self).location_cache = Some(new_location);
+        app.get_mut(self).location_cache = Some(new_location.clone());
         new_location
     }
 
@@ -2688,7 +2704,7 @@ impl OverlayPortalState {
             "OverlayPortalController::show should not be called during build."
         );
         self.set_state(app, |state| state.z_order_index = Some(z_order_index));
-        if let Some(cached) = app.get(self).location_cache {
+        if let Some(cached) = app.get(self).location_cache.handle() {
             cached.debug_mark_location_invalid(app);
         }
         app.get_mut(self).location_cache = None;
@@ -2700,7 +2716,7 @@ impl OverlayPortalState {
             "OverlayPortalController::hide should not be called during build."
         );
         self.set_state(app, |state| state.z_order_index = None);
-        if let Some(cached) = app.get(self).location_cache {
+        if let Some(cached) = app.get(self).location_cache.handle() {
             cached.debug_mark_location_invalid(app);
         }
         app.get_mut(self).location_cache = None;
@@ -2713,7 +2729,7 @@ impl State for OverlayPortalState {
     crate::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
-        let controller = self.widget(app).controller;
+        let controller = self.widget(app).controller.handle();
         self.setup_controller(app, controller);
     }
 
@@ -2722,9 +2738,10 @@ impl State for OverlayPortalState {
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &OverlayPortal) {
-        let (old_location, old_controller) = (old_widget.overlay_location, old_widget.controller);
+        let (old_location, old_controller) =
+            (old_widget.overlay_location, old_widget.controller.handle());
         let widget = self.widget(app);
-        let (new_location, new_controller) = (widget.overlay_location, widget.controller);
+        let (new_location, new_controller) = (widget.overlay_location, widget.controller.handle());
         let state = app.get_mut(self);
         state.child_model_may_have_changed =
             state.child_model_may_have_changed || old_location != new_location;
@@ -2735,13 +2752,13 @@ impl State for OverlayPortalState {
     }
 
     fn activate(self: Handle<Self>, app: &mut App) {
-        debug_assert!(app.get(self.widget(app).controller).attach_target == Some(self));
+        debug_assert!(app.get(&self.widget(app).controller).attach_target == Some(self));
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        let controller = self.widget(app).controller;
+        let controller = self.widget(app).controller.handle();
         app.get_mut(controller).attach_target = None;
-        if let Some(cached) = app.get(self).location_cache {
+        if let Some(cached) = app.get(self).location_cache.handle() {
             cached.debug_mark_location_invalid(app);
         }
         app.get_mut(self).location_cache = None;
@@ -2760,7 +2777,7 @@ impl State for OverlayPortalState {
 
         let widget_location = self.widget(app).overlay_location;
         let overlay_location = self.get_location(app, z_order_index, widget_location);
-        let child_model_context = app.get(overlay_location).child_model.context(app);
+        let child_model_context = app.get(&overlay_location).child_model.context(app);
         let overlay_data = MediaQuery::of(app, child_model_context);
         let data = MediaQuery::of(app, context)
             .copy_with()
@@ -2831,7 +2848,7 @@ impl OverlayEntryLocation {
         z_order_index: i64,
         child_model: Handle<OverlayEntryWidgetState>,
         theater: RenderHandle<RenderTheater>,
-    ) -> Handle<OverlayEntryLocation> {
+    ) -> Ref<OverlayEntryLocation> {
         let this = app.create(OverlayEntryLocation {
             z_order_index,
             child_model,
@@ -2840,7 +2857,8 @@ impl OverlayEntryLocation {
             slot_token: None,
             debug_location_invalid: false,
         });
-        app.get_mut(this).slot_token = Some(Rc::new(this));
+        // The slot names the location bare: the element in it does not keep it.
+        app.get_mut(&this).slot_token = Some(Rc::new(this.handle()));
         this
     }
 
@@ -2878,7 +2896,10 @@ impl OverlayEntryLocation {
             let location = app.get(self);
             (location.child_model, location.theater)
         };
-        child_model.add(app, self);
+        let kept = self
+            .upgrade(app)
+            .expect("a location is kept by its overlay portal");
+        child_model.add(app, kept);
         theater.mark_needs_paint(app);
     }
 
@@ -3015,7 +3036,7 @@ struct RawOverlayPortal {
     overlay_child: Option<WidgetRef>,
     /// A widget below this widget in the tree.
     child: Option<WidgetRef>,
-    overlay_location: Option<Handle<OverlayEntryLocation>>,
+    overlay_location: Option<Ref<OverlayEntryLocation>>,
 }
 
 impl RawOverlayPortal {
@@ -3053,7 +3074,7 @@ impl RenderObjectWidget for RawOverlayPortal {
     type RenderObject = RenderLayoutSurrogateProxyBox;
 
     fn create_render_object(&self, app: &mut App, _context: BuildContext) -> AnyRenderObject {
-        RenderLayoutSurrogateProxyBox::new(app, self.overlay_location).as_object()
+        RenderLayoutSurrogateProxyBox::new(app, self.overlay_location.clone()).as_object()
     }
 
     fn update_render_object(
@@ -3062,7 +3083,7 @@ impl RenderObjectWidget for RawOverlayPortal {
         _context: BuildContext,
         render_object: RenderHandle<RenderLayoutSurrogateProxyBox>,
     ) {
-        render_object.get_mut(app).overlay_location = self.overlay_location;
+        render_object.get_mut(app).overlay_location = self.overlay_location.clone();
     }
 }
 
@@ -3084,6 +3105,7 @@ impl RawOverlayPortalElement {
             overlay_child: None,
             child: None,
         })
+        .into_tree_node(app)
     }
 
     fn update_children(self: Handle<Self>, app: &mut App) {
@@ -3093,7 +3115,7 @@ impl RawOverlayPortalElement {
             (
                 widget.child.clone(),
                 widget.overlay_child.clone(),
-                widget.overlay_location,
+                widget.overlay_location.handle(),
             )
         };
         let child = app.get(self).child;
@@ -3570,7 +3592,7 @@ struct RenderLayoutSurrogateProxyBox {
     // This variable is set as soon as the DeferredLayout widget creates it, and it is only set
     // to None when the DeferredLayout widget is being removed from the tree.
     deferred_layout_child: Option<RenderHandle<RenderDeferredLayoutBox>>,
-    overlay_location: Option<Handle<OverlayEntryLocation>>,
+    overlay_location: Option<Ref<OverlayEntryLocation>>,
     debug_is_first_attach: bool,
     did_detach_deferred_child: bool,
 }
@@ -3578,7 +3600,7 @@ struct RenderLayoutSurrogateProxyBox {
 impl RenderLayoutSurrogateProxyBox {
     fn new(
         app: &mut App,
-        overlay_location: Option<Handle<OverlayEntryLocation>>,
+        overlay_location: Option<Ref<OverlayEntryLocation>>,
     ) -> RenderHandle<RenderLayoutSurrogateProxyBox> {
         RenderHandle::new_box(
             app,
@@ -3632,6 +3654,7 @@ impl RenderObject for RenderLayoutSurrogateProxyBox {
             let location = self
                 .get(app)
                 .overlay_location
+                .handle()
                 .expect("a deferred child has a location");
             location.reattach_from_layout_surrogate(app, deferred);
         }
@@ -3649,6 +3672,7 @@ impl RenderObject for RenderLayoutSurrogateProxyBox {
             let location = self
                 .get(app)
                 .overlay_location
+                .handle()
                 .expect("a deferred child has a location");
             location.detach_from_layout_surrogate(app, deferred);
             self.get_mut(app).did_detach_deferred_child = true;
@@ -3855,7 +3879,7 @@ struct OverlayChildLayoutBuilderElement {
     child: Option<AnyElement>,
     /// Dart's `late final _buildScope`, created right after the element so its
     /// `scheduleRebuild` can name it.
-    build_scope: Option<Handle<BuildScope>>,
+    build_scope: Option<Ref<BuildScope>>,
     deferred_callback_scheduled: bool,
     previous_layout_info: Option<OverlayChildLayoutInfo>,
     needs_build: bool,
@@ -3864,15 +3888,17 @@ struct OverlayChildLayoutBuilderElement {
 impl OverlayChildLayoutBuilderElement {
     fn create(app: &mut App, widget: WidgetRef) -> Handle<OverlayChildLayoutBuilderElement> {
         debug_assert!(downcast_widget::<OverlayChildLayoutBuilderWidget>(&*widget).is_some());
-        let this = app.create(OverlayChildLayoutBuilderElement {
-            element: ElementData::new(widget),
-            render_object_element: RenderObjectElementData::default(),
-            child: None,
-            build_scope: None,
-            deferred_callback_scheduled: false,
-            previous_layout_info: None,
-            needs_build: true,
-        });
+        let this = app
+            .create(OverlayChildLayoutBuilderElement {
+                element: ElementData::new(widget),
+                render_object_element: RenderObjectElementData::default(),
+                child: None,
+                build_scope: None,
+                deferred_callback_scheduled: false,
+                previous_layout_info: None,
+                needs_build: true,
+            })
+            .into_tree_node(app);
         let build_scope = BuildScope::new(
             app,
             Some(Listener::handle_method(this, Self::schedule_rebuild)),
@@ -3986,7 +4012,10 @@ impl Element for OverlayChildLayoutBuilderElement {
     }
 
     fn build_scope(self: Handle<Self>, app: &App) -> Handle<BuildScope> {
-        app.get(self).build_scope.expect("created with the element")
+        app.get(self)
+            .build_scope
+            .handle()
+            .expect("created with the element")
     }
 
     fn visit_children(self: Handle<Self>, app: &App, visitor: &mut dyn FnMut(AnyElement)) {
@@ -4049,11 +4078,7 @@ impl Element for OverlayChildLayoutBuilderElement {
     fn unmount(self: Handle<Self>, app: &mut App) {
         let render_object = self.render_layout_builder(app);
         render_object.get_mut(app).callback = None;
-        let build_scope = app.get_mut(self).build_scope.take();
         RenderObjectElement::unmount(self, app);
-        if let Some(build_scope) = build_scope {
-            app.destroy(build_scope);
-        }
     }
 
     fn update_parent_data(self: Handle<Self>, app: &mut App, parent_data_element: AnyElement) {
@@ -4333,7 +4358,7 @@ mod tests {
     use crate::widgets::media_query::MediaQueryData;
     use waft_foundation::AppCell;
 
-    fn test_entry(app: &mut App) -> Handle<OverlayEntry> {
+    fn test_entry(app: &mut App) -> Ref<OverlayEntry> {
         OverlayEntry::new(
             app,
             Rc::new(|_app, _context| SizedBox::shrink().into_widget()),
@@ -4343,7 +4368,7 @@ mod tests {
         )
     }
 
-    fn mount_overlay(app: &mut App, entries: Vec<Handle<OverlayEntry>>) -> Harness {
+    fn mount_overlay(app: &mut App, entries: Vec<Ref<OverlayEntry>>) -> Harness {
         let tree = MediaQuery::new(
             MediaQueryData::new(),
             Directionality::new(TextDirection::Ltr, Overlay::new().initial_entries(entries)),
@@ -4369,6 +4394,7 @@ mod tests {
             .as_object()
             .parent_data_of::<TheaterParentData>(app)
             .overlay_entry
+            .handle()
             .expect("a child built by an entry")
     }
 
@@ -4390,33 +4416,39 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let (first, second) = (test_entry(&mut app), test_entry(&mut app));
-        let harness = mount_overlay(&mut app, vec![first, second]);
+        let harness = mount_overlay(&mut app, vec![first.clone(), second.clone()]);
         let theater = theater_of(&harness, &app);
-        assert_eq!(entries_in_render_order(&app, theater), vec![first, second]);
+        assert_eq!(
+            entries_in_render_order(&app, theater),
+            vec![*first, *second]
+        );
 
-        let overlay = app.get(first).overlay.expect("inserted by initial_entries");
+        let overlay = app
+            .get(&first)
+            .overlay
+            .expect("inserted by initial_entries");
         let third = test_entry(&mut app);
-        overlay.insert(&mut app, third, Some(first), None);
+        overlay.insert(&mut app, third.clone(), Some(*first), None);
         harness.pump(&mut app);
         assert_eq!(
             entries_in_render_order(&app, theater),
-            vec![third, first, second]
+            vec![*third, *first, *second]
         );
 
         let fourth = test_entry(&mut app);
-        overlay.insert_all(&mut app, vec![fourth], None, None);
+        overlay.insert_all(&mut app, vec![fourth.clone()], None, None);
         harness.pump(&mut app);
         assert_eq!(
             entries_in_render_order(&app, theater),
-            vec![third, first, second, fourth]
+            vec![*third, *first, *second, *fourth]
         );
 
         // `first` and `second` move to the bottom; the entries not mentioned stay on top.
-        overlay.rearrange(&mut app, vec![second, first], None, None);
+        overlay.rearrange(&mut app, vec![second.clone(), first.clone()], None, None);
         harness.pump(&mut app);
         assert_eq!(
             entries_in_render_order(&app, theater),
-            vec![second, first, third, fourth]
+            vec![*second, *first, *third, *fourth]
         );
 
         second.remove(&mut app);
@@ -4424,7 +4456,7 @@ mod tests {
         harness.pump(&mut app);
         assert_eq!(
             entries_in_render_order(&app, theater),
-            vec![first, third, fourth]
+            vec![*first, *third, *fourth]
         );
     }
 
@@ -4446,7 +4478,7 @@ mod tests {
             false,
             false,
         );
-        let harness = mount_overlay(&mut app, vec![bottom, top]);
+        let harness = mount_overlay(&mut app, vec![bottom.clone(), top.clone()]);
         let theater = theater_of(&harness, &app);
 
         // `bottom` is kept in the tree by maintain_state, but skipped when painting.
@@ -4454,14 +4486,14 @@ mod tests {
         assert_eq!(theater.skip_count(&app), 1);
         let painted = RenderTheaterMixin::children_in_paint_order(theater, &app).collect(&app);
         assert_eq!(painted.len(), 1);
-        assert_eq!(entry_of(&app, painted[0]), top);
+        assert_eq!(entry_of(&app, painted[0]), *top);
 
         // Without maintain_state an offstage entry is not built at all.
         bottom.set_maintain_state(&mut app, false);
         harness.pump(&mut app);
         assert_eq!(theater.child_count(&app), 1);
         assert_eq!(theater.skip_count(&app), 0);
-        assert_eq!(entries_in_render_order(&app, theater), vec![top]);
+        assert_eq!(entries_in_render_order(&app, theater), vec![*top]);
 
         // Dropping the opacity brings it back onstage.
         top.set_opaque(&mut app, false);
@@ -4480,10 +4512,11 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let controller = OverlayPortalController::new(&mut app, None);
+        let portal_controller = controller.clone();
         let entry = OverlayEntry::new(
             &mut app,
             Rc::new(move |_app: &mut App, _context| {
-                OverlayPortal::new(controller, |_app: &mut App, _context| {
+                OverlayPortal::new(portal_controller.clone(), |_app: &mut App, _context| {
                     SizedBox::square(Some(40.0)).into_widget()
                 })
                 .child(SizedBox::square(Some(10.0)))
@@ -4493,7 +4526,7 @@ mod tests {
             false,
             false,
         );
-        let harness = mount_overlay(&mut app, vec![entry]);
+        let harness = mount_overlay(&mut app, vec![entry.clone()]);
         let theater = theater_of(&harness, &app);
         assert!(!controller.is_showing(&app));
         assert_eq!(
@@ -4566,20 +4599,24 @@ mod tests {
         let controller = OverlayPortalController::new(&mut app, None);
         let observed = Rc::new(Cell::new(None::<OverlayChildLayoutInfo>));
         let output = observed.clone();
+        let portal_controller = controller.clone();
         let entry = OverlayEntry::new(
             &mut app,
             Rc::new(move |_, _| {
                 let output = output.clone();
                 Positioned::new(
-                    OverlayPortal::overlay_child_layout_builder(controller, move |_, _, info| {
-                        output.set(Some(info));
-                        Positioned::new(SizedBox::expand())
-                            .left(0.0)
-                            .top(0.0)
-                            .width(40.0)
-                            .height(20.0)
-                            .into_widget()
-                    })
+                    OverlayPortal::overlay_child_layout_builder(
+                        portal_controller.clone(),
+                        move |_, _, info| {
+                            output.set(Some(info));
+                            Positioned::new(SizedBox::expand())
+                                .left(0.0)
+                                .top(0.0)
+                                .width(40.0)
+                                .height(20.0)
+                                .into_widget()
+                        },
+                    )
                     .child(SizedBox::expand()),
                 )
                 .left(30.0)
@@ -4592,7 +4629,7 @@ mod tests {
             false,
             false,
         );
-        let harness = mount_overlay(&mut app, vec![entry]);
+        let harness = mount_overlay(&mut app, vec![entry.clone()]);
         let theater = theater_of(&harness, &app);
         for _ in 0..2 {
             controller.show(&mut app);

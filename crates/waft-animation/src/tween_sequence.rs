@@ -1,7 +1,7 @@
 //! Flutter counterpart: `animation/tween_sequence.dart`.
 
 use std::fmt::{self, Debug};
-use std::sync::Arc;
+use std::rc::Rc;
 
 use waft_foundation::App;
 
@@ -15,8 +15,8 @@ use crate::tween::Animatable;
 /// interval indicated by its weight.
 #[derive(Clone)]
 pub struct TweenSequence<T> {
-    items: Arc<[TweenSequenceItem<T>]>,
-    intervals: Arc<[Interval]>,
+    items: Rc<[TweenSequenceItem<T>]>,
+    intervals: Rc<[Interval]>,
 }
 
 impl<T> TweenSequence<T> {
@@ -119,7 +119,7 @@ pub struct TweenSequenceItem<T> {
     /// in the list of items.
     ///
     /// [`weight`]: TweenSequenceItem::weight
-    pub tween: Arc<dyn Animatable<T>>,
+    pub tween: Rc<dyn Animatable<T>>,
 
     /// An arbitrary value that indicates the relative percentage of a
     /// [`TweenSequence`] animation's duration when [`tween`] will be used.
@@ -132,7 +132,7 @@ impl<T> TweenSequenceItem<T> {
     /// Construct a TweenSequenceItem.
     ///
     /// The `weight` must be greater than 0.0.
-    pub fn new(tween: Arc<dyn Animatable<T>>, weight: f64) -> TweenSequenceItem<T> {
+    pub fn new(tween: Rc<dyn Animatable<T>>, weight: f64) -> TweenSequenceItem<T> {
         debug_assert!(weight > 0.0);
         TweenSequenceItem { tween, weight }
     }
@@ -157,21 +157,19 @@ impl Interval {
 
 #[cfg(test)]
 mod tests {
+    use crate::AnimationRef;
     use std::rc::Rc;
-    use std::sync::Arc;
 
     use waft_foundation::{App, AppCell, Handle};
 
     use super::*;
-    use crate::animation::Animation;
     use crate::animations::{AlwaysStoppedAnimation, ProxyAnimation};
     use crate::curves::{Curves, Interval as CurveInterval};
     use crate::tween::{ConstantTween, CurveTween, Tween};
 
     fn set_value(app: &mut App, driver: Handle<ProxyAnimation>, value: f64) {
-        let stopped = app
-            .create(AlwaysStoppedAnimation::new(value))
-            .as_animation();
+        let stopped: AnimationRef<f64> =
+            app.create(AlwaysStoppedAnimation::new(value)).into_erased();
         driver.set_parent(app, Some(stopped));
     }
 
@@ -182,15 +180,15 @@ mod tests {
         let driver = ProxyAnimation::new(&mut app, None);
 
         let sequence = TweenSequence::new(vec![
-            TweenSequenceItem::new(Arc::new(Tween::new(&mut app, Some(5.0), Some(10.0))), 4.0),
-            TweenSequenceItem::new(Arc::new(ConstantTween::new(&mut app, 10.0)), 2.0),
-            TweenSequenceItem::new(Arc::new(Tween::new(&mut app, Some(10.0), Some(5.0))), 4.0),
+            TweenSequenceItem::new(Rc::new(Tween::new(&mut app, Some(5.0), Some(10.0))), 4.0),
+            TweenSequenceItem::new(Rc::new(ConstantTween::new(&mut app, 10.0)), 2.0),
+            TweenSequenceItem::new(Rc::new(Tween::new(&mut app, Some(10.0), Some(5.0))), 4.0),
         ]);
-        let animation = sequence.animate(&mut app, driver.as_animation());
+        let animation = sequence.animate(&mut app, driver.erase());
 
         assert_eq!(animation.value(&app), 5.0);
         for (t, expected) in [(0.2, 7.5), (0.4, 10.0), (0.6, 10.0), (0.8, 7.5), (1.0, 5.0)] {
-            set_value(&mut app, driver, t);
+            set_value(&mut app, *driver, t);
             assert_eq!(animation.value(&app), expected, "at t = {t}");
         }
     }
@@ -213,15 +211,15 @@ mod tests {
         ));
 
         let sequence = TweenSequence::new(vec![
-            TweenSequenceItem::new(Arc::new(first), 4.0),
-            TweenSequenceItem::new(Arc::new(middle), 2.0),
-            TweenSequenceItem::new(Arc::new(last), 4.0),
+            TweenSequenceItem::new(Rc::new(first), 4.0),
+            TweenSequenceItem::new(Rc::new(middle), 2.0),
+            TweenSequenceItem::new(Rc::new(last), 4.0),
         ]);
-        let animation = sequence.animate(&mut app, driver.as_animation());
+        let animation = sequence.animate(&mut app, driver.erase());
 
         assert_eq!(animation.value(&app), 5.0);
         for (t, expected) in [(0.2, 5.0), (0.4, 10.0), (0.6, 10.0), (0.8, 5.0), (1.0, 5.0)] {
-            set_value(&mut app, driver, t);
+            set_value(&mut app, *driver, t);
             assert_eq!(animation.value(&app), expected, "at t = {t}");
         }
     }
@@ -233,15 +231,15 @@ mod tests {
         let driver = ProxyAnimation::new(&mut app, None);
 
         let sequence = TweenSequence::new(vec![TweenSequenceItem::new(
-            Arc::new(Tween::new(&mut app, Some(5.0), Some(10.0))),
+            Rc::new(Tween::new(&mut app, Some(5.0), Some(10.0))),
             1.0,
         )]);
-        let animation = sequence.animate(&mut app, driver.as_animation());
+        let animation = sequence.animate(&mut app, driver.erase());
 
         assert_eq!(animation.value(&app), 5.0);
-        set_value(&mut app, driver, 0.5);
+        set_value(&mut app, *driver, 0.5);
         assert_eq!(animation.value(&app), 7.5);
-        set_value(&mut app, driver, 1.0);
+        set_value(&mut app, *driver, 1.0);
         assert_eq!(animation.value(&app), 10.0);
     }
 
@@ -250,7 +248,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let sequence = FlippedTweenSequence::new(vec![TweenSequenceItem::new(
-            Arc::new(Tween::new(&mut app, Some(0.0), Some(0.5))),
+            Rc::new(Tween::new(&mut app, Some(0.0), Some(0.5))),
             1.0,
         )]);
         assert_eq!(sequence.transform(&app, 0.25), 0.625);

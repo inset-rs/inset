@@ -4,24 +4,27 @@
 //! kit's items through `crate::`, which only this file's imports answer.
 #![feature(arbitrary_self_types)]
 #[path = "../../../crates/waft-winui/src/controls/scroll_bar_viewport.rs"]
-#[expect(dead_code, reason = "the kit's flyouts call `axis`, which this test does not")]
+#[expect(
+    dead_code,
+    reason = "the kit's flyouts call `axis`, which this test does not"
+)]
 mod presentation;
 use presentation::ScrollBarViewport;
-use std::{cell::Cell, rc::Rc, time::Duration};
+use std::{cell::RefCell, rc::Rc, time::Duration};
 use waft_embedder::{Offset, PointerChange, PointerData, PointerDataPacket, PointerDeviceKind};
-use waft_foundation::{Handle, Listener};
+use waft_foundation::{Listener, Ref};
 use waft_gestures::GestureBinding;
 use waft_rendering::{CrossAxisAlignment, MainAxisSize};
 use waft_widgets::*;
 use waft_winui::*;
 use waft_winui_test_support::Fixture;
-fn fixture(theme: Theme) -> (Fixture, Handle<ScrollViewportController>) {
-    let slot = Rc::new(Cell::new(None));
+fn fixture(theme: Theme) -> (Fixture, Ref<ScrollViewportController>) {
+    let slot = Rc::new(RefCell::new(None));
     let q = slot.clone();
     let f = Fixture::with_root([260, 240], move |app| {
         winui_gallery::install_fonts(app);
         let controller = ScrollViewportController::new(app);
-        q.set(Some(controller));
+        *q.borrow_mut() = Some(controller.clone());
         run_app(
             app,
             WidgetsApp::new(AccentPalette::default().base)
@@ -42,7 +45,7 @@ fn fixture(theme: Theme) -> (Fixture, Handle<ScrollViewportController>) {
                                 .solid_background_fill_color_base,
                         )
                         .child(ScrollBarViewport::new(
-                            controller,
+                            controller.clone(),
                             Column::new()
                                 .main_axis_size(MainAxisSize::Min)
                                 .cross_axis_alignment(CrossAxisAlignment::Stretch)
@@ -54,7 +57,8 @@ fn fixture(theme: Theme) -> (Fixture, Handle<ScrollViewportController>) {
                 .into_widget(),
         );
     });
-    (f, slot.get().unwrap())
+    let controller = slot.borrow().clone().unwrap();
+    (f, controller)
 }
 fn settle(f: &mut Fixture) {
     for _ in 0..4 {
@@ -134,13 +138,13 @@ fn native_thumb_drag_and_track_press_change_the_same_controller() {
     );
 }
 /// A lazy list of 30 items that scrolls itself, with the scrollbar put on it.
-fn lazy_list_fixture() -> (Fixture, Handle<ScrollViewportController>) {
-    let slot = Rc::new(Cell::new(None));
+fn lazy_list_fixture() -> (Fixture, Ref<ScrollViewportController>) {
+    let slot = Rc::new(RefCell::new(None));
     let q = slot.clone();
     let f = Fixture::with_root([260, 240], move |app| {
         winui_gallery::install_fonts(app);
         let controller = ScrollViewportController::new(app);
-        q.set(Some(controller));
+        *q.borrow_mut() = Some(controller.clone());
         let list = ListView::builder(|_, _, index| {
             Some(
                 SizedBox::new()
@@ -159,14 +163,15 @@ fn lazy_list_fixture() -> (Fixture, Handle<ScrollViewportController>) {
                 .builder(move |_, _, _| {
                     ThemeScope::new(
                         Theme::Light,
-                        ScrollBarViewport::scroller(controller, list.clone()),
+                        ScrollBarViewport::scroller(controller.clone(), list.clone()),
                     )
                     .into_widget()
                 })
                 .into_widget(),
         );
     });
-    (f, slot.get().unwrap())
+    let controller = slot.borrow().clone().unwrap();
+    (f, controller)
 }
 #[test]
 fn the_scrollbar_pages_a_lazy_list_it_is_put_on() {

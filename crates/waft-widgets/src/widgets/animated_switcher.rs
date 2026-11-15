@@ -6,7 +6,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use waft_animation::{
-    Animation, AnimationBehavior, AnimationController, AnimationStatusListener, AnyAnimation,
+    Animation, AnimationBehavior, AnimationController, AnimationRef, AnimationStatusListener,
     Curve, CurvedAnimation, Curves,
 };
 use waft_foundation::{App, Handle, HandleId, ValueKey};
@@ -20,6 +20,7 @@ use crate::framework::{
 use crate::widgets::basic::{KeyedSubtree, Stack};
 use crate::widgets::ticker_provider::{TickerProviderStateMixin, TickerProviderStateMixinData};
 use crate::widgets::transitions::FadeTransition;
+use waft_foundation::Ref;
 
 /// Internal representation of a child that, now or in the past, was set on the
 /// [`AnimatedSwitcher::child`] field, but is now in the process of
@@ -27,10 +28,10 @@ use crate::widgets::transitions::FadeTransition;
 /// to expose to the public API (like the controller).
 struct ChildEntry {
     /// The animation controller for the child's transition.
-    controller: Handle<AnimationController>,
+    controller: Ref<AnimationController>,
 
     /// The (curved) animation being used to drive the transition.
-    animation: Handle<CurvedAnimation>,
+    animation: Ref<CurvedAnimation>,
 
     /// The currently built transition for this child.
     transition: WidgetRef,
@@ -63,7 +64,7 @@ pub struct AnimatedSwitcherTransitionBuilder {
 
 /// The function an [`AnimatedSwitcherTransitionBuilder`] calls.
 type AnimatedSwitcherTransitionBuilderFn =
-    dyn Fn(&mut App, &WidgetRef, AnyAnimation<f64>) -> WidgetRef;
+    dyn Fn(&mut App, &WidgetRef, AnimationRef<f64>) -> WidgetRef;
 
 /// Equality key: closures compare by allocation, functions by the `TypeId` of the function
 /// item, handle-methods by `(handle, TypeId of the function item)`.
@@ -77,7 +78,7 @@ enum AnimatedSwitcherTransitionBuilderIdentity {
 impl AnimatedSwitcherTransitionBuilder {
     /// Wraps a closure; it equals only its clones.
     pub fn new(
-        builder: impl Fn(&mut App, &WidgetRef, AnyAnimation<f64>) -> WidgetRef + 'static,
+        builder: impl Fn(&mut App, &WidgetRef, AnimationRef<f64>) -> WidgetRef + 'static,
     ) -> AnimatedSwitcherTransitionBuilder {
         AnimatedSwitcherTransitionBuilder {
             builder: Rc::new(builder),
@@ -91,7 +92,7 @@ impl AnimatedSwitcherTransitionBuilder {
     /// canonical identity.
     pub fn function<F>(builder: F) -> AnimatedSwitcherTransitionBuilder
     where
-        F: Fn(&mut App, &WidgetRef, AnyAnimation<f64>) -> WidgetRef + 'static,
+        F: Fn(&mut App, &WidgetRef, AnimationRef<f64>) -> WidgetRef + 'static,
     {
         const {
             assert!(
@@ -114,7 +115,7 @@ impl AnimatedSwitcherTransitionBuilder {
     /// identity.
     pub fn handle_method<T: 'static, F>(this: Handle<T>, f: F) -> AnimatedSwitcherTransitionBuilder
     where
-        F: Fn(Handle<T>, &mut App, &WidgetRef, AnyAnimation<f64>) -> WidgetRef + 'static,
+        F: Fn(Handle<T>, &mut App, &WidgetRef, AnimationRef<f64>) -> WidgetRef + 'static,
     {
         const {
             assert!(
@@ -139,7 +140,7 @@ impl AnimatedSwitcherTransitionBuilder {
         &self,
         app: &mut App,
         child: &WidgetRef,
-        animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
     ) -> WidgetRef {
         (self.builder)(app, child, animation)
     }
@@ -393,7 +394,7 @@ impl AnimatedSwitcher {
     pub fn default_transition_builder(
         _app: &mut App,
         child: &WidgetRef,
-        animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
     ) -> WidgetRef {
         let key = ValueKey::new(child.key().cloned());
         FadeTransition::new(animation)
@@ -475,7 +476,7 @@ impl TickerProviderStateMixin for AnimatedSwitcherState {
 }
 
 impl TickerProviderObject for AnimatedSwitcherState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         TickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -488,7 +489,7 @@ fn update_transition_for_entry(
     entry: &mut ChildEntry,
 ) {
     let key = entry.transition.key().cloned();
-    let child = transition_builder.call(app, &entry.widget_child, entry.animation.as_animation());
+    let child = transition_builder.call(app, &entry.widget_child, entry.animation.erase());
     let mut transition = KeyedSubtree::new(child);
     transition.key = key;
     entry.transition = transition.into_widget();
@@ -499,7 +500,7 @@ impl AnimatedSwitcherState {
         debug_assert!(animate || app.get(self).current_entry.is_none());
         if let Some(current_entry) = app.get_mut(self).current_entry.take() {
             debug_assert!(animate);
-            let controller = current_entry.controller;
+            let controller = current_entry.controller.handle();
             let state = app.get_mut(self);
             state.outgoing_entries.push(current_entry);
             controller.reverse(app, None);
@@ -526,11 +527,11 @@ impl AnimatedSwitcherState {
         );
         let animation = CurvedAnimation::create(
             app,
-            controller.view(),
+            controller.erase(),
             switch_in_curve,
             Some(switch_out_curve),
         );
-        let entry = self.new_entry(app, child, &builder, controller, animation);
+        let entry = self.new_entry(app, child, &builder, controller.clone(), animation);
         app.get_mut(self).current_entry = Some(entry);
         if animate {
             controller.forward(app, None);
@@ -545,35 +546,35 @@ impl AnimatedSwitcherState {
         app: &mut App,
         child: WidgetRef,
         builder: &AnimatedSwitcherTransitionBuilder,
-        controller: Handle<AnimationController>,
-        animation: Handle<CurvedAnimation>,
+        controller: Ref<AnimationController>,
+        animation: Ref<CurvedAnimation>,
     ) -> ChildEntry {
         let child_number = app.get(self).child_number;
-        let transition = KeyedSubtree::wrap(
-            builder.call(app, &child, animation.as_animation()),
-            child_number,
-        )
-        .into_widget();
+        let transition =
+            KeyedSubtree::wrap(builder.call(app, &child, animation.erase()), child_number)
+                .into_widget();
+        // The listener lives on the animation: it names the entry's objects without keeping
+        // them, and the entry it removes was their keeper.
+        let (controller_handle, animation_handle) = (controller.handle(), animation.handle());
         animation.as_animation().add_status_listener(
             app,
             AnimationStatusListener::new(move |status, app| {
+                let (controller, animation) = (controller_handle, animation_handle);
                 if status.is_dismissed() {
                     self.set_state(app, |state| {
                         debug_assert!(
                             state
                                 .outgoing_entries
                                 .iter()
-                                .any(|entry| entry.controller == controller)
+                                .any(|entry| *entry.controller == controller)
                         );
                         state
                             .outgoing_entries
-                            .retain(|entry| entry.controller != controller);
+                            .retain(|entry| *entry.controller != controller);
                         state.outgoing_widgets = None;
                     });
                     controller.dispose(app);
                     animation.dispose(app);
-                    app.destroy_lingering(animation);
-                    app.destroy_lingering(controller);
                 }
             }),
         );
@@ -678,13 +679,11 @@ impl State for AnimatedSwitcherState {
             .current_entry
             .iter()
             .chain(&state.outgoing_entries)
-            .map(|entry| (entry.controller, entry.animation))
+            .map(|entry| (entry.controller.handle(), entry.animation.handle()))
             .collect();
         for (controller, animation) in entries {
             controller.dispose(app);
             animation.dispose(app);
-            app.destroy_lingering(animation);
-            app.destroy_lingering(controller);
         }
         TickerProviderStateMixin::dispose(self, app);
     }
@@ -940,11 +939,10 @@ mod tests {
         );
     }
 
-    /// Dart's collector frees the curved animation each child entry drives once the entry
-    /// leaves; here the state frees it when it disposes it, on the outgoing child's dismissal
-    /// and at its own `dispose`.
+    /// The curved animation each child entry drives is freed once the entry leaves, on the
+    /// outgoing child's dismissal and with the state, as Dart's collector frees it.
     #[test]
-    fn frees_each_entrys_curved_animation_as_it_disposes_it() {
+    fn frees_each_entrys_curved_animation_once_its_entry_leaves() {
         let cell = binding_cell();
         let (one, two) = (unique_key(), unique_key());
         binding_mount(&cell, switcher(Some(keyed_box(&one))).into_widget());
@@ -958,6 +956,7 @@ mod tests {
                 .as_ref()
                 .expect("a child entry")
                 .animation
+                .handle()
         };
         let first = current_animation(&mut cell.borrow_mut());
 
@@ -1302,7 +1301,7 @@ mod tests {
             _this: Handle<Host>,
             _app: &mut App,
             child: &WidgetRef,
-            _animation: AnyAnimation<f64>,
+            _animation: AnimationRef<f64>,
         ) -> WidgetRef {
             child.clone()
         }
@@ -1310,7 +1309,7 @@ mod tests {
             _this: Handle<Host>,
             _app: &mut App,
             child: &WidgetRef,
-            _animation: AnyAnimation<f64>,
+            _animation: AnimationRef<f64>,
         ) -> WidgetRef {
             child.clone()
         }
@@ -1319,18 +1318,18 @@ mod tests {
         let mut app = cell.borrow_mut();
         let host = app.create(Host);
         let other_host = app.create(Host);
-        let tear_off = AnimatedSwitcherTransitionBuilder::handle_method(host, build_transition);
+        let tear_off = AnimatedSwitcherTransitionBuilder::handle_method(*host, build_transition);
 
         assert!(
-            tear_off == AnimatedSwitcherTransitionBuilder::handle_method(host, build_transition)
+            tear_off == AnimatedSwitcherTransitionBuilder::handle_method(*host, build_transition)
         );
         assert!(
             tear_off
-                != AnimatedSwitcherTransitionBuilder::handle_method(other_host, build_transition)
+                != AnimatedSwitcherTransitionBuilder::handle_method(*other_host, build_transition)
         );
         assert!(
             tear_off
-                != AnimatedSwitcherTransitionBuilder::handle_method(host, other_build_transition)
+                != AnimatedSwitcherTransitionBuilder::handle_method(*host, other_build_transition)
         );
         assert!(tear_off != AnimatedSwitcher::new(DURATION).transition_builder);
         assert!(

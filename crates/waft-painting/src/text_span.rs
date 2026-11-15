@@ -9,8 +9,7 @@ use std::rc::Rc;
 use waft_embedder::{ParagraphBuilder, TextAffinity, TextPosition};
 use waft_foundation::App;
 use waft_gestures::{
-    AnyGestureRecognizer, HitTestEntry, HitTestTarget, PointerEnterEventListener, PointerEvent,
-    PointerExitEventListener,
+    HitTestEntry, HitTestTarget, PointerEnterEventListener, PointerEvent, PointerExitEventListener,
 };
 use waft_services::{MouseCursor, MouseCursorRef, MouseTrackerAnnotation, SystemMouseCursors};
 
@@ -19,6 +18,8 @@ use crate::inline_span::{Accumulator, InlineSpan, InlineSpanRef, same_span, utf1
 use crate::text_painter::PlaceholderDimensions;
 use crate::text_scaler::TextScaler;
 use crate::text_style::TextStyle;
+use waft_foundation::OptionRetained;
+use waft_gestures::RecognizerRef;
 
 /// An immutable span of text.
 ///
@@ -61,7 +62,7 @@ pub struct TextSpan {
     /// [`InlineSpan`] also does not manage the lifetime of the gesture recognizer. The code
     /// that owns the gesture recognizer must call its `dispose` when the [`InlineSpan`] object
     /// is no longer used.
-    pub recognizer: Option<AnyGestureRecognizer>,
+    pub recognizer: Option<RecognizerRef>,
     /// Mouse cursor when the mouse hovers over this span, as the caller gave it; read it with
     /// [`effective_mouse_cursor`](Self::effective_mouse_cursor).
     ///
@@ -104,7 +105,7 @@ impl TextSpan {
     }
 
     /// Dart `TextSpan(recognizer:)`.
-    pub fn recognizer(mut self, recognizer: AnyGestureRecognizer) -> TextSpan {
+    pub fn recognizer(mut self, recognizer: RecognizerRef) -> TextSpan {
         self.recognizer = Some(recognizer);
         self
     }
@@ -131,7 +132,7 @@ impl TextSpan {
     /// [`SystemMouseCursors::CLICK`] when there is a [`recognizer`](Self::recognizer), else
     /// `MouseCursor.defer`.
     pub fn effective_mouse_cursor(&self) -> MouseCursorRef {
-        match (&self.mouse_cursor, self.recognizer) {
+        match (&self.mouse_cursor, &self.recognizer) {
             (Some(mouse_cursor), _) => Rc::clone(mouse_cursor),
             (None, None) => <dyn MouseCursor>::defer(),
             (None, Some(_)) => SystemMouseCursors::CLICK.into(),
@@ -160,7 +161,7 @@ impl TextSpan {
 impl HitTestTarget for TextSpan {
     fn handle_event(&self, app: &mut App, event: &PointerEvent, _entry: &HitTestEntry) {
         if let PointerEvent::Down(event) = event
-            && let Some(recognizer) = self.recognizer
+            && let Some(recognizer) = self.recognizer.handle()
         {
             recognizer.add_pointer(app, event);
         }
@@ -542,16 +543,16 @@ mod tests {
     #[test]
     fn the_recognizer_sets_the_default_cursor() {
         use waft_foundation::AppCell;
-        use waft_gestures::{GestureRecognizerLeaf, TapGestureRecognizer};
+        use waft_gestures::TapGestureRecognizer;
 
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let first = TapGestureRecognizer::new(&mut app).as_recognizer();
-        let second = TapGestureRecognizer::new(&mut app).as_recognizer();
+        let first: RecognizerRef = TapGestureRecognizer::new(&mut app).erase();
+        let second: RecognizerRef = TapGestureRecognizer::new(&mut app).erase();
         let click: MouseCursorRef = SystemMouseCursors::CLICK.into();
         let forbidden: MouseCursorRef = SystemMouseCursors::FORBIDDEN.into();
 
-        let link = TextSpan::new().text("a").recognizer(first);
+        let link = TextSpan::new().text("a").recognizer(first.clone());
         assert!(*link.effective_mouse_cursor() == *click);
         assert!(
             TextSpan::new()
@@ -561,12 +562,12 @@ mod tests {
         );
         let named = TextSpan::new()
             .text("a")
-            .recognizer(first)
+            .recognizer(first.clone())
             .mouse_cursor(SystemMouseCursors::FORBIDDEN);
         assert!(*named.effective_mouse_cursor() == *forbidden);
         assert!(*link.mouse_tracker_annotation().cursor == *click);
 
-        let relinked = TextSpan::new().text("a").recognizer(second);
+        let relinked = TextSpan::new().text("a").recognizer(second.clone());
         assert_eq!(link.compare_to(&relinked), RenderComparison::Metadata);
         assert!(!link.eq_span(&relinked));
         assert!(

@@ -7,10 +7,10 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use waft_animation::{
-    AnimationBehavior, AnimationController, AnyAnimation, CurveTween, Curves, Tween,
+    AnimationBehavior, AnimationController, AnimationRef, CurveTween, Curves, Drive, Tween,
 };
 use waft_embedder::{Brightness, Size, TargetPlatform};
-use waft_foundation::{App, Handle, K_IS_WEB, Listener, ValueChanged};
+use waft_foundation::{App, Handle, K_IS_WEB, Listener, OptionRetained, Ref, ValueChanged};
 use waft_gestures::{
     LongPressGestureRecognizer, TapDownDetails, TapGestureRecognizer, TapMoveDetails, TapUpDetails,
 };
@@ -22,8 +22,8 @@ use waft_rendering::{BoxConstraints, HitTestBehavior};
 use waft_scheduler::{Ticker, TickerCallback, TickerProviderObject};
 use waft_services::{MouseCursor, MouseCursorRef, SystemMouseCursors};
 use waft_widgets::{
-    Action, ActivateIntent, Align, AnyAction, AnyFocusNode, BuildContext, CallbackAction,
-    ConstrainedBox, DecoratedBox, DefaultTextStyle, FadeTransition, FocusableActionDetector,
+    ActionRef, ActivateIntent, Align, BuildContext, CallbackAction, ConstrainedBox, DecoratedBox,
+    DefaultTextStyle, FadeTransition, FocusNodeRef, FocusableActionDetector,
     GestureRecognizerFactories, GestureRecognizerFactory, GestureRecognizerFactoryWithHandlers,
     IconTheme, IntoWidget, KeyRef, MediaQuery, MouseRegion, Padding, RawGestureDetector, Semantics,
     SingleTickerProviderStateMixin, SingleTickerProviderStateMixinData, State, StateData,
@@ -175,7 +175,7 @@ pub struct CupertinoButton {
     /// by this widget. The widget will be focusable even if a `focus_node` is not supplied.
     /// If supplied, the given `focus_node` will be _hosted_ by this widget, but not owned.
     /// See `FocusNode` for more information on what being hosted and/or owned implies.
-    pub focus_node: Option<AnyFocusNode>,
+    pub focus_node: Option<FocusNodeRef>,
     /// Handler called when the focus changes.
     ///
     /// Called with true if this widget's node gains focus, and false if it loses focus.
@@ -342,7 +342,7 @@ impl CupertinoButton {
     }
 
     /// Dart `CupertinoButton(focusNode:)`.
-    pub fn focus_node(mut self, focus_node: AnyFocusNode) -> CupertinoButton {
+    pub fn focus_node(mut self, focus_node: FocusNodeRef) -> CupertinoButton {
         self.focus_node = Some(focus_node);
         self
     }
@@ -437,13 +437,13 @@ pub struct CupertinoButtonState {
     single_ticker_provider: SingleTickerProviderStateMixinData,
     /// Dart's `final Tween<double> _opacityTween = Tween<double>(begin: 1.0)`, created in
     /// `init_state` because a state is created without the `App`.
-    opacity_tween: Option<Handle<Tween<f64>>>,
-    curve_tween: Option<Handle<CurveTween>>,
-    animation_controller: Option<Handle<AnimationController>>,
-    opacity_animation: Option<AnyAnimation<f64>>,
+    opacity_tween: Option<Ref<Tween<f64>>>,
+    curve_tween: Option<Ref<CurveTween>>,
+    animation_controller: Option<Ref<AnimationController>>,
+    opacity_animation: Option<AnimationRef<f64>>,
     is_focused: bool,
     /// Dart's `late final _actionMap`, filled in `init_state` (an action is an arena object).
-    action_map: HashMap<TypeId, AnyAction>,
+    action_map: HashMap<TypeId, ActionRef>,
     button_held_down: bool,
     tap_in_progress: bool,
 }
@@ -463,12 +463,17 @@ impl CupertinoButtonState {
     fn animation_controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
         app.get(self)
             .animation_controller
+            .handle()
             .expect("created in init_state")
     }
 
     fn set_tween(self: Handle<Self>, app: &mut App) {
         let end = self.widget(app).pressed_opacity.unwrap_or(1.0);
-        let opacity_tween = app.get(self).opacity_tween.expect("created in init_state");
+        let opacity_tween = app
+            .get(self)
+            .opacity_tween
+            .handle()
+            .expect("created in init_state");
         opacity_tween.set_end(app, Some(end));
     }
 
@@ -596,7 +601,7 @@ impl SingleTickerProviderStateMixin for CupertinoButtonState {
 
 /// Dart's `vsync: this`.
 impl TickerProviderObject for CupertinoButtonState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -616,7 +621,7 @@ impl State for CupertinoButtonState {
         );
         app.get_mut(self)
             .action_map
-            .insert(TypeId::of::<ActivateIntent>(), activate.as_action());
+            .insert(TypeId::of::<ActivateIntent>(), activate.into_erased());
         let animation_controller = AnimationController::create(
             app,
             Some(0.0),
@@ -630,8 +635,8 @@ impl State for CupertinoButtonState {
         let opacity_tween = Tween::new(app, Some(1.0), None);
         let curve_tween = CurveTween::new(app, Curves::decelerate());
         let opacity_animation = animation_controller
-            .drive(app, curve_tween)
-            .drive(app, opacity_tween);
+            .drive(app, curve_tween.clone())
+            .drive(app, opacity_tween.clone());
         let state = app.get_mut(self);
         state.animation_controller = Some(animation_controller);
         state.opacity_tween = Some(opacity_tween);
@@ -649,24 +654,9 @@ impl State for CupertinoButtonState {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        for action in std::mem::take(&mut app.get_mut(self).action_map).into_values() {
-            app.destroy(action.id());
-        }
         let animation_controller = self.animation_controller(app);
         animation_controller.dispose(app);
         SingleTickerProviderStateMixin::dispose(self, app);
-        let state = app.get_mut(self);
-        let opacity_tween = state.opacity_tween.take();
-        let curve_tween = state.curve_tween.take();
-        state.animation_controller = None;
-        state.opacity_animation = None;
-        app.destroy(animation_controller);
-        if let Some(opacity_tween) = opacity_tween {
-            app.destroy(opacity_tween);
-        }
-        if let Some(curve_tween) = curve_tween {
-            app.destroy(curve_tween);
-        }
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -847,6 +837,7 @@ impl State for CupertinoButtonState {
         let opacity = app
             .get(self)
             .opacity_animation
+            .clone()
             .expect("created in init_state");
         let mut detector = FocusableActionDetector::new(
             RawGestureDetector::new()
@@ -880,7 +871,7 @@ impl State for CupertinoButtonState {
             self.on_show_focus_highlight(app, show_highlight)
         })
         .enabled(enabled);
-        if let Some(focus_node) = widget.focus_node {
+        if let Some(focus_node) = widget.focus_node.clone() {
             detector = detector.focus_node(focus_node);
         }
         if let Some(on_focus_change) = widget.on_focus_change.clone() {
@@ -903,7 +894,7 @@ mod tests {
     use waft_embedder::{PointerChange, PointerData, PointerDataPacket, PointerDeviceKind};
     use waft_gestures::GestureBinding;
     use waft_widgets::{
-        Actions, Builder, Directionality, FocusNode, FocusNodeLeaf, GlobalKey, SizedBox,
+        Actions, Builder, Directionality, FocusNode, FocusNodeRef, GlobalKey, SizedBox,
     };
 
     use super::*;
@@ -964,7 +955,7 @@ mod tests {
     fn an_activate_intent_presses_the_button_and_autofocus_takes_the_supplied_node() {
         let cell = crate::test_support::test_cell();
         let mut app = cell.borrow_mut();
-        let node = FocusNode::new(&mut app).as_node();
+        let node: FocusNodeRef = FocusNode::new(&mut app).into_erased();
         let presses = Rc::new(Cell::new(0));
         let on_pressed = Listener::new({
             let presses = Rc::clone(&presses);
@@ -982,7 +973,7 @@ mod tests {
         build(
             &cell,
             CupertinoButton::new(child.into_widget(), Some(on_pressed))
-                .focus_node(node)
+                .focus_node(node.clone())
                 .autofocus(true)
                 .into_widget(),
         );
@@ -1004,6 +995,7 @@ mod tests {
             .borrow()
             .get(mounted.state)
             .opacity_animation
+            .clone()
             .expect("created in init_state")
             .value(&mounted.cell.borrow())
     }

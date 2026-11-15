@@ -23,6 +23,7 @@ use crate::recognizer::{
     RecognizerLeafData, UNSET_TOUCH_SLOP,
 };
 use crate::team::GestureArenaTeam;
+use waft_foundation::Ref;
 
 /// Details for `GestureTapDownCallback`, such as position.
 ///
@@ -305,7 +306,7 @@ pub struct TapGestureRecognizer {
 
 impl TapGestureRecognizer {
     /// Creates a tap gesture recognizer.
-    pub fn new(app: &mut App) -> Handle<TapGestureRecognizer> {
+    pub fn new(app: &mut App) -> Ref<TapGestureRecognizer> {
         app.create(TapGestureRecognizer {
             recognizer: GestureRecognizerData::new(),
             one_sequence: OneSequenceData::new(),
@@ -334,11 +335,11 @@ impl TapGestureRecognizer {
     ///
     /// If none, events from all device kinds will be tracked and recognized.
     pub fn supported_devices(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         devices: impl IntoIterator<Item = PointerDeviceKind>,
-    ) -> Handle<TapGestureRecognizer> {
-        app.get_mut(self).recognizer.supported_devices = Some(devices.into_iter().collect());
+    ) -> Ref<TapGestureRecognizer> {
+        app.get_mut(&self).recognizer.supported_devices = Some(devices.into_iter().collect());
         self
     }
 
@@ -366,11 +367,11 @@ impl TapGestureRecognizer {
     ///
     /// `None` means unlimited. Omitted at [`new`](Self::new) uses touch slop.
     pub fn pre_accept_slop_tolerance(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         value: Option<f64>,
-    ) -> Handle<TapGestureRecognizer> {
-        app.get_mut(self).primary.pre_accept_slop_tolerance = value;
+    ) -> Ref<TapGestureRecognizer> {
+        app.get_mut(&self).primary.pre_accept_slop_tolerance = value;
         self
     }
 
@@ -378,11 +379,11 @@ impl TapGestureRecognizer {
     ///
     /// `None` means unlimited. Omitted at [`new`](Self::new) uses touch slop.
     pub fn post_accept_slop_tolerance(
-        self: Handle<Self>,
+        self: Ref<Self>,
         app: &mut App,
         value: Option<f64>,
-    ) -> Handle<TapGestureRecognizer> {
-        app.get_mut(self).primary.post_accept_slop_tolerance = value;
+    ) -> Ref<TapGestureRecognizer> {
+        app.get_mut(&self).primary.post_accept_slop_tolerance = value;
         self
     }
 
@@ -523,11 +524,11 @@ impl TapGestureRecognizer {
 
     /// The team that this recognizer belongs to, if any.
     pub fn team(self: Handle<Self>, app: &App) -> Option<Handle<GestureArenaTeam>> {
-        app.get(self).one_sequence.team
+        app.get(self).one_sequence.team.as_deref().copied()
     }
 
     /// The [`team`](Self::team) can only be set once.
-    pub fn set_team(self: Handle<Self>, app: &mut App, value: Handle<GestureArenaTeam>) {
+    pub fn set_team(self: Handle<Self>, app: &mut App, value: Ref<GestureArenaTeam>) {
         debug_assert!(app.get(self).one_sequence.entries.is_empty());
         debug_assert!(app.get(self).one_sequence.tracked_pointers.is_empty());
         debug_assert!(app.get(self).one_sequence.team.is_none());
@@ -983,6 +984,7 @@ mod tests {
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
     use waft_foundation::AppCell;
+    use waft_foundation::Ref;
 
     use waft_foundation::HandleId;
 
@@ -1342,7 +1344,7 @@ mod tests {
         let competitor = TestMember::new(&mut app);
         GestureBinding::instance(&mut app)
             .gesture_arena(&app)
-            .add(&mut app, 1, competitor);
+            .add(&mut app, 1, *competitor);
         close_arena(&mut app, 1);
         route(&mut app, PointerEvent::Down(down1));
         assert!(!down_fired.get());
@@ -1408,7 +1410,7 @@ mod tests {
         let member = TestMember::new(&mut app);
         let entry = GestureBinding::instance(&mut app)
             .gesture_arena(&app)
-            .add(&mut app, 1, member);
+            .add(&mut app, 1, *member);
         GestureBinding::instance(&mut app)
             .gesture_arena(&app)
             .hold(&mut app, 1);
@@ -1436,7 +1438,7 @@ mod tests {
         let member = TestMember::new(&mut app);
         let entry = GestureBinding::instance(&mut app)
             .gesture_arena(&app)
-            .add(&mut app, 1, member);
+            .add(&mut app, 1, *member);
         GestureBinding::instance(&mut app)
             .gesture_arena(&app)
             .hold(&mut app, 1);
@@ -1454,7 +1456,7 @@ mod tests {
     struct TestMember;
 
     impl TestMember {
-        fn new(app: &mut App) -> Handle<TestMember> {
+        fn new(app: &mut App) -> Ref<TestMember> {
             app.create(TestMember)
         }
     }

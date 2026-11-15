@@ -143,13 +143,15 @@ impl<W: InheritedNotifier> InheritedNotifierElement<W> {
     /// Creates an element that uses the given widget as its configuration.
     pub fn create(app: &mut App, widget: WidgetRef) -> AnyElement {
         debug_assert!(downcast_widget::<W>(&*widget).is_some());
-        let this = app.create(InheritedNotifierElement::<W> {
-            element: ElementData::new(widget),
-            component: ComponentElementData::default(),
-            dependents: HashMap::new(),
-            dirty: false,
-            marker: PhantomData,
-        });
+        let this = app
+            .create(InheritedNotifierElement::<W> {
+                element: ElementData::new(widget),
+                component: ComponentElementData::default(),
+                dependents: HashMap::new(),
+                dirty: false,
+                marker: PhantomData,
+            })
+            .into_tree_node(app);
         if let Some(notifier) = this.widget(app).notifier() {
             notifier.add_listener(app, this.update_listener());
         }

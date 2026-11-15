@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 use waft_animation::Curves;
-use waft_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, Listenable, Listener};
+use waft_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, Listenable, Listener, Ref};
 use waft_painting::{Axis, EdgeInsetsGeometry};
 use waft_scheduler::FrameCallback;
 use waft_widgets::*;
@@ -38,7 +38,7 @@ pub struct ScrollViewportMetrics {
 /// its lifetime and disposes it after the scrolling child has unmounted.
 pub struct ScrollViewportController {
     notifier: ChangeNotifierData,
-    native: Handle<ScrollController>,
+    native: Ref<ScrollController>,
     native_listener: Option<Listener>,
     reported: ScrollViewportMetrics,
     report_pending: bool,
@@ -47,36 +47,37 @@ pub struct ScrollViewportController {
 
 impl ScrollViewportController {
     /// Creates an unattached controller at offset zero.
-    pub fn new(app: &mut App) -> Handle<Self> {
+    pub fn new(app: &mut App) -> Ref<Self> {
         let native = ScrollController::default(app);
         Self::with_native(app, native)
     }
 
     /// Creates an unattached controller whose viewports start at `offset`.
-    pub fn with_initial_offset(app: &mut App, offset: f64) -> Handle<Self> {
+    pub fn with_initial_offset(app: &mut App, offset: f64) -> Ref<Self> {
         let native = ScrollController::new(app, offset, false, None, None, None);
         Self::with_native(app, native)
     }
 
     /// Wraps `native`, reporting its changes.
-    fn with_native(app: &mut App, native: Handle<ScrollController>) -> Handle<Self> {
+    fn with_native(app: &mut App, native: Ref<ScrollController>) -> Ref<Self> {
         let controller = app.create(Self {
             notifier: ChangeNotifierData::new(),
-            native,
+            native: native.clone(),
             native_listener: None,
             reported: ScrollViewportMetrics::default(),
             report_pending: false,
             disposed: false,
         });
-        let listener = Listener::new(move |app| controller.schedule_report(app));
+        let handle = controller.handle();
+        let listener = Listener::new(move |app| handle.schedule_report(app));
         native.add_listener(app, listener.clone());
-        app.get_mut(controller).native_listener = Some(listener);
+        app.get_mut(&controller).native_listener = Some(listener);
         controller
     }
 
     /// The native controller to pass to ListView, CustomScrollView or another reveal scroller.
-    pub fn native_controller(self: Handle<Self>, app: &App) -> AnyScrollController {
-        app.get(self).native.as_controller()
+    pub fn native_controller(self: Handle<Self>, app: &App) -> ScrollControllerRef {
+        app.get(self).native.erase()
     }
 
     /// Whether a scrolling child has attached its scroll position.
@@ -164,12 +165,12 @@ impl ScrollViewportController {
             return;
         }
         state.disposed = true;
-        let native = state.native;
+        let native = state.native.clone();
         let listener = state.native_listener.take();
         if let Some(listener) = listener {
             native.remove_listener(app, &listener);
         }
-        ScrollControllerLeaf::dispose(native, app);
+        ScrollControllerLeaf::dispose(native.handle(), app);
         app.get_mut(self).notifier.dispose();
     }
 
@@ -218,7 +219,7 @@ pub struct ScrollMetricsObserver {
     pub key: Option<KeyRef>,
 
     /// Controller attached to the immediate descendant scroller.
-    pub controller: Handle<ScrollViewportController>,
+    pub controller: Ref<ScrollViewportController>,
 
     /// A native ListView, CustomScrollView or other scrolling widget.
     pub child: WidgetRef,
@@ -226,7 +227,7 @@ pub struct ScrollMetricsObserver {
 
 impl ScrollMetricsObserver {
     /// Observes layout and activity notifications from the scrolling child.
-    pub fn new<K>(controller: Handle<ScrollViewportController>, child: impl IntoWidget<K>) -> Self {
+    pub fn new<K>(controller: Ref<ScrollViewportController>, child: impl IntoWidget<K>) -> Self {
         Self {
             key: None,
             controller,
@@ -247,7 +248,7 @@ impl StatelessWidget for ScrollMetricsObserver {
     }
 
     fn build(&self, app: &mut App, context: BuildContext) -> WidgetRef {
-        let controller = self.controller;
+        let controller = self.controller.clone();
         let behavior = ScrollConfiguration::of(app, context)
             .copy_with()
             .scrollbars(false);
@@ -255,11 +256,14 @@ impl StatelessWidget for ScrollMetricsObserver {
             ScrollBehaviorRef::new(behavior),
             NotificationListener::<ScrollMetricsNotification>::new(
                 NotificationListener::<dyn ScrollNotification>::new(self.child.clone())
-                    .on_notification(move |app, notification| {
-                        if notification.depth() == 0 {
-                            controller.schedule_report(app);
+                    .on_notification({
+                        let controller = controller.clone();
+                        move |app, notification| {
+                            if notification.depth() == 0 {
+                                controller.schedule_report(app);
+                            }
+                            false
                         }
-                        false
                     })
                     .into_widget(),
             )
@@ -288,7 +292,7 @@ pub struct ScrollViewport {
     pub axis: Axis,
 
     /// Controller owned by the enclosing control or application.
-    pub controller: Handle<ScrollViewportController>,
+    pub controller: Ref<ScrollViewportController>,
 
     /// Content of this viewport.
     pub child: WidgetRef,
@@ -301,7 +305,7 @@ impl ScrollViewport {
     /// Creates a native single-axis viewport.
     pub fn new<K>(
         axis: Axis,
-        controller: Handle<ScrollViewportController>,
+        controller: Ref<ScrollViewportController>,
         child: impl IntoWidget<K>,
     ) -> Self {
         Self {
@@ -333,7 +337,7 @@ impl StatelessWidget for ScrollViewport {
 
     fn build(&self, app: &mut App, _: BuildContext) -> WidgetRef {
         ScrollMetricsObserver::new(
-            self.controller,
+            self.controller.clone(),
             SingleChildScrollView::new()
                 .scroll_direction(self.axis)
                 .controller(self.controller.native_controller(app))

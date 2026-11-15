@@ -7,10 +7,14 @@
 #[path = "../../../crates/waft-winui/src/controls/scroll_tab_viewer.rs"]
 mod template;
 
-use std::{cell::Cell, rc::Rc, time::Duration};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+    time::Duration,
+};
 use template::TabScrollViewer;
 use waft_embedder::{Offset, PointerChange, Rect};
-use waft_foundation::{App, Handle, Listener};
+use waft_foundation::{App, Handle, Listener, Ref};
 use waft_painting::{Axis, EdgeInsetsGeometry};
 use waft_widgets::*;
 use waft_winui::*;
@@ -19,7 +23,7 @@ use waft_winui_test_support::Fixture;
 #[derive(Clone, Debug, Default)]
 struct Probe {
     state: Rc<Cell<Option<Handle<PageState>>>>,
-    controller: Rc<Cell<Option<Handle<ScrollViewportController>>>>,
+    controller: Rc<RefCell<Option<Ref<ScrollViewportController>>>>,
     built: Rc<Cell<usize>>,
 }
 #[derive(Debug)]
@@ -46,7 +50,7 @@ impl State for PageState {
     fn build(self: Handle<Self>, app: &mut App, _: BuildContext) -> WidgetRef {
         let probe = self.widget(app).0.clone();
         probe.state.set(Some(self));
-        let controller = probe.controller.get().unwrap();
+        let controller = probe.controller.borrow().clone().unwrap();
         let native = controller.native_controller(app);
         let built = probe.built.clone();
         let list = ListView::builder(move |_, _, index| {
@@ -83,7 +87,7 @@ fn fixture() -> (Fixture, Probe) {
     let f = Fixture::with_root([500, 48], move |app| {
         winui_gallery::install_fonts(app);
         let controller = ScrollViewportController::new(app);
-        page.controller.set(Some(controller));
+        *page.controller.borrow_mut() = Some(controller.clone());
         let entry = OverlayEntry::new(
             app,
             Rc::new(move |_, _| Page(page.clone()).into_widget()),
@@ -95,7 +99,11 @@ fn fixture() -> (Fixture, Probe) {
             app,
             WidgetsApp::new(AccentPalette::default().base)
                 .debug_show_checked_mode_banner(false)
-                .builder(move |_, _, _| Overlay::new().initial_entries([entry]).into_widget())
+                .builder(move |_, _, _| {
+                    Overlay::new()
+                        .initial_entries([entry.clone()])
+                        .into_widget()
+                })
                 .into_widget(),
         );
     });
@@ -131,7 +139,7 @@ fn source_scroll_buttons_repeat_and_stop_at_edges_in_both_themes() {
     let r = ThemeResources::new(Theme::Light, AccentPalette::default());
     let (mut f, p) = fixture();
     settle(&mut f);
-    let controller = p.controller.get().unwrap();
+    let controller = p.controller.borrow().clone().unwrap();
     let b = buttons(&f);
     assert_eq!(b.len(), 2);
     assert!(!b[0].1 && b[1].1);
@@ -172,7 +180,7 @@ fn source_scroll_buttons_repeat_and_stop_at_edges_in_both_themes() {
 fn hiding_scroll_buttons_preserves_native_list_position_and_changes_viewport_width() {
     let (mut f, p) = fixture();
     settle(&mut f);
-    let controller = p.controller.get().unwrap();
+    let controller = p.controller.borrow().clone().unwrap();
     controller.change_view(&mut f.cell.borrow_mut(), 500.0, true);
     settle(&mut f);
     let position = controller

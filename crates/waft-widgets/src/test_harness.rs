@@ -6,11 +6,12 @@
 use std::rc::Rc;
 
 use waft_embedder::{View as EmbedderView, ViewConstraints, ViewId, ViewMetrics};
-use waft_foundation::{App, AppCell, Handle, HandleId};
+use waft_foundation::{App, AppCell, Handle, HandleId, OptionRetained};
 use waft_rendering::{AnyRenderObject, PipelineOwner, RenderHandle, RenderView, ViewConfiguration};
 use waft_test::{IMPLICIT_VIEW_ID, TestPlatform};
 
 use crate::*;
+use waft_foundation::Ref;
 
 // ---- the test root: `RawView` in miniature ----
 
@@ -64,7 +65,7 @@ pub(crate) struct TestRootElement {
     element: ElementData,
     render_object_element: RenderObjectElementData,
     child: Option<AnyElement>,
-    pipeline_owner: Option<Handle<PipelineOwner>>,
+    pipeline_owner: Option<Ref<PipelineOwner>>,
 }
 
 impl TestRootElement {
@@ -75,6 +76,7 @@ impl TestRootElement {
             child: None,
             pipeline_owner: None,
         })
+        .into_tree_node(app)
     }
 
     fn update_child_from_widget(self: Handle<Self>, app: &mut App) {
@@ -252,7 +254,7 @@ impl Harness {
     /// A frame: build, layout, paint, finalize.
     pub(crate) fn pump(&self, app: &mut App) {
         self.owner.build_scope(app, self.root.as_element(), None);
-        let pipeline = app.get(self.root).pipeline_owner.expect("mounted");
+        let pipeline = app.get(self.root).pipeline_owner.handle().expect("mounted");
         pipeline.flush_layout(app);
         pipeline.flush_compositing_bits(app);
         pipeline.flush_paint(app);
@@ -357,7 +359,7 @@ pub(crate) struct TestScrollContext {
 }
 
 impl TestScrollContext {
-    pub(crate) fn new(app: &mut App, context: BuildContext) -> Handle<TestScrollContext> {
+    pub(crate) fn new(app: &mut App, context: BuildContext) -> Ref<TestScrollContext> {
         app.create(TestScrollContext {
             context,
             axis_direction: waft_painting::AxisDirection::Down,
@@ -374,7 +376,7 @@ impl waft_scheduler::TickerProviderObject for TestScrollContext {
         self: Handle<Self>,
         app: &mut App,
         on_tick: waft_scheduler::TickerCallback,
-    ) -> Handle<waft_scheduler::Ticker> {
+    ) -> Ref<waft_scheduler::Ticker> {
         waft_scheduler::Ticker::new(app, on_tick, None)
     }
 }
@@ -433,7 +435,7 @@ impl ScrollContext for Handle<TestScrollContext> {
 pub(crate) struct ScrollHarness {
     #[allow(dead_code)]
     pub(crate) harness: Harness,
-    pub(crate) context: Handle<TestScrollContext>,
+    pub(crate) context: Ref<TestScrollContext>,
     /// [`context`](Self::context) as the one `ScrollContext` every position under test shares.
     pub(crate) scroll_context: Rc<dyn ScrollContext>,
     pub(crate) notifications: Rc<std::cell::RefCell<Vec<String>>>,
@@ -472,10 +474,11 @@ pub(crate) fn mount_scroll_harness(app: &mut App) -> ScrollHarness {
     let listener = harness.root.as_element().children(app)[0];
     let inner = listener.children(app)[0];
     let context = TestScrollContext::new(app, inner);
+    let scroll_context: Rc<dyn ScrollContext> = Rc::new(*context);
     ScrollHarness {
         harness,
         context,
-        scroll_context: Rc::new(context),
+        scroll_context,
         notifications,
     }
 }

@@ -7,7 +7,7 @@ use std::{
     rc::Rc,
 };
 use waft_embedder::{Offset, PointerChange};
-use waft_foundation::{App, Handle, Listener};
+use waft_foundation::{App, Handle, Listener, OptionRetained, Ref};
 use waft_painting::Alignment;
 use waft_services::{
     HardwareKeyboard, KeyDownEvent, KeyEvent, KeyUpEvent, LogicalKeyboardKey, PhysicalKeyboardKey,
@@ -38,9 +38,9 @@ struct OwnerState {
     checked: bool,
     enabled: bool,
     theme: Theme,
-    flyout: Option<Handle<Flyout>>,
-    focus: Option<AnyFocusNode>,
-    next_focus: Option<AnyFocusNode>,
+    flyout: Option<Ref<Flyout>>,
+    focus: Option<FocusNodeRef>,
+    next_focus: Option<FocusNodeRef>,
 }
 
 impl StatefulWidget for Owner {
@@ -66,26 +66,25 @@ impl State for OwnerState {
     fn init_state(self: Handle<Self>, app: &mut App) {
         self.widget(app).probe.state.set(Some(self));
         app.get_mut(self).flyout = Some(Flyout::new(app, Text::new("Menu choice")));
-        app.get_mut(self).focus = Some(FocusNode::new(app).as_node());
-        app.get_mut(self).next_focus = Some(FocusNode::new(app).as_node());
+        app.get_mut(self).focus = Some(FocusNode::new(app).into_erased());
+        app.get_mut(self).next_focus = Some(FocusNode::new(app).into_erased());
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        app.get(self).flyout.unwrap().dispose(app);
+        app.get(self).flyout.handle().unwrap().dispose(app);
         for node in [
-            app.get(self).focus.unwrap(),
-            app.get(self).next_focus.unwrap(),
+            app.get(self).focus.handle().unwrap(),
+            app.get(self).next_focus.handle().unwrap(),
         ] {
             node.dispose(app);
-            app.destroy(node.id());
         }
     }
 
     fn build(self: Handle<Self>, app: &mut App, _: BuildContext) -> WidgetRef {
         let probe = self.widget(app).probe.clone();
         let click = Listener::new(move |_| probe.events.borrow_mut().push("click"));
-        let flyout = app.get(self).flyout.unwrap();
-        let focus = app.get(self).focus.unwrap();
+        let flyout = app.get(self).flyout.clone().unwrap();
+        let focus = app.get(self).focus.clone().unwrap();
         let enabled = app.get(self).enabled;
         let button = if self.widget(app).toggle {
             ToggleSplitButton::text("Primary", app.get(self).checked, move |app, checked| {
@@ -112,7 +111,7 @@ impl State for OwnerState {
                     .children([
                         SizedBox::new().width(180.0).child(button).into_widget(),
                         Button::text("Next", Listener::new(|_| {}))
-                            .focus_node(app.get(self).next_focus.unwrap())
+                            .focus_node(app.get(self).next_focus.clone().unwrap())
                             .into_widget(),
                     ]),
             ),
@@ -144,7 +143,7 @@ fn fixture(toggle: bool) -> (Fixture, Rc<Probe>) {
             WidgetsApp::new(AccentPalette::default().base)
                 .debug_show_checked_mode_banner(false)
                 .builder(move |_, _, _| {
-                    FocusScope::new(Overlay::new().initial_entries([entry]))
+                    FocusScope::new(Overlay::new().initial_entries([entry.clone()]))
                         .autofocus(true)
                         .into_widget()
                 })
@@ -200,7 +199,7 @@ fn both_classes_have_one_tab_stop_and_keyboard_flyout_activation() {
         let (mut f, probe) = fixture(toggle);
         let state = probe.state.get().unwrap();
         key(&mut f, PhysicalKeyboardKey::TAB, LogicalKeyboardKey::TAB);
-        let focus = f.cell.borrow().get(state).focus.unwrap();
+        let focus = f.cell.borrow().get(state).focus.handle().unwrap();
         assert!(focus.has_primary_focus(&f.cell.borrow()));
         key(
             &mut f,
@@ -225,6 +224,7 @@ fn both_classes_have_one_tab_stop_and_keyboard_flyout_activation() {
                 .borrow()
                 .get(state)
                 .next_focus
+                .handle()
                 .unwrap()
                 .has_primary_focus(&f.cell.borrow())
         );
@@ -248,7 +248,7 @@ fn disabled_checked_button_ignores_both_pointer_actions() {
     assert!(probe.events.borrow().is_empty());
     let app = f.cell.borrow();
     assert!(app.get(state).checked);
-    assert!(!app.get(state).flyout.unwrap().is_open(&app));
+    assert!(!app.get(state).flyout.handle().unwrap().is_open(&app));
 }
 
 #[test]

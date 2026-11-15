@@ -5,6 +5,7 @@ use std::rc::Rc;
 use waft_foundation::{App, Handle};
 
 use crate::events::PointerEvent;
+use waft_foundation::Ref;
 
 /// The callback to register with a [`PointerSignalResolver`] to express
 /// interest in a pointer signal event.
@@ -40,7 +41,7 @@ pub struct PointerSignalResolver {
 
 impl PointerSignalResolver {
     /// Creates a resolver with no event in flight.
-    pub fn new(app: &mut App) -> Handle<PointerSignalResolver> {
+    pub fn new(app: &mut App) -> Ref<PointerSignalResolver> {
         app.create(PointerSignalResolver::default())
     }
 

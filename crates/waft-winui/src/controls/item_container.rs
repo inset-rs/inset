@@ -7,7 +7,7 @@ use crate::*;
 use std::{fmt, rc::Rc, time::Duration, time::Instant};
 use waft_animation::{Cubic, Curve};
 use waft_embedder::{Color, Offset, PointerDeviceKind};
-use waft_foundation::{App, Handle, ListenableObject, Listener};
+use waft_foundation::{App, Handle, ListenableObject, Listener, OptionRetained, Ref};
 use waft_gestures::{K_DOUBLE_TAP_SLOP, K_DOUBLE_TAP_TIMEOUT, TapDownDetails};
 use waft_painting::AlignmentGeometry;
 use waft_rendering::HitTestBehavior;
@@ -224,7 +224,7 @@ struct ShownItem {
 /// The container's pointer, focus and place in its view.
 pub struct ItemContainerState {
     state: StateData<ItemContainer>,
-    focus_node: Option<Handle<FocusNode>>,
+    focus_node: Option<Ref<FocusNode>>,
     pointer: PointerInfo,
     focused: bool,
     /// When and where the last tap was, which a second tap near it soon after makes a double tap.
@@ -237,7 +237,10 @@ pub struct ItemContainerState {
 
 impl ItemContainerState {
     fn focus_node(self: Handle<Self>, app: &App) -> Handle<FocusNode> {
-        app.get(self).focus_node.expect("made in `init_state`")
+        app.get(self)
+            .focus_node
+            .handle()
+            .expect("made in `init_state`")
     }
 
     /// What the view says of the item now; outside a view, the container's own `IsSelected`.
@@ -472,7 +475,6 @@ impl State for ItemContainerState {
         }
         if let Some(node) = app.get_mut(self).focus_node.take() {
             node.dispose(app);
-            app.destroy(node);
         }
     }
 
@@ -512,7 +514,13 @@ impl State for ItemContainerState {
             }))
             .child(gesture);
         Focus::new(mouse)
-            .focus_node(self.focus_node(app).as_node())
+            .focus_node(
+                app.get(self)
+                    .focus_node
+                    .as_ref()
+                    .expect("made in `init_state`")
+                    .erase(),
+            )
             .can_request_focus(widget.is_enabled)
             .skip_traversal(!app.get(self).shown.tab_stop)
             .on_focus_change(move |app, focused| self.focus_changed(app, focused))

@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use waft_animation::Curve;
 use waft_embedder::{Clip, Offset};
-use waft_foundation::{App, CompleterFuture, Handle, HandleId, Listener, wait_all};
+use waft_foundation::{App, CompleterFuture, Handle, HandleId, Listener, OptionRetained, wait_all};
 use waft_gestures::{
     DeviceGestureSettings, Drag, DragDownDetails, DragEndDetails, DragGestureRecognizer,
     DragStartBehavior, DragStartDetails, DragUpdateDetails, GestureBinding,
@@ -16,7 +16,7 @@ use waft_gestures::{
 use waft_painting::{
     Axis, AxisDirection, axis_direction_is_reversed, axis_direction_to_axis, flip_axis,
 };
-use waft_rendering::{AnyRenderObject, AnyViewportOffset, HitTestBehavior, RenderIgnorePointer};
+use waft_rendering::{AnyRenderObject, HitTestBehavior, RenderIgnorePointer, ViewportOffsetRef};
 use waft_scheduler::{Ticker, TickerCallback, TickerProvider, TickerProviderObject};
 use waft_services::{HardwareKeyboard, RestorationBucket, RestorationData, RestorationManager};
 
@@ -39,16 +39,19 @@ use crate::widgets::scroll_activity::ScrollHoldController;
 use crate::widgets::scroll_configuration::{ScrollBehaviorRef, ScrollConfiguration};
 use crate::widgets::scroll_context::ScrollContext;
 use crate::widgets::scroll_controller::{
-    AnyScrollController, ScrollController, ScrollControllerLeaf,
+    ScrollController, ScrollControllerLeaf, ScrollControllerRef,
 };
 use crate::widgets::scroll_physics::ScrollPhysicsRef;
-use crate::widgets::scroll_position::{AnyScrollPosition, ScrollPositionAlignmentPolicy};
+use crate::widgets::scroll_position::{
+    AnyScrollPosition, ScrollPositionAlignmentPolicy, ScrollPositionRef,
+};
 use crate::widgets::scrollable_helpers::{ScrollIncrementCalculator, ScrollableDetails};
 use crate::widgets::ticker_provider::{TickerProviderStateMixin, TickerProviderStateMixinData};
+use waft_foundation::Ref;
 
 /// Signature used by [`Scrollable`] to build the viewport through which the
 /// scrollable content is displayed.
-pub type ViewportBuilder = Rc<dyn Fn(&mut App, BuildContext, AnyViewportOffset) -> WidgetRef>;
+pub type ViewportBuilder = Rc<dyn Fn(&mut App, BuildContext, ViewportOffsetRef) -> WidgetRef>;
 
 // The return type of `perform_ensure_visible`.
 //
@@ -108,7 +111,7 @@ pub struct Scrollable {
     ///
     /// If `None`, a `ScrollController` will be created internally by [`Scrollable`]
     /// in order to create and manage the [`ScrollPosition`](crate::ScrollPosition).
-    pub controller: Option<AnyScrollController>,
+    pub controller: Option<ScrollControllerRef>,
 
     /// How the widgets should respond to user input.
     ///
@@ -215,7 +218,7 @@ impl Scrollable {
     }
 
     /// Dart `Scrollable(controller:)`.
-    pub fn controller(mut self, controller: AnyScrollController) -> Scrollable {
+    pub fn controller(mut self, controller: ScrollControllerRef) -> Scrollable {
         self.controller = Some(controller);
         self
     }
@@ -365,7 +368,7 @@ impl Scrollable {
             else {
                 return false;
             };
-            let (scrollable, position) = (widget.scrollable, widget.position);
+            let (scrollable, position) = (widget.scrollable, widget.position.handle());
             if axis
                 .is_none_or(|axis| axis_direction_to_axis(scrollable.axis_direction(app)) == axis)
             {
@@ -475,7 +478,7 @@ impl Debug for Scrollable {
 #[derive(Debug)]
 struct ScrollableScope {
     scrollable: Handle<ScrollableState>,
-    position: AnyScrollPosition,
+    position: ScrollPositionRef,
     child: WidgetRef,
 }
 
@@ -508,11 +511,11 @@ pub struct ScrollableState {
     state: StateData<Scrollable>,
     ticker_provider: TickerProviderStateMixinData,
     restoration: RestorationMixinData,
-    position: Option<AnyScrollPosition>,
+    position: Option<ScrollPositionRef>,
     physics: Option<ScrollPhysicsRef>,
-    persisted_scroll_offset: Option<Handle<RestorableScrollOffset>>,
+    persisted_scroll_offset: Option<Ref<RestorableScrollOffset>>,
     configuration: Option<ScrollBehaviorRef>,
-    fallback_scroll_controller: Option<Handle<ScrollController>>,
+    fallback_scroll_controller: Option<Ref<ScrollController>>,
     media_query_gesture_settings: Option<DeviceGestureSettings>,
     device_pixel_ratio: f64,
     gesture_detector_key: GlobalKey,
@@ -539,6 +542,7 @@ impl ScrollableState {
     pub fn position(self: Handle<Self>, app: &App) -> AnyScrollPosition {
         app.get(self)
             .position
+            .handle()
             .expect("the position is created in didChangeDependencies")
     }
 
@@ -562,18 +566,31 @@ impl ScrollableState {
         }
     }
 
-    fn effective_scroll_controller(self: Handle<Self>, app: &App) -> AnyScrollController {
-        self.widget(app).controller.unwrap_or_else(|| {
+    /// The controller this scrollable's position is attached to; Dart's
+    /// `_effectiveScrollController`.
+    fn effective_scroll_controller(self: Handle<Self>, app: &App) -> ScrollControllerRef {
+        self.widget(app).controller.clone().unwrap_or_else(|| {
             app.get(self)
                 .fallback_scroll_controller
+                .as_ref()
                 .expect("a scrollable without a controller creates a fallback")
-                .as_controller()
+                .erase()
         })
+    }
+
+    /// The [`position`](Self::position) as a reference, for a caller that keeps it: a field
+    /// Dart types as the `ScrollPosition` it reads from a `ScrollableState`.
+    pub fn kept_position(self: Handle<Self>, app: &App) -> ScrollPositionRef {
+        app.get(self)
+            .position
+            .clone()
+            .expect("the position is created in didChangeDependencies")
     }
 
     fn persisted_scroll_offset(self: Handle<Self>, app: &App) -> Handle<RestorableScrollOffset> {
         app.get(self)
             .persisted_scroll_offset
+            .handle()
             .expect("the property is created in initState")
     }
 
@@ -612,10 +629,10 @@ impl ScrollableState {
         });
         app.get_mut(self).physics = Some(physics.clone());
 
-        let old_position = app.get(self).position;
-        if let Some(old_position) = old_position {
+        let old_position = app.get_mut(self).position.take();
+        if let Some(old_position) = old_position.clone() {
             self.effective_scroll_controller(app)
-                .detach(app, old_position);
+                .detach(app, old_position.handle());
             // It's important that we not dispose the old position until after the viewport has
             // had a chance to unregister its listeners from the old position. So, schedule a
             // microtask to do it.
@@ -625,8 +642,8 @@ impl ScrollableState {
         let scroll_context = self.scroll_context(app);
         let position = self
             .effective_scroll_controller(app)
-            .create_scroll_position(app, physics, scroll_context, old_position);
-        app.get_mut(self).position = Some(position);
+            .create_scroll_position(app, physics, scroll_context, old_position.handle());
+        app.get_mut(self).position = Some(position.clone());
         self.effective_scroll_controller(app).attach(app, position);
     }
 
@@ -672,8 +689,12 @@ impl ScrollableState {
 
         self.widget(app)
             .controller
-            .map(AnyScrollController::type_id)
-            != old_widget.controller.map(AnyScrollController::type_id)
+            .handle()
+            .map(|controller| controller.type_id())
+            != old_widget
+                .controller
+                .handle()
+                .map(|controller| controller.type_id())
     }
 
     // TOUCH HANDLERS
@@ -886,7 +907,7 @@ impl ScrollableState {
 }
 
 impl TickerProviderObject for ScrollableState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         TickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -1126,16 +1147,17 @@ impl State for ScrollableState {
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &Scrollable) {
         self.did_update_restoration_id(app);
 
-        let controller = self.widget(app).controller;
-        if controller != old_widget.controller {
+        let controller = self.widget(app).controller.handle();
+        if controller != old_widget.controller.handle() {
             let position = self.position(app);
-            match old_widget.controller {
+            match old_widget.controller.handle() {
                 None => {
                     // The old controller was `None`, meaning the fallback cannot be `None`.
                     // Dispose of the fallback.
                     let fallback = app
                         .get(self)
                         .fallback_scroll_controller
+                        .handle()
                         .expect("a scrollable without a controller has a fallback");
                     debug_assert!(controller.is_some());
                     fallback.detach(app, position);
@@ -1153,6 +1175,7 @@ impl State for ScrollableState {
                 }
             }
             // Attach the updated effective scroll controller.
+            let position = self.kept_position(app);
             self.effective_scroll_controller(app).attach(app, position);
         }
 
@@ -1163,10 +1186,10 @@ impl State for ScrollableState {
 
     fn dispose(self: Handle<Self>, app: &mut App) {
         let position = self.position(app);
-        match self.widget(app).controller {
+        match self.widget(app).controller.handle() {
             Some(controller) => controller.detach(app, position),
             None => {
-                if let Some(fallback) = app.get(self).fallback_scroll_controller {
+                if let Some(fallback) = app.get(self).fallback_scroll_controller.handle() {
                     fallback.detach(app, position);
                     ScrollControllerLeaf::dispose(fallback, app);
                 }
@@ -1192,9 +1215,9 @@ impl State for ScrollableState {
         //
         // Since `notification_context` points to the gesture detector's context, the scope
         // must be placed above the widget using it: `RawGestureDetector`.
-        let position = self.position(app);
+        let position = self.kept_position(app);
         let viewport_builder = self.widget(app).viewport_builder.clone();
-        let viewport = viewport_builder(app, context, position.as_viewport_offset());
+        let viewport = viewport_builder(app, context, position.erase());
         let hit_test_behavior = self.widget(app).hit_test_behavior;
         let state = app.get(self);
         let result = ScrollableScope {
@@ -1242,7 +1265,7 @@ pub struct RestorableScrollOffset {
 
 impl RestorableScrollOffset {
     /// Creates a property whose default value is "no stored offset".
-    pub fn new(app: &mut App) -> Handle<RestorableScrollOffset> {
+    pub fn new(app: &mut App) -> Ref<RestorableScrollOffset> {
         app.create(RestorableScrollOffset {
             change_notifier: waft_foundation::ChangeNotifierData::new(),
             property: RestorablePropertyData::new(),
@@ -1406,7 +1429,7 @@ mod tests {
     /// content: what the `Viewport` widget builds, in miniature.
     #[derive(Debug)]
     struct TestViewport {
-        offset: AnyViewportOffset,
+        offset: ViewportOffsetRef,
     }
 
     impl crate::framework::RenderObjectWidget for TestViewport {
@@ -1429,7 +1452,7 @@ mod tests {
             waft_rendering::RenderViewport::new(
                 app,
                 AxisDirection::Right,
-                self.offset,
+                self.offset.clone(),
                 Some(vec![RenderSliver::as_sliver(sliver)]),
                 None,
             )
@@ -1442,7 +1465,7 @@ mod tests {
             _context: BuildContext,
             render_object: waft_rendering::RenderHandle<waft_rendering::RenderViewport>,
         ) {
-            waft_rendering::RenderViewportBase::set_offset(render_object, app, self.offset);
+            waft_rendering::RenderViewportBase::set_offset(render_object, app, self.offset.clone());
         }
     }
 
@@ -1479,7 +1502,7 @@ mod tests {
         let controller = ScrollController::new(&mut app, 17.0, true, None, None, None);
         let (_harness, state) = mount_scrollable(
             &mut app,
-            Scrollable::new(box_viewport()).controller(controller.as_controller()),
+            Scrollable::new(box_viewport()).controller(controller.erase()),
         );
 
         assert_eq!(state.position(&app).pixels(&app), 17.0);

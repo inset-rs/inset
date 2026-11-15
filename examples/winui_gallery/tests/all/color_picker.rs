@@ -165,7 +165,7 @@ fn label_starting(f: &Fixture, prefix: &str) -> String {
 }
 
 /// The text box showing `text`: its center and its focus.
-fn text_box(f: &Fixture, text: &str) -> (Offset, Handle<FocusNode>) {
+fn text_box(f: &Fixture, text: &str) -> (Offset, AnyFocusNode) {
     let elements = f.elements();
     let app = f.cell.borrow();
     for element in elements {
@@ -179,7 +179,7 @@ fn text_box(f: &Fixture, text: &str) -> (Offset, Handle<FocusNode>) {
                 Offset::new(size.width() / 2.0, size.height() / 2.0),
                 None,
             );
-            return (center, editable.focus_node);
+            return (center, editable.focus_node.handle());
         }
     }
     panic!("missing text box {text}")
@@ -437,7 +437,7 @@ fn owner_of(
                         Rc::new(move |app, context, _, _| builder(app, context)),
                     )
                     .settings(app, RouteSettingsRef::Settings(settings.clone()));
-                    PageRoute::as_page_route(route)
+                    route.into_erased()
                 })
                 .home(ThemeScope::new(
                     Theme::Light,

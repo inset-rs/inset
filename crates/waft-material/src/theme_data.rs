@@ -5160,7 +5160,7 @@ mod tests {
             .navigation_rail_theme(other_theme.navigation_rail_theme.clone())
             .outlined_button_theme(other_theme.outlined_button_theme.clone())
             .popup_menu_theme(other_theme.popup_menu_theme.clone())
-            .progress_indicator_theme(other_theme.progress_indicator_theme)
+            .progress_indicator_theme(other_theme.progress_indicator_theme.clone())
             .radio_theme(other_theme.radio_theme.clone())
             .slider_theme(other_theme.slider_theme.clone())
             .snack_bar_theme(other_theme.snack_bar_theme.clone())

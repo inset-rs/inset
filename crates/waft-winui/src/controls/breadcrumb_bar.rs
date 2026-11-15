@@ -7,7 +7,7 @@ use std::{
     rc::Rc,
 };
 use waft_embedder::{FontWeight, Size, TextDirection};
-use waft_foundation::{App, Handle, Listener, ValueKey};
+use waft_foundation::{App, Handle, Listener, OptionRetained, Ref, ValueKey};
 use waft_painting::EdgeInsetsGeometry;
 use waft_rendering::{CrossAxisAlignment, MainAxisSize};
 use waft_services::{KeyEvent, LogicalKeyboardKey};
@@ -127,10 +127,10 @@ pub struct BreadcrumbBarState {
     layout: BreadcrumbLayoutInfo,
 
     /// Source ellipsis Flyout.
-    flyout: Option<Handle<Flyout>>,
+    flyout: Option<Ref<Flyout>>,
 
     /// Source vertical overflow ScrollViewer.
-    scroll: Option<Handle<ScrollViewportController>>,
+    scroll: Option<Ref<ScrollViewportController>>,
 }
 
 impl StatefulWidget for BreadcrumbBar {
@@ -226,15 +226,19 @@ impl BreadcrumbBarState {
                 .into_widget()
             })
             .collect();
-        let flyout = app.get(self).flyout.unwrap();
-        flyout.content(
+        let flyout = app.get(self).flyout.clone().unwrap();
+        flyout.clone().content(
             app,
             Column::new()
                 .main_axis_size(MainAxisSize::Min)
                 .cross_axis_alignment(CrossAxisAlignment::Stretch)
                 .children(children),
         );
-        app.get(self).scroll.unwrap().change_view(app, 0.0, true);
+        app.get(self)
+            .scroll
+            .handle()
+            .unwrap()
+            .change_view(app, 0.0, true);
         flyout.show_at(app, target);
     }
 
@@ -247,7 +251,7 @@ impl BreadcrumbBarState {
         dropdown: bool,
     ) {
         if dropdown {
-            app.get(self).flyout.unwrap().hide(app);
+            app.get(self).flyout.handle().unwrap().hide(app);
         }
         let callback = self.widget(app).item_clicked.clone();
         callback(app, BreadcrumbBarItemClickedEventArgs { index, item });
@@ -261,35 +265,36 @@ impl State for BreadcrumbBarState {
     fn init_state(self: Handle<Self>, app: &mut App) {
         InputDevice::initialize(app);
         let scroll = ScrollViewportController::new(app);
-        app.get_mut(self).scroll = Some(scroll);
+        app.get_mut(self).scroll = Some(scroll.clone());
         let flyout = Flyout::new(app, SizedBox::new());
-        app.get_mut(self).flyout = Some(flyout);
-        app.get_mut(flyout).placement = FlyoutPlacementMode::Bottom;
-        app.get_mut(flyout).minimum_size = Some(Size::new(0.0, 40.0));
-        app.get_mut(flyout).flyout_presenter_style = Some(Rc::new(move |app, context, content| {
-            let r = ThemeResources::of(app, context);
-            IntrinsicWidth::new()
-                .child(
-                    ControlBorder::new(
-                        Brush::Acrylic(r.breadcrumb_bar_ellipsis_flyout_presenter_background),
-                        Brush::Solid(r.breadcrumb_bar_ellipsis_flyout_presenter_border_brush),
-                    )
-                    .border_thickness_ltrb(
-                        r.breadcrumb_bar_ellipsis_flyout_presenter_border_theme_thickness,
-                    )
-                    .corner_radius_corners(r.overlay_corner_radius)
+        app.get_mut(self).flyout = Some(flyout.clone());
+        app.get_mut(&flyout).placement = FlyoutPlacementMode::Bottom;
+        app.get_mut(&flyout).minimum_size = Some(Size::new(0.0, 40.0));
+        app.get_mut(&flyout).flyout_presenter_style =
+            Some(Rc::new(move |app, context, content| {
+                let r = ThemeResources::of(app, context);
+                IntrinsicWidth::new()
                     .child(
-                        Padding::new(EdgeInsetsGeometry::from_ltrb(0.0, 2.0, 0.0, 2.0))
-                            .child(ScrollBarViewport::new(scroll, content)),
-                    ),
-                )
-                .into_widget()
-        }));
+                        ControlBorder::new(
+                            Brush::Acrylic(r.breadcrumb_bar_ellipsis_flyout_presenter_background),
+                            Brush::Solid(r.breadcrumb_bar_ellipsis_flyout_presenter_border_brush),
+                        )
+                        .border_thickness_ltrb(
+                            r.breadcrumb_bar_ellipsis_flyout_presenter_border_theme_thickness,
+                        )
+                        .corner_radius_corners(r.overlay_corner_radius)
+                        .child(
+                            Padding::new(EdgeInsetsGeometry::from_ltrb(0.0, 2.0, 0.0, 2.0))
+                                .child(ScrollBarViewport::new(scroll.clone(), content)),
+                        ),
+                    )
+                    .into_widget()
+            }));
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        app.get(self).flyout.unwrap().dispose(app);
-        app.get(self).scroll.unwrap().dispose(app);
+        app.get(self).flyout.handle().unwrap().dispose(app);
+        app.get(self).scroll.handle().unwrap().dispose(app);
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -367,7 +372,7 @@ struct BreadcrumbItemState {
     state: StateData<BreadcrumbItemControl>,
 
     /// Outer control focus; the inline button is not a Tab stop.
-    focus: Option<AnyFocusNode>,
+    focus: Option<FocusNodeRef>,
 
     /// Whether the item has the focus.
     focused: bool,
@@ -396,7 +401,7 @@ impl StatefulWidget for BreadcrumbItemControl {
 impl BreadcrumbItemState {
     /// Native focus identity.
     fn node(self: Handle<Self>, app: &App) -> AnyFocusNode {
-        app.get(self).focus.unwrap()
+        app.get(self).focus.handle().unwrap()
     }
 
     /// Same-element focus requests also update the WinUI focus state.
@@ -593,8 +598,8 @@ impl State for BreadcrumbItemState {
     waft_widgets::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
-        let node = FocusNode::new(app).as_node();
-        app.get_mut(self).focus = Some(node);
+        let node: FocusNodeRef = FocusNode::new(app).into_erased();
+        app.get_mut(self).focus = Some(node.clone());
         node.set_on_key_event(
             app,
             Some(Rc::new(move |app, _, event| self.key(app, event))),
@@ -621,7 +626,6 @@ impl State for BreadcrumbItemState {
         }
         let node = self.node(app);
         node.dispose(app);
-        app.destroy(node.id());
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -630,7 +634,7 @@ impl State for BreadcrumbItemState {
             app.get_mut(self).target = Some(context);
             content.clone()
         })))
-        .focus_node(self.node(app))
+        .focus_node(app.get(self).focus.clone().unwrap())
         .enabled(self.widget(app).enabled)
         .on_focus_change(move |app, focused| self.set_state(app, |state| state.focused = focused))
         .into_widget()

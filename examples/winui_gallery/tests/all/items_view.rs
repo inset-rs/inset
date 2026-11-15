@@ -7,7 +7,7 @@ use std::{
     time::Duration,
 };
 use waft_embedder::{Color, Offset, PointerChange};
-use waft_foundation::Handle;
+use waft_foundation::Ref;
 use waft_painting::EdgeInsetsGeometry;
 use waft_services::{
     HardwareKeyboard, KeyDownEvent, KeyEvent, KeyUpEvent, LogicalKeyboardKey as Key,
@@ -22,7 +22,7 @@ const ROW: f64 = 40.0;
 /// What a test reads back from its list.
 #[derive(Default)]
 struct Probe {
-    selection: Cell<Option<Handle<ItemsViewSelection>>>,
+    selection: RefCell<Option<Ref<ItemsViewSelection>>>,
     invoked: RefCell<Vec<usize>>,
     selection_changes: Cell<usize>,
     /// Indices the template was asked to build.
@@ -32,12 +32,20 @@ struct Probe {
 impl Probe {
     fn selected(&self, f: &Fixture) -> Vec<usize> {
         let app = f.cell.borrow();
-        self.selection.get().unwrap().selected_indices(&app)
+        self.selection
+            .borrow()
+            .clone()
+            .unwrap()
+            .selected_indices(&app)
     }
 
     fn current(&self, f: &Fixture) -> Option<usize> {
         let app = f.cell.borrow();
-        self.selection.get().unwrap().current_item_index(&app)
+        self.selection
+            .borrow()
+            .clone()
+            .unwrap()
+            .current_item_index(&app)
     }
 }
 
@@ -74,7 +82,7 @@ fn fixture(setup: Setup) -> (Fixture, Rc<Probe>) {
     let f = Fixture::with_root([400, 400], move |app| {
         winui_gallery::install_fonts(app);
         let selection = ItemsViewSelection::new(app);
-        shared.selection.set(Some(selection));
+        *shared.selection.borrow_mut() = Some(selection.clone());
         let probe = shared.clone();
         let mut view = ItemsView::new(setup.count, {
             let probe = probe.clone();
@@ -322,7 +330,7 @@ fn an_item_the_user_cannot_select_stays_unselected() {
 #[test]
 fn the_application_selects_through_the_selection() {
     let (mut f, p) = fixture(Setup::new(5, ItemsViewSelectionMode::Multiple));
-    let selection = p.selection.get().unwrap();
+    let selection = p.selection.borrow().clone().unwrap();
     selection.select_all(&mut f.cell.borrow_mut());
     f.cell.checkpoint();
     settle(&mut f);

@@ -5,9 +5,9 @@ use std::fmt::{self, Debug};
 use std::rc::Rc;
 use std::time::Duration;
 
-use waft_animation::{AnimationBehavior, AnimationController, AnyAnimation};
+use waft_animation::{AnimationBehavior, AnimationController, AnimationRef, AnyAnimation};
 use waft_embedder::Color;
-use waft_foundation::{App, Handle, Listener, ValueChanged};
+use waft_foundation::{App, Handle, Listener, OptionRetained, Ref, ValueChanged};
 use waft_painting::{AlignmentGeometry, EdgeInsetsGeometry, ShapeBorderRef, TextStyle};
 use waft_scheduler::{Ticker, TickerCallback, TickerProviderObject};
 use waft_widgets::{
@@ -465,6 +465,7 @@ impl StatelessWidget for NavigationDrawerDestination {
         let defaults = Rc::new(NavigationDrawerDefaultsM3::new(context));
 
         let animation = NavigationDrawerDestinationInfo::of(app, context).selected_animation;
+        let icon_animation = animation.clone();
 
         let enabled = self.enabled;
         let icon = self.icon.clone();
@@ -517,7 +518,7 @@ impl StatelessWidget for NavigationDrawerDestination {
                     icon.clone(),
                 );
 
-                if animation.is_forward_or_completed(app) {
+                if icon_animation.is_forward_or_completed(app) {
                     selected_icon_widget
                 } else {
                     unselected_icon_widget
@@ -714,18 +715,21 @@ impl StatelessWidget for NavigationDestinationSemantics {
     fn build(&self, app: &mut App, context: BuildContext) -> WidgetRef {
         let localizations = <dyn MaterialLocalizations>::of(app, context);
         let destination_info = NavigationDrawerDestinationInfo::of(app, context);
-        let selected_animation = destination_info.selected_animation;
+        let selected_animation = destination_info.selected_animation.clone();
         // The AnimationStatusBuilder will make sure that the semantics update to
         // "selected" when the animation status changes.
-        StatusTransitionWidgetBuilder::new(selected_animation, move |app, _context, child| {
-            let mut semantics = Semantics::new()
-                .selected(selected_animation.is_forward_or_completed(app))
-                .container(true);
-            if let Some(child) = child {
-                semantics = semantics.child(child.clone());
-            }
-            semantics.into_widget()
-        })
+        StatusTransitionWidgetBuilder::new(
+            selected_animation.clone(),
+            move |app, _context, child| {
+                let mut semantics = Semantics::new()
+                    .selected(selected_animation.is_forward_or_completed(app))
+                    .container(true);
+                if let Some(child) = child {
+                    semantics = semantics.child(child.clone());
+                }
+                semantics.into_widget()
+            },
+        )
         .child(
             Stack::new().alignment(AlignmentGeometry::CENTER).children([
                 self.child.clone(),
@@ -748,7 +752,7 @@ impl StatelessWidget for NavigationDestinationSemantics {
 /// only need to rebuild when the `Animation::status` changes, since
 /// `AnimatedBuilder` rebuilds every time the animation ticks.
 struct StatusTransitionWidgetBuilder {
-    animation: AnyAnimation<f64>,
+    animation: AnimationRef<f64>,
 
     /// Called every time the animation changes `AnimationStatus`.
     builder: TransitionBuilder,
@@ -769,7 +773,7 @@ struct StatusTransitionWidgetBuilder {
 impl StatusTransitionWidgetBuilder {
     /// Creates a widget that rebuilds when the given animation changes status.
     fn new(
-        animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
         builder: impl Fn(&mut App, BuildContext, Option<&WidgetRef>) -> WidgetRef + 'static,
     ) -> StatusTransitionWidgetBuilder {
         StatusTransitionWidgetBuilder {
@@ -797,7 +801,7 @@ impl Debug for StatusTransitionWidgetBuilder {
 
 impl StatusTransitionWidget for StatusTransitionWidgetBuilder {
     fn animation(&self) -> AnyAnimation<f64> {
-        self.animation
+        self.animation.handle()
     }
 
     fn build(&self, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -840,7 +844,7 @@ struct NavigationDrawerDestinationInfo {
 
     /// Indicates whether or not this destination is selected, from 0 (unselected)
     /// to 1 (selected).
-    selected_animation: AnyAnimation<f64>,
+    selected_animation: AnimationRef<f64>,
 
     /// The color of the indicator.
     ///
@@ -917,7 +921,7 @@ impl InheritedWidget for NavigationDrawerDestinationInfo {
 
 /// Dart's `Widget Function(BuildContext, Animation<double>)` builder of
 /// [`SelectableAnimatedBuilder`].
-type AnimationWidgetBuilder = Rc<dyn Fn(&mut App, BuildContext, AnyAnimation<f64>) -> WidgetRef>;
+type AnimationWidgetBuilder = Rc<dyn Fn(&mut App, BuildContext, AnimationRef<f64>) -> WidgetRef>;
 
 // Builder widget for widgets that need to be animated from 0 (unselected) to
 // 1.0 (selected).
@@ -961,7 +965,7 @@ impl SelectableAnimatedBuilder {
     /// 1 and back depending on when [`is_selected`](Self::is_selected) is true.
     fn new(
         is_selected: bool,
-        builder: impl Fn(&mut App, BuildContext, AnyAnimation<f64>) -> WidgetRef + 'static,
+        builder: impl Fn(&mut App, BuildContext, AnimationRef<f64>) -> WidgetRef + 'static,
     ) -> SelectableAnimatedBuilder {
         SelectableAnimatedBuilder {
             is_selected,
@@ -1003,12 +1007,15 @@ impl StatefulWidget for SelectableAnimatedBuilder {
 struct SelectableAnimatedBuilderState {
     state: StateData<SelectableAnimatedBuilder>,
     single_ticker_provider: SingleTickerProviderStateMixinData,
-    controller: Option<Handle<AnimationController>>,
+    controller: Option<Ref<AnimationController>>,
 }
 
 impl SelectableAnimatedBuilderState {
     fn controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
-        app.get(self).controller.expect("created in init_state")
+        app.get(self)
+            .controller
+            .handle()
+            .expect("created in init_state")
     }
 }
 
@@ -1029,7 +1036,7 @@ impl SingleTickerProviderStateMixin for SelectableAnimatedBuilderState {
 }
 
 impl TickerProviderObject for SelectableAnimatedBuilderState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -1049,11 +1056,11 @@ impl State for SelectableAnimatedBuilderState {
             AnimationBehavior::Normal,
             self,
         );
-        app.get_mut(self).controller = Some(controller);
+        app.get_mut(self).controller = Some(controller.clone());
         let widget = self.widget(app);
         let duration = widget.duration;
         let value = if widget.is_selected { 1.0 } else { 0.0 };
-        app.get_mut(controller).duration = Some(duration);
+        app.get_mut(&controller).duration = Some(duration);
         controller.set_value(app, value);
     }
 
@@ -1086,14 +1093,17 @@ impl State for SelectableAnimatedBuilderState {
         let controller = self.controller(app);
         controller.dispose(app);
         SingleTickerProviderStateMixin::dispose(self, app);
-        app.get_mut(self).controller = None;
-        app.destroy(controller);
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
         let builder = Rc::clone(&self.widget(app).builder);
-        let controller = self.controller(app);
-        builder(app, context, controller.view())
+        let controller = app
+            .get(self)
+            .controller
+            .as_ref()
+            .expect("created in init_state")
+            .erase();
+        builder(app, context, controller)
     }
 }
 

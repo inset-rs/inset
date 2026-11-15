@@ -10,7 +10,7 @@ use waft_embedder::{
     SeekTolerance, VideoOutput,
 };
 use waft_foundation::{
-    App, ChangeNotifier, ChangeNotifierData, Handle, Listenable, ListenableObject, Listener,
+    App, ChangeNotifier, ChangeNotifierData, Handle, Listenable, ListenableObject, Listener, Ref,
 };
 use waft_painting::AlignmentGeometry;
 
@@ -43,7 +43,7 @@ pub struct Player {
 impl Player {
     /// A player of the media at `url`, which starts loading at once: a link, or a picked file's
     /// `PickedFile::url`. `None` where the platform has no players.
-    pub fn new(app: &mut App, url: &str) -> Option<Handle<Player>> {
+    pub fn new(app: &mut App, url: &str) -> Option<Ref<Player>> {
         let platform = app.platform();
         let host: Rc<dyn MediaPlayer> = Rc::from(platform.players()?.open(url));
         let changed = host.changed();
@@ -170,7 +170,11 @@ impl Player {
             let mut changed = changed;
             loop {
                 changed.await;
-                match cx.update(|app| self.take_host_state(app)) {
+                let next = cx.update(|app| {
+                    let player = self.upgrade(app)?;
+                    player.take_host_state(app)
+                });
+                match next {
                     Some(next) => changed = next,
                     None => return,
                 }
@@ -242,11 +246,11 @@ impl Player {
 #[derive(Clone)]
 pub struct PlayerView {
     pub key: Option<KeyRef>,
-    pub player: Handle<Player>,
+    pub player: Ref<Player>,
 }
 
 impl PlayerView {
-    pub fn new(player: Handle<Player>) -> PlayerView {
+    pub fn new(player: Ref<Player>) -> PlayerView {
         PlayerView { key: None, player }
     }
 
@@ -269,8 +273,8 @@ impl StatelessWidget for PlayerView {
 
     fn build(&self, _app: &mut App, _context: BuildContext) -> WidgetRef {
         PlayerPicture {
-            player: self.player,
-            overlay: subtitles_of(self.player),
+            player: self.player.clone(),
+            overlay: subtitles_of(self.player.clone()),
         }
         .into_widget()
     }
@@ -280,7 +284,7 @@ impl StatelessWidget for PlayerView {
 /// logical pixels, as large as the constraints let it be at that aspect, with `overlay` over the
 /// video's rectangle, as Media3's content frame holds its subtitle view over the surface.
 struct PlayerPicture {
-    player: Handle<Player>,
+    player: Ref<Player>,
     overlay: WidgetRef,
 }
 
@@ -340,7 +344,7 @@ impl State for PlayerPictureState {
     crate::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
-        let player = self.widget(app).player;
+        let player = self.widget(app).player.handle();
         player.add_listener(app, Listener::handle_method(self, Self::player_changed));
         let layer = app
             .platform()
@@ -351,25 +355,25 @@ impl State for PlayerPictureState {
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &PlayerPicture) {
-        let player = self.widget(app).player;
-        if player == old_widget.player {
+        let player = self.widget(app).player.handle();
+        if player == *old_widget.player {
             return;
         }
         let listener = Listener::handle_method(self, Self::player_changed);
         old_widget.player.remove_listener(app, &listener);
         player.add_listener(app, listener);
-        self.release(app, old_widget.player);
+        self.release(app, *old_widget.player);
         self.show(app, player);
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        let player = self.widget(app).player;
+        let player = self.widget(app).player.handle();
         self.release(app, player);
         player.remove_listener(app, &Listener::handle_method(self, Self::player_changed));
     }
 
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
-        let player = self.widget(app).player;
+        let player = self.widget(app).player.handle();
         let Some(size) = player.state(app).size else {
             return SizedBox::shrink().into_widget();
         };
@@ -392,10 +396,10 @@ fn with_overlay(video: WidgetRef, overlay: WidgetRef) -> WidgetRef {
 
 /// A [`SubtitleView`] of `player`'s cues, built again each time they change: Media3's
 /// `PlayerView` setting its subtitle view's cues at each `onCues`.
-fn subtitles_of(player: Handle<Player>) -> WidgetRef {
-    let listenable: Rc<dyn Listenable> = Rc::new(player);
+fn subtitles_of(player: Ref<Player>) -> WidgetRef {
+    let listenable: Rc<dyn Listenable> = Rc::new(player.clone());
     ListenableBuilder::new(listenable, move |app, _, _| {
-        SubtitleView::new(Player::cues(player, app).to_vec()).into_widget()
+        SubtitleView::new(Player::cues(*player, app).to_vec()).into_widget()
     })
     .into_widget()
 }
@@ -458,7 +462,7 @@ mod tests {
         let heard = Rc::new(std::cell::Cell::new(0));
         {
             let heard = Rc::clone(&heard);
-            let listenable: Rc<dyn waft_foundation::Listenable> = Rc::new(player);
+            let listenable: Rc<dyn waft_foundation::Listenable> = Rc::new(player.clone());
             listenable.add_listener(
                 &mut cell.borrow_mut(),
                 waft_foundation::Listener::new(move |_app| heard.set(heard.get() + 1)),
@@ -513,7 +517,7 @@ mod tests {
         let heard = Rc::new(std::cell::Cell::new(0));
         {
             let heard = Rc::clone(&heard);
-            let listenable: Rc<dyn waft_foundation::Listenable> = Rc::new(player);
+            let listenable: Rc<dyn waft_foundation::Listenable> = Rc::new(player.clone());
             listenable.add_listener(
                 &mut cell.borrow_mut(),
                 waft_foundation::Listener::new(move |_app| heard.set(heard.get() + 1)),
@@ -549,7 +553,7 @@ mod tests {
         let heard = Rc::new(std::cell::Cell::new(0));
         {
             let heard = Rc::clone(&heard);
-            let listenable: Rc<dyn waft_foundation::Listenable> = Rc::new(player);
+            let listenable: Rc<dyn waft_foundation::Listenable> = Rc::new(player.clone());
             listenable.add_listener(
                 &mut cell.borrow_mut(),
                 waft_foundation::Listener::new(move |_app| heard.set(heard.get() + 1)),
@@ -691,7 +695,7 @@ mod tests {
         let cell = app_with(&players, &MockCompositor::new(), &view);
         let player = Player::new(&mut cell.borrow_mut(), "https://example.com/a.mp4").unwrap();
         let host = &players.opened()[0];
-        mount(&cell, PlayerView::new(player).into_widget());
+        mount(&cell, PlayerView::new(player.clone()).into_widget());
         assert!(host.video_layer().is_some());
         mount(&cell, crate::SizedBox::new().into_widget());
         assert!(
@@ -700,7 +704,7 @@ mod tests {
         );
         assert_eq!(host.calls().last(), Some(&PlayerCall::SetVideoOutput(None)));
 
-        mount(&cell, PlayerView::new(player).into_widget());
+        mount(&cell, PlayerView::new(player.clone()).into_widget());
         let elsewhere = waft_embedder::test_support::idle_layer();
         player.set_video_output(
             &mut cell.borrow_mut(),
@@ -728,7 +732,7 @@ mod tests {
         let cell = AppCell::with_platform(Rc::new(platform));
         let player = Player::new(&mut cell.borrow_mut(), "https://example.com/a.mp4").unwrap();
         let host = &players.opened()[0];
-        mount(&cell, PlayerView::new(player).into_widget());
+        mount(&cell, PlayerView::new(player.clone()).into_widget());
 
         let reader = cell
             .borrow()

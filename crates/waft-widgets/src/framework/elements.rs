@@ -168,6 +168,7 @@ impl<W: StatelessWidget> StatelessElement<W> {
             component: ComponentElementData::default(),
             marker: std::marker::PhantomData,
         })
+        .into_tree_node(app)
         .as_element()
     }
 }
@@ -231,13 +232,15 @@ impl<W: StatefulWidget> StatefulElement<W> {
                 .expect("a StatefulElement holds its StatefulWidget");
             stateful.create_state()
         };
-        let state = app.create(state);
-        let this = app.create(StatefulElement::<W> {
-            element: ElementData::new(widget.clone()),
-            component: ComponentElementData::default(),
-            state: Some(state),
-            did_change_dependencies: false,
-        });
+        let state = app.create(state).into_tree_node(app);
+        let this = app
+            .create(StatefulElement::<W> {
+                element: ElementData::new(widget.clone()),
+                component: ComponentElementData::default(),
+                state: Some(state),
+                did_change_dependencies: false,
+            })
+            .into_tree_node(app);
         debug_assert!(state.state_data(app).element().is_none());
         state.state_data_mut(app).set_element(Some(this));
         state.state_data_mut(app).set_widget(widget);
@@ -370,7 +373,7 @@ impl<W: StatefulWidget> Element for StatefulElement<W> {
         }
         state.state_data_mut(app).set_element(None);
         app.get_mut(self).state = None;
-        app.destroy(state);
+        app.release_tree_node(state);
     }
 
     fn did_change_dependencies(self: Handle<Self>, app: &mut App) {
@@ -439,6 +442,7 @@ impl<W: InheritedWidget> InheritedElement<W> {
             dependents: HashMap::new(),
             marker: std::marker::PhantomData,
         })
+        .into_tree_node(app)
         .as_element()
     }
 
@@ -626,6 +630,7 @@ impl<W: ParentDataWidget> ParentDataElement<W> {
             component: ComponentElementData::default(),
             marker: std::marker::PhantomData,
         })
+        .into_tree_node(app)
         .as_element()
     }
 
@@ -1112,6 +1117,7 @@ impl<W: LeafRenderObjectWidget> LeafRenderObjectElement<W> {
             render_object_element: RenderObjectElementData::default(),
             marker: std::marker::PhantomData,
         })
+        .into_tree_node(app)
         .as_element()
     }
 }
@@ -1322,6 +1328,7 @@ where
             single_child: SingleChildRenderObjectElementData::default(),
             marker: std::marker::PhantomData,
         })
+        .into_tree_node(app)
         .as_element()
     }
 }
@@ -1693,6 +1700,7 @@ where
             multi_child: MultiChildRenderObjectElementData::default(),
             marker: std::marker::PhantomData,
         })
+        .into_tree_node(app)
         .as_element()
     }
 }

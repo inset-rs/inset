@@ -3,7 +3,7 @@
 use crate::{Brush, ControlBorder, ThemeResources};
 use std::{any::Any, rc::Rc};
 use waft_embedder::{Color, Offset, Rect, Size, TextDirection};
-use waft_foundation::{App, Handle, Listener, ValueKey};
+use waft_foundation::{App, Handle, Listener, Ref, ValueKey};
 use waft_painting::transform_rect;
 use waft_rendering::{
     BoxConstraints, ChildLayoutId, MultiChildLayoutChildren, MultiChildLayoutDelegate,
@@ -96,9 +96,9 @@ pub(crate) struct AnchoredFlyoutState {
     /// Native state identity.
     state: StateData<AnchoredFlyout>,
     /// Portal to the root overlay.
-    portal: Option<Handle<OverlayPortalController>>,
+    portal: Option<Ref<OverlayPortalController>>,
     /// Closed-loop popup focus scope.
-    focus: Option<Handle<FocusScopeNode>>,
+    focus: Option<Ref<FocusScopeNode>>,
     /// Focus target saved before opening.
     previous: Option<AnyFocusNode>,
     /// Invalidates delayed focus callbacks after rapid open/close changes.
@@ -122,7 +122,13 @@ impl AnchoredFlyoutState {
     /// Restores a surviving opener, without overriding a newer popup's focus.
     fn restore(self: Handle<Self>, app: &mut App) {
         let previous = app.get_mut(self).previous.take();
-        let owns_focus = app.get(self).focus.unwrap().as_node().has_focus(app);
+        let owns_focus = app
+            .get(self)
+            .focus
+            .clone()
+            .unwrap()
+            .as_node()
+            .has_focus(app);
         if owns_focus
             && let Some(previous) = previous.filter(|p| {
                 app.contains(p.id())
@@ -142,24 +148,23 @@ impl AnchoredFlyoutState {
         SchedulerBinding::add_post_frame_callback(
             app,
             FrameCallback::new(move |app, _| {
-                if !app.contains(self) || !self.mounted(app) || app.get(self).epoch != epoch {
+                if !self.mounted(app) || app.get(self).epoch != epoch {
                     return;
                 }
-                let portal = app.get(self).portal.unwrap();
+                let portal = app.get(self).portal.clone().unwrap();
                 if self.widget(app).open {
                     app.get_mut(self).previous = primary_focus(app);
                     portal.show(app);
                     SchedulerBinding::add_post_frame_callback(
                         app,
                         FrameCallback::new(move |app, _| {
-                            if !app.contains(self)
-                                || !self.mounted(app)
+                            if !self.mounted(app)
                                 || app.get(self).epoch != epoch
                                 || !self.widget(app).open
                             {
                                 return;
                             }
-                            let scope = app.get(self).focus.unwrap().as_node();
+                            let scope = app.get(self).focus.clone().unwrap().as_node();
                             let first = scope
                                 .traversal_descendants(app)
                                 .into_iter()
@@ -199,16 +204,14 @@ impl State for AnchoredFlyoutState {
 
     fn dispose(self: Handle<Self>, app: &mut App) {
         self.restore(app);
-        let focus = app.get(self).focus.unwrap();
+        let focus = app.get(self).focus.clone().unwrap();
         focus.as_node().dispose(app);
-        app.destroy(focus);
-        app.destroy(app.get(self).portal.unwrap());
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
         let rtl = Directionality::maybe_of(app, context) == Some(TextDirection::Rtl);
         OverlayPortal::overlay_child_layout_builder(
-            app.get(self).portal.unwrap(),
+            app.get(self).portal.clone().unwrap(),
             move |app, context, info| {
                 let widget = self.widget(app).clone();
                 let r = ThemeResources::of(app, context);
@@ -222,7 +225,7 @@ impl State for AnchoredFlyoutState {
                 .padding(widget.padding.unwrap_or(r.flyout_content_padding))
                 .child(widget.content);
                 let popup = FocusScope::new(SingleChildScrollView::new().child(presenter))
-                    .node(app.get(self).focus.unwrap())
+                    .node(app.get(self).focus.clone().unwrap())
                     .on_key_event(Rc::new(move |app, _, event| {
                         if matches!(event, KeyEvent::Down(_))
                             && matches!(

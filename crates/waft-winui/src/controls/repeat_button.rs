@@ -10,7 +10,7 @@ use crate::{
 };
 use std::{fmt, rc::Rc, time::Duration};
 use waft_embedder::{Color, FontWeight, Offset, PointerDeviceKind};
-use waft_foundation::{App, Handle, Listener, Timer};
+use waft_foundation::{App, Handle, Listener, OptionRetained, Timer};
 use waft_gestures::{K_PRIMARY_BUTTON, PointerDownEvent, PointerMoveEvent};
 use waft_rendering::HitTestBehavior;
 use waft_services::{KeyEvent, LogicalKeyboardKey};
@@ -206,7 +206,7 @@ pub struct RepeatButtonState {
     key_down: bool,
     gamepad_a_key_down: bool,
     focused: bool,
-    focus_node: Option<AnyFocusNode>,
+    focus_node: Option<FocusNodeRef>,
 }
 
 impl RepeatButtonState {
@@ -392,19 +392,20 @@ impl State for RepeatButtonState {
 
     fn init_state(self: Handle<Self>, app: &mut App) {
         crate::InputDevice::initialize(app);
-        let node = FocusNode::new(app).as_node();
+        let node: FocusNodeRef = FocusNode::new(app).into_erased();
         node.set_skip_traversal(app, !self.widget(app).is_tab_stop);
         node.set_on_key_event(
             app,
             Some(Rc::new(move |app, _, event| self.on_key_event(app, event))),
         );
-        app.get_mut(self).focus_node = Some(node);
+        app.get_mut(self).focus_node = Some(node.clone());
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &RepeatButton) {
         if self.widget(app).is_tab_stop != old_widget.is_tab_stop {
             app.get(self)
                 .focus_node
+                .handle()
                 .expect("initialized focus node")
                 .set_skip_traversal(app, !self.widget(app).is_tab_stop);
         }
@@ -418,7 +419,6 @@ impl State for RepeatButtonState {
         self.stop_timer(app);
         if let Some(node) = app.get_mut(self).focus_node.take() {
             node.dispose(app);
-            app.destroy(node.id());
         }
     }
 
@@ -459,7 +459,12 @@ impl State for RepeatButtonState {
             .child(presenter);
         FocusableActionDetector::new(pointer)
             .enabled(widget.is_enabled)
-            .focus_node(app.get(self).focus_node.expect("initialized focus node"))
+            .focus_node(
+                app.get(self)
+                    .focus_node
+                    .clone()
+                    .expect("initialized focus node"),
+            )
             .on_show_hover_highlight(move |app, value| {
                 self.set_state(app, |state| state.pointer_over = value);
                 if value {

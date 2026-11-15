@@ -362,9 +362,7 @@ impl FlexibleSpaceBarState {
 /// Dart's `Tween<double>(begin: begin, end: end).transform(t)`.
 fn transform_tween(app: &mut App, begin: f64, end: f64, t: f64) -> f64 {
     let tween = Tween::new(app, Some(begin), Some(end));
-    let value = waft_animation::Animatable::transform(&tween, app, t);
-    app.destroy(tween);
-    value
+    waft_animation::Animatable::transform(&tween, app, t)
 }
 
 impl State for FlexibleSpaceBarState {

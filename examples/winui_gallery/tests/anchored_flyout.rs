@@ -7,9 +7,12 @@
 mod attachment;
 mod theme {}
 use attachment::{AnchoredFlyout, AnchoredFlyoutPlacement};
-use std::{cell::Cell, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
 use waft_embedder::{Offset, PointerChange, TextDirection};
-use waft_foundation::{App, Handle, Listener};
+use waft_foundation::{App, Handle, Listener, OptionRetained};
 use waft_rendering::{CrossAxisAlignment, MainAxisSize};
 use waft_services::{
     HardwareKeyboard, KeyDownEvent, KeyEvent, KeyUpEvent, LogicalKeyboardKey, PhysicalKeyboardKey,
@@ -21,9 +24,9 @@ use waft_winui_test_support::Fixture;
 #[derive(Clone, Debug, Default)]
 struct Probe {
     state: Rc<Cell<Option<Handle<PageState>>>>,
-    opener: Rc<Cell<Option<AnyFocusNode>>>,
-    first: Rc<Cell<Option<AnyFocusNode>>>,
-    last: Rc<Cell<Option<AnyFocusNode>>>,
+    opener: Rc<RefCell<Option<FocusNodeRef>>>,
+    first: Rc<RefCell<Option<FocusNodeRef>>>,
+    last: Rc<RefCell<Option<FocusNodeRef>>>,
 }
 #[derive(Debug)]
 struct Page(Probe);
@@ -70,13 +73,14 @@ impl State for PageState {
             "Open",
             Listener::new(move |app| self.set_state(app, |s| s.open = true)),
         )
-        .focus_node(p.opener.get().unwrap());
+        .focus_node(p.opener.borrow().clone().unwrap());
         let first = Button::text(
             "First",
             Listener::new(move |app| self.set_state(app, |s| s.clicks += 1)),
         )
-        .focus_node(p.first.get().unwrap());
-        let last = Button::text("Last", Listener::new(|_| {})).focus_node(p.last.get().unwrap());
+        .focus_node(p.first.borrow().clone().unwrap());
+        let last = Button::text("Last", Listener::new(|_| {}))
+            .focus_node(p.last.borrow().clone().unwrap());
         let mut items = vec![first.into_widget()];
         if app.get(self).long {
             for n in 0..30 {
@@ -92,8 +96,9 @@ impl State for PageState {
                         "Child",
                         Listener::new(move |app| self.set_state(app, |s| s.child_open = true)),
                     )
-                    .focus_node(p.first.get().unwrap()),
-                    Button::text("Leaf", Listener::new(|_| {})).focus_node(p.last.get().unwrap()),
+                    .focus_node(p.first.borrow().clone().unwrap()),
+                    Button::text("Leaf", Listener::new(|_| {}))
+                        .focus_node(p.last.borrow().clone().unwrap()),
                     Listener::new(move |app| self.set_state(app, |s| s.child_open = false)),
                 )
                 .placement(AnchoredFlyoutPlacement::RightEdgeAlignedTop)
@@ -170,9 +175,9 @@ fn fixture() -> (Fixture, Probe) {
     let q = p.clone();
     let f = Fixture::with_root([520, 360], move |app| {
         winui_gallery::install_fonts(app);
-        q.opener.set(Some(FocusNode::new(app).as_node()));
-        q.first.set(Some(FocusNode::new(app).as_node()));
-        q.last.set(Some(FocusNode::new(app).as_node()));
+        *q.opener.borrow_mut() = Some(FocusNode::new(app).into_erased());
+        *q.first.borrow_mut() = Some(FocusNode::new(app).into_erased());
+        *q.last.borrow_mut() = Some(FocusNode::new(app).into_erased());
         let entry = OverlayEntry::new(
             app,
             Rc::new(move |_, _| Page(q.clone()).into_widget()),
@@ -184,7 +189,11 @@ fn fixture() -> (Fixture, Probe) {
             app,
             WidgetsApp::new(AccentPalette::default().base)
                 .debug_show_checked_mode_banner(false)
-                .builder(move |_, _, _| Overlay::new().initial_entries([entry]).into_widget())
+                .builder(move |_, _, _| {
+                    Overlay::new()
+                        .initial_entries([entry.clone()])
+                        .into_widget()
+                })
                 .into_widget(),
         );
     });
@@ -218,16 +227,29 @@ fn focus_cycles_inside_interactive_popup_and_escape_restores_opener() {
     let (mut f, p) = fixture();
     {
         let mut app = f.cell.borrow_mut();
-        p.opener.get().unwrap().request_focus(&mut app, None);
+        p.opener
+            .borrow()
+            .clone()
+            .unwrap()
+            .request_focus(&mut app, None);
     }
     settle(&mut f);
     f.tap("Open");
     settle(&mut f);
-    assert_eq!(primary_focus(&mut f.cell.borrow_mut()), p.first.get());
+    assert_eq!(
+        primary_focus(&mut f.cell.borrow_mut()),
+        p.first.borrow().handle()
+    );
     key(&mut f, LogicalKeyboardKey::TAB, PhysicalKeyboardKey::TAB);
-    assert_eq!(primary_focus(&mut f.cell.borrow_mut()), p.last.get());
+    assert_eq!(
+        primary_focus(&mut f.cell.borrow_mut()),
+        p.last.borrow().handle()
+    );
     key(&mut f, LogicalKeyboardKey::TAB, PhysicalKeyboardKey::TAB);
-    assert_eq!(primary_focus(&mut f.cell.borrow_mut()), p.first.get());
+    assert_eq!(
+        primary_focus(&mut f.cell.borrow_mut()),
+        p.first.borrow().handle()
+    );
     f.tap("First");
     settle(&mut f);
     assert_eq!(f.cell.borrow().get(p.state.get().unwrap()).clicks, 1);
@@ -238,7 +260,10 @@ fn focus_cycles_inside_interactive_popup_and_escape_restores_opener() {
         LogicalKeyboardKey::ESCAPE,
         PhysicalKeyboardKey::ESCAPE,
     );
-    assert_eq!(primary_focus(&mut f.cell.borrow_mut()), p.opener.get());
+    assert_eq!(
+        primary_focus(&mut f.cell.borrow_mut()),
+        p.opener.borrow().handle()
+    );
     assert_eq!(f.cell.borrow().get(p.state.get().unwrap()).dismissed, 1);
 }
 #[test]
@@ -289,7 +314,11 @@ fn nested_escape_closes_only_top_flyout_and_restores_each_opener() {
     let (mut f, p) = fixture();
     {
         let mut app = f.cell.borrow_mut();
-        p.opener.get().unwrap().request_focus(&mut app, None);
+        p.opener
+            .borrow()
+            .clone()
+            .unwrap()
+            .request_focus(&mut app, None);
     }
     update(&mut f, &p, |s| {
         s.nested = true;
@@ -297,7 +326,10 @@ fn nested_escape_closes_only_top_flyout_and_restores_each_opener() {
     });
     f.tap("Child");
     settle(&mut f);
-    assert_eq!(primary_focus(&mut f.cell.borrow_mut()), p.last.get());
+    assert_eq!(
+        primary_focus(&mut f.cell.borrow_mut()),
+        p.last.borrow().handle()
+    );
     key(
         &mut f,
         LogicalKeyboardKey::ESCAPE,
@@ -305,14 +337,20 @@ fn nested_escape_closes_only_top_flyout_and_restores_each_opener() {
     );
     assert!(!f.cell.borrow().get(p.state.get().unwrap()).child_open);
     assert!(f.cell.borrow().get(p.state.get().unwrap()).open);
-    assert_eq!(primary_focus(&mut f.cell.borrow_mut()), p.first.get());
+    assert_eq!(
+        primary_focus(&mut f.cell.borrow_mut()),
+        p.first.borrow().handle()
+    );
     key(
         &mut f,
         LogicalKeyboardKey::ESCAPE,
         PhysicalKeyboardKey::ESCAPE,
     );
     assert!(!f.cell.borrow().get(p.state.get().unwrap()).open);
-    assert_eq!(primary_focus(&mut f.cell.borrow_mut()), p.opener.get());
+    assert_eq!(
+        primary_focus(&mut f.cell.borrow_mut()),
+        p.opener.borrow().handle()
+    );
 }
 
 #[test]

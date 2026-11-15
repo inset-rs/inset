@@ -260,6 +260,7 @@ impl<W: InheritedModel> InheritedModelElement<W> {
             dependents: HashMap::new(),
             marker: PhantomData,
         })
+        .into_tree_node(app)
         .as_element()
     }
 

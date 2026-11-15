@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use waft_embedder::{Locale, TextDirection};
 use waft_foundation::{
-    App, ChangeNotifier, ChangeNotifierData, Completer, CompleterFuture, Handle, wait_all,
+    App, ChangeNotifier, ChangeNotifierData, Completer, CompleterFuture, Handle, Ref, wait_all,
 };
 use waft_rendering::RendererBinding;
 
@@ -917,6 +917,8 @@ pub struct LocalizationsResolver {
     supported_locales: Vec<Locale>,
     locale: Option<Locale>,
     resolved_locale: Option<Locale>,
+    /// What the binding observes, kept to remove it. It keeps this object, as Dart's binding
+    /// keeps its observer, until `dispose` removes it.
     observer: Option<WidgetsBindingObserverRef>,
 }
 
@@ -930,7 +932,7 @@ impl LocalizationsResolver {
         locale_resolution_callback: Option<LocaleResolutionCallback>,
         localizations_delegates: Option<Vec<LocalizationsDelegateRef>>,
         supported_locales: Vec<Locale>,
-    ) -> Handle<LocalizationsResolver> {
+    ) -> Ref<LocalizationsResolver> {
         let this = app.create(LocalizationsResolver {
             change_notifier: ChangeNotifierData::default(),
             localizations_delegates,
@@ -943,20 +945,19 @@ impl LocalizationsResolver {
         });
         let platform_locales = app.platform().locales();
         let resolved_locale = this.resolve_locales(app, Some(&platform_locales));
-        app.get_mut(this).resolved_locale = Some(resolved_locale);
-        let observer: WidgetsBindingObserverRef = Rc::new(this);
+        app.get_mut(&this).resolved_locale = Some(resolved_locale);
+        let observer: WidgetsBindingObserverRef = Rc::new(this.clone());
         WidgetsBinding::instance(app).add_observer(app, Rc::clone(&observer));
-        app.get_mut(this).observer = Some(observer);
+        app.get_mut(&this).observer = Some(observer);
         this
     }
 
-    /// Unregisters from the binding, disposes the notifier, and frees the slot.
+    /// Unregisters from the binding and disposes the notifier.
     pub fn dispose(self: Handle<Self>, app: &mut App) {
         if let Some(observer) = app.get_mut(self).observer.take() {
             WidgetsBinding::instance(app).remove_observer(app, &observer);
         }
         app.get_mut(self).change_notifier.dispose();
-        app.destroy(self);
     }
 
     /// Updates the resolver with the given configuration, re-resolving the locale when
@@ -1453,7 +1454,7 @@ mod tests {
             "no platform locales: the first supported"
         );
         let notified = Rc::new(Cell::new(0));
-        app.get_mut(resolver)
+        app.get_mut(&resolver)
             .change_notifier
             .add_listener(waft_foundation::Listener::new({
                 let notified = Rc::clone(&notified);
@@ -1486,7 +1487,14 @@ mod tests {
         assert_eq!(resolver.localizations_delegates(&app).len(), 1);
 
         resolver.dispose(&mut app);
-        assert!(!app.contains(resolver));
+        let freed = *resolver;
+        drop(resolver);
+        drop(app);
+        cell.checkpoint();
+        assert!(
+            !cell.borrow().contains(freed),
+            "the binding let go of it at dispose"
+        );
     }
 
     #[test]

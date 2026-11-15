@@ -4,12 +4,12 @@ use std::fmt::{self, Debug};
 use std::rc::Rc;
 
 use waft_embedder::Color;
-use waft_foundation::{App, Handle, ValueChanged};
+use waft_foundation::{App, Ref, ValueChanged};
 use waft_gestures::GestureTapCallback;
 use waft_painting::{AnyBorderSide, EdgeInsetsGeometry, OutlinedBorderRef, ShapeBorderRef};
 use waft_services::MouseCursorRef;
 use waft_widgets::{
-    AnyFocusNode, BuildContext, ExcludeFocus, IntoWidget, KeyRef, MergeSemantics, StatelessWidget,
+    BuildContext, ExcludeFocus, FocusNodeRef, IntoWidget, KeyRef, MergeSemantics, StatelessWidget,
     Transform, WidgetRef, WidgetState, WidgetStatePropertyRef, WidgetStates,
     WidgetStatesController,
 };
@@ -157,9 +157,9 @@ pub struct CheckboxListTile {
     /// Defines how compact the list tile's layout will be.
     pub visual_density: Option<VisualDensity>,
     /// An optional focus node to use as the focus node for this widget.
-    pub focus_node: Option<AnyFocusNode>,
+    pub focus_node: Option<FocusNodeRef>,
     /// Controls the interactive states of the backing [`ListTile`].
-    pub states_controller: Option<Handle<WidgetStatesController>>,
+    pub states_controller: Option<Ref<WidgetStatesController>>,
     /// True if this widget will be selected as the initial focus when no other
     /// node in its scope is currently focused.
     pub autofocus: bool,
@@ -420,8 +420,8 @@ impl CheckboxListTile {
         splash_radius: f64 => "splashRadius",
         material_tap_target_size: MaterialTapTargetSize => "materialTapTargetSize",
         visual_density: VisualDensity => "visualDensity",
-        focus_node: AnyFocusNode => "focusNode",
-        states_controller: Handle<WidgetStatesController> => "statesController",
+        focus_node: FocusNodeRef => "focusNode",
+        states_controller: Ref<WidgetStatesController> => "statesController",
         shape: ShapeBorderRef => "shape",
         side: AnyBorderSide => "side",
         tile_color: Color => "tileColor",
@@ -615,8 +615,8 @@ impl StatelessWidget for CheckboxListTile {
         list_tile.selected_tile_color = self.selected_tile_color;
         list_tile.tile_color = self.tile_color;
         list_tile.visual_density = self.visual_density;
-        list_tile.focus_node = self.focus_node;
-        list_tile.states_controller = self.states_controller;
+        list_tile.focus_node = self.focus_node.clone();
+        list_tile.states_controller = self.states_controller.clone();
         list_tile.on_focus_change = self.on_focus_change.clone();
         list_tile.enable_feedback = self.enable_feedback;
         list_tile.horizontal_title_gap = self.horizontal_title_gap;
@@ -635,6 +635,7 @@ pub(crate) mod tests {
     use std::cell::{Cell, RefCell};
     use std::time::Duration;
     use waft_painting::ShapeBorder;
+    use waft_widgets::AnyFocusNode;
 
     use waft_embedder::TextDirection;
     use waft_embedder::{
@@ -647,8 +648,8 @@ pub(crate) mod tests {
     use waft_services::SystemMouseCursors;
     use waft_widgets::{
         AnyElement, Center, Column, Container, Directionality, FocusHighlightStrategy, FocusNode,
-        FocusNodeLeaf, GlobalKey, ListView, MouseRegion, SizedBox, StatefulBuilder, Text,
-        UnfocusDisposition, WidgetStateMouseCursor, WidgetStateProperty,
+        GlobalKey, ListView, MouseRegion, SizedBox, StatefulBuilder, Text, UnfocusDisposition,
+        WidgetStateMouseCursor, WidgetStateProperty,
     };
 
     use super::*;
@@ -718,8 +719,8 @@ pub(crate) mod tests {
         node.has_primary_focus(&tester.cell.borrow())
     }
 
-    pub(crate) fn new_focus_node(tester: &WidgetTester) -> AnyFocusNode {
-        FocusNode::new(&mut tester.cell.borrow_mut()).as_node()
+    pub(crate) fn new_focus_node(tester: &WidgetTester) -> FocusNodeRef {
+        FocusNode::new(&mut tester.cell.borrow_mut()).into_erased::<waft_widgets::AnyFocusNode>()
     }
 
     /// A focus-change callback that records the last value it was handed.
@@ -1051,11 +1052,11 @@ pub(crate) mod tests {
             pump_in_material(&mut tester, m3, |_app| {
                 CheckboxListTile::new(Some(true), ignore())
                     .title(Text::new("Checkbox"))
-                    .states_controller(controller)
+                    .states_controller(controller.clone())
                     .into_widget()
             });
             let forwarded = tester.widget(nth::<ListTile>(&tester, 0), |tile: &ListTile| {
-                tile.states_controller
+                tile.states_controller.clone()
             });
             assert_eq!(forwarded, Some(controller));
         });
@@ -1426,12 +1427,12 @@ pub(crate) mod tests {
 
     /// Dart's "onFocusChange callback" case for a tile `make(focus_node, on_focus_change)`.
     pub(crate) fn check_on_focus_change(
-        make: impl FnOnce(AnyFocusNode, ValueChanged<bool>) -> WidgetRef,
+        make: impl FnOnce(FocusNodeRef, ValueChanged<bool>) -> WidgetRef,
     ) {
         let mut tester = tester();
         let node = new_focus_node(&tester);
         let got_focus = Rc::new(Cell::new(false));
-        let tile = make(node, record_focus(&got_focus));
+        let tile = make(node.clone(), record_focus(&got_focus));
         pump_in_material(&mut tester, m3, |_app| tile);
 
         node.request_focus(&mut tester.cell.borrow_mut(), None);

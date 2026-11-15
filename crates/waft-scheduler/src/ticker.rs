@@ -9,7 +9,7 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use waft_embedder::ViewId;
-use waft_foundation::{App, Completer, CompleterFuture, Handle, Listener};
+use waft_foundation::{App, Completer, CompleterFuture, Handle, Listener, Ref};
 
 use crate::binding::{FrameCallback, FrameTarget, SchedulerBinding, SchedulerPhase};
 
@@ -29,28 +29,31 @@ pub type TickerCallback = FrameCallback;
 /// An object in the App implements [`TickerProviderObject`]; its [`Handle`] is then a
 /// provider — Dart's `TickerProviderStateMixin` is `vsync: this` — and a field that Dart types
 /// as `TickerProvider` holds an `Rc<dyn TickerProvider>`.
+///
+/// The ticker is the caller's to keep (an `AnimationController` holds it); a provider that keeps
+/// a set of the tickers it vends holds a second [`Ref`] to each.
 pub trait TickerProvider {
     /// Creates a ticker with the given callback.
     ///
     /// The kind of ticker provided depends on the kind of ticker provider.
-    fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker>;
+    fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker>;
 }
 
 /// [`TickerProvider`] for an object in the App: Dart's `implements TickerProvider` on a
 /// `State`, whose `vsync: this` is the object's [`Handle`].
 pub trait TickerProviderObject: Sized + 'static {
     /// See [`TickerProvider::create_ticker`].
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker>;
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker>;
 }
 
 impl<T: TickerProviderObject> TickerProvider for Handle<T> {
-    fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         TickerProviderObject::create_ticker(*self, app, on_tick)
     }
 }
 
 impl<T: TickerProvider + ?Sized> TickerProvider for Rc<T> {
-    fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         T::create_ticker(self, app, on_tick)
     }
 }
@@ -101,7 +104,8 @@ pub type TickerRemover = Rc<dyn Fn(&mut App, Handle<Ticker>)>;
 impl Ticker {
     /// Creates a ticker that will call the provided callback once per frame of `view`, or of
     /// every frame for `None`, while running.
-    pub fn new(app: &mut App, on_tick: TickerCallback, view: Option<ViewId>) -> Handle<Ticker> {
+    #[track_caller]
+    pub fn new(app: &mut App, on_tick: TickerCallback, view: Option<ViewId>) -> Ref<Ticker> {
         app.create(Ticker {
             future: None,
             force_frames: false,
@@ -333,7 +337,7 @@ impl Ticker {
 
         self.unschedule_tick(app);
         if canceled {
-            local_future.mark_canceled(app, Some(self));
+            local_future.mark_canceled(app, self.upgrade(app));
         } else {
             local_future.mark_complete(app);
         }
@@ -388,13 +392,14 @@ impl Ticker {
     ///   [`TickerFuture::when_complete_or_cancel`] resolve as
     ///   canceled.
     pub fn dispose(self: Handle<Self>, app: &mut App) {
+        app.mark_disposed(self);
         if let Some(remove_from_creator) = app.get_mut(self).remove_from_creator.take() {
             remove_from_creator(app, self);
         }
         if let Some(local_future) = app.get_mut(self).future.take() {
             debug_assert!(!self.is_active(app));
             self.unschedule_tick(app);
-            local_future.mark_canceled(app, Some(self));
+            local_future.mark_canceled(app, self.upgrade(app));
         }
         #[cfg(debug_assertions)]
         {
@@ -472,7 +477,7 @@ impl TickerFuture {
 
     /// Dart's private `_cancel`, called by [`Ticker::stop`] with `canceled` and by
     /// [`Ticker::dispose`].
-    fn mark_canceled(&self, app: &mut App, ticker: Option<Handle<Ticker>>) {
+    fn mark_canceled(&self, app: &mut App, ticker: Option<Ref<Ticker>>) {
         debug_assert!(self.shared.completed.get().is_none());
         self.shared.completed.set(Some(false));
         if let Some(secondary) = self.shared.secondary.get() {
@@ -544,12 +549,12 @@ pub struct TickerCanceled {
     ///
     /// This may be `None` in the case that the future created for
     /// [`TickerFuture::or_cancel`] was created after the ticker was canceled.
-    pub ticker: Option<Handle<Ticker>>,
+    pub ticker: Option<Ref<Ticker>>,
 }
 
 impl fmt::Display for TickerCanceled {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.ticker {
+        match &self.ticker {
             Some(ticker) => write!(f, "This ticker was canceled: {ticker:?}"),
             None => write!(
                 f,
@@ -755,7 +760,7 @@ mod tests {
             FrameCallback::new(|_app, _t| {}),
             Some(IMPLICIT_VIEW_ID),
         );
-        absorber.absorb_ticker(&mut app, original);
+        absorber.absorb_ticker(&mut app, *original);
 
         assert!(absorber.is_active(&app));
 
@@ -794,7 +799,7 @@ mod tests {
     struct TestVSync;
 
     impl TickerProvider for TestVSync {
-        fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+        fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
             Ticker::new(app, on_tick, Some(IMPLICIT_VIEW_ID))
         }
     }
@@ -812,13 +817,13 @@ mod tests {
     }
 
     struct Host {
-        ticker: Option<Handle<Ticker>>,
+        ticker: Option<Ref<Ticker>>,
     }
 
     impl TickerProvider for Handle<Host> {
-        fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+        fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
             let ticker = Ticker::new(app, on_tick, Some(IMPLICIT_VIEW_ID));
-            app.get_mut(*self).ticker = Some(ticker);
+            app.get_mut(*self).ticker = Some(ticker.clone());
             ticker
         }
     }
@@ -830,7 +835,7 @@ mod tests {
         let host = app.create(Host { ticker: None });
         let log = Rc::new(RefCell::new(Vec::new()));
         let ticker = host.create_ticker(&mut app, elapsed_recorder(&log));
-        assert!(app.get(host).ticker.is_some());
+        assert!(app.get(&host).ticker.is_some());
         ticker.start(&mut app);
         pump(&mut app, Duration::from_millis(10));
         assert_eq!(*log.borrow(), vec![Duration::ZERO]);
@@ -868,6 +873,24 @@ mod tests {
             "its new view's frame"
         );
         ticker.stop(&mut app, false);
+    }
+
+    /// Dropped while ticking and never disposed (D3: the last drop runs no `dispose`): the ticker
+    /// is freed and its scheduled frame callback is skipped.
+    #[test]
+    fn a_ticker_dropped_while_ticking_is_freed_and_its_frame_callback_skipped() {
+        let cell = app_with_implicit_view();
+        let log = Rc::new(RefCell::new(Vec::new()));
+        let ticker = {
+            let mut app = cell.borrow_mut();
+            let ticker = Ticker::new(&mut app, elapsed_recorder(&log), Some(IMPLICIT_VIEW_ID));
+            ticker.start(&mut app);
+            *ticker
+        };
+        cell.checkpoint();
+        assert!(!cell.borrow().contains(ticker));
+        pump(&mut cell.borrow_mut(), Duration::from_millis(10));
+        assert!(log.borrow().is_empty());
     }
 
     #[test]

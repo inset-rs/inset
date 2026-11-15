@@ -645,7 +645,8 @@ mod tests {
     fn a_lazy_host_starts_listening_on_the_first_listener_and_stops_on_the_last() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let host = app.create(LazyHost::default());
+        let host_ref = app.create(LazyHost::default());
+        let host = *host_ref;
         let log = Rc::clone(&app.get(host).log);
 
         let first = recording(&log, "first");
@@ -670,7 +671,8 @@ mod tests {
     fn removing_an_unregistered_listener_does_not_reach_did_unregister_listener() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let host = app.create(LazyHost::default());
+        let host_ref = app.create(LazyHost::default());
+        let host = *host_ref;
         let log = Rc::clone(&app.get(host).log);
 
         let registered = recording(&log, "registered");
@@ -686,7 +688,8 @@ mod tests {
     fn a_lazy_host_starts_again_after_going_empty() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let host = app.create(LazyHost::default());
+        let host_ref = app.create(LazyHost::default());
+        let host = *host_ref;
         let log = Rc::clone(&app.get(host).log);
 
         let listener = recording(&log, "listener");
@@ -701,7 +704,8 @@ mod tests {
     fn an_eager_host_never_starts_or_stops_but_disposes() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let host = app.create(EagerHost::default());
+        let host_ref = app.create(EagerHost::default());
+        let host = *host_ref;
         let log: Log = Log::default();
 
         host.add_listener(&mut app, recording(&log, "listener"));
@@ -719,7 +723,8 @@ mod tests {
     fn notify_listeners_calls_every_registered_listener() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let host = app.create(EagerHost::default());
+        let host_ref = app.create(EagerHost::default());
+        let host = *host_ref;
         let log: Log = Log::default();
 
         host.add_listener(&mut app, recording(&log, "one"));
@@ -742,7 +747,8 @@ mod tests {
     fn a_listener_removed_mid_dispatch_is_not_called() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let host = app.create(EagerHost::default());
+        let host_ref = app.create(EagerHost::default());
+        let host = *host_ref;
         let log: Log = Log::default();
 
         let doomed = recording(&log, "doomed");
@@ -771,7 +777,8 @@ mod tests {
     fn a_lazy_status_only_host_starts_and_stops_on_its_status_listeners() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let host = app.create(ReverseHost::default());
+        let host_ref = app.create(ReverseHost::default());
+        let host = *host_ref;
         let log = Rc::clone(&app.get(host).log);
 
         let listener = recording_status(&log, "status");
@@ -797,7 +804,8 @@ mod tests {
     fn a_status_listener_removed_mid_dispatch_is_not_called() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let host = app.create(ReverseHost::default());
+        let host_ref = app.create(ReverseHost::default());
+        let host = *host_ref;
         let log = Rc::clone(&app.get(host).log);
 
         let doomed = recording_status(&log, "doomed");
@@ -833,8 +841,10 @@ mod tests {
     fn a_start_hook_can_register_on_another_host_through_the_app() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let parent = app.create(EagerHost::default());
-        let proxy = app.create(ProxyLikeHost::default());
+        let parent_ref = app.create(EagerHost::default());
+        let parent = *parent_ref;
+        let proxy_ref = app.create(ProxyLikeHost::default());
+        let proxy = *proxy_ref;
         let log = Rc::clone(&app.get(proxy).log);
         app.get_mut(proxy).parent = Some(parent);
 
@@ -863,7 +873,8 @@ mod tests {
     fn clear_listeners_does_not_reach_did_unregister_listener() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let host = app.create(LazyHost::default());
+        let host_ref = app.create(LazyHost::default());
+        let host = *host_ref;
         let log = Rc::clone(&app.get(host).log);
 
         host.add_listener(&mut app, recording(&log, "listener"));

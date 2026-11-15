@@ -856,10 +856,9 @@ mod tests {
     };
     use waft_services::{SystemMouseCursor, SystemMouseCursors};
     use waft_widgets::{
-        AnyElement, AnyFocusNode, Builder, Center, DefaultTextStyle, Directionality,
-        FocusHighlightStrategy, FocusManager, FocusNode, FocusNodeLeaf, GlobalKey, Icon, IconTheme,
-        MouseRegion, Padding, SizedBox, Text, UnfocusDisposition, WidgetStatesController,
-        downcast_widget,
+        AnyElement, Builder, Center, DefaultTextStyle, Directionality, FocusHighlightStrategy,
+        FocusManager, FocusNode, GlobalKey, Icon, IconTheme, MouseRegion, Padding, SizedBox, Text,
+        UnfocusDisposition, WidgetStatesController, downcast_widget,
     };
 
     use super::*;
@@ -874,6 +873,7 @@ mod tests {
         Drawn, WidgetTester, ahem_text, material_app, with_main_thread_stack,
     };
     use crate::theme_data::ThemeData;
+    use waft_widgets::FocusNodeRef;
 
     /// A tester with the OS fonts, which the debug banner and an `Icon` need to lay out, and
     /// the Material icons.
@@ -991,8 +991,8 @@ mod tests {
         FocusManager::instance(&mut app).set_highlight_strategy(&mut app, strategy);
     }
 
-    fn focus_node(tester: &WidgetTester) -> AnyFocusNode {
-        FocusNode::new(&mut tester.cell.borrow_mut()).as_node()
+    fn focus_node(tester: &WidgetTester) -> FocusNodeRef {
+        FocusNode::new(&mut tester.cell.borrow_mut()).into_erased()
     }
 
     /// The colours of the rects the button's ink features draw.
@@ -1290,7 +1290,7 @@ mod tests {
                 Center::new()
                     .child(
                         ElevatedButton::new(Some(pressed()), Some(text("ElevatedButton")))
-                            .focus_node(focus_node),
+                            .focus_node(focus_node.clone()),
                     )
                     .into_widget(),
             ));
@@ -1372,7 +1372,7 @@ mod tests {
                                         state_color,
                                     )),
                             ),
-                            button.focus_node(focus_node),
+                            button.focus_node(focus_node.clone()),
                         ))
                         .into_widget(),
                 ));
@@ -1463,7 +1463,7 @@ mod tests {
             let frame = |button: ElevatedButton| {
                 Directionality::new(
                     TextDirection::Ltr,
-                    SizedBox::square(Some(100.0)).child(button.focus_node(focus_node)),
+                    SizedBox::square(Some(100.0)).child(button.focus_node(focus_node.clone())),
                 )
                 .into_widget()
             };
@@ -1574,7 +1574,7 @@ mod tests {
                     Directionality::new(
                         TextDirection::Ltr,
                         ElevatedButton::new(enabled.then(pressed), Some(SizedBox::new()))
-                            .focus_node(node)
+                            .focus_node(node.clone())
                             .on_focus_change(on_focus_change),
                     )
                     .into_widget(),
@@ -1628,7 +1628,7 @@ mod tests {
                 Some(text("button")),
             )
             .style(overlay(WidgetState::Focused))
-            .focus_node(node)));
+            .focus_node(node.clone())));
             set_highlight_strategy(&tester, FocusHighlightStrategy::AlwaysTraditional);
             node.request_focus(&mut tester.cell.borrow_mut(), None);
             tester.pump_and_settle();
@@ -2294,7 +2294,7 @@ mod tests {
                 tester.pump_widget(material_app(
                     theme,
                     Center::new()
-                        .child(button.focus_node(focus_node).autofocus(true))
+                        .child(button.focus_node(focus_node.clone()).autofocus(true))
                         .into_widget(),
                 ));
             };
@@ -2825,7 +2825,7 @@ mod tests {
                     Center::new()
                         .child(
                             ElevatedButton::new(Some(pressed()), Some(text("Button")))
-                                .states_controller(controller)
+                                .states_controller(controller.clone())
                                 .is_selected(is_selected),
                         )
                         .into_widget(),
@@ -2851,7 +2851,7 @@ mod tests {
                 tester
                     .cell
                     .borrow()
-                    .get(controller)
+                    .get(&controller)
                     .value()
                     .contains(&WidgetState::Selected)
             );
@@ -2864,7 +2864,7 @@ mod tests {
                 !tester
                     .cell
                     .borrow()
-                    .get(controller)
+                    .get(&controller)
                     .value()
                     .contains(&WidgetState::Selected)
             );
@@ -3200,14 +3200,14 @@ mod tests {
                                 enabled.then(pressed),
                                 ahem_text("button").key(label_key.clone().into()),
                             )
-                            .states_controller(controller)
+                            .states_controller(controller.clone())
                             .icon(icon()),
                         )
                         .into_widget(),
                 )
             };
             let value =
-                |tester: &WidgetTester| tester.cell.borrow().get(controller).value().clone();
+                |tester: &WidgetTester| tester.cell.borrow().get(&controller).value().clone();
 
             let first = frame(&tester, true);
             tester.pump_widget(first);

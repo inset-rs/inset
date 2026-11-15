@@ -973,7 +973,7 @@ mod tests {
                 Center::new()
                     .child(
                         ValueListenableBuilder::new(
-                            Rc::new(variant),
+                            Rc::new(variant.clone()),
                             |_app, _context, value: &Option<StyleVariant>, child| {
                                 let mut data = ElevatedButtonThemeData::new();
                                 data.variant = *value;

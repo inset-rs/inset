@@ -2,7 +2,7 @@
 
 use crate::{column, example, row, section};
 use std::rc::Rc;
-use waft_foundation::{App, Handle, Listener};
+use waft_foundation::{App, Handle, Listener, OptionRetained, Ref};
 use waft_widgets::*;
 use waft_winui::*;
 
@@ -37,7 +37,7 @@ struct FlyoutDemoState {
     state: StateData<FlyoutDemo>,
 
     /// Shared by two opening targets to demonstrate content retention.
-    flyout: Option<Handle<Flyout>>,
+    flyout: Option<Ref<Flyout>>,
 
     /// Current preferred placement.
     placement: FlyoutPlacementMode,
@@ -73,14 +73,14 @@ impl State for FlyoutDemoState {
 
     fn init_state(self: Handle<Self>, app: &mut App) {
         let flyout = Flyout::new(app, RetainedCounter);
-        app.get_mut(flyout).closing = Some(Rc::new(move |app, args| {
+        app.get_mut(&flyout).closing = Some(Rc::new(move |app, args| {
             args.cancel = app.get(self).prevent_close;
         }));
         app.get_mut(self).flyout = Some(flyout);
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        app.get(self).flyout.unwrap().dispose(app);
+        app.get(self).flyout.handle().unwrap().dispose(app);
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -88,16 +88,21 @@ impl State for FlyoutDemoState {
         let widget = self.widget(app);
         let dropdown = widget.dropdown;
         let state = app.get(self);
-        let flyout = state.flyout.unwrap();
+        let flyout = state.flyout.clone().unwrap();
         let placement = state.placement;
         let mode = state.mode;
         let prevent_close = state.prevent_close;
         let outside_clicks = state.outside_clicks;
+        let opener_flyout = flyout.clone();
         let opener = move |text: &'static str| -> WidgetRef {
+            let flyout = opener_flyout.clone();
             if dropdown {
-                DropDownButton::text(text).flyout(flyout).into_widget()
+                DropDownButton::text(text)
+                    .flyout(flyout.clone())
+                    .into_widget()
             } else {
                 FlyoutTarget::new(Builder::new(move |_, context| {
+                    let flyout = flyout.clone();
                     Button::text(text, Listener::new(move |app| flyout.show_at(app, context)))
                         .into_widget()
                 }))
@@ -112,16 +117,19 @@ impl State for FlyoutDemoState {
                 vec![
                     Button::text(
                         format!("Placement: {placement:?}"),
-                        Listener::new(move |app| {
-                            let next = match app.get(self).placement {
-                                FlyoutPlacementMode::Top => FlyoutPlacementMode::Bottom,
-                                FlyoutPlacementMode::Bottom => FlyoutPlacementMode::Left,
-                                FlyoutPlacementMode::Left => FlyoutPlacementMode::Right,
-                                FlyoutPlacementMode::Right => FlyoutPlacementMode::Full,
-                                _ => FlyoutPlacementMode::Top,
-                            };
-                            flyout.placement(app, next);
-                            self.set_state(app, |state| state.placement = next);
+                        Listener::new({
+                            let flyout = flyout.clone();
+                            move |app| {
+                                let next = match app.get(self).placement {
+                                    FlyoutPlacementMode::Top => FlyoutPlacementMode::Bottom,
+                                    FlyoutPlacementMode::Bottom => FlyoutPlacementMode::Left,
+                                    FlyoutPlacementMode::Left => FlyoutPlacementMode::Right,
+                                    FlyoutPlacementMode::Right => FlyoutPlacementMode::Full,
+                                    _ => FlyoutPlacementMode::Top,
+                                };
+                                flyout.clone().placement(app, next);
+                                self.set_state(app, |state| state.placement = next);
+                            }
                         }),
                     )
                     .into_widget(),
@@ -135,15 +143,15 @@ impl State for FlyoutDemoState {
             "Standard mode blocks the click that dismisses it. Transient mode lets that click reach the control behind it.",
             &resources,
             column(vec![
-                Button::text(format!("Mode: {mode:?}"), Listener::new(move |app| {
+                Button::text(format!("Mode: {mode:?}"), Listener::new({ let flyout = flyout.clone(); move |app| {
                     let next = match app.get(self).mode {
                         FlyoutShowMode::Standard => FlyoutShowMode::Transient,
                         FlyoutShowMode::Transient => FlyoutShowMode::TransientWithDismissOnPointerMoveAway,
                         _ => FlyoutShowMode::Standard,
                     };
-                    flyout.show_mode(app, next);
+                    flyout.clone().show_mode(app, next);
                     self.set_state(app, |state| state.mode = next);
-                })).into_widget(),
+                }})).into_widget(),
                 CheckBox::new(Some(prevent_close), move |app, checked| {
                     self.set_state(app, |state| state.prevent_close = checked == Some(true));
                 }).content(Text::new("Cancel Closing")).into_widget(),
@@ -158,7 +166,7 @@ impl State for FlyoutDemoState {
                 "A disabled button cannot open its flyout.",
                 &resources,
                 DropDownButton::text("Unavailable")
-                    .flyout(flyout)
+                    .flyout(flyout.clone())
                     .is_enabled(false)
                     .into_widget(),
             ));

@@ -2,7 +2,7 @@
 
 use crate::{column, example, label, section};
 use waft_embedder::FontWeight;
-use waft_foundation::{App, Handle, Listener};
+use waft_foundation::{App, Handle, Listener, Ref};
 use waft_painting::EdgeInsetsGeometry;
 use waft_widgets::*;
 use waft_winui::*;
@@ -19,10 +19,10 @@ struct ItemsViewDemo;
 /// One selection per example, and what was last invoked.
 struct ItemsViewDemoState {
     state: StateData<ItemsViewDemo>,
-    single: Option<Handle<ItemsViewSelection>>,
-    multiple: Option<Handle<ItemsViewSelection>>,
-    extended: Option<Handle<ItemsViewSelection>>,
-    long: Option<Handle<ItemsViewSelection>>,
+    single: Option<Ref<ItemsViewSelection>>,
+    multiple: Option<Ref<ItemsViewSelection>>,
+    extended: Option<Ref<ItemsViewSelection>>,
+    long: Option<Ref<ItemsViewSelection>>,
     /// The row last invoked in the single-selection example.
     invoked: Option<usize>,
 }
@@ -65,8 +65,8 @@ impl ItemsViewDemoState {
     fn selection(
         self: Handle<Self>,
         app: &App,
-        pick: fn(&ItemsViewDemoState) -> Option<Handle<ItemsViewSelection>>,
-    ) -> Handle<ItemsViewSelection> {
+        pick: fn(&ItemsViewDemoState) -> Option<Ref<ItemsViewSelection>>,
+    ) -> Ref<ItemsViewSelection> {
         pick(app.get(self)).expect("made in `init_state`")
     }
 
@@ -79,7 +79,7 @@ impl ItemsViewDemoState {
     fn feeds(
         self: Handle<Self>,
         mode: ItemsViewSelectionMode,
-        selection: Handle<ItemsViewSelection>,
+        selection: Ref<ItemsViewSelection>,
     ) -> WidgetRef {
         let view = ItemsView::new(FEEDS.len(), |_, _, index| feed_row(index))
             .selection_mode(mode)
@@ -88,7 +88,7 @@ impl ItemsViewDemoState {
         SizedBox::new().height(200.0).child(view).into_widget()
     }
 
-    fn caption(self: Handle<Self>, app: &App, selection: Handle<ItemsViewSelection>) -> String {
+    fn caption(self: Handle<Self>, app: &App, selection: Ref<ItemsViewSelection>) -> String {
         let selected: Vec<&str> = selection
             .selected_indices(app)
             .into_iter()
@@ -147,10 +147,10 @@ impl State for ItemsViewDemoState {
     fn init_state(self: Handle<Self>, app: &mut App) {
         let made: Vec<_> = (0..4).map(|_| ItemsViewSelection::new(app)).collect();
         let state = app.get_mut(self);
-        state.single = Some(made[0]);
-        state.multiple = Some(made[1]);
-        state.extended = Some(made[2]);
-        state.long = Some(made[3]);
+        state.single = Some(made[0].clone());
+        state.multiple = Some(made[1].clone());
+        state.extended = Some(made[2].clone());
+        state.long = Some(made[3].clone());
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
@@ -163,17 +163,16 @@ impl State for ItemsViewDemoState {
         ];
         for selection in all.into_iter().flatten() {
             selection.dispose(app);
-            app.destroy(selection);
         }
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
         let resources = ThemeResources::of(app, context);
         let secondary = resources.text_fill_color_secondary;
-        let single = self.selection(app, |s| s.single);
-        let multiple = self.selection(app, |s| s.multiple);
-        let extended = self.selection(app, |s| s.extended);
-        let long = self.selection(app, |s| s.long);
+        let single = self.selection(app, |s| s.single.clone());
+        let multiple = self.selection(app, |s| s.multiple.clone());
+        let extended = self.selection(app, |s| s.extended.clone());
+        let long = self.selection(app, |s| s.long.clone());
         let invoked = app
             .get(self)
             .invoked
@@ -184,7 +183,7 @@ impl State for ItemsViewDemoState {
             .height(200.0)
             .child(
                 ItemsView::new(FEEDS.len(), |_, _, index| feed_row(index))
-                    .selection(single)
+                    .selection(single.clone())
                     .is_item_invoked_enabled(true)
                     .item_invoked(move |app, index| {
                         self.set_state(app, |state| state.invoked = Some(index))
@@ -202,7 +201,7 @@ impl State for ItemsViewDemoState {
                     )))
                 })
                 .selection_mode(ItemsViewSelectionMode::Extended)
-                .selection(long)
+                .selection(long.clone())
                 .item_extent(LONG_ROW)
                 .selection_changed(move |app| self.changed().call(app)),
             )
@@ -236,7 +235,7 @@ impl State for ItemsViewDemoState {
                     &resources,
                     column(
                         vec![
-                            self.feeds(ItemsViewSelectionMode::Multiple, multiple),
+                            self.feeds(ItemsViewSelectionMode::Multiple, multiple.clone()),
                             label(
                                 self.caption(app, multiple),
                                 TextBlockStyle::Caption,
@@ -252,7 +251,7 @@ impl State for ItemsViewDemoState {
                     &resources,
                     column(
                         vec![
-                            self.feeds(ItemsViewSelectionMode::Extended, extended),
+                            self.feeds(ItemsViewSelectionMode::Extended, extended.clone()),
                             label(
                                 self.caption(app, extended),
                                 TextBlockStyle::Caption,

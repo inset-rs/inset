@@ -4,7 +4,7 @@ use std::any::TypeId;
 use std::fmt::{self, Debug};
 use std::rc::Rc;
 
-use waft_animation::AnyAnimation;
+use waft_animation::AnimationRef;
 use waft_embedder::{Color, TargetPlatform};
 use waft_foundation::{App, Handle, Listenable, Listener, ValueNotifier};
 use waft_gestures::{
@@ -29,6 +29,7 @@ use crate::widgets::gesture_detector::{
 };
 use crate::widgets::navigator::Navigator;
 use crate::widgets::transitions::AnimatedWidget;
+use waft_foundation::Ref;
 
 /// A widget that prevents the user from interacting with widgets behind itself.
 ///
@@ -73,7 +74,7 @@ pub struct ModalBarrier {
     pub semantics_label: Option<String>,
     /// Contains a value of type [`EdgeInsets`] that specifies how the semantics node rectangle
     /// of the widget should be clipped.
-    pub clip_details_notifier: Option<Handle<ValueNotifier<EdgeInsets>>>,
+    pub clip_details_notifier: Option<Ref<ValueNotifier<EdgeInsets>>>,
     /// This hint text instructs users what they are able to do when they tap on the
     /// [`ModalBarrier`].
     pub semantics_on_tap_hint: Option<String>,
@@ -156,7 +157,7 @@ impl ModalBarrier {
     /// Dart `ModalBarrier(clipDetailsNotifier:)`.
     pub fn clip_details_notifier(
         mut self,
-        clip_details_notifier: Handle<ValueNotifier<EdgeInsets>>,
+        clip_details_notifier: Ref<ValueNotifier<EdgeInsets>>,
     ) -> ModalBarrier {
         self.clip_details_notifier = Some(clip_details_notifier);
         self
@@ -278,7 +279,7 @@ impl StatelessWidget for ModalBarrier {
 pub struct AnimatedModalBarrier {
     pub key: Option<KeyRef>,
     /// If non-`None`, fill the barrier with this color.
-    pub color: AnyAnimation<Option<Color>>,
+    pub color: AnimationRef<Option<Color>>,
     /// Whether touching the barrier will pop the current route off the [`Navigator`].
     pub dismissible: bool,
     /// Semantics label used for the barrier if it is [`dismissible`](Self::dismissible).
@@ -288,7 +289,7 @@ pub struct AnimatedModalBarrier {
     /// Called when the barrier is being dismissed.
     pub on_dismiss: Option<Listener>,
     /// See [`ModalBarrier::clip_details_notifier`].
-    pub clip_details_notifier: Option<Handle<ValueNotifier<EdgeInsets>>>,
+    pub clip_details_notifier: Option<Ref<ValueNotifier<EdgeInsets>>>,
     /// See [`ModalBarrier::semantics_on_tap_hint`].
     pub semantics_on_tap_hint: Option<String>,
 }
@@ -298,7 +299,7 @@ impl AnimatedModalBarrier {
     /// setters.
     ///
     /// Dart's default: `dismissible` true.
-    pub fn new(color: AnyAnimation<Option<Color>>) -> AnimatedModalBarrier {
+    pub fn new(color: AnimationRef<Option<Color>>) -> AnimatedModalBarrier {
         AnimatedModalBarrier {
             key: None,
             color,
@@ -357,7 +358,7 @@ impl AnimatedModalBarrier {
     /// Dart `AnimatedModalBarrier(clipDetailsNotifier:)`.
     pub fn clip_details_notifier(
         mut self,
-        clip_details_notifier: Handle<ValueNotifier<EdgeInsets>>,
+        clip_details_notifier: Ref<ValueNotifier<EdgeInsets>>,
     ) -> AnimatedModalBarrier {
         self.clip_details_notifier = Some(clip_details_notifier);
         self
@@ -384,7 +385,7 @@ impl AnimatedWidget for AnimatedModalBarrier {
     }
 
     fn listenable(&self) -> Rc<dyn Listenable> {
-        Rc::new(self.color)
+        Rc::new(self.color.clone())
     }
 
     fn build(&self, app: &mut App, _context: BuildContext) -> WidgetRef {
@@ -398,7 +399,7 @@ impl AnimatedWidget for AnimatedModalBarrier {
         if let Some(on_dismiss) = self.on_dismiss.clone() {
             barrier = barrier.on_dismiss(on_dismiss);
         }
-        if let Some(clip_details_notifier) = self.clip_details_notifier {
+        if let Some(clip_details_notifier) = self.clip_details_notifier.clone() {
             barrier = barrier.clip_details_notifier(clip_details_notifier);
         }
         if let Some(semantics_on_tap_hint) = self.semantics_on_tap_hint.clone() {
@@ -421,7 +422,7 @@ struct AnyTapGestureRecognizer {
 }
 
 impl AnyTapGestureRecognizer {
-    fn new(app: &mut App) -> Handle<AnyTapGestureRecognizer> {
+    fn new(app: &mut App) -> Ref<AnyTapGestureRecognizer> {
         app.create(AnyTapGestureRecognizer {
             recognizer: GestureRecognizerData::new(),
             one_sequence: OneSequenceData::new(),
@@ -575,7 +576,7 @@ struct AnyTapGestureRecognizerFactory {
 }
 
 impl GestureRecognizerFactory<AnyTapGestureRecognizer> for AnyTapGestureRecognizerFactory {
-    fn constructor(&self, app: &mut App) -> Handle<AnyTapGestureRecognizer> {
+    fn constructor(&self, app: &mut App) -> Ref<AnyTapGestureRecognizer> {
         AnyTapGestureRecognizer::new(app)
     }
 

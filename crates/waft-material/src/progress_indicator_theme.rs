@@ -3,7 +3,7 @@
 use waft_animation::AnimationController;
 use waft_embedder::StrokeCap;
 use waft_embedder::{Color, lerp_double};
-use waft_foundation::{App, Handle};
+use waft_foundation::{App, Ref};
 use waft_painting::{BorderRadiusGeometry, EdgeInsetsGeometry};
 use waft_rendering::BoxConstraints;
 use waft_widgets::{BuildContext, InheritedTheme, InheritedWidget, IntoWidget, KeyRef, WidgetRef};
@@ -26,7 +26,7 @@ use crate::theme::Theme;
 ///    theme down its subtree.
 ///  * `ThemeData::progress_indicator_theme`, which describes the defaults for
 ///    any progress indicators as part of the application's `ThemeData`.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct ProgressIndicatorThemeData {
     /// The color of the `ProgressIndicator`'s indicator.
     ///
@@ -135,7 +135,7 @@ pub struct ProgressIndicatorThemeData {
     ///
     /// If this property is also null, the progress indicator will create and
     /// manage its own internal [`AnimationController`].
-    pub controller: Option<Handle<AnimationController>>,
+    pub controller: Option<Ref<AnimationController>>,
 }
 
 crate::theme_data_getters::theme_data_getters! {
@@ -158,7 +158,7 @@ crate::theme_data_getters::theme_data_getters! {
         track_gap: Option<f64>,
         circular_track_padding: Option<EdgeInsetsGeometry>,
         year2023: Option<bool>,
-        controller: Option<Handle<AnimationController>>,
+        controller: Option<Ref<AnimationController>>,
     }
 }
 
@@ -283,7 +283,7 @@ impl ProgressIndicatorThemeData {
     /// Dart `ProgressIndicatorThemeData(controller:)`.
     pub fn controller(
         mut self,
-        controller: Handle<AnimationController>,
+        controller: Ref<AnimationController>,
     ) -> ProgressIndicatorThemeData {
         self.controller = Some(controller);
         self
@@ -295,7 +295,7 @@ impl ProgressIndicatorThemeData {
     /// Dart's named arguments are the fluent setters on the copy
     /// (`data.copy_with().stroke_width(8.0)`).
     pub fn copy_with(&self) -> ProgressIndicatorThemeData {
-        *self
+        self.clone()
     }
 
     /// Linearly interpolate between two progress indicator themes.
@@ -308,7 +308,7 @@ impl ProgressIndicatorThemeData {
     ) -> Option<ProgressIndicatorThemeData> {
         match (a, b) {
             (None, None) => return None,
-            (Some(a), Some(b)) if std::ptr::eq(a, b) => return Some(*a),
+            (Some(a), Some(b)) if std::ptr::eq(a, b) => return Some(a.clone()),
             _ => {}
         }
         Some(ProgressIndicatorThemeData {
@@ -371,7 +371,7 @@ impl ProgressIndicatorThemeData {
                 t,
             ),
             year2023: pick(a, b, t, |theme| theme.year2023),
-            controller: pick(a, b, t, |theme| theme.controller),
+            controller: pick(a, b, t, |theme| theme.controller.clone()),
         })
     }
 }
@@ -443,15 +443,15 @@ impl ProgressIndicatorTheme {
     /// ```
     pub fn of(app: &mut App, context: BuildContext) -> ProgressIndicatorThemeData {
         match context.depend_on_inherited_widget_of_exact_type::<ProgressIndicatorTheme>(app) {
-            Some(progress_indicator_theme) => progress_indicator_theme.data,
-            None => Theme::of(app, context).progress_indicator_theme,
+            Some(progress_indicator_theme) => progress_indicator_theme.data.clone(),
+            None => Theme::of(app, context).progress_indicator_theme.clone(),
         }
     }
 }
 
 impl InheritedTheme for ProgressIndicatorTheme {
     fn wrap(&self, _app: &mut App, _context: BuildContext, child: WidgetRef) -> WidgetRef {
-        ProgressIndicatorTheme::new(self.data, child).into_widget()
+        ProgressIndicatorTheme::new(self.data.clone(), child).into_widget()
     }
 }
 
@@ -952,11 +952,11 @@ mod tests {
 
     /// The controllers of the theme-controller cases: the widget's, the
     /// `ProgressIndicatorTheme`'s and the `ThemeData`'s.
-    #[derive(Clone, Copy, Default)]
+    #[derive(Clone, Default)]
     struct Controllers {
-        widget: Option<Handle<AnimationController>>,
-        indicator_theme: Option<Handle<AnimationController>>,
-        global_theme: Option<Handle<AnimationController>>,
+        widget: Option<Ref<AnimationController>>,
+        indicator_theme: Option<Ref<AnimationController>>,
+        global_theme: Option<Ref<AnimationController>>,
     }
 
     /// The theme-controller cases' `buildApp`, around `indicator`.
@@ -972,11 +972,11 @@ mod tests {
         };
         crate::app::MaterialApp::new()
             .home(Material::new().child(Center::new().child(themed(
-                theme_with(app, with(global_theme, controllers.global_theme)),
+                theme_with(app, with(global_theme, controllers.global_theme.clone())),
                 ProgressIndicatorTheme::new(
                     with(
                         ProgressIndicatorThemeData::new(),
-                        controllers.indicator_theme,
+                        controllers.indicator_theme.clone(),
                     ),
                     SizedBox::new().width(200.0).child(indicator),
                 ),
@@ -991,14 +991,14 @@ mod tests {
             let pump = |tester: &mut crate::test_support::WidgetTester,
                         controllers: Controllers| {
                 pump_with(tester, |app| {
-                    let indicator = match controllers.widget {
+                    let indicator = match controllers.widget.clone() {
                         Some(controller) => LinearProgressIndicator::new().controller(controller),
                         None => LinearProgressIndicator::new(),
                     };
                     build_app(
                         app,
                         ProgressIndicatorThemeData::new(),
-                        controllers,
+                        controllers.clone(),
                         indicator.into_widget(),
                     )
                 });
@@ -1022,20 +1022,20 @@ mod tests {
                 };
 
             let mut controllers = Controllers::default();
-            pump(&mut tester, controllers);
+            pump(&mut tester, controllers.clone());
             tester.pump(Duration::from_millis(500));
             expect_progress_at(&tester, 16.028758883476257, 141.07513427734375);
 
             controllers.global_theme = Some(controller_at(&tester, 0.1));
-            pump(&mut tester, controllers);
+            pump(&mut tester, controllers.clone());
             expect_progress_at(&tester, 0.0, 37.14974820613861);
 
             controllers.indicator_theme = Some(controller_at(&tester, 0.5));
-            pump(&mut tester, controllers);
+            pump(&mut tester, controllers.clone());
             expect_progress_at(&tester, 127.79541015625, 200.0);
 
             controllers.widget = Some(controller_at(&tester, 0.8));
-            pump(&mut tester, controllers);
+            pump(&mut tester, controllers.clone());
             expect_progress_at(&tester, 98.24226796627045, 181.18448555469513);
         });
     }
@@ -1047,7 +1047,7 @@ mod tests {
             let pump = |tester: &mut crate::test_support::WidgetTester,
                         controllers: Controllers| {
                 pump_with(tester, |app| {
-                    let indicator = match controllers.widget {
+                    let indicator = match controllers.widget.clone() {
                         Some(controller) => CircularProgressIndicator::new().controller(controller),
                         None => CircularProgressIndicator::new(),
                     };
@@ -1056,7 +1056,7 @@ mod tests {
                         ProgressIndicatorThemeData::new()
                             .color(Colors::BLACK)
                             .linear_track_color(Colors::GREEN.primary()),
-                        controllers,
+                        controllers.clone(),
                         indicator.into_widget(),
                     )
                 });
@@ -1070,20 +1070,20 @@ mod tests {
                 };
 
             let mut controllers = Controllers::default();
-            pump(&mut tester, controllers);
+            pump(&mut tester, controllers.clone());
             tester.pump(Duration::from_millis(500));
             expect_progress_at(&tester, 0.43225767465697107, 4.52182126629162);
 
             controllers.global_theme = Some(controller_at(&tester, 0.1));
-            pump(&mut tester, controllers);
+            pump(&mut tester, controllers.clone());
             expect_progress_at(&tester, 0.628318530718057, 2.8904563625380906);
 
             controllers.indicator_theme = Some(controller_at(&tester, 0.5));
-            pump(&mut tester, controllers);
+            pump(&mut tester, controllers.clone());
             expect_progress_at(&tester, std::f64::consts::FRAC_PI_2, 0.001);
 
             controllers.widget = Some(controller_at(&tester, 0.8));
-            pump(&mut tester, controllers);
+            pump(&mut tester, controllers.clone());
             expect_progress_at(&tester, 2.520489337828999, 4.076855234710353);
         });
     }

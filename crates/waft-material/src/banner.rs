@@ -3,13 +3,13 @@
 use std::fmt;
 use std::rc::Rc;
 use std::time::Duration;
-
 use waft_animation::{
-    Animatable, Animation, AnimationBehavior, AnimationController, AnimationStatus,
-    AnimationStatusListener, AnyAnimation, Curve, CurvedAnimation, Curves, Threshold, Tween,
+    Animatable, AnimationBehavior, AnimationController, AnimationRef, AnimationStatus,
+    AnimationStatusListener, Curve, CurvedAnimation, Curves, Threshold, Tween,
 };
+
 use waft_embedder::{Color, Offset};
-use waft_foundation::{App, Handle, VoidCallback};
+use waft_foundation::{App, Handle, OptionRetained, Ref, VoidCallback};
 use waft_painting::{AlignmentGeometry, EdgeInsetsGeometry, TextStyle};
 use waft_rendering::BoxConstraints;
 use waft_scheduler::TickerProvider;
@@ -226,7 +226,7 @@ pub struct MaterialBanner {
 
     /// The animation driving the entrance and exit of the material banner when presented by
     /// the `ScaffoldMessenger`.
-    pub animation: Option<AnyAnimation<f64>>,
+    pub animation: Option<AnimationRef<f64>>,
 
     /// Called the first time that the material banner is visible within a `Scaffold` when
     /// presented by the `ScaffoldMessenger`.
@@ -353,7 +353,7 @@ impl MaterialBanner {
     }
 
     /// Dart `MaterialBanner(animation:)`.
-    pub fn animation(mut self, animation: AnyAnimation<f64>) -> MaterialBanner {
+    pub fn animation(mut self, animation: AnimationRef<f64>) -> MaterialBanner {
         self.animation = Some(animation);
         self
     }
@@ -371,7 +371,7 @@ impl MaterialBanner {
     pub fn create_animation_controller(
         app: &mut App,
         vsync: impl TickerProvider,
-    ) -> Handle<AnimationController> {
+    ) -> Ref<AnimationController> {
         AnimationController::create(
             app,
             None,
@@ -391,7 +391,7 @@ impl MaterialBanner {
     /// use the given fallback key.
     pub fn with_animation(
         &self,
-        new_animation: AnyAnimation<f64>,
+        new_animation: AnimationRef<f64>,
         fallback_key: Option<KeyRef>,
     ) -> MaterialBanner {
         MaterialBanner {
@@ -445,7 +445,6 @@ impl StatefulWidget for MaterialBanner {
             was_visible: false,
             height_animation: None,
             slide_out_curved_animation: None,
-            slide_out_animation: None,
         }
     }
 }
@@ -454,11 +453,8 @@ impl StatefulWidget for MaterialBanner {
 pub struct MaterialBannerState {
     state: StateData<MaterialBanner>,
     was_visible: bool,
-    height_animation: Option<Handle<CurvedAnimation>>,
-    slide_out_curved_animation: Option<Handle<CurvedAnimation>>,
-    /// The tween and the animation the last build slid the banner with, which Dart's collector
-    /// frees once a build replaces them; the next build or `dispose` frees them.
-    slide_out_animation: Option<(Handle<Tween<Offset>>, AnyAnimation<Offset>)>,
+    height_animation: Option<Ref<CurvedAnimation>>,
+    slide_out_curved_animation: Option<Ref<CurvedAnimation>>,
 }
 
 impl MaterialBannerState {
@@ -469,33 +465,27 @@ impl MaterialBannerState {
         )
     }
 
-    /// Dart's `curvedAnimation?.dispose()`, then frees it.
+    /// Dart's `curvedAnimation?.dispose()`.
     fn dispose_curved_animation(app: &mut App, animation: Option<Handle<CurvedAnimation>>) {
         if let Some(animation) = animation {
             animation.dispose(app);
-            app.destroy_lingering(animation);
-        }
-    }
-
-    /// Frees the last build's slide tween and animation; the `SlideTransition` that listens to
-    /// the animation lets go when it rebuilds, before the entries go at the next checkpoint.
-    fn free_slide_out_animation(self: Handle<Self>, app: &mut App) {
-        if let Some((tween, animation)) = app.get_mut(self).slide_out_animation.take() {
-            app.destroy_lingering(animation.id());
-            app.destroy_lingering(tween);
         }
     }
 
     fn set_curved_animations(self: Handle<Self>, app: &mut App) {
-        MaterialBannerState::dispose_curved_animation(app, app.get(self).height_animation);
+        MaterialBannerState::dispose_curved_animation(app, app.get(self).height_animation.handle());
         MaterialBannerState::dispose_curved_animation(
             app,
-            app.get(self).slide_out_curved_animation,
+            app.get(self).slide_out_curved_animation.handle(),
         );
-        match self.widget(app).animation {
+        match self.widget(app).animation.clone() {
             Some(animation) => {
-                let height_animation =
-                    CurvedAnimation::create(app, animation, material_banner_height_curve(), None);
+                let height_animation = CurvedAnimation::create(
+                    app,
+                    animation.clone(),
+                    material_banner_height_curve(),
+                    None,
+                );
                 let slide_out_curved_animation =
                     CurvedAnimation::create(app, animation, Rc::new(Threshold::new(0.0)), None);
                 let this = app.get_mut(self);
@@ -528,16 +518,16 @@ impl State for MaterialBannerState {
     waft_widgets::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
-        if let Some(animation) = self.widget(app).animation {
+        if let Some(animation) = self.widget(app).animation.clone() {
             animation.add_status_listener(app, self.status_listener());
         }
         self.set_curved_animations(app);
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &MaterialBanner) {
-        let animation = self.widget(app).animation;
+        let animation = self.widget(app).animation.clone();
         if animation != old_widget.animation {
-            if let Some(old_animation) = old_widget.animation {
+            if let Some(old_animation) = old_widget.animation.clone() {
                 old_animation.remove_status_listener(app, &self.status_listener());
             }
             if let Some(animation) = animation {
@@ -548,15 +538,14 @@ impl State for MaterialBannerState {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        if let Some(animation) = self.widget(app).animation {
+        if let Some(animation) = self.widget(app).animation.clone() {
             animation.remove_status_listener(app, &self.status_listener());
         }
-        MaterialBannerState::dispose_curved_animation(app, app.get(self).height_animation);
+        MaterialBannerState::dispose_curved_animation(app, app.get(self).height_animation.handle());
         MaterialBannerState::dispose_curved_animation(
             app,
-            app.get(self).slide_out_curved_animation,
+            app.get(self).slide_out_curved_animation.handle(),
         );
-        self.free_slide_out_animation(app);
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -699,12 +688,10 @@ impl State for MaterialBannerState {
         let slide_out_curved_animation = app
             .get(self)
             .slide_out_curved_animation
+            .clone()
             .expect("set with the animation");
         let slide_out_tween = Tween::new(app, Some(Offset::new(0.0, -1.0)), Some(Offset::ZERO));
-        let slide_out_animation =
-            slide_out_tween.animate(app, slide_out_curved_animation.as_animation());
-        self.free_slide_out_animation(app);
-        app.get_mut(self).slide_out_animation = Some((slide_out_tween, slide_out_animation));
+        let slide_out_animation = slide_out_tween.animate(app, slide_out_curved_animation.erase());
 
         material_banner = Semantics::new()
             .container(true)
@@ -725,18 +712,22 @@ impl State for MaterialBannerState {
         let material_banner_transition = if accessible_navigation {
             material_banner
         } else {
-            let height_animation = app
+            let height_animation: AnimationRef<f64> = app
                 .get(self)
                 .height_animation
+                .as_ref()
                 .expect("set with the animation")
-                .as_animation();
-            AnimatedBuilder::new(Rc::new(height_animation), move |app, _context, child| {
-                Align::new()
-                    .alignment(AlignmentGeometry::BOTTOM_START)
-                    .height_factor(height_animation.value(app))
-                    .child(child.cloned().expect("the builder's child"))
-                    .into_widget()
-            })
+                .erase();
+            AnimatedBuilder::new(
+                Rc::new(height_animation.clone()),
+                move |app, _context, child| {
+                    Align::new()
+                        .alignment(AlignmentGeometry::BOTTOM_START)
+                        .height_factor(height_animation.value(app))
+                        .child(child.cloned().expect("the builder's child"))
+                        .into_widget()
+                },
+            )
             .child(material_banner)
             .into_widget()
         };

@@ -7,7 +7,7 @@ use std::{
 use waft_embedder::{
     Offset, PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, PointerSignalKind,
 };
-use waft_foundation::{Handle, Listenable, Listener};
+use waft_foundation::{Listenable, Listener, Ref};
 use waft_gestures::GestureBinding;
 use waft_painting::{Axis, EdgeInsetsGeometry};
 use waft_services::{
@@ -19,7 +19,7 @@ use waft_winui_test_support::Fixture;
 
 #[derive(Clone, Default)]
 struct Probe {
-    controller: Rc<Cell<Option<Handle<ScrollViewportController>>>>,
+    controller: Rc<RefCell<Option<Ref<ScrollViewportController>>>>,
     built: Rc<Cell<usize>>,
     metrics: Rc<RefCell<Vec<ScrollViewportMetrics>>>,
 }
@@ -30,11 +30,12 @@ fn virtualized(axis: Axis) -> (Fixture, Probe) {
     let f = Fixture::with_root([320, 200], move |app| {
         winui_gallery::install_fonts(app);
         let controller = ScrollViewportController::new(app);
-        output.controller.set(Some(controller));
+        *output.controller.borrow_mut() = Some(controller.clone());
         let metrics = output.metrics.clone();
+        let observed = controller.handle();
         controller.add_listener(
             app,
-            Listener::new(move |app| metrics.borrow_mut().push(controller.metrics(app))),
+            Listener::new(move |app| metrics.borrow_mut().push(observed.metrics(app))),
         );
         let native = controller.native_controller(app);
         run_app(
@@ -42,6 +43,8 @@ fn virtualized(axis: Axis) -> (Fixture, Probe) {
             WidgetsApp::new(AccentPalette::default().base)
                 .debug_show_checked_mode_banner(false)
                 .builder(move |_, _, _| {
+                    let controller = controller.clone();
+                    let native = native.clone();
                     let built = output.built.clone();
                     let list = ListView::builder(move |_, _, index| {
                         built.set(built.get() + 1);
@@ -100,7 +103,7 @@ fn controller_commands_clamp_and_keep_the_native_list_virtualized() {
     for axis in [Axis::Horizontal, Axis::Vertical] {
         let (mut f, p) = virtualized(axis);
         settle(&mut f);
-        let controller = p.controller.get().unwrap();
+        let controller = p.controller.borrow().clone().unwrap();
         let m = controller.metrics(&f.cell.borrow());
         let viewport = if axis == Axis::Horizontal {
             320.0
@@ -138,7 +141,7 @@ fn controller_commands_clamp_and_keep_the_native_list_virtualized() {
 #[test]
 fn native_mouse_wheel_and_keyboard_scroll_the_same_controller() {
     let (mut f, p) = virtualized(Axis::Vertical);
-    let controller = p.controller.get().unwrap();
+    let controller = p.controller.borrow().clone().unwrap();
     wheel(&mut f, 0.0, 100.0);
     assert_eq!(controller.metrics(&f.cell.borrow()).offset, 100.0);
     controller.change_view(&mut f.cell.borrow_mut(), 0.0, true);
@@ -165,7 +168,8 @@ fn native_mouse_wheel_and_keyboard_scroll_the_same_controller() {
     wheel(&mut horizontal, 90.0, 0.0);
     assert_eq!(
         hp.controller
-            .get()
+            .borrow()
+            .clone()
             .unwrap()
             .metrics(&horizontal.cell.borrow())
             .offset,
@@ -175,11 +179,11 @@ fn native_mouse_wheel_and_keyboard_scroll_the_same_controller() {
 
 #[test]
 fn simple_viewport_receives_native_touch_drag_and_reports_its_content_extent() {
-    let controller_slot = Rc::new(Cell::new(None));
+    let controller_slot = Rc::new(RefCell::new(None));
     let slot = controller_slot.clone();
     let mut f = Fixture::with_root([320, 200], move |app| {
         let controller = ScrollViewportController::new(app);
-        slot.set(Some(controller));
+        *slot.borrow_mut() = Some(controller.clone());
         run_app(
             app,
             WidgetsApp::new(AccentPalette::default().base)
@@ -187,7 +191,7 @@ fn simple_viewport_receives_native_touch_drag_and_reports_its_content_extent() {
                 .builder(move |_, _, _| {
                     ScrollViewport::new(
                         Axis::Vertical,
-                        controller,
+                        controller.clone(),
                         SizedBox::new()
                             .height(1000.0)
                             .child(Text::new("Scrollable content")),
@@ -197,7 +201,7 @@ fn simple_viewport_receives_native_touch_drag_and_reports_its_content_extent() {
                 .into_widget(),
         );
     });
-    let controller = controller_slot.get().unwrap();
+    let controller: Ref<ScrollViewportController> = controller_slot.borrow().clone().unwrap();
     assert_eq!(controller.metrics(&f.cell.borrow()).extent_length, 1000.0);
     f.send(PointerChange::Down, Offset::new(100.0, 150.0));
     for (y, dy) in [(110.0, -40.0), (50.0, -60.0)] {

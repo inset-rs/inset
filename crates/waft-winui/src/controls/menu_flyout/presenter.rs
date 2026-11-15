@@ -10,7 +10,7 @@ use crate::*;
 // Waft exports a `FocusState` of its own; the XAML one is meant here.
 use crate::FocusState;
 use std::{collections::BTreeMap, rc::Rc};
-use waft_foundation::{App, Handle};
+use waft_foundation::{App, Handle, OptionRetained, Ref};
 use waft_painting::{PaintingBinding, TextPainter, TextSpan};
 use waft_rendering::{BoxConstraints, CrossAxisAlignment, MainAxisSize};
 use waft_services::{KeyEvent, LogicalKeyboardKey};
@@ -32,7 +32,7 @@ pub(super) struct MenuFlyoutPresenterState {
     pub containers: BTreeMap<usize, Handle<MenuItemState>>,
 
     /// ScrollViewer's retained vertical position.
-    scroll: Option<Handle<ScrollViewportController>>,
+    scroll: Option<Ref<ScrollViewportController>>,
 
     /// Item whose child submenu is currently open.
     pub sub_item: Option<Handle<MenuItemState>>,
@@ -54,7 +54,11 @@ impl StatefulWidget for MenuFlyoutPresenter {
 impl MenuFlyoutPresenterState {
     /// Source opening reinstalls ItemsSource and starts with the first focusable item.
     pub(super) fn prepare_open(self: Handle<Self>, app: &mut App) {
-        app.get(self).scroll.unwrap().change_view(app, 0.0, true);
+        app.get(self)
+            .scroll
+            .handle()
+            .unwrap()
+            .change_view(app, 0.0, true);
         self.set_state(app, |_| {});
     }
 
@@ -192,9 +196,12 @@ impl State for MenuFlyoutPresenterState {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        app.get(self).scroll.unwrap().dispose(app);
+        app.get(self).scroll.handle().unwrap().dispose(app);
         let menu = self.widget(app).menu;
-        app.get_mut(menu).presenter = None;
+        // The presenter outlives a menu its owner has already let go.
+        if app.contains(menu) {
+            app.get_mut(menu).presenter = None;
+        }
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -233,7 +240,7 @@ impl State for MenuFlyoutPresenterState {
         .child(Margin::new(
             resources.menu_flyout_presenter_theme_padding,
             ConstrainedBox::new(BoxConstraints::new().min_width(min_width)).child(
-                ScrollBarViewport::new(app.get(self).scroll.unwrap(), contents),
+                ScrollBarViewport::new(app.get(self).scroll.clone().unwrap(), contents),
             ),
         ));
         Focus::new(

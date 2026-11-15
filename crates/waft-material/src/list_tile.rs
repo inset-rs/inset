@@ -7,7 +7,7 @@ use std::fmt::{self, Debug};
 use std::rc::Rc;
 
 use waft_embedder::{Brightness, Color, Offset, Size, TextBaseline, TextDirection};
-use waft_foundation::{App, Handle, ValueChanged};
+use waft_foundation::{App, Handle, Ref, ValueChanged};
 use waft_gestures::{GestureLongPressCallback, GestureTapCallback};
 use waft_painting::{
     AnyColor, Border, BoxDecoration, EdgeInsets, EdgeInsetsGeometry, ShapeBorderRef,
@@ -20,7 +20,7 @@ use waft_rendering::{
 };
 use waft_services::MouseCursorRef;
 use waft_widgets::{
-    AnimatedDefaultTextStyle, AnyFocusNode, BuildContext, ColoredBox, DecoratedBox, Directionality,
+    AnimatedDefaultTextStyle, BuildContext, ColoredBox, DecoratedBox, Directionality, FocusNodeRef,
     IconTheme, IconThemeData, IntoWidget, KeyRef, RenderObjectWidget, SafeArea, Semantics,
     SizedBox, SlottedContainerRenderObjectData, SlottedContainerRenderObjectMixin,
     SlottedMultiChildRenderObjectWidget, StatelessWidget, WidgetRef, WidgetState, WidgetStateColor,
@@ -545,7 +545,7 @@ pub struct ListTile {
     pub splash_color: Option<Color>,
 
     /// An optional focus node to use as the focus node for this widget.
-    pub focus_node: Option<AnyFocusNode>,
+    pub focus_node: Option<FocusNodeRef>,
 
     /// True if this widget will be selected as the initial focus when no other
     /// node in its scope is currently focused.
@@ -629,7 +629,7 @@ pub struct ListTile {
     /// Represents the interactive "state" of this widget in terms of a set of
     /// [`WidgetState`]s, including [`WidgetState::Pressed`], [`WidgetState::Hovered`] and
     /// [`WidgetState::Focused`].
-    pub states_controller: Option<Handle<MaterialStatesController>>,
+    pub states_controller: Option<Ref<MaterialStatesController>>,
 }
 
 impl Default for ListTile {
@@ -752,7 +752,7 @@ impl ListTile {
         focus_color: Color => "focusColor",
         hover_color: Color => "hoverColor",
         splash_color: Color => "splashColor",
-        focus_node: AnyFocusNode => "focusNode",
+        focus_node: FocusNodeRef => "focusNode",
         tile_color: Color => "tileColor",
         selected_tile_color: Color => "selectedTileColor",
         enable_feedback: bool => "enableFeedback",
@@ -761,7 +761,7 @@ impl ListTile {
         min_leading_width: f64 => "minLeadingWidth",
         min_tile_height: f64 => "minTileHeight",
         title_alignment: ListTileTitleAlignment => "titleAlignment",
-        states_controller: Handle<MaterialStatesController> => "statesController",
+        states_controller: Ref<MaterialStatesController> => "statesController",
     );
 
     /// Dart `ListTile(enabled:)`.
@@ -1312,11 +1312,11 @@ impl StatelessWidget for ListTile {
             None
         };
         ink_well.ink_response.on_focus_change = self.on_focus_change.clone();
-        ink_well.ink_response.focus_node = self.focus_node;
+        ink_well.ink_response.focus_node = self.focus_node.clone();
         ink_well.ink_response.focus_color = self.focus_color;
         ink_well.ink_response.hover_color = self.hover_color;
         ink_well.ink_response.splash_color = self.splash_color;
-        ink_well.ink_response.states_controller = self.states_controller;
+        ink_well.ink_response.states_controller = self.states_controller.clone();
         ink_well.into_widget()
     }
 }
@@ -2266,8 +2266,8 @@ pub(crate) mod tests {
     };
     use waft_services::SystemMouseCursors;
     use waft_widgets::{
-        Builder, Center, Container, FocusHighlightStrategy, FocusNode, FocusNodeLeaf, GlobalKey,
-        ListView, MediaQuery, MediaQueryData, MouseRegion, StatefulBuilder, Text,
+        Builder, Center, Container, FocusHighlightStrategy, FocusNode, GlobalKey, ListView,
+        MediaQuery, MediaQueryData, MouseRegion, StatefulBuilder, Text,
     };
 
     use super::*;
@@ -2276,6 +2276,7 @@ pub(crate) mod tests {
     use crate::test_support::{
         AhemText, Drawn, WidgetTester, material_app, with_main_thread_stack,
     };
+    use waft_widgets::AnyFocusNode;
 
     /// A tester with the OS fonts, which `MaterialApp`'s debug banner paints with.
     pub(crate) fn tester() -> WidgetTester {
@@ -3171,13 +3172,14 @@ pub(crate) mod tests {
     fn list_tile_is_focusable_and_has_correct_focus_color() {
         with_main_thread_stack(|| {
             let mut tester = tester();
-            let focus_node = FocusNodeLeaf::as_node(FocusNode::new(&mut tester.cell.borrow_mut()));
+            let focus_node =
+                FocusNode::new(&mut tester.cell.borrow_mut()).into_erased::<AnyFocusNode>();
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             let frame = |tester: &WidgetTester, enabled: bool| {
                 let mut tile = ListTile::new()
                     .focus_color(Colors::ORANGE.shade500())
                     .autofocus(true)
-                    .focus_node(focus_node);
+                    .focus_node(focus_node.clone());
                 if enabled {
                     tile = tile.on_tap(noop());
                 }
@@ -3433,7 +3435,7 @@ pub(crate) mod tests {
     fn list_tile_on_focus_change_callback() {
         with_main_thread_stack(|| {
             let mut tester = tester();
-            let node = FocusNodeLeaf::as_node(FocusNode::new(&mut tester.cell.borrow_mut()));
+            let node = FocusNode::new(&mut tester.cell.borrow_mut()).into_erased::<AnyFocusNode>();
             let got_focus = Rc::new(Cell::new(false));
             let on_focus_change: ValueChanged<bool> = {
                 let got_focus = Rc::clone(&got_focus);
@@ -3443,7 +3445,7 @@ pub(crate) mod tests {
                 m3(&tester.cell.borrow()),
                 Material::new().child(
                     ListTile::new()
-                        .focus_node(node)
+                        .focus_node(node.clone())
                         .on_focus_change(on_focus_change)
                         .on_tap(noop()),
                 ),
@@ -4698,7 +4700,7 @@ pub(crate) mod tests {
             });
             let frame = |tester: &WidgetTester, enabled: bool| {
                 let mut tile = ListTile::new()
-                    .states_controller(controller)
+                    .states_controller(controller.clone())
                     .title(Text::new("title"));
                 if enabled {
                     tile = tile.on_tap(noop());
@@ -4706,7 +4708,7 @@ pub(crate) mod tests {
                 material_app(m3(&tester.cell.borrow()), centered_in_scaffold(tile))
             };
             let value = |tester: &WidgetTester| -> WidgetStates {
-                tester.cell.borrow().get(controller).value().clone()
+                tester.cell.borrow().get(&controller).value().clone()
             };
             let states =
                 |states: &[WidgetState]| -> WidgetStates { states.iter().copied().collect() };

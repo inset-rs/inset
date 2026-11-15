@@ -986,7 +986,7 @@ mod tests {
     use waft_foundation::ValueChanged;
     use waft_rendering::{RenderBox, RenderObject};
     use waft_services::SystemMouseCursors;
-    use waft_widgets::{Center, FocusNodeLeaf, SizedBox, StatefulBuilder, WidgetStatePropertyAll};
+    use waft_widgets::{Center, SizedBox, StatefulBuilder, WidgetStatePropertyAll};
 
     use super::*;
     use crate::material::Material;
@@ -2421,7 +2421,8 @@ mod tests {
                     Colors::TRANSPARENT
                 }),
             );
-            let focus_node = waft_widgets::FocusNode::new(&mut tester.cell.borrow_mut()).as_node();
+            let focus_node = waft_widgets::FocusNode::new(&mut tester.cell.borrow_mut())
+                .into_erased::<waft_widgets::AnyFocusNode>();
             tester.set_highlight_strategy(waft_widgets::FocusHighlightStrategy::AlwaysTraditional);
             let value = Rc::new(Cell::new(0.5));
             let theme = ThemeData::builder()
@@ -2432,7 +2433,8 @@ mod tests {
                 material_app(
                     theme.clone(),
                     Material::new()
-                        .child(Center::new().child(StatefulBuilder::new(
+                        .child(Center::new().child(StatefulBuilder::new({
+                            let focus_node = focus_node.clone();
                             move |_app, _context, set_state| {
                                 let on_changed_value = Rc::clone(&value);
                                 let on_changed: Option<ValueChanged<f64>> = enabled.then(|| {
@@ -2443,10 +2445,10 @@ mod tests {
                                 });
                                 Slider::new(value.get(), on_changed)
                                     .autofocus(true)
-                                    .focus_node(focus_node)
+                                    .focus_node(focus_node.clone())
                                     .into_widget()
-                            },
-                        )))
+                            }
+                        })))
                         .into_widget(),
                 )
             };

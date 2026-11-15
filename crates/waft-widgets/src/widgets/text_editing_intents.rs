@@ -10,7 +10,7 @@ use waft_gestures::{PointerDownEvent, PointerUpEvent};
 use waft_services::{SelectionChangedCause, TextEditingValue, TextSelection};
 
 use crate::widgets::actions::Intent;
-use crate::widgets::focus_manager::AnyFocusNode;
+use crate::widgets::focus_manager::FocusNodeRef;
 
 /// An [`Intent`] to send the event straight to the engine.
 ///
@@ -864,7 +864,7 @@ impl Intent for TransposeCharactersIntent {
 #[derive(Clone, Debug)]
 pub struct EditableTextTapOutsideIntent {
     /// The `FocusNode` that this [`Intent`]'s action should be performed on.
-    pub focus_node: AnyFocusNode,
+    pub focus_node: FocusNodeRef,
     /// The `PointerDownEvent` that initiated this [`Intent`].
     pub pointer_down_event: PointerDownEvent,
 }
@@ -872,7 +872,7 @@ pub struct EditableTextTapOutsideIntent {
 impl EditableTextTapOutsideIntent {
     /// Creates an [`EditableTextTapOutsideIntent`].
     pub fn new(
-        focus_node: AnyFocusNode,
+        focus_node: FocusNodeRef,
         pointer_down_event: PointerDownEvent,
     ) -> EditableTextTapOutsideIntent {
         EditableTextTapOutsideIntent {
@@ -903,7 +903,7 @@ impl Intent for EditableTextTapOutsideIntent {
 #[derive(Clone, Debug)]
 pub struct EditableTextTapUpOutsideIntent {
     /// The `FocusNode` that this [`Intent`]'s action should be performed on.
-    pub focus_node: AnyFocusNode,
+    pub focus_node: FocusNodeRef,
     /// The `PointerUpEvent` that initiated this [`Intent`].
     pub pointer_up_event: PointerUpEvent,
 }
@@ -911,7 +911,7 @@ pub struct EditableTextTapUpOutsideIntent {
 impl EditableTextTapUpOutsideIntent {
     /// Creates an [`EditableTextTapUpOutsideIntent`].
     pub fn new(
-        focus_node: AnyFocusNode,
+        focus_node: FocusNodeRef,
         pointer_up_event: PointerUpEvent,
     ) -> EditableTextTapUpOutsideIntent {
         EditableTextTapUpOutsideIntent {

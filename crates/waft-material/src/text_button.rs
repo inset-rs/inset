@@ -673,8 +673,8 @@ mod tests {
     use waft_embedder::{FontWeight, Offset, PointerChange, Rect, TargetPlatform, TextDirection};
     use waft_painting::{ShapeBorder, ShapeBorderRef, StadiumBorder};
     use waft_widgets::{
-        Align, Builder, Center, Directionality, FocusHighlightStrategy, FocusNode, FocusNodeLeaf,
-        GlobalKey, Icon, MouseRegion, Padding, SizedBox, Text, UnfocusDisposition,
+        Align, Builder, Center, Directionality, FocusHighlightStrategy, FocusNode, GlobalKey, Icon,
+        MouseRegion, Padding, SizedBox, Text, UnfocusDisposition,
     };
 
     use waft_foundation::Listenable;
@@ -693,6 +693,7 @@ mod tests {
     use crate::text_button_theme::TextButtonThemeData;
     use crate::text_theme::TextTheme;
     use crate::theme_data::ThemeData;
+    use waft_widgets::FocusNodeRef;
 
     /// A tester with the OS fonts, which a `Text` needs to lay out, and the Material icons.
     fn tester() -> WidgetTester {
@@ -735,8 +736,8 @@ mod tests {
         states.iter().copied().collect()
     }
 
-    fn focus_node(tester: &WidgetTester) -> waft_widgets::AnyFocusNode {
-        FocusNode::new(&mut tester.cell.borrow_mut()).as_node()
+    fn focus_node(tester: &WidgetTester) -> FocusNodeRef {
+        FocusNode::new(&mut tester.cell.borrow_mut()).into_erased()
     }
 
     /// Reads the button's `Material`, the last one in the tree: Dart's
@@ -1038,7 +1039,8 @@ mod tests {
             let primary = theme.color_scheme.primary;
             tester.pump_widget(app_centered(
                 theme,
-                TextButton::new(pressed(), Some(Text::new("TextButton"))).focus_node(focus_node),
+                TextButton::new(pressed(), Some(Text::new("TextButton")))
+                    .focus_node(focus_node.clone()),
             ));
 
             // Hovered.
@@ -1108,7 +1110,7 @@ mod tests {
                             .then_some(focus_color)
                     }),
                 ))
-                .focus_node(focus_node)));
+                .focus_node(focus_node.clone())));
 
             tester.set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
             focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
@@ -1138,14 +1140,14 @@ mod tests {
 
     /// Runs default, focused, hovered and pressed, reading `read` at each.
     fn stateful_color_case(
-        button: impl FnOnce(waft_widgets::AnyFocusNode) -> WidgetRef,
+        button: impl FnOnce(waft_widgets::FocusNodeRef) -> WidgetRef,
         read: impl Fn(&WidgetTester) -> Color,
         settle_pressed: bool,
     ) {
         let mut tester = tester();
         let focus_node = focus_node(&tester);
         let theme = default_theme(&tester);
-        tester.pump_widget(app_centered(theme, button(focus_node)));
+        tester.pump_widget(app_centered(theme, button(focus_node.clone())));
 
         // Default, not disabled.
         assert_eq!(read(&tester), DEFAULT_COLOR);
@@ -1187,7 +1189,7 @@ mod tests {
                                 |states| Some(color_for(states))
                             )),
                         )
-                        .focus_node(focus_node)
+                        .focus_node(focus_node.clone())
                         .into_widget()
                 },
                 |tester| tester.text_color("TextButton"),
@@ -1208,7 +1210,7 @@ mod tests {
                             |states| Some(color_for(states))
                         )))
                         .icon(Icon::new(Some(Icons::add())))
-                        .focus_node(focus_node)
+                        .focus_node(focus_node.clone())
                         .into_widget()
                 },
                 |tester| *tester.icon_style().color.expect("an icon color"),
@@ -1270,7 +1272,7 @@ mod tests {
                 let mut button =
                     TextButton::new(if enabled { pressed() } else { None }, Some(child))
                         .on_hover(hover_setter(&hovering))
-                        .focus_node(focus_node);
+                        .focus_node(focus_node.clone());
                 if enabled {
                     button = button
                         .autofocus(true)
@@ -1369,7 +1371,7 @@ mod tests {
         };
         let on_pressed = if enabled { pressed() } else { None };
         let button = TextButton::new(on_pressed, Some(SizedBox::new()))
-            .focus_node(node)
+            .focus_node(node.clone())
             .on_focus_change(on_focus_change);
         tester.pump_widget(ltr(button));
 
@@ -2067,12 +2069,12 @@ mod tests {
                 app_centered(
                     theme,
                     TextButton::icon(if enabled { pressed() } else { None }, Text::new("button"))
-                        .states_controller(controller)
+                        .states_controller(controller.clone())
                         .icon(Icon::new(Some(Icons::add()))),
                 )
             };
             let value =
-                |tester: &WidgetTester| tester.cell.borrow().get(controller).value().clone();
+                |tester: &WidgetTester| tester.cell.borrow().get(&controller).value().clone();
 
             let first = frame(&tester, true);
             tester.pump_widget(first);

@@ -10,11 +10,11 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use waft_animation::{
-    Animatable, Animation, AnyAnimation, Cubic, Curve, CurvedAnimation, Curves, ValueCurveTween,
+    Animatable, AnimationRef, Cubic, Curve, CurvedAnimation, Curves, Drive, ValueCurveTween,
     ValueTween,
 };
 use waft_embedder::{Color, Offset, Size};
-use waft_foundation::{App, Handle, Listenable, MergingListenable};
+use waft_foundation::{App, Handle, Listenable, MergingListenable, OptionRetained};
 use waft_painting::AlignmentGeometry;
 
 use crate::framework::{
@@ -28,6 +28,7 @@ use crate::widgets::pages::AnyPageRoute;
 use crate::widgets::transitions::{
     AnimatedBuilder, DelegatedTransitionBuilder, FadeTransition, SlideTransition,
 };
+use waft_foundation::Ref;
 
 /// Defines a page transition animation for a [`PageRoute`](crate::PageRoute).
 ///
@@ -93,8 +94,8 @@ pub trait PageTransitionsBuilder: Debug + 'static {
         app: &mut App,
         route: AnyPageRoute,
         context: BuildContext,
-        animation: AnyAnimation<f64>,
-        secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        secondary_animation: AnimationRef<f64>,
         child: WidgetRef,
     ) -> WidgetRef;
 }
@@ -138,8 +139,8 @@ impl Debug for PageTransitionsBuilderRef {
 // Slides the page upwards and fades it in, starting from 1/4 screen below the top. The
 // transition is intended to match the default for Android O.
 struct FadeUpwardsPageTransition {
-    position_animation: AnyAnimation<Offset>,
-    opacity_animation: AnyAnimation<f64>,
+    position_animation: AnimationRef<Offset>,
+    opacity_animation: AnimationRef<f64>,
     child: WidgetRef,
 }
 
@@ -147,7 +148,7 @@ impl FadeUpwardsPageTransition {
     /// `route_animation` is the route's linear 0.0 - 1.0 animation.
     fn new(
         app: &mut App,
-        route_animation: AnyAnimation<f64>,
+        route_animation: AnimationRef<f64>,
         child: WidgetRef,
     ) -> FadeUpwardsPageTransition {
         let position_animation = route_animation.drive(
@@ -185,9 +186,9 @@ impl Debug for FadeUpwardsPageTransition {
 
 impl StatelessWidget for FadeUpwardsPageTransition {
     fn build(&self, _app: &mut App, _context: BuildContext) -> WidgetRef {
-        SlideTransition::new(self.position_animation)
+        SlideTransition::new(self.position_animation.clone())
             // TODO(ianh): tell the transform to be un-transformed for hit testing
-            .child(FadeTransition::new(self.opacity_animation).child(self.child.clone()))
+            .child(FadeTransition::new(self.opacity_animation.clone()).child(self.child.clone()))
             .into_widget()
     }
 }
@@ -227,28 +228,18 @@ impl PageTransitionsBuilder for FadeUpwardsPageTransitionsBuilder {
         app: &mut App,
         _route: AnyPageRoute,
         _context: BuildContext,
-        animation: AnyAnimation<f64>,
-        _secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        _secondary_animation: AnimationRef<f64>,
         child: WidgetRef,
     ) -> WidgetRef {
-        let transition = FadeUpwardsPageTransition::new(app, animation, child);
-        let made = [
-            transition.position_animation.id(),
-            transition.opacity_animation.id(),
-        ];
-        let transition = transition.into_widget();
-        // The `SlideTransition` and `FadeTransition` its build makes retain them.
-        for made in made {
-            app.destroy_lingering(made);
-        }
-        transition
+        FadeUpwardsPageTransition::new(app, animation, child).into_widget()
     }
 }
 
 // This transition is intended to match the default for Android P.
 struct OpenUpwardsPageTransition {
-    animation: AnyAnimation<f64>,
-    secondary_animation: AnyAnimation<f64>,
+    animation: AnimationRef<f64>,
+    secondary_animation: AnimationRef<f64>,
     child: WidgetRef,
 }
 
@@ -272,8 +263,8 @@ impl OpenUpwardsPageTransition {
     const TRANSITION_CURVE: Cubic = Cubic::new(0.20, 0.00, 0.00, 1.00);
 
     fn new(
-        animation: AnyAnimation<f64>,
-        secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        secondary_animation: AnimationRef<f64>,
         child: WidgetRef,
     ) -> OpenUpwardsPageTransition {
         OpenUpwardsPageTransition {
@@ -309,15 +300,15 @@ impl StatefulWidget for OpenUpwardsPageTransition {
 /// Dart's `_OpenUpwardsPageTransitionState`.
 struct OpenUpwardsPageTransitionState {
     state: StateData<OpenUpwardsPageTransition>,
-    primary_animation: Option<Handle<CurvedAnimation>>,
-    secondary_translation_curved_animation: Option<Handle<CurvedAnimation>>,
+    primary_animation: Option<Ref<CurvedAnimation>>,
+    secondary_translation_curved_animation: Option<Ref<CurvedAnimation>>,
 }
 
 impl OpenUpwardsPageTransitionState {
     fn set_animations(self: Handle<Self>, app: &mut App) {
         let widget = self.widget(app);
-        let animation = widget.animation;
-        let secondary_animation = widget.secondary_animation;
+        let animation = widget.animation.clone();
+        let secondary_animation = widget.secondary_animation.clone();
         let primary_animation = CurvedAnimation::create(
             app,
             animation,
@@ -342,33 +333,34 @@ impl OpenUpwardsPageTransitionState {
     fn dispose_animations(self: Handle<Self>, app: &mut App) {
         let state = app.get(self);
         let animations = [
-            state.primary_animation,
-            state.secondary_translation_curved_animation,
+            state.primary_animation.handle(),
+            state.secondary_translation_curved_animation.handle(),
         ];
         for animation in animations.into_iter().flatten() {
             animation.dispose(app);
-            // The animations driven from it retain it while a build still reads them.
-            app.destroy_lingering(animation);
         }
     }
 
     /// The scrim, the clip and the two translations over the size the page is given.
     fn build_for_constraints(self: Handle<Self>, app: &mut App, size: Size) -> WidgetRef {
         let state = app.get(self);
-        let primary_animation = state
+        let primary_animation: AnimationRef<f64> = state
             .primary_animation
+            .as_ref()
             .expect("init_state ran first")
-            .as_animation();
-        let secondary_translation_curved_animation = state
+            .erase();
+        let secondary_translation_curved_animation: AnimationRef<f64> = state
             .secondary_translation_curved_animation
+            .as_ref()
             .expect("init_state ran first")
-            .as_animation();
+            .erase();
 
         // Gradually expose the new page from bottom to top.
-        let clip_animation = ValueTween::new(0.0, size.height()).animate(app, primary_animation);
+        let clip_animation =
+            ValueTween::new(0.0, size.height()).animate(app, primary_animation.clone());
 
         let opacity_animation =
-            OpenUpwardsPageTransition::SCRIM_OPACITY_TWEEN.animate(app, primary_animation);
+            OpenUpwardsPageTransition::SCRIM_OPACITY_TWEEN.animate(app, primary_animation.clone());
         let primary_translation_animation =
             OpenUpwardsPageTransition::PRIMARY_TRANSLATION_TWEEN.animate(app, primary_animation);
 
@@ -376,33 +368,14 @@ impl OpenUpwardsPageTransitionState {
             OpenUpwardsPageTransition::SECONDARY_TRANSLATION_TWEEN
                 .animate(app, secondary_translation_curved_animation);
 
-        // The builder reads them on every frame: it retains them, and this build frees its
-        // own part at once, so they go with the last builder that reads them.
-        let retained = (
-            app.retain(clip_animation),
-            app.retain(opacity_animation),
-            app.retain(primary_translation_animation),
-            app.retain(secondary_translation_animation),
-        );
-        app.destroy_lingering(clip_animation);
-        app.destroy_lingering(opacity_animation);
-        app.destroy_lingering(primary_translation_animation);
-        app.destroy_lingering(secondary_translation_animation);
-
         let widget = self.widget(app);
-        let animation: Rc<dyn Listenable> = Rc::new(widget.animation);
-        let secondary_animation: Rc<dyn Listenable> = Rc::new(widget.secondary_animation);
+        let animation: Rc<dyn Listenable> = Rc::new(widget.animation.clone());
+        let secondary_animation: Rc<dyn Listenable> = Rc::new(widget.secondary_animation.clone());
         let merged = Rc::new(MergingListenable::new(vec![
             Some(animation),
             Some(secondary_animation),
         ]));
         AnimatedBuilder::new(merged, move |app, _context, _child| {
-            let (
-                clip_animation,
-                opacity_animation,
-                primary_translation_animation,
-                secondary_translation_animation,
-            ) = (*retained.0, *retained.1, *retained.2, *retained.3);
             // Dart's `withOpacity`, deprecated there too: its rounding to an 8-bit alpha is
             // part of the behaviour being ported.
             #[allow(deprecated)]
@@ -453,8 +426,8 @@ impl State for OpenUpwardsPageTransitionState {
         old_widget: &OpenUpwardsPageTransition,
     ) {
         let widget = self.widget(app);
-        if old_widget.animation != widget.animation
-            || old_widget.secondary_animation != widget.secondary_animation
+        if old_widget.animation.handle() != widget.animation.handle()
+            || old_widget.secondary_animation.handle() != widget.secondary_animation.handle()
         {
             self.dispose_animations(app);
             self.set_animations(app);
@@ -514,8 +487,8 @@ impl PageTransitionsBuilder for OpenUpwardsPageTransitionsBuilder {
         _app: &mut App,
         _route: AnyPageRoute,
         _context: BuildContext,
-        animation: AnyAnimation<f64>,
-        secondary_animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
+        secondary_animation: AnimationRef<f64>,
         child: WidgetRef,
     ) -> WidgetRef {
         OpenUpwardsPageTransition::new(animation, secondary_animation, child).into_widget()
@@ -526,6 +499,8 @@ impl PageTransitionsBuilder for OpenUpwardsPageTransitionsBuilder {
 mod tests {
     use std::cell::RefCell;
     use std::collections::HashMap;
+    use waft_animation::AnimationRef;
+    use waft_animation::Drive;
 
     use waft_embedder::{TargetPlatform, TextDirection};
     use waft_foundation::AppCell;
@@ -538,7 +513,7 @@ mod tests {
     use crate::framework::GlobalKey;
     use crate::test_harness::pump_every_view;
     use crate::widgets::basic::{Center, Directionality};
-    use crate::widgets::navigator::{AnyRoute, Navigator, NavigatorState, Route, RouteSettings};
+    use crate::widgets::navigator::{Navigator, NavigatorState, RouteRef, RouteSettings};
     use crate::widgets::overlay::RenderTheater;
     use crate::widgets::pages::{PageRoute, PageRouteBuilder};
     use crate::widgets::text::Text;
@@ -575,14 +550,15 @@ mod tests {
         settings: &RouteSettings,
         transitions_builder: PageTransitionsBuilderRef,
         builder: impl Fn(&mut App, BuildContext) -> WidgetRef + 'static,
-    ) -> AnyRoute {
+    ) -> RouteRef {
         let route = PageRouteBuilder::new(
             app,
             Rc::new(move |app, context, _animation, _secondary_animation| builder(app, context)),
         )
         .settings(app, settings.clone().into());
-        let page_route = PageRoute::as_page_route(route);
-        route.transitions_builder(
+        // The transitions builder lives on the route: it names the route without keeping it.
+        let page_route = PageRoute::as_page_route(route.handle());
+        let route = route.transitions_builder(
             app,
             Rc::new(move |app, context, animation, secondary_animation, child| {
                 transitions_builder.build_transitions(
@@ -595,14 +571,14 @@ mod tests {
                 )
             }),
         );
-        route.as_route()
+        route.erase()
     }
 
     /// A navigator under the `Directionality` its overlay needs, building `route` for every
     /// name.
     fn navigator(
         key: &GlobalKey,
-        route: impl Fn(&mut App, &RouteSettings) -> AnyRoute + 'static,
+        route: impl Fn(&mut App, &RouteSettings) -> RouteRef + 'static,
     ) -> WidgetRef {
         Directionality::new(
             TextDirection::Ltr,
@@ -697,7 +673,8 @@ mod tests {
         let opacity = context
             .find_ancestor_widget_of_exact_type::<FadeTransition>(app)
             .expect("a FadeTransition above")
-            .opacity;
+            .opacity
+            .handle();
         opacity.value(app)
     }
 
@@ -706,8 +683,8 @@ mod tests {
         &mut App,
         AnyPageRoute,
         BuildContext,
-        AnyAnimation<f64>,
-        AnyAnimation<f64>,
+        AnimationRef<f64>,
+        AnimationRef<f64>,
         WidgetRef,
     ) -> WidgetRef;
 
@@ -728,8 +705,8 @@ mod tests {
             app: &mut App,
             route: AnyPageRoute,
             context: BuildContext,
-            animation: AnyAnimation<f64>,
-            secondary_animation: AnyAnimation<f64>,
+            animation: AnimationRef<f64>,
+            secondary_animation: AnimationRef<f64>,
             child: WidgetRef,
         ) -> WidgetRef {
             (self.on_build_transitions)(app, route, context, animation, secondary_animation, child)
@@ -737,7 +714,7 @@ mod tests {
     }
 
     /// The opacity and the scale animation of one route's transition.
-    type RouteTransition = (AnyAnimation<f64>, AnyAnimation<f64>);
+    type RouteTransition = (AnimationRef<f64>, AnimationRef<f64>);
 
     #[test]
     fn page_transitions_builder_works_with_custom_navigator_and_page_route() {
@@ -754,9 +731,10 @@ mod tests {
                         let scale_tween = waft_animation::Tween::new(app, Some(0.5), Some(1.0));
                         let scale = animation.drive(app, scale_tween.chain(curve_tween));
                         let name = route.as_route().settings(app).name().map(str::to_string);
-                        transitions
-                            .borrow_mut()
-                            .insert(name.expect("a named route"), (animation, scale));
+                        transitions.borrow_mut().insert(
+                            name.expect("a named route"),
+                            (animation.clone(), scale.clone()),
+                        );
                         FadeTransition::new(animation)
                             .child(ScaleTransition::new(scale).child(child))
                             .into_widget()
@@ -919,18 +897,16 @@ mod tests {
         cell.borrow().debug_object_count() as isize - before
     }
 
-    /// Not a Dart case: Dart's collector frees the animations each frame's
-    /// `_FadeUpwardsPageTransition` drives; here the builder frees them once it has handed
-    /// them on, and the transitions that read them retain them.
+    /// Not a Dart case: the animations each frame's `_FadeUpwardsPageTransition` drives go with
+    /// the last transition that reads them, as Dart's collector frees them.
     #[test]
     fn a_frame_of_a_fade_upwards_push_leaves_no_new_arena_objects() {
         let builder = PageTransitionsBuilderRef::new(FadeUpwardsPageTransitionsBuilder::new());
         assert_eq!(objects_a_mid_push_frame_leaves(builder), 0);
     }
 
-    /// Not a Dart case: Dart's collector frees the animations each layout of
-    /// `_OpenUpwardsPageTransition` drives; here the layout frees them once its builder
-    /// retains them.
+    /// Not a Dart case: the animations each layout of `_OpenUpwardsPageTransition` drives go
+    /// with the last builder that reads them, as Dart's collector frees them.
     #[test]
     fn a_frame_of_an_open_upwards_push_leaves_no_new_arena_objects() {
         let builder = PageTransitionsBuilderRef::new(OpenUpwardsPageTransitionsBuilder::new());

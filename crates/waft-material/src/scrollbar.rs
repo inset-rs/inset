@@ -13,14 +13,14 @@ use std::time::Duration;
 use waft_animation::{Animation, AnimationBehavior, AnimationController};
 use waft_cupertino::CupertinoScrollbar;
 use waft_embedder::{Brightness, Color, Offset, Radius, TargetPlatform};
-use waft_foundation::{App, Handle, Listener};
+use waft_foundation::{App, Handle, Listener, OptionRetained, Ref};
 use waft_gestures::{PointerHoverEvent, Velocity};
 use waft_painting::EdgeInsetsGeometry;
 use waft_scheduler::{Ticker, TickerCallback, TickerProviderObject};
 use waft_widgets::{
-    AnyScrollController, BuildContext, Directionality, IntoWidget, KeyRef, MediaQuery,
-    RawScrollbarData, RawScrollbarLeaf, RawScrollbarState, RawScrollbarStateData,
-    RawScrollbarStateLeaf, ScrollNotificationPredicate, ScrollbarOrientation, State, StateData,
+    BuildContext, Directionality, IntoWidget, KeyRef, MediaQuery, RawScrollbarData,
+    RawScrollbarLeaf, RawScrollbarState, RawScrollbarStateData, RawScrollbarStateLeaf,
+    ScrollControllerRef, ScrollNotificationPredicate, ScrollbarOrientation, State, StateData,
     StatefulWidget, StatelessWidget, TickerProviderStateMixin, TickerProviderStateMixinData,
     WidgetRef, WidgetState, WidgetStateProperty, WidgetStatePropertyRef, WidgetStates,
     default_scroll_notification_predicate,
@@ -87,7 +87,7 @@ pub struct Scrollbar {
     /// The `ScrollController` used to implement Scrollbar dragging.
     ///
     /// For more information, see `RawScrollbarData::controller`.
-    pub controller: Option<AnyScrollController>,
+    pub controller: Option<ScrollControllerRef>,
 
     /// Indicates that the scrollbar thumb should be visible, even when a scroll
     /// is not underway.
@@ -212,7 +212,7 @@ impl Scrollbar {
     }
 
     /// Dart `Scrollbar(controller:)`.
-    pub fn controller(mut self, controller: AnyScrollController) -> Scrollbar {
+    pub fn controller(mut self, controller: ScrollControllerRef) -> Scrollbar {
         self.controller = Some(controller);
         self
     }
@@ -302,7 +302,7 @@ impl StatelessWidget for Scrollbar {
                     self.radius
                         .unwrap_or(CupertinoScrollbar::DEFAULT_RADIUS_WHILE_DRAGGING),
                 );
-            if let Some(controller) = self.controller {
+            if let Some(controller) = self.controller.clone() {
                 scrollbar = scrollbar.controller(controller);
             }
             if let Some(notification_predicate) = &self.notification_predicate {
@@ -316,7 +316,7 @@ impl StatelessWidget for Scrollbar {
         let mut scrollbar =
             MaterialScrollbar::new(self.child.clone(), self.notification_predicate.clone());
         let raw_scrollbar = &mut scrollbar.raw_scrollbar;
-        raw_scrollbar.controller = self.controller;
+        raw_scrollbar.controller = self.controller.clone();
         raw_scrollbar.thumb_visibility = self.thumb_visibility;
         raw_scrollbar.track_visibility = self.track_visibility;
         raw_scrollbar.thickness = self.thickness;
@@ -389,7 +389,7 @@ struct MaterialScrollbarState {
     state: StateData<MaterialScrollbar>,
     ticker_provider: TickerProviderStateMixinData,
     raw_scrollbar_state: RawScrollbarStateData,
-    hover_animation_controller: Option<Handle<AnimationController>>,
+    hover_animation_controller: Option<Ref<AnimationController>>,
     drag_is_active: bool,
     hover_is_active: bool,
     color_scheme: Option<ColorScheme>,
@@ -402,6 +402,7 @@ impl MaterialScrollbarState {
     fn hover_animation_controller(self: Handle<Self>, app: &App) -> Handle<AnimationController> {
         app.get(self)
             .hover_animation_controller
+            .handle()
             .expect("initState creates the controller")
     }
 
@@ -594,7 +595,7 @@ impl State for MaterialScrollbarState {
             AnimationBehavior::Normal,
             self,
         );
-        app.get_mut(self).hover_animation_controller = Some(controller);
+        app.get_mut(self).hover_animation_controller = Some(controller.clone());
         controller.add_listener(
             app,
             Listener::new(move |app: &mut App| {
@@ -629,7 +630,6 @@ impl State for MaterialScrollbarState {
     fn dispose(self: Handle<Self>, app: &mut App) {
         let hover_animation_controller = self.hover_animation_controller(app);
         hover_animation_controller.dispose(app);
-        app.destroy_lingering(hover_animation_controller);
         RawScrollbarState::dispose(self, app);
         TickerProviderStateMixin::dispose(self, app);
     }
@@ -766,7 +766,7 @@ impl RawScrollbarStateLeaf for MaterialScrollbarState {
 }
 
 impl TickerProviderObject for MaterialScrollbarState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         TickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }
@@ -804,9 +804,8 @@ pub(crate) mod tests {
     use waft_widgets::{
         Center, Column, Container, CustomScrollView, FixedScrollMetrics, GestureDetector,
         GlobalKey, Icon, ListView, MediaQueryData, PrimaryScrollController, ScrollBehavior,
-        ScrollBehaviorRef, ScrollConfiguration, ScrollController, ScrollControllerLeaf, Scrollable,
-        ScrollableDetails, SingleChildScrollView, SizedBox, SliverToBoxAdapter, StatefulBuilder,
-        Text,
+        ScrollBehaviorRef, ScrollConfiguration, ScrollController, Scrollable, ScrollableDetails,
+        SingleChildScrollView, SizedBox, SliverToBoxAdapter, StatefulBuilder, Text,
     };
 
     use super::*;
@@ -818,6 +817,7 @@ pub(crate) mod tests {
         Drawn, TestPointer, WidgetTester, material_app, with_main_thread_stack,
     };
     use crate::theme_data::ThemeData;
+    use waft_widgets::AnyScrollController;
 
     pub(crate) const K_SCROLLBAR_FADE_DURATION_FOR_TESTS: Duration = Duration::from_millis(300);
     pub(crate) const K_SCROLLBAR_TIME_TO_FADE_FOR_TESTS: Duration = Duration::from_millis(600);
@@ -912,13 +912,13 @@ pub(crate) mod tests {
 
     /// `SingleChildScrollView(controller: controller, child: SizedBox(width:, height:))`.
     pub(crate) fn scroll_view(
-        controller: Option<AnyScrollController>,
+        controller: Option<ScrollControllerRef>,
         width: f64,
         height: f64,
     ) -> SingleChildScrollView {
         let view = SingleChildScrollView::new().child(SizedBox::new().width(width).height(height));
         match controller {
-            Some(controller) => view.controller(controller),
+            Some(controller) => view.controller(controller.clone()),
             None => view,
         }
     }
@@ -1067,8 +1067,8 @@ pub(crate) mod tests {
         controller.offset(&tester.cell.borrow())
     }
 
-    fn controller(tester: &WidgetTester) -> AnyScrollController {
-        ScrollController::default(&mut tester.cell.borrow_mut()).as_controller()
+    fn controller(tester: &WidgetTester) -> ScrollControllerRef {
+        ScrollController::default(&mut tester.cell.borrow_mut()).into_erased()
     }
 
     fn m2(tester: &WidgetTester) -> ThemeData {
@@ -1085,7 +1085,7 @@ pub(crate) mod tests {
             let theme = ThemeData::new(&tester.cell.borrow());
             tester.pump_widget(build_boilerplate(Theme::new(
                 theme,
-                Scrollbar::new(scroll_view(Some(controller), 4000.0, 4000.0))
+                Scrollbar::new(scroll_view(Some(controller.clone()), 4000.0, 4000.0))
                     .thumb_visibility(true)
                     .controller(controller),
             )));
@@ -1121,7 +1121,7 @@ pub(crate) mod tests {
             let theme = ThemeData::new(&tester.cell.borrow());
             tester.pump_widget(build_boilerplate(Theme::new(
                 theme,
-                Scrollbar::new(scroll_view(Some(controller), 4000.0, 4000.0))
+                Scrollbar::new(scroll_view(Some(controller.clone()), 4000.0, 4000.0))
                     .thumb_visibility(false)
                     .controller(controller),
             )));
@@ -1139,9 +1139,9 @@ pub(crate) mod tests {
                 let theme = ThemeData::new(&tester.cell.borrow());
                 build_boilerplate(Theme::new(
                     theme,
-                    Scrollbar::new(scroll_view(Some(controller), 4000.0, 4000.0))
+                    Scrollbar::new(scroll_view(Some(controller.clone()), 4000.0, 4000.0))
                         .thumb_visibility(thumb_visibility)
-                        .controller(controller),
+                        .controller(controller.clone()),
                 ))
             };
             let tree = view_with_scroll(&tester, true);
@@ -1171,9 +1171,10 @@ pub(crate) mod tests {
             let controller = controller(&tester);
             let view_with_scroll = |tester: &WidgetTester, radius: Option<Radius>| {
                 let theme = ThemeData::new(&tester.cell.borrow());
-                let mut scrollbar = Scrollbar::new(scroll_view(Some(controller), 1600.0, 1200.0))
-                    .controller(controller)
-                    .thickness(20.0);
+                let mut scrollbar =
+                    Scrollbar::new(scroll_view(Some(controller.clone()), 1600.0, 1200.0))
+                        .controller(controller.clone())
+                        .thickness(20.0);
                 if let Some(radius) = radius {
                     scrollbar = scrollbar.radius(radius);
                 }
@@ -1240,10 +1241,14 @@ pub(crate) mod tests {
                     waft_embedder::TextDirection::Ltr,
                     MediaQuery::new(
                         MediaQueryData::new(),
-                        Scrollbar::new(scroll_view(Some(scroll_controller), 1000.0, 1000.0))
-                            .interactive(true)
-                            .thumb_visibility(true)
-                            .controller(scroll_controller),
+                        Scrollbar::new(scroll_view(
+                            Some(scroll_controller.clone()),
+                            1000.0,
+                            1000.0,
+                        ))
+                        .interactive(true)
+                        .thumb_visibility(true)
+                        .controller(scroll_controller.clone()),
                     )
                     .into_widget(),
                 )
@@ -1251,7 +1256,7 @@ pub(crate) mod tests {
             );
 
             tester.pump_and_settle();
-            assert_eq!(offset(&tester, scroll_controller), 0.0);
+            assert_eq!(offset(&tester, scroll_controller.handle()), 0.0);
             let border = (Offset::new(796.0, 0.0), Offset::new(796.0, 600.0));
             let drawn = painted(&tester);
             assert_track(
@@ -1272,7 +1277,7 @@ pub(crate) mod tests {
             tester.tap(Offset::new(796.0, 550.0), 1);
             tester.pump_and_settle();
 
-            assert_eq!(offset(&tester, scroll_controller), 400.0);
+            assert_eq!(offset(&tester, scroll_controller.handle()), 400.0);
             let drawn = painted(&tester);
             assert_track(
                 &tester,
@@ -1292,7 +1297,7 @@ pub(crate) mod tests {
             tester.tap(Offset::new(796.0, 50.0), 1);
             tester.pump_and_settle();
 
-            assert_eq!(offset(&tester, scroll_controller), 0.0);
+            assert_eq!(offset(&tester, scroll_controller.handle()), 0.0);
             let drawn = painted(&tester);
             assert_track(
                 &tester,
@@ -1378,16 +1383,16 @@ pub(crate) mod tests {
             tester.pump_widget(material_app(
                 theme,
                 PrimaryScrollController::new(
-                    scroll_controller,
+                    scroll_controller.clone(),
                     Scrollbar::new(scroll_view(None, 4000.0, 4000.0))
                         .interactive(true)
                         .thumb_visibility(true)
-                        .controller(scroll_controller),
+                        .controller(scroll_controller.clone()),
                 )
                 .into_widget(),
             ));
             tester.pump_and_settle();
-            assert_eq!(offset(&tester, scroll_controller), 0.0);
+            assert_eq!(offset(&tester, scroll_controller.handle()), 0.0);
             let border = (Offset::new(796.0, 0.0), Offset::new(796.0, 600.0));
             let drawn = painted(&tester);
             assert_track(
@@ -1432,7 +1437,7 @@ pub(crate) mod tests {
 
             // The view has scrolled more than it would have by a swipe pointer of the
             // same distance.
-            assert!(offset(&tester, scroll_controller) > SCROLL_AMOUNT * 2.0);
+            assert!(offset(&tester, scroll_controller.handle()) > SCROLL_AMOUNT * 2.0);
             let drawn = painted(&tester);
             assert_track(
                 &tester,
@@ -1458,7 +1463,7 @@ pub(crate) mod tests {
         material_app(
             theme,
             no_scrollbar(
-                Scrollbar::new(scroll_view(Some(controller), 4000.0, 4000.0))
+                Scrollbar::new(scroll_view(Some(controller.clone()), 4000.0, 4000.0))
                     .controller(controller),
             ),
         )
@@ -1702,15 +1707,15 @@ pub(crate) mod tests {
             let theme = ThemeData::new(&tester.cell.borrow());
             tester.pump_widget(build_boilerplate(Theme::new(
                 theme,
-                Scrollbar::new(scroll_view(Some(controller), 4000.0, 4000.0))
-                    .controller(controller),
+                Scrollbar::new(scroll_view(Some(controller.clone()), 4000.0, 4000.0))
+                    .controller(controller.clone()),
             )));
             let cupertino = *tester
                 .find_by_type::<CupertinoScrollbar>()
                 .first()
                 .expect("a Cupertino scrollbar on iOS");
             let passed = tester.widget(cupertino, |scrollbar: &CupertinoScrollbar| {
-                scrollbar.raw_scrollbar_data().controller
+                scrollbar.raw_scrollbar_data().controller.clone()
             });
             assert_eq!(passed, Some(controller));
         });
@@ -1725,16 +1730,16 @@ pub(crate) mod tests {
             tester.pump_widget(material_app(
                 theme,
                 PrimaryScrollController::new(
-                    scroll_controller,
+                    scroll_controller.clone(),
                     Scrollbar::new(scroll_view(None, 4000.0, 4000.0))
                         .interactive(false)
                         .thumb_visibility(true)
-                        .controller(scroll_controller),
+                        .controller(scroll_controller.clone()),
                 )
                 .into_widget(),
             ));
             tester.pump_and_settle();
-            assert_eq!(offset(&tester, scroll_controller), 0.0);
+            assert_eq!(offset(&tester, scroll_controller.handle()), 0.0);
             let drawn = painted(&tester);
             assert_track(
                 &tester,
@@ -1765,7 +1770,7 @@ pub(crate) mod tests {
             tester.up(&drag_scrollbar_thumb_gesture);
             tester.pump_and_settle();
             // Dragging on the thumb does not change the offset.
-            assert_eq!(offset(&tester, scroll_controller), 0.0);
+            assert_eq!(offset(&tester, scroll_controller.handle()), 0.0);
 
             // Drag in the track area to validate pass through to scrollable.
             let mut drag_pass_through_track = start_gesture(&mut tester, Offset::new(797.0, 250.0));
@@ -1778,13 +1783,13 @@ pub(crate) mod tests {
             tester.up(&drag_pass_through_track);
             tester.pump_and_settle();
             // The scroll view received the drag.
-            assert_eq!(offset(&tester, scroll_controller), SCROLL_AMOUNT);
+            assert_eq!(offset(&tester, scroll_controller.handle()), SCROLL_AMOUNT);
 
             // Tap on the track to validate the scroll view will not page.
             tester.tap(Offset::new(797.0, 200.0), 1);
             tester.pump_and_settle();
             // The offset should not have changed.
-            assert_eq!(offset(&tester, scroll_controller), SCROLL_AMOUNT);
+            assert_eq!(offset(&tester, scroll_controller.handle()), SCROLL_AMOUNT);
         });
     }
 
@@ -1802,7 +1807,7 @@ pub(crate) mod tests {
             tester.pump_widget(material_app(
                 theme,
                 PrimaryScrollController::new(
-                    scroll_controller,
+                    scroll_controller.clone(),
                     Scrollbar::new(
                         SingleChildScrollView::new()
                             .drag_start_behavior(waft_gestures::DragStartBehavior::Down)
@@ -1814,12 +1819,12 @@ pub(crate) mod tests {
                             ),
                     )
                     .thumb_visibility(true)
-                    .controller(scroll_controller),
+                    .controller(scroll_controller.clone()),
                 )
                 .into_widget(),
             ));
             tester.pump_and_settle();
-            assert_eq!(offset(&tester, scroll_controller), 0.0);
+            assert_eq!(offset(&tester, scroll_controller.handle()), 0.0);
             let border = (Offset::new(796.0, 0.0), Offset::new(796.0, 600.0));
             let drawn = painted(&tester);
             assert_track(
@@ -1847,7 +1852,7 @@ pub(crate) mod tests {
             drag_without_slop(&mut tester, Offset::new(0.0, SCROLL_AMOUNT));
             tester.pump_and_settle();
             // Dragging on the thumb does not change the offset.
-            assert_eq!(offset(&tester, scroll_controller), 0.0);
+            assert_eq!(offset(&tester, scroll_controller.handle()), 0.0);
             assert_eq!(tap_count.get(), 0);
 
             // Try to drag up in the thumb area to validate pass through to scrollable.
@@ -1858,14 +1863,17 @@ pub(crate) mod tests {
             );
             tester.pump_and_settle();
             // The scroll view received the drag.
-            assert_eq!(offset(&tester, scroll_controller), SCROLL_AMOUNT);
+            assert_eq!(offset(&tester, scroll_controller.handle()), SCROLL_AMOUNT);
             assert_eq!(tap_count.get(), 0);
 
             // Drag in the track area to validate pass through to scrollable.
             drag_without_slop(&mut tester, Offset::new(0.0, -SCROLL_AMOUNT));
             tester.pump_and_settle();
             // The scroll view received the drag.
-            assert_eq!(offset(&tester, scroll_controller), SCROLL_AMOUNT * 2.0);
+            assert_eq!(
+                offset(&tester, scroll_controller.handle()),
+                SCROLL_AMOUNT * 2.0
+            );
             assert_eq!(tap_count.get(), 0);
 
             // Tap on the thumb to validate the scroll view receives a click.
@@ -1877,7 +1885,10 @@ pub(crate) mod tests {
             tester.tap(Offset::new(797.0, 400.0), 1);
             tester.pump_and_settle();
             // The offset should not have changed.
-            assert_eq!(offset(&tester, scroll_controller), SCROLL_AMOUNT * 2.0);
+            assert_eq!(
+                offset(&tester, scroll_controller.handle()),
+                SCROLL_AMOUNT * 2.0
+            );
             assert_eq!(tap_count.get(), 2);
         });
     }
@@ -1893,7 +1904,7 @@ pub(crate) mod tests {
             tester.pump_widget(build_boilerplate(Theme::new(
                 theme,
                 PrimaryScrollController::new(
-                    scroll_controller,
+                    scroll_controller.clone(),
                     Scrollbar::new(scroll_view(None, 4000.0, 4000.0))
                         .interactive(true)
                         .thumb_visibility(true)
@@ -2265,12 +2276,12 @@ pub(crate) mod tests {
     // attached.'
     #[test]
     fn thumb_visibility_panics_when_the_controller_has_two_positions() {
-        fn get_tab_content(scroll_controller: Option<AnyScrollController>) -> WidgetRef {
+        fn get_tab_content(scroll_controller: Option<ScrollControllerRef>) -> WidgetRef {
             let list =
                 ListView::builder(|_app, _context, _index| Some(Text::new("Test").into_widget()))
                     .item_count(200)
                     .build();
-            let list = match scroll_controller {
+            let list = match scroll_controller.clone() {
                 Some(controller) => list.controller(controller),
                 None => list,
             };
@@ -2284,7 +2295,7 @@ pub(crate) mod tests {
 
         fn build_app(
             tester: &WidgetTester,
-            scroll_controller: Option<AnyScrollController>,
+            scroll_controller: Option<ScrollControllerRef>,
         ) -> WidgetRef {
             let theme = ThemeData::new(&tester.cell.borrow());
             material_app(
@@ -2292,7 +2303,7 @@ pub(crate) mod tests {
                 crate::tab_controller::DefaultTabController::new(
                     2,
                     Scaffold::new().body(crate::tabs::TabBarView::new([
-                        get_tab_content(scroll_controller),
+                        get_tab_content(scroll_controller.clone()),
                         get_tab_content(scroll_controller),
                     ])),
                 )
@@ -2346,7 +2357,7 @@ pub(crate) mod tests {
             // has its own key, so a fresh tester stands for it.
             let mut tester = tester_on(TargetPlatform::Android);
             let scroll_controller = controller(&tester);
-            let app = build_app(&tester, Some(scroll_controller));
+            let app = build_app(&tester, Some(scroll_controller.clone()));
             tester.pump_widget(app);
             assert_eq!(
                 swipe_and_take_exception(&mut tester),
@@ -2361,7 +2372,7 @@ pub(crate) mod tests {
 
     /// The toggle cases' tree: a `Scaffold` whose `FloatingActionButton` flips the
     /// scrollbar's `thumbVisibility`, which starts as `thumb_visibility`.
-    fn toggled_view(controller: AnyScrollController, thumb_visibility: bool) -> WidgetRef {
+    fn toggled_view(controller: ScrollControllerRef, thumb_visibility: bool) -> WidgetRef {
         let thumb_visibility = Rc::new(Cell::new(thumb_visibility));
         build_boilerplate(StatefulBuilder::new(move |app, _context, set_state| {
             let toggled = Rc::clone(&thumb_visibility);
@@ -2376,9 +2387,9 @@ pub(crate) mod tests {
                         .child(Icon::new(Some(Icons::threed_rotation()))),
                     )
                     .body(
-                        Scrollbar::new(scroll_view(Some(controller), 4000.0, 4000.0))
+                        Scrollbar::new(scroll_view(Some(controller.clone()), 4000.0, 4000.0))
                             .thumb_visibility(thumb_visibility.get())
-                            .controller(controller),
+                            .controller(controller.clone()),
                     ),
             )
             .into_widget()
@@ -2412,7 +2423,7 @@ pub(crate) mod tests {
         with_main_thread_stack(|| {
             let mut tester = tester_on(TargetPlatform::Android);
             let controller = controller(&tester);
-            tester.pump_widget(toggled_view(controller, true));
+            tester.pump_widget(toggled_view(controller.clone(), true));
             tester.pump_and_settle();
             fling_scroll_view(&mut tester);
             assert!(paints_thumb(&tester));
@@ -2431,7 +2442,7 @@ pub(crate) mod tests {
         with_main_thread_stack(|| {
             let mut tester = tester_on(TargetPlatform::Android);
             let controller = controller(&tester);
-            tester.pump_widget(toggled_view(controller, false));
+            tester.pump_widget(toggled_view(controller.clone(), false));
             tester.pump_and_settle();
             assert!(!paints_thumb(&tester));
 
@@ -2449,7 +2460,7 @@ pub(crate) mod tests {
         with_main_thread_stack(|| {
             let mut tester = tester_on(TargetPlatform::Android);
             let controller = controller(&tester);
-            tester.pump_widget(toggled_view(controller, false));
+            tester.pump_widget(toggled_view(controller.clone(), false));
             tester.pump_and_settle();
             assert!(!paints_thumb(&tester));
             fling_scroll_view(&mut tester);
@@ -2610,16 +2621,16 @@ pub(crate) mod tests {
             tester.pump_widget(material_app(
                 theme,
                 PrimaryScrollController::new(
-                    scroll_controller,
+                    scroll_controller.clone(),
                     Scrollbar::new(scroll_view(None, 4000.0, 4000.0))
                         .interactive(true)
                         .thumb_visibility(true)
-                        .controller(scroll_controller),
+                        .controller(scroll_controller.clone()),
                 )
                 .into_widget(),
             ));
             tester.pump_and_settle();
-            assert_eq!(offset(&tester, scroll_controller), 0.0);
+            assert_eq!(offset(&tester, scroll_controller.handle()), 0.0);
             let border = (Offset::new(796.0, 0.0), Offset::new(796.0, 600.0));
             let assert_painted = |tester: &WidgetTester, thumb: Rect, color: u32| {
                 let drawn = painted(tester);
@@ -2653,8 +2664,8 @@ pub(crate) mod tests {
                 Offset::new(0.0, SCROLL_AMOUNT),
             );
             tester.pump_and_settle();
-            assert!(offset(&tester, scroll_controller) > 10.0);
-            let previous_offset = offset(&tester, scroll_controller);
+            assert!(offset(&tester, scroll_controller.handle()) > 10.0);
+            let previous_offset = offset(&tester, scroll_controller.handle());
             assert_painted(
                 &tester,
                 Rect::from_ltrb(796.0, 10.0, 800.0, 100.0),
@@ -2685,7 +2696,7 @@ pub(crate) mod tests {
 
             // Scrolling while holding the drag on the scrollbar and still hovered over
             // the scrollbar should not have changed the scroll offset.
-            assert_eq!(offset(&tester, scroll_controller), previous_offset);
+            assert_eq!(offset(&tester, scroll_controller.handle()), previous_offset);
             assert_painted(
                 &tester,
                 Rect::from_ltrb(796.0, 10.0, 800.0, 100.0),
@@ -2703,7 +2714,7 @@ pub(crate) mod tests {
             pointer_scroll(&mut tester, center, Offset::new(0.0, -90.0));
             tester.pump_and_settle();
             // Scrolling while holding the drag on the scrollbar changed the offset
-            assert_eq!(offset(&tester, scroll_controller), 0.0);
+            assert_eq!(offset(&tester, scroll_controller.handle()), 0.0);
             assert_painted(
                 &tester,
                 Rect::from_ltrb(796.0, 0.0, 800.0, 90.0),
@@ -2712,7 +2723,7 @@ pub(crate) mod tests {
 
             tester.up(&drag_scrollbar_gesture);
             tester.pump_and_settle();
-            assert_eq!(offset(&tester, scroll_controller), 0.0);
+            assert_eq!(offset(&tester, scroll_controller.handle()), 0.0);
             assert_painted(
                 &tester,
                 Rect::from_ltrb(796.0, 0.0, 800.0, 90.0),
@@ -2722,7 +2733,7 @@ pub(crate) mod tests {
     }
 
     /// Dart's collector frees the hover controller `_MaterialScrollbarState` makes once the
-    /// state is gone; here the state frees it in its `dispose`.
+    /// state is gone; here it is freed with the state's reference to it.
     #[test]
     fn a_disposed_scrollbar_frees_its_hover_controller() {
         with_main_thread_stack(|| {
@@ -2731,7 +2742,7 @@ pub(crate) mod tests {
             let theme = ThemeData::new(&tester.cell.borrow());
             tester.pump_widget(build_boilerplate(Theme::new(
                 theme,
-                Scrollbar::new(scroll_view(Some(controller), 4000.0, 4000.0))
+                Scrollbar::new(scroll_view(Some(controller.clone()), 4000.0, 4000.0))
                     .controller(controller),
             )));
             let hover = {

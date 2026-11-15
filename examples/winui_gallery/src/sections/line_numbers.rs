@@ -3,7 +3,7 @@
 //! text.
 
 use waft::{FrameCallback, SchedulerBinding};
-use waft_foundation::{App, Handle, ListenableObject, Listener};
+use waft_foundation::{App, Handle, ListenableObject, Listener, Ref};
 use waft_painting::EdgeInsetsGeometry;
 use waft_widgets::*;
 use waft_winui::*;
@@ -17,7 +17,7 @@ pub struct LineNumbers {
     /// The numbered box; its text is its controller's.
     pub text_box: TextBox,
     /// The box's controller, which says when the text changed.
-    pub controller: Handle<TextEditingController>,
+    pub controller: Ref<TextEditingController>,
 }
 
 /// Where each line's number goes.
@@ -123,7 +123,7 @@ impl State for LineNumbersState {
 
     fn dispose(self: Handle<Self>, app: &mut App) {
         if let Some(listener) = app.get_mut(self).listener.take() {
-            let controller = self.widget(app).controller;
+            let controller = self.widget(app).controller.handle();
             controller.remove_listener(app, &listener);
         }
     }

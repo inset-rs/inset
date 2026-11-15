@@ -11,7 +11,7 @@ use std::fmt;
 use std::rc::Rc;
 
 use waft_embedder::{ViewFocusDirection, ViewFocusEvent, ViewFocusState, ViewId, ViewRef};
-use waft_foundation::{App, Handle, ListenableObject, Listener, ValueKey};
+use waft_foundation::{App, Handle, ListenableObject, Listener, OptionRetained, ValueKey};
 use waft_rendering::{AnyRenderObject, PipelineOwner, RenderHandle, RenderView, RendererBinding};
 use waft_scheduler::{FrameTarget, SchedulerBinding};
 
@@ -24,12 +24,12 @@ use crate::framework::{
 };
 use crate::widgets::focus_manager::{FocusManager, FocusNodeLeaf, FocusScopeNode};
 use crate::widgets::focus_scope::FocusScope;
-use crate::widgets::focus_traversal::{
-    AnyFocusTraversalPolicy, FocusTraversalGroup, FocusTraversalPolicy, ReadingOrderTraversalPolicy,
-};
+use crate::widgets::focus_traversal::FocusTraversalPolicyRef;
+use crate::widgets::focus_traversal::{FocusTraversalGroup, ReadingOrderTraversalPolicy};
 use crate::widgets::lookup_boundary::LookupBoundary;
 use crate::widgets::media_query::MediaQuery;
 use crate::window::WindowScopeOfView;
+use waft_foundation::Ref;
 
 /// Bootstraps a render tree that is rendered into the provided `FlutterView`.
 ///
@@ -139,7 +139,7 @@ impl View {
     pub fn pipeline_owner_of(app: &mut App, context: BuildContext) -> Handle<PipelineOwner> {
         let scoped = context
             .depend_on_inherited_widget_of_exact_type::<PipelineOwnerScope>(app)
-            .map(|scope| scope.pipeline_owner);
+            .map(|scope| scope.pipeline_owner.handle());
         scoped.unwrap_or_else(|| RendererBinding::instance(app).root_pipeline_owner(app))
     }
 }
@@ -174,8 +174,8 @@ impl StatefulWidget for View {
 /// The state of a [`View`], including synchronization with native view focus.
 pub struct ViewState {
     state: StateData<View>,
-    scope_node: Option<Handle<FocusScopeNode>>,
-    policy: Option<AnyFocusTraversalPolicy>,
+    scope_node: Option<Ref<FocusScopeNode>>,
+    policy: Option<FocusTraversalPolicyRef>,
     /// Whether the native view owns focus, independently of its widget subtree.
     view_has_focus: bool,
     /// Retains the observer identity for removal on disposal.
@@ -187,7 +187,10 @@ pub struct ViewState {
 impl ViewState {
     /// The focus scope node this view's subtree is scoped by.
     fn scope_node(self: Handle<Self>, app: &App) -> Handle<FocusScopeNode> {
-        app.get(self).scope_node.expect("created in init_state")
+        app.get(self)
+            .scope_node
+            .handle()
+            .expect("created in init_state")
     }
 
     /// Requests native focus when the framework focuses a descendant of this view.
@@ -216,7 +219,11 @@ impl WidgetsBindingObserverObject for ViewState {
         match event.state {
             ViewFocusState::Focused => {
                 let scope = self.scope_node(app).as_node();
-                let policy = app.get(self).policy.expect("created in init_state");
+                let policy = app
+                    .get(self)
+                    .policy
+                    .handle()
+                    .expect("created in init_state");
                 let next_focus = match event.direction {
                     ViewFocusDirection::Forward => {
                         policy.find_first_focus(app, scope, true).unwrap_or(scope)
@@ -242,9 +249,9 @@ impl State for ViewState {
     fn init_state(self: Handle<Self>, app: &mut App) {
         let scope_node = FocusScopeNode::new(app);
         scope_node.set_debug_label(app, Some("View Scope".to_string()));
-        let policy = ReadingOrderTraversalPolicy::new(app).as_policy();
+        let policy = ReadingOrderTraversalPolicy::new(app).into_erased();
         let this = app.get_mut(self);
-        this.scope_node = Some(scope_node);
+        this.scope_node = Some(scope_node.clone());
         this.policy = Some(policy);
         let observer: WidgetsBindingObserverRef = Rc::new(self);
         WidgetsBinding::instance(app).add_observer(app, observer.clone());
@@ -269,9 +276,16 @@ impl State for ViewState {
             let widget = self.widget(app);
             (Rc::clone(&widget.view), widget.child.clone())
         };
-        let scope_node = self.scope_node(app);
-        let policy = app.get(self).policy.expect("created in init_state");
-        let root_scope = FocusManager::instance(app).root_scope(app);
+        let scope_node = app
+            .get(self)
+            .scope_node
+            .clone()
+            .expect("created in init_state");
+        let policy = app.get(self).policy.clone().expect("created in init_state");
+        let root_scope = FocusManager::instance(app)
+            .root_scope(app)
+            .upgrade(app)
+            .expect("the focus manager keeps its root scope");
         // Attach this view's focus subtree directly to the root scope rather than nesting it
         // under an enclosing view's scope (which happens when a view is rendered inside another
         // via a `ViewAnchor`). Each view is an independent focus root: nesting would otherwise
@@ -289,7 +303,7 @@ impl State for ViewState {
             FocusScope::with_external_focus_node(child, scope_node).include_semantics(false),
         )
         .policy(policy)
-        .parent_node(root_scope.as_node());
+        .parent_node(root_scope.into_erased());
         let content = MediaQuery::from_view(None, Rc::clone(&view), scoped);
         RawView::new(view, content).into_widget()
     }
@@ -351,7 +365,7 @@ impl StatelessWidget for RawView {
         RawViewInternal::new(
             Rc::clone(&self.view),
             Rc::new(
-                move |_app: &mut App, _context: BuildContext, owner: Handle<PipelineOwner>| {
+                move |_app: &mut App, _context: BuildContext, owner: Ref<PipelineOwner>| {
                     let scoped = PipelineOwnerScope::new(owner, child.clone());
                     ViewScope::new(Rc::clone(&view), scoped).into_widget()
                 },
@@ -362,7 +376,7 @@ impl StatelessWidget for RawView {
 }
 
 /// Dart's `_RawViewContentBuilder`.
-type RawViewContentBuilder = Rc<dyn Fn(&mut App, BuildContext, Handle<PipelineOwner>) -> WidgetRef>;
+type RawViewContentBuilder = Rc<dyn Fn(&mut App, BuildContext, Ref<PipelineOwner>) -> WidgetRef>;
 
 /// Dart's `_RawViewInternal`: the render object widget behind [`RawView`], keyed by its view
 /// so two views never share an element.
@@ -435,7 +449,7 @@ pub struct RawViewElement {
     render_object_element: RenderObjectElementData,
     /// Dart's `late final _pipelineOwner`, made when the element mounts, where Dart first reads
     /// it: its callbacks reach this element.
-    pipeline_owner: Option<Handle<PipelineOwner>>,
+    pipeline_owner: Option<Ref<PipelineOwner>>,
     child: Option<AnyElement>,
     /// Is `None` if the view is currently not attached.
     parent_pipeline_owner: Option<Handle<PipelineOwner>>,
@@ -450,10 +464,11 @@ impl RawViewElement {
             child: None,
             parent_pipeline_owner: None,
         })
+        .into_tree_node(app)
     }
 
     /// Dart's initializer of `_pipelineOwner`. Semantics callbacks wait with accessibility.
-    fn create_pipeline_owner(self: Handle<Self>, app: &mut App) -> Handle<PipelineOwner> {
+    fn create_pipeline_owner(self: Handle<Self>, app: &mut App) -> Ref<PipelineOwner> {
         // The view is the widget's key, so it is this element's for its whole life.
         let view = Self::widget_of(self.as_element().widget(app)).view.id();
         PipelineOwner::new(
@@ -491,6 +506,7 @@ impl RawViewElement {
     pub fn pipeline_owner(self: Handle<Self>, app: &App) -> Handle<PipelineOwner> {
         app.get(self)
             .pipeline_owner
+            .handle()
             .expect("a RawViewElement makes its pipeline owner when it mounts")
     }
 
@@ -498,7 +514,11 @@ impl RawViewElement {
         let builder = Self::widget_of(self.as_element().widget(app))
             .builder
             .clone();
-        let owner = self.pipeline_owner(app);
+        let owner = app
+            .get(self)
+            .pipeline_owner
+            .clone()
+            .expect("a RawViewElement makes its pipeline owner when it mounts");
         let built = builder(app, self.as_element(), owner);
         let child = app.get(self).child;
         let child = self
@@ -515,7 +535,11 @@ impl RawViewElement {
         debug_assert!(app.get(self).parent_pipeline_owner.is_none());
         let parent_pipeline_owner = parent_pipeline_owner
             .unwrap_or_else(|| View::pipeline_owner_of(app, self.as_element()));
-        let owner = self.pipeline_owner(app);
+        let owner = app
+            .get(self)
+            .pipeline_owner
+            .clone()
+            .expect("a RawViewElement makes its pipeline owner when it mounts");
         parent_pipeline_owner.adopt_child(app, owner);
         let render_view = self.render_view(app);
         RendererBinding::instance(app).add_render_view(app, render_view);
@@ -593,7 +617,7 @@ impl Element for RawViewElement {
     ) {
         RenderObjectElement::mount(self, app, parent, new_slot);
         let owner = self.create_pipeline_owner(app);
-        app.get_mut(self).pipeline_owner = Some(owner);
+        app.get_mut(self).pipeline_owner = Some(owner.clone());
         debug_assert!(owner.root_node(app).is_none());
         let render_view = self.render_view(app);
         owner.set_root_node(app, Some(render_view.as_object()));
@@ -644,9 +668,7 @@ impl Element for RawViewElement {
     fn unmount(self: Handle<Self>, app: &mut App) {
         // Dart disposes its pipeline owner here; ours has no resources beyond the arena
         // slot, which goes with the element.
-        let owner = self.pipeline_owner(app);
         RenderObjectElement::unmount(self, app);
-        app.destroy(owner);
     }
 
     fn update_parent_data(self: Handle<Self>, app: &mut App, parent_data_element: AnyElement) {
@@ -736,14 +758,14 @@ impl InheritedWidget for ViewScope {
 /// Dart's `_PipelineOwnerScope`: the pipeline owner a subtree's views attach to.
 #[derive(Debug)]
 pub struct PipelineOwnerScope {
-    pub pipeline_owner: Handle<PipelineOwner>,
+    pub pipeline_owner: Ref<PipelineOwner>,
     pub child: WidgetRef,
 }
 
 impl PipelineOwnerScope {
     /// Creates a `PipelineOwnerScope`; Dart's arguments are all required.
     pub fn new<K>(
-        pipeline_owner: Handle<PipelineOwner>,
+        pipeline_owner: Ref<PipelineOwner>,
         child: impl IntoWidget<K>,
     ) -> PipelineOwnerScope {
         PipelineOwnerScope {
@@ -956,6 +978,7 @@ impl MultiChildComponentElement {
             forgotten_view_elements: HashSet::new(),
             child_element: None,
         })
+        .into_tree_node(app)
     }
 
     /// The views and the child the widget carries, whichever of the two widget types it is.
@@ -1134,6 +1157,7 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
     use std::time::Duration;
+    use waft_foundation::Ref;
 
     use waft_embedder::ViewId;
     use waft_foundation::{App, AppCell, Handle};
@@ -1209,10 +1233,10 @@ mod tests {
                 waft_embedder::TextDirection::Ltr,
                 Row::new().children(vec![
                     Focus::new(SizedBox::new().width(20.0).height(20.0))
-                        .focus_node(first.as_node())
+                        .focus_node(first.erase())
                         .into_widget(),
                     Focus::new(SizedBox::new().width(20.0).height(20.0))
-                        .focus_node(last.as_node())
+                        .focus_node(last.erase())
                         .into_widget(),
                 ]),
             )
@@ -1332,7 +1356,7 @@ mod tests {
     struct TickingState {
         state: StateData<Ticking>,
         single_ticker_provider: SingleTickerProviderStateMixinData,
-        ticker: Option<Handle<Ticker>>,
+        ticker: Option<Ref<Ticker>>,
     }
 
     impl SingleTickerProviderStateMixin for TickingState {

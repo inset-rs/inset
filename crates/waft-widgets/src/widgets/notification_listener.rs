@@ -126,6 +126,7 @@ impl<T: ?Sized + NotificationTarget> NotificationElement<T> {
             component: ComponentElementData::default(),
             marker: PhantomData,
         })
+        .into_tree_node(app)
     }
 
     fn widget(self: Handle<Self>, app: &App) -> &NotificationListener<T> {

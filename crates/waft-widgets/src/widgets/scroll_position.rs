@@ -10,8 +10,8 @@ use std::time::Duration;
 use waft_animation::Curve;
 use waft_embedder::{Rect, clamp_double};
 use waft_foundation::{
-    App, CompleterFuture, Handle, HandleId, Listenable, ListenableObject, Listener,
-    PRECISION_ERROR_TOLERANCE, ValueNotifier,
+    App, CompleterFuture, Handle, HandleId, Listenable, ListenableObject, Listener, OptionRetained,
+    PRECISION_ERROR_TOLERANCE, Retained, ValueNotifier,
 };
 use waft_gestures::{Drag, DragStartDetails};
 use waft_painting::{Axis, AxisDirection, axis_direction_to_axis, transform_rect};
@@ -24,7 +24,7 @@ use waft_scheduler::{FrameCallback, SchedulerBinding, SchedulerPhase};
 use crate::framework::{BuildContext, Notification};
 use crate::view::View;
 use crate::widgets::page_storage::PageStorage;
-use crate::widgets::scroll_activity::{AnyScrollActivity, ScrollHoldController};
+use crate::widgets::scroll_activity::{AnyScrollActivity, ScrollActivityRef, ScrollHoldController};
 use crate::widgets::scroll_context::ScrollContext;
 use crate::widgets::scroll_metrics::{FixedScrollMetrics, ScrollMetrics};
 use crate::widgets::scroll_notification::{
@@ -32,6 +32,7 @@ use crate::widgets::scroll_notification::{
     ViewportNotificationMixin,
 };
 use crate::widgets::scroll_physics::ScrollPhysicsRef;
+use waft_foundation::Ref;
 
 /// The policy to use when applying the `alignment` parameter of
 /// [`ScrollPosition::ensure_visible`].
@@ -77,8 +78,8 @@ pub struct ScrollPositionData {
     last_metrics: Option<Rc<dyn ScrollMetrics>>,
     have_scheduled_update_notification: bool,
     last_axis: Option<Axis>,
-    is_scrolling_notifier: Handle<ValueNotifier<bool>>,
-    activity: Option<AnyScrollActivity>,
+    is_scrolling_notifier: Ref<ValueNotifier<bool>>,
+    activity: Option<ScrollActivityRef>,
 }
 
 impl ScrollPositionData {
@@ -589,7 +590,9 @@ pub trait ScrollPosition: ViewportOffset {
     /// Listeners added by stateful widgets should be removed in the widget's
     /// `State::dispose` method.
     fn is_scrolling_notifier(self: Handle<Self>, app: &App) -> Handle<ValueNotifier<bool>> {
-        self.scroll_position_data(app).is_scrolling_notifier
+        self.scroll_position_data(app)
+            .is_scrolling_notifier
+            .handle()
     }
 
     /// Changes the scrolling position based on a pointer signal from current
@@ -640,7 +643,7 @@ pub trait ScrollPosition: ViewportOffset {
     ///
     /// Call [`begin_activity`](Self::begin_activity) to change the current activity.
     fn activity(self: Handle<Self>, app: &App) -> Option<AnyScrollActivity> {
-        self.scroll_position_data(app).activity
+        self.scroll_position_data(app).activity.handle()
     }
 
     /// Change the current [`activity`](Self::activity), disposing of the old one and
@@ -649,7 +652,7 @@ pub trait ScrollPosition: ViewportOffset {
     /// If the argument is `None`, this method has no effect. This is convenient for
     /// cases where the new activity is obtained from another method, and that
     /// method might return `None`.
-    fn begin_activity(self: Handle<Self>, app: &mut App, new_activity: Option<AnyScrollActivity>) {
+    fn begin_activity(self: Handle<Self>, app: &mut App, new_activity: Option<ScrollActivityRef>) {
         ScrollPositionBase::begin_activity(self, app, new_activity);
     }
 
@@ -816,10 +819,9 @@ impl ScrollPositionBase {
         debug_assert!(this.activity(app).is_none());
         debug_assert!(other.activity(app).is_some());
         let activity = other
-            .activity(app)
+            .take_activity(app)
             .expect("the old position has an activity");
-        this.scroll_position_data_mut(app).activity = Some(activity);
-        other.take_activity(app);
+        this.scroll_position_data_mut(app).activity = Some(activity.clone());
         if other.type_id() != TypeId::of::<P>() {
             activity.reset_activity(app);
         }
@@ -1043,12 +1045,14 @@ impl ScrollPositionBase {
                 // Dart's microtask holds the position, and through it its context, until it runs
                 // (scroll_position.dart:678-680): a scrollable disposed in this frame stays
                 // readable, its notification context `null` (scrollable.dart:603), so nothing is
-                // sent (scroll_position.dart:1089). A position is never destroyed, so its context
-                // is all there is to keep.
-                let context_retained = app.retain_id(this.context(app).handle_id());
+                // sent (scroll_position.dart:1089).
+                let position = this
+                    .upgrade(app)
+                    .expect("a position laid out is kept by its owner");
+                let context = this.context(app).handle_id().upgrade(app);
                 app.schedule_microtask(Listener::new(move |app| {
-                    let _context_retained = &context_retained;
-                    P::did_update_scroll_metrics(this, app);
+                    let _context = &context;
+                    P::did_update_scroll_metrics(position.handle(), app);
                 }));
                 this.scroll_position_data_mut(app)
                     .have_scheduled_update_notification = true;
@@ -1227,11 +1231,12 @@ impl ScrollPositionBase {
     pub fn begin_activity<P: ScrollPosition>(
         this: Handle<P>,
         app: &mut App,
-        new_activity: Option<AnyScrollActivity>,
+        new_activity: Option<ScrollActivityRef>,
     ) {
-        let Some(new_activity) = new_activity else {
+        let Some(new_activity_ref) = new_activity else {
             return;
         };
+        let new_activity = new_activity_ref.handle();
         let was_scrolling;
         let old_ignore_pointer;
         if let Some(activity) = this.activity(app) {
@@ -1246,7 +1251,7 @@ impl ScrollPositionBase {
             old_ignore_pointer = false;
             was_scrolling = false;
         }
-        this.scroll_position_data_mut(app).activity = Some(new_activity);
+        this.scroll_position_data_mut(app).activity = Some(new_activity_ref);
         let should_ignore_pointer = new_activity.should_ignore_pointer(app);
         if old_ignore_pointer != should_ignore_pointer {
             this.context(app)
@@ -1451,7 +1456,7 @@ struct ScrollPositionVTable {
     have_dimensions: fn(&App, HandleId) -> bool,
     should_ignore_pointer: fn(&App, HandleId) -> bool,
     absorb: fn(&mut App, HandleId, AnyScrollPosition),
-    take_activity: fn(&mut App, HandleId),
+    take_activity: fn(&mut App, HandleId) -> Option<ScrollActivityRef>,
     set_pixels: fn(&mut App, HandleId, f64) -> f64,
     correct_pixels: fn(&mut App, HandleId, f64),
     correct_by: fn(&mut App, HandleId, f64),
@@ -1470,7 +1475,7 @@ struct ScrollPositionVTable {
     drag: fn(&mut App, HandleId, DragStartDetails, Listener) -> Rc<dyn Drag>,
     restore_offset: fn(&mut App, HandleId, f64, bool),
     activity: fn(&App, HandleId) -> Option<AnyScrollActivity>,
-    begin_activity: fn(&mut App, HandleId, Option<AnyScrollActivity>),
+    begin_activity: fn(&mut App, HandleId, Option<ScrollActivityRef>),
     did_start_scroll: fn(&mut App, HandleId),
     did_update_scroll_position_by: fn(&mut App, HandleId, f64),
     did_end_scroll: fn(&mut App, HandleId),
@@ -1513,7 +1518,9 @@ impl ScrollPositionVTable {
             should_ignore_pointer: |app, id| P::should_ignore_pointer(resolve(id), app),
             absorb: |app, id, other| P::absorb(resolve(id), app, other),
             take_activity: |app, id| {
-                P::scroll_position_data_mut(resolve::<P>(id), app).activity = None;
+                P::scroll_position_data_mut(resolve::<P>(id), app)
+                    .activity
+                    .take()
             },
             set_pixels: |app, id, pixels| P::set_pixels(resolve(id), app, pixels),
             correct_pixels: |app, id, value| P::correct_pixels(resolve(id), app, value),
@@ -1584,6 +1591,30 @@ impl ScrollPositionVTable {
 pub struct AnyScrollPosition {
     id: HandleId,
     vtable: &'static ScrollPositionVTable,
+}
+
+impl From<AnyScrollPosition> for HandleId {
+    fn from(handle: AnyScrollPosition) -> HandleId {
+        handle.id
+    }
+}
+
+/// A field Dart types as the erased object, kept: AnyScrollPosition with its count.
+pub type ScrollPositionRef = Retained<AnyScrollPosition>;
+
+/// A kept object erases to a [`ScrollPositionRef`] with [`Retained::erase`]: Dart's upcast.
+impl<T: ScrollPosition> From<Handle<T>> for AnyScrollPosition {
+    fn from(handle: Handle<T>) -> AnyScrollPosition {
+        handle.as_scroll_position()
+    }
+}
+
+/// A kept position erases to a `ViewportOffsetRef` with [`Retained::erase`]: Dart's upcast of a
+/// `ScrollPosition` to the `ViewportOffset` a viewport keeps.
+impl From<AnyScrollPosition> for AnyViewportOffset {
+    fn from(position: AnyScrollPosition) -> AnyViewportOffset {
+        position.as_viewport_offset()
+    }
 }
 
 impl AnyScrollPosition {
@@ -1722,9 +1753,9 @@ impl AnyScrollPosition {
         (self.vtable.absorb)(app, self.id, other);
     }
 
-    /// Dart's `other._activity = null` inside `absorb`.
-    fn take_activity(self, app: &mut App) {
-        (self.vtable.take_activity)(app, self.id);
+    /// Dart's `other.activity` read and then `other._activity = null` inside `absorb`.
+    fn take_activity(self, app: &mut App) -> Option<ScrollActivityRef> {
+        (self.vtable.take_activity)(app, self.id)
     }
 
     /// See [`ScrollPosition::set_pixels`].
@@ -1868,7 +1899,7 @@ impl AnyScrollPosition {
     }
 
     /// See [`ScrollPosition::begin_activity`].
-    pub fn begin_activity(self, app: &mut App, new_activity: Option<AnyScrollActivity>) {
+    pub fn begin_activity(self, app: &mut App, new_activity: Option<ScrollActivityRef>) {
         (self.vtable.begin_activity)(app, self.id, new_activity);
     }
 

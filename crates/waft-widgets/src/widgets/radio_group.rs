@@ -9,7 +9,8 @@ use std::rc::Rc;
 
 use waft_embedder::SemanticsRole;
 use waft_foundation::{
-    App, ChangeNotifier, ChangeNotifierData, Handle, HandleId, Listener, ValueChanged,
+    App, ChangeNotifier, ChangeNotifierData, Handle, HandleId, Listener, OptionRetained, Ref,
+    ValueChanged,
 };
 use waft_services::{KeyEvent, LogicalKeyboardKey};
 
@@ -21,12 +22,12 @@ use crate::widgets::basic::Semantics;
 use crate::widgets::focus_manager::{AnyFocusNode, KeyEventResult};
 use crate::widgets::focus_traversal::{
     DirectionalFocusTraversalPolicyMixin, DirectionalFocusTraversalPolicyMixinData,
-    FocusTraversalGroup, FocusTraversalPolicy, FocusTraversalPolicyData,
+    FocusTraversalGroup, FocusTraversalPolicy, FocusTraversalPolicyData, FocusTraversalPolicyRef,
     ReadingOrderTraversalPolicy,
 };
 use crate::widgets::shortcuts::{
     ShortcutActivatorRef, ShortcutManagerBase, ShortcutManagerData, ShortcutManagerKeypress,
-    ShortcutMap, Shortcuts, SingleActivator,
+    ShortcutManagerRef, ShortcutMap, Shortcuts, SingleActivator,
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -449,8 +450,8 @@ impl<T: Clone + PartialEq + 'static> StatefulWidget for RadioGroup<T> {
 /// Dart's `_RadioGroupState`.
 pub struct RadioGroupState<T: Clone + PartialEq + 'static> {
     state: StateData<RadioGroup<T>>,
-    radio_group_shortcut_manager: Option<Handle<RadioGroupShortcutManager<T>>>,
-    policy: Option<Handle<SkipUnselectedRadioPolicy<T>>>,
+    radio_group_shortcut_manager: Option<Ref<RadioGroupShortcutManager<T>>>,
+    policy: Option<Ref<SkipUnselectedRadioPolicy<T>>>,
     radios: Vec<AnyRadioClient<T>>,
 }
 
@@ -612,31 +613,43 @@ impl<T: Clone + PartialEq + 'static> State for RadioGroupState<T> {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        if let Some(manager) = app.get(self).radio_group_shortcut_manager {
+        if let Some(manager) = app.get(self).radio_group_shortcut_manager.handle() {
             app.get_mut(manager).change_notifier.dispose();
         }
     }
 
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
-        let manager = app
+        let manager: ShortcutManagerRef = app
             .get(self)
             .radio_group_shortcut_manager
+            .as_ref()
+            .expect("created in init_state")
+            .erase();
+        let policy: FocusTraversalPolicyRef = app
+            .get(self)
+            .policy
+            .as_ref()
+            .expect("created in init_state")
+            .erase();
+        let typed_policy = app
+            .get(self)
+            .policy
+            .handle()
             .expect("created in init_state");
-        let policy = app.get(self).policy.expect("created in init_state");
         let group_value = self.widget(app).group_value.clone();
-        policy.set_group_value(app, group_value.clone());
+        typed_policy.set_group_value(app, group_value.clone());
         let child = self.widget(app).child.clone();
         Semantics::new()
             .container(true)
             .role(SemanticsRole::RadioGroup)
             .child(Shortcuts::manager(
-                manager.as_shortcut_manager(),
+                manager,
                 FocusTraversalGroup::new(RadioGroupStateScope {
                     state: self,
                     group_value,
                     child,
                 })
-                .policy(policy.as_policy()),
+                .policy(policy),
             ))
             .into_widget()
     }
@@ -651,10 +664,7 @@ pub struct RadioGroupShortcutManager<T: Clone + PartialEq + 'static> {
 }
 
 impl<T: Clone + PartialEq + 'static> RadioGroupShortcutManager<T> {
-    fn new(
-        app: &mut App,
-        state: Handle<RadioGroupState<T>>,
-    ) -> Handle<RadioGroupShortcutManager<T>> {
+    fn new(app: &mut App, state: Handle<RadioGroupState<T>>) -> Ref<RadioGroupShortcutManager<T>> {
         app.create(RadioGroupShortcutManager {
             change_notifier: ChangeNotifierData::new(),
             shortcut_manager: ShortcutManagerData::new(),
@@ -739,10 +749,7 @@ pub struct SkipUnselectedRadioPolicy<T: Clone + PartialEq + 'static> {
 }
 
 impl<T: Clone + PartialEq + 'static> SkipUnselectedRadioPolicy<T> {
-    fn new(
-        app: &mut App,
-        state: Handle<RadioGroupState<T>>,
-    ) -> Handle<SkipUnselectedRadioPolicy<T>> {
+    fn new(app: &mut App, state: Handle<RadioGroupState<T>>) -> Ref<SkipUnselectedRadioPolicy<T>> {
         app.create(SkipUnselectedRadioPolicy {
             policy: FocusTraversalPolicyData::new(),
             directional: DirectionalFocusTraversalPolicyMixinData::new(),
@@ -843,7 +850,7 @@ mod tests {
     use waft_services::{HardwareKeyboard, KeyDownEvent, LogicalKeyboardKey, PhysicalKeyboardKey};
 
     use super::*;
-    use crate::widgets::actions::{Action, Actions, VoidCallbackAction};
+    use crate::widgets::actions::{Actions, VoidCallbackAction};
     use crate::widgets::basic::{Directionality, Positioned, SizedBox, Stack};
     use crate::widgets::focus_manager::tests::{app_with_view, mount};
     use crate::widgets::focus_manager::{FocusNode, FocusNodeLeaf, primary_focus};
@@ -873,12 +880,15 @@ mod tests {
     struct TestRadioState {
         state: StateData<TestRadio>,
         radio_client: RadioClientData<u32>,
-        focus_node: Option<Handle<FocusNode>>,
+        focus_node: Option<Ref<FocusNode>>,
     }
 
     impl TestRadioState {
         fn node(self: Handle<Self>, app: &App) -> Handle<FocusNode> {
-            app.get(self).focus_node.expect("created in init_state")
+            app.get(self)
+                .focus_node
+                .handle()
+                .expect("created in init_state")
         }
     }
 
@@ -929,7 +939,12 @@ mod tests {
         }
 
         fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
-            let node = self.node(app).as_node();
+            let node: crate::widgets::focus_manager::FocusNodeRef = app
+                .get(self)
+                .focus_node
+                .as_ref()
+                .expect("created in init_state")
+                .erase();
             let enabled = self.widget(app).enabled;
             let rect = self.widget(app).rect;
             Positioned::from_rect(
@@ -987,7 +1002,7 @@ mod tests {
                 Actions::new(
                     HashMap::from([(
                         TypeId::of::<VoidCallbackIntent>(),
-                        Action::as_action(void_callback_action),
+                        void_callback_action.erase(),
                     )]),
                     group,
                 ),
@@ -1099,6 +1114,7 @@ mod tests {
             .borrow()
             .get(harness.state)
             .policy
+            .handle()
             .expect("created in init_state");
         let sorted =
             policy.sort_descendants(&mut harness.cell.borrow_mut(), nodes.clone(), nodes[0]);

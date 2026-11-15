@@ -361,6 +361,10 @@ fn a_different_widget_type_disposes_the_old_subtree_at_finalize() {
     assert!(!app.get(state).disposed, "dispose waits for finalize_tree");
     harness.pump(&mut app);
     assert_eq!(old_element.lifecycle(&app), ElementLifecycle::Defunct);
+    // The tree released the old subtree; the checkpoint frees it.
+    drop(app);
+    cell.checkpoint();
+    let app = cell.borrow();
     assert!(
         !app.contains(state),
         "the state slot is freed after dispose"

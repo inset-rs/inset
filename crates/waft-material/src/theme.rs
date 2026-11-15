@@ -6,7 +6,7 @@ use std::time::Duration;
 use waft_animation::Animatable;
 use waft_cupertino::{CupertinoTheme, CupertinoThemeData, InheritedCupertinoTheme};
 use waft_embedder::Brightness;
-use waft_foundation::{App, Handle};
+use waft_foundation::{App, Handle, Ref};
 use waft_painting::AnyColor;
 use waft_scheduler::{Ticker, TickerCallback, TickerProviderObject};
 use waft_widgets::{
@@ -458,7 +458,7 @@ impl SingleTickerProviderStateMixin for AnimatedThemeState {
 }
 
 impl TickerProviderObject for AnimatedThemeState {
-    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+    fn create_ticker(self: Handle<Self>, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
         SingleTickerProviderStateMixin::create_ticker(self, app, on_tick)
     }
 }

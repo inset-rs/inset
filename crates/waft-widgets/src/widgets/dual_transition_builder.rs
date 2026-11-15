@@ -4,10 +4,10 @@ use std::fmt::{self, Debug};
 use std::rc::Rc;
 
 use waft_animation::{
-    Animation, AnimationStatus, AnimationStatusListener, AnyAnimation, ProxyAnimation,
-    ReverseAnimation, k_always_complete_animation, k_always_dismissed_animation,
+    AnimationRef, AnimationStatus, AnimationStatusListener, ProxyAnimation, ReverseAnimation,
+    k_always_complete_animation, k_always_dismissed_animation,
 };
-use waft_foundation::{App, Handle, RetainedHandleId};
+use waft_foundation::{App, Handle, OptionRetained, Ref};
 
 use crate::framework::{
     BuildContext, IntoWidget, KeyRef, State, StateData, StatefulWidget, WidgetRef,
@@ -27,7 +27,7 @@ use crate::framework::{
 /// widget tree avoids rebuilding it for every frame of the animation and
 /// can improve performance significantly in some cases.
 pub type AnimatedTransitionBuilder =
-    Rc<dyn Fn(&mut App, BuildContext, AnyAnimation<f64>, Option<&WidgetRef>) -> WidgetRef>;
+    Rc<dyn Fn(&mut App, BuildContext, AnimationRef<f64>, Option<&WidgetRef>) -> WidgetRef>;
 
 /// A transition builder that animates its [`child`](Self::child) based on the
 /// [`AnimationStatus`] of the provided [`animation`](Self::animation).
@@ -51,7 +51,7 @@ pub struct DualTransitionBuilder {
     /// When this animation runs forward, the [`child`](Self::child) transitions as specified
     /// by [`forward_builder`](Self::forward_builder). When it runs in reverse, the child
     /// transitions according to [`reverse_builder`](Self::reverse_builder).
-    pub animation: AnyAnimation<f64>,
+    pub animation: AnimationRef<f64>,
 
     /// A builder for the transition that makes [`child`](Self::child) appear on screen.
     ///
@@ -115,18 +115,18 @@ impl Debug for DualTransitionBuilder {
 impl DualTransitionBuilder {
     /// Creates a [`DualTransitionBuilder`].
     pub fn new(
-        animation: AnyAnimation<f64>,
+        animation: AnimationRef<f64>,
         forward_builder: impl Fn(
             &mut App,
             BuildContext,
-            AnyAnimation<f64>,
+            AnimationRef<f64>,
             Option<&WidgetRef>,
         ) -> WidgetRef
         + 'static,
         reverse_builder: impl Fn(
             &mut App,
             BuildContext,
-            AnyAnimation<f64>,
+            AnimationRef<f64>,
             Option<&WidgetRef>,
         ) -> WidgetRef
         + 'static,
@@ -166,9 +166,6 @@ impl StatefulWidget for DualTransitionBuilder {
             effective_animation_status: AnimationStatus::Dismissed,
             forward_animation: None,
             reverse_animation: None,
-            reverse_animation_parent: None,
-            listened_animation: None,
-            reversed_animation: None,
         }
     }
 }
@@ -176,20 +173,12 @@ impl StatefulWidget for DualTransitionBuilder {
 /// Dart's `_DualTransitionBuilderState`.
 ///
 /// The two proxies are Dart's field initialisers; they need the `App`, so `init_state` makes
-/// them before anything reads them. `reverse_animation_parent` is the `ReverseAnimation`
-/// Dart's `_updateAnimations` allocates, kept to free it when the proxy lets go of it.
-///
-/// The widget's animation may be one a build made and freed at once (a page transition's
-/// `ReverseAnimation` of the secondary animation), so the state retains it while it listens
-/// to it and while its `ReverseAnimation` reverses it, as Dart's references keep it alive.
+/// them before anything reads them.
 pub struct DualTransitionBuilderState {
     state: StateData<DualTransitionBuilder>,
     effective_animation_status: AnimationStatus,
-    forward_animation: Option<Handle<ProxyAnimation>>,
-    reverse_animation: Option<Handle<ProxyAnimation>>,
-    reverse_animation_parent: Option<Handle<ReverseAnimation>>,
-    listened_animation: Option<RetainedHandleId>,
-    reversed_animation: Option<RetainedHandleId>,
+    forward_animation: Option<Ref<ProxyAnimation>>,
+    reverse_animation: Option<Ref<ProxyAnimation>>,
 }
 
 impl Debug for DualTransitionBuilderState {
@@ -203,12 +192,14 @@ impl DualTransitionBuilderState {
     fn forward_animation(self: Handle<Self>, app: &App) -> Handle<ProxyAnimation> {
         app.get(self)
             .forward_animation
+            .handle()
             .expect("created in init_state")
     }
 
     fn reverse_animation(self: Handle<Self>, app: &App) -> Handle<ProxyAnimation> {
         app.get(self)
             .reverse_animation
+            .handle()
             .expect("created in init_state")
     }
 
@@ -222,11 +213,9 @@ impl DualTransitionBuilderState {
     }
 
     fn update_animations(self: Handle<Self>, app: &mut App) {
-        let animation = self.widget(app).animation;
+        let animation = self.widget(app).animation.clone();
         let forward_animation = self.forward_animation(app);
         let reverse_animation = self.reverse_animation(app);
-        let old_reverse_parent = app.get_mut(self).reverse_animation_parent.take();
-        let old_reversed_animation = app.get_mut(self).reversed_animation.take();
         match app.get(self).effective_animation_status {
             AnimationStatus::Dismissed | AnimationStatus::Forward => {
                 forward_animation.set_parent(app, Some(animation));
@@ -236,32 +225,9 @@ impl DualTransitionBuilderState {
             AnimationStatus::Reverse | AnimationStatus::Completed => {
                 let complete = k_always_complete_animation(app);
                 forward_animation.set_parent(app, Some(complete));
-                let reversed = app.create(ReverseAnimation::new(animation));
-                let retained = app.retain_id(animation.id());
-                let state = app.get_mut(self);
-                state.reverse_animation_parent = Some(reversed);
-                state.reversed_animation = Some(retained);
-                reverse_animation.set_parent(app, Some(reversed.as_animation()));
+                let reversed = ReverseAnimation::new(app, animation);
+                reverse_animation.set_parent(app, Some(reversed.into_erased()));
             }
-        }
-        if let Some(old_reverse_parent) = old_reverse_parent {
-            app.destroy(old_reverse_parent);
-        }
-        if let Some(old_reversed_animation) = old_reversed_animation {
-            app.release_id(old_reversed_animation);
-        }
-    }
-
-    /// Keeps `retained`, the animation this state now listens to, and gives back the last.
-    fn replace_listened_animation(
-        self: Handle<Self>,
-        app: &mut App,
-        retained: Option<RetainedHandleId>,
-    ) {
-        if let Some(released) =
-            std::mem::replace(&mut app.get_mut(self).listened_animation, retained)
-        {
-            app.release_id(released);
         }
     }
 }
@@ -301,20 +267,18 @@ impl State for DualTransitionBuilderState {
         let state = app.get_mut(self);
         state.forward_animation = Some(forward_animation);
         state.reverse_animation = Some(reverse_animation);
-        let animation = self.widget(app).animation;
+        let animation = self.widget(app).animation.handle();
         app.get_mut(self).effective_animation_status = animation.status(app);
         animation.add_status_listener(
             app,
             AnimationStatusListener::handle_method(self, Self::animation_listener),
         );
-        let retained = app.retain_id(animation.id());
-        self.replace_listened_animation(app, Some(retained));
         self.update_animations(app);
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &DualTransitionBuilder) {
-        let animation = self.widget(app).animation;
-        if old_widget.animation != animation {
+        let animation = self.widget(app).animation.handle();
+        if old_widget.animation.handle() != animation {
             old_widget.animation.remove_status_listener(
                 app,
                 &AnimationStatusListener::handle_method(self, Self::animation_listener),
@@ -323,28 +287,17 @@ impl State for DualTransitionBuilderState {
                 app,
                 AnimationStatusListener::handle_method(self, Self::animation_listener),
             );
-            let retained = app.retain_id(animation.id());
-            self.replace_listened_animation(app, Some(retained));
             let status = animation.status(app);
             self.animation_listener(app, status);
         }
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        let animation = self.widget(app).animation;
+        let animation = self.widget(app).animation.handle();
         animation.remove_status_listener(
             app,
             &AnimationStatusListener::handle_method(self, Self::animation_listener),
         );
-        self.replace_listened_animation(app, None);
-        // Dart's collector frees the two proxies and the `ReverseAnimation` with the state;
-        // they linger for the transitions built from them, which hold them while they unmount.
-        let reverse_animation_parent = app.get_mut(self).reverse_animation_parent.take();
-        app.destroy_lingering(self.forward_animation(app));
-        app.destroy_lingering(self.reverse_animation(app));
-        if let Some(reverse_animation_parent) = reverse_animation_parent {
-            app.destroy_lingering(reverse_animation_parent);
-        }
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -352,8 +305,17 @@ impl State for DualTransitionBuilderState {
         let forward_builder = Rc::clone(&widget.forward_builder);
         let reverse_builder = Rc::clone(&widget.reverse_builder);
         let child = widget.child.clone();
-        let forward_animation = self.forward_animation(app).as_animation();
-        let reverse_animation = self.reverse_animation(app).as_animation();
+        let state = app.get(self);
+        let forward_animation: AnimationRef<f64> = state
+            .forward_animation
+            .as_ref()
+            .expect("created in init_state")
+            .erase();
+        let reverse_animation: AnimationRef<f64> = state
+            .reverse_animation
+            .as_ref()
+            .expect("created in init_state")
+            .erase();
         let reversed = reverse_builder(app, context, reverse_animation, child.as_ref());
         forward_builder(app, context, forward_animation, Some(&reversed))
     }
@@ -363,9 +325,11 @@ impl State for DualTransitionBuilderState {
 mod tests {
     use std::cell::Cell;
     use std::time::Duration;
+    use waft_animation::Drive;
     use waft_foundation::AppCell;
+    use waft_foundation::Ref;
 
-    use waft_animation::{AnimationBehavior, AnimationController, Tween};
+    use waft_animation::{AnimationBehavior, AnimationController, AnyAnimation, Tween};
     use waft_embedder::Color;
     use waft_scheduler::{Ticker, TickerCallback, TickerProvider};
 
@@ -379,7 +343,7 @@ mod tests {
     struct TestVSync;
 
     impl TickerProvider for TestVSync {
-        fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Handle<Ticker> {
+        fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
             Ticker::new(app, on_tick, None)
         }
     }
@@ -402,7 +366,7 @@ mod tests {
         }
     }
 
-    fn controller(app: &mut App, value: Option<f64>) -> Handle<AnimationController> {
+    fn controller(app: &mut App, value: Option<f64>) -> Ref<AnimationController> {
         AnimationController::create(
             app,
             value,
@@ -415,7 +379,7 @@ mod tests {
         )
     }
 
-    fn tree(animation: AnyAnimation<f64>, observed: &Observed, child: WidgetRef) -> WidgetRef {
+    fn tree(animation: AnimationRef<f64>, observed: &Observed, child: WidgetRef) -> WidgetRef {
         let scale = Rc::clone(&observed.scale);
         let opacity = Rc::clone(&observed.opacity);
         Center::new()
@@ -423,7 +387,7 @@ mod tests {
                 DualTransitionBuilder::new(
                     animation,
                     move |_app, _context, animation, child| {
-                        scale.set(Some(animation));
+                        scale.set(Some(animation.handle()));
                         ScaleTransition::new(animation)
                             .child(child.expect("a child").clone())
                             .into_widget()
@@ -431,7 +395,7 @@ mod tests {
                     move |app, _context, animation, child| {
                         let tween = Tween::new(app, Some(1.0), Some(0.0));
                         let faded = animation.drive(app, tween);
-                        opacity.set(Some(faded));
+                        opacity.set(Some(faded.handle()));
                         FadeTransition::new(faded)
                             .child(child.expect("a child").clone())
                             .into_widget()
@@ -461,13 +425,9 @@ mod tests {
     }
 
     /// Mounts the tree for `controller` and runs the frame that builds it.
-    fn mount(
-        cell: &AppCell,
-        controller: Handle<AnimationController>,
-        child: WidgetRef,
-    ) -> Observed {
+    fn mount(cell: &AppCell, controller: &Ref<AnimationController>, child: WidgetRef) -> Observed {
         let observed = Observed::default();
-        binding_mount(cell, tree(controller.view(), &observed, child));
+        binding_mount(cell, tree(controller.erase(), &observed, child));
         observed
     }
 
@@ -475,7 +435,7 @@ mod tests {
     fn runs_animations() {
         let cell = binding_cell();
         let controller = controller(&mut cell.borrow_mut(), None);
-        let observed = mount(&cell, controller, green_box());
+        let observed = mount(&cell, &controller, green_box());
         assert_scale_and_opacity(&cell, &observed, 0.0, 1.0);
 
         controller.forward(&mut cell.borrow_mut(), None);
@@ -502,8 +462,8 @@ mod tests {
         controller.dispose(&mut cell.borrow_mut());
     }
 
-    /// Not a Dart case: Dart's collector frees a disposed state's proxies and the
-    /// `ReverseAnimation` it made; here its `dispose` frees them.
+    /// Not a Dart case: the proxies and the `ReverseAnimation` a state made are freed once the
+    /// unmounted tree lets go of them, as Dart's collector frees them.
     #[test]
     fn a_disposed_state_frees_its_proxies_and_reverse_animation() {
         let cell = binding_cell();
@@ -513,13 +473,13 @@ mod tests {
         let tree = {
             let (forward, reverse) = (Rc::clone(&forward), Rc::clone(&reverse));
             DualTransitionBuilder::new(
-                controller.view(),
+                controller.erase(),
                 move |_app, _context, animation, child| {
-                    forward.set(Some(animation));
+                    forward.set(Some(animation.handle()));
                     child.cloned().expect("a child")
                 },
                 move |_app, _context, animation, child| {
-                    reverse.set(Some(animation));
+                    reverse.set(Some(animation.handle()));
                     child.cloned().expect("a child")
                 },
             )
@@ -545,7 +505,7 @@ mod tests {
             assert!(!app.contains(freed), "{freed:?} is freed");
         }
         assert!(
-            app.contains(controller),
+            app.contains(&controller),
             "the widget's animation is its owner's"
         );
     }
@@ -555,7 +515,7 @@ mod tests {
         let cell = binding_cell();
         let controller = controller(&mut cell.borrow_mut(), None);
         let probe = Probe::default();
-        mount(&cell, controller, probe.widget());
+        mount(&cell, &controller, probe.widget());
         assert_eq!((probe.inits.get(), probe.disposes.get()), (1, 0));
 
         controller.forward(&mut cell.borrow_mut(), None);
@@ -576,7 +536,7 @@ mod tests {
     fn does_not_jump_when_interrupted_forward() {
         let cell = binding_cell();
         let controller = controller(&mut cell.borrow_mut(), None);
-        let observed = mount(&cell, controller, green_box());
+        let observed = mount(&cell, &controller, green_box());
         assert_scale_and_opacity(&cell, &observed, 0.0, 1.0);
 
         controller.forward(&mut cell.borrow_mut(), None);
@@ -604,7 +564,7 @@ mod tests {
     fn does_not_jump_when_interrupted_reverse() {
         let cell = binding_cell();
         let controller = controller(&mut cell.borrow_mut(), Some(1.0));
-        let observed = mount(&cell, controller, green_box());
+        let observed = mount(&cell, &controller, green_box());
         assert_scale_and_opacity(&cell, &observed, 1.0, 1.0);
 
         controller.reverse(&mut cell.borrow_mut(), None);
