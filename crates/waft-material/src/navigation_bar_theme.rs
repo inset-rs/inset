@@ -1,7 +1,5 @@
 //! Flutter counterpart: material_ui's `navigation_bar_theme.dart`.
 
-use std::rc::Rc;
-
 use waft_embedder::{Color, lerp_double};
 use waft_foundation::App;
 use waft_painting::{EdgeInsetsGeometry, ShapeBorder, TextStyle};
@@ -261,15 +259,6 @@ impl NavigationBarThemeData {
     }
 }
 
-/// Dart's `==` on a `WidgetStateProperty` field, which no property overrides here.
-fn same_property<T: ?Sized>(a: &Option<Rc<T>>, b: &Option<Rc<T>>) -> bool {
-    match (a, b) {
-        (None, None) => true,
-        (Some(a), Some(b)) => Rc::ptr_eq(a, b),
-        _ => false,
-    }
-}
-
 impl PartialEq for NavigationBarThemeData {
     fn eq(&self, other: &NavigationBarThemeData) -> bool {
         if std::ptr::eq(self, other) {
@@ -282,10 +271,10 @@ impl PartialEq for NavigationBarThemeData {
             && other.surface_tint_color == self.surface_tint_color
             && other.indicator_color == self.indicator_color
             && other.indicator_shape == self.indicator_shape
-            && same_property(&other.label_text_style, &self.label_text_style)
-            && same_property(&other.icon_theme, &self.icon_theme)
+            && other.label_text_style == self.label_text_style
+            && other.icon_theme == self.icon_theme
             && other.label_behavior == self.label_behavior
-            && same_property(&other.overlay_color, &self.overlay_color)
+            && other.overlay_color == self.overlay_color
             && other.label_padding == self.label_padding
     }
 }

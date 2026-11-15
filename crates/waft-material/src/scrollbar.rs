@@ -627,7 +627,9 @@ impl State for MaterialScrollbarState {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        self.hover_animation_controller(app).dispose(app);
+        let hover_animation_controller = self.hover_animation_controller(app);
+        hover_animation_controller.dispose(app);
+        app.destroy_lingering(hover_animation_controller);
         RawScrollbarState::dispose(self, app);
         TickerProviderStateMixin::dispose(self, app);
     }
@@ -869,7 +871,7 @@ pub(crate) mod tests {
             self
         }
 
-        fn get_platform(&self, app: &App, context: BuildContext) -> TargetPlatform {
+        fn get_platform(&self, app: &mut App, context: BuildContext) -> TargetPlatform {
             MaterialScrollBehavior::new().get_platform(app, context)
         }
 
@@ -2716,6 +2718,34 @@ pub(crate) mod tests {
                 Rect::from_ltrb(796.0, 0.0, 800.0, 90.0),
                 0xffbcbcbc,
             );
+        });
+    }
+
+    /// Dart's collector frees the hover controller `_MaterialScrollbarState` makes once the
+    /// state is gone; here the state frees it in its `dispose`.
+    #[test]
+    fn a_disposed_scrollbar_frees_its_hover_controller() {
+        with_main_thread_stack(|| {
+            let mut tester = tester_on(TargetPlatform::Android);
+            let controller = controller(&tester);
+            let theme = ThemeData::new(&tester.cell.borrow());
+            tester.pump_widget(build_boilerplate(Theme::new(
+                theme,
+                Scrollbar::new(scroll_view(Some(controller), 4000.0, 4000.0))
+                    .controller(controller),
+            )));
+            let hover = {
+                let scrollbar = tester.find_by_type::<MaterialScrollbar>()[0];
+                let app = tester.cell.borrow();
+                scrollbar
+                    .state_handle::<MaterialScrollbarState>(&app)
+                    .expect("a MaterialScrollbar is stateful")
+                    .hover_animation_controller(&app)
+            };
+
+            tester.pump_widget(SizedBox::new().into_widget());
+            tester.cell.checkpoint();
+            assert!(!tester.cell.borrow().contains(hover));
         });
     }
 }

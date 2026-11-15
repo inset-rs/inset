@@ -103,6 +103,14 @@ Ported against: 4765bd950d31784578608cfbb0c723453cc49216
   Reason: language — `kCupertinoModalBarrierColor` is a `CupertinoDynamicColor` (colors.rs) and widgets' `ModalRoute::barrier_color` is a plain `Color`.
   Affect: a barrier whose colour was never resolved paints its light value, as Dart's does when the route is pushed outside a `CupertinoTheme`.
 
+- Change: `CupertinoPageTransition`'s delegated transition and `CupertinoDialogRoute`'s transitions free the curve and the driven animations each build makes with `destroy_lingering` once they hand them on, and the page and fullscreen-dialog transition states free their curves and driven animations when they replace them and at `dispose`; the `SlideTransition`, `ScaleTransition` and `DecoratedBoxTransition` that hold them retain them, and a driven animation retains its curve.
+  Reason: language — Dart's collector frees what each build or update replaces, and a static transition builder has no state to keep them in.
+  Affect: a handle to one of them is stale once the transition that holds it has moved to the next build's.
+
+- Change: `CupertinoDialogRoute`'s scale tween is a `ValueTween` constant, where Dart's is a `static final` `Tween`.
+  Reason: language — an arena tween held by a `static` would never be freed (the porting skill's value-tweens pattern).
+  Affect: none beyond the tween's type.
+
 ## sheet.rs → sheet.dart
 
 - Change: Dart's "either scrollableBuilder or builder" assert on `CupertinoSheetRoute` runs on the first build.
@@ -112,6 +120,10 @@ Ported against: 4765bd950d31784578608cfbb0c723453cc49216
 - Change: `CupertinoSheetRoute` points its six transition members at the private sheet-transition trait by hand instead of through macros.
   Reason: language — no mixin linearization, and the trait is private with one implementor.
   Affect: a second route that mixes the trait in repeats the six forwarders, and a missing one falls back to `PageRoute`'s transition without complaint.
+
+- Change: the sheet's delegated transitions and the cover sheet's primary transition free the curve and the driven animations each build makes with `destroy_lingering` once they hand them on, with the radius the clip's builder reads retained by that builder; the sheet transition state frees its curves and driven animations when it replaces them and at `dispose`.
+  Reason: language — Dart's collector frees what each build or update replaces, and the builders are static functions with no state to keep them in.
+  Affect: a handle to one of them is stale once the transition or builder that holds it has moved to the next build's.
 
 ## dialog.rs → dialog.dart
 
@@ -132,6 +144,10 @@ Ported against: 4765bd950d31784578608cfbb0c723453cc49216
 - Change: both the `middle` and `large_title` setters exist on the one `CupertinoNavigationBar` type, each asserting the other is unset.
   Reason: language — two Dart constructors of one class are two associated functions returning the same struct, so a field the other constructor forbids can only be guarded where it is written.
   Affect: writing both `middle` and `large_title` panics in debug, where Dart's two constructors make it unsayable.
+
+- Change: `_NavigationBarComponentsTransition` drives each component's animation through `drive_handed_on`, which frees it with `destroy_lingering` as it hands it to the transition, or the animation driven from it, that retains it; the search bottom frees its cancel fade the same way.
+  Reason: language — Dart's collector frees what each build of the flight's shuttle replaces, and the components transition is a plain object with no state to keep them in.
+  Affect: a handle to a component's animation is stale once the component that holds it has gone, at the end of the flight or when the shuttle rebuilds.
 
 ## checkbox.rs → checkbox.dart
 
@@ -167,7 +183,7 @@ Ported against: 4765bd950d31784578608cfbb0c723453cc49216
 - text_field.rs: `CupertinoTextFieldState` as `AutofillClient`; `EditableText` is the autofill client until then. Trigger: autofill.
 - adaptive_text_selection_toolbar.rs: `CupertinoAdaptiveTextSelectionToolbar.selectable`. Trigger: `SelectableRegion`.
 - nav_bar.rs: the large-title sliver delegate's `DiagnosticableTreeMixin`. Trigger: diagnostics.
-- route.rs, sheet.rs, nav_bar.rs: a disposed `CurvedAnimation` or driven animation keeps its arena slot. Trigger: an arena-slot lifetime for disposed foundation objects.
+- nav_bar.rs: the searchable sliver bar's persistent-height and large-title-height animations, which each `did_change_dependencies` replaces and never frees, and the transition states' `AnimationController`s (the sheet's stretch controller, the sliver bar's search controller), which `dispose` disposes and never frees. Trigger: an arena-slot lifetime for disposed foundation objects.
 - route.rs: the page routes' `debugLabel` and the edge shadow decoration's diagnostics and `hashCode`. Trigger: `TransitionRoute::debug_label` taking the `App`; diagnostics.
 - route.rs: `anchorPoint` on `CupertinoModalPopupRoute` and `CupertinoDialogRoute`, and the `DisplayFeatureSubScreen` it feeds. Trigger: `display_feature_sub_screen.dart`, which needs `MediaQuery.displayFeatures`.
 - sheet.rs: `showCupertinoSheet`'s deprecated `pageBuilder`, a duplicate of the deprecated `builder`. Trigger: never — port it only if Flutter un-deprecates it.

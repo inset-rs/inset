@@ -10,12 +10,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use waft_animation::{
-    Animatable, Animation, AnyAnimation, CurvedAnimation, Curves, Interval, ProxyAnimation,
-    ReverseAnimation, TweenSequence, TweenSequenceItem, k_always_dismissed_animation,
+    Animatable, Animation, AnimationWithParent, AnyAnimation, CurvedAnimation, Curves, Interval,
+    ProxyAnimation, ReverseAnimation, TweenSequence, TweenSequenceItem, ValueConstantTween,
+    ValueTween, k_always_dismissed_animation,
 };
 use waft_embedder::Radius;
 use waft_embedder::{Color, Offset, Size};
-use waft_foundation::{App, Handle, Listenable};
+use waft_foundation::{App, Handle, HandleId, Listenable};
 use waft_painting::BorderRadius;
 use waft_services::{PredictiveBackEvent, SwipeEdge};
 use waft_widgets::{
@@ -25,7 +26,7 @@ use waft_widgets::{
 };
 
 use crate::page_transitions_theme::{
-    DoubleTween, FadeForwardsPageTransitionsBuilder, OffsetTween, ZoomPageTransitionsBuilder,
+    FadeForwardsPageTransitionsBuilder, ZoomPageTransitionsBuilder,
 };
 
 /// Used by `PageTransitionsTheme` to define a `MaterialPageRoute` page transition animation
@@ -521,6 +522,8 @@ impl StatefulWidget for PredictiveBackSharedElementPageTransition {
             curved_animation_reversed: None,
             position_animation: None,
             last_drag: Offset::ZERO,
+            made_animations: Vec::new(),
+            replaced_curved_animations: Vec::new(),
         }
     }
 }
@@ -554,6 +557,15 @@ pub(crate) struct PredictiveBackSharedElementPageTransitionState {
     position_animation: Option<AnyAnimation<Offset>>,
 
     last_drag: Offset,
+
+    /// The bounce parent and the position animation the last `_updateAnimations` made, which
+    /// Dart's collector frees once the next one replaces them; that one frees them here.
+    made_animations: Vec<HandleId>,
+
+    /// The curved animations, and the reverse animation under one, that
+    /// `_updateCurvedAnimations` replaced; the proxies may still follow them until the next
+    /// `_updateAnimations`, which frees them.
+    replaced_curved_animations: Vec<HandleId>,
 }
 
 impl PredictiveBackSharedElementPageTransitionState {
@@ -589,16 +601,16 @@ impl PredictiveBackSharedElementPageTransitionState {
 
     // Provides a smooth transition between the default radius and the _kDeviceBorderRadius,
     // when the display corner radii are unavailable.
-    const BORDER_RADIUS_TWEEN: DoubleTween = DoubleTween::new(
+    const BORDER_RADIUS_TWEEN: ValueTween<f64> = ValueTween::new(
         0.0,
         PredictiveBackSharedElementPageTransitionState::K_DEVICE_BORDER_RADIUS,
     );
 
     // The route fades out after commit.
-    const OPACITY_TWEEN: DoubleTween = DoubleTween::new(1.0, 0.0);
+    const OPACITY_TWEEN: ValueTween<f64> = ValueTween::new(1.0, 0.0);
 
     // The route shrinks during the gesture and animates back to normal after commit.
-    const SCALE_TWEEN: DoubleTween = DoubleTween::new(
+    const SCALE_TWEEN: ValueTween<f64> = ValueTween::new(
         1.0,
         PredictiveBackSharedElementPageTransitionState::K_MIN_SCALE,
     );
@@ -677,12 +689,13 @@ impl PredictiveBackSharedElementPageTransitionState {
         animation.set_parent(app, Some(animation_parent));
 
         let bounce_animation_parent = match phase {
-            PredictiveBackPhase::Commit => DoubleTween::new(0.0, last_bounce_animation_value)
+            PredictiveBackPhase::Commit => ValueTween::new(0.0, last_bounce_animation_value)
                 .animate(app, curved_animation.as_animation()),
             _ => app
                 .create(ReverseAnimation::new(widget_animation))
                 .as_animation(),
         };
+        let mut made = vec![bounce_animation_parent.id()];
         self.bounce_animation(app)
             .set_parent(app, Some(bounce_animation_parent));
 
@@ -697,7 +710,7 @@ impl PredictiveBackSharedElementPageTransitionState {
             / PredictiveBackSharedElementPageTransitionState::K_DIVISION_FACTOR)
             - PredictiveBackSharedElementPageTransitionState::K_MARGIN;
         let position_tween = match phase {
-            PredictiveBackPhase::Commit => OffsetTween::new(
+            PredictiveBackPhase::Commit => ValueTween::new(
                 last_drag,
                 Offset::new(
                     screen_size.height()
@@ -713,23 +726,29 @@ impl PredictiveBackSharedElementPageTransitionState {
                     Some(SwipeEdge::Right) => Offset::new(-x_shift, y_shift),
                     None => Offset::new(x_shift, y_shift),
                 };
-                OffsetTween::new(begin, Offset::ZERO)
+                ValueTween::new(begin, Offset::ZERO)
             }
         };
         let position_animation = animation.drive(app, position_tween);
         app.get_mut(self).position_animation = Some(position_animation);
+        made.push(position_animation.id());
+        self.free_replaced_animations(app, made);
+    }
+
+    /// Keeps `made`, what this `_updateAnimations` made, and frees what the last one made and
+    /// what `_updateCurvedAnimations` replaced since; they linger until the next checkpoint,
+    /// for the transitions built from them to move off them.
+    fn free_replaced_animations(self: Handle<Self>, app: &mut App, made: Vec<HandleId>) {
+        let state = app.get_mut(self);
+        let mut replaced = std::mem::replace(&mut state.made_animations, made);
+        replaced.append(&mut state.replaced_curved_animations);
+        for replaced in replaced {
+            app.destroy_lingering(replaced);
+        }
     }
 
     fn update_curved_animations(self: Handle<Self>, app: &mut App) {
-        let state = app.get(self);
-        let (curved_animation, curved_animation_reversed) =
-            (state.curved_animation, state.curved_animation_reversed);
-        if let Some(curved_animation) = curved_animation {
-            curved_animation.dispose(app);
-        }
-        if let Some(curved_animation_reversed) = curved_animation_reversed {
-            curved_animation_reversed.dispose(app);
-        }
+        self.dispose_curved_animations(app);
         let animation = self.widget(app).animation;
         let commit_interval: Rc<dyn waft_animation::Curve> =
             Rc::new(PredictiveBackSharedElementPageTransitionState::k_commit_interval());
@@ -741,6 +760,28 @@ impl PredictiveBackSharedElementPageTransitionState {
         let state = app.get_mut(self);
         state.curved_animation = Some(curved_animation);
         state.curved_animation_reversed = Some(curved_animation_reversed);
+    }
+
+    /// Dart's `_curvedAnimation?.dispose()` and `_curvedAnimationReversed?.dispose()`; the
+    /// two, with the `ReverseAnimation` under the second, are freed with what the next
+    /// `_updateAnimations` replaces, as the proxies may still follow them until then.
+    fn dispose_curved_animations(self: Handle<Self>, app: &mut App) {
+        let state = app.get(self);
+        let (curved_animation, curved_animation_reversed) =
+            (state.curved_animation, state.curved_animation_reversed);
+        if let Some(curved_animation) = curved_animation {
+            curved_animation.dispose(app);
+            app.get_mut(self)
+                .replaced_curved_animations
+                .push(curved_animation.into());
+        }
+        if let Some(curved_animation_reversed) = curved_animation_reversed {
+            let reversed = AnimationWithParent::parent(curved_animation_reversed, app);
+            curved_animation_reversed.dispose(app);
+            app.get_mut(self)
+                .replaced_curved_animations
+                .extend([curved_animation_reversed.into(), reversed.id()]);
+        }
     }
 
     fn build_transition(
@@ -826,15 +867,19 @@ impl State for PredictiveBackSharedElementPageTransitionState {
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
-        let state = app.get(self);
-        let (curved_animation, curved_animation_reversed) =
-            (state.curved_animation, state.curved_animation_reversed);
-        curved_animation
-            .expect("set in did_change_dependencies")
-            .dispose(app);
-        curved_animation_reversed
-            .expect("set in did_change_dependencies")
-            .dispose(app);
+        debug_assert!(
+            app.get(self).curved_animation.is_some(),
+            "set in did_change_dependencies"
+        );
+        self.dispose_curved_animations(app);
+        self.free_replaced_animations(app, Vec::new());
+        for proxy in [
+            self.commit_animation(app),
+            self.bounce_animation(app),
+            self.proxy_animation(app),
+        ] {
+            app.destroy_lingering(proxy);
+        }
     }
 
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
@@ -891,8 +936,8 @@ impl StatefulWidget for PredictiveBackFullscreenPageTransition {
 pub(crate) struct PredictiveBackFullscreenPageTransitionState {
     state: StateData<PredictiveBackFullscreenPageTransition>,
     primary_position_tween: Option<TweenSequence<Offset>>,
-    secondary_position_tween: Option<OffsetTween>,
-    secondary_current_position_tween: Option<ConstantTween<Offset>>,
+    secondary_position_tween: Option<ValueTween<Offset>>,
+    secondary_current_position_tween: Option<ValueConstantTween<Offset>>,
 }
 
 impl PredictiveBackFullscreenPageTransitionState {
@@ -911,7 +956,7 @@ impl PredictiveBackFullscreenPageTransitionState {
     const K_X_SHIFT_ADJUSTMENT: f64 = 8.0;
     const K_COMMIT_DURATION: Duration = Duration::from_millis(100);
 
-    const PRIMARY_OPACITY_TWEEN: DoubleTween = DoubleTween::new(
+    const PRIMARY_OPACITY_TWEEN: ValueTween<f64> = ValueTween::new(
         PredictiveBackFullscreenPageTransitionState::K_OPACITY_START_TRANSITION,
         PredictiveBackFullscreenPageTransitionState::K_OPACITY_FULLY_OPENED,
     );
@@ -920,48 +965,49 @@ impl PredictiveBackFullscreenPageTransitionState {
         type S = PredictiveBackFullscreenPageTransitionState;
         TweenSequence::new(vec![
             TweenSequenceItem::new(
-                Arc::new(DoubleTween::new(S::K_SCALE_START, S::K_SCALE_START)),
+                Arc::new(ValueTween::new(S::K_SCALE_START, S::K_SCALE_START)),
                 S::K_WEIGHT_PRE_COMMIT,
             ),
             TweenSequenceItem::new(
-                Arc::new(DoubleTween::new(S::K_SCALE_COMMIT, S::K_SCALE_START)),
+                Arc::new(ValueTween::new(S::K_SCALE_COMMIT, S::K_SCALE_START)),
                 S::K_WEIGHT_POST_COMMIT,
             ),
         ])
     }
 
-    const SECONDARY_SCALE_TWEEN_CURRENT: ConstantTween<f64> =
-        ConstantTween(PredictiveBackFullscreenPageTransitionState::K_SCALE_START);
+    const SECONDARY_SCALE_TWEEN_CURRENT: ValueConstantTween<f64> =
+        ValueConstantTween::new(PredictiveBackFullscreenPageTransitionState::K_SCALE_START);
 
     fn secondary_tween_scale() -> TweenSequence<f64> {
         type S = PredictiveBackFullscreenPageTransitionState;
         TweenSequence::new(vec![
             TweenSequenceItem::new(
-                Arc::new(DoubleTween::new(S::K_SCALE_COMMIT, S::K_SCALE_START)),
+                Arc::new(ValueTween::new(S::K_SCALE_COMMIT, S::K_SCALE_START)),
                 S::K_WEIGHT_PRE_COMMIT,
             ),
             TweenSequenceItem::new(
-                Arc::new(DoubleTween::new(S::K_SCALE_START, S::K_SCALE_START)),
+                Arc::new(ValueTween::new(S::K_SCALE_START, S::K_SCALE_START)),
                 S::K_WEIGHT_POST_COMMIT,
             ),
         ])
     }
 
-    const SECONDARY_OPACITY_TWEEN_CURRENT: ConstantTween<f64> =
-        ConstantTween(PredictiveBackFullscreenPageTransitionState::K_OPACITY_FULLY_OPENED);
+    const SECONDARY_OPACITY_TWEEN_CURRENT: ValueConstantTween<f64> = ValueConstantTween::new(
+        PredictiveBackFullscreenPageTransitionState::K_OPACITY_FULLY_OPENED,
+    );
 
     fn secondary_opacity_tween() -> TweenSequence<f64> {
         type S = PredictiveBackFullscreenPageTransitionState;
         TweenSequence::new(vec![
             TweenSequenceItem::new(
-                Arc::new(DoubleTween::new(
+                Arc::new(ValueTween::new(
                     S::K_OPACITY_FULLY_OPENED,
                     S::K_OPACITY_START_TRANSITION,
                 )),
                 S::K_WEIGHT_PRE_COMMIT,
             ),
             TweenSequenceItem::new(
-                Arc::new(DoubleTween::new(
+                Arc::new(ValueTween::new(
                     S::K_OPACITY_FULLY_OPENED,
                     S::K_OPACITY_FULLY_OPENED,
                 )),
@@ -1061,20 +1107,20 @@ impl State for PredictiveBackFullscreenPageTransitionState {
             (screen_width / Self::K_SCREEN_WIDTH_DIVISION_FACTOR) - Self::K_X_SHIFT_ADJUSTMENT;
         let primary_position_tween = TweenSequence::new(vec![
             TweenSequenceItem::new(
-                Arc::new(OffsetTween::new(Offset::ZERO, Offset::ZERO)),
+                Arc::new(ValueTween::new(Offset::ZERO, Offset::ZERO)),
                 Self::K_WEIGHT_PRE_COMMIT,
             ),
             TweenSequenceItem::new(
-                Arc::new(OffsetTween::new(Offset::new(x_shift, 0.0), Offset::ZERO)),
+                Arc::new(ValueTween::new(Offset::new(x_shift, 0.0), Offset::ZERO)),
                 Self::K_WEIGHT_POST_COMMIT,
             ),
         ]);
 
         let state = app.get_mut(self);
         state.primary_position_tween = Some(primary_position_tween);
-        state.secondary_current_position_tween = Some(ConstantTween(Offset::ZERO));
+        state.secondary_current_position_tween = Some(ValueConstantTween::new(Offset::ZERO));
         state.secondary_position_tween =
-            Some(OffsetTween::new(Offset::new(x_shift, 0.0), Offset::ZERO));
+            Some(ValueTween::new(Offset::new(x_shift, 0.0), Offset::ZERO));
     }
 
     fn build(self: Handle<Self>, app: &mut App, context: BuildContext) -> WidgetRef {
@@ -1102,16 +1148,6 @@ impl State for PredictiveBackFullscreenPageTransitionState {
             ),
         )
         .into_widget()
-    }
-}
-
-/// Dart's `ConstantTween` as a value, for the reason [`DoubleTween`] gives.
-#[derive(Clone, Copy, Debug)]
-struct ConstantTween<T>(T);
-
-impl<T: Copy> Animatable<T> for ConstantTween<T> {
-    fn transform(&self, _app: &App, _t: f64) -> T {
-        self.0
     }
 }
 
@@ -1147,6 +1183,94 @@ mod tests {
     use crate::text_button::TextButton;
     use crate::theme::Theme;
     use crate::theme_data::ThemeData;
+
+    /// Not a Dart case: Dart's collector frees a disposed shared-element transition's proxies
+    /// and animations; here its `dispose` frees them.
+    #[test]
+    fn a_disposed_shared_element_transition_frees_its_animations() {
+        with_main_thread_stack(|| {
+            let mut tester = tester_on(TargetPlatform::Android);
+            let animation = tester
+                .cell
+                .borrow_mut()
+                .create(waft_animation::AlwaysStoppedAnimation::new(0.5))
+                .as_animation();
+            tester.pump_widget(
+                PredictiveBackSharedElementPageTransition {
+                    is_delegated_transition: false,
+                    animation,
+                    secondary_animation: animation,
+                    phase: PredictiveBackPhase::Update,
+                    start_back_event: None,
+                    current_back_event: None,
+                    child: waft_widgets::SizedBox::new().into_widget(),
+                }
+                .into_widget(),
+            );
+            let element = tester.find_by_type::<PredictiveBackSharedElementPageTransition>()[0];
+            let owned: Vec<HandleId> = {
+                let app = tester.cell.borrow();
+                let state = element
+                    .state_handle::<PredictiveBackSharedElementPageTransitionState>(&app)
+                    .expect("the transition's state");
+                let curved_animation_reversed = app
+                    .get(state)
+                    .curved_animation_reversed
+                    .expect("set in did_change_dependencies");
+                let mut owned = vec![
+                    state.commit_animation(&app).into(),
+                    state.bounce_animation(&app).into(),
+                    state.proxy_animation(&app).into(),
+                    app.get(state).curved_animation.expect("set").into(),
+                    curved_animation_reversed.into(),
+                    AnimationWithParent::parent(curved_animation_reversed, &app).id(),
+                ];
+                owned.extend(app.get(state).made_animations.iter().copied());
+                owned
+            };
+            tester.pump_widget(waft_widgets::SizedBox::new().into_widget());
+            tester.cell.checkpoint();
+            let app = tester.cell.borrow();
+            for id in owned {
+                assert!(!app.contains(id), "{id:?} is freed");
+            }
+        });
+    }
+
+    /// Not a Dart case: Dart's collector frees the animations a shared-element transition's
+    /// `_updateCurvedAnimations` and `_updateAnimations` replace; here the state frees them.
+    #[test]
+    fn a_shared_element_transition_given_new_dependencies_leaves_no_new_arena_objects() {
+        with_main_thread_stack(|| {
+            let mut tester = tester_on(TargetPlatform::Android);
+            let animation = tester
+                .cell
+                .borrow_mut()
+                .create(waft_animation::AlwaysStoppedAnimation::new(0.5))
+                .as_animation();
+            let transition = move |width: f64| -> WidgetRef {
+                waft_widgets::MediaQuery::new(
+                    waft_widgets::MediaQueryData::new().size(Size::new(width, 600.0)),
+                    PredictiveBackSharedElementPageTransition {
+                        is_delegated_transition: false,
+                        animation,
+                        secondary_animation: animation,
+                        phase: PredictiveBackPhase::Update,
+                        start_back_event: None,
+                        current_back_event: None,
+                        child: waft_widgets::SizedBox::new().into_widget(),
+                    },
+                )
+                .into_widget()
+            };
+            tester.pump_widget(transition(800.0));
+            tester.pump_widget(transition(700.0));
+            let before = tester.cell.borrow().debug_object_count();
+            tester.pump_widget(transition(800.0));
+            tester.pump_widget(transition(700.0));
+            assert_eq!(tester.cell.borrow().debug_object_count(), before);
+        });
+    }
 
     const ALL_PLATFORMS: [TargetPlatform; 6] = [
         TargetPlatform::Android,

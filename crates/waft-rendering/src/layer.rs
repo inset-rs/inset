@@ -20,8 +20,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use waft_embedder::{
-    BlendMode, Clip, EngineLayer, FillRule, ImageFilter, Matrix4, Offset, Picture, RRect, Rect,
-    Scene, SceneBuilder, Size,
+    BlendMode, Clip, EngineLayer, ImageFilter, Matrix4, Offset, Picture, RRect, Rect, Scene,
+    SceneBuilder, Size,
 };
 use waft_embedder::{CompositionLayer, VideoFrameReader};
 use waft_foundation::{App, Handle, HandleId, RetainedHandle};
@@ -2409,7 +2409,7 @@ impl ContainerLayer for ClipRRectLayer {
 pub struct ClipPathLayer {
     layer: LayerData,
     container_layer: ContainerLayerData,
-    clip_path: Option<Arc<waft_embedder::Path>>,
+    clip_path: Option<waft_embedder::Path>,
     clip_behavior: Clip,
 }
 
@@ -2432,16 +2432,12 @@ impl ClipPathLayer {
     ///
     /// The scene must be explicitly recomposited after this property is changed (as described at
     /// [`Layer`]).
-    pub fn clip_path(self: Handle<Self>, app: &App) -> Option<&Arc<waft_embedder::Path>> {
+    pub fn clip_path(self: Handle<Self>, app: &App) -> Option<&waft_embedder::Path> {
         app.get(self).clip_path.as_ref()
     }
 
     /// See [`clip_path`](Self::clip_path).
-    pub fn set_clip_path(
-        self: Handle<Self>,
-        app: &mut App,
-        value: Option<Arc<waft_embedder::Path>>,
-    ) {
+    pub fn set_clip_path(self: Handle<Self>, app: &mut App, value: Option<waft_embedder::Path>) {
         app.get_mut(self).clip_path = value;
         self.as_layer().mark_needs_add_to_scene(app);
     }
@@ -2469,13 +2465,7 @@ impl Layer for ClipPathLayer {
     crate::layer_accessors!(container);
 
     fn describe_clip_bounds(self: Handle<Self>, app: &App) -> Option<Rect> {
-        let bounds = app.get(self).clip_path.as_ref()?.bounds();
-        Some(Rect::from_ltwh(
-            bounds.x as f64,
-            bounds.y as f64,
-            bounds.width as f64,
-            bounds.height as f64,
-        ))
+        Some(app.get(self).clip_path.as_ref()?.get_bounds())
     }
 
     fn supports_rasterization(self: Handle<Self>, app: &App) -> bool {
@@ -2510,7 +2500,7 @@ impl Layer for ClipPathLayer {
             .clip_path
             .as_ref()
             .expect("clipPath must be set before searching annotations");
-        if !path.contains(local_position.into(), FillRule::NonZero) {
+        if !path.contains(local_position) {
             return false;
         }
         ContainerLayer::find_annotations(self, app, result, local_position, only_first)
@@ -2523,12 +2513,11 @@ impl Layer for ClipPathLayer {
             enabled = !crate::debug::debug_disable_clip_layers();
         }
         if enabled {
-            let clip_path = Arc::clone(
-                app.get(self)
-                    .clip_path
-                    .as_ref()
-                    .expect("clipPath must be set before compositing"),
-            );
+            let clip_path = app
+                .get(self)
+                .clip_path
+                .clone()
+                .expect("clipPath must be set before compositing");
             let clip_behavior = self.clip_behavior(app);
             builder.push_clip_path(&clip_path, clip_behavior);
         }
@@ -4447,7 +4436,7 @@ mod tests {
         let mut path = waft_embedder::PathBuilder::new();
         path.rect(Rect::from_ltwh(0.0, 0.0, 50.0, 50.0).into());
         let clip_path = ClipPathLayer::new(&mut app);
-        clip_path.set_clip_path(&mut app, Some(path.build()));
+        clip_path.set_clip_path(&mut app, Some(path.build().into()));
         let child = tag(&mut app, 9);
         clip_path
             .as_container_layer()

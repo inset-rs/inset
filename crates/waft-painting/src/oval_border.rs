@@ -2,7 +2,6 @@
 
 use std::any::Any;
 use std::fmt::{Debug, Formatter, Result as FmtResult};
-use std::sync::Arc;
 
 use waft_embedder::{Canvas, Paint, Path};
 use waft_embedder::{Offset, Rect, clamp_double, lerp_double};
@@ -116,11 +115,11 @@ impl ShapeBorder for OvalBorder {
         }
     }
 
-    fn get_inner_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Arc<Path> {
+    fn get_inner_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Path {
         self.as_circle().get_inner_path(rect, text_direction)
     }
 
-    fn get_outer_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Arc<Path> {
+    fn get_outer_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Path {
         self.as_circle().get_outer_path(rect, text_direction)
     }
 
@@ -203,7 +202,7 @@ impl Debug for OvalBorder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use waft_embedder::{Color, FillRule};
+    use waft_embedder::Color;
 
     fn side_width(width: f64) -> BorderSide {
         BorderSide {
@@ -212,8 +211,8 @@ mod tests {
         }
     }
 
-    fn contains(path: &Arc<Path>, x: f64, y: f64) -> bool {
-        path.contains(Offset::new(x, y).into(), FillRule::NonZero)
+    fn contains(path: &Path, x: f64, y: f64) -> bool {
+        path.contains(Offset::new(x, y))
     }
 
     #[test]

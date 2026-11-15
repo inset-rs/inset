@@ -9,8 +9,6 @@
 //! keep: the mutators are what the containers above the layer do, outermost first, and nothing a
 //! host can work out from them is stored beside them.
 
-use std::sync::Arc;
-
 use crate::geometry::{Matrix4, RRect, Rect};
 use crate::painting::Path;
 
@@ -35,8 +33,8 @@ pub enum Mutator {
     ClipRect(Rect),
     /// Nothing of the layer shows outside the rounded rectangle.
     ClipRRect(RRect),
-    /// Nothing of the layer shows outside the path, filled non-zero.
-    ClipPath(Arc<Path>),
+    /// Nothing of the layer shows outside the path, filled by its fill type.
+    ClipPath(Path),
     /// The layer shows at this alpha, out of 255.
     Opacity(u8),
 }
@@ -91,7 +89,7 @@ impl Placement {
                 }
                 Mutator::ClipRect(rect) => *rect,
                 Mutator::ClipRRect(rrect) => rrect.outer_rect(),
-                Mutator::ClipPath(path) => rect_of(path.bounds()),
+                Mutator::ClipPath(path) => path.get_bounds(),
                 Mutator::Opacity(_) => continue,
             };
             visible = visible_part_of(visible, bounds_under(&transform, clip_bounds));
@@ -129,7 +127,7 @@ fn visible_part_of(rect: Rect, clip: Rect) -> Rect {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::painting::PathBuilder;
+    use crate::painting::{Path, PathBuilder};
 
     fn placement(rect: Rect, mutators: Vec<Mutator>) -> Placement {
         Placement { rect, mutators }
@@ -173,7 +171,7 @@ mod tests {
         let path = {
             let mut path = PathBuilder::new();
             path.rrect(Rect::from_ltwh(0.0, 0.0, 200.0, 20.0).into(), 4.0);
-            path.build()
+            Path::new(path.build())
         };
         let clipped = placement(
             Rect::from_ltwh(-5.0, -5.0, 300.0, 300.0),

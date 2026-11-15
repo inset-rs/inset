@@ -1415,6 +1415,7 @@ impl<T: Clone + PartialEq + 'static> PopupMenuState<T> {
     fn set_opacities(self: Handle<Self>, app: &mut App) {
         for opacity in std::mem::take(&mut app.get_mut(self).opacities) {
             opacity.dispose(app);
+            app.destroy_lingering(opacity);
         }
         let route = self.widget(app).route;
         let count = app.get(route).items.len();
@@ -1457,6 +1458,7 @@ impl<T: Clone + PartialEq + 'static> State for PopupMenuState<T> {
     fn dispose(self: Handle<Self>, app: &mut App) {
         for opacity in std::mem::take(&mut app.get_mut(self).opacities) {
             opacity.dispose(app);
+            app.destroy_lingering(opacity);
         }
     }
 
@@ -1967,7 +1969,7 @@ impl<T: Clone + PartialEq + 'static> PredictiveBackRoute for PopupMenuRoute<T> {
 impl<T: Clone + PartialEq + 'static> TransitionRoute for PopupMenuRoute<T> {
     waft_widgets::modal_transition_route_overrides!();
 
-    fn transition_duration(self: Handle<Self>, app: &App) -> Duration {
+    fn transition_duration(self: Handle<Self>, app: &mut App) -> Duration {
         app.get(self)
             .pop_up_animation_style
             .as_ref()
@@ -7268,6 +7270,42 @@ mod tests {
                     tester.pump_and_settle();
                 }
             }
+        });
+    }
+
+    /// Dart's collector frees the item fades `_PopupMenuState` makes once the menu closes;
+    /// here the state frees them in its `dispose`.
+    #[test]
+    fn a_closed_menu_frees_the_item_fades_its_state_made() {
+        with_main_thread_stack(|| {
+            let mut tester = tester();
+            let key = GlobalKey::new();
+            let button_key = key.clone();
+            pump_app(&mut tester, m3, move |_app| {
+                Material::new()
+                    .child(
+                        PopupMenuButton::new(|_app, _context| vec![item(1, "One"), item(2, "Two")])
+                            .key(button_key.into()),
+                    )
+                    .into_widget()
+            });
+            tap_key(&mut tester, &key);
+            tester.pump_and_settle();
+            let opacities = {
+                let menu = only(tester.find_by_type::<PopupMenu<i32>>());
+                let app = tester.cell.borrow();
+                let state = menu
+                    .state_handle::<PopupMenuState<i32>>(&app)
+                    .expect("the menu is stateful");
+                app.get(state).opacities.clone()
+            };
+            assert_eq!(opacities.len(), 2);
+
+            tester.tap(Offset::ZERO, 1);
+            tester.pump_and_settle();
+            tester.cell.checkpoint();
+            let app = tester.cell.borrow();
+            assert!(opacities.iter().all(|opacity| !app.contains(*opacity)));
         });
     }
 }

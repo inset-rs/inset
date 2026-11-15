@@ -669,11 +669,11 @@ fn progress_rectangle(width: f64, height: f64, radius: f64, color: Color) -> Wid
 struct ProgressClipper(Rect);
 
 impl CustomClipper<Rect> for ProgressClipper {
-    fn get_clip(&self, _: Size) -> Rect {
+    fn get_clip(&self, _app: &App, _: Size) -> Rect {
         self.0
     }
 
-    fn should_reclip(&self, old: &dyn CustomClipper<Rect>) -> bool {
+    fn should_reclip(&self, _app: &App, old: &dyn CustomClipper<Rect>) -> bool {
         old.as_any()
             .downcast_ref::<Self>()
             .is_none_or(|old| old.0 != self.0)

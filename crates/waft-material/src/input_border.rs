@@ -7,7 +7,6 @@
 use std::any::Any;
 use std::f64::consts::PI;
 use std::fmt::{self, Debug};
-use std::sync::Arc;
 
 use waft_embedder::{
     Canvas, FillRule, Offset, Paint, Path, PathBuilder, PathOperation, RRect, Radius, Rect,
@@ -131,17 +130,17 @@ impl MaybeWidgetStateProperty<Box<dyn InputBorder>> for Box<dyn InputBorder> {
 }
 
 /// Dart's `Path()..addRect(rect)`.
-fn rect_path(rect: Rect) -> Arc<Path> {
+fn rect_path(rect: Rect) -> Path {
     let mut path = PathBuilder::new();
     path.rect(rect.into());
-    path.build()
+    path.build().into()
 }
 
 /// Dart's `Path()..addRRect(rrect)`.
-fn rrect_path(rrect: RRect) -> Arc<Path> {
+fn rrect_path(rrect: RRect) -> Path {
     let mut path = PathBuilder::new();
     path.rrect_radii_elliptical(rrect.outer_rect(), rrect_radii_elliptical(rrect));
-    path.build()
+    path.build().into()
 }
 
 /// Dart's `Path.addArc(oval, startAngle, sweepAngle)`: a new contour along the oval inscribed
@@ -188,11 +187,11 @@ impl ShapeBorder for NoInputBorder {
         Box::new(NoInputBorder)
     }
 
-    fn get_outer_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Arc<Path> {
+    fn get_outer_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Path {
         rect_path(rect)
     }
 
-    fn get_inner_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Arc<Path> {
+    fn get_inner_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Path {
         rect_path(rect)
     }
 
@@ -399,7 +398,7 @@ impl ShapeBorder for UnderlineInputBorder {
         }
     }
 
-    fn get_inner_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Arc<Path> {
+    fn get_inner_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Path {
         rect_path(Rect::from_ltwh(
             rect.left,
             rect.top,
@@ -408,7 +407,7 @@ impl ShapeBorder for UnderlineInputBorder {
         ))
     }
 
-    fn get_outer_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Arc<Path> {
+    fn get_outer_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Path {
         rrect_path(self.border_radius.resolve(text_direction).to_rrect(rect))
     }
 
@@ -655,13 +654,7 @@ impl OutlineInputBorder {
             .gap_padding(self.gap_padding * t)
     }
 
-    fn gap_border_path(
-        &self,
-        center: RRect,
-        outer_width: f64,
-        start: f64,
-        extent: f64,
-    ) -> Arc<Path> {
+    fn gap_border_path(&self, center: RRect, outer_width: f64, start: f64, extent: f64) -> Path {
         // When the corner radii on any side add up to be greater than the
         // given height, each radius has to be scaled to not exceed the
         // size of the width/height of the RRect.
@@ -774,7 +767,7 @@ impl OutlineInputBorder {
             scaled_rrect.top + scaled_rrect.tl_radius_y,
         ));
 
-        path.build()
+        path.build().into()
     }
 }
 
@@ -833,7 +826,7 @@ impl ShapeBorder for OutlineInputBorder {
         }
     }
 
-    fn get_inner_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Arc<Path> {
+    fn get_inner_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Path {
         rrect_path(
             self.border_radius
                 .resolve(text_direction)
@@ -842,7 +835,7 @@ impl ShapeBorder for OutlineInputBorder {
         )
     }
 
-    fn get_outer_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Arc<Path> {
+    fn get_outer_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Path {
         rrect_path(self.border_radius.resolve(text_direction).to_rrect(rect))
     }
 
@@ -935,7 +928,7 @@ impl InputBorder for OutlineInputBorder {
                     TextDirection::Ltr => gap_start - self.gap_padding,
                 };
                 let path = self.gap_border_path(center, outer.width(), start.max(0.0), extent);
-                canvas.draw_path(&path, FillRule::NonZero, &paint);
+                canvas.draw_path(path.as_valo(), path.fill_type, &paint);
             }
             _ => draw_rrect(canvas, center, &paint),
         }
@@ -1054,7 +1047,7 @@ impl ShapedInputBorder {
         start: f64,
         extent: f64,
         text_direction: Option<TextDirection>,
-    ) -> Arc<Path> {
+    ) -> Path {
         // Create a continuous path for the border with a gap in the top edge.
         let outer_path = self.shape.get_outer_path(rect, text_direction);
 
@@ -1144,12 +1137,12 @@ impl ShapeBorder for ShapedInputBorder {
         }
     }
 
-    fn get_inner_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Arc<Path> {
+    fn get_inner_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Path {
         self.shape
             .get_inner_path(rect.deflate(self.border_side.width), text_direction)
     }
 
-    fn get_outer_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Arc<Path> {
+    fn get_outer_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Path {
         self.shape.get_outer_path(rect, text_direction)
     }
 
@@ -1165,11 +1158,8 @@ impl ShapeBorder for ShapedInputBorder {
                 .paint_interior(canvas, rect, paint, text_direction);
         } else {
             // Fallback for shapes that don't support paintInterior.
-            canvas.draw_path(
-                &self.shape.get_outer_path(rect, text_direction),
-                FillRule::NonZero,
-                paint,
-            );
+            let path = self.shape.get_outer_path(rect, text_direction);
+            canvas.draw_path(path.as_valo(), path.fill_type, paint);
         }
     }
 
@@ -1247,7 +1237,7 @@ impl InputBorder for ShapedInputBorder {
                 };
                 let path =
                     self.gap_border_path(deflated_rect, start.max(0.0), extent, text_direction);
-                canvas.draw_path(&path, FillRule::NonZero, &paint);
+                canvas.draw_path(path.as_valo(), path.fill_type, &paint);
             }
             // Draw the shape without a gap.
             _ => match self.shape.as_outlined_border() {
@@ -1256,11 +1246,10 @@ impl InputBorder for ShapedInputBorder {
                     let shaped_border = outlined_shape.copy_with(Some(self.border_side));
                     shaped_border.paint(canvas, deflated_rect, text_direction);
                 }
-                None => canvas.draw_path(
-                    &self.shape.get_outer_path(deflated_rect, text_direction),
-                    FillRule::NonZero,
-                    &paint,
-                ),
+                None => {
+                    let path = self.shape.get_outer_path(deflated_rect, text_direction);
+                    canvas.draw_path(path.as_valo(), path.fill_type, &paint);
+                }
             },
         }
     }
@@ -1506,15 +1495,22 @@ mod tests {
             Some(TextDirection::Ltr),
         );
         let list = canvas.build();
-        let Some(Op::DrawPath { path, .. }) = list
+        let Some(Op::DrawPath {
+            path, fill_rule, ..
+        }) = list
             .ops()
             .iter()
             .find(|op| matches!(op, Op::DrawPath { .. }))
         else {
             panic!("the border is drawn as a path");
         };
+        assert_eq!(
+            *fill_rule,
+            FillRule::EvenOdd,
+            "the fill type `Path.combine` gives"
+        );
         // The deflated rect's top is at 0.5; the gap runs from 40 - 4 to 36 + 60 + 2 * 4.
-        let contains = |x, y| path.contains(Point::new(x, y), FillRule::EvenOdd);
+        let contains = |x, y| path.contains(Point::new(x, y), *fill_rule);
         assert!(contains(20.0, 1.0), "the top edge before the gap");
         assert!(!contains(70.0, 1.0), "the gap");
         assert!(contains(70.0, 10.0), "below the gap");

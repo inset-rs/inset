@@ -2398,6 +2398,7 @@ impl DialogRoute {
         if current.map(|curved| curved.parent(app)) != Some(animation) {
             if let Some(curved) = current {
                 curved.dispose(app);
+                app.destroy_lingering(curved);
             }
             let style = app.get(self).animation_style.clone();
             let curve = style
@@ -2493,6 +2494,7 @@ impl Route for DialogRoute {
     fn dispose(self: Handle<Self>, app: &mut App) {
         if let Some(curved) = app.get(self).curved_animation {
             curved.dispose(app);
+            app.destroy_lingering(curved);
         }
         TransitionRoute::dispose(self, app)
     }
@@ -5779,6 +5781,49 @@ pub(crate) mod tests {
                 message.lines().next(),
                 Some("This BuildContext is no longer valid.")
             );
+        });
+    }
+
+    /// Dart's collector frees the `CurvedAnimation` a `DialogRoute` makes for its fade once
+    /// the route is gone; here the route frees it in its `dispose`.
+    #[test]
+    fn a_disposed_dialog_route_frees_its_fade() {
+        with_main_thread_stack(|| {
+            let mut tester = tester();
+            let saved_context = context_cell();
+            let saved = Rc::clone(&saved_context);
+            pump_app(&mut tester, m3, move |_app| {
+                Material::new()
+                    .child(Builder::new(move |_app, context| {
+                        saved.set(Some(context));
+                        SizedBox::new().into_widget()
+                    }))
+                    .into_widget()
+            });
+            let navigator =
+                Navigator::of(&mut tester.cell.borrow_mut(), seen(&saved_context), false);
+            let route = {
+                let mut app = tester.cell.borrow_mut();
+                let route = DialogRoute::new(
+                    &mut app,
+                    seen(&saved_context),
+                    Rc::new(move |_app, _context| Text::new("Dialog").into_widget()),
+                );
+                drop(navigator.push(&mut app, route.as_route()));
+                route
+            };
+            tester.pump_and_settle();
+            let fade = tester
+                .cell
+                .borrow()
+                .get(route)
+                .curved_animation
+                .expect("the route built its transitions");
+
+            navigator.pop(&mut tester.cell.borrow_mut(), None);
+            tester.pump_and_settle();
+            tester.cell.checkpoint();
+            assert!(!tester.cell.borrow().contains(fade));
         });
     }
 }

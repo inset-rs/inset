@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use waft_foundation::{App, Handle, ListenableObject, Listener, RetainedHandle};
+use waft_foundation::{App, Handle, ListenableObject, Listener, RetainedHandle, RetainedHandleId};
 
 use crate::animation::{Animation, AnimationStatus, AnimationStatusListener, AnyAnimation};
 use crate::curves::Curve;
@@ -220,6 +220,9 @@ pub struct ProxyAnimation {
     status: Option<AnimationStatus>,
     value: Option<f64>,
     parent: Option<AnyAnimation<f64>>,
+    /// Keeps `parent` past its owner's `destroy` while this proxy follows it, as Dart's
+    /// reference keeps it alive: a build may hand a proxy an animation it frees at once.
+    retained_parent: Option<RetainedHandleId>,
 
     // Dart mixes in `AnimationLazyListenerMixin`,
     // `AnimationLocalListenersMixin` and `AnimationLocalStatusListenersMixin`;
@@ -235,10 +238,12 @@ impl ProxyAnimation {
     /// If the animation argument is `None`, the proxy animation has the status
     /// [`AnimationStatus::Dismissed`] and a value of 0.0.
     pub fn new(app: &mut App, animation: Option<AnyAnimation<f64>>) -> Handle<ProxyAnimation> {
+        let retained_parent = animation.map(|animation| app.retain_id(animation.id()));
         let mut result = ProxyAnimation {
             status: None,
             value: None,
             parent: animation,
+            retained_parent,
             lazy_listener: AnimationLazyListenerData::new(),
             local_listeners: AnimationLocalListenersData::new(),
             local_status_listeners: AnimationLocalStatusListenersData::new(),
@@ -289,6 +294,11 @@ impl ProxyAnimation {
             }
         }
         app.get_mut(self).parent = value;
+        let retained = value.map(|value| app.retain_id(value.id()));
+        if let Some(released) = std::mem::replace(&mut app.get_mut(self).retained_parent, retained)
+        {
+            app.release_id(released);
+        }
         if let Some(parent) = app.get(self).parent {
             if self.is_listening(app) {
                 self.did_start_listening(app);

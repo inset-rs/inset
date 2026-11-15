@@ -264,29 +264,20 @@ impl SwitchThemeData {
     }
 }
 
-/// Dart's `==` on a `WidgetStateProperty`, which no override makes more than identity here.
-fn same_property<T: ?Sized>(a: &Option<Rc<T>>, b: &Option<Rc<T>>) -> bool {
-    match (a, b) {
-        (None, None) => true,
-        (Some(a), Some(b)) => Rc::ptr_eq(a, b),
-        _ => false,
-    }
-}
-
 impl PartialEq for SwitchThemeData {
     fn eq(&self, other: &SwitchThemeData) -> bool {
         if std::ptr::eq(self, other) {
             return true;
         }
-        same_property(&other.thumb_color, &self.thumb_color)
-            && same_property(&other.track_color, &self.track_color)
-            && same_property(&other.track_outline_color, &self.track_outline_color)
-            && same_property(&other.track_outline_width, &self.track_outline_width)
+        other.thumb_color == self.thumb_color
+            && other.track_color == self.track_color
+            && other.track_outline_color == self.track_outline_color
+            && other.track_outline_width == self.track_outline_width
             && other.material_tap_target_size == self.material_tap_target_size
-            && same_property(&other.mouse_cursor, &self.mouse_cursor)
-            && same_property(&other.overlay_color, &self.overlay_color)
+            && other.mouse_cursor == self.mouse_cursor
+            && other.overlay_color == self.overlay_color
             && other.splash_radius == self.splash_radius
-            && same_property(&other.thumb_icon, &self.thumb_icon)
+            && other.thumb_icon == self.thumb_icon
             && other.padding == self.padding
     }
 }
@@ -422,7 +413,9 @@ mod tests {
         })
     }
 
-    fn all<T: Clone + std::fmt::Debug + 'static>(value: T) -> WidgetStatePropertyRef<Option<T>> {
+    fn all<T: Clone + std::fmt::Debug + PartialEq + 'static>(
+        value: T,
+    ) -> WidgetStatePropertyRef<Option<T>> {
         <dyn WidgetStateProperty<Option<T>>>::all(Some(value))
     }
 

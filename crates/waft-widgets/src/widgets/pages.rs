@@ -446,11 +446,11 @@ impl PredictiveBackRoute for PageRouteBuilder {
 impl TransitionRoute for PageRouteBuilder {
     crate::page_transition_route_overrides!();
 
-    fn transition_duration(self: Handle<Self>, app: &App) -> Duration {
+    fn transition_duration(self: Handle<Self>, app: &mut App) -> Duration {
         app.get(self).transition_duration
     }
 
-    fn reverse_transition_duration(self: Handle<Self>, app: &App) -> Duration {
+    fn reverse_transition_duration(self: Handle<Self>, app: &mut App) -> Duration {
         app.get(self).reverse_transition_duration
     }
 

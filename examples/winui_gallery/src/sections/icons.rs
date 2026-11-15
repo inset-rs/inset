@@ -4,8 +4,8 @@
 use crate::{column, example, example_row, label, section};
 use std::sync::Arc;
 
-use waft_embedder::valo::{Point, Rect as ValoRect};
-use waft_embedder::{FillRule, Path, PathBuilder, TextDirection};
+use waft_embedder::valo::{Path, Point, Rect as ValoRect};
+use waft_embedder::{FillRule, PathBuilder, TextDirection};
 use waft_foundation::{App, Handle, Listener};
 use waft_rendering::{CrossAxisAlignment, MainAxisSize};
 use waft_widgets::*;

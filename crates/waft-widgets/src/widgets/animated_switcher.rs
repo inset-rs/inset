@@ -572,6 +572,8 @@ impl AnimatedSwitcherState {
                     });
                     controller.dispose(app);
                     animation.dispose(app);
+                    app.destroy_lingering(animation);
+                    app.destroy_lingering(controller);
                 }
             }),
         );
@@ -681,6 +683,8 @@ impl State for AnimatedSwitcherState {
         for (controller, animation) in entries {
             controller.dispose(app);
             animation.dispose(app);
+            app.destroy_lingering(animation);
+            app.destroy_lingering(controller);
         }
         TickerProviderStateMixin::dispose(self, app);
     }
@@ -933,6 +937,53 @@ mod tests {
         assert!(
             requests.is_empty(),
             "pumpAndSettle would settle after one frame"
+        );
+    }
+
+    /// Dart's collector frees the curved animation each child entry drives once the entry
+    /// leaves; here the state frees it when it disposes it, on the outgoing child's dismissal
+    /// and at its own `dispose`.
+    #[test]
+    fn frees_each_entrys_curved_animation_as_it_disposes_it() {
+        let cell = binding_cell();
+        let (one, two) = (unique_key(), unique_key());
+        binding_mount(&cell, switcher(Some(keyed_box(&one))).into_widget());
+        let current_animation = |app: &mut App| {
+            let state = elements(app)
+                .into_iter()
+                .find_map(|element| element.state_handle::<AnimatedSwitcherState>(app))
+                .expect("a mounted AnimatedSwitcher");
+            app.get(state)
+                .current_entry
+                .as_ref()
+                .expect("a child entry")
+                .animation
+        };
+        let first = current_animation(&mut cell.borrow_mut());
+
+        let second = {
+            let mut app = cell.borrow_mut();
+            pump_widget(
+                &mut app,
+                switcher(Some(keyed_box(&two))).into_widget(),
+                at(0),
+            );
+            binding_pump(&mut app, at(200));
+            current_animation(&mut app)
+        };
+        cell.checkpoint();
+        assert!(!cell.borrow().contains(first), "the outgoing entry's");
+        assert!(cell.borrow().contains(second));
+
+        pump_widget(
+            &mut cell.borrow_mut(),
+            SizedBox::new().into_widget(),
+            at(300),
+        );
+        cell.checkpoint();
+        assert!(
+            !cell.borrow().contains(second),
+            "the current entry's, at dispose"
         );
     }
 

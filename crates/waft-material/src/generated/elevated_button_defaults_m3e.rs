@@ -251,7 +251,7 @@ fn stadium() -> Box<dyn OutlinedBorder> {
 }
 
 /// Dart's `const WidgetStatePropertyAll<T>(value)`.
-fn all<T: Clone + Debug + 'static>(value: T) -> WidgetStatePropertyRef<Option<T>> {
+fn all<T: Clone + Debug + PartialEq + 'static>(value: T) -> WidgetStatePropertyRef<Option<T>> {
     Rc::new(WidgetStatePropertyAll::new(Some(value)))
 }
 

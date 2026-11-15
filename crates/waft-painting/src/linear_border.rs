@@ -2,7 +2,6 @@
 
 use std::any::Any;
 use std::fmt::{Debug, Formatter, Result as FmtResult};
-use std::sync::Arc;
 
 use waft_embedder::{
     Canvas, Color, FillRule, Offset, Paint, PaintStyle, Path, PathBuilder, Rect, Stroke,
@@ -283,17 +282,17 @@ impl ShapeBorder for LinearBorder {
         }
     }
 
-    fn get_inner_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Arc<Path> {
+    fn get_inner_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Path {
         let adjusted_rect = self.dimensions().resolve(text_direction).deflate_rect(rect);
         let mut path = PathBuilder::new();
         path.rect(adjusted_rect.into());
-        path.build()
+        path.build().into()
     }
 
-    fn get_outer_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Arc<Path> {
+    fn get_outer_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Path {
         let mut path = PathBuilder::new();
         path.rect(rect.into());
-        path.build()
+        path.build().into()
     }
 
     fn paint(&self, canvas: &mut Canvas, rect: Rect, text_direction: Option<TextDirection>) {

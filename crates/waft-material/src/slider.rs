@@ -3568,7 +3568,7 @@ pub(crate) mod tests {
     /// The bounds of `path` when it is what `Canvas::draw_circle` records: one square contour
     /// of a move, four conic quarters and a close, which a zero radius records too. A rounded
     /// rect's contour has lines between its corners.
-    pub(crate) fn circle_of(path: &waft_embedder::Path) -> Option<Rect> {
+    pub(crate) fn circle_of(path: &waft_embedder::valo::Path) -> Option<Rect> {
         let bounds = path.bounds();
         // The conics' f32 points leave the two extents a rounding apart.
         let square = (bounds.width - bounds.height).abs() <= 1e-4 * bounds.width.max(1.0);

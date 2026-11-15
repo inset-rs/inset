@@ -366,6 +366,14 @@ struct ResolvedIcon {
     foreground: Option<Paint>,
 }
 
+/// Dart's `Widget.==`, which is identity: an `Icon` equals only itself, so an `Rc<Icon>`
+/// compares as the Dart reference does.
+impl PartialEq for Icon {
+    fn eq(&self, other: &Icon) -> bool {
+        std::ptr::eq(self, other)
+    }
+}
+
 impl StatelessWidget for Icon {
     fn key(&self) -> Option<&KeyRef> {
         self.key.as_ref()
@@ -495,9 +503,9 @@ mod tests {
     use waft_foundation::AppCell;
     use waft_painting::{PaintingBinding, TextScaler};
     use waft_rendering::{
-        AnyRenderBox, BoxConstraints, RenderBox, RenderConstrainedBox, RenderExcludeSemantics,
-        RenderHandle, RenderObject, RenderObjectWithChildMixin, RenderParagraph,
-        RenderPositionedBox, RenderSemanticsAnnotations, RenderTransform,
+        AnyRenderBox, BoxConstraints, RenderBox, RenderConstrainedBox, RenderConstrainedBoxBase,
+        RenderExcludeSemantics, RenderHandle, RenderObject, RenderObjectWithChildMixin,
+        RenderParagraph, RenderPositionedBox, RenderSemanticsAnnotations, RenderTransform,
         SemanticsAnnotationsMixin,
     };
 

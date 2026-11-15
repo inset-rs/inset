@@ -988,8 +988,11 @@ impl WidgetTester {
             .collect()
     }
 
-    /// Whether `element` is onstage: in an entry each `Overlay` above it keeps onstage, and
-    /// under no `Offstage` that hides it. Dart's finders skip the rest (`skipOffstage: true`).
+    /// Whether `element` is onstage, as the `debugVisitOnstageChildren` overrides of the
+    /// elements above it answer: in an entry each `Overlay` keeps onstage, under no `Offstage`
+    /// that hides it, at each `IndexedStack`'s index, a toolbar item that is painted, and in a
+    /// viewport's visible sliver and a lazy sliver's painted window. Dart's finders skip the
+    /// rest (`skipOffstage: true`).
     pub(crate) fn is_onstage(&self, element: waft_widgets::AnyElement) -> bool {
         use waft_rendering::ContainerRenderObjectMixin as _;
         let app = self.cell.borrow();
@@ -1020,6 +1023,20 @@ impl WidgetTester {
             {
                 return false;
             }
+            // Dart's `_IndexedStackElement.debugVisitOnstageChildren`: only the child at the
+            // stack's index is onstage, and none when the index is null.
+            if let Some(stack) = parent.downcast::<waft_rendering::RenderIndexedStack>(&app) {
+                let Some(index) = stack.index(&app) else {
+                    return false;
+                };
+                let mut child = stack.first_child(&app);
+                for _ in 0..index {
+                    child = child.and_then(|current| stack.child_after(&app, current));
+                }
+                if child.is_none_or(|current| current.as_object() != object) {
+                    return false;
+                }
+            }
             // Dart's `debugVisitOnstageChildren` of Material's
             // `_TextSelectionToolbarItemsLayoutElement` and Cupertino's
             // `_CupertinoTextSelectionToolbarItemsElement`: a child not painted is offstage.
@@ -1032,6 +1049,14 @@ impl WidgetTester {
                     .parent_data(&app)
                     .and_then(|data| data.part::<waft_widgets::ToolbarItemsParentData>())
                     .is_some_and(|data| !data.should_paint)
+            {
+                return false;
+            }
+            // Dart's `_ViewportElement.debugVisitOnstageChildren`: a viewport's sliver is onstage
+            // only while its geometry is visible.
+            if parent.as_sliver().is_none()
+                && let Some(sliver) = object.as_sliver()
+                && !sliver.geometry(&app).visible
             {
                 return false;
             }

@@ -1,7 +1,5 @@
 //! Flutter counterpart: material_ui's `scrollbar_theme.dart`.
 
-use std::rc::Rc;
-
 use waft_embedder::{Color, Radius, lerp_double};
 use waft_foundation::App;
 use waft_widgets::{
@@ -282,28 +280,19 @@ impl ScrollbarThemeData {
     }
 }
 
-/// Dart's `==` on a `WidgetStateProperty`, which no override makes more than identity here.
-fn same_property<T: ?Sized>(a: &Option<Rc<T>>, b: &Option<Rc<T>>) -> bool {
-    match (a, b) {
-        (None, None) => true,
-        (Some(a), Some(b)) => Rc::ptr_eq(a, b),
-        _ => false,
-    }
-}
-
 impl PartialEq for ScrollbarThemeData {
     fn eq(&self, other: &ScrollbarThemeData) -> bool {
         if std::ptr::eq(self, other) {
             return true;
         }
-        same_property(&other.thumb_visibility, &self.thumb_visibility)
-            && same_property(&other.thickness, &self.thickness)
-            && same_property(&other.track_visibility, &self.track_visibility)
+        other.thumb_visibility == self.thumb_visibility
+            && other.thickness == self.thickness
+            && other.track_visibility == self.track_visibility
             && other.interactive == self.interactive
             && other.radius == self.radius
-            && same_property(&other.thumb_color, &self.thumb_color)
-            && same_property(&other.track_color, &self.track_color)
-            && same_property(&other.track_border_color, &self.track_border_color)
+            && other.thumb_color == self.thumb_color
+            && other.track_color == self.track_color
+            && other.track_border_color == self.track_border_color
             && other.cross_axis_margin == self.cross_axis_margin
             && other.main_axis_margin == self.main_axis_margin
             && other.min_thumb_length == self.min_thumb_length
@@ -394,6 +383,8 @@ impl InheritedWidget for ScrollbarTheme {
 
 #[cfg(test)]
 mod tests {
+    use std::rc::Rc;
+
     use waft_embedder::{Offset, Rect, TargetPlatform};
     use waft_widgets::{ScrollController, ScrollControllerLeaf, WidgetState, WidgetStates};
 
@@ -443,7 +434,10 @@ mod tests {
             .thickness(<dyn WidgetStateProperty<Option<f64>>>::all(Some(3.0)));
         // Dart's `identical`: the same property objects come back.
         let lerped = ScrollbarThemeData::lerp(Some(&data), Some(&data), 0.5);
-        assert!(same_property(&lerped.thickness, &data.thickness));
+        assert!(Rc::ptr_eq(
+            lerped.thickness.as_ref().expect("lerped"),
+            data.thickness.as_ref().expect("given")
+        ));
     }
 
     /// `MaterialApp(theme: theme, home: ScrollConfiguration(NoScrollbarBehavior,

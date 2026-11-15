@@ -79,7 +79,7 @@ pub trait ScrollBehavior: Debug + 'static {
     /// The platform whose scroll physics should be implemented.
     ///
     /// Defaults to the current platform.
-    fn get_platform(&self, app: &App, context: BuildContext) -> TargetPlatform {
+    fn get_platform(&self, app: &mut App, context: BuildContext) -> TargetPlatform {
         ScrollBehaviorBase::get_platform(app, context)
     }
 
@@ -101,7 +101,7 @@ pub trait ScrollBehavior: Debug + 'static {
     /// [`MultitouchDragStrategy::AverageBoundaryPointers`] for Apple platforms.
     fn get_multitouch_drag_strategy(
         &self,
-        app: &App,
+        app: &mut App,
         context: BuildContext,
     ) -> MultitouchDragStrategy {
         ScrollBehaviorBase::get_multitouch_drag_strategy(self, app, context)
@@ -161,7 +161,7 @@ pub trait ScrollBehavior: Debug + 'static {
     /// and a new [`VelocityTracker`] on other platforms for each new pointer.
     fn velocity_tracker_builder(
         &self,
-        app: &App,
+        app: &mut App,
         context: BuildContext,
     ) -> GestureVelocityTrackerBuilder {
         ScrollBehaviorBase::velocity_tracker_builder(self, app, context)
@@ -173,7 +173,7 @@ pub trait ScrollBehavior: Debug + 'static {
     /// Defaults to [`RangeMaintainingScrollPhysics`] mixed with
     /// [`BouncingScrollPhysics`] on iOS and [`ClampingScrollPhysics`] on
     /// Android.
-    fn get_scroll_physics(&self, app: &App, context: BuildContext) -> ScrollPhysicsRef {
+    fn get_scroll_physics(&self, app: &mut App, context: BuildContext) -> ScrollPhysicsRef {
         ScrollBehaviorBase::get_scroll_physics(self, app, context)
     }
 
@@ -197,7 +197,7 @@ pub trait ScrollBehavior: Debug + 'static {
     /// Defaults to [`ScrollViewKeyboardDismissBehavior::Manual`].
     fn get_keyboard_dismiss_behavior(
         &self,
-        app: &App,
+        app: &mut App,
         context: BuildContext,
     ) -> ScrollViewKeyboardDismissBehavior {
         let _ = (app, context);
@@ -210,7 +210,7 @@ pub struct ScrollBehaviorBase;
 
 impl ScrollBehaviorBase {
     /// See [`ScrollBehavior::get_platform`].
-    pub fn get_platform(app: &App, context: BuildContext) -> TargetPlatform {
+    pub fn get_platform(app: &mut App, context: BuildContext) -> TargetPlatform {
         let _ = context;
         app.platform().target_platform()
     }
@@ -223,7 +223,7 @@ impl ScrollBehaviorBase {
     /// See [`ScrollBehavior::get_multitouch_drag_strategy`].
     pub fn get_multitouch_drag_strategy<B: ScrollBehavior + ?Sized>(
         behavior: &B,
-        app: &App,
+        app: &mut App,
         context: BuildContext,
     ) -> MultitouchDragStrategy {
         match behavior.get_platform(app, context) {
@@ -294,7 +294,7 @@ impl ScrollBehaviorBase {
     /// See [`ScrollBehavior::velocity_tracker_builder`].
     pub fn velocity_tracker_builder<B: ScrollBehavior + ?Sized>(
         behavior: &B,
-        app: &App,
+        app: &mut App,
         context: BuildContext,
     ) -> GestureVelocityTrackerBuilder {
         match behavior.get_platform(app, context) {
@@ -339,7 +339,7 @@ impl ScrollBehaviorBase {
     /// See [`ScrollBehavior::get_scroll_physics`].
     pub fn get_scroll_physics<B: ScrollBehavior + ?Sized>(
         behavior: &B,
-        app: &App,
+        app: &mut App,
         context: BuildContext,
     ) -> ScrollPhysicsRef {
         match behavior.get_platform(app, context) {
@@ -553,7 +553,7 @@ impl ScrollBehavior for WrappedScrollBehavior {
         self
     }
 
-    fn get_platform(&self, app: &App, context: BuildContext) -> TargetPlatform {
+    fn get_platform(&self, app: &mut App, context: BuildContext) -> TargetPlatform {
         self.platform
             .unwrap_or_else(|| self.delegate.get_platform(app, context))
     }
@@ -566,7 +566,7 @@ impl ScrollBehavior for WrappedScrollBehavior {
 
     fn get_multitouch_drag_strategy(
         &self,
-        app: &App,
+        app: &mut App,
         context: BuildContext,
     ) -> MultitouchDragStrategy {
         self.multitouch_drag_strategy
@@ -609,13 +609,13 @@ impl ScrollBehavior for WrappedScrollBehavior {
 
     fn velocity_tracker_builder(
         &self,
-        app: &App,
+        app: &mut App,
         context: BuildContext,
     ) -> GestureVelocityTrackerBuilder {
         self.delegate.velocity_tracker_builder(app, context)
     }
 
-    fn get_scroll_physics(&self, app: &App, context: BuildContext) -> ScrollPhysicsRef {
+    fn get_scroll_physics(&self, app: &mut App, context: BuildContext) -> ScrollPhysicsRef {
         self.physics
             .clone()
             .unwrap_or_else(|| self.delegate.get_scroll_physics(app, context))
@@ -623,7 +623,7 @@ impl ScrollBehavior for WrappedScrollBehavior {
 
     fn get_keyboard_dismiss_behavior(
         &self,
-        app: &App,
+        app: &mut App,
         context: BuildContext,
     ) -> ScrollViewKeyboardDismissBehavior {
         self.keyboard_dismiss_behavior
@@ -766,8 +766,8 @@ mod tests {
             let context = descendant(&harness, &app, 0);
 
             let behavior = ScrollConfiguration::of(&mut app, context);
-            assert_eq!(behavior.get_platform(&app, context), platform);
-            let physics = behavior.get_scroll_physics(&app, context);
+            assert_eq!(behavior.get_platform(&mut app, context), platform);
+            let physics = behavior.get_scroll_physics(&mut app, context);
             let described = format!("{physics:?}");
             assert!(described.contains(expected), "{platform:?}: {described}");
             assert!(
@@ -799,11 +799,11 @@ mod tests {
         );
         let context = descendant(&harness, &app, 1);
         let ambient = ScrollConfiguration::of(&mut app, context);
-        assert_eq!(ambient.get_platform(&app, context), TargetPlatform::IOS);
+        assert_eq!(ambient.get_platform(&mut app, context), TargetPlatform::IOS);
         // As in Dart, `_WrappedScrollBehavior.getScrollPhysics` defers to the delegate, which
         // reads its own platform; only `copyWith(physics:)` replaces the physics.
         assert!(
-            format!("{:?}", ambient.get_scroll_physics(&app, context))
+            format!("{:?}", ambient.get_scroll_physics(&mut app, context))
                 .contains("ClampingScrollPhysics")
         );
 
@@ -814,7 +814,7 @@ mod tests {
                 .physics(bouncing.clone()),
         );
         assert!(Rc::ptr_eq(
-            &overridden.get_scroll_physics(&app, context),
+            &overridden.get_scroll_physics(&mut app, context),
             &bouncing
         ));
     }
@@ -852,7 +852,7 @@ mod tests {
         assert!(behavior.drag_devices().contains(&PointerDeviceKind::Touch));
         assert!(!behavior.drag_devices().contains(&PointerDeviceKind::Mouse));
         assert_eq!(
-            behavior.get_multitouch_drag_strategy(&app, context),
+            behavior.get_multitouch_drag_strategy(&mut app, context),
             MultitouchDragStrategy::LatestPointer
         );
     }

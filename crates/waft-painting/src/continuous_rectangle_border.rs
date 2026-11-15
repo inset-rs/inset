@@ -2,9 +2,8 @@
 
 use std::any::Any;
 use std::fmt::{Debug, Formatter, Result as FmtResult};
-use std::sync::Arc;
 
-use waft_embedder::{Canvas, FillRule, Path, PathBuilder, RRect};
+use waft_embedder::{Canvas, Path, PathBuilder, RRect};
 use waft_embedder::{Offset, Rect};
 
 use crate::basic_types::TextDirection;
@@ -67,7 +66,7 @@ impl ContinuousRectangleBorder {
         }
     }
 
-    fn get_path(rrect: RRect) -> Arc<Path> {
+    fn get_path(rrect: RRect) -> Path {
         let left = rrect.left;
         let right = rrect.right;
         let top = rrect.top;
@@ -109,7 +108,7 @@ impl ContinuousRectangleBorder {
                 Offset::new(left, bottom - bl_radius_y),
             )
             .close();
-        path.build()
+        path.build().into()
     }
 }
 
@@ -156,7 +155,7 @@ impl ShapeBorder for ContinuousRectangleBorder {
         }
     }
 
-    fn get_inner_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Arc<Path> {
+    fn get_inner_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Path {
         Self::get_path(
             self.border_radius
                 .resolve(text_direction)
@@ -165,7 +164,7 @@ impl ShapeBorder for ContinuousRectangleBorder {
         )
     }
 
-    fn get_outer_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Arc<Path> {
+    fn get_outer_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Path {
         Self::get_path(self.border_radius.resolve(text_direction).to_rrect(rect))
     }
 
@@ -176,11 +175,8 @@ impl ShapeBorder for ContinuousRectangleBorder {
         match self.side.style {
             BorderStyle::None => {}
             BorderStyle::Solid => {
-                canvas.draw_path(
-                    &self.get_outer_path(rect, text_direction),
-                    FillRule::NonZero,
-                    &self.side.to_paint(),
-                );
+                let path = self.get_outer_path(rect, text_direction);
+                canvas.draw_path(path.as_valo(), path.fill_type, &self.side.to_paint());
             }
         }
     }
@@ -236,8 +232,8 @@ mod tests {
 
     use crate::border_radius::BorderRadiusDirectional;
 
-    fn contains(path: &Arc<Path>, x: f64, y: f64) -> bool {
-        path.contains(Offset::new(x, y).into(), FillRule::NonZero)
+    fn contains(path: &Path, x: f64, y: f64) -> bool {
+        path.contains(Offset::new(x, y))
     }
 
     fn side_width(width: f64) -> BorderSide {

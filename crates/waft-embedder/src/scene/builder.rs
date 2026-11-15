@@ -120,9 +120,9 @@ impl SceneBuilder {
     /// Pushes a path clip operation onto the operation stack.
     ///
     /// Rasterization outside the given path is discarded.
-    pub fn push_clip_path(&mut self, path: &Arc<Path>, clip_behavior: Clip) {
+    pub fn push_clip_path(&mut self, path: &Path, clip_behavior: Clip) {
         self.push_layer(Effect::ClipPath {
-            path: Arc::clone(path),
+            path: path.clone(),
             clip_behavior,
         });
     }

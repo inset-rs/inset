@@ -1,7 +1,5 @@
 //! Flutter counterpart: material_ui's `tab_bar_theme.dart`.
 
-use std::rc::Rc;
-
 use waft_embedder::Color;
 use waft_foundation::App;
 use waft_painting::{
@@ -963,15 +961,6 @@ impl Clone for TabBarThemeData {
     }
 }
 
-/// Dart's `==` on a `WidgetStateProperty` or an ink factory: identity.
-fn same_property<T: ?Sized>(a: &Option<Rc<T>>, b: &Option<Rc<T>>) -> bool {
-    match (a, b) {
-        (None, None) => true,
-        (Some(a), Some(b)) => Rc::ptr_eq(a, b),
-        _ => false,
-    }
-}
-
 /// Dart's `Decoration ==`.
 fn same_decoration(a: &Option<Box<dyn Decoration>>, b: &Option<Box<dyn Decoration>>) -> bool {
     match (a.as_deref(), b.as_deref()) {
@@ -996,9 +985,9 @@ impl PartialEq for TabBarThemeData {
             && other.label_style == self.label_style
             && other.unselected_label_color == self.unselected_label_color
             && other.unselected_label_style == self.unselected_label_style
-            && same_property(&other.overlay_color, &self.overlay_color)
-            && same_property(&other.splash_factory, &self.splash_factory)
-            && same_property(&other.mouse_cursor, &self.mouse_cursor)
+            && other.overlay_color == self.overlay_color
+            && other.splash_factory == self.splash_factory
+            && other.mouse_cursor == self.mouse_cursor
             && other.tab_alignment == self.tab_alignment
             && other.text_scaler == self.text_scaler
             && other.indicator_animation == self.indicator_animation
@@ -1078,7 +1067,7 @@ mod tests {
         );
         assert_ne!(theme.copy_with().divider_height(5.0), theme);
         assert_ne!(theme.copy_with().tab_alignment(TabAlignment::Fill), theme);
-        // Dart compares a `WidgetStateProperty` and a splash factory by identity.
+        // Dart compares a `resolveWith` property and a splash factory by identity.
         let overlay = <dyn WidgetStateProperty<Option<Color>>>::resolve_with(|_| None);
         let with_overlay = theme.copy_with().overlay_color(overlay.clone());
         assert_eq!(with_overlay.copy_with(), with_overlay);

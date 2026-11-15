@@ -5,8 +5,9 @@
 
 use std::sync::Arc;
 
+use waft_embedder::valo::Path;
 use waft_embedder::{
-    Canvas, Color, FillRule, FontStyle, FontWeight, Paint, Path, Size, TextAlign, TextDirection,
+    Canvas, Color, FillRule, FontStyle, FontWeight, Paint, Size, TextAlign, TextDirection,
 };
 use waft_foundation::App;
 use waft_painting::{PaintingBinding, TextScaler, TextStyle};

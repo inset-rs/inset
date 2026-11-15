@@ -281,13 +281,13 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
     ///
     ///  * [`reverse_transition_duration`](Self::reverse_transition_duration), which controls
     ///    the duration of the transition when it is in reverse.
-    fn transition_duration(self: Handle<Self>, app: &App) -> Duration;
+    fn transition_duration(self: Handle<Self>, app: &mut App) -> Duration;
 
     /// The duration the transition going in reverse.
     ///
     /// By default, the reverse transition duration is set to the value of the forwards
     /// [`transition_duration`](Self::transition_duration).
-    fn reverse_transition_duration(self: Handle<Self>, app: &App) -> Duration {
+    fn reverse_transition_duration(self: Handle<Self>, app: &mut App) -> Duration {
         TransitionRoute::transition_duration(self, app)
     }
 
@@ -946,6 +946,11 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
         let result = self.transition_route_data(app).result.clone();
         let transition_completer = self.transition_route_data(app).transition_completer.clone();
         transition_completer.complete(app, result);
+        // The navigator disposes a route once its overlay entries have unmounted, so nothing
+        // reads what its last builds made any more.
+        if let Some(modal_route) = self.as_route().as_modal_route(app) {
+            modal_route.free_last_build_objects(app);
+        }
         OverlayRoute::dispose(self, app);
     }
 
@@ -966,8 +971,8 @@ struct TransitionRouteVTable {
     controller_value: fn(&App, HandleId) -> f64,
     opaque: fn(&App, HandleId) -> bool,
     allow_snapshotting: fn(&App, HandleId) -> bool,
-    transition_duration: fn(&App, HandleId) -> Duration,
-    reverse_transition_duration: fn(&App, HandleId) -> Duration,
+    transition_duration: fn(&mut App, HandleId) -> Duration,
+    reverse_transition_duration: fn(&mut App, HandleId) -> Duration,
     can_transition_to: fn(&App, HandleId, AnyTransitionRoute) -> bool,
     can_transition_from: fn(&App, HandleId, AnyTransitionRoute) -> bool,
     completed: fn(&App, HandleId) -> CompleterFuture<RouteResult>,
@@ -1089,12 +1094,12 @@ impl AnyTransitionRoute {
     }
 
     /// See [`TransitionRoute::transition_duration`].
-    pub fn transition_duration(self, app: &App) -> Duration {
+    pub fn transition_duration(self, app: &mut App) -> Duration {
         (self.vtable.transition_duration)(app, self.id)
     }
 
     /// See [`TransitionRoute::reverse_transition_duration`].
-    pub fn reverse_transition_duration(self, app: &App) -> Duration {
+    pub fn reverse_transition_duration(self, app: &mut App) -> Duration {
         (self.vtable.reverse_transition_duration)(app, self.id)
     }
 
@@ -1560,6 +1565,7 @@ impl StatefulWidget for ModalScope {
             focus_scope_node: None,
             primary_scroll_controller: None,
             no_gesture_in_progress: None,
+            dismiss_action: None,
         }
     }
 }
@@ -1577,9 +1583,26 @@ struct ModalScopeState {
     focus_scope_node: Option<Handle<FocusScopeNode>>,
     primary_scroll_controller: Option<Handle<ScrollController>>,
     no_gesture_in_progress: Option<Handle<waft_foundation::ValueNotifier<bool>>>,
+    /// The `_DismissModalAction` the last build made, which Dart's collector frees once the
+    /// next build replaces it; that build, or `dispose`, frees it here.
+    dismiss_action: Option<Handle<DismissModalAction>>,
 }
 
 impl ModalScopeState {
+    /// Keeps `made`, this build's dismiss action, and frees the last build's.
+    ///
+    /// It lingers until the next checkpoint: the `Actions` built with it removes its listener
+    /// from it only when this build's replaces it.
+    fn replace_dismiss_action(
+        self: Handle<Self>,
+        app: &mut App,
+        made: Option<Handle<DismissModalAction>>,
+    ) {
+        if let Some(replaced) = std::mem::replace(&mut app.get_mut(self).dismiss_action, made) {
+            app.destroy_lingering(replaced);
+        }
+    }
+
     /// The node this scope uses for its root `FocusScope` widget.
     fn focus_scope_node(self: Handle<Self>, app: &App) -> Handle<FocusScopeNode> {
         app.get(self).focus_scope_node.expect("init_state has run")
@@ -1701,6 +1724,7 @@ impl State for ModalScopeState {
         node.dispose(app);
         let controller = app.get(self).primary_scroll_controller.expect("init_state");
         ScrollController::dispose(controller.as_controller(), app);
+        self.replace_dismiss_action(app, None);
     }
 
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
@@ -1759,10 +1783,12 @@ impl State for ModalScopeState {
         .into_widget();
 
         let scope_child = Builder::new(move |app, context| {
+            let dismiss_action = DismissModalAction::new(app, context);
+            self.replace_dismiss_action(app, Some(dismiss_action));
             let mut actions = HashMap::new();
             actions.insert(
                 <DismissModalAction as Action>::intent_type(),
-                Action::as_action(DismissModalAction::new(app, context)),
+                Action::as_action(dismiss_action),
             );
             let controller = app.get(self).primary_scroll_controller.expect("init_state");
             Actions::new(
@@ -1843,6 +1869,13 @@ pub struct ModalRouteData {
     modal_barrier: Option<Handle<OverlayEntry>>,
     modal_scope: Option<Handle<OverlayEntry>>,
     modal_scope_cache: Option<WidgetRef>,
+    /// The tweens and the colour animation the last `build_modal_barrier` drove, which Dart's
+    /// collector frees once the next build replaces them; that build frees them here.
+    barrier_animations: Vec<HandleId>,
+    /// The static proxy the last `_buildFlexibleTransitions` handed this route's transitions
+    /// in place of the secondary animation, which they read across frames until the next one
+    /// replaces it; Dart's collector frees it then, and that build frees it here.
+    flexible_transitions_proxy: Option<Handle<ProxyAnimation>>,
 }
 
 impl ModalRouteData {
@@ -1863,6 +1896,8 @@ impl ModalRouteData {
             modal_barrier: None,
             modal_scope: None,
             modal_scope_cache: None,
+            barrier_animations: Vec::new(),
+            flexible_transitions_proxy: None,
         }
     }
 }
@@ -2001,6 +2036,7 @@ pub trait ModalRoute: LocalHistoryRoute {
     ) -> WidgetRef {
         let received = self.modal_route_data(app).received_transition.clone();
         let Some(received) = received else {
+            self.replace_flexible_transitions_proxy(app, None);
             return ModalRoute::build_transitions(
                 self,
                 app,
@@ -2011,6 +2047,7 @@ pub trait ModalRoute: LocalHistoryRoute {
             );
         };
         if secondary_animation.is_dismissed(app) {
+            self.replace_flexible_transitions_proxy(app, None);
             return ModalRoute::build_transitions(
                 self,
                 app,
@@ -2023,6 +2060,7 @@ pub trait ModalRoute: LocalHistoryRoute {
 
         // Create a static proxy animation to suppress the original secondary transition.
         let proxy_animation = ProxyAnimation::new(app, None);
+        self.replace_flexible_transitions_proxy(app, Some(proxy_animation));
         let proxied_original_transitions = ModalRoute::build_transitions(
             self,
             app,
@@ -2556,17 +2594,59 @@ pub trait ModalRouteBase: ModalRoute {
                 let color_tween = ColorTween::new(app, Some(transparent), Some(barrier_color));
                 let curve_tween = CurveTween::new(app, curve);
                 let color = animation.drive(app, color_tween.chain(curve_tween));
+                self.replace_barrier_animations(
+                    app,
+                    vec![color_tween.into(), curve_tween.into(), color.id()],
+                );
                 AnimatedModalBarrier::new(color)
                     .dismissible(dismissible)
                     .barrier_semantics_dismissible(semantics_dismissible)
                     .maybe_semantics_label(semantics_label)
                     .into_widget()
             }
-            _ => ModalBarrier::new()
-                .dismissible(dismissible)
-                .barrier_semantics_dismissible(semantics_dismissible)
-                .maybe_semantics_label(semantics_label)
-                .into_widget(),
+            _ => {
+                self.replace_barrier_animations(app, Vec::new());
+                ModalBarrier::new()
+                    .dismissible(dismissible)
+                    .barrier_semantics_dismissible(semantics_dismissible)
+                    .maybe_semantics_label(semantics_label)
+                    .into_widget()
+            }
+        }
+    }
+
+    /// Keeps `made`, the proxy this `_buildFlexibleTransitions` hands the transitions, and
+    /// frees the last one; it lingers until the next checkpoint, for the transitions built
+    /// with it to move to this build's.
+    fn replace_flexible_transitions_proxy(
+        self: Handle<Self>,
+        app: &mut App,
+        made: Option<Handle<ProxyAnimation>>,
+    ) {
+        if let Some(replaced) = std::mem::replace(
+            &mut self.modal_route_data_mut(app).flexible_transitions_proxy,
+            made,
+        ) {
+            app.destroy_lingering(replaced);
+        }
+    }
+
+    /// Frees what the route's last builds made and still keeps — the barrier's tweens and
+    /// animation and the transitions' proxy — which Dart's collector frees with the route.
+    fn free_last_build_objects(self: Handle<Self>, app: &mut App) {
+        self.replace_barrier_animations(app, Vec::new());
+        self.replace_flexible_transitions_proxy(app, None);
+    }
+
+    /// Keeps `made`, what this build of the barrier drove, and frees what the last build drove.
+    ///
+    /// They linger until the next checkpoint: the barrier built from them moves off them only
+    /// when this build's barrier replaces it.
+    fn replace_barrier_animations(self: Handle<Self>, app: &mut App, made: Vec<HandleId>) {
+        let replaced =
+            std::mem::replace(&mut self.modal_route_data_mut(app).barrier_animations, made);
+        for replaced in replaced {
+            app.destroy_lingering(replaced);
         }
     }
 }
@@ -2615,6 +2695,7 @@ struct ModalRouteVTable {
     remove_local_history_entry: fn(&mut App, HandleId, Handle<LocalHistoryEntry>),
     register_pop_entry: fn(&mut App, HandleId, Rc<dyn PopEntry>),
     unregister_pop_entry: fn(&mut App, HandleId, Rc<dyn PopEntry>),
+    free_last_build_objects: fn(&mut App, HandleId),
 }
 
 impl ModalRouteVTable {
@@ -2672,6 +2753,9 @@ impl ModalRouteVTable {
             },
             register_pop_entry: |app, id, entry| R::register_pop_entry(resolve(id), app, entry),
             unregister_pop_entry: |app, id, entry| R::unregister_pop_entry(resolve(id), app, entry),
+            free_last_build_objects: |app, id| {
+                ModalRouteBase::free_last_build_objects(resolve::<R>(id), app)
+            },
         }
     }
 }
@@ -2943,6 +3027,11 @@ impl AnyModalRoute {
     /// See [`ModalRoute::unregister_pop_entry`].
     pub fn unregister_pop_entry(self, app: &mut App, pop_entry: Rc<dyn PopEntry>) {
         (self.vtable.unregister_pop_entry)(app, self.id, pop_entry)
+    }
+
+    /// See [`ModalRouteBase::free_last_build_objects`]; `TransitionRoute::dispose` calls it.
+    fn free_last_build_objects(self, app: &mut App) {
+        (self.vtable.free_last_build_objects)(app, self.id)
     }
 }
 
@@ -3801,7 +3890,7 @@ macro_rules! raw_dialog_route_transition_route_overrides {
 
         fn transition_duration(
             self: ::waft_foundation::Handle<Self>,
-            app: &::waft_foundation::App,
+            app: &mut ::waft_foundation::App,
         ) -> ::std::time::Duration {
             $crate::RawDialogRouteLeaf::transition_duration(self, app)
         }
@@ -4396,6 +4485,93 @@ mod tests {
         pump_every_view(&mut app, at);
         settle(&mut app, at);
         assert!(!dialog.is_active(&app), "the barrier popped the dialog");
+    }
+
+    /// Not a Dart case: Dart's collector frees the tweens and the colour animation each build
+    /// of a modal barrier replaces; here the route keeps the last ones and frees what they
+    /// replace.
+    #[test]
+    fn rebuilding_a_coloured_barrier_leaves_no_new_arena_objects() {
+        let cell = app_with_view();
+        let key = GlobalKey::new();
+        mount(
+            &cell,
+            navigator(&key, |app, _settings| {
+                Some(page_route(app, None, "/").as_route())
+            }),
+        );
+        let mut app = cell.borrow_mut();
+        let navigator_state = state(&key, &mut app);
+        let at = settle(&mut app, Duration::ZERO);
+        let dialog = RawDialogRoute::new(&mut app, corner_page(None))
+            .barrier_color(&mut app, Some(Color::new(0x80000000)));
+        navigator_state.push(&mut app, dialog.as_route());
+        let mut at = settle(&mut app, at);
+        let rebuild_barrier = |app: &mut App, at: &mut Duration| {
+            ModalRoute::changed_internal_state(dialog, app);
+            *at += Duration::from_millis(20);
+            pump_every_view(app, *at);
+        };
+        rebuild_barrier(&mut app, &mut at);
+        drop(app);
+        cell.checkpoint();
+
+        let before = cell.borrow().debug_object_count();
+        rebuild_barrier(&mut cell.borrow_mut(), &mut at);
+        cell.checkpoint();
+        assert_eq!(cell.borrow().debug_object_count(), before);
+    }
+
+    /// Not a Dart case: Dart's collector frees a disposed route's last barrier tweens and
+    /// colour animation; here the route's disposal frees them.
+    #[test]
+    fn a_disposed_route_frees_its_last_barrier_animations() {
+        let cell = app_with_view();
+        let key = GlobalKey::new();
+        mount(
+            &cell,
+            navigator(&key, |app, _settings| {
+                Some(page_route(app, None, "/").as_route())
+            }),
+        );
+        let (dialog, barrier_animations) = {
+            let mut app = cell.borrow_mut();
+            let navigator_state = state(&key, &mut app);
+            let at = settle(&mut app, Duration::ZERO);
+            let dialog = RawDialogRoute::new(&mut app, corner_page(None))
+                .barrier_color(&mut app, Some(Color::new(0x80000000)));
+            navigator_state.push(&mut app, dialog.as_route());
+            let mut at = settle(&mut app, at);
+            navigator_state.pop(&mut app, None);
+            // What the barrier's last build drove, read frame by frame until the route goes.
+            let mut barrier_animations = Vec::new();
+            for _ in 0..40 {
+                let driven = &dialog.modal_route_data(&app).barrier_animations;
+                if !driven.is_empty() {
+                    barrier_animations.clone_from(driven);
+                }
+                at += Duration::from_millis(20);
+                pump_every_view(&mut app, at);
+            }
+            (dialog, barrier_animations)
+        };
+        cell.checkpoint();
+        let app = cell.borrow();
+        assert!(
+            dialog
+                .transition_route_data(&app)
+                .transition_completer
+                .is_completed(),
+            "the route is disposed"
+        );
+        assert_eq!(
+            barrier_animations.len(),
+            3,
+            "two tweens and the colour animation"
+        );
+        for id in barrier_animations {
+            assert!(!app.contains(id), "{id:?} is freed");
+        }
     }
 
     #[test]

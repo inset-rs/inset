@@ -784,7 +784,7 @@ impl ScrollBehavior for CupertinoScrollBehavior {
         child
     }
 
-    fn get_scroll_physics(&self, app: &App, context: BuildContext) -> ScrollPhysicsRef {
+    fn get_scroll_physics(&self, app: &mut App, context: BuildContext) -> ScrollPhysicsRef {
         // When modifying this function, consider modifying the implementation in
         // the base class ScrollBehavior as well.
         if self.get_platform(app, context) == TargetPlatform::MacOS {
@@ -797,7 +797,7 @@ impl ScrollBehavior for CupertinoScrollBehavior {
 
     fn get_multitouch_drag_strategy(
         &self,
-        app: &App,
+        app: &mut App,
         context: BuildContext,
     ) -> MultitouchDragStrategy {
         let _ = (app, context);
@@ -1097,8 +1097,8 @@ mod tests {
             TargetPlatform::Windows,
         ] {
             let (cell, context) = app_with_context(platform);
-            let app = cell.borrow();
-            let physics = CupertinoScrollBehavior::new().get_scroll_physics(&app, context);
+            let mut app = cell.borrow_mut();
+            let physics = CupertinoScrollBehavior::new().get_scroll_physics(&mut app, context);
             let bouncing = physics
                 .as_any()
                 .downcast_ref::<BouncingScrollPhysics>()
@@ -1110,8 +1110,8 @@ mod tests {
             );
         }
         let (cell, context) = app_with_context(TargetPlatform::MacOS);
-        let app = cell.borrow();
-        let physics = CupertinoScrollBehavior::new().get_scroll_physics(&app, context);
+        let mut app = cell.borrow_mut();
+        let physics = CupertinoScrollBehavior::new().get_scroll_physics(&mut app, context);
         let bouncing = physics
             .as_any()
             .downcast_ref::<BouncingScrollPhysics>()
@@ -1122,9 +1122,9 @@ mod tests {
     #[test]
     fn the_multitouch_drag_strategy_averages_the_boundary_pointers() {
         let (cell, context) = app_with_context(TargetPlatform::Android);
-        let app = cell.borrow();
+        let mut app = cell.borrow_mut();
         assert_eq!(
-            CupertinoScrollBehavior::new().get_multitouch_drag_strategy(&app, context),
+            CupertinoScrollBehavior::new().get_multitouch_drag_strategy(&mut app, context),
             MultitouchDragStrategy::AverageBoundaryPointers
         );
     }

@@ -2,7 +2,6 @@
 
 use std::any::Any;
 use std::fmt::{Debug, Formatter, Result as FmtResult};
-use std::sync::Arc;
 
 use waft_embedder::{Canvas, Paint, Path, PathBuilder, rrect_radii_elliptical};
 use waft_embedder::{Offset, RRect, Radius, Rect, clamp_double, lerp_double};
@@ -130,11 +129,11 @@ impl ShapeBorder for CircleBorder {
         }
     }
 
-    fn get_inner_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Arc<Path> {
+    fn get_inner_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Path {
         oval_path(self.adjust_rect(rect).deflate(self.side.stroke_inset()))
     }
 
-    fn get_outer_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Arc<Path> {
+    fn get_outer_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Path {
         oval_path(self.adjust_rect(rect))
     }
 
@@ -240,24 +239,24 @@ impl Debug for CircleBorder {
     }
 }
 
-pub(crate) fn oval_path(rect: Rect) -> Arc<Path> {
+pub(crate) fn oval_path(rect: Rect) -> Path {
     let mut path = PathBuilder::new();
     let rx = (rect.width() / 2.0) as f32;
     let ry = (rect.height() / 2.0) as f32;
     path.rrect_radii_elliptical(rect, [[rx, ry]; 4]);
-    path.build()
+    path.build().into()
 }
 
-pub(crate) fn rrect_path(rrect: RRect) -> Arc<Path> {
+pub(crate) fn rrect_path(rrect: RRect) -> Path {
     let mut path = PathBuilder::new();
     path.rrect_radii_elliptical(rrect.outer_rect(), rrect_radii_elliptical(rrect));
-    path.build()
+    path.build().into()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use waft_embedder::{Color, FillRule};
+    use waft_embedder::Color;
 
     fn side_width(width: f64) -> BorderSide {
         BorderSide {
@@ -266,8 +265,8 @@ mod tests {
         }
     }
 
-    fn contains(path: &Arc<Path>, x: f64, y: f64) -> bool {
-        path.contains(Offset::new(x, y).into(), FillRule::NonZero)
+    fn contains(path: &Path, x: f64, y: f64) -> bool {
+        path.contains(Offset::new(x, y))
     }
 
     #[test]
@@ -329,14 +328,17 @@ mod tests {
     fn paths_for_square_and_eccentric_oval() {
         let circle_rect = Rect::from_ltwh(50.0, 0.0, 100.0, 100.0);
         let rect = Rect::from_ltwh(0.0, 0.0, 200.0, 100.0);
-        let bounds = CircleBorder::default().get_outer_path(rect, None).bounds();
+        let bounds = CircleBorder::default()
+            .get_outer_path(rect, None)
+            .as_valo()
+            .bounds();
         assert!((bounds.x - circle_rect.left as f32).abs() < 0.01);
         assert!((bounds.y - circle_rect.top as f32).abs() < 0.01);
         assert!((bounds.width - circle_rect.width() as f32).abs() < 0.01);
         assert!((bounds.height - circle_rect.height() as f32).abs() < 0.01);
 
         let oval = CircleBorder::new(BorderSide::NONE, 1.0);
-        let outer = oval.get_outer_path(rect, None).bounds();
+        let outer = oval.get_outer_path(rect, None).as_valo().bounds();
         assert!((outer.width - 200.0).abs() < 0.01);
         assert!((outer.height - 100.0).abs() < 0.01);
     }

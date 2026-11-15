@@ -61,19 +61,18 @@ use std::sync::{Arc, Mutex, Weak};
 
 use objc2::Message;
 use objc2::rc::Retained;
-use objc2_core_foundation::CFRetained;
-use objc2_core_graphics::CGMutablePath;
 use objc2_foundation::{NSPoint, NSRect};
-use objc2_quartz_core::{CALayer, CAShapeLayer, CATransaction};
+use objc2_quartz_core::{CALayer, CAShapeLayer, CATransaction, kCAFillRuleEvenOdd};
 use waft_embedder::{
-    CompositionLayer, Compositor, HardwareBuffer, LayerPicture, Placement, VideoFrame, ViewId,
+    CompositionLayer, Compositor, FillRule, HardwareBuffer, LayerPicture, Placement, VideoFrame,
+    ViewId,
 };
 
 use super::hardware_buffers::SurfaceBuffer;
 use winit::window::Window;
 
 use buffers::{PresentedBuffers, ShownBuffer, notify_released};
-use layer_geometry::LayerGeometry;
+use layer_geometry::{ClipShape, LayerGeometry};
 use placed::PlacedLayers;
 
 #[cfg(target_os = "macos")]
@@ -557,13 +556,17 @@ fn is_sublayer_of(layer: &CALayer, parent: &CALayer) -> bool {
 /// Masks `layer` to the intersection of `shapes`, in its own points, or to nothing beyond its
 /// bounds when there are none: each shape a shape layer, the mask of the one before, so Core
 /// Animation keeps only what lies inside every one.
-fn mask_to_shapes(layer: &CALayer, shapes: &[CFRetained<CGMutablePath>]) {
+fn mask_to_shapes(layer: &CALayer, shapes: &[ClipShape]) {
     let bounds = NSRect::new(NSPoint::new(0.0, 0.0), layer.bounds().size);
     let mut mask: Option<Retained<CALayer>> = None;
     for shape in shapes.iter().rev() {
         let shape_layer = CAShapeLayer::new();
         shape_layer.setFrame(bounds);
-        shape_layer.setPath(Some(shape));
+        shape_layer.setPath(Some(&shape.path));
+        if shape.fill_rule == FillRule::EvenOdd {
+            // SAFETY: a constant Core Animation defines for this property.
+            shape_layer.setFillRule(unsafe { kCAFillRuleEvenOdd });
+        }
         // SAFETY: a mask made here, in no layer tree, inside the caller's transaction.
         unsafe { shape_layer.setMask(mask.as_deref()) };
         mask = Some(Retained::into_super(shape_layer));

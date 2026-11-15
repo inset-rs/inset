@@ -928,6 +928,7 @@ impl SnackBarState {
         ];
         for animation in animations.into_iter().flatten() {
             animation.dispose(app);
+            app.destroy_lingering(animation);
         }
     }
 
@@ -4797,6 +4798,49 @@ mod tests {
     fn a_theme_fixed_snack_bar_asserts_against_a_width() {
         with_main_thread_stack(|| {
             themed_and_shown(SnackBarBehavior::Fixed, |snack_bar| snack_bar.width(5.0));
+        });
+    }
+
+    /// Dart's collector frees the curved animations `_SnackBarState` makes once the snack bar
+    /// is gone; here the state frees them in its `dispose`.
+    #[test]
+    fn a_dismissed_snack_bar_frees_its_curved_animations() {
+        with_main_thread_stack(|| {
+            let mut tester = tester();
+            let home = x_scaffold(|app, context| {
+                show(
+                    app,
+                    context,
+                    SnackBar::new(Text::new("Snack")).duration(Duration::from_secs(1)),
+                );
+            });
+            pump_app(&mut tester, m3, home.into_widget());
+            tap_x_and_settle_entrance(&mut tester);
+            let animations = {
+                let snack_bar = tester.find_by_type::<SnackBar>()[0];
+                let app = tester.cell.borrow();
+                let state = app.get(
+                    snack_bar
+                        .state_handle::<SnackBarState>(&app)
+                        .expect("a SnackBar is stateful"),
+                );
+                [
+                    state.height_animation,
+                    state.fade_in_animation,
+                    state.fade_in_m3_animation,
+                    state.fade_out_animation,
+                    state.height_m3_animation,
+                ]
+                .map(|animation| animation.expect("made in init_state"))
+            };
+
+            tester.pump(ms(1500)); // the timer dismisses the snack bar
+            tester.pump(Duration::ZERO); // begin the reverse animation
+            tester.pump(ms(750)); // its last frame removes the snack bar
+            assert!(tester.find_by_type::<SnackBar>().is_empty());
+            tester.cell.checkpoint();
+            let app = tester.cell.borrow();
+            assert!(animations.iter().all(|animation| !app.contains(*animation)));
         });
     }
 }

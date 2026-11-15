@@ -4,7 +4,7 @@ use crate::*;
 use std::{any::Any, fmt, rc::Rc};
 use waft_embedder::Canvas;
 use waft_embedder::valo::{FillRule, Paint};
-use waft_embedder::{Color, FontWeight, Path, PathBuilder, Size};
+use waft_embedder::{Color, FontWeight, PathBuilder, Size};
 use waft_foundation::{App, Listener};
 use waft_painting::{Alignment, EdgeInsetsGeometry};
 use waft_rendering::{BoxConstraints, CustomPainter};
@@ -725,7 +725,11 @@ impl CustomPainter for TabChromePainter {
 }
 
 /// UpdateTabGeometry: four-pixel outward lower corners and the theme's upper radii.
-fn selected_tab_geometry(corner_radius: [f64; 4], width: f32, height: f32) -> std::sync::Arc<Path> {
+fn selected_tab_geometry(
+    corner_radius: [f64; 4],
+    width: f32,
+    height: f32,
+) -> std::sync::Arc<waft_embedder::valo::Path> {
     use std::f32::consts::{FRAC_PI_2, PI};
     let left = corner_radius[0] as f32;
     let right = corner_radius[1] as f32;

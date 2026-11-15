@@ -2,7 +2,6 @@
 
 use std::any::Any;
 use std::fmt::{Debug, Formatter, Result as FmtResult};
-use std::sync::Arc;
 
 use waft_embedder::{BlendMode, Canvas, ClipOp, Paint};
 use waft_embedder::{Offset, Path, PathBuilder, Rect, Size};
@@ -301,7 +300,7 @@ impl Decoration for BoxDecoration {
             .unwrap_or(EdgeInsets::ZERO.into())
     }
 
-    fn get_clip_path(&self, rect: Rect, text_direction: TextDirection) -> Arc<Path> {
+    fn get_clip_path(&self, rect: Rect, text_direction: TextDirection) -> Path {
         match self.shape {
             BoxShape::Circle => {
                 let center = rect.center();
@@ -314,7 +313,7 @@ impl Decoration for BoxDecoration {
                 } else {
                     let mut path = PathBuilder::new();
                     path.rect(rect.into());
-                    path.build()
+                    path.build().into()
                 }
             }
         }
@@ -648,7 +647,7 @@ impl Debug for BoxDecorationPainter {
 mod tests {
     use super::*;
     use waft_embedder::Color;
-    use waft_embedder::{FillRule, Radius, lerp_double};
+    use waft_embedder::{Radius, lerp_double};
 
     use waft_embedder::valo::{Op, Shader};
 
@@ -698,13 +697,13 @@ mod tests {
             }
         }
 
-        fn get_outer_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Arc<Path> {
+        fn get_outer_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Path {
             let mut path = PathBuilder::new();
             path.rect(rect.into());
-            path.build()
+            path.build().into()
         }
 
-        fn get_inner_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Arc<Path> {
+        fn get_inner_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Path {
             self.get_outer_path(rect, text_direction)
         }
 
@@ -765,8 +764,8 @@ mod tests {
         }
     }
 
-    fn contains(path: &Arc<Path>, x: f64, y: f64) -> bool {
-        path.contains(Offset::new(x, y).into(), FillRule::NonZero)
+    fn contains(path: &Path, x: f64, y: f64) -> bool {
+        path.contains(Offset::new(x, y))
     }
 
     #[test]

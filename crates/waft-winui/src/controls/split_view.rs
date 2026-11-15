@@ -5,8 +5,8 @@ use crate::{
     Brush, ColorTransition, ColumnDefinition, Grid, GridCell, GridLength, SizeObserver,
     ThemeResources, after_next_frame,
 };
-use std::{any::Any, fmt, rc::Rc, sync::Arc, time::Duration};
-use waft_embedder::{Color, Offset, Path, PathBuilder, Rect, Size};
+use std::{any::Any, fmt, rc::Rc, time::Duration};
+use waft_embedder::{Color, Offset, Path, PathBuilder, PathFillType, Rect, Size};
 use waft_foundation::{App, Handle, Listener};
 use waft_painting::{Alignment, EdgeInsets, transform_point};
 use waft_rendering::{BoxConstraints, CustomClipper, StackFit};
@@ -1025,11 +1025,11 @@ impl SplitViewState {
 #[derive(Debug)]
 struct PaneClipper(f64);
 impl CustomClipper<Rect> for PaneClipper {
-    fn get_clip(&self, size: Size) -> Rect {
+    fn get_clip(&self, _app: &App, size: Size) -> Rect {
         Rect::from_ltwh(self.0, 0.0, size.width(), size.height())
     }
 
-    fn should_reclip(&self, old: &dyn CustomClipper<Rect>) -> bool {
+    fn should_reclip(&self, _app: &App, old: &dyn CustomClipper<Rect>) -> bool {
         old.as_any()
             .downcast_ref::<Self>()
             .is_none_or(|old| old.0 != self.0)
@@ -1045,20 +1045,9 @@ impl CustomClipper<Rect> for PaneClipper {
 /// WinUI uses four polygonal elements for DComp input; the native overlay uses a clipped hole.
 #[derive(Debug)]
 struct OutsideClipper([Offset; 4]);
-impl CustomClipper<Arc<Path>> for OutsideClipper {
-    fn get_clip(&self, size: Size) -> Arc<Path> {
-        let mut hole = self.0;
-        // A reflected ancestor reverses the hole's winding.
-        let signed_area: f64 = (0..4)
-            .map(|i| {
-                let a = hole[i];
-                let b = hole[(i + 1) % 4];
-                a.dx() * b.dy() - b.dx() * a.dy()
-            })
-            .sum();
-        if signed_area > 0.0 {
-            hole.reverse();
-        }
+impl CustomClipper<Path> for OutsideClipper {
+    fn get_clip(&self, _app: &App, size: Size) -> Path {
+        let hole = self.0;
         let mut path = PathBuilder::new();
         for polygon in [
             [
@@ -1075,10 +1064,13 @@ impl CustomClipper<Arc<Path>> for OutsideClipper {
             }
             path.close();
         }
-        path.build()
+        let mut path = Path::new(path.build());
+        // The hole cuts out of the bounds whichever way a reflected ancestor turns it.
+        path.fill_type = PathFillType::EvenOdd;
+        path
     }
 
-    fn should_reclip(&self, old: &dyn CustomClipper<Arc<Path>>) -> bool {
+    fn should_reclip(&self, _app: &App, old: &dyn CustomClipper<Path>) -> bool {
         old.as_any()
             .downcast_ref::<Self>()
             .is_none_or(|old| old.0 != self.0)

@@ -559,11 +559,105 @@ impl Animatable<f64> for Handle<CurveTween> {
     }
 }
 
+/// Dart's `Tween<T>` held as a value rather than an arena object: for a tween whose ends
+/// are fixed once it is made, as a Dart `static final` or `const` tween's are, or one a build
+/// makes and drops.
+///
+/// A driven animation holds a copy, so nothing frees it and nothing can change its ends; a
+/// tween whose `begin` or `end` is written after it is driven is a [`Tween`]
+/// (`patterns/value-tweens.md` in the porting skill).
+#[derive(Clone, Copy, Debug)]
+pub struct ValueTween<T> {
+    /// The value this variable has at the beginning of the animation.
+    pub begin: T,
+
+    /// The value this variable has at the end of the animation.
+    pub end: T,
+}
+
+impl<T> ValueTween<T> {
+    /// Creates a tween from `begin` to `end`.
+    pub const fn new(begin: T, end: T) -> ValueTween<T> {
+        ValueTween { begin, end }
+    }
+}
+
+impl<T: TweenLerp> ValueTween<T> {
+    /// Returns the value this variable has at the given animation clock value.
+    pub fn lerp(&self, t: f64) -> T {
+        T::lerp(&self.begin, &self.end, t)
+    }
+}
+
+impl<T: TweenLerp> Animatable<T> for ValueTween<T> {
+    fn transform(&self, _app: &App, t: f64) -> T {
+        if t == 0.0 {
+            return self.begin.clone();
+        }
+        if t == 1.0 {
+            return self.end.clone();
+        }
+        self.lerp(t)
+    }
+}
+
+/// Dart's `ConstantTween<T>` held as a value, for the tweens [`ValueTween`] is for.
+#[derive(Clone, Copy, Debug)]
+pub struct ValueConstantTween<T> {
+    /// The value at every point of the animation: Dart's `begin` and `end`.
+    pub value: T,
+}
+
+impl<T> ValueConstantTween<T> {
+    /// Create a tween whose begin and end values equal `value`.
+    pub const fn new(value: T) -> ValueConstantTween<T> {
+        ValueConstantTween { value }
+    }
+}
+
+impl<T: Clone> ValueConstantTween<T> {
+    /// Dart's `ConstantTween.lerp`: the value, whatever `t` is.
+    pub fn lerp(&self, _t: f64) -> T {
+        self.value.clone()
+    }
+}
+
+impl<T: Clone> Animatable<T> for ValueConstantTween<T> {
+    fn transform(&self, _app: &App, t: f64) -> T {
+        self.lerp(t)
+    }
+}
+
+/// Dart's `CurveTween` held as a value, for the tweens [`ValueTween`] is for.
+#[derive(Clone, Debug)]
+pub struct ValueCurveTween {
+    /// The curve to use when transforming the value of the animation.
+    pub curve: Rc<dyn Curve>,
+}
+
+impl ValueCurveTween {
+    /// Creates a curve tween.
+    pub fn new(curve: Rc<dyn Curve>) -> ValueCurveTween {
+        ValueCurveTween { curve }
+    }
+}
+
+impl Animatable<f64> for ValueCurveTween {
+    fn transform(&self, _app: &App, t: f64) -> f64 {
+        if t == 0.0 || t == 1.0 {
+            debug_assert_eq!(self.curve.transform(t).round(), t);
+            return t;
+        }
+        self.curve.transform(t)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::animation::Animation;
     use crate::animations::AlwaysStoppedAnimation;
+    use crate::curves::SawTooth;
     use waft_foundation::AppCell;
 
     #[test]
@@ -613,5 +707,26 @@ mod tests {
             Some(Size::new(20.0, 0.0)),
         );
         assert_eq!(tween.transform(&app, 0.5), Size::new(15.0, 10.0));
+    }
+
+    #[test]
+    fn a_value_tween_walks_the_line_without_an_arena_entry() {
+        let cell = AppCell::new();
+        let app = cell.borrow();
+        let tween = ValueTween::new(Offset::new(0.0, 10.0), Offset::new(4.0, -10.0));
+        assert_eq!(tween.transform(&app, 0.0), Offset::new(0.0, 10.0));
+        assert_eq!(tween.transform(&app, 0.25), Offset::new(1.0, 5.0));
+        assert_eq!(tween.transform(&app, 1.0), Offset::new(4.0, -10.0));
+    }
+
+    #[test]
+    fn a_value_tween_chained_onto_a_value_curve_tween_reads_the_curved_input() {
+        let cell = AppCell::new();
+        let app = cell.borrow();
+        let tween =
+            ValueTween::new(0.0, 10.0).chain(ValueCurveTween::new(Rc::new(SawTooth::new(2))));
+        assert_eq!(tween.transform(&app, 0.25), 5.0);
+        assert_eq!(tween.transform(&app, 0.75), 5.0);
+        assert_eq!(ValueConstantTween::new(3.0).transform(&app, 0.5), 3.0);
     }
 }

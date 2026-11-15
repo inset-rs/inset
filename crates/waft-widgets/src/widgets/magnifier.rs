@@ -3,11 +3,11 @@
 use std::any::Any;
 use std::fmt::{self, Debug};
 use std::rc::Rc;
-use std::sync::Arc;
 
 use waft_animation::AnimationController;
 use waft_embedder::{
-    Clip, FilterQuality, ImageFilter, Matrix4, Offset, Path, PathBuilder, Rect, Size, TextBaseline,
+    Clip, FilterQuality, ImageFilter, Matrix4, Offset, Path, PathBuilder, PathFillType, Rect, Size,
+    TextBaseline,
 };
 use waft_foundation::{App, Handle, Listener, ValueNotifier};
 use waft_painting::{
@@ -668,11 +668,6 @@ impl StatelessWidget for RawMagnifier {
 }
 
 /// A clip that renders everything except the inside of a shape.
-///
-/// Dart's `_NegativeClip` fills `Rect.largest` and the shape's inner path with the even-odd
-/// rule. A clip here is always non-zero (`waft-painting`'s `PORTING.md`), so the rectangle is
-/// wound against the inner path instead: the two cancel inside the shape, which leaves the
-/// same hole for an inner path of one contour.
 struct NegativeClip {
     shape: Box<dyn ShapeBorder>,
 }
@@ -683,16 +678,22 @@ impl NegativeClip {
     }
 }
 
-impl CustomClipper<Arc<Path>> for NegativeClip {
-    fn get_clip(&self, size: Size) -> Arc<Path> {
-        let hole = self.shape.get_inner_path(Offset::ZERO & size, None);
+impl CustomClipper<Path> for NegativeClip {
+    fn get_clip(&self, _app: &App, size: Size) -> Path {
         let mut path = PathBuilder::new();
-        add_rect_wound_against(&mut path, Rect::LARGEST, &hole);
-        path.append(&hole, &Matrix4::IDENTITY);
-        path.build()
+        path.rect(Rect::LARGEST.into());
+        path.append(
+            self.shape
+                .get_inner_path(Offset::ZERO & size, None)
+                .as_valo(),
+            &Matrix4::IDENTITY,
+        );
+        let mut path = Path::new(path.build());
+        path.fill_type = PathFillType::EvenOdd;
+        path
     }
 
-    fn should_reclip(&self, old_clipper: &dyn CustomClipper<Arc<Path>>) -> bool {
+    fn should_reclip(&self, _app: &App, old_clipper: &dyn CustomClipper<Path>) -> bool {
         let Some(old_clipper) = old_clipper.as_any().downcast_ref::<NegativeClip>() else {
             return true;
         };
@@ -702,42 +703,6 @@ impl CustomClipper<Arc<Path>> for NegativeClip {
     fn as_any(&self) -> &dyn Any {
         self
     }
-}
-
-/// Adds `rect` as a closed contour turning the other way from `hole`, so that under the
-/// non-zero rule `hole` cuts out of it.
-fn add_rect_wound_against(path: &mut PathBuilder, rect: Rect, hole: &Path) {
-    let mut corners = [
-        (rect.left as f32, rect.top as f32),
-        (rect.right as f32, rect.top as f32),
-        (rect.right as f32, rect.bottom as f32),
-        (rect.left as f32, rect.bottom as f32),
-    ];
-    if winds_clockwise(hole) {
-        corners.reverse();
-    }
-    path.move_to(corners[0]);
-    for corner in &corners[1..] {
-        path.line_to(*corner);
-    }
-    path.close();
-}
-
-/// Whether `path` turns clockwise on the y-down plane: the sign of its area by the shoelace
-/// formula, over every contour.
-fn winds_clockwise(path: &Path) -> bool {
-    let signed_area: f32 = path
-        .flatten(1.0)
-        .iter()
-        .map(|contour| {
-            contour
-                .points
-                .windows(2)
-                .map(|edge| edge[0].x * edge[1].y - edge[1].x * edge[0].y)
-                .sum::<f32>()
-        })
-        .sum();
-    signed_area >= 0.0
 }
 
 /// Dart's `_Magnifier`: the render object widget of the lens.
@@ -1022,7 +987,7 @@ mod tests {
     use std::time::Duration;
 
     use waft_animation::{AnimationBehavior, AnimationStatus};
-    use waft_embedder::{BlurStyle, Color, FillRule, Radius, TextDirection};
+    use waft_embedder::{BlurStyle, Color, Radius, TextDirection};
     use waft_foundation::UniqueKey;
     use waft_painting::{BorderRadius, BorderSide, BorderStyle, CircleBorder};
     use waft_rendering::{
@@ -1330,17 +1295,19 @@ mod tests {
         let negative = decoration_clip
             .clipper(&app)
             .expect("the negative clip")
-            .get_clip(Size::new(100.0, 100.0));
-        assert!(negative.contains((-50.0, -50.0).into(), FillRule::NonZero));
-        assert!(negative.contains((150.0, 50.0).into(), FillRule::NonZero));
-        assert!(!negative.contains((50.0, 50.0).into(), FillRule::NonZero));
+            .get_clip(&app, Size::new(100.0, 100.0));
+        assert!(negative.contains(Offset::new(-50.0, -50.0)));
+        assert!(negative.contains(Offset::new(150.0, 50.0)));
+        assert!(!negative.contains(Offset::new(50.0, 50.0)));
 
         let stack = render_objects::<RenderStack>(&mut app);
         assert_eq!(stack[0].size(&app), Size::new(100.0, 100.0));
     }
 
     #[test]
-    fn the_negative_clip_cuts_out_the_inside_of_a_shape_whichever_way_it_turns() {
+    fn the_negative_clip_cuts_out_the_inside_of_a_shape() {
+        let cell = waft_foundation::AppCell::new();
+        let app = cell.borrow();
         let size = Size::new(100.0, 60.0);
         for shape in [
             Box::new(RoundedRectangleBorder::default()) as Box<dyn ShapeBorder>,
@@ -1350,46 +1317,33 @@ mod tests {
             )),
             Box::new(CircleBorder::default()),
         ] {
-            let clip = NegativeClip::new(shape.clone()).get_clip(size);
+            let clip = NegativeClip::new(shape.clone()).get_clip(&app, size);
+            assert_eq!(clip.fill_type, PathFillType::EvenOdd);
             let hole = shape.get_inner_path(Offset::ZERO & size, None);
-            for point in [(50.0, 30.0), (40.0, 25.0), (60.0, 35.0)] {
+            for (x, y) in [(50.0, 30.0), (40.0, 25.0), (60.0, 35.0)] {
+                let point = Offset::new(x, y);
                 assert_eq!(
-                    clip.contains(point.into(), FillRule::NonZero),
-                    !hole.contains(point.into(), FillRule::NonZero),
+                    clip.contains(point),
+                    !hole.contains(point),
                     "{shape:?} at {point:?}"
                 );
             }
-            for point in [(-1.0e6, -1.0e6), (1.0e6, 30.0), (50.0, 61.0)] {
-                assert!(
-                    clip.contains(point.into(), FillRule::NonZero),
-                    "{shape:?} at {point:?}"
-                );
+            for (x, y) in [(-1.0e6, -1.0e6), (1.0e6, 30.0), (50.0, 61.0)] {
+                let point = Offset::new(x, y);
+                assert!(clip.contains(point), "{shape:?} at {point:?}");
             }
         }
-
-        let mut counter_clockwise = PathBuilder::new();
-        counter_clockwise
-            .move_to((0.0, 0.0))
-            .line_to((0.0, 10.0))
-            .line_to((10.0, 10.0))
-            .line_to((10.0, 0.0))
-            .close();
-        let hole = counter_clockwise.build();
-        let mut path = PathBuilder::new();
-        add_rect_wound_against(&mut path, Rect::LARGEST, &hole);
-        path.append(&hole, &Matrix4::IDENTITY);
-        let clip = path.build();
-        assert!(!clip.contains((5.0, 5.0).into(), FillRule::NonZero));
-        assert!(clip.contains((20.0, 5.0).into(), FillRule::NonZero));
     }
 
     #[test]
     fn the_negative_clip_reclips_only_for_another_shape() {
+        let cell = waft_foundation::AppCell::new();
+        let app = cell.borrow();
         let square = NegativeClip::new(Box::new(RoundedRectangleBorder::default()));
         let same = NegativeClip::new(Box::new(RoundedRectangleBorder::default()));
         let round = NegativeClip::new(Box::new(CircleBorder::default()));
-        assert!(!same.should_reclip(&square));
-        assert!(round.should_reclip(&square));
+        assert!(!same.should_reclip(&app, &square));
+        assert!(round.should_reclip(&app, &square));
     }
 
     #[test]

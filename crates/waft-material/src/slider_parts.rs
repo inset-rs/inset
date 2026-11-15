@@ -12,7 +12,6 @@
 use std::any::Any;
 use std::fmt::Debug;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use waft_animation::{Animatable, AnyAnimation, ColorTween, Tween};
 use waft_embedder::{
@@ -64,7 +63,7 @@ pub(crate) fn draw_shadow(
     app: &App,
     canvas: &mut Canvas,
     parent_box: AnyRenderBox,
-    path: &Arc<Path>,
+    path: &Path,
     color: Color,
     elevation: f64,
     transparent_occluder: bool,
@@ -76,8 +75,8 @@ pub(crate) fn draw_shadow(
         .and_then(|root| root.downcast::<RenderView>(app))
         .map_or(1.0, |view| view.configuration(app).device_pixel_ratio);
     canvas.draw_shadow(
-        path,
-        FillRule::NonZero,
+        path.as_valo(),
+        path.fill_type,
         color.into(),
         elevation as f32,
         transparent_occluder,
@@ -1207,7 +1206,7 @@ impl SliderComponentShape for RoundSliderThumbShape {
         );
         let mut path = PathBuilder::new();
         path.arc(center, radius as f32, 0.0, std::f32::consts::TAU);
-        let path = path.build();
+        let path = Path::new(path.build());
 
         let mut paint_shadows = true;
         if cfg!(debug_assertions) && debug_disable_shadows() {
@@ -2129,11 +2128,11 @@ impl RoundedRectSliderValueIndicatorPathPainter {
 }
 
 /// Dart's `_debugDrawShadow`.
-fn debug_draw_shadow(canvas: &mut Canvas, path: &Arc<Path>, elevation: f64) {
+fn debug_draw_shadow(canvas: &mut Canvas, path: &Path, elevation: f64) {
     if elevation > 0.0 {
         canvas.draw_path(
-            path,
-            FillRule::NonZero,
+            path.as_valo(),
+            path.fill_type,
             &Paint {
                 color: Colors::BLACK.into(),
                 style: PaintStyle::Stroke(Stroke::new((elevation * 2.0) as f32)),

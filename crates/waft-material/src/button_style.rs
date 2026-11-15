@@ -1,8 +1,7 @@
 //! Flutter counterpart: material_ui's `button_style.dart`.
 //!
 //! A state-dependent field holds a [`WidgetStatePropertyRef`] of `Option<T>`: Dart's
-//! `WidgetStateProperty<T?>`, whose `null` lets the next style decide. `==` compares those
-//! properties by identity; see [`ButtonStyle`]'s `PartialEq`.
+//! `WidgetStateProperty<T?>`, whose `null` lets the next style decide.
 
 use std::any::TypeId;
 use std::fmt::{self, Debug};
@@ -814,44 +813,34 @@ impl ButtonStyle {
     }
 }
 
-/// Dart's `==` on a property: `WidgetStateProperty` has no equality hook here, so two
-/// properties are equal when they are the same object.
-fn same_property<T: ?Sized>(a: &Option<Rc<T>>, b: &Option<Rc<T>>) -> bool {
-    match (a, b) {
-        (None, None) => true,
-        (Some(a), Some(b)) => Rc::ptr_eq(a, b),
-        _ => false,
-    }
-}
-
 impl PartialEq for ButtonStyle {
     fn eq(&self, other: &ButtonStyle) -> bool {
         if std::ptr::eq(self, other) {
             return true;
         }
-        same_property(&other.text_style, &self.text_style)
-            && same_property(&other.background_color, &self.background_color)
-            && same_property(&other.foreground_color, &self.foreground_color)
-            && same_property(&other.overlay_color, &self.overlay_color)
-            && same_property(&other.shadow_color, &self.shadow_color)
-            && same_property(&other.surface_tint_color, &self.surface_tint_color)
-            && same_property(&other.elevation, &self.elevation)
-            && same_property(&other.padding, &self.padding)
-            && same_property(&other.minimum_size, &self.minimum_size)
-            && same_property(&other.fixed_size, &self.fixed_size)
-            && same_property(&other.maximum_size, &self.maximum_size)
-            && same_property(&other.icon_color, &self.icon_color)
-            && same_property(&other.icon_size, &self.icon_size)
+        other.text_style == self.text_style
+            && other.background_color == self.background_color
+            && other.foreground_color == self.foreground_color
+            && other.overlay_color == self.overlay_color
+            && other.shadow_color == self.shadow_color
+            && other.surface_tint_color == self.surface_tint_color
+            && other.elevation == self.elevation
+            && other.padding == self.padding
+            && other.minimum_size == self.minimum_size
+            && other.fixed_size == self.fixed_size
+            && other.maximum_size == self.maximum_size
+            && other.icon_color == self.icon_color
+            && other.icon_size == self.icon_size
             && other.icon_alignment == self.icon_alignment
-            && same_property(&other.side, &self.side)
-            && same_property(&other.shape, &self.shape)
-            && same_property(&other.mouse_cursor, &self.mouse_cursor)
+            && other.side == self.side
+            && other.shape == self.shape
+            && other.mouse_cursor == self.mouse_cursor
             && other.visual_density == self.visual_density
             && other.tap_target_size == self.tap_target_size
             && other.animation_duration == self.animation_duration
             && other.enable_feedback == self.enable_feedback
             && other.alignment == self.alignment
-            && same_property(&other.splash_factory, &self.splash_factory)
+            && other.splash_factory == self.splash_factory
             && other.background_builder == self.background_builder
             && other.foreground_builder == self.foreground_builder
             && other.size_variant == self.size_variant
@@ -913,7 +902,7 @@ mod tests {
 
     use super::*;
 
-    fn all<T: Clone + Debug + 'static>(value: T) -> WidgetStatePropertyRef<Option<T>> {
+    fn all<T: Clone + Debug + PartialEq + 'static>(value: T) -> WidgetStatePropertyRef<Option<T>> {
         Rc::new(WidgetStatePropertyAll::new(Some(value)))
     }
 

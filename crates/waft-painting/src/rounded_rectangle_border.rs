@@ -2,7 +2,6 @@
 
 use std::any::Any;
 use std::fmt::{Debug, Formatter, Result as FmtResult};
-use std::sync::Arc;
 
 use waft_embedder::{
     Canvas, Offset, Paint, Path, PathBuilder, RSuperellipse, Radius, Rect, lerp_double,
@@ -118,12 +117,12 @@ impl ShapeBorder for RoundedRectangleBorder {
         }
     }
 
-    fn get_inner_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Arc<Path> {
+    fn get_inner_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Path {
         let border_rect = self.border_radius.resolve(text_direction).to_rrect(rect);
         rrect_path(border_rect.deflate(self.side.stroke_inset()))
     }
 
-    fn get_outer_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Arc<Path> {
+    fn get_outer_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Path {
         rrect_path(self.border_radius.resolve(text_direction).to_rrect(rect))
     }
 
@@ -328,7 +327,7 @@ impl ShapeBorder for RoundedSuperellipseBorder {
         }
     }
 
-    fn get_inner_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Arc<Path> {
+    fn get_inner_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Path {
         if self.border_radius == BorderRadius::ZERO.into() {
             rect_path(rect.deflate(self.side.stroke_inset()))
         } else {
@@ -340,7 +339,7 @@ impl ShapeBorder for RoundedSuperellipseBorder {
         }
     }
 
-    fn get_outer_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Arc<Path> {
+    fn get_outer_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Path {
         if self.border_radius == BorderRadius::ZERO.into() {
             rect_path(rect)
         } else {
@@ -455,16 +454,16 @@ impl Debug for RoundedSuperellipseBorder {
     }
 }
 
-fn rect_path(rect: Rect) -> Arc<Path> {
+fn rect_path(rect: Rect) -> Path {
     let mut path = PathBuilder::new();
     path.rect(rect.into());
-    path.build()
+    path.build().into()
 }
 
-fn rsuperellipse_path(rse: RSuperellipse) -> Arc<Path> {
+fn rsuperellipse_path(rse: RSuperellipse) -> Path {
     let mut path = PathBuilder::new();
     path.rsuperellipse_radii(rse.outer_rect().into(), rsuperellipse_radii_elliptical(rse));
-    path.build()
+    path.build().into()
 }
 
 fn shape_to_circle_adjust_rect(rect: Rect, circularity: f64, eccentricity: f64) -> Rect {
@@ -563,7 +562,7 @@ impl RoundedRectangleToCircleBorder {
         draw_rrect(canvas, rrect, paint);
     }
 
-    fn build_path(rect: Rect, radius: BorderRadius, inflation: Option<f64>) -> Arc<Path> {
+    fn build_path(rect: Rect, radius: BorderRadius, inflation: Option<f64>) -> Path {
         let mut rrect = radius.to_rrect(rect);
         if let Some(inflation) = inflation {
             rrect = rrect.inflate(inflation);
@@ -648,7 +647,7 @@ impl ShapeBorder for RoundedRectangleToCircleBorder {
         }
     }
 
-    fn get_inner_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Arc<Path> {
+    fn get_inner_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Path {
         Self::build_path(
             shape_to_circle_adjust_rect(rect, self.circularity, self.eccentricity),
             shape_to_circle_adjust_border_radius(
@@ -662,7 +661,7 @@ impl ShapeBorder for RoundedRectangleToCircleBorder {
         )
     }
 
-    fn get_outer_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Arc<Path> {
+    fn get_outer_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Path {
         Self::build_path(
             shape_to_circle_adjust_rect(rect, self.circularity, self.eccentricity),
             shape_to_circle_adjust_border_radius(
@@ -854,7 +853,7 @@ impl RoundedSuperellipseToCircleBorder {
         draw_rsuperellipse(canvas, rsuperellipse, paint);
     }
 
-    fn build_path(rect: Rect, radius: BorderRadius, inflation: Option<f64>) -> Arc<Path> {
+    fn build_path(rect: Rect, radius: BorderRadius, inflation: Option<f64>) -> Path {
         let mut rsuperellipse = radius.to_r_superellipse(rect);
         if let Some(inflation) = inflation {
             rsuperellipse = rsuperellipse.inflate(inflation);
@@ -941,7 +940,7 @@ impl ShapeBorder for RoundedSuperellipseToCircleBorder {
         }
     }
 
-    fn get_inner_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Arc<Path> {
+    fn get_inner_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Path {
         Self::build_path(
             shape_to_circle_adjust_rect(rect, self.circularity, self.eccentricity),
             shape_to_circle_adjust_border_radius(
@@ -955,7 +954,7 @@ impl ShapeBorder for RoundedSuperellipseToCircleBorder {
         )
     }
 
-    fn get_outer_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Arc<Path> {
+    fn get_outer_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Path {
         Self::build_path(
             shape_to_circle_adjust_rect(rect, self.circularity, self.eccentricity),
             shape_to_circle_adjust_border_radius(
@@ -1112,7 +1111,7 @@ impl Debug for RoundedSuperellipseToCircleBorder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use waft_embedder::{Color, FillRule, Radius};
+    use waft_embedder::{Color, Radius};
 
     use crate::border_radius::BorderRadiusDirectional;
     use crate::circle_border::CircleBorder;
@@ -1124,8 +1123,8 @@ mod tests {
         }
     }
 
-    fn contains(path: &Arc<Path>, x: f64, y: f64) -> bool {
-        path.contains(Offset::new(x, y).into(), FillRule::NonZero)
+    fn contains(path: &Path, x: f64, y: f64) -> bool {
+        path.contains(Offset::new(x, y))
     }
 
     #[test]

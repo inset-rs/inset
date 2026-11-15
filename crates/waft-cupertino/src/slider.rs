@@ -1,10 +1,8 @@
 //! Flutter counterpart: `cupertino_ui/slider.dart`.
 //!
 //! [`CupertinoSlider`] builds a private leaf render object, Dart's `_RenderCupertinoSlider`,
-//! which extends `RenderConstrainedBox`: it holds the constrained box's fields itself and
-//! repeats its layout and intrinsics, so a change to `RenderConstrainedBox` must be made here
-//! too. The semantics configuration and its increase and decrease actions wait with
-//! accessibility, and the haptics follow the platform `App` reports.
+//! a `RenderConstrainedBoxBase` leaf. The semantics configuration and its increase and decrease
+//! actions wait with accessibility, and the haptics follow the platform `App` reports.
 
 use std::fmt::{self, Debug};
 use std::rc::Rc;
@@ -23,10 +21,10 @@ use waft_gestures::{
 };
 use waft_painting::{AnyColor, ClipContext, draw_rrect};
 use waft_rendering::{
-    AnyRenderBox, AnyRenderObject, BoxConstraints, BoxHitTestEntry, BoxHitTestResult, Constraints,
-    PaintingContext, RenderBox, RenderBoxData, RenderHandle, RenderObject, RenderObjectBase,
-    RenderObjectData, RenderObjectWithChildData, RenderObjectWithChildMixin, RenderProxyBoxMixin,
-    TickerProviderRef,
+    AnyRenderBox, AnyRenderObject, BoxConstraints, BoxHitTestEntry, BoxHitTestResult,
+    PaintingContext, RenderBox, RenderBoxData, RenderConstrainedBoxBase, RenderConstrainedBoxData,
+    RenderHandle, RenderObject, RenderObjectBase, RenderObjectData, RenderObjectWithChildData,
+    RenderObjectWithChildMixin, RenderProxyBoxMixin, TickerProviderRef,
 };
 use waft_scheduler::{Ticker, TickerCallback, TickerProviderObject};
 use waft_services::{
@@ -485,16 +483,13 @@ const K_SLIDER_WIDTH: f64 = 176.0; // Matches Material Design slider.
 const K_DISCRETE_TRANSITION_DURATION: Duration = Duration::from_millis(500);
 
 /// Dart's `_RenderCupertinoSlider extends RenderConstrainedBox implements
-/// MouseTrackerAnnotation`.
-///
-/// The constrained box's fields are this leaf's own (`additional_constraints`, and the child
-/// slot a leaf widget never fills), and its layout and intrinsics bodies are repeated here:
-/// `RenderConstrainedBox` is a concrete struct with no bag or trait to inherit them from.
+/// MouseTrackerAnnotation`: a [`RenderConstrainedBoxBase`] leaf that overrides `paint`,
+/// `hit_test_self` and `handle_event`.
 struct RenderCupertinoSlider {
     render_object: RenderObjectData,
     render_box: RenderBoxData,
     child: RenderObjectWithChildData<AnyRenderBox>,
-    additional_constraints: BoxConstraints,
+    constrained_box: RenderConstrainedBoxData,
     value: f64,
     divisions: Option<i32>,
     active_color: Color,
@@ -538,9 +533,6 @@ impl RenderCupertinoSlider {
         cursor: MouseCursorRef,
     ) -> RenderHandle<RenderCupertinoSlider> {
         debug_assert!((0.0..=1.0).contains(&value));
-        let additional_constraints =
-            BoxConstraints::tight_for(Some(K_SLIDER_WIDTH), Some(K_SLIDER_HEIGHT));
-        debug_assert!(additional_constraints.debug_assert_is_valid(false));
         let drag = HorizontalDragGestureRecognizer::new(app);
         let position = AnimationController::create(
             app,
@@ -558,7 +550,10 @@ impl RenderCupertinoSlider {
                 render_object: RenderObjectData::new(),
                 render_box: RenderBoxData::new(),
                 child: RenderObjectWithChildData::new(),
-                additional_constraints,
+                constrained_box: RenderConstrainedBoxData::new(BoxConstraints::tight_for(
+                    Some(K_SLIDER_WIDTH),
+                    Some(K_SLIDER_HEIGHT),
+                )),
                 value,
                 divisions,
                 active_color,
@@ -806,6 +801,19 @@ fn mark_needs_paint(this: Handle<RenderCupertinoSlider>, app: &mut App) {
     RenderHandle::from_handle(this).mark_needs_paint(app);
 }
 
+impl RenderConstrainedBoxBase for RenderCupertinoSlider {
+    fn constrained_box_data(self: RenderHandle<Self>, app: &App) -> &RenderConstrainedBoxData {
+        &self.get(app).constrained_box
+    }
+
+    fn constrained_box_data_mut(
+        self: RenderHandle<Self>,
+        app: &mut App,
+    ) -> &mut RenderConstrainedBoxData {
+        &mut self.get_mut(app).constrained_box
+    }
+}
+
 impl RenderObjectWithChildMixin for RenderCupertinoSlider {
     type ChildType = AnyRenderBox;
 
@@ -826,16 +834,8 @@ impl RenderProxyBoxMixin for RenderCupertinoSlider {}
 impl RenderObject for RenderCupertinoSlider {
     waft_rendering::render_object_accessors!();
 
-    /// `RenderConstrainedBox.performLayout`.
     fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
-        let constraints = self.constraints(app);
-        let additional = self.get(app).additional_constraints;
-        if let Some(child) = self.child(app) {
-            child.layout(app, additional.enforce(constraints), true);
-            self.set_size(app, child.size(app));
-        } else {
-            self.set_size(app, additional.enforce(constraints).constrain(Size::ZERO));
-        }
+        RenderConstrainedBoxBase::perform_layout(self, app);
     }
 
     fn paint(
@@ -964,64 +964,20 @@ impl RenderBox for RenderCupertinoSlider {
         }
     }
 
-    /// `RenderConstrainedBox.computeMinIntrinsicWidth`.
     fn compute_min_intrinsic_width(self: RenderHandle<Self>, app: &mut App, height: f64) -> f64 {
-        let additional = self.get(app).additional_constraints;
-        if additional.has_bounded_width() && additional.has_tight_width() {
-            return additional.min_width;
-        }
-        let width = RenderProxyBoxMixin::compute_min_intrinsic_width(self, app, height);
-        debug_assert!(width.is_finite());
-        if additional.has_infinite_width() {
-            width
-        } else {
-            additional.constrain_width(width)
-        }
+        RenderConstrainedBoxBase::compute_min_intrinsic_width(self, app, height)
     }
 
-    /// `RenderConstrainedBox.computeMaxIntrinsicWidth`.
     fn compute_max_intrinsic_width(self: RenderHandle<Self>, app: &mut App, height: f64) -> f64 {
-        let additional = self.get(app).additional_constraints;
-        if additional.has_bounded_width() && additional.has_tight_width() {
-            return additional.min_width;
-        }
-        let width = RenderProxyBoxMixin::compute_max_intrinsic_width(self, app, height);
-        debug_assert!(width.is_finite());
-        if additional.has_infinite_width() {
-            width
-        } else {
-            additional.constrain_width(width)
-        }
+        RenderConstrainedBoxBase::compute_max_intrinsic_width(self, app, height)
     }
 
-    /// `RenderConstrainedBox.computeMinIntrinsicHeight`.
     fn compute_min_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
-        let additional = self.get(app).additional_constraints;
-        if additional.has_bounded_height() && additional.has_tight_height() {
-            return additional.min_height;
-        }
-        let height = RenderProxyBoxMixin::compute_min_intrinsic_height(self, app, width);
-        debug_assert!(height.is_finite());
-        if additional.has_infinite_height() {
-            height
-        } else {
-            additional.constrain_height(height)
-        }
+        RenderConstrainedBoxBase::compute_min_intrinsic_height(self, app, width)
     }
 
-    /// `RenderConstrainedBox.computeMaxIntrinsicHeight`.
     fn compute_max_intrinsic_height(self: RenderHandle<Self>, app: &mut App, width: f64) -> f64 {
-        let additional = self.get(app).additional_constraints;
-        if additional.has_bounded_height() && additional.has_tight_height() {
-            return additional.min_height;
-        }
-        let height = RenderProxyBoxMixin::compute_max_intrinsic_height(self, app, width);
-        debug_assert!(height.is_finite());
-        if additional.has_infinite_height() {
-            height
-        } else {
-            additional.constrain_height(height)
-        }
+        RenderConstrainedBoxBase::compute_max_intrinsic_height(self, app, width)
     }
 
     fn compute_distance_to_actual_baseline(
@@ -1032,30 +988,21 @@ impl RenderBox for RenderCupertinoSlider {
         RenderProxyBoxMixin::compute_distance_to_actual_baseline(self, app, baseline)
     }
 
-    /// `RenderConstrainedBox.computeDryBaseline`.
     fn compute_dry_baseline(
         self: RenderHandle<Self>,
         app: &mut App,
         constraints: BoxConstraints,
         baseline: TextBaseline,
     ) -> Option<f64> {
-        let additional = self.get(app).additional_constraints;
-        self.child(app).and_then(|child| {
-            child.get_dry_baseline(app, additional.enforce(constraints), baseline)
-        })
+        RenderConstrainedBoxBase::compute_dry_baseline(self, app, constraints, baseline)
     }
 
-    /// `RenderConstrainedBox.computeDryLayout`.
     fn compute_dry_layout(
         self: RenderHandle<Self>,
         app: &mut App,
         constraints: BoxConstraints,
     ) -> Size {
-        let additional = self.get(app).additional_constraints;
-        match self.child(app) {
-            Some(child) => child.get_dry_layout(app, additional.enforce(constraints)),
-            None => additional.enforce(constraints).constrain(Size::ZERO),
-        }
+        RenderConstrainedBoxBase::compute_dry_layout(self, app, constraints)
     }
 }
 

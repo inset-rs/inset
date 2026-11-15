@@ -1471,8 +1471,8 @@ mod tests {
     use waft_embedder::{Size, TargetPlatform};
     use waft_foundation::{App, AppCell, Completer, Handle};
     use waft_rendering::{
-        AnyRenderObject, BoxConstraints, RenderBox, RenderConstrainedBox, RenderHandle,
-        RendererBinding,
+        AnyRenderObject, BoxConstraints, RenderBox, RenderConstrainedBox, RenderConstrainedBoxBase,
+        RenderHandle, RendererBinding,
     };
     use waft_scheduler::SchedulerBinding;
     use waft_test::{IMPLICIT_VIEW_ID, TestPlatform, TestView};

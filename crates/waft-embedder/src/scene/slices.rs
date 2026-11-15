@@ -29,7 +29,7 @@ use crate::composition::CompositionLayer;
 use crate::geometry::{Clip, Color, Matrix4, Offset, Rect, rrect_radii_elliptical};
 use crate::media::VideoFrameReader;
 use crate::painting::{
-    Backdrop, BlendMode, Canvas, ClipOp, FillRule, Image, ImageFilter, Paint, Picture, valo,
+    Backdrop, BlendMode, Canvas, ClipOp, Image, ImageFilter, Paint, Picture, valo,
 };
 
 /// The scene's slices and composition layers, in paint order: what Flutter's embedder hands its
@@ -282,12 +282,12 @@ impl SliceRecording {
             } => {
                 canvas.save();
                 canvas.clip_path(
-                    path,
-                    FillRule::NonZero,
+                    path.as_valo(),
+                    path.fill_type,
                     ClipOp::Intersect,
                     anti_aliases(*clip_behavior),
                 );
-                open_clip_layer(canvas, *clip_behavior, path.bounds());
+                open_clip_layer(canvas, *clip_behavior, path.as_valo().bounds());
             }
             Effect::Opacity { alpha, offset } => {
                 let paint = Paint {
@@ -354,7 +354,7 @@ fn mutators_of(open: &[&Effect]) -> Vec<Mutator> {
             Effect::Transform(matrix) => mutators.push(Mutator::Transform(*matrix)),
             Effect::ClipRect { rect, .. } => mutators.push(Mutator::ClipRect(*rect)),
             Effect::ClipRRect { rrect, .. } => mutators.push(Mutator::ClipRRect(*rrect)),
-            Effect::ClipPath { path, .. } => mutators.push(Mutator::ClipPath(Arc::clone(path))),
+            Effect::ClipPath { path, .. } => mutators.push(Mutator::ClipPath(path.clone())),
             Effect::Opacity { alpha, offset } => {
                 if *offset != Offset::ZERO {
                     mutators.push(Mutator::Transform(translation(*offset)));
@@ -398,7 +398,7 @@ fn apply(canvas: &mut Canvas, mutator: &Mutator) {
             true,
         ),
         Mutator::ClipPath(path) => {
-            canvas.clip_path(path, FillRule::NonZero, ClipOp::Intersect, true)
+            canvas.clip_path(path.as_valo(), path.fill_type, ClipOp::Intersect, true)
         }
         Mutator::Opacity(_) => {}
     }

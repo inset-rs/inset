@@ -350,9 +350,10 @@ impl InteractiveInkFeature {
         if let Some(clip_callback) = clip_callback {
             let rect = clip_callback(app);
             if let Some(custom_border) = custom_border {
+                let path = custom_border.get_outer_path(rect, text_direction);
                 canvas.clip_path(
-                    &custom_border.get_outer_path(rect, text_direction),
-                    waft_embedder::FillRule::NonZero,
+                    path.as_valo(),
+                    path.fill_type,
                     waft_embedder::ClipOp::Intersect,
                     true,
                 );
@@ -427,6 +428,16 @@ pub trait InteractiveInkFeatureFactory: fmt::Debug {
 /// A field Dart types as `InteractiveInkFeatureFactory`; equal by identity, as Dart's `const`
 /// factories are.
 pub type InteractiveInkFeatureFactoryRef = Rc<dyn InteractiveInkFeatureFactory>;
+
+/// Dart's `==` on a factory, which no factory overrides: identity.
+impl PartialEq for dyn InteractiveInkFeatureFactory {
+    fn eq(&self, other: &dyn InteractiveInkFeatureFactory) -> bool {
+        std::ptr::addr_eq(
+            self as *const dyn InteractiveInkFeatureFactory,
+            other as *const dyn InteractiveInkFeatureFactory,
+        )
+    }
+}
 
 /// Dart's `_ParentInkResponseProvider`.
 #[derive(Debug)]

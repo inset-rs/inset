@@ -11,7 +11,6 @@
 use std::any::Any;
 use std::fmt::{self, Debug};
 use std::rc::Rc;
-use std::sync::Arc;
 
 use waft_animation::AnyAnimation;
 use waft_embedder::{
@@ -1290,7 +1289,7 @@ impl RangeSliderThumbShape for RoundRangeSliderThumbShape {
             };
         let mut shadow_path = PathBuilder::new();
         shadow_path.arc(center, radius as f32, 0.0, std::f32::consts::TAU);
-        let shadow_path = shadow_path.build();
+        let shadow_path = Path::new(shadow_path.build());
 
         let mut paint_shadows = true;
         if cfg!(debug_assertions) && debug_disable_shadows() {
@@ -1301,8 +1300,8 @@ impl RangeSliderThumbShape for RoundRangeSliderThumbShape {
         if paint_shadows {
             let device_pixel_ratio = implicit_view_device_pixel_ratio(app);
             context.canvas().draw_shadow(
-                &shadow_path,
-                FillRule::NonZero,
+                shadow_path.as_valo(),
+                shadow_path.fill_type,
                 Colors::BLACK.into(),
                 evaluated_elevation as f32,
                 true,
@@ -1418,11 +1417,11 @@ impl Debug for RangeLabels {
 }
 
 /// Dart's `_debugDrawShadow`.
-fn debug_draw_shadow(canvas: &mut Canvas, path: &Arc<Path>, elevation: f64) {
+fn debug_draw_shadow(canvas: &mut Canvas, path: &Path, elevation: f64) {
     if elevation > 0.0 {
         canvas.draw_path(
-            path,
-            FillRule::NonZero,
+            path.as_valo(),
+            path.fill_type,
             &Paint {
                 color: Colors::BLACK.into(),
                 style: PaintStyle::Stroke(Stroke::new((elevation * 2.0) as f32)),

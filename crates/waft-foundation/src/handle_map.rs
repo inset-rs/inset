@@ -213,6 +213,12 @@ impl HandleMap {
         }
     }
 
+    /// The number of entries, live or destroyed but still retained.
+    #[cfg(debug_assertions)]
+    pub(crate) fn debug_entry_count(&self) -> usize {
+        self.entries.len()
+    }
+
     /// Whether the owner has destroyed the object while a retained handle still keeps it: it can
     /// be read and can receive events, but it is out of every tree and must not be laid out,
     /// painted or attached.

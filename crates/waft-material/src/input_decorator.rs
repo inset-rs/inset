@@ -17,8 +17,7 @@ use waft_animation::{
     AnyAnimation, ColorTween, Curve, CurvedAnimation, Curves, Tween,
 };
 use waft_embedder::{
-    Brightness, Canvas, Color, FillRule, Matrix4, Offset, Paint, PaintStyle, Size, TextBaseline,
-    lerp_double,
+    Brightness, Canvas, Color, Matrix4, Offset, Paint, PaintStyle, Size, TextBaseline, lerp_double,
 };
 use waft_foundation::{
     App, ChangeNotifier, ChangeNotifierData, Handle, Listenable, Listener, MergingListenable,
@@ -240,11 +239,8 @@ impl CustomPainter for InputBorderPainter {
             if border_value.prefer_paint_interior() {
                 border_value.paint_interior(canvas, canvas_rect, &paint, Some(self.text_direction));
             } else {
-                canvas.draw_path(
-                    &border_value.get_outer_path(canvas_rect, Some(self.text_direction)),
-                    FillRule::NonZero,
-                    &paint,
-                );
+                let path = border_value.get_outer_path(canvas_rect, Some(self.text_direction));
+                canvas.draw_path(path.as_valo(), path.fill_type, &paint);
             }
         }
 
@@ -9544,7 +9540,7 @@ mod tests {
 
         use waft_embedder::valo::Op;
         use waft_embedder::{
-            Canvas, Color, FillRule, Offset, PaintStyle, Path, RRect, Radius, Rect, TargetPlatform,
+            Canvas, Color, FillRule, Offset, PaintStyle, RRect, Radius, Rect, TargetPlatform,
         };
         use waft_painting::{
             Alignment, AlignmentGeometry, BorderRadius, BorderSide, EdgeInsetsGeometry,
@@ -9653,7 +9649,7 @@ mod tests {
         }
 
         /// The path `draw` records first.
-        fn path_drawn_by(draw: impl FnOnce(&mut Canvas)) -> Arc<Path> {
+        fn path_drawn_by(draw: impl FnOnce(&mut Canvas)) -> Arc<waft_embedder::valo::Path> {
             let mut canvas = Canvas::new();
             draw(&mut canvas);
             let list = canvas.build();
@@ -16911,7 +16907,7 @@ mod tests {
             });
         }
 
-        fn property<T: Clone + std::fmt::Debug + 'static>(
+        fn property<T: Clone + std::fmt::Debug + PartialEq + 'static>(
             value: T,
         ) -> WidgetStatePropertyRef<Option<T>> {
             Rc::new(WidgetStatePropertyAll::new(Some(value)))

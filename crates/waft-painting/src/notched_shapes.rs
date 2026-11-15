@@ -5,7 +5,6 @@
 
 use std::fmt::Debug;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use waft_embedder::{Offset, Path, PathBuilder, PathOperation, Rect, path_combine};
 
@@ -28,7 +27,7 @@ pub trait NotchedShape: Debug {
     ///
     /// The `guest` is the bounding rectangle of the shape for which a notch will
     /// be made. It is null when there is no guest.
-    fn get_outer_path(&self, host: Rect, guest: Option<Rect>) -> Arc<Path>;
+    fn get_outer_path(&self, host: Rect, guest: Option<Rect>) -> Path;
 }
 
 /// What a field or parameter Dart types as `NotchedShape` becomes.
@@ -74,11 +73,11 @@ impl NotchedShape for CircularNotchedRectangle {
     /// The notch is curve that smoothly connects the host's top edge and
     /// the guest circle.
     // TODO(amirh): add an example diagram here.
-    fn get_outer_path(&self, host: Rect, guest: Option<Rect>) -> Arc<Path> {
+    fn get_outer_path(&self, host: Rect, guest: Option<Rect>) -> Path {
         let Some(guest) = guest.filter(|guest| host.overlaps(*guest)) else {
             let mut path = PathBuilder::new();
             path.rect(host.into());
-            return path.build();
+            return path.build().into();
         };
 
         // The guest's shape is a circle bounded by the guest rectangle.
@@ -154,7 +153,7 @@ impl NotchedShape for CircularNotchedRectangle {
         }
 
         path.close();
-        path.build()
+        path.build().into()
     }
 }
 
@@ -242,7 +241,7 @@ impl Clone for AutomaticNotchedShape {
 }
 
 impl NotchedShape for AutomaticNotchedShape {
-    fn get_outer_path(&self, host_rect: Rect, guest_rect: Option<Rect>) -> Arc<Path> {
+    fn get_outer_path(&self, host_rect: Rect, guest_rect: Option<Rect>) -> Path {
         let host_path = self.host.get_outer_path(host_rect, None);
         if let (Some(guest), Some(guest_rect)) = (&self.guest, guest_rect) {
             let guest_path = guest.get_outer_path(guest_rect, None);
@@ -256,13 +255,11 @@ impl NotchedShape for AutomaticNotchedShape {
 mod tests {
     use std::f64::consts::PI;
 
-    use waft_embedder::FillRule;
-
     use super::*;
     use crate::rounded_rectangle_border::RoundedRectangleBorder;
 
     fn path_contains(path: &Path, point: Offset) -> bool {
-        path.contains(point.into(), FillRule::NonZero)
+        path.contains(point)
     }
 
     /// Dart's `pathDoesNotContainCircle`.
@@ -310,10 +307,10 @@ mod tests {
         true
     }
 
-    fn rect_path(rect: Rect) -> Arc<Path> {
+    fn rect_path(rect: Rect) -> Path {
         let mut path = PathBuilder::new();
         path.rect(rect.into());
-        path.build()
+        path.build().into()
     }
 
     fn host() -> Rect {
@@ -415,10 +412,30 @@ mod tests {
         expected.close();
         assert!(covers_same_area_as(
             &actual,
-            &expected.build(),
+            &Path::new(expected.build()),
             Rect::from_ltwh(-300.0, -300.0, 600.0, 600.0),
             100
         ));
+    }
+
+    // ---- not in notched_shapes_test.dart: a guest wholly inside the host ----
+
+    #[test]
+    fn an_automatic_notched_shape_cuts_a_hole_for_a_guest_wholly_inside_the_host() {
+        let host = Rect::from_ltwh(0.0, 0.0, 100.0, 100.0);
+        let guest = Rect::from_ltwh(25.0, 25.0, 50.0, 50.0);
+
+        let actual = AutomaticNotchedShape::new(RoundedRectangleBorder::default())
+            .guest(RoundedRectangleBorder::default())
+            .get_outer_path(host, Some(guest));
+
+        assert_eq!(actual.fill_type, waft_embedder::PathFillType::EvenOdd);
+        assert!(path_contains(&actual, Offset::new(10.0, 10.0)));
+        assert!(
+            !path_contains(&actual, guest.center()),
+            "the guest is a hole"
+        );
+        assert!(!path_contains(&actual, Offset::new(150.0, 50.0)));
     }
 
     #[test]

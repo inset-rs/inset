@@ -21,7 +21,7 @@ use crate::ink_well::{
 };
 use crate::material::{
     AnyMaterialInkController, InkFeature, InkFeatureData, InkFeatureLeaf, InkFeatureLeafData,
-    InkFeatureObject, Material, RectCallback, destroy_lingering,
+    InkFeatureObject, Material, RectCallback,
 };
 
 const K_DEFAULT_HIGHLIGHT_FADE_DURATION: Duration = Duration::from_millis(200);
@@ -179,9 +179,10 @@ impl InkHighlight {
         let highlight = app.get(self);
         canvas.save();
         if let Some(custom_border) = highlight.interactive_ink_feature().custom_border_ref() {
+            let path = custom_border.get_outer_path(rect, Some(highlight.text_direction));
             canvas.clip_path(
-                &custom_border.get_outer_path(rect, Some(highlight.text_direction)),
-                waft_embedder::FillRule::NonZero,
+                path.as_valo(),
+                path.fill_type,
                 waft_embedder::ClipOp::Intersect,
                 true,
             );
@@ -231,12 +232,12 @@ impl InkFeatureLeaf for InkHighlight {
     fn dispose(self: Handle<Self>, app: &mut App) {
         let alpha_controller = self.alpha_controller(app);
         alpha_controller.dispose(app);
-        destroy_lingering(app, alpha_controller);
+        app.destroy_lingering(alpha_controller);
         if let Some(alpha_tween) = app.get_mut(self).alpha_tween.take() {
-            destroy_lingering(app, alpha_tween);
+            app.destroy_lingering(alpha_tween);
         }
         if let Some(alpha) = app.get_mut(self).alpha.take() {
-            destroy_lingering(app, alpha);
+            app.destroy_lingering(alpha);
         }
         InkFeature::dispose(self, app);
     }

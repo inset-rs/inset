@@ -70,11 +70,8 @@ pub enum Effect {
     ClipRect { rect: Rect, clip_behavior: Clip },
     /// `ClipRRectLayer`: nothing of the children outside the rounded rectangle.
     ClipRRect { rrect: RRect, clip_behavior: Clip },
-    /// `ClipPathLayer`: nothing of the children outside the path, filled non-zero.
-    ClipPath {
-        path: Arc<Path>,
-        clip_behavior: Clip,
-    },
+    /// `ClipPathLayer`: nothing of the children outside the path, filled by its fill type.
+    ClipPath { path: Path, clip_behavior: Clip },
     /// `OpacityLayer`: the children moved by `offset` and composited as one at `alpha`, out of
     /// 255.
     Opacity { alpha: u8, offset: Offset },

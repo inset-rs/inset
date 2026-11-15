@@ -1082,7 +1082,8 @@ impl CheckboxPainter {
         if shape.prefer_paint_interior() {
             shape.paint_interior(canvas, outer, paint, None);
         } else {
-            canvas.draw_path(&shape.get_outer_path(outer, None), FillRule::NonZero, paint);
+            let path = shape.get_outer_path(outer, None);
+            canvas.draw_path(path.as_valo(), path.fill_type, paint);
         }
         if let Some(side) = side {
             shape.copy_with(Some(side)).paint(canvas, outer, None);
@@ -1372,8 +1373,8 @@ pub(crate) mod tests {
     use std::rc::Rc;
     use std::sync::Arc;
 
-    use waft_embedder::valo::Op;
-    use waft_embedder::{Path, PointerChange, RRect};
+    use waft_embedder::valo::{Op, Path};
+    use waft_embedder::{PointerChange, RRect};
     use waft_foundation::K_IS_WEB;
     use waft_rendering::{
         AnyRenderObject, RenderBox, RenderCustomPaint, RenderHandle, RenderObject,

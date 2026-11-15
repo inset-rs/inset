@@ -15,8 +15,8 @@ use waft_animation::{
     ConstantTween, CurveTween, Curves, Tween, TweenSequence, TweenSequenceItem,
 };
 use waft_embedder::{
-    Canvas, ClipOp, Color, FillRule, FragmentProgram, FragmentShader, Matrix4, Offset, Paint,
-    Shader, TextDirection, UniformFloatSlot, UniformVec2Slot, UniformVec4Slot,
+    Canvas, ClipOp, Color, FragmentProgram, FragmentShader, Matrix4, Offset, Paint, Shader,
+    TextDirection, UniformFloatSlot, UniformVec2Slot, UniformVec4Slot,
 };
 use waft_foundation::{App, Handle, HandleId, Listener};
 use waft_painting::{BorderRadius, ShapeBorder, get_as_translation};
@@ -29,7 +29,7 @@ use crate::ink_well::{
 };
 use crate::material::{
     AnyMaterialInkController, InkFeature, InkFeatureData, InkFeatureLeaf, InkFeatureLeafData,
-    InkFeatureObject, RectCallback, destroy_lingering,
+    InkFeatureObject, RectCallback,
 };
 
 /// Begin a Material 3 ink sparkle ripple, centered at the tap or click position
@@ -451,12 +451,8 @@ impl InkSparkle {
     ) {
         let rect = clip_callback(app);
         if let Some(custom_border) = custom_border {
-            canvas.clip_path(
-                &custom_border.get_outer_path(rect, text_direction),
-                FillRule::NonZero,
-                ClipOp::Intersect,
-                true,
-            );
+            let path = custom_border.get_outer_path(rect, text_direction);
+            canvas.clip_path(path.as_valo(), path.fill_type, ClipOp::Intersect, true);
         } else if border_radius != BorderRadius::ZERO {
             clip_rrect(canvas, rrect_from_rect_and_corners(rect, border_radius));
         } else {
@@ -498,9 +494,9 @@ impl InkFeatureLeaf for InkSparkle {
         let animation_controller = self.animation_controller(app);
         animation_controller.stop(app, true);
         animation_controller.dispose(app);
-        destroy_lingering(app, animation_controller);
+        app.destroy_lingering(animation_controller);
         for owned in std::mem::take(&mut app.get_mut(self).owned) {
-            destroy_lingering(app, owned);
+            app.destroy_lingering(owned);
         }
         app.get_mut(self).fragment_shader = None;
         InkFeature::dispose(self, app);

@@ -486,9 +486,28 @@ impl App {
         self.handles.destroy(handle.into());
     }
 
+    /// [`destroy`](Self::destroy), with the entry kept readable until the next checkpoint.
+    ///
+    /// Dart's collector keeps an object alive while the code that let go of it still runs: an
+    /// ink feature disposes the controller whose status listener is running, and a build drops
+    /// the action or animation its last build made while the widgets that use it have yet to
+    /// move off it.
+    pub fn destroy_lingering<T: Copy + Into<HandleId>>(&mut self, handle: T) {
+        let retained = self.retain(handle);
+        self.destroy(handle);
+        drop(retained);
+    }
+
     /// Whether the entry exists: live, or destroyed but still retained.
     pub fn contains(&self, handle: impl Into<HandleId>) -> bool {
         self.handles.contains(handle.into())
+    }
+
+    /// How many objects the arena holds, live or destroyed but still retained: what Flutter's
+    /// leak tracking counts, for a test that a frame leaves nothing behind.
+    #[cfg(debug_assertions)]
+    pub fn debug_object_count(&self) -> usize {
+        self.handles.debug_entry_count()
     }
 
     /// A [`RetainedHandle`] that keeps the object past its owner's `destroy`; see
@@ -605,6 +624,23 @@ mod tests {
         assert_ne!(second.id(), first_id);
         assert!(!app.contains(first_id));
         assert!(app.contains(second));
+    }
+
+    #[test]
+    fn a_lingering_destroy_keeps_the_object_readable_until_the_checkpoint() {
+        let cell = AppCell::new();
+        let counter = cell.borrow_mut().create(Counter(3));
+        let before = cell.borrow().debug_object_count();
+
+        cell.borrow_mut().destroy_lingering(counter);
+        {
+            let app = cell.borrow();
+            assert_eq!(app.get(counter), &Counter(3), "still readable");
+            assert_eq!(app.debug_object_count(), before, "still counted");
+        }
+        cell.checkpoint();
+        assert!(!cell.borrow().contains(counter), "freed at the checkpoint");
+        assert_eq!(cell.borrow().debug_object_count(), before - 1);
     }
 
     #[test]

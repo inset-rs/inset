@@ -89,6 +89,13 @@ impl From<GlobalKey> for KeyRef {
 /// A shared, immutable widget (Dart's `Widget` reference).
 pub type WidgetRef = Rc<dyn Widget>;
 
+/// Dart's `Widget.==`, which no widget can override: identity.
+impl PartialEq for dyn Widget {
+    fn eq(&self, other: &dyn Widget) -> bool {
+        std::ptr::addr_eq(self as *const dyn Widget, other as *const dyn Widget)
+    }
+}
+
 /// Describes the configuration for an `Element`.
 ///
 /// Widgets are the central class hierarchy in the Flutter framework. A widget is an immutable

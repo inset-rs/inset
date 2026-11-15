@@ -2,7 +2,6 @@
 
 use std::any::Any;
 use std::fmt::{Debug, Formatter, Result as FmtResult};
-use std::sync::Arc;
 
 use waft_embedder::{Canvas, Paint, PaintStyle, Path, PathBuilder, Stroke};
 use waft_embedder::{Color, Offset, RRect, Radius, Rect};
@@ -327,17 +326,17 @@ fn paint_uniform_border_with_rectangle(canvas: &mut Canvas, rect: Rect, side: Bo
     canvas.draw_rect(rect.inflate(side.stroke_offset() / 2.0), &side.to_paint());
 }
 
-fn rect_path(rect: Rect) -> Arc<Path> {
+fn rect_path(rect: Rect) -> Path {
     let mut path = PathBuilder::new();
     path.rect(rect.into());
-    path.build()
+    path.build().into()
 }
 
 fn box_get_inner_path(
     dimensions: EdgeInsetsGeometry,
     rect: Rect,
     text_direction: Option<TextDirection>,
-) -> Arc<Path> {
+) -> Path {
     debug_assert!(
         text_direction.is_some(),
         "The textDirection argument to getInnerPath must not be null."
@@ -345,7 +344,7 @@ fn box_get_inner_path(
     rect_path(dimensions.resolve(text_direction).deflate_rect(rect))
 }
 
-fn box_get_outer_path(rect: Rect, text_direction: Option<TextDirection>) -> Arc<Path> {
+fn box_get_outer_path(rect: Rect, text_direction: Option<TextDirection>) -> Path {
     debug_assert!(
         text_direction.is_some(),
         "The textDirection argument to getOuterPath must not be null."
@@ -542,11 +541,11 @@ impl ShapeBorder for Border {
         }
     }
 
-    fn get_outer_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Arc<Path> {
+    fn get_outer_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Path {
         box_get_outer_path(rect, text_direction)
     }
 
-    fn get_inner_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Arc<Path> {
+    fn get_inner_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Path {
         box_get_inner_path(self.dimensions(), rect, text_direction)
     }
 
@@ -950,11 +949,11 @@ impl ShapeBorder for BorderDirectional {
         }
     }
 
-    fn get_outer_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Arc<Path> {
+    fn get_outer_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Path {
         box_get_outer_path(rect, text_direction)
     }
 
-    fn get_inner_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Arc<Path> {
+    fn get_inner_path(&self, rect: Rect, text_direction: Option<TextDirection>) -> Path {
         box_get_inner_path(self.dimensions(), rect, text_direction)
     }
 
@@ -1170,9 +1169,8 @@ impl Debug for BorderDirectional {
 mod tests {
     use super::*;
     use std::any::Any;
-    use std::sync::Arc;
 
-    use waft_embedder::{Color, FillRule};
+    use waft_embedder::Color;
 
     use crate::edge_insets::EdgeInsetsGeometry;
 
@@ -1231,8 +1229,8 @@ mod tests {
         assert_eq!(*got, expected);
     }
 
-    fn contains(path: &Arc<Path>, x: f64, y: f64) -> bool {
-        path.contains(Offset::new(x, y).into(), FillRule::NonZero)
+    fn contains(path: &Path, x: f64, y: f64) -> bool {
+        path.contains(Offset::new(x, y))
     }
 
     #[derive(Clone, Copy, Debug)]
@@ -1247,11 +1245,11 @@ mod tests {
             Box::new(*self)
         }
 
-        fn get_outer_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Arc<Path> {
+        fn get_outer_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Path {
             rect_path(rect)
         }
 
-        fn get_inner_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Arc<Path> {
+        fn get_inner_path(&self, rect: Rect, _text_direction: Option<TextDirection>) -> Path {
             rect_path(rect)
         }
 

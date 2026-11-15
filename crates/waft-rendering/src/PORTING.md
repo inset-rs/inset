@@ -131,6 +131,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — a canvas belongs to no view and the embedder holds no implicit view whose metrics it could read, so Valo's `draw_shadow` takes the ratio from its caller.
   Affect: a physical model in a second view with another pixel ratio draws its shadow at that view's ratio, where Flutter's uses the implicit view's.
 
+- Change: `RenderAnimatedOpacity` (`RenderAnimatedOpacityMixin`) retains its opacity animation while it reads it, and gives it back when `set_opacity` replaces it.
+  Reason: language — Dart's reference keeps the animation alive; the arena frees one its owner destroyed, and a build may make the animation and free it at once.
+  Affect: a `FadeTransition`'s animation stays readable past its owner's `destroy` until the render object moves off it or is freed.
+
 ## shifted_box.rs → shifted_box.dart (RenderConstraintsTransformBox)
 
 - Change: `BoxConstraintsTransform` is a plain `fn(BoxConstraints) -> BoxConstraints`, and the setter compares the old and new transform by function address.
@@ -235,7 +239,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## tweens.rs → tweens.dart
 
-- Change: `FractionalOffsetTween`, `AlignmentTween` and `AlignmentGeometryTween` are `Clone` values that implement `Animatable<T>` directly, where `waft_animation`'s tweens are arena objects.
+- Change: `FractionalOffsetTween`, `AlignmentTween` and `AlignmentGeometryTween` are `Clone` values that implement `Animatable<T>` directly, as `waft_animation`'s `ValueTween` does, where its Flutter-named tweens are arena objects.
   Reason: language — orphan rule: an `Animatable` impl for a `Handle` of one of these tweens names no type of this crate.
   Affect: `drive` takes a clone, so writing `begin` or `end` afterwards does not reach the driven animation, as it does on a Dart `Tween`.
 
@@ -276,3 +280,4 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - `RenderIgnoreBaseline`, which reports no baseline for a child that has one, so that a baseline-aligned row puts that child at the top. Trigger: a child a baseline-aligned `Row` should not align by its baseline.
 - `PaintingContext.pushColorFilter`. Trigger: its first caller.
 - proxy_box.rs: the physical models' diagnostics. Trigger: diagnostics.
+- proxy_box.rs: `CustomClipper.getApproximateClipRect` and the clips' `describeApproximatePaintClip`, with `_DismissibleClipper`'s override of it. Trigger: the semantics tree.

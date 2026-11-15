@@ -1,7 +1,5 @@
 //! Flutter counterpart: material_ui's `navigation_drawer_theme.dart`.
 
-use std::rc::Rc;
-
 use waft_embedder::{Color, Size, lerp_double};
 use waft_foundation::App;
 use waft_painting::{ShapeBorder, TextStyle};
@@ -231,16 +229,6 @@ impl NavigationDrawerThemeData {
     }
 }
 
-/// Dart's `==` on a `WidgetStateProperty` field: identity, as nothing gives the property a
-/// value equality here.
-fn same_property<T: ?Sized>(a: &Option<Rc<T>>, b: &Option<Rc<T>>) -> bool {
-    match (a, b) {
-        (None, None) => true,
-        (Some(a), Some(b)) => Rc::ptr_eq(a, b),
-        _ => false,
-    }
-}
-
 impl PartialEq for NavigationDrawerThemeData {
     fn eq(&self, other: &NavigationDrawerThemeData) -> bool {
         if std::ptr::eq(self, other) {
@@ -254,8 +242,8 @@ impl PartialEq for NavigationDrawerThemeData {
             && other.indicator_color == self.indicator_color
             && other.indicator_shape == self.indicator_shape
             && other.indicator_size == self.indicator_size
-            && same_property(&other.label_text_style, &self.label_text_style)
-            && same_property(&other.icon_theme, &self.icon_theme)
+            && other.label_text_style == self.label_text_style
+            && other.icon_theme == self.icon_theme
     }
 }
 

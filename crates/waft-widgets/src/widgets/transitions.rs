@@ -1698,7 +1698,8 @@ mod tests {
     use waft_painting::{AnyColor, BoxDecoration};
     use waft_rendering::{
         BoxConstraints, ContainerRenderObjectMixin, RenderAligningShiftedBox, RenderConstrainedBox,
-        RenderFractionalTranslation, RenderObjectWithChildMixin, RenderTransform,
+        RenderConstrainedBoxBase, RenderFractionalTranslation, RenderObjectWithChildMixin,
+        RenderTransform,
     };
     use waft_scheduler::{Ticker, TickerCallback, TickerProvider};
 

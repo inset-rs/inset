@@ -1,7 +1,6 @@
 //! Flutter counterpart: material_ui's `menu_theme.dart`.
 
 use std::fmt::{self, Debug};
-use std::rc::Rc;
 
 use waft_foundation::App;
 use waft_widgets::{
@@ -99,12 +98,7 @@ impl PartialEq for MenuThemeData {
         if std::ptr::eq(self, other) {
             return true;
         }
-        other.style == self.style
-            && match (&other.submenu_icon, &self.submenu_icon) {
-                (None, None) => true,
-                (Some(theirs), Some(mine)) => Rc::ptr_eq(theirs, mine),
-                _ => false,
-            }
+        other.style == self.style && other.submenu_icon == self.submenu_icon
     }
 }
 
@@ -207,6 +201,7 @@ impl InheritedWidget for MenuTheme {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use std::rc::Rc;
     use std::time::Duration;
 
     use waft_embedder::{Color, Rect};
@@ -263,7 +258,9 @@ pub(crate) mod tests {
         pub(crate) item_shape: Option<Box<dyn OutlinedBorder>>,
     }
 
-    fn all<T: Clone + std::fmt::Debug + 'static>(value: T) -> WidgetStatePropertyRef<Option<T>> {
+    fn all<T: Clone + std::fmt::Debug + PartialEq + 'static>(
+        value: T,
+    ) -> WidgetStatePropertyRef<Option<T>> {
         Rc::new(WidgetStatePropertyAll::new(Some(value)))
     }
 

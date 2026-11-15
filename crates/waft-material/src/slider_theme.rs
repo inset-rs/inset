@@ -813,9 +813,8 @@ impl SliderThemeData {
     }
 }
 
-/// Dart's `==` on a value Dart compares by identity: a `WidgetStateProperty` or a
-/// `RangeThumbSelector` closure.
-fn same_rc<T: ?Sized>(a: &Option<Rc<T>>, b: &Option<Rc<T>>) -> bool {
+/// Dart's `==` on a `RangeThumbSelector`: a closure, equal only to itself.
+fn same_thumb_selector(a: &Option<RangeThumbSelector>, b: &Option<RangeThumbSelector>) -> bool {
     match (a, b) {
         (None, None) => true,
         (Some(a), Some(b)) => Rc::ptr_eq(a, b),
@@ -858,11 +857,11 @@ impl PartialEq for SliderThemeData {
             && other.show_value_indicator == self.show_value_indicator
             && other.value_indicator_text_style == self.value_indicator_text_style
             && other.min_thumb_separation == self.min_thumb_separation
-            && same_rc(&other.thumb_selector, &self.thumb_selector)
-            && same_rc(&other.mouse_cursor, &self.mouse_cursor)
+            && same_thumb_selector(&other.thumb_selector, &self.thumb_selector)
+            && other.mouse_cursor == self.mouse_cursor
             && other.allowed_interaction == self.allowed_interaction
             && other.padding == self.padding
-            && same_rc(&other.thumb_size, &self.thumb_size)
+            && other.thumb_size == self.thumb_size
             && other.track_gap == self.track_gap
             && other.year2023 == self.year2023
     }
@@ -976,7 +975,10 @@ mod tests {
             Size::new(20.0, 20.0),
         ))));
         let lerp = SliderThemeData::lerp(&data, &data, 0.5);
-        assert!(same_rc(&lerp.thumb_size, &data.thumb_size));
+        assert!(Rc::ptr_eq(
+            lerp.thumb_size.as_ref().expect("lerped"),
+            data.thumb_size.as_ref().expect("given")
+        ));
         assert_eq!(lerp, data);
     }
 
