@@ -338,6 +338,7 @@ impl<C: EmbedderClient> Host<C> {
             return;
         };
         view.window_arrived(&self.gpu, window.clone());
+        view.refresh_gesture_settings();
         self.sync_configuration(&view);
         self.sync_screen(&view);
         view.refresh_metrics(view.density(), self.screen_id());
@@ -397,6 +398,7 @@ impl<C: EmbedderClient> Host<C> {
             return;
         };
         view.set_configuration(configuration);
+        view.refresh_gesture_settings();
         self.sync_configuration(&view);
         self.sync_screen(&view);
         self.sync_geometry(id);
