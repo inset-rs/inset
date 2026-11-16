@@ -35,7 +35,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::desktop::Format;
 use crate::devices::Target;
-use crate::ios::Destination;
+use crate::ios::{ExportMethod, Signing};
 use crate::new::Template;
 use crate::project::{Profile, Project};
 
@@ -87,6 +87,9 @@ enum Command {
         /// iOS: build for the simulator instead of a device.
         #[arg(long)]
         simulator: bool,
+        /// ipa: how the .ipa is distributed; Xcode signs it for that.
+        #[arg(long, value_enum, default_value_t)]
+        export_method: ExportMethod,
     },
 }
 
@@ -156,13 +159,20 @@ fn run() -> Result<()> {
             debug,
             package,
             simulator,
+            export_method,
         } => {
             let profile = if debug {
                 Profile::Debug
             } else {
                 Profile::Release
             };
-            build(target, profile, package.as_deref(), simulator)
+            build(
+                target,
+                profile,
+                package.as_deref(),
+                simulator,
+                export_method,
+            )
         }
     }
 }
@@ -192,11 +202,11 @@ fn run_on(
             serve::serve_and_open(out, browser)
         }
         Target::IosSimulator(simulator) => {
-            let app = ios::build(&project, profile, Destination::Simulator)?;
+            let app = ios::build(&project, profile, Signing::Simulator)?;
             ios::run_simulator(&app, &simulator)
         }
         Target::IosDevice(device) => {
-            let app = ios::build(&project, profile, Destination::Device(Some(&device)))?;
+            let app = ios::build(&project, profile, Signing::Development(Some(&device)))?;
             ios::run_device(&app, &device)
         }
         Target::AndroidEmulator(avd) => {
@@ -219,6 +229,7 @@ fn build(
     profile: Profile,
     package: Option<&str>,
     simulator: bool,
+    export_method: ExportMethod,
 ) -> Result<()> {
     let project = Project::load(package)?;
     let outputs = match target {
@@ -232,16 +243,17 @@ fn build(
         BuildTarget::Deb => desktop::build(&project, profile, Format::Deb)?,
         BuildTarget::Appimage => desktop::build(&project, profile, Format::AppImage)?,
         BuildTarget::Ios => {
-            let destination = if simulator {
-                Destination::Simulator
+            let signing = if simulator {
+                Signing::Simulator
             } else {
-                Destination::Device(None)
+                Signing::Development(None)
             };
-            vec![ios::build(&project, profile, destination)?.path]
+            vec![ios::build(&project, profile, signing)?.path]
         }
         BuildTarget::Ipa => {
-            let app = ios::build(&project, profile, Destination::Device(None))?;
-            vec![ios::ipa(&app, &project.out_dir("ipa", profile))?]
+            let app = ios::build(&project, profile, Signing::Distribution)?;
+            let out = project.out_dir("ipa", profile);
+            vec![ios::export_ipa(&project, &app, export_method, &out)?]
         }
         BuildTarget::Apk => vec![android::build(&project, profile, android::Abi::Arm64)?.path],
         BuildTarget::Web => vec![web::build(&project, profile)?],

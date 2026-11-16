@@ -75,6 +75,30 @@ pub fn development_identity(team: Option<&str>) -> Result<Identity> {
     }
 }
 
+/// The team the app is signed for: `team` where the metadata names it, else the team of the
+/// keychain's Apple Development or Apple Distribution certificate.
+pub fn team(team: Option<&str>) -> Result<String> {
+    if let Some(team) = team {
+        return Ok(team.to_owned());
+    }
+    let identity = keychain_identities()?.into_iter().find(|i| {
+        [
+            "Apple Development",
+            "Apple Distribution",
+            "iPhone Developer",
+            "iPhone Distribution",
+        ]
+        .iter()
+        .any(|kind| i.name.starts_with(kind))
+    });
+    match identity {
+        Some(identity) => Ok(identity.team),
+        None => bail!(
+            "no Apple team: name it as `team` in the metadata, or sign in to Xcode once (Settings > Accounts) to create a certificate"
+        ),
+    }
+}
+
 /// The keychain identity `named` names, as `codesign --sign` takes it: its hash, or its name or
 /// a part of it that only it has.
 pub fn keychain_identity(named: &str) -> Result<Identity> {
