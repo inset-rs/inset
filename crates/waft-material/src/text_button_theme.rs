@@ -154,7 +154,7 @@ impl InheritedWidget for TextButtonTheme {
 #[cfg(test)]
 mod tests {
     #![allow(deprecated)]
-    use crate::drawer_theme::tests::assert_near;
+    use waft_widgets::testing::assert_f32_equals;
 
     use std::time::Duration;
 
@@ -170,7 +170,7 @@ mod tests {
         WidgetStateProperty, WidgetStates,
     };
 
-    use waft_widgets::testing::{WidgetTester, test_widgets};
+    use waft_widgets::testing::{WidgetTester, find, test_widgets};
 
     use super::*;
     use crate::button_style::{ButtonLayerBuilder, ButtonStyle};
@@ -190,21 +190,24 @@ mod tests {
 
     /// Reads the button's `Material`, the last one in the tree.
     fn material<R>(tester: &WidgetTester, read: impl FnOnce(&Material) -> R) -> R {
-        let element = *tester
-            .find_by_type::<Material>()
+        let element = *find::by_type::<Material>()
+            .evaluate(tester)
             .last()
             .expect("the button's Material");
         tester.widget(element, read)
     }
 
     fn ink_well<R>(tester: &WidgetTester, read: impl FnOnce(&InkWell) -> R) -> R {
-        let element = *tester.find_by_type::<InkWell>().last().expect("an InkWell");
+        let element = *find::by_type::<InkWell>()
+            .evaluate(tester)
+            .last()
+            .expect("an InkWell");
         tester.widget(element, read)
     }
 
     fn align_of_label(tester: &WidgetTester) -> AlignmentGeometry {
-        let label = *tester.find_text("button").first().expect("the label");
-        let align = tester.ancestor_of_type::<Align>(label);
+        let align =
+            tester.element(find::ancestor(find::text("button"), find::by_type::<Align>()).first());
         tester.widget(align, |align: &Align| align.alignment)
     }
 
@@ -446,11 +449,11 @@ mod tests {
                 );
                 assert!(!ink_well.ink_response.enable_feedback);
             });
-            let button = *tester
-                .find_by_type::<TextButton>()
+            let button = *find::by_type::<TextButton>()
+                .evaluate(tester)
                 .first()
                 .expect("an TextButton");
-            let size = tester.render_box_of(button).size(&tester.cell.borrow());
+            let size = tester.get_size(button);
             assert_eq!(size, Size::new(200.0, 200.0));
             assert!(align_of_label(tester) == AlignmentGeometry::CENTER_LEFT);
             let is_below = |key: GlobalKey, ancestor: waft_widgets::AnyElement| {
@@ -459,11 +462,14 @@ mod tests {
                     .expect("the keyed subtree is mounted");
                 tester.ancestors(keyed).contains(&ancestor)
             };
-            let material = *tester
-                .find_by_type::<Material>()
+            let material = *find::by_type::<Material>()
+                .evaluate(tester)
                 .last()
                 .expect("a Material");
-            let ink_well = *tester.find_by_type::<InkWell>().last().expect("an InkWell");
+            let ink_well = *find::by_type::<InkWell>()
+                .evaluate(tester)
+                .last()
+                .expect("an InkWell");
             assert!(is_below(background_key(), material));
             assert!(is_below(foreground_key(), ink_well));
         }
@@ -649,22 +655,22 @@ mod tests {
                         .into_widget(),
                 ));
                 tester.pump_and_settle();
-                let button = *tester
-                    .find_by_type::<Material>()
+                let button = *find::by_type::<Material>()
+                    .evaluate(tester)
                     .last()
                     .expect("a Material");
-                let icon = *tester.find_by_type::<Icon>().first().expect("an Icon");
-                (
-                    tester.global_rect(tester.render_box_of(button)),
-                    tester.global_rect(tester.render_box_of(icon)),
-                )
+                let icon = *find::by_type::<Icon>()
+                    .evaluate(tester)
+                    .first()
+                    .expect("an Icon");
+                (tester.get_rect(button), tester.get_rect(icon))
             };
 
             let (button, icon) = case(None);
             assert_eq!(button.left, icon.left - 12.0);
 
             let (button, icon) = case(Some(IconAlignment::End));
-            assert_near(button.right, icon.right + 16.0);
+            assert_f32_equals(button.right, icon.right + 16.0);
         });
     }
 

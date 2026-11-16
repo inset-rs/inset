@@ -3947,7 +3947,7 @@ mod tests {
     use super::*;
     use crate::binding::WidgetsBinding;
     use crate::framework::GlobalKey;
-    use crate::testing::{WidgetTester, test_widgets};
+    use crate::testing::{WidgetTester, find, test_widgets};
     use crate::view::View;
     use crate::widgets::basic::{Align, Builder, Directionality, SizedBox, Stack};
     use crate::widgets::text::Text;
@@ -3985,20 +3985,20 @@ mod tests {
             let on_end = Listener::new(move |_app| counted.set(counted.get() + 1));
             tester.pump_widget(positioned_tree(&key, 20.0, Some(on_end.clone())));
             assert_eq!(
-                tester.size_of(&key),
+                tester.get_size(&key),
                 Size::new(20.0, 10.0),
                 "the first build does not animate"
             );
 
             tester.pump_widget(positioned_tree(&key, 40.0, Some(on_end)));
             assert_eq!(
-                tester.size_of(&key).width(),
+                tester.get_size(&key).width(),
                 20.0,
                 "the frame that starts the animation still shows the old width"
             );
 
             tester.pump_by(ms(50));
-            let halfway = tester.size_of(&key).width();
+            let halfway = tester.get_size(&key).width();
             assert!(
                 (halfway - 30.0).abs() < 0.001,
                 "halfway between 20 and 40, not {halfway}"
@@ -4006,7 +4006,7 @@ mod tests {
             assert_eq!(ends.get(), 0, "the animation is still running");
 
             tester.pump_by(ms(50));
-            assert_eq!(tester.size_of(&key).width(), 40.0);
+            assert_eq!(tester.get_size(&key).width(), 40.0);
             assert_eq!(
                 ends.get(),
                 0,
@@ -4164,8 +4164,7 @@ mod tests {
             };
             tester.pump_widget(directional(TextDirection::Ltr));
             let positioned = |tester: &WidgetTester| {
-                let element = tester.find_by_type::<Positioned>()[0];
-                tester.widget(element, |positioned: &Positioned| {
+                tester.widget(find::by_type::<Positioned>(), |positioned: &Positioned| {
                     (positioned.left, positioned.right)
                 })
             };
@@ -4253,20 +4252,20 @@ mod tests {
             let on_end = Listener::new(move |_app| counted.set(counted.get() + 1));
             tester.pump_widget(container_tree(&key, 20.0, Some(on_end.clone())));
             assert_eq!(
-                tester.size_of(&key),
+                tester.get_size(&key),
                 Size::new(20.0, 10.0),
                 "the first build does not animate"
             );
 
             tester.pump_widget(container_tree(&key, 40.0, Some(on_end)));
             assert_eq!(
-                tester.size_of(&key).width(),
+                tester.get_size(&key).width(),
                 20.0,
                 "the frame that starts the animation still shows the old width"
             );
 
             tester.pump_by(ms(50));
-            let halfway = tester.size_of(&key).width();
+            let halfway = tester.get_size(&key).width();
             assert!(
                 (halfway - 30.0).abs() < 0.001,
                 "halfway between 20 and 40, not {halfway}"
@@ -4274,7 +4273,7 @@ mod tests {
             assert_eq!(ends.get(), 0, "the animation is still running");
 
             tester.pump_by(ms(50));
-            assert_eq!(tester.size_of(&key).width(), 40.0);
+            assert_eq!(tester.get_size(&key).width(), 40.0);
 
             tester.pump_by(ms(50));
             assert_eq!(ends.get(), 1);
@@ -4354,12 +4353,6 @@ mod tests {
         });
     }
 
-    /// The global offset of the widget the key is on.
-    fn offset_of(tester: &WidgetTester, key: &GlobalKey) -> Offset {
-        let render = tester.render_object(key).as_box().expect("a box");
-        tester.global_rect(render).top_left()
-    }
-
     fn padding_tree(key: &GlobalKey, text_direction: TextDirection, start: f64) -> WidgetRef {
         Directionality::new(
             text_direction,
@@ -4377,21 +4370,21 @@ mod tests {
         test_widgets(|tester| {
             let key = GlobalKey::new();
             tester.pump_widget(padding_tree(&key, TextDirection::Ltr, 0.0));
-            assert_eq!(offset_of(tester, &key), Offset::ZERO);
+            assert_eq!(tester.get_top_left(&key), Offset::ZERO);
 
             tester.pump_widget(padding_tree(&key, TextDirection::Ltr, 40.0));
             tester.pump_by(ms(50));
-            let halfway = offset_of(tester, &key).dx();
+            let halfway = tester.get_top_left(&key).dx();
             assert!((halfway - 20.0).abs() < 0.001, "{halfway}");
 
             tester.pump_by(ms(50));
-            assert_eq!(offset_of(tester, &key).dx(), 40.0);
+            assert_eq!(tester.get_top_left(&key).dx(), 40.0);
         });
         test_widgets(|tester| {
             let key = GlobalKey::new();
             tester.pump_widget(padding_tree(&key, TextDirection::Rtl, 40.0));
             assert_eq!(
-                offset_of(tester, &key),
+                tester.get_top_left(&key),
                 Offset::ZERO,
                 "an rtl start is an inset on the right"
             );
@@ -4409,14 +4402,14 @@ mod tests {
         test_widgets(|tester| {
             let key = GlobalKey::new();
             tester.pump_widget(align_tree(&key, AlignmentGeometry::TOP_LEFT));
-            assert_eq!(offset_of(tester, &key), Offset::ZERO);
+            assert_eq!(tester.get_top_left(&key), Offset::ZERO);
 
             tester.pump_widget(align_tree(&key, AlignmentGeometry::BOTTOM_RIGHT));
             tester.pump_by(ms(50));
-            assert_eq!(offset_of(tester, &key), Offset::new(395.0, 295.0));
+            assert_eq!(tester.get_top_left(&key), Offset::new(395.0, 295.0));
 
             tester.pump_by(ms(50));
-            assert_eq!(offset_of(tester, &key), Offset::new(790.0, 590.0));
+            assert_eq!(tester.get_top_left(&key), Offset::new(790.0, 590.0));
         });
     }
 
@@ -4435,14 +4428,14 @@ mod tests {
         test_widgets(|tester| {
             let key = GlobalKey::new();
             tester.pump_widget(slide_tree(&key, Offset::ZERO));
-            assert_eq!(offset_of(tester, &key), Offset::ZERO);
+            assert_eq!(tester.get_top_left(&key), Offset::ZERO);
 
             tester.pump_widget(slide_tree(&key, Offset::new(2.0, 0.0)));
             tester.pump_by(ms(50));
-            assert_eq!(offset_of(tester, &key), Offset::new(10.0, 0.0));
+            assert_eq!(tester.get_top_left(&key), Offset::new(10.0, 0.0));
 
             tester.pump_by(ms(50));
-            assert_eq!(offset_of(tester, &key), Offset::new(20.0, 0.0));
+            assert_eq!(tester.get_top_left(&key), Offset::new(20.0, 0.0));
         });
     }
 
@@ -4705,9 +4698,8 @@ mod tests {
                 )),
             ));
             tester.pump_and_settle();
-            let element = tester.find_by_type::<AnimatedPhysicalModel>()[0];
             assert_eq!(
-                tester.global_rect(tester.render_box_of(element)).size(),
+                tester.get_size(find::by_type::<AnimatedPhysicalModel>()),
                 Size::ZERO
             );
         });

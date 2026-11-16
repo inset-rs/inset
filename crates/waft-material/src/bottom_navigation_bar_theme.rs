@@ -426,7 +426,7 @@ mod tests {
         WidgetStateProperty,
     };
 
-    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+    use waft_widgets::testing::{TestPointer, WidgetTester, find, test_widgets};
 
     use super::*;
     use crate::bottom_navigation_bar::BottomNavigationBar;
@@ -492,7 +492,7 @@ mod tests {
     fn transform_center(tester: &WidgetTester, text: &str) -> Offset {
         let transform =
             tester.ancestor_of_type::<waft_widgets::Transform>(first_text(tester, text));
-        tester.global_rect(tester.render_box_of(transform)).center()
+        tester.get_rect(transform).center()
     }
 
     #[test]
@@ -695,7 +695,7 @@ mod tests {
     }
 
     fn bar_descendants<W: 'static>(tester: &WidgetTester) -> Vec<waft_widgets::AnyElement> {
-        let bar = tester.find_by_type::<BottomNavigationBar>()[0];
+        let bar = find::by_type::<BottomNavigationBar>().evaluate(tester)[0];
         tester.descendants_of_type::<W>(bar)
     }
 

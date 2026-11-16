@@ -2487,7 +2487,8 @@ pub(crate) mod tests {
     use waft_widgets::{AnyElement, Center, InheritedTheme, TickerMode, downcast_widget};
 
     use waft_widgets::testing::{
-        TargetPlatformVariant, WidgetTester, test_widgets, test_widgets_variant,
+        TargetPlatformVariant, WidgetTester, expect, find, finds_one_widget, test_widgets,
+        test_widgets_variant,
     };
 
     use super::*;
@@ -2567,8 +2568,8 @@ pub(crate) mod tests {
 
     /// The first element whose widget is a `W`: Dart's `find.byType(W)`.
     pub(crate) fn first<W: 'static>(tester: &WidgetTester) -> AnyElement {
-        *tester
-            .find_by_type::<W>()
+        *find::by_type::<W>()
+            .evaluate(tester)
             .first()
             .expect("a widget of that type")
     }
@@ -2817,15 +2818,11 @@ pub(crate) mod tests {
     /// find.byType(D))`.
     pub(crate) fn descendants<W: 'static, D: 'static>(tester: &WidgetTester) -> Vec<AnyElement> {
         let of = first::<W>(tester);
-        tester
-            .find_by_type::<D>()
+        find::by_type::<D>()
+            .evaluate(tester)
             .into_iter()
             .filter(|element| tester.ancestors(*element).contains(&of))
             .collect()
-    }
-
-    pub(crate) fn size_of(tester: &WidgetTester, element: AnyElement) -> Size {
-        tester.global_rect(tester.render_box_of(element)).size()
     }
 
     pub(crate) fn controller_at(tester: &WidgetTester, value: f64) -> Ref<AnimationController> {
@@ -3666,7 +3663,11 @@ pub(crate) mod tests {
             for platform in APPLE {
                 test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
                     pump_adaptive(tester, CircularProgressIndicator::adaptive());
-                    assert_eq!(tester.find_by_type::<CupertinoActivityIndicator>().len(), 1);
+                    expect(
+                        tester,
+                        &find::by_type::<CupertinoActivityIndicator>(),
+                        finds_one_widget(),
+                    );
                 });
             }
         });
@@ -3678,7 +3679,7 @@ pub(crate) mod tests {
             for platform in APPLE {
                 test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
                     pump_adaptive(tester, CircularProgressIndicator::adaptive().value(0.5));
-                    let indicators = tester.find_by_type::<CupertinoActivityIndicator>();
+                    let indicators = find::by_type::<CupertinoActivityIndicator>().evaluate(tester);
                     assert_eq!(indicators.len(), 1);
                     let actual_progress = tester
                         .widget(indicators[0], |indicator: &CupertinoActivityIndicator| {
@@ -3728,8 +3729,8 @@ pub(crate) mod tests {
                 test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
                     pump_adaptive(tester, CircularProgressIndicator::adaptive());
                     assert!(
-                        tester
-                            .find_by_type::<CupertinoActivityIndicator>()
+                        find::by_type::<CupertinoActivityIndicator>()
+                            .evaluate(tester)
                             .is_empty()
                     );
                 });
@@ -3792,7 +3793,7 @@ pub(crate) mod tests {
                 )
             });
             let indicator = first::<CircularProgressIndicator>(tester);
-            assert_eq!(size_of(tester, indicator), Size::new(36.0, 36.0));
+            assert_eq!(tester.get_size(indicator), Size::new(36.0, 36.0));
         });
     }
 
@@ -3806,7 +3807,7 @@ pub(crate) mod tests {
                 )
             });
             let indicator = first::<CircularProgressIndicator>(tester);
-            assert_eq!(size_of(tester, indicator), Size::new(48.0, 48.0));
+            assert_eq!(tester.get_size(indicator), Size::new(48.0, 48.0));
         });
     }
 
@@ -4099,7 +4100,7 @@ pub(crate) mod tests {
     pub(crate) fn circular_sizes(tester: &WidgetTester) -> (Size, Size) {
         let indicator = first::<CircularProgressIndicator>(tester);
         let constrained_box = descendants::<CircularProgressIndicator, ConstrainedBox>(tester)[0];
-        (size_of(tester, indicator), size_of(tester, constrained_box))
+        (tester.get_size(indicator), tester.get_size(constrained_box))
     }
 
     pub(crate) fn padded(size: Size, padding: EdgeInsetsGeometry) -> Size {
@@ -4225,7 +4226,7 @@ pub(crate) mod tests {
                     .into_widget()
             });
             let indicator = first::<CircularProgressIndicator>(tester);
-            assert_eq!(size_of(tester, indicator), size);
+            assert_eq!(tester.get_size(indicator), size);
         });
     }
 
@@ -4291,15 +4292,15 @@ pub(crate) mod tests {
         test_widgets(|tester| {
             pump_shrunk(tester, RefreshProgressIndicator::new().into_widget());
             let indicator = first::<RefreshProgressIndicator>(tester);
-            assert_eq!(size_of(tester, indicator), Size::ZERO);
+            assert_eq!(tester.get_size(indicator), Size::ZERO);
 
             pump_shrunk(tester, CircularProgressIndicator::new().into_widget());
             let indicator = first::<CircularProgressIndicator>(tester);
-            assert_eq!(size_of(tester, indicator), Size::ZERO);
+            assert_eq!(tester.get_size(indicator), Size::ZERO);
 
             pump_shrunk(tester, LinearProgressIndicator::new().into_widget());
             let indicator = first::<LinearProgressIndicator>(tester);
-            assert_eq!(size_of(tester, indicator), Size::ZERO);
+            assert_eq!(tester.get_size(indicator), Size::ZERO);
         });
     }
 }

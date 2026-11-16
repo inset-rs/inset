@@ -439,6 +439,28 @@ impl Element for ViewportElement {
         MultiChildRenderObjectElementBase::visit_children(self, app, visitor);
     }
 
+    /// Dart's `_ViewportElement.debugVisitOnstageChildren`: the slivers whose geometry is
+    /// visible.
+    fn debug_visit_onstage_children(
+        self: Handle<Self>,
+        app: &App,
+        visitor: &mut dyn FnMut(AnyElement),
+    ) {
+        let mut children = Vec::new();
+        MultiChildRenderObjectElementBase::visit_children(self, app, &mut |child| {
+            children.push(child);
+        });
+        children
+            .into_iter()
+            .filter(|child| {
+                child
+                    .render_object(app)
+                    .and_then(|render| render.as_sliver())
+                    .is_some_and(|sliver| sliver.geometry(app).visible)
+            })
+            .for_each(visitor);
+    }
+
     fn forget_child(self: Handle<Self>, app: &mut App, child: AnyElement) {
         MultiChildRenderObjectElementBase::forget_child(self, app, child);
     }

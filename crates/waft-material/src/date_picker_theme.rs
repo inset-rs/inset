@@ -1370,7 +1370,7 @@ mod tests {
     use waft_rendering::RenderBox as _;
     use waft_widgets::{Builder, Container};
 
-    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+    use waft_widgets::testing::{TestPointer, WidgetTester, find, test_widgets};
 
     use super::*;
     use crate::color_scheme::ColorScheme;
@@ -1901,15 +1901,10 @@ mod tests {
     use waft_widgets::{MediaQuery, SizedBox};
 
     use crate::calendar_date_picker::YearPicker;
-    use crate::chip::tests::size_of;
     use crate::scaffold::Scaffold;
 
     fn year_container(tester: &WidgetTester, year: &str) -> waft_widgets::AnyElement {
-        let text = *tester
-            .find_text(year)
-            .first()
-            .unwrap_or_else(|| panic!("a Text showing {year:?}"));
-        tester.ancestor_of_type::<Container>(text)
+        tester.element(find::ancestor(find::text(year), find::by_type::<Container>()).first())
     }
 
     /// Dart's `findTextDecoration(tester, date)`.
@@ -1961,7 +1956,7 @@ mod tests {
                     theme.clone(),
                     year_picker_with_scale(text_scale_factor),
                 ));
-                let size = size_of(tester, year_container(tester, "2025"));
+                let size = tester.get_size(year_container(tester, "2025"));
                 assert_eq!((size.width(), size.height()), (width, height));
                 let decoration = year_decoration(tester, "2025");
                 assert_eq!(
@@ -2046,7 +2041,6 @@ mod tests {
     use waft_widgets::{AnyElement, Center, Directionality, Text};
 
     use crate::button_style::ButtonStyle;
-    use crate::chip::tests::center_of;
     use crate::date::DateTimeRange;
     use crate::date_picker::{DatePickerDialog, DateRangePickerDialog};
     use crate::dialog::Dialog;
@@ -2055,24 +2049,11 @@ mod tests {
     use crate::ink_decoration::Ink;
     use crate::input_border::UnderlineInputBorder;
     use crate::material::Material;
-    use waft_rendering::testing::{PaintCall, assert_paints, paints};
+    use waft_rendering::testing::{PaintCall, assert_paints};
     /// What Dart's `paints` reads from the first `_RenderInkFeatures`: it paints its subtree.
     fn ink_ops(tester: &WidgetTester) -> Vec<waft_embedder::valo::Op> {
         let ink_features = tester.first::<crate::material::RenderInkFeatures>();
         tester.painted_ops_deep(ink_features.as_object())
-    }
-
-    /// Dart's `paints` on a `Material`'s render object, which does not record the fill that the
-    /// `Material` itself paints as a physical model (the test canvas paints a pushed layer's
-    /// children inline and skips the layer's own shape): the calls are matched from any draw on,
-    /// so the fills drawn before them do not stand in the way.
-    fn paints_after_material_fills(ops: &[waft_embedder::valo::Op], calls: &[PaintCall]) -> bool {
-        (0..ops.len()).any(|start| paints(&ops[start..], calls).is_ok())
-    }
-
-    fn tap_text(tester: &mut WidgetTester, text: &str) {
-        let at = center_of(tester, text_of(tester, text));
-        tester.tap(at, 1);
     }
 
     fn date_picker_theme() -> DatePickerThemeData {
@@ -2151,26 +2132,6 @@ mod tests {
         )
     }
 
-    /// Dart's `gesture.removePointer()`: `TestGesture` dispatches a `PointerRemovedEvent` that
-    /// carries the pointer's id, so a recognizer tracking the pointer sees it (and gives up a
-    /// press that is still down); the engine's converter would leave the id at zero.
-    fn remove_pointer(tester: &mut WidgetTester, pointer: &TestPointer) {
-        tester.update(|app| {
-            waft_gestures::GestureBinding::instance(app).handle_pointer_event(
-                app,
-                waft_gestures::PointerEvent::Removed(waft_gestures::PointerRemovedEvent {
-                    kind: waft_embedder::PointerDeviceKind::Mouse,
-                    device: pointer.id,
-                    pointer: pointer.id,
-                    position: pointer.position,
-                    ..waft_gestures::PointerRemovedEvent::default()
-                }),
-            );
-            app.drain_microtasks();
-        });
-        tester.cell.checkpoint();
-    }
-
     fn themed(theme: DatePickerThemeData, use_material3: bool, tester: &WidgetTester) -> ThemeData {
         ThemeData::builder()
             .date_picker_theme(theme)
@@ -2205,10 +2166,7 @@ mod tests {
     }
 
     fn text_of(tester: &WidgetTester, text: &str) -> AnyElement {
-        *tester
-            .find_text(text)
-            .first()
-            .unwrap_or_else(|| panic!("a Text showing {text:?}"))
+        tester.element(find::text(text).first())
     }
 
     fn text_style(tester: &WidgetTester, text: &str) -> TextStyle {
@@ -2223,8 +2181,9 @@ mod tests {
 
     /// Dart's `findDialogMaterial`.
     fn find_dialog_material(tester: &WidgetTester) -> AnyElement {
-        let dialog = tester.find_by_type::<Dialog>()[0];
-        tester.descendants_of_type::<Material>(dialog)[0]
+        tester.element(
+            find::descendant(find::by_type::<Dialog>().at(0), find::by_type::<Material>()).first(),
+        )
     }
 
     struct MaterialRead {
@@ -2247,7 +2206,7 @@ mod tests {
 
     /// Dart's `findHeaderMaterial`: the nearest `Material` above the text.
     fn find_header_material(tester: &WidgetTester, text: &str) -> AnyElement {
-        tester.ancestor_of_type::<Material>(text_of(tester, text))
+        tester.element(find::ancestor(find::text(text), find::by_type::<Material>()).first())
     }
 
     fn shape_decoration_of(
@@ -2265,7 +2224,7 @@ mod tests {
 
     /// Dart's `findDayDecoration`.
     fn find_day_decoration(tester: &WidgetTester, day: &str) -> waft_painting::ShapeDecoration {
-        let ink = tester.ancestor_of_type::<Ink>(text_of(tester, day));
+        let ink = tester.element(find::ancestor(find::text(day), find::by_type::<Ink>()).first());
         tester.widget(ink, |ink: &Ink| {
             shape_decoration_of(ink.decoration.as_deref())
         })
@@ -2278,8 +2237,13 @@ mod tests {
     }
 
     fn action_button_style(tester: &WidgetTester, text: &str) -> Option<ButtonStyle> {
-        let button =
-            tester.ancestor_of_type::<crate::text_button::TextButton>(text_of(tester, text));
+        let button = tester.element(
+            find::ancestor(
+                find::text(text),
+                find::by_type::<crate::text_button::TextButton>(),
+            )
+            .first(),
+        );
         tester.widget(button, |button: &crate::text_button::TextButton| {
             crate::button_style_button::ButtonStyleButton::button_style_button_data(button)
                 .style
@@ -2417,7 +2381,7 @@ mod tests {
                 style_color(&january_2023),
                 theme_data.sub_header_foreground_color
             );
-            let arrow = tester.find_by_icon(&Icons::arrow_drop_down());
+            let arrow = tester.element(find::by_icon(&Icons::arrow_drop_down()).first());
             assert_eq!(
                 tester
                     .widget(arrow, |icon: &waft_widgets::Icon| icon.color.clone())
@@ -2428,7 +2392,7 @@ mod tests {
             // The day overlay color.
             let mut mouse = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut mouse, waft_embedder::Offset::ZERO);
-            let at = center_of(tester, text_of(tester, "25"));
+            let at = tester.get_center(text_of(tester, "25"));
             tester.move_to(&mut mouse, at, false);
             tester.pump_and_settle();
             assert_paints(
@@ -2437,7 +2401,7 @@ mod tests {
             );
 
             // Show the year selector.
-            tap_text(tester, "January 2023");
+            tester.tap(find::text("January 2023"));
             tester.pump_and_settle();
 
             let year_font_size = theme_data
@@ -2489,13 +2453,13 @@ mod tests {
             );
 
             // The year overlay color.
-            let at = center_of(tester, text_of(tester, "2024"));
+            let at = tester.get_center(text_of(tester, "2024"));
             tester.move_to(&mut mouse, at, false);
             tester.pump_and_settle();
-            assert!(paints_after_material_fills(
+            assert_paints(
                 &ink_ops(tester),
-                &[PaintCall::rect(resolved(&theme_data.year_overlay_color))]
-            ));
+                &[PaintCall::rect(resolved(&theme_data.year_overlay_color))],
+            );
 
             assert_eq!(
                 action_button_style(tester, "Cancel"),
@@ -2565,7 +2529,7 @@ mod tests {
     }
 
     fn input_decoration(tester: &WidgetTester) -> crate::input_decorator::InputDecoration {
-        let text_field = tester.find_by_type::<crate::text_field::TextField>()[0];
+        let text_field = tester.element(find::by_type::<crate::text_field::TextField>().at(0));
         tester.widget(text_field, |text_field: &crate::text_field::TextField| {
             text_field.decoration.clone().expect("a decoration")
         })
@@ -2584,7 +2548,7 @@ mod tests {
 
         let material = read_material(tester, find_dialog_material(tester));
         assert_eq!(material.color, theme_data.background_color);
-        let scaffold = tester.find_by_type::<crate::scaffold::Scaffold>()[0];
+        let scaffold = tester.element(find::by_type::<crate::scaffold::Scaffold>().at(0));
         assert_eq!(
             tester.widget(scaffold, |scaffold: &crate::scaffold::Scaffold| scaffold
                 .background_color),
@@ -2598,7 +2562,7 @@ mod tests {
         );
         assert_eq!(material.shape, theme_data.range_picker_shape);
 
-        let app_bar = tester.find_by_type::<crate::app_bar::AppBar>()[0];
+        let app_bar = tester.element(find::by_type::<crate::app_bar::AppBar>().at(0));
         assert_eq!(
             tester.widget(app_bar, |app_bar: &crate::app_bar::AppBar| app_bar
                 .background_color
@@ -2636,7 +2600,7 @@ mod tests {
         // The day overlay color.
         let mut mouse = TestPointer::mouse(1, 0);
         tester.add_pointer(&mut mouse, waft_embedder::Offset::ZERO);
-        let at = center_of(tester, text_of(tester, "16"));
+        let at = tester.get_center(text_of(tester, "16"));
         tester.move_to(&mut mouse, at, false);
         tester.pump_and_settle();
         assert_paints(
@@ -2645,7 +2609,7 @@ mod tests {
         );
 
         // The range selection overlay color.
-        let at = center_of(tester, text_of(tester, "18"));
+        let at = tester.get_center(text_of(tester, "18"));
         tester.move_to(&mut mouse, at, false);
         tester.pump_and_settle();
         assert_paints(
@@ -2678,7 +2642,7 @@ mod tests {
             };
 
             let tester = show_picker(WIDE_WINDOW_SIZE);
-            let vertical = tester.find_by_type::<VerticalDivider>()[0];
+            let vertical = tester.element(find::by_type::<VerticalDivider>().at(0));
             assert_eq!(
                 tester.widget(vertical, |divider: &VerticalDivider| divider.color),
                 theme_data.divider_color
@@ -2686,7 +2650,7 @@ mod tests {
 
             // The portrait layout.
             let tester = show_picker(NARROW_WINDOW_SIZE);
-            let horizontal = tester.find_by_type::<Divider>()[0];
+            let horizontal = tester.element(find::by_type::<Divider>().at(0));
             assert_eq!(
                 tester.widget(horizontal, |divider: &Divider| divider.color),
                 theme_data.divider_color
@@ -2804,7 +2768,7 @@ mod tests {
             // The hover overlay color.
             let mut mouse = TestPointer::mouse(1, 1);
             tester.add_pointer(&mut mouse, waft_embedder::Offset::ZERO);
-            let at = center_of(tester, text_of(tester, "20"));
+            let at = tester.get_center(text_of(tester, "20"));
             tester.move_to(&mut mouse, at, false);
             tester.pump_and_settle();
             assert_paints(
@@ -2829,7 +2793,7 @@ mod tests {
                 ],
             );
 
-            remove_pointer(tester, &mouse);
+            tester.remove_pointer(&mouse);
             tester.pump_and_settle();
 
             // Focus day selection.
@@ -2872,26 +2836,23 @@ mod tests {
             // The hover overlay color.
             let mut mouse = TestPointer::mouse(1, 1);
             tester.add_pointer(&mut mouse, waft_embedder::Offset::ZERO);
-            let at = center_of(tester, text_of(tester, "2022"));
+            let at = tester.get_center(text_of(tester, "2022"));
             tester.move_to(&mut mouse, at, false);
             tester.pump_and_settle();
-            assert!(paints_after_material_fills(
-                &ink_ops(tester),
-                &[PaintCall::rect(Some(hovered))]
-            ));
+            assert_paints(&ink_ops(tester), &[PaintCall::rect(Some(hovered))]);
 
             // The pressed overlay color.
             tester.down(&mut mouse, at);
             tester.pump_and_settle();
-            assert!(paints_after_material_fills(
+            assert_paints(
                 &ink_ops(tester),
                 &[
                     PaintCall::rect(Some(hovered)),
-                    PaintCall::rect(Some(pressed))
-                ]
-            ));
+                    PaintCall::rect(Some(pressed)),
+                ],
+            );
 
-            remove_pointer(tester, &mouse);
+            tester.remove_pointer(&mouse);
             tester.pump_and_settle();
 
             // Focus year selection.
@@ -2901,10 +2862,7 @@ mod tests {
             }
 
             // The focused overlay color.
-            assert!(paints_after_material_fills(
-                &ink_ops(tester),
-                &[PaintCall::rect(Some(focused))]
-            ));
+            assert_paints(&ink_ops(tester), &[PaintCall::rect(Some(focused))]);
         });
     }
 
@@ -2925,7 +2883,7 @@ mod tests {
             // The hover overlay color.
             let mut mouse = TestPointer::mouse(1, 1);
             tester.add_pointer(&mut mouse, waft_embedder::Offset::ZERO);
-            let at = center_of(tester, text_of(tester, "18"));
+            let at = tester.get_center(text_of(tester, "18"));
             tester.move_to(&mut mouse, at, false);
             tester.pump_and_settle();
             assert_paints(&ink_ops(tester), &[PaintCall::circle(Some(hovered))]);

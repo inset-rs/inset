@@ -72,7 +72,7 @@ mod tests {
         StateSetter, StatefulBuilder,
     };
 
-    use waft_widgets::testing::{WidgetTester, test_widgets};
+    use waft_widgets::testing::{WidgetTester, find, test_widgets};
 
     use super::*;
 
@@ -114,8 +114,8 @@ mod tests {
             );
 
             let toolbar_y = |tester: &WidgetTester| {
-                let container = tester.find_by_type::<Container>()[0];
-                tester.global_rect(tester.render_box_of(container)).top
+                let container = find::by_type::<Container>().evaluate(tester)[0];
+                tester.get_rect(container).top
             };
 
             // When the toolbar doesn't fit below anchor, it positions itself such that

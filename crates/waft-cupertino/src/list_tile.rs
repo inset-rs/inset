@@ -702,7 +702,7 @@ mod tests {
                 .current_state::<CupertinoListTileState>(&tester.cell.borrow())
                 .expect("the tile mounted");
 
-            tester.tap(TILE, 1);
+            tester.tap_at(TILE, 1);
             assert!(
                 tester.cell.borrow().get(state).tapped,
                 "the callback's task is still pending"

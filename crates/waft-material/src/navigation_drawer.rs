@@ -1127,7 +1127,9 @@ mod tests {
         StatefulBuilder, Text, WidgetStatePropertyAll, WidgetsBinding,
     };
 
-    use waft_widgets::testing::{WidgetTester, test_widgets};
+    use waft_widgets::testing::{
+        WidgetTester, expect, find, finds_n_widgets, finds_one_widget, test_widgets,
+    };
 
     use super::*;
     use crate::app::MaterialApp;
@@ -1195,22 +1197,22 @@ mod tests {
     }
 
     fn found(tester: &WidgetTester, text: &str) -> usize {
-        tester.find_text(text).len()
+        find::text(text).evaluate(tester).len()
     }
 
     fn text_center(tester: &WidgetTester, text: &str) -> Offset {
-        let text = *tester.find_text(text).first().expect("the text");
-        tester.global_rect(tester.render_box_of(text)).center()
+        let text = *find::text(text).evaluate(tester).first().expect("the text");
+        tester.get_rect(text).center()
     }
 
     fn icon_center(tester: &WidgetTester, icon: &IconData) -> Offset {
-        let icon = tester.find_by_icon(icon);
-        tester.global_rect(tester.render_box_of(icon)).center()
+        let icon = tester.element(find::by_icon(icon).first());
+        tester.get_rect(icon).center()
     }
 
     fn navigation_drawer(tester: &WidgetTester) -> AnyElement {
-        *tester
-            .find_by_type::<NavigationDrawer>()
+        *find::by_type::<NavigationDrawer>()
+            .evaluate(tester)
             .first()
             .expect("a NavigationDrawer")
     }
@@ -1238,8 +1240,8 @@ mod tests {
     /// Dart's `_getIndicatorDecoration(tester)`: the `ShapeDecoration` of the first `Ink`
     /// under a `NavigationIndicator`, as its color and shape.
     fn indicator_decoration(tester: &WidgetTester) -> (Option<Color>, ShapeBorderRef) {
-        let ink = tester
-            .find_by_type::<NavigationIndicator>()
+        let ink = find::by_type::<NavigationIndicator>()
+            .evaluate(tester)
             .into_iter()
             .flat_map(|indicator| tester.descendants_of_type::<Ink>(indicator))
             .next()
@@ -1263,7 +1265,7 @@ mod tests {
     /// Dart's `_iconStyle(tester, icon)?.color`.
     fn icon_color(tester: &WidgetTester, icon: &IconData) -> Option<Color> {
         tester
-            .glyph_style(tester.find_by_icon(icon))
+            .glyph_style(tester.element(find::by_icon(icon).first()))
             .color
             .as_deref()
             .copied()
@@ -1271,7 +1273,10 @@ mod tests {
 
     /// Dart's `_labelStyle(tester, label)`.
     fn label_style(tester: &WidgetTester, label: &str) -> TextStyle {
-        let text = *tester.find_text(label).first().expect("the label");
+        let text = *find::text(label)
+            .evaluate(tester)
+            .first()
+            .expect("the label");
         tester.glyph_style(text)
     }
 
@@ -1307,11 +1312,11 @@ mod tests {
             tester.pump_by(Duration::from_secs(1)); // animation done
 
             let at = text_center(tester, "Alarm");
-            tester.tap(at, 1);
+            tester.tap_at(at, 1);
             assert_eq!(mutated_index.get(), 1);
 
             let at = text_center(tester, "AC");
-            tester.tap(at, 2);
+            tester.tap_at(at, 2);
             assert_eq!(mutated_index.get(), 0);
         });
     }
@@ -1358,7 +1363,10 @@ mod tests {
             });
 
             let find_destination_ink = |tester: &WidgetTester, label: &str| -> Vec<AnyElement> {
-                let text = *tester.find_text(label).first().expect("the label");
+                let text = *find::text(label)
+                    .evaluate(tester)
+                    .first()
+                    .expect("the label");
                 let destination = tester.ancestor_of_type::<NavigationDrawerDestination>(text);
                 tester.descendants_of_type::<Ink>(destination)
             };
@@ -1369,7 +1377,7 @@ mod tests {
 
             // Destination with no custom background color.
             let at = text_center(tester, "AC");
-            tester.tap(at, 1);
+            tester.tap_at(at, 1);
             tester.pump();
 
             // When no background color is set, only the non-visible indicator Ink is expected.
@@ -1377,7 +1385,7 @@ mod tests {
 
             // Destination with a custom background color.
             let at = icon_center(tester, &Icons::access_alarm());
-            tester.tap(at, 2);
+            tester.tap_at(at, 2);
             tester.pump();
 
             // A Material is added with the custom color.
@@ -1469,9 +1477,11 @@ mod tests {
                 Some(colors.on_surface_variant())
             );
             // Test that the icon and label are the correct size.
-            let icon_box = tester.render_box_of(tester.find_by_icon(&Icons::ac_unit()));
+            let icon_box =
+                tester.render_box_of(tester.element(find::by_icon(&Icons::ac_unit()).first()));
             assert_eq!(icon_box.size(&tester.cell.borrow()), Size::new(24.0, 24.0));
-            let icon_box = tester.render_box_of(tester.find_by_icon(&Icons::access_alarm()));
+            let icon_box =
+                tester.render_box_of(tester.element(find::by_icon(&Icons::access_alarm()).first()));
             assert_eq!(icon_box.size(&tester.cell.borrow()), Size::new(24.0, 24.0));
         });
     }
@@ -1481,16 +1491,16 @@ mod tests {
     /// `SliverMultiBoxAdaptorElement.debugVisitOnstageChildren` lets the finder see only the
     /// children between the scroll offset and the end of the remaining paint extent.
     fn onstage_label(tester: &WidgetTester, label: &str) -> bool {
-        let Some(&text) = tester.find_text(label).first() else {
+        let Some(&text) = find::text(label).evaluate(tester).first() else {
             return false;
         };
-        let list = *tester
-            .find_by_type::<ListView>()
+        let list = *find::by_type::<ListView>()
+            .evaluate(tester)
             .first()
             .expect("the ListView");
-        let viewport = tester.global_rect(tester.render_box_of(list));
+        let viewport = tester.get_rect(list);
         let destination = tester.ancestor_of_type::<NavigationDrawerDestination>(text);
-        let item = tester.global_rect(tester.render_box_of(destination));
+        let item = tester.get_rect(destination);
         item.top < viewport.bottom && item.bottom > viewport.top
     }
 
@@ -1563,9 +1573,12 @@ mod tests {
             tester.pump_by(Duration::from_secs(1));
 
             let destination_rect = |label: &str| -> Rect {
-                let text = *tester.find_text(label).first().expect("the label");
+                let text = *find::text(label)
+                    .evaluate(tester)
+                    .first()
+                    .expect("the label");
                 let destination = tester.ancestor_of_type::<NavigationDrawerDestination>(text);
-                tester.global_rect(tester.render_box_of(destination))
+                tester.get_rect(destination)
             };
 
             // Safe area padding on the top and sides.
@@ -1698,11 +1711,11 @@ mod tests {
             assert_eq!(selected_index.get(), 0);
 
             let at = text_center(tester, "Alarm");
-            tester.tap(at, 1);
+            tester.tap_at(at, 1);
             assert_eq!(selected_index.get(), 1);
 
             let at = text_center(tester, "Accessible");
-            tester.tap(at, 2);
+            tester.tap_at(at, 2);
             assert_eq!(selected_index.get(), 1);
 
             tester.pump_and_settle();
@@ -1756,12 +1769,12 @@ mod tests {
             open_drawer(tester, &key);
             tester.pump_by(Duration::from_secs(1));
 
-            assert_eq!(tester.find_by_type::<DrawerHeader>().len(), 1);
+            expect(tester, &find::by_type::<DrawerHeader>(), finds_one_widget());
             assert_eq!(found(tester, "Header"), 1);
-            assert_eq!(tester.find_by_type::<FlutterLogo>().len(), 2);
-            assert_eq!(tester.find_by_type::<ListTile>().len(), 1);
+            expect(tester, &find::by_type::<FlutterLogo>(), finds_n_widgets(2));
+            expect(tester, &find::by_type::<ListTile>(), finds_one_widget());
             assert_eq!(found(tester, "Footer"), 1);
-            tester.find_by_icon(&Icons::settings());
+            tester.element(find::by_icon(&Icons::settings()).first());
         });
     }
 
@@ -1816,12 +1829,15 @@ mod tests {
             open_drawer(tester, &key);
             tester.pump_and_settle();
 
-            let footer_text = *tester.find_text("Footer").first().expect("the footer");
+            let footer_text = *find::text("Footer")
+                .evaluate(tester)
+                .first()
+                .expect("the footer");
             let footer = tester.ancestor_of_type::<Padding>(footer_text);
             let footer_rect = tester.get_rect(tester.render_box_of(footer));
 
-            let first_destination = *tester
-                .find_by_type::<NavigationDrawerDestination>()
+            let first_destination = *find::by_type::<NavigationDrawerDestination>()
+                .evaluate(tester)
                 .first()
                 .expect("a destination");
             let ink_wells = tester.descendants_of_type::<InkWell>(first_destination);
@@ -1875,8 +1891,8 @@ mod tests {
 
             // The indicator is painted by an Ink widget, which paints on the nearest
             // ancestor Material rather than on its own render object.
-            let indicator = *tester
-                .find_by_type::<NavigationIndicator>()
+            let indicator = *find::by_type::<NavigationIndicator>()
+                .evaluate(tester)
                 .first()
                 .expect("an indicator");
             let indicator_ink = *tester

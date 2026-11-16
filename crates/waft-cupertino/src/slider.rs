@@ -1277,8 +1277,10 @@ mod tests {
             }
         }
 
+        /// Dart's `tester.tapAt(at)`.
         fn tap(&mut self, at: Offset) {
-            self.tester.tap(at, 1);
+            let pointer = self.tester.next_pointer();
+            self.tester.tap_at(at, pointer);
         }
 
         fn render_object(&self) -> AnyRenderObject {
@@ -1695,7 +1697,7 @@ mod tests {
                     ),
                 ),
             ));
-            assert_eq!(tester.size_of(&key), Size::ZERO);
+            assert_eq!(tester.get_size(&key), Size::ZERO);
         });
     }
 

@@ -724,9 +724,9 @@ impl IntoWidget<StatefulKind> for FilledButtonIcon {
 
 #[cfg(test)]
 mod tests {
-    use crate::drawer_theme::tests::assert_near;
     use std::cell::{Cell, RefCell};
     use waft_widgets::Text;
+    use waft_widgets::testing::assert_f32_equals;
 
     use waft_embedder::{FontWeight, Offset, Rect, TextDirection};
     use waft_embedder::{PointerChange, RRect, Radius};
@@ -740,7 +740,7 @@ mod tests {
         IconData, IconTheme, MouseRegion, Padding, SizedBox, downcast_widget,
     };
 
-    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+    use waft_widgets::testing::{TestPointer, WidgetTester, find, test_widgets};
 
     use super::*;
     use crate::color_scheme::ColorScheme;
@@ -749,8 +749,9 @@ mod tests {
     use crate::ink_well::InkWell;
     use crate::material::{Material, MaterialType};
     use crate::material_state::MaterialStatesController;
-    use crate::test_support::{Drawn, PaintInspection, material_app};
+    use crate::test_support::{PaintInspection, material_app};
     use crate::theme_data::ThemeData;
+    use waft_rendering::testing::RecordedCall;
     use waft_widgets::FocusNodeRef;
 
     fn pressed() -> Listener {
@@ -779,8 +780,8 @@ mod tests {
 
     /// The first `W` below a `FilledButton`.
     fn in_button<W: 'static>(tester: &WidgetTester) -> AnyElement {
-        tester
-            .find_by_type::<W>()
+        find::by_type::<W>()
+            .evaluate(tester)
             .into_iter()
             .find(|element| is_inside::<FilledButton>(tester, *element))
             .expect("a descendant of the button")
@@ -803,18 +804,15 @@ mod tests {
     }
 
     fn material_rect(tester: &WidgetTester) -> Rect {
-        tester.global_rect(tester.render_box_of(in_button::<Material>(tester)))
+        tester.get_rect(in_button::<Material>(tester))
     }
 
     fn icon_rect(tester: &WidgetTester) -> Rect {
-        tester.global_rect(tester.render_box_of(tester.find_by_type::<Icon>()[0]))
+        tester.get_rect(find::by_type::<Icon>().evaluate(tester)[0])
     }
 
     fn button_center(tester: &WidgetTester) -> Offset {
-        let render = tester.render_box_of(tester.find_by_type::<FilledButton>()[0]);
-        let app = tester.cell.borrow();
-        let size = render.size(&app);
-        render.local_to_global(&app, size.center(Offset::ZERO), None)
+        tester.get_center(find::by_type::<FilledButton>().evaluate(tester)[0])
     }
 
     fn physical_elevation(tester: &WidgetTester) -> f64 {
@@ -828,10 +826,10 @@ mod tests {
 
     fn ink_rect_colors(tester: &WidgetTester) -> Vec<u32> {
         tester
-            .ink_drawn()
+            .ink_calls()
             .into_iter()
             .filter_map(|drawn| match drawn {
-                Drawn::Rect(color, _) => Some(color),
+                RecordedCall::Rect { color, .. } => Some(color.value()),
                 _ => None,
             })
             .collect()
@@ -1039,7 +1037,7 @@ mod tests {
                     theme.clone(),
                     Center::new().child(build(Some(icon()))).into_widget(),
                 ));
-                assert_eq!(tester.find_by_type::<Icon>().len(), 1);
+                assert_eq!(find::by_type::<Icon>().evaluate(tester).len(), 1);
                 assert!(
                     label_key
                         .current_context(&tester.cell.borrow_mut())
@@ -1051,7 +1049,7 @@ mod tests {
                     // No icon specified.
                     Center::new().child(build(None)).into_widget(),
                 ));
-                assert!(tester.find_by_type::<Icon>().is_empty());
+                assert!(find::by_type::<Icon>().evaluate(tester).is_empty());
                 assert!(
                     label_key
                         .current_context(&tester.cell.borrow_mut())
@@ -1142,20 +1140,20 @@ mod tests {
                 Directionality::new(TextDirection::Ltr, button).into_widget()
             };
             let enabled = |tester: &WidgetTester| {
-                let button = tester.find_by_type::<FilledButton>()[0];
+                let button = find::by_type::<FilledButton>().evaluate(tester)[0];
                 tester.widget::<FilledButton, _>(button, |button| button.enabled())
             };
 
             // onPressed not null, onLongPress null.
             tester.pump_widget(build_frame(Some(count()), None));
             assert!(enabled(tester));
-            tester.tap(button_center(tester), 1);
+            tester.tap_at(button_center(tester), 1);
             assert_eq!(was_pressed.get(), 1);
 
             // onPressed null, onLongPress not null.
             tester.pump_widget(build_frame(None, Some(count())));
             assert!(enabled(tester));
-            tester.long_press(button_center(tester), 2);
+            tester.long_press_at(button_center(tester), 2);
             assert_eq!(was_pressed.get(), 2);
 
             // onPressed null, onLongPress null.
@@ -1246,13 +1244,8 @@ mod tests {
 
                         // Measure padding in terms of the difference between the button and
                         // its label child and check that.
-                        let label_bounds = tester
-                            .global_rect(tester.render_object(&label_key).as_box().expect("a box"));
-                        let icon_bounds = with_icon.then(|| {
-                            tester.global_rect(
-                                tester.render_object(&icon_key).as_box().expect("a box"),
-                            )
-                        });
+                        let label_bounds = tester.get_rect(&label_key);
+                        let icon_bounds = with_icon.then(|| tester.get_rect(&icon_key));
                         let child_bounds = match icon_bounds {
                             Some(icon_bounds) => label_bounds.expand_to_include(icon_bounds),
                             None => label_bounds,
@@ -1261,8 +1254,7 @@ mod tests {
                         // We measure the `InkResponse` descendant of the button element,
                         // because the button has a larger `RenderBox` which accommodates the
                         // minimum tap target with a height of 48.
-                        let button_bounds =
-                            tester.global_rect(tester.render_box_of(in_button::<InkWell>(tester)));
+                        let button_bounds = tester.get_rect(in_button::<InkWell>(tester));
 
                         // Since there is a requirement of a minimum width of 64 and a minimum
                         // height of 36 on material buttons, the visual padding of smaller
@@ -1407,7 +1399,7 @@ mod tests {
                 let context = key
                     .current_context(&tester.cell.borrow_mut())
                     .expect("mounted");
-                tester.global_rect(tester.render_box_of(context))
+                tester.get_rect(context)
             };
             assert_eq!(rect(&button_key), Rect::from_ltrb(0.0, 0.0, 200.0, 100.0));
             assert_eq!(rect(&icon_key), Rect::from_ltrb(46.0, 0.0, 96.0, 100.0));
@@ -1450,19 +1442,19 @@ mod tests {
                 build(tester, TextDirection::Ltr, None, None);
                 assert_eq!(material_rect(tester).left, icon_rect(tester).left - 16.0);
                 build(tester, TextDirection::Rtl, None, None);
-                assert_near(material_rect(tester).right, icon_rect(tester).right + 16.0);
+                assert_f32_equals(material_rect(tester).right, icon_rect(tester).right + 16.0);
 
                 build(tester, TextDirection::Ltr, Some(IconAlignment::Start), None);
                 assert_eq!(material_rect(tester).left, icon_rect(tester).left - 16.0);
                 build(tester, TextDirection::Ltr, Some(IconAlignment::End), None);
-                assert_near(material_rect(tester).right, icon_rect(tester).right + 24.0);
+                assert_f32_equals(material_rect(tester).right, icon_rect(tester).right + 24.0);
                 build(tester, TextDirection::Rtl, Some(IconAlignment::Start), None);
-                assert_near(material_rect(tester).right, icon_rect(tester).right + 16.0);
+                assert_f32_equals(material_rect(tester).right, icon_rect(tester).right + 16.0);
                 build(tester, TextDirection::Rtl, Some(IconAlignment::End), None);
                 assert_eq!(material_rect(tester).left, icon_rect(tester).left - 24.0);
 
                 build(tester, TextDirection::Ltr, None, Some(IconAlignment::End));
-                assert_near(material_rect(tester).right, icon_rect(tester).right + 24.0);
+                assert_f32_equals(material_rect(tester).right, icon_rect(tester).right + 24.0);
             }
         });
     }
@@ -1588,7 +1580,7 @@ mod tests {
     /// The colour of the glyph of the `Icon` showing `icon`.
     fn glyph_color(tester: &WidgetTester, icon: &IconData) -> Option<Color> {
         tester
-            .glyph_style(tester.find_by_icon(icon))
+            .glyph_style(tester.element(find::by_icon(icon).first()))
             .color
             .map(|color| color.color())
     }
@@ -1625,12 +1617,11 @@ mod tests {
                 .into_widget(),
             );
 
-            let padding_rect =
-                tester.global_rect(tester.render_box_of(in_button::<Padding>(tester)));
+            let padding_rect = tester.get_rect(in_button::<Padding>(tester));
             let label = label_key
                 .current_context(&tester.cell.borrow_mut())
                 .expect("mounted");
-            let label_rect = tester.global_rect(tester.render_box_of(label));
+            let label_rect = tester.get_rect(label);
             let icon_rect = icon_rect(tester);
 
             // The right padding should be applied on the right of the label, whereas the
@@ -1678,9 +1669,9 @@ mod tests {
                     .into_widget(),
             ));
 
-            let button = tester.render_box_of(tester.find_by_type::<FilledButton>()[0]);
+            let button = tester.render_object(find::by_type::<FilledButton>().evaluate(tester)[0]);
             waft_rendering::testing::assert_paints(
-                &tester.painted_ops(button.as_object()),
+                &tester.painted_ops(button),
                 &[waft_rendering::testing::PaintCall::drrect_between(
                     // Outer and inner rect that give the outline a width of 10.
                     RRect::from_ltrbr(0.0, 0.0, 116.0, 36.0, Radius::circular(16.0)),
@@ -1780,7 +1771,7 @@ mod tests {
             assert_eq!(value(tester), states(&[]));
             assert_eq!(count.get(), 0);
 
-            let center = tester.center_of(&label_key);
+            let center = tester.get_center(&label_key);
             let mut gesture = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
             tester.add_pointer(&mut gesture, Offset::ZERO);
             tester.move_to(&mut gesture, center, false);
@@ -1888,7 +1879,7 @@ mod tests {
 
             let button_top_right = material_rect(tester).top_right();
             let icon_top_right = icon_rect(tester).top_right();
-            assert_near(button_top_right.dx(), icon_top_right.dx() + 24.0);
+            assert_f32_equals(button_top_right.dx(), icon_top_right.dx() + 24.0);
         });
     }
 

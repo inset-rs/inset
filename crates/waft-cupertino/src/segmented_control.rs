@@ -1732,7 +1732,7 @@ mod tests {
             );
 
             let tap = mounted.segment_center(1);
-            mounted.tester.tap(tap, 1);
+            mounted.tester.tap_at(tap, 1);
             assert_eq!(*mounted.changes.borrow(), [1], "the second segment's key");
 
             mounted.tester.pump_by(Duration::from_millis(20));
@@ -1754,7 +1754,7 @@ mod tests {
         test_widgets(|tester| {
             let mounted = mount(tester, vec![2], TextDirection::Ltr);
             let tap = mounted.segment_center(2);
-            mounted.tester.tap(tap, 1);
+            mounted.tester.tap_at(tap, 1);
             assert!(
                 mounted.changes.borrow().is_empty(),
                 "a disabled segment reports nothing"

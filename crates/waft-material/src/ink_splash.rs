@@ -364,9 +364,10 @@ mod tests {
     use super::*;
     use crate::ink_well::InkWell;
     use crate::no_splash::NoSplash;
-    use crate::test_support::{Drawn, PaintInspection};
+    use crate::test_support::{PaintInspection, path_like};
     use crate::theme::Theme;
     use crate::theme_data::ThemeData;
+    use waft_rendering::testing::RecordedCall;
 
     fn with_theme(tester: &WidgetTester, use_material3: bool, child: WidgetRef) -> WidgetRef {
         let data = ThemeData::builder()
@@ -403,18 +404,31 @@ mod tests {
             tester.pump(); // start gesture
             tester.pump_by(Duration::from_millis(200)); // wait for splash to be well under way
 
-            let drawn = tester.ink_drawn();
+            let drawn = tester.ink_calls();
             let circle = drawn
                 .iter()
-                .find_map(|drawn| match drawn {
-                    Drawn::Path(color, bounds) if *color == splash_color.value() => Some(*bounds),
-                    _ => None,
+                .find_map(|call| {
+                    path_like(call)
+                        .filter(|(color, _)| color.value() == splash_color.value())
+                        .map(|(_, bounds)| bounds)
                 })
                 .unwrap_or_else(|| panic!("a splash circle in {drawn:?}"));
             assert_eq!(circle.center(), Offset::new(100.0, 30.0));
-            assert!((circle.width() / 2.0 - 21.0).abs() < 1e-3, "{circle:?}");
-            let all = Drawn::all(&tester.ink_list());
-            assert!(all.contains(&Drawn::Clip), "the rounded clip: {all:?}");
+            waft_widgets::testing::assert_more_or_less_equals_within(
+                circle.width() / 2.0,
+                21.0,
+                1e-3,
+            );
+            let all: Vec<RecordedCall> = tester
+                .ink_list()
+                .ops()
+                .iter()
+                .map(RecordedCall::of)
+                .collect();
+            assert!(
+                all.contains(&RecordedCall::Clip),
+                "the rounded clip: {all:?}"
+            );
 
             tester.up(&gesture);
         });
@@ -446,14 +460,14 @@ mod tests {
         tester.down(&mut gesture, WidgetTester::SIZE.center(Offset::ZERO));
         tester.pump_by(Duration::from_millis(200));
         tester.pump_by(Duration::from_millis(16));
-        let drawn = tester.ink_drawn();
+        let drawn = tester.ink_calls();
         let rects = drawn
             .iter()
-            .filter(|drawn| matches!(drawn, Drawn::Rect(..)))
+            .filter(|drawn| matches!(drawn, RecordedCall::Rect { .. }))
             .count();
         let circles = drawn
             .iter()
-            .filter(|drawn| matches!(drawn, Drawn::Path(..)))
+            .filter(|drawn| path_like(drawn).is_some())
             .count();
         tester.up(&gesture);
         tester.pump_and_settle();

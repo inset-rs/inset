@@ -1893,16 +1893,17 @@ pub(crate) mod tests {
     use std::cell::RefCell;
 
     use waft_services::{LogicalKeyboardKey, PhysicalKeyboardKey, SystemMouseCursors};
-    use waft_widgets::{AnyElement, Center, Icon, IconData, Row, Text};
+    use waft_widgets::{Center, Icon, IconData, Row, Text};
 
-    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+    use waft_widgets::testing::{TestPointer, WidgetTester, find, test_widgets};
 
     use super::*;
     use crate::icons::Icons;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{Drawn, PaintInspection, material_app};
+    use crate::test_support::{PaintInspection, material_app};
     use crate::theme_data::ThemeData;
     use crate::tooltip::tests::m3;
+    use waft_rendering::testing::RecordedCall;
 
     pub(crate) fn label(text: &str) -> Text {
         Text::new(text)
@@ -1934,16 +1935,10 @@ pub(crate) mod tests {
     }
 
     fn state_of(tester: &WidgetTester) -> Handle<SegmentedButtonState<i32>> {
-        let element = tester.find_by_type::<SegmentedButton<i32>>()[0];
+        let element = find::by_type::<SegmentedButton<i32>>().evaluate(tester)[0];
         element
             .state_handle::<SegmentedButtonState<i32>>(&tester.cell.borrow())
             .expect("a segmented button state")
-    }
-
-    fn tap_text(tester: &mut WidgetTester, text: &str) {
-        let element = tester.find_text(text)[0];
-        let center = tester.get_rect(tester.render_box_of(element)).center();
-        tester.tap(center, 1);
     }
 
     // 'SegmentedButton releases state controllers for deleted segments'
@@ -1990,9 +1985,13 @@ pub(crate) mod tests {
             );
 
             // Expect SegmentedButton to be built with type MaterialType.transparency.
-            let text = tester.find_text("1")[0];
-            let parent = tester.ancestor_of_type::<Material>(text);
-            let parent_material = tester.ancestor_of_type::<Material>(parent);
+            let parent_material = tester.element(
+                find::ancestor(
+                    find::ancestor(find::text("1"), find::by_type::<Material>()).first(),
+                    find::by_type::<Material>(),
+                )
+                .first(),
+            );
             let material_type =
                 tester.widget::<Material, _>(parent_material, |material| material.r#type);
             assert_eq!(material_type, MaterialType::Transparency);
@@ -2055,7 +2054,7 @@ pub(crate) mod tests {
             assert_eq!(recording.callback_count(), 0);
 
             // Tap on segment 1.
-            tap_text(tester, "1");
+            tester.tap(find::text("1"));
             tester.pump_and_settle();
             assert_eq!(recording.callback_count(), 1);
             assert_eq!(recording.selection(), [1]);
@@ -2064,13 +2063,13 @@ pub(crate) mod tests {
             frame_with_selection(tester, 1);
 
             // Tap on segment 1 again should do nothing.
-            tap_text(tester, "1");
+            tester.tap(find::text("1"));
             tester.pump_and_settle();
             assert_eq!(recording.callback_count(), 1);
             assert_eq!(recording.selection(), [1]);
 
             // Tap on segment 3.
-            tap_text(tester, "3");
+            tester.tap(find::text("3"));
             tester.pump_and_settle();
             assert_eq!(recording.callback_count(), 2);
             assert_eq!(recording.selection(), [3]);
@@ -2097,7 +2096,7 @@ pub(crate) mod tests {
             assert_eq!(recording.callback_count(), 0);
 
             // Tap on segment 2.
-            tap_text(tester, "2");
+            tester.tap(find::text("2"));
             tester.pump_and_settle();
             assert_eq!(recording.callback_count(), 1);
             assert_eq!(sorted(recording.selection()), [1, 2]);
@@ -2107,7 +2106,7 @@ pub(crate) mod tests {
             tester.pump_and_settle();
 
             // Tap on segment 1 again should remove it from selection.
-            tap_text(tester, "1");
+            tester.tap(find::text("1"));
             tester.pump_and_settle();
             assert_eq!(recording.callback_count(), 2);
             assert_eq!(recording.selection(), [2]);
@@ -2117,7 +2116,7 @@ pub(crate) mod tests {
             tester.pump_and_settle();
 
             // Tap on segment 3.
-            tap_text(tester, "3");
+            tester.tap(find::text("3"));
             tester.pump_and_settle();
             assert_eq!(recording.callback_count(), 3);
             assert_eq!(sorted(recording.selection()), [2, 3]);
@@ -2144,7 +2143,7 @@ pub(crate) mod tests {
             assert_eq!(recording.callback_count(), 0);
 
             // Tap on segment 1 should deselect it and make the selection empty.
-            tap_text(tester, "1");
+            tester.tap(find::text("1"));
             tester.pump_and_settle();
             assert_eq!(recording.callback_count(), 1);
             assert_eq!(recording.selection(), Vec::<i32>::new());
@@ -2153,7 +2152,7 @@ pub(crate) mod tests {
             frame_with_selection(tester, vec![]);
 
             // Tap on segment 2 should select it.
-            tap_text(tester, "2");
+            tester.tap(find::text("2"));
             tester.pump_and_settle();
             assert_eq!(recording.callback_count(), 2);
             assert_eq!(recording.selection(), [2]);
@@ -2162,7 +2161,7 @@ pub(crate) mod tests {
             frame_with_selection(tester, vec![2]);
 
             // Tap on segment 3.
-            tap_text(tester, "3");
+            tester.tap(find::text("3"));
             tester.pump_and_settle();
             assert_eq!(recording.callback_count(), 3);
             assert_eq!(recording.selection(), [3]);
@@ -2171,38 +2170,21 @@ pub(crate) mod tests {
 
     /// `find.descendant(of: find.widgetWithText(Row, text), matching: find.byIcon(icon))`.
     fn icons_in_rows_with_text(tester: &WidgetTester, text: &str, icon: &IconData) -> usize {
-        let text_element = tester.find_text(text)[0];
-        tester
-            .find_by_type::<Row>()
-            .into_iter()
-            .filter(|row| tester.ancestors(text_element).contains(row))
-            .map(|row| icons_under(tester, row, icon))
-            .sum()
+        find::descendant(find::widget_with_text::<Row>(text), find::by_icon(icon))
+            .evaluate(tester)
+            .len()
     }
 
     /// `find.descendant(of: find.widgetWithIcon(Row, icon1), matching: find.byIcon(icon2))`.
     fn icons_in_rows_with_icon(tester: &WidgetTester, icon1: &IconData, icon2: &IconData) -> usize {
-        tester
-            .find_by_type::<Row>()
-            .into_iter()
-            .filter(|row| icons_under(tester, *row, icon1) > 0)
-            .map(|row| icons_under(tester, row, icon2))
-            .sum()
-    }
-
-    fn icons_under(tester: &WidgetTester, of: AnyElement, icon: &IconData) -> usize {
-        tester
-            .descendants_of_type::<Icon>(of)
-            .into_iter()
-            .filter(|element| {
-                tester.widget(*element, |widget: &Icon| widget.icon.as_ref() == Some(icon))
-            })
-            .count()
+        find::descendant(find::widget_with_icon::<Row>(icon1), find::by_icon(icon2))
+            .evaluate(tester)
+            .len()
     }
 
     fn count_icons(tester: &WidgetTester, icon: &IconData) -> usize {
-        tester
-            .find_by_type::<Icon>()
+        find::by_type::<Icon>()
+            .evaluate(tester)
             .into_iter()
             .filter(|element| {
                 tester.widget(*element, |widget: &Icon| widget.icon.as_ref() == Some(icon))
@@ -2298,8 +2280,8 @@ pub(crate) mod tests {
     }
 
     fn tooltip_messages(tester: &WidgetTester) -> Vec<String> {
-        tester
-            .find_by_type::<Tooltip>()
+        find::by_type::<Tooltip>()
+            .evaluate(tester)
             .into_iter()
             .filter_map(|element| {
                 tester.widget(element, |tooltip: &Tooltip| tooltip.message.clone())
@@ -2328,7 +2310,7 @@ pub(crate) mod tests {
                     .on_selection_changed(|_app, _selected| {}),
             );
 
-            assert!(tester.find_by_type::<Tooltip>().is_empty());
+            assert!(find::by_type::<Tooltip>().evaluate(tester).is_empty());
         });
     }
 
@@ -2343,7 +2325,7 @@ pub(crate) mod tests {
                     .on_selection_changed(|_app, _selected| {}),
             );
 
-            assert_eq!(tester.find_by_type::<Tooltip>().len(), 2);
+            assert_eq!(find::by_type::<Tooltip>().evaluate(tester).len(), 2);
             assert_eq!(tooltip_messages(tester), ["t2", "t3"]);
         });
     }
@@ -2397,7 +2379,7 @@ pub(crate) mod tests {
             // Check the initial states.
             assert_eq!(first_states(tester), states);
             // Trigger a rebuild.
-            tap_text(tester, "Trigger rebuild");
+            tester.tap(find::text("Trigger rebuild"));
             tester.pump_and_settle();
             // Check the states after the rebuild.
             assert_eq!(first_states(tester), states);
@@ -2405,15 +2387,13 @@ pub(crate) mod tests {
     }
 
     fn segmented_button_width(tester: &WidgetTester) -> f64 {
-        let element = tester.find_by_type::<SegmentedButton<i32>>()[0];
-        let app = tester.cell.borrow();
-        tester.render_box_of(element).size(&app).width()
+        let element = find::by_type::<SegmentedButton<i32>>().evaluate(tester)[0];
+        tester.get_size(element).width()
     }
 
     fn scaffold_width(tester: &WidgetTester) -> f64 {
-        let element = tester.find_by_type::<Scaffold>()[0];
-        let app = tester.cell.borrow();
-        tester.render_box_of(element).size(&app).width()
+        let element = find::by_type::<Scaffold>().evaluate(tester)[0];
+        tester.get_size(element).width()
     }
 
     // 'SegmentedButton expands to fill the available width when expandedInsets is not null'
@@ -2464,9 +2444,11 @@ pub(crate) mod tests {
 
             let mut previous_child_rect: Option<Rect> = None;
             for i in 0..=3 {
-                let text = tester.find_text(&i.to_string())[0];
-                let button = tester.ancestor_of_type::<TextButton>(text);
-                let current_child_rect = tester.get_rect(tester.render_box_of(button));
+                let button = tester.element(
+                    find::ancestor(find::text(&i.to_string()), find::by_type::<TextButton>())
+                        .first(),
+                );
+                let current_child_rect = tester.get_rect(button);
                 if let Some(previous) = previous_child_rect {
                     assert_eq!(current_child_rect.left, previous.left);
                     assert_eq!(current_child_rect.right, previous.right);
@@ -2495,8 +2477,8 @@ pub(crate) mod tests {
             };
             tester.pump_widget(root);
 
-            let element = tester.find_by_type::<SegmentedButton<&str>>()[0];
-            let size = tester.render_box_of(element).size(&tester.cell.borrow());
+            let element = find::by_type::<SegmentedButton<&str>>().evaluate(tester)[0];
+            let size = tester.get_size(element);
             assert_eq!(size, Size::ZERO);
         });
     }
@@ -2529,22 +2511,15 @@ pub(crate) mod tests {
             tester.pump_widget(root);
             tester.pump_and_settle();
 
-            let button = tester.find_by_type::<SegmentedButton<&str>>()[0];
-            assert_eq!(
-                tester
-                    .render_box_of(button)
-                    .size(&tester.cell.borrow())
-                    .width(),
-                SCREEN_WIDTH
-            );
-            for material in tester.descendants_of_type::<Material>(button) {
-                assert_eq!(
-                    tester
-                        .render_box_of(material)
-                        .size(&tester.cell.borrow())
-                        .width(),
-                    SCREEN_WIDTH
-                );
+            let button = find::by_type::<SegmentedButton<&str>>().evaluate(tester)[0];
+            assert_eq!(tester.get_size(button).width(), SCREEN_WIDTH);
+            for material in find::descendant(
+                find::by_type::<SegmentedButton<&str>>(),
+                find::by_type::<Material>(),
+            )
+            .evaluate(tester)
+            {
+                assert_eq!(tester.get_size(material).width(), SCREEN_WIDTH);
             }
         });
     }
@@ -2572,8 +2547,8 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn text_center(tester: &WidgetTester, text: &str) -> Offset {
-        let element = tester.find_text(text)[0];
-        tester.get_rect(tester.render_box_of(element)).center()
+        let element = find::text(text).evaluate(tester)[0];
+        tester.get_rect(element).center()
     }
 
     // 'SegmentedButton has expected mouse cursor when explicitly configured'
@@ -2593,8 +2568,8 @@ pub(crate) mod tests {
             );
 
             let mut gesture = TestPointer::mouse(1, 0);
-            let element = tester.find_by_type::<SegmentedButton<i32>>()[0];
-            let center = tester.get_rect(tester.render_box_of(element)).center();
+            let element = find::by_type::<SegmentedButton<i32>>().evaluate(tester)[0];
+            let center = tester.get_rect(element).center();
             tester.add_pointer(&mut gesture, center);
 
             assert_eq!(tester.active_cursor(1), SystemMouseCursors::GRAB.into());
@@ -2614,10 +2589,10 @@ pub(crate) mod tests {
             .flat_map(|render| {
                 let mut canvas = waft_embedder::Canvas::new();
                 render.paint_ink_features(&mut tester.cell.borrow_mut(), &mut canvas, Offset::ZERO);
-                Drawn::draws(&canvas.build())
+                crate::test_support::draw_calls(canvas.build().ops())
             })
             .filter_map(|drawn| match drawn {
-                Drawn::Rect(color, _) => Some(color),
+                RecordedCall::Rect { color, .. } => Some(color.value()),
                 _ => None,
             })
             .collect()
@@ -2643,7 +2618,7 @@ pub(crate) mod tests {
     }
 
     fn button_style_of(tester: &WidgetTester, index: usize) -> ButtonStyle {
-        let button = tester.find_by_type::<TextButton>()[index];
+        let button = find::by_type::<TextButton>().evaluate(tester)[index];
         tester.widget(button, |button: &TextButton| {
             button
                 .button_style_button_data()
@@ -2665,13 +2640,13 @@ pub(crate) mod tests {
                     .on_selection_changed(|_app, _selected| {}),
             );
             let on_surface = theme.color_scheme.on_surface;
-            let button = *tester
-                .find_by_type::<TextButton>()
-                .last()
-                .expect("a button");
-            let material = tester.descendants_of_type::<Material>(button)[0];
+            let material = find::descendant(
+                find::by_type::<TextButton>().last(),
+                find::by_type::<Material>(),
+            )
+            .first();
             let text_color = |tester: &WidgetTester| {
-                tester.widget(material, |material: &Material| {
+                tester.widget(&material, |material: &Material| {
                     material
                         .text_style
                         .as_ref()
@@ -2833,8 +2808,12 @@ pub(crate) mod tests {
             );
 
             // Test provided button style is applied to the segmented button material.
-            let segmented_button = tester.find_by_type::<SegmentedButton<i32>>()[0];
-            let material = tester.descendants_of_type::<Material>(segmented_button)[0];
+            let segmented_button = find::by_type::<SegmentedButton<i32>>().evaluate(tester)[0];
+            let material = find::descendant(
+                find::by_type::<SegmentedButton<i32>>(),
+                find::by_type::<Material>(),
+            )
+            .evaluate(tester)[0];
             let (elevation, shadow_color, surface_tint_color) =
                 tester.widget(material, |material: &Material| {
                     (
@@ -2866,7 +2845,7 @@ pub(crate) mod tests {
                 .expect("styleFrom gives a side")
                 .color
                 .into();
-            let render = tester.render_box_of(segmented_button).as_object();
+            let render = tester.render_object(segmented_button);
             assert!(tester.painted_ops(render).iter().any(|op| matches!(
                 op,
                 waft_embedder::valo::Op::DrawPath { path, paint, .. }
@@ -2992,11 +2971,8 @@ pub(crate) mod tests {
 
             // Test enabled button.
             pump_button(tester, m3, build_button(true));
-            let icon = tester.find_by_icon(&Icons::add());
-            assert_eq!(
-                tester.render_box_of(icon).size(&tester.cell.borrow()),
-                Size::new(icon_size, icon_size)
-            );
+            let icon = tester.element(find::by_icon(&Icons::add()).first());
+            assert_eq!(tester.get_size(icon), Size::new(icon_size, icon_size));
             assert_eq!(
                 tester.glyph_style(icon).color.as_deref().copied(),
                 Some(icon_color)
@@ -3005,7 +2981,7 @@ pub(crate) mod tests {
             // Test disabled button.
             pump_button(tester, m3, build_button(false));
             tester.pump_and_settle();
-            let icon = tester.find_by_icon(&Icons::add());
+            let icon = tester.element(find::by_icon(&Icons::add()).first());
             assert_eq!(
                 tester.glyph_style(icon).color.as_deref().copied(),
                 Some(disabled_icon_color)
@@ -3013,28 +2989,13 @@ pub(crate) mod tests {
         });
     }
 
-    /// The colours of the shapes the segmented button paints as paths, in paint order: Dart's
-    /// `drawRRect` calls, which Valo records as paths. The divider lines, also paths, are left
-    /// out: a line is a path of two elements.
-    fn rrect_colors(tester: &WidgetTester) -> Vec<waft_embedder::valo::Color> {
-        use waft_embedder::valo::Op;
-        let element = tester.find_by_type::<SegmentedButton<i32>>()[0];
-        let render = tester.render_box_of(element).as_object();
-        tester
-            .painted_ops(render)
-            .iter()
-            .filter_map(|op| match op {
-                Op::DrawPath { path, paint, .. } if path.elements().count() > 2 => {
-                    Some(paint.color)
-                }
-                _ => None,
-            })
-            .collect()
-    }
-
     /// Dart's `paints..rrect(color:)` on the segmented button.
     fn paints_rrect_of_color(tester: &WidgetTester, color: Color) -> bool {
-        rrect_colors(tester).contains(&color.into())
+        waft_rendering::testing::paints(
+            &tester.painted_ops(tester.render_object(find::by_type::<SegmentedButton<i32>>())),
+            &[waft_rendering::testing::PaintCall::rrect(Some(color))],
+        )
+        .is_ok()
     }
 
     fn border_side_style(
@@ -3215,14 +3176,13 @@ pub(crate) mod tests {
             tester.pump_and_settle();
 
             // First segment has an enabled border, the second a disabled one, in that order.
-            let colors = rrect_colors(tester);
-            let enabled = colors
-                .iter()
-                .position(|color| *color == Color::new(enabled_color).into())
-                .expect("an enabled border");
-            assert!(
-                colors[enabled + 1..].contains(&Color::new(disabled_color).into()),
-                "{colors:?}"
+            let element = find::by_type::<SegmentedButton<i32>>().evaluate(tester)[0];
+            waft_rendering::testing::assert_paints(
+                &tester.painted_ops(tester.render_object(element)),
+                &[
+                    waft_rendering::testing::PaintCall::rrect(Some(Color::new(enabled_color))),
+                    waft_rendering::testing::PaintCall::rrect(Some(Color::new(disabled_color))),
+                ],
             );
         });
     }
@@ -3261,14 +3221,8 @@ pub(crate) mod tests {
                 MaterialTapTargetSize::Padded
             );
 
-            let button = tester.find_by_type::<SegmentedButton<i32>>()[0];
-            assert_eq!(
-                tester
-                    .render_box_of(button)
-                    .size(&tester.cell.borrow())
-                    .height(),
-                48.0
-            );
+            let button = find::by_type::<SegmentedButton<i32>>().evaluate(tester)[0];
+            assert_eq!(tester.get_size(button).height(), 48.0);
             // Button border height is button.bottom(43.5) - button.top(4.5) + stoke width(1) = 40.
             let mut canvas = waft_embedder::Canvas::new();
             waft_painting::draw_rrect(
@@ -3290,7 +3244,7 @@ pub(crate) mod tests {
             else {
                 panic!("draw_rrect records a path");
             };
-            let render = tester.render_box_of(button).as_object();
+            let render = tester.render_object(button);
             assert!(tester.painted_ops(render).iter().any(|op| matches!(
                 op,
                 Op::DrawPath { path, paint, .. }
@@ -3324,7 +3278,7 @@ pub(crate) mod tests {
             tester.pump_and_settle();
 
             let segment_2_has_focus = |tester: &WidgetTester, request: bool| {
-                let element = tester.find_text("2")[0];
+                let element = find::text("2").evaluate(tester)[0];
                 let mut app = tester.cell.borrow_mut();
                 let node = waft_widgets::Focus::of(&mut app, element, false, true);
                 if request {
@@ -3367,8 +3321,8 @@ pub(crate) mod tests {
                 .on_selection_changed(|_app, _selected| {}),
             );
 
-            let element = tester.find_by_type::<SegmentedButton<i32>>()[0];
-            let render = tester.render_box_of(element).as_object();
+            let element = find::by_type::<SegmentedButton<i32>>().evaluate(tester)[0];
+            let render = tester.render_object(element);
             assert_paints(
                 &tester.painted_ops(render),
                 &[
@@ -3413,8 +3367,8 @@ pub(crate) mod tests {
                 Offset::new(166.8000030517578, 4.0),
                 Offset::new(166.8000030517578, TAP_TARGET_SIZE - 4.0),
             );
-            let element = tester.find_by_type::<SegmentedButton<i32>>()[0];
-            let render = tester.render_box_of(element).as_object();
+            let element = find::by_type::<SegmentedButton<i32>>().evaluate(tester)[0];
+            let render = tester.render_object(element);
             let lines: Vec<(Offset, Offset)> = tester
                 .painted_ops(render)
                 .iter()

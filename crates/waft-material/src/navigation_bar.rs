@@ -2190,7 +2190,9 @@ pub(crate) mod tests {
         RichText, StatefulBuilder, WidgetStateProperty,
     };
 
-    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+    use waft_widgets::testing::{
+        TestPointer, WidgetTester, expect, find, finds_n_widgets, finds_one_widget, test_widgets,
+    };
 
     use super::*;
     use crate::icons::Icons;
@@ -2231,7 +2233,7 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn navigation_bar(tester: &WidgetTester) -> AnyElement {
-        tester.find_by_type::<NavigationBar>()[0]
+        find::by_type::<NavigationBar>().evaluate(tester)[0]
     }
 
     pub(crate) fn bar_size(tester: &WidgetTester) -> Size {
@@ -2249,9 +2251,9 @@ pub(crate) mod tests {
     /// Dart's `_getIndicatorDecoration(tester)`: the color and shape of the first `Ink` under
     /// a `FadeTransition`.
     pub(crate) fn indicator_decoration(tester: &WidgetTester) -> (Option<Color>, ShapeBorderRef) {
-        let fade = tester.find_by_type::<FadeTransition>();
-        let ink = tester
-            .find_by_type::<Ink>()
+        let fade = find::by_type::<FadeTransition>().evaluate(tester);
+        let ink = find::by_type::<Ink>()
+            .evaluate(tester)
             .into_iter()
             .find(|ink| {
                 let ancestors = tester.ancestors(*ink);
@@ -2271,19 +2273,16 @@ pub(crate) mod tests {
         })
     }
 
-    pub(crate) fn center_of(tester: &WidgetTester, element: AnyElement) -> Offset {
-        tester.global_rect(tester.render_box_of(element)).center()
-    }
-
     pub(crate) fn text(tester: &WidgetTester, text: &str) -> AnyElement {
-        let found = tester.find_onstage_text(text);
+        let found = find::text(text).evaluate(tester);
         assert_eq!(found.len(), 1, "one Text showing {text}");
         found[0]
     }
 
     /// Dart's `_getLabelPadding(tester, text)`.
     pub(crate) fn label_padding(tester: &WidgetTester, label: &str) -> EdgeInsetsGeometry {
-        let padding = tester.ancestor_of_type::<Padding>(text(tester, label));
+        let padding =
+            tester.element(find::ancestor(find::text(label), find::by_type::<Padding>()).first());
         tester.widget(padding, |padding: &Padding| padding.padding)
     }
 
@@ -2418,13 +2417,13 @@ pub(crate) mod tests {
                     .into_widget()
             });
 
-            assert_eq!(tester.find_onstage_text("AC").len(), 1);
-            assert_eq!(tester.find_onstage_text("Alarm").len(), 1);
+            expect(tester, &find::text("AC"), finds_one_widget());
+            expect(tester, &find::text("Alarm"), finds_one_widget());
 
-            tester.tap(center_of(tester, text(tester, "Alarm")), 1);
+            tester.tap_at(tester.get_center(text(tester, "Alarm")), 1);
             assert_eq!(mutated_index.get(), Some(1));
 
-            tester.tap(center_of(tester, text(tester, "AC")), 2);
+            tester.tap_at(tester.get_center(text(tester, "AC")), 2);
             assert_eq!(mutated_index.get(), Some(0));
         });
     }
@@ -2514,8 +2513,8 @@ pub(crate) mod tests {
                 .on_destination_selected(|_app, _i| {})
             };
             let center_item = |tester: &WidgetTester| {
-                let found = tester.find_onstage_by_key(&center_key());
-                center_of(tester, found[0])
+                let found = find::by_key(center_key()).evaluate(tester);
+                tester.get_center(found[0])
             };
             let with_padding = |padding: EdgeInsets| {
                 move || {
@@ -2672,13 +2671,13 @@ pub(crate) mod tests {
             let first = || NavigationDestination::new(icon(Icons::ac_unit()), label).tooltip(label);
 
             pump_scaled_bar(tester, m2, TextScaler::NO_SCALING, first());
-            assert_eq!(tester.find_text(label).len(), 1);
-            tester.long_press(center_of(tester, tester.find_text(label)[0]), 1);
-            assert_eq!(tester.find_text(label).len(), 2);
+            expect(tester, &find::text(label), finds_one_widget());
+            tester.long_press_at(tester.get_center(find::text(label).evaluate(tester)[0]), 1);
+            expect(tester, &find::text(label), finds_n_widgets(2));
 
             // The default size of a tooltip with the text A.
             let default_tooltip_size = Size::new(14.0, 14.0);
-            let found = tester.find_text(label);
+            let found = find::text(label).evaluate(tester);
             assert_eq!(
                 text_size(tester, found[found.len() - 1]),
                 default_tooltip_size
@@ -2687,9 +2686,9 @@ pub(crate) mod tests {
             tester.pump_and_settle_by(Duration::from_secs(2));
 
             pump_scaled_bar(tester, m2, TextScaler::linear(4.0), first());
-            assert_eq!(tester.find_text(label).len(), 1);
-            tester.long_press(center_of(tester, tester.find_text(label)[0]), 2);
-            let found = tester.find_text(label);
+            expect(tester, &find::text(label), finds_one_widget());
+            tester.long_press_at(tester.get_center(find::text(label).evaluate(tester)[0]), 2);
+            let found = find::text(label).evaluate(tester);
             assert_eq!(
                 text_size(tester, found[found.len() - 1]),
                 Size::new(
@@ -2707,11 +2706,11 @@ pub(crate) mod tests {
             let first = || NavigationDestination::new(icon(Icons::ac_unit()), label).tooltip(label);
 
             pump_scaled_bar(tester, m3, TextScaler::NO_SCALING, first());
-            assert_eq!(tester.find_text(label).len(), 1);
-            tester.long_press(center_of(tester, tester.find_text(label)[0]), 1);
-            assert_eq!(tester.find_text(label).len(), 2);
+            expect(tester, &find::text(label), finds_one_widget());
+            tester.long_press_at(tester.get_center(find::text(label).evaluate(tester)[0]), 1);
+            expect(tester, &find::text(label), finds_n_widgets(2));
 
-            let found = tester.find_text(label);
+            let found = find::text(label).evaluate(tester);
             assert_eq!(
                 text_size(tester, found[found.len() - 1]),
                 Size::new(14.25, 20.0)
@@ -2720,10 +2719,10 @@ pub(crate) mod tests {
             tester.pump_and_settle_by(Duration::from_secs(2));
 
             pump_scaled_bar(tester, m3, TextScaler::linear(4.0), first());
-            assert_eq!(tester.find_text(label).len(), 1);
-            tester.long_press(center_of(tester, tester.find_text(label)[0]), 2);
+            expect(tester, &find::text(label), finds_one_widget());
+            tester.long_press_at(tester.get_center(find::text(label).evaluate(tester)[0]), 2);
 
-            let found = tester.find_text(label);
+            let found = find::text(label).evaluate(tester);
             assert_eq!(
                 text_size(tester, found[found.len() - 1]),
                 Size::new(56.25, 80.0)
@@ -2743,7 +2742,7 @@ pub(crate) mod tests {
             let first = || NavigationDestination::new(icon(Icons::ac_unit()), label);
 
             pump_scaled_bar(tester, m3, TextScaler::NO_SCALING, first());
-            assert_eq!(tester.find_text(label).len(), 1);
+            expect(tester, &find::text(label), finds_one_widget());
             let size = text_size(tester, text(tester, label));
             assert!(size_almost_equal(size, Size::new(12.5, 16.0)), "{size:?}");
 
@@ -2764,8 +2763,8 @@ pub(crate) mod tests {
 
     /// Dart's `findByTooltip(message)`: the `Tooltip`s whose message is `message`.
     fn tooltips_with_message(tester: &WidgetTester, message: &str) -> usize {
-        tester
-            .find_by_type::<Tooltip>()
+        find::by_type::<Tooltip>()
+            .evaluate(tester)
             .into_iter()
             .filter(|tooltip| {
                 tester.widget(*tooltip, |tooltip: &Tooltip| {
@@ -2792,16 +2791,16 @@ pub(crate) mod tests {
                     .into_widget()
             });
 
-            assert_eq!(tester.find_onstage_text("A").len(), 1);
-            tester.long_press(center_of(tester, text(tester, "A")), 1);
+            expect(tester, &find::text("A"), finds_one_widget());
+            tester.long_press_at(tester.get_center(text(tester, "A")), 1);
             assert_eq!(tooltips_with_message(tester, "A tooltip"), 1);
 
-            assert_eq!(tester.find_onstage_text("B").len(), 1);
-            tester.long_press(center_of(tester, text(tester, "B")), 2);
+            expect(tester, &find::text("B"), finds_one_widget());
+            tester.long_press_at(tester.get_center(text(tester, "B")), 2);
             assert_eq!(tooltips_with_message(tester, "B"), 1);
 
-            assert_eq!(tester.find_onstage_text("C").len(), 1);
-            tester.long_press(center_of(tester, text(tester, "C")), 3);
+            expect(tester, &find::text("C"), finds_one_widget());
+            tester.long_press_at(tester.get_center(text(tester, "C")), 3);
             assert_eq!(tooltips_with_message(tester, "C"), 0);
         });
     }
@@ -2849,7 +2848,7 @@ pub(crate) mod tests {
     }
 
     fn icon_center(tester: &WidgetTester, icon: &IconData) -> Offset {
-        center_of(tester, tester.find_by_icon(icon))
+        tester.get_center(tester.element(find::by_icon(icon).first()))
     }
 
     /// Dart's `Material3/Material2 - Navigation indicator renders ripple`, with the indicator
@@ -2942,8 +2941,8 @@ pub(crate) mod tests {
 
     /// The x scale of the last `Transform` under a `NavigationIndicator`.
     fn indicator_x_scale(tester: &WidgetTester) -> f32 {
-        let transforms: Vec<AnyElement> = tester
-            .find_by_type::<NavigationIndicator>()
+        let transforms: Vec<AnyElement> = find::by_type::<NavigationIndicator>()
+            .evaluate(tester)
             .into_iter()
             .flat_map(|indicator| tester.descendants_of_type::<Transform>(indicator))
             .collect();
@@ -3033,13 +3032,13 @@ pub(crate) mod tests {
                 .into_widget()
             });
 
-            tester.tap(center_of(tester, text(tester, "AC")), 1);
+            tester.tap_at(tester.get_center(text(tester, "AC")), 1);
             assert_eq!(selected_index.get(), 0);
 
-            tester.tap(center_of(tester, text(tester, "Alarm")), 2);
+            tester.tap_at(tester.get_center(text(tester, "Alarm")), 2);
             assert_eq!(selected_index.get(), 1);
 
-            tester.tap(center_of(tester, text(tester, "Bookmark")), 3);
+            tester.tap_at(tester.get_center(text(tester, "Bookmark")), 3);
             assert_eq!(selected_index.get(), 1);
         });
     }
@@ -3067,8 +3066,8 @@ pub(crate) mod tests {
         let focus_color = 0xff00ffff;
         let pressed_color = 0xffff00ff;
 
-        let indicators = tester.find_by_type::<NavigationIndicator>();
-        let indicator = center_of(tester, indicators[indicators.len() - 1]);
+        let indicators = find::by_type::<NavigationIndicator>().evaluate(tester);
+        let indicator = tester.get_center(indicators[indicators.len() - 1]);
         let mut mouse = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
         tester.add_pointer(&mut mouse, Offset::ZERO);
         mouse_over(tester, &mut mouse, indicator);
@@ -3260,13 +3259,13 @@ pub(crate) mod tests {
                     .into_widget()
             });
             let last_icon_color = |tester: &WidgetTester| {
-                let icons = tester.find_by_type::<Icon>();
+                let icons = find::by_type::<Icon>().evaluate(tester);
                 tester.widget(icons[icons.len() - 1], |icon: &Icon| icon.color.clone())
             };
             let initial_color = last_icon_color(tester).expect("the icon has a color");
 
             // Trigger a rebuild.
-            tester.tap(center_of(tester, text(tester, "Alarm")), 1);
+            tester.tap_at(tester.get_center(text(tester, "Alarm")), 1);
             tester.pump_and_settle();
 
             // Icon color should be the same as before the rebuild.
@@ -3410,7 +3409,7 @@ pub(crate) mod tests {
                 .into_widget()
             });
 
-            let padding = tester.find_by_type::<Padding>()[0];
+            let padding = find::by_type::<Padding>().evaluate(tester)[0];
             let safe_area_bottom_padding = tester.widget(padding, |padding: &Padding| {
                 padding.padding.resolve(Some(text_direction)).bottom
             });

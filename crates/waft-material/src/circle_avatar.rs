@@ -306,7 +306,7 @@ mod tests {
     use waft_painting::{EdgeInsets, TextScaler};
     use waft_widgets::{Builder, DecoratedBox, MediaQueryData, SizedBox, Text, UnconstrainedBox};
 
-    use waft_widgets::testing::{WidgetTester, test_widgets};
+    use waft_widgets::testing::{WidgetTester, find, test_widgets};
 
     use super::*;
     use crate::bottom_navigation_bar::tests::paragraph_style;
@@ -321,14 +321,17 @@ mod tests {
     }
 
     fn avatar_rect(tester: &WidgetTester) -> waft_embedder::Rect {
-        let avatar = tester.find_by_type::<CircleAvatar>()[0];
-        tester.global_rect(tester.render_box_of(avatar))
+        let avatar = find::by_type::<CircleAvatar>().evaluate(tester)[0];
+        tester.get_rect(avatar)
     }
 
     /// Dart's `box.child! as RenderDecoratedBox).decoration`.
     fn avatar_decoration(tester: &WidgetTester) -> BoxDecoration {
-        let avatar = tester.find_by_type::<CircleAvatar>()[0];
-        let boxes = tester.descendants_of_type::<DecoratedBox>(avatar);
+        let boxes = find::descendant(
+            find::by_type::<CircleAvatar>(),
+            find::by_type::<DecoratedBox>(),
+        )
+        .evaluate(tester);
         tester.widget(boxes[0], |decorated_box: &DecoratedBox| {
             decorated_box
                 .decoration
@@ -455,9 +458,7 @@ mod tests {
             );
 
             assert_eq!(
-                tester
-                    .global_rect(tester.render_box_of(tester.find_text("Z")[0]))
-                    .size(),
+                tester.get_rect(find::text("Z").evaluate(tester)[0]).size(),
                 Size::new(16.0, 16.0)
             );
 
@@ -488,9 +489,7 @@ mod tests {
             // This should be overridden to 1.0.
             assert_eq!(data.text_scaler, TextScaler::NO_SCALING);
             assert_eq!(
-                tester
-                    .global_rect(tester.render_box_of(tester.find_text("Z")[0]))
-                    .size(),
+                tester.get_rect(find::text("Z").evaluate(tester)[0]).size(),
                 Size::new(16.0, 16.0)
             );
         });
@@ -624,7 +623,7 @@ mod tests {
                     .child(CircleAvatar::new().child(Text::new("X")))
                     .into_widget()
             });
-            assert_eq!(tester.find_by_type::<CircleAvatar>().len(), 1);
+            assert_eq!(find::by_type::<CircleAvatar>().evaluate(tester).len(), 1);
         });
     }
 
@@ -640,8 +639,8 @@ mod tests {
             pump_wrapped(tester, CircleAvatar::new().radius(10.0).into_widget());
             assert_eq!(avatar_rect(tester).size(), Size::new(20.0, 20.0));
             assert!(
-                tester
-                    .descendants_of_type::<Center>(tester.find_by_type::<CircleAvatar>()[0])
+                find::descendant(find::by_type::<CircleAvatar>(), find::by_type::<Center>())
+                    .evaluate(tester)
                     .is_empty()
             );
         });

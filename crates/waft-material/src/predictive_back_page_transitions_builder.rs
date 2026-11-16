@@ -1135,7 +1135,7 @@ mod tests {
     };
 
     use waft_widgets::testing::{
-        TargetPlatformVariant, WidgetTester, test_widgets, test_widgets_variant,
+        TargetPlatformVariant, WidgetTester, find, test_widgets, test_widgets_variant,
     };
 
     use super::*;
@@ -1146,12 +1146,13 @@ mod tests {
     use crate::page_transitions_theme::{
         FadeForwardsPageTransition, PageTransitionsTheme, ZoomEnterTransition, ZoomPageTransition,
     };
-    use crate::test_support::{Drawn, PaintInspection, material_page_app};
+    use crate::test_support::{PaintInspection, material_page_app};
     use crate::text_button::TextButton;
     use crate::theme::Theme;
     use crate::theme_data::ThemeData;
     use waft_animation::AnimationWithParent;
     use waft_foundation::HandleId;
+    use waft_rendering::testing::{PaintCall, assert_paints};
     use waft_test::{assert_no_new_objects, object_snapshot};
 
     /// Not a Dart case: Dart's collector frees a disposed shared-element transition's proxies
@@ -1176,7 +1177,8 @@ mod tests {
                 }
                 .into_widget(),
             );
-            let element = tester.find_by_type::<PredictiveBackSharedElementPageTransition>()[0];
+            let element =
+                find::by_type::<PredictiveBackSharedElementPageTransition>().evaluate(tester)[0];
             let owned: Vec<HandleId> = {
                 let app = tester.cell.borrow();
                 let state = element
@@ -1309,23 +1311,14 @@ mod tests {
         ]
     }
 
-    fn tap_text(tester: &mut WidgetTester, text: &str) {
-        let element = *tester
-            .find_onstage_text(text)
-            .first()
-            .expect("the text is onstage");
-        let center = tester.global_rect(tester.render_box_of(element)).center();
-        tester.tap(center, 1);
-    }
-
     fn found(tester: &WidgetTester, text: &str) -> usize {
-        tester.find_onstage_text(text).len()
+        find::text(text).evaluate(tester).len()
     }
 
     /// Dart's `find.byType(W)` with its default `skipOffstage`.
     fn count_of<W: 'static>(tester: &WidgetTester) -> usize {
-        tester
-            .find_by_type::<W>()
+        find::by_type::<W>()
+            .evaluate(tester)
             .into_iter()
             .filter(|element| tester.is_onstage(*element))
             .count()
@@ -1414,8 +1407,8 @@ mod tests {
     }
 
     fn top_left(tester: &WidgetTester, text: &str) -> Offset {
-        let element: AnyElement = *tester.find_text(text).first().expect("the text");
-        tester.global_rect(tester.render_box_of(element)).top_left()
+        let element: AnyElement = *find::text(text).evaluate(tester).first().expect("the text");
+        tester.get_rect(element).top_left()
     }
 
     /// The first part of the gesture cases: the app with `variant`'s builder on every platform
@@ -1438,7 +1431,7 @@ mod tests {
         assert_eq!(variant.predictive_back_transitions(tester), 0);
         assert_eq!(variant.fallback_transitions(tester), 1);
 
-        tap_text(tester, "push");
+        tester.tap(find::text("push"));
         tester.pump_and_settle();
 
         assert_eq!(found(tester, "push"), 0);
@@ -1702,7 +1695,7 @@ mod tests {
                     assert_eq!(variant.predictive_back_transitions(tester), 0);
                     assert_eq!(variant.fallback_transitions(tester), 1);
 
-                    tap_text(tester, "push b");
+                    tester.tap(find::text("push b"));
                     tester.pump_and_settle();
 
                     assert_eq!(found(tester, "push"), 0);
@@ -1711,7 +1704,7 @@ mod tests {
                     assert_eq!(variant.predictive_back_transitions(tester), 0);
                     assert_eq!(variant.fallback_transitions(tester), 1);
 
-                    tap_text(tester, "push c");
+                    tester.tap(find::text("push c"));
                     tester.pump_and_settle();
 
                     assert_eq!(found(tester, "push"), 0);
@@ -1819,7 +1812,7 @@ mod tests {
                 assert_eq!(found(tester, "push"), 1);
                 assert_eq!(found(tester, "page b"), 0);
 
-                tap_text(tester, "push");
+                tester.tap(find::text("push"));
                 tester.pump_and_settle();
 
                 assert_eq!(found(tester, "push"), 0);
@@ -1859,7 +1852,7 @@ mod tests {
             test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
                 pump_app(tester, ThemeData::new, |app| app.routes(push_routes()));
 
-                let push = *tester.find_text("push").first().expect("push");
+                let push = *find::text("push").evaluate(tester).first().expect("push");
                 let builder = {
                     let mut app = tester.cell.borrow_mut();
                     Theme::of(&mut app, push)
@@ -1893,7 +1886,7 @@ mod tests {
                 assert_eq!(found(tester, "push"), 1);
                 assert_eq!(found(tester, "page b"), 0);
 
-                tap_text(tester, "push");
+                tester.tap(find::text("push"));
                 tester.pump_and_settle();
 
                 assert_eq!(found(tester, "push"), 0);
@@ -1983,11 +1976,11 @@ mod tests {
                 assert_eq!(variant.predictive_back_transitions(tester), 0);
                 assert_eq!(variant.fallback_transitions(tester), 1);
 
-                tap_text(tester, "push");
+                tester.tap(find::text("push"));
                 tester.pump_by(Duration::from_millis(400));
 
-                let colored_box = *tester
-                    .find_by_type::<ColoredBox>()
+                let colored_box = *find::by_type::<ColoredBox>()
+                    .evaluate(tester)
                     .into_iter()
                     .filter(|element| tester.is_onstage(*element))
                     .collect::<Vec<_>>()
@@ -2022,13 +2015,13 @@ mod tests {
                 assert_eq!(variant.fallback_transitions(tester), 1);
 
                 // Pump till animation is half-way through.
-                tap_text(tester, "push");
+                tester.tap(find::text("push"));
                 tester.pump();
                 tester.pump_by(Duration::from_millis(125));
 
                 // The entering page's zoom transition paints the scrim.
-                let enter = *tester
-                    .find_by_type::<ZoomEnterTransition>()
+                let enter = *find::by_type::<ZoomEnterTransition>()
+                    .evaluate(tester)
                     .iter()
                     .find(|element| {
                         let app = tester.cell.borrow();
@@ -2038,18 +2031,11 @@ mod tests {
                     })
                     .expect("the entering page's zoom transition");
                 let render = tester.render_box_of(enter).as_object();
-                let rects: Vec<u32> = tester
-                    .painted(render)
-                    .into_iter()
-                    .filter_map(|drawn| match drawn {
-                        Drawn::Rect(color, _) => Some(color),
-                        _ => None,
-                    })
-                    .collect();
+                let ops = tester.painted_ops(render);
                 // Expect the color to be at exactly 59.6% opacity at this time.
                 #[allow(deprecated)]
-                let expected = Colors::BLACK.with_opacity(0.596).to_argb32();
-                assert!(rects.contains(&expected), "{platform:?}: {rects:x?}");
+                let expected = Colors::BLACK.with_opacity(0.596);
+                assert_paints(&ops, &[PaintCall::rect(Some(expected))]);
 
                 tester.pump_and_settle();
             });
@@ -2094,7 +2080,7 @@ mod tests {
                 },
             );
             let is_snapshotting = |tester: &WidgetTester, text: &str| {
-                let text = *tester.find_text(text).first().expect("the text");
+                let text = *find::text(text).evaluate(tester).first().expect("the text");
                 let ancestors = tester.ancestors(text);
                 let app = tester.cell.borrow();
                 ancestors.into_iter().any(|ancestor| {
@@ -2103,8 +2089,8 @@ mod tests {
                 })
             };
             let navigator = {
-                let element = *tester
-                    .find_by_type::<Navigator>()
+                let element = *find::by_type::<Navigator>()
+                    .evaluate(tester)
                     .first()
                     .expect("a navigator");
                 element
@@ -2158,7 +2144,7 @@ mod tests {
             pump_app(tester, theme_for_every_platform(variant.builder()), |app| {
                 app.routes(push_routes())
             });
-            tap_text(tester, "push");
+            tester.tap(find::text("push"));
             tester.pump_and_settle();
 
             let handled = {

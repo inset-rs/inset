@@ -273,7 +273,7 @@ mod tests {
                     )
                     .into_widget(),
             );
-            assert_eq!(tester.size_of(&key), Size::ZERO);
+            assert_eq!(tester.get_size(&key), Size::ZERO);
         });
     }
 }

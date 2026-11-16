@@ -239,12 +239,13 @@ pub(crate) mod tests {
         WidgetStatePropertyRef,
     };
 
-    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+    use waft_widgets::testing::{
+        TestPointer, WidgetTester, assert_more_or_less_equals_within, find, test_widgets,
+    };
 
     use super::*;
     use crate::chip::tests::{
-        center_of, chip_material_of, icon_data, ink_decoration_color, label_style_color, only,
-        rect_of, size_of, text, wrap_ltr,
+        chip_material_of, icon_data, ink_decoration_color, label_style_color, only, text, wrap_ltr,
     };
     use crate::colors::Colors;
     use crate::icons::Icons;
@@ -286,9 +287,9 @@ pub(crate) mod tests {
             pump_chip(tester, &theme, enabled, true);
 
             // Test default chip size.
-            let size = size_of(tester, only::<ActionChip>(tester));
-            assert!((size.width() - 189.1).abs() <= 0.01, "{size:?}");
-            assert!((size.height() - 48.0).abs() <= 0.01, "{size:?}");
+            let size = tester.get_size(only::<ActionChip>(tester));
+            assert_more_or_less_equals_within(size.width(), 189.1, 0.01);
+            assert_more_or_less_equals_within(size.height(), 48.0, 0.01);
             // Test default label style.
             assert_eq!(
                 label_style_color(tester, LABEL),
@@ -344,9 +345,9 @@ pub(crate) mod tests {
             let enabled = ActionChip::elevated(Text::new(LABEL)).on_pressed(Listener::new(|_| {}));
             pump_chip(tester, &theme, enabled, true);
 
-            let size = size_of(tester, only::<ActionChip>(tester));
-            assert!((size.width() - 189.1).abs() <= 0.01, "{size:?}");
-            assert!((size.height() - 48.0).abs() <= 0.01, "{size:?}");
+            let size = tester.get_size(only::<ActionChip>(tester));
+            assert_more_or_less_equals_within(size.width(), 189.1, 0.01);
+            assert_more_or_less_equals_within(size.height(), 48.0, 0.01);
             assert_eq!(
                 label_style_color(tester, LABEL),
                 Some(theme.color_scheme.on_surface)
@@ -399,7 +400,7 @@ pub(crate) mod tests {
             pump_chip(tester, &theme, chip, false);
 
             let center = crate::chip::tests::center_of(tester, only::<ActionChip>(tester));
-            tester.tap(center, 1);
+            tester.tap_at(center, 1);
             assert_eq!(pressed.get(), 1);
         });
     }
@@ -441,7 +442,7 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn raw_chips(tester: &WidgetTester) -> Vec<AnyElement> {
-        tester.find_by_type::<RawChip>()
+        find::by_type::<RawChip>().evaluate(tester)
     }
 
     #[test]
@@ -459,7 +460,7 @@ pub(crate) mod tests {
 
             // Test default chip size.
             assert_eq!(
-                size_of(tester, only::<ActionChip>(tester)),
+                tester.get_size(only::<ActionChip>(tester)),
                 Size::new(178.0, 48.0)
             );
             // Test default label style.
@@ -587,7 +588,7 @@ pub(crate) mod tests {
     fn action_chip_clip_behavior_properly_passes_through_to_the_material() {
         test_widgets(|tester| {
             let check = |tester: &WidgetTester, clip_behavior: Clip| {
-                let materials = tester.find_by_type::<Material>();
+                let materials = find::by_type::<Material>().evaluate(tester);
                 // There should be two Material widgets, first Material is from the
                 // "wrapForChip" and last Material is from the "RawChip".
                 assert_eq!(materials.len(), 2);
@@ -671,12 +672,16 @@ pub(crate) mod tests {
                 }
                 pump_wrapped(tester, Center::new().child(chip));
             };
-            let chip_size = |tester: &WidgetTester| size_of(tester, only::<ActionChip>(tester));
+            let chip_size = |tester: &WidgetTester| tester.get_size(only::<ActionChip>(tester));
             let chip_top_left = |tester: &WidgetTester| {
-                rect_of(tester, material_of(tester, only::<RawChip>(tester))).top_left()
+                tester
+                    .get_rect(material_of(tester, only::<RawChip>(tester)))
+                    .top_left()
             };
             let label_top_left = |tester: &WidgetTester| {
-                rect_of(tester, only::<waft_widgets::Container>(tester)).top_left()
+                tester
+                    .get_rect(only::<waft_widgets::Container>(tester))
+                    .top_left()
             };
 
             // Test default avatar layout constraints.
@@ -686,7 +691,8 @@ pub(crate) mod tests {
 
             // Calculate the distance between avatar and chip edges.
             let top_left = chip_top_left(tester);
-            let avatar_center = center_of(tester, tester.find_by_icon(&Icons::favorite()));
+            let avatar_center =
+                tester.get_center(tester.element(find::by_icon(&Icons::favorite()).first()));
             assert_eq!(
                 top_left.dx(),
                 avatar_center.dx() - (label_size.width() / 2.0) - padding - border
@@ -792,7 +798,7 @@ pub(crate) mod tests {
         tester.add_pointer(mouse, Offset::new(10.0, 10.0));
         tester.pump();
         assert!(*tester.active_cursor(1) == *MouseCursorRef::from(SystemMouseCursors::BASIC));
-        let chip = center_of(tester, text(tester, "Chip"));
+        let chip = tester.get_center(text(tester, "Chip"));
         tester.move_to(mouse, chip, false);
         tester.pump();
     }
@@ -859,7 +865,7 @@ pub(crate) mod tests {
 
             // Unfocused case.
             let mut mouse = TestPointer::mouse(1, 0);
-            let chip = center_of(tester, text(tester, "Chip"));
+            let chip = tester.get_center(text(tester, "Chip"));
             tester.add_pointer(&mut mouse, chip);
             tester.pump();
             tester.move_to(&mut mouse, chip, false);
@@ -893,7 +899,7 @@ pub(crate) mod tests {
                     .into_widget(),
             ));
             let x_text = text(tester, "X");
-            assert!(size_of(tester, x_text).is_empty());
+            assert!(tester.get_size(x_text).is_empty());
         });
     }
 }

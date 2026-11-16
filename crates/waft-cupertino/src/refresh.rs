@@ -888,7 +888,10 @@ mod tests {
     use waft_embedder::{HapticFeedbackType, Haptics, Rect, TargetPlatform, TextDirection};
     use waft_foundation::Completer;
     use waft_test::TestPlatform;
-    use waft_widgets::testing::{TestPointer, WidgetTester};
+    use waft_widgets::testing::{
+        Finder, MoreOrLessEquals, PRECISION_ERROR_TOLERANCE, TestPointer, WidgetTester,
+        assert_f32_equals, expect, find, finds_nothing, finds_one_widget,
+    };
     use waft_widgets::{
         BouncingScrollPhysics, Builder, Container, CustomScrollView, Directionality, GlobalKey,
         MediaQuery, MediaQueryData, SliverList, Text,
@@ -898,12 +901,10 @@ mod tests {
     use crate::app::CupertinoApp;
     use crate::nav_bar::CupertinoSliverNavigationBar;
 
-    /// Dart's `precisionErrorTolerance`, which `moreOrLessEquals` defaults to.
-    const PRECISION_ERROR_TOLERANCE: f64 = 1e-10;
-
-    /// The tolerance of a position read through `local_to_global`: `Matrix4` is valo's f32
-    /// matrix (waft-gestures' PORTING.md), so a transformed position is exact only to f32.
-    const POSITION_TOLERANCE: f64 = 1e-4;
+    /// Dart's `find.byType(LayoutBuilder)`: the refresh control's.
+    fn layout_builder() -> Finder {
+        find::by_type::<LayoutBuilder>()
+    }
 
     /// Dart's `kDragSlopDefault`, the slop `tester.drag` moves through first.
     const K_DRAG_SLOP_DEFAULT: f64 = 20.0;
@@ -944,8 +945,10 @@ mod tests {
         fn matches(self, value: f64) -> bool {
             match self {
                 Extent::Exactly(expected) => value == expected,
-                Extent::About(expected) => (value - expected).abs() <= PRECISION_ERROR_TOLERANCE,
-                Extent::AboutPosition(expected) => (value - expected).abs() <= POSITION_TOLERANCE,
+                Extent::About(expected) => {
+                    value.more_or_less_equals(&expected, PRECISION_ERROR_TOLERANCE)
+                }
+                Extent::AboutPosition(expected) => value.equals_within_f32(&expected),
                 Extent::Between(low, high) => value > low && value < high,
             }
         }
@@ -1165,9 +1168,9 @@ mod tests {
             self.tester.down(&mut self.gesture, position);
         }
 
+        /// Dart's `gesture.moveBy(offset)`.
         fn move_by(&mut self, offset: Offset) {
-            let position = self.gesture.position + offset;
-            self.tester.move_to(&mut self.gesture, position, true);
+            self.tester.move_by(&mut self.gesture, offset, true);
         }
 
         fn up(&mut self) {
@@ -1201,20 +1204,10 @@ mod tests {
                 .fling_from(start, offset, speed, self.gesture.id);
         }
 
-        fn rect_of(&self, key: &GlobalKey) -> Option<Rect> {
-            let app = self.tester.cell.borrow();
-            let object = key
-                .current_context(&app)?
-                .find_render_object(&app)?
-                .as_box()?;
-            Some(object.local_to_global(&app, Offset::ZERO, None) & object.size(&app))
-        }
-
         /// `tester.getRect(find.widgetWithText(SizedBox, '$index'))`: the `Center` inside is
         /// the same rect.
         fn item_rect(&self, index: usize) -> Rect {
-            self.rect_of(&self.items[index])
-                .unwrap_or_else(|| panic!("item {index} is built"))
+            self.tester.get_rect(&self.items[index])
         }
 
         fn item_top(&self, index: usize) -> f64 {
@@ -1223,38 +1216,21 @@ mod tests {
 
         /// `tester.getRect(find.widgetWithText(Center, '-1'))`.
         fn indicator_rect(&self) -> Rect {
-            self.rect_of(&self.indicator)
-                .expect("the indicator is built")
+            self.tester.get_rect(&self.indicator)
         }
 
-        /// `find.text('-1')` finds a widget.
-        fn indicator_shown(&self) -> bool {
-            self.indicator
-                .current_context(&self.tester.cell.borrow())
-                .is_some()
-        }
-
-        /// `CupertinoSliverRefreshControl.state(tester.element(find.byType(LayoutBuilder)))`.
-        fn state(&self) -> RefreshIndicatorMode {
-            let layout_builder = *self
-                .tester
-                .find_by_type::<LayoutBuilder>()
-                .first()
-                .expect("the refresh control's LayoutBuilder is mounted");
+        /// `CupertinoSliverRefreshControl.state(tester.element(layoutBuilder))`.
+        fn state(&self, layout_builder: Finder) -> RefreshIndicatorMode {
+            let layout_builder = self.tester.element(layout_builder);
             CupertinoSliverRefreshControl::state(&self.tester.cell.borrow(), layout_builder)
         }
 
         /// `tester.widget<CupertinoActivityIndicator>(find.byType(..))`'s progress and radius.
         fn activity_indicator(&self) -> (f64, f64) {
-            let indicator = *self
-                .tester
-                .find_by_type::<CupertinoActivityIndicator>()
-                .first()
-                .expect("a CupertinoActivityIndicator is built");
-            self.tester
-                .widget(indicator, |indicator: &CupertinoActivityIndicator| {
-                    (indicator.progress, indicator.radius)
-                })
+            self.tester.widget(
+                find::by_type::<CupertinoActivityIndicator>(),
+                |indicator: &CupertinoActivityIndicator| (indicator.progress, indicator.radius),
+            )
         }
 
         fn invocations(&self) -> Vec<Invocation> {
@@ -1315,14 +1291,6 @@ mod tests {
             let mut tester = Tester::new(platform);
             case(&mut tester);
         }
-    }
-
-    /// Dart's `moreOrLessEquals` of a position.
-    fn assert_about(actual: f64, expected: f64, what: &str) {
-        assert!(
-            (actual - expected).abs() <= POSITION_TOLERANCE,
-            "{what}: {actual} is not about {expected}"
-        );
     }
 
     // UI tests.
@@ -1523,13 +1491,9 @@ mod tests {
             } else {
                 (-175.38461538461536, -115.38461538461536)
             };
-            assert_about(t.indicator_rect().top, indicator_top, "the indicator's top");
-            assert_about(
-                t.indicator_rect().bottom,
-                indicator_bottom,
-                "the indicator's bottom",
-            );
-            assert_about(t.item_top(0), indicator_bottom, "the first item's top");
+            assert_f32_equals(t.indicator_rect().top, indicator_top);
+            assert_f32_equals(t.indicator_rect().bottom, indicator_bottom);
+            assert_f32_equals(t.item_top(0), indicator_bottom);
 
             // Scroll the top of the refresh indicator back to overscroll, it will
             // snap to the size of the refresh indicator and stay there.
@@ -1571,7 +1535,7 @@ mod tests {
             assert!(t.contains(matches_builder(Done, exactly(60.0))));
 
             t.pump_by(Duration::from_secs(5));
-            assert!(!t.indicator_shown());
+            expect(&t.tester, &find::text("-1"), finds_nothing());
             assert_eq!(t.item_rect(0), Rect::from_ltrb(0.0, 0.0, 800.0, 200.0));
         });
     }
@@ -1610,9 +1574,9 @@ mod tests {
 
             let top = t.item_top(0);
             assert!(top > 0.0 && top < 6.0, "the first item's top: {top}");
-            assert_about(t.indicator_rect().height(), top, "the indicator's height");
+            assert_f32_equals(t.indicator_rect().height(), top);
             assert!(t.contains(matches_builder(Inactive, about_position(top))));
-            assert!(t.indicator_shown());
+            expect(&t.tester, &find::text("-1"), finds_one_widget());
         });
     }
 
@@ -1655,7 +1619,7 @@ mod tests {
 
             // Now let it fully go away.
             t.pump_by(Duration::from_secs(5));
-            assert!(!t.indicator_shown());
+            expect(&t.tester, &find::text("-1"), finds_nothing());
             assert_eq!(t.item_rect(0), Rect::from_ltrb(0.0, 0.0, 800.0, 200.0));
 
             // Start another drag. It's now in drag mode.
@@ -1692,7 +1656,7 @@ mod tests {
             t.up();
             t.pump();
             t.pump_by(Duration::from_secs(5));
-            assert!(!t.indicator_shown());
+            expect(&t.tester, &find::text("-1"), finds_nothing());
             assert_eq!(t.item_rect(0), Rect::from_ltrb(0.0, 0.0, 800.0, 200.0));
         });
     }
@@ -1753,7 +1717,7 @@ mod tests {
             );
 
             t.pump_by(Duration::from_secs(5));
-            assert!(!t.indicator_shown());
+            expect(&t.tester, &find::text("-1"), finds_nothing());
             assert_eq!(t.item_rect(0), Rect::from_ltrb(0.0, 0.0, 800.0, 200.0));
         });
     }
@@ -1818,7 +1782,7 @@ mod tests {
         for_each_variant(&APPLE, |t| {
             t.pump_control(CupertinoSliverRefreshControl::new().builder(t.builder()));
 
-            assert_eq!(t.state(), Inactive);
+            assert_eq!(t.state(layout_builder().skip_offstage(false)), Inactive);
         });
     }
 
@@ -1830,11 +1794,11 @@ mod tests {
             t.drag_item(0, Offset::new(0.0, 20.0), K_DRAG_SLOP_DEFAULT);
             t.pump();
 
-            assert_eq!(t.state(), Drag);
+            assert_eq!(t.state(layout_builder()), Drag);
 
             t.pump_by(Duration::from_secs(2));
 
-            assert_eq!(t.state(), Inactive);
+            assert_eq!(t.state(layout_builder().skip_offstage(false)), Inactive);
         });
     }
 
@@ -1850,7 +1814,7 @@ mod tests {
             t.start_gesture(Offset::ZERO);
             t.move_by(Offset::new(0.0, 79.0));
             t.pump();
-            assert_eq!(t.state(), Drag);
+            assert_eq!(t.state(layout_builder()), Drag);
             // Overscrolling, need to move more than 1px.
             if t.on_mac_os() {
                 t.move_by(Offset::new(0.0, 20.0));
@@ -1858,7 +1822,7 @@ mod tests {
                 t.move_by(Offset::new(0.0, 3.0));
             }
             t.pump();
-            assert_eq!(t.state(), Armed);
+            assert_eq!(t.state(layout_builder()), Armed);
         });
     }
 
@@ -1877,7 +1841,7 @@ mod tests {
             // Arm it.
             t.move_by(Offset::new(0.0, 90.0));
             t.pump();
-            assert_eq!(t.state(), Armed);
+            assert_eq!(t.state(layout_builder()), Armed);
 
             // Overscrolling, need to move more than -40.
             t.move_by(Offset::new(0.0, -80.0));
@@ -1888,8 +1852,8 @@ mod tests {
             } else {
                 49.775111111111116
             };
-            assert_about(t.item_top(0), expected, "the first item's top");
-            assert_eq!(t.state(), Refresh);
+            assert_f32_equals(t.item_top(0), expected);
+            assert_eq!(t.state(layout_builder()), Refresh);
         });
     }
 
@@ -1904,19 +1868,19 @@ mod tests {
 
             t.drag_item(0, Offset::new(0.0, 100.0), 0.0);
             t.pump();
-            assert_eq!(t.state(), Armed);
+            assert_eq!(t.state(layout_builder()), Armed);
             // The sliver scroll offset correction is applied on the next frame.
             t.pump();
 
             t.pump_by(Duration::from_secs(2));
-            assert_eq!(t.state(), Refresh);
+            assert_eq!(t.state(layout_builder()), Refresh);
             assert_eq!(t.item_rect(0), Rect::from_ltrb(0.0, 60.0, 800.0, 260.0));
 
             t.complete_refresh();
             // The task completed between frames. The internal state goes to done
             // right away even though the sliver gets a new offset correction the
             // next frame.
-            assert_eq!(t.state(), Done);
+            assert_eq!(t.state(layout_builder()), Done);
         });
     }
 
@@ -1932,10 +1896,10 @@ mod tests {
             t.start_gesture(Offset::ZERO);
             t.move_by(Offset::new(0.0, 150.0));
             t.pump();
-            assert_eq!(t.state(), Armed);
+            assert_eq!(t.state(layout_builder()), Armed);
 
             t.complete_refresh();
-            assert_eq!(t.state(), Done);
+            assert_eq!(t.state(layout_builder()), Done);
             t.pump();
 
             // Now back in overscroll mode.
@@ -1950,9 +1914,9 @@ mod tests {
             } else {
                 27.944444444444457
             };
-            assert_about(t.item_top(0), expected, "the first item's top");
+            assert_f32_equals(t.item_top(0), expected);
             // Need to bring it to 100 * 0.1 to reset to inactive.
-            assert_eq!(t.state(), Done);
+            assert_eq!(t.state(layout_builder()), Done);
 
             if t.on_mac_os() {
                 t.move_by(Offset::new(0.0, -16.0));
@@ -1965,8 +1929,8 @@ mod tests {
             } else {
                 9.313890708161875
             };
-            assert_about(t.item_top(0), expected, "the first item's top");
-            assert_eq!(t.state(), Inactive);
+            assert_f32_equals(t.item_top(0), expected);
+            assert_eq!(t.state(layout_builder()), Inactive);
         });
     }
 
@@ -1982,7 +1946,7 @@ mod tests {
             t.start_gesture(Offset::ZERO);
             t.move_by(Offset::new(0.0, 150.0));
             t.pump();
-            assert_eq!(t.state(), Armed);
+            assert_eq!(t.state(layout_builder()), Armed);
             // Sliver scroll offset correction is applied one frame later.
             t.pump();
 
@@ -1994,30 +1958,18 @@ mod tests {
             };
             t.pump();
             // The refresh indicator is offscreen now.
-            assert_about(
-                t.item_top(0),
-                indicator_destination_position,
-                "the first item's top",
-            );
-            assert_eq!(t.state(), Refresh);
+            assert_f32_equals(t.item_top(0), indicator_destination_position);
+            assert_eq!(t.state(layout_builder().skip_offstage(false)), Refresh);
 
             t.complete_refresh();
             // The sliver layout extent is removed on next frame.
             t.pump();
-            assert_eq!(t.state(), Inactive);
+            assert_eq!(t.state(layout_builder().skip_offstage(false)), Inactive);
             // Nothing moved.
-            assert_about(
-                t.item_top(0),
-                indicator_destination_position,
-                "the first item's top",
-            );
+            assert_f32_equals(t.item_top(0), indicator_destination_position);
             t.pump_by(Duration::from_secs(2));
             // Everything stayed as is.
-            assert_about(
-                t.item_top(0),
-                indicator_destination_position,
-                "the first item's top",
-            );
+            assert_f32_equals(t.item_top(0), indicator_destination_position);
         });
     }
 
@@ -2034,18 +1986,18 @@ mod tests {
 
             t.drag_item(0, Offset::new(0.0, 150.0), K_DRAG_SLOP_DEFAULT);
             t.pump();
-            assert_eq!(t.state(), Armed);
+            assert_eq!(t.state(layout_builder()), Armed);
 
             t.pump();
             t.pump_by(Duration::from_secs(5));
             // In refresh mode but has no UI.
-            assert_eq!(t.state(), Refresh);
+            assert_eq!(t.state(layout_builder().skip_offstage(false)), Refresh);
             assert_eq!(t.item_rect(0), Rect::from_ltrb(0.0, 0.0, 800.0, 200.0));
 
             t.complete_refresh();
             t.pump();
             // Goes to inactive right away since the sliver is already collapsed.
-            assert_eq!(t.state(), Inactive);
+            assert_eq!(t.state(layout_builder().skip_offstage(false)), Inactive);
         });
     }
 

@@ -936,7 +936,7 @@ mod tests {
     use waft_widgets::{Builder, Center, Container, GlobalKey, Text, TextOverflow};
 
     use waft_widgets::testing::{
-        TargetPlatformVariant, WidgetTester, test_widgets, test_widgets_variant,
+        TargetPlatformVariant, WidgetTester, find, test_widgets, test_widgets_variant,
     };
 
     use super::*;
@@ -1008,11 +1008,11 @@ mod tests {
     /// bottom of the space bar.
     fn title_bottom_left(tester: &WidgetTester, key: &GlobalKey) -> Offset {
         let title = rect_of_key(tester, key);
-        let bar = *tester
-            .find_by_type::<FlexibleSpaceBar>()
+        let bar = *find::by_type::<FlexibleSpaceBar>()
+            .evaluate(tester)
             .first()
             .expect("a FlexibleSpaceBar");
-        let bar = tester.global_rect(tester.render_box_of(bar));
+        let bar = tester.get_rect(bar);
         Offset::new(title.left, bar.bottom - title.bottom)
     }
 
@@ -1063,7 +1063,7 @@ mod tests {
                 );
             };
             let title = |tester: &WidgetTester| {
-                tester.global_rect(tester.render_box_of(tester.find_text("X")[0]))
+                tester.global_rect(tester.render_box_of(find::text("X").evaluate(tester)[0]))
             };
             pump(tester, TargetPlatform::Android);
             let rect = title(tester);
@@ -1229,8 +1229,8 @@ mod tests {
             });
 
             tester.pump_and_settle();
-            let text = tester.find_by_type::<waft_widgets::Text>()[0];
-            let left = tester.global_rect(tester.render_box_of(text)).left;
+            let text = find::by_type::<waft_widgets::Text>().evaluate(tester)[0];
+            let left = tester.get_rect(text).left;
             assert!((left - 72.0).abs() < 0.01, "{left}");
         });
     }
@@ -1286,14 +1286,14 @@ mod tests {
 
             // The current (200) is half way between the min (100) and max (300) and the
             // lerp values used to calculate the scale are 1 and 1.5, so we check for 1.25.
-            let transform = tester.find_by_type::<Transform>();
+            let transform = find::by_type::<Transform>().evaluate(tester);
             let transform = *transform.first().expect("the title's Transform");
             let scale = tester.widget(transform, |transform: &Transform| transform.transform);
             assert_eq!(scale, Matrix4::scale(1.25, 1.25));
 
             // The space bar rect always starts fully expanded.
-            let clip_rect = *tester
-                .find_by_type::<ClipRect>()
+            let clip_rect = *find::by_type::<ClipRect>()
+                .evaluate(tester)
                 .last()
                 .expect("the space bar's ClipRect");
             let clip_size = tester.render_box_of(clip_rect).size(&tester.cell.borrow());
@@ -1383,7 +1383,7 @@ mod tests {
         });
         let text_width = width.get();
         assert_eq!(text_width, 800.0);
-        let title = tester.find_by_type::<Text>()[0];
+        let title = find::by_type::<Text>().evaluate(tester)[0];
         transformed_rect(tester, title)
     }
 
@@ -1479,8 +1479,8 @@ mod tests {
                 .into_widget()
         });
         let center_of_text = |tester: &WidgetTester, text: &str| {
-            let element = tester.find_text(text)[0];
-            tester.global_rect(tester.render_box_of(element)).center()
+            let element = find::text(text).evaluate(tester)[0];
+            tester.get_rect(element).center()
         };
 
         // We drag up to fully collapse the space bar.
@@ -1488,7 +1488,7 @@ mod tests {
         tester.drag_from(start, Offset::new(0.0, -600.0), 1);
         tester.pump_and_settle();
 
-        let title = |tester: &WidgetTester| tester.find_by_type::<Text>()[0];
+        let title = |tester: &WidgetTester| find::by_type::<Text>().evaluate(tester)[0];
         let collapsed_width = transformed_rect(tester, title(tester)).width();
 
         // We drag down to fully expand the space bar.
@@ -1553,8 +1553,8 @@ mod tests {
                     .background(Text::new("Background"))
                     .collapse_mode(CollapseMode::Pin),
             );
-            let opacity = *tester
-                .find_by_type::<FlexibleSpaceHeaderOpacity>()
+            let opacity = *find::by_type::<FlexibleSpaceHeaderOpacity>()
+                .evaluate(tester)
                 .first()
                 .expect("a FlexibleSpaceHeaderOpacity");
             assert_eq!(
@@ -1584,10 +1584,10 @@ mod tests {
                     .into_widget()
             });
 
-            let app_bar = tester.find_by_type::<AppBar>()[0];
-            let app_bar_center = tester.global_rect(tester.render_box_of(app_bar)).center();
-            let title = tester.find_text("X")[0];
-            let title_center = tester.global_rect(tester.render_box_of(title)).center();
+            let app_bar = find::by_type::<AppBar>().evaluate(tester)[0];
+            let app_bar_center = tester.get_rect(app_bar).center();
+            let title = find::text("X").evaluate(tester)[0];
+            let title_center = tester.get_rect(title).center();
             assert_eq!(app_bar_center.dx(), title_center.dx());
         });
     }
@@ -1609,7 +1609,7 @@ mod tests {
                     .into_widget()
             });
 
-            let title = tester.find_text("Title")[0];
+            let title = find::text("Title").evaluate(tester)[0];
             let style = DefaultTextStyle::of(&mut tester.cell.borrow_mut(), title).style;
             assert_eq!(
                 style.color,
@@ -1630,8 +1630,8 @@ mod tests {
                     )))
                     .into_widget()
             });
-            let bar = *tester
-                .find_by_type::<FlexibleSpaceBar>()
+            let bar = *find::by_type::<FlexibleSpaceBar>()
+                .evaluate(tester)
                 .first()
                 .expect("a FlexibleSpaceBar");
             assert_eq!(
@@ -1750,7 +1750,9 @@ mod tests {
                         .background(Container::new()),
                 );
                 assert_eq!(
-                    tester.find_by_type::<waft_widgets::BackdropFilter>().len(),
+                    find::by_type::<waft_widgets::BackdropFilter>()
+                        .evaluate(tester)
+                        .len(),
                     filters
                 );
             }
@@ -1773,8 +1775,8 @@ mod tests {
                 .stretch_modes(vec![StretchMode::FadeTitle])
                 .title(keyed_title(&key)),
         );
-        let title = *tester
-            .find_by_type::<SizedBox>()
+        let title = *find::by_type::<SizedBox>()
+            .evaluate(tester)
             .iter()
             .find(|element| {
                 tester.ancestors(**element).iter().any(|ancestor| {

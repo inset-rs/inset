@@ -522,7 +522,7 @@ mod tests {
     use waft_widgets::{Builder, IconThemeData, MediaQueryData, RawView, SizedBox, WidgetsBinding};
 
     use waft_widgets::testing::{
-        TargetPlatformVariant, WidgetTester, test_widgets, test_widgets_variant,
+        TargetPlatformVariant, WidgetTester, find, test_widgets, test_widgets_variant,
     };
 
     use super::*;
@@ -1560,7 +1560,7 @@ mod tests {
             ));
             tester.pump_and_settle();
 
-            let editable_text = tester.find_by_type::<waft_widgets::EditableText>();
+            let editable_text = find::by_type::<waft_widgets::EditableText>().evaluate(tester);
             assert_eq!(editable_text.len(), 1);
             let style_color = tester
                 .widget::<waft_widgets::EditableText, _>(editable_text[0], |editable_text| {

@@ -399,8 +399,9 @@ mod tests {
         DESKTOP, K_DEFAULT_IDLE_THUMB_COLOR, K_DEFAULT_THUMB_RADIUS, assert_thumb_rrect,
         assert_track, hover_at, move_by, no_scrollbar, painted, scroll_view, start_gesture,
     };
-    use crate::test_support::{Drawn, material_app};
+    use crate::test_support::material_app;
     use crate::theme_data::ThemeData;
+    use waft_rendering::testing::{PaintCall, draws, paints_exactly};
 
     // The const represents the starting position of the scrollbar thumb for
     // the below tests. The thumb is 90 pixels long, and 8 pixels wide, with a 2
@@ -902,14 +903,20 @@ mod tests {
                 tester.pump_and_settle();
 
                 let drawn = painted(tester);
-                assert!(
-                    matches!(drawn.as_slice(), [
-                        Drawn::Rect(0x08000000, _),
-                        Drawn::Path(0x1a000000, _),
-                        Drawn::Path(thumb, _),
-                    ] if *thumb == GREEN.to_argb32()),
-                    "{drawn:?}"
-                );
+                paints_exactly(
+                    &draws(&drawn),
+                    &[
+                        PaintCall::rect(Some(Color::new(0x08000000))),
+                        PaintCall::Line {
+                            p1: None,
+                            p2: None,
+                            color: Some(Color::new(0x1a000000)),
+                            stroke_width: None,
+                        },
+                        PaintCall::rrect(Some(GREEN)),
+                    ],
+                )
+                .unwrap();
             });
         }
     }

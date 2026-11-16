@@ -1193,7 +1193,8 @@ mod tests {
     };
 
     use waft_widgets::testing::{
-        TargetPlatformVariant, TestPointer, WidgetTester, test_widgets, test_widgets_variant,
+        TargetPlatformVariant, TestPointer, WidgetTester, expect, find, finds_n_widgets,
+        finds_nothing, finds_one_widget, test_widgets, test_widgets_variant,
     };
 
     use super::*;
@@ -1241,7 +1242,7 @@ mod tests {
     }
 
     fn editable_elements(tester: &WidgetTester) -> Vec<AnyElement> {
-        tester.find_by_type::<EditableText>()
+        find::by_type::<EditableText>().evaluate(tester)
     }
 
     fn controller_at(
@@ -1300,13 +1301,13 @@ mod tests {
     }
 
     fn top_left_of_selectable_text(tester: &WidgetTester, index: usize) -> Offset {
-        let element = tester.find_by_type::<SelectableText>()[index];
-        tester.global_rect(tester.render_box_of(element)).top_left()
+        let element = find::by_type::<SelectableText>().evaluate(tester)[index];
+        tester.get_rect(element).top_left()
     }
 
     fn center_of_selectable_text(tester: &WidgetTester) -> Offset {
-        let element = tester.find_by_type::<SelectableText>()[0];
-        tester.global_rect(tester.render_box_of(element)).center()
+        let element = find::by_type::<SelectableText>().evaluate(tester)[0];
+        tester.get_rect(element).center()
     }
 
     fn selection_overlay(tester: &WidgetTester) -> Handle<waft_widgets::TextSelectionOverlay> {
@@ -1398,28 +1399,36 @@ mod tests {
     /// Dart's `expectMaterialSelectionToolbar()`.
     fn expect_material_selection_toolbar(tester: &WidgetTester, platform: TargetPlatform) {
         if platform == TargetPlatform::Android {
-            assert_eq!(tester.find_onstage_by_type::<TextButton>().len(), 3);
-            assert_eq!(tester.find_onstage_text("Copy").len(), 1);
-            assert_eq!(tester.find_onstage_text("Share").len(), 1);
-            assert_eq!(tester.find_onstage_text("Select all").len(), 1);
+            expect(tester, &find::by_type::<TextButton>(), finds_n_widgets(3));
+            expect(tester, &find::text("Copy"), finds_one_widget());
+            expect(tester, &find::text("Share"), finds_one_widget());
+            expect(tester, &find::text("Select all"), finds_one_widget());
         } else {
-            assert_eq!(tester.find_onstage_by_type::<TextButton>().len(), 2);
-            assert_eq!(tester.find_onstage_text("Copy").len(), 1);
-            assert_eq!(tester.find_onstage_text("Select all").len(), 1);
+            expect(tester, &find::by_type::<TextButton>(), finds_n_widgets(2));
+            expect(tester, &find::text("Copy"), finds_one_widget());
+            expect(tester, &find::text("Select all"), finds_one_widget());
         }
     }
 
     /// Dart's `expectCupertinoSelectionToolbar()`.
     fn expect_cupertino_selection_toolbar(tester: &WidgetTester, platform: TargetPlatform) {
         if platform == TargetPlatform::IOS {
-            assert_eq!(tester.find_onstage_by_type::<CupertinoButton>().len(), 4);
-            assert_eq!(tester.find_onstage_text("Copy").len(), 1);
-            assert_eq!(tester.find_onstage_text("Look Up").len(), 1);
-            assert_eq!(tester.find_onstage_text("Search Web").len(), 1);
-            assert_eq!(tester.find_onstage_text("Share...").len(), 1);
+            expect(
+                tester,
+                &find::by_type::<CupertinoButton>(),
+                finds_n_widgets(4),
+            );
+            expect(tester, &find::text("Copy"), finds_one_widget());
+            expect(tester, &find::text("Look Up"), finds_one_widget());
+            expect(tester, &find::text("Search Web"), finds_one_widget());
+            expect(tester, &find::text("Share..."), finds_one_widget());
         } else {
-            assert_eq!(tester.find_onstage_by_type::<CupertinoButton>().len(), 1);
-            assert_eq!(tester.find_onstage_text("Copy").len(), 1);
+            expect(
+                tester,
+                &find::by_type::<CupertinoButton>(),
+                finds_one_widget(),
+            );
+            expect(tester, &find::text("Copy"), finds_one_widget());
         }
     }
 
@@ -1532,7 +1541,7 @@ mod tests {
             let root = overlay(tester, SelectableText::new("some text").show_cursor(true));
             tester.pump_widget(root);
             let at = center_of_selectable_text(tester);
-            tester.tap(at, 1);
+            tester.tap_at(at, 1);
 
             let editable_text = editable_state(tester);
             let visible = |tester: &WidgetTester| {
@@ -1566,7 +1575,7 @@ mod tests {
             // Tap to reposition the caret.
             let tap_index = 4;
             let e_pos = text_offset_to_position(tester, tap_index);
-            tester.tap(e_pos, 1);
+            tester.tap_at(e_pos, 1);
             tester.pump();
 
             assert_eq!(selection(tester).base_offset, tap_index);
@@ -1587,7 +1596,7 @@ mod tests {
 
             // Tap would ordinarily reposition the caret.
             let e_pos = text_offset_to_position(tester, 4);
-            tester.tap(e_pos, 1);
+            tester.tap_at(e_pos, 1);
             tester.pump();
 
             assert_eq!(selection(tester).base_offset, -1);
@@ -1629,7 +1638,7 @@ mod tests {
 
             // Long press the 'e' to select 'def'.
             let e_pos = text_offset_to_position(tester, 5);
-            tester.long_press(e_pos, 1);
+            tester.long_press_at(e_pos, 1);
             tester.pump();
 
             // 'def' is selected.
@@ -1638,7 +1647,7 @@ mod tests {
 
             // Tapping elsewhere immediately collapses and moves the cursor.
             let at = text_offset_to_position(tester, 9);
-            tester.tap(at, 2);
+            tester.tap_at(at, 2);
             tester.pump();
 
             assert!(selection(tester).is_collapsed());
@@ -1739,20 +1748,20 @@ mod tests {
             assert!(selection(tester).is_collapsed());
 
             let at = center_of_selectable_text(tester);
-            tester.tap(at, 1);
+            tester.tap_at(at, 1);
             tester.pump();
 
             // Collapse selection should not paint.
             assert!(!handles_are_visible(tester));
             // Long press on the 't' character of text 'selectable' to show context menu.
             let d_pos = text_offset_to_position(tester, 5);
-            tester.long_press(d_pos, 2);
+            tester.long_press_at(d_pos, 2);
             tester.pump();
 
             // Context menu should not have paste and cut.
-            assert_eq!(tester.find_onstage_text("Copy").len(), 1);
-            assert!(tester.find_onstage_text("Paste").is_empty());
-            assert!(tester.find_onstage_text("Cut").is_empty());
+            expect(tester, &find::text("Copy"), finds_one_widget());
+            expect(tester, &find::text("Paste"), finds_nothing());
+            expect(tester, &find::text("Cut"), finds_nothing());
         });
     }
 
@@ -1769,11 +1778,11 @@ mod tests {
             );
             tester.pump_widget(root);
             let d_pos = text_offset_to_position(tester, 5);
-            tester.long_press(d_pos, 1);
+            tester.long_press_at(d_pos, 1);
             tester.pump();
             // Context menu should not have copy.
-            assert!(tester.find_onstage_text("Copy").is_empty());
-            assert_eq!(tester.find_onstage_text("Select all").len(), 1);
+            expect(tester, &find::text("Copy"), finds_nothing());
+            expect(tester, &find::text("Select all"), finds_one_widget());
         });
     }
 
@@ -1813,7 +1822,7 @@ mod tests {
 
             // Tap the selection handle to bring up the "paste / select all" menu.
             let at = text_offset_to_position(&tester, test_value.find('e').unwrap() as i32);
-            tester.tap(at, 1);
+            tester.tap_at(at, 1);
             tester.pump();
             // Skip past the frame where the opacity is zero.
             tester.pump_by(Duration::from_millis(200));
@@ -1830,25 +1839,23 @@ mod tests {
             // Tapping on the part of the handle's GestureDetector where it overlaps
             // with the text itself does not show the menu, so add a small vertical
             // offset to tap below the text.
-            tester.tap(handle_point + Offset::new(1.0, 13.0), 2);
+            tester.tap_at(handle_point + Offset::new(1.0, 13.0), 2);
             tester.pump();
             // Skip past the frame where the opacity is zero.
             tester.pump_by(Duration::from_millis(200));
 
             // Select all should select all the text.
-            let select_all = tester.find_onstage_text("Select all")[0];
-            let at = tester
-                .global_rect(tester.render_box_of(select_all))
-                .center();
-            tester.tap(at, 3);
+            let select_all = find::text("Select all").evaluate(&tester)[0];
+            let at = tester.get_rect(select_all).center();
+            tester.tap_at(at, 3);
             tester.pump();
             assert_eq!(selection(&tester).base_offset, 0);
             assert_eq!(selection(&tester).extent_offset, test_value.len() as i32);
 
             // Copy should reset the selection.
-            let copy = tester.find_onstage_text("Copy")[0];
-            let at = tester.global_rect(tester.render_box_of(copy)).center();
-            tester.tap(at, 4);
+            let copy = find::text("Copy").evaluate(&tester)[0];
+            let at = tester.get_rect(copy).center();
+            tester.tap_at(at, 4);
             tester.pump();
             tester.pump_by(Duration::from_millis(200));
             assert!(selection(&tester).is_collapsed());
@@ -1871,7 +1878,7 @@ mod tests {
     }
 
     fn selectable_text_size(tester: &WidgetTester) -> waft_embedder::Size {
-        let element = tester.find_by_type::<SelectableText>()[0];
+        let element = find::by_type::<SelectableText>().evaluate(tester)[0];
         let render = tester.render_box_of(element);
         render.size(&tester.cell.borrow())
     }
@@ -1991,7 +1998,7 @@ mod tests {
 
             // First tap on the first SelectableText sets the cursor.
             let at = text_offset_to_position(tester, 5);
-            tester.tap(at, 1);
+            tester.tap_at(at, 1);
             tester.pump_and_settle();
 
             let controller_a = controller_at(tester, 0);
@@ -2010,7 +2017,7 @@ mod tests {
             // Tapping on the second SelectableText sets the cursor on it, and clears the
             // selection from the first SelectableText.
             let selectable_text_start = top_left_of_selectable_text(tester, 1);
-            tester.tap(selectable_text_start, 2);
+            tester.tap_at(selectable_text_start, 2);
             tester.pump_and_settle();
             assert_eq!(read(tester, controller_a.handle()), empty);
             assert_eq!(
@@ -2076,7 +2083,7 @@ mod tests {
         let root = material_home(tester, SelectableText::new(text).max_lines(Some(3)));
         tester.pump_widget(root);
         let at = center_of_selectable_text(tester);
-        tester.tap(at, 1);
+        tester.tap_at(at, 1);
         tester.pump_and_settle();
     }
 
@@ -2160,7 +2167,7 @@ mod tests {
             );
             tester.pump_widget(root);
             let at = center_of_selectable_text(&tester);
-            tester.tap(at, 1);
+            tester.tap_at(at, 1);
             tester.pump_and_settle();
 
             controller(&tester).set_selection(
@@ -2195,7 +2202,7 @@ mod tests {
             let root = material_home(tester, SelectableText::new(test_value).max_lines(Some(3)));
             tester.pump_widget(root);
             let at = center_of_selectable_text(tester);
-            tester.tap(at, 1);
+            tester.tap_at(at, 1);
             tester.pump_and_settle();
 
             // Select All.
@@ -2226,7 +2233,7 @@ mod tests {
             );
             tester.pump_widget(root);
             let at = center_of_selectable_text(tester);
-            tester.tap(at, 1);
+            tester.tap_at(at, 1);
             tester.pump_and_settle();
             let tapped = new_selection.borrow_mut().take().expect("a tap selects");
             assert_eq!(tapped.base_offset, 31);
@@ -2265,7 +2272,7 @@ mod tests {
             assert_eq!(tap_count.get(), 0);
             for pointer in 1..=3 {
                 let at = center_of_selectable_text(tester);
-                tester.tap(at, pointer);
+                tester.tap_at(at, pointer);
                 // Wait a bit so they're all single taps and not double taps.
                 tester.pump_by(Duration::from_millis(300));
             }
@@ -2339,7 +2346,7 @@ mod tests {
             tester.pump_widget(root);
 
             let at = selectable_text_start_plus(tester, 50.0);
-            tester.tap(at, 1);
+            tester.tap_at(at, 1);
             tester.pump();
 
             // We moved the cursor.
@@ -2349,7 +2356,7 @@ mod tests {
             );
 
             // But don't trigger the toolbar.
-            assert!(tester.find_onstage_by_type::<CupertinoButton>().is_empty());
+            expect(tester, &find::by_type::<CupertinoButton>(), finds_nothing());
         });
     }
 
@@ -2364,7 +2371,7 @@ mod tests {
                 tester.pump_widget(root);
 
                 let at = selectable_text_start_plus(tester, 50.0);
-                tester.tap(at, 1);
+                tester.tap_at(at, 1);
                 tester.pump();
 
                 // We moved the cursor.
@@ -2375,10 +2382,7 @@ mod tests {
                 );
 
                 // But don't trigger the toolbar.
-                assert!(
-                    tester.find_onstage_by_type::<TextButton>().is_empty(),
-                    "{platform:?}"
-                );
+                expect(tester, &find::by_type::<TextButton>(), finds_nothing());
             });
         }
     }
@@ -2390,9 +2394,9 @@ mod tests {
             tester.pump_widget(root);
 
             let at = selectable_text_start_plus(tester, 50.0);
-            tester.tap(at, 1);
+            tester.tap_at(at, 1);
             tester.pump_by(Duration::from_millis(500));
-            tester.tap(at, 2);
+            tester.tap_at(at, 2);
             tester.pump();
 
             // Plain collapsed selection.
@@ -2402,7 +2406,7 @@ mod tests {
             );
 
             // No toolbar.
-            assert!(tester.find_onstage_by_type::<CupertinoButton>().is_empty());
+            expect(tester, &find::by_type::<CupertinoButton>(), finds_nothing());
         });
     }
 
@@ -2417,9 +2421,9 @@ mod tests {
                 tester.pump_widget(root);
 
                 let at = selectable_text_start_plus(tester, 50.0);
-                tester.tap(at, 1);
+                tester.tap_at(at, 1);
                 tester.pump_by(Duration::from_millis(500));
-                tester.tap(at, 2);
+                tester.tap_at(at, 2);
                 tester.pump();
 
                 // Plain collapsed selection.
@@ -2430,7 +2434,7 @@ mod tests {
                 );
 
                 // No toolbar.
-                assert!(tester.find_onstage_by_type::<CupertinoButton>().is_empty());
+                expect(tester, &find::by_type::<CupertinoButton>(), finds_nothing());
             });
         }
     }
@@ -2445,11 +2449,11 @@ mod tests {
                 // This tap just puts the cursor somewhere different than where the double
                 // tap will occur to test that the double tap moves the existing cursor first.
                 let at = selectable_text_start_plus(tester, 50.0);
-                tester.tap(at, 1);
+                tester.tap_at(at, 1);
                 tester.pump_by(Duration::from_millis(500));
 
                 let at = selectable_text_start_plus(tester, 150.0);
-                tester.tap(at, 2);
+                tester.tap_at(at, 2);
                 tester.pump_by(Duration::from_millis(50));
 
                 // First tap moved the cursor.
@@ -2467,7 +2471,7 @@ mod tests {
                     ),
                     "{platform:?}"
                 );
-                tester.tap(at, 3);
+                tester.tap_at(at, 3);
                 tester.pump();
 
                 // Second tap selects the word around the cursor.
@@ -2486,11 +2490,11 @@ mod tests {
             tester.pump_widget(root);
 
             let at = selectable_text_start_plus(tester, 50.0);
-            tester.tap(at, 1);
+            tester.tap_at(at, 1);
             tester.pump_by(Duration::from_millis(500));
 
             let at = selectable_text_start_plus(tester, 150.0);
-            tester.tap(at, 2);
+            tester.tap_at(at, 2);
             tester.pump_by(Duration::from_millis(50));
 
             // First tap moved the cursor.
@@ -2498,7 +2502,7 @@ mod tests {
                 selection(tester),
                 TextSelection::collapsed(11, TextAffinity::Upstream)
             );
-            tester.tap(at, 3);
+            tester.tap_at(at, 3);
             tester.pump();
 
             // Second tap selects the word around the cursor.
@@ -2517,7 +2521,7 @@ mod tests {
             // Tap to put the cursor after the "w".
             let index = 3;
             let at = text_offset_to_position(tester, index);
-            tester.tap(at, 1);
+            tester.tap_at(at, 1);
             tester.pump_by(Duration::from_millis(500));
 
             assert_eq!(
@@ -2526,7 +2530,7 @@ mod tests {
             );
 
             // Double tap on the same location.
-            tester.tap(at, 2);
+            tester.tap_at(at, 2);
             tester.pump_by(Duration::from_millis(50));
 
             // First tap doesn't change the selection.
@@ -2536,7 +2540,7 @@ mod tests {
             );
 
             // Second tap selects the word around the cursor.
-            tester.tap(at, 3);
+            tester.tap_at(at, 3);
             tester.pump();
             assert_eq!(selection(tester), TextSelection::new(0, 7));
 
@@ -2552,7 +2556,7 @@ mod tests {
                 tester.pump_widget(root);
 
                 let at = selectable_text_start_plus(tester, 50.0);
-                tester.long_press(at, 1);
+                tester.long_press_at(at, 1);
                 tester.pump();
 
                 // The long pressed word is selected.
@@ -2570,7 +2574,7 @@ mod tests {
             tester.pump_widget(root);
 
             let at = selectable_text_start_plus(tester, 50.0);
-            tester.long_press(at, 1);
+            tester.long_press_at(at, 1);
             tester.pump();
 
             assert_eq!(selection(tester), TextSelection::new(0, 7));
@@ -2587,19 +2591,19 @@ mod tests {
                 tester.pump_widget(root);
 
                 let at = selectable_text_start_plus(tester, 50.0);
-                tester.long_press(at, 1);
+                tester.long_press_at(at, 1);
                 tester.pump();
 
                 // The long pressed word is selected.
                 assert_eq!(selection(tester), TextSelection::new(0, 7), "{platform:?}");
 
                 // Toolbar shows one button (copy).
-                assert_eq!(
-                    tester.find_onstage_by_type::<CupertinoButton>().len(),
-                    1,
-                    "{platform:?}"
+                expect(
+                    tester,
+                    &find::by_type::<CupertinoButton>(),
+                    finds_one_widget(),
                 );
-                assert_eq!(tester.find_onstage_text("Copy").len(), 1, "{platform:?}");
+                expect(tester, &find::text("Copy"), finds_one_widget());
             });
         }
     }
@@ -2612,23 +2616,19 @@ mod tests {
                 tester.pump_widget(root);
 
                 let at = selectable_text_start_plus(tester, 50.0);
-                tester.long_press(at, 1);
+                tester.long_press_at(at, 1);
                 tester.pump();
 
                 assert_eq!(selection(tester), TextSelection::new(0, 7), "{platform:?}");
 
                 // Collapsed toolbar shows 2 buttons: copy, select all
                 assert_eq!(
-                    tester.find_onstage_by_type::<TextButton>().len(),
+                    find::by_type::<TextButton>().evaluate(tester).len(),
                     2,
                     "{platform:?}"
                 );
-                assert_eq!(tester.find_onstage_text("Copy").len(), 1, "{platform:?}");
-                assert_eq!(
-                    tester.find_onstage_text("Select all").len(),
-                    1,
-                    "{platform:?}"
-                );
+                expect(tester, &find::text("Copy"), finds_one_widget());
+                expect(tester, &find::text("Select all"), finds_one_widget());
             });
         }
     }
@@ -2659,7 +2659,7 @@ mod tests {
 
             // Long press at 'e' in 'def'.
             let e_pos = text_offset_to_position(tester, 5);
-            tester.long_press(e_pos, 1);
+            tester.long_press_at(e_pos, 1);
             tester.pump_and_settle();
 
             assert!(handles_are_visible(tester));
@@ -2675,9 +2675,9 @@ mod tests {
 
             // Double tap at 'e' in 'def'.
             let e_pos = text_offset_to_position(tester, 5);
-            tester.tap(e_pos, 1);
+            tester.tap_at(e_pos, 1);
             tester.pump_by(Duration::from_millis(50));
-            tester.tap(e_pos, 2);
+            tester.tap_at(e_pos, 2);
             tester.pump();
 
             assert!(handles_are_visible(tester));
@@ -2759,20 +2759,18 @@ mod tests {
 
             // Long press to select 'abc'.
             let a_location = text_offset_to_position(tester, 1);
-            tester.long_press(a_location, 1);
+            tester.long_press_at(a_location, 1);
             tester.pump();
             assert_eq!(count.get(), 1);
             // Long press to select 'def'.
             let at = text_offset_to_position(tester, 5);
-            tester.long_press(at, 2);
+            tester.long_press_at(at, 2);
             tester.pump();
             assert_eq!(count.get(), 2);
             // Tap on 'Select all' option to select the whole text.
-            let select_all = tester.find_onstage_text("Select all")[0];
-            let at = tester
-                .global_rect(tester.render_box_of(select_all))
-                .center();
-            tester.tap(at, 3);
+            let select_all = find::text("Select all").evaluate(tester)[0];
+            let at = tester.get_rect(select_all).center();
+            tester.tap_at(at, 3);
             assert_eq!(count.get(), 3);
         });
     }
@@ -2825,7 +2823,7 @@ mod tests {
             // Tap to put the cursor before the "F".
             let index = 7;
             let at = text_offset_to_position(tester, index);
-            tester.tap(at, 1);
+            tester.tap_at(at, 1);
             tester.pump_by(Duration::from_millis(500));
             assert_eq!(
                 *selection_seen.borrow(),
@@ -2835,7 +2833,7 @@ mod tests {
             assert_eq!(count.get(), 1);
 
             // Tap on the same location again.
-            tester.tap(at, 2);
+            tester.tap_at(at, 2);
             tester.pump_by(Duration::from_millis(50));
             assert_eq!(
                 *selection_seen.borrow(),

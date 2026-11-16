@@ -1405,7 +1405,7 @@ mod tests {
         StatefulBuilder, WidgetStates,
     };
 
-    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+    use waft_widgets::testing::{TestPointer, WidgetTester, find, test_widgets};
 
     use super::*;
     use crate::color_scheme::ColorScheme;
@@ -1413,8 +1413,9 @@ mod tests {
     use crate::icon_button_theme::IconButtonThemeData;
     use crate::icons::Icons;
     use crate::material::{Material, MaterialType};
-    use crate::test_support::{Drawn, PaintInspection, material_app};
+    use crate::test_support::{PaintInspection, material_app, path_like};
     use crate::theme_data::ThemeData;
+    use waft_rendering::testing::RecordedCall;
 
     /// `IconButton::new` or one of its named constructors.
     type Constructor = fn(Option<Listener>, Icon) -> IconButton;
@@ -1476,23 +1477,21 @@ mod tests {
     }
 
     fn icon_button_element(tester: &WidgetTester) -> AnyElement {
-        tester.find_by_type::<IconButton>()[0]
+        find::by_type::<IconButton>().evaluate(tester)[0]
     }
 
     /// Dart's `tester.getSize(find.byType(IconButton))`.
     fn button_size(tester: &WidgetTester) -> Size {
-        let render = tester.render_box_of(icon_button_element(tester));
-        render.size(&tester.cell.borrow())
+        tester.get_size(icon_button_element(tester))
     }
 
     fn button_center(tester: &WidgetTester) -> Offset {
-        let render = tester.render_box_of(icon_button_element(tester));
-        tester.global_rect(render).center()
+        tester.get_center(icon_button_element(tester))
     }
 
     /// The elements of `find.byIcon(data)`.
     fn find_icon(tester: &WidgetTester, data: &IconData) -> Vec<AnyElement> {
-        let found = tester.find_by_type::<Icon>();
+        let found = find::by_type::<Icon>().evaluate(tester);
         found
             .into_iter()
             .filter(|element| {
@@ -1502,13 +1501,12 @@ mod tests {
     }
 
     fn icon_size(tester: &WidgetTester) -> Size {
-        let render = tester.render_box_of(tester.find_by_type::<Icon>()[0]);
-        render.size(&tester.cell.borrow())
+        tester.get_size(find::by_type::<Icon>().evaluate(tester)[0])
     }
 
     /// Dart's `_iconStyle(tester, icon)?.color`.
     fn icon_color(tester: &WidgetTester) -> Option<Color> {
-        let rich_text = tester.find_by_type::<RichText>()[0];
+        let rich_text = find::by_type::<RichText>().evaluate(tester)[0];
         tester.widget(rich_text, |rich_text: &RichText| {
             rich_text
                 .text
@@ -1519,7 +1517,7 @@ mod tests {
 
     /// Dart's `IconTheme.of(tester.element(find.byIcon(icon))).color`.
     fn icon_theme_color(tester: &WidgetTester) -> Option<Color> {
-        let element = tester.find_by_type::<Icon>()[0];
+        let element = find::by_type::<Icon>().evaluate(tester)[0];
         let mut app = tester.cell.borrow_mut();
         IconTheme::of(&mut app, element)
             .color
@@ -1529,8 +1527,8 @@ mod tests {
     /// The `Material` below the `IconButton`.
     fn button_material<R>(tester: &WidgetTester, read: impl FnOnce(&Material) -> R) -> R {
         let button = icon_button_element(tester);
-        let material = tester
-            .find_by_type::<Material>()
+        let material = find::by_type::<Material>()
+            .evaluate(tester)
             .into_iter()
             .find(|material| tester.ancestors(*material).contains(&button))
             .expect("a Material below the IconButton");
@@ -1539,13 +1537,12 @@ mod tests {
 
     fn button_material_size(tester: &WidgetTester) -> Size {
         let button = icon_button_element(tester);
-        let material = tester
-            .find_by_type::<Material>()
+        let material = find::by_type::<Material>()
+            .evaluate(tester)
             .into_iter()
             .find(|material| tester.ancestors(*material).contains(&button))
             .expect("a Material below the IconButton");
-        let render = tester.render_box_of(material);
-        render.size(&tester.cell.borrow())
+        tester.get_size(material)
     }
 
     fn material_color(tester: &WidgetTester) -> Option<Color> {
@@ -1591,8 +1588,8 @@ mod tests {
     }
 
     fn check_icon_alignment_and_size(tester: &WidgetTester) {
-        let icon = tester.find_by_type::<Icon>()[0];
-        let align = tester.ancestor_of_type::<Align>(icon);
+        let align = tester
+            .element(find::ancestor(find::by_type::<Icon>(), find::by_type::<Align>()).first());
         tester.widget(align, |align: &Align| {
             assert!(align.alignment == AlignmentGeometry::CENTER);
         });
@@ -1614,10 +1611,10 @@ mod tests {
     /// `paints..rect(color:)` on `_RenderInkFeatures`.
     fn ink_rects(tester: &WidgetTester) -> Vec<u32> {
         tester
-            .ink_drawn()
+            .ink_calls()
             .into_iter()
             .filter_map(|drawn| match drawn {
-                Drawn::Rect(color, _) => Some(color),
+                RecordedCall::Rect { color, .. } => Some(color.value()),
                 _ => None,
             })
             .collect()
@@ -1679,7 +1676,7 @@ mod tests {
             assert_eq!(button_size(tester), Size::new(48.0, 48.0));
 
             let center = button_center(tester);
-            tester.tap(center, 1);
+            tester.tap_at(center, 1);
             assert_eq!(pressed.get(), 1);
         });
     }
@@ -1950,8 +1947,8 @@ mod tests {
                 true,
             );
             tester.pump_widget(widget);
-            let icon = tester.find_by_type::<Icon>()[0];
-            let align = tester.ancestor_of_type::<Align>(icon);
+            let align = tester
+                .element(find::ancestor(find::by_type::<Icon>(), find::by_type::<Align>()).first());
             tester.widget(align, |align: &Align| {
                 assert!(align.alignment == AlignmentGeometry::CENTER);
             });
@@ -1977,7 +1974,7 @@ mod tests {
             };
             let widget = build(tester, None);
             tester.pump_widget(widget);
-            assert!(tester.find_by_type::<Tooltip>().is_empty());
+            assert!(find::by_type::<Tooltip>().evaluate(tester).is_empty());
 
             // Clear the widget tree.
             tester.pump_widget(
@@ -1988,17 +1985,17 @@ mod tests {
 
             let widget = build(tester, Some("Test tooltip"));
             tester.pump_widget(widget);
-            assert_eq!(tester.find_by_type::<Tooltip>().len(), 1);
+            assert_eq!(find::by_type::<Tooltip>().evaluate(tester).len(), 1);
 
             let center = button_center(tester);
-            tester.tap(center, 1);
+            tester.tap_at(center, 1);
             assert_eq!(pressed.get(), 1);
 
             // Hovering over the button should show the tooltip.
             let mut mouse = TestPointer::mouse(2, 0);
             tester.add_pointer(&mut mouse, center);
             tester.pump();
-            assert_eq!(tester.find_text("Test tooltip").len(), 1);
+            assert_eq!(find::text("Test tooltip").evaluate(tester).len(), 1);
         });
     }
 
@@ -2022,8 +2019,8 @@ mod tests {
             );
             tester.pump_widget(widget);
 
-            let bar = tester.find_by_type::<crate::app_bar::AppBar>()[0];
-            let bar_size = tester.render_box_of(bar).size(&tester.cell.borrow());
+            let bar = find::by_type::<crate::app_bar::AppBar>().evaluate(tester)[0];
+            let bar_size = tester.get_size(bar);
             let icon_size = button_size(tester);
             assert_eq!(
                 icon_size.height(),
@@ -2041,12 +2038,9 @@ mod tests {
             let direct_highlight_color = Color::new(0xFF0000F0);
             let circles = |tester: &WidgetTester| -> Vec<u32> {
                 tester
-                    .ink_drawn()
+                    .ink_calls()
                     .into_iter()
-                    .filter_map(|drawn| match drawn {
-                        Drawn::Path(color, _) => Some(color),
-                        _ => None,
-                    })
+                    .filter_map(|drawn| path_like(&drawn).map(|(color, _)| color.value()))
                     .collect()
             };
             let themed = |tester: &WidgetTester,
@@ -2146,12 +2140,9 @@ mod tests {
             tester.pump_by(Duration::from_millis(1000)); // Wait for splash to be well under way.
 
             let splash = tester
-                .ink_drawn()
+                .ink_calls()
                 .into_iter()
-                .find_map(|drawn| match drawn {
-                    Drawn::Path(_, bounds) => Some(bounds),
-                    _ => None,
-                });
+                .find_map(|call| path_like(&call).map(|(_, bounds)| bounds));
             let splash = splash.expect("a splash circle");
             assert_eq!(splash.width(), splash_radius * 2.0);
             assert_eq!(splash.height(), splash_radius * 2.0);
@@ -2792,7 +2783,7 @@ mod tests {
 
             // Selected
             let center = button_center(tester);
-            tester.tap(center, 1);
+            tester.tap_at(center, 1);
             tester.pump_and_settle();
             assert_eq!(icon_color(tester), Some(selected_color));
 
@@ -2855,8 +2846,8 @@ mod tests {
         test_widgets(|tester| {
             let padding_of = |tester: &WidgetTester| {
                 let button = icon_button_element(tester);
-                let padding = tester
-                    .find_by_type::<Padding>()
+                let padding = find::by_type::<Padding>()
+                    .evaluate(tester)
                     .into_iter()
                     .find(|padding| tester.ancestors(*padding).contains(&button))
                     .expect("a Padding below the IconButton");
@@ -2951,7 +2942,7 @@ mod tests {
 
             // The non-toggle IconButton should not change appearance after clicking
             let center = button_center(tester);
-            tester.tap(center, 1);
+            tester.tap_at(center, 1);
             tester.pump_and_settle();
 
             assert_eq!(selected_of(tester), None);
@@ -2974,7 +2965,7 @@ mod tests {
 
             // The toggle IconButton should change appearance after clicking
             let center = button_center(tester);
-            tester.tap(center, 1);
+            tester.tap_at(center, 1);
             tester.pump_and_settle();
 
             assert_eq!(selected_of(tester), Some(true));
@@ -2982,7 +2973,7 @@ mod tests {
             assert_eq!(material_color(tester), Some(Colors::TRANSPARENT));
 
             // The IconButton should be unselected if it's clicked again
-            tester.tap(center, 2);
+            tester.tap_at(center, 2);
             tester.pump_and_settle();
 
             assert_eq!(selected_of(tester), Some(false));
@@ -3005,7 +2996,7 @@ mod tests {
 
             // The IconButton becomes unselected if it's clicked
             let center = button_center(tester);
-            tester.tap(center, 1);
+            tester.tap_at(center, 1);
             tester.pump_and_settle();
 
             assert_eq!(selected_of(tester), Some(false));
@@ -3032,14 +3023,14 @@ mod tests {
 
             // The icon becomes to selectedIcon
             let center = button_center(tester);
-            tester.tap(center, 1);
+            tester.tap_at(center, 1);
             tester.pump_and_settle();
 
             assert_eq!(find_icon(tester, &Icons::account_box()).len(), 1);
             assert!(find_icon(tester, &Icons::account_box_outlined()).is_empty());
 
             // The icon becomes the original icon when it's clicked again
-            tester.tap(center, 2);
+            tester.tap_at(center, 2);
             tester.pump_and_settle();
 
             assert_eq!(find_icon(tester, &Icons::account_box_outlined()).len(), 1);
@@ -3075,7 +3066,7 @@ mod tests {
             assert_eq!(find_icon(tester, &Icons::account_box()).len(), 1);
 
             let center = button_center(tester);
-            tester.tap(center, 1);
+            tester.tap_at(center, 1);
             tester.pump_and_settle();
 
             assert_eq!(selected_of(tester), Some(true));
@@ -3493,13 +3484,12 @@ mod tests {
             tester.pump_widget(widget);
 
             // Verify that the tooltip is not shown initially.
-            assert!(tester.find_text("Test tooltip").is_empty());
+            assert!(find::text("Test tooltip").evaluate(tester).is_empty());
 
             // Start hovering within IconButton area to show the tooltip.
             let mut mouse = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut mouse, Offset::ZERO);
-            let icon = tester.render_box_of(tester.find_by_type::<Icon>()[0]);
-            let top_left = tester.global_rect(icon).top_left();
+            let top_left = tester.get_top_left(find::by_type::<Icon>().evaluate(tester)[0]);
             // Move the cursor just outside the Icon.
             tester.move_to(
                 &mut mouse,
@@ -3509,7 +3499,7 @@ mod tests {
             tester.pump();
 
             // Verify that the tooltip is shown.
-            assert_eq!(tester.find_text("Test tooltip").len(), 1);
+            assert_eq!(find::text("Test tooltip").evaluate(tester).len(), 1);
         });
     }
 
@@ -3553,9 +3543,7 @@ mod tests {
     /// The centre of the `IconButton` around the icon `data`: Dart's
     /// `find.widgetWithIcon(IconButton, data)`.
     fn center_of_button_with(tester: &WidgetTester, data: &IconData) -> Offset {
-        let icon = find_icon(tester, data)[0];
-        let button = tester.ancestor_of_type::<IconButton>(icon);
-        tester.global_rect(tester.render_box_of(button)).center()
+        tester.get_center(find::widget_with_icon::<IconButton>(data).first())
     }
 
     /// Dart's `IconButton variants hovered & onLongPressed` cases; as in Dart, the filled,
@@ -3590,7 +3578,7 @@ mod tests {
             assert!(hovered.get());
 
             pointer += 1;
-            tester.long_press(offset, pointer);
+            tester.long_press_at(offset, pointer);
             tester.pump();
             assert!(long_pressed.get());
 
@@ -3610,7 +3598,7 @@ mod tests {
             assert!(!hovered.get());
 
             pointer += 1;
-            tester.long_press(offset, pointer);
+            tester.long_press_at(offset, pointer);
             tester.pump();
             assert!(!long_pressed.get());
 
@@ -3652,8 +3640,7 @@ mod tests {
         assert_eq!(states_value(tester, controller.handle()), states(&[]));
         assert_eq!(count.get(), 0);
 
-        let icon = tester.render_box_of(tester.find_by_type::<Icon>()[0]);
-        let center = tester.global_rect(icon).center();
+        let center = tester.get_center(find::by_type::<Icon>().evaluate(tester)[0]);
         let mut mouse = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
         tester.add_pointer(&mut mouse, Offset::ZERO);
         tester.move_to(&mut mouse, center, false);
@@ -3812,7 +3799,7 @@ mod tests {
             .into_iter()
             .enumerate()
             {
-                tester.tap(center + offset, pointer as i64 + 1);
+                tester.tap_at(center + offset, pointer as i64 + 1);
                 tester.pump();
             }
             assert_eq!(press_count.get(), 4);
@@ -4229,7 +4216,7 @@ mod tests {
             );
             tester.pump_widget(widget);
             let center = button_center(tester);
-            tester.long_press(center, 1);
+            tester.long_press_at(center, 1);
             assert_eq!(long_pressed.get(), 0);
         });
     }
@@ -4307,10 +4294,7 @@ mod tests {
             );
             tester.pump_widget(widget);
 
-            let top_left = {
-                let render = tester.render_object(&box_key).as_box().expect("a box");
-                tester.global_rect(render).top_left()
-            };
+            let top_left = tester.get_top_left(&box_key);
             let mut gesture = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
             tester.add_pointer(&mut gesture, Offset::ZERO);
             tester.move_to(&mut gesture, top_left, false);
@@ -4320,10 +4304,10 @@ mod tests {
             // then the button's overlay, in order among what it paints.
             let ink = tester.first::<crate::material::RenderInkFeatures>();
             let rects: Vec<u32> = tester
-                .painted(waft_rendering::RenderBox::as_object(ink))
+                .painted_calls(waft_rendering::RenderBox::as_object(ink))
                 .into_iter()
                 .filter_map(|drawn| match drawn {
-                    Drawn::Rect(color, _) => Some(color),
+                    RecordedCall::Rect { color, .. } => Some(color.value()),
                     _ => None,
                 })
                 .collect();

@@ -1003,7 +1003,7 @@ mod tests {
     use crate::slider_parts::{RectangularSliderTrackShape, SliderTrackShape};
     use crate::test_support::{PaintInspection, is_same_color_as, material_app};
     use crate::theme_data::ThemeData;
-    use waft_rendering::testing::{PaintCall, assert_paints};
+    use waft_rendering::testing::{CanvasMethod, PaintCall, assert_paints, count_calls, paints};
 
     // 'SliderThemeData copyWith, ==, hashCode basics'.
     #[test]
@@ -2644,32 +2644,6 @@ mod tests {
             .as_render_object(&tester.cell.borrow())
     }
 
-    fn count_ops(
-        tester: &WidgetTester,
-        render: waft_rendering::AnyRenderObject,
-        of: fn(&waft_embedder::valo::Op) -> bool,
-    ) -> usize {
-        tester
-            .painted_ops(render)
-            .iter()
-            .filter(|op| of(op))
-            .count()
-    }
-
-    fn draw_path(op: &waft_embedder::valo::Op) -> bool {
-        matches!(op, waft_embedder::valo::Op::DrawPath { path, .. }
-            if crate::slider::tests::circle_of(path).is_none())
-    }
-
-    fn draw_circle(op: &waft_embedder::valo::Op) -> bool {
-        matches!(op, waft_embedder::valo::Op::DrawPath { path, .. }
-            if crate::slider::tests::circle_of(path).is_some())
-    }
-
-    fn draw_rect(op: &waft_embedder::valo::Op) -> bool {
-        matches!(op, waft_embedder::valo::Op::DrawRect { .. })
-    }
-
     /// The body of Dart's two 'skips all painting at zero scale' cases: a slider showing only
     /// its value indicator, which paints nothing on the press's first frame and one path the
     /// next.
@@ -2701,14 +2675,38 @@ mod tests {
         // Nothing to paint at scale 0.
         tester.pump();
         if check_material {
-            assert_eq!(count_ops(tester, slider_render(tester), draw_rect), 0);
-            assert_eq!(count_ops(tester, slider_render(tester), draw_circle), 0);
+            assert_eq!(
+                count_calls(
+                    &tester.painted_ops(slider_render(tester)),
+                    CanvasMethod::DrawRect
+                ),
+                0
+            );
+            assert_eq!(
+                count_calls(
+                    &tester.painted_ops(slider_render(tester)),
+                    CanvasMethod::DrawCircle
+                ),
+                0
+            );
         }
-        assert_eq!(count_ops(tester, value_indicator_box(tester), draw_path), 0);
+        assert_eq!(
+            count_calls(
+                &tester.painted_ops(value_indicator_box(tester)),
+                CanvasMethod::DrawPath
+            ),
+            0
+        );
 
         // Painting a path for the value indicator.
         tester.pump_by(Duration::from_millis(16));
-        assert_eq!(count_ops(tester, value_indicator_box(tester), draw_path), 1);
+        assert_eq!(
+            count_calls(
+                &tester.painted_ops(value_indicator_box(tester)),
+                CanvasMethod::DrawPath
+            ),
+            1
+        );
 
         tester.up(&gesture);
     }
@@ -2974,8 +2972,6 @@ mod tests {
         });
     }
 
-    /// Whether `render` paints a circle centred at (`x`, `y`) in `color`: Dart's
-    /// `paints..circle(x:, y:, color:)`.
     fn paints_circle_at(
         tester: &WidgetTester,
         render: waft_rendering::AnyRenderObject,
@@ -2983,17 +2979,17 @@ mod tests {
         y: f64,
         color: Color,
     ) -> bool {
-        tester.painted_ops(render).iter().any(|op| match op {
-            waft_embedder::valo::Op::DrawPath { path, paint, .. }
-                if waft_rendering::testing::colors_match(paint.color, color) =>
-            {
-                crate::slider::tests::circle_of(path).is_some_and(|circle| {
-                    (circle.center().dx() - x).abs() < 1e-3
-                        && (circle.center().dy() - y).abs() < 1e-3
-                })
-            }
-            _ => false,
-        })
+        paints(
+            &tester.painted_ops(render),
+            &[PaintCall::Circle {
+                x: Some(x),
+                y: Some(y),
+                radius: None,
+                color: Some(color),
+                style: None,
+            }],
+        )
+        .is_ok()
     }
 
     // 'Slider with transparent track colors and custom track height can reach extreme ends'.

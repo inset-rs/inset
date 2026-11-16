@@ -717,7 +717,7 @@ mod tests {
         Focus, FocusNode, WidgetState, WidgetStateColor, WidgetStateOutlinedBorder,
     };
 
-    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+    use waft_widgets::testing::{TestPointer, WidgetTester, find, test_widgets};
 
     use super::*;
     use crate::test_support::{PaintInspection, is_same_color_as};
@@ -1286,10 +1286,7 @@ mod tests {
         Icon, IconTheme, SizedBox, Text, TextDirection,
     };
 
-    use crate::chip::{
-        RawChip,
-        tests::{center_of, only, rect_of, size_of},
-    };
+    use crate::chip::{RawChip, tests::only};
     use crate::icons::Icons;
     use crate::material::Material;
     use waft_embedder::valo::Op;
@@ -1408,7 +1405,7 @@ mod tests {
             chip_theme.background_color.expect("a color")
         ));
         assert_eq!(material_elevation(tester), 4.0);
-        assert_eq!(size_of(tester, only::<RawChip>(tester)), size); // label + padding + labelPadding
+        assert_eq!(tester.get_size(only::<RawChip>(tester)), size); // label + padding + labelPadding
         assert_eq!(material_shape(tester), Some(shape));
         assert_eq!(label_font_size(tester), Some(32.0));
         assert_eq!(icon_color(tester), Some(Color::new(0xff332211)));
@@ -1510,7 +1507,7 @@ mod tests {
 
             assert!(paints_rect(&material_box_ops(tester), background_color));
             assert_eq!(
-                size_of(tester, only::<RawChip>(tester)),
+                tester.get_size(only::<RawChip>(tester)),
                 Size::new(242.0, 132.0)
             ); // label + padding + labelPadding
             assert_eq!(material_elevation(tester), elevation);
@@ -1531,7 +1528,7 @@ mod tests {
             &material_box_ops(tester),
             &[PaintCall::circle(Some(background_color))],
         );
-        assert_eq!(size_of(tester, only::<RawChip>(tester)), size); // label + padding + labelPadding
+        assert_eq!(tester.get_size(only::<RawChip>(tester)), size); // label + padding + labelPadding
         assert_eq!(material_elevation(tester), 3.0);
         assert_eq!(material_shape(tester), Some(ShapeBorderRef::new(shape)));
         assert_eq!(label_font_size(tester), Some(32.0));
@@ -1678,7 +1675,7 @@ mod tests {
             assert_eq!(tester.text_color("Chip"), focused_color);
 
             // Hovered.
-            let center = center_of(tester, only::<ChoiceChip>(tester));
+            let center = tester.get_center(only::<ChoiceChip>(tester));
             let mut gesture = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
             tester.add_pointer(&mut gesture, Offset::ZERO);
             tester.move_to(&mut gesture, center, false);
@@ -2046,13 +2043,14 @@ mod tests {
                     .into_widget(),
             );
 
-            let chip_size = size_of(tester, only::<RawChip>(tester));
+            let chip_size = tester.get_size(only::<RawChip>(tester));
             assert_eq!(chip_size.width(), 127.0);
             assert_eq!(chip_size.height(), 93.0);
 
             // Calculate the distance between avatar and chip edges.
-            let chip_top_left = rect_of(tester, material_of_chip(tester)).top_left();
-            let avatar_center = center_of(tester, tester.find_by_icon(&Icons::favorite()));
+            let chip_top_left = tester.get_rect(material_of_chip(tester)).top_left();
+            let avatar_center =
+                tester.get_center(tester.element(find::by_icon(&Icons::favorite()).first()));
             assert_eq!(
                 chip_top_left.dx(),
                 avatar_center.dx() - (icon_size / 2.0) - padding - border
@@ -2063,7 +2061,7 @@ mod tests {
             );
 
             // Calculate the distance between avatar and label.
-            let label_top_left = rect_of(tester, only::<Container>(tester)).top_left();
+            let label_top_left = tester.get_rect(only::<Container>(tester)).top_left();
             assert_eq!(
                 label_top_left.dx(),
                 avatar_center.dx() + (icon_size / 2.0) + label_padding
@@ -2095,13 +2093,14 @@ mod tests {
                     .into_widget(),
             );
 
-            let chip_size = size_of(tester, only::<RawChip>(tester));
+            let chip_size = tester.get_size(only::<RawChip>(tester));
             assert_eq!(chip_size.width(), 127.0);
             assert_eq!(chip_size.height(), 93.0);
 
             // Calculate the distance between delete icon and chip edges.
-            let chip_top_right = rect_of(tester, material_of_chip(tester)).top_right();
-            let delete_icon_center = center_of(tester, tester.find_by_icon(&Icons::cancel()));
+            let chip_top_right = tester.get_rect(material_of_chip(tester)).top_right();
+            let delete_icon_center =
+                tester.get_center(tester.element(find::by_icon(&Icons::cancel()).first()));
             assert_eq!(
                 chip_top_right.dx(),
                 delete_icon_center.dx() + (icon_size / 2.0) + padding + border
@@ -2112,7 +2111,7 @@ mod tests {
             );
 
             // Calculate the distance between delete icon and label.
-            let label_top_right = rect_of(tester, only::<Container>(tester)).top_right();
+            let label_top_right = tester.get_rect(only::<Container>(tester)).top_right();
             assert_eq!(
                 label_top_right.dx(),
                 delete_icon_center.dx() - (icon_size / 2.0) - label_padding
@@ -2144,10 +2143,10 @@ mod tests {
             );
 
             // Test rendered icon size.
-            let avatar_icon = tester.find_by_icon(&Icons::favorite());
-            let delete_icon = tester.find_by_icon(&Icons::delete());
-            assert_eq!(size_of(tester, avatar_icon).width(), icon_size);
-            assert_eq!(size_of(tester, delete_icon).width(), icon_size);
+            let avatar_icon = tester.element(find::by_icon(&Icons::favorite()).first());
+            let delete_icon = tester.element(find::by_icon(&Icons::delete()).first());
+            assert_eq!(tester.get_size(avatar_icon).width(), icon_size);
+            assert_eq!(tester.get_size(delete_icon).width(), icon_size);
 
             // Test rendered icon color.
             assert_eq!(
@@ -2195,7 +2194,7 @@ mod tests {
             };
             let delete_glyph_color = |tester: &WidgetTester| {
                 tester
-                    .glyph_style(tester.find_by_icon(&Icons::delete()))
+                    .glyph_style(tester.element(find::by_icon(&Icons::delete()).first()))
                     .color
                     .map(|color| color.color())
             };

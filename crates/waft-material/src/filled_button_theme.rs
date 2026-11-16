@@ -165,7 +165,7 @@ mod tests {
         OutlinedBorderRef, RoundedRectangleBorder, ShapeBorder, StadiumBorder, TextStyle,
     };
     use waft_services::{MouseCursorRef, SystemMouseCursors};
-    use waft_widgets::testing::{WidgetTester, test_widgets};
+    use waft_widgets::testing::{WidgetTester, find, test_widgets};
     use waft_widgets::{
         Align, AnyElement, Builder, Center, Column, Icon, IconTheme, SizedBox, Text, WidgetState,
         WidgetStateProperty, WidgetStates, downcast_widget,
@@ -204,8 +204,8 @@ mod tests {
 
     /// The first `W` below an `FilledButton`.
     fn in_button<W: 'static>(tester: &WidgetTester) -> AnyElement {
-        tester
-            .find_by_type::<W>()
+        find::by_type::<W>()
+            .evaluate(tester)
             .into_iter()
             .find(|element| is_inside::<FilledButton>(tester, *element))
             .expect("a descendant of the button")
@@ -402,8 +402,8 @@ mod tests {
             );
             assert_eq!(response.enable_feedback, ENABLE_FEEDBACK);
         });
-        let button = tester.find_by_type::<FilledButton>()[0];
-        let size = tester.render_box_of(button).size(&tester.cell.borrow());
+        let button = find::by_type::<FilledButton>().evaluate(tester)[0];
+        let size = tester.get_size(button);
         assert_eq!(size, Size::new(200.0, 200.0));
         let align = in_button::<Align>(tester);
         tester.widget::<Align, _>(align, |align| assert!(align.alignment == ALIGNMENT));
@@ -527,10 +527,8 @@ mod tests {
                     icon_button_frame(theme, tonal)
                 };
                 let rects = |tester: &WidgetTester| {
-                    let material =
-                        tester.global_rect(tester.render_box_of(in_button::<Material>(tester)));
-                    let icon =
-                        tester.global_rect(tester.render_box_of(tester.find_by_type::<Icon>()[0]));
+                    let material = tester.get_rect(in_button::<Material>(tester));
+                    let icon = tester.get_rect(find::by_type::<Icon>().evaluate(tester)[0]);
                     (material, icon)
                 };
 
@@ -546,12 +544,7 @@ mod tests {
                 // Within f32: global positions go through valo's f32 matrices (waft-gestures'
                 // `Matrix4` entry), where Dart's are f64 and compare equal.
                 let expected = icon.right + 24.0;
-                assert!(
-                    (button.right - expected).abs()
-                        <= f64::from(f32::EPSILON) * expected.abs().max(1.0),
-                    "{} is not {expected}",
-                    button.right
-                );
+                waft_widgets::testing::assert_f32_equals(button.right, expected);
             });
         }
     }

@@ -219,9 +219,9 @@ mod tests {
         test_widgets(|tester| {
             let key = GlobalKey::new();
             tester.pump_widget(keyed_placeholder(&key));
-            assert_eq!(tester.size_of(&key), Size::new(800.0, 600.0));
+            assert_eq!(tester.get_size(&key), Size::new(800.0, 600.0));
             tester.pump_widget(Center::new().child(keyed_placeholder(&key)));
-            assert_eq!(tester.size_of(&key), Size::new(800.0, 600.0));
+            assert_eq!(tester.get_size(&key), Size::new(800.0, 600.0));
             tester.pump_widget(
                 Stack::new()
                     .text_direction(TextDirection::Ltr)
@@ -230,7 +230,7 @@ mod tests {
                         .bottom(0.0)
                         .into_widget()]),
             );
-            assert_eq!(tester.size_of(&key), Size::new(400.0, 600.0));
+            assert_eq!(tester.get_size(&key), Size::new(400.0, 600.0));
             tester.pump_widget(
                 Stack::new()
                     .text_direction(TextDirection::Ltr)
@@ -239,7 +239,7 @@ mod tests {
                         .right(0.0)
                         .into_widget()]),
             );
-            assert_eq!(tester.size_of(&key), Size::new(800.0, 400.0));
+            assert_eq!(tester.get_size(&key), Size::new(800.0, 400.0));
             tester.pump_widget(
                 Stack::new()
                     .text_direction(TextDirection::Ltr)
@@ -251,7 +251,7 @@ mod tests {
                     .top(0.0)
                     .into_widget()]),
             );
-            assert_eq!(tester.size_of(&key), Size::new(200.0, 300.0));
+            assert_eq!(tester.get_size(&key), Size::new(200.0, 300.0));
         });
     }
 
@@ -309,7 +309,7 @@ mod tests {
                 TextDirection::Ltr,
                 Center::new().child(SizedBox::shrink().child(keyed_placeholder(&key))),
             ));
-            assert_eq!(tester.size_of(&key), Size::ZERO);
+            assert_eq!(tester.get_size(&key), Size::ZERO);
         });
     }
 }

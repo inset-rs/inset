@@ -3329,7 +3329,7 @@ mod tests {
                 "the popup ends flush with the bottom of the 600pt view"
             );
 
-            tester.tap(Offset::new(200.0, 20.0), 1);
+            tester.tap_at(Offset::new(200.0, 20.0), 1);
             tester.pump_and_settle();
             assert!(
                 matches!(popped.peek(), Some(None)),

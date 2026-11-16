@@ -217,7 +217,7 @@ impl Fixture {
     }
 
     fn tap_at(&mut self, point: Offset) {
-        self.tester.tap(point, 1);
+        self.tester.tap_at(point, 1);
         self.settle();
     }
 

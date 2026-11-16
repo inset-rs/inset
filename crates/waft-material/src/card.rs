@@ -393,7 +393,7 @@ pub(crate) mod tests {
     use waft_painting::AlignmentGeometry;
     use waft_widgets::{Builder, Center, Container, SizedBox, Text};
 
-    use waft_widgets::testing::{WidgetTester, test_widgets};
+    use waft_widgets::testing::{WidgetTester, find, test_widgets};
 
     use super::*;
     use crate::color_scheme::ColorScheme;
@@ -415,8 +415,8 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn card_material(tester: &WidgetTester) -> CardMaterial {
-        let card = tester.find_by_type::<Card>()[0];
-        let materials = tester.descendants_of_type::<Material>(card);
+        let materials =
+            find::descendant(find::by_type::<Card>(), find::by_type::<Material>()).evaluate(tester);
         assert_eq!(materials.len(), 1, "one Material under the Card");
         tester.widget(materials[0], |material: &Material| CardMaterial {
             clip_behavior: material.clip_behavior,
@@ -431,8 +431,8 @@ pub(crate) mod tests {
     /// Dart's `tester.widget<Padding>(find.descendant(of: find.byType(Card), matching:
     /// find.byType(Padding)))`, whose padding it returns.
     pub(crate) fn card_padding(tester: &WidgetTester) -> EdgeInsetsGeometry {
-        let card = tester.find_by_type::<Card>()[0];
-        let paddings = tester.descendants_of_type::<Padding>(card);
+        let paddings =
+            find::descendant(find::by_type::<Card>(), find::by_type::<Padding>()).evaluate(tester);
         assert_eq!(paddings.len(), 1, "one Padding under the Card");
         tester.widget(paddings[0], |padding: &Padding| padding.padding)
     }
@@ -552,17 +552,12 @@ pub(crate) mod tests {
             );
 
             // Default margin is 4
-            let card = tester.find_by_type::<Card>()[0];
-            let rect = tester.global_rect(tester.render_box_of(card));
+            let card = find::by_type::<Card>().evaluate(tester)[0];
+            let rect = tester.get_rect(card);
             assert_eq!(rect.top_left(), waft_embedder::Offset::ZERO);
             assert_eq!(rect.size(), Size::new(108.0, 108.0));
 
-            let contents_rect = tester.global_rect(
-                tester
-                    .render_object(&contents_key)
-                    .as_box()
-                    .expect("a render box"),
-            );
+            let contents_rect = tester.get_rect(&contents_key);
             assert_eq!(
                 contents_rect.top_left(),
                 waft_embedder::Offset::new(4.0, 4.0)
@@ -581,17 +576,12 @@ pub(crate) mod tests {
             );
 
             // Specified margin is zero
-            let card = tester.find_by_type::<Card>()[0];
-            let rect = tester.global_rect(tester.render_box_of(card));
+            let card = find::by_type::<Card>().evaluate(tester)[0];
+            let rect = tester.get_rect(card);
             assert_eq!(rect.top_left(), waft_embedder::Offset::ZERO);
             assert_eq!(rect.size(), Size::new(100.0, 100.0));
 
-            let contents_rect = tester.global_rect(
-                tester
-                    .render_object(&contents_key)
-                    .as_box()
-                    .expect("a render box"),
-            );
+            let contents_rect = tester.get_rect(&contents_key);
             assert_eq!(contents_rect.top_left(), waft_embedder::Offset::ZERO);
             assert_eq!(contents_rect.size(), Size::new(100.0, 100.0));
         });
@@ -638,7 +628,7 @@ pub(crate) mod tests {
         test_widgets(|tester| {
             tester.pump_widget(Card::new().into_widget());
 
-            let card = tester.find_by_type::<Card>()[0];
+            let card = find::by_type::<Card>().evaluate(tester)[0];
             assert_eq!(tester.widget(card, |card: &Card| card.shadow_color), None);
             assert_eq!(
                 card_material(tester).shadow_color,
@@ -651,7 +641,7 @@ pub(crate) mod tests {
                     .into_widget(),
             );
 
-            let card = tester.find_by_type::<Card>()[0];
+            let card = find::by_type::<Card>().evaluate(tester)[0];
             assert_eq!(
                 card_material(tester).shadow_color,
                 tester.widget(card, |card: &Card| card.shadow_color)
@@ -674,8 +664,8 @@ pub(crate) mod tests {
                     )
                     .into_widget()
             });
-            let x_text = tester.find_text("X")[0];
-            let rect = tester.global_rect(tester.render_box_of(x_text));
+            let x_text = find::text("X").evaluate(tester)[0];
+            let rect = tester.get_rect(x_text);
             assert!(rect.width() <= 0.0 || rect.height() <= 0.0);
         });
     }

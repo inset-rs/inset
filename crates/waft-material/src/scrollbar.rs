@@ -796,7 +796,7 @@ pub(crate) mod tests {
 
     use waft_cupertino::CupertinoScrollbarState;
     use waft_embedder::Size;
-    use waft_embedder::{Canvas, PointerDeviceKind, Rect};
+    use waft_embedder::{Canvas, PointerDeviceKind, RRect, Rect};
     use waft_gestures::{GestureBinding, PointerEvent, PointerScrollEvent};
     use waft_painting::{AxisDirection, Border, BorderSide, BorderStyle, BoxDecoration};
     use waft_rendering::{HitTestBehavior, RenderViewport, RenderViewportBase};
@@ -809,7 +809,8 @@ pub(crate) mod tests {
     };
 
     use waft_widgets::testing::{
-        TargetPlatformVariant, TestPointer, WidgetTester, test_widgets, test_widgets_variant,
+        TargetPlatformVariant, TestPointer, WidgetTester, expect, find, finds_nothing,
+        finds_one_widget, test_widgets, test_widgets_variant,
     };
 
     use super::*;
@@ -817,8 +818,10 @@ pub(crate) mod tests {
     use crate::floating_action_button::FloatingActionButton;
     use crate::icons::Icons;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{Drawn, material_app};
+    use crate::test_support::material_app;
     use crate::theme_data::ThemeData;
+    use waft_embedder::valo::Op;
+    use waft_rendering::testing::{PaintCall, assert_paints, draws, paints_exactly};
     use waft_widgets::AnyScrollController;
 
     pub(crate) const K_SCROLLBAR_FADE_DURATION_FOR_TESTS: Duration = Duration::from_millis(300);
@@ -920,8 +923,8 @@ pub(crate) mod tests {
 
     /// The Material scrollbar's state.
     fn material_state(tester: &WidgetTester) -> Handle<MaterialScrollbarState> {
-        let element = *tester
-            .find_by_type::<MaterialScrollbar>()
+        let element = *find::by_type::<MaterialScrollbar>()
+            .evaluate(tester)
             .first()
             .expect("a Material scrollbar");
         element
@@ -931,12 +934,12 @@ pub(crate) mod tests {
 
     /// What the scrollbar paints over its child: Dart's `paints` matcher on
     /// `find.byType(Scrollbar)`, without the child's own draws.
-    pub(crate) fn painted(tester: &WidgetTester) -> Vec<Drawn> {
+    pub(crate) fn painted(tester: &WidgetTester) -> Vec<Op> {
         painted_by(tester, material_state(tester))
     }
 
     /// What the scrollbar painter of `state` paints over its child.
-    fn painted_by<S: RawScrollbarStateLeaf>(tester: &WidgetTester, state: Handle<S>) -> Vec<Drawn>
+    fn painted_by<S: RawScrollbarStateLeaf>(tester: &WidgetTester, state: Handle<S>) -> Vec<Op>
     where
         S::Widget: RawScrollbarLeaf,
     {
@@ -950,7 +953,7 @@ pub(crate) mod tests {
             .size(&app);
         let mut canvas = Canvas::new();
         painter.paint(&mut app, &mut canvas, size);
-        Drawn::draws(&canvas.build())
+        canvas.build().ops().to_vec()
     }
 
     /// Dart's `paints..rect(rect: track, color:)..line(p1:, p2:, color:)`: the track and
@@ -961,14 +964,14 @@ pub(crate) mod tests {
     /// track's width from the thickness and margin it is laid out with.
     pub(crate) fn assert_track(
         tester: &WidgetTester,
-        drawn: &[Drawn],
+        drawn: &[Op],
         rect: Rect,
         color: u32,
         border: (Offset, Offset),
         border_color: u32,
     ) {
         if color == K_TRANSPARENT && border_color == K_TRANSPARENT {
-            assert_eq!(drawn.len(), 1, "only the thumb in {drawn:?}");
+            assert_eq!(draws(drawn).len(), 1, "only the thumb in {drawn:?}");
             let state = material_state(tester);
             let app = tester.cell.borrow();
             let painter = RawScrollbarState::scrollbar_painter(state, &app);
@@ -981,59 +984,45 @@ pub(crate) mod tests {
             );
             return;
         }
-        assert_eq!(
-            drawn.first(),
-            Some(&Drawn::Rect(color, rect)),
-            "the track in {drawn:?}"
-        );
-        // A stroked path's recorded bounds take in the stroke, so the border is matched by
-        // its centre and by covering both ends of the line.
-        let line = Rect::from_points(border.0, border.1);
-        let Some(Drawn::Path(painted_color, bounds)) = drawn.get(1) else {
-            panic!("the track border in {drawn:?}");
-        };
-        assert_eq!(*painted_color, border_color, "the track border's colour");
-        assert_eq!(bounds.center(), line.center(), "the track border's line");
-        assert!(
-            bounds.contains(border.0) && bounds.contains(border.1),
-            "the track border {bounds:?} covers {line:?}"
+        assert_paints(
+            drawn,
+            &[
+                PaintCall::rect_at(rect, Some(Color::new(color))),
+                PaintCall::Line {
+                    p1: Some(border.0),
+                    p2: Some(border.1),
+                    color: Some(Color::new(border_color)),
+                    stroke_width: None,
+                },
+            ],
         );
     }
 
     /// Dart's `paints..rect(rect: thumb, color:)`: a square thumb, the last draw.
-    pub(crate) fn assert_thumb_rect(drawn: &[Drawn], rect: Rect, color: u32) {
-        assert_eq!(
-            drawn.last(),
-            Some(&Drawn::Rect(color, rect)),
-            "the thumb in {drawn:?}"
-        );
+    pub(crate) fn assert_thumb_rect(drawn: &[Op], rect: Rect, color: u32) {
+        assert_paints(drawn, &[PaintCall::rect_at(rect, Some(Color::new(color)))]);
     }
 
     /// Dart's `paints..rrect(rrect: RRect.fromRectAndRadius(rect, radius), color:)`: a
-    /// rounded thumb, the last draw.
+    /// rounded thumb.
     pub(crate) fn assert_thumb_rrect(
         tester: &WidgetTester,
         rect: Rect,
         radius: Radius,
         color: u32,
     ) {
-        let drawn = painted(tester);
-        assert_eq!(
-            drawn.last(),
-            Some(&Drawn::Path(color, rect)),
-            "the thumb in {drawn:?}"
-        );
-        let state = material_state(tester);
-        let app = tester.cell.borrow();
-        assert_eq!(
-            RawScrollbarState::scrollbar_painter(state, &app).radius(&app),
-            Some(radius)
+        assert_paints(
+            &painted(tester),
+            &[PaintCall::rrect_at(
+                RRect::from_rect_and_radius(rect, radius),
+                Some(Color::new(color)),
+            )],
         );
     }
 
     /// Whether the thumb is painted: Dart's `paints..rect()` against `isNot(paints..rect())`.
     pub(crate) fn paints_thumb(tester: &WidgetTester) -> bool {
-        !painted(tester).is_empty()
+        !draws(&painted(tester)).is_empty()
     }
 
     /// Dart's `tester.startGesture(at)` and a settle.
@@ -1259,7 +1248,7 @@ pub(crate) mod tests {
             );
 
             // Tap on the track area below the thumb.
-            tester.tap(Offset::new(796.0, 550.0), 1);
+            tester.tap_at(Offset::new(796.0, 550.0), 1);
             tester.pump_and_settle();
 
             assert_eq!(offset(tester, scroll_controller.handle()), 400.0);
@@ -1279,7 +1268,7 @@ pub(crate) mod tests {
             );
 
             // Tap on the track area above the thumb.
-            tester.tap(Offset::new(796.0, 50.0), 1);
+            tester.tap_at(Offset::new(796.0, 50.0), 1);
             tester.pump_and_settle();
 
             assert_eq!(offset(tester, scroll_controller.handle()), 0.0);
@@ -1523,7 +1512,7 @@ pub(crate) mod tests {
                     K_DEFAULT_THUMB_RADIUS,
                     K_DEFAULT_IDLE_THUMB_COLOR,
                 );
-                tester.tap(Offset::new(794.0, 5.0), 1);
+                tester.tap_at(Offset::new(794.0, 5.0), 1);
                 tester.pump_and_settle();
 
                 // Tapping triggers a hover enter event. In this case, the Scrollbar should
@@ -1664,19 +1653,39 @@ pub(crate) mod tests {
             // Scrollbar fully showing
             tester.pump_by(Duration::from_millis(500));
             assert!(paints_thumb(tester));
-            assert!(tester.find_by_type::<CupertinoScrollbar>().is_empty());
+            expect(
+                tester,
+                &find::by_type::<CupertinoScrollbar>(),
+                finds_nothing(),
+            );
 
             let tree = view_with_scroll(tester, TargetPlatform::IOS);
             tester.pump_widget(tree);
-            assert_eq!(tester.find_by_type::<CupertinoScrollbar>().len(), 1);
-            assert!(tester.find_by_type::<MaterialScrollbar>().is_empty());
+            expect(
+                tester,
+                &find::by_type::<CupertinoScrollbar>(),
+                finds_one_widget(),
+            );
+            expect(
+                tester,
+                &find::by_type::<MaterialScrollbar>(),
+                finds_nothing(),
+            );
             tester.pump_and_settle();
 
             // Only iOS adapts: macOS keeps the Material scrollbar.
             let tree = view_with_scroll(tester, TargetPlatform::MacOS);
             tester.pump_widget(tree);
-            assert!(tester.find_by_type::<CupertinoScrollbar>().is_empty());
-            assert_eq!(tester.find_by_type::<MaterialScrollbar>().len(), 1);
+            expect(
+                tester,
+                &find::by_type::<CupertinoScrollbar>(),
+                finds_nothing(),
+            );
+            expect(
+                tester,
+                &find::by_type::<MaterialScrollbar>(),
+                finds_one_widget(),
+            );
         });
     }
 
@@ -1690,8 +1699,8 @@ pub(crate) mod tests {
                 Scrollbar::new(scroll_view(Some(controller.clone()), 4000.0, 4000.0))
                     .controller(controller.clone()),
             )));
-            let cupertino = *tester
-                .find_by_type::<CupertinoScrollbar>()
+            let cupertino = *find::by_type::<CupertinoScrollbar>()
+                .evaluate(tester)
                 .first()
                 .expect("a Cupertino scrollbar on iOS");
             let passed = tester.widget(cupertino, |scrollbar: &CupertinoScrollbar| {
@@ -1767,7 +1776,7 @@ pub(crate) mod tests {
                 assert_eq!(offset(tester, scroll_controller.handle()), SCROLL_AMOUNT);
 
                 // Tap on the track to validate the scroll view will not page.
-                tester.tap(Offset::new(797.0, 200.0), 1);
+                tester.tap_at(Offset::new(797.0, 200.0), 1);
                 tester.pump_and_settle();
                 // The offset should not have changed.
                 assert_eq!(offset(tester, scroll_controller.handle()), SCROLL_AMOUNT);
@@ -1858,12 +1867,12 @@ pub(crate) mod tests {
             assert_eq!(tap_count.get(), 0);
 
             // Tap on the thumb to validate the scroll view receives a click.
-            tester.tap(Offset::new(797.0, 45.0), 1);
+            tester.tap_at(Offset::new(797.0, 45.0), 1);
             tester.pump_and_settle();
             assert_eq!(tap_count.get(), 1);
 
             // Tap on the track to validate the scroll view will not page and receives a click.
-            tester.tap(Offset::new(797.0, 400.0), 1);
+            tester.tap_at(Offset::new(797.0, 400.0), 1);
             tester.pump_and_settle();
             // The offset should not have changed.
             assert_eq!(
@@ -1921,8 +1930,8 @@ pub(crate) mod tests {
                     .child(SizedBox::shrink().child(Scrollbar::new(SingleChildScrollView::new())))
                     .into_widget(),
             ));
-            let scrollbar = *tester
-                .find_by_type::<Scrollbar>()
+            let scrollbar = *find::by_type::<Scrollbar>()
+                .evaluate(tester)
                 .first()
                 .expect("the scrollbar");
             let app = tester.cell.borrow();
@@ -2065,13 +2074,11 @@ pub(crate) mod tests {
                 tester.pump_by(Duration::from_secs(5)); // to let the theme animate
             };
             let fling = |tester: &mut WidgetTester| {
-                let scrollable = *tester
-                    .find_by_type::<Scrollable>()
+                let scrollable = *find::by_type::<Scrollable>()
+                    .evaluate(tester)
                     .first()
                     .expect("a scrollable");
-                let center = tester
-                    .global_rect(tester.render_box_of(scrollable))
-                    .center();
+                let center = tester.get_rect(scrollable).center();
                 tester.fling_from(center, Offset::new(0.0, -DRAG_OFFSET), 1000.0, 1);
             };
 
@@ -2149,9 +2156,12 @@ pub(crate) mod tests {
                 0,
                 "Building a list with a scrollbar triggered an animation."
             );
-            let list = *tester.find_by_type::<ListView>().first().expect("a list");
-            let center = tester.global_rect(tester.render_box_of(list)).center();
-            tester.tap(center, 1);
+            let list = *find::by_type::<ListView>()
+                .evaluate(tester)
+                .first()
+                .expect("a list");
+            let center = tester.get_rect(list).center();
+            tester.tap_at(center, 1);
             assert_eq!(
                 transient_callback_count(tester),
                 0,
@@ -2189,8 +2199,8 @@ pub(crate) mod tests {
                 RawScrollbarState::scrollbar_painter(state, &tester.cell.borrow())
             };
             // Dragging makes the scrollbar first appear.
-            let text = *tester.find_text("0").first().expect("the text");
-            let center = tester.global_rect(tester.render_box_of(text)).center();
+            let text = *find::text("0").evaluate(tester).first().expect("the text");
+            let center = tester.get_rect(text).center();
             tester.drag_from(center, Offset::new(0.0, -10.0), 1);
             tester.pump_by(Duration::from_millis(200));
             tester.pump_by(Duration::from_millis(200));
@@ -2290,7 +2300,7 @@ pub(crate) mod tests {
         /// ScrollPositions during the transition: Dart's `tester.drag` and `pump`, then
         /// `tester.takeException()`.
         fn swipe_and_take_exception(tester: &mut WidgetTester) -> String {
-            let first = tester.find_text("Test")[0];
+            let first = find::text("Test").evaluate(tester)[0];
             let center = {
                 let render = tester.render_box_of(first);
                 let app = tester.cell.borrow();
@@ -2371,22 +2381,22 @@ pub(crate) mod tests {
 
     /// Dart's `tester.fling(find.byType(SingleChildScrollView), Offset(0.0, -10.0), 10)`.
     fn fling_scroll_view(tester: &mut WidgetTester) {
-        let view = *tester
-            .find_by_type::<SingleChildScrollView>()
+        let view = *find::by_type::<SingleChildScrollView>()
+            .evaluate(tester)
             .first()
             .expect("the scroll view");
-        let center = tester.global_rect(tester.render_box_of(view)).center();
+        let center = tester.get_rect(view).center();
         tester.fling_from(center, Offset::new(0.0, -10.0), 10.0, 1);
     }
 
     /// Dart's `tester.tap(find.byType(FloatingActionButton))`.
     fn tap_floating_action_button(tester: &mut WidgetTester) {
-        let button = *tester
-            .find_by_type::<FloatingActionButton>()
+        let button = *find::by_type::<FloatingActionButton>()
+            .evaluate(tester)
             .first()
             .expect("the button");
-        let center = tester.global_rect(tester.render_box_of(button)).center();
-        tester.tap(center, 2);
+        let center = tester.get_rect(button).center();
+        tester.tap_at(center, 2);
     }
 
     // 'With thumbVisibility: true, fling a scroll. While it is still scrolling, set
@@ -2450,7 +2460,7 @@ pub(crate) mod tests {
 
     /// What the scrollbar under the `Scrollbar` keyed `key` paints over its child, whether
     /// it adapted to a `CupertinoScrollbar` or not.
-    fn painted_under(tester: &WidgetTester, key: &GlobalKey) -> Vec<Drawn> {
+    fn painted_under(tester: &WidgetTester, key: &GlobalKey) -> Vec<Op> {
         let keyed = key
             .current_context(&tester.cell.borrow_mut())
             .expect("the keyed scrollbar is mounted");
@@ -2553,15 +2563,12 @@ pub(crate) mod tests {
                 // Valo records no op for the transparent track and its border, which Dart's
                 // `paintsExactlyCountTimes` counts: what is left is the thumb, and the outer
                 // scrollbar draws nothing (Dart's counts on `key2` take in `key1`'s draws).
-                assert_eq!(painted_under(tester, &key2), []);
+                assert!(draws(&painted_under(tester, &key2)).is_empty());
                 let inner_drawn = painted_under(tester, &key1);
                 match theme_platform {
                     TargetPlatform::Android => {
                         // On android, draws two rectangles for the track and thumb.
-                        assert!(
-                            matches!(inner_drawn.as_slice(), [Drawn::Rect(..)]),
-                            "{inner_drawn:?}"
-                        );
+                        paints_exactly(&draws(&inner_drawn), &[PaintCall::rect(None)]).unwrap();
                     }
                     TargetPlatform::IOS
                     | TargetPlatform::Fuchsia
@@ -2569,10 +2576,7 @@ pub(crate) mod tests {
                     | TargetPlatform::MacOS
                     | TargetPlatform::Windows => {
                         // Draws a rectangle for the track and a rounded rectangle for the thumb.
-                        assert!(
-                            matches!(inner_drawn.as_slice(), [Drawn::Path(..)]),
-                            "{inner_drawn:?}"
-                        );
+                        paints_exactly(&draws(&inner_drawn), &[PaintCall::rrect(None)]).unwrap();
                     }
                 }
             });
@@ -2669,11 +2673,11 @@ pub(crate) mod tests {
 
             // Drag is still being held, move pointer to be hovering over another area
             // of the scrollable (not over the scrollbar) and execute another pointer scroll
-            let view = *tester
-                .find_by_type::<SingleChildScrollView>()
+            let view = *find::by_type::<SingleChildScrollView>()
+                .evaluate(tester)
                 .first()
                 .expect("the scroll view");
-            let center = tester.global_rect(tester.render_box_of(view)).center();
+            let center = tester.get_rect(view).center();
             assert_eq!(center, Offset::new(400.0, 300.0));
             pointer_scroll(tester, center, Offset::new(0.0, -90.0));
             tester.pump_and_settle();
@@ -2701,7 +2705,7 @@ pub(crate) mod tests {
                     .controller(controller),
             )));
             let hover = {
-                let scrollbar = tester.find_by_type::<MaterialScrollbar>()[0];
+                let scrollbar = find::by_type::<MaterialScrollbar>().evaluate(tester)[0];
                 let app = tester.cell.borrow();
                 scrollbar
                     .state_handle::<MaterialScrollbarState>(&app)

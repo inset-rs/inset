@@ -18,6 +18,7 @@ use waft_rendering::{
     PaintingContext, PipelineOwner, RenderBox, RenderBoxData, RenderHandle, RenderObject,
     RenderObjectData, RenderObjectWithChildData, RenderObjectWithChildMixin, RenderProxyBoxMixin,
 };
+use waft_widgets::AnyElement;
 use waft_widgets::{
     AnimatedSize, BuildContext, CustomSingleChildLayout, Directionality, Icon, IntoWidget, KeyRef,
     MediaQuery, MultiChildRenderObjectWidget, Padding, RenderObjectWidget,
@@ -618,8 +619,31 @@ struct TextSelectionToolbarItemsLayout {
     children: Vec<WidgetRef>,
 }
 
+/// Dart's `_TextSelectionToolbarItemsLayoutElement._shouldPaint`.
+fn should_paint(app: &App, child: AnyElement) -> bool {
+    child
+        .render_object(app)
+        .and_then(|render| render.parent_data(app))
+        .and_then(|data| data.part::<ToolbarItemsParentData>())
+        .is_some_and(|data| data.should_paint)
+}
+
 impl RenderObjectWidget for TextSelectionToolbarItemsLayout {
     type RenderObject = RenderTextSelectionToolbarItemsLayout;
+
+    /// Dart's `_TextSelectionToolbarItemsLayoutElement.debugVisitOnstageChildren`: the children
+    /// the layout paints.
+    fn debug_visit_onstage_children(
+        &self,
+        app: &App,
+        children: &[AnyElement],
+        visitor: &mut dyn FnMut(AnyElement),
+    ) {
+        children
+            .iter()
+            .filter(|child| should_paint(app, **child))
+            .for_each(|child| visitor(*child));
+    }
 
     fn create_render_object(&self, app: &mut App, _context: BuildContext) -> AnyRenderObject {
         RenderTextSelectionToolbarItemsLayout::new(
@@ -1157,7 +1181,9 @@ mod tests {
         downcast_widget,
     };
 
-    use waft_widgets::testing::{WidgetTester, test_widgets};
+    use waft_widgets::testing::{
+        WidgetTester, expect, find, finds_n_widgets, finds_nothing, finds_one_widget, test_widgets,
+    };
 
     use super::*;
     use crate::colors::Colors;
@@ -1253,23 +1279,21 @@ mod tests {
 
     /// Dart's `findOverflowButton()`.
     fn find_overflow_button(tester: &WidgetTester) -> Vec<AnyElement> {
-        tester.find_onstage_by_type::<TextSelectionToolbarOverflowButton>()
+        find::by_type::<TextSelectionToolbarOverflowButton>().evaluate(tester)
     }
 
     /// Dart's `tester.tap(findOverflowButton())` and `pumpAndSettle`.
     fn tap_overflow_button(tester: &mut WidgetTester) {
         let buttons = find_overflow_button(tester);
         assert_eq!(buttons.len(), 1, "one overflow button");
-        let center = tester
-            .global_rect(tester.render_box_of(buttons[0]))
-            .center();
-        tester.tap(center, 1);
+        let center = tester.get_rect(buttons[0]).center();
+        tester.tap_at(center, 1);
         tester.pump_and_settle();
     }
 
     /// Dart's `tester.getRect(finder)` of the first element found.
     fn rect_of(tester: &WidgetTester, elements: &[AnyElement]) -> Rect {
-        tester.global_rect(tester.render_box_of(elements[0]))
+        tester.get_rect(elements[0])
     }
 
     fn test_boxes(count: usize) -> Vec<WidgetRef> {
@@ -1290,7 +1314,7 @@ mod tests {
 
         // All children fit on the screen, so they are all rendered.
         let count = children.borrow().len();
-        assert_eq!(tester.find_onstage_by_type::<TestBox>().len(), count);
+        assert_eq!(find::by_type::<TestBox>().evaluate(tester).len(), count);
         assert!(find_overflow_button(tester).is_empty());
 
         // Adding one more child makes the children overflow.
@@ -1298,17 +1322,17 @@ mod tests {
             children.borrow_mut().push(TestBox::new().into_widget());
         });
         let count = children.borrow().len();
-        assert_eq!(tester.find_onstage_by_type::<TestBox>().len(), count - 1);
+        assert_eq!(find::by_type::<TestBox>().evaluate(tester).len(), count - 1);
         assert_eq!(find_overflow_button(tester).len(), 1);
 
         // Tap the overflow button to show the overflow menu.
         tap_overflow_button(tester);
-        assert_eq!(tester.find_onstage_by_type::<TestBox>().len(), 1);
+        expect(tester, &find::by_type::<TestBox>(), finds_one_widget());
         assert_eq!(find_overflow_button(tester).len(), 1);
 
         // Tap the overflow button again to hide the overflow menu.
         tap_overflow_button(tester);
-        assert_eq!(tester.find_onstage_by_type::<TestBox>().len(), count - 1);
+        assert_eq!(find::by_type::<TestBox>().evaluate(tester).len(), count - 1);
         assert_eq!(find_overflow_button(tester).len(), 1);
     }
 
@@ -1349,7 +1373,7 @@ mod tests {
             let toolbar_y = |tester: &WidgetTester| {
                 rect_of(
                     tester,
-                    &tester.find_by_type::<TextSelectionToolbarOverflowable>(),
+                    &find::by_type::<TextSelectionToolbarOverflowable>().evaluate(tester),
                 )
                 .top
             };
@@ -1384,7 +1408,7 @@ mod tests {
     /// Dart's `toolbarContainer.color`: the first `Material` under the
     /// `_TextSelectionToolbarContainer`.
     fn toolbar_container_color(tester: &WidgetTester) -> Option<Color> {
-        let containers = tester.find_by_type::<TextSelectionToolbarContainer>();
+        let containers = find::by_type::<TextSelectionToolbarContainer>().evaluate(tester);
         assert!(!containers.is_empty());
         let materials = tester.descendants_of_type::<Material>(containers[0]);
         assert!(!materials.is_empty());
@@ -1478,7 +1502,7 @@ mod tests {
 
             // All children fit on the screen, so they are all rendered.
             let count = children.borrow().len();
-            assert_eq!(tester.find_onstage_by_type::<TestBox>().len(), count);
+            assert_eq!(find::by_type::<TestBox>().evaluate(tester).len(), count);
             assert!(find_overflow_button(tester).is_empty());
 
             const SHORT: &str = "Short";
@@ -1497,17 +1521,17 @@ mod tests {
 
             // Tap the overflow button to show the overflow menu.
             tap_overflow_button(tester);
-            assert!(tester.find_onstage_by_type::<TestBox>().is_empty());
-            assert_eq!(tester.find_onstage_by_type::<Text>().len(), 3);
+            expect(tester, &find::by_type::<TestBox>(), finds_nothing());
+            expect(tester, &find::by_type::<Text>(), finds_n_widgets(3));
             assert_eq!(find_overflow_button(tester).len(), 1);
 
-            let containers = tester.find_by_type::<TextSelectionToolbarContainer>();
+            let containers = find::by_type::<TextSelectionToolbarContainer>().evaluate(tester);
             assert!(!containers.is_empty());
 
             // Buttons have their width set to the container width.
             let overflow_menu_width = rect_of(tester, &containers).width();
             let text_width = |text: &str| {
-                let found: Vec<AnyElement> = tester.find_onstage_text(text);
+                let found: Vec<AnyElement> = find::text(text).evaluate(tester);
                 rect_of(tester, &found).width()
             };
             assert_eq!(text_width(LONG), overflow_menu_width);
@@ -1544,11 +1568,14 @@ mod tests {
             );
 
             // Verify all items are visible.
-            assert_eq!(tester.find_onstage_by_type::<TestBox>().len(), ITEM_COUNT);
+            assert_eq!(
+                find::by_type::<TestBox>().evaluate(tester).len(),
+                ITEM_COUNT
+            );
 
             // Find all text widgets by their content and get their positions.
             let text_rects: Vec<Rect> = (0..ITEM_COUNT)
-                .map(|i| rect_of(tester, &tester.find_onstage_text(&format!("{i}"))))
+                .map(|i| tester.get_rect(find::text(&format!("{i}"))))
                 .collect();
 
             // In RTL, items should be in reverse order (2, 1, 0).
@@ -1595,13 +1622,13 @@ mod tests {
             );
             let more = StandardComponentType::MoreButton.key();
             let back = StandardComponentType::BackButton.key();
-            assert_eq!(tester.find_onstage_by_key(&more).len(), 1);
-            assert!(tester.find_onstage_by_key(&back).is_empty());
+            expect(tester, &find::by_key(more.clone()), finds_one_widget());
+            expect(tester, &find::by_key(back.clone()), finds_nothing());
 
             tap_overflow_button(tester);
-            assert!(tester.find_onstage_by_key(&more).is_empty());
-            assert_eq!(tester.find_onstage_by_key(&back).len(), 1);
-            let back_button = tester.find_onstage_by_key(&back)[0];
+            expect(tester, &find::by_key(more.clone()), finds_nothing());
+            expect(tester, &find::by_key(back.clone()), finds_one_widget());
+            let back_button = tester.element(find::by_key(back.clone()));
             let app = tester.cell.borrow();
             assert!(
                 downcast_widget::<TextSelectionToolbarOverflowButton>(&**back_button.widget(&app))

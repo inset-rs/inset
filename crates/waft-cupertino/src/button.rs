@@ -1046,7 +1046,7 @@ mod tests {
                 .current_state::<CupertinoButtonState>(&tester.cell.borrow())
                 .expect("the button mounted");
 
-            tester.tap(Offset::new(20.0, 20.0), 1);
+            tester.tap_at(Offset::new(20.0, 20.0), 1);
             let app = tester.cell.borrow();
             assert!(!app.get(state).tap_in_progress);
             assert!(!app.get(state).button_held_down);

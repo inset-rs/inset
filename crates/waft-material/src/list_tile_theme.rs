@@ -816,7 +816,7 @@ mod tests {
         WidgetStateColor, WidgetStateMouseCursor, WidgetStateProperty,
     };
 
-    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+    use waft_widgets::testing::{TestPointer, WidgetTester, find, test_widgets};
 
     use super::*;
     use crate::colors::Colors;
@@ -825,7 +825,7 @@ mod tests {
     use crate::list_tile::ListTile;
     use crate::list_tile::tests::{
         THIRTEEN_LINES, avatar, ink_tile_color, key_rect, m2, m3, placeholder, pump_app, sized,
-        style_color, test_icon, test_text, text_rect, tile_rect,
+        style_color, test_icon, test_text, tile_rect,
     };
     use crate::material::Material;
     use crate::scaffold::{Scaffold, ScaffoldState};
@@ -1144,7 +1144,7 @@ mod tests {
                 shape: Some(ShapeBorderRef::new(rounded_shape)),
                 ..ThemedArgs::default()
             });
-            let ink_well = case.tester.find_by_type::<InkWell>()[0];
+            let ink_well = case.tester.element(find::by_type::<InkWell>().at(0));
             let custom_border = case.tester.widget(ink_well, |ink_well: &InkWell| {
                 ink_well.ink_response.custom_border.clone()
             });
@@ -1155,7 +1155,7 @@ mod tests {
                 enabled: Some(false),
                 ..ThemedArgs::default()
             });
-            let list_tile = text_rect(case.tester, "title").center();
+            let list_tile = case.tester.get_rect(find::text("title")).center();
             let mut gesture = TestPointer::mouse(1, 0);
             case.tester.add_pointer(&mut gesture, Offset::ZERO);
             case.tester.move_to(&mut gesture, list_tile, false);
@@ -1170,7 +1170,7 @@ mod tests {
             );
 
             // titleAlignment is respected.
-            let title_offset = text_rect(case.tester, "title").top_left();
+            let title_offset = case.tester.get_rect(find::text("title")).top_left();
             let leading_offset = key_rect(case.tester, &case.leading_key).top_left();
             let trailing_offset = key_rect(case.tester, &case.trailing_key).top_right();
             assert_eq!(leading_offset.dy() - title_offset.dy(), 6.0);
@@ -1396,7 +1396,7 @@ mod tests {
         let before = ink_tile_color(tester);
         // Tap on tile to change isSelected.
         let center = tile_rect(tester, 0).center();
-        tester.tap(center, 1);
+        tester.tap_at(center, 1);
         tester.pump_and_settle();
         (before, ink_tile_color(tester))
     }
@@ -1484,9 +1484,9 @@ mod tests {
             // Start drawer animation.
             tester.pump();
 
-            let list_tile = tester.find_by_type::<ListTile>()[0];
-            let ink_well = tester
-                .find_by_type::<InkWell>()
+            let list_tile = tester.element(find::by_type::<ListTile>().at(0));
+            let ink_well = find::by_type::<InkWell>()
+                .evaluate(tester)
                 .into_iter()
                 .find(|ink_well| tester.ancestors(*ink_well).contains(&list_tile))
                 .expect("the tile's InkWell");

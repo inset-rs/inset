@@ -816,13 +816,13 @@ mod tests {
         Builder, Center, Container, GlobalKey, Icon, IconThemeData, Padding, Text, WidgetBuilder,
     };
 
-    use waft_widgets::testing::{WidgetTester, test_widgets};
+    use waft_widgets::testing::{WidgetTester, find, test_widgets};
 
     use super::*;
     use crate::colors::Colors;
     use crate::dialog::tests::{
-        dialog_material, last_barrier_color, material_from_dialog, open, placeholder, rect_of,
-        rect_of_key, tap_text, text_style_in_dialog,
+        dialog_material, last_barrier_color, material_from_dialog, open, placeholder, rect_of_key,
+        text_style_in_dialog,
     };
     use crate::dialog::{AlertDialog, Dialog, SimpleDialog, show_dialog};
     use crate::elevated_button::ElevatedButton;
@@ -891,7 +891,7 @@ mod tests {
 
     /// Dart's `_getMaterialAlertDialog(tester)`.
     fn material_alert_dialog<R>(tester: &WidgetTester, read: impl FnOnce(&Material) -> R) -> R {
-        let dialog = tester.find_by_type::<AlertDialog>()[0];
+        let dialog = find::by_type::<AlertDialog>().evaluate(tester)[0];
         let material = tester.descendants_of_type::<Material>(dialog)[0];
         tester.widget::<Material, R>(material, read)
     }
@@ -899,7 +899,7 @@ mod tests {
     /// Dart's `_getIconRenderObject(tester, icon).text.style?.color`.
     fn icon_color(tester: &WidgetTester, icon: &waft_widgets::IconData) -> Option<Color> {
         tester
-            .glyph_style(tester.find_by_icon(icon))
+            .glyph_style(tester.element(find::by_icon(icon).first()))
             .color
             .map(|color| color.color())
     }
@@ -912,7 +912,7 @@ mod tests {
     }
 
     fn dialog_bottom_left(tester: &WidgetTester) -> Offset {
-        rect_of(tester, dialog_material(tester)).bottom_left()
+        tester.get_rect(dialog_material(tester)).bottom_left()
     }
 
     #[test]
@@ -1019,7 +1019,7 @@ mod tests {
         assert_eq!(text_color(tester, "Content"), Some(Color::new(0xff000000)));
         assert_eq!(last_barrier_color(tester), theme.barrier_color);
 
-        let cancel = tester.find_by_icon(&Icons::cancel());
+        let cancel = tester.element(find::by_icon(&Icons::cancel()).first());
         let padding = tester.ancestor_of_type::<Padding>(cancel);
         assert_eq!(
             tester.widget::<Padding, _>(padding, |padding| padding.padding),
@@ -1524,7 +1524,7 @@ mod tests {
                 with_dialog_theme(DialogThemeData::new().inset_padding(inset_padding)),
                 None,
             );
-            tap_text(tester, "X");
+            tester.tap(find::text("X"));
             tester.pump_by(std::time::Duration::ZERO);
 
             assert_eq!(

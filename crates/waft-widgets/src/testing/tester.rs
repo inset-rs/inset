@@ -26,6 +26,8 @@ pub struct WidgetTester {
     restoration: Option<Rc<TestRestoration>>,
     /// Whether a pump is running, or began and unwound: a pump that panicked never clears it.
     in_pump: bool,
+    /// Dart's `_nextPointer`: the pointer the next finder-taking gesture uses.
+    next_pointer: std::cell::Cell<i64>,
 }
 
 /// The host side of flutter_test's `TestRestorationManager`: it answers `Restoration::get` with
@@ -95,6 +97,7 @@ impl WidgetTester {
             device_pixel_ratio,
             restoration: None,
             in_pump: false,
+            next_pointer: std::cell::Cell::new(1),
         };
         tester.install_flutter_test_fonts();
         tester.pump_pre_test_tree();
@@ -201,16 +204,48 @@ impl WidgetTester {
     /// Dart's `tester.pumpWidget(widget)`: makes `widget` the view's child, schedules a frame
     /// and pumps once.
     pub fn pump_widget<K>(&mut self, widget: impl IntoWidget<K>) {
-        self.in_pump = true;
-        {
-            let mut app = self.cell.borrow_mut();
-            let view = Rc::clone(&self.view) as ViewRef;
-            let view_id = view.id();
-            let root = View::new(view, widget.into_widget()).into_widget();
-            WidgetsBinding::instance(&mut app).attach_root_widget(&mut app, root);
-            SchedulerBinding::schedule_frame(&mut app, FrameTarget::View(view_id));
-        }
+        self.attach_and_schedule(widget);
         self.pump();
+    }
+
+    /// Dart's `binding.attachRootWidget(binding.wrapWithDefaultView(widget))` and
+    /// `binding.scheduleFrame()`.
+    fn attach_and_schedule<K>(&mut self, widget: impl IntoWidget<K>) {
+        self.in_pump = true;
+        let mut app = self.cell.borrow_mut();
+        let view = Rc::clone(&self.view) as ViewRef;
+        let view_id = view.id();
+        let root = View::new(view, widget.into_widget()).into_widget();
+        WidgetsBinding::instance(&mut app).attach_root_widget(&mut app, root);
+        SchedulerBinding::schedule_frame(&mut app, FrameTarget::View(view_id));
+    }
+
+    /// Dart's `tester.pumpFrames(target, maxDuration)`: makes `widget` the view's child,
+    /// schedules a frame, and pumps frames 16.683ms apart until `max_duration` has passed.
+    pub fn pump_frames<K>(&mut self, widget: impl IntoWidget<K>, max_duration: Duration) {
+        self.pump_frames_every(widget, max_duration, Duration::from_micros(16_683));
+    }
+
+    /// Dart's `tester.pumpFrames(target, maxDuration, interval)`.
+    pub fn pump_frames_every<K>(
+        &mut self,
+        widget: impl IntoWidget<K>,
+        max_duration: Duration,
+        interval: Duration,
+    ) {
+        self.attach_and_schedule(widget);
+        let mut elapsed = Duration::ZERO;
+        while elapsed < max_duration {
+            self.pump_by(interval);
+            elapsed += interval;
+        }
+    }
+
+    /// Dart's `tester.nextPointer`: the pointer a finder-taking gesture uses, numbered from 1.
+    pub fn next_pointer(&self) -> i64 {
+        let pointer = self.next_pointer.get();
+        self.next_pointer.set(pointer + 1);
+        pointer
     }
 
     /// Dart's `tester.pump()`: a frame now, if a view asked for one, with no time passing and

@@ -1193,7 +1193,9 @@ mod tests {
         SizedBox, State, StateData, StatefulWidget, WidgetRef, WidgetsBinding, downcast_widget,
     };
 
-    use waft_widgets::testing::{WidgetTester, test_widgets};
+    use waft_widgets::testing::{
+        WidgetTester, expect, find, finds_nothing, finds_one_widget, test_widgets,
+    };
 
     use super::*;
     use crate::app_bar::AppBar;
@@ -1254,7 +1256,7 @@ mod tests {
     }
 
     fn fab_box(tester: &WidgetTester) -> waft_rendering::AnyRenderBox {
-        let found = tester.find_by_type::<FloatingActionButton>();
+        let found = find::by_type::<FloatingActionButton>().evaluate(tester);
         assert_eq!(found.len(), 1, "one FloatingActionButton");
         tester.render_box_of(found[0])
     }
@@ -1280,17 +1282,6 @@ mod tests {
         let app = tester.cell.borrow();
         let size = render.size(&app);
         render.local_to_global(&app, Offset::new(size.width(), 0.0), None)
-    }
-
-    /// `tester.getRect(find.byKey(key))`.
-    fn rect_of(tester: &WidgetTester, key: &GlobalKey) -> Rect {
-        let render = tester.render_object(key).as_box().expect("a render box");
-        let app = tester.cell.borrow();
-        let size = render.size(&app);
-        let top_left = render.local_to_global(&app, Offset::ZERO, None);
-        let bottom_right =
-            render.local_to_global(&app, Offset::new(size.width(), size.height()), None);
-        Rect::from_points(top_left, bottom_right)
     }
 
     fn transient_callback_count(tester: &WidgetTester) -> usize {
@@ -1401,21 +1392,33 @@ mod tests {
             };
             tester.pump_widget(null_frame(None));
 
-            assert!(tester.find_by_type::<FloatingActionButton>().is_empty());
+            expect(
+                tester,
+                &find::by_type::<FloatingActionButton>(),
+                finds_nothing(),
+            );
             assert_eq!(transient_callback_count(tester), 0);
 
             tester.pump_widget(null_frame(Some(
                 <dyn FloatingActionButtonLocation>::end_float(),
             )));
 
-            assert!(tester.find_by_type::<FloatingActionButton>().is_empty());
+            expect(
+                tester,
+                &find::by_type::<FloatingActionButton>(),
+                finds_nothing(),
+            );
             assert!(transient_callback_count(tester) > 0);
 
             tester.pump_widget(null_frame(Some(
                 <dyn FloatingActionButtonLocation>::center_float(),
             )));
 
-            assert!(tester.find_by_type::<FloatingActionButton>().is_empty());
+            expect(
+                tester,
+                &find::by_type::<FloatingActionButton>(),
+                finds_nothing(),
+            );
             assert!(transient_callback_count(tester) > 0);
         });
     }
@@ -1961,7 +1964,11 @@ mod tests {
             let root = frame(tester, &fab_location, &fab_animator);
             tester.pump_widget(root);
 
-            assert_eq!(tester.find_by_type::<FloatingActionButton>().len(), 1);
+            expect(
+                tester,
+                &find::by_type::<FloatingActionButton>(),
+                finds_one_widget(),
+            );
             assert_eq!(transient_callback_count(tester), 0);
             assert_coordinate_eq(fab_center(tester).dx(), 44.0);
 
@@ -2110,14 +2117,14 @@ mod tests {
         }
 
         fn rect(&self, tester: &WidgetTester) -> Rect {
-            rect_of(tester, &self.key)
+            tester.get_rect(&self.key)
         }
 
         /// `tester.tap(find.byKey(floatingActionButton))` and `pumpAndSettle`: shows a snack
         /// bar.
         fn tap_and_settle(&mut self, tester: &mut WidgetTester) {
-            let center = tester.center_of(&self.key);
-            tester.tap(center, self.next_pointer);
+            let center = tester.get_center(&self.key);
+            tester.tap_at(center, self.next_pointer);
             self.next_pointer += 1;
             tester.pump_and_settle();
         }
@@ -2553,7 +2560,7 @@ mod tests {
             )
             .into_widget(),
         ));
-        rect_of(tester, &key)
+        tester.get_rect(&key)
     }
 
     // 'Start-top floating action button location LTR'.

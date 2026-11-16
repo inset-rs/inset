@@ -253,7 +253,7 @@ mod tests {
     use waft_embedder::Color;
     use waft_widgets::{Column, Icon, IconData, RichText, SizedBox};
 
-    use waft_widgets::testing::{WidgetTester, test_widgets};
+    use waft_widgets::testing::{WidgetTester, find, test_widgets};
 
     use super::*;
     use crate::action_buttons::{BackButton, CloseButton, DrawerButton, EndDrawerButton};
@@ -294,14 +294,14 @@ mod tests {
 
     /// The glyphs of the four buttons: each button's `Icon`, with the colour its `RichText` paints.
     fn expect_sample_icons(tester: &WidgetTester) {
-        let icons = tester.find_by_type::<Icon>();
+        let icons = find::by_type::<Icon>().evaluate(tester);
         assert_eq!(icons.len(), 4);
         for icon in icons {
             assert!(tester.widget(icon, |icon: &Icon| icon.icon == Some(ICON)));
             let style = tester.glyph_style(icon);
             assert_eq!(style.color.as_ref().map(|color| color.color()), Some(GREEN));
         }
-        assert_eq!(tester.find_by_type::<RichText>().len(), 4);
+        assert_eq!(find::by_type::<RichText>().evaluate(tester).len(), 4);
     }
 
     // 'ActionIconThemeData copyWith, ==, hashCode basics'
@@ -431,8 +431,8 @@ mod tests {
             let root = theme(ActionIconThemeData::new());
             tester.pump_widget(root);
             assert!(
-                tester
-                    .find_by_type::<Icon>()
+                find::by_type::<Icon>()
+                    .evaluate(tester)
                     .into_iter()
                     .all(|icon| tester.widget(icon, |icon: &Icon| icon.icon != Some(ICON)))
             );

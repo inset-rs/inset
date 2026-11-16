@@ -587,7 +587,9 @@ mod tests {
     use waft_scheduler::FrameCallback;
 
     use super::*;
-    use crate::testing::{WidgetTester, test_widgets};
+    use crate::testing::{
+        WidgetTester, expect, find, finds_n_widgets, finds_nothing, finds_one_widget, test_widgets,
+    };
     use crate::widgets::actions::FocusableActionDetector;
     use crate::widgets::basic::{Builder, Center, Directionality, Semantics, SizedBox};
     use crate::widgets::container::Container;
@@ -600,28 +602,6 @@ mod tests {
 
     fn ms(milliseconds: u64) -> Duration {
         Duration::from_millis(milliseconds)
-    }
-
-    /// Dart's `tester.getSize(find.byType(AnimatedCrossFade))`.
-    fn cross_fade_size(tester: &WidgetTester) -> Size {
-        let element = tester.find_by_type::<AnimatedCrossFade>()[0];
-        tester.global_rect(tester.render_box_of(element)).size()
-    }
-
-    /// The global top left of the box whose widget is keyed `key`.
-    fn global_offset_of(tester: &WidgetTester, key: &KeyRef) -> Offset {
-        let element = keyed_elements(tester, key)[0];
-        tester.global_rect(tester.render_box_of(element)).top_left()
-    }
-
-    /// The elements whose widget is keyed `key`: Dart's `find.byKey(key)`.
-    fn keyed_elements(tester: &WidgetTester, key: &KeyRef) -> Vec<crate::framework::AnyElement> {
-        let elements = tester.elements();
-        let app = tester.cell.borrow();
-        elements
-            .into_iter()
-            .filter(|element| element.widget(&app).key() == Some(key))
-            .collect()
     }
 
     fn sized(width: f64, height: f64) -> WidgetRef {
@@ -651,8 +631,15 @@ mod tests {
                 TextDirection::Ltr,
                 simple_cross_fade(CrossFadeState::ShowFirst),
             ));
-            assert_eq!(tester.find_by_type::<FadeTransition>().len(), 2);
-            assert_eq!(cross_fade_size(tester), Size::new(100.0, 100.0));
+            expect(
+                tester,
+                &find::by_type::<FadeTransition>(),
+                finds_n_widgets(2),
+            );
+            assert_eq!(
+                tester.get_size(find::by_type::<AnimatedCrossFade>()),
+                Size::new(100.0, 100.0)
+            );
 
             tester.pump_widget(centered(
                 TextDirection::Ltr,
@@ -660,8 +647,15 @@ mod tests {
             ));
             tester.pump_by(ms(100));
 
-            assert_eq!(tester.find_by_type::<FadeTransition>().len(), 2);
-            assert_eq!(cross_fade_size(tester), Size::new(150.0, 150.0));
+            expect(
+                tester,
+                &find::by_type::<FadeTransition>(),
+                finds_n_widgets(2),
+            );
+            assert_eq!(
+                tester.get_size(find::by_type::<AnimatedCrossFade>()),
+                Size::new(150.0, 150.0)
+            );
         });
     }
 
@@ -672,8 +666,15 @@ mod tests {
                 TextDirection::Ltr,
                 simple_cross_fade(CrossFadeState::ShowSecond),
             ));
-            assert_eq!(tester.find_by_type::<FadeTransition>().len(), 2);
-            assert_eq!(cross_fade_size(tester), Size::new(200.0, 200.0));
+            expect(
+                tester,
+                &find::by_type::<FadeTransition>(),
+                finds_n_widgets(2),
+            );
+            assert_eq!(
+                tester.get_size(find::by_type::<AnimatedCrossFade>()),
+                Size::new(200.0, 200.0)
+            );
         });
     }
 
@@ -703,8 +704,14 @@ mod tests {
             tester.pump_widget(tree(CrossFadeState::ShowSecond));
             tester.pump_by(ms(100));
 
-            assert_eq!(global_offset_of(tester, &first_key), expected);
-            assert_eq!(global_offset_of(tester, &second_key), expected);
+            assert_eq!(
+                tester.get_top_left(find::by_key(first_key.clone())),
+                expected
+            );
+            assert_eq!(
+                tester.get_top_left(find::by_key(second_key.clone())),
+                expected
+            );
         });
     }
 
@@ -911,18 +918,17 @@ mod tests {
                 }
                 Directionality::new(TextDirection::Ltr, cross_fade).into_widget()
             };
-            let count = |tester: &WidgetTester, key: &KeyRef| keyed_elements(tester, key).len();
             tester.pump_widget(tree(CrossFadeState::ShowFirst, false));
-            assert_eq!(count(tester, &first), 1);
-            assert_eq!(count(tester, &second), 1);
+            expect(tester, &find::by_key(first.clone()), finds_one_widget());
+            expect(tester, &find::by_key(second.clone()), finds_one_widget());
 
             tester.pump_widget(tree(CrossFadeState::ShowFirst, true));
-            assert_eq!(count(tester, &first), 1);
-            assert_eq!(count(tester, &second), 0);
+            expect(tester, &find::by_key(first.clone()), finds_one_widget());
+            expect(tester, &find::by_key(second.clone()), finds_nothing());
 
             tester.pump_widget(tree(CrossFadeState::ShowSecond, true));
-            assert_eq!(count(tester, &second), 1);
-            assert_eq!(count(tester, &first), 0);
+            expect(tester, &find::by_key(second.clone()), finds_one_widget());
+            expect(tester, &find::by_key(first.clone()), finds_nothing());
         });
     }
 
@@ -990,7 +996,10 @@ mod tests {
                     Duration::from_secs(1),
                 ))),
             ));
-            assert_eq!(cross_fade_size(tester), Size::ZERO);
+            assert_eq!(
+                tester.get_size(find::by_type::<AnimatedCrossFade>()),
+                Size::ZERO
+            );
         });
     }
 
@@ -1060,16 +1069,17 @@ mod tests {
     fn assert_clip_behavior(cross_fade: fn() -> AnimatedCrossFade, expected: Clip) {
         test_widgets(|tester| {
             tester.pump_widget(centered(TextDirection::Ltr, cross_fade()));
-            let clip_rect = tester.find_by_type::<ClipRect>()[0];
             assert_eq!(
-                tester.widget(clip_rect, |clip_rect: &ClipRect| clip_rect.clip_behavior),
+                tester.widget(find::by_type::<ClipRect>(), |clip_rect: &ClipRect| {
+                    clip_rect.clip_behavior
+                }),
                 expected
             );
-            let animated_size = tester.find_by_type::<AnimatedSize>()[0];
             assert_eq!(
-                tester.widget(animated_size, |animated_size: &AnimatedSize| {
-                    animated_size.clip_behavior
-                }),
+                tester.widget(
+                    find::by_type::<AnimatedSize>(),
+                    |animated_size: &AnimatedSize| { animated_size.clip_behavior }
+                ),
                 expected
             );
         });
@@ -1142,7 +1152,7 @@ mod tests {
                         .into_widget()
                 };
             let touch_second_button = |tester: &mut WidgetTester| {
-                tester.tap(Offset::new(150.0, 300.0), 1);
+                tester.tap_at(Offset::new(150.0, 300.0), 1);
             };
 
             tester.pump_widget(build_animated_frame(CrossFadeState::ShowSecond));

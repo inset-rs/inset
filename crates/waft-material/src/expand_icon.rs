@@ -411,7 +411,7 @@ mod tests {
     use std::rc::Rc;
 
     use waft_embedder::Size;
-    use waft_widgets::testing::{WidgetTester, test_widgets};
+    use waft_widgets::testing::{WidgetTester, find, test_widgets};
     use waft_widgets::{Animated, Center, IconTheme, SizedBox, StatefulBuilder};
 
     use super::*;
@@ -443,8 +443,8 @@ mod tests {
 
     /// Dart's `tester.firstWidget<IconTheme>(find.byType(IconTheme).last).data.color`.
     fn last_icon_theme_color(tester: &WidgetTester) -> Option<Color> {
-        let last = *tester
-            .find_by_type::<IconTheme>()
+        let last = *find::by_type::<IconTheme>()
+            .evaluate(tester)
             .last()
             .expect("an IconTheme");
         tester.widget(last, |icon_theme: &IconTheme| {
@@ -454,10 +454,9 @@ mod tests {
 
     /// Dart's `tester.tap(find.byType(ExpandIcon))`.
     fn tap_expand_icon(tester: &mut WidgetTester) {
-        let element = tester.find_by_type::<ExpandIcon>()[0];
-        let render = tester.render_box_of(element);
-        let center = tester.global_rect(render).center();
-        tester.tap(center, 1);
+        let element = find::by_type::<ExpandIcon>().evaluate(tester)[0];
+        let center = tester.get_center(element);
+        tester.tap_at(center, 1);
     }
 
     fn toggling(expanded: &Rc<Cell<bool>>) -> ValueChanged<bool> {
@@ -592,7 +591,7 @@ mod tests {
                 m3,
                 ExpandIcon::new(Some(Rc::new(|_app, _is_expanded| {}))).is_expanded(true),
             );
-            let rotation = tester.find_by_type::<Animated<RotationTransition>>()[0];
+            let rotation = find::by_type::<Animated<RotationTransition>>().evaluate(tester)[0];
             let turns = tester.widget(rotation, |rotation: &Animated<RotationTransition>| {
                 rotation.0.turns()
             });
@@ -610,7 +609,7 @@ mod tests {
                 ExpandIcon::new(Some(Rc::new(|_app, _is_expanded| {}))),
             );
 
-            let icon = tester.find_by_type::<ExpandIcon>()[0];
+            let icon = find::by_type::<ExpandIcon>().evaluate(tester)[0];
             assert_eq!(tester.widget(icon, |icon: &ExpandIcon| icon.size), 24.0);
         });
     }
@@ -625,7 +624,7 @@ mod tests {
                 ExpandIcon::new(Some(Rc::new(|_app, _is_expanded| {}))).size(36.0),
             );
 
-            let icon = tester.find_by_type::<ExpandIcon>()[0];
+            let icon = find::by_type::<ExpandIcon>().evaluate(tester)[0];
             assert_eq!(tester.widget(icon, |icon: &ExpandIcon| icon.size), 36.0);
 
             wrap(
@@ -634,7 +633,7 @@ mod tests {
                 ExpandIcon::new(Some(Rc::new(|_app, _is_expanded| {}))).size(48.0),
             );
 
-            let icon = tester.find_by_type::<ExpandIcon>()[0];
+            let icon = find::by_type::<ExpandIcon>().evaluate(tester)[0];
             assert_eq!(tester.widget(icon, |icon: &ExpandIcon| icon.size), 48.0);
         });
     }
@@ -765,8 +764,8 @@ mod tests {
                     ))
                     .into_widget(),
             ));
-            let icon = tester.find_by_type::<ExpandIcon>()[0];
-            let size = tester.render_box_of(icon).size(&tester.cell.borrow());
+            let icon = find::by_type::<ExpandIcon>().evaluate(tester)[0];
+            let size = tester.get_size(icon);
             assert_eq!(size, Size::ZERO);
         });
     }

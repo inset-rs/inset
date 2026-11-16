@@ -2339,8 +2339,10 @@ mod tests {
         SizedBox, Text, TextEditingController, WidgetStates,
     };
 
+    use waft_rendering::testing::{PaintCall, paints};
     use waft_widgets::testing::{
-        TargetPlatformVariant, TestPointer, WidgetTester, test_widgets, test_widgets_variant,
+        TargetPlatformVariant, TestPointer, WidgetTester, expect, find, finds_nothing,
+        finds_one_widget, test_widgets, test_widgets_variant,
     };
 
     use super::*;
@@ -2420,7 +2422,7 @@ mod tests {
     }
 
     fn editable_elements(tester: &WidgetTester) -> Vec<AnyElement> {
-        tester.find_by_type::<EditableText>()
+        find::by_type::<EditableText>().evaluate(tester)
     }
 
     fn editable_state_at(tester: &WidgetTester, index: usize) -> Handle<EditableTextState> {
@@ -2447,8 +2449,8 @@ mod tests {
     }
 
     fn text_field_center(tester: &WidgetTester, index: usize) -> Offset {
-        let element = tester.find_by_type::<TextField>()[index];
-        tester.global_rect(tester.render_box_of(element)).center()
+        let element = find::by_type::<TextField>().evaluate(tester)[index];
+        tester.get_rect(element).center()
     }
 
     /// Dart's `tester.showKeyboard(finder)` on the `index`th field.
@@ -2509,7 +2511,7 @@ mod tests {
     }
 
     fn text_color(tester: &WidgetTester, text: &str) -> Option<Color> {
-        let element = tester.find_onstage_text(text)[0];
+        let element = find::text(text).evaluate(tester)[0];
         tester.widget::<Text, _>(element, |widget| {
             widget
                 .style
@@ -2715,7 +2717,7 @@ mod tests {
 
             let click = |tester: &mut WidgetTester, index: usize, pointer: i64| {
                 let center = text_field_center(tester, index);
-                tester.tap(center, pointer);
+                tester.tap_at(center, pointer);
                 enter_text_at(tester, index, "Hello");
                 tester.pump();
             };
@@ -2739,11 +2741,9 @@ mod tests {
             click(tester, 2, 3);
             assert_eq!(outside(), (true, true, false));
 
-            let outside_text = tester.find_onstage_text("Outside")[0];
-            let at = tester
-                .global_rect(tester.render_box_of(outside_text))
-                .center();
-            tester.tap(at, 4);
+            let outside_text = find::text("Outside").evaluate(tester)[0];
+            let at = tester.get_rect(outside_text).center();
+            tester.tap_at(at, 4);
             assert_eq!(outside(), (true, true, true));
         });
     }
@@ -2753,7 +2753,7 @@ mod tests {
         test_widgets(|tester| {
             let root = overlay(tester, TextField::new());
             tester.pump_widget(root);
-            let element = tester.find_by_type::<TextField>()[0];
+            let element = find::by_type::<TextField>().evaluate(tester)[0];
             let (width, height, radius) = tester.widget::<TextField, _>(element, |field| {
                 (field.cursor_width, field.cursor_height, field.cursor_radius)
             });
@@ -2771,7 +2771,7 @@ mod tests {
                 TextField::new().cursor_radius(Radius::circular(3.0)),
             );
             tester.pump_widget(root);
-            let element = tester.find_by_type::<TextField>()[0];
+            let element = find::by_type::<TextField>().evaluate(tester)[0];
             let (width, radius) = tester
                 .widget::<TextField, _>(element, |field| (field.cursor_width, field.cursor_radius));
             assert_eq!(width, 2.0);
@@ -2784,7 +2784,7 @@ mod tests {
         test_widgets(|tester| {
             let root = overlay(tester, TextField::new());
             tester.pump_widget(root);
-            let element = tester.find_by_type::<TextField>()[0];
+            let element = find::by_type::<TextField>().evaluate(tester)[0];
             let clip_behavior = tester.widget::<TextField, _>(element, |field| field.clip_behavior);
             assert_eq!(clip_behavior, Clip::HardEdge);
         });
@@ -2806,7 +2806,7 @@ mod tests {
             // Tap to reposition the caret.
             let tap_index = test_value.find('e').unwrap() as i32;
             let e_pos = text_offset_to_position(tester, tap_index);
-            tester.tap(e_pos, 1);
+            tester.tap_at(e_pos, 1);
             tester.pump();
 
             assert_eq!(
@@ -2841,7 +2841,7 @@ mod tests {
             // Tap would ordinarily reposition the caret.
             let tap_index = test_value.find('e').unwrap() as i32;
             let e_pos = text_offset_to_position(tester, tap_index);
-            tester.tap(e_pos, 1);
+            tester.tap_at(e_pos, 1);
             tester.pump();
 
             assert_eq!(
@@ -2868,7 +2868,7 @@ mod tests {
 
             // Long press the 'e' to select 'def'.
             let e_pos = text_offset_to_position(tester, test_value.find('e').unwrap() as i32);
-            tester.long_press(e_pos, 7);
+            tester.long_press_at(e_pos, 7);
             tester.pump_and_settle();
 
             // 'def' is selected.
@@ -2883,7 +2883,7 @@ mod tests {
 
             // Tapping elsewhere immediately collapses and moves the cursor.
             let h_pos = text_offset_to_position(tester, test_value.find('h').unwrap() as i32);
-            tester.tap(h_pos, 8);
+            tester.tap_at(h_pos, 8);
             tester.pump();
 
             assert!(selection(tester, controller.handle()).is_collapsed());
@@ -2983,7 +2983,7 @@ mod tests {
 
             // Long press the 'e' to select 'def'.
             let e_pos = text_offset_to_position(tester, test_value.find('e').unwrap() as i32);
-            tester.long_press(e_pos, 7);
+            tester.long_press_at(e_pos, 7);
             tester.pump_and_settle();
 
             assert!(selection(tester, controller.handle()).is_collapsed());
@@ -3174,7 +3174,7 @@ mod tests {
 
             // Long press does select text.
             let e_pos = text_offset_to_position(tester, 1);
-            tester.long_press(e_pos, 7);
+            tester.long_press_at(e_pos, 7);
             tester.pump_and_settle();
             assert!(!selection(tester, controller.handle()).is_collapsed());
         });
@@ -3199,7 +3199,7 @@ mod tests {
 
             // Long press doesn't select text.
             let e_pos2 = text_offset_to_position(tester, 1);
-            tester.long_press(e_pos2, 7);
+            tester.long_press_at(e_pos2, 7);
             tester.pump_and_settle();
             assert!(selection(tester, controller.handle()).is_collapsed());
         });
@@ -3224,7 +3224,7 @@ mod tests {
 
             // Long press doesn't select text.
             let e_pos2 = text_offset_to_position(tester, 1);
-            tester.long_press(e_pos2, 7);
+            tester.long_press_at(e_pos2, 7);
             tester.pump_and_settle();
             assert!(selection(tester, controller.handle()).is_collapsed());
         });
@@ -3246,7 +3246,7 @@ mod tests {
 
             // Long press does select text.
             let b_pos = text_offset_to_position(tester, 1);
-            tester.long_press(b_pos, 7);
+            tester.long_press_at(b_pos, 7);
             tester.pump_and_settle();
             let selection = selection(tester, controller.handle());
             assert!(!selection.is_collapsed());
@@ -3267,8 +3267,8 @@ mod tests {
                 )),
             );
             tester.pump_widget(root);
-            assert_eq!(tester.find_onstage_text("helper text").len(), 0);
-            assert_eq!(tester.find_onstage_text("error text").len(), 1);
+            expect(tester, &find::text("helper text"), finds_nothing());
+            expect(tester, &find::text("error text"), finds_one_widget());
         });
     }
 
@@ -3343,7 +3343,7 @@ mod tests {
             let root = overlay(tester, field);
             tester.pump_widget(root);
             assert!(formatters.is_empty());
-            let element = tester.find_by_type::<TextField>()[0];
+            let element = find::by_type::<TextField>().evaluate(tester)[0];
             let given = tester.widget::<TextField, _>(element, |field| {
                 field.input_formatters.as_ref().map(Vec::len)
             });
@@ -3373,18 +3373,18 @@ mod tests {
             let expected = TextSelection::new(0, 4);
 
             let first = text_field_center(tester, 0);
-            tester.tap(first, 1);
+            tester.tap_at(first, 1);
             enter_text_at(tester, 0, "abcd");
             tester.pump();
 
             let second = text_field_center(tester, 1);
-            tester.tap(second, 2);
+            tester.tap_at(second, 2);
             enter_text_at(tester, 1, "dcba");
             tester.pump();
 
             // Focus and selection is active on first TextField, so the second TextFields
             // selectionColor should be dropped.
-            tester.tap(first, 3);
+            tester.tap_at(first, 3);
             controller1.set_selection(&mut tester.cell.borrow_mut(), TextSelection::new(0, 4));
             tester.pump();
             assert_eq!(selection(tester, controller1.handle()), expected);
@@ -3399,7 +3399,7 @@ mod tests {
 
             // Focus and selection is active on second TextField, so the first TextFields
             // selectionColor should be dropped.
-            tester.tap(second, 4);
+            tester.tap_at(second, 4);
             tester.pump();
             assert_eq!(
                 editable_at(tester, 0, |widget| widget.selection_color),
@@ -3569,14 +3569,14 @@ mod tests {
             tester.pump();
 
             assert_eq!(text(tester, controller.handle()), "0123456789101112");
-            assert_eq!(tester.find_onstage_text("16/10").len(), 1);
+            expect(tester, &find::text("16/10"), finds_one_widget());
             assert_eq!(text_color(tester, "16/10"), Some(deep_purple_accent));
 
             enter_text(tester, "0123456789");
             tester.pump();
 
             assert_eq!(text(tester, controller.handle()), "0123456789");
-            assert_eq!(tester.find_onstage_text("10/10").len(), 1);
+            expect(tester, &find::text("10/10"), finds_one_widget());
             assert_ne!(text_color(tester, "10/10"), Some(deep_purple_accent));
         });
     }
@@ -3603,7 +3603,7 @@ mod tests {
         tester.pump();
 
         assert_eq!(text(tester, controller.handle()), long);
-        assert_eq!(tester.find_onstage_text("16/10").len(), 1);
+        expect(tester, &find::text("16/10"), finds_one_widget());
         assert_eq!(text_color(tester, "16/10"), Some(deep_purple_accent));
 
         let full = format!("{prefix}012345678");
@@ -3611,7 +3611,7 @@ mod tests {
         tester.pump();
 
         assert_eq!(text(tester, controller.handle()), full);
-        assert_eq!(tester.find_onstage_text("10/10").len(), 1);
+        expect(tester, &find::text("10/10"), finds_one_widget());
         assert_ne!(text_color(tester, "10/10"), Some(deep_purple_accent));
     }
 
@@ -3651,14 +3651,14 @@ mod tests {
             tester.pump();
 
             assert_eq!(text(tester, controller.handle()), "0123456789101112");
-            assert_eq!(tester.find_onstage_text("16/10").len(), 1);
+            expect(tester, &find::text("16/10"), finds_one_widget());
             assert_eq!(text_color(tester, "16/10"), Some(deep_purple_accent));
 
             enter_text(tester, "0123456789");
             tester.pump();
 
             assert_eq!(text(tester, controller.handle()), "0123456789");
-            assert_eq!(tester.find_onstage_text("10/10").len(), 1);
+            expect(tester, &find::text("10/10"), finds_one_widget());
             assert_ne!(text_color(tester, "10/10"), Some(deep_purple_accent));
         });
     }
@@ -3672,12 +3672,12 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            assert_eq!(tester.find_onstage_text("0/10").len(), 1);
+            expect(tester, &find::text("0/10"), finds_one_widget());
 
             enter_text(tester, "01234");
             tester.pump();
 
-            assert_eq!(tester.find_onstage_text("5/10").len(), 1);
+            expect(tester, &find::text("5/10"), finds_one_widget());
         });
     }
 
@@ -3690,12 +3690,12 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            assert_eq!(tester.find_onstage_text("0/10").len(), 1);
+            expect(tester, &find::text("0/10"), finds_one_widget());
 
             enter_text(tester, "😆");
             tester.pump();
 
-            assert_eq!(tester.find_onstage_text("1/10").len(), 1);
+            expect(tester, &find::text("1/10"), finds_one_widget());
         });
     }
 
@@ -3708,12 +3708,12 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            assert_eq!(tester.find_onstage_text("0/10").len(), 1);
+            expect(tester, &find::text("0/10"), finds_one_widget());
 
             enter_text(tester, "👨\u{200d}👩\u{200d}👦");
             tester.pump();
 
-            assert_eq!(tester.find_onstage_text("1/10").len(), 1);
+            expect(tester, &find::text("1/10"), finds_one_widget());
         });
     }
 
@@ -3726,12 +3726,12 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            assert_eq!(tester.find_onstage_text("0").len(), 1);
+            expect(tester, &find::text("0"), finds_one_widget());
 
             enter_text(tester, "01234");
             tester.pump();
 
-            assert_eq!(tester.find_onstage_text("5").len(), 1);
+            expect(tester, &find::text("5"), finds_one_widget());
         });
     }
 
@@ -3755,12 +3755,12 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            assert_eq!(tester.find_onstage_text("0 of 10").len(), 1);
+            expect(tester, &find::text("0 of 10"), finds_one_widget());
 
             enter_text(tester, "01234");
             tester.pump();
 
-            assert_eq!(tester.find_onstage_text("5 of 10").len(), 1);
+            expect(tester, &find::text("5 of 10"), finds_one_widget());
         });
     }
 
@@ -3898,9 +3898,7 @@ mod tests {
             let mut gesture = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
             tester.add_pointer(&mut gesture, Offset::new(1.0, 1.0));
             let editable_element = editable_elements(tester)[0];
-            let center = tester
-                .global_rect(tester.render_box_of(editable_element))
-                .center();
+            let center = tester.get_rect(editable_element).center();
             tester.move_to(&mut gesture, center, false);
             tester.pump();
             assert_eq!(
@@ -4176,12 +4174,12 @@ mod tests {
 
             assert_eq!(tap_count.get(), 0);
             let center = text_field_center(tester, 0);
-            tester.tap(center, 1);
+            tester.tap_at(center, 1);
             // Wait a bit so they're all single taps and not double taps.
             tester.pump_by(Duration::from_millis(300));
-            tester.tap(center, 2);
+            tester.tap_at(center, 2);
             tester.pump_by(Duration::from_millis(300));
-            tester.tap(center, 3);
+            tester.tap_at(center, 3);
             tester.pump_by(Duration::from_millis(300));
             assert_eq!(tap_count.get(), 3);
         });
@@ -4202,9 +4200,9 @@ mod tests {
 
             assert_eq!(tap_count.get(), 0);
             let center = text_field_center(tester, 0);
-            tester.tap(center, 1);
-            tester.tap(center, 2);
-            tester.tap(center, 3);
+            tester.tap_at(center, 1);
+            tester.tap_at(center, 2);
+            tester.tap_at(center, 3);
             assert_eq!(tap_count.get(), 0);
         });
     }
@@ -4340,7 +4338,7 @@ mod tests {
 
             // Tap to trigger the text field.
             let center = text_field_center(tester, 0);
-            tester.tap(center, 1);
+            tester.tap_at(center, 1);
             tester.pump();
 
             assert_eq!(selection_overlay_visibility(tester), (true, false));
@@ -4359,7 +4357,7 @@ mod tests {
 
             // Tap to trigger the text field.
             let center = text_field_center(tester, 0);
-            tester.tap(center, 1);
+            tester.tap_at(center, 1);
             tester.pump();
 
             assert_eq!(selection_overlay_visibility(tester), (false, false));
@@ -4400,7 +4398,7 @@ mod tests {
 
             // Long press to trigger the text field.
             let center = text_field_center(tester, 0);
-            tester.long_press(center, 1);
+            tester.long_press_at(center, 1);
             tester.pump();
 
             assert_eq!(selection_overlay_visibility(tester), (true, true));
@@ -4419,7 +4417,7 @@ mod tests {
 
             // Tap to trigger the text field.
             let center = text_field_center(tester, 0);
-            tester.long_press(center, 1);
+            tester.long_press_at(center, 1);
             tester.pump();
 
             assert_eq!(selection_overlay_visibility(tester), (true, true));
@@ -4438,9 +4436,9 @@ mod tests {
 
         // Double tap to trigger the text field.
         let center = text_field_center(tester, 0);
-        tester.tap(center, 1);
+        tester.tap_at(center, 1);
         tester.pump_by(Duration::from_millis(50));
-        tester.tap(center, 2);
+        tester.tap_at(center, 2);
         tester.pump();
 
         selection_overlay_visibility(tester)
@@ -4588,7 +4586,7 @@ mod tests {
 
             // Tap to position the cursor and show the selection handles.
             let e_pos = text_offset_to_position(tester, 5); // Index of 'e'.
-            tester.tap(e_pos, 7);
+            tester.tap_at(e_pos, 7);
             tester.pump_and_settle();
 
             assert_eq!(selection_overlay_visibility(tester), (true, false));
@@ -4598,12 +4596,12 @@ mod tests {
 
             // Tap the handle to show the toolbar.
             let handle_pos = endpoints[0] + Offset::new(0.0, 1.0);
-            tester.tap(handle_pos, 7);
+            tester.tap_at(handle_pos, 7);
             tester.pump();
             assert!(selection_overlay_visibility(tester).1);
 
             // Tap the handle again to hide the toolbar.
-            tester.tap(handle_pos, 7);
+            tester.tap_at(handle_pos, 7);
             tester.pump();
             assert!(!selection_overlay_visibility(tester).1);
         });
@@ -4667,8 +4665,8 @@ mod tests {
                     .into_widget(),
             );
             tester.pump_widget(root);
-            let element = tester.find_by_type::<TextField>()[0];
-            let height = tester.global_rect(tester.render_box_of(element)).height();
+            let element = find::by_type::<TextField>().evaluate(tester)[0];
+            let height = tester.get_rect(element).height();
             assert!(height >= K_MIN_INTERACTIVE_DIMENSION, "{height}");
         });
     }
@@ -4687,8 +4685,8 @@ mod tests {
                     .into_widget(),
             );
             tester.pump_widget(root);
-            let element = tester.find_by_type::<TextField>()[0];
-            let height = tester.global_rect(tester.render_box_of(element)).height();
+            let element = find::by_type::<TextField>().evaluate(tester)[0];
+            let height = tester.get_rect(element).height();
             assert_eq!(height, K_MIN_INTERACTIVE_DIMENSION);
         });
     }
@@ -4747,8 +4745,8 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            let element = tester.find_by_type::<TextField>()[0];
-            let rect = tester.global_rect(tester.render_box_of(element));
+            let element = find::by_type::<TextField>().evaluate(tester)[0];
+            let rect = tester.get_rect(element);
             // Center, which is within the text area
             let center = rect.center();
             // Top left, which is not the text area
@@ -4833,7 +4831,7 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            let element = tester.find_by_type::<InputDecorator>()[0];
+            let element = find::by_type::<InputDecorator>().evaluate(tester)[0];
             let given = tester
                 .widget::<InputDecorator, _>(element, |decorator| decorator.decoration.clone());
             let expected = decoration
@@ -5063,12 +5061,12 @@ mod tests {
 
             // The text field cannot be focused if it is tapped.
             let center = text_field_center(tester, 0);
-            tester.tap(center, 1);
+            tester.tap_at(center, 1);
             tester.pump();
             assert!(!has_focus(tester, focus_node.handle()));
 
             // The text field cannot be focused if it is long pressed.
-            tester.long_press(center, 2);
+            tester.long_press_at(center, 2);
             tester.pump();
             assert!(!has_focus(tester, focus_node.handle()));
         });
@@ -5108,7 +5106,7 @@ mod tests {
                 tester.pump();
                 assert!(focus_node.has_primary_focus(&tester.cell.borrow()));
 
-                tester.tap(Offset::new(10.0, 10.0), 1);
+                tester.tap_at(Offset::new(10.0, 10.0), 1);
                 tester.pump();
 
                 assert!(
@@ -5129,7 +5127,7 @@ mod tests {
                 tester.pump();
                 assert!(focus_node.has_primary_focus(&tester.cell.borrow()));
 
-                tester.tap(Offset::new(10.0, 10.0), 1);
+                tester.tap_at(Offset::new(10.0, 10.0), 1);
                 tester.pump();
 
                 // Focus is lost on mobile browsers, but not mobile apps.
@@ -5197,7 +5195,7 @@ mod tests {
             let text = "Hello World";
             let alternative_text = "Something Else";
             let mut tester = restored(None);
-            assert_eq!(tester.find_onstage_text(text).len(), 0);
+            expect(&tester, &find::text(text), finds_nothing());
 
             enter_text(&mut tester, text);
             skip_past_scrolling_animation(&mut tester);
@@ -5239,7 +5237,7 @@ mod tests {
             tester.pump_widget(root);
 
             let center = text_field_center(tester, 0);
-            tester.tap(center, 1);
+            tester.tap_at(center, 1);
             tester.pump();
 
             let opacity = |tester: &WidgetTester| {
@@ -5295,7 +5293,7 @@ mod tests {
                 tester.pump_widget(root);
 
                 let center = text_field_center(tester, 0);
-                tester.tap(center, 1);
+                tester.tap_at(center, 1);
                 tester.pump();
                 // Wait for the current animation to finish. If the cursor never stops its
                 // blinking animation the test will timeout.
@@ -5312,14 +5310,6 @@ mod tests {
         }
     }
 
-    fn argb(color: Color) -> u32 {
-        let channel = |value: f64| (value * 255.0).round() as u32;
-        (channel(color.a) << 24)
-            | (channel(color.r) << 16)
-            | (channel(color.g) << 8)
-            | channel(color.b)
-    }
-
     #[test]
     fn cursor_does_not_animate_on_android() {
         test_widgets(|tester| {
@@ -5333,7 +5323,7 @@ mod tests {
             tester.pump_widget(root);
 
             let center = text_field_center(tester, 0);
-            tester.tap(center, 1);
+            tester.tap_at(center, 1);
             tester.pump();
 
             let alpha = |tester: &WidgetTester| {
@@ -5342,18 +5332,17 @@ mod tests {
                     .expect("the cursor has a color")
                     .alpha()
             };
-            let cursor_rects = |tester: &WidgetTester| {
+            let paints_nothing = |tester: &WidgetTester| {
                 let render = render_editable(tester).as_object();
-                tester
-                    .painted(render)
-                    .into_iter()
-                    .filter(|drawn| matches!(drawn, crate::test_support::Drawn::Rect(..)))
-                    .collect::<Vec<_>>()
+                paints(&tester.painted_ops(render), &[PaintCall::rect(None)]).is_err()
             };
             let paints_cursor = |tester: &WidgetTester| {
-                cursor_rects(tester).iter().any(|drawn| {
-                    matches!(drawn, crate::test_support::Drawn::Rect(color, _) if *color == argb(default_cursor_color))
-                })
+                let render = render_editable(tester).as_object();
+                paints(
+                    &tester.painted_ops(render),
+                    &[PaintCall::rect(Some(default_cursor_color))],
+                )
+                .is_ok()
             };
 
             tester.pump();
@@ -5368,7 +5357,7 @@ mod tests {
             tester.pump_by(Duration::from_millis(1));
             assert_eq!(alpha(tester), 0);
             // Don't try to draw the cursor.
-            assert!(cursor_rects(tester).is_empty());
+            assert!(paints_nothing(tester));
 
             tester.pump_by(Duration::from_millis(500));
             assert_eq!(alpha(tester), 255);
@@ -5376,7 +5365,7 @@ mod tests {
 
             tester.pump_by(Duration::from_millis(500));
             assert_eq!(alpha(tester), 0);
-            assert!(cursor_rects(tester).is_empty());
+            assert!(paints_nothing(tester));
         });
     }
 
@@ -5434,7 +5423,7 @@ mod tests {
                 let root = material_home(theme, TextField::new().autofocus(true));
                 tester.pump_widget(root);
                 tester.pump();
-                let state = tester.find_by_type::<TextField>()[0]
+                let state = find::by_type::<TextField>().evaluate(&tester)[0]
                     .state_handle::<TextFieldState>(&tester.cell.borrow())
                     .expect("a TextField state");
                 let force_press = state.force_press_enabled(&tester.cell.borrow());
@@ -5442,7 +5431,7 @@ mod tests {
                 let selection_color = editable(&tester, |widget| widget.selection_color);
                 let expected = match platform {
                     TargetPlatform::IOS | TargetPlatform::MacOS => {
-                        let element = tester.find_by_type::<EditableText>()[0];
+                        let element = find::by_type::<EditableText>().evaluate(&tester)[0];
                         let cupertino = CupertinoTheme::of(&mut tester.cell.borrow_mut(), element);
                         cupertino.primary_color().color().with_opacity(0.40)
                     }

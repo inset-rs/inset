@@ -1047,7 +1047,8 @@ mod tests {
     };
 
     use waft_widgets::testing::{
-        TargetPlatformVariant, TestPointer, WidgetTester, test_widgets, test_widgets_variant,
+        TargetPlatformVariant, TestPointer, WidgetTester, expect, find, finds_nothing,
+        finds_one_widget, test_widgets, test_widgets_variant,
     };
 
     use super::*;
@@ -1084,8 +1085,8 @@ mod tests {
     }
 
     fn navigator(tester: &WidgetTester) -> Handle<NavigatorState> {
-        let element = *tester
-            .find_by_type::<Navigator>()
+        let element = *find::by_type::<Navigator>()
+            .evaluate(tester)
             .first()
             .expect("a navigator");
         element
@@ -1094,18 +1095,19 @@ mod tests {
     }
 
     fn the_text(tester: &WidgetTester, text: &str) -> AnyElement {
-        *tester.find_text(text).first().expect("the text is mounted")
+        *find::text(text)
+            .evaluate(tester)
+            .first()
+            .expect("the text is mounted")
     }
 
     /// Dart's `tester.getTopLeft(find.text(text))`.
     fn top_left(tester: &WidgetTester, text: &str) -> Offset {
-        tester
-            .global_rect(tester.render_box_of(the_text(tester, text)))
-            .top_left()
+        tester.get_rect(the_text(tester, text)).top_left()
     }
 
     fn onstage(tester: &WidgetTester, text: &str) -> bool {
-        !tester.find_onstage_text(text).is_empty()
+        !find::text(text).evaluate(tester).is_empty()
     }
 
     fn push(tester: &WidgetTester, route: impl FnOnce(&mut App) -> RouteRef) {
@@ -1174,7 +1176,7 @@ mod tests {
                 tester.pump_and_settle();
 
                 assert!(onstage(tester, "Page 1"));
-                assert!(tester.find_text("Page 2").is_empty());
+                assert!(find::text("Page 2").evaluate(tester).is_empty());
 
                 // Page 1 is back where it started.
                 assert_eq!(top_left(tester, "Page 1"), widget_1_initial_top_left);
@@ -1234,7 +1236,7 @@ mod tests {
                 tester.pump_and_settle();
 
                 assert!(onstage(tester, "Page 1"));
-                assert!(tester.find_text("Page 2").is_empty());
+                assert!(find::text("Page 2").evaluate(tester).is_empty());
 
                 // Page 1 is back where it started.
                 assert_eq!(top_left(tester, "Page 1"), widget_1_initial_top_left);
@@ -1254,7 +1256,7 @@ mod tests {
         navigator(&tester).push_named(&mut tester.cell.borrow_mut(), "/next", None);
         tester.pump_and_settle();
 
-        assert!(tester.find_onstage_text("Page 1").is_empty());
+        expect(&tester, &find::text("Page 1"), finds_nothing());
         assert!(onstage(&tester, "Page 2"));
         tester
     }
@@ -1270,7 +1272,7 @@ mod tests {
             tester.move_to(&mut gesture, Offset::new(405.0, 100.0), true);
             tester.pump();
 
-            assert!(tester.find_onstage_text("Page 1").is_empty());
+            expect(&tester, &find::text("Page 1"), finds_nothing());
             assert!(onstage(&tester, "Page 2"));
 
             // Page 2 didn't move.
@@ -1325,7 +1327,7 @@ mod tests {
                 });
                 tester.pump_and_settle();
 
-                assert!(tester.find_onstage_text("Page 1").is_empty());
+                expect(tester, &find::text("Page 1"), finds_nothing());
                 assert!(onstage(tester, "Page 2"));
 
                 // Drag from left edge to invoke the gesture.
@@ -1334,7 +1336,7 @@ mod tests {
                 tester.move_to(&mut gesture, Offset::new(405.0, 100.0), true);
                 tester.pump();
 
-                assert!(tester.find_onstage_text("Page 1").is_empty());
+                expect(tester, &find::text("Page 1"), finds_nothing());
                 assert!(onstage(tester, "Page 2"));
 
                 // Page 2 didn't move.
@@ -1376,8 +1378,8 @@ mod tests {
                     })
                 });
 
-                assert_eq!(tester.find_onstage_text("Page 1").len(), 1);
-                assert!(tester.find_onstage_text("Page 2").is_empty());
+                expect(tester, &find::text("Page 1"), finds_one_widget());
+                expect(tester, &find::text("Page 2"), finds_nothing());
 
                 let page_title_dx = top_left(tester, "Page 1").dx();
 
@@ -1386,7 +1388,7 @@ mod tests {
                 tester.pump_by(Duration::from_millis(100));
 
                 // Second page transition has started.
-                assert_eq!(tester.find_onstage_text("Page 2").len(), 1);
+                expect(tester, &find::text("Page 2"), finds_one_widget());
 
                 // First page has not moved.
                 assert_eq!(top_left(tester, "Page 1").dx(), page_title_dx);
@@ -1463,8 +1465,7 @@ mod tests {
                 tester.pump();
                 tester.pump_by(Duration::from_millis(100));
 
-                let widget_2_rect =
-                    tester.global_rect(tester.render_box_of(the_text(tester, "Page 2")));
+                let widget_2_rect = tester.get_rect(the_text(tester, "Page 2"));
                 let widget_2_top_left = widget_2_rect.top_left();
 
                 // Android transition is vertical only.
@@ -1477,7 +1478,7 @@ mod tests {
                 tester.pump_by(Duration::from_millis(300));
 
                 // Page 2 covers page 1.
-                assert!(tester.find_onstage_text("Page 1").is_empty());
+                expect(tester, &find::text("Page 1"), finds_nothing());
                 assert!(onstage(tester, "Page 2"));
 
                 // Re-pump the same app but with iOS instead of Android.
@@ -1505,7 +1506,7 @@ mod tests {
                 tester.pump_by(Duration::from_millis(300));
 
                 assert!(onstage(tester, "Page 1"));
-                assert!(tester.find_text("Page 2").is_empty());
+                assert!(find::text("Page 2").evaluate(tester).is_empty());
 
                 // Page 1 is back where it started.
                 assert_eq!(top_left(tester, "Page 1"), widget_1_initial_top_left);
@@ -1525,8 +1526,8 @@ mod tests {
                 route.into_erased()
             });
             tester.pump_and_settle();
-            assert_eq!(tester.find_onstage_text("route").len(), 1);
-            assert!(tester.find_onstage_text("home").is_empty());
+            expect(tester, &find::text("route"), finds_one_widget());
+            expect(tester, &find::text("home"), finds_nothing());
 
             // Try to dismiss the route with the escape key.
             tester.send_key_event(
@@ -1535,7 +1536,7 @@ mod tests {
             );
             tester.pump_and_settle();
 
-            assert!(tester.find_onstage_text("route").is_empty());
+            expect(tester, &find::text("route"), finds_nothing());
         });
     }
 
@@ -1559,8 +1560,13 @@ mod tests {
             tester.pump_and_settle();
 
             // The first page does not maintain state.
-            assert!(tester.find_text("first").is_empty());
-            assert_eq!(tester.find_onstage_text("second").len(), 1);
+            assert!(
+                find::text("first")
+                    .skip_offstage(false)
+                    .evaluate(tester)
+                    .is_empty()
+            );
+            expect(tester, &find::text("second"), finds_one_widget());
         });
     }
 
@@ -1633,7 +1639,7 @@ mod tests {
                 .into_widget()
             };
             tester.pump_widget(navigator_for(pages("first")));
-            assert_eq!(tester.find_onstage_text("first").len(), 1);
+            expect(tester, &find::text("first"), finds_one_widget());
             let first_route = {
                 let mut app = tester.cell.borrow_mut();
                 AnyModalRoute::of(&mut app, context.get().expect("built")).expect("a route")
@@ -1647,8 +1653,8 @@ mod tests {
             // There should be no transition because the page has the same key.
             assert_eq!(first_route, second_route);
             // The content does update.
-            assert!(tester.find_text("first").is_empty());
-            assert_eq!(tester.find_onstage_text("second").len(), 1);
+            assert!(find::text("first").evaluate(tester).is_empty());
+            expect(tester, &find::text("second"), finds_one_widget());
         });
     }
 
@@ -1679,14 +1685,20 @@ mod tests {
             tester.pump_widget(navigator_for(pages(false)));
 
             // Page one does not maintain state.
-            assert!(tester.find_text("first").is_empty());
-            assert_eq!(tester.find_onstage_text("second").len(), 1);
+            assert!(find::text("first").evaluate(tester).is_empty());
+            expect(tester, &find::text("second"), finds_one_widget());
 
             tester.pump_widget(navigator_for(pages(true)));
 
             // Page one sets the maintain state to be true, its widget tree should be built.
-            assert_eq!(tester.find_text("first").len(), 1);
-            assert_eq!(tester.find_onstage_text("second").len(), 1);
+            assert_eq!(
+                find::text("first")
+                    .skip_offstage(false)
+                    .evaluate(tester)
+                    .len(),
+                1
+            );
+            expect(tester, &find::text("second"), finds_one_widget());
         });
     }
 
@@ -1742,19 +1754,11 @@ mod tests {
 
     /// Dart's `tester.getCenter(find.text(text))`.
     fn center(tester: &WidgetTester, text: &str) -> Offset {
-        tester
-            .global_rect(tester.render_box_of(the_text(tester, text)))
-            .center()
-    }
-
-    /// Dart's `tester.tap(find.text(text))`.
-    fn tap_text(tester: &mut WidgetTester, text: &str) {
-        let at = center(tester, text);
-        tester.tap(at, 1);
+        tester.get_rect(the_text(tester, text)).center()
     }
 
     fn count_onstage(tester: &WidgetTester, text: &str) -> usize {
-        tester.find_onstage_text(text).len()
+        find::text(text).evaluate(tester).len()
     }
 
     fn platform_at(tester: &WidgetTester, text: &str) -> TargetPlatform {
@@ -1788,7 +1792,7 @@ mod tests {
             pump_app(tester, platform_theme(TargetPlatform::IOS), |app| {
                 app.routes(routes())
             });
-            tap_text(tester, "PUSH");
+            tester.tap(find::text("PUSH"));
             assert_eq!(tester.pump_and_settle_by(Duration::from_secs(60)), 2);
             assert_eq!(count_onstage(tester, "PUSH"), 0);
             assert_eq!(count_onstage(tester, "HELLO"), 1);
@@ -1837,12 +1841,12 @@ mod tests {
             tester.up(&gesture);
             assert_eq!(tester.pump_and_settle_by(Duration::from_secs(60)), 3);
             assert_eq!(count_onstage(tester, "PUSH"), 1);
-            assert!(tester.find_text("HELLO").is_empty());
+            assert!(find::text("HELLO").evaluate(tester).is_empty());
 
             pump_app(tester, platform_theme(TargetPlatform::MacOS), |app| {
                 app.routes(routes())
             });
-            tap_text(tester, "PUSH");
+            tester.tap(find::text("PUSH"));
             assert_eq!(tester.pump_and_settle_by(Duration::from_secs(60)), 2);
             assert_eq!(count_onstage(tester, "PUSH"), 0);
             assert_eq!(count_onstage(tester, "HELLO"), 1);
@@ -1949,9 +1953,7 @@ mod tests {
     /// Dart's `tester.getTopLeft(find.ancestor(of: find.text(text), matching: find.byType(Scaffold)))`.
     fn scaffold_top_left(tester: &WidgetTester, text: &str) -> Offset {
         let scaffold = tester.ancestor_of_type::<Scaffold>(the_text(tester, text));
-        tester
-            .global_rect(tester.render_box_of(scaffold))
-            .top_left()
+        tester.get_rect(scaffold).top_left()
     }
 
     /// Dart's `tester.getTopLeft(find.byKey(key))`.
@@ -1998,7 +2000,7 @@ mod tests {
                 // Check the basic iOS back-swipe dismiss transition. Dragging the pushed
                 // route halfway across the screen will trigger the iOS dismiss animation.
 
-                tap_text(tester, "push");
+                tester.tap(find::text("push"));
                 tester.pump_and_settle();
                 assert_eq!(count_onstage(tester, "route"), 1);
                 assert_eq!(count_onstage(tester, "push"), 0);
@@ -2022,7 +2024,7 @@ mod tests {
                 // and then press the button. A drag dropped animation is 400ms when dropped
                 // exactly halfway. It follows a curve that is very steep initially.
 
-                tap_text(tester, "push");
+                tester.tap(find::text("push"));
                 tester.pump_and_settle();
                 assert_eq!(count_onstage(tester, "route"), 1);
                 assert_eq!(count_onstage(tester, "push"), 0);
@@ -2111,8 +2113,8 @@ mod tests {
     }
 
     fn tap_key(tester: &mut WidgetTester, key: &GlobalKey) {
-        let at = tester.center_of(key);
-        tester.tap(at, 1);
+        let at = tester.get_center(key);
+        tester.tap_at(at, 1);
     }
 
     #[test]
@@ -2164,8 +2166,8 @@ mod tests {
                 assert_eq!(page_tap_count.get(), 1);
 
                 // Tapping the "page" route's back button doesn't do anything either.
-                let back_button = tester
-                    .find_by_type::<IconButton>()
+                let back_button = find::by_type::<IconButton>()
+                    .evaluate(tester)
                     .into_iter()
                     .find(|button| {
                         tester.widget(*button, |button: &IconButton| {
@@ -2173,10 +2175,8 @@ mod tests {
                         })
                     })
                     .expect("the back button");
-                let at = tester
-                    .global_rect(tester.render_box_of(back_button))
-                    .center();
-                tester.tap(at, 1);
+                let at = tester.get_rect(back_button).center();
+                tester.tap_at(at, 1);
                 tester.pump_and_settle();
                 assert_eq!(
                     key_top_left(tester, &page_scaffold_key),

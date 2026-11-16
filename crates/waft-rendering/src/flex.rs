@@ -1927,14 +1927,12 @@ mod tests {
     use std::any::Any;
     use waft_foundation::AppCell;
 
-    use waft_foundation::Ref;
     use waft_gestures::{HitTestEntry, HitTestResult};
+    use waft_painting::AlignmentGeometry;
 
     use super::*;
     use crate::box_::BoxHitTestEntry;
-    use crate::layer::{ContainerLayer, ErasedLayer, OffsetLayer, PictureLayer};
-    use crate::pipeline_owner::PipelineOwner;
-    use crate::proxy_box::RenderRepaintBoundary;
+    use crate::testing::{EnginePhase, layout, layout_with, painted_ops, pump_frame};
     use waft_embedder::valo::Op;
 
     /// A leaf that takes its preferred size where the constraints allow, and answers hit tests
@@ -1987,37 +1985,10 @@ mod tests {
         child.box_parent_data(app).offset
     }
 
-    fn schedule_root_paint(app: &mut App, node: AnyRenderObject) {
-        let root = OffsetLayer::new(app, Offset::ZERO);
-        root.as_layer().attach(app, node.id());
-        node.schedule_initial_paint(app, root.as_container_layer());
-    }
-
-    /// The test binding's first frame: attach, lay the root out, schedule and flush paint.
-    fn first_frame(
-        app: &mut App,
-        root: AnyRenderBox,
-        constraints: BoxConstraints,
-    ) -> Ref<PipelineOwner> {
-        let owner = PipelineOwner::new(app, None, None);
-        owner.set_root_node(app, Some(root.as_object()));
-        root.layout(app, constraints, false);
-        schedule_root_paint(app, root.as_object());
-        owner.flush_compositing_bits(app);
-        owner.flush_paint(app);
-        owner
-    }
-
-    fn picture_has_clip(app: &App, boundary: AnyRenderObject) -> bool {
-        let layer = boundary.debug_layer(app).expect("painted");
-        layer
-            .depth_first_iterate_children(app)
-            .into_iter()
-            .filter_map(|child| {
-                app.handle::<PictureLayer>(child.id())
-                    .and_then(|picture| picture.picture(app).map(|p| p.ops().to_vec()))
-            })
-            .flatten()
+    /// Whether `render`, painted on its own, clips.
+    fn picture_has_clip(app: &mut App, render: AnyRenderObject) -> bool {
+        painted_ops(app, render)
+            .iter()
             .any(|op| matches!(op, Op::ClipPath { .. }))
     }
 
@@ -2318,18 +2289,17 @@ mod tests {
             let second = sized_box(&mut app, Size::new(80.0, 20.0));
             let flex = row(&mut app, vec![first, second]);
             flex.set_clip_behavior(&mut app, clip_behavior);
-            let root = RenderRepaintBoundary::new(&mut app, Some(flex.as_box()));
-
-            let owner = first_frame(
+            layout_with(
                 &mut app,
-                root.as_box(),
-                BoxConstraints::tight(Size::new(100.0, 20.0)),
+                flex.as_box(),
+                Some(BoxConstraints::tight(Size::new(100.0, 20.0))),
+                AlignmentGeometry::CENTER,
+                EnginePhase::Paint,
             );
 
             assert_eq!(flex.size(&app), Size::new(100.0, 20.0));
-            let clipped = picture_has_clip(&app, root.as_object());
+            let clipped = picture_has_clip(&mut app, flex.as_object());
             assert_eq!(clipped, clips, "{clip_behavior:?}");
-            let _ = owner;
         }
     }
 
@@ -2487,20 +2457,6 @@ mod tests {
         flex
     }
 
-    /// Lays `root` out as the root of a pipeline, so that a changed property is laid out again
-    /// by `flush_layout`.
-    fn lay_out_root(
-        app: &mut App,
-        root: AnyRenderBox,
-        constraints: BoxConstraints,
-    ) -> Ref<PipelineOwner> {
-        let owner = PipelineOwner::new(app, None, None);
-        owner.set_root_node(app, Some(root.as_object()));
-        root.as_object().schedule_initial_layout(app);
-        root.layout(app, constraints, false);
-        owner
-    }
-
     /// Gives `child` the flex factor `flex` and the fit `fit` in its flex.
     fn set_flex(app: &mut App, child: AnyRenderBox, flex: i32, fit: FlexFit) {
         let parent_data = child.parent_data_of_mut::<FlexParentData>(app);
@@ -2518,18 +2474,14 @@ mod tests {
         let second = sized_box(&mut app, Size::new(100.0, 100.0));
         let flex = baseline_row(&mut app, vec![first, second]);
         flex.set_vertical_direction(&mut app, VerticalDirection::Up);
-        let owner = lay_out_root(
-            &mut app,
-            flex.as_box(),
-            BoxConstraints::tight(Size::new(800.0, 600.0)),
-        );
+        layout(&mut app, flex.as_box());
 
         // Not start-aligned.
         assert_eq!(offset_of(&app, first).dy(), 0.0);
         assert_eq!(offset_of(&app, second).dy(), 0.0);
 
         flex.set_vertical_direction(&mut app, VerticalDirection::Down);
-        owner.flush_layout(&mut app);
+        pump_frame(&mut app, EnginePhase::Layout);
         assert_eq!(offset_of(&app, first).dy(), 0.0);
         assert_eq!(offset_of(&app, second).dy(), 0.0);
     }
@@ -2559,7 +2511,13 @@ mod tests {
         flex.set_direction(&mut app, Axis::Vertical);
         flex.add_all(&mut app, Some(children));
         let constraints = BoxConstraints::tight(Size::new(800.0, 600.0));
-        let owner = lay_out_root(&mut app, flex.as_box(), constraints);
+        layout_with(
+            &mut app,
+            flex.as_box(),
+            None,
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
+        );
         let flex_height = flex.size(&app).height();
 
         let expect_baseline = |app: &mut App, expected: f64| {
@@ -2576,15 +2534,15 @@ mod tests {
         expect_baseline(&mut app, 100.0 + 10.0);
 
         flex.set_main_axis_alignment(&mut app, MainAxisAlignment::End);
-        owner.flush_layout(&mut app);
+        pump_frame(&mut app, EnginePhase::Paint);
         expect_baseline(&mut app, flex_height - 400.0 + 10.0);
 
         flex.set_vertical_direction(&mut app, VerticalDirection::Up);
-        owner.flush_layout(&mut app);
+        pump_frame(&mut app, EnginePhase::Paint);
         expect_baseline(&mut app, 300.0 + 10.0);
 
         flex.set_main_axis_alignment(&mut app, MainAxisAlignment::Start);
-        owner.flush_layout(&mut app);
+        pump_frame(&mut app, EnginePhase::Paint);
         expect_baseline(&mut app, flex_height - 200.0 + 10.0);
     }
 
@@ -2701,7 +2659,13 @@ mod tests {
         let loose = BoxConstraints::loose(Size::new(200.0, 100.0));
         let dry_size = row.get_dry_layout(&mut app, loose);
         let dry_baseline = row.get_dry_baseline(&mut app, loose, TextBaseline::Alphabetic);
-        let _owner = lay_out_root(&mut app, row, loose);
+        layout_with(
+            &mut app,
+            row,
+            Some(loose),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Layout,
+        );
 
         assert_eq!(flex.size(&app), Size::new(200.0, 50.0));
         assert_eq!(offset_of(&app, deep).dy(), 0.0);

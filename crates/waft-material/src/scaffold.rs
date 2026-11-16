@@ -5378,7 +5378,8 @@ mod tests {
     };
 
     use waft_widgets::testing::{
-        TargetPlatformVariant, WidgetTester, test_widgets, test_widgets_variant,
+        TargetPlatformVariant, WidgetTester, expect, find, finds_one_widget, test_widgets,
+        test_widgets_variant,
     };
 
     use super::*;
@@ -5989,7 +5990,7 @@ mod tests {
     }
 
     fn center_of_element(tester: &WidgetTester, element: waft_widgets::AnyElement) -> Offset {
-        tester.global_rect(tester.render_box_of(element)).center()
+        tester.get_rect(element).center()
     }
 
     // 'Persistent bottom buttons are persistent'.
@@ -6011,14 +6012,14 @@ mod tests {
                     .into_widget()
             });
 
-            let scroll_view = tester.find_by_type::<SingleChildScrollView>()[0];
+            let scroll_view = find::by_type::<SingleChildScrollView>().evaluate(tester)[0];
             let start = center_of_element(tester, scroll_view);
             tester.drag_from(start, Offset::new(0.0, -1000.0), 1);
             tester.pump();
             assert!(!did_press_button.get());
-            let x = tester.find_text("X")[0];
+            let x = find::text("X").evaluate(tester)[0];
             let at = center_of_element(tester, x);
-            tester.tap(at, 2);
+            tester.tap_at(at, 2);
             assert!(did_press_button.get());
         });
     }
@@ -6043,8 +6044,8 @@ mod tests {
                 });
             };
             let footer_button = |tester: &WidgetTester| {
-                let button = tester.find_by_type::<TextButton>()[0];
-                tester.global_rect(tester.render_box_of(button))
+                let button = find::by_type::<TextButton>().evaluate(tester)[0];
+                tester.get_rect(button)
             };
 
             build_app(tester, AlignmentDirectional::CENTER_END);
@@ -6060,7 +6061,7 @@ mod tests {
 
     /// Dart's `find.ancestor(of: find.byType(OverflowBar), matching: find.byType(W)).first`.
     fn overflow_bar_ancestor<W: 'static>(tester: &WidgetTester) -> waft_widgets::AnyElement {
-        let overflow_bar = tester.find_by_type::<OverflowBar>()[0];
+        let overflow_bar = find::by_type::<OverflowBar>().evaluate(tester)[0];
         tester.ancestor_of_type::<W>(overflow_bar)
     }
 
@@ -6077,7 +6078,7 @@ mod tests {
             ));
 
             let buttons_bar = overflow_bar_ancestor::<Padding>(tester);
-            let rect = tester.global_rect(tester.render_box_of(buttons_bar));
+            let rect = tester.get_rect(buttons_bar);
             assert_eq!(rect.bottom_left(), Offset::new(10.0, 560.0));
             assert_eq!(rect.bottom_right(), Offset::new(770.0, 560.0));
         });
@@ -6167,9 +6168,9 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            let scaffold = tester.find_by_type::<Scaffold>()[0];
-            let material = *tester
-                .find_by_type::<Material>()
+            let scaffold = find::by_type::<Scaffold>().evaluate(tester)[0];
+            let material = *find::by_type::<Material>()
+                .evaluate(tester)
                 .iter()
                 .find(|material| tester.ancestors(**material).contains(&scaffold))
                 .expect("the scaffold's material");
@@ -6369,12 +6370,12 @@ mod tests {
 
     /// Dart's `tester.tap(find.byType(IconButton).first)`: the app bar's drawer button.
     fn tap_first_icon_button(tester: &mut WidgetTester, pointer: i64) {
-        let button = *tester
-            .find_by_type::<crate::icon_button::IconButton>()
+        let button = *find::by_type::<crate::icon_button::IconButton>()
+            .evaluate(tester)
             .first()
             .expect("an IconButton");
         let at = center_of_element(tester, button);
-        tester.tap(at, pointer);
+        tester.tap_at(at, pointer);
     }
 
     // 'Drawer opens correctly with custom edgeDragWidth' .
@@ -6610,7 +6611,7 @@ mod tests {
                 );
 
                 // Test that we can close the drawer with a tap gesture in the body.
-                tester.tap(Offset::new(500.0, 300.0), 3);
+                tester.tap_at(Offset::new(500.0, 300.0), 3);
                 tester.pump_and_settle();
                 assert!(
                     !scaffold_state.is_drawer_open(&tester.cell.borrow()),
@@ -6899,7 +6900,8 @@ mod tests {
     }
 
     fn rotation_turns(tester: &WidgetTester) -> f64 {
-        let rotation = tester.find_by_type::<waft_widgets::Animated<RotationTransition>>()[0];
+        let rotation =
+            tester.element(find::by_type::<waft_widgets::Animated<RotationTransition>>());
         let turns = tester.widget(
             rotation,
             |rotation: &waft_widgets::Animated<RotationTransition>| rotation.0.turns(),
@@ -7036,14 +7038,17 @@ mod tests {
 
     /// Dart's `find.byType(ElevatedButton)` tapped at its centre.
     fn tap_elevated_button(tester: &mut WidgetTester, label: &str, pointer: i64) {
-        let text = *tester.find_text(label).first().expect("the button's label");
+        let text = *find::text(label)
+            .evaluate(tester)
+            .first()
+            .expect("the button's label");
         let button = tester.ancestor_of_type::<ElevatedButton>(text);
         let at = center_of_element(tester, button);
-        tester.tap(at, pointer);
+        tester.tap_at(at, pointer);
     }
 
     fn fab_top_left(tester: &WidgetTester) -> Offset {
-        let fab = tester.find_by_type::<FloatingActionButton>()[0];
+        let fab = find::by_type::<FloatingActionButton>().evaluate(tester)[0];
         let render = tester.render_box_of(fab);
         let app = tester.cell.borrow();
         render.local_to_global(&app, Offset::ZERO, None)
@@ -7080,7 +7085,11 @@ mod tests {
             });
 
             // FAB is not visible.
-            assert!(tester.find_by_type::<FloatingActionButton>().is_empty());
+            assert!(
+                find::by_type::<FloatingActionButton>()
+                    .evaluate(tester)
+                    .is_empty()
+            );
 
             // Tap the button to show the FAB.
             tap_elevated_button(tester, "Toggle FAB", 1);
@@ -7120,7 +7129,11 @@ mod tests {
 
             tester.pump_by(Duration::from_millis(50)); // Advance the animation by 50ms.
             // FAB is not visible.
-            assert!(tester.find_by_type::<FloatingActionButton>().is_empty());
+            assert!(
+                find::by_type::<FloatingActionButton>()
+                    .evaluate(tester)
+                    .is_empty()
+            );
         });
     }
 
@@ -7185,7 +7198,11 @@ mod tests {
             });
 
             // FAB is not visible.
-            assert!(tester.find_by_type::<FloatingActionButton>().is_empty());
+            assert!(
+                find::by_type::<FloatingActionButton>()
+                    .evaluate(tester)
+                    .is_empty()
+            );
 
             // Tap the button to show the FAB.
             tap_elevated_button(tester, "Toggle FAB", 1);
@@ -7197,7 +7214,11 @@ mod tests {
             tap_elevated_button(tester, "Toggle FAB", 2);
             tester.pump();
             // FAB is not visible.
-            assert!(tester.find_by_type::<FloatingActionButton>().is_empty());
+            assert!(
+                find::by_type::<FloatingActionButton>()
+                    .evaluate(tester)
+                    .is_empty()
+            );
 
             // Tap the button to show the FAB.
             tap_elevated_button(tester, "Toggle FAB", 3);
@@ -7216,7 +7237,11 @@ mod tests {
             tap_elevated_button(tester, "Toggle FAB", 5);
             tester.pump();
             // FAB is not visible.
-            assert!(tester.find_by_type::<FloatingActionButton>().is_empty());
+            assert!(
+                find::by_type::<FloatingActionButton>()
+                    .evaluate(tester)
+                    .is_empty()
+            );
         });
     }
 
@@ -7355,7 +7380,7 @@ mod tests {
                         .extend_body_behind_app_bar(extend_body_behind_app_bar)
                         .into_widget()
                 });
-                let fab = tester.find_by_type::<FloatingActionButton>()[0];
+                let fab = find::by_type::<FloatingActionButton>().evaluate(tester)[0];
                 let render = tester.render_box_of(fab);
                 tester.global_rect(render).center().dy()
             };
@@ -7405,8 +7430,8 @@ mod tests {
                     scaffold_messenger.set(Some(ScaffoldMessenger::maybe_of(app, context)));
                 }
             }));
-            let at = tester.center_of(&tap_target);
-            tester.tap(at, 1);
+            let at = tester.get_center(&tap_target);
+            tester.tap_at(at, 1);
             tester.pump();
             assert_eq!(scaffold_messenger.get(), Some(None));
         });
@@ -7423,10 +7448,10 @@ mod tests {
 
     /// Dart's `tester.tap(find.text(label))`, which skips offstage widgets.
     fn tap_onstage_text(tester: &mut WidgetTester, label: &str, pointer: i64) {
-        let found = tester.find_onstage_text(label);
+        let found = find::text(label).evaluate(tester);
         assert_eq!(found.len(), 1, "one onstage {label:?}");
-        let at = tester.global_rect(tester.render_box_of(found[0])).center();
-        tester.tap(at, pointer);
+        let at = tester.get_rect(found[0]).center();
+        tester.tap_at(at, pointer);
     }
 
     // 'ScaffoldMessenger checks for nesting when a new Scaffold is registered'. A
@@ -7467,12 +7492,12 @@ mod tests {
             });
 
             let snack_bars =
-                |tester: &WidgetTester| tester.find_onstage_text(SNACK_BAR_CONTENT).len();
+                |tester: &WidgetTester| find::text(SNACK_BAR_CONTENT).evaluate(tester).len();
             assert_eq!(snack_bars(tester), 0);
             tap_onstage_text(tester, "Push route", 1);
             tester.pump_and_settle();
             assert_eq!(snack_bars(tester), 0);
-            assert_eq!(tester.find_onstage_text("Pop route").len(), 1);
+            expect(tester, &find::text("Pop route"), finds_one_widget());
 
             // Show SnackBar on second page
             tap_onstage_text(tester, "Show SnackBar", 2);
@@ -7502,9 +7527,9 @@ mod tests {
             tester.pump_widget(tap_target_scaffold(&tap_target, false, |app, context| {
                 ScaffoldMessenger::of(app, context);
             }));
-            let at = tester.center_of(&tap_target);
+            let at = tester.get_center(&tap_target);
             let outcome =
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| tester.tap(at, 1)));
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| tester.tap_at(at, 1)));
             let message = panic_message(outcome.expect_err("ScaffoldMessenger.of panics"));
             assert!(
                 message.starts_with("No ScaffoldMessenger widget found.\n"),
@@ -7543,7 +7568,7 @@ mod tests {
             };
             tester.pump_widget(material_app(theme, SizedBox::shrink().into_widget()));
 
-            let messenger = tester.find_by_type::<ScaffoldMessenger>()[0];
+            let messenger = find::by_type::<ScaffoldMessenger>().evaluate(tester)[0];
             let mut app = tester.cell.borrow_mut();
             let messenger_theme = Theme::of(&mut app, messenger);
             assert!(messenger_theme.color_scheme == color_scheme);
@@ -7579,11 +7604,7 @@ mod tests {
     }
 
     fn snack_bar_text_top(tester: &WidgetTester) -> f64 {
-        let text = *tester
-            .find_text("I am a snack bar.")
-            .first()
-            .expect("the snack bar's text");
-        tester.global_rect(tester.render_box_of(text)).top
+        tester.get_rect(find::text("I am a snack bar.")).top
     }
 
     #[track_caller]
@@ -7595,9 +7616,9 @@ mod tests {
     }
 
     fn tap_close_icon(tester: &mut WidgetTester, pointer: i64) {
-        let icon_button = tester.find_by_type::<crate::IconButton>()[0];
+        let icon_button = find::by_type::<crate::IconButton>().evaluate(tester)[0];
         let at = center_of_element(tester, icon_button);
-        tester.tap(at, pointer);
+        tester.tap_at(at, pointer);
     }
 
     // 'ScaffoldMessenger showSnackBar default animation'.
@@ -7733,7 +7754,7 @@ mod tests {
             tester.pump();
 
             // The SnackBar is dismissed.
-            assert!(tester.find_text("I am a snack bar.").is_empty());
+            assert!(find::text("I am a snack bar.").evaluate(tester).is_empty());
         });
     }
 
@@ -7875,8 +7896,8 @@ mod tests {
                 |_app, _context| Container::new().into_widget(),
                 None,
             );
-            let at = tester.center_of(&button_key);
-            tester.tap(at, 1);
+            let at = tester.get_center(&button_key);
+            tester.tap_at(at, 1);
             // Dart: `expect(tester.takeException(), isAssertionError)`. The assertion unwinds out
             // of the pump, where `test_widgets` re-raises it.
             tester.pump();
@@ -7931,12 +7952,6 @@ mod tests {
         });
     }
 
-    fn tap_text(tester: &mut WidgetTester, text: &str, pointer: i64) {
-        let element = *tester.find_text(text).first().expect("the text");
-        let at = center_of_element(tester, element);
-        tester.tap(at, pointer);
-    }
-
     // 'Scaffold showBottomSheet default animation'.
     #[test]
     fn show_bottom_sheet_animates_in_250_and_out_200_milliseconds_by_default() {
@@ -7945,7 +7960,7 @@ mod tests {
             pump_bottom_sheet_app(tester, &sheet_key, None);
 
             // Tap the 'X' to show the bottom sheet.
-            tap_text(tester, "X", 1);
+            tester.tap(find::text("X"));
             tester.pump();
             // Advance the animation by 1/2 of the default forward duration.
             tester.pump_by(Duration::from_millis(125));
@@ -7960,7 +7975,7 @@ mod tests {
             assert_eq!(rect_of(tester, &sheet_key).top, 0.0);
 
             // Dismiss the bottom sheet.
-            tap_text(tester, "Close", 2);
+            tester.tap(find::text("Close"));
             tester.pump();
             // Advance the animation by 1/2 of the default reverse duration.
             tester.pump_by(Duration::from_millis(100));
@@ -7985,9 +8000,9 @@ mod tests {
             let sheet_key = GlobalKey::new();
             pump_bottom_sheet_app(tester, &sheet_key, None);
             tester.assert_leaves_nothing_behind(|tester| {
-                tap_text(tester, "X", 1);
+                tester.tap(find::text("X"));
                 tester.pump_and_settle();
-                tap_text(tester, "Close", 2);
+                tester.tap(find::text("Close"));
                 tester.pump_and_settle();
                 assert!(sheet_key.current_context(&tester.cell.borrow()).is_none());
             });
@@ -8010,7 +8025,7 @@ mod tests {
                     Some(Duration::from_millis(400)),
                 )),
             );
-            tap_text(tester, "X", 1);
+            tester.tap(find::text("X"));
             tester.pump();
             // Advance the animation by 1/2 of the custom forward duration.
             tester.pump_by(Duration::from_millis(400));
@@ -8025,7 +8040,7 @@ mod tests {
             assert_eq!(rect_of(tester, &sheet_key).top, 0.0);
 
             // Dismiss the bottom sheet.
-            tap_text(tester, "Close", 2);
+            tester.tap(find::text("Close"));
             tester.pump();
             // Advance the animation by 1/2 of the custom reverse duration.
             tester.pump_by(Duration::from_millis(200));
@@ -8042,14 +8057,14 @@ mod tests {
             // Test no animation style.
             pump_bottom_sheet_app(tester, &sheet_key, Some(AnimationStyle::NO_ANIMATION));
             tester.pump_and_settle();
-            tap_text(tester, "X", 3);
+            tester.tap(find::text("X"));
             tester.pump();
 
             // The bottom sheet is fully visible.
             assert_eq!(rect_of(tester, &sheet_key).top, 0.0);
 
             // Dismiss the bottom sheet.
-            tap_text(tester, "Close", 4);
+            tester.tap(find::text("Close"));
             tester.pump();
 
             // The bottom sheet is dismissed.
@@ -8168,9 +8183,9 @@ mod tests {
 
     /// Dart's `find.descendant(of: find.byType(Scaffold), matching: find.byType(ModalBarrier))`.
     fn modal_barriers(tester: &WidgetTester) -> Vec<waft_widgets::AnyElement> {
-        let scaffold = tester.find_by_type::<Scaffold>()[0];
-        tester
-            .find_by_type::<ModalBarrier>()
+        let scaffold = find::by_type::<Scaffold>().evaluate(tester)[0];
+        find::by_type::<ModalBarrier>()
+            .evaluate(tester)
             .into_iter()
             .filter(|barrier| tester.ancestors(*barrier).contains(&scaffold))
             .collect()
@@ -8205,7 +8220,7 @@ mod tests {
             );
 
             tester.pump();
-            assert_eq!(tester.find_by_type::<BottomSheet>().len(), 1);
+            assert_eq!(find::by_type::<BottomSheet>().evaluate(tester).len(), 1);
 
             // The scrim is not present yet.
             assert!(modal_barriers(tester).is_empty());
@@ -8246,7 +8261,8 @@ mod tests {
             });
 
             let get_scale = |tester: &WidgetTester| {
-                let scale = tester.find_by_type::<waft_widgets::Animated<ScaleTransition>>()[0];
+                let scale =
+                    tester.element(find::by_type::<waft_widgets::Animated<ScaleTransition>>());
                 let scale = tester
                     .widget(scale, |scale: &waft_widgets::Animated<ScaleTransition>| {
                         scale.0.scale()
@@ -8453,19 +8469,28 @@ mod tests {
             tester.pump_and_settle();
 
             // Bottom sheet and FAB are visible.
-            assert_eq!(tester.find_by_type::<FloatingActionButton>().len(), 1);
+            assert_eq!(
+                find::by_type::<FloatingActionButton>()
+                    .evaluate(tester)
+                    .len(),
+                1
+            );
             assert!(is_mounted(tester, &bottom_sheet_key));
 
             // Close bottom sheet while removing FAB.
-            let at = tester.center_of(&fab_key);
-            tester.tap(at, 2);
+            let at = tester.get_center(&fab_key);
+            tester.tap_at(at, 2);
             tester.pump(); // start animation
             tap_elevated_button(tester, "BottomSheet", 3);
             // Let the animation finish.
             tester.pump_and_settle();
 
             // Bottom sheet and FAB are gone.
-            assert!(tester.find_by_type::<FloatingActionButton>().is_empty());
+            assert!(
+                find::by_type::<FloatingActionButton>()
+                    .evaluate(tester)
+                    .is_empty()
+            );
             assert!(!is_mounted(tester, &bottom_sheet_key));
         });
     }
@@ -8503,7 +8528,7 @@ mod tests {
 
     /// Dart's `tester.state<ScrollableState>(find.byType(Scrollable)).position`.
     fn scrollable_position(tester: &WidgetTester) -> waft_widgets::AnyScrollPosition {
-        let scrollables = tester.find_by_type::<waft_widgets::Scrollable>();
+        let scrollables = find::by_type::<waft_widgets::Scrollable>().evaluate(tester);
         assert_eq!(scrollables.len(), 1, "one Scrollable");
         let app = tester.cell.borrow();
         scrollables[0]
@@ -8549,7 +8574,7 @@ mod tests {
 
     /// Dart's `tester.state<ScaffoldState>(find.byType(Scaffold))`.
     fn only_scaffold_state(tester: &WidgetTester) -> Handle<ScaffoldState> {
-        let scaffolds = tester.find_by_type::<Scaffold>();
+        let scaffolds = find::by_type::<Scaffold>().evaluate(tester);
         assert_eq!(scaffolds.len(), 1, "one Scaffold");
         scaffolds[0]
             .state_handle::<ScaffoldState>(&tester.cell.borrow())
@@ -8707,8 +8732,8 @@ mod tests {
 
     /// Dart's `tester.widget<Icon>(find.byType(Icon)).icon`: the one onstage `Icon`.
     fn only_onstage_icon(tester: &WidgetTester) -> Option<waft_widgets::IconData> {
-        let icons: Vec<_> = tester
-            .find_by_type::<waft_widgets::Icon>()
+        let icons: Vec<_> = find::by_type::<waft_widgets::Icon>()
+            .evaluate(tester)
             .into_iter()
             .filter(|icon| tester.is_onstage(*icon))
             .collect();

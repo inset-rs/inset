@@ -1313,6 +1313,22 @@ impl Element for TheaterElement {
         MultiChildRenderObjectElementBase::visit_children(self, app, visitor);
     }
 
+    /// Dart's `_TheaterElement.debugVisitOnstageChildren`: the children after the theater's
+    /// `skip_count`, the entries the overlay keeps onstage.
+    fn debug_visit_onstage_children(
+        self: Handle<Self>,
+        app: &App,
+        visitor: &mut dyn FnMut(AnyElement),
+    ) {
+        let skip_count = Self::widget_of(self.as_element().widget(app)).skip_count;
+        let mut children = Vec::new();
+        MultiChildRenderObjectElementBase::visit_children(self, app, &mut |child| {
+            children.push(child);
+        });
+        debug_assert!(children.len() >= skip_count);
+        children.into_iter().skip(skip_count).for_each(visitor);
+    }
+
     fn forget_child(self: Handle<Self>, app: &mut App, child: AnyElement) {
         MultiChildRenderObjectElementBase::forget_child(self, app, child);
     }

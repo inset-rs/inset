@@ -801,10 +801,7 @@ mod tests {
     fn assert_uniform(shader: &valo::RuntimeShader, name: &str, expected: &[f64]) {
         let actual = uniform(shader, name, expected.len() as u32);
         for (actual, expected) in actual.iter().zip(expected) {
-            assert!(
-                (f64::from(*actual) - expected).abs() <= 1e-5 * expected.abs().max(1.0),
-                "{name}: {actual} is not {expected}"
-            );
+            waft_widgets::testing::assert_f32_equals(f64::from(*actual), *expected);
         }
     }
 
@@ -823,7 +820,7 @@ mod tests {
                         .build(),
                 ),
             ));
-            tester.tap(WidgetTester::SIZE.center(Offset::ZERO), 1);
+            tester.tap_at(WidgetTester::SIZE.center(Offset::ZERO), 1);
             tester.pump();
             tester.pump_and_settle();
             assert!(InkSparkleFactory::program().is_some());
@@ -840,7 +837,7 @@ mod tests {
                     .child(SizedBox::new().width(80.0).height(20.0))
                     .on_tap(Listener::new(|_app| {})),
             ));
-            tester.tap(WidgetTester::SIZE.center(Offset::ZERO), 1);
+            tester.tap_at(WidgetTester::SIZE.center(Offset::ZERO), 1);
             tester.pump();
             tester.pump_by(Duration::from_millis(200));
 
@@ -869,7 +866,7 @@ mod tests {
                     .child(SizedBox::new().width(80.0).height(20.0))
                     .on_tap(Listener::new(|_app| {})),
             ));
-            tester.tap(WidgetTester::SIZE.center(Offset::ZERO), 1);
+            tester.tap_at(WidgetTester::SIZE.center(Offset::ZERO), 1);
             tester.pump();
             tester.pump_by(Duration::from_millis(200));
 
@@ -893,7 +890,7 @@ mod tests {
                     .on_tap(Listener::new(|_app| {})),
             ));
             let well_center = WidgetTester::SIZE.center(Offset::ZERO);
-            tester.tap(well_center + Offset::new(-30.0, -5.0), 1);
+            tester.tap_at(well_center + Offset::new(-30.0, -5.0), 1);
             tester.pump();
             tester.pump_by(Duration::from_millis(50));
 

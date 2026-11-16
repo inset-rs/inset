@@ -513,7 +513,7 @@ mod tests {
         SizedBox, Text, WidgetStatePropertyAll,
     };
 
-    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+    use waft_widgets::testing::{TestPointer, WidgetTester, find, test_widgets};
 
     use super::*;
     use crate::colors::Colors;
@@ -541,13 +541,12 @@ mod tests {
     }
 
     fn tap(tester: &mut WidgetTester, element: AnyElement) {
-        let render = tester.render_box_of(element);
-        let center = tester.global_rect(render).center();
-        tester.tap(center, 1);
+        let center = tester.get_center(element);
+        tester.tap_at(center, 1);
     }
 
     fn only<W: 'static>(tester: &WidgetTester) -> AnyElement {
-        let found = tester.find_by_type::<W>();
+        let found = find::by_type::<W>().evaluate(tester);
         assert_eq!(found.len(), 1);
         found[0]
     }
@@ -566,7 +565,7 @@ mod tests {
     /// The colour of the glyph the button's `Icon` paints: Dart's `tester.firstWidget<RichText>(
     /// find.descendant(of: find.byType(Button), matching: find.byType(RichText))).text.style!.color`.
     fn glyph_color(tester: &WidgetTester) -> Option<Color> {
-        let icon = tester.find_by_type::<Icon>()[0];
+        let icon = find::by_type::<Icon>().evaluate(tester)[0];
         tester
             .glyph_style(icon)
             .color
@@ -608,7 +607,7 @@ mod tests {
     }
 
     fn on_home(tester: &WidgetTester) -> bool {
-        !tester.find_onstage_text("Home").is_empty()
+        !find::text("Home").evaluate(tester).is_empty()
     }
 
     // 'BackButton control test'
@@ -621,7 +620,7 @@ mod tests {
             tap(tester, button);
             tester.pump_and_settle();
 
-            assert_eq!(tester.find_onstage_text("Home").len(), 1);
+            assert_eq!(find::text("Home").evaluate(tester).len(), 1);
         });
     }
 
@@ -681,14 +680,14 @@ mod tests {
             tap(tester, button);
             tester.pump_and_settle();
 
-            assert_eq!(tester.find_onstage_text("Home").len(), 1);
+            assert_eq!(find::text("Home").evaluate(tester).len(), 1);
         });
     }
 
     /// The icons of the `Icon`s the tester found, in tree order.
     fn icons(tester: &WidgetTester) -> Vec<Option<IconData>> {
-        tester
-            .find_by_type::<Icon>()
+        find::by_type::<Icon>()
+            .evaluate(tester)
             .into_iter()
             .map(|element| tester.widget(element, |icon: &Icon| icon.icon.clone()))
             .collect()
@@ -777,8 +776,8 @@ mod tests {
             ];
             pump_app(tester, material(Column::new().children(buttons)));
 
-            let tooltips: Vec<Option<String>> = tester
-                .find_by_type::<IconButton>()
+            let tooltips: Vec<Option<String>> = find::by_type::<IconButton>()
+                .evaluate(tester)
                 .into_iter()
                 .map(|element| tester.widget(element, |button: &IconButton| button.tooltip.clone()))
                 .collect();
@@ -806,8 +805,8 @@ mod tests {
             ];
             pump_app(tester, material(Column::new().children(buttons)));
 
-            let keys: Vec<Option<KeyRef>> = tester
-                .find_by_type::<IconButton>()
+            let keys: Vec<Option<KeyRef>> = find::by_type::<IconButton>()
+                .evaluate(tester)
                 .into_iter()
                 .map(|element| tester.widget(element, |button: &IconButton| button.key.clone()))
                 .collect();
@@ -961,13 +960,13 @@ mod tests {
             );
             tester.pump_and_settle();
 
-            assert!(tester.find_by_type::<Drawer>().is_empty());
+            assert!(find::by_type::<Drawer>().evaluate(tester).is_empty());
 
             let button = only::<DrawerButton>(tester);
             tap(tester, button);
             tester.pump_and_settle();
 
-            assert_eq!(tester.find_by_type::<Drawer>().len(), 1);
+            assert_eq!(find::by_type::<Drawer>().evaluate(tester).len(), 1);
         });
     }
 
@@ -983,13 +982,13 @@ mod tests {
             );
             tester.pump_and_settle();
 
-            assert!(tester.find_by_type::<Drawer>().is_empty());
+            assert!(find::by_type::<Drawer>().evaluate(tester).is_empty());
 
             let button = only::<EndDrawerButton>(tester);
             tap(tester, button);
             tester.pump_and_settle();
 
-            assert_eq!(tester.find_by_type::<Drawer>().len(), 1);
+            assert_eq!(find::by_type::<Drawer>().evaluate(tester).len(), 1);
         });
     }
 
@@ -1006,14 +1005,14 @@ mod tests {
             );
             tester.pump_and_settle();
 
-            assert!(tester.find_by_type::<Drawer>().is_empty());
+            assert!(find::by_type::<Drawer>().evaluate(tester).is_empty());
             assert_eq!(calls.get(), 0);
             let button = only::<DrawerButton>(tester);
             tap(tester, button);
             tester.pump_and_settle();
 
             // Drawer is still closed
-            assert!(tester.find_by_type::<Drawer>().is_empty());
+            assert!(find::by_type::<Drawer>().evaluate(tester).is_empty());
             // The custom callback is called.
             assert_eq!(calls.get(), 1);
         });
@@ -1032,13 +1031,13 @@ mod tests {
             );
             tester.pump_and_settle();
 
-            assert!(tester.find_by_type::<Drawer>().is_empty());
+            assert!(find::by_type::<Drawer>().evaluate(tester).is_empty());
             assert_eq!(calls.get(), 0);
             let button = only::<EndDrawerButton>(tester);
             tap(tester, button);
             tester.pump_and_settle();
 
-            assert!(tester.find_by_type::<Drawer>().is_empty());
+            assert!(find::by_type::<Drawer>().evaluate(tester).is_empty());
             assert_eq!(calls.get(), 1);
         });
     }
@@ -1116,8 +1115,7 @@ mod tests {
                 .into_widget(),
         );
         let element = only::<W>(tester);
-        let render = tester.render_box_of(element);
-        render.size(&tester.cell.borrow())
+        tester.get_size(element)
     }
 
     // 'EndDrawerButton does not crash at zero area'
@@ -1165,8 +1163,7 @@ mod tests {
                     .into_widget(),
             );
             let icon = only::<BackButtonIcon>(tester);
-            let render = tester.render_box_of(icon);
-            let size = render.size(&tester.cell.borrow());
+            let size = tester.get_size(icon);
             assert!(size.is_empty());
         });
     }
@@ -1179,8 +1176,7 @@ mod tests {
         pump_app(tester, material(button));
         let mut mouse = TestPointer::mouse(1, 0);
         tester.add_pointer(&mut mouse, Offset::new(1000.0, 1000.0));
-        let render = tester.render_box_of(only::<W>(tester));
-        let center = tester.global_rect(render).center();
+        let center = tester.get_center(only::<W>(tester));
         tester.move_to(&mut mouse, center, false);
         tester.pump_by(std::time::Duration::ZERO);
         tester.active_cursor(1)

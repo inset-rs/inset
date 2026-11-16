@@ -1523,11 +1523,6 @@ mod tests {
         Listener::new(|_app| {})
     }
 
-    fn size_of(tester: &WidgetTester, key: &GlobalKey) -> Size {
-        let render = tester.render_object(key).as_box().expect("a render box");
-        render.size(&tester.cell.borrow())
-    }
-
     fn rect_of(tester: &WidgetTester, key: &GlobalKey) -> Rect {
         let render = tester.render_object(key).as_box().expect("a render box");
         let app = tester.cell.borrow();
@@ -1605,15 +1600,15 @@ mod tests {
                     .on_long_press(counter(&did_long_press_button))
                     .key(key.clone().into()),
             )));
-            let center = tester.center_of(&key);
+            let center = tester.get_center(&key);
 
             assert_eq!(did_press_button.get(), 0);
-            tester.tap(center, 1);
+            tester.tap_at(center, 1);
             tester.pump_and_settle();
             assert_eq!(did_press_button.get(), 1);
 
             assert_eq!(did_long_press_button.get(), 0);
-            tester.long_press(center, 2);
+            tester.long_press_at(center, 2);
             tester.pump_and_settle();
             assert_eq!(did_long_press_button.get(), 1);
         });
@@ -1648,12 +1643,12 @@ mod tests {
             let key1 = GlobalKey::new();
             let frame = build_frame(tester, MaterialTapTargetSize::Padded, &key1);
             tester.pump_widget(frame);
-            assert_eq!(size_of(tester, &key1), Size::new(88.0, 48.0));
+            assert_eq!(tester.get_size(&key1), Size::new(88.0, 48.0));
 
             let key2 = GlobalKey::new();
             let frame = build_frame(tester, MaterialTapTargetSize::ShrinkWrap, &key2);
             tester.pump_widget(frame);
-            assert_eq!(size_of(tester, &key2), Size::new(88.0, 36.0));
+            assert_eq!(tester.get_size(&key2), Size::new(88.0, 36.0));
         });
     }
 
@@ -1713,12 +1708,12 @@ mod tests {
             build_test(tester, VisualDensity::STANDARD, false);
             let child_rect = rect_of(tester, &child_key);
             tester.pump_and_settle();
-            assert_eq!(size_of(tester, &key), Size::new(132.0, 100.0));
+            assert_eq!(tester.get_size(&key), Size::new(132.0, 100.0));
             assert_eq!(child_rect, Rect::from_ltrb(350.0, 250.0, 450.0, 350.0));
 
             build_test(tester, VisualDensity::new(3.0, 3.0), false);
             tester.pump_and_settle();
-            assert_eq!(size_of(tester, &key), Size::new(156.0, 124.0));
+            assert_eq!(tester.get_size(&key), Size::new(156.0, 124.0));
             assert_eq!(
                 rect_of(tester, &child_key),
                 Rect::from_ltrb(350.0, 250.0, 450.0, 350.0)
@@ -1726,7 +1721,7 @@ mod tests {
 
             build_test(tester, VisualDensity::new(-3.0, -3.0), false);
             tester.pump_and_settle();
-            assert_eq!(size_of(tester, &key), Size::new(132.0, 100.0));
+            assert_eq!(tester.get_size(&key), Size::new(132.0, 100.0));
             assert_eq!(
                 rect_of(tester, &child_key),
                 Rect::from_ltrb(350.0, 250.0, 450.0, 350.0)
@@ -1734,7 +1729,7 @@ mod tests {
 
             build_test(tester, VisualDensity::STANDARD, true);
             tester.pump_and_settle();
-            assert_eq!(size_of(tester, &key), Size::new(88.0, 48.0));
+            assert_eq!(tester.get_size(&key), Size::new(88.0, 48.0));
             assert_eq!(
                 rect_of(tester, &child_key),
                 Rect::from_ltrb(372.0, 293.0, 428.0, 307.0)
@@ -1742,7 +1737,7 @@ mod tests {
 
             build_test(tester, VisualDensity::new(3.0, 3.0), true);
             tester.pump_and_settle();
-            assert_eq!(size_of(tester, &key), Size::new(112.0, 60.0));
+            assert_eq!(tester.get_size(&key), Size::new(112.0, 60.0));
             assert_eq!(
                 rect_of(tester, &child_key),
                 Rect::from_ltrb(372.0, 293.0, 428.0, 307.0)
@@ -1750,7 +1745,7 @@ mod tests {
 
             build_test(tester, VisualDensity::new(-3.0, -3.0), true);
             tester.pump_and_settle();
-            assert_eq!(size_of(tester, &key), Size::new(88.0, 36.0));
+            assert_eq!(tester.get_size(&key), Size::new(88.0, 36.0));
             assert_eq!(
                 rect_of(tester, &child_key),
                 Rect::from_ltrb(372.0, 293.0, 428.0, 307.0)
@@ -1823,9 +1818,9 @@ mod tests {
             );
             tester.pump_widget(frame);
 
-            assert_eq!(size_of(tester, &keys[0]), Size::new(100.0, 100.0));
-            assert_eq!(size_of(tester, &keys[1]).width(), 200.0);
-            assert_eq!(size_of(tester, &keys[2]).height(), 200.0);
+            assert_eq!(tester.get_size(&keys[0]), Size::new(100.0, 100.0));
+            assert_eq!(tester.get_size(&keys[1]).width(), 200.0);
+            assert_eq!(tester.get_size(&keys[2]).height(), 200.0);
         });
     }
 
@@ -1856,8 +1851,8 @@ mod tests {
             );
             tester.pump_widget(frame);
 
-            assert_eq!(size_of(tester, &fixed), Size::new(200.0, 200.0));
-            assert_eq!(size_of(tester, &bounded), Size::new(200.0, 200.0));
+            assert_eq!(tester.get_size(&fixed), Size::new(200.0, 200.0));
+            assert_eq!(tester.get_size(&bounded), Size::new(200.0, 200.0));
         });
     }
 
@@ -1888,7 +1883,7 @@ mod tests {
             assert_eq!(value(tester, controller.handle()), states(&[]));
             assert_eq!(count.get(), 0);
 
-            let center = tester.center_of(&key);
+            let center = tester.get_center(&key);
             let mut gesture: TestPointer = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
             tester.add_pointer(&mut gesture, Offset::ZERO);
             tester.move_to(&mut gesture, center, false);
@@ -2203,7 +2198,7 @@ mod tests {
             assert_eq!(*foreground_states.borrow(), focused_states);
 
             // Hovered.
-            let center = tester.center_of(&key);
+            let center = tester.get_center(&key);
             let mut gesture = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
             tester.add_pointer(&mut gesture, Offset::ZERO);
             tester.move_to(&mut gesture, center, false);
@@ -2299,7 +2294,7 @@ mod tests {
 
             assert_eq!(*seen.borrow(), (Some(idle_color), Some(idle_color)));
 
-            let button_center = tester.center_of(&key);
+            let button_center = tester.get_center(&key);
             let mut gesture = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut gesture, Offset::ZERO);
             tester.move_to(&mut gesture, button_center, false);
@@ -2346,7 +2341,7 @@ mod tests {
                 )),
             );
             tester.pump_widget(frame);
-            assert_eq!(size_of(tester, &key), Size::ZERO);
+            assert_eq!(tester.get_size(&key), Size::ZERO);
         });
     }
 
@@ -2367,7 +2362,7 @@ mod tests {
             // The button's material is 36 high and centred in the 48 high tap target.
             let rect = rect_of(tester, &key);
             assert_eq!(rect.height(), 48.0);
-            tester.tap(Offset::new(rect.center().dx(), rect.top + 2.0), 1);
+            tester.tap_at(Offset::new(rect.center().dx(), rect.top + 2.0), 1);
             tester.pump_and_settle();
             assert_eq!(taps.get(), 1);
         });
@@ -2396,7 +2391,7 @@ mod tests {
             );
             tester.pump_widget(frame);
             let rect = rect_of(tester, &first);
-            tester.tap(rect.center(), 1);
+            tester.tap_at(rect.center(), 1);
             tester.pump_and_settle();
             assert_eq!(first_taps.get(), 1);
             assert_eq!(second_taps.get(), 0);

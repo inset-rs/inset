@@ -817,11 +817,12 @@ mod tests {
     use waft_embedder::Color;
     use waft_test::TestPlatform;
     use waft_widgets::testing::{
-        TargetPlatformVariant, WidgetTester, test_widgets, test_widgets_variant,
+        Finder, TargetPlatformVariant, WidgetTester, expect, find, finds_widgets, test_widgets,
+        test_widgets_variant,
     };
     use waft_widgets::{
-        AnyElement, AnyModalRoute, Localizations, Navigator, ScrollController, ScrollControllerRef,
-        SizedBox, StatelessWidget, WidgetsBinding, WidgetsLocalizations, downcast_widget,
+        AnyModalRoute, Localizations, Navigator, ScrollController, ScrollControllerRef, SizedBox,
+        StatelessWidget, WidgetsLocalizations, downcast_widget,
     };
 
     use super::*;
@@ -846,28 +847,9 @@ mod tests {
         })
     }
 
-    fn root_element(app: &mut App) -> AnyElement {
-        WidgetsBinding::instance(app)
-            .root_element(app)
-            .expect("a mounted app")
-    }
-
-    /// Every element of the mounted tree, parents before children.
-    fn descendants(app: &App, root: AnyElement) -> Vec<AnyElement> {
-        let mut all = vec![root];
-        let mut visited = 0;
-        while visited < all.len() {
-            let element = all[visited];
-            element.visit_children(app, &mut |child| all.push(child));
-            visited += 1;
-        }
-        all
-    }
-
-    fn has_widget<W: 'static>(app: &App, root: AnyElement) -> bool {
-        descendants(app, root)
-            .into_iter()
-            .any(|element| downcast_widget::<W>(&**element.widget(app)).is_some())
+    /// Dart's `find.byType(W, skipOffstage: false)`.
+    fn built<W: 'static>() -> Finder {
+        find::by_type::<W>().skip_offstage(false)
     }
 
     /// Mounts `configure(CupertinoApp::new())` and settles its route transitions.
@@ -889,18 +871,18 @@ mod tests {
     fn an_app_with_a_home_wraps_it_in_the_cupertino_chrome_and_a_navigator() {
         test_widgets(|tester| {
             mount(tester, |cupertino_app| cupertino_app.home(Marker));
-            let mut app = tester.cell.borrow_mut();
-            let root = root_element(&mut app);
-            assert!(has_widget::<ScrollConfiguration>(&app, root));
-            assert!(has_widget::<CupertinoUserInterfaceLevel>(&app, root));
-            assert!(has_widget::<CupertinoTheme>(&app, root));
-            assert!(has_widget::<HeroControllerScope>(&app, root));
-            assert!(has_widget::<WidgetsApp>(&app, root));
-            assert!(has_widget::<Navigator>(&app, root));
-            assert!(
-                has_widget::<Marker>(&app, root),
-                "the home route shows home"
+            expect(tester, &built::<ScrollConfiguration>(), finds_widgets());
+            expect(
+                tester,
+                &built::<CupertinoUserInterfaceLevel>(),
+                finds_widgets(),
             );
+            expect(tester, &built::<CupertinoTheme>(), finds_widgets());
+            expect(tester, &built::<HeroControllerScope>(), finds_widgets());
+            expect(tester, &built::<WidgetsApp>(), finds_widgets());
+            expect(tester, &built::<Navigator>(), finds_widgets());
+            // The home route shows home.
+            expect(tester, &built::<Marker>(), finds_widgets());
         });
     }
 

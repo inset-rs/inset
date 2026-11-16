@@ -252,7 +252,7 @@ mod tests {
     use waft_painting::EdgeInsets;
     use waft_widgets::{Center, SizedBox, StateSetter, StatefulBuilder, Text, WidgetStates};
 
-    use waft_widgets::testing::{WidgetTester, test_widgets};
+    use waft_widgets::testing::{WidgetTester, find, test_widgets};
 
     use super::*;
     use crate::button_style::ButtonStyle;
@@ -296,7 +296,7 @@ mod tests {
 
     /// Dart's `tester.widget<TextButton>(find.byType(TextButton)).style!`.
     fn text_button_style(tester: &WidgetTester) -> ButtonStyle {
-        let buttons = tester.find_by_type::<TextButton>();
+        let buttons = find::by_type::<TextButton>().evaluate(tester);
         assert_eq!(buttons.len(), 1, "one TextButton");
         tester.widget(buttons[0], |button: &TextButton| {
             button
@@ -335,7 +335,7 @@ mod tests {
             };
             tester.pump_widget(root);
             let size = |tester: &WidgetTester| {
-                let buttons = tester.find_by_type::<TextSelectionToolbarTextButton>();
+                let buttons = find::by_type::<TextSelectionToolbarTextButton>().evaluate(tester);
                 let render = tester.render_box_of(buttons[0]);
                 render.size(&tester.cell.borrow())
             };
@@ -493,7 +493,7 @@ mod tests {
                 )
             };
             tester.pump_widget(root);
-            let buttons = tester.find_by_type::<TextSelectionToolbarTextButton>();
+            let buttons = find::by_type::<TextSelectionToolbarTextButton>().evaluate(tester);
             let render = tester.render_box_of(buttons[0]);
             assert_eq!(render.size(&tester.cell.borrow()), Size::ZERO);
         });
