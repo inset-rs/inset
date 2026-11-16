@@ -23,19 +23,16 @@ impl SelectionModel {
         self.item_count
     }
 
-    /// Sets the number of items; selected indices and an anchor past the end are dropped, as for items the source removed.
-    pub fn set_item_count(&mut self, count: usize) -> bool {
+    /// `SelectionModel::Source(value)` (`SelectionModel.cpp`, 44): the selection and the anchor are cleared (`ClearSelection(true, false)`), the count is the new source's, and `SelectionChanged` is raised, which the `true` answers.
+    pub fn set_source(&mut self, count: usize) -> bool {
+        self.clear();
         self.item_count = count;
-        if self.anchor.is_some_and(|anchor| anchor >= count) {
-            self.anchor = None;
-        }
-        let before = self.ranges.clone();
-        self.ranges = before
-            .iter()
-            .filter(|range| *range.start() < count)
-            .map(|range| *range.start()..=(*range.end()).min(count.saturating_sub(1)))
-            .collect();
-        before != self.ranges
+        true
+    }
+
+    /// `SelectionNode::IsValidIndex` (`SelectionNode.cpp`, 335): the index is within the source's count.
+    fn is_valid_index(&self, index: usize) -> bool {
+        index < self.item_count
     }
 
     /// `SingleSelect`: switching it on with several items selected keeps only the first.
@@ -160,7 +157,9 @@ impl SelectionModel {
         if self.single_select && select {
             self.clear();
         }
-        let changed = index < self.item_count && self.is_selected(index) != select;
+        // `changedSelection` compares before `SelectionNode::Select` checks the index, so an index past
+        // the count is a change too.
+        let changed = self.is_selected(index) != select;
         if self.select_valid(index, select) {
             self.anchor = Some(index);
         }
@@ -213,7 +212,7 @@ impl SelectionModel {
 
     /// `SelectionNode::Select`: answers whether `index` is valid.
     fn select_valid(&mut self, index: usize, select: bool) -> bool {
-        if index >= self.item_count {
+        if !self.is_valid_index(index) {
             return false;
         }
         if select {
@@ -267,7 +266,7 @@ mod tests {
 
     fn model(count: usize) -> SelectionModel {
         let mut model = SelectionModel::default();
-        model.set_item_count(count);
+        model.set_source(count);
         model
     }
 
@@ -331,14 +330,47 @@ mod tests {
         assert_eq!(selected(&model), [1]);
     }
 
+    // `SelectionModel::Source(value)` clears the selection and the anchor, and raises `SelectionChanged`.
     #[test]
-    fn a_shorter_list_drops_what_is_past_its_end() {
-        let mut model = model(10);
-        model.select_range(3, 8);
-        model.set_anchor_index(Some(8));
-        assert!(model.set_item_count(5));
-        assert_eq!(selected(&model), [3, 4]);
+    fn a_new_source_clears_the_selection_and_reports_it() {
+        let mut model = model(5);
+        model.select(2);
+        assert!(model.set_source(5));
+        assert_eq!(selected(&model), Vec::<usize>::new());
         assert_eq!(model.anchor_index(), None);
-        assert!(!model.select_at(7), "past the end is no item");
+        assert_eq!(model.item_count(), 5);
+    }
+
+    // `SelectionNode::Select` answers false for an index past `Count()` and selects nothing, but
+    // `SelectionModel::SelectImpl` still raises `SelectionChanged`: the index was not selected.
+    #[test]
+    fn an_index_past_the_count_is_dropped() {
+        let mut model = model(5);
+        assert!(model.select(5), "SelectImpl raises SelectionChanged");
+        assert!(model.select(9));
+        assert_eq!(selected(&model), Vec::<usize>::new());
+        assert_eq!(model.anchor_index(), None);
+    }
+
+    // `SelectWithPathImpl` sets `changedSelection` from `IsSelected` before `SelectionNode::Select`
+    // refuses the index, so `SelectAt` past the count raises `SelectionChanged` and selects nothing.
+    #[test]
+    fn select_at_past_the_count_selects_nothing_and_reports_a_change() {
+        let mut model = model(5);
+        assert!(model.select_at(7));
+        assert_eq!(selected(&model), Vec::<usize>::new());
+        assert_eq!(model.anchor_index(), None);
+    }
+
+    // In single-select mode `SelectImpl` clears the selection before `SelectionNode::Select`
+    // refuses an index past `Count()`, so the selection is gone and `SelectionChanged` raised.
+    #[test]
+    fn a_single_select_past_the_count_clears_the_selection() {
+        let mut model = model(5);
+        model.set_single_select(true);
+        model.select(2);
+        assert!(model.select(9));
+        assert_eq!(selected(&model), Vec::<usize>::new());
+        assert_eq!(model.anchor_index(), None);
     }
 }

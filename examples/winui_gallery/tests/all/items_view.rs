@@ -22,7 +22,7 @@ const ROW: f64 = 40.0;
 /// What a test reads back from its list.
 #[derive(Default)]
 struct Probe {
-    selection: RefCell<Option<Ref<ItemsViewSelection>>>,
+    selection: RefCell<Option<Ref<ItemsViewSource>>>,
     invoked: RefCell<Vec<usize>>,
     selection_changes: Cell<usize>,
     /// Indices the template was asked to build.
@@ -81,10 +81,10 @@ fn fixture(setup: Setup) -> (Fixture, Rc<Probe>) {
     let shared = probe.clone();
     let f = Fixture::with_root([400, 400], move |app| {
         winui_gallery::install_fonts(app);
-        let selection = ItemsViewSelection::new(app);
+        let selection = ItemsViewSource::new(app, setup.count);
         *shared.selection.borrow_mut() = Some(selection.clone());
         let probe = shared.clone();
-        let mut view = ItemsView::new(setup.count, {
+        let mut view = ItemsView::new(selection.clone(), {
             let probe = probe.clone();
             move |_, _, index| {
                 probe.built.borrow_mut().push(index);
@@ -105,7 +105,6 @@ fn fixture(setup: Setup) -> (Fixture, Rc<Probe>) {
             }
         })
         .selection_mode(setup.mode)
-        .selection(selection)
         .is_item_invoked_enabled(setup.invoked)
         .item_invoked({
             let probe = probe.clone();
@@ -570,4 +569,34 @@ fn the_gallery_page_selects_invokes_and_shows_both_themes() {
     f.capture("gallery_items_view_light");
     f.tap("Dark theme");
     f.capture("gallery_items_view_dark");
+}
+
+// MARK: The items source
+
+#[test]
+fn a_view_with_selection_mode_none_builds_its_items() {
+    let (f, p) = fixture(Setup::new(3, ItemsViewSelectionMode::None));
+    assert!(p.built.borrow().contains(&2));
+    assert!(p.selected(&f).is_empty());
+}
+
+// `SelectionModel::Source(value)` clears the selection and raises `SelectionChanged`, once; the
+// view shows the new items, and a select after that is kept.
+#[test]
+fn giving_the_source_new_items_rebuilds_the_list_and_clears_the_selection_once() {
+    let (mut f, p) = fixture(Setup::new(2, ItemsViewSelectionMode::Single));
+    tap_row(&mut f, 1);
+    assert_eq!(p.selected(&f), [1]);
+    let changes = p.selection_changes.get();
+
+    let source = p.selection.borrow().clone().unwrap();
+    source.set_items(&mut f.cell.borrow_mut(), 4);
+    settle(&mut f);
+    assert!(p.selected(&f).is_empty());
+    assert_eq!(p.selection_changes.get(), changes + 1);
+    assert!(p.built.borrow().contains(&3), "the list shows four rows");
+
+    source.select(&mut f.cell.borrow_mut(), 3);
+    settle(&mut f);
+    assert_eq!(p.selected(&f), [3]);
 }

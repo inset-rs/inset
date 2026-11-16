@@ -630,6 +630,10 @@ Ported against: aa3207e6
   Reason: framework — Waft rebuilds a control's description from its owner's state instead of the control holding a `SelectedItem` property of its own.
   Affect: Callers set `selected` from `selection_changed`, and selecting an item from code raises no event, where setting WinUI's `SelectedItem` raises `SelectionChanged`.
 
+- Change: when the number of items changes, `SelectorBar` gives its `ItemsView` a new source with `ItemsViewSource::set_items` and selects its index again, with the clear that `set_items` notifies kept from asking the application to deselect.
+  Reason: framework — WinUI's bar keeps one `Items` collection whose changes reach the selection through `SelectionNode::OnSourceListChanged`, which shifts it in place, and Waft's source has no such path.
+  Affect: None an application sees: the same index stays selected.
+
 ## item_container.rs → `ItemContainer`
 
 - Change: `ItemContainer` takes a press through Waft's tap recognizer, which shows the pressed state once a press has lasted `kPressTimeout` or at its release, gives the press up to a list that starts to scroll, and takes the primary button only.
@@ -648,9 +652,9 @@ Ported against: aa3207e6
 
 - Change: `ItemsView` takes an item count and a builder that returns each item's `ItemContainer`, and lays a vertical `StackLayout` out as Waft's lazy `ListView` and a horizontal one as a row of every item.
   Reason: framework — WinUI's `ItemsRepeater` makes containers from `ItemsSource` through `ItemTemplate` and virtualizes them with its layouts, while Waft's slivers build only the items in and near the view.
-  Affect: An application writes `ItemsView::new(count, |app, context, index| ItemContainer::new(row))`, a horizontal view builds all its items, and only `StackLayout` is available.
+  Affect: An application writes `ItemsView::new(source, |app, context, index| ItemContainer::new(row))`, a horizontal view builds all its items, and only `StackLayout` is available.
 
-- Change: `ItemsView` keeps its selection and current item in an `ItemsViewSelection` the application makes and passes in, or the view makes when given none, and reports selected items by index.
+- Change: `ItemsView` takes its items from an `ItemsViewSource` the application makes with the number of items and passes in, and that object also keeps the selection and the current item, and reports selected items by index.
   Reason: framework — WinUI exposes `Select`, `SelectAll`, `SelectedItems` and `CurrentItemIndex` as members of the control, while a Waft application reaches a control's state through a controller it holds, as with `ScrollController`.
   Affect: An application calls `select_all`, `deselect_all`, `invert_selection` and `selected_indices` on the selection, and maps indices to its items itself.
 
@@ -674,7 +678,7 @@ Ported against: aa3207e6
 
 - Change: `SelectionModel` holds one flat list's selection, without the tree of `IndexPath`s, the source collection or its change notifications.
   Reason: framework — `ItemsView` asks only for a flat selection (`SelectAllFlat`), and Waft's list builder has no collection to observe.
-  Affect: Inserting or removing items does not shift the selection; an application that does so adjusts the selection itself, and items past a shortened count are dropped.
+  Affect: Inserting or removing items does not shift the selection; an application that does so adjusts the selection itself, and items past a shortened count are dropped. A new count is a new `ItemsSource`: `ItemsViewSource::set_items` clears the selection as `SelectionModel::Source` does.
 
 ## page.rs → `Page`
 
@@ -741,6 +745,7 @@ Ported against: aa3207e6
 - `Page`'s `TopAppBar` and `BottomAppBar`, whose closed height WinUI also keeps the content clear of, remain deferred. Trigger: The kit ports `AppBar`.
 - `Page`'s navigation members, `Frame`, `NavigationCacheMode` and `OnNavigatedTo`, `OnNavigatedFrom` and `OnNavigatingFrom`, remain deferred. Trigger: The kit ports `Frame`.
 - `Page` giving the focus to its first focusable element when it loads with nothing focused, with the soft keyboard held back for that focus (`InitialFocusSIPSuspender`), remains deferred. Trigger: Waft's text input can be focused without showing the soft keyboard.
+- `SelectionNode::OnSourceListChanged`, which shifts or drops the selection when items are added to or removed from the same `ItemsSource`, remains deferred; `ItemsViewSource::set_items` replaces the items and clears the selection. Trigger: A caller that changes items in place.
 - `ItemsView`'s other layouts, `LinedFlowLayout` and `UniformGridLayout`, its `ItemTransitionProvider` and its `VerticalScrollController` remain deferred. Trigger: An application needs a grid or flow of items, or animated insertion and removal.
 - `ItemsView`'s and `ItemContainer`'s accessibility, their automation peers and selection patterns, remains deferred. Trigger: The kit gains accessibility support.
 - `ItemsView`'s gamepad and XY focus navigation remains deferred. Trigger: A host supplies gamepad or remote-control input.

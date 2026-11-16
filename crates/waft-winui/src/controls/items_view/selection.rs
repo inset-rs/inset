@@ -6,10 +6,10 @@ use super::selection_model::SelectionModel;
 use super::selector::{ItemsViewSelectionMode, Selector};
 use waft_foundation::{App, ChangeNotifier, ChangeNotifierData, Handle, Ref};
 
-/// The selection and the current item of an `ItemsView`.
+/// What an `ItemsView` shows and what of it is selected: WinUI's `ItemsSource` and the `SelectionModel` and current-element model that `ItemsView` keeps over it, as one object the application holds.
 ///
-/// An application makes one with [`ItemsViewSelection::new`], hands it to the `ItemsView`, and disposes it after the view; an `ItemsView` given none makes its own.
-pub struct ItemsViewSelection {
+/// The application makes one with [`ItemsViewSource::new`], giving the number of items, hands it to the `ItemsView`, and disposes it after the view. [`set_items`](Self::set_items) is assigning a new `ItemsSource`: `SelectionModel::Source(value)` clears the selection and the anchor and raises `SelectionChanged` (`controls/dev/Repeater/SelectionModel.cpp`, 44), and `ItemsView` does it when it is given an `ItemsSource` (`ItemsView.cpp`, `OnItemsSourceChanged`, or `OnItemsRepeaterItemsSourceChanged` once its repeater exists). A selection taken after that, before the view is built, is kept, as WinUI's is before `Loaded`; an index past the items is ignored, as `SelectionNode::Select` ignores it, and `SelectionChanged` raised all the same, as `SelectionModel::SelectImpl` raises it. Items added or removed in place (`SelectionNode::OnSourceListChanged`) are not ported: the application gives the new items with `set_items`.
+pub struct ItemsViewSource {
     notifier: ChangeNotifierData,
     model: SelectionModel,
     selector: Selector,
@@ -19,10 +19,11 @@ pub struct ItemsViewSelection {
     revision: u64,
 }
 
-impl ItemsViewSelection {
-    /// Creates an empty selection for `ItemsView`'s default `Single` mode.
-    pub fn new(app: &mut App) -> Ref<Self> {
+impl ItemsViewSource {
+    /// Creates a source of `item_count` items with nothing selected, for `ItemsView`'s default `Single` mode.
+    pub fn new(app: &mut App, item_count: usize) -> Ref<Self> {
         let mut model = SelectionModel::default();
+        model.set_source(item_count);
         let (selector, _) = Selector::for_mode(ItemsViewSelectionMode::Single, &mut model);
         app.create(Self {
             notifier: ChangeNotifierData::new(),
@@ -116,9 +117,14 @@ impl ItemsViewSelection {
         app.get_mut(self).selector = selector;
     }
 
-    /// The number of items the view shows; selection past the end is dropped.
-    pub(crate) fn set_item_count(self: Handle<Self>, app: &mut App, count: usize) {
-        self.change(app, |model| model.set_item_count(count));
+    /// The number of items: `ItemsSource`'s count.
+    pub fn item_count(self: Handle<Self>, app: &App) -> usize {
+        app.get(self).model.item_count()
+    }
+
+    /// Assigns new items: `ItemsView.ItemsSource` set, which sets the selection model's `Source`. The selection and the anchor are cleared and `SelectionChanged` raised once (`SelectionModel.cpp`, 44).
+    pub fn set_items(self: Handle<Self>, app: &mut App, count: usize) {
+        self.change(app, |model| model.set_source(count));
     }
 
     /// `ItemsView::SetCurrentElementIndex`.
@@ -187,12 +193,59 @@ impl ItemsViewSelection {
     }
 }
 
-impl ChangeNotifier for ItemsViewSelection {
+impl ChangeNotifier for ItemsViewSource {
     fn change_notifier_data(&self) -> &ChangeNotifierData {
         &self.notifier
     }
 
     fn change_notifier_data_mut(&mut self) -> &mut ChangeNotifierData {
         &mut self.notifier
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use waft_foundation::AppCell;
+
+    // `ItemsView.cpp`, `OnItemsSourceChanged`: a selection taken once `ItemsSource` is set is kept,
+    // before the view is shown.
+    #[test]
+    fn a_selection_taken_after_the_items_are_given_is_kept() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let source = ItemsViewSource::new(&mut app, 5);
+        source.select(&mut app, 3);
+        assert_eq!(source.selected_indices(&app), [3]);
+        assert_eq!(source.item_count(&app), 5);
+    }
+
+    // `SelectionModel::Source(value)` clears the selection and raises `SelectionChanged`, once.
+    #[test]
+    fn giving_the_items_clears_the_selection_and_notifies_once() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let source = ItemsViewSource::new(&mut app, 5);
+        source.select(&mut app, 3);
+        let revision = source.revision(&app);
+
+        source.set_items(&mut app, 7);
+        assert_eq!(source.selected_indices(&app), Vec::<usize>::new());
+        assert_eq!(source.item_count(&app), 7);
+        assert_eq!(source.revision(&app), revision + 1);
+    }
+
+    // `SelectionNode::Select` refuses an index past the items, and `SelectionModel::SelectImpl`
+    // raises `SelectionChanged` all the same.
+    #[test]
+    fn a_select_past_the_items_is_refused_and_raised() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let source = ItemsViewSource::new(&mut app, 5);
+        let revision = source.revision(&app);
+
+        source.select(&mut app, 5);
+        assert_eq!(source.selected_indices(&app), Vec::<usize>::new());
+        assert_eq!(source.revision(&app), revision + 1, "SelectionChanged");
     }
 }

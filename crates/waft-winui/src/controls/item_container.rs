@@ -231,7 +231,7 @@ pub struct ItemContainerState {
     last_tap: Option<(Instant, Offset)>,
     /// The item's index and its view, from the scope the view puts around it.
     item: Option<ItemsViewItem>,
-    selection_listener: Option<(Handle<ItemsViewSelection>, Listener)>,
+    selection_listener: Option<(Handle<ItemsViewSource>, Listener)>,
     shown: ShownItem,
 }
 
@@ -280,7 +280,7 @@ impl ItemContainerState {
         if let Some(item) = item {
             item.view
                 .register(app, item.index, self, self.focus_node(app));
-            let selection = item.view.selection(app);
+            let selection = item.view.items_source(app);
             let listener = Listener::new(move |app| self.selection_changed(app));
             selection.add_listener(app, listener.clone());
             app.get_mut(self).selection_listener = Some((selection, listener));
