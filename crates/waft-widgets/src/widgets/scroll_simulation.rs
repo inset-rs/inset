@@ -91,11 +91,16 @@ impl BouncingScrollSimulation {
             spring_time: 0.0,
             tolerance,
         };
-        if position < leading_extent {
+        // A release past an edge, moving back into the content fast enough to cross that edge
+        // again, decelerates like a release within the extents, as UIKit's does, where Flutter's
+        // springs back to the edge (`PORTING.md`).
+        let carried_back =
+            simulation.carries_back_into_content(position, velocity, constant_deceleration);
+        if position < leading_extent && !carried_back {
             simulation.spring_simulation =
                 Some(simulation.underscroll_simulation(position, velocity));
             simulation.spring_time = f64::NEG_INFINITY;
-        } else if position > trailing_extent {
+        } else if position > trailing_extent && !carried_back {
             simulation.spring_simulation =
                 Some(simulation.overscroll_simulation(position, velocity));
             simulation.spring_time = f64::NEG_INFINITY;
@@ -138,6 +143,34 @@ impl BouncingScrollSimulation {
             simulation.friction_simulation = Some(friction_simulation);
         }
         simulation
+    }
+
+    /// Whether a release at `position`, past an edge, moves back into the content fast enough
+    /// for friction to carry it back past that edge.
+    fn carries_back_into_content(
+        &self,
+        position: f64,
+        velocity: f64,
+        constant_deceleration: f64,
+    ) -> bool {
+        let past_leading_moving_in = position < self.leading_extent && velocity > 0.0;
+        let past_trailing_moving_in = position > self.trailing_extent && velocity < 0.0;
+        if !past_leading_moving_in && !past_trailing_moving_in {
+            return false;
+        }
+        let final_x = FrictionSimulation::with_options(
+            0.135,
+            position,
+            velocity,
+            self.tolerance,
+            constant_deceleration,
+        )
+        .final_x();
+        if past_leading_moving_in {
+            final_x > self.leading_extent
+        } else {
+            final_x < self.trailing_extent
+        }
     }
 
     /// The maximum velocity that can be transferred from the inertia of a ballistic
@@ -592,6 +625,96 @@ mod tests {
         assert_eq!(
             format!("{simulation:?}"),
             "BouncingScrollSimulation(leadingExtent: -1.0, trailingExtent: 500.0)"
+        );
+    }
+
+    /// The positions a simulation passes through at 60Hz until it is done.
+    fn trajectory(simulation: &dyn Simulation, deadline: f64) -> Vec<f64> {
+        let mut positions = Vec::new();
+        let mut time = 0.0;
+        loop {
+            positions.push(simulation.x(time));
+            if simulation.is_done(time) {
+                return positions;
+            }
+            time += 1.0 / 60.0;
+            assert!(
+                time < deadline,
+                "the simulation must finish before {deadline}s"
+            );
+        }
+    }
+
+    /// A release past an edge moving outward springs back to that edge, as Flutter's does.
+    #[test]
+    fn a_release_past_an_edge_moving_outward_springs_back_to_it() {
+        let simulation = BouncingScrollSimulation::new(350.0, 1000.0, 0.0, 300.0, default_spring());
+        let positions = trajectory(&simulation, 10.0);
+        assert!((positions.last().unwrap() - 300.0).abs() < 1.0);
+        assert!(
+            positions.iter().all(|x| *x > 299.0),
+            "it never enters the content"
+        );
+    }
+
+    /// A release past an edge at rest springs back to that edge, as Flutter's does.
+    #[test]
+    fn a_release_past_an_edge_at_rest_springs_back_to_it() {
+        let simulation = BouncingScrollSimulation::new(-60.0, 0.0, 0.0, 300.0, default_spring());
+        let positions = trajectory(&simulation, 10.0);
+        assert!(positions.last().unwrap().abs() < 1.0);
+        assert!(positions.iter().all(|x| *x < 1.0));
+    }
+
+    /// A release moving back into the content too slowly for friction to carry it past the
+    /// edge springs back to that edge, as Flutter's does.
+    #[test]
+    fn a_slow_release_back_into_the_content_springs_back_to_the_edge() {
+        let simulation = BouncingScrollSimulation::new(320.0, -20.0, 0.0, 300.0, default_spring());
+        let positions = trajectory(&simulation, 10.0);
+        assert!((positions.last().unwrap() - 300.0).abs() < 1.0);
+    }
+
+    /// A release past an edge moving back into the content fast enough decelerates through the
+    /// edge and stops inside the content, as UIKit's does, with no spring.
+    #[test]
+    fn a_fast_release_back_into_the_content_decelerates_like_any_fling() {
+        let simulation = BouncingScrollSimulation::new(320.0, -500.0, 0.0, 300.0, default_spring());
+        assert_eq!(simulation.x(0.0), 320.0);
+        assert_eq!(simulation.dx(0.0), -500.0);
+        let positions = trajectory(&simulation, 10.0);
+        let resting = *positions.last().unwrap();
+        // 0.135 friction carries -500 px/s 500 / ln(1 / 0.135) px.
+        assert!((resting - (320.0 - 500.0 / (1.0f64 / 0.135).ln())).abs() < 1.0);
+        assert!(resting > 0.0 && resting < 300.0, "stopped at {resting}");
+        let mirrored = BouncingScrollSimulation::new(-20.0, 500.0, 0.0, 300.0, default_spring());
+        let resting = *trajectory(&mirrored, 10.0).last().unwrap();
+        assert!(resting > 0.0 && resting < 300.0, "stopped at {resting}");
+    }
+
+    /// The lead's recording on an iPhone, touch 3: released at 377 px with the end at 303,
+    /// moving back at about -7,276 px/s. UIKit carries it through the end and the whole page,
+    /// springing only at the far edge; it never comes back to the end it was past.
+    #[test]
+    fn the_recorded_release_never_returns_to_the_edge_it_crossed() {
+        let simulation =
+            BouncingScrollSimulation::new(377.0, -7276.0, 0.0, 303.0, default_spring());
+        let positions = trajectory(&simulation, 10.0);
+        let crossed = positions
+            .iter()
+            .position(|x| *x < 303.0)
+            .expect("it crosses the end it was past");
+        assert!(
+            positions[crossed..].iter().all(|x| *x < 303.0),
+            "it never returns to 303 once it crossed it"
+        );
+        assert!(
+            positions.iter().any(|x| *x < 0.0),
+            "it runs past the far edge"
+        );
+        assert!(
+            positions.last().unwrap().abs() < 1.0,
+            "and settles at the far edge"
         );
     }
 }
