@@ -70,25 +70,21 @@ pub(crate) fn run(presentation: Presentation) {
 /// Plays the video as `presentation` says: the window's content.
 fn playing(app: &mut App, presentation: &Presentation) -> WidgetRef {
     let player = Player::new(app, &presentation.url).expect("macOS has players");
-    Player::set_looping(player.handle(), app, true);
+    player.set_looping(app, true);
     let reader = app
         .platform()
         .video_frame_readers()
         .expect("macOS hands out frames")
         .make_reader();
-    Player::set_video_output(
-        player.handle(),
-        app,
-        Some(VideoOutput::Frames(Arc::clone(&reader))),
-    );
+    player.set_video_output(app, Some(VideoOutput::Frames(Arc::clone(&reader))));
     let video = VideoFrameView::new(reader).into_widget();
     follow_tracks(app, player.handle(), presentation.subtitles.clone());
-    Player::play(player.handle(), app);
+    player.play(app);
     let presentation = presentation.clone();
     let listenable: Rc<dyn Listenable> = Rc::new(player.clone());
     ListenableBuilder::new(listenable, move |app, _, _| {
-        let subtitled = with_subtitles(video.clone(), Player::cues(player.handle(), app).to_vec());
-        let state = Player::state(player.handle(), app);
+        let subtitled = with_subtitles(video.clone(), player.cues(app).to_vec());
+        let state = player.state(app);
         page(player.clone(), subtitled, state, &presentation)
     })
     .into_widget()
@@ -102,7 +98,7 @@ fn follow_tracks(app: &mut App, player: Handle<Player>, language: Option<String>
     player.add_listener(
         app,
         Listener::new(move |app| {
-            let tracks = Player::state(player, app).tracks.clone();
+            let tracks = player.state(app).tracks.clone();
             if *printed.borrow() != tracks {
                 print_tracks(&tracks);
                 *printed.borrow_mut() = tracks.clone();
@@ -114,7 +110,7 @@ fn follow_tracks(app: &mut App, player: Handle<Player>, language: Option<String>
                 return;
             }
             if let Some(track) = text_track_in(&tracks, language) {
-                Player::select_text_track(player, app, Some(&track.id));
+                player.select_text_track(app, Some(&track.id));
                 chosen.set(true);
             }
         }),
@@ -175,9 +171,9 @@ fn page(
     let clickable = GestureDetector::new()
         .on_tap(Listener::new(move |app| {
             if paused {
-                Player::play(tapped.handle(), app);
+                tapped.play(app);
             } else {
-                Player::pause(tapped.handle(), app);
+                tapped.pause(app);
             }
         }))
         .child(turned);
@@ -237,8 +233,7 @@ impl StatusLineState {
 
     /// Runs the ticker while the player plays, and stops it otherwise.
     fn tick_while_playing(self: Handle<Self>, app: &mut App) {
-        let playing = Player::state(self.widget(app).player.handle(), app).activity
-            == PlayerActivity::Playing;
+        let playing = self.widget(app).player.state(app).activity == PlayerActivity::Playing;
         let ticker = self.ticker(app);
         if playing && !ticker.is_active(app) {
             let _ticking = ticker.start(app);
@@ -311,7 +306,7 @@ impl State for StatusLineState {
 
 /// `player`'s status, its position read now.
 fn status_line(app: &App, player: Handle<Player>) -> String {
-    status(Player::state(player, app), Player::position(player, app))
+    status(player.state(app), player.position(app))
 }
 
 /// What the player is doing, how far it is, at `position`, and what size its frames are.

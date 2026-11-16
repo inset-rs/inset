@@ -12,6 +12,7 @@
 //! Run through `cargo waft`, the app is a bundle that says why it uses the camera
 //! (`usage_descriptions` in its `Cargo.toml`), without which macOS ends an app that opens one.
 #![windows_subsystem = "windows"]
+#![feature(arbitrary_self_types)]
 
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -58,8 +59,8 @@ fn url_of(argument: String) -> String {
 fn start(app: &mut App, url: Option<String>) {
     let player = url.and_then(|url| Player::new(app, &url));
     if let Some(player) = &player {
-        Player::set_looping(player.handle(), app, true);
-        Player::play(player.handle(), app);
+        player.set_looping(app, true);
+        player.play(app);
     }
     print_cameras(app);
     let camera = app.new_entity(|_cx| CameraPane::Opening);
@@ -165,10 +166,7 @@ async fn start_preview(
     let session = starting.await?;
     cx.update(|app| {
         println!("  picked {}", described(format));
-        println!(
-            "  runs in {}",
-            described(CameraSession::format(session.handle(), app))
-        );
+        println!("  runs in {}", described(session.format(app)));
         print_states(app, &session);
     });
     Ok(session)
@@ -210,11 +208,11 @@ fn described(format: &CameraFormat) -> String {
 /// Prints `session`'s state now and each time it changes.
 fn print_states(app: &mut App, session: &Ref<CameraSession>) {
     let handle = session.handle();
-    println!("  state: {:?}", CameraSession::state(handle, app));
+    println!("  state: {:?}", handle.state(app));
     let listenable: Rc<dyn Listenable> = Rc::new(session.clone());
     listenable.add_listener(
         app,
-        Listener::new(move |app| println!("  state: {:?}", CameraSession::state(handle, app))),
+        Listener::new(move |app| println!("  state: {:?}", handle.state(app))),
     );
 }
 
@@ -256,13 +254,10 @@ fn clickable(player: Ref<Player>) -> WidgetRef {
     GestureDetector::new()
         .on_tap(Listener::new(move |app| {
             let player = tapped.handle();
-            if matches!(
-                Player::state(player, app).activity,
-                PlayerActivity::Paused(_)
-            ) {
-                Player::play(player, app);
+            if matches!(player.state(app).activity, PlayerActivity::Paused(_)) {
+                player.play(app);
             } else {
-                Player::pause(player, app);
+                player.pause(app);
             }
         }))
         .child(PlayerView::new(player))

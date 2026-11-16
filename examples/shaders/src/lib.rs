@@ -4,6 +4,7 @@
 //! into the binary with `include_str!` (`programs.rs`).
 //!
 //! The crate is a library as well as a binary so `tests/` can draw the real app.
+#![feature(arbitrary_self_types)]
 
 pub mod programs;
 
