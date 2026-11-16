@@ -6,6 +6,13 @@ Ported against: 34b89b2086d4
 - constants.rs → constants.dart
 - text_theme.rs → text_theme.dart
 - generated/typography_defaults_m3.rs → generated/typography_defaults_m3.g.dart
+- date_picker.rs → date_picker.dart
+- date_picker_theme.rs → date_picker_theme.dart
+- time_picker.rs → time_picker.dart
+- generated/time_picker_defaults_m3.rs → generated/time_picker_defaults_m3.g.dart
+- time_picker_theme.rs → time_picker_theme.dart
+- generated/date_picker_defaults_m3.rs → generated/date_picker_defaults_m3.g.dart
+- input_date_picker_form_field.rs → input_date_picker_form_field.dart
 - generated/color_scheme_defaults.rs → generated/color_scheme_defaults.g.dart
 - material_localizations.rs → material_localizations.dart
 - no_splash.rs → no_splash.dart
@@ -564,10 +571,23 @@ Ported against: 34b89b2086d4
   Reason: platform — positions pass through Valo's f32 transforms in the hit-test result.
   Affect: a debug build accepts the rounded point where Dart asserts exact equality.
 
+## date.rs → date.dart
+- Change: `CalendarDelegate` and `DateTimeRange` have no type parameter: their dates are `waft_foundation::DateTime`.
+  Reason: language — Rust has no subclasses of `DateTime`, which Dart's `CalendarDelegate<T extends DateTime>` ranges over.
+  Affect: a non-Gregorian calendar maps its dates onto `DateTime`, and a delegate is held as an `Rc<dyn CalendarDelegate>`.
+- Change: "today" is `DateTime::now()`, the UTC date.
+  Reason: platform — waft-foundation's `DateTime` is UTC only, and no host gives a time zone.
+  Affect: near midnight the highlighted day follows UTC, not the local zone.
+
+## calendar_date_picker.rs → calendar_date_picker.dart
+- Change: `YearPicker::new` has no `initial_date`, Dart's deprecated parameter that has no effect.
+  Reason: language — a fluent widget has no deprecated, ignored setter to keep.
+  Affect: code ported from Dart drops the argument.
+
 ## Deferred
 - input_decorator.rs: the 13 cases Dart runs on a `TextField`, the 16 Material 2 cases and the `customLabel` twins listed in the step 11 review. Trigger: none, portable now.
 - text_form_field.rs: the ~38 text_form_field_test cases not ported. Trigger: none, portable now.
-- switch.rs: switch_test 'Material2/3 - Switch does not get distorted upon changing constraints with parent' (golden-only). Trigger: golden-image comparison in test_support.
+- switch.rs: switch_test 'Material2/3 - Switch does not get distorted upon changing constraints with parent' (golden-only). Trigger: golden comparison in waft-test.
 - slider.rs, slider_theme.rs: the parts of slider_test 'Slider removes value indicator from overlay…' and slider_theme_test 'Slider uses the right theme colors…' and 'Default value indicator color' that read off the whole `Overlay`. Trigger: a test_support `paints` helper that records a render object's repaint-boundary children inline, as flutter_test's `TestRecordingPaintingContext` does.
 - expansion_tile.rs: the state announcement through `SemanticsService.sendAnnouncement` when the tile expands or collapses, with the iOS `Timer` that delays it. Trigger: the semantics tree.
 - switch_list_tile.rs: `activeThumbImage`, `onActiveThumbImageError`, `inactiveThumbImage`, `onInactiveThumbImageError` and their constructor asserts. Trigger: `DecorationImage` (with `Switch`'s).
@@ -639,16 +659,17 @@ Ported against: 34b89b2086d4
 - ink_well.rs: `InkResponse(onDoubleTap:)` reaching the gesture detector (the field and `handleDoubleTap` exist; a double tap never fires). Trigger: `DoubleTapGestureRecognizer` (waft-widgets gesture_detector deferral).
 - ink_decoration.rs: `Ink.image`. Trigger: `DecorationImage`.
 - debug.rs: the `describeMissingAncestor` part of the messages. Trigger: `BuildContext::describe_missing_ancestor` in waft-widgets.
-- theme_data.rs: the component theme fields, each with its factory and `copyWith` argument and its `lerp` and `==` branches: bottom_app_bar_theme, carousel_view_theme (`carousel_theme.dart`), data_table_theme, date_picker_theme, search_bar_theme, search_view_theme, time_picker_theme, button_bar_theme. Trigger: each one's `*_theme.dart`, with its component.
+- theme_data.rs: the component theme fields, each with its factory and `copyWith` argument and its `lerp` and `==` branches: bottom_app_bar_theme, carousel_view_theme (`carousel_theme.dart`), data_table_theme, search_bar_theme, search_view_theme, button_bar_theme. Trigger: each one's `*_theme.dart`, with its component.
 - button_theme.rs: `ButtonThemeData`'s methods that take a `MaterialButton` (`getBrightness`, `getTextTheme`, `getDisabledTextColor`, `getDisabledFillColor`, `getFillColor`, `getTextColor`, `getSplashColor`, `getFocusColor`, `getHoverColor`, `getHighlightColor`, the five elevation getters, `getPadding`, `getShape`, `getAnimationDuration`, `getConstraints`, `getMaterialTapTargetSize`). Trigger: material_button.dart.
 - theme_data.rs: `ThemeData(useSystemColors:)` and `_overrideWithSystemColors`. Trigger: dart:ui `SystemColor` in waft-embedder, with `floating_action_button_theme`.
 - theme_data.rs: `ThemeData`'s `hashCode` (`Hash`). Trigger: the first map or set keyed by a `ThemeData`.
+- date.rs: "today" in the local zone (`DateTime.now()` and `DateUtils.dateOnly` in local time). Trigger: local time in Waft (waft-foundation's `DateTime` is UTC only and no host gives a time zone).
 - time.rs: `TimeOfDay.now`. Trigger: local time in Waft (waft-foundation's `DateTime` is UTC only and no host gives a time zone).
 - `ColorScheme.fromImageProvider` with `_extractColorsFromImageProvider`, `_imageProviderToScaled` and `_getArgbFromAbgr`. Trigger: reading an image's pixels back (`Image.toByteData`, deferred in waft-embedder) and `Picture.toImage`.
 - `ColorScheme`'s `hashCode` (`Hash`). Trigger: the first map or set keyed by a `ColorScheme`.
 - input_decorator.rs: the `Semantics` wrappers and what feeds them (helper/error containers and live region, the counter's wrapper, the affixes' `sortKey`/`tagForChildren` with the state's `OrdinalSortKey`s and `SemanticsTag`s, the prefix/suffix icon tags, the error `hint`, `_RenderDecoration.visitChildrenForSemantics`, `_childSemanticsConfigurationDelegate`, `describeSemanticsConfiguration`, `markNeedsSemanticsUpdate` in `isFocused`, the counter's `semanticsLabel`, `copyWith(semanticsService:)`). Trigger: the next edit of input_decorator.rs for the wrappers (the semantics widgets exist); the semantics tree for the rest.
 - input_decorator.rs: `InputDecoration`'s and `InputDecorationThemeData`'s `hashCode` (`Hash`). Trigger: the first map or set keyed by one.
-- theme_data.rs, input_decorator.rs, dropdown_menu_theme.rs, dropdown_menu.rs, dropdown_menu_form_field.rs: Dart's `ThemeData(inputDecorationTheme:)`, `InputDecoration.applyDefaults` and the `inputDecorationTheme` of `DropdownMenuThemeData`, `DropdownMenu` and `DropdownMenuFormField` take `Object` with a TODO to retype them; here they take `impl Into<InputDecorationThemeData>`. Trigger: Flutter retyping them.
+- theme_data.rs, input_decorator.rs, dropdown_menu_theme.rs, dropdown_menu.rs, dropdown_menu_form_field.rs, date_picker_theme.rs, time_picker_theme.rs: Dart's `ThemeData(inputDecorationTheme:)`, `InputDecoration.applyDefaults` and the `inputDecorationTheme` of `DropdownMenuThemeData`, `DropdownMenu` and `DropdownMenuFormField` take `Object` with a TODO to retype them; here they take `impl Into<InputDecorationThemeData>`. Trigger: Flutter retyping them.
 - input_decorator.rs: cases waiting for `TextField` ('OutlineInputBorder radius carries over when lerping'; the four M3 and four M2 alignLabelWithHint multiline cases; 'InputDecorator counter text, widget, and null'; 'Material2 - InputDecorator suffixIcon color in error state'; 'uses alphabetic baseline for CJK layout'; 'helper text and character counter do not overlap'). Trigger: the next edit of input_decorator.rs (`text_field.rs` exists).
 - text_selection_toolbar.rs: `_TextSelectionToolbarItemsLayoutElement` and its `debugVisitOnstageChildren` (and Cupertino's); test_support's `is_onstage` reads the `ToolbarItemsParentData.should_paint` of the children those two lay out. Trigger: `Element::debug_visit_onstage_children` in waft-widgets.
 - text_selection_toolbar.rs: `_RenderTextSelectionToolbarItemsLayout.visitChildrenForSemantics`. Trigger: the semantics tree.
@@ -679,3 +700,22 @@ Ported against: 34b89b2086d4
 - chip.rs tests (chip_test): 'Chip label only does layout once' (needs `WidgetToRenderBoxAdapter`); the `feedback.clickSoundCount` assertions of 'Chip control test' and 'FilterChip delete button control test'; the three 'Delete button semantic tap target ...' cases. Trigger: `WidgetToRenderBoxAdapter` in waft-widgets (its render object); `SystemSound`; the semantics tree.
 - chip.rs tests: the `matchesGoldenFile` expectations ('Delete button is visible on disabled RawChip', FilterChip and InputChip versions, the golden lines of the M3 sparkle cases). Trigger: golden comparison in waft-test.
 - chip.rs, chip_theme.rs: the chip_test cases that expect a draw with no effect: the six 'Chip uses stateful border side color …' cases (Material 2 and 3 of 'in different states', 'from resolveWith' and 'nullable border side color from resolveWith') and the paint half of 'Chip defers to theme, if shape and side resolves to null' and its Material 2 twin, whose borders are drawn in the alpha-0 colours `0x0000000N`, and the `..rect(color: Colors.transparent)` step of 'Chip does not glitch on hover when providing ThemeData.hoverColor'; chip_theme_test's four 'Chip uses stateful border side' cases (Material 2 and 3 of 'from resolveWith pattern' and 'from chip theme'), whose sides are tagged `0x00000001` and `0x00000002`. Trigger: a test canvas in Waft that records calls.
+- date_picker_theme.rs, time_picker_theme.rs: `hashCode` of `DatePickerThemeData` and `TimePickerThemeData`, and their `debugFillProperties` cases. Trigger: the first map or set keyed by one; diagnostics.
+- date_picker.rs, time_picker.rs, calendar_date_picker.rs: the semantics cases of their tests and the `Semantics` information of the dial, the grids and the headers beyond the widgets ported, and calendar_date_picker.rs's `SemanticsService.sendAnnouncement` of the selected date and the month. Trigger: the semantics tree.
+- date_picker.rs, time_picker.rs: the `anchorPoint` of `showDatePicker`, `showDateRangePicker` and `showTimePicker`, and the cases on `anchorPoint` and display features (six in date_picker_test, the `anchorPoint` ones of time_picker_test). Trigger: `display_feature_sub_screen.dart`, with dialog.rs's `anchorPoint`.
+- date_picker.rs tests: the dialog-orientation-change and text-field-with-viewInsets cases (two in each of date_picker_test and date_range_picker_test). Trigger: harness branch D (a test_support tester that changes view size and viewInsets).
+- date_picker.rs tests: one assertion of the M3 and M2 'Default layout (calendar mode)' cases of date_range_picker_test, the gap between the first and last date headers (66 in M3, 72 in M2), the width of the `Text(' – ')` between them, whose trailing space Valo leaves out of a paragraph's max intrinsic width. Trigger: Valo counting trailing whitespace in a paragraph's max intrinsic width.
+- date_picker.rs tests: the golden 'Dialog contents are visible' and 'Calendar dialog contents are visible' cases (textScaler 0.88, 1.0, 2.0). Trigger: golden comparison in waft-test.
+- time_picker.rs tests: the 'Can double tap hours/minutes (when selected) to enter input mode' cases. Trigger: `DoubleTapGestureRecognizer` (ink_well.rs's `InkResponse(onDoubleTap:)` deferral).
+- time_picker.rs tests, calendar_date_picker.rs tests: the cases that need non-English `MaterialLocalizations` ('Accepts 24-hour input for a 24-hour locale', 'parses localized digits', 'TimePicker dialog displays centered separator between hour and minute inputs for non-english locale', the `ko_KR` and Farsi spacing cases, `weekdayBuilder` in `en_GB` order, 'Date text localization'). Trigger: non-English `MaterialLocalizations`.
+- time_picker.rs tests: 'Material3 - large actions label should not overflow in input mode', which asserts no overflow was reported. Trigger: `FlutterError.reportError`, with the flex overflow report.
+- time_picker.rs tests: the `feedback.clickSoundCount` assertions. Trigger: `SystemSound`.
+- time_picker.rs tests: the two 'TimePicker dialog displays centered separator between hour and minute selectors' golden cases. Trigger: golden comparison in waft-test.
+- time_picker.rs tests: 'TAB key selects text in hour and minute fields on the web', whose behaviour (`_HourMinuteTextFieldState`'s select-all on focus under `kIsWeb`) is ported. Trigger: a waft-material test run on the web target.
+
+## Skipped
+
+- date_picker.rs, time_picker.rs tests: the restoration cases (four date and range picker, three time picker, each for both designs). Waft's navigator has no restorable anonymous routes, by design (navigator.rs).
+- time_picker.rs tests: the input-mode half of 'Draws input without overflows' at 100x100 (Dart's own layout asserts there, and its test hides it with a matcher that always passes).
+- date_picker.rs tests: the four textScale 1.3 screen cases, which run the cases without it again (Dart's `showPicker` ignores the argument); the `isA` checks of the calendar delegate ('Defaults to Gregorian calendar system' and 'Using custom calendar delegate implementation' of both test files, and the last line of the two `showDateRangePicker` delegate cases), which no user can see.
+- calendar_date_picker.rs, input_date_picker_form_field.rs tests: the `clipPath(pathMatcher: coversSameAreaAs(..))` step of 'Default day selection overlay' (Dart's matcher samples from the origin and never reaches the clip, and its expected 70 px square is not the clip Flutter paints, the 42 px cell's `dayShape` circle); the two `isA` delegate cases of input_date_picker_form_field_test (no runtime type test); 'Date text localization' (asserts only that nothing throws).

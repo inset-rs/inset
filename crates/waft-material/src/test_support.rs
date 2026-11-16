@@ -663,6 +663,26 @@ impl WidgetTester {
         self.send(pointer, waft_embedder::PointerChange::Cancel);
     }
 
+    /// Dart's `gesture.removePointer()`: `TestGesture` dispatches a `PointerRemovedEvent` that
+    /// carries the pointer's id, so a recognizer tracking the pointer sees it (and gives up a
+    /// press that is still down); the engine's converter would leave the id at zero.
+    pub(crate) fn remove_pointer(&mut self, pointer: &TestPointer) {
+        let mut app = self.cell.borrow_mut();
+        waft_gestures::GestureBinding::instance(&mut app).handle_pointer_event(
+            &mut app,
+            waft_gestures::PointerEvent::Removed(waft_gestures::PointerRemovedEvent {
+                kind: waft_embedder::PointerDeviceKind::Mouse,
+                device: pointer.id,
+                pointer: pointer.id,
+                position: pointer.position,
+                ..waft_gestures::PointerRemovedEvent::default()
+            }),
+        );
+        app.drain_microtasks();
+        drop(app);
+        self.cell.checkpoint();
+    }
+
     /// Dart's `gesture.addPointer()` for a mouse, at `at`.
     pub(crate) fn add_pointer(&mut self, pointer: &mut TestPointer, at: waft_embedder::Offset) {
         pointer.position = at;
@@ -694,6 +714,15 @@ impl WidgetTester {
         app.drain_microtasks();
         drop(app);
         self.cell.checkpoint();
+    }
+
+    /// Dart's `tester.tap(find.text(text))`: a tap at the center of the one onstage `Text`
+    /// showing `text`. More than one is ambiguous, as Dart's `tap` says it is.
+    pub(crate) fn tap_text(&mut self, text: &str) {
+        let found = self.find_onstage_text(text);
+        assert_eq!(found.len(), 1, "tap needs a single Text showing {text:?}");
+        let center = self.get_rect(self.render_box_of(found[0])).center();
+        self.tap(center, 1);
     }
 
     /// Dart's `tester.tap(at)`: down and up with no frame between.
@@ -1116,6 +1145,39 @@ impl WidgetTester {
             .collect()
     }
 
+    /// Dart's `tester.widget<TextField>(find.byType(TextField)).controller!.text`: the text of
+    /// the first `TextField`'s controller.
+    pub(crate) fn text_field_controller_text(&self) -> String {
+        let field = self.find_by_type::<crate::text_field::TextField>()[0];
+        let controller = self.widget(field, |field: &crate::text_field::TextField| {
+            field.controller.clone().expect("a controller")
+        });
+        controller.text_value(&self.cell.borrow()).to_owned()
+    }
+
+    /// The one onstage `Text` showing `text`: Dart's `find.text(text)` expected to find one widget.
+    pub(crate) fn only_onstage_text(&self, text: &str) -> waft_widgets::AnyElement {
+        let found = self.find_onstage_text(text);
+        assert_eq!(found.len(), 1, "one Text showing {text:?}");
+        found[0]
+    }
+
+    /// Dart's `find.byIcon(icon)` with its default `skipOffstage`: every onstage `Icon` showing
+    /// `icon`.
+    pub(crate) fn find_onstage_by_icon(
+        &self,
+        icon: &waft_widgets::IconData,
+    ) -> Vec<waft_widgets::AnyElement> {
+        self.find_onstage_by_type::<waft_widgets::Icon>()
+            .into_iter()
+            .filter(|element| {
+                self.widget(*element, |widget: &waft_widgets::Icon| {
+                    widget.icon.as_ref() == Some(icon)
+                })
+            })
+            .collect()
+    }
+
     /// Dart's `find.byType(W)` with its default `skipOffstage`:
     /// [`find_by_type`](Self::find_by_type) without the offstage ones.
     pub(crate) fn find_onstage_by_type<W: 'static>(&self) -> Vec<waft_widgets::AnyElement> {
@@ -1449,6 +1511,23 @@ impl WidgetTester {
         self.pictures_painted(render, true)
     }
 
+    /// Dart's `Material.of(tester.element(finder))` read by `paints`: what the ink features of
+    /// the `Material` nearest above `element`, and their subtree, draw.
+    pub(crate) fn nearest_material_ops(
+        &self,
+        element: waft_widgets::AnyElement,
+    ) -> Vec<waft_embedder::valo::Op> {
+        let ink_features = {
+            let app = self.cell.borrow();
+            waft_widgets::LookupBoundary::find_ancestor_render_object_of_type::<
+                crate::material::RenderInkFeatures,
+            >(&app, element)
+            .expect("a Material above the element")
+        };
+        use waft_rendering::RenderBox;
+        self.painted_ops_deep(ink_features.as_object())
+    }
+
     /// The ops of [`pictures_deep`](Self::pictures_deep), flattened.
     pub(crate) fn painted_ops_deep(
         &self,
@@ -1582,7 +1661,10 @@ pub(crate) enum PaintCall {
         stroked: Option<bool>,
     },
     /// `..rect(color:)`.
-    Rect { color: Option<waft_embedder::Color> },
+    Rect {
+        rect: Option<waft_embedder::Rect>,
+        color: Option<waft_embedder::Color>,
+    },
     /// `..rrect(rrect:, color:)`.
     RRect {
         rrect: Option<waft_embedder::RRect>,
@@ -1590,6 +1672,11 @@ pub(crate) enum PaintCall {
     },
     /// `..drrect(color:)`.
     DRRect { color: Option<waft_embedder::Color> },
+    /// `..circle(color:, style: PaintingStyle.stroke, strokeWidth:)`.
+    StrokedCircle {
+        color: Option<waft_embedder::Color>,
+        stroke_width: f64,
+    },
     /// `..circle(x:, y:, radius:, color:)`.
     Circle {
         x: Option<f64>,
@@ -1629,7 +1716,18 @@ impl PaintCall {
 
     /// `..rect(color:)`.
     pub(crate) fn rect(color: Option<waft_embedder::Color>) -> PaintCall {
-        PaintCall::Rect { color }
+        PaintCall::Rect { rect: None, color }
+    }
+
+    /// `..rect(rect:, color:)`.
+    pub(crate) fn rect_at(
+        rect: waft_embedder::Rect,
+        color: Option<waft_embedder::Color>,
+    ) -> PaintCall {
+        PaintCall::Rect {
+            rect: Some(rect),
+            color,
+        }
     }
 
     /// `..rrect(color:)`.
@@ -1651,6 +1749,14 @@ impl PaintCall {
     /// `..drrect(color:)`.
     pub(crate) fn drrect(color: Option<waft_embedder::Color>) -> PaintCall {
         PaintCall::DRRect { color }
+    }
+
+    /// `..circle(color:, style: PaintingStyle.stroke, strokeWidth:)`.
+    pub(crate) fn stroked_circle(color: waft_embedder::Color, stroke_width: f64) -> PaintCall {
+        PaintCall::StrokedCircle {
+            color: Some(color),
+            stroke_width,
+        }
     }
 
     /// `..circle(color:)`.
@@ -1691,6 +1797,7 @@ impl PaintCall {
             }
             PaintCall::DRRect { .. } => call == CanvasCall::DrawDRRect,
             PaintCall::Circle { .. } => call == CanvasCall::DrawCircle || stroked_oval,
+            PaintCall::StrokedCircle { .. } => stroked_oval,
             PaintCall::Shadow { .. } => call == CanvasCall::DrawShadow,
             PaintCall::Paragraph => call == CanvasCall::DrawParagraph,
             PaintCall::Scale => call == CanvasCall::Scale,
@@ -1723,8 +1830,11 @@ impl PaintCall {
                     && stroke_width
                         .is_none_or(|expected| width.is_some_and(|width| f32_is(width, expected)))
             }
-            (PaintCall::Rect { color }, Op::DrawRect { paint, .. })
-            | (PaintCall::DRRect { color }, Op::DrawPath { paint, .. }) => {
+            (PaintCall::Rect { rect, color }, Op::DrawRect { rect: painted, paint, .. }) => {
+                color_matches(paint.color, color)
+                    && rect.is_none_or(|rect| waft_embedder::valo::Rect::from(rect) == *painted)
+            }
+            (PaintCall::DRRect { color }, Op::DrawPath { paint, .. }) => {
                 color_matches(paint.color, color)
             }
             (PaintCall::RRect { rrect, color }, Op::DrawPath { path, paint, .. }) => {
@@ -1773,6 +1883,16 @@ impl PaintCall {
             ) => {
                 color.is_none_or(|color| colors_match(*shadow, color))
                     && elevation.is_none_or(|elevation| f32_is(*shadow_elevation, elevation))
+            }
+            (
+                PaintCall::StrokedCircle {
+                    color,
+                    stroke_width,
+                },
+                Op::DrawPath { paint, .. },
+            ) => {
+                color_matches(paint.color, color)
+                    && matches!(&paint.style, PaintStyle::Stroke(stroke) if f32_is(stroke.width, *stroke_width))
             }
             (PaintCall::Paragraph, Op::GlyphRun { .. }) | (PaintCall::Scale, Op::Transform(_)) => {
                 true
