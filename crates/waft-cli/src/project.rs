@@ -48,6 +48,7 @@ pub struct Metadata {
     pub macos: MacosMetadata,
     pub ios: IosMetadata,
     pub android: AndroidMetadata,
+    pub windows: WindowsMetadata,
 }
 
 /// A kind of file the app opens: one `[[package.metadata.waft.file_associations]]` table.
@@ -137,6 +138,20 @@ pub struct Library {
     pub lib: String,
 }
 
+/// How the Windows installers and the executables in them are signed: by a certificate in the
+/// machine's store, or by a command of the developer's; unsigned with neither.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct WindowsMetadata {
+    /// The SHA-1 thumbprint of the certificate `signtool` signs with.
+    pub certificate_thumbprint: Option<String>,
+    /// The command each file is signed with, `%1` standing for its path, for a signer other than
+    /// `signtool`: `osslsigncode` off Windows, or a cloud signing service's tool.
+    pub sign_command: Option<String>,
+    /// The RFC 3161 server each signature is timestamped by, so it outlives the certificate.
+    pub timestamp_url: Option<String>,
+}
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct IosMetadata {
@@ -174,6 +189,32 @@ pub struct AndroidMetadata {
     /// `.aar` or a `.jar`, relative to the package root, in priority order, the first winning a
     /// resource both define. An app lists the libraries each of these needs too.
     pub dependencies: Vec<PathBuf>,
+    /// The key a release build is signed with. Without it a release build is signed with the
+    /// debug key, as a new Flutter app's is, with a warning.
+    pub release: Option<ReleaseKey>,
+}
+
+/// An Android app's release key: a key in a keystore, whose passwords the metadata only says where
+/// to find, for apksigner to read.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReleaseKey {
+    /// The keystore, relative to the package root.
+    pub keystore: PathBuf,
+    /// The key's alias in the keystore.
+    pub alias: String,
+    pub store_password: Secret,
+    /// The key's own password, where it is not the keystore's.
+    pub key_password: Option<Secret>,
+}
+
+/// Where a password is: `{ env = "NAME" }`, an environment variable, or `{ file = "path" }`, a
+/// file's first line, the path relative to the package root. Never the password itself.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "lowercase", deny_unknown_fields)]
+pub enum Secret {
+    Env(String),
+    File(PathBuf),
 }
 
 /// Android's adaptive launcher icon: a foreground over a background, each 108 dp square, which the
@@ -241,6 +282,7 @@ pub struct Project {
     pub macos: MacosMetadata,
     pub ios: IosMetadata,
     pub android: AndroidMetadata,
+    pub windows: WindowsMetadata,
 }
 
 impl Project {
@@ -307,6 +349,7 @@ impl Project {
             .into_iter()
             .map(|library| existing_file(&root, library, "the Android library"))
             .collect::<Result<_>>()?;
+        android.release = android.release.map(|key| key.under(&root)).transpose()?;
         Ok(Project {
             workspace_root: metadata.workspace_root.clone().into_std_path_buf(),
             target_dir: metadata.target_directory.clone().into_std_path_buf(),
@@ -325,6 +368,7 @@ impl Project {
             usage_descriptions: waft.usage_descriptions,
             macos,
             ios: waft.ios,
+            windows: waft.windows,
             android,
             root,
         })
@@ -361,6 +405,29 @@ impl Project {
             }
         }
         Ok(files)
+    }
+}
+
+impl ReleaseKey {
+    /// The key with its keystore's path, and a password file's, under the package `root`, each of
+    /// which must exist.
+    fn under(self, root: &Path) -> Result<ReleaseKey> {
+        let secret = |secret: Secret| -> Result<Secret> {
+            Ok(match secret {
+                Secret::File(file) => Secret::File(existing_file(
+                    root,
+                    file,
+                    "the release key's password file",
+                )?),
+                env => env,
+            })
+        };
+        Ok(ReleaseKey {
+            keystore: existing_file(root, self.keystore, "the release keystore")?,
+            alias: self.alias,
+            store_password: secret(self.store_password)?,
+            key_password: self.key_password.map(secret).transpose()?,
+        })
     }
 }
 
@@ -495,5 +562,28 @@ mod tests {
         assert!(metadata.ios.team.is_none());
         assert!(metadata.macos.helpers.is_empty() && metadata.macos.libraries.is_empty());
         assert!(metadata.android.dependencies.is_empty());
+        assert!(metadata.android.release.is_none());
+    }
+
+    #[test]
+    fn a_release_key_names_where_its_passwords_are_never_the_passwords() {
+        let metadata: Metadata =
+            serde_json::from_value(serde_json::json!({ "android": { "release": {
+            "keystore": "android/upload.jks",
+            "alias": "upload",
+            "store_password": { "env": "WAFT_ANDROID_STORE_PASSWORD" },
+            "key_password": { "file": "secrets/key" },
+        } } }))
+            .unwrap();
+        let key = metadata.android.release.unwrap();
+        assert!(
+            matches!(key.store_password, Secret::Env(ref name) if name == "WAFT_ANDROID_STORE_PASSWORD")
+        );
+        assert!(matches!(key.key_password, Some(Secret::File(_))));
+        let written_out =
+            serde_json::from_value::<Metadata>(serde_json::json!({ "android": { "release": {
+            "keystore": "k.jks", "alias": "a", "store_password": "hunter2",
+        } } }));
+        assert!(written_out.is_err());
     }
 }

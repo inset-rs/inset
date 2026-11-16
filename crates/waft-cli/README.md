@@ -25,10 +25,12 @@ cargo waft build macos          # .app              build dmg
 cargo waft build windows        # folder            build msi | nsis
 cargo waft build linux          # folder            build deb | appimage
 cargo waft build ios            # .app for a device (`--simulator` for the simulator)
-cargo waft build ipa            # .ipa around the device .app
+cargo waft build ipa            # .ipa signed by Xcode for --export-method app-store (the default), ad-hoc, development or enterprise
 cargo waft build apk            # .apk for 64-bit ARM, signed with the debug key
 cargo waft build web            # static folder: index.html, app.js, app_bg.wasm, .br copies
 ```
+
+`-d` names a device as `cargo waft devices` lists it, as Flutter's `-d` does: by its id, else its whole name, else the start of its name, ignoring case and the kind of apostrophe. A physical device is taken before a simulator or an emulator the name also fits, two physical devices it fits are refused, and among simulators of one name the booted one is taken, else the newest runtime's. `ios` and `android` take each platform's own pick: the booted simulator or the newest iPhone; a device `adb` reaches, else the first emulator.
 
 `run` builds debug unless `--release`; `build` builds release unless `--debug`. Output lands under `target/waft/<target>/<profile>/`, so `cargo clean` removes it. In a workspace, pass `-p <package>`.
 
@@ -90,6 +92,17 @@ permissions = ["android.permission.INTERNET"]  # what the app asks for besides W
 adaptive_icon = { foreground = "assets/icon-foreground.png", background = "#ffffff" }  # the launcher icon on API 26 and up, two 108 dp layers the launcher cuts to its shape; background is #rrggbb or a PNG; without it, `icon` is shrunk into the shape
 dependencies = ["android/some-library-1.0.aar", "android/kotlin-stdlib-2.2.10.jar"]  # Android libraries merged into the package, as Gradle merges a module's; see Android libraries
 
+[package.metadata.waft.android.release]  # the key a release build is signed with; see Signing
+keystore = "android/upload.jks"
+alias = "upload"
+store_password = { env = "WAFT_ANDROID_STORE_PASSWORD" }  # or { file = "path" }; never the password itself
+key_password = { file = "../secrets/upload-key-password" }  # where the key's own password differs
+
+[package.metadata.waft.windows]    # how the MSI and NSIS installers, and the executables in them, are signed; see Signing
+certificate_thumbprint = "A1B2…"   # a certificate in the machine's store, for signtool; or:
+# sign_command = "osslsigncode sign -pkcs11module … -in %1 -out %1"   # a command per file, %1 its path
+timestamp_url = "http://timestamp.digicert.com"
+
 [[package.metadata.waft.file_associations]]  # a kind of file this app defines
 extensions = ["mydoc"]
 name = "My document"
@@ -146,15 +159,16 @@ On Android a declared camera puts `android.permission.CAMERA` in the manifest, w
 Signing happens when credentials are present, never by flag.
 
 - iOS simulator: no account and no signing.
-- iOS device: the Apple Development certificate in your keychain, whose team is the one its certificate is issued to, and a provisioning profile that lets the bundle id run on the device. `doctor` names the certificate that will be used; `ios.team` in the metadata picks one when a machine has several. A profile Xcode stored is used when one is of the team, covers the bundle id and lists the device; else the CLI has Xcode get one, as `flutter run` does: `xcodebuild -allowProvisioningUpdates -allowProvisioningDeviceRegistration` builds the smallest app with the bundle id and the team (under `target/waft/ios/<profile>/provisioning`), and Xcode, with the account signed in under Xcode > Settings > Accounts, registers the device, makes the app id and stores the profile, which the app is then signed with. The CLI never handles the account; with no account of the team signed in, it says so. `build ios` and `build ipa` get one for the team's registered devices. A free team's profile lasts seven days, and its app does not open until the device's user trusts its developer under Settings > General > VPN & Device Management. `build ipa` needs a distribution profile and is uploaded with Transporter or `xcrun altool`.
+- iOS device: the Apple Development certificate in your keychain, whose team is the one its certificate is issued to, and a provisioning profile that lets the bundle id run on the device. `doctor` names the certificate that will be used; `ios.team` in the metadata picks one when a machine has several. A profile Xcode stored is used when one is of the team, covers the bundle id and lists the device; else the CLI has Xcode get one, as `flutter run` does: `xcodebuild -allowProvisioningUpdates -allowProvisioningDeviceRegistration` builds the smallest app with the bundle id and the team (under `target/waft/ios/<profile>/provisioning`), and Xcode, with the account signed in under Xcode > Settings > Accounts, registers the device, makes the app id and stores the profile, which the app is then signed with. The CLI never handles the account; with no account of the team signed in, it says so. `build ios` gets one for the team's registered devices. A free team's profile lasts seven days, and its app does not open until the device's user trusts its developer under Settings > General > VPN & Device Management.
+- iOS distribution: `build ipa` leaves the app unsigned and has Xcode sign it as it exports it, as `flutter build ipa` does: the app goes into an archive (`target/waft/ipa/<profile>/<name>.xcarchive`), and `xcodebuild -exportArchive -allowProvisioningUpdates` signs it automatically for the team and the export method, `--export-method` as Flutter names them, `app-store` by default, making the distribution certificate and profile with the signed-in account where the team has none, and writes the `.ipa`. Xcode signs, since a distribution certificate may be one Apple keeps in the cloud, which only Xcode signs with. An `app-store` `.ipa` is uploaded with Transporter or `xcrun altool`; a free team distributes nothing.
 - macOS: the `.app` is signed with `APPLE_SIGNING_IDENTITY`, an identity in the keychain by its name, part of it, or its hash, `-` for ad hoc; else with the keychain's Apple Development certificate when there is one, so permission grants such as Accessibility survive a rebuild; else ad hoc. A certificate's signature carries the hardened runtime. Distribution needs a Developer ID and notarization, which Apple only grants against an account: with `APPLE_SIGNING_IDENTITY` naming the Developer ID, `build macos` notarizes and staples the `.app`, and `build dmg` the `.app` and the disk image, when the environment holds one of these sets:
   - `APPLE_KEYCHAIN_PROFILE`, a profile stored with `xcrun notarytool store-credentials`;
   - `APPLE_ID`, `APPLE_PASSWORD` (an app-specific password) and `APPLE_TEAM_ID`;
   - an App Store Connect key: `APPLE_API_KEY` (its id), `APPLE_API_ISSUER` and `APPLE_API_KEY_PATH`.
 
   `run` is never notarized.
-- Windows: `certificate_thumbprint` or a custom sign command, through cargo-packager.
-- Android: the debug key in `~/.android/debug.keystore`, made with `keytool` when the machine has none, for `run` and `build apk` alike. A release key is not here yet.
+- Windows: `build msi` and `build nsis` sign the installer and the executables in it, through cargo-packager, with `signtool` and the certificate whose thumbprint `windows.certificate_thumbprint` gives, or with `windows.sign_command`, a command run for each file with `%1` standing for its path, never both; SHA-256, timestamped by `windows.timestamp_url` where it is given. With neither the packages are unsigned, which SmartScreen warns of. The folder `build windows` makes is not signed.
+- Android: a debug build, and a release build of an app that names no release key, is signed with the debug key in `~/.android/debug.keystore`, made with `keytool` when the machine has none; the release build with a warning, since a store refuses it, as a new Flutter app's release build is. A release build, `run --release` and `build apk` alike, of an app with `[package.metadata.waft.android.release]` is signed with that key: the keystore and alias it names, and its passwords from where it says, an environment variable or a file, which apksigner reads itself (`env:` and `file:`), so they never pass through the CLI or sit in `Cargo.toml`.
 
 ## Size
 
@@ -179,7 +193,11 @@ The CLI puts the `.app` together itself, as it does an iOS app: the executable i
 
 ## Windows
 
-`build windows`, `build msi` and `build nsis` link the app's icon into its executable as a resource (`src/windows_resources.rs`): its sizes from 16 to 256 pixels, as the compiled resource file `rc.exe` would make, written by the CLI and passed to the linker for the app's own crate alone (`cargo rustc -- -Clink-arg=…`), so neither a resource compiler nor a build script is needed. Explorer, the shortcuts and the taskbar show it, and Waft's host gives it to every window whose configuration names no icon, at the title bar's size and at the taskbar's. cargo-packager puts the same icon on the installer. `cargo waft run` builds and runs the same executable; `cargo run` builds one without the icon. Cargo does not track the resource file, only the argument naming it, so the file is named after a hash of its content: a changed icon is a new argument, and the executable links again.
+`build windows`, `build msi` and `build nsis` link the app's icon into its executable as a resource (`src/windows/resources.rs`): its sizes from 16 to 256 pixels, as the compiled resource file `rc.exe` would make, written by the CLI and passed to the linker for the app's own crate alone (`cargo rustc -- -Clink-arg=…`), so neither a resource compiler nor a build script is needed. Explorer, the shortcuts and the taskbar show it, and Waft's host gives it to every window whose configuration names no icon, at the title bar's size and at the taskbar's. cargo-packager puts the same icon on the installer. `cargo waft run` builds and runs the same executable; `cargo run` builds one without the icon. Cargo does not track the resource file, only the argument naming it, so the file is named after a hash of its content: a changed icon is a new argument, and the executable links again.
+
+## Source layout
+
+One module per platform, each with what `build` makes for it, what `run` does there and how it signs: `macos/`, `ios/`, `android/`, `windows/`, `linux/`, `web/` and `wasm`. `main.rs` only reads the command and hands it to the platform's module; `packager.rs` holds what Windows and Linux share through cargo-packager, `apple.rs` what macOS and iOS share, and `devices.rs` what `run -d` can name.
 
 ## Tools it fetches
 

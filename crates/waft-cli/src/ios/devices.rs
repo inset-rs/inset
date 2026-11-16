@@ -5,7 +5,7 @@ use std::process::Command;
 
 use anyhow::Result;
 
-use crate::devices::Device;
+use crate::devices::{Device, Target};
 use crate::tools;
 
 #[derive(Clone, Debug)]
@@ -68,30 +68,25 @@ fn parse_simulators(json: &str) -> Vec<Simulator> {
         .collect()
 }
 
-/// The simulator `-d` names, or the booted one, or the newest iPhone.
-pub fn pick_simulator<'a>(
-    simulators: &'a [Simulator],
-    wanted: Option<&str>,
-) -> Option<&'a Simulator> {
-    match wanted {
-        Some(wanted) => {
-            let lower = wanted.to_lowercase();
+/// What `-d ios` picks: the booted simulator, else the newest runtime's iPhone, else the first.
+pub fn default_simulator(devices: &[Device]) -> Option<&Device> {
+    let simulators: Vec<(&Device, &Simulator)> = devices
+        .iter()
+        .filter_map(|device| match &device.target {
+            Target::IosSimulator(simulator) => Some((device, simulator)),
+            _ => None,
+        })
+        .collect();
+    simulators
+        .iter()
+        .find(|(_, s)| s.state == "Booted")
+        .or_else(|| {
             simulators
                 .iter()
-                .find(|s| s.udid.eq_ignore_ascii_case(wanted))
-                .or_else(|| simulators.iter().find(|s| s.name.to_lowercase() == lower))
-                .or_else(|| {
-                    simulators
-                        .iter()
-                        .find(|s| s.name.to_lowercase().starts_with(&lower))
-                })
-        }
-        None => simulators
-            .iter()
-            .find(|s| s.state == "Booted")
-            .or_else(|| simulators.iter().find(|s| s.name.starts_with("iPhone")))
-            .or_else(|| simulators.first()),
-    }
+                .find(|(_, s)| s.name.starts_with("iPhone"))
+        })
+        .or_else(|| simulators.first())
+        .map(|(device, _)| *device)
 }
 
 /// An iPhone or iPad `devicectl` reaches.
@@ -111,17 +106,21 @@ pub fn listed_devices() -> Result<Vec<Device>> {
     let mut devices: Vec<Device> = simulators()?
         .into_iter()
         .map(|simulator| Device {
-            id: simulator.udid,
-            name: format!("{} ({})", simulator.name, simulator.runtime),
+            id: simulator.udid.clone(),
+            name: simulator.name.clone(),
+            detail: simulator.runtime.clone(),
             platform: "ios simulator",
-            state: simulator.state,
+            state: simulator.state.clone(),
+            target: Target::IosSimulator(simulator),
         })
         .collect();
     devices.extend(connected_iphones().into_iter().map(|device| Device {
-        id: device.id,
-        name: device.name,
+        id: device.id.clone(),
+        name: device.name.clone(),
+        detail: String::new(),
         platform: "ios device",
-        state: device.state,
+        state: device.state.clone(),
+        target: Target::IosDevice(device),
     }));
     Ok(devices)
 }
@@ -201,7 +200,7 @@ mod tests {
     }
 
     #[test]
-    fn simulators_come_newest_runtime_first_and_ios_only() {
+    fn simulators_come_newest_runtime_first_and_ios_only_and_the_booted_is_the_default() {
         let json = r#"{"devices":{
             "com.apple.CoreSimulator.SimRuntime.iOS-17-5":[{"name":"iPhone 15","udid":"A","state":"Shutdown"}],
             "com.apple.CoreSimulator.SimRuntime.tvOS-18-0":[{"name":"Apple TV","udid":"T","state":"Shutdown"}],
@@ -212,8 +211,17 @@ mod tests {
             ["B", "A"]
         );
         assert_eq!(list[0].runtime, "iOS 18.6");
-        assert_eq!(pick_simulator(&list, None).unwrap().udid, "B");
-        assert_eq!(pick_simulator(&list, Some("iphone 15")).unwrap().udid, "A");
-        assert_eq!(pick_simulator(&list, Some("iPhone")).unwrap().udid, "B");
+        let listed: Vec<Device> = list
+            .into_iter()
+            .map(|simulator| Device {
+                id: simulator.udid.clone(),
+                name: simulator.name.clone(),
+                detail: simulator.runtime.clone(),
+                platform: "ios simulator",
+                state: simulator.state.clone(),
+                target: Target::IosSimulator(simulator),
+            })
+            .collect();
+        assert_eq!(default_simulator(&listed).unwrap().id, "B");
     }
 }

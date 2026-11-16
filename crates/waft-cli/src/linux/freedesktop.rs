@@ -245,6 +245,7 @@ mod tests {
             macos: Default::default(),
             ios: Default::default(),
             android: Default::default(),
+            windows: Default::default(),
         }
     }
 

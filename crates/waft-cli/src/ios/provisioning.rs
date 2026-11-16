@@ -77,7 +77,7 @@ pub(super) fn obtain_profile(request: &Request, dir: &Path) -> Result<()> {
         String::from_utf8_lossy(&built.stdout),
         String::from_utf8_lossy(&built.stderr)
     );
-    bail!(failure(&log, request.team))
+    bail!(failure(&log, request.team, "get a provisioning profile"))
 }
 
 /// The project and its source, written afresh into `dir`; answers the project's path.
@@ -116,12 +116,12 @@ fn xcodebuild_arguments(request: &Request, project: &Path, derived_data: &Path) 
     ]
 }
 
-/// What went wrong, from `xcodebuild`'s `log`: Xcode signed in to no account of `team`, said as
-/// what to do; else the errors it printed.
-fn failure(log: &str, team: &str) -> String {
+/// Why Xcode could not do `what`, from `xcodebuild`'s `log`: it signed in to no account of `team`,
+/// said as what to do; else the errors it printed.
+pub(super) fn failure(log: &str, team: &str, what: &str) -> String {
     if log.contains("No Accounts") || log.contains("No Account for Team") {
         return format!(
-            "Xcode has no account of team {team} signed in, which it gets the provisioning profile with: \
+            "Xcode has no account of team {team} signed in, which it needs to {what}: \
              open Xcode > Settings > Accounts, add an Apple ID of that team, then run this again"
         );
     }
@@ -130,17 +130,12 @@ fn failure(log: &str, team: &str) -> String {
         .filter(|line| line.contains("error:"))
         .map(str::trim)
         .collect();
-    if errors.is_empty() {
-        format!(
-            "Xcode could not get a provisioning profile:\n{}",
-            log.trim()
-        )
+    let shown = if errors.is_empty() {
+        log.trim().to_owned()
     } else {
-        format!(
-            "Xcode could not get a provisioning profile:\n{}",
-            errors.join("\n")
-        )
-    }
+        errors.join("\n")
+    };
+    format!("Xcode could not {what}:\n{shown}")
 }
 
 #[cfg(test)]
@@ -179,8 +174,15 @@ mod tests {
     #[test]
     fn no_account_is_said_as_what_to_do() {
         let log = "error: No Account for Team \"TEAM123456\". Add a new account in Accounts settings or verify that your accounts have valid credentials. (in target 'Provisioning' from project 'Provisioning')";
-        assert!(failure(log, "TEAM123456").contains("Xcode > Settings > Accounts"));
-        let other = failure("note: x\nerror: Device is locked\n", "TEAM123456");
+        assert!(
+            failure(log, "TEAM123456", "get a provisioning profile")
+                .contains("Xcode > Settings > Accounts")
+        );
+        let other = failure(
+            "note: x\nerror: Device is locked\n",
+            "TEAM123456",
+            "get a provisioning profile",
+        );
         assert!(other.ends_with("error: Device is locked"));
     }
 }

@@ -1,95 +1,87 @@
 //! iOS: the `.app` folder Xcode would produce, assembled from a cargo binary.
 //!
 //! No Xcode project. The binary, an `Info.plist`, icons, and resources go into a
-//! folder; `codesign` signs it (ad hoc for the simulator, a development identity
-//! and profile for a device); `simctl` or `devicectl` installs and launches it.
+//! folder, signed as [`Signing`] says (`signing.rs`): ad hoc for the simulator, with a
+//! development identity and profile for a device, or left for Xcode to sign as it exports the
+//! app for distribution (`export.rs`); `simctl` or `devicectl` installs and launches it.
 
 mod devices;
+mod export;
 mod profiles;
 mod provisioning;
+mod signing;
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use plist::{Dictionary, Value};
 
-pub use devices::{
-    IosDevice, Simulator, connected_iphones, listed_devices, pick_simulator, simulators,
-};
+pub use devices::{IosDevice, Simulator, default_simulator, listed_devices};
+pub use signing::ExportMethod;
+use signing::Signing;
 
-use crate::apple::{self, SigningIdentity, SigningSettings};
+use crate::apple;
 use crate::cargo::{self, Artifact, Build};
 use crate::file_associations;
 use crate::icons;
 use crate::project::{Profile, Project};
 use crate::tools;
-use profiles::Signed;
-use provisioning::Request;
 
 const DEFAULT_MINIMUM_VERSION: &str = "15.0";
-
-/// Where the app is built to run: a simulator, or a device, the one named or any of the team's.
-#[derive(Clone, Copy, Debug)]
-pub enum Destination<'a> {
-    Simulator,
-    Device(Option<&'a IosDevice>),
-}
-
-impl Destination<'_> {
-    fn triple(self) -> &'static str {
-        match self {
-            Destination::Simulator if cfg!(target_arch = "aarch64") => "aarch64-apple-ios-sim",
-            Destination::Simulator => "x86_64-apple-ios",
-            Destination::Device(_) => "aarch64-apple-ios",
-        }
-    }
-
-    fn dir_name(self) -> &'static str {
-        match self {
-            Destination::Simulator => "ios-simulator",
-            Destination::Device(_) => "ios",
-        }
-    }
-
-    fn platform_name(self) -> &'static str {
-        match self {
-            Destination::Simulator => "iphonesimulator",
-            Destination::Device(_) => "iphoneos",
-        }
-    }
-
-    fn supported_platform(self) -> &'static str {
-        match self {
-            Destination::Simulator => "iPhoneSimulator",
-            Destination::Device(_) => "iPhoneOS",
-        }
-    }
-}
 
 pub struct App {
     pub path: PathBuf,
     pub bundle_id: String,
 }
 
-pub fn build(project: &Project, profile: Profile, destination: Destination) -> Result<App> {
+/// `build ios`: the `.app` for a device, signed for the team's development devices, or for the
+/// simulator.
+pub fn build_app(project: &Project, profile: Profile, simulator: bool) -> Result<PathBuf> {
+    let signing = if simulator {
+        Signing::Simulator
+    } else {
+        Signing::Development(None)
+    };
+    Ok(build(project, profile, signing)?.path)
+}
+
+/// `build ipa`: the `.ipa` Xcode signs as it exports the app for `method`.
+pub fn build_ipa(project: &Project, profile: Profile, method: ExportMethod) -> Result<PathBuf> {
+    let app = build(project, profile, Signing::Distribution)?;
+    export::export_ipa(project, &app, method, &project.out_dir("ipa", profile))
+}
+
+/// `run` on `simulator`: the app built for it, installed, and launched there.
+pub fn run_on_simulator(project: &Project, profile: Profile, simulator: &Simulator) -> Result<()> {
+    let app = build(project, profile, Signing::Simulator)?;
+    run_simulator(&app, simulator)
+}
+
+/// `run` on `device`: the app built and signed for it, installed, and launched there.
+pub fn run_on_device(project: &Project, profile: Profile, device: &IosDevice) -> Result<()> {
+    let app = build(project, profile, Signing::Development(Some(device)))?;
+    run_device(&app, device)
+}
+
+fn build(project: &Project, profile: Profile, signing: Signing) -> Result<App> {
     if !cfg!(target_os = "macos") {
         bail!("iOS builds need macOS with the Xcode command line tools");
     }
     let minimum_version = minimum_version(project);
-    tools::ensure_rust_target(&project.root, destination.triple())?;
+    tools::ensure_rust_target(&project.root, signing.triple())?;
     let executable = cargo::build(&Build {
         project,
         package: &project.package,
         profile,
-        triple: Some(destination.triple()),
+        triple: Some(signing.triple()),
         artifact: Artifact::Executable(&project.bin),
         env: vec![("IPHONEOS_DEPLOYMENT_TARGET", minimum_version.clone())],
         link_inputs: Vec::new(),
     })?;
 
-    let out = project.out_dir(destination.dir_name(), profile);
+    let out = project.out_dir(signing.dir_name(), profile);
     let app = out.join(format!("{}.app", project.name));
     if app.exists() {
         fs::remove_dir_all(&app)?;
@@ -99,7 +91,7 @@ pub fn build(project: &Project, profile: Profile, destination: Destination) -> R
     let icon_names = write_icons(project, &app)?;
     plist::to_file_xml(
         app.join("Info.plist"),
-        &info_plist(project, destination, &minimum_version, &icon_names),
+        &info_plist(project, signing, &minimum_version, &icon_names),
     )?;
     for (source, relative) in project.resource_files()? {
         let dest = app.join(relative);
@@ -108,10 +100,7 @@ pub fn build(project: &Project, profile: Profile, destination: Destination) -> R
         }
         fs::copy(source, dest)?;
     }
-    match destination {
-        Destination::Simulator => sign_ad_hoc(&app)?,
-        Destination::Device(device) => sign_for_device(project, &app, &out, device)?,
-    }
+    signing::sign(project, &app, &out, signing)?;
     Ok(App {
         path: app,
         bundle_id: project.identifier.clone(),
@@ -127,40 +116,9 @@ fn minimum_version(project: &Project) -> String {
         .unwrap_or_else(|| DEFAULT_MINIMUM_VERSION.to_owned())
 }
 
-/// `Payload/<name>.app` zipped, the shape TestFlight and device installers take.
-pub fn ipa(app: &App, out: &Path) -> Result<PathBuf> {
-    let payload = out.join("Payload");
-    if payload.exists() {
-        fs::remove_dir_all(&payload)?;
-    }
-    fs::create_dir_all(&payload)?;
-    let name = app.path.file_name().context("app folder has no name")?;
-    tools::run(
-        Command::new("cp")
-            .arg("-R")
-            .arg(&app.path)
-            .arg(payload.join(name)),
-        "copying the app into Payload",
-    )?;
-    let stem = app.path.file_stem().context("app folder has no name")?;
-    let ipa = out.join(format!("{}.ipa", stem.to_string_lossy()));
-    if ipa.exists() {
-        fs::remove_file(&ipa)?;
-    }
-    tools::run(
-        Command::new("ditto")
-            .current_dir(out)
-            .args(["-c", "-k", "--sequesterRsrc", "--keepParent", "Payload"])
-            .arg(&ipa),
-        "ditto",
-    )?;
-    fs::remove_dir_all(&payload)?;
-    Ok(ipa)
-}
-
 fn info_plist(
     project: &Project,
-    destination: Destination,
+    signing: Signing,
     minimum_version: &str,
     icon_names: &[String],
 ) -> Value {
@@ -171,10 +129,10 @@ fn info_plist(
     let text = |s: &str| Value::String(s.to_owned());
     put(
         "CFBundleSupportedPlatforms",
-        Value::Array(vec![text(destination.supported_platform())]),
+        Value::Array(vec![text(signing.supported_platform())]),
     );
-    put("DTPlatformName", text(destination.platform_name()));
-    put("DTSDKName", text(destination.platform_name()));
+    put("DTPlatformName", text(signing.platform_name()));
+    put("DTSDKName", text(signing.platform_name()));
     put("LSRequiresIPhoneOS", Value::Boolean(true));
     put("MinimumOSVersion", text(minimum_version));
     put(
@@ -203,7 +161,7 @@ fn info_plist(
             .collect(),
         ),
     );
-    if matches!(destination, Destination::Device(_)) {
+    if !matches!(signing, Signing::Simulator) {
         put(
             "UIRequiredDeviceCapabilities",
             Value::Array(vec![text("arm64")]),
@@ -284,84 +242,7 @@ fn write_icons(project: &Project, app: &Path) -> Result<Vec<String>> {
     ])
 }
 
-fn sign_ad_hoc(app: &Path) -> Result<()> {
-    apple::sign(
-        app,
-        &SigningSettings {
-            identity: &SigningIdentity::AdHoc,
-            hardened_runtime: false,
-            entitlements: None,
-            timestamp: false,
-        },
-    )
-}
-
-/// Signs `app` with the keychain's Apple Development certificate and a profile that lets it run on
-/// `device`, or on the team's devices where none is named: one Xcode stored, or else one Xcode gets
-/// now, as `flutter run` has Xcode get it.
-fn sign_for_device(
-    project: &Project,
-    app: &Path,
-    out: &Path,
-    device: Option<&IosDevice>,
-) -> Result<()> {
-    let identity = apple::development_identity(project.ios.team.as_deref())?;
-    let signed = Signed {
-        bundle_id: &project.identifier,
-        team: &identity.team,
-        device: device.map(|device| device.udid.as_str()),
-    };
-    let profile = match profiles::stored_profile(&signed) {
-        Some(profile) => profile,
-        None => {
-            let request = Request {
-                bundle_id: signed.bundle_id,
-                team: signed.team,
-                device: signed.device,
-                minimum_version: &minimum_version(project),
-            };
-            provisioning::obtain_profile(&request, &out.join("provisioning"))?;
-            profiles::stored_profile(&signed).with_context(|| {
-                format!(
-                    "Xcode got no provisioning profile for {} (team {}) that Waft finds among those it stores",
-                    signed.bundle_id, signed.team
-                )
-            })?
-        }
-    };
-    fs::copy(&profile.path, app.join("embedded.mobileprovision"))?;
-    let entitlements = out.join("entitlements.plist");
-    plist::to_file_xml(
-        &entitlements,
-        &entitlements_plist(&project.identifier, &identity.team),
-    )?;
-    println!("signing with {} ({})", identity.name, profile.name);
-    apple::sign(
-        app,
-        &SigningSettings {
-            identity: &SigningIdentity::Keychain(identity),
-            hardened_runtime: false,
-            entitlements: Some(&entitlements),
-            timestamp: false,
-        },
-    )
-}
-
-fn entitlements_plist(bundle_id: &str, team: &str) -> Value {
-    let mut entitlements = Dictionary::new();
-    entitlements.insert(
-        "application-identifier".to_owned(),
-        Value::String(format!("{team}.{bundle_id}")),
-    );
-    entitlements.insert(
-        "com.apple.developer.team-identifier".to_owned(),
-        Value::String(team.to_owned()),
-    );
-    entitlements.insert("get-task-allow".to_owned(), Value::Boolean(true));
-    Value::Dictionary(entitlements)
-}
-
-pub fn run_simulator(app: &App, simulator: &Simulator) -> Result<()> {
+fn run_simulator(app: &App, simulator: &Simulator) -> Result<()> {
     let udid = simulator.udid.as_str();
     if simulator.state != "Booted" {
         println!("booting {} ({})", simulator.name, simulator.runtime);
@@ -397,7 +278,7 @@ pub fn run_simulator(app: &App, simulator: &Simulator) -> Result<()> {
     )
 }
 
-pub fn run_device(app: &App, device: &IosDevice) -> Result<()> {
+fn run_device(app: &App, device: &IosDevice) -> Result<()> {
     let device = device.id.as_str();
     tools::run(
         Command::new("xcrun")
@@ -428,7 +309,7 @@ mod tests {
     #[test]
     fn info_plist_names_the_executable_and_platform() {
         let project = test_project();
-        let plist = info_plist(&project, Destination::Simulator, "15.0", &[]);
+        let plist = info_plist(&project, Signing::Simulator, "15.0", &[]);
         let dict = plist.as_dictionary().unwrap();
         assert_eq!(
             dict.get("CFBundleExecutable").unwrap().as_string(),
@@ -447,7 +328,7 @@ mod tests {
     #[test]
     fn info_plist_adopts_the_scene_lifecycle_with_the_hosts_delegate() {
         let project = test_project();
-        let plist = info_plist(&project, Destination::Simulator, "15.0", &[]);
+        let plist = info_plist(&project, Signing::Simulator, "15.0", &[]);
         let dict = plist.as_dictionary().unwrap();
         let manifest = dict
             .get("UIApplicationSceneManifest")
@@ -487,7 +368,7 @@ mod tests {
             { "extensions": ["wapk"], "name": "WaOS program", "owner": true },
         ]))
         .unwrap();
-        let plist = info_plist(&project, Destination::Device(None), "15.0", &[]);
+        let plist = info_plist(&project, Signing::Development(None), "15.0", &[]);
         let dict = plist.as_dictionary().unwrap();
         let exported = dict
             .get("UTExportedTypeDeclarations")
@@ -506,7 +387,7 @@ mod tests {
                 .and_then(Value::as_boolean),
             Some(true)
         );
-        let without = info_plist(&test_project(), Destination::Simulator, "15.0", &[]);
+        let without = info_plist(&test_project(), Signing::Simulator, "15.0", &[]);
         assert!(
             without
                 .as_dictionary()
@@ -520,7 +401,7 @@ mod tests {
     fn info_plist_says_why_the_app_uses_the_camera() {
         let mut project = test_project();
         project.usage_descriptions.camera = Some("Scans the code on a ticket.".into());
-        let plist = info_plist(&project, Destination::Device(None), "15.0", &[]);
+        let plist = info_plist(&project, Signing::Development(None), "15.0", &[]);
         let dict = plist.as_dictionary().unwrap();
         assert_eq!(
             dict.get("NSCameraUsageDescription").unwrap().as_string(),
@@ -549,6 +430,7 @@ mod tests {
             macos: Default::default(),
             ios: Default::default(),
             android: Default::default(),
+            windows: Default::default(),
         }
     }
 }
