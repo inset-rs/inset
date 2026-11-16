@@ -586,11 +586,11 @@ mod tests {
     fn the_default_strings_format_dates_like_dart() {
         let strings = DefaultCupertinoLocalizations::new();
         assert_eq!(
-            strings.date_picker_medium_date(&DateTime::utc(2026, 9, 5)),
+            strings.date_picker_medium_date(&DateTime::new(2026, 9, 5)),
             "Sat Sep 5 "
         );
         assert_eq!(
-            strings.date_picker_medium_date(&DateTime::utc(2026, 12, 25)),
+            strings.date_picker_medium_date(&DateTime::new(2026, 12, 25)),
             "Fri Dec 25"
         );
         assert_eq!(

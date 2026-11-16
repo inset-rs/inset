@@ -14,6 +14,24 @@ async-task.workspace = true
 indexmap.workspace = true
 waft-embedder.workspace = true
 slotmap.workspace = true
+# The current time on every target: std's, except in a browser, where std's panics.
+web-time.workspace = true
 
-[lints]
-workspace = true
+# Local time from the system, as the Dart VM asks it (`local_time`).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.60", features = ["Win32_Foundation", "Win32_System_Time"] }
+
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+js-sys = "0.3"
+
+[target.'cfg(all(target_os = "wasi", target_env = "p3"))'.dependencies]
+wit-bindgen = "0.63"
+
+# `unsafe` only in `local_time`'s backends: the C library's and Win32's time zone calls, and the
+# canonical ABI glue `wit-bindgen` generates for WASI's.
+[lints.rust]
+unsafe_code = "deny"
+

@@ -78,9 +78,25 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## date_time.rs → dart:core `DateTime`
 
-- Change: only UTC exists: `DateTime::utc(..)`, `now()` read as UTC, and epoch constructors with no `isUtc`.
-  Reason: platform — the standard library has no time zone database, and its duration is unsigned.
-  Affect: every `DateTime` reads as UTC whatever the host's zone; local time, `parse` and `difference` are absent, so a difference is a subtraction of `microseconds_since_epoch()`.
+- Change: local time comes from a module inside waft-foundation with one backend per target, not from the host's `Platform`: `localtime_r` on macOS, iOS, Linux and Android, the Win32 zone calls on Windows, JS `Date` on the web, and WASI 0.3's `wasi:clocks/timezone` inside a component; a target with none of these reads local time as UTC.
+  Reason: platform — Dart's two natives sit in the runtime beneath dart:ui and `DateTime.now()` takes no context, so there is no `App` to reach a host through.
+  Affect: a host does nothing for local time, and a WASI host that does not serve `wasi:clocks/timezone` cannot instantiate a component that reads it.
+
+- Change: a local value asks the system for its offset once, when it is made, for its fields; `time_zone_offset` and `time_zone_name` ask again on every call, as Dart's do.
+  Reason: language — Dart works its fields out lazily and keeps them in the object; a `Copy` value works them out when it is made.
+  Affect: a local value made before the zone changed keeps the old zone's fields, as Dart's does once read, while `time_zone_offset` answers the new zone's.
+
+- Change: `time_zone_offset` is a `SignedDuration`, Waft's port of Dart's `Duration` where it can be negative, under its own name; everywhere else a Dart `Duration` is `std::time::Duration`.
+  Reason: language — std's duration is unsigned and cannot hold a zone west of UTC, and a second type named `Duration` would shadow std's in every `use waft::*`.
+  Affect: `time_zone_offset()` reads as Dart's (`-8:00:00.000000` west of UTC), and a caller that adds it to an instant converts with its `in_microseconds`.
+
+- Change: `DateTime`'s `Ord` orders by the instant and then puts a local value before the UTC value of the same instant; `compare_to` is Dart's `compareTo`, which answers equal for the two.
+  Reason: language — Rust's `Ord` must agree with `==`, and Dart's `==` tells the two apart where its `compareTo` does not.
+  Affect: sorting a local and a UTC value of one instant puts the local one first, and `<` holds between them where `compare_to` answers `Equal`.
+
+- Change: inside a WASI component, `time_zone_name` is the zone's IANA identifier, such as `Europe/Paris`; for a zone the host gives an offset but no IANA id for, the host's `to-debug-string`, shown and never parsed; and `UTC` when the host gives no zone.
+  Reason: platform — WASI 0.3's time zone interface gives an IANA id and no abbreviation.
+  Affect: a program inside WaOS reads "Europe/Paris" where the same program on macOS reads "CET".
 
 ## change_notifier.rs → change_notifier.dart
 
@@ -106,7 +122,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## Deferred
 
-- date_time.rs: local time, `parse` / `tryParse`, `difference`. Trigger: a host with a time zone database; a signed duration.
+- date_time.rs: `parse` / `tryParse`, `difference`. Trigger: a caller that parses a date or measures between two (`difference` would return a `SignedDuration`).
 - `ChangeNotifier.maybeDispatchObjectCreation` / `memory_allocations`. Trigger: leak tracker / devtools.
 - Diagnostics / `FlutterError` structured trees; messages are `debug_assert!` strings meanwhile. Trigger: porting diagnostics.
 - `IterableFilter`. Trigger: the first iterable-filter call site.

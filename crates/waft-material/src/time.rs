@@ -1,8 +1,7 @@
 //! Flutter counterpart: material_ui's `time.dart`.
 //!
 //! [`TimeOfDayFormat`] and [`HourFormat`] keep Dart's names: they are ICU patterns, where
-//! `H` and `h` are different hours. `TimeOfDay.now` waits for local time (see this folder's
-//! `PORTING.md`).
+//! `H` and `h` are different hours.
 
 use std::cmp::Ordering;
 use std::fmt;
@@ -41,7 +40,7 @@ pub enum DayPeriod {
 /// # use waft_foundation::DateTime;
 /// # use waft_material::TimeOfDay;
 /// let release_time = TimeOfDay::new(15, 0); // 3:00pm
-/// let room_booked = TimeOfDay::from_date_time(&DateTime::utc_with_time(2018, 10, 20, 16, 30, 4, 0, 0)); // 4:30pm
+/// let room_booked = TimeOfDay::from_date_time(&DateTime::new_with_time(2018, 10, 20, 16, 30, 4, 0, 0)); // 4:30pm
 /// ```
 ///
 /// See also:
@@ -67,6 +66,11 @@ impl TimeOfDay {
     /// argument must be between 0 and 59, inclusive.
     pub const fn new(hour: i32, minute: i32) -> TimeOfDay {
         TimeOfDay { hour, minute }
+    }
+
+    /// Creates a time of day based on the current time, in the local time zone.
+    pub fn now() -> TimeOfDay {
+        TimeOfDay::from_date_time(&DateTime::now())
     }
 
     /// Creates a time of day based on the given time.
@@ -534,7 +538,7 @@ mod tests {
         assert_eq!(TimeOfDay::new(12, 0).period(), DayPeriod::Pm);
         assert_eq!(TimeOfDay::new(21, 0).period_offset(), 12);
         assert_eq!(
-            TimeOfDay::from_date_time(&DateTime::utc_with_time(2018, 10, 20, 16, 30, 4, 0, 0)),
+            TimeOfDay::from_date_time(&DateTime::new_with_time(2018, 10, 20, 16, 30, 4, 0, 0)),
             TimeOfDay::new(16, 30)
         );
         assert_eq!(format!("{:?}", TimeOfDay::new(7, 5)), "TimeOfDay(07:05)");

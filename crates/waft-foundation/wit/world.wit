@@ -1,0 +1,9 @@
+// What `DateTime` imports inside a WASI 0.3 component: the host's time zone, as the Dart VM's
+// natives ask the system's (`src/local_time/wasi.rs`). The interface is WASI's own, copied from
+// `wasi:clocks@0.3.0` (`deps/wasi-clocks-0.3.0`), so Waft names no host but WASI.
+package waft:foundation;
+
+world local-time {
+  @unstable(feature = clocks-timezone)
+  import wasi:clocks/timezone@0.3.0;
+}
