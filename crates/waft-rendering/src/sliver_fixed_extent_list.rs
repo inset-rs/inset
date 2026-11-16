@@ -805,6 +805,8 @@ mod tests {
     use waft_gestures::HitTestResult;
 
     use super::*;
+    use crate::object::ContainerRenderObjectMixin;
+    use crate::sliver::SliverHitTestResult;
     use crate::sliver_multi_box_adaptor::test_support::TestChildManager;
     use crate::sliver_multi_box_adaptor::viewport_test_support::ScrollHarness;
 
