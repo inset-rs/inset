@@ -28,11 +28,13 @@ pub enum Entry {
     Dialogs,
     Menus,
     Pickers,
+    Autocomplete,
+    ReorderableListView,
 }
 
 impl Entry {
     /// Index order — the order the tiles appear in.
-    pub const ALL: [Entry; 16] = [
+    pub const ALL: [Entry; 18] = [
         Entry::Buttons,
         Entry::AppBars,
         Entry::Lists,
@@ -49,6 +51,8 @@ impl Entry {
         Entry::Dialogs,
         Entry::Menus,
         Entry::Pickers,
+        Entry::Autocomplete,
+        Entry::ReorderableListView,
     ];
 
     /// The entry named by its variant, case-insensitively: how a launcher picks a page.
@@ -78,6 +82,8 @@ impl Entry {
             Entry::Dialogs => "Dialogs",
             Entry::Menus => "Menus",
             Entry::Pickers => "Date & Time Pickers",
+            Entry::Autocomplete => "Autocomplete",
+            Entry::ReorderableListView => "Reorderable Lists",
         }
     }
 
@@ -100,6 +106,8 @@ impl Entry {
             Entry::Dialogs => Icons::chat_bubble(),
             Entry::Menus => Icons::more_vert(),
             Entry::Pickers => Icons::event(),
+            Entry::Autocomplete => Icons::manage_search(),
+            Entry::ReorderableListView => Icons::reorder(),
         }
     }
 
@@ -133,6 +141,8 @@ impl Entry {
             Entry::Dialogs => pages::dialogs::body(app, context),
             Entry::Menus => pages::menus::body(app, context),
             Entry::Pickers => pages::pickers::body(app, context),
+            Entry::Autocomplete => pages::autocomplete::body(app, context),
+            Entry::ReorderableListView => pages::reorderable_list_view::body(app, context),
         }
     }
 

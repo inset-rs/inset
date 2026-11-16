@@ -728,6 +728,8 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 
 ## widgets/autocomplete.rs → autocomplete.dart
 
+- Note, kept on purpose: `RawAutocompleteState::init_state` adds `_onFocusChange` to the caller's focus node, while `did_update_widget` and `dispose` remove `_updateOptionsViewVisibility` instead, as Flutter's source does, so the first listener is never removed. Here a stale listener is skipped once the state is freed.
+
 - Change: `AutocompleteOptionsBuilder` returns a `Task<Vec<T>>`; a builder that has its options at hand returns `Task::ready`.
   Reason: language — Rust has no `FutureOr` union of a value and a future.
   Affect: every options builder is written as returning a task, and its options reach the state at the next checkpoint either way, as Dart's `await` delivers even a plain value in a microtask.
@@ -810,7 +812,6 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - Scroll semantics: `ScrollContext.setSemanticsActions`, scrollable.rs's semantics widget and its render object with `excludeFromSemantics` and `semanticChildCount`, and scroll_position.rs's semantic action bookkeeping. Trigger: the semantics tree.
 - scrollable.rs: the selection handler and container delegate around a scrollable. Trigger: `SelectionContainer` / `SelectionRegistrar`.
 - scrollable.rs, scroll_configuration.rs, primary_scroll_controller.rs: diagnostics, and `ScrollableDetails.hashCode` (no `Hash` over an erased physics). Trigger: diagnostics; a map keyed by scrollable details.
-- scroll_view.rs: `ListView.prototypeItem` and its branch of the child layout. Trigger: `sliver_prototype_extent_list.dart`.
 - scroll_view.rs: the scroll view diagnostics. Trigger: diagnostics.
 - single_child_scroll_view.rs: the semantics clip and the approximate paint clip (deferred crate-wide in rendering's PORTING.md), and its diagnostics. Trigger: the semantics tree; the inspector; diagnostics.
 - scrollbar.rs: the painter's semantics and the structured error reports, which are plain assert messages here. Trigger: the semantics tree; diagnostics.

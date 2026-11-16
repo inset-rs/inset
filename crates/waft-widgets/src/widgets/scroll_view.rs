@@ -40,6 +40,7 @@ use crate::widgets::scrollable::{Scrollable, ViewportBuilder};
 use crate::widgets::sliver::{
     SliverFixedExtentList, SliverGrid, SliverList, SliverVariedExtentList,
 };
+use crate::widgets::sliver_prototype_extent_list::SliverPrototypeExtentList;
 use crate::widgets::viewport::{ShrinkWrappingViewport, Viewport};
 
 /// A representation of how a [`ScrollView`] should dismiss the on-screen
@@ -843,6 +844,11 @@ impl BoxScrollViewBase {
 /// use of the foreknowledge of the children's extent to save work, for example when the
 /// scroll position changes drastically.
 ///
+/// If non-`None`, the [`prototype_item`](Self::prototype_item) forces the children to have the
+/// same extent as the given widget in the scroll direction. You can't specify more than one of
+/// [`item_extent`](Self::item_extent), [`prototype_item`](Self::prototype_item) and
+/// [`item_extent_builder`](Self::item_extent_builder).
+///
 /// There are four ways to construct a [`ListView`]:
 ///
 ///  1. [`ListView::new`] takes an explicit list of children through the
@@ -897,6 +903,25 @@ pub struct ListView {
     /// make use of the foreknowledge of the children's extent to save work, for
     /// example when the scroll position changes drastically.
     pub item_extent_builder: Option<ItemExtentBuilder>,
+
+    /// If non-`None`, forces the children to have the same extent as the given
+    /// widget in the scroll direction.
+    ///
+    /// Specifying a prototype item is more efficient than letting the children
+    /// determine their own extent because the scrolling machinery can make use of
+    /// the foreknowledge of the children's extent to save work, for example when
+    /// the scroll position changes drastically.
+    ///
+    /// See also:
+    ///
+    ///  * [`SliverPrototypeExtentList`], the sliver used internally when this
+    ///    property is provided. It constrains its box children to have the same
+    ///    extent as a prototype item along the main axis.
+    ///  * The [`item_extent`](Self::item_extent) property, which allows forcing the
+    ///    children's extent to a given value.
+    ///  * The [`item_extent_builder`](Self::item_extent_builder) property, which allows
+    ///    forcing the children's extent to be the value returned by the callback.
+    pub prototype_item: Option<WidgetRef>,
 
     /// A delegate that provides the children for the [`ListView`].
     ///
@@ -1009,6 +1034,7 @@ impl ListView {
             box_scroll_view: BoxScrollViewData::new(),
             item_extent: None,
             item_extent_builder: None,
+            prototype_item: None,
             children_delegate: list_arguments.clone().into_delegate(),
             list_arguments: Some(list_arguments),
         }
@@ -1060,6 +1086,7 @@ impl ListView {
             box_scroll_view: BoxScrollViewData::new(),
             item_extent: None,
             item_extent_builder: None,
+            prototype_item: None,
             children_delegate,
             list_arguments: None,
         }
@@ -1076,8 +1103,8 @@ impl ListView {
     /// Dart `ListView(itemExtent:)`.
     pub fn item_extent(mut self, item_extent: f64) -> ListView {
         debug_assert!(
-            self.item_extent_builder.is_none(),
-            "You can only pass one of itemExtent and itemExtentBuilder."
+            self.prototype_item.is_none() && self.item_extent_builder.is_none(),
+            "You can only pass one of itemExtent, prototypeItem and itemExtentBuilder."
         );
         self.item_extent = Some(item_extent);
         self
@@ -1086,10 +1113,20 @@ impl ListView {
     /// Dart `ListView(itemExtentBuilder:)`.
     pub fn item_extent_builder(mut self, item_extent_builder: ItemExtentBuilder) -> ListView {
         debug_assert!(
-            self.item_extent.is_none(),
-            "You can only pass one of itemExtent and itemExtentBuilder."
+            self.item_extent.is_none() && self.prototype_item.is_none(),
+            "You can only pass one of itemExtent, prototypeItem and itemExtentBuilder."
         );
         self.item_extent_builder = Some(item_extent_builder);
+        self
+    }
+
+    /// Dart `ListView(prototypeItem:)`.
+    pub fn prototype_item<K>(mut self, prototype_item: impl IntoWidget<K>) -> ListView {
+        debug_assert!(
+            self.item_extent.is_none() && self.item_extent_builder.is_none(),
+            "You can only pass one of itemExtent, prototypeItem and itemExtentBuilder."
+        );
+        self.prototype_item = Some(prototype_item.into_widget());
         self
     }
 
@@ -1124,6 +1161,10 @@ impl BoxScrollView for ListView {
                 item_extent_builder,
             )
             .into_widget();
+        }
+        if let Some(prototype_item) = self.prototype_item.clone() {
+            return SliverPrototypeExtentList::new(self.children_delegate.clone(), prototype_item)
+                .into_widget();
         }
         SliverList::new(self.children_delegate.clone()).into_widget()
     }
@@ -1304,6 +1345,7 @@ impl Clone for ListView {
             box_scroll_view: self.box_scroll_view.clone(),
             item_extent: self.item_extent,
             item_extent_builder: self.item_extent_builder.clone(),
+            prototype_item: self.prototype_item.clone(),
             children_delegate: self.children_delegate.clone(),
             list_arguments: self.list_arguments.clone(),
         }
@@ -1699,10 +1741,11 @@ mod tests {
 
     use super::*;
     use crate::test_harness::{Harness, VIEW_HEIGHT};
-    use crate::testing::{WidgetTester, test_widgets};
+    use crate::testing::{WidgetTester, find, test_widgets};
     use crate::widgets::basic::{Directionality, SizedBox};
     use crate::widgets::media_query::MediaQueryData;
     use crate::widgets::scroll_controller::{ScrollController, ScrollControllerLeaf};
+    use crate::widgets::text::Text;
 
     const ITEM_EXTENT: f64 = 50.0;
     const ITEM_COUNT: usize = 40;
@@ -1859,6 +1902,77 @@ mod tests {
             built.iter().all(|index| *index < built.len() as i32),
             "the builder is called for the leading indices only: {built:?}"
         );
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "You can only pass one of itemExtent, prototypeItem and itemExtentBuilder."
+    )]
+    fn a_list_view_asserts_on_both_non_null_item_extent_and_prototype_item() {
+        ListView::new()
+            .item_extent(100.0)
+            .prototype_item(SizedBox::new());
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "You can only pass one of itemExtent, prototypeItem and itemExtentBuilder."
+    )]
+    fn a_list_view_builder_asserts_on_both_non_null_item_extent_and_prototype_item() {
+        ListView::builder(|_app, _context, _index| Some(SizedBox::new().into_widget()))
+            .build()
+            .item_extent(100.0)
+            .prototype_item(SizedBox::new());
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "You can only pass one of itemExtent, prototypeItem and itemExtentBuilder."
+    )]
+    fn a_list_view_custom_asserts_on_both_non_null_item_extent_and_prototype_item() {
+        let delegate = SliverChildBuilderDelegate::from_builder(Rc::new(
+            |_app: &mut App, _context, _index: i32| Some(SizedBox::new().into_widget()),
+        ))
+        .into_delegate();
+        ListView::custom(delegate)
+            .item_extent(100.0)
+            .prototype_item(SizedBox::new());
+    }
+
+    /// `prototypeItem` and `itemExtentBuilder` exclude each other too, as Dart's assert says.
+    #[test]
+    #[should_panic(
+        expected = "You can only pass one of itemExtent, prototypeItem and itemExtentBuilder."
+    )]
+    fn a_list_view_asserts_on_both_non_null_prototype_item_and_item_extent_builder() {
+        ListView::new()
+            .prototype_item(SizedBox::new())
+            .item_extent_builder(Rc::new(|_index, _dimensions| Some(30.0)));
+    }
+
+    #[test]
+    fn if_prototype_item_is_non_null_children_have_same_extent_in_the_scroll_direction() {
+        test_widgets(|tester| {
+            let numbers = [0, 1, 2];
+            let list = ListView::builder(move |_app, _context, index| {
+                let number = numbers[index as usize];
+                Some(
+                    SizedBox::new()
+                        // children with different heights
+                        .height(20.0 + f64::from(number) * 10.0)
+                        .child(Text::new(number.to_string()))
+                        .into_widget(),
+                )
+            })
+            .item_count(numbers.len() as i32)
+            .build()
+            .prototype_item(SizedBox::new().height(30.0).child(Text::new("3")));
+            tester.pump_widget(wrap_in_tester_view(list));
+
+            assert_eq!(tester.get_size(find::text("0")).height(), 30.0);
+            assert_eq!(tester.get_size(find::text("1")).height(), 30.0);
+            assert_eq!(tester.get_size(find::text("2")).height(), 30.0);
+        });
     }
 
     #[test]

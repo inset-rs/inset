@@ -1,6 +1,7 @@
 //! One module per gallery entry, plus the index.
 
 pub mod app_bars;
+pub mod autocomplete;
 pub mod buttons;
 pub mod cards;
 pub mod chips;
@@ -12,6 +13,7 @@ pub mod menus;
 pub mod messages;
 pub mod pickers;
 pub mod progress;
+pub mod reorderable_list_view;
 pub mod segments;
 pub mod selection_controls;
 pub mod sliders;

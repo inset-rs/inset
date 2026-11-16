@@ -755,3 +755,122 @@ fn the_time_picker_opens_and_answers_with_ok() {
         assert_ne!(before, after, "the page's caption took the picked time");
     });
 }
+
+/// Types `text` into the `index`th text field on the page, as the platform's keyboard would.
+fn enter_text_in_field(fixture: &mut Fixture, index: usize, text: &str) {
+    use waft_services::TextInputClient;
+
+    let element = fixture
+        .tester
+        .element(find::by_type::<waft_widgets::EditableText>().at(index));
+    let state = element
+        .state_handle::<waft_widgets::EditableTextState>(&fixture.tester.cell.borrow())
+        .expect("an EditableText state");
+    state.request_keyboard(&mut fixture.tester.cell.borrow_mut());
+    fixture.settle();
+    let length = text.encode_utf16().count() as i32;
+    let value = waft_services::TextEditingValue::new().text(text).selection(
+        waft_embedder::TextSelection::collapsed(length, waft_embedder::TextAffinity::Downstream),
+    );
+    TextInputClient::update_editing_value(state, &mut fixture.tester.cell.borrow_mut(), value);
+    fixture.tester.cell.checkpoint();
+    fixture.settle();
+}
+
+/// The first autocomplete lists the fruits that contain the text, and a tap on one selects it.
+#[test]
+fn an_autocomplete_filters_its_options_and_selects_one() {
+    on_each_platform(|fixture| {
+        fixture.open_from_index(Entry::Autocomplete);
+        expect(
+            fixture.tester,
+            &find::text("Selected: \u{2014}"),
+            finds_widgets(),
+        );
+
+        fixture.tap(find::by_type::<waft_material::TextFormField>().first());
+        fixture.expect_shown("Apple");
+
+        enter_text_in_field(fixture, 0, "cher");
+        fixture.expect_gone("Apple");
+        fixture.tap_text("Cherry");
+        fixture.expect_shown("Selected: Cherry");
+
+        fixture.go_back();
+        assert!(!fixture.can_pop());
+    });
+}
+
+/// The second autocomplete's options are people, listed and selected by their names.
+#[test]
+fn an_autocomplete_of_a_custom_type_shows_the_display_string() {
+    on_each_platform(|fixture| {
+        fixture.open_from_index(Entry::Autocomplete);
+
+        fixture.tap(find::by_type::<waft_material::TextFormField>().at(1));
+        enter_text_in_field(fixture, 1, "bob");
+        fixture.tap_text("Bob");
+        fixture.expect_shown("Selected: Bob");
+
+        fixture.go_back();
+        assert!(!fixture.can_pop());
+    });
+}
+
+/// Presses at `from`, holds for `hold`, drags by `by` and lets go, a frame after each step as a
+/// finger's would take, and lets the app settle: what a reorder needs to see the item move.
+fn press_hold_drag_release(fixture: &mut Fixture, from: Offset, hold: Duration, by: Offset) {
+    let mut pointer = waft_widgets::testing::TestPointer::touch(fixture.tester.next_pointer());
+    fixture.tester.down(&mut pointer, from);
+    fixture.tester.pump_by(hold);
+    fixture.tester.move_by(&mut pointer, by, true);
+    fixture.tester.pump_by(waft_gestures::K_PRESS_TIMEOUT);
+    fixture.tester.up(&pointer);
+    fixture.settle();
+}
+
+/// A tile is dragged by the handle the page placed in it, past the last tile: a reorder puts the item last only once its leading edge is below the last tile.
+#[test]
+fn a_tile_is_reordered_by_its_drag_handle() {
+    on_each_platform(|fixture| {
+        fixture.open_from_index(Entry::ReorderableListView);
+        fixture.expect_shown("Order: Red, Green, Blue");
+
+        let handle = find::descendant(
+            find::widget_with_text::<ListTile>("Red"),
+            find::by_icon(&waft_material::Icons::drag_handle()),
+        );
+        let from = fixture.tester.get_center(handle);
+        press_hold_drag_release(
+            fixture,
+            from,
+            waft_gestures::K_PRESS_TIMEOUT,
+            Offset::new(0.0, 200.0),
+        );
+        fixture.expect_shown("Order: Green, Blue, Red");
+
+        fixture.go_back();
+        assert!(!fixture.can_pop());
+    });
+}
+
+/// A tile is pressed and held, and then dragged past the last tile.
+#[test]
+fn a_tile_is_reordered_by_a_long_press() {
+    on_each_platform(|fixture| {
+        fixture.open_from_index(Entry::ReorderableListView);
+        fixture.expect_shown("Order: Cat, Dog, Fox");
+
+        let from = fixture.center_of_text("Cat");
+        press_hold_drag_release(
+            fixture,
+            from,
+            waft_gestures::K_LONG_PRESS_TIMEOUT + waft_gestures::K_PRESS_TIMEOUT,
+            Offset::new(0.0, 200.0),
+        );
+        fixture.expect_shown("Order: Dog, Fox, Cat");
+
+        fixture.go_back();
+        assert!(!fixture.can_pop());
+    });
+}

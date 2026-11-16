@@ -584,7 +584,21 @@ Ported against: 34b89b2086d4
   Reason: language — a fluent widget has no deprecated, ignored setter to keep.
   Affect: code ported from Dart drops the argument.
 
+## autocomplete.rs → autocomplete.dart
+- Change: `Autocomplete<T>` needs `T: Clone + PartialEq + Hash + Debug + Display`, and the default options list keys each option with a global key that compares and hashes as the option's value.
+  Reason: language — Dart's `GlobalObjectKey(option)` compares the option by identity, which a Rust value does not have, and every Dart object has a `toString` that `Display` stands for.
+  Affect: an option type must implement `Hash`, `Debug` and `Display`, and two equal options in one list share a key, so the framework reports a duplicate global key where Dart's distinct objects with equal values would not.
+
+## reorderable_list.rs → reorderable_list.dart
+- Change: `ReorderableListView::new` takes the children by value, and its `item_builder` hands out clones of them.
+  Reason: language — Dart's `itemBuilder` closes over the caller's `List`, which the caller can go on mutating and the list view then reads; a moved `Vec` has no second owner.
+  Affect: a caller that reorders its own children and rebuilds the same widget sees the old order until it builds a new `ReorderableListView` from the new list, as a state's `build` does.
+
 ## Deferred
+- reorderable_list.rs: reorderable_list_test 'Vertical drag in progress golden image' and 'Horizontal drag in progress golden image'. Trigger: golden comparison in waft-test.
+- reorderable_list.rs: reorderable_list_test "Doesn't hide accessibility when a child declares its own semantics" (reads the semantics tree of a `SwitchListTile` item). Trigger: the semantics tree.
+- reorderable_list.rs: reorderable_list_test 'ReorderableListView auto scrolls speed is configurable' (offsets in a ratio of 3 where Dart's is 4, as the widgets' `SliverReorderableList` case). Trigger: a task resumed within the frame in which what it awaits completes (waft-widgets' scrollable_helpers.rs's auto-scroll entry).
+- autocomplete.rs: the `Semantics` of the default options (`button`, `selected`) are ported, and autocomplete_test's 'autocomplete options have button semantics' is not. Trigger: the semantics tree.
 - input_decorator.rs: the 13 cases Dart runs on a `TextField`, the 16 Material 2 cases and the `customLabel` twins listed in the step 11 review. Trigger: none, portable now.
 - text_form_field.rs: the ~38 text_form_field_test cases not ported. Trigger: none, portable now.
 - switch.rs: switch_test 'Material2/3 - Switch does not get distorted upon changing constraints with parent' (golden-only). Trigger: golden comparison in waft-test.
