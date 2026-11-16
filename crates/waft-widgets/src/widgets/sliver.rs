@@ -1302,65 +1302,60 @@ where
     let element = context
         .downcast::<SliverMultiBoxAdaptorElement<W>>(app)
         .expect("a SliverMultiBoxAdaptorWidget creates its render object from its own element");
-    Rc::new(ChildManager::<W>(element))
+    element.as_child_manager()
 }
 
-/// An element that lazily builds children for a [`SliverMultiBoxAdaptorWidget`].
-///
-/// Implements `RenderSliverBoxChildManager`, which lets this element manage the children of
-/// implementors of `RenderSliverMultiBoxAdaptor`. The render object holds the manager as an
-/// `Rc<dyn RenderSliverBoxChildManager>`, which the widget hands it in `create_render_object`
-/// after casting the [`BuildContext`] back to this element.
-pub struct SliverMultiBoxAdaptorElement<W: SliverMultiBoxAdaptorWidget>
-where
-    W::RenderObject: RenderSliverMultiBoxAdaptor,
-{
-    element: ElementData,
-    render_object_element: RenderObjectElementData,
+/// The fields of Dart's `SliverMultiBoxAdaptorElement`.
+pub struct SliverMultiBoxAdaptorElementData {
     replace_moved_children: bool,
     child_elements: BTreeMap<i32, Option<AnyElement>>,
     current_before_child: Option<AnyRenderBox>,
     currently_updating_child_index: Option<i32>,
     did_underflow: bool,
-    marker: std::marker::PhantomData<fn() -> W>,
 }
 
-impl<W: SliverMultiBoxAdaptorWidget> SliverMultiBoxAdaptorElement<W>
-where
-    W::RenderObject: RenderSliverMultiBoxAdaptor,
-{
-    /// Creates an element that lazily builds children for the given widget.
-    ///
-    /// If `replace_moved_children` is true, a new child is proactively inflated for the index
-    /// that was previously occupied by a child that moved to a new index. The layout offset of
-    /// the moved child is copied over to the new child. Render objects that depend on the layout
-    /// offset of existing children during `RenderObject::perform_layout` should set this to true
-    /// (example: `RenderSliverList`). For render objects that figure out the layout offset of
-    /// their children without looking at the layout offset of existing children this should be
-    /// set to false (example: `RenderSliverFixedExtentList`) to avoid inflating unnecessary
-    /// children.
-    pub fn new(
-        app: &mut App,
-        widget: WidgetRef,
-        replace_moved_children: bool,
-    ) -> Handle<SliverMultiBoxAdaptorElement<W>> {
-        debug_assert!(downcast_widget::<W>(&*widget).is_some());
-        app.create(SliverMultiBoxAdaptorElement::<W> {
-            element: ElementData::new(widget),
-            render_object_element: RenderObjectElementData::default(),
+impl SliverMultiBoxAdaptorElementData {
+    /// The fields of an element that has built no children yet; `replace_moved_children` is
+    /// [`SliverMultiBoxAdaptorElement::new`]'s.
+    pub fn new(replace_moved_children: bool) -> SliverMultiBoxAdaptorElementData {
+        SliverMultiBoxAdaptorElementData {
             replace_moved_children,
             child_elements: BTreeMap::new(),
             current_before_child: None,
             currently_updating_child_index: None,
             did_underflow: false,
-            marker: std::marker::PhantomData,
-        })
-        .into_tree_node(app)
+        }
     }
+}
 
-    /// The render object this element manages the children of.
-    pub fn render_object(self: Handle<Self>, app: &App) -> RenderHandle<W::RenderObject> {
-        self.typed_render_object(app)
+/// The bodies of Dart's `SliverMultiBoxAdaptorElement`: an element that lazily builds children
+/// for a [`SliverMultiBoxAdaptorWidget`].
+///
+/// Implements `RenderSliverBoxChildManager`, which lets this element manage the children of
+/// implementors of `RenderSliverMultiBoxAdaptor`. The render object holds the manager as an
+/// `Rc<dyn RenderSliverBoxChildManager>` ([`as_child_manager`](Self::as_child_manager)), which
+/// the widget hands it in `create_render_object` after casting the [`BuildContext`] back to this
+/// element.
+///
+/// Flutter's class is instantiable and also subclassed (`SliverPrototypeExtentList`'s element),
+/// so the bodies live on this trait and [`SliverMultiBoxAdaptorElement`] is the plain leaf that
+/// implements it; a subclass calls the body it overrides by name where Dart writes `super`.
+pub trait SliverMultiBoxAdaptorElementBase:
+    RenderObjectElement + RenderObjectElementWidget
+where
+    Self::Widget: SliverMultiBoxAdaptorWidget,
+    <Self::Widget as RenderObjectWidget>::RenderObject: RenderSliverMultiBoxAdaptor,
+{
+    /// The lazily built children, held under the field `adaptor`.
+    fn adaptor_data(self: Handle<Self>, app: &App) -> &SliverMultiBoxAdaptorElementData;
+
+    /// See [`adaptor_data`](Self::adaptor_data).
+    fn adaptor_data_mut(self: Handle<Self>, app: &mut App)
+    -> &mut SliverMultiBoxAdaptorElementData;
+
+    /// This element as the `RenderSliverBoxChildManager` its render object holds.
+    fn as_child_manager(self: Handle<Self>) -> Rc<dyn RenderSliverBoxChildManager> {
+        Rc::new(ChildManager(self))
     }
 
     /// Flutter's `_build`.
@@ -1402,12 +1397,14 @@ where
             .filter(|object| object.parent_data_is::<SliverMultiBoxAdaptorParentData>(app))
     }
 
+    /// The layout offset in the child's `SliverMultiBoxAdaptorParentData`.
     fn layout_offset(app: &App, object: AnyRenderObject) -> Option<f64> {
         object
             .parent_data_of::<SliverMultiBoxAdaptorParentData>(app)
             .layout_offset()
     }
 
+    /// Sets the layout offset in the child's `SliverMultiBoxAdaptorParentData`.
     fn set_layout_offset(app: &mut App, object: AnyRenderObject, value: Option<f64>) {
         object
             .parent_data_of_mut::<SliverMultiBoxAdaptorParentData>(app)
@@ -1423,13 +1420,20 @@ where
         index_to_layout_offset: &HashMap<i32, f64>,
         children_updated: &mut bool,
     ) {
-        app.get_mut(self).currently_updating_child_index = Some(index);
-        let existing = app.get(self).child_elements.get(&index).copied().flatten();
+        self.adaptor_data_mut(app).currently_updating_child_index = Some(index);
+        let existing = self
+            .adaptor_data(app)
+            .child_elements
+            .get(&index)
+            .copied()
+            .flatten();
         let planned = new_children.get(&index).copied().flatten();
         if existing.is_some() && existing != planned {
             // This index has an old child that isn't used anywhere and should be deactivated.
             let deactivated = self.update_child(app, existing, None, Some(Slot::Index(index)));
-            app.get_mut(self).child_elements.insert(index, deactivated);
+            self.adaptor_data_mut(app)
+                .child_elements
+                .insert(index, deactivated);
             *children_updated = true;
         }
         let built = self.build(app, index);
@@ -1437,9 +1441,14 @@ where
         match new_child {
             Some(new_child) => {
                 *children_updated = *children_updated
-                    || app.get(self).child_elements.get(&index).copied().flatten()
+                    || self
+                        .adaptor_data(app)
+                        .child_elements
+                        .get(&index)
+                        .copied()
+                        .flatten()
                         != Some(new_child);
-                app.get_mut(self)
+                self.adaptor_data_mut(app)
                     .child_elements
                     .insert(index, Some(new_child));
                 let object = new_child
@@ -1452,13 +1461,13 @@ where
                 }
                 let parent_data = object.parent_data_of::<SliverMultiBoxAdaptorParentData>(app);
                 if !parent_data.kept_alive() {
-                    app.get_mut(self).current_before_child =
+                    self.adaptor_data_mut(app).current_before_child =
                         Some(object.as_box().expect("a sliver child is a box"));
                 }
             }
             None => {
                 *children_updated = true;
-                app.get_mut(self).child_elements.remove(&index);
+                self.adaptor_data_mut(app).child_elements.remove(&index);
             }
         }
     }
@@ -1493,28 +1502,22 @@ where
             .expect("a mounted element has an owner");
         owner.build_scope(app, self.as_element(), Some(Box::new(callback)));
     }
-}
 
-// ---- the `RenderSliverBoxChildManager` members, which Dart implements on the element ----
+    // ---- the `RenderSliverBoxChildManager` members, which Dart implements on the element ----
 
-impl<W: SliverMultiBoxAdaptorWidget> SliverMultiBoxAdaptorElement<W>
-where
-    W::RenderObject: RenderSliverMultiBoxAdaptor,
-{
     /// `RenderSliverBoxChildManager::create_child`.
-    pub fn create_child(
-        self: Handle<Self>,
-        app: &mut App,
-        index: i32,
-        after: Option<AnyRenderBox>,
-    ) {
-        debug_assert!(app.get(self).currently_updating_child_index.is_none());
+    fn create_child(self: Handle<Self>, app: &mut App, index: i32, after: Option<AnyRenderBox>) {
+        debug_assert!(
+            self.adaptor_data(app)
+                .currently_updating_child_index
+                .is_none()
+        );
         self.in_build_scope(app, move |app| {
             let insert_first = after.is_none();
             debug_assert!(
                 insert_first
-                    || app
-                        .get(self)
+                    || self
+                        .adaptor_data(app)
                         .child_elements
                         .get(&(index - 1))
                         .copied()
@@ -1524,49 +1527,63 @@ where
             let before = if insert_first {
                 None
             } else {
-                app.get(self).child_elements[&(index - 1)]
+                self.adaptor_data(app).child_elements[&(index - 1)]
                     .expect("asserted above")
                     .render_object(app)
                     .map(|object| object.as_box().expect("a sliver child is a box"))
             };
-            app.get_mut(self).current_before_child = before;
-            app.get_mut(self).currently_updating_child_index = Some(index);
+            self.adaptor_data_mut(app).current_before_child = before;
+            self.adaptor_data_mut(app).currently_updating_child_index = Some(index);
             let built = self.build(app, index);
-            let existing = app.get(self).child_elements.get(&index).copied().flatten();
+            let existing = self
+                .adaptor_data(app)
+                .child_elements
+                .get(&index)
+                .copied()
+                .flatten();
             let new_child = self.update_child(app, existing, built, Some(Slot::Index(index)));
-            app.get_mut(self).currently_updating_child_index = None;
+            self.adaptor_data_mut(app).currently_updating_child_index = None;
             match new_child {
                 Some(new_child) => {
-                    app.get_mut(self)
+                    self.adaptor_data_mut(app)
                         .child_elements
                         .insert(index, Some(new_child));
                 }
                 None => {
-                    app.get_mut(self).child_elements.remove(&index);
+                    self.adaptor_data_mut(app).child_elements.remove(&index);
                 }
             }
         });
     }
 
     /// `RenderSliverBoxChildManager::remove_child`.
-    pub fn remove_child(self: Handle<Self>, app: &mut App, child: AnyRenderBox) {
-        let index = self.render_object(app).index_of(app, child);
-        debug_assert!(app.get(self).currently_updating_child_index.is_none());
+    fn remove_child(self: Handle<Self>, app: &mut App, child: AnyRenderBox) {
+        let index = self.typed_render_object(app).index_of(app, child);
+        debug_assert!(
+            self.adaptor_data(app)
+                .currently_updating_child_index
+                .is_none()
+        );
         debug_assert!(index >= 0);
         self.in_build_scope(app, move |app| {
-            debug_assert!(app.get(self).child_elements.contains_key(&index));
-            app.get_mut(self).currently_updating_child_index = Some(index);
-            let existing = app.get(self).child_elements.get(&index).copied().flatten();
+            debug_assert!(self.adaptor_data(app).child_elements.contains_key(&index));
+            self.adaptor_data_mut(app).currently_updating_child_index = Some(index);
+            let existing = self
+                .adaptor_data(app)
+                .child_elements
+                .get(&index)
+                .copied()
+                .flatten();
             let result = self.update_child(app, existing, None, Some(Slot::Index(index)));
             debug_assert!(result.is_none());
-            app.get_mut(self).currently_updating_child_index = None;
-            app.get_mut(self).child_elements.remove(&index);
-            debug_assert!(!app.get(self).child_elements.contains_key(&index));
+            self.adaptor_data_mut(app).currently_updating_child_index = None;
+            self.adaptor_data_mut(app).child_elements.remove(&index);
+            debug_assert!(!self.adaptor_data(app).child_elements.contains_key(&index));
         });
     }
 
     /// `RenderSliverBoxChildManager::estimate_max_scroll_offset`.
-    pub fn estimate_max_scroll_offset(
+    fn estimate_max_scroll_offset(
         self: Handle<Self>,
         app: &App,
         constraints: SliverConstraints,
@@ -1604,14 +1621,14 @@ where
     }
 
     /// `RenderSliverBoxChildManager::estimated_child_count`.
-    pub fn estimated_child_count(self: Handle<Self>, app: &App) -> Option<i32> {
+    fn estimated_child_count(self: Handle<Self>, app: &App) -> Option<i32> {
         Self::widget_of(self.as_element().widget(app))
             .delegate()
             .estimated_child_count()
     }
 
     /// `RenderSliverBoxChildManager::child_count`.
-    pub fn child_count(self: Handle<Self>, app: &mut App) -> i32 {
+    fn child_count(self: Handle<Self>, app: &mut App) -> i32 {
         if let Some(result) = self.estimated_child_count(app) {
             return result;
         }
@@ -1650,22 +1667,22 @@ where
     }
 
     /// `RenderSliverBoxChildManager::did_start_layout`.
-    pub fn did_start_layout(self: Handle<Self>, app: &App) {
+    fn did_start_layout(self: Handle<Self>, app: &App) {
         debug_assert!(self.debug_assert_child_list_locked(app));
     }
 
     /// `RenderSliverBoxChildManager::did_finish_layout`.
-    pub fn did_finish_layout(self: Handle<Self>, app: &App) {
+    fn did_finish_layout(self: Handle<Self>, app: &App) {
         debug_assert!(self.debug_assert_child_list_locked(app));
-        let first_index = app
-            .get(self)
+        let first_index = self
+            .adaptor_data(app)
             .child_elements
             .keys()
             .next()
             .copied()
             .unwrap_or(0);
-        let last_index = app
-            .get(self)
+        let last_index = self
+            .adaptor_data(app)
             .child_elements
             .keys()
             .next_back()
@@ -1677,15 +1694,23 @@ where
     }
 
     /// `RenderSliverBoxChildManager::debug_assert_child_list_locked`.
-    pub fn debug_assert_child_list_locked(self: Handle<Self>, app: &App) -> bool {
-        debug_assert!(app.get(self).currently_updating_child_index.is_none());
+    fn debug_assert_child_list_locked(self: Handle<Self>, app: &App) -> bool {
+        debug_assert!(
+            self.adaptor_data(app)
+                .currently_updating_child_index
+                .is_none()
+        );
         true
     }
 
     /// `RenderSliverBoxChildManager::did_adopt_child`.
-    pub fn did_adopt_child(self: Handle<Self>, app: &mut App, child: AnyRenderBox) {
-        debug_assert!(app.get(self).currently_updating_child_index.is_some());
-        let index = app.get(self).currently_updating_child_index;
+    fn did_adopt_child(self: Handle<Self>, app: &mut App, child: AnyRenderBox) {
+        debug_assert!(
+            self.adaptor_data(app)
+                .currently_updating_child_index
+                .is_some()
+        );
+        let index = self.adaptor_data(app).currently_updating_child_index;
         child
             .as_object()
             .parent_data_of_mut::<SliverMultiBoxAdaptorParentData>(app)
@@ -1693,8 +1718,261 @@ where
     }
 
     /// `RenderSliverBoxChildManager::set_did_underflow`.
-    pub fn set_did_underflow(self: Handle<Self>, app: &mut App, value: bool) {
-        app.get_mut(self).did_underflow = value;
+    fn set_did_underflow(self: Handle<Self>, app: &mut App, value: bool) {
+        self.adaptor_data_mut(app).did_underflow = value;
+    }
+
+    // ---- the `Element` overrides ----
+
+    /// `SliverMultiBoxAdaptorElement.update`.
+    fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
+        let old_widget = self.as_element().widget(app).clone();
+        RenderObjectElement::update(self, app, new_widget.clone());
+        let new_delegate = Rc::clone(Self::widget_of(&new_widget).delegate());
+        let old_delegate = Rc::clone(Self::widget_of(&old_widget).delegate());
+        if !same_delegate(&new_delegate, &old_delegate)
+            && (new_delegate.delegate_type() != old_delegate.delegate_type()
+                || new_delegate.should_rebuild(&*old_delegate))
+        {
+            Element::perform_rebuild(self, app);
+        }
+    }
+
+    /// `SliverMultiBoxAdaptorElement.performRebuild`.
+    fn perform_rebuild(self: Handle<Self>, app: &mut App) {
+        RenderObjectElement::perform_rebuild(self, app);
+        self.adaptor_data_mut(app).current_before_child = None;
+        let mut children_updated = false;
+        debug_assert!(
+            self.adaptor_data(app)
+                .currently_updating_child_index
+                .is_none()
+        );
+
+        let mut new_children: BTreeMap<i32, Option<AnyElement>> = BTreeMap::new();
+        let mut index_to_layout_offset: HashMap<i32, f64> = HashMap::new();
+        for index in self
+            .adaptor_data(app)
+            .child_elements
+            .keys()
+            .copied()
+            .collect::<Vec<_>>()
+        {
+            let child = self.adaptor_data(app).child_elements[&index].expect("a live child");
+            let key = child.widget(app).key().cloned();
+            let new_index = key.and_then(|key| {
+                Self::widget_of(self.as_element().widget(app))
+                    .delegate()
+                    .find_index_by_key(&key)
+            });
+            let child_parent_data = Self::adaptor_parent_data(app, Some(child));
+
+            if let Some(object) = child_parent_data
+                && let Some(layout_offset) = Self::layout_offset(app, object)
+            {
+                index_to_layout_offset.insert(index, layout_offset);
+            }
+
+            match new_index {
+                Some(new_index) if new_index != index => {
+                    // The layout offset of the child being moved is no longer accurate.
+                    if let Some(object) = child_parent_data {
+                        Self::set_layout_offset(app, object, None);
+                    }
+                    new_children.insert(new_index, Some(child));
+                    if self.adaptor_data(app).replace_moved_children {
+                        // We need to make sure the original index gets processed.
+                        new_children.entry(index).or_insert(None);
+                    }
+                    // We do not want the remapped child to get deactivated during
+                    // `process_element`.
+                    self.adaptor_data_mut(app).child_elements.remove(&index);
+                }
+                _ => {
+                    new_children.entry(index).or_insert(Some(child));
+                }
+            }
+        }
+
+        // Moving children will temporarily violate the integrity.
+        self.typed_render_object(app)
+            .set_debug_child_integrity_enabled(app, false);
+        for index in new_children.keys().copied().collect::<Vec<_>>() {
+            self.process_element(
+                app,
+                index,
+                &new_children,
+                &index_to_layout_offset,
+                &mut children_updated,
+            );
+        }
+        // An element rebuild only updates existing children. The underflow check is here to make
+        // sure we look ahead one more child if we were at the end of the child list before the
+        // update. By doing so, we can update the max scroll offset during the layout phase.
+        // Otherwise, the layout phase may be skipped, and the scroll view may be stuck at the
+        // previous max scroll offset.
+        //
+        // This logic is not needed if any existing children has been updated, because we will not
+        // skip the layout phase if that happens.
+        if !children_updated && self.adaptor_data(app).did_underflow {
+            let last_key = self
+                .adaptor_data(app)
+                .child_elements
+                .keys()
+                .next_back()
+                .copied()
+                .unwrap_or(-1);
+            let right_boundary = last_key + 1;
+            let existing = self
+                .adaptor_data(app)
+                .child_elements
+                .get(&right_boundary)
+                .copied()
+                .flatten();
+            new_children.insert(right_boundary, existing);
+            self.process_element(
+                app,
+                right_boundary,
+                &new_children,
+                &index_to_layout_offset,
+                &mut children_updated,
+            );
+        }
+        self.adaptor_data_mut(app).currently_updating_child_index = None;
+        self.typed_render_object(app)
+            .set_debug_child_integrity_enabled(app, true);
+    }
+
+    /// `SliverMultiBoxAdaptorElement.forgetChild`.
+    fn forget_child(self: Handle<Self>, app: &mut App, child: AnyElement) {
+        let slot = child.slot(app).expect("a lazily built child has an index");
+        let Slot::Index(index) = slot else {
+            unreachable!("a lazily built child has an index slot");
+        };
+        debug_assert!(self.adaptor_data(app).child_elements.contains_key(&index));
+        self.adaptor_data_mut(app).child_elements.remove(&index);
+    }
+
+    /// `SliverMultiBoxAdaptorElement.visitChildren`.
+    fn visit_children(self: Handle<Self>, app: &App, visitor: &mut dyn FnMut(AnyElement)) {
+        // The copy is so that the underlying map can be modified by the visitor.
+        let children: Vec<AnyElement> = self
+            .adaptor_data(app)
+            .child_elements
+            .values()
+            .map(|child| child.expect("no child slot is empty outside a rebuild"))
+            .collect();
+        for child in children {
+            visitor(child);
+        }
+    }
+
+    /// Dart's `SliverMultiBoxAdaptorElement.debugVisitOnstageChildren`: the children whose
+    /// layout offset falls in the sliver's painted window, which a kept-alive child's does not.
+    fn debug_visit_onstage_children(
+        self: Handle<Self>,
+        app: &App,
+        visitor: &mut dyn FnMut(AnyElement),
+    ) {
+        let Some(sliver) = self
+            .as_element()
+            .render_object(app)
+            .and_then(|render| render.as_sliver())
+        else {
+            return;
+        };
+        let constraints = sliver.constraints(app);
+        let children: Vec<AnyElement> = self
+            .adaptor_data(app)
+            .child_elements
+            .values()
+            .map(|child| child.expect("no child slot is empty outside a rebuild"))
+            .collect();
+        for child in children {
+            let Some(render) = child.render_object(app) else {
+                continue;
+            };
+            let paint_bounds = render.paint_bounds(app);
+            let item_extent = match constraints.axis() {
+                waft_painting::Axis::Horizontal => paint_bounds.width(),
+                waft_painting::Axis::Vertical => paint_bounds.height(),
+            };
+            let onstage = render
+                .parent_data(app)
+                .and_then(|data| data.part::<waft_rendering::SliverMultiBoxAdaptorParentData>())
+                .and_then(|data| data.layout_offset())
+                .is_some_and(|layout_offset| {
+                    layout_offset < constraints.scroll_offset + constraints.remaining_paint_extent
+                        && layout_offset + item_extent > constraints.scroll_offset
+                });
+            if onstage {
+                visitor(child);
+            }
+        }
+    }
+
+    /// `SliverMultiBoxAdaptorElement.insertRenderObjectChild`.
+    fn insert_render_object_child(
+        self: Handle<Self>,
+        app: &mut App,
+        child: AnyRenderObject,
+        slot: Option<Slot>,
+    ) {
+        debug_assert!(
+            slot == self
+                .adaptor_data(app)
+                .currently_updating_child_index
+                .map(Slot::Index)
+        );
+        let render_object = self.typed_render_object(app);
+        let before = self.adaptor_data(app).current_before_child;
+        let child = child.as_box().expect("a sliver child is a box");
+        RenderSliverMultiBoxAdaptor::insert(render_object, app, child, before);
+        debug_assert!(
+            slot == child
+                .as_object()
+                .parent_data_of::<SliverMultiBoxAdaptorParentData>(app)
+                .index
+                .map(Slot::Index)
+        );
+    }
+
+    /// `SliverMultiBoxAdaptorElement.moveRenderObjectChild`.
+    fn move_render_object_child(
+        self: Handle<Self>,
+        app: &mut App,
+        child: AnyRenderObject,
+        _old_slot: Option<Slot>,
+        new_slot: Option<Slot>,
+    ) {
+        debug_assert!(
+            new_slot
+                == self
+                    .adaptor_data(app)
+                    .currently_updating_child_index
+                    .map(Slot::Index)
+        );
+        let render_object = self.typed_render_object(app);
+        let before = self.adaptor_data(app).current_before_child;
+        let child = child.as_box().expect("a sliver child is a box");
+        RenderSliverMultiBoxAdaptor::move_child(render_object, app, child, before);
+    }
+
+    /// `SliverMultiBoxAdaptorElement.removeRenderObjectChild`.
+    fn remove_render_object_child(
+        self: Handle<Self>,
+        app: &mut App,
+        child: AnyRenderObject,
+        _slot: Option<Slot>,
+    ) {
+        debug_assert!(
+            self.adaptor_data(app)
+                .currently_updating_child_index
+                .is_some()
+        );
+        let render_object = self.typed_render_object(app);
+        let child = child.as_box().expect("a sliver child is a box");
+        RenderSliverMultiBoxAdaptor::remove(render_object, app, child);
     }
 }
 
@@ -1702,13 +1980,15 @@ where
 ///
 /// A local wrapper, because `impl RenderSliverBoxChildManager for Handle<..>` names two foreign
 /// types.
-struct ChildManager<W: SliverMultiBoxAdaptorWidget>(Handle<SliverMultiBoxAdaptorElement<W>>)
+struct ChildManager<E: SliverMultiBoxAdaptorElementBase>(Handle<E>)
 where
-    W::RenderObject: RenderSliverMultiBoxAdaptor;
+    E::Widget: SliverMultiBoxAdaptorWidget,
+    <E::Widget as RenderObjectWidget>::RenderObject: RenderSliverMultiBoxAdaptor;
 
-impl<W: SliverMultiBoxAdaptorWidget> RenderSliverBoxChildManager for ChildManager<W>
+impl<E: SliverMultiBoxAdaptorElementBase> RenderSliverBoxChildManager for ChildManager<E>
 where
-    W::RenderObject: RenderSliverMultiBoxAdaptor,
+    E::Widget: SliverMultiBoxAdaptorWidget,
+    <E::Widget as RenderObjectWidget>::RenderObject: RenderSliverMultiBoxAdaptor,
 {
     fn create_child(&self, app: &mut App, index: i32, after: Option<AnyRenderBox>) {
         self.0.create_child(app, index, after);
@@ -1763,6 +2043,70 @@ where
 
     fn debug_assert_child_list_locked(&self, app: &App) -> bool {
         self.0.debug_assert_child_list_locked(app)
+    }
+}
+
+/// An element that lazily builds children for a [`SliverMultiBoxAdaptorWidget`]: the leaf that
+/// has no bodies of its own beyond [`SliverMultiBoxAdaptorElementBase`]'s.
+pub struct SliverMultiBoxAdaptorElement<W: SliverMultiBoxAdaptorWidget>
+where
+    W::RenderObject: RenderSliverMultiBoxAdaptor,
+{
+    element: ElementData,
+    render_object_element: RenderObjectElementData,
+    adaptor: SliverMultiBoxAdaptorElementData,
+    marker: std::marker::PhantomData<fn() -> W>,
+}
+
+impl<W: SliverMultiBoxAdaptorWidget> SliverMultiBoxAdaptorElement<W>
+where
+    W::RenderObject: RenderSliverMultiBoxAdaptor,
+{
+    /// Creates an element that lazily builds children for the given widget.
+    ///
+    /// If `replace_moved_children` is true, a new child is proactively inflated for the index
+    /// that was previously occupied by a child that moved to a new index. The layout offset of
+    /// the moved child is copied over to the new child. Render objects that depend on the layout
+    /// offset of existing children during `RenderObject::perform_layout` should set this to true
+    /// (example: `RenderSliverList`). For render objects that figure out the layout offset of
+    /// their children without looking at the layout offset of existing children this should be
+    /// set to false (example: `RenderSliverFixedExtentList`) to avoid inflating unnecessary
+    /// children.
+    pub fn new(
+        app: &mut App,
+        widget: WidgetRef,
+        replace_moved_children: bool,
+    ) -> Handle<SliverMultiBoxAdaptorElement<W>> {
+        debug_assert!(downcast_widget::<W>(&*widget).is_some());
+        app.create(SliverMultiBoxAdaptorElement::<W> {
+            element: ElementData::new(widget),
+            render_object_element: RenderObjectElementData::default(),
+            adaptor: SliverMultiBoxAdaptorElementData::new(replace_moved_children),
+            marker: std::marker::PhantomData,
+        })
+        .into_tree_node(app)
+    }
+
+    /// The render object this element manages the children of.
+    pub fn render_object(self: Handle<Self>, app: &App) -> RenderHandle<W::RenderObject> {
+        self.typed_render_object(app)
+    }
+}
+
+impl<W: SliverMultiBoxAdaptorWidget> SliverMultiBoxAdaptorElementBase
+    for SliverMultiBoxAdaptorElement<W>
+where
+    W::RenderObject: RenderSliverMultiBoxAdaptor,
+{
+    fn adaptor_data(self: Handle<Self>, app: &App) -> &SliverMultiBoxAdaptorElementData {
+        &app.get(self).adaptor
+    }
+
+    fn adaptor_data_mut(
+        self: Handle<Self>,
+        app: &mut App,
+    ) -> &mut SliverMultiBoxAdaptorElementData {
+        &mut app.get_mut(self).adaptor
     }
 }
 
@@ -1824,116 +2168,11 @@ where
     }
 
     fn update(self: Handle<Self>, app: &mut App, new_widget: WidgetRef) {
-        let old_widget = self.as_element().widget(app).clone();
-        RenderObjectElement::update(self, app, new_widget.clone());
-        let new_delegate = Rc::clone(Self::widget_of(&new_widget).delegate());
-        let old_delegate = Rc::clone(Self::widget_of(&old_widget).delegate());
-        if !same_delegate(&new_delegate, &old_delegate)
-            && (new_delegate.delegate_type() != old_delegate.delegate_type()
-                || new_delegate.should_rebuild(&*old_delegate))
-        {
-            Element::perform_rebuild(self, app);
-        }
+        SliverMultiBoxAdaptorElementBase::update(self, app, new_widget);
     }
 
     fn perform_rebuild(self: Handle<Self>, app: &mut App) {
-        RenderObjectElement::perform_rebuild(self, app);
-        app.get_mut(self).current_before_child = None;
-        let mut children_updated = false;
-        debug_assert!(app.get(self).currently_updating_child_index.is_none());
-
-        let mut new_children: BTreeMap<i32, Option<AnyElement>> = BTreeMap::new();
-        let mut index_to_layout_offset: HashMap<i32, f64> = HashMap::new();
-        for index in app
-            .get(self)
-            .child_elements
-            .keys()
-            .copied()
-            .collect::<Vec<_>>()
-        {
-            let child = app.get(self).child_elements[&index].expect("a live child");
-            let key = child.widget(app).key().cloned();
-            let new_index = key.and_then(|key| {
-                Self::widget_of(self.as_element().widget(app))
-                    .delegate()
-                    .find_index_by_key(&key)
-            });
-            let child_parent_data = Self::adaptor_parent_data(app, Some(child));
-
-            if let Some(object) = child_parent_data
-                && let Some(layout_offset) = Self::layout_offset(app, object)
-            {
-                index_to_layout_offset.insert(index, layout_offset);
-            }
-
-            match new_index {
-                Some(new_index) if new_index != index => {
-                    // The layout offset of the child being moved is no longer accurate.
-                    if let Some(object) = child_parent_data {
-                        Self::set_layout_offset(app, object, None);
-                    }
-                    new_children.insert(new_index, Some(child));
-                    if app.get(self).replace_moved_children {
-                        // We need to make sure the original index gets processed.
-                        new_children.entry(index).or_insert(None);
-                    }
-                    // We do not want the remapped child to get deactivated during
-                    // `process_element`.
-                    app.get_mut(self).child_elements.remove(&index);
-                }
-                _ => {
-                    new_children.entry(index).or_insert(Some(child));
-                }
-            }
-        }
-
-        // Moving children will temporarily violate the integrity.
-        self.render_object(app)
-            .set_debug_child_integrity_enabled(app, false);
-        for index in new_children.keys().copied().collect::<Vec<_>>() {
-            self.process_element(
-                app,
-                index,
-                &new_children,
-                &index_to_layout_offset,
-                &mut children_updated,
-            );
-        }
-        // An element rebuild only updates existing children. The underflow check is here to make
-        // sure we look ahead one more child if we were at the end of the child list before the
-        // update. By doing so, we can update the max scroll offset during the layout phase.
-        // Otherwise, the layout phase may be skipped, and the scroll view may be stuck at the
-        // previous max scroll offset.
-        //
-        // This logic is not needed if any existing children has been updated, because we will not
-        // skip the layout phase if that happens.
-        if !children_updated && app.get(self).did_underflow {
-            let last_key = app
-                .get(self)
-                .child_elements
-                .keys()
-                .next_back()
-                .copied()
-                .unwrap_or(-1);
-            let right_boundary = last_key + 1;
-            let existing = app
-                .get(self)
-                .child_elements
-                .get(&right_boundary)
-                .copied()
-                .flatten();
-            new_children.insert(right_boundary, existing);
-            self.process_element(
-                app,
-                right_boundary,
-                &new_children,
-                &index_to_layout_offset,
-                &mut children_updated,
-            );
-        }
-        app.get_mut(self).currently_updating_child_index = None;
-        self.render_object(app)
-            .set_debug_child_integrity_enabled(app, true);
+        SliverMultiBoxAdaptorElementBase::perform_rebuild(self, app);
     }
 
     fn deactivate(self: Handle<Self>, app: &mut App) {
@@ -1961,69 +2200,19 @@ where
     }
 
     fn forget_child(self: Handle<Self>, app: &mut App, child: AnyElement) {
-        let slot = child.slot(app).expect("a lazily built child has an index");
-        let Slot::Index(index) = slot else {
-            unreachable!("a lazily built child has an index slot");
-        };
-        debug_assert!(app.get(self).child_elements.contains_key(&index));
-        app.get_mut(self).child_elements.remove(&index);
+        SliverMultiBoxAdaptorElementBase::forget_child(self, app, child);
     }
 
     fn visit_children(self: Handle<Self>, app: &App, visitor: &mut dyn FnMut(AnyElement)) {
-        // The copy is so that the underlying map can be modified by the visitor.
-        let children: Vec<AnyElement> = app
-            .get(self)
-            .child_elements
-            .values()
-            .map(|child| child.expect("no child slot is empty outside a rebuild"))
-            .collect();
-        for child in children {
-            visitor(child);
-        }
+        SliverMultiBoxAdaptorElementBase::visit_children(self, app, visitor);
     }
 
-    /// Dart's `SliverMultiBoxAdaptorElement.debugVisitOnstageChildren`: the children whose
-    /// layout offset falls in the sliver's painted window, which a kept-alive child's does not.
     fn debug_visit_onstage_children(
         self: Handle<Self>,
         app: &App,
         visitor: &mut dyn FnMut(AnyElement),
     ) {
-        let Some(sliver) = self
-            .as_element()
-            .render_object(app)
-            .and_then(|render| render.as_sliver())
-        else {
-            return;
-        };
-        let constraints = sliver.constraints(app);
-        let children: Vec<AnyElement> = app
-            .get(self)
-            .child_elements
-            .values()
-            .map(|child| child.expect("no child slot is empty outside a rebuild"))
-            .collect();
-        for child in children {
-            let Some(render) = child.render_object(app) else {
-                continue;
-            };
-            let paint_bounds = render.paint_bounds(app);
-            let item_extent = match constraints.axis() {
-                waft_painting::Axis::Horizontal => paint_bounds.width(),
-                waft_painting::Axis::Vertical => paint_bounds.height(),
-            };
-            let onstage = render
-                .parent_data(app)
-                .and_then(|data| data.part::<waft_rendering::SliverMultiBoxAdaptorParentData>())
-                .and_then(|data| data.layout_offset())
-                .is_some_and(|layout_offset| {
-                    layout_offset < constraints.scroll_offset + constraints.remaining_paint_extent
-                        && layout_offset + item_extent > constraints.scroll_offset
-                });
-            if onstage {
-                visitor(child);
-            }
-        }
+        SliverMultiBoxAdaptorElementBase::debug_visit_onstage_children(self, app, visitor);
     }
 
     fn insert_render_object_child(
@@ -2032,55 +2221,28 @@ where
         child: AnyRenderObject,
         slot: Option<Slot>,
     ) {
-        debug_assert!(
-            slot == app
-                .get(self)
-                .currently_updating_child_index
-                .map(Slot::Index)
-        );
-        let render_object = self.render_object(app);
-        let before = app.get(self).current_before_child;
-        let child = child.as_box().expect("a sliver child is a box");
-        RenderSliverMultiBoxAdaptor::insert(render_object, app, child, before);
-        debug_assert!(
-            slot == child
-                .as_object()
-                .parent_data_of::<SliverMultiBoxAdaptorParentData>(app)
-                .index
-                .map(Slot::Index)
-        );
+        SliverMultiBoxAdaptorElementBase::insert_render_object_child(self, app, child, slot);
     }
 
     fn move_render_object_child(
         self: Handle<Self>,
         app: &mut App,
         child: AnyRenderObject,
-        _old_slot: Option<Slot>,
+        old_slot: Option<Slot>,
         new_slot: Option<Slot>,
     ) {
-        debug_assert!(
-            new_slot
-                == app
-                    .get(self)
-                    .currently_updating_child_index
-                    .map(Slot::Index)
+        SliverMultiBoxAdaptorElementBase::move_render_object_child(
+            self, app, child, old_slot, new_slot,
         );
-        let render_object = self.render_object(app);
-        let before = app.get(self).current_before_child;
-        let child = child.as_box().expect("a sliver child is a box");
-        RenderSliverMultiBoxAdaptor::move_child(render_object, app, child, before);
     }
 
     fn remove_render_object_child(
         self: Handle<Self>,
         app: &mut App,
         child: AnyRenderObject,
-        _slot: Option<Slot>,
+        slot: Option<Slot>,
     ) {
-        debug_assert!(app.get(self).currently_updating_child_index.is_some());
-        let render_object = self.render_object(app);
-        let child = child.as_box().expect("a sliver child is a box");
-        RenderSliverMultiBoxAdaptor::remove(render_object, app, child);
+        SliverMultiBoxAdaptorElementBase::remove_render_object_child(self, app, child, slot);
     }
 }
 
