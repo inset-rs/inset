@@ -56,6 +56,8 @@ mod editor_info;
 mod file_dialogs;
 #[cfg(target_os = "android")]
 mod frame_fence;
+#[cfg(any(target_os = "android", test))]
+mod gesture_settings;
 #[cfg(target_os = "android")]
 mod gpu;
 #[cfg(target_os = "android")]

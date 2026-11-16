@@ -23,9 +23,9 @@ use std::sync::Arc;
 use ndk::configuration::{Configuration, UiModeNight};
 use ndk::native_window::NativeWindow;
 use waft_embedder::{
-    RequestId, Scene, ScreenId, SystemMouseCursorKind, SystemUiOverlayStyle, TextInputHost, View,
-    ViewConstraints, ViewFocusDirection, ViewFocusState, ViewHost, ViewId, ViewMetrics,
-    ViewPadding, WindowRef,
+    GestureSettings, RequestId, Scene, ScreenId, SystemMouseCursorKind, SystemUiOverlayStyle,
+    TextInputHost, View, ViewConstraints, ViewFocusDirection, ViewFocusState, ViewHost, ViewId,
+    ViewMetrics, ViewPadding, WindowRef,
 };
 
 use crate::activity::{Activity, AttachedActivity};
@@ -58,6 +58,12 @@ pub(crate) struct AndroidView {
     /// How the picture reaches the screen (`picture.rs`).
     picture: RefCell<ViewPicture>,
     metrics: Cell<ViewMetrics>,
+    /// The touch slop Android gives the activity (`gesture_settings.rs`), read as it attaches and
+    /// at each change of configuration.
+    gesture_settings: Cell<GestureSettings>,
+    /// Whether the gesture settings changed since the framework last heard of the metrics, which
+    /// Flutter sends them with.
+    gesture_settings_untold: Cell<bool>,
     /// What a frame starts from.
     clear: valo::Color,
     /// The last picture the framework handed over, kept to present again on the window the
@@ -130,6 +136,8 @@ impl AndroidView {
             content_rect: Cell::new([0; 4]),
             picture: RefCell::new(ViewPicture::new(id, gpu, compositor, context)),
             metrics: Cell::new(ViewMetrics::default()),
+            gesture_settings: Cell::new(GestureSettings::default()),
+            gesture_settings_untold: Cell::new(false),
             clear: valo::Color::WHITE,
             latest: RefCell::new(None),
             on_screen: Cell::new(false),
@@ -299,14 +307,28 @@ impl AndroidView {
     }
 
     /// Takes the metrics the system now reports of the window, at `density` pixels per logical
-    /// pixel on `screen`, and answers whether they changed.
+    /// pixel on `screen`, and answers whether they, or the gesture settings sent with them,
+    /// changed since the framework last heard.
     pub(crate) fn refresh_metrics(&self, density: f64, screen: Option<ScreenId>) -> bool {
         let metrics = self.geometry(density, screen).metrics();
+        let gestures_changed = self.gesture_settings_untold.replace(false);
         if self.metrics.get() == metrics {
-            return false;
+            return gestures_changed;
         }
         self.metrics.set(metrics);
         true
+    }
+
+    /// Reads again the gesture settings Android gives the activity, as Flutter's view reads its
+    /// touch slop for the viewport metrics.
+    pub(crate) fn refresh_gesture_settings(&self) {
+        let Some(activity) = self.activity() else {
+            return;
+        };
+        let settings = crate::gesture_settings::read_gesture_settings(&activity);
+        if self.gesture_settings.replace(settings) != settings {
+            self.gesture_settings_untold.set(true);
+        }
     }
 
     /// What the system says about the window now; no size while there is no window.
@@ -341,6 +363,11 @@ impl View for AndroidView {
 
     fn metrics(&self) -> ViewMetrics {
         self.metrics.get()
+    }
+
+    /// Flutter's `physicalTouchSlop`, Android's scaled touch slop (`gesture_settings.rs`).
+    fn gesture_settings(&self) -> GestureSettings {
+        self.gesture_settings.get()
     }
 
     fn present(&self, scene: Arc<Scene>) {
