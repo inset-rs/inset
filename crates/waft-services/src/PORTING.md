@@ -180,7 +180,7 @@ The key constants and the four tables are machine-written from the Dart, as Flut
 - Platform channels, `SystemChannels`, `BinaryMessenger`. Trigger: the first service that needs a named channel rather than a `Platform` method.
 - `MouseCursor` diagnostics (`debugFillProperties`, `toString(minLevel)`). Trigger: diagnostics.
 - An `EmbedderClient` hook for restoration data that arrives while the app runs. Trigger: an embedder whose OS hands it new data after start; until then the host calls `RestorationManager::handle_restoration_update_from_engine`.
-- The rest of text input: `ScribbleClient`, `DeltaTextInputClient`, `TextInputControl` / `setInputControl`, `setSelectionRects` and `updateStyle` reaching the host, asset bundles. Trigger: scribble, a custom input control, or a host that implements autofill.
+- The rest of text input: `ScribbleClient`, `DeltaTextInputClient`, `TextInputControl` / `setInputControl`, `updateStyle` reaching the host, and asset bundles. Trigger: scribble, a custom input control, or a host that implements autofill.
 - The rest of `SystemChrome`: `setPreferredOrientations`, `setEnabledSystemUIMode`, `restoreSystemUIOverlays`, `setSystemUIChangeCallback`, `DeviceOrientation`, `SystemUiMode`. Trigger: an orientation-aware or fullscreen-capable host.
 - The raw key path (`RawKeyboard`, `RawKeyEvent`, `KeyMessage`, `KeyDataTransitMode`, `KeyEventManager.handleRawKeyMessage`), which Flutter has deprecated. Trigger: an embedder that can only send raw key data.
 - `debugPrintKeyboardEvents` and `HardwareKeyboard._logEventIfIrregular`. Trigger: `services/debug.dart`.

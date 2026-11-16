@@ -44,8 +44,9 @@ pub trait HitTestTarget: Debug + Any {
     fn handle_event(&self, app: &mut App, event: &PointerEvent, entry: &HitTestEntry);
 
     /// The arena object this target delivers to, if it is one, so a result kept across turns
-    /// can [`retain`](App::retain) it: Dart keeps the object alive by holding it in the path.
-    fn retained_handle(&self) -> Option<HandleId> {
+    /// keeps it ([`HitTestResult::keep_targets`]): Dart keeps the object alive by holding it in
+    /// the path.
+    fn arena_id(&self) -> Option<HandleId> {
         None
     }
 }
@@ -166,8 +167,7 @@ impl HitTestResult {
     }
 
     /// Keeps every object on the path, for a result kept past this turn (Dart keeps them alive
-    /// by holding the path). The references live in the result: dropping it, or
-    /// [`release_targets`](Self::release_targets), lets go of them.
+    /// by holding the path). The references live in the result: dropping it lets go of them.
     pub fn keep_targets(&mut self, app: &App) {
         if !self.kept.is_empty() {
             return;
@@ -175,14 +175,9 @@ impl HitTestResult {
         self.kept = self
             .path
             .iter()
-            .filter_map(|entry| entry.target.retained_handle())
+            .filter_map(|entry| entry.target.arena_id())
             .filter_map(|id| id.upgrade(app))
             .collect();
-    }
-
-    /// Lets go of what [`keep_targets`](Self::keep_targets) kept.
-    pub fn release_targets(&mut self) {
-        self.kept.clear();
     }
 
     /// An unmodifiable list of [`HitTestEntry`] objects recorded during the hit test.

@@ -981,7 +981,7 @@ mod tests {
             count: Rc::clone(&count),
         });
         let binding = RendererBinding::instance(&mut shell.app());
-        binding.set_overrides(&mut shell.app(), Rc::new(counting.handle()));
+        binding.set_overrides(&mut shell.app(), Rc::new(counting));
 
         shell.view_added(ViewId(1));
         assert_eq!(count.get(), 1, "a view added");

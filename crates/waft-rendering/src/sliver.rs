@@ -748,7 +748,7 @@ impl SliverHitTestEntry {
 }
 
 impl HitTestTarget for SliverHitTestEntry {
-    fn retained_handle(&self) -> Option<HandleId> {
+    fn arena_id(&self) -> Option<HandleId> {
         Some(self.target.id)
     }
 

@@ -266,13 +266,11 @@ impl GestureBinding {
         {
             self.dispatch_event(app, event, hit_test_result.as_ref());
         }
-        if let Some(mut result) = hit_test_result {
-            if cache_after {
-                result.keep_targets(app);
-                app.get_mut(self).hit_tests.insert(pointer, result);
-            } else {
-                result.release_targets();
-            }
+        if let Some(mut result) = hit_test_result
+            && cache_after
+        {
+            result.keep_targets(app);
+            app.get_mut(self).hit_tests.insert(pointer, result);
         }
     }
 
@@ -339,10 +337,7 @@ impl GestureBinding {
     ///
     /// This is typically called between tests.
     pub fn reset_gesture_binding(self: Handle<Self>, app: &mut App) {
-        let hit_tests = std::mem::take(&mut app.get_mut(self).hit_tests);
-        for mut result in hit_tests.into_values() {
-            result.release_targets();
-        }
+        app.get_mut(self).hit_tests.clear();
     }
 }
 

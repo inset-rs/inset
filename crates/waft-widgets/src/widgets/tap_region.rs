@@ -485,7 +485,7 @@ impl HitTestTarget for TapRegionSurfaceHitTarget {
         self.surface.handle_event_from_cache(app, event, &self.path);
     }
 
-    fn retained_handle(&self) -> Option<HandleId> {
+    fn arena_id(&self) -> Option<HandleId> {
         Some(self.surface.handle().id())
     }
 }
@@ -591,7 +591,7 @@ impl RenderBox for RenderTapRegionSurface {
             let path = result
                 .path()
                 .iter()
-                .filter_map(|entry| entry.target().retained_handle())
+                .filter_map(|entry| entry.target().arena_id())
                 .collect();
             result.add(HitTestEntry::new(TapRegionSurfaceHitTarget {
                 surface: self,

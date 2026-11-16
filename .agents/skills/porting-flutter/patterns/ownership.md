@@ -13,7 +13,7 @@ Dart keeps an object while something refers to it. Here an arena object lives wh
 
 ## Constructors
 
-A constructor is `new`. One that takes `&mut App` makes an arena object and returns a `Ref`; one without makes a plain value. `App::create` is the arena call those constructors make. A second, named Dart constructor keeps its name (`AnimationController.unbounded` → `AnimationController::unbounded`). A tree node's constructor returns the bare handle the tree keeps (`Retained::into_tree_node`).
+A constructor is `new`. One that makes an arena object takes `&mut App` and returns a `Ref`; one that makes a plain value returns the value, and takes the `App` only to read it (a Material defaults object reads `Theme::of`, `ThemeData::new` the platform). `App::create` is the arena call those constructors make. A second, named Dart constructor keeps its name (`AnimationController.unbounded` → `AnimationController::unbounded`). A tree node's constructor returns the bare handle the tree keeps (`Retained::into_tree_node`). A base class's field bag (`ModalRouteData::new(app)`) is a plain value whose fields keep the objects it makes.
 
 ## Porting a field
 
@@ -55,4 +55,6 @@ entry.add_listener(app, listener);
 A debug build reports Flutter's two leak kinds:
 
 - `App::debug_take_not_disposed`: an object that expects a `dispose` (`App::expect_dispose`) and was freed without one. Today that covers a `ChangeNotifier` from its first listener, `Ticker`, `AnimationController`, `CurvedAnimation` and `RestorationBucket`. It does not cover the gesture recognizers or the image types yet.
-- `App::debug_take_not_collected`: an object disposed through `App::mark_disposed` and still kept two checkpoints later, a ring of `Ref`s or a holder that forgot it. It skips tree nodes (elements, states, render objects, layers), which a holder such as the hit-test path keeps legitimately after the tree releases them. `waft_test::object_snapshot` and `assert_no_new_objects` bracket a cycle in a test and name what it left behind by type and creation site.
+- `App::debug_take_not_collected`: an object disposed through `App::mark_disposed` and still kept two checkpoints later, a ring of `Ref`s or a holder that forgot it. It sees only the types whose `dispose` calls `mark_disposed` (the five above, the gesture recognizers and the image types), and it skips tree nodes (elements, states, render objects, layers), which a holder such as the hit-test path keeps legitimately after the tree releases them.
+
+Neither report sees a type with no `dispose`, such as a `ProxyAnimation` or a tween, nor a ring made only of such objects. `waft_test::object_snapshot` and `assert_no_new_objects` bracket a cycle in a test and name what it left behind, of any type, by type and creation site. The creation site is where `App::create` ran: the caller's line for a constructor marked `#[track_caller]` (waft-animation's, the `Ticker`'s, the render objects'), and the constructor's own line for the others.

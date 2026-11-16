@@ -1098,17 +1098,10 @@ impl<T: Clone + PartialEq + 'static> DropdownMenuState<T> {
         focus_node.into_erased()
     }
 
-    fn menu_controller(self: Handle<Self>, app: &App) -> AnyMenuController {
+    fn menu_controller(self: Handle<Self>, app: &App) -> &MenuControllerRef {
         app.get(self)
             .controller
-            .handle()
-            .expect("init_state sets the menu controller")
-    }
-
-    fn menu_controller_ref(self: Handle<Self>, app: &App) -> MenuControllerRef {
-        app.get(self)
-            .controller
-            .clone()
+            .as_ref()
             .expect("init_state sets the menu controller")
     }
 
@@ -1563,7 +1556,7 @@ impl<T: Clone + PartialEq + 'static> DropdownMenuState<T> {
         }
         app.get_mut(self).enable_filter = false;
         if self.widget(app).close_behavior == DropdownMenuCloseBehavior::SelfOnly {
-            self.menu_controller(app).close(app);
+            self.menu_controller(app).handle().close(app);
         }
     }
 
@@ -1578,7 +1571,7 @@ impl<T: Clone + PartialEq + 'static> DropdownMenuState<T> {
     /// The `setState` body of Dart's `handleUpKey` and `handleDownKey`.
     fn move_highlight(self: Handle<Self>, app: &mut App, forward: bool) {
         let enabled = self.widget(app).enabled;
-        let is_open = self.menu_controller(app).is_open(app);
+        let is_open = self.menu_controller(app).handle().is_open(app);
         if enabled && app.get(self).menu_has_enabled_item && is_open {
             let state = app.get_mut(self);
             state.enable_filter = false;
@@ -1603,7 +1596,7 @@ impl<T: Clone + PartialEq + 'static> DropdownMenuState<T> {
     }
 
     fn handle_enter_key(self: Handle<Self>, app: &mut App) {
-        let controller = self.menu_controller(app);
+        let controller = self.menu_controller(app).handle();
         if self.select_only(app) && !controller.is_open(app) {
             controller.open(app, None);
             return;
@@ -1641,7 +1634,7 @@ impl<T: Clone + PartialEq + 'static> DropdownMenuState<T> {
     }
 
     fn handle_submitted(self: Handle<Self>, app: &mut App) {
-        let controller = self.menu_controller(app);
+        let controller = self.menu_controller(app).handle();
         if let Some(current_highlight) = app.get(self).current_highlight {
             let entry = app.get(self).filtered_entries[current_highlight].clone();
             if entry.enabled {
@@ -1777,7 +1770,7 @@ impl<T: Clone + PartialEq + 'static> DropdownMenuState<T> {
         let localizations = <dyn MaterialLocalizations>::of(app, context);
         let is_button = self.is_button(app);
         let can_request_focus = self.can_request_focus(app);
-        let menu_controller = self.menu_controller(app);
+        let menu_controller = self.menu_controller(app).handle();
         let is_open = menu_controller.is_open(app);
         let mut semantics = Semantics::new().button(is_button);
         // This is set specifically for iOS because iOS does not have any native
@@ -1963,7 +1956,7 @@ impl<T: Clone + PartialEq + 'static> DropdownMenuState<T> {
                 None
             }),
         );
-        let controller = self.menu_controller_ref(app);
+        let controller = self.menu_controller(app).clone();
         let dismiss = DismissMenuAction::new(app, controller);
         let mut actions: HashMap<TypeId, ActionRef> = HashMap::new();
         actions.insert(TypeId::of::<ArrowUpIntent>(), up.into_erased());
@@ -2268,7 +2261,7 @@ impl<T: Clone + PartialEq + 'static> State for DropdownMenuState<T> {
             false => None,
         };
 
-        let controller = self.menu_controller_ref(app);
+        let controller = self.menu_controller(app).clone();
         let anchor_arguments = Rc::new(AnchorBuildArguments {
             effective_input_decoration_theme,
             effective_text_style,

@@ -79,25 +79,23 @@ fn mixin_counter() {
         counter: counter.clone(),
         shown: 0,
     });
-    let label = *label;
-
     // Closure listener: keep the listener; a second `Listener::new` would not match. It is
     // registered on the counter, so it names the counter by its bare handle: a `Ref` captured
     // here would keep the counter until the listener is removed.
-    let counter_handle = *counter;
+    let counter_handle = counter.handle();
     let on_print = Listener::new(move |app| {
         println!("  print       = {}", app.get(counter_handle).count);
     });
     counter.add_listener(&mut app, on_print.clone());
 
     // Method tear-off: rebuild at the removal site with the same handle and function.
-    counter.add_listener(&mut app, Listener::handle_method(label, rebuild));
+    counter.add_listener(&mut app, Listener::handle_method(label.handle(), rebuild));
 
     counter.increment(&mut app);
     counter.increment(&mut app);
 
     counter.remove_listener(&mut app, &on_print);
-    counter.remove_listener(&mut app, &Listener::handle_method(label, rebuild));
+    counter.remove_listener(&mut app, &Listener::handle_method(label.handle(), rebuild));
 
     println!("  (listeners removed)");
     counter.increment(&mut app);
@@ -110,7 +108,7 @@ fn value_notifier() {
     let mut app = cell.borrow_mut();
     let count = app.create(ValueNotifier::new(0i32));
 
-    let count_handle = *count;
+    let count_handle = count.handle();
     let on_print = Listener::new(move |app| {
         println!("  value       = {}", *app.get(count_handle).value());
     });
