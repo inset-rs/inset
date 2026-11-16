@@ -137,6 +137,22 @@ pub enum FluentSymbol {
     List,
     /// Rows and columns of a table.
     Table,
+    /// A camera; WinUI's `Symbol.Camera`.
+    Camera,
+    /// A microphone; WinUI's `Symbol.Microphone`.
+    Mic,
+    /// A folder; WinUI's `Symbol.Folder`.
+    Folder,
+    /// A globe; WinUI's `Symbol.Globe`.
+    Globe,
+    /// A shield, for security and protection.
+    Shield,
+    /// A clipboard; WinUI's `Symbol.Paste` shows one.
+    Clipboard,
+    /// A bell, for notifications and alerts.
+    Alert,
+    /// A console window, for a terminal.
+    WindowConsole,
 }
 
 impl FluentSymbol {
@@ -192,6 +208,14 @@ impl FluentSymbol {
             Self::Document => 62329,
             Self::List => 62702,
             Self::Table => 63326,
+            Self::Camera => 62036,
+            Self::Mic => 59385,
+            Self::Folder => 62488,
+            Self::Globe => 62554,
+            Self::Shield => 63166,
+            Self::Clipboard => 62153,
+            Self::Alert => 61716,
+            Self::WindowConsole => 61039,
         })
         .unwrap()
     }
@@ -425,5 +449,32 @@ impl CustomPainter for PathIconPainter {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FluentSymbol;
+
+    // Each name is the bundled font's own: its glyph is the one `codepoints.json` gives that name.
+    #[test]
+    fn the_inspectors_symbols_are_the_fonts_named_glyphs() {
+        let codepoints = include_str!("../../assets/fluent-system-icons/codepoints.json");
+        for (symbol, name) in [
+            (FluentSymbol::Camera, "ic_fluent_camera_20_regular"),
+            (FluentSymbol::Mic, "ic_fluent_mic_20_regular"),
+            (FluentSymbol::Folder, "ic_fluent_folder_20_regular"),
+            (FluentSymbol::Globe, "ic_fluent_globe_20_regular"),
+            (FluentSymbol::Shield, "ic_fluent_shield_20_regular"),
+            (FluentSymbol::Clipboard, "ic_fluent_clipboard_20_regular"),
+            (FluentSymbol::Alert, "ic_fluent_alert_20_regular"),
+            (
+                FluentSymbol::WindowConsole,
+                "ic_fluent_window_console_20_regular",
+            ),
+        ] {
+            let entry = format!("\"{name}\": {}", symbol.glyph() as u32);
+            assert!(codepoints.contains(&entry), "{symbol:?} is {name}");
+        }
     }
 }
