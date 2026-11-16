@@ -2385,6 +2385,7 @@ dependencies = [
  "waft-embedder",
  "waft-embedder-default",
  "waft-foundation",
+ "waft-gestures",
  "waft-material",
  "waft-painting",
  "waft-rendering",
