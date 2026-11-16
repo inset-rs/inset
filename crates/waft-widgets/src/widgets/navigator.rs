@@ -2942,13 +2942,16 @@ impl RouteEntry {
             return;
         }
 
-        let navigator = route.navigator(app).expect("an installed route");
+        // Dart's closure holds `final NavigatorState navigator` strongly, so the state outlives
+        // the subtree whose unmounting runs the microtask.
+        let navigator = route.navigator(app).expect("an installed route").keep(app);
         let kept = self.keep(app);
-        app.get_mut(navigator)
+        app.get_mut(navigator.handle())
             .entry_waiting_for_subtree_disposal
             .insert(kept);
         let remaining = Rc::new(std::cell::Cell::new(mounted_entries.len()));
         for overlay_entry in mounted_entries {
+            let navigator = navigator.clone();
             // Dart's `late VoidCallback listener`: the closure names itself weakly, so it does
             // not keep itself once the entry lets it go.
             let itself: Rc<std::cell::OnceCell<WeakListener>> = Rc::default();
@@ -2963,9 +2966,10 @@ impl RouteEntry {
                         overlay_entry.remove_listener(app, &listener);
                     }
                     if remaining.get() == 0 {
+                        let navigator = navigator.clone();
                         app.schedule_microtask(Listener::new(move |app| {
                             if !app
-                                .get_mut(navigator)
+                                .get_mut(navigator.handle())
                                 .entry_waiting_for_subtree_disposal
                                 .remove(&self)
                             {
