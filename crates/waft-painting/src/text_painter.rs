@@ -1695,11 +1695,11 @@ mod tests {
 
     /// Flutter's `handles newlines properly` for a soft wrap: affinity tells the end of the
     /// first line from the start of the second. Wrapped at a space, which ends the first line
-    /// as a ghost, since valo breaks no word.
+    /// as a ghost: the width fits the longer word, so neither word breaks between clusters.
     #[test]
     fn affinity_tells_a_soft_wraps_two_carets_apart() {
         let mut fonts = fonts();
-        let mut first = painter("aaa ");
+        let mut first = painter("aaaa");
         first.layout(&mut fonts, 0.0, f64::INFINITY);
         let mut painter = painter("aaa aaaa");
         painter.layout(&mut fonts, 0.0, first.max_intrinsic_width() + 1.0);
