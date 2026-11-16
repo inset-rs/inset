@@ -213,7 +213,7 @@ fn info_plist(project: &Project, icon: Option<&str>) -> Dictionary {
         info.insert("LSUIElement".into(), true.into());
     }
     if !project.file_associations.is_empty() {
-        info.extend(file_associations::macos_info_plist(
+        info.extend(file_associations::apple_info_plist(
             &project.file_associations,
             &project.identifier,
         ));

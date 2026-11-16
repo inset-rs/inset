@@ -1,13 +1,13 @@
 //! What the app tells each system about the files it opens: cargo-packager's file
-//! associations for every desktop package, and for the macOS bundle the `Info.plist` keys
-//! cargo-packager leaves out.
+//! associations for every desktop package, and for the macOS and iOS bundles the `Info.plist`
+//! keys cargo-packager leaves out.
 //!
 //! cargo-packager writes a macOS document type that names its extensions and nothing else.
-//! macOS also wants the type itself declared, exported by the app that defines it and
+//! macOS and iOS also want the type itself declared, exported by the app that defines it and
 //! imported by an app that only opens it, and a document type that names that declaration
-//! and ranks the app's claim on it. The fragment [`macos_info_plist`] makes replaces
-//! cargo-packager's `CFBundleDocumentTypes` with such types and adds the declarations; keep
-//! the two describing the same types.
+//! and ranks the app's claim on it: iOS offers an app a file from AirDrop or Files only by
+//! such a type. The fragment [`apple_info_plist`] makes holds such types in
+//! `CFBundleDocumentTypes` and adds the declarations; keep the two describing the same types.
 
 use anyhow::{Result, bail};
 use cargo_packager::config::{self as packager, BundleTypeRole};
@@ -57,7 +57,7 @@ pub fn packager_associations(associations: &[FileAssociation]) -> Vec<packager::
 /// The `Info.plist` keys for these types that cargo-packager does not write: document types
 /// that name each type's declaration and rank the app's claim, the declarations of the types
 /// the app owns, and those of the types it opens that have an identifier.
-pub fn macos_info_plist(associations: &[FileAssociation], app_identifier: &str) -> Dictionary {
+pub fn apple_info_plist(associations: &[FileAssociation], app_identifier: &str) -> Dictionary {
     let mut info = Dictionary::new();
     info.insert(
         "CFBundleDocumentTypes".into(),
@@ -145,7 +145,7 @@ fn type_declaration(association: &FileAssociation, identifier: String) -> Value 
     Value::Dictionary(declaration)
 }
 
-/// The type's identifier on macOS: the one given, or for a type the app owns, the app's
+/// The type's identifier on macOS and iOS: the one given, or for a type the app owns, the app's
 /// identifier followed by the first extension.
 fn type_identifier(association: &FileAssociation, app_identifier: &str) -> Option<String> {
     association.identifier.clone().or_else(|| {
@@ -218,7 +218,7 @@ mod tests {
 
     #[test]
     fn an_owned_type_is_exported_under_the_apps_identifier_and_ranks_the_app_its_owner() {
-        let info = macos_info_plist(&sample_associations(), "dev.wasdk.waos");
+        let info = apple_info_plist(&sample_associations(), "dev.wasdk.waos");
         let exported = entries(&info, "UTExportedTypeDeclarations");
         assert_eq!(exported.len(), 1);
         assert_eq!(
@@ -244,7 +244,7 @@ mod tests {
 
     #[test]
     fn a_type_the_app_only_opens_is_imported_when_it_has_an_identifier() {
-        let info = macos_info_plist(&sample_associations(), "dev.wasdk.waos");
+        let info = apple_info_plist(&sample_associations(), "dev.wasdk.waos");
         let imported = entries(&info, "UTImportedTypeDeclarations");
         assert_eq!(imported.len(), 1);
         assert_eq!(
@@ -261,7 +261,7 @@ mod tests {
 
     #[test]
     fn a_type_the_app_only_opens_without_an_identifier_is_matched_by_its_extensions() {
-        let info = macos_info_plist(&sample_associations(), "dev.wasdk.waos");
+        let info = apple_info_plist(&sample_associations(), "dev.wasdk.waos");
         let document = &entries(&info, "CFBundleDocumentTypes")[2];
         assert_eq!(
             document["CFBundleTypeExtensions"],

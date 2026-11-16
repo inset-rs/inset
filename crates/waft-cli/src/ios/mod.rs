@@ -21,6 +21,7 @@ pub use devices::{
 
 use crate::apple::{self, SigningIdentity, SigningSettings};
 use crate::cargo::{self, Artifact, Build};
+use crate::file_associations;
 use crate::icons;
 use crate::project::{Profile, Project};
 use crate::tools;
@@ -207,6 +208,16 @@ fn info_plist(
             "UIRequiredDeviceCapabilities",
             Value::Array(vec![text("arm64")]),
         );
+    }
+    if !project.file_associations.is_empty() {
+        for (key, value) in
+            file_associations::apple_info_plist(&project.file_associations, &project.identifier)
+        {
+            put(&key, value);
+        }
+        // A document from Files opens where it is, which the host reaches through its URL's
+        // security-scoped access, rather than as a copy in the app's Inbox.
+        put("LSSupportsOpeningDocumentsInPlace", Value::Boolean(true));
     }
     if !icon_names.is_empty() {
         let mut primary = Dictionary::new();
@@ -466,6 +477,42 @@ mod tests {
             dict.get("CADisableMinimumFrameDurationOnPhone")
                 .and_then(Value::as_boolean),
             Some(true)
+        );
+    }
+
+    #[test]
+    fn info_plist_declares_the_documents_the_app_opens_in_place() {
+        let mut project = test_project();
+        project.file_associations = serde_json::from_value(serde_json::json!([
+            { "extensions": ["wapk"], "name": "WaOS program", "owner": true },
+        ]))
+        .unwrap();
+        let plist = info_plist(&project, Destination::Device(None), "15.0", &[]);
+        let dict = plist.as_dictionary().unwrap();
+        let exported = dict
+            .get("UTExportedTypeDeclarations")
+            .and_then(Value::as_array)
+            .expect("the type the app owns, declared");
+        assert_eq!(
+            exported[0]
+                .as_dictionary()
+                .and_then(|declaration| declaration.get("UTTypeIdentifier"))
+                .and_then(Value::as_string),
+            Some("com.example.myapp.wapk")
+        );
+        assert!(dict.get("CFBundleDocumentTypes").is_some());
+        assert_eq!(
+            dict.get("LSSupportsOpeningDocumentsInPlace")
+                .and_then(Value::as_boolean),
+            Some(true)
+        );
+        let without = info_plist(&test_project(), Destination::Simulator, "15.0", &[]);
+        assert!(
+            without
+                .as_dictionary()
+                .unwrap()
+                .get("LSSupportsOpeningDocumentsInPlace")
+                .is_none()
         );
     }
 
