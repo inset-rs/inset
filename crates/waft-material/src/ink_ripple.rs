@@ -435,7 +435,7 @@ mod tests {
 
     use crate::ink_well::{InkResponse, InkWell};
     use crate::material::{Material, RenderInkFeatures};
-    use crate::test_support::{Drawn, PaintInspection};
+    use crate::test_support::{PaintInspection, path_like};
     use crate::theme::Theme;
     use crate::theme_data::ThemeData;
 
@@ -492,13 +492,14 @@ mod tests {
              {expected_alpha}\nFound: center == {center:?} radius == {radius} alpha == {alpha}"
         );
         if alpha > 0 {
-            let drawn = tester.ink_drawn();
+            let drawn = tester.ink_calls();
             assert!(
-                drawn.iter().any(|drawn| matches!(
-                    drawn,
-                    Drawn::Path(color, bounds) if *color >> 24 == alpha as u32
-                        && (bounds.center() - center).distance() < 1e-3
-                )),
+                drawn
+                    .iter()
+                    .any(|call| path_like(call).is_some_and(|(color, bounds)| {
+                        color.value() >> 24 == alpha as u32
+                            && (bounds.center() - center).distance() < 1e-3
+                    })),
                 "the ripple's circle is drawn: {drawn:?}"
             );
         }
@@ -509,7 +510,7 @@ mod tests {
         test_widgets(|tester| {
             tester.pump_widget(ripple_frame(None));
             let tap_down_offset = TOP_LEFT;
-            tester.tap(tap_down_offset, 1);
+            tester.tap_at(tap_down_offset, 1);
             tester.pump(); // start gesture
 
             // Initially the ripple's center is where the tap occurred;
@@ -611,7 +612,7 @@ mod tests {
                 )
                 .into_widget(),
             );
-            tester.tap(TOP_LEFT, 1);
+            tester.tap_at(TOP_LEFT, 1);
             tester.pump(); // start splash
             tester.pump_by(K_FADE_OUT_DURATION); // _kFadeOutDuration, in_ripple.dart
 
@@ -629,7 +630,7 @@ mod tests {
         // Regression test for https://github.com/flutter/flutter/issues/14391
         test_widgets(|tester| {
             tester.pump_widget(ripple_frame(None));
-            tester.tap(TOP_LEFT, 1);
+            tester.tap_at(TOP_LEFT, 1);
             tester.pump(); // start splash
             // No delay here so _fadeInController.value=1.0 (InkRipple.dart)
 
@@ -725,11 +726,10 @@ mod tests {
                     .into_widget()
                 };
             let circle_center = |tester: &WidgetTester| {
-                tester.ink_drawn().iter().find_map(|drawn| match drawn {
-                    Drawn::Path(color, bounds) if *color == splash_color.value() => {
-                        Some(bounds.center())
-                    }
-                    _ => None,
+                tester.ink_calls().iter().find_map(|call| {
+                    path_like(call)
+                        .filter(|(color, _)| color.value() == splash_color.value())
+                        .map(|(_, bounds)| bounds.center())
                 })
             };
 

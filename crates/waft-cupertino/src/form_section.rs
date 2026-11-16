@@ -232,14 +232,13 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use waft_embedder::{Offset, TextDirection};
-    use waft_rendering::{AnyRenderObject, RenderClipRRect, RenderHandle, RenderObject};
+    use waft_embedder::TextDirection;
+    use waft_rendering::RenderClipRRect;
     use waft_widgets::{Builder, Directionality, GlobalKey, SizedBox};
 
-    use waft_widgets::testing::{WidgetTester, test_widgets};
+    use waft_widgets::testing::{WidgetTester, assert_f32_equals, test_widgets};
 
     use super::*;
-    use crate::test_support::assert_near;
 
     fn key_of(key: &GlobalKey) -> KeyRef {
         key.clone().into()
@@ -248,37 +247,6 @@ mod tests {
     /// A `SizedBox` of `width` x `height`, findable through `key`.
     fn slot(key: &GlobalKey, width: f64, height: f64) -> SizedBox {
         SizedBox::new().key(key_of(key)).width(width).height(height)
-    }
-
-    fn offset_of(app: &mut App, key: &GlobalKey) -> Offset {
-        key.current_context(app)
-            .expect("the slot mounted")
-            .find_render_object(app)
-            .expect("the slot has been laid out")
-            .as_box()
-            .expect("a box")
-            .local_to_global(app, Offset::ZERO, None)
-    }
-
-    /// The first descendant render object of type `T`, from `node` down.
-    fn find<T: RenderObject>(app: &App, node: AnyRenderObject) -> Option<RenderHandle<T>> {
-        if let Some(found) = node.downcast::<T>(app) {
-            return Some(found);
-        }
-        let mut found = None;
-        node.visit_children(app, &mut |child| {
-            if found.is_none() {
-                found = find::<T>(app, child);
-            }
-        });
-        found
-    }
-
-    fn root(app: &mut App, key: &GlobalKey) -> AnyRenderObject {
-        key.current_context(app)
-            .expect("the section mounted")
-            .find_render_object(app)
-            .expect("the section has been laid out")
     }
 
     fn mount<K>(tester: &mut WidgetTester, section: impl IntoWidget<K>) {
@@ -321,8 +289,6 @@ mod tests {
                 .header(probe(&seen))
                 .footer(probe(&seen)),
             );
-            let mut app = tester.cell.borrow_mut();
-
             let styles = seen.borrow();
             assert_eq!(styles.len(), 2, "header and footer");
             for style in styles.iter() {
@@ -332,31 +298,28 @@ mod tests {
 
             // The list section's top margin, the header margin, and the long divider, a device
             // pixel at 3.0.
-            assert_near(offset_of(&mut app, &first).dy(), 28.0 + 1.0 / 3.0);
+            assert_f32_equals(tester.get_top_left(&first).dy(), 28.0 + 1.0 / 3.0);
             // The short divider between the rows.
-            assert_near(offset_of(&mut app, &second).dy(), 68.0 + 2.0 / 3.0);
+            assert_f32_equals(tester.get_top_left(&second).dy(), 68.0 + 2.0 / 3.0);
         });
     }
 
     #[test]
     fn an_inset_grouped_form_section_keeps_the_form_margin_and_does_not_clip() {
         test_widgets(|tester| {
-            let (section_key, first) = (GlobalKey::new(), GlobalKey::new());
+            let first = GlobalKey::new();
             let section =
                 CupertinoFormSection::inset_grouped([slot(&first, 50.0, 40.0).into_widget()]);
             assert_eq!(section.margin, K_FORM_DEFAULT_INSET_GROUPED_ROWS_MARGIN);
             assert_eq!(section.clip_behavior, Clip::None);
-            mount(tester, section.key(key_of(&section_key)));
-            let mut app = tester.cell.borrow_mut();
-
+            mount(tester, section);
             assert_eq!(
-                offset_of(&mut app, &first).dy(),
+                tester.get_top_left(&first).dy(),
                 0.0,
                 "no top margin, and the form's own margin has none either"
             );
-            let root = root(&mut app, &section_key);
             assert!(
-                find::<RenderClipRRect>(&app, root).is_none(),
+                tester.all::<RenderClipRRect>().is_empty(),
                 "the form section clips nothing"
             );
         });

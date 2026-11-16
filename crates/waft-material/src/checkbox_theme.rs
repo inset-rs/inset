@@ -455,13 +455,12 @@ mod tests {
     use waft_services::SystemMouseCursors;
     use waft_widgets::{FocusHighlightStrategy, SizedBox, WidgetState};
 
+    use waft_rendering::testing::PaintCall;
     use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
 
     use super::*;
     use crate::checkbox::Checkbox;
-    use crate::checkbox::tests::{
-        Paints, assert_paints, checkbox_center, checkbox_size, ignore, press,
-    };
+    use crate::checkbox::tests::{assert_paints, checkbox_center, checkbox_size, ignore, press};
     use crate::color_scheme::ColorScheme;
     use crate::colors::Colors;
     use crate::scaffold::Scaffold;
@@ -612,7 +611,7 @@ mod tests {
 
             // Checkbox.
             frame(tester, false, false);
-            assert_paints(tester, &[Paints::Rrect(DEFAULT_FILL_COLOR)]);
+            assert_paints(tester, &[PaintCall::rrect(Some(DEFAULT_FILL_COLOR))]);
             // Size from MaterialTapTargetSize.shrinkWrap with added VisualDensity.
             assert_eq!(
                 checkbox_size(tester),
@@ -621,12 +620,12 @@ mod tests {
 
             // Selected checkbox.
             frame(tester, true, false);
-            assert_paints(tester, &[Paints::Rrect(SELECTED_FILL_COLOR)]);
+            assert_paints(tester, &[PaintCall::rrect(Some(SELECTED_FILL_COLOR))]);
             assert_paints(
                 tester,
                 &[
-                    Paints::Rrect(SELECTED_FILL_COLOR),
-                    Paints::Path(DEFAULT_CHECK_COLOR),
+                    PaintCall::rrect(Some(SELECTED_FILL_COLOR)),
+                    PaintCall::path(Some(DEFAULT_CHECK_COLOR)),
                 ],
             );
 
@@ -635,19 +634,25 @@ mod tests {
             let gesture = point_gesture_to_checkbox(tester);
             tester.pump_and_settle();
             assert_eq!(tester.active_cursor(1), SystemMouseCursors::TEXT.into());
-            assert_paints(tester, &[Paints::Circle(HOVER_OVERLAY_COLOR)]);
+            assert_paints(tester, &[PaintCall::circle(Some(HOVER_OVERLAY_COLOR))]);
 
             // Checkbox with focus.
             frame(tester, true, true);
             assert_paints(
                 tester,
-                &[Paints::CircleRadius(FOCUS_OVERLAY_COLOR, SPLASH_RADIUS)],
+                &[PaintCall::Circle {
+                    x: None,
+                    y: None,
+                    radius: Some(SPLASH_RADIUS),
+                    color: Some(FOCUS_OVERLAY_COLOR),
+                    style: None,
+                }],
             );
             assert_paints(
                 tester,
                 &[
-                    Paints::Rrect(SELECTED_FILL_COLOR),
-                    Paints::Path(FOCUSED_CHECK_COLOR),
+                    PaintCall::rrect(Some(SELECTED_FILL_COLOR)),
+                    PaintCall::path(Some(FOCUSED_CHECK_COLOR)),
                 ],
             );
             tester.send(&gesture, PointerChange::Remove);
@@ -722,7 +727,7 @@ mod tests {
 
             // Checkbox.
             frame(tester, false, false);
-            assert_paints(tester, &[Paints::Rrect(DEFAULT_FILL_COLOR)]);
+            assert_paints(tester, &[PaintCall::rrect(Some(DEFAULT_FILL_COLOR))]);
             // Size from MaterialTapTargetSize.shrinkWrap with added VisualDensity.
             assert_eq!(
                 checkbox_size(tester),
@@ -731,12 +736,12 @@ mod tests {
 
             // Selected checkbox.
             frame(tester, true, false);
-            assert_paints(tester, &[Paints::Rrect(SELECTED_FILL_COLOR)]);
+            assert_paints(tester, &[PaintCall::rrect(Some(SELECTED_FILL_COLOR))]);
             assert_paints(
                 tester,
                 &[
-                    Paints::Rrect(SELECTED_FILL_COLOR),
-                    Paints::Path(CHECK_COLOR),
+                    PaintCall::rrect(Some(SELECTED_FILL_COLOR)),
+                    PaintCall::path(Some(CHECK_COLOR)),
                 ],
             );
 
@@ -745,11 +750,20 @@ mod tests {
             let gesture = point_gesture_to_checkbox(tester);
             tester.pump_and_settle();
             assert_eq!(tester.active_cursor(1), SystemMouseCursors::TEXT.into());
-            assert_paints(tester, &[Paints::Circle(HOVER_COLOR)]);
+            assert_paints(tester, &[PaintCall::circle(Some(HOVER_COLOR))]);
 
             // Checkbox with focus.
             frame(tester, false, true);
-            assert_paints(tester, &[Paints::CircleRadius(FOCUS_COLOR, SPLASH_RADIUS)]);
+            assert_paints(
+                tester,
+                &[PaintCall::Circle {
+                    x: None,
+                    y: None,
+                    radius: Some(SPLASH_RADIUS),
+                    color: Some(FOCUS_COLOR),
+                    style: None,
+                }],
+            );
             tester.send(&gesture, PointerChange::Remove);
         });
     }
@@ -779,11 +793,11 @@ mod tests {
 
             // Unselected checkbox.
             frame(tester, false);
-            assert_paints(tester, &[Paints::Rrect(THEME_DEFAULT_FILL_COLOR)]);
+            assert_paints(tester, &[PaintCall::rrect(Some(THEME_DEFAULT_FILL_COLOR))]);
 
             // Selected checkbox.
             frame(tester, true);
-            assert_paints(tester, &[Paints::Rrect(SELECTED_FILL_COLOR)]);
+            assert_paints(tester, &[PaintCall::rrect(Some(SELECTED_FILL_COLOR))]);
         });
     }
 
@@ -814,10 +828,13 @@ mod tests {
             tester.pump_and_settle();
             assert_paints(
                 tester,
-                &[Paints::CircleRadius(
-                    INACTIVE_PRESSED_OVERLAY_COLOR,
-                    SPLASH_RADIUS,
-                )],
+                &[PaintCall::Circle {
+                    x: None,
+                    y: None,
+                    radius: Some(SPLASH_RADIUS),
+                    color: Some(INACTIVE_PRESSED_OVERLAY_COLOR),
+                    style: None,
+                }],
             );
 
             pump_themed(
@@ -829,10 +846,13 @@ mod tests {
             tester.pump_and_settle();
             assert_paints(
                 tester,
-                &[Paints::CircleRadius(
-                    ACTIVE_PRESSED_OVERLAY_COLOR,
-                    SPLASH_RADIUS,
-                )],
+                &[PaintCall::Circle {
+                    x: None,
+                    y: None,
+                    radius: Some(SPLASH_RADIUS),
+                    color: Some(ACTIVE_PRESSED_OVERLAY_COLOR),
+                    style: None,
+                }],
             );
 
             // Finish gesture to release resources.
@@ -863,12 +883,12 @@ mod tests {
                 .into_widget(),
             );
             tester.pump_and_settle();
-            assert_paints(tester, &[Paints::Rrect(LOCAL_THEME_FILL_COLOR)]);
+            assert_paints(tester, &[PaintCall::rrect(Some(LOCAL_THEME_FILL_COLOR))]);
             assert_paints(
                 tester,
                 &[
-                    Paints::Rrect(LOCAL_THEME_FILL_COLOR),
-                    Paints::Path(LOCAL_THEME_CHECK_COLOR),
+                    PaintCall::rrect(Some(LOCAL_THEME_FILL_COLOR)),
+                    PaintCall::path(Some(LOCAL_THEME_CHECK_COLOR)),
                 ],
             );
         });
@@ -1077,11 +1097,11 @@ mod tests {
 
             frame(tester, Colors::RED.primary());
             tester.pump_and_settle();
-            assert_paints(tester, &[Paints::Ring(primary.get())]);
+            assert_paints(tester, &[PaintCall::drrect(Some(primary.get()))]);
 
             frame(tester, Colors::BLUE.primary());
             tester.pump_by(waft_gestures::K_PRESS_TIMEOUT);
-            assert_paints(tester, &[Paints::Ring(primary.get())]);
+            assert_paints(tester, &[PaintCall::drrect(Some(primary.get()))]);
         });
     }
 

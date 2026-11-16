@@ -689,10 +689,10 @@ mod tests {
     use std::cell::Cell;
     use std::fmt::Debug;
 
-    use waft_embedder::{Rect, Size, TextAffinity, TextSelection};
+    use waft_embedder::{Size, TextAffinity, TextSelection};
     use waft_widgets::{AnyElement, Form, FormState, GlobalKey, Icon, SizedBox, Text};
 
-    use waft_widgets::testing::{WidgetTester, test_widgets};
+    use waft_widgets::testing::{WidgetTester, expect, find, finds_one_widget, test_widgets};
 
     use super::*;
     use crate::icons::Icons;
@@ -749,18 +749,9 @@ mod tests {
 
     // ---- finders and gestures ----
 
-    fn only(found: Vec<AnyElement>) -> AnyElement {
-        assert_eq!(found.len(), 1, "one widget found");
-        found[0]
-    }
-
-    fn rect_of(tester: &WidgetTester, element: AnyElement) -> Rect {
-        tester.get_rect(tester.render_box_of(element))
-    }
-
     fn tap(tester: &mut WidgetTester, element: AnyElement) {
-        let center = rect_of(tester, element).center();
-        tester.tap(center, 1);
+        let center = tester.get_rect(element).center();
+        tester.tap_at(center, 1);
     }
 
     fn pump(tester: &mut WidgetTester) {
@@ -769,13 +760,16 @@ mod tests {
 
     /// Dart's `findMenuItemButton(label)`: the last `MenuItemButton` showing `label`.
     fn find_menu_item_button(tester: &WidgetTester, label: &str) -> AnyElement {
-        let text = *tester.find_text(label).last().expect("the label");
+        let text = *find::text(label)
+            .evaluate(tester)
+            .last()
+            .expect("the label");
         tester.ancestor_of_type::<MenuItemButton>(text)
     }
 
     /// Dart's `tester.tap(find.byType(DropdownMenu<T>))`.
     fn tap_dropdown_menu<T: 'static>(tester: &mut WidgetTester) {
-        let menu = only(tester.find_by_type::<DropdownMenu<T>>());
+        let menu = tester.element(find::by_type::<DropdownMenu<T>>());
         tap(tester, menu);
     }
 
@@ -797,12 +791,12 @@ mod tests {
     }
 
     fn menu<R>(tester: &WidgetTester, read: impl FnOnce(&DropdownMenu<MenuItem>) -> R) -> R {
-        let menu = only(tester.find_by_type::<DropdownMenu<MenuItem>>());
+        let menu = tester.element(find::by_type::<DropdownMenu<MenuItem>>());
         tester.widget(menu, read)
     }
 
     fn text_field<R>(tester: &WidgetTester, read: impl FnOnce(&TextField) -> R) -> R {
-        let field = only(tester.find_by_type::<TextField>());
+        let field = tester.element(find::by_type::<TextField>());
         tester.widget(field, read)
     }
 
@@ -851,7 +845,11 @@ mod tests {
     fn the_field_creates_a_dropdown_menu() {
         test_widgets(|tester| {
             pump_field(tester, field());
-            assert_eq!(tester.find_by_type::<DropdownMenu<MenuItem>>().len(), 1);
+            expect(
+                tester,
+                &find::by_type::<DropdownMenu<MenuItem>>(),
+                finds_one_widget(),
+            );
         });
     }
 
@@ -1371,7 +1369,7 @@ mod tests {
             assert_eq!(menu(tester, |menu| menu.restoration_id.clone()), None);
 
             pump_field(tester, field().restoration_id("dropdown_menu"));
-            assert_eq!(tester.find_by_type::<TextField>().len(), 1);
+            expect(tester, &find::by_type::<TextField>(), finds_one_widget());
             assert_eq!(
                 menu(tester, |menu| menu.restoration_id.clone()).as_deref(),
                 Some("dropdown_menu")
@@ -1596,7 +1594,7 @@ mod tests {
             state.validate(&mut tester.cell.borrow_mut());
             pump(tester);
 
-            assert_eq!(tester.find_text(validation_error).len(), 1);
+            expect(tester, &find::text(validation_error), finds_one_widget());
             text_field(tester, |text_field| {
                 assert_eq!(
                     text_field
@@ -1847,7 +1845,7 @@ mod tests {
                     .body(waft_widgets::Center::new().child(SizedBox::shrink().child(field())))
                     .into_widget(),
             ));
-            let form_field = only(tester.find_by_type::<DropdownMenuFormField<MenuItem>>());
+            let form_field = tester.element(find::by_type::<DropdownMenuFormField<MenuItem>>());
             let size = tester.render_box_of(form_field).size(&tester.cell.borrow());
             assert_eq!(size, Size::ZERO);
         });
@@ -1886,7 +1884,8 @@ mod tests {
             ));
 
             // Open the menu.
-            let form_field = only(tester.find_by_type::<DropdownMenuFormField<Option<String>>>());
+            let form_field =
+                tester.element(find::by_type::<DropdownMenuFormField<Option<String>>>());
             tap(tester, form_field);
             pump(tester);
 

@@ -298,6 +298,23 @@ pub trait Element: Sized + 'static {
         let _ = (self, app, visitor);
     }
 
+    /// Calls the argument for each child considered onstage.
+    ///
+    /// Classes like `Offstage` and `Overlay` override this method to hide their children.
+    ///
+    /// Being onstage affects the element's discoverability during testing when you use
+    /// flutter_test's `Finder`. Offstage elements are ignored by finders by default.
+    ///
+    /// Most widgets are not visible when offstage, but that is not always the case: an element
+    /// that is offstage here may still paint.
+    fn debug_visit_onstage_children(
+        self: Handle<Self>,
+        app: &App,
+        visitor: &mut dyn FnMut(AnyElement),
+    ) {
+        self.visit_children(app, visitor);
+    }
+
     /// Returns the child of this [`Element`] that will insert a `RenderObject` into an
     /// ancestor of this Element to construct the render tree.
     ///
@@ -571,6 +588,7 @@ pub(crate) struct ElementVTable {
     pub element_data: fn(&App, HandleId) -> &ElementData,
     pub element_data_mut: fn(&mut App, HandleId) -> &mut ElementData,
     pub visit_children: fn(&App, HandleId, &mut dyn FnMut(AnyElement)),
+    pub debug_visit_onstage_children: fn(&App, HandleId, &mut dyn FnMut(AnyElement)),
     pub render_object_attaching_child: fn(&App, HandleId) -> Option<AnyElement>,
     pub mount: fn(&mut App, HandleId, Option<AnyElement>, Option<Slot>),
     pub update: fn(&mut App, HandleId, WidgetRef),
@@ -618,6 +636,9 @@ impl ElementVTable {
             element_data: |app, id| T::element_data(resolve(id), app),
             element_data_mut: |app, id| T::element_data_mut(resolve(id), app),
             visit_children: |app, id, visitor| T::visit_children(resolve(id), app, visitor),
+            debug_visit_onstage_children: |app, id, visitor| {
+                T::debug_visit_onstage_children(resolve(id), app, visitor)
+            },
             render_object_attaching_child: |app, id| {
                 T::render_object_attaching_child(resolve(id), app)
             },
@@ -837,6 +858,11 @@ impl AnyElement {
     /// See [`Element::visit_children`].
     pub fn visit_children(self, app: &App, visitor: &mut dyn FnMut(AnyElement)) {
         (self.vtable.visit_children)(app, self.id, visitor);
+    }
+
+    /// See [`Element::debug_visit_onstage_children`].
+    pub fn debug_visit_onstage_children(self, app: &App, visitor: &mut dyn FnMut(AnyElement)) {
+        (self.vtable.debug_visit_onstage_children)(app, self.id, visitor);
     }
 
     /// See [`Element::render_object_attaching_child`].

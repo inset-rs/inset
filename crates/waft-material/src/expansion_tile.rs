@@ -1504,7 +1504,8 @@ pub(crate) mod tests {
     };
 
     use waft_widgets::testing::{
-        TargetPlatformVariant, TestPointer, WidgetTester, test_widgets, test_widgets_variant,
+        TargetPlatformVariant, TestPointer, WidgetTester, assert_more_or_less_equals_within,
+        expect, find, finds_nothing, finds_one_widget, test_widgets, test_widgets_variant,
     };
 
     use super::*;
@@ -1514,9 +1515,10 @@ pub(crate) mod tests {
     use crate::material::RenderInkFeatures;
     use crate::motion::Easing;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{Drawn, PaintInspection, is_same_color_as, material_app};
+    use crate::test_support::{PaintInspection, is_same_color_as, material_app};
     use crate::text_theme::TextTheme;
     use waft_foundation::HandleId;
+    use waft_rendering::testing::{PaintCall, assert_paints};
 
     const DIVIDER_COLOR: Color = Color::new(0x1f333333);
     const UNSELECTED_WIDGET_COLOR: Color = Colors::BLACK54;
@@ -1581,20 +1583,9 @@ pub(crate) mod tests {
         .into_widget()
     }
 
-    pub(crate) fn rect_of(tester: &WidgetTester, element: AnyElement) -> Rect {
-        tester.global_rect(tester.render_box_of(element))
-    }
-
-    /// Dart's `tester.getRect(find.text(text))`.
-    pub(crate) fn text_rect(tester: &WidgetTester, text: &str) -> Rect {
-        let found = tester.find_text(text);
-        assert_eq!(found.len(), 1, "one {text:?}");
-        rect_of(tester, found[0])
-    }
-
     /// Dart's `tester.getRect(find.byKey(key))`.
     pub(crate) fn key_rect(tester: &WidgetTester, key: &GlobalKey) -> Rect {
-        tester.global_rect(tester.render_object(key).as_box().expect("a render box"))
+        tester.get_rect(key)
     }
 
     /// Dart's `tester.getSize(find.byKey(key)).height`.
@@ -1602,34 +1593,34 @@ pub(crate) mod tests {
         key_rect(tester, key).height()
     }
 
-    /// Dart's `tester.tap(find.text(text))`.
-    pub(crate) fn tap_text(tester: &mut WidgetTester, text: &str) {
-        let center = text_rect(tester, text).center();
-        tester.tap(center, 1);
-    }
-
     /// Dart's `tester.getRect(find.byType(ListTile))`.
     pub(crate) fn list_tile_rect(tester: &WidgetTester) -> Rect {
-        let found = tester.find_by_type::<ListTile>();
+        let found = find::by_type::<ListTile>().evaluate(tester);
         assert_eq!(found.len(), 1, "one ListTile");
-        rect_of(tester, found[0])
+        tester.get_rect(found[0])
     }
 
     /// Dart's `tester.getRect(find.byIcon(Icons.expand_more))`.
     pub(crate) fn expand_more_rect(tester: &WidgetTester) -> Rect {
-        rect_of(tester, tester.find_by_icon(&Icons::expand_more()))
+        tester.get_rect(tester.element(find::by_icon(&Icons::expand_more()).first()))
     }
 
     /// Dart's `tester.getRect(find.byType(Column).last)`.
     fn last_column_rect(tester: &WidgetTester) -> Rect {
-        let last = *tester.find_by_type::<Column>().last().expect("a Column");
-        rect_of(tester, last)
+        let last = *find::by_type::<Column>()
+            .evaluate(tester)
+            .last()
+            .expect("a Column");
+        tester.get_rect(last)
     }
 
     /// Dart's `tester.getRect(find.byType(Padding).last)`.
     pub(crate) fn last_padding_rect(tester: &WidgetTester) -> Rect {
-        let last = *tester.find_by_type::<Padding>().last().expect("a Padding");
-        rect_of(tester, last)
+        let last = *find::by_type::<Padding>()
+            .evaluate(tester)
+            .last()
+            .expect("a Padding");
+        tester.get_rect(last)
     }
 
     fn element_of(tester: &WidgetTester, key: &GlobalKey) -> AnyElement {
@@ -1641,7 +1632,9 @@ pub(crate) mod tests {
     /// find.byKey(key), matching: find.byType(DecoratedBox))).decoration as ShapeDecoration`,
     /// with the colours of its `Border` shape's top and bottom sides.
     fn decoration_of(tester: &WidgetTester, key: &GlobalKey) -> (Option<Color>, Color, Color) {
-        let first = tester.descendants_of_type::<DecoratedBox>(element_of(tester, key))[0];
+        let first = tester.element(
+            find::descendant(find::by_global_key(key), find::by_type::<DecoratedBox>()).first(),
+        );
         tester.widget(first, |decorated_box: &DecoratedBox| {
             let decoration = decorated_box
                 .decoration
@@ -1666,8 +1659,13 @@ pub(crate) mod tests {
     pub(crate) fn tile_material(
         tester: &WidgetTester,
     ) -> (Option<ShapeBorderRef>, Option<Color>, Clip) {
-        let tile = tester.find_by_type::<ExpansionTile>()[0];
-        let material = tester.descendants_of_type::<Material>(tile)[0];
+        let material = tester.element(
+            find::descendant(
+                find::by_type::<ExpansionTile>().at(0),
+                find::by_type::<Material>(),
+            )
+            .first(),
+        );
         tester.widget(material, |material: &Material| {
             (
                 material.shape.clone(),
@@ -1678,7 +1676,7 @@ pub(crate) mod tests {
     }
 
     fn the_list_tile<R>(tester: &WidgetTester, read: impl FnOnce(&ListTile) -> R) -> R {
-        let found = tester.find_by_type::<ListTile>();
+        let found = find::by_type::<ListTile>().evaluate(tester);
         assert_eq!(found.len(), 1, "one ListTile");
         tester.widget(found[0], read)
     }
@@ -1708,20 +1706,6 @@ pub(crate) mod tests {
             None => tile,
         }
         .into_widget()
-    }
-
-    fn assert_close(actual: f64, expected: f64, tolerance: f64) {
-        assert!(
-            (actual - expected).abs() <= tolerance,
-            "{actual} is not within {tolerance} of {expected}"
-        );
-    }
-
-    /// Whether `drawn` has draws matching `matchers` in that order: Dart's `paints` matcher
-    /// with one call per matcher.
-    fn paints_in_order(drawn: &[Drawn], matchers: &[&dyn Fn(&Drawn) -> bool]) -> bool {
-        let mut rest = drawn.iter();
-        matchers.iter().all(|matcher| rest.by_ref().any(matcher))
     }
 
     fn initial_state_case(tester: &mut WidgetTester) {
@@ -1780,9 +1764,9 @@ pub(crate) mod tests {
         assert_eq!(top, Colors::TRANSPARENT);
         assert_eq!(bottom, Colors::TRANSPARENT);
 
-        tap_text(tester, "Expanded");
-        tap_text(tester, "Collapsed");
-        tap_text(tester, "Default");
+        tester.tap(find::text("Expanded"));
+        tester.tap(find::text("Collapsed"));
+        tester.tap(find::text("Default"));
 
         tester.pump();
 
@@ -1892,8 +1876,8 @@ pub(crate) mod tests {
         assert_eq!(collapsed_icon.get(), Some(UNSELECTED_WIDGET_COLOR));
 
         // Tap both tiles to change their state: collapse and extend respectively
-        tap_text(tester, "Expanded");
-        tap_text(tester, "Collapsed");
+        tester.tap(find::text("Expanded"));
+        tester.tap(find::text("Collapsed"));
         tester.pump();
         tester.pump_by(Duration::from_secs(1));
         tester.pump_by(Duration::from_secs(1));
@@ -1935,7 +1919,7 @@ pub(crate) mod tests {
                 ),
             );
 
-            assert_eq!(tester.find_onstage_text("Subtitle").len(), 1);
+            expect(tester, &find::text("Subtitle"), finds_one_widget());
         });
     }
 
@@ -1967,10 +1951,14 @@ pub(crate) mod tests {
             );
 
             // This text should be offstage while ExpansionTile collapsed
-            assert_eq!(tester.find_text("Maintaining State").len(), 1);
-            assert!(tester.find_onstage_text("Maintaining State").is_empty());
+            expect(
+                tester,
+                &find::text("Maintaining State").skip_offstage(false),
+                finds_one_widget(),
+            );
+            expect(tester, &find::text("Maintaining State"), finds_nothing());
             // This text shouldn't be there while ExpansionTile collapsed
-            assert!(tester.find_onstage_text("Discarding State").is_empty());
+            expect(tester, &find::text("Discarding State"), finds_nothing());
         });
     }
 
@@ -1989,7 +1977,7 @@ pub(crate) mod tests {
                 ),
             );
 
-            let title_rect = text_rect(tester, "Hello");
+            let title_rect = tester.get_rect(find::text("Hello"));
             let trailing_rect = expand_more_rect(tester);
             let list_tile_rect = list_tile_rect(tester);
             let taller_widget = if title_rect.height() > trailing_rect.height() {
@@ -2030,7 +2018,7 @@ pub(crate) mod tests {
             None => material,
         };
         pump_app(tester, m3, home);
-        tap_text(tester, "title");
+        tester.tap(find::text("title"));
         tester.pump_and_settle();
     }
 
@@ -2275,7 +2263,7 @@ pub(crate) mod tests {
             let (color, _, _) = decoration_of(tester, &expansion_tile_key);
             assert_eq!(color, Some(collapsed_background_color));
 
-            tap_text(tester, "Title");
+            tester.tap(find::text("Title"));
             tester.pump_and_settle();
 
             let (color, _, _) = decoration_of(tester, &expansion_tile_key);
@@ -2307,7 +2295,7 @@ pub(crate) mod tests {
             );
             assert_eq!(text_color.get(), Some(theme.color_scheme.on_surface));
 
-            tap_text(tester, "title");
+            tester.tap(find::text("title"));
             tester.pump_and_settle();
 
             assert_eq!(icon_color.get(), Some(theme.color_scheme.primary));
@@ -2344,7 +2332,7 @@ pub(crate) mod tests {
             assert_eq!(icon.get(), Some(collapsed_icon_color));
             assert_eq!(text.get(), Some(collapsed_text_color));
 
-            tap_text(tester, "title");
+            tester.tap(find::text("title"));
             tester.pump_and_settle();
 
             assert_eq!(icon.get(), Some(icon_color));
@@ -2353,10 +2341,15 @@ pub(crate) mod tests {
     }
 
     /// What the first `Material` below the `ExpansionTile` and its subtree draw.
-    fn tile_material_painted(tester: &WidgetTester) -> Vec<Drawn> {
-        let tile = tester.find_by_type::<ExpansionTile>()[0];
-        let material = tester.descendants_of_type::<Material>(tile)[0];
-        tester.painted(tester.render_box_of(material).as_object())
+    fn tile_material_painted(tester: &WidgetTester) -> Vec<waft_embedder::valo::Op> {
+        let material = tester.element(
+            find::descendant(
+                find::by_type::<ExpansionTile>().at(0),
+                find::by_type::<Material>(),
+            )
+            .first(),
+        );
+        tester.painted_ops(tester.render_object(material))
     }
 
     /// "ExpansionTile shows hover color with opaque backgroundColor".
@@ -2379,17 +2372,16 @@ pub(crate) mod tests {
             let mut gesture = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut gesture, Offset::ZERO);
             tester.pump();
-            let center = text_rect(tester, "Title").center();
+            let center = tester.get_rect(find::text("Title")).center();
             tester.move_to(&mut gesture, center, false);
             tester.pump_and_settle();
 
             // Dart's `paints..rect(color: Colors.transparent)..rect(color: hoverColor)`: a draw
             // with a transparent paint is not recorded at all, so the tile's transparent ink
             // decoration has no entry and the hover highlight is the first draw.
-            let drawn = tile_material_painted(tester);
-            assert!(
-                matches!(drawn.first(), Some(Drawn::Rect(color, _)) if *color == hover_color.to_argb32()),
-                "{drawn:?}"
+            assert_paints(
+                &tile_material_painted(tester),
+                &[PaintCall::rect(Some(hover_color))],
             );
         });
     }
@@ -2417,10 +2409,9 @@ pub(crate) mod tests {
             // Dart's `paints..rect(color: Colors.transparent)..rect(color: focusColor)`: a draw
             // with a transparent paint is not recorded at all, so the tile's transparent ink
             // decoration has no entry and the focus highlight is the first draw.
-            let drawn = tile_material_painted(tester);
-            assert!(
-                matches!(drawn.first(), Some(Drawn::Rect(color, _)) if *color == focus_color.to_argb32()),
-                "{drawn:?}"
+            assert_paints(
+                &tile_material_painted(tester),
+                &[PaintCall::rect(Some(focus_color))],
             );
         });
     }
@@ -2470,7 +2461,7 @@ pub(crate) mod tests {
             assert_eq!(material_shape, some_shape(collapsed_shape));
             assert_eq!(clip_behavior, Clip::AntiAlias);
 
-            tap_text(tester, "ExpansionTile");
+            tester.tap(find::text("ExpansionTile"));
             tester.pump_and_settle();
 
             // ExpansionTile should be Expanded now.
@@ -2657,7 +2648,7 @@ pub(crate) mod tests {
             assert_eq!(text.get(), Some(Color::new(0xffffffff)));
 
             // Tap the button to update the ExpansionTile properties.
-            tap_text(tester, "Update collapsed properties");
+            tester.tap(find::text("Update collapsed properties"));
             tester.pump_and_settle();
 
             let (shape, color, clip_behavior) = tile_material(tester);
@@ -2707,7 +2698,7 @@ pub(crate) mod tests {
             );
 
             // Tap to expand the ExpansionTile.
-            tap_text(tester, "title");
+            tester.tap(find::text("title"));
             tester.pump_and_settle();
 
             // When a custom shape is provided, ExpansionTile will use the
@@ -2723,7 +2714,7 @@ pub(crate) mod tests {
             assert_eq!(text.get(), Some(Color::new(0xff00ffff)));
 
             // Tap the button to update the ExpansionTile properties.
-            tap_text(tester, "Update collapsed properties");
+            tester.tap(find::text("Update collapsed properties"));
             tester.pump_and_settle();
 
             let (shape, color, clip_behavior) = tile_material(tester);
@@ -2753,17 +2744,17 @@ pub(crate) mod tests {
         assert_eq!(height(tester), 58.0);
 
         // Test the default expansion animation.
-        tap_text(tester, "title");
+        tester.tap(find::text("title"));
         tester.pump();
         // Advance the animation by 1/4 of its duration.
         tester.pump_by(Duration::from_millis(50));
 
-        assert_close(height(tester), 67.4, 0.1);
+        assert_more_or_less_equals_within(height(tester), 67.4, 0.1);
 
         // Advance the animation by 2/4 of its duration.
         tester.pump_by(Duration::from_millis(50));
 
-        assert_close(height(tester), 89.6, 0.1);
+        assert_more_or_less_equals_within(height(tester), 89.6, 0.1);
 
         // Advance the animation to the end.
         tester.pump_and_settle();
@@ -2771,7 +2762,7 @@ pub(crate) mod tests {
         assert_eq!(height(tester), 158.0);
 
         // Tap to collapse the ExpansionTile.
-        tap_text(tester, "title");
+        tester.tap(find::text("title"));
         tester.pump_and_settle();
 
         // Override the animation duration.
@@ -2788,17 +2779,17 @@ pub(crate) mod tests {
         tester.pump_and_settle();
 
         // Test the overridden animation duration.
-        tap_text(tester, "title");
+        tester.tap(find::text("title"));
         tester.pump();
         // Advance the animation by 1/4 of its duration.
         tester.pump_by(Duration::from_millis(200));
 
-        assert_close(height(tester), 67.4, 0.1);
+        assert_more_or_less_equals_within(height(tester), 67.4, 0.1);
 
         // Advance the animation by 2/4 of its duration.
         tester.pump_by(Duration::from_millis(200));
 
-        assert_close(height(tester), 89.6, 0.1);
+        assert_more_or_less_equals_within(height(tester), 89.6, 0.1);
 
         // Advance the animation to the end.
         tester.pump_and_settle();
@@ -2806,7 +2797,7 @@ pub(crate) mod tests {
         assert_eq!(height(tester), 158.0);
 
         // Tap to collapse the ExpansionTile.
-        tap_text(tester, "title");
+        tester.tap(find::text("title"));
         tester.pump_and_settle();
 
         // Override the animation curve.
@@ -2823,17 +2814,17 @@ pub(crate) mod tests {
         tester.pump_and_settle();
 
         // Test the overridden animation curve.
-        tap_text(tester, "title");
+        tester.tap(find::text("title"));
         tester.pump();
         // Advance the animation by 1/4 of its duration.
         tester.pump_by(Duration::from_millis(50));
 
-        assert_close(height(tester), 141.2, 0.1);
+        assert_more_or_less_equals_within(height(tester), 141.2, 0.1);
 
         // Advance the animation by 2/4 of its duration.
         tester.pump_by(Duration::from_millis(50));
 
-        assert_close(height(tester), 153.0, 0.1);
+        assert_more_or_less_equals_within(height(tester), 153.0, 0.1);
 
         // Advance the animation to the end.
         tester.pump_and_settle();
@@ -2842,17 +2833,17 @@ pub(crate) mod tests {
 
         if reverse_curve {
             // Test the overridden reverse (collapse) animation curve.
-            tap_text(tester, "title");
+            tester.tap(find::text("title"));
             tester.pump();
             // Advance the animation by 1/4 of its duration.
             tester.pump_by(Duration::from_millis(50));
 
-            assert_close(height(tester), 98.6, 0.1);
+            assert_more_or_less_equals_within(height(tester), 98.6, 0.1);
 
             // Advance the animation by 2/4 of its duration.
             tester.pump_by(Duration::from_millis(50));
 
-            assert_close(height(tester), 73.4, 0.1);
+            assert_more_or_less_equals_within(height(tester), 73.4, 0.1);
 
             // Advance the animation to the end.
             tester.pump_and_settle();
@@ -2860,7 +2851,7 @@ pub(crate) mod tests {
             assert_eq!(height(tester), 58.0);
         } else {
             // Tap to collapse the ExpansionTile.
-            tap_text(tester, "title");
+            tester.tap(find::text("title"));
         }
 
         // Test no animation.
@@ -2871,7 +2862,7 @@ pub(crate) mod tests {
         );
 
         // Tap to expand the ExpansionTile.
-        tap_text(tester, "title");
+        tester.tap(find::text("title"));
         tester.pump();
 
         assert_eq!(height(tester), 158.0);
@@ -2962,7 +2953,7 @@ pub(crate) mod tests {
                     .and_then(|style| style.color.as_deref().copied())
             );
 
-            tap_text(tester, "title");
+            tester.tap(find::text("title"));
             tester.pump_and_settle();
 
             assert_eq!(icon_color.get(), Some(theme.color_scheme.primary));
@@ -3007,18 +2998,14 @@ pub(crate) mod tests {
             tester.pump_by(Duration::from_millis(100));
 
             let ink_features = tester.first::<RenderInkFeatures>();
-            let drawn = tester.painted(ink_features.as_object());
             let splash_color = m2(&tester.cell.borrow()).splash_color;
             // Check if the ink splash is drawn on top of the background color.
-            assert!(
-                paints_in_order(
-                    &drawn,
-                    &[
-                        &|draw| matches!(draw, Drawn::Path(color, _) if *color == collapsed_background_color.to_argb32()),
-                        &|draw| matches!(draw, Drawn::Path(color, _) if *color == splash_color.to_argb32()),
-                    ]
-                ),
-                "{drawn:?}"
+            assert_paints(
+                &tester.painted_ops(ink_features.as_object()),
+                &[
+                    PaintCall::rrect(Some(collapsed_background_color)),
+                    PaintCall::circle(Some(splash_color)),
+                ],
             );
 
             // Finish gesture to release resources.
@@ -3044,17 +3031,17 @@ pub(crate) mod tests {
             );
 
             let is_expanded = |tester: &WidgetTester| controller.is_expanded(&tester.cell.borrow());
-            assert!(tester.find_onstage_text("Child 0").is_empty());
+            expect(tester, &find::text("Child 0"), finds_nothing());
             assert!(!is_expanded(tester));
             controller.expand(&mut tester.cell.borrow_mut());
             assert!(is_expanded(tester));
             tester.pump_and_settle();
-            assert_eq!(tester.find_onstage_text("Child 0").len(), 1);
+            expect(tester, &find::text("Child 0"), finds_one_widget());
             assert!(is_expanded(tester));
             controller.collapse(&mut tester.cell.borrow_mut());
             assert!(!is_expanded(tester));
             tester.pump_and_settle();
-            assert!(tester.find_onstage_text("Child 0").is_empty());
+            expect(tester, &find::text("Child 0"), finds_nothing());
 
             controller.dispose(&mut tester.cell.borrow_mut());
         });
@@ -3085,20 +3072,20 @@ pub(crate) mod tests {
             );
 
             let is_expanded = |tester: &WidgetTester| controller.is_expanded(&tester.cell.borrow());
-            assert_eq!(tester.find_onstage_text("Child 0").len(), 1);
+            expect(tester, &find::text("Child 0"), finds_one_widget());
             assert!(is_expanded(tester));
             controller.expand(&mut tester.cell.borrow_mut());
             assert!(is_expanded(tester));
             tester.pump();
             assert!(!has_running_animations(tester));
-            assert_eq!(tester.find_onstage_text("Child 0").len(), 1);
+            expect(tester, &find::text("Child 0"), finds_one_widget());
             controller.collapse(&mut tester.cell.borrow_mut());
             assert!(!is_expanded(tester));
             tester.pump();
             assert!(has_running_animations(tester));
             tester.pump_and_settle();
             assert!(!is_expanded(tester));
-            assert!(tester.find_onstage_text("Child 0").is_empty());
+            expect(tester, &find::text("Child 0"), finds_nothing());
             controller.collapse(&mut tester.cell.borrow_mut());
             assert!(!is_expanded(tester));
             tester.pump();
@@ -3212,9 +3199,9 @@ pub(crate) mod tests {
 
     /// Dart's `tester.tap(find.widgetWithText(ExpansionTile, text))`.
     fn tap_tile(tester: &mut WidgetTester) {
-        let tile = tester.find_by_type::<ExpansionTile>()[0];
-        let center = rect_of(tester, tile).center();
-        tester.tap(center, 1);
+        let tile = tester.element(find::by_type::<ExpansionTile>().at(0));
+        let center = tester.get_rect(tile).center();
+        tester.tap_at(center, 1);
     }
 
     /// "ExpansionTileController should not toggle if disabled".
@@ -3235,19 +3222,19 @@ pub(crate) mod tests {
             );
 
             let is_expanded = |tester: &WidgetTester| controller.is_expanded(&tester.cell.borrow());
-            assert!(tester.find_onstage_text("Child 0").is_empty());
+            expect(tester, &find::text("Child 0"), finds_nothing());
             assert!(!is_expanded(tester));
             tap_tile(tester);
             tester.pump_and_settle();
-            assert!(tester.find_onstage_text("Child 0").is_empty());
+            expect(tester, &find::text("Child 0"), finds_nothing());
             assert!(!is_expanded(tester));
             controller.expand(&mut tester.cell.borrow_mut());
             tester.pump_and_settle();
-            assert_eq!(tester.find_onstage_text("Child 0").len(), 1);
+            expect(tester, &find::text("Child 0"), finds_one_widget());
             assert!(is_expanded(tester));
             tap_tile(tester);
             tester.pump_and_settle();
-            assert_eq!(tester.find_onstage_text("Child 0").len(), 1);
+            expect(tester, &find::text("Child 0"), finds_one_widget());
             assert!(is_expanded(tester));
 
             controller.dispose(&mut tester.cell.borrow_mut());
@@ -3257,10 +3244,11 @@ pub(crate) mod tests {
     /// Dart's `tester.getSize(find.descendant(of: find.byType(ExpansionTile), matching:
     /// find.byType(ColoredBox))).width`.
     fn title_width(tester: &WidgetTester) -> f64 {
-        let tile = tester.find_by_type::<ExpansionTile>()[0];
-        let colored_box = tester.descendants_of_type::<ColoredBox>(tile);
-        assert_eq!(colored_box.len(), 1, "one ColoredBox");
-        rect_of(tester, colored_box[0]).width()
+        let colored_box = find::descendant(
+            find::by_type::<ExpansionTile>().first(),
+            find::by_type::<ColoredBox>(),
+        );
+        tester.get_rect(colored_box).width()
     }
 
     /// "ExpansionTile does not include the default trailing icon when showTrailingIcon: false
@@ -3322,9 +3310,9 @@ pub(crate) mod tests {
                 );
             };
             let top_left = |tester: &WidgetTester| {
-                let found = tester.find_text("ExpansionTile");
+                let found = find::text("ExpansionTile").evaluate(tester);
                 assert_eq!(found.len(), 1, "one ExpansionTile title");
-                rect_of(tester, found[0]).top_left()
+                tester.get_rect(found[0]).top_left()
             };
 
             build_view(tester, ListTileControlAffinity::Leading);
@@ -3355,20 +3343,20 @@ pub(crate) mod tests {
 
             pump_app(tester, m3, tile(controller1.clone()));
 
-            assert_eq!(tester.find_onstage_text("Child 0").len(), 1);
+            expect(tester, &find::text("Child 0"), finds_one_widget());
             assert!(controller1.is_expanded(&tester.cell.borrow()));
             controller1.collapse(&mut tester.cell.borrow_mut());
             assert!(!controller1.is_expanded(&tester.cell.borrow()));
             tester.pump_and_settle();
-            assert!(tester.find_onstage_text("Child 0").is_empty());
+            expect(tester, &find::text("Child 0"), finds_nothing());
 
             pump_app(tester, m3, tile(controller2.clone()));
 
-            assert!(tester.find_onstage_text("Child 0").is_empty());
+            expect(tester, &find::text("Child 0"), finds_nothing());
             controller2.expand(&mut tester.cell.borrow_mut());
             assert!(controller2.is_expanded(&tester.cell.borrow()));
             tester.pump_and_settle();
-            assert_eq!(tester.find_onstage_text("Child 0").len(), 1);
+            expect(tester, &find::text("Child 0"), finds_one_widget());
 
             controller1.dispose(&mut tester.cell.borrow_mut());
             controller2.dispose(&mut tester.cell.borrow_mut());
@@ -3391,25 +3379,25 @@ pub(crate) mod tests {
 
             pump_app(tester, m3, tile(controller1.clone()));
 
-            assert!(tester.find_onstage_text("Child 0").is_empty());
+            expect(tester, &find::text("Child 0"), finds_nothing());
             assert!(!controller1.is_expanded(&tester.cell.borrow()));
             controller1.expand(&mut tester.cell.borrow_mut());
             assert!(controller1.is_expanded(&tester.cell.borrow()));
             tester.pump_and_settle();
-            assert_eq!(tester.find_onstage_text("Child 0").len(), 1);
+            expect(tester, &find::text("Child 0"), finds_one_widget());
 
             pump_app(tester, m3, tile(controller2.clone()));
 
             tester.pump_and_settle();
 
             assert!(
-                tester.find_onstage_text("Child 0").is_empty(),
+                find::text("Child 0").evaluate(tester).is_empty(),
                 "The widget should update to the state of the new controller"
             );
             controller2.expand(&mut tester.cell.borrow_mut());
             assert!(controller2.is_expanded(&tester.cell.borrow()));
             tester.pump_and_settle();
-            assert_eq!(tester.find_onstage_text("Child 0").len(), 1);
+            expect(tester, &find::text("Child 0"), finds_one_widget());
 
             controller1.dispose(&mut tester.cell.borrow_mut());
             controller2.dispose(&mut tester.cell.borrow_mut());
@@ -3473,10 +3461,10 @@ pub(crate) mod tests {
                 ),
             );
 
-            tap_text(tester, "Title");
+            tester.tap(find::text("Title"));
             assert_eq!(*changes.borrow(), [true]);
             tester.pump_and_settle();
-            tap_text(tester, "Title");
+            tester.tap(find::text("Title"));
             assert_eq!(*changes.borrow(), [true, false]);
             tester.pump_and_settle();
         });
@@ -3500,7 +3488,7 @@ pub(crate) mod tests {
                         .into_span(),
                 )),
             );
-            assert_eq!(tester.find_text("Header").len(), 1);
+            expect(tester, &find::text("Header"), finds_one_widget());
         });
     }
 
@@ -3516,23 +3504,23 @@ pub(crate) mod tests {
             };
 
             pump_app(tester, m3, Material::new().child(tile()));
-            assert!(tester.find_onstage_text("Child 0").is_empty());
+            expect(tester, &find::text("Child 0"), finds_nothing());
 
             pump_app(
                 tester,
                 m3,
                 Material::new().child(tile().controller(controller.clone())),
             );
-            assert!(tester.find_onstage_text("Child 0").is_empty());
+            expect(tester, &find::text("Child 0"), finds_nothing());
 
             controller.toggle(&mut tester.cell.borrow_mut());
             tester.pump_and_settle();
             assert!(controller.is_expanded(&tester.cell.borrow()));
-            assert_eq!(tester.find_onstage_text("Child 0").len(), 1);
+            expect(tester, &find::text("Child 0"), finds_one_widget());
 
             controller.toggle(&mut tester.cell.borrow_mut());
             tester.pump_and_settle();
-            assert!(tester.find_onstage_text("Child 0").is_empty());
+            expect(tester, &find::text("Child 0"), finds_nothing());
 
             pump_app(tester, m3, SizedBox::new());
             controller.dispose(&mut tester.cell.borrow_mut());
@@ -3541,7 +3529,7 @@ pub(crate) mod tests {
 
     /// The animations a tile drove for its header and its decoration.
     fn driven_animations(tester: &WidgetTester) -> [HandleId; 5] {
-        let tile = tester.find_by_type::<ExpansionTile>()[0];
+        let tile = tester.element(find::by_type::<ExpansionTile>().at(0));
         let app = tester.cell.borrow();
         let state = app.get(
             tile.state_handle::<ExpansionTileState>(&app)
@@ -3572,7 +3560,7 @@ pub(crate) mod tests {
             );
             let first = driven_animations(tester);
 
-            tap_text(tester, "Title");
+            tester.tap(find::text("Title"));
             tester.pump_by(Duration::from_millis(50));
             let mid_expansion = driven_animations(tester);
             {

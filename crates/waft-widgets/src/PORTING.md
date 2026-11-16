@@ -310,6 +310,12 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — Rust has no `static const` object holding an `Rc`, so the identity of Dart's one canonical object is the identity of the resolver every call shares.
   Affect: two calls of one of them compare equal, as Dart's `const` does, but are two objects; a cursor made by `resolve_with` is equal only to itself.
 
+## framework/ → framework.dart (`Element.debugVisitOnstageChildren`)
+
+- Change: the element subclasses Dart writes only to hide children from the test finders (`_OffstageElement`, `_IndexedStackElement`, Material's `_TextSelectionToolbarItemsLayoutElement`) have no element of their own: the generic single- and multi-child render-object elements ask their widget, through `RenderObjectWidget::debug_visit_onstage_children`, which children are onstage; an element of a widget's own (`_TheaterElement`, `_ViewportElement`, `SliverMultiBoxAdaptorElement`, Cupertino's toolbar items) overrides `Element::debug_visit_onstage_children` as Dart does.
+  Reason: language — Waft's generic elements stand in for Dart's per-widget element subclasses, and a subclass for one debug override would repeat a whole element.
+  Affect: a widget that hides children from the finders overrides the widget method, not the element's.
+
 ## framework: notifications → framework.dart (`Notification`, `NotifiableElementMixin`, `_NotificationNode`)
 
 - Change: `NotificationListener<T>` matches one concrete notification type, or a family such as `dyn ScrollNotification` or `dyn LayoutChangedNotification` that a notification declares itself part of.
@@ -743,7 +749,7 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - basic.rs, implicit_animations.rs: the `PhysicalModel`, `PhysicalShape` and `AnimatedPhysicalModel` diagnostics. Trigger: diagnostics.
 - basic.rs: `RepaintBoundary.wrap` and `wrapAll`, `DefaultAssetBundle`. Trigger: the sliver child delegates that call them; asset bundles.
 - basic.rs: `SliverSemantics`, which waits on `RenderSliverSemanticsAnnotations`, and the semantics flags on the pointer and opacity widgets, which only feed `visitChildrenForSemantics`. Trigger: a `SliverSemantics` caller; the semantics tree.
-- basic.rs: the inspector-only transform labels and the onstage-child debug walks. Trigger: diagnostics.
+- basic.rs: the inspector-only transform labels. Trigger: diagnostics.
 - icon.rs: icon diagnostics. Trigger: diagnostics.
 - visibility.rs: `SliverVisibility`. Trigger: `SliverOpacity`, `SliverIgnorePointer` and `SliverOffstage`.
 - visibility.rs: what `Visibility.maintainSemantics` controls. Trigger: the semantics tree.
@@ -772,10 +778,10 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 - automatic_keep_alive.rs: diagnostics. Trigger: diagnostics.
 - layout_builder.rs: `SliverLayoutBuilder` with the abstract generic builders, and the error widget on a builder panic. Trigger: the next edit of layout_builder.rs (slivers exist); diagnostics.
 - sliver.rs: `SliverOpacity`, `SliverIgnorePointer`, `SliverOffstage`, `SliverConstrainedCrossAxis`, `SliverCrossAxisExpanded`, `SliverCrossAxisGroup` and `SliverMainAxisGroup`. Trigger: each one's render sliver.
-- sliver.rs: `SliverEnsureSemantics` and the adaptor element's onstage-child debug walk. Trigger: the semantics tree; diagnostics.
+- sliver.rs: `SliverEnsureSemantics`. Trigger: the semantics tree.
 - Two-dimensional scrolling: the two-dimensional viewport, its scrollable and scopes, its child delegates, `DiagonalDragBehavior`, and sliver.rs's `KeepAlive` under such a viewport. Trigger: `two_dimensional_viewport.dart`.
 - scroll_delegate.rs: the `_SelectionKeepAlive` the delegates put inside each child's `AutomaticKeepAlive`, and the delegate description's exception branch. Trigger: `selection_container.dart`; diagnostics.
-- viewport.rs: the viewport diagnostics and the onstage-child debug walk. Trigger: diagnostics.
+- viewport.rs: the viewport diagnostics. Trigger: diagnostics.
 - Scroll semantics: `ScrollContext.setSemanticsActions`, scrollable.rs's semantics widget and its render object with `excludeFromSemantics` and `semanticChildCount`, and scroll_position.rs's semantic action bookkeeping. Trigger: the semantics tree.
 - scrollable.rs: the selection handler and container delegate around a scrollable. Trigger: `SelectionContainer` / `SelectionRegistrar`.
 - scrollable.rs, scroll_configuration.rs, primary_scroll_controller.rs: diagnostics, and `ScrollableDetails.hashCode` (no `Hash` over an erased physics). Trigger: diagnostics; a map keyed by scrollable details.

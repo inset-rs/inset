@@ -1242,8 +1242,10 @@ mod tests {
         WidgetsBinding, WidgetsLocalizations, downcast_widget,
     };
 
+    use waft_rendering::testing::{PaintCall, paints};
     use waft_widgets::testing::{
-        TargetPlatformVariant, TestPointer, WidgetTester, test_widgets, test_widgets_variant,
+        TargetPlatformVariant, TestPointer, WidgetTester, expect, find, finds_one_widget,
+        test_widgets, test_widgets_variant,
     };
 
     use super::*;
@@ -1336,16 +1338,16 @@ mod tests {
     }
 
     fn found(tester: &WidgetTester, text: &str) -> usize {
-        tester.find_text(text).len()
+        find::text(text).skip_offstage(false).evaluate(tester).len()
     }
 
     fn onstage(tester: &WidgetTester, text: &str) -> usize {
-        tester.find_onstage_text(text).len()
+        find::text(text).evaluate(tester).len()
     }
 
     fn navigator(tester: &WidgetTester) -> Handle<NavigatorState> {
-        let element = *tester
-            .find_by_type::<Navigator>()
+        let element = *find::by_type::<Navigator>()
+            .evaluate(tester)
             .first()
             .expect("a navigator");
         element
@@ -1354,21 +1356,24 @@ mod tests {
     }
 
     fn center_of_text(tester: &WidgetTester, text: &str) -> Offset {
-        let element = *tester.find_text(text).first().expect("the text is mounted");
-        tester.global_rect(tester.render_box_of(element)).center()
+        let element = *find::text(text)
+            .evaluate(tester)
+            .first()
+            .expect("the text is mounted");
+        tester.get_rect(element).center()
     }
 
     /// The colour of the first `Material`: Dart's `tester.widget<Material>(find.byType(Material)).color`.
     fn material_color(tester: &WidgetTester) -> Option<Color> {
-        let element = *tester
-            .find_by_type::<Material>()
+        let element = *find::by_type::<Material>()
+            .evaluate(tester)
             .first()
             .expect("a Material");
         tester.widget(element, |material: &Material| material.color)
     }
 
     fn count_of<W: 'static>(tester: &WidgetTester) -> usize {
-        tester.find_by_type::<W>().len()
+        find::by_type::<W>().evaluate(tester).len()
     }
 
     #[test]
@@ -1393,7 +1398,7 @@ mod tests {
             pump(tester, |_| {
                 MaterialApp::new().home(MaterialApp::new().home(Text::new("Home sweet home")))
             });
-            assert_eq!(found(tester, "Home sweet home"), 1);
+            assert_eq!(onstage(tester, "Home sweet home"), 1);
         });
     }
 
@@ -1420,7 +1425,7 @@ mod tests {
 
             assert_eq!(build_counter.get(), 0);
             let x = center_of_text(tester, "X");
-            tester.tap(x, 1);
+            tester.tap_at(x, 1);
             assert_eq!(build_counter.get(), 0);
             tester.pump();
             assert_eq!(build_counter.get(), 1);
@@ -1449,11 +1454,11 @@ mod tests {
             let a = home("A");
             pump(tester, |_| MaterialApp::new().home(a));
             assert_eq!(build_counter.get(), 1);
-            assert_eq!(found(tester, "A"), 1);
+            assert_eq!(onstage(tester, "A"), 1);
             let b = home("B");
             pump(tester, |_| MaterialApp::new().home(b));
             assert_eq!(build_counter.get(), 2);
-            assert_eq!(found(tester, "B"), 1);
+            assert_eq!(onstage(tester, "B"), 1);
         });
     }
 
@@ -1495,13 +1500,13 @@ mod tests {
     fn the_initial_route_cannot_be_popped() {
         test_widgets(|tester| {
             pump(tester, |_| MaterialApp::new().home(Text::new("Home")));
-            assert_eq!(found(tester, "Home"), 1);
+            assert_eq!(onstage(tester, "Home"), 1);
 
             let navigator = navigator(tester);
             let result = navigator.maybe_pop(&mut tester.cell.borrow_mut(), None);
 
             assert!(!result);
-            assert_eq!(found(tester, "Home"), 1);
+            assert_eq!(onstage(tester, "Home"), 1);
         });
     }
 
@@ -1605,7 +1610,7 @@ mod tests {
                     .theme_animation_style(AnimationStyle::NO_ANIMATION)
                     .builder(|_app, _context, _child| Text::new("Works").into_widget())
             });
-            assert_eq!(found(tester, "Works"), 1);
+            assert_eq!(onstage(tester, "Works"), 1);
         });
     }
 
@@ -2228,12 +2233,12 @@ mod tests {
                 )
             });
 
-            let glow = *tester
-                .find_by_type::<GlowingOverscrollIndicator>()
+            let glow = *find::by_type::<GlowingOverscrollIndicator>()
+                .evaluate(tester)
                 .first()
                 .expect("a glowing indicator");
-            let custom_paint = tester
-                .find_by_type::<waft_widgets::CustomPaint>()
+            let custom_paint = find::by_type::<waft_widgets::CustomPaint>()
+                .evaluate(tester)
                 .into_iter()
                 .find(|custom_paint| tester.ancestors(*custom_paint).contains(&glow))
                 .expect("the glow paints through a CustomPaint");
@@ -2247,11 +2252,11 @@ mod tests {
             }
             tester.up(&gesture);
             assert!(
-                tester.painted(painter).iter().any(|drawn| matches!(
-                    drawn,
-                    crate::test_support::Drawn::Path(color, _)
-                        if *color == glow_secondary_color.to_argb32()
-                )),
+                paints(
+                    &tester.painted_ops(painter),
+                    &[PaintCall::circle(Some(glow_secondary_color))]
+                )
+                .is_ok(),
                 "the glow paints a circle in the secondary colour"
             );
         });
@@ -2307,7 +2312,7 @@ mod tests {
                 let at = gesture.position + Offset::new(0.0, 200.0);
                 tester.move_to(&mut gesture, at, true);
                 tester.pump_and_settle();
-                assert_eq!(found(tester, "Index 1"), 1);
+                assert_eq!(onstage(tester, "Index 1"), 1);
                 assert!(center_of_text(tester, "Index 1").dy() > 0.0);
                 // Now clipping
                 assert_eq!(clip_of(tester), expected);
@@ -2321,7 +2326,7 @@ mod tests {
 
             assert_eq!(count_of::<StretchingOverscrollIndicator>(tester), 1);
             assert_eq!(count_of::<GlowingOverscrollIndicator>(tester), 0);
-            assert_eq!(found(tester, "Index 1"), 1);
+            assert_eq!(onstage(tester, "Index 1"), 1);
 
             // Currently not clipping
             assert_eq!(clip_of(tester), Clip::None);
@@ -2617,8 +2622,8 @@ mod tests {
     }
 
     fn material_app_size(tester: &WidgetTester) -> Size {
-        let element: AnyElement = *tester
-            .find_by_type::<MaterialApp>()
+        let element: AnyElement = *find::by_type::<MaterialApp>()
+            .evaluate(tester)
             .first()
             .expect("a MaterialApp");
         tester.render_box_of(element).size(&tester.cell.borrow())
@@ -2696,19 +2701,9 @@ mod tests {
                     .into_widget(),
             );
 
-            assert_eq!(tester.find_onstage_text("Home").len(), 1);
+            expect(tester, &find::text("Home"), finds_one_widget());
             focus_scope_node.dispose(&mut tester.cell.borrow_mut());
         });
-    }
-
-    /// Dart's `tester.tap(find.text(text))`.
-    fn tap_text(tester: &mut WidgetTester, text: &str) {
-        let element = *tester
-            .find_onstage_text(text)
-            .first()
-            .expect("the text is onstage");
-        let center = tester.global_rect(tester.render_box_of(element)).center();
-        tester.tap(center, 1);
     }
 
     #[test]
@@ -2748,11 +2743,11 @@ mod tests {
                         }) as WidgetBuilder,
                     )])
             });
-            tap_text(tester, "X");
+            tester.tap(find::text("X"));
             tester.pump();
             tester.pump_by(Duration::from_secs(1));
-            assert_eq!(tester.find_onstage_text("Y").len(), 1);
-            tap_text(tester, "Y");
+            expect(tester, &find::text("Y"), finds_one_widget());
+            tester.tap(find::text("Y"));
             tester.pump();
 
             let value = result

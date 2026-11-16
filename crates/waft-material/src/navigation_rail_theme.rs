@@ -389,7 +389,9 @@ mod tests {
     };
     use waft_widgets::{AnyElement, Flexible, Icon, IconData, IconTheme, RichText, Text};
 
-    use waft_widgets::testing::{WidgetTester, test_widgets};
+    use waft_widgets::testing::{
+        WidgetTester, expect, find, finds_nothing, finds_widgets, test_widgets,
+    };
 
     use super::*;
     use crate::icons::Icons;
@@ -424,7 +426,7 @@ mod tests {
     }
 
     fn rail(tester: &WidgetTester) -> AnyElement {
-        tester.find_by_type::<NavigationRail>()[0]
+        find::by_type::<NavigationRail>().evaluate(tester)[0]
     }
 
     /// Dart's `_railMaterial`: the first material is for the rail, and the rest are for the
@@ -439,7 +441,7 @@ mod tests {
         tester: &WidgetTester,
         read: impl FnOnce(&ShapeDecoration) -> R,
     ) -> R {
-        let indicator = tester.find_by_type::<NavigationIndicator>()[0];
+        let indicator = find::by_type::<NavigationIndicator>().evaluate(tester)[0];
         let ink = tester.descendants_of_type::<Ink>(indicator)[0];
         tester.widget(ink, |ink: &Ink| {
             read(
@@ -453,7 +455,8 @@ mod tests {
 
     /// Dart's `_iconTheme`: the first IconTheme is the one added by the navigation rail.
     fn icon_theme(tester: &WidgetTester, icon: IconData) -> IconThemeData {
-        let element = tester.ancestor_of_type::<IconTheme>(tester.find_by_icon(&icon));
+        let element = tester
+            .element(find::ancestor(find::by_icon(&icon), find::by_type::<IconTheme>()).first());
         tester.widget(element, |icon_theme: &IconTheme| icon_theme.data.clone())
     }
 
@@ -466,7 +469,7 @@ mod tests {
     }
 
     fn label_style(tester: &WidgetTester, text: &str) -> TextStyle {
-        let text = tester.find_text(text)[0];
+        let text = find::text(text).evaluate(tester)[0];
         let rich_text = tester.descendants_of_type::<RichText>(text)[0];
         tester.widget(rich_text, |rich_text: &RichText| {
             rich_text.text.style().cloned().expect("a styled label")
@@ -483,7 +486,9 @@ mod tests {
 
     /// Dart's `_destinationSize`.
     fn destination_size(tester: &WidgetTester) -> Size {
-        let material = tester.ancestor_of_type::<Material>(tester.find_by_icon(&Icons::favorite()));
+        let material = tester.ancestor_of_type::<Material>(
+            tester.element(find::by_icon(&Icons::favorite()).first()),
+        );
         let render = tester.render_box_of(material);
         render.size(&tester.cell.borrow())
     }
@@ -491,14 +496,14 @@ mod tests {
     /// Dart's `_destinationsAlign(tester).alignment`: the first Flexible widget is the one
     /// within the main Column for the rail content.
     fn destinations_alignment(tester: &WidgetTester) -> AlignmentGeometry {
-        let flexible = tester.find_by_type::<Flexible>()[0];
+        let flexible = find::by_type::<Flexible>().evaluate(tester)[0];
         let align = tester.descendants_of_type::<waft_widgets::Align>(flexible)[0];
         tester.widget(align, |align: &waft_widgets::Align| align.alignment)
     }
 
     /// Dart's `_visibilityAboveLabel(text)`: the `Visibility` above the label, if any.
     fn visibility_above_label(tester: &WidgetTester, text: &str) -> Option<bool> {
-        let text = tester.find_text(text)[0];
+        let text = find::text(text).evaluate(tester)[0];
         let ancestors = tester.ancestors(text);
         let app = tester.cell.borrow();
         ancestors.iter().find_map(|element| {
@@ -569,7 +574,11 @@ mod tests {
                 AlignmentGeometry::TOP_CENTER
             );
             assert_eq!(label_type(tester), NavigationRailLabelType::None);
-            assert!(!tester.find_by_type::<NavigationIndicator>().is_empty());
+            expect(
+                tester,
+                &find::by_type::<NavigationIndicator>(),
+                finds_widgets(),
+            );
             assert_eq!(
                 indicator_decoration(tester, |decoration| decoration.color.clone()),
                 Some(theme.color_scheme.secondary_container().into())
@@ -578,7 +587,7 @@ mod tests {
             assert!(indicator_decoration(tester, |decoration| {
                 &*decoration.shape == &stadium as &dyn ShapeBorder
             }));
-            let ink_response = tester.find_by_type::<InkResponse>()[0];
+            let ink_response = find::by_type::<InkResponse>().evaluate(tester)[0];
             assert!(tester.widget(ink_response, |ink_response: &InkResponse| {
                 ink_response.custom_border.as_deref() == Some(&stadium as &dyn ShapeBorder)
             }));
@@ -631,7 +640,11 @@ mod tests {
                 AlignmentGeometry::TOP_CENTER
             );
             assert_eq!(label_type(tester), NavigationRailLabelType::None);
-            assert!(tester.find_by_type::<NavigationIndicator>().is_empty());
+            expect(
+                tester,
+                &find::by_type::<NavigationIndicator>(),
+                finds_nothing(),
+            );
         });
     }
 
@@ -732,7 +745,11 @@ mod tests {
                 AlignmentGeometry::Alignment(Alignment::CENTER)
             );
             assert_eq!(label_type(tester), label_type_value);
-            assert!(!tester.find_by_type::<NavigationIndicator>().is_empty());
+            expect(
+                tester,
+                &find::by_type::<NavigationIndicator>(),
+                finds_widgets(),
+            );
             assert_eq!(
                 indicator_decoration(tester, |decoration| decoration.color.clone()),
                 Some(indicator_color.into())
@@ -858,7 +875,11 @@ mod tests {
                 AlignmentGeometry::Alignment(Alignment::CENTER)
             );
             assert_eq!(label_type(tester), label_type_value);
-            assert!(!tester.find_by_type::<NavigationIndicator>().is_empty());
+            expect(
+                tester,
+                &find::by_type::<NavigationIndicator>(),
+                finds_widgets(),
+            );
             assert_eq!(
                 indicator_decoration(tester, |decoration| decoration.color.clone()),
                 Some(indicator_color.into())

@@ -5140,10 +5140,12 @@ impl TimePickerDefaults for TimePickerDefaultsM2 {
 pub(crate) mod tests {
     //! time_picker_test.dart.
 
-    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+    use waft_widgets::testing::{
+        TestPointer, WidgetTester, assert_f32_equals, assert_more_or_less_equals_within, find,
+        test_widgets,
+    };
 
     use super::*;
-    use crate::chip::tests::{center_of, size_of};
     use crate::dialog::Dialog;
     use crate::material::Material;
     use crate::test_support::{PaintInspection, material_app};
@@ -5158,6 +5160,7 @@ pub(crate) mod tests {
     use waft_embedder::{TextAffinity, TextEditingValue, TextSelection};
     use waft_foundation::Listener;
     use waft_painting::{EdgeInsets, TextScaler, TextStyle};
+    use waft_rendering::testing::{PaintCall, assert_paints};
     use waft_services::TextInputClient;
     use waft_widgets::{
         AnyElement, BuildContext, Builder, Icon, IntoWidget, MediaQuery, MediaQueryData,
@@ -5282,24 +5285,16 @@ pub(crate) mod tests {
         let root = IntoWidget::into_widget(root);
         tester.pump_widget(root);
         if boilerplate.tap_button {
-            tap_text(tester, "X");
+            tester.tap(find::text("X"));
         }
         tester.pump_and_settle();
     }
 
     fn dialog_material_size(tester: &WidgetTester) -> Size {
-        let dialog = tester.find_by_type::<Dialog>()[0];
-        let material = tester.descendants_of_type::<Material>(dialog)[0];
-        size_of(tester, material)
-    }
-
-    /// Dart's `tester.tap(find.text(text))`: a tap at the center of the one onstage `Text`
-    /// showing `text`.
-    fn tap_text(tester: &mut WidgetTester, text: &str) {
-        let found = tester.find_onstage_text(text);
-        assert_eq!(found.len(), 1, "tap needs a single Text showing {text:?}");
-        let center = tester.get_rect(tester.render_box_of(found[0])).center();
-        tester.tap(center, 1);
+        let material = tester.element(
+            find::descendant(find::by_type::<Dialog>().at(0), find::by_type::<Material>()).first(),
+        );
+        tester.get_size(material)
     }
 
     #[test]
@@ -5320,7 +5315,7 @@ pub(crate) mod tests {
             let height = TIME_PICKER_PORTRAIT_SIZE.height() + padding.vertical();
             assert_eq!(dialog_material_size(tester), Size::new(width, height));
 
-            tap_text(tester, OK_STRING); // dismiss the dialog
+            tester.tap(find::text(OK_STRING)); // dismiss the dialog
             tester.pump_and_settle();
 
             // landscape
@@ -5442,17 +5437,17 @@ pub(crate) mod tests {
             });
         }
         tester.pump_widget(IntoWidget::into_widget(app));
-        tap_text(tester, "X");
+        tester.tap(find::text("X"));
         tester.pump_and_settle_by(Duration::from_secs(1));
         (parameters.entry_mode == TimePickerEntryMode::Dial).then(|| {
-            let dial = tester.find_by_type::<Dial>()[0];
-            center_of(tester, dial)
+            let dial = tester.element(find::by_type::<Dial>().at(0));
+            tester.get_center(dial)
         })
     }
 
     /// Dart's `finishPicker`.
     fn finish_picker(tester: &mut WidgetTester) {
-        tap_text(tester, OK_STRING);
+        tester.tap(find::text(OK_STRING));
         tester.pump_and_settle_by(Duration::from_secs(1));
     }
 
@@ -5463,8 +5458,13 @@ pub(crate) mod tests {
     /// Dart's `findDialPaint`: the `CustomPaint` under the private `_Dial`, which
     /// time_picker_theme_test also finds by the widget's type name.
     pub(crate) fn dial_paint(tester: &WidgetTester) -> AnyElement {
-        let dial = tester.find_by_type::<Dial>()[0];
-        tester.descendants_of_type::<waft_widgets::CustomPaint>(dial)[0]
+        tester.element(
+            find::descendant(
+                find::by_type::<Dial>().at(0),
+                find::by_type::<waft_widgets::CustomPaint>(),
+            )
+            .first(),
+        )
     }
 
     /// Dart's `dialPainter.primaryLabels.first.painter.text.style` and
@@ -5513,7 +5513,7 @@ pub(crate) mod tests {
             let height = TIME_PICKER_PORTRAIT_SIZE.height() + padding.vertical();
             assert_eq!(dialog_material_size(tester), Size::new(width, height));
 
-            tap_text(tester, OK_STRING); // dismiss the dialog
+            tester.tap(find::text(OK_STRING)); // dismiss the dialog
             tester.pump_and_settle();
 
             // landscape
@@ -5548,7 +5548,7 @@ pub(crate) mod tests {
             assert_eq!(dialog_size.width(), width);
             assert!(dialog_size.height() < height);
 
-            tap_text(tester, OK_STRING); // dismiss the dialog
+            tester.tap(find::text(OK_STRING)); // dismiss the dialog
             tester.pump_and_settle();
 
             boilerplate.always_use_24_hour_format = true;
@@ -5582,7 +5582,7 @@ pub(crate) mod tests {
             assert_eq!(dialog_size.width(), width);
             assert!(dialog_size.height() < height);
 
-            tap_text(tester, OK_STRING); // dismiss the dialog
+            tester.tap(find::text(OK_STRING)); // dismiss the dialog
             tester.pump_and_settle();
 
             boilerplate.always_use_24_hour_format = true;
@@ -5646,26 +5646,26 @@ pub(crate) mod tests {
                 let result: PickerResult = Rc::default();
                 let mut center =
                     start_picker(tester, &result, StartPicker::new(material_type)).expect("a dial");
-                tester.tap(Offset::new(center.dx(), center.dy() - 50.0), 1); // 12:00 AM
+                tester.tap_at(Offset::new(center.dx(), center.dy() - 50.0), 1); // 12:00 AM
                 finish_picker(tester);
                 assert_eq!(picked_time(&result), Some(TimeOfDay::new(0, 0)));
 
                 center =
                     start_picker(tester, &result, StartPicker::new(material_type)).expect("a dial");
-                tester.tap(Offset::new(center.dx() + 50.0, center.dy()), 1);
+                tester.tap_at(Offset::new(center.dx() + 50.0, center.dy()), 1);
                 finish_picker(tester);
                 assert_eq!(picked_time(&result), Some(TimeOfDay::new(3, 0)));
 
                 center =
                     start_picker(tester, &result, StartPicker::new(material_type)).expect("a dial");
-                tester.tap(Offset::new(center.dx(), center.dy() + 50.0), 1);
+                tester.tap_at(Offset::new(center.dx(), center.dy() + 50.0), 1);
                 finish_picker(tester);
                 assert_eq!(picked_time(&result), Some(TimeOfDay::new(6, 0)));
 
                 center =
                     start_picker(tester, &result, StartPicker::new(material_type)).expect("a dial");
-                tester.tap(Offset::new(center.dx(), center.dy() + 50.0), 1);
-                tester.tap(Offset::new(center.dx() - 50.0, center.dy()), 1);
+                tester.tap_at(Offset::new(center.dx(), center.dy() + 50.0), 1);
+                tester.tap_at(Offset::new(center.dx() - 50.0, center.dy()), 1);
                 finish_picker(tester);
                 assert_eq!(picked_time(&result), Some(TimeOfDay::new(9, 0)));
             });
@@ -5732,9 +5732,9 @@ pub(crate) mod tests {
                 let hour6 = Offset::new(center.dx(), center.dy() + 50.0); // 6:00
                 let min45 = Offset::new(center.dx() - 50.0, center.dy()); // 45 mins (or 9:00 hours)
 
-                tester.tap(hour6, 1);
+                tester.tap_at(hour6, 1);
                 tester.pump_by(Duration::from_millis(50));
-                tester.tap(min45, 1);
+                tester.tap_at(min45, 1);
                 finish_picker(tester);
                 assert_eq!(picked_time(&result), Some(TimeOfDay::new(6, 45)));
             });
@@ -5771,9 +5771,9 @@ pub(crate) mod tests {
                 let hour6 = Offset::new(center.dx(), center.dy() + 50.0); // 6:00
                 let min46 = Offset::new(center.dx() - 50.0, center.dy() - 5.0); // 46 mins
 
-                tester.tap(hour6, 1);
+                tester.tap_at(hour6, 1);
                 tester.pump_by(Duration::from_millis(50));
-                tester.tap(min46, 1);
+                tester.tap_at(min46, 1);
                 finish_picker(tester);
                 assert_eq!(picked_time(&result), Some(TimeOfDay::new(6, 45)));
             });
@@ -5790,9 +5790,9 @@ pub(crate) mod tests {
                 let hour6 = Offset::new(center.dx(), center.dy() + 50.0); // 6:00
                 let min48 = Offset::new(center.dx() - 50.0, center.dy() - 15.0); // 48 mins
 
-                tester.tap(hour6, 1);
+                tester.tap_at(hour6, 1);
                 tester.pump_by(Duration::from_millis(50));
-                tester.tap(min48, 1);
+                tester.tap_at(min48, 1);
                 finish_picker(tester);
                 assert_eq!(picked_time(&result), Some(TimeOfDay::new(6, 50)));
             });
@@ -5800,7 +5800,7 @@ pub(crate) mod tests {
     }
 
     fn only_text(tester: &WidgetTester, text: &str) -> AnyElement {
-        let found = tester.find_onstage_text(text);
+        let found = find::text(text).evaluate(tester);
         assert_eq!(found.len(), 1, "one {text:?}");
         found[0]
     }
@@ -5870,7 +5870,7 @@ pub(crate) mod tests {
     }
 
     fn day_period_input_padding_orientation(tester: &WidgetTester) -> Orientation {
-        let element = tester.find_by_type::<DayPeriodInputPadding>()[0];
+        let element = tester.element(find::by_type::<DayPeriodInputPadding>().at(0));
         tester.widget(element, |padding: &DayPeriodInputPadding| {
             padding.orientation
         })
@@ -5924,7 +5924,7 @@ pub(crate) mod tests {
 
     /// Dart's `PickerObserver.pickerCount`: how many time pickers the navigator shows.
     fn picker_count(tester: &WidgetTester) -> usize {
-        tester.find_by_type::<TimePickerDialog>().len()
+        find::by_type::<TimePickerDialog>().evaluate(tester).len()
     }
 
     /// An app with a button that shows a time picker with the given arguments.
@@ -5984,12 +5984,12 @@ pub(crate) mod tests {
             open_picker_app(tester, |app, context| drop(show_default(app, context)));
 
             // Open the dialog.
-            tap_text(tester, "X");
+            tester.tap(find::text("X"));
             tester.pump_and_settle();
             assert_eq!(picker_count(tester), 1);
 
             // Tap on the barrier.
-            tester.tap(Offset::new(10.0, 10.0), 1);
+            tester.tap_at(Offset::new(10.0, 10.0), 1);
             tester.pump_and_settle();
             assert_eq!(picker_count(tester), 0);
         });
@@ -6025,12 +6025,12 @@ pub(crate) mod tests {
             });
 
             // Open the dialog.
-            tap_text(tester, "X");
+            tester.tap(find::text("X"));
             tester.pump_and_settle();
             assert_eq!(picker_count(tester), 1);
 
             // Tap on the barrier, which shouldn't do anything this time.
-            tester.tap(Offset::new(10.0, 10.0), 1);
+            tester.tap_at(Offset::new(10.0, 10.0), 1);
             tester.pump_and_settle();
             assert_eq!(picker_count(tester), 1);
         });
@@ -6040,8 +6040,8 @@ pub(crate) mod tests {
         tester: &WidgetTester,
         read: impl FnOnce(&waft_widgets::ModalBarrier) -> R,
     ) -> R {
-        let barrier = *tester
-            .find_by_type::<waft_widgets::ModalBarrier>()
+        let barrier = *find::by_type::<waft_widgets::ModalBarrier>()
+            .evaluate(tester)
             .last()
             .expect("a ModalBarrier");
         tester.widget(barrier, read)
@@ -6053,7 +6053,7 @@ pub(crate) mod tests {
             open_picker_app(tester, |app, context| drop(show_default(app, context)));
 
             // Open the dialog.
-            tap_text(tester, "X");
+            tester.tap(find::text("X"));
             tester.pump_and_settle();
             assert_eq!(
                 last_modal_barrier(tester, |barrier| barrier.color),
@@ -6061,7 +6061,7 @@ pub(crate) mod tests {
             );
 
             // Dismiss the dialog.
-            tester.tap(Offset::new(10.0, 10.0), 1);
+            tester.tap_at(Offset::new(10.0, 10.0), 1);
 
             open_picker_app(tester, |app, context| {
                 drop(show_time_picker(
@@ -6090,7 +6090,7 @@ pub(crate) mod tests {
             });
 
             // Open the dialog.
-            tap_text(tester, "X");
+            tester.tap(find::text("X"));
             tester.pump_and_settle();
             assert_eq!(
                 last_modal_barrier(tester, |barrier| barrier.color),
@@ -6129,7 +6129,7 @@ pub(crate) mod tests {
             });
 
             // Open the dialog.
-            tap_text(tester, "X");
+            tester.tap(find::text("X"));
             tester.pump_and_settle();
             assert_eq!(
                 last_modal_barrier(tester, |barrier| barrier.semantics_label.clone()),
@@ -6179,16 +6179,16 @@ pub(crate) mod tests {
                 };
 
             build_frame(tester, waft_painting::TextDirection::Ltr);
-            tap_text(tester, "X");
+            tester.tap(find::text("X"));
             tester.pump_and_settle();
             let ok = only_text(tester, OK_STRING);
-            let ltr_ok_right = tester.get_rect(tester.render_box_of(ok)).right;
+            let ltr_ok_right = tester.get_rect(ok).right;
 
-            tap_text(tester, OK_STRING); // dismiss the dialog
+            tester.tap(find::text(OK_STRING)); // dismiss the dialog
             tester.pump_and_settle();
 
             build_frame(tester, waft_painting::TextDirection::Rtl);
-            tap_text(tester, "X");
+            tester.tap(find::text("X"));
             tester.pump_and_settle();
 
             // Verify that the time picker is being laid out RTL.
@@ -6196,10 +6196,10 @@ pub(crate) mod tests {
             // layout to match the gap between right edge of the 'OK'
             // button and the right edge of the 800 wide view.
             let ok = only_text(tester, OK_STRING);
-            let rtl_ok_left = tester.get_rect(tester.render_box_of(ok)).left;
+            let rtl_ok_left = tester.get_rect(ok).left;
             // Dart's `rtlOkLeft == 800 - ltrOkRight`, compared at the f32 rounding of the 800
             // wide view the two edges add up to.
-            assert_f32_eq(rtl_ok_left + ltr_ok_right, 800.0);
+            assert_f32_equals(rtl_ok_left + ltr_ok_right, 800.0);
         });
     }
 
@@ -6233,7 +6233,7 @@ pub(crate) mod tests {
             });
 
             // Open the picker.
-            tap_text(tester, "X");
+            tester.tap(find::text("X"));
             tester.pump_and_settle_by(Duration::from_secs(1));
 
             only_text(tester, "Custom Cancel");
@@ -6278,26 +6278,6 @@ pub(crate) mod tests {
                 false,
             ));
         });
-    }
-
-    fn text_rect(tester: &WidgetTester, text: &str) -> waft_embedder::Rect {
-        tester.get_rect(tester.render_box_of(only_text(tester, text)))
-    }
-
-    fn close(actual: f64, expected: f64, epsilon: f64) {
-        assert!(
-            (actual - expected).abs() <= epsilon,
-            "{actual} is not within {epsilon} of {expected}"
-        );
-    }
-
-    /// Dart's exact `==` on a position that went through Valo's `f32` text metrics: equal
-    /// within that value's `f32` rounding.
-    fn assert_f32_eq(actual: f64, expected: f64) {
-        assert!(
-            (actual - expected).abs() <= f64::from(f32::EPSILON) * expected.abs().max(1.0),
-            "{actual} is not {expected} within f32 rounding"
-        );
     }
 
     #[test]
@@ -6355,31 +6335,31 @@ pub(crate) mod tests {
             };
 
             m2_app(tester, waft_painting::TextDirection::Ltr);
-            tap_text(tester, "X");
+            tester.tap(find::text("X"));
             tester.pump_and_settle();
 
-            let select_time = text_rect(tester, SELECT_TIME_STRING);
+            let select_time = tester.get_rect(find::text(SELECT_TIME_STRING));
             assert_eq!(select_time.top_left(), Offset::new(154.0, 155.0));
             assert_eq!(select_time.bottom_right(), Offset::new(280.5, 165.0));
-            assert_eq!(text_rect(tester, OK_STRING).right, 644.0);
-            assert_eq!(text_rect(tester, OK_STRING).left, 616.0);
-            assert_eq!(text_rect(tester, CANCEL_STRING).right, 582.0);
+            assert_eq!(tester.get_rect(find::text(OK_STRING)).right, 644.0);
+            assert_eq!(tester.get_rect(find::text(OK_STRING)).left, 616.0);
+            assert_eq!(tester.get_rect(find::text(CANCEL_STRING)).right, 582.0);
 
-            tap_text(tester, OK_STRING);
+            tester.tap(find::text(OK_STRING));
             tester.pump_and_settle();
 
             m2_app(tester, waft_painting::TextDirection::Rtl);
-            tap_text(tester, "X");
+            tester.tap(find::text("X"));
             tester.pump_and_settle();
 
-            let select_time = text_rect(tester, SELECT_TIME_STRING);
+            let select_time = tester.get_rect(find::text(SELECT_TIME_STRING));
             assert_eq!(select_time.top_left(), Offset::new(519.5, 155.0));
             assert_eq!(select_time.bottom_right(), Offset::new(646.0, 165.0));
-            assert_eq!(text_rect(tester, OK_STRING).left, 156.0);
-            assert_eq!(text_rect(tester, OK_STRING).right, 184.0);
-            assert_eq!(text_rect(tester, CANCEL_STRING).left, 218.0);
+            assert_eq!(tester.get_rect(find::text(OK_STRING)).left, 156.0);
+            assert_eq!(tester.get_rect(find::text(OK_STRING)).right, 184.0);
+            assert_eq!(tester.get_rect(find::text(CANCEL_STRING)).left, 218.0);
 
-            tap_text(tester, OK_STRING);
+            tester.tap(find::text(OK_STRING));
             tester.pump_and_settle();
         });
     }
@@ -6391,30 +6371,42 @@ pub(crate) mod tests {
             const CANCEL_STRING: &str = "Cancel";
 
             open_directional_picker(tester, waft_painting::TextDirection::Ltr);
-            tap_text(tester, "X");
+            tester.tap(find::text("X"));
             tester.pump_and_settle();
 
-            let select_time = text_rect(tester, SELECT_TIME_STRING);
+            let select_time = tester.get_rect(find::text(SELECT_TIME_STRING));
             assert_eq!(select_time.top_left(), Offset::new(138.0, 129.0));
             assert_eq!(select_time.bottom_right(), Offset::new(294.75, 149.0));
-            close(text_rect(tester, OK_STRING).left, 615.9, 0.001);
-            assert_f32_eq(text_rect(tester, CANCEL_STRING).right, 578.0);
+            assert_more_or_less_equals_within(
+                tester.get_rect(find::text(OK_STRING)).left,
+                615.9,
+                0.001,
+            );
+            assert_f32_equals(tester.get_rect(find::text(CANCEL_STRING)).right, 578.0);
 
-            tap_text(tester, OK_STRING);
+            tester.tap(find::text(OK_STRING));
             tester.pump_and_settle();
 
             open_directional_picker(tester, waft_painting::TextDirection::Rtl);
-            tap_text(tester, "X");
+            tester.tap(find::text("X"));
             tester.pump_and_settle();
 
-            let select_time = text_rect(tester, SELECT_TIME_STRING);
+            let select_time = tester.get_rect(find::text(SELECT_TIME_STRING));
             assert_eq!(select_time.top_left(), Offset::new(505.25, 129.0));
             assert_eq!(select_time.bottom_right(), Offset::new(662.0, 149.0));
-            close(text_rect(tester, OK_STRING).left, 155.9, 0.001);
-            close(text_rect(tester, OK_STRING).right, 184.1, 0.001);
-            assert_f32_eq(text_rect(tester, CANCEL_STRING).left, 222.0);
+            assert_more_or_less_equals_within(
+                tester.get_rect(find::text(OK_STRING)).left,
+                155.9,
+                0.001,
+            );
+            assert_more_or_less_equals_within(
+                tester.get_rect(find::text(OK_STRING)).right,
+                184.1,
+                0.001,
+            );
+            assert_f32_equals(tester.get_rect(find::text(CANCEL_STRING)).left, 222.0);
 
-            tap_text(tester, OK_STRING);
+            tester.tap(find::text(OK_STRING));
             tester.pump_and_settle();
         });
     }
@@ -6428,30 +6420,36 @@ pub(crate) mod tests {
                 boilerplate.initial_time = TimeOfDay::new(7, 41);
                 media_query_boilerplate(tester, size, boilerplate.clone());
 
-                let minutes_display_height = text_rect(tester, "41").height();
-                let am_height = text_rect(tester, AM_STRING).height();
+                let minutes_display_height = tester.get_rect(find::text("41")).height();
+                let am_height = tester.get_rect(find::text(AM_STRING)).height();
 
-                tap_text(tester, OK_STRING); // dismiss the dialog
+                tester.tap(find::text(OK_STRING)); // dismiss the dialog
                 tester.pump_and_settle();
 
                 // Verify that the time display is not affected by text scale.
                 boilerplate.text_scaler = TextScaler::linear(2.0);
                 media_query_boilerplate(tester, size, boilerplate.clone());
 
-                let am_height_2x = text_rect(tester, AM_STRING).height();
-                assert_eq!(text_rect(tester, "41").height(), minutes_display_height);
+                let am_height_2x = tester.get_rect(find::text(AM_STRING)).height();
+                assert_eq!(
+                    tester.get_rect(find::text("41")).height(),
+                    minutes_display_height
+                );
                 assert_eq!(am_height_2x, f64::min(38.0, am_height * 2.0));
 
-                tap_text(tester, OK_STRING); // dismiss the dialog
+                tester.tap(find::text(OK_STRING)); // dismiss the dialog
                 tester.pump_and_settle();
 
                 // Verify that text scale for AM/PM is at most 2x.
                 boilerplate.text_scaler = TextScaler::linear(3.0);
                 media_query_boilerplate(tester, size, boilerplate);
 
-                assert_eq!(text_rect(tester, "41").height(), minutes_display_height);
                 assert_eq!(
-                    text_rect(tester, AM_STRING).height(),
+                    tester.get_rect(find::text("41")).height(),
+                    minutes_display_height
+                );
+                assert_eq!(
+                    tester.get_rect(find::text(AM_STRING)).height(),
                     f64::min(38.0, am_height * 2.0)
                 );
             });
@@ -6502,7 +6500,7 @@ pub(crate) mod tests {
     fn dial_haptic_feedback_tap_select_vibrates_once() {
         test_widgets(|_| {
             haptic_case(|tester, center, feedback| {
-                tester.tap(Offset::new(center.dx(), center.dy() - 50.0), 1);
+                tester.tap_at(Offset::new(center.dx(), center.dy() - 50.0), 1);
                 finish_picker(tester);
                 assert_eq!(feedback.haptic_count(), 1);
             });
@@ -6513,9 +6511,9 @@ pub(crate) mod tests {
     fn dial_haptic_feedback_quick_successive_tap_selects_vibrate_once() {
         test_widgets(|_| {
             haptic_case(|tester, center, feedback| {
-                tester.tap(Offset::new(center.dx(), center.dy() - 50.0), 1);
+                tester.tap_at(Offset::new(center.dx(), center.dy() - 50.0), 1);
                 tester.pump_by(FAST_FEEDBACK_INTERVAL);
-                tester.tap(Offset::new(center.dx(), center.dy() + 50.0), 1);
+                tester.tap_at(Offset::new(center.dx(), center.dy() + 50.0), 1);
                 finish_picker(tester);
                 assert_eq!(feedback.haptic_count(), 1);
             });
@@ -6526,11 +6524,11 @@ pub(crate) mod tests {
     fn dial_haptic_feedback_slow_successive_tap_selects_vibrate_once_per_tap() {
         test_widgets(|_| {
             haptic_case(|tester, center, feedback| {
-                tester.tap(Offset::new(center.dx(), center.dy() - 50.0), 1);
+                tester.tap_at(Offset::new(center.dx(), center.dy() - 50.0), 1);
                 tester.pump_by(SLOW_FEEDBACK_INTERVAL);
-                tester.tap(Offset::new(center.dx(), center.dy() + 50.0), 1);
+                tester.tap_at(Offset::new(center.dx(), center.dy() + 50.0), 1);
                 tester.pump_by(SLOW_FEEDBACK_INTERVAL);
-                tester.tap(Offset::new(center.dx(), center.dy() - 50.0), 1);
+                tester.tap_at(Offset::new(center.dx(), center.dy() - 50.0), 1);
                 finish_picker(tester);
                 assert_eq!(feedback.haptic_count(), 3);
             });
@@ -6592,7 +6590,7 @@ pub(crate) mod tests {
 
     /// Dart's `tester.enterText(find.byType(TextField).at(index), text)`.
     fn enter_text_at(tester: &mut WidgetTester, index: usize, text: &str) {
-        let editable = tester.find_by_type::<EditableText>()[index];
+        let editable = tester.element(find::by_type::<EditableText>().at(index));
         let state = editable
             .state_handle::<EditableTextState>(&tester.cell.borrow())
             .expect("an EditableText state");
@@ -6610,7 +6608,9 @@ pub(crate) mod tests {
     }
 
     fn text_field_count(tester: &WidgetTester) -> usize {
-        tester.find_by_type::<crate::text_field::TextField>().len()
+        find::by_type::<crate::text_field::TextField>()
+            .evaluate(tester)
+            .len()
     }
 
     fn input_boilerplate(material_type: MaterialType) -> Boilerplate {
@@ -6621,14 +6621,14 @@ pub(crate) mod tests {
     }
 
     fn tap_icon(tester: &mut WidgetTester, icon: &waft_widgets::IconData) {
-        let element = tester.find_by_icon(icon);
-        let center = center_of(tester, element);
-        tester.tap(center, 1);
+        let element = tester.element(find::by_icon(icon).first());
+        let center = tester.get_center(element);
+        tester.tap_at(center, 1);
     }
 
     fn has_icon(tester: &WidgetTester, icon: &waft_widgets::IconData) -> bool {
-        tester
-            .find_by_type::<waft_widgets::Icon>()
+        find::by_type::<waft_widgets::Icon>()
+            .evaluate(tester)
             .into_iter()
             .any(|element| {
                 tester.widget(element, |widget: &waft_widgets::Icon| {
@@ -6712,7 +6712,7 @@ pub(crate) mod tests {
                 // Input invalid time (hour) to force validation error
                 enter_text_at(tester, 0, "88");
                 // Tap the ok button to trigger the validation error with custom translation
-                tap_text(tester, OK_STRING);
+                tester.tap(find::text(OK_STRING));
                 tester.pump_and_settle_by(Duration::from_secs(1));
                 only_text(tester, "Custom validation error");
             });
@@ -6874,12 +6874,18 @@ pub(crate) mod tests {
 
     /// Dart's `find.ancestor(of: find.text(text), matching: find.byType(InkWell))`.
     fn ink_well_of_text(tester: &WidgetTester, text: &str) -> AnyElement {
-        tester.ancestor_of_type::<crate::ink_well::InkWell>(only_text(tester, text))
+        tester.element(
+            find::ancestor(
+                find::text(text),
+                find::by_type::<crate::ink_well::InkWell>(),
+            )
+            .first(),
+        )
     }
 
     fn tap_element(tester: &mut WidgetTester, element: AnyElement) {
-        let center = center_of(tester, element);
-        tester.tap(center, 1);
+        let center = tester.get_center(element);
+        tester.tap_at(center, 1);
     }
 
     #[test]
@@ -6992,8 +6998,8 @@ pub(crate) mod tests {
     }
 
     fn text_field_texts(tester: &WidgetTester) -> Vec<(String, Option<String>)> {
-        tester
-            .find_by_type::<crate::text_field::TextField>()
+        find::by_type::<crate::text_field::TextField>()
+            .evaluate(tester)
             .into_iter()
             .map(|field| {
                 tester.widget(field, |field: &crate::text_field::TextField| {
@@ -7118,9 +7124,13 @@ pub(crate) mod tests {
     }
 
     fn border_painter_size(tester: &WidgetTester) -> Size {
-        let decorator = tester.find_by_type::<crate::input_decorator::InputDecorator>()[0];
-        let paint = tester.descendants_of_type::<waft_widgets::CustomPaint>(decorator)[0];
-        size_of(tester, paint)
+        tester.get_size(
+            find::descendant(
+                find::by_type::<crate::input_decorator::InputDecorator>().first(),
+                find::by_type::<waft_widgets::CustomPaint>(),
+            )
+            .first(),
+        )
     }
 
     #[test]
@@ -7139,7 +7149,7 @@ pub(crate) mod tests {
 
                 // Enter invalid hour.
                 enter_text_at(tester, 0, "AB");
-                tap_text(tester, OK_STRING);
+                tester.tap(find::text(OK_STRING));
 
                 assert_eq!(border_painter_size(tester), Size::new(96.0, 70.0));
             }
@@ -7161,21 +7171,21 @@ pub(crate) mod tests {
                     )
                     .into_widget(),
             ));
-            let dialog = tester.find_by_type::<TimePickerDialog>()[0];
-            assert_eq!(size_of(tester, dialog), Size::ZERO);
+            let dialog = tester.element(find::by_type::<TimePickerDialog>().at(0));
+            assert_eq!(tester.get_size(dialog), Size::ZERO);
         });
     }
 
-    /// Dart's `paints..circle(color: first)..circle(color: second)` on the dial's `CustomPaint`.
-    fn dial_paints_circles(tester: &WidgetTester, colors: &[waft_embedder::Color]) -> bool {
-        let dial = tester.find_by_type::<Dial>()[0];
-        let paint = tester.descendants_of_type::<waft_widgets::CustomPaint>(dial)[0];
-        let render = tester.render_box_of(paint).as_object();
-        let calls: Vec<waft_rendering::testing::PaintCall> = colors
-            .iter()
-            .map(|color| waft_rendering::testing::PaintCall::circle(Some(*color)))
-            .collect();
-        waft_rendering::testing::paints(&tester.painted_ops_deep(render), &calls).is_ok()
+    /// What the dial's `CustomPaint` paints: Dart's `paints` on its render object.
+    fn dial_ops(tester: &WidgetTester) -> Vec<waft_embedder::valo::Op> {
+        let paint = tester.element(
+            find::descendant(
+                find::by_type::<Dial>().at(0),
+                find::by_type::<waft_widgets::CustomPaint>(),
+            )
+            .first(),
+        );
+        tester.painted_ops_deep(tester.render_object(paint))
     }
 
     fn open_default_picker(tester: &mut WidgetTester, theme: ThemeData) {
@@ -7193,7 +7203,7 @@ pub(crate) mod tests {
             )
             .into_widget();
         tester.pump_widget(material_app(theme, home));
-        tap_text(tester, "X");
+        tester.tap(find::text("X"));
         tester.pump_and_settle();
     }
 
@@ -7205,15 +7215,15 @@ pub(crate) mod tests {
 
             open_default_picker(tester, theme.clone());
             // Test default dial background color.
-            assert!(dial_paints_circles(
-                tester,
+            assert_paints(
+                &dial_ops(tester),
                 &[
-                    theme.color_scheme.surface_container_highest(),
-                    theme.color_scheme.primary
-                ]
-            ));
+                    PaintCall::circle(Some(theme.color_scheme.surface_container_highest())),
+                    PaintCall::circle(Some(theme.color_scheme.primary)),
+                ],
+            );
 
-            tap_text(tester, OK_STRING); // dismiss the dialog
+            tester.tap(find::text(OK_STRING)); // dismiss the dialog
             tester.pump_and_settle();
 
             // Test dial background color when theme color scheme is changed.
@@ -7227,13 +7237,13 @@ pub(crate) mod tests {
                 )
                 .build();
             open_default_picker(tester, theme.clone());
-            assert!(dial_paints_circles(
-                tester,
+            assert_paints(
+                &dial_ops(tester),
                 &[
-                    theme.color_scheme.surface_container_highest(),
-                    theme.color_scheme.primary
-                ]
-            ));
+                    PaintCall::circle(Some(theme.color_scheme.surface_container_highest())),
+                    PaintCall::circle(Some(theme.color_scheme.primary)),
+                ],
+            );
         });
     }
 
@@ -7323,9 +7333,10 @@ pub(crate) mod tests {
         tester.pump_widget(root);
 
         // Open the dialog.
-        let button = tester.find_by_type::<crate::elevated_button::ElevatedButton>()[0];
-        let center = center_of(tester, button);
-        tester.tap(center, 1);
+        let button =
+            tester.element(find::by_type::<crate::elevated_button::ElevatedButton>().at(0));
+        let center = tester.get_center(button);
+        tester.tap_at(center, 1);
 
         let app = tester.cell.borrow();
         (
@@ -7351,8 +7362,8 @@ pub(crate) mod tests {
     /// Dart's `find.ancestor(of: find.text(text), matching: find.byType(InkWell))`, which finds
     /// one ink well: the header's, not a dial label's.
     fn ink_well_above_text(tester: &WidgetTester, text: &str) -> AnyElement {
-        let wells: Vec<AnyElement> = tester
-            .find_onstage_text(text)
+        let wells: Vec<AnyElement> = find::text(text)
+            .evaluate(tester)
             .into_iter()
             .filter_map(|found| {
                 let ancestors = tester.ancestors(found);
@@ -7381,18 +7392,18 @@ pub(crate) mod tests {
                 media_query_boilerplate(tester, size, Boilerplate::new(material_type));
 
                 let day_period_control_size =
-                    size_of(tester, tester.find_by_type::<DayPeriodControl>()[0]);
+                    tester.get_size(tester.element(find::by_type::<DayPeriodControl>().at(0)));
                 assert!(day_period_control_size.width() >= 48.0, "{material_type:?}");
                 assert!(
                     day_period_control_size.height() >= 80.0,
                     "{material_type:?}"
                 );
 
-                let hour_size = size_of(tester, ink_well_above_text(tester, "7"));
+                let hour_size = tester.get_size(ink_well_above_text(tester, "7"));
                 assert!(hour_size.width() >= 48.0, "{material_type:?}");
                 assert!(hour_size.height() >= 48.0, "{material_type:?}");
 
-                let minute_size = size_of(tester, ink_well_above_text(tester, "00"));
+                let minute_size = tester.get_size(ink_well_above_text(tester, "00"));
                 assert!(minute_size.width() >= 48.0, "{material_type:?}");
                 assert!(minute_size.height() >= 48.0, "{material_type:?}");
             });
@@ -7426,7 +7437,7 @@ pub(crate) mod tests {
                         media_query_boilerplate(tester, size, boilerplate);
                         tester.pump_and_settle();
                         assert_eq!(
-                            tester.find_by_type::<TimePickerDialog>().len(),
+                            find::by_type::<TimePickerDialog>().evaluate(tester).len(),
                             1,
                             "{material_type:?} {entry_mode:?} at {size:?}"
                         );
@@ -7448,9 +7459,11 @@ pub(crate) mod tests {
                 let top = |element: AnyElement| {
                     crate::chip::tests::rect_of(tester, element).top_left().dy()
                 };
-                let hour_field_top = top(tester.find_by_type::<HourTextField>()[0]);
-                let minute_field_top = top(tester.find_by_type::<MinuteTextField>()[0]);
-                let separator_top = top(tester.find_by_type::<TimeSelectorSeparator>()[0]);
+                let hour_field_top = top(tester.element(find::by_type::<HourTextField>().at(0)));
+                let minute_field_top =
+                    top(tester.element(find::by_type::<MinuteTextField>().at(0)));
+                let separator_top =
+                    top(tester.element(find::by_type::<TimeSelectorSeparator>().at(0)));
                 assert_eq!(hour_field_top, separator_top, "{material_type:?}");
                 assert_eq!(minute_field_top, separator_top, "{material_type:?}");
             });
@@ -7468,7 +7481,7 @@ pub(crate) mod tests {
 
                 let field = |tester: &WidgetTester, index: usize| {
                     tester.widget(
-                        tester.find_by_type::<crate::text_field::TextField>()[index],
+                        tester.element(find::by_type::<crate::text_field::TextField>().at(index)),
                         |field: &crate::text_field::TextField| field.clone(),
                     )
                 };
@@ -7478,9 +7491,9 @@ pub(crate) mod tests {
                 };
                 let last = text_field_count(tester) - 1;
 
-                let hour = tester.find_by_type::<crate::text_field::TextField>()[0];
-                let center = center_of(tester, hour);
-                tester.tap(center, 1);
+                let hour = tester.element(find::by_type::<crate::text_field::TextField>().at(0));
+                let center = tester.get_center(hour);
+                tester.tap_at(center, 1);
                 assert!(has_focus(tester, 0), "{material_type:?}");
 
                 enter_text_at(tester, 0, "08");
@@ -7491,7 +7504,7 @@ pub(crate) mod tests {
                     field(tester, last).text_input_action,
                     Some(waft_services::TextInputAction::Done)
                 );
-                let minute_editable = tester.find_by_type::<EditableText>()[last];
+                let minute_editable = tester.element(find::by_type::<EditableText>().at(last));
                 let state = minute_editable
                     .state_handle::<EditableTextState>(&tester.cell.borrow())
                     .expect("an EditableText state");

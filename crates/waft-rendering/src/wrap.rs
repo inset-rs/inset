@@ -1149,11 +1149,12 @@ impl RenderBox for RenderWrap {
 #[cfg(test)]
 mod tests {
     use waft_embedder::valo::Op;
-    use waft_foundation::{AppCell, Ref};
+    use waft_foundation::AppCell;
+    use waft_painting::AlignmentGeometry;
 
     use super::*;
-    use crate::layer::{ContainerLayer, ErasedLayer, OffsetLayer, PictureLayer};
-    use crate::proxy_box::{RenderConstrainedBox, RenderRepaintBoundary};
+    use crate::proxy_box::RenderConstrainedBox;
+    use crate::testing::{EnginePhase, layout_with, painted_ops};
 
     /// A box at least 80 square, as `wrap_test.dart`'s children are.
     fn box_80(app: &mut App) -> AnyRenderBox {
@@ -1308,37 +1309,10 @@ mod tests {
         assert_eq!(dry, wrap.size(&app));
     }
 
-    fn schedule_root_paint(app: &mut App, node: AnyRenderObject) {
-        let root = OffsetLayer::new(app, Offset::ZERO);
-        root.as_layer().attach(app, node.id());
-        node.schedule_initial_paint(app, root.as_container_layer());
-    }
-
-    /// The test binding's first frame: attach, lay the root out, schedule and flush paint.
-    fn first_frame(
-        app: &mut App,
-        root: AnyRenderBox,
-        constraints: BoxConstraints,
-    ) -> Ref<PipelineOwner> {
-        let owner = PipelineOwner::new(app, None, None);
-        owner.set_root_node(app, Some(root.as_object()));
-        root.layout(app, constraints, false);
-        schedule_root_paint(app, root.as_object());
-        owner.flush_compositing_bits(app);
-        owner.flush_paint(app);
-        owner
-    }
-
-    fn picture_has_clip(app: &App, boundary: AnyRenderObject) -> bool {
-        let layer = boundary.debug_layer(app).expect("painted");
-        layer
-            .depth_first_iterate_children(app)
-            .into_iter()
-            .filter_map(|child| {
-                app.handle::<PictureLayer>(child.id())
-                    .and_then(|picture| picture.picture(app).map(|p| p.ops().to_vec()))
-            })
-            .flatten()
+    /// Whether `render`, painted on its own, clips.
+    fn picture_has_clip(app: &mut App, render: AnyRenderObject) -> bool {
+        painted_ops(app, render)
+            .iter()
             .any(|op| matches!(op, Op::ClipPath { .. }))
     }
 
@@ -1359,20 +1333,19 @@ mod tests {
                 wrap.set_clip_behavior(&mut app, clip_behavior);
             }
             wrap.add(&mut app, child.as_box());
-            let root = RenderRepaintBoundary::new(&mut app, Some(wrap.as_box()));
-
-            let owner = first_frame(
+            layout_with(
                 &mut app,
-                root.as_box(),
-                BoxConstraints::new().max_width(100.0).max_height(100.0),
+                wrap.as_box(),
+                Some(BoxConstraints::new().max_width(100.0).max_height(100.0)),
+                AlignmentGeometry::CENTER,
+                EnginePhase::Paint,
             );
 
             assert_eq!(
-                picture_has_clip(&app, root.as_object()),
+                picture_has_clip(&mut app, wrap.as_object()),
                 clips,
                 "{clip_behavior:?}"
             );
-            let _ = owner;
         }
     }
 }

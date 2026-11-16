@@ -3502,7 +3502,8 @@ mod tests {
     };
 
     use waft_widgets::testing::{
-        TargetPlatformVariant, TestPointer, WidgetTester, test_widgets, test_widgets_variant,
+        TargetPlatformVariant, TestPointer, WidgetTester, assert_f32_equals, expect, find,
+        finds_n_widgets, finds_nothing, finds_one_widget, test_widgets, test_widgets_variant,
     };
 
     use super::*;
@@ -3511,19 +3512,10 @@ mod tests {
     use crate::test_support::{PaintInspection, material_app};
     use crate::theme_data::ThemeData;
     use crate::tooltip::tests::m2;
+    use waft_rendering::testing::{PaintCall, PaintedStyle, assert_paints, paints};
     use waft_widgets::AnyFocusNode;
 
     const MENU_ITEMS: [&str; 4] = ["one", "two", "three", "four"];
-
-    /// Dart's `moreOrLessEquals` on positions that went through a render object's transform:
-    /// `Matrix4` is valo's f32 matrix, so they carry f32 rounding that Dart's f64 has not, and
-    /// nothing more.
-    fn assert_near(actual: f64, expected: f64) {
-        assert!(
-            (actual - expected).abs() <= f64::from(f32::EPSILON) * expected.abs().max(1.0),
-            "{actual} is not {expected}"
-        );
-    }
 
     fn key(text: &str) -> KeyRef {
         ValueKey::new(text.to_owned()).into()
@@ -3895,14 +3887,16 @@ mod tests {
         tester.pump_widget(root);
     }
 
-    /// Dart's `find.byKey(key, skipOffstage: false)`.
+    /// Dart's `find.byKey(key)`.
     fn all_by_key(tester: &WidgetTester, key: &KeyRef) -> Vec<AnyElement> {
-        let found = tester.elements();
-        let app = tester.cell.borrow();
-        found
-            .into_iter()
-            .filter(|element| element.widget(&app).key() == Some(key))
-            .collect()
+        find::by_key(key.clone()).evaluate(tester)
+    }
+
+    /// Dart's `find.byKey(key, skipOffstage: false)`.
+    fn all_by_key_offstage(tester: &WidgetTester, key: &KeyRef) -> Vec<AnyElement> {
+        find::by_key(key.clone())
+            .skip_offstage(false)
+            .evaluate(tester)
     }
 
     /// Dart's `tester.renderObjectList<RenderBox>(find.byKey(ValueKey(text)))`.
@@ -3922,35 +3916,20 @@ mod tests {
         render.local_to_global(&tester.cell.borrow(), Offset::ZERO, None)
     }
 
-    fn size_of(tester: &WidgetTester, render: AnyRenderBox) -> Size {
-        render.size(&tester.cell.borrow())
-    }
-
-    fn rect_of(tester: &WidgetTester, render: AnyRenderBox) -> Rect {
-        tester.global_rect(render)
-    }
-
     fn key_box(tester: &WidgetTester, key: &GlobalKey) -> AnyRenderBox {
         tester.render_object(key).as_box().expect("a render box")
     }
 
     /// Dart's `tester.tap(finder)` on `render`.
     fn tap_box(tester: &mut WidgetTester, render: AnyRenderBox) {
-        let center = rect_of(tester, render).center();
-        tester.tap(center, 1);
+        let center = tester.get_rect(render).center();
+        tester.tap_at(center, 1);
     }
 
     /// Dart's `tester.tap(find.text(text).last)`.
     fn tap_last_text(tester: &mut WidgetTester, text: &str) {
-        let found = tester.find_onstage_text(text);
+        let found = find::text(text).evaluate(tester);
         let element = *found.last().expect("the text is shown");
-        let render = tester.render_box_of(element);
-        tap_box(tester, render);
-    }
-
-    /// Dart's `tester.tap(find.text(text))` of the only one shown.
-    fn tap_text(tester: &mut WidgetTester, text: &str) {
-        let element = only(tester.find_onstage_text(text));
         let render = tester.render_box_of(element);
         tap_box(tester, render);
     }
@@ -3958,14 +3937,14 @@ mod tests {
     /// Dart's `tester.tap(find.text(text, skipOffstage: false), warnIfMissed: false)`: a tap
     /// on the first one, shown or not.
     fn tap_first_text_anywhere(tester: &mut WidgetTester, text: &str) {
-        let element = tester.find_text(text)[0];
+        let element = find::text(text).skip_offstage(false).evaluate(tester)[0];
         let render = tester.render_box_of(element);
         tap_box(tester, render);
     }
 
     fn tap_key(tester: &mut WidgetTester, key: &GlobalKey) {
-        let center = tester.center_of(key);
-        tester.tap(center, 1);
+        let center = tester.get_center(key);
+        tester.tap_at(center, 1);
     }
 
     /// `pump()` then `pump(1s)`: finish the menu animation.
@@ -3983,7 +3962,7 @@ mod tests {
             global_top_left(tester, boxes[0]),
             global_top_left(tester, boxes[1])
         );
-        assert_eq!(size_of(tester, boxes[0]), size_of(tester, boxes[1]));
+        assert_eq!(tester.get_size(boxes[0]), tester.get_size(boxes[1]));
     }
 
     fn value_log() -> (Rc<RefCell<Option<String>>>, ValueChanged<Option<String>>) {
@@ -4008,7 +3987,7 @@ mod tests {
 
             pump_frame(tester, &build(&value));
 
-            tap_text(tester, "one");
+            tester.tap(find::text("one"));
             settle_menu(tester);
             assert_eq!(value.borrow().as_deref(), Some("one"));
 
@@ -4148,14 +4127,14 @@ mod tests {
 
     /// Dart's `getMenuRect`: the rectangle of the `_DropdownMenu` above the menu's `ListView`.
     fn menu_rect(tester: &WidgetTester) -> Rect {
-        let list_view = only(tester.find_by_type::<ListView>());
+        let list_view = tester.element(find::by_type::<ListView>());
         let menu = tester.ancestor_of_type::<DropdownMenu<String>>(list_view);
         let render = tester.render_box_of(menu);
-        rect_of(tester, render)
+        tester.get_rect(render)
     }
 
     fn the_button(tester: &WidgetTester) -> AnyRenderBox {
-        let button = only(tester.find_by_type::<DropdownButton<String>>());
+        let button = tester.element(find::by_type::<DropdownButton<String>>());
         tester.render_box_of(button)
     }
 
@@ -4214,7 +4193,7 @@ mod tests {
             let root = build(tester);
             tester.pump_widget(root);
 
-            tap_text(tester, "one");
+            tester.tap(find::text("one"));
             settle_menu(tester);
             assert_eq!(value.borrow().as_deref(), Some("one"));
 
@@ -4259,7 +4238,7 @@ mod tests {
     }
 
     fn indexed_stack_index(tester: &WidgetTester) -> Option<i32> {
-        let stack = only(tester.find_by_type::<IndexedStack>());
+        let stack = tester.element(find::by_type::<IndexedStack>());
         tester.widget(stack, |stack: &IndexedStack| stack.index)
     }
 
@@ -4325,7 +4304,8 @@ mod tests {
     }
 
     fn form_field_state(tester: &WidgetTester) -> Handle<DropdownButtonFormFieldState<String>> {
-        only(tester.find_by_type::<DropdownButtonFormField<String>>())
+        tester
+            .element(find::by_type::<DropdownButtonFormField<String>>())
             .state_handle::<DropdownButtonFormFieldState<String>>(&tester.cell.borrow())
             .expect("the form field's state")
     }
@@ -4359,14 +4339,14 @@ mod tests {
             );
 
             // Open the dropdown menu.
-            tap_text(tester, "one");
+            tester.tap(find::text("one"));
             tester.pump_and_settle();
 
             tap_last_text(tester, "three");
             tester.pump_and_settle();
 
             // The value should update to selected, not the initial value.
-            assert_eq!(tester.find_onstage_text("three").len(), 1);
+            expect(tester, &find::text("three"), finds_one_widget());
             assert_eq!(
                 state.value(&tester.cell.borrow()).map(String::as_str),
                 Some("three")
@@ -4376,7 +4356,7 @@ mod tests {
             tester.pump();
 
             // Reset to the initial value.
-            assert_eq!(tester.find_onstage_text("one").len(), 1);
+            expect(tester, &find::text("one"), finds_one_widget());
             assert_eq!(
                 state.value(&tester.cell.borrow()).map(String::as_str),
                 Some("one")
@@ -4409,7 +4389,7 @@ mod tests {
                     .into_widget(),
             );
             tester.pump_widget(root);
-            tap_text(tester, "foo");
+            tester.tap(find::text("foo"));
             tester.pump();
             let item_boxes: Vec<AnyRenderBox> = all_by_key(tester, &item_key)
                 .into_iter()
@@ -4417,7 +4397,7 @@ mod tests {
                 .collect();
             assert_eq!(global_top_left(tester, item_boxes[0]).dx(), 0.0);
             assert_eq!(global_top_left(tester, item_boxes[1]).dx(), 16.0);
-            assert_eq!(size_of(tester, item_boxes[1]).width(), 800.0 - 16.0 * 2.0);
+            assert_eq!(tester.get_size(item_boxes[1]).width(), 800.0 - 16.0 * 2.0);
         });
     }
 
@@ -4448,12 +4428,16 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            tap_text(tester, "4");
+            tester.tap(find::text("4"));
             settle_menu(tester);
 
             // We should have two copies of item 5, one in the menu and one in the
             // button itself.
-            assert_eq!(tester.find_text("5").len(), 2);
+            expect(
+                tester,
+                &find::text("5").skip_offstage(false),
+                finds_n_widgets(2),
+            );
 
             assert_eq!(value.get(), Some(4));
             tap_key(tester, &button_key);
@@ -4477,7 +4461,7 @@ mod tests {
             let button_box = key_box(tester, &button_key);
             let button_origin_before_tap = global_top_left(tester, button_box);
 
-            tap_text(tester, "two");
+            tester.tap(find::text("two"));
             settle_menu(tester);
 
             // Tapping the dropdown button should not cause it to move.
@@ -4495,8 +4479,8 @@ mod tests {
                 match text_direction {
                     TextDirection::Rtl => {
                         assert_eq!(
-                            rect_of(tester, button_box).bottom_right(),
-                            rect_of(tester, item_box).bottom_right()
+                            tester.get_rect(button_box).bottom_right(),
+                            tester.get_rect(item_box).bottom_right()
                         );
                     }
                     TextDirection::Ltr => {
@@ -4507,8 +4491,8 @@ mod tests {
                     }
                 }
                 assert_eq!(
-                    size_of(tester, button_box).height(),
-                    size_of(tester, item_box).height()
+                    tester.get_size(button_box).height(),
+                    tester.get_size(item_box).height()
                 );
             }
 
@@ -4540,11 +4524,12 @@ mod tests {
                     .on_changed(on_changed()),
             );
             let button_box = key_box(tester, &button_key);
-            let arrow_icon = tester.render_box_of(tester.find_by_icon(&Icons::arrow_drop_down()));
+            let arrow_icon = tester
+                .render_box_of(tester.element(find::by_icon(&Icons::arrow_drop_down()).first()));
 
             // Arrow icon should be aligned with far right of button when expanded
-            let button_size = size_of(tester, button_box);
-            let arrow_size = size_of(tester, arrow_icon);
+            let button_size = tester.get_size(button_box);
+            let arrow_size = tester.get_size(arrow_icon);
             assert_eq!(
                 global_top_left(tester, arrow_icon).dx(),
                 button_size
@@ -4594,8 +4579,8 @@ mod tests {
 
     /// Dart's `find.byIcon(icon)`.
     fn icons_showing(tester: &WidgetTester, icon: &waft_widgets::IconData) -> Vec<AnyElement> {
-        tester
-            .find_by_type::<Icon>()
+        find::by_type::<Icon>()
+            .evaluate(tester)
             .into_iter()
             .filter(|element| {
                 tester.widget(*element, |widget: &Icon| widget.icon.as_ref() == Some(icon))
@@ -4618,7 +4603,7 @@ mod tests {
 
             // test for size
             assert_eq!(
-                size_of(tester, icon_box(tester, &icon_key)),
+                tester.get_size(icon_box(tester, &icon_key)),
                 Size::new(24.0, 24.0)
             );
 
@@ -4647,7 +4632,7 @@ mod tests {
 
             // test for size
             assert_eq!(
-                size_of(tester, icon_box(tester, &icon_key)),
+                tester.get_size(icon_box(tester, &icon_key)),
                 Size::new(30.0, 30.0)
             );
 
@@ -4682,7 +4667,7 @@ mod tests {
 
             // test for size
             assert_eq!(
-                size_of(tester, icon_box(tester, &icon_key)),
+                tester.get_size(icon_box(tester, &icon_key)),
                 Size::new(40.0, 40.0)
             );
 
@@ -4714,7 +4699,7 @@ mod tests {
             );
             let button_box = key_box(tester, &button_key);
 
-            tap_text(tester, "two");
+            tester.tap(find::text("two"));
             settle_menu(tester);
 
             // The selected dropdown item is both in menu we just popped up, and in
@@ -4727,14 +4712,14 @@ mod tests {
             // heights are not.
             let menu_item_height = item_boxes
                 .iter()
-                .map(|item_box| size_of(tester, *item_box).height())
+                .map(|item_box| tester.get_size(*item_box).height())
                 .fold(f64::MIN, f64::max);
-            assert!(menu_item_height > size_of(tester, button_box).height());
+            assert!(menu_item_height > tester.get_size(button_box).height());
 
             for item_box in item_boxes {
                 assert_eq!(
-                    rect_of(tester, button_box).center().dy(),
-                    rect_of(tester, item_box).center().dy()
+                    tester.get_rect(button_box).center().dy(),
+                    tester.get_rect(item_box).center().dy()
                 );
             }
 
@@ -4771,12 +4756,12 @@ mod tests {
     }
 
     fn scrollable_box(tester: &WidgetTester) -> AnyRenderBox {
-        tester.render_box_of(only(tester.find_by_type::<Scrollable>()))
+        tester.render_box_of(tester.element(find::by_type::<Scrollable>()))
     }
 
     /// Dart's `find.descendant(of: find.byType(Scrollable), matching: find.byKey(ValueKey(text)))`.
     fn menu_item_box(tester: &WidgetTester, text: &str) -> AnyRenderBox {
-        let scrollable = only(tester.find_by_type::<Scrollable>());
+        let scrollable = tester.element(find::by_type::<Scrollable>());
         let element = only(
             all_by_key(tester, &key(text))
                 .into_iter()
@@ -4816,7 +4801,7 @@ mod tests {
                     .local_to_global(&app, Offset::new(0.0, -8.0), None)
                     .dy()
             };
-            assert_eq!(first_top, rect_of(tester, menu_item_container).top);
+            assert_eq!(first_top, tester.get_rect(menu_item_container).top);
         });
     }
 
@@ -4842,8 +4827,8 @@ mod tests {
 
             // List should be scrolled so that the selected item is in line with the button
             assert_eq!(
-                rect_of(tester, selected_item).center().dy(),
-                rect_of(tester, button_box).center().dy()
+                tester.get_rect(selected_item).center().dy(),
+                tester.get_rect(button_box).center().dy()
             );
         });
     }
@@ -4863,7 +4848,7 @@ mod tests {
             tap_key(tester, &button_key);
             tester.pump();
 
-            let list_view = only(tester.find_by_type::<ListView>());
+            let list_view = tester.element(find::by_type::<ListView>());
             {
                 let mut app = tester.cell.borrow_mut();
                 let scroll_controller = PrimaryScrollController::of(&mut app, list_view);
@@ -4888,7 +4873,7 @@ mod tests {
                     + size.height()
             };
             // Selected item should be aligned to the bottom of the dropdown menu.
-            assert_eq!(rect_of(tester, selected_item).bottom, container_bottom);
+            assert_eq!(tester.get_rect(selected_item).bottom, container_bottom);
         });
     }
 
@@ -4912,8 +4897,8 @@ mod tests {
             // A Dropdown button with a null value should be the same size as a
             // one with a non-null value.
             assert_eq!(
-                rect_of(tester, button_box),
-                rect_of(tester, button_box_null_value)
+                tester.get_rect(button_box),
+                tester.get_rect(button_box_null_value)
             );
         });
     }
@@ -4942,8 +4927,8 @@ mod tests {
             // A Dropdown button with a null value should be the same size as a
             // one with a non-null value.
             assert_eq!(
-                rect_of(tester, button_box),
-                rect_of(tester, button_box_null_items)
+                tester.get_rect(button_box),
+                tester.get_rect(button_box_null_items)
             );
         });
     }
@@ -4988,7 +4973,7 @@ mod tests {
             };
 
             pump_frame(tester, &build(None));
-            assert_eq!(tester.find_onstage_text("onetwothree").len(), 1);
+            expect(tester, &find::text("onetwothree"), finds_one_widget());
             let button_box_hint_value = key_box(tester, &button_key);
 
             pump_frame(tester, &build(Some("three")));
@@ -4997,8 +4982,8 @@ mod tests {
             // A Dropdown button with a null value and a hint should be the same size as a
             // one with a non-null value.
             assert_eq!(
-                rect_of(tester, button_box),
-                rect_of(tester, button_box_hint_value)
+                tester.get_rect(button_box),
+                tester.get_rect(button_box_hint_value)
             );
         });
     }
@@ -5017,7 +5002,7 @@ mod tests {
                 tap_box(tester, button);
                 tester.pump_and_settle();
                 let menu_rect = menu_rect(tester);
-                let button_rect = button_padding.inflate_rect(rect_of(tester, the_button(tester)));
+                let button_rect = button_padding.inflate_rect(tester.get_rect(the_button(tester)));
                 tap_box(tester, button);
                 (menu_rect, button_rect)
             };
@@ -5144,39 +5129,55 @@ mod tests {
             let button = the_button(tester);
             tap_box(tester, button);
             tester.pump_and_settle();
-            assert_eq!(tester.find_onstage_by_type::<ListView>().len(), 1);
+            expect(
+                tester,
+                &find::by_type::<ListView>().skip_offstage(false),
+                finds_one_widget(),
+            );
 
             // Show a keyboard (simulate by shortening the height).
             pump_frame(tester, &build(Size::new(800.0, 300.0)));
             tester.pump();
-            assert_eq!(tester.find_by_type::<ListView>().len(), 1);
+            expect(
+                tester,
+                &find::by_type::<ListView>().skip_offstage(false),
+                finds_one_widget(),
+            );
 
             // Hide a keyboard again (simulate by increasing the height).
             pump_frame(tester, &build(Size::new(800.0, 600.0)));
             tester.pump();
-            assert_eq!(tester.find_by_type::<ListView>().len(), 1);
+            expect(
+                tester,
+                &find::by_type::<ListView>().skip_offstage(false),
+                finds_one_widget(),
+            );
 
             // Rotate the device (simulate by changing the aspect ratio).
             pump_frame(tester, &build(Size::new(600.0, 800.0)));
             tester.pump();
-            assert!(tester.find_by_type::<ListView>().is_empty());
+            expect(
+                tester,
+                &find::by_type::<ListView>().skip_offstage(false),
+                finds_nothing(),
+            );
         });
     }
 
     fn shows(tester: &WidgetTester, text: &str) -> usize {
-        tester.find_onstage_text(text).len()
+        find::text(text).evaluate(tester).len()
     }
 
     fn center_dy_of(tester: &WidgetTester, element: AnyElement) -> f64 {
-        rect_of(tester, tester.render_box_of(element)).center().dy()
+        tester.get_rect(tester.render_box_of(element)).center().dy()
     }
 
     fn text_center_dy(tester: &WidgetTester, text: &str) -> f64 {
-        center_dy_of(tester, only(tester.find_onstage_text(text)))
+        center_dy_of(tester, tester.element(find::text(text)))
     }
 
     fn icon_center_dy(tester: &WidgetTester) -> f64 {
-        center_dy_of(tester, only(tester.find_by_type::<Icon>()))
+        center_dy_of(tester, tester.element(find::by_type::<Icon>()))
     }
 
     #[test]
@@ -5221,8 +5222,8 @@ mod tests {
             assert_eq!(shows(tester, "enabled"), 1);
             let enabled_hint_box = key_box(tester, &button_key);
             assert_eq!(
-                rect_of(tester, enabled_hint_box),
-                rect_of(tester, disabled_hint_box)
+                tester.get_rect(enabled_hint_box),
+                tester.get_rect(disabled_hint_box)
             );
         });
     }
@@ -5365,12 +5366,12 @@ mod tests {
     /// with a `Text` showing `text` below it.
     fn row_with_text(tester: &WidgetTester, text: &str, skip_offstage: bool) -> Size {
         let texts = if skip_offstage {
-            tester.find_onstage_text(text)
+            find::text(text).evaluate(tester)
         } else {
-            tester.find_text(text)
+            find::text(text).skip_offstage(false).evaluate(tester)
         };
-        let row = tester
-            .find_by_type::<Row>()
+        let row = find::by_type::<Row>()
+            .evaluate(tester)
             .into_iter()
             .find(|row| {
                 texts
@@ -5378,7 +5379,7 @@ mod tests {
                     .any(|text| tester.ancestors(*text).contains(row))
             })
             .expect("a Row with the text");
-        size_of(tester, tester.render_box_of(row))
+        tester.get_size(tester.render_box_of(row))
     }
 
     const SQUARE_ITEMS: [&str; 3] = ["25", "50", "100"];
@@ -5537,7 +5538,7 @@ mod tests {
                     .on_changed(on_changed()),
             );
 
-            tap_text(tester, "25");
+            tester.tap(find::text("25"));
             tester.pump_and_settle();
 
             assert_eq!(menu_rect(tester).width(), 200.0);
@@ -5552,7 +5553,7 @@ mod tests {
 
     /// Dart's `PrimaryScrollController.of(tester.element(find.byType(ListView))).position.pixels`.
     fn menu_scroll(tester: &WidgetTester) -> f64 {
-        let list_view = only(tester.find_by_type::<ListView>());
+        let list_view = tester.element(find::by_type::<ListView>());
         let mut app = tester.cell.borrow_mut();
         let scroll_controller = PrimaryScrollController::of(&mut app, list_view);
         scroll_controller.position(&app).pixels(&app)
@@ -5576,7 +5577,7 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            tap_text(tester, &value.to_string());
+            tester.tap(find::text(&value.to_string()));
             tester.pump_and_settle();
             assert_eq!(menu_scroll(tester), expected);
         });
@@ -5644,7 +5645,7 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            tap_text(tester, "12");
+            tester.tap(find::text("12"));
             tester.pump_and_settle();
             assert_eq!(selected_index.get(), None);
 
@@ -5757,9 +5758,9 @@ mod tests {
             tester.pump_widget(root);
 
             assert_eq!(shows(tester, "One as an Arabic numeral: 1"), 1);
-            tap_text(tester, "One as an Arabic numeral: 1");
+            tester.tap(find::text("One as an Arabic numeral: 1"));
             tester.pump_and_settle();
-            tap_text(tester, "Two");
+            tester.tap(find::text("Two"));
             tester.pump_and_settle();
             assert_eq!(shows(tester, "Two as an Arabic numeral: 2"), 1);
         });
@@ -5768,7 +5769,6 @@ mod tests {
     /// Dart's `checkDropdownColor`: the menu's painter fills its rounded rectangle, after the
     /// elevation's three shadows, in `color`, or else the theme's canvas colour.
     fn check_dropdown_color(color: Option<Color>, is_form_field: bool) {
-        use waft_embedder::valo::Op;
         test_widgets(|tester| {
             let text = "foo";
             let items = || {
@@ -5797,10 +5797,10 @@ mod tests {
                 Material::new().child(home).into_widget(),
             );
             tester.pump_widget(root);
-            tap_text(tester, text);
+            tester.tap(find::text(text));
             tester.pump();
 
-            let menu = only(tester.find_by_type::<DropdownMenu<String>>());
+            let menu = tester.element(find::by_type::<DropdownMenu<String>>());
             let custom_paint = only(
                 tester
                     .descendants_of_type::<CustomPaint>(menu)
@@ -5809,20 +5809,22 @@ mod tests {
                     .collect(),
             );
             let render = tester.render_box_of(custom_paint).as_object();
-            let ops = tester.painted_ops(render);
-            assert!(matches!(ops.first(), Some(Op::Save)));
-            // Dart's `rrect` calls: a blurred shadow rect is Valo's `RRectBlur`, where Dart's is
-            // an `rrect` call with a mask filter.
-            let rrects: Vec<(bool, waft_embedder::valo::Color)> = ops
-                .iter()
-                .filter_map(|op| match op {
-                    Op::DrawPath { paint, .. } => Some((false, paint.color)),
-                    Op::RRectBlur { paint, .. } => Some((true, paint.color)),
-                    _ => None,
-                })
-                .collect();
-            let expected = color.unwrap_or(Colors::GREY.shade50());
-            assert_eq!(rrects[3], (false, expected.into()));
+            use waft_rendering::testing::PaintCall;
+            waft_rendering::testing::assert_paints(
+                &tester.painted_ops(render),
+                &[
+                    PaintCall::Save,
+                    PaintCall::rrect(None),
+                    PaintCall::rrect(None),
+                    PaintCall::rrect(None),
+                    PaintCall::RRect {
+                        rrect: None,
+                        color: Some(color.unwrap_or(Colors::GREY.shade50())),
+                        style: None,
+                        has_mask_filter: Some(false),
+                    },
+                ],
+            );
         });
     }
 
@@ -5887,7 +5889,7 @@ mod tests {
             assert_eq!(shows(tester, "Please select an item"), 1);
             tap_first_text_anywhere(tester, "Please select an item");
             tester.pump_and_settle();
-            tap_text(tester, "1");
+            tester.tap(find::text("1"));
             tester.pump_and_settle();
             // Selecting an item should display its corresponding item builder
             assert_eq!(shows(tester, "You have selected: 1"), 1);
@@ -5940,22 +5942,19 @@ mod tests {
             );
 
             let boxes = |tester: &WidgetTester, value: f64| -> Vec<Rect> {
-                all_by_key(tester, &value_key(value))
+                all_by_key_offstage(tester, &value_key(value))
                     .into_iter()
-                    .map(|element| rect_of(tester, tester.render_box_of(element)))
+                    .map(|element| tester.get_rect(tester.render_box_of(element)))
                     .collect()
             };
             let icon_rect = |tester: &WidgetTester| {
-                rect_of(
-                    tester,
-                    tester.render_box_of(only(tester.find_by_type::<Icon>())),
-                )
+                tester.get_rect(tester.render_box_of(tester.element(find::by_type::<Icon>())))
             };
 
             // Only the DropdownButton is visible. It contains the selected item
             // and a dropdown arrow icon.
             tester.pump_widget(root);
-            assert_eq!(tester.find_by_type::<Icon>().len(), 1);
+            expect(tester, &find::by_type::<Icon>(), finds_one_widget());
             assert_eq!(boxes(tester, 30.0).len(), 1);
 
             // All menu items have a minimum height of 48. The centers of the
@@ -5967,7 +5966,7 @@ mod tests {
             assert_eq!(item30.top_right().dx(), icon_rect(tester).top_left().dx());
 
             // Show the popup menu.
-            tester.tap(item30.center(), 1);
+            tester.tap_at(item30.center(), 1);
             tester.pump_and_settle();
 
             // Each item appears twice, once in the menu and once
@@ -6009,10 +6008,10 @@ mod tests {
             );
 
             // Dismiss the menu by selecting item40 and then show the menu again.
-            tester.tap(boxes(tester, 40.0)[1].center(), 1);
+            tester.tap_at(boxes(tester, 40.0)[1].center(), 1);
             tester.pump_and_settle();
             assert_eq!(dropdown_value.get(), Some(40.0));
-            tester.tap(boxes(tester, 40.0)[0].center(), 1);
+            tester.tap_at(boxes(tester, 40.0)[0].center(), 1);
             tester.pump_and_settle();
 
             // The vertical center of the selectedItem (item40) should
@@ -6074,7 +6073,7 @@ mod tests {
             // Select a different item to trigger setState, which updates mediaQuery
             // and forces a performLayout on the popped _DropdownRoute. This operation
             // should not cause an exception.
-            tap_text(tester, "one");
+            tester.tap(find::text("one"));
             tester.pump_and_settle();
             tap_last_text(tester, "two");
             tester.pump_and_settle();
@@ -6126,13 +6125,12 @@ mod tests {
             );
             tester.pump_and_settle(); // Pump a frame for autofocus to take effect.
             assert!(has_primary_focus(tester, focus_node.handle()));
-            assert!(
-                tester
-                    .ink_drawn()
-                    .contains(&crate::test_support::Drawn::Rect(
-                        0x1f000000,
-                        Rect::from_ltrb(348.0, 276.0, 452.0, 324.0)
-                    ))
+            assert_paints(
+                tester.ink_list().ops(),
+                &[PaintCall::rect_at(
+                    Rect::from_ltrb(348.0, 276.0, 452.0, 324.0),
+                    Some(Color::new(0x1f000000)),
+                )],
             );
 
             pump_frame(
@@ -6145,13 +6143,12 @@ mod tests {
                     .use_material3(false),
             );
             tester.pump_and_settle(); // Pump a frame for autofocus to take effect.
-            assert!(
-                tester
-                    .ink_drawn()
-                    .contains(&crate::test_support::Drawn::Rect(
-                        0x1f00ff00,
-                        Rect::from_ltrb(348.0, 276.0, 452.0, 324.0)
-                    ))
+            assert_paints(
+                tester.ink_list().ops(),
+                &[PaintCall::rect_at(
+                    Rect::from_ltrb(348.0, 276.0, 452.0, 324.0),
+                    Some(Color::new(0x1f00ff00)),
+                )],
             );
         });
     }
@@ -6159,15 +6156,22 @@ mod tests {
     /// Dart's `findInputDecoratorBorderPainter()` with `paints..rrect(style: fill, color:)`:
     /// whether the decorator's border container fills a path in `color`.
     fn input_decorator_fills(tester: &WidgetTester, color: Color) -> bool {
-        let decorator = only(tester.find_by_type::<InputDecorator>());
+        let decorator = tester.element(find::by_type::<InputDecorator>());
         let render = tester.render_box_of(decorator).as_object();
-        tester.painted(render).iter().any(|drawn| {
-            matches!(drawn, crate::test_support::Drawn::Path(fill, _) if *fill == color.to_argb32())
-        })
+        paints(
+            &tester.painted_ops(render),
+            &[PaintCall::RRect {
+                rrect: None,
+                color: Some(color),
+                style: Some(PaintedStyle::Fill),
+                has_mask_filter: None,
+            }],
+        )
+        .is_ok()
     }
 
     fn decorator_theme(tester: &WidgetTester) -> Rc<ThemeData> {
-        let decorator = only(tester.find_by_type::<InputDecorator>());
+        let decorator = tester.element(find::by_type::<InputDecorator>());
         Theme::of(&mut tester.cell.borrow_mut(), decorator)
     }
 
@@ -6292,7 +6296,7 @@ mod tests {
             // delegates to the InputDecorator which manages hover overlay.
             let is_hovering = |tester: &WidgetTester| {
                 tester.widget(
-                    only(tester.find_by_type::<InputDecorator>()),
+                    tester.element(find::by_type::<InputDecorator>()),
                     |decorator: &InputDecorator| decorator.is_hovering,
                 )
             };
@@ -6300,7 +6304,7 @@ mod tests {
 
             let mut mouse = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut mouse, Offset::ZERO);
-            let center = tester.center_of(&button_key);
+            let center = tester.get_center(&button_key);
             tester.move_to(&mut mouse, center, false);
             tester.pump();
 
@@ -6464,7 +6468,7 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            tap_text(tester, "One");
+            tester.tap(find::text("One"));
             tester.pump_and_settle();
             tap_last_text(tester, "None");
             tester.pump_and_settle();
@@ -6542,8 +6546,8 @@ mod tests {
 
     /// Dart's `find.text(text).hitTestable()`.
     fn hit_testable_texts(tester: &WidgetTester, text: &str) -> Vec<AnyElement> {
-        tester
-            .find_onstage_text(text)
+        find::text(text)
+            .evaluate(tester)
             .into_iter()
             .filter(|element| hit_testable(tester, *element))
             .collect()
@@ -6704,11 +6708,11 @@ mod tests {
             assert!(has_primary_focus(tester, node));
 
             // Scroll back to the top using touch, and make sure we end up there.
-            let menu = tester.render_box_of(only(tester.find_by_type::<DropdownMenu<i32>>()));
-            let menu_rect = rect_of(tester, menu);
+            let menu = tester.render_box_of(tester.element(find::by_type::<DropdownMenu<i32>>()));
+            let menu_rect = tester.get_rect(menu);
             let menu_rect = menu_rect.shift(menu_rect.top_left());
             for _ in 0..10 {
-                let center = rect_of(tester, menu).center();
+                let center = tester.get_rect(menu).center();
                 tester.fling_from(center, Offset::new(0.0, menu_rect.height()), 10.0, 1);
             }
             tester.pump_and_settle();
@@ -6719,13 +6723,13 @@ mod tests {
             assert_eq!(ones.len(), 2);
             let last_one = tester.render_box_of(*ones.last().expect("two found"));
             assert_eq!(
-                rect_of(tester, last_one),
+                tester.get_rect(last_one),
                 Rect::from_ltrb(372.0, 104.0, 436.0, 152.0)
             );
 
             // Scrolling to the top again has removed the one the focus was on from the
             // tree, causing it to lose focus.
-            let ninety_one = *all_by_key(tester, &int_key(91))
+            let ninety_one = *all_by_key_offstage(tester, &int_key(91))
                 .last()
                 .expect("the menu's 91, offstage");
             let node = focus_of(tester, ninety_one);
@@ -6776,11 +6780,11 @@ mod tests {
             tester.pump(); // Pump a frame for autofocus to take effect.
             assert!(!has_primary_focus(tester, focus_node.handle()));
 
-            tap_text(tester, "1");
+            tester.tap(find::text("1"));
             tester.pump_and_settle();
 
             // Close the dropdown menu.
-            tester.tap(Offset::new(1.0, 1.0), 1);
+            tester.tap_at(Offset::new(1.0, 1.0), 1);
             tester.pump_and_settle();
 
             assert!(has_primary_focus(tester, focus_node.handle()));
@@ -6838,7 +6842,7 @@ mod tests {
             assert_eq!(dropdown_button_tap_counter.get(), 0);
 
             // Tap dropdown button.
-            tap_text(tester, "one");
+            tester.tap(find::text("one"));
             tester.pump_and_settle();
 
             assert_eq!(value.borrow().as_deref(), Some("one"));
@@ -6897,7 +6901,7 @@ mod tests {
             tester.pump_widget(root);
 
             // Tap dropdown button.
-            tap_text(tester, "one");
+            tester.tap(find::text("one"));
             tester.pump_and_settle();
 
             assert_eq!(value.borrow().as_deref(), Some("one"));
@@ -7001,19 +7005,16 @@ mod tests {
             let scrollbar_paints_rect = |tester: &WidgetTester| {
                 // The scrollbar's painter is on the first `CustomPaint` below it; the
                 // `Scrollbar`'s own render object is a repaint boundary.
-                let scrollbar = only(tester.find_by_type::<Scrollbar>());
+                let scrollbar = tester.element(find::by_type::<Scrollbar>());
                 let custom_paint = *tester
                     .descendants_of_type::<CustomPaint>(scrollbar)
                     .first()
                     .expect("the scrollbar's painter");
                 let render = tester.render_box_of(custom_paint).as_object();
-                tester
-                    .painted(render)
-                    .iter()
-                    .any(|drawn| matches!(drawn, crate::test_support::Drawn::Rect(..)))
+                paints(&tester.painted_ops(render), &[PaintCall::rect(None)]).is_ok()
             };
             let max_scroll_extent = |tester: &WidgetTester| {
-                let list_view = only(tester.find_by_type::<ListView>());
+                let list_view = tester.element(find::by_type::<ListView>());
                 let mut app = tester.cell.borrow_mut();
                 let scroll_controller = PrimaryScrollController::of(&mut app, list_view);
                 scroll_controller.position(&app).max_scroll_extent(&app)
@@ -7026,7 +7027,7 @@ mod tests {
                     .items(Some(numbers(10)))
                     .on_changed(on_changed()),
             );
-            tap_text(tester, "0");
+            tester.tap(find::text("0"));
             tester.pump_and_settle();
 
             // The scrollbar shouldn't show if the list fits into the screen.
@@ -7043,7 +7044,7 @@ mod tests {
                     .items(Some(numbers(100)))
                     .on_changed(on_changed()),
             );
-            tap_text(tester, "0");
+            tester.tap(find::text("0"));
             tester.pump_and_settle();
 
             // The scrollbar is shown when the list is longer than the height of the screen.
@@ -7056,11 +7057,9 @@ mod tests {
     fn dropdown_menus_maximum_height_should_be_influenced_by_dropdown_button_menu_max_height() {
         test_widgets(|tester| {
             let list_view_height = |tester: &WidgetTester| {
-                size_of(
-                    tester,
-                    tester.render_box_of(only(tester.find_by_type::<ListView>())),
-                )
-                .height()
+                tester
+                    .get_size(tester.render_box_of(tester.element(find::by_type::<ListView>())))
+                    .height()
             };
             let base = || {
                 frame()
@@ -7069,10 +7068,10 @@ mod tests {
                     .on_changed(on_changed())
             };
             pump_frame(tester, &base());
-            tap_text(tester, "0");
+            tester.tap(find::text("0"));
             tester.pump_and_settle();
 
-            let list_view = only(tester.find_by_type::<ListView>());
+            let list_view = tester.element(find::by_type::<ListView>());
             let mut menu_height = list_view_height(tester);
             // The default maximum height should be one item height from the edge.
             // https://material.io/design/components/menus.html#usage
@@ -7090,7 +7089,7 @@ mod tests {
                 tester,
                 &base().menu_max_height(7.0 * K_MIN_INTERACTIVE_DIMENSION),
             );
-            tap_text(tester, "0");
+            tester.tap(find::text("0"));
             tester.pump_and_settle();
 
             menu_height = list_view_height(tester);
@@ -7104,7 +7103,7 @@ mod tests {
             // Set menuMaxHeight which is greater than defaultMenuHeight
             pump_frame(tester, &base().menu_max_height(media_height));
 
-            tap_text(tester, "0");
+            tester.tap(find::text("0"));
             tester.pump_and_settle();
 
             menu_height = list_view_height(tester);
@@ -7127,15 +7126,15 @@ mod tests {
                     .menu_max_height(2.0 * K_MIN_INTERACTIVE_DIMENSION),
             );
 
-            tap_text(tester, "6");
+            tester.tap(find::text("6"));
             tester.pump_and_settle();
 
-            let menu_box = tester.render_box_of(only(tester.find_by_type::<ListView>()));
+            let menu_box = tester.render_box_of(tester.element(find::by_type::<ListView>()));
             let button_box = key_box(tester, &button_key);
             // The menu's bottom should align with the drop-button's bottom.
             assert_eq!(
-                rect_of(tester, menu_box).bottom,
-                rect_of(tester, button_box).bottom
+                tester.get_rect(menu_box).bottom,
+                tester.get_rect(button_box).bottom
             );
         });
     }
@@ -7143,7 +7142,6 @@ mod tests {
     // Regression test for https://github.com/flutter/flutter/issues/76614
     #[test]
     fn do_not_crash_if_used_in_very_short_screen() {
-        use waft_embedder::valo::Op;
         test_widgets(|_| {
             // The default item height is 48.0 pixels and needs two items padding since
             // the menu requires empty space surrounding the menu. Finally, the constraint height
@@ -7175,7 +7173,7 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            tap_text(tester, "foo");
+            tester.tap(find::text("foo"));
             tester.pump_and_settle();
 
             let item_boxes: Vec<AnyRenderBox> = all_by_key(tester, &item_key)
@@ -7188,28 +7186,25 @@ mod tests {
             assert_eq!(global_top_left(tester, item_boxes[1]).dx(), 364.0);
             assert_eq!(global_top_left(tester, item_boxes[1]).dy(), 47.5);
 
-            let menu = only(tester.find_by_type::<DropdownMenu<String>>());
+            let menu = tester.element(find::by_type::<DropdownMenu<String>>());
             let custom_paint = *tester
                 .descendants_of_type::<CustomPaint>(menu)
                 .first()
                 .expect("the menu's painter");
-            let ops = tester.painted_ops(tester.render_box_of(custom_paint).as_object());
-            assert!(matches!(ops.first(), Some(Op::Save)));
-            let rrects: Vec<&Op> = ops
-                .iter()
-                .filter(|op| matches!(op, Op::DrawPath { .. } | Op::RRectBlur { .. }))
-                .collect();
-            // The height of menu is 47.0.
-            let Op::DrawPath { paint, .. } = rrects[3] else {
-                panic!("the fourth rrect is the menu's fill, with no mask filter");
-            };
-            assert_eq!(paint.color, Colors::GREY.shade50().into());
+            use waft_rendering::testing::PaintCall;
             waft_rendering::testing::assert_paints(
                 &tester.painted_ops(tester.render_box_of(custom_paint).as_object()),
-                &[waft_rendering::testing::PaintCall::rrect_at(
-                    waft_embedder::RRect::from_ltrbxy(0.0, 0.0, 112.0, 47.0, 2.0, 2.0),
-                    Some(Colors::GREY.shade50()),
-                )],
+                &[
+                    PaintCall::Save,
+                    PaintCall::rrect(None),
+                    PaintCall::rrect(None),
+                    PaintCall::rrect(None),
+                    // The height of menu is 47.0.
+                    PaintCall::rrect_at(
+                        waft_embedder::RRect::from_ltrbxy(0.0, 0.0, 112.0, 47.0, 2.0, 2.0),
+                        Some(Colors::GREY.shade50()),
+                    ),
+                ],
             );
         });
     }
@@ -7333,29 +7328,28 @@ mod tests {
             tester.pump_widget(root);
 
             let button_box = key_box(tester, &button_key);
-            let mut selected_item_box =
-                tester.render_box_of(only(tester.find_onstage_text("enabled")));
+            let mut selected_item_box = tester.render_box_of(tester.element(find::text("enabled")));
             // Default to center-start aligned.
             assert_eq!(
                 local_to_global(
                     tester,
                     button_box,
-                    Offset::new(0.0, size_of(tester, button_box).height() / 2.0)
+                    Offset::new(0.0, tester.get_size(button_box).height() / 2.0)
                 ),
                 local_to_global(
                     tester,
                     selected_item_box,
-                    Offset::new(0.0, size_of(tester, selected_item_box).height() / 2.0)
+                    Offset::new(0.0, tester.get_size(selected_item_box).height() / 2.0)
                 )
             );
 
             let root = build(tester, Some(AlignmentGeometry::CENTER));
             tester.pump_widget(root);
 
-            selected_item_box = tester.render_box_of(only(tester.find_onstage_text("enabled")));
+            selected_item_box = tester.render_box_of(tester.element(find::text("enabled")));
             // Should be center-center aligned, the icon size is 24.0 pixels.
-            let button_size = size_of(tester, button_box);
-            let item_size = size_of(tester, selected_item_box);
+            let button_size = tester.get_size(button_box);
+            let item_size = tester.get_size(selected_item_box);
             let expected = local_to_global(
                 tester,
                 button_box,
@@ -7370,36 +7364,37 @@ mod tests {
                 Offset::new(item_size.width() / 2.0, item_size.height() / 2.0),
             );
             // Dart's `offsetMoreOrLessEquals`.
-            assert_near(actual.dx(), expected.dx());
-            assert_near(actual.dy(), expected.dy());
+            assert_f32_equals(actual.dx(), expected.dx());
+            assert_f32_equals(actual.dy(), expected.dy());
 
             // Open dropdown.
             tap_hit_testable_text(tester, "enabled");
             tester.pump_and_settle();
 
-            let selected_item_box_in_menu = tester.render_box_of(tester.find_text("enabled")[1]);
+            let selected_item_box_in_menu =
+                tester.render_box_of(find::text("enabled").evaluate(tester)[1]);
             let menu_rect = menu_rect_any(tester);
-            let in_menu_size = size_of(tester, selected_item_box_in_menu);
+            let in_menu_size = tester.get_size(selected_item_box_in_menu);
             let center = local_to_global(
                 tester,
                 selected_item_box_in_menu,
                 Offset::new(in_menu_size.width() / 2.0, in_menu_size.height() / 2.0),
             );
 
-            assert_near(center.dx(), menu_rect.top_center().dx());
-            let item_size = size_of(tester, selected_item_box);
+            assert_f32_equals(center.dx(), menu_rect.top_center().dx());
+            let item_size = tester.get_size(selected_item_box);
             let button_item_center = local_to_global(
                 tester,
                 selected_item_box,
                 Offset::new(item_size.width() / 2.0, item_size.height() / 2.0),
             );
-            assert_near(center.dy(), button_item_center.dy());
+            assert_f32_equals(center.dy(), button_item_center.dy());
         });
     }
 
     /// Dart's `tester.getRect(find.byWidgetPredicate(runtimeType starts with '_DropdownMenu<'))`.
     fn menu_rect_any(tester: &WidgetTester) -> Rect {
-        let menu = only(tester.find_by_type::<DropdownMenu<String>>());
+        let menu = tester.element(find::by_type::<DropdownMenu<String>>());
         tester.get_rect(tester.render_box_of(menu))
     }
 
@@ -7439,8 +7434,8 @@ mod tests {
 
             // Find DropdownMenuItem.
             let item = tester.render_box_of(only(tester.find_onstage_by_key(&item_key)));
-            let on_menu_item = rect_of(tester, item).center();
-            let off_menu_item = rect_of(tester, item).bottom_right() + Offset::new(1.0, 1.0);
+            let on_menu_item = tester.get_rect(item).center();
+            let off_menu_item = tester.get_rect(item).bottom_right() + Offset::new(1.0, 1.0);
             let mut gesture = TestPointer::mouse(1, 0);
 
             tester.add_pointer(&mut gesture, on_menu_item);
@@ -7470,7 +7465,7 @@ mod tests {
             let root = one_item_app(tester, button(Some(super::tests::on_changed())));
             tester.pump_widget(root);
 
-            let button_rect = rect_of(tester, key_box(tester, &key));
+            let button_rect = tester.get_rect(key_box(tester, &key));
             let on_dropdown_button = button_rect.center();
             let off_dropdown_button = button_rect.bottom_right() + Offset::new(1.0, 1.0);
             let mut gesture = TestPointer::mouse(1, 0);
@@ -7515,7 +7510,7 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            let on_dropdown_button = tester.center_of(&menu_key);
+            let on_dropdown_button = tester.get_center(&menu_key);
             let mut gesture = TestPointer::mouse(1, 0);
 
             tester.add_pointer(&mut gesture, on_dropdown_button);
@@ -7553,7 +7548,7 @@ mod tests {
 
             // Find DropdownMenuItem.
             let item = tester.render_box_of(only(tester.find_onstage_by_key(&item_key)));
-            let on_menu_item = rect_of(tester, item).center();
+            let on_menu_item = tester.get_rect(item).center();
 
             tester.add_pointer(&mut gesture, on_menu_item);
             tester.pump();
@@ -7565,23 +7560,22 @@ mod tests {
     /// Dart's `paints..save()..rrect()..rrect()..rrect()..rrect(rrect: rrect)` on the menu's
     /// painter: after the elevation's three blurred shadows it fills `rrect`.
     fn menu_painter_fills(tester: &WidgetTester, rrect: waft_embedder::RRect) {
-        use waft_embedder::valo::Op;
-        let menu = only(tester.find_by_type::<DropdownMenu<String>>());
+        let menu = tester.element(find::by_type::<DropdownMenu<String>>());
         let custom_paint = *tester
             .descendants_of_type::<CustomPaint>(menu)
             .first()
             .expect("the menu's painter");
         let render = tester.render_box_of(custom_paint).as_object();
-        let ops = tester.painted_ops(render);
-        assert!(matches!(ops.first(), Some(Op::Save)));
-        let rrects = ops
-            .iter()
-            .filter(|op| matches!(op, Op::DrawPath { .. } | Op::RRectBlur { .. }))
-            .count();
-        assert!(rrects >= 4);
+        use waft_rendering::testing::PaintCall;
         waft_rendering::testing::assert_paints(
             &tester.painted_ops(render),
-            &[waft_rendering::testing::PaintCall::rrect_at(rrect, None)],
+            &[
+                PaintCall::Save,
+                PaintCall::rrect(None),
+                PaintCall::rrect(None),
+                PaintCall::rrect(None),
+                PaintCall::rrect_at(rrect, None),
+            ],
         );
     }
 
@@ -7608,7 +7602,7 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            tap_text(tester, "One");
+            tester.tap(find::text("One"));
             tester.pump_and_settle();
 
             menu_painter_fills(
@@ -7650,12 +7644,12 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            tap_text(tester, "One");
+            tester.tap(find::text("One"));
             tester.pump_and_settle();
 
             for key in &keys {
                 for element in all_by_key(tester, key) {
-                    let height = size_of(tester, tester.render_box_of(element)).height();
+                    let height = tester.get_size(tester.render_box_of(element)).height();
                     assert_eq!(height, item_height);
                 }
             }
@@ -7684,7 +7678,7 @@ mod tests {
             tester.pump_widget(root);
 
             // Opening the menu and settling does not panic.
-            tap_text(tester, "One");
+            tester.tap(find::text("One"));
             tester.pump_and_settle();
         });
     }
@@ -7714,7 +7708,7 @@ mod tests {
             let root = border_radius_form_field_app(tester, radius);
             tester.pump_widget(root);
 
-            tap_text(tester, "One");
+            tester.tap(find::text("One"));
             tester.pump_and_settle();
 
             menu_painter_fills(
@@ -7764,9 +7758,12 @@ mod tests {
                 }
                 frame
             };
-            let hint_rect = |tester: &WidgetTester| {
-                tester.get_rect(tester.render_box_of(tester.find_text(hint_text)[0]))
-            };
+            let hint_rect =
+                |tester: &WidgetTester| {
+                    tester.get_rect(tester.render_box_of(
+                        find::text(hint_text).skip_offstage(false).evaluate(tester)[0],
+                    ))
+                };
             let cases: [HintAlignmentCase; 14] = [
                 // AlignmentDirectional.centerStart (default)
                 (
@@ -7877,7 +7874,11 @@ mod tests {
         test_widgets(|tester| {
             pump_frame(tester, &decoration_hint_frame().on_changed(on_changed()));
 
-            assert_eq!(tester.find_text("Decoration Hint text").len(), 1);
+            expect(
+                tester,
+                &find::text("Decoration Hint text").skip_offstage(false),
+                finds_one_widget(),
+            );
         });
     }
 
@@ -7891,8 +7892,16 @@ mod tests {
                     .on_changed(on_changed()),
             );
 
-            assert_eq!(tester.find_text("Hint text").len(), 1);
-            assert!(tester.find_text("Decoration Hint text").is_empty());
+            expect(
+                tester,
+                &find::text("Hint text").skip_offstage(false),
+                finds_one_widget(),
+            );
+            expect(
+                tester,
+                &find::text("Decoration Hint text").skip_offstage(false),
+                finds_nothing(),
+            );
         });
     }
 
@@ -7902,7 +7911,11 @@ mod tests {
             // The Dropdown is disabled because onChanged is not defined.
             pump_frame(tester, &decoration_hint_frame());
 
-            assert_eq!(tester.find_text("Decoration Hint text").len(), 1);
+            expect(
+                tester,
+                &find::text("Decoration Hint text").skip_offstage(false),
+                finds_one_widget(),
+            );
         });
     }
 
@@ -7916,8 +7929,16 @@ mod tests {
                     .disabled_hint(Text::new("Disabled Hint text").into_widget()),
             );
 
-            assert_eq!(tester.find_text("Disabled Hint text").len(), 1);
-            assert!(tester.find_text("Decoration Hint text").is_empty());
+            expect(
+                tester,
+                &find::text("Disabled Hint text").skip_offstage(false),
+                finds_one_widget(),
+            );
+            expect(
+                tester,
+                &find::text("Decoration Hint text").skip_offstage(false),
+                finds_nothing(),
+            );
         });
     }
 
@@ -7931,8 +7952,16 @@ mod tests {
                 &decoration_hint_frame().hint(Text::new("Hint text").into_widget()),
             );
 
-            assert_eq!(tester.find_text("Hint text").len(), 1);
-            assert!(tester.find_text("Decoration Hint text").is_empty());
+            expect(
+                tester,
+                &find::text("Hint text").skip_offstage(false),
+                finds_one_widget(),
+            );
+            expect(
+                tester,
+                &find::text("Decoration Hint text").skip_offstage(false),
+                finds_nothing(),
+            );
         });
     }
 
@@ -7943,7 +7972,7 @@ mod tests {
             let root = border_radius_form_field_app(tester, radius);
             tester.pump_widget(root);
 
-            tap_text(tester, "One");
+            tester.tap(find::text("One"));
             tester.pump_and_settle();
 
             let render_clip = tester.first::<waft_rendering::RenderClipRRect>();
@@ -7965,7 +7994,7 @@ mod tests {
                 tester,
                 &frame().button_key(&button_key).on_changed(on_changed()),
             );
-            let no_padding_size = size_of(tester, key_box(tester, &button_key));
+            let no_padding_size = tester.get_size(key_box(tester, &button_key));
 
             pump_frame(
                 tester,
@@ -7974,7 +8003,7 @@ mod tests {
                     .on_changed(on_changed())
                     .padding(EdgeInsetsGeometry::symmetric(pad_vertical, pad_horizontal)),
             );
-            let padded_size = size_of(tester, key_box(tester, &button_key));
+            let padded_size = tester.get_size(key_box(tester, &button_key));
 
             // dropdowns with padding should be that much larger than with no padding
             assert_eq!(
@@ -8013,7 +8042,7 @@ mod tests {
             tester.pump_and_settle();
 
             // Tap on the barrier.
-            tester.tap(Offset::new(400.0, 400.0), 1);
+            tester.tap_at(Offset::new(400.0, 400.0), 1);
             tester.pump_and_settle();
 
             assert_eq!(shows(tester, "second"), expected_second);
@@ -8070,23 +8099,23 @@ mod tests {
             assert_eq!(shows(tester, "one"), 1);
 
             // Tap to open the dropdown.
-            tap_text(tester, "one");
+            tester.tap(find::text("one"));
             tester.pump_and_settle();
 
             // Select the second item from the dropdown list.
-            tap_text(tester, "two");
+            tester.tap(find::text("two"));
             tester.pump_and_settle();
 
             // Make sure the current item of dropdown is the second item of items list menuItems.
             assert_eq!(shows(tester, "two"), 1);
 
             // Tap to reopen the dropdown.
-            tap_text(tester, "two");
+            tester.tap(find::text("two"));
             tester.pump_and_settle();
 
             // Make sure the current selected item is highlighted with selectedColor.
-            let ink = tester
-                .find_onstage_text("two")
+            let ink = find::text("two")
+                .evaluate(tester)
                 .into_iter()
                 .find_map(|two| {
                     let ancestors = tester.ancestors(two);
@@ -8172,8 +8201,8 @@ mod tests {
                     .into_widget(),
             );
             tester.pump_widget(root);
-            let button = only(tester.find_by_type::<DropdownButton<String>>());
-            assert_eq!(size_of(tester, tester.render_box_of(button)), Size::ZERO);
+            let button = tester.element(find::by_type::<DropdownButton<String>>());
+            assert_eq!(tester.get_size(tester.render_box_of(button)), Size::ZERO);
         });
     }
 
@@ -8187,8 +8216,8 @@ mod tests {
                     .into_widget(),
             );
             tester.pump_widget(root);
-            let field = only(tester.find_by_type::<DropdownButtonFormField<String>>());
-            assert_eq!(size_of(tester, tester.render_box_of(field)), Size::ZERO);
+            let field = tester.element(find::by_type::<DropdownButtonFormField<String>>());
+            assert_eq!(tester.get_size(tester.render_box_of(field)), Size::ZERO);
         });
     }
 
@@ -8202,8 +8231,8 @@ mod tests {
                     .into_widget(),
             );
             tester.pump_widget(root);
-            let item = only(tester.find_by_type::<DropdownMenuItem<String>>());
-            assert_eq!(size_of(tester, tester.render_box_of(item)), Size::ZERO);
+            let item = tester.element(find::by_type::<DropdownMenuItem<String>>());
+            assert_eq!(tester.get_size(tester.render_box_of(item)), Size::ZERO);
         });
     }
 
@@ -8238,7 +8267,7 @@ mod tests {
             .into_widget();
             tester.pump_widget(root);
 
-            let label = tester.find_text(label_text)[0];
+            let label = find::text(label_text).evaluate(tester)[0];
             let label_style =
                 waft_widgets::DefaultTextStyle::of(&mut tester.cell.borrow_mut(), label).style;
             assert_eq!(
@@ -8394,7 +8423,7 @@ mod tests {
 
     fn label_top_left(tester: &WidgetTester) -> Offset {
         tester
-            .get_rect(tester.render_box_of(only(tester.find_onstage_text("labelText"))))
+            .get_rect(tester.render_box_of(tester.element(find::text("labelText"))))
             .top_left()
     }
 
@@ -8441,7 +8470,7 @@ mod tests {
             let hint_empty_label = label_top_left(tester);
 
             // Select a item.
-            tap_text(tester, "Hint");
+            tester.tap(find::text("Hint"));
             tester.pump_and_settle();
             tap_last_text(tester, "One");
             tester.pump_and_settle();
@@ -8561,7 +8590,7 @@ mod tests {
             let non_empty_label = label_top_left(tester);
 
             // Switch to `null` value item from value 1.
-            tap_text(tester, "One");
+            tester.tap(find::text("One"));
             tester.pump_and_settle();
             tap_last_text(tester, "None");
             tester.pump();
@@ -8617,7 +8646,7 @@ mod tests {
 
             assert_eq!(validate_called.get(), 1);
             assert_eq!(value.borrow().as_deref(), Some("one"));
-            tap_text(tester, "one");
+            tester.tap(find::text("one"));
             tester.pump_and_settle();
             tap_last_text(tester, "three");
             tester.pump();
@@ -8646,11 +8675,12 @@ mod tests {
             frame.items = Some(items);
             pump_form_frame(tester, &frame);
             let button_box = key_box(tester, &button_key);
-            let arrow_icon = tester.render_box_of(tester.find_by_icon(&Icons::arrow_drop_down()));
+            let arrow_icon = tester
+                .render_box_of(tester.element(find::by_icon(&Icons::arrow_drop_down()).first()));
 
             // Arrow icon should be aligned with far right of button when expanded
-            let button_size = size_of(tester, button_box);
-            let arrow_size = size_of(tester, arrow_icon);
+            let button_size = tester.get_size(button_box);
+            let arrow_size = tester.get_size(arrow_icon);
             assert_eq!(
                 global_top_left(tester, arrow_icon).dx(),
                 button_size
@@ -8670,7 +8700,7 @@ mod tests {
             pump_form_frame(tester, &frame);
             let button_box = key_box(tester, &button_key);
 
-            tap_text(tester, "two");
+            tester.tap(find::text("two"));
             settle_menu(tester);
 
             // The selected dropdown item is both in menu we just popped up, and in
@@ -8683,22 +8713,22 @@ mod tests {
             // heights are not.
             let menu_item_height = item_boxes
                 .iter()
-                .map(|item_box| size_of(tester, *item_box).height())
+                .map(|item_box| tester.get_size(*item_box).height())
                 .fold(f64::MIN, f64::max);
-            assert!(menu_item_height >= size_of(tester, button_box).height());
+            assert!(menu_item_height >= tester.get_size(button_box).height());
 
             for item_box in item_boxes {
                 assert_eq!(
-                    rect_of(tester, button_box).center().dy(),
-                    rect_of(tester, item_box).center().dy()
+                    tester.get_rect(button_box).center().dy(),
+                    tester.get_rect(item_box).center().dy()
                 );
             }
         });
     }
 
     fn dropdown_button_height(tester: &WidgetTester) -> f64 {
-        let button = only(tester.find_by_type::<DropdownButton<String>>());
-        size_of(tester, tester.render_box_of(button)).height()
+        let button = tester.element(find::by_type::<DropdownButton<String>>());
+        tester.get_size(tester.render_box_of(button)).height()
     }
 
     fn scaled_field(field: DropdownButtonFormField<String>, scale_factor: f64) -> WidgetRef {
@@ -8784,7 +8814,7 @@ mod tests {
                 scale_factor,
             ));
 
-            let button = only(tester.find_by_type::<DropdownButton<String>>());
+            let button = tester.element(find::by_type::<DropdownButton<String>>());
             let style = Theme::of(&mut tester.cell.borrow_mut(), button)
                 .text_theme
                 .title_medium
@@ -8970,8 +9000,8 @@ mod tests {
             pump_form_frame(tester, &build(Some(strings(&MENU_ITEMS))));
             let enabled_hint_box = key_box(tester, &button_key);
             assert_eq!(
-                rect_of(tester, enabled_hint_box),
-                rect_of(tester, disabled_hint_box)
+                tester.get_rect(enabled_hint_box),
+                tester.get_rect(disabled_hint_box)
             );
         });
     }
@@ -8995,7 +9025,7 @@ mod tests {
 
             // test for size
             assert_eq!(
-                size_of(tester, icon_box(tester, &icon_key)),
+                tester.get_size(icon_box(tester, &icon_key)),
                 Size::new(30.0, 30.0)
             );
 
@@ -9015,43 +9045,32 @@ mod tests {
 
     /// Dart's `verifyPaintedShadow`: the menu's painter draws the first three shadows of
     /// `elevation` as blurred rounded rects, each the menu's 800x208 rect shifted by its
-    /// offset and inflated by its spread. A blurred rect is Valo's `RRectBlur`, where Dart's
-    /// is an `rrect` call with a mask filter.
+    /// offset and inflated by its spread.
     fn verify_painted_shadow(tester: &WidgetTester, elevation: i32) {
-        use waft_embedder::valo::Op;
+        use waft_rendering::testing::PaintCall;
         let original_rectangle = Rect::from_ltrb(0.0, 0.0, 800.0, 208.0);
         let box_shadows = &k_elevation_to_shadow(elevation).expect("a defined elevation")[..3];
+        let shadow = |index: usize| PaintCall::RRect {
+            rrect: Some(waft_embedder::RRect::from_rect_and_radius(
+                original_rectangle
+                    .shift(box_shadows[index].offset)
+                    .inflate(box_shadows[index].spread_radius),
+                waft_embedder::Radius::circular(2.0),
+            )),
+            color: Some(box_shadows[index].color),
+            style: None,
+            has_mask_filter: Some(true),
+        };
 
-        let menu = only(tester.find_by_type::<DropdownMenu<String>>());
+        let menu = tester.element(find::by_type::<DropdownMenu<String>>());
         let custom_paint = *tester
             .descendants_of_type::<CustomPaint>(menu)
             .first()
             .expect("the menu's painter");
-        let ops = tester.painted_ops(tester.render_box_of(custom_paint).as_object());
-        assert!(matches!(ops.first(), Some(Op::Save)));
-        for (index, op) in ops[1..4].iter().enumerate() {
-            let shadow = &box_shadows[index];
-            let expected = original_rectangle
-                .shift(shadow.offset)
-                .inflate(shadow.spread_radius);
-            let Op::RRectBlur {
-                rect, radii, paint, ..
-            } = op
-            else {
-                panic!("a blurred shadow rect");
-            };
-            assert_eq!(
-                (rect.x, rect.y, rect.width, rect.height),
-                (
-                    expected.left as f32,
-                    expected.top as f32,
-                    expected.width() as f32,
-                    expected.height() as f32
-                )
-            );
-            assert_eq!(*radii, [2.0; 4]);
-            assert_eq!(paint.color, shadow.color.into());
-        }
+        waft_rendering::testing::assert_paints(
+            &tester.painted_ops(tester.render_box_of(custom_paint).as_object()),
+            &[PaintCall::Save, shadow(0), shadow(1), shadow(2)],
+        );
     }
 
     #[test]
@@ -9148,9 +9167,9 @@ mod tests {
             tester.pump_widget(root);
 
             assert_eq!(shows(tester, "One as an Arabic numeral: 1"), 1);
-            tap_text(tester, "One as an Arabic numeral: 1");
+            tester.tap(find::text("One as an Arabic numeral: 1"));
             tester.pump_and_settle();
-            tap_text(tester, "Two");
+            tester.tap(find::text("Two"));
             tester.pump_and_settle();
             assert_eq!(shows(tester, "Two as an Arabic numeral: 2"), 1);
         });
@@ -9172,7 +9191,7 @@ mod tests {
             assert_eq!(dropdown_button_tap_counter.get(), 0);
 
             // Tap dropdown button.
-            tap_text(tester, "one");
+            tester.tap(find::text("one"));
             tester.pump_and_settle();
 
             assert_eq!(value.borrow().as_deref(), Some("one"));
@@ -9186,7 +9205,7 @@ mod tests {
             assert_eq!(dropdown_button_tap_counter.get(), 1); // Should not change.
 
             // Tap dropdown button again.
-            tap_text(tester, "three");
+            tester.tap(find::text("three"));
             tester.pump_and_settle();
 
             assert_eq!(value.borrow().as_deref(), Some("three"));
@@ -9241,7 +9260,7 @@ mod tests {
             assert_eq!(shows(tester, "two"), 1);
 
             // Tap the DropdownButtonFormField widget
-            tap_text(tester, "two");
+            tester.tap(find::text("two"));
             tester.pump_and_settle();
 
             // Tap the first dropdown menu item.
@@ -9290,13 +9309,13 @@ mod tests {
             frame.value = Some("one".to_owned());
             pump_form_frame(tester, &frame);
 
-            let button_box = tester.render_box_of(only(tester.find_by_type::<IndexedStack>()));
-            let selected_item_box = tester.render_box_of(only(tester.find_onstage_text("one")));
+            let button_box = tester.render_box_of(tester.element(find::by_type::<IndexedStack>()));
+            let selected_item_box = tester.render_box_of(tester.element(find::text("one")));
 
             // Should be center-center aligned.
             assert_eq!(
-                rect_of(tester, button_box).center(),
-                rect_of(tester, selected_item_box).center()
+                tester.get_rect(button_box).center(),
+                tester.get_rect(selected_item_box).center()
             );
         });
     }
@@ -9339,7 +9358,7 @@ mod tests {
             );
 
             // Select 'Two'.
-            tap_text(tester, "One");
+            tester.tap(find::text("One"));
             tester.pump_and_settle();
             tap_last_text(tester, "Two");
             tester.pump_and_settle();
@@ -9406,14 +9425,14 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            let decorator = tester.render_box_of(only(tester.find_by_type::<InputDecorator>()));
+            let decorator = tester.render_box_of(tester.element(find::by_type::<InputDecorator>()));
             tap_box(tester, decorator);
             tester.pump();
 
             // Check InputDecorator state because DropdownButtonFormField delegates
             // visual logic to the InputDecorator.
             let (is_focused, error_text) = tester.widget(
-                only(tester.find_by_type::<InputDecorator>()),
+                tester.element(find::by_type::<InputDecorator>()),
                 |decorator: &InputDecorator| {
                     (
                         decorator.is_focused,
@@ -9550,7 +9569,7 @@ mod tests {
             tester.pump_and_settle();
 
             // Tap on the barrier.
-            tester.tap(Offset::new(400.0, 400.0), 1);
+            tester.tap_at(Offset::new(400.0, 400.0), 1);
             tester.pump_and_settle();
 
             assert_eq!(shows(tester, "second"), expected_second);
@@ -9593,7 +9612,10 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            let icon = *tester.find_by_type::<Icon>().last().expect("an icon");
+            let icon = *find::by_type::<Icon>()
+                .evaluate(tester)
+                .last()
+                .expect("an icon");
             assert_eq!(
                 text_center_dy(tester, "Label Text"),
                 center_dy_of(tester, icon)
@@ -9616,8 +9638,8 @@ mod tests {
 
             assert!(*tester.active_cursor(1) == *cursor(waft_services::SystemMouseCursors::BASIC));
 
-            let field = only(tester.find_by_type::<DropdownButtonFormField<String>>());
-            let center = rect_of(tester, tester.render_box_of(field)).center();
+            let field = tester.element(find::by_type::<DropdownButtonFormField<String>>());
+            let center = tester.get_rect(tester.render_box_of(field)).center();
             tester.move_to(&mut gesture, center, false);
             tester.pump();
 
@@ -9641,8 +9663,8 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            let field = only(tester.find_by_type::<DropdownButtonFormField<String>>());
-            let center = rect_of(tester, tester.render_box_of(field)).center();
+            let field = tester.element(find::by_type::<DropdownButtonFormField<String>>());
+            let center = tester.get_rect(tester.render_box_of(field)).center();
             let mut gesture = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut gesture, center);
 
@@ -9678,7 +9700,7 @@ mod tests {
             tester.pump_widget(root);
 
             // Open the menu,
-            tap_text(tester, "one");
+            tester.tap(find::text("one"));
             tester.pump_and_settle();
 
             // Select the second item,
@@ -9707,43 +9729,12 @@ mod tests {
             tester.pump_widget(root);
 
             // Attempt to open the menu.
-            tap_text(tester, "one");
+            tester.tap(find::text("one"));
             tester.pump_and_settle();
 
             // Menu should not open, so 'two' should not be visible.
             assert_eq!(shows(tester, "two"), 0);
         });
-    }
-
-    /// Dart's `paints..line(p1:, p2:)`: whether `render`'s pictures stroke a two-point path
-    /// from `p1` to `p2`, read from the path's bounds.
-    fn paints_line(tester: &WidgetTester, render: AnyRenderBox, p1: Offset, p2: Offset) -> bool {
-        use waft_embedder::valo::{Op, PaintStyle as ValoPaintStyle};
-        let lines: Vec<(Offset, Offset)> = tester
-            .painted_ops(render.as_object())
-            .into_iter()
-            .filter_map(|op| match op {
-                Op::DrawPath { path, paint, .. }
-                    if matches!(paint.style, ValoPaintStyle::Stroke(_))
-                        && path.elements().count() == 2 =>
-                {
-                    let bounds = path.bounds();
-                    Some((
-                        Offset::new(f64::from(bounds.x), f64::from(bounds.y)),
-                        Offset::new(
-                            f64::from(bounds.x + bounds.width),
-                            f64::from(bounds.y + bounds.height),
-                        ),
-                    ))
-                }
-                _ => None,
-            })
-            .collect();
-        let found = lines.contains(&(p1, p2));
-        if !found {
-            eprintln!("lines painted: {lines:?}");
-        }
-        found
     }
 
     #[test]
@@ -9768,15 +9759,17 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            let decorator = tester.render_box_of(only(tester.find_by_type::<InputDecorator>()));
-            let width = size_of(tester, decorator).width();
+            let decorator = tester.render_box_of(tester.element(find::by_type::<InputDecorator>()));
+            let width = tester.get_size(decorator).width();
 
-            assert!(paints_line(
-                tester,
-                decorator,
-                Offset::new(0.0, CONTAINER_HEIGHT - 0.5),
-                Offset::new(width, CONTAINER_HEIGHT - 0.5),
-            ));
+            assert_paints(
+                &tester.painted_ops(decorator.as_object()),
+                &[PaintCall::line(
+                    Offset::new(0.0, CONTAINER_HEIGHT - 0.5),
+                    Offset::new(width, CONTAINER_HEIGHT - 0.5),
+                    None,
+                )],
+            );
         });
     }
 
@@ -9787,12 +9780,20 @@ mod tests {
         test_widgets(|tester| {
             pump_frame(tester, &frame().on_changed(on_changed()));
             tester.assert_leaves_nothing_behind(|tester| {
-                tap_text(tester, "two");
+                tester.tap(find::text("two"));
                 tester.pump_and_settle();
-                assert!(!tester.find_by_type::<DropdownMenu<String>>().is_empty());
-                tester.tap(Offset::ZERO, 1);
+                assert!(
+                    !find::by_type::<DropdownMenu<String>>()
+                        .evaluate(tester)
+                        .is_empty()
+                );
+                tester.tap_at(Offset::ZERO, 1);
                 tester.pump_and_settle();
-                assert!(tester.find_by_type::<DropdownMenu<String>>().is_empty());
+                expect(
+                    tester,
+                    &find::by_type::<DropdownMenu<String>>(),
+                    finds_nothing(),
+                );
             });
         });
     }
@@ -9883,15 +9884,16 @@ mod tests {
 
             let root = build_frame(tester);
             tester.pump_widget(root);
-            let hint = tester.render_box_of(only(tester.find_onstage_text("-item0-")));
+            let hint = tester.render_box_of(tester.element(find::text("-item0-")));
             assert_eq!(global_top_left(tester, hint).dx(), 8.0);
 
             // Show the popup menu.
-            let hint = tester.render_box_of(tester.find_text("-item0-")[0]);
+            let hint = tester
+                .render_box_of(find::text("-item0-").skip_offstage(false).evaluate(tester)[0]);
             tap_box(tester, hint);
             tester.pump_and_settle();
 
-            let hint = tester.render_box_of(only(tester.find_onstage_text("-item0-")));
+            let hint = tester.render_box_of(tester.element(find::text("-item0-")));
             assert_eq!(global_top_left(tester, hint).dx(), 8.0);
         });
     }
@@ -9942,15 +9944,16 @@ mod tests {
                         )
                         .into_widget()
                 };
-            let menus = |tester: &WidgetTester| tester.find_by_type::<DropdownMenu<String>>();
+            let menus =
+                |tester: &WidgetTester| find::by_type::<DropdownMenu<String>>().evaluate(tester);
             let width_of = |tester: &WidgetTester, element: AnyElement| {
-                size_of(tester, tester.render_box_of(element)).width()
+                tester.get_size(tester.render_box_of(element)).width()
             };
             let foo_rects = |tester: &WidgetTester| -> Vec<Rect> {
-                tester
-                    .find_onstage_text("foo")
+                find::text("foo")
+                    .evaluate(tester)
                     .into_iter()
-                    .map(|element| rect_of(tester, tester.render_box_of(element)))
+                    .map(|element| tester.get_rect(tester.render_box_of(element)))
                     .collect()
             };
 
@@ -9961,13 +9964,13 @@ mod tests {
 
             // 240 = 200.0 (button width) + _kUnalignedMenuMargin (20.0 left and right)
             assert_eq!(
-                size_of(tester, key_box(tester, &dropdown_key)).width(),
+                tester.get_size(key_box(tester, &dropdown_key)).width(),
                 200.0
             );
             assert_eq!(width_of(tester, only(menus(tester))), 240.0);
 
             // Dismiss the menu.
-            tester.tap(Offset::ZERO, 1);
+            tester.tap_at(Offset::ZERO, 1);
             tester.pump_and_settle();
             assert!(menus(tester).is_empty());
 
@@ -9978,7 +9981,7 @@ mod tests {
 
             // Aligneddropdown: true means the button and menu widths match
             assert_eq!(
-                size_of(tester, key_box(tester, &dropdown_key)).width(),
+                tester.get_size(key_box(tester, &dropdown_key)).width(),
                 200.0
             );
             assert_eq!(width_of(tester, only(menus(tester))), 200.0);
@@ -9990,7 +9993,7 @@ mod tests {
             assert_eq!(rects[0], rects[1]);
 
             // Dismiss the menu.
-            tester.tap(Offset::ZERO, 1);
+            tester.tap_at(Offset::ZERO, 1);
             tester.pump_and_settle();
             assert!(menus(tester).is_empty());
 
@@ -10036,8 +10039,8 @@ mod tests {
                     )
                 };
             let selected_value_rect = |tester: &WidgetTester| {
-                let element = tester.find_onstage_text(MENU_ITEMS[0])[0];
-                rect_of(tester, tester.render_box_of(element))
+                let element = find::text(MENU_ITEMS[0]).evaluate(tester)[0];
+                tester.get_rect(tester.render_box_of(element))
             };
 
             for text_direction in [TextDirection::Ltr, TextDirection::Rtl] {
@@ -10074,7 +10077,7 @@ mod tests {
             };
             let is_decoration_enabled = |tester: &WidgetTester| {
                 tester.widget(
-                    only(tester.find_by_type::<InputDecorator>()),
+                    tester.element(find::by_type::<InputDecorator>()),
                     |decorator: &InputDecorator| decorator.decoration.enabled,
                 )
             };
@@ -10155,9 +10158,13 @@ mod tests {
                     .into_widget(),
             );
             tester.pump_widget(root);
-            tap_text(tester, "First Item");
+            tester.tap(find::text("First Item"));
             tester.pump();
-            let second_item = tester.render_box_of(tester.find_text("Second Item")[1]);
+            let second_item = tester.render_box_of(
+                find::text("Second Item")
+                    .skip_offstage(false)
+                    .evaluate(tester)[1],
+            );
             assert_eq!(global_top_left(tester, second_item).dx(), 150.0);
             assert_eq!(global_top_left(tester, second_item).dy(), 176.0);
         });
@@ -10184,7 +10191,7 @@ mod tests {
 
             let mut gesture = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut gesture, Offset::ZERO);
-            let center = tester.center_of(&button_key);
+            let center = tester.get_center(&button_key);
             tester.move_to(&mut gesture, center, false);
             tester.pump();
             tester.pump_by(Duration::from_millis(15)); // Hover animation.
@@ -10237,14 +10244,14 @@ mod tests {
             // The inherited ScrollBehavior should not apply Scrollbars since they are
             // already built in to the widget. For iOS platform, ScrollBar directly returns
             // CupertinoScrollbar
-            let cupertino = tester
-                .find_onstage_by_type::<waft_cupertino::CupertinoScrollbar>()
+            let cupertino = find::by_type::<waft_cupertino::CupertinoScrollbar>()
+                .evaluate(tester)
                 .len();
             assert_eq!(cupertino, usize::from(platform == TargetPlatform::IOS));
-            assert_eq!(tester.find_onstage_by_type::<Scrollbar>().len(), 1);
+            expect(tester, &find::by_type::<Scrollbar>(), finds_one_widget());
             assert!(
-                tester
-                    .find_onstage_by_type::<waft_widgets::RawScrollbar>()
+                find::by_type::<waft_widgets::RawScrollbar>()
+                    .evaluate(tester)
                     .is_empty()
             );
         });

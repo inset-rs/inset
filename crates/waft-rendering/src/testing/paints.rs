@@ -22,8 +22,10 @@ use waft_embedder::{Color, Offset, RRect, Rect, StrokeCap};
 /// apart by the path (an oval, a rounded rect, any other). A `drawDRRect` is the even-odd path
 /// between two contours that `draw_drrect` records, a `drawLine` the open path of two points that
 /// `draw_line` records, and a `drawRRect` of a rounded rect without corners a `drawRect`
-/// (`draw_rrect`). A `drawArc` is a path, which [`PaintCall::Arc`] reads by where it runs. A transform that is both, such as the identity, is a
-/// `translate` and a `scale`; [`of`](Self::of) answers the translation.
+/// (`draw_rrect`). A `drawArc` is a path, which [`PaintCall::Arc`] reads by where it runs. A
+/// `drawRect` or `drawRRect` whose paint has a mask filter is valo's blurred (r)rect. A transform
+/// that is both, such as the identity, is a `translate` and a `scale`; [`of`](Self::of) answers
+/// the translation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CanvasMethod {
     Save,
@@ -72,6 +74,11 @@ impl CanvasMethod {
                 }
             }
             Op::DrawRect { .. } => CanvasMethod::DrawRect,
+            // A `drawRect` or `drawRRect` whose paint has a mask filter (a box shadow's).
+            Op::RRectBlur { radii, .. } if radii.iter().all(|radius| *radius == 0.0) => {
+                CanvasMethod::DrawRect
+            }
+            Op::RRectBlur { .. } => CanvasMethod::DrawRRect,
             Op::DrawShadow { .. } => CanvasMethod::DrawShadow,
             Op::GlyphRun { .. } => CanvasMethod::DrawParagraph,
             Op::DrawPaint { .. } => CanvasMethod::DrawPaint,
@@ -205,6 +212,17 @@ impl RecordedCall {
             Op::DrawRect { rect, paint, .. } => RecordedCall::Rect {
                 rect: rect_of(*rect),
                 color: paint.color.into(),
+            },
+            Op::RRectBlur {
+                rect, radii, paint, ..
+            } if radii.iter().all(|radius| *radius == 0.0) => RecordedCall::Rect {
+                rect: rect_of(*rect),
+                color: paint.color.into(),
+            },
+            Op::RRectBlur { rect, paint, .. } => RecordedCall::RRect {
+                bounds: rect_of(*rect),
+                color: paint.color.into(),
+                stroke_width: None,
             },
             Op::DrawPath {
                 path,
@@ -346,11 +364,12 @@ pub enum PaintCall {
         rect: Option<Rect>,
         color: Option<Color>,
     },
-    /// `..rrect(rrect:, color:, style:, strokeWidth:)`.
+    /// `..rrect(rrect:, color:, style:, strokeWidth:, hasMaskFilter:)`.
     RRect {
         rrect: Option<RRect>,
         color: Option<Color>,
         style: Option<PaintedStyle>,
+        has_mask_filter: Option<bool>,
     },
     /// `..drrect(outer:, inner:, color:, style:, strokeWidth:)`.
     DRRect {
@@ -379,6 +398,17 @@ pub enum PaintCall {
     SaveRestore,
     /// `..something(predicate)`.
     Something(SomethingPredicate),
+}
+
+/// How an op reads as a call of a step's method. Valo records some calls of two methods alike
+/// (a rounded rect without corners and a rect, a straight path and a line); such an op could be
+/// either, and a step takes it only when its arguments match, reading it otherwise as the other
+/// method's call, which the step skips as Dart's skips another method.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Reading {
+    Is,
+    Could,
+    Not,
 }
 
 impl PaintCall {
@@ -456,6 +486,7 @@ impl PaintCall {
             rrect: None,
             color,
             style: None,
+            has_mask_filter: None,
         }
     }
 
@@ -465,6 +496,7 @@ impl PaintCall {
             rrect: Some(rrect),
             color,
             style: None,
+            has_mask_filter: None,
         }
     }
 
@@ -525,32 +557,60 @@ impl PaintCall {
         PaintCall::Something(Rc::new(predicate))
     }
 
-    /// Whether `op` is a call of this step's method, whatever its arguments.
-    fn is_call(&self, op: &Op) -> bool {
+    /// Whether `op` is a call of this step's method, whatever its arguments: [`Reading::Is`]
+    /// when the op is what only that method records, [`Reading::Could`] when valo records that
+    /// method and another one alike.
+    fn reading(&self, op: &Op) -> Reading {
         let method = CanvasMethod::of(op);
+        let is = |yes: bool| if yes { Reading::Is } else { Reading::Not };
         match self {
-            PaintCall::Save | PaintCall::SaveRestore => method == CanvasMethod::Save,
-            PaintCall::Restore => method == CanvasMethod::Restore,
-            PaintCall::Translate { .. } => method == CanvasMethod::Translate,
-            PaintCall::Scale { .. } => scale_of(op).is_some(),
-            PaintCall::Rotate { .. } => method == CanvasMethod::Rotate,
-            PaintCall::Clip => method == CanvasMethod::Clip,
-            PaintCall::Path { .. } | PaintCall::Arc { .. } => method == CanvasMethod::DrawPath,
-            PaintCall::Line { .. } => method == CanvasMethod::DrawLine,
-            PaintCall::Rect { .. } => method == CanvasMethod::DrawRect,
-            // `draw_rrect` records a rounded rect without corners as `drawRect`, and one whose
-            // corners make a circle as an oval.
-            PaintCall::RRect { rrect: None, .. } => {
-                method == CanvasMethod::DrawRRect || method == CanvasMethod::DrawRect
-            }
+            PaintCall::Save | PaintCall::SaveRestore => is(method == CanvasMethod::Save),
+            PaintCall::Restore => is(method == CanvasMethod::Restore),
+            PaintCall::Translate { .. } => is(method == CanvasMethod::Translate),
+            PaintCall::Scale { .. } => is(scale_of(op).is_some()),
+            PaintCall::Rotate { .. } => is(method == CanvasMethod::Rotate),
+            PaintCall::Clip => is(method == CanvasMethod::Clip),
+            // A `drawPath` of a straight run of two points is recorded as a `drawLine`.
+            PaintCall::Path { .. } if method == CanvasMethod::DrawLine => Reading::Could,
+            PaintCall::Path { .. } | PaintCall::Arc { .. } => is(method == CanvasMethod::DrawPath),
+            PaintCall::Line { .. } => is(method == CanvasMethod::DrawLine),
+            // `draw_rrect` records a rounded rect without corners (a rectangular
+            // `PhysicalModel`'s fill, Dart's `drawRRect`) as a `drawRect`.
+            PaintCall::Rect { .. } if method == CanvasMethod::DrawRect => Reading::Could,
+            PaintCall::Rect { .. } => Reading::Not,
+            // `draw_rrect` records a rounded rect without corners as a `drawRect`, one whose
+            // corners make an oval as a `drawCircle`, and one whose corners are not circular as a
+            // `drawPath`.
+            PaintCall::RRect { rrect: None, .. } => match method {
+                CanvasMethod::DrawRRect => Reading::Is,
+                CanvasMethod::DrawRect | CanvasMethod::DrawCircle | CanvasMethod::DrawPath => {
+                    Reading::Could
+                }
+                _ => Reading::Not,
+            },
+            // Recorded as another method's call, the rounded rect is that method's too.
             PaintCall::RRect {
                 rrect: Some(rrect), ..
-            } => method == drawn_rrect_method(*rrect),
-            PaintCall::DRRect { .. } => method == CanvasMethod::DrawDRRect,
-            PaintCall::Circle { .. } => method == CanvasMethod::DrawCircle,
-            PaintCall::Shadow { .. } => method == CanvasMethod::DrawShadow,
-            PaintCall::Paragraph => method == CanvasMethod::DrawParagraph,
-            PaintCall::Something(_) => true,
+            } => match drawn_rrect_method(*rrect) {
+                drawn if drawn != method => Reading::Not,
+                CanvasMethod::DrawRRect => Reading::Is,
+                _ => Reading::Could,
+            },
+            PaintCall::DRRect { .. } => is(method == CanvasMethod::DrawDRRect),
+            PaintCall::Circle { .. } => is(method == CanvasMethod::DrawCircle),
+            PaintCall::Shadow { .. } => is(method == CanvasMethod::DrawShadow),
+            PaintCall::Paragraph => is(method == CanvasMethod::DrawParagraph),
+            PaintCall::Something(_) => Reading::Is,
+        }
+    }
+
+    /// Whether this step takes `op`: a call of its method, or, of a record two methods share,
+    /// one with the step's arguments; [`matches`](Self::matches) then checks the arguments.
+    fn takes(&self, op: &Op) -> bool {
+        match self.reading(op) {
+            Reading::Is => true,
+            Reading::Could => self.matches(op),
+            Reading::Not => false,
         }
     }
 
@@ -653,11 +713,13 @@ impl PaintCall {
                     rrect,
                     color,
                     style,
+                    has_mask_filter,
                 },
                 Op::DrawPath { path, paint, .. },
             ) => {
                 color_matches(paint.color, *color)
                     && style_matches(*style, &paint.style)
+                    && mask_matches(*has_mask_filter, paint)
                     && rrect.is_none_or(|rrect| same_round_rect(path, rrect))
             }
             (
@@ -665,13 +727,42 @@ impl PaintCall {
                     rrect,
                     color,
                     style,
+                    has_mask_filter,
                 },
                 Op::DrawRect { rect, paint, .. },
             ) => {
                 color_matches(paint.color, *color)
                     && style_matches(*style, &paint.style)
+                    && mask_matches(*has_mask_filter, paint)
                     && rrect
                         .is_none_or(|rrect| same_rect(valo::Rect::from(rrect.outer_rect()), *rect))
+            }
+            (
+                PaintCall::RRect {
+                    rrect,
+                    color,
+                    style,
+                    has_mask_filter,
+                },
+                Op::RRectBlur {
+                    rect, radii, paint, ..
+                },
+            ) => {
+                color_matches(paint.color, *color)
+                    && style_matches(*style, &paint.style)
+                    && mask_matches(*has_mask_filter, paint)
+                    && rrect.is_none_or(|rrect| same_blurred_round_rect(*rect, *radii, rrect))
+            }
+            (
+                PaintCall::Rect { rect, color },
+                Op::RRectBlur {
+                    rect: painted,
+                    paint,
+                    ..
+                },
+            ) => {
+                color_matches(paint.color, *color)
+                    && rect.is_none_or(|rect| valo::Rect::from(rect) == *painted)
             }
             (
                 PaintCall::Circle {
@@ -711,6 +802,11 @@ impl PaintCall {
             _ => false,
         }
     }
+}
+
+/// Dart's `hasMaskFilter:`: whether the paint blurs what it draws.
+fn mask_matches(expected: Option<bool>, paint: &valo::Paint) -> bool {
+    expected.is_none_or(|expected| paint.mask_blur.is_some() == expected)
 }
 
 fn style_matches(expected: Option<PaintedStyle>, style: &PaintStyle) -> bool {
@@ -759,16 +855,38 @@ fn same_round_rect(path: &valo::Path, rrect: RRect) -> bool {
         return false;
     };
     match (round_rect_of(path), round_rect_of(expected)) {
-        (Some((rect, radii)), Some((expected_rect, expected_radii))) => {
-            same_rect(rect, expected_rect)
-                && radii
-                    .iter()
-                    .flatten()
-                    .zip(expected_radii.iter().flatten())
-                    .all(|(a, b)| within_rrect_eps(*a, *b))
-        }
+        (Some(recorded), Some(expected)) => same_corners(recorded, expected),
         _ => *path == **expected,
     }
+}
+
+/// Whether the blurred (r)rect over `rect` with circular `radii` is what `draw_rrect` records
+/// for `rrect` with a mask filter, within Dart's `_RRectPaintPredicate` tolerance.
+fn same_blurred_round_rect(rect: valo::Rect, radii: [f32; 4], rrect: RRect) -> bool {
+    let mut canvas = waft_embedder::Canvas::new();
+    waft_painting::draw_rrect(&mut canvas, rrect, &waft_embedder::Paint::default());
+    let expected = match canvas.build().ops().first() {
+        Some(Op::DrawPath { path, .. }) => round_rect_of(path),
+        Some(Op::DrawRect { rect, .. }) => Some((*rect, [[0.0; 2]; 4])),
+        _ => None,
+    };
+    expected.is_some_and(|expected| {
+        same_corners((rect, radii.map(|radius| [radius, radius])), expected)
+    })
+}
+
+/// Whether two rounded rects' sides and radii are within Dart's `_RRectPaintPredicate`
+/// tolerance of each other.
+fn same_corners(
+    (rect, radii): (valo::Rect, [[f32; 2]; 4]),
+    (expected_rect, expected_radii): (valo::Rect, [[f32; 2]; 4]),
+) -> bool {
+    same_rect(rect, expected_rect)
+        && radii
+            .iter()
+            .flatten()
+            .zip(expected_radii.iter().flatten())
+            .all(|(a, b)| within_rrect_eps(*a, *b))
 }
 
 /// The rect and the per-corner radii of `path` if it was built as a rounded rect or an oval.
@@ -919,9 +1037,11 @@ impl fmt::Debug for PaintCall {
                 rrect,
                 color,
                 style,
+                has_mask_filter,
             } => write!(
                 f,
-                "rrect(rrect: {rrect:?}, color: {color:?}, style: {style:?})"
+                "rrect(rrect: {rrect:?}, color: {color:?}, style: {style:?}, \
+                 has_mask_filter: {has_mask_filter:?})"
             ),
             PaintCall::DRRect {
                 outer,
@@ -1024,9 +1144,9 @@ pub fn paints(ops: &[Op], pattern: &[PaintCall]) -> Result<(), Box<PaintMismatch
     Ok(())
 }
 
-/// The index of the first call of `step`'s method at or after `from`.
+/// The index of the first op at or after `from` that `step` takes as a call of its method.
 fn next_call(ops: &[Op], from: usize, step: &PaintCall) -> Option<usize> {
-    (from..ops.len()).find(|&index| step.is_call(&ops[index]))
+    (from..ops.len()).find(|&index| step.takes(&ops[index]))
 }
 
 /// [`paints`], failing the case with the mismatch's description.
@@ -1067,7 +1187,7 @@ pub fn paints_exactly(ops: &[Op], pattern: &[PaintCall]) -> Result<(), Box<Paint
                     "saveRestore spans calls",
                 ));
             }
-            _ => expected.is_call(op) && expected.matches(op),
+            _ => expected.takes(op) && expected.matches(op),
         };
         if !fits {
             return Err(mismatch(step, Some(step), written, "the call differs"));

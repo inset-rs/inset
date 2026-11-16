@@ -3516,7 +3516,10 @@ mod tests {
         SingleChildScrollView, SizedBox, SliverToBoxAdapter, Text, WidgetStateColor,
     };
 
-    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+    use waft_rendering::testing::{PaintCall, assert_paints};
+    use waft_widgets::testing::{
+        TestPointer, WidgetTester, assert_f32_equals, expect, find, finds_one_widget, test_widgets,
+    };
 
     use super::*;
     use crate::drawer::Drawer;
@@ -3556,34 +3559,32 @@ mod tests {
     }
 
     fn rect_of(tester: &WidgetTester, element: AnyElement) -> Rect {
-        tester.global_rect(tester.render_box_of(element))
+        tester.get_rect(element)
     }
 
     fn key_rect(tester: &WidgetTester, key: &GlobalKey) -> Rect {
         tester.global_rect(tester.render_object(key).as_box().expect("a render box"))
     }
 
-    /// Dart's `tester.getRect(find.text(text))`.
-    fn text_rect(tester: &WidgetTester, text: &str) -> Rect {
-        let element = *tester
-            .find_onstage_text(text)
-            .first()
-            .expect("a Text showing the text");
-        rect_of(tester, element)
-    }
-
     /// Dart's `tester.getRect(find.byType(AppBar, skipOffstage: false))`.
     fn app_bar_rect(tester: &WidgetTester) -> Rect {
-        let app_bar = *tester.find_by_type::<AppBar>().first().expect("an AppBar");
+        let app_bar = *find::by_type::<AppBar>()
+            .skip_offstage(false)
+            .evaluate(tester)
+            .first()
+            .expect("an AppBar");
         rect_of(tester, app_bar)
     }
 
     /// Dart's `tester.widget<Material>(find.descendant(of: find.byType(AppBar), matching:
     /// find.byType(Material)).first)`.
     fn app_bar_material<R>(tester: &WidgetTester, read: impl FnOnce(&Material) -> R) -> R {
-        let app_bar = *tester.find_by_type::<AppBar>().first().expect("an AppBar");
-        let material = tester
-            .find_by_type::<Material>()
+        let app_bar = *find::by_type::<AppBar>()
+            .evaluate(tester)
+            .first()
+            .expect("an AppBar");
+        let material = find::by_type::<Material>()
+            .evaluate(tester)
             .into_iter()
             .find(|material| tester.ancestors(*material).contains(&app_bar))
             .expect("the app bar's Material");
@@ -3600,8 +3601,8 @@ mod tests {
 
     /// Dart's `find.byIcon(icon)` count.
     fn icon_count(tester: &WidgetTester, icon: &IconData) -> usize {
-        tester
-            .find_by_type::<Icon>()
+        find::by_type::<Icon>()
+            .evaluate(tester)
             .into_iter()
             .filter(|element| {
                 tester.widget(*element, |widget: &Icon| widget.icon.as_ref() == Some(icon))
@@ -3612,13 +3613,13 @@ mod tests {
     /// Dart's `_iconStyle(tester, icon)?.color`.
     fn icon_color(tester: &WidgetTester, icon: &IconData) -> Option<Color> {
         tester
-            .glyph_style(tester.find_by_icon(icon))
+            .glyph_style(tester.element(find::by_icon(icon)))
             .color
             .map(|color| color.color())
     }
 
     fn icon_size(tester: &WidgetTester, icon: &IconData) -> Size {
-        rect_of(tester, tester.find_by_icon(icon)).size()
+        tester.get_size(find::by_icon(icon))
     }
 
     /// Dart's `SystemChrome.latestStyle`.
@@ -3639,8 +3640,8 @@ mod tests {
         tester: &WidgetTester,
         read: impl FnOnce(&NavigationToolbar) -> R,
     ) -> R {
-        let toolbar = *tester
-            .find_by_type::<NavigationToolbar>()
+        let toolbar = *find::by_type::<NavigationToolbar>()
+            .evaluate(tester)
             .first()
             .expect("a NavigationToolbar");
         tester.widget(toolbar, read)
@@ -3665,7 +3666,7 @@ mod tests {
             pump_app(tester, m3, |_app| {
                 scaffold_with(AppBar::new().title(Text::new("X"))).into_widget()
             });
-            let title = text_rect(tester, "X");
+            let title = tester.get_rect(find::text("X"));
             assert!(title.center().dx() < 400.0 - title.width() / 2.0);
 
             for platform in [TargetPlatform::IOS, TargetPlatform::MacOS] {
@@ -3676,7 +3677,7 @@ mod tests {
                 pump_app(tester, theme, |_app| {
                     scaffold_with(AppBar::new().title(Text::new("X"))).into_widget()
                 });
-                let title = text_rect(tester, "X");
+                let title = tester.get_rect(find::text("X"));
                 assert!(
                     title.center().dx() > 400.0 - title.width() / 2.0,
                     "on {platform:?}"
@@ -3695,7 +3696,7 @@ mod tests {
                     )
                     .into_widget()
                 });
-                let title = text_rect(tester, "X");
+                let title = tester.get_rect(find::text("X"));
                 assert!(
                     title.center().dx() > 400.0 - title.width() / 2.0,
                     "on {platform:?}"
@@ -3713,7 +3714,7 @@ mod tests {
                     ]))
                     .into_widget()
                 });
-                let title = text_rect(tester, "X");
+                let title = tester.get_rect(find::text("X"));
                 assert!(
                     title.center().dx() < 400.0 - title.width() / 2.0,
                     "on {platform:?}"
@@ -3728,7 +3729,7 @@ mod tests {
             pump_app(tester, m3, |_app| {
                 scaffold_with(AppBar::new().center_title(true).title(Text::new("X"))).into_widget()
             });
-            let title = text_rect(tester, "X");
+            let title = tester.get_rect(find::text("X"));
             assert!(title.center().dx() > 400.0 - title.width() / 2.0);
             assert!(title.center().dx() < 400.0 + title.width() / 2.0);
         });
@@ -3791,7 +3792,7 @@ mod tests {
                 )
                 .into_widget()
             });
-            rect = text_rect(tester, "X");
+            rect = tester.get_rect(find::text("X"));
         });
         rect
     }
@@ -3830,7 +3831,7 @@ mod tests {
                     .into_widget()
             });
             for text in ["L", "No Scaffold", "A1", "A2"] {
-                assert_eq!(tester.find_onstage_text(text).len(), 1, "{text}");
+                expect(tester, &find::text(text), finds_one_widget());
             }
         });
     }
@@ -3846,7 +3847,7 @@ mod tests {
                     )
                     .into_widget()
             });
-            assert!(text_rect(tester, "X").size().is_empty());
+            assert!(tester.get_rect(find::text("X")).size().is_empty());
         });
     }
 
@@ -4050,7 +4051,7 @@ mod tests {
                 .into_widget()
             });
             // Default IconButton has a size of (48x48).
-            let hamburger = rect_of(tester, tester.find_by_type::<IconButton>()[0]);
+            let hamburger = rect_of(tester, find::by_type::<IconButton>().evaluate(tester)[0]);
             assert_eq!(hamburger.top_left(), Offset::new(4.0, 4.0));
             assert_eq!(hamburger.size(), Size::new(48.0, 48.0));
 
@@ -4107,7 +4108,10 @@ mod tests {
             });
             let add_button = rect_of(
                 tester,
-                tester.ancestor_of_type::<IconButton>(tester.find_by_icon(&Icons::add())),
+                tester.element(
+                    find::ancestor(find::by_icon(&Icons::add()), find::by_type::<IconButton>())
+                        .first(),
+                ),
             );
             assert_eq!(add_button.top_right(), Offset::new(800.0, 0.0));
             // It's still the size it was plus the 2 * 8dp padding from IconButton.
@@ -4115,7 +4119,13 @@ mod tests {
 
             let share_button = rect_of(
                 tester,
-                tester.ancestor_of_type::<IconButton>(tester.find_by_icon(&Icons::share())),
+                tester.element(
+                    find::ancestor(
+                        find::by_icon(&Icons::share()),
+                        find::by_type::<IconButton>(),
+                    )
+                    .first(),
+                ),
             );
             // The 20dp icon is expanded to fill the IconButton's touch target to 48dp.
             assert_eq!(share_button.size(), Size::new(48.0, 48.0));
@@ -4182,7 +4192,7 @@ mod tests {
             // Starts with the base elevation.
             assert_eq!(app_bar_elevation(tester), 2.0);
 
-            let start = text_rect(tester, "Item 2").center();
+            let start = tester.get_rect(find::text("Item 2")).center();
             tester.fling_from(start, Offset::new(0.0, -600.0), 2000.0, 1);
             tester.pump_and_settle();
 
@@ -4220,7 +4230,7 @@ mod tests {
             // Starts with the base elevation.
             assert_eq!(app_bar_elevation(tester), 0.0);
 
-            let start = text_rect(tester, "Item 2").center();
+            let start = tester.get_rect(find::text("Item 2")).center();
             tester.fling_from(start, Offset::new(0.0, -600.0), 2000.0, 1);
             tester.pump_and_settle();
 
@@ -4269,7 +4279,7 @@ mod tests {
                 top_padding_100,
             ));
             assert_eq!(app_bar_rect(tester).top, 0.0);
-            assert!(text_rect(tester, "title").top > 100.0);
+            assert!(tester.get_rect(find::text("title")).top > 100.0);
             assert_eq!(app_bar_rect(tester).height(), K_TOOLBAR_HEIGHT + 100.0);
 
             tester.pump_widget(top_padded(
@@ -4299,7 +4309,7 @@ mod tests {
                 top_padding_100,
             ));
             assert_eq!(app_bar_rect(tester).top, 0.0);
-            assert!(text_rect(tester, "title").top < 100.0);
+            assert!(tester.get_rect(find::text("title")).top < 100.0);
         });
     }
 
@@ -4449,8 +4459,8 @@ mod tests {
                     .end_drawer(Drawer::new())
                     .into_widget()
             });
-            let menu = rect_of(tester, tester.find_by_icon(&Icons::menu())).center();
-            tester.tap(menu, 1);
+            let menu = tester.get_rect(find::by_icon(&Icons::menu())).center();
+            tester.tap_at(menu, 1);
             tester.pump();
 
             assert!(navigation_toolbar(tester, |toolbar| toolbar
@@ -4501,7 +4511,7 @@ mod tests {
 
             assert_eq!(app_bar_background_color(tester), Some(BACKGROUND_COLOR));
 
-            let title = tester.find_onstage_text("title")[0];
+            let title = find::text("title").evaluate(tester)[0];
             let title_style = tester.ancestor_of_type::<DefaultTextStyle>(title);
             assert_eq!(
                 tester.widget(title_style, |style: &DefaultTextStyle| style
@@ -4668,7 +4678,7 @@ mod tests {
                     ])
                     .into_widget()
             });
-            let app_bar = tester.find_by_type::<AppBar>()[0];
+            let app_bar = find::by_type::<AppBar>().evaluate(tester)[0];
             assert!(tester.widget(app_bar, |app_bar: &AppBar| app_bar.shape.is_none()));
             assert!(app_bar_material(tester, |material| material
                 .shape
@@ -4697,7 +4707,7 @@ mod tests {
                     .into_widget()
             });
             let expected: ShapeBorderRef = ShapeBorderRef::new(rounded_rectangle_border());
-            let app_bar = tester.find_by_type::<AppBar>()[0];
+            let app_bar = find::by_type::<AppBar>().evaluate(tester)[0];
             assert!(
                 tester.widget(app_bar, |app_bar: &AppBar| app_bar.shape.as_deref()
                     == Some(&*expected))
@@ -4891,9 +4901,9 @@ mod tests {
     }
 
     fn app_bar_material_height(tester: &WidgetTester) -> f64 {
-        let app_bar = tester.find_by_type::<AppBar>()[0];
-        let material = tester
-            .find_by_type::<Material>()
+        let app_bar = find::by_type::<AppBar>().evaluate(tester)[0];
+        let material = find::by_type::<Material>()
+            .evaluate(tester)
             .into_iter()
             .find(|material| tester.ancestors(*material).contains(&app_bar))
             .expect("the app bar's Material");
@@ -5113,7 +5123,7 @@ mod tests {
                 .into_widget()
             });
             let opacity = Interval::new(0.25, 1.0, Curves::fast_out_slow_in()).transform(0.5);
-            let title = tester.find_onstage_text("title")[0];
+            let title = find::text("title").evaluate(tester)[0];
             let title_style = tester.ancestor_of_type::<DefaultTextStyle>(title);
             let title_alpha = tester.widget(title_style, |style: &DefaultTextStyle| {
                 style.style.color.as_ref().expect("a color").a
@@ -5128,7 +5138,7 @@ mod tests {
             let expected_alpha = on_surface.with_opacity(opacity).a;
             assert_eq!(title_alpha, expected_alpha);
 
-            let add = tester.find_by_icon(&Icons::add());
+            let add = tester.element(find::by_icon(&Icons::add()));
             let icon_theme = tester.ancestor_of_type::<IconTheme>(add);
             let icon_opacity = tester.widget(icon_theme, |theme: &IconTheme| theme.data.opacity);
             assert_eq!(icon_opacity, Some(opacity));
@@ -5146,7 +5156,7 @@ mod tests {
                 )
                 .into_widget()
             });
-            let opacity = tester.find_by_type::<Opacity>();
+            let opacity = find::by_type::<Opacity>().evaluate(tester);
             assert_eq!(opacity.len(), 1);
             assert_eq!(
                 tester.widget(opacity[0], |opacity: &Opacity| opacity.opacity),
@@ -5251,7 +5261,7 @@ mod tests {
 
     /// The geometry of the `SliverAppBar`'s sliver.
     fn sliver_app_bar_geometry(tester: &WidgetTester) -> waft_rendering::SliverGeometry {
-        let sliver_app_bar = tester.find_by_type::<SliverAppBar>()[0];
+        let sliver_app_bar = find::by_type::<SliverAppBar>().evaluate(tester)[0];
         let app = tester.cell.borrow();
         sliver_app_bar
             .find_render_object(&app)
@@ -5260,10 +5270,9 @@ mod tests {
             .geometry(&app)
     }
 
-    /// Dart's `find.byType(SliverAppBar)` with its default `skipOffstage`: a viewport's
-    /// element visits only the slivers whose geometry is visible.
+    /// Dart's `expect(find.byType(SliverAppBar), findsOneWidget)` against `findsNothing`.
     fn sliver_app_bar_is_onstage(tester: &WidgetTester) -> bool {
-        sliver_app_bar_geometry(tester).visible
+        find::by_type::<SliverAppBar>().evaluate(tester).len() == 1
     }
 
     fn tab_bar_height(tester: &WidgetTester, handles: &SliverAppBarAppHandles) -> f64 {
@@ -5694,7 +5703,7 @@ mod tests {
             // the main row until it is completely hidden and then the first title is
             // faded in. The last is the title on the mainrow with the icons. It is
             // transparent when the app bar is expanded, and opaque when it is collapsed.
-            let titles = tester.find_onstage_text("AppBar Title");
+            let titles = find::text("AppBar Title").evaluate(tester);
             let expanded_title = titles[0];
             let collapsed_title = *titles.last().expect("two titles");
             let expanded_title_clip = tester.ancestor_of_type::<ClipRect>(expanded_title);
@@ -5832,19 +5841,15 @@ mod tests {
                 }
             });
 
-            assert_eq!(tester.find_by_type::<SliverAppBar>().len(), 1);
+            assert_eq!(find::by_type::<SliverAppBar>().evaluate(tester).len(), 1);
             assert_eq!(
                 app_bar_rect(tester).height(),
                 expanded_app_bar_height + BOTTOM_HEIGHT
             );
 
-            let expanded_title = text_rect(tester, title);
-            let tab_offset = key_rect(tester, &tab_bar_key).top_left();
-            // Valo's paragraph metrics are f32.
-            assert!(
-                (expanded_title.bottom_left().dy() - tab_offset.dy()).abs() < 1e-4,
-                "{expanded_title:?} {tab_offset:?}"
-            );
+            let expanded_title_offset = tester.get_bottom_left(find::text(title).first());
+            let tab_offset = tester.get_top_left(find::by_type::<TabBar>());
+            assert_f32_equals(expanded_title_offset.dy(), tab_offset.dy());
 
             // Scroll CustomScrollView to collapse SliverAppBar.
             controller.jump_to(&mut tester.cell.borrow_mut(), collapse_to);
@@ -5911,7 +5916,7 @@ mod tests {
     fn a_sliver_app_bar_is_elevated_only_when_forced_or_scrolled_under() {
         test_widgets(|tester| {
             let app_bar_elevation_field = |tester: &WidgetTester| {
-                let app_bar = tester.find_by_type::<AppBar>()[0];
+                let app_bar = find::by_type::<AppBar>().evaluate(tester)[0];
                 tester.widget(app_bar, |app_bar: &AppBar| app_bar.elevation)
             };
 
@@ -6002,8 +6007,8 @@ mod tests {
             tester.move_to(&mut gesture, Offset::new(50.0, 300.0), true);
             tester.up(&gesture);
 
-            let at = tester.center_of(&button_key);
-            tester.tap(at, 2);
+            let at = tester.get_center(&button_key);
+            tester.tap_at(at, 2);
             tester.pump_and_settle();
             assert!(!snap.get());
 
@@ -6034,7 +6039,7 @@ mod tests {
                             .into_widget()])
                         .into_widget()
                 });
-                let header = tester.find_by_type::<SliverPersistentHeader>()[0];
+                let header = find::by_type::<SliverPersistentHeader>().evaluate(tester)[0];
                 let (vsync, snap_configuration, show_on_screen_configuration) =
                     tester.widget(header, |header: &SliverPersistentHeader| {
                         (
@@ -6091,7 +6096,7 @@ mod tests {
     /// Dart's `slowDrag`: a touch down at the centre of `key`'s box, a move by `offset`, ten
     /// milliseconds, and an up.
     fn slow_drag(tester: &mut WidgetTester, key: &GlobalKey, offset: Offset, pointer: i64) {
-        let target = tester.center_of(key);
+        let target = tester.get_center(key);
         let mut gesture = TestPointer::touch(pointer);
         tester.down(&mut gesture, target);
         tester.move_to(&mut gesture, target + offset, true);
@@ -6217,9 +6222,12 @@ mod tests {
     /// The first `W` below the first `A`: Dart's
     /// `find.descendant(of: find.byType(A), matching: find.byType(W)).first`.
     fn first_below<A: 'static, W: 'static>(tester: &WidgetTester) -> AnyElement {
-        let ancestor = *tester.find_by_type::<A>().first().expect("an ancestor");
-        tester
-            .find_by_type::<W>()
+        let ancestor = *find::by_type::<A>()
+            .evaluate(tester)
+            .first()
+            .expect("an ancestor");
+        find::by_type::<W>()
+            .evaluate(tester)
             .into_iter()
             .find(|element| tester.ancestors(*element).contains(&ancestor))
             .expect("a descendant of that type")
@@ -6244,7 +6252,12 @@ mod tests {
     /// Dart's `_getAppBarIconRichText(tester).text.style!.color`.
     fn app_bar_icon_color(tester: &WidgetTester) -> Option<Color> {
         tester
-            .glyph_style(*tester.find_by_type::<Icon>().first().expect("an Icon"))
+            .glyph_style(
+                *find::by_type::<Icon>()
+                    .evaluate(tester)
+                    .first()
+                    .expect("an Icon"),
+            )
             .color
             .map(|color| color.color())
     }
@@ -6587,7 +6600,7 @@ mod tests {
                 .into_widget()
             });
 
-            let button = tester.find_by_type::<W>()[0];
+            let button = find::by_type::<W>().evaluate(tester)[0];
             let button_rect = rect_of(tester, button);
             assert_eq!(button_rect.size(), Size::new(48.0, 48.0));
 
@@ -6600,13 +6613,13 @@ mod tests {
                 .on_surface;
             #[expect(deprecated, reason = "Dart's case calls the deprecated `withOpacity`")]
             let hover_color = on_surface.with_opacity(0.08);
-            let painted = tester.painted(tester.render_box_of(button).as_object());
-            assert!(
-                painted.contains(&crate::test_support::Drawn::Rect(
-                    hover_color.to_argb32(),
+            let ops = tester.painted_ops(tester.render_box_of(button).as_object());
+            assert_paints(
+                &ops,
+                &[PaintCall::rect_at(
                     Rect::from_ltrb(0.0, 0.0, 40.0, 40.0),
-                )),
-                "{painted:?}"
+                    Some(hover_color),
+                )],
             );
 
             // Get the offset of the Center widget that wraps the IconButton.

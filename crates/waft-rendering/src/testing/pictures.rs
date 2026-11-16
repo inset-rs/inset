@@ -48,6 +48,11 @@ fn painted_pictures(app: &mut App, render: AnyRenderObject, deep: bool) -> Vec<A
         !render.is_repaint_boundary(app),
         "a repaint boundary would move its layer out of the scene"
     );
+    // A real painting context paints a child only once its compositing bits are current, where
+    // Dart's `TestRecordingPaintingContext` paints after a layout-only frame.
+    if let Some(owner) = render.owner(app) {
+        owner.flush_compositing_bits(app);
+    }
     let layer = OffsetLayer::new(app, Offset::ZERO);
     let container = layer.as_container_layer();
     let bounds = render.paint_bounds(app);

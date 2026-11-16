@@ -262,7 +262,7 @@ mod tests {
 
     use waft_widgets::WidgetStatePropertyAll;
 
-    use waft_widgets::testing::{WidgetTester, test_widgets};
+    use waft_widgets::testing::{WidgetTester, expect, find, finds_one_widget, test_widgets};
 
     use super::*;
     use crate::colors::Colors;
@@ -475,13 +475,13 @@ mod tests {
 
     /// Dart's `find.widgetWithIcon(IconButton, Icons.arrow_drop_down).first`.
     fn arrow_drop_down_button(tester: &WidgetTester) -> AnyElement {
-        let icon = tester.find_by_icon(&Icons::arrow_drop_down());
+        let icon = tester.element(find::by_icon(&Icons::arrow_drop_down()).first());
         tester.ancestor_of_type::<IconButton>(icon)
     }
 
     /// Dart's `getMenuMaterial`.
     fn menu_material<R>(tester: &WidgetTester, read: impl FnOnce(&Material) -> R) -> R {
-        let panel = only(tester.find_by_type::<MenuPanel>());
+        let panel = tester.element(find::by_type::<MenuPanel>());
         let material = tester.descendants_of_type::<Material>(panel)[0];
         tester.widget::<Material, R>(material, read)
     }
@@ -492,7 +492,10 @@ mod tests {
         label: &str,
         read: impl FnOnce(&Material) -> R,
     ) -> R {
-        let text = *tester.find_text(label).last().expect("the label");
+        let text = *find::text(label)
+            .evaluate(tester)
+            .last()
+            .expect("the label");
         let button = tester.ancestor_of_type::<MenuItemButton>(text);
         let material = only(tester.descendants_of_type::<Material>(button));
         tester.widget::<Material, R>(material, read)
@@ -508,12 +511,12 @@ mod tests {
     fn tap(tester: &mut WidgetTester, element: AnyElement) {
         let render = tester.render_box_of(element);
         let center = tester.get_rect(render).center();
-        tester.tap(center, 1);
+        tester.tap_at(center, 1);
     }
 
     /// What the cases but the first expect of the field, the menu and its first item.
     fn assert_the_menu_shows(tester: &mut WidgetTester, theme: &ThemeData, expected: &Expected) {
-        let editable = only(tester.find_by_type::<EditableText>());
+        let editable = tester.element(find::by_type::<EditableText>());
         tester.widget(editable, |editable: &EditableText| {
             assert_eq!(editable.style.color, Some(expected.color.clone()));
             assert_eq!(
@@ -529,7 +532,7 @@ mod tests {
             assert_eq!(editable.style.word_spacing, Some(expected.word_spacing));
         });
 
-        let text_field = only(tester.find_by_type::<TextField>());
+        let text_field = tester.element(find::by_type::<TextField>());
         tester.widget(text_field, |text_field: &TextField| {
             let decoration = text_field.decoration.as_ref().expect("a decoration");
             assert_eq!(decoration.filled, Some(true));
@@ -539,7 +542,7 @@ mod tests {
         let button = arrow_drop_down_button(tester);
         tap(tester, button);
         tester.pump_by(std::time::Duration::ZERO);
-        assert_eq!(tester.find_by_type::<MenuAnchor>().len(), 1);
+        expect(tester, &find::by_type::<MenuAnchor>(), finds_one_widget());
 
         menu_material(tester, |material| {
             assert_eq!(material.color, Some(expected.menu_background));
@@ -578,7 +581,7 @@ mod tests {
             ));
 
             let label_large = theme.text_theme.label_large.clone().expect("a label large");
-            let editable = only(tester.find_by_type::<EditableText>());
+            let editable = tester.element(find::by_type::<EditableText>());
             tester.widget(editable, |editable: &EditableText| {
                 assert_eq!(editable.style.color, label_large.color);
                 assert_eq!(editable.style.background, label_large.background);
@@ -587,7 +590,7 @@ mod tests {
                 assert_eq!(editable.style.word_spacing, label_large.word_spacing);
             });
 
-            let text_field = only(tester.find_by_type::<TextField>());
+            let text_field = tester.element(find::by_type::<TextField>());
             tester.widget(text_field, |text_field: &TextField| {
                 let decoration = text_field.decoration.as_ref().expect("a decoration");
                 assert!(decoration.border.as_ref().is_some_and(|border| {
@@ -598,7 +601,7 @@ mod tests {
             let button = arrow_drop_down_button(tester);
             tap(tester, button);
             tester.pump_by(std::time::Duration::ZERO);
-            assert_eq!(tester.find_by_type::<MenuAnchor>().len(), 1);
+            expect(tester, &find::by_type::<MenuAnchor>(), finds_one_widget());
 
             menu_material(tester, |material| {
                 assert_eq!(material.color, Some(theme.color_scheme.surface_container()));
@@ -701,7 +704,7 @@ mod tests {
             ));
 
             // make sure the displaying text has grey color
-            let editable = only(tester.find_by_type::<EditableText>());
+            let editable = tester.element(find::by_type::<EditableText>());
             tester.widget(editable, |editable: &EditableText| {
                 assert_eq!(editable.style.color, Some(Colors::GREY.primary().into()));
             });

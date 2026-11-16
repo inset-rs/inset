@@ -646,16 +646,16 @@ mod tests {
     use waft_test::{TestPlatform, TestView};
 
     use waft_foundation::{Listenable, Listener};
+    use waft_painting::AlignmentGeometry;
 
     use super::*;
-    use crate::box_::{BoxConstraints, BoxHitTestResult, RenderBox};
+    use crate::box_::{AnyRenderBox, BoxConstraints, BoxHitTestResult, RenderBox};
     use crate::object::RenderObject;
     use crate::object::RenderObjectWithChildMixin;
     use crate::pipeline_owner::PipelineOwner;
-    use crate::proxy_box::{
-        RenderConstrainedBox, RenderMouseRegion, RenderMouseRegionBase, RenderRepaintBoundary,
-    };
+    use crate::proxy_box::{RenderConstrainedBox, RenderMouseRegion, RenderMouseRegionBase};
     use crate::shifted_box::RenderPadding;
+    use crate::testing::{EnginePhase, layout_with, pump_frame, test_render_root};
 
     /// An app on a platform with views 0 and 2, whose hosts record the cursors they are asked
     /// for, and those views.
@@ -668,11 +668,9 @@ mod tests {
         (AppCell::with_platform(Rc::new(platform)), first, second)
     }
 
-    /// A laid-out tree: a 200×200 root holding a mouse region padded 50 on each side, so the
-    /// region covers (50..150, 50..150). Returns the root and the region.
+    /// A laid-out tree: a 200×200 padding at the test view's top left holding a mouse region
+    /// padded 50 on each side, so the region covers (50..150, 50..150).
     struct RegionTree {
-        owner: Ref<PipelineOwner>,
-        root: crate::RenderHandle<RenderRepaintBoundary>,
         padding: crate::RenderHandle<RenderPadding>,
         region: crate::RenderHandle<RenderMouseRegion>,
     }
@@ -685,23 +683,25 @@ mod tests {
             None,
             Some(region.as_box()),
         );
-        let root = RenderRepaintBoundary::new(app, Some(padding.as_box()));
-        let owner = PipelineOwner::new(app, None, None);
-        owner.set_root_node(app, Some(root.as_object()));
-        root.schedule_initial_layout(app);
-        root.layout(app, BoxConstraints::tight(Size::new(200.0, 200.0)), false);
-        RegionTree {
-            owner,
-            root,
-            padding,
-            region,
-        }
+        lay_out_at_the_top_left(app, padding.as_box(), Size::new(200.0, 200.0));
+        RegionTree { padding, region }
     }
 
-    fn tracker_for(
-        app: &mut App,
-        root: crate::RenderHandle<RenderRepaintBoundary>,
-    ) -> Ref<MouseTracker> {
+    /// Lays `render_box` out at `size`, at the test view's top left, so that its positions are
+    /// the view's.
+    fn lay_out_at_the_top_left(app: &mut App, render_box: AnyRenderBox, size: Size) {
+        layout_with(
+            app,
+            render_box,
+            Some(BoxConstraints::tight(size)),
+            AlignmentGeometry::TOP_LEFT,
+            EnginePhase::Layout,
+        );
+    }
+
+    /// A tracker that hit-tests the test view.
+    fn tracker_for(app: &mut App) -> Ref<MouseTracker> {
+        let root = test_render_root(app);
         MouseTracker::new(
             app,
             Rc::new(move |app: &mut App, position: Offset, _view_id: ViewId| {
@@ -776,8 +776,8 @@ mod tests {
     fn entering_and_leaving_a_region_sends_enter_then_exit_in_local_coordinates() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let RegionTree { root, region, .. } = tree_with_region(&mut app);
-        let tracker = tracker_for(&mut app, root);
+        let RegionTree { region, .. } = tree_with_region(&mut app);
+        let tracker = tracker_for(&mut app);
         let log = record_events(&mut app, region);
 
         tracker.update_with_event(&mut app, &mouse_added(Offset::new(10.0, 10.0)), None);
@@ -797,13 +797,8 @@ mod tests {
     fn a_still_mouse_notices_the_tree_moving_under_it_after_a_frame() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let RegionTree {
-            owner,
-            root,
-            padding,
-            region,
-        } = tree_with_region(&mut app);
-        let tracker = tracker_for(&mut app, root);
+        let RegionTree { padding, region } = tree_with_region(&mut app);
+        let tracker = tracker_for(&mut app);
         let log = record_events(&mut app, region);
         tracker.update_with_event(&mut app, &mouse_added(Offset::new(100.0, 100.0)), None);
         assert_eq!(*log.borrow(), ["enter Offset(50.0, 50.0)"]);
@@ -813,7 +808,7 @@ mod tests {
             &mut app,
             waft_painting::EdgeInsetsGeometry::only(150.0, 0.0, 0.0, 0.0),
         );
-        owner.flush_layout(&mut app);
+        pump_frame(&mut app, EnginePhase::Layout);
         tracker.update_all_devices(&mut app);
         assert_eq!(
             *log.borrow(),
@@ -826,19 +821,14 @@ mod tests {
     fn a_region_removed_from_the_tree_sends_no_exit() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let RegionTree {
-            owner,
-            root,
-            padding,
-            region,
-        } = tree_with_region(&mut app);
-        let tracker = tracker_for(&mut app, root);
+        let RegionTree { padding, region } = tree_with_region(&mut app);
+        let tracker = tracker_for(&mut app);
         let log = record_events(&mut app, region);
         tracker.update_with_event(&mut app, &mouse_added(Offset::new(100.0, 100.0)), None);
         assert_eq!(*log.borrow(), ["enter Offset(50.0, 50.0)"]);
 
         padding.set_child(&mut app, None);
-        owner.flush_layout(&mut app);
+        pump_frame(&mut app, EnginePhase::Layout);
         tracker.update_all_devices(&mut app);
         assert_eq!(
             *log.borrow(),
@@ -869,8 +859,8 @@ mod tests {
     fn a_removed_mouse_exits_and_disconnects() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let RegionTree { root, region, .. } = tree_with_region(&mut app);
-        let tracker = tracker_for(&mut app, root);
+        let RegionTree { region, .. } = tree_with_region(&mut app);
+        let tracker = tracker_for(&mut app);
         let log = record_events(&mut app, region);
         let notifications = Rc::new(Cell::new(0));
         let counted = Rc::clone(&notifications);
@@ -897,8 +887,8 @@ mod tests {
     fn touch_and_signal_events_are_ignored() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let RegionTree { root, region, .. } = tree_with_region(&mut app);
-        let tracker = tracker_for(&mut app, root);
+        let RegionTree { region, .. } = tree_with_region(&mut app);
+        let tracker = tracker_for(&mut app);
         let log = record_events(&mut app, region);
 
         tracker.update_with_event(
@@ -928,18 +918,13 @@ mod tests {
     fn the_front_regions_cursor_wins_and_deferring_regions_let_the_one_behind_decide() {
         let (cell, first, _) = app_with_cursor_host();
         let mut app = cell.borrow_mut();
-        let RegionTree {
-            owner,
-            root,
-            region,
-            ..
-        } = tree_with_region(&mut app);
+        let RegionTree { region, .. } = tree_with_region(&mut app);
         region.set_cursor(&mut app, SystemMouseCursors::TEXT.into());
         // A deferring region in front of the text region, sharing its bounds.
         let front = RenderMouseRegion::new(&mut app, true, None);
         region.set_child(&mut app, Some(front.as_box()));
-        owner.flush_layout(&mut app);
-        let tracker = tracker_for(&mut app, root);
+        pump_frame(&mut app, EnginePhase::Layout);
+        let tracker = tracker_for(&mut app);
 
         tracker.update_with_event(&mut app, &mouse_added(Offset::new(100.0, 100.0)), None);
         assert_eq!(
@@ -971,9 +956,9 @@ mod tests {
     fn the_cursor_goes_to_the_view_the_pointer_was_last_seen_on() {
         let (cell, first, second) = app_with_cursor_host();
         let mut app = cell.borrow_mut();
-        let RegionTree { root, region, .. } = tree_with_region(&mut app);
+        let RegionTree { region, .. } = tree_with_region(&mut app);
         region.set_cursor(&mut app, SystemMouseCursors::TEXT.into());
-        let tracker = tracker_for(&mut app, root);
+        let tracker = tracker_for(&mut app);
 
         let added = PointerEvent::Added(PointerAddedEvent {
             kind: PointerDeviceKind::Mouse,
@@ -1003,16 +988,8 @@ mod tests {
         let mut app = cell.borrow_mut();
         let back = RenderMouseRegion::new(&mut app, true, None);
         let front = RenderMouseRegion::new(&mut app, true, Some(back.as_box()));
-        let root = RenderRepaintBoundary::new(&mut app, Some(front.as_box()));
-        let owner = PipelineOwner::new(&mut app, None, None);
-        owner.set_root_node(&mut app, Some(root.as_object()));
-        root.schedule_initial_layout(&mut app);
-        root.layout(
-            &mut app,
-            BoxConstraints::tight(Size::new(100.0, 100.0)),
-            false,
-        );
-        let tracker = tracker_for(&mut app, root);
+        lay_out_at_the_top_left(&mut app, front.as_box(), Size::new(100.0, 100.0));
+        let tracker = tracker_for(&mut app);
         let back_log = record_events(&mut app, back);
         let front_log = record_events(&mut app, front);
 
@@ -1042,15 +1019,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let region = RenderMouseRegion::new(&mut app, true, None);
-        let root = RenderRepaintBoundary::new(&mut app, Some(region.as_box()));
-        let owner = PipelineOwner::new(&mut app, None, None);
-        owner.set_root_node(&mut app, Some(root.as_object()));
-        root.schedule_initial_layout(&mut app);
-        root.layout(
-            &mut app,
-            BoxConstraints::tight(Size::new(100.0, 100.0)),
-            false,
-        );
+        lay_out_at_the_top_left(&mut app, region.as_box(), Size::new(100.0, 100.0));
 
         let mut result = HitTestResult::new();
         assert!(RenderBox::hit_test(
@@ -1080,16 +1049,8 @@ mod tests {
         let mut app = cell.borrow_mut();
         let child =
             RenderConstrainedBox::new(&mut app, BoxConstraints::tight(Size::new(10.0, 10.0)), None);
-        let root = RenderRepaintBoundary::new(&mut app, Some(child.as_box()));
-        let owner = PipelineOwner::new(&mut app, None, None);
-        owner.set_root_node(&mut app, Some(root.as_object()));
-        root.schedule_initial_layout(&mut app);
-        root.layout(
-            &mut app,
-            BoxConstraints::tight(Size::new(100.0, 100.0)),
-            false,
-        );
-        let tracker = tracker_for(&mut app, root);
+        lay_out_at_the_top_left(&mut app, child.as_box(), Size::new(100.0, 100.0));
+        let tracker = tracker_for(&mut app);
         tracker.update_with_event(&mut app, &mouse_added(Offset::new(5.0, 5.0)), None);
         assert_eq!(
             first.test_host().cursors(),

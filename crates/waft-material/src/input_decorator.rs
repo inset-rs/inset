@@ -8533,6 +8533,14 @@ pub(crate) mod tests {
             MatrixTransition, WidgetRef, downcast_widget,
         };
 
+        use crate::test_support::PaintInspection;
+        use waft_embedder::valo::Op;
+        pub(super) use waft_rendering::testing::{PaintCall, PaintedStyle, assert_paints, paints};
+        pub(super) use waft_widgets::testing::{
+            assert_f32_equals, assert_more_or_less_equals_within, expect, find, finds_nothing,
+            finds_one_widget,
+        };
+
         use super::super::*;
         use crate::app::MaterialApp;
         use crate::icon_button_theme::IconButtonThemeData;
@@ -8771,33 +8779,39 @@ pub(crate) mod tests {
             }
         }
 
-        /// Dart's `tester.getRect(find.byWidget(..))` of an element.
-        pub(super) fn rect_of(tester: &WidgetTester, element: AnyElement) -> Rect {
-            tester.get_rect(tester.render_box_of(element))
-        }
-
-        /// Dart's `tester.getRect(find.text(text))`.
-        pub(super) fn text_rect(tester: &WidgetTester, text: &str) -> Rect {
-            let found = tester.find_text(text);
-            assert_eq!(found.len(), 1, "one {text:?}");
-            rect_of(tester, found[0])
-        }
-
         /// Dart's `tester.getRect(find.byType(InputDecorator))`.
         pub(super) fn get_decorator_rect(tester: &WidgetTester) -> Rect {
-            rect_of(tester, tester.find_by_type::<InputDecorator>()[0])
+            tester.get_rect(find::by_type::<InputDecorator>())
+        }
+
+        /// The ops the render object of `element` and its subtree record.
+        pub(super) fn ops_of(tester: &WidgetTester, element: AnyElement) -> Vec<Op> {
+            tester.painted_ops(tester.render_object(element))
+        }
+
+        /// Dart's `expect(findBorderPainter(), paints…)`: what the border painter records.
+        pub(super) fn border_painter_ops(tester: &WidgetTester) -> Vec<Op> {
+            ops_of(
+                tester,
+                find_border_painter(tester).expect("a border painter"),
+            )
+        }
+
+        /// Dart's `expect(tester.renderObject(find.byType(InputDecorator)), paints…)`.
+        pub(super) fn decorator_ops(tester: &WidgetTester) -> Vec<Op> {
+            ops_of(tester, tester.element(find::by_type::<InputDecorator>()))
         }
 
         /// Dart's `findBorderPainter()`: the `CustomPaint` the `_BorderContainer` builds, if any.
         pub(super) fn find_border_painter(tester: &WidgetTester) -> Option<AnyElement> {
-            let container = tester
-                .find_by_type::<BorderContainer>()
-                .into_iter()
-                .next()?;
-            tester
-                .descendants_of_type::<CustomPaint>(container)
-                .into_iter()
-                .next()
+            find::descendant(
+                find::by_type::<BorderContainer>().first(),
+                find::by_type::<CustomPaint>(),
+            )
+            .first()
+            .evaluate(tester)
+            .into_iter()
+            .next()
         }
 
         /// Reads the `_InputBorderPainter` of the border painter.
@@ -8862,14 +8876,16 @@ pub(crate) mod tests {
         pub(crate) fn borders_and_container_colors(
             tester: &WidgetTester,
         ) -> Vec<(InputBorderRef, Color)> {
-            tester
-                .find_by_type::<BorderContainer>()
-                .into_iter()
-                .filter_map(|container| {
-                    tester
-                        .descendants_of_type::<CustomPaint>(container)
-                        .into_iter()
-                        .next()
+            (0..find::by_type::<BorderContainer>().evaluate(tester).len())
+                .filter_map(|index| {
+                    find::descendant(
+                        find::by_type::<BorderContainer>().at(index),
+                        find::by_type::<CustomPaint>(),
+                    )
+                    .first()
+                    .evaluate(tester)
+                    .into_iter()
+                    .next()
                 })
                 .map(|element| {
                     let app = tester.cell.borrow();
@@ -8913,11 +8929,16 @@ pub(crate) mod tests {
         /// Dart's `findLabel()`: the label's text, a descendant of a `MatrixTransition` (the
         /// decorator's; the page route's transitions have their own).
         pub(super) fn find_label(tester: &WidgetTester) -> AnyElement {
-            for transition in tester.find_by_type::<waft_widgets::Animated<MatrixTransition>>() {
-                if let Some(text) = tester
-                    .descendants_of_type::<waft_widgets::Text>(transition)
-                    .into_iter()
-                    .next()
+            let transitions = find::by_type::<waft_widgets::Animated<MatrixTransition>>();
+            for index in 0..transitions.evaluate(tester).len() {
+                if let Some(text) = find::descendant(
+                    transitions.clone().at(index),
+                    find::by_type::<waft_widgets::Text>(),
+                )
+                .first()
+                .evaluate(tester)
+                .into_iter()
+                .next()
                 {
                     return text;
                 }
@@ -8927,7 +8948,7 @@ pub(crate) mod tests {
 
         /// Dart's `getLabelRect(tester)`.
         pub(super) fn get_label_rect(tester: &WidgetTester) -> Rect {
-            rect_of(tester, find_label(tester))
+            tester.get_rect(find_label(tester))
         }
 
         /// Dart's `getLabelStyle(tester)`: the style of the `AnimatedDefaultTextStyle` above the label.
@@ -9538,20 +9559,17 @@ pub(crate) mod tests {
     // border cases after it.
     #[allow(deprecated)]
     mod container_and_borders {
-        use std::sync::Arc;
         use waft_widgets::testing::{
             TargetPlatformVariant, WidgetTester, test_widgets, test_widgets_variant,
         };
 
         use waft_embedder::valo::Op;
-        use waft_embedder::{
-            Canvas, Color, FillRule, Offset, PaintStyle, RRect, Radius, Rect, TargetPlatform,
-        };
+        use waft_embedder::{Canvas, Color, Offset, RRect, Radius, Rect, TargetPlatform};
         use waft_painting::{
             Alignment, AlignmentGeometry, BorderRadius, BorderSide, EdgeInsetsGeometry,
-            ShapeBorder, TextDirection, draw_drrect, draw_rrect,
+            ShapeBorder, TextDirection,
         };
-        use waft_widgets::{AnyElement, Container, Icon, IntoWidget, RepaintBoundary, WidgetRef};
+        use waft_widgets::{Container, Icon, IntoWidget, RepaintBoundary, WidgetRef};
 
         use super::super::*;
         use super::common::K_TRANSITION_DURATION;
@@ -9561,7 +9579,6 @@ pub(crate) mod tests {
         use crate::icons::Icons;
         use crate::input_border::{InputBorderRef, OutlineInputBorder, UnderlineInputBorder};
         use crate::scaffold::Scaffold;
-        use crate::test_support::PaintInspection;
         use crate::theme::Theme;
         use crate::theme_data::{ThemeData, VisualDensity};
 
@@ -9599,7 +9616,7 @@ pub(crate) mod tests {
 
         /// Dart's `Theme.of(tester.element(findDecorator()))`.
         fn theme_of(tester: &WidgetTester) -> Rc<ThemeData> {
-            let element = tester.find_by_type::<InputDecorator>()[0];
+            let element = tester.element(find::by_type::<InputDecorator>());
             Theme::of(&mut tester.cell.borrow_mut(), element)
         }
 
@@ -9625,136 +9642,6 @@ pub(crate) mod tests {
             } else {
                 decoration.helper_text(HELPER_TEXT)
             }
-        }
-
-        /// The ops the render object of `element` and its subtree record.
-        fn ops_of(tester: &WidgetTester, element: AnyElement) -> Vec<Op> {
-            tester.painted_ops(tester.render_box_of(element).as_object())
-        }
-
-        /// Dart's `expect(findBorderPainter(), paints…)`: what the border painter records.
-        fn border_painter_ops(tester: &WidgetTester) -> Vec<Op> {
-            ops_of(
-                tester,
-                find_border_painter(tester).expect("a border painter"),
-            )
-        }
-
-        /// Dart's `expect(tester.renderObject(find.byType(InputDecorator)), paints…)`.
-        fn decorator_ops(tester: &WidgetTester) -> Vec<Op> {
-            ops_of(tester, tester.find_by_type::<InputDecorator>()[0])
-        }
-
-        /// The path `draw` records first.
-        fn path_drawn_by(draw: impl FnOnce(&mut Canvas)) -> Arc<waft_embedder::valo::Path> {
-            let mut canvas = Canvas::new();
-            draw(&mut canvas);
-            let list = canvas.build();
-            match list
-                .ops()
-                .iter()
-                .find(|op| matches!(op, Op::DrawPath { .. }))
-            {
-                Some(Op::DrawPath { path, .. }) => Arc::clone(path),
-                _ => panic!("the draw records a path"),
-            }
-        }
-
-        /// A paint style the matchers name: `PaintingStyle.fill`, or `PaintingStyle.stroke`
-        /// with an optional `strokeWidth`.
-        #[derive(Clone, Copy)]
-        enum Style {
-            Fill,
-            Stroke(Option<f64>),
-        }
-
-        fn style_matches(style: Style, paint: &waft_embedder::Paint) -> bool {
-            match (style, &paint.style) {
-                (Style::Fill, PaintStyle::Fill) => true,
-                (Style::Stroke(None), PaintStyle::Stroke(_)) => true,
-                (Style::Stroke(Some(width)), PaintStyle::Stroke(stroke)) => {
-                    f64::from(stroke.width) == width
-                }
-                _ => false,
-            }
-        }
-
-        fn color_matches(color: Option<Color>, paint: &waft_embedder::Paint) -> bool {
-            let color: Option<waft_embedder::valo::Color> = color.map(Into::into);
-            color.is_none_or(|color| paint.color == color)
-        }
-
-        /// One call of Dart's `paints` matcher.
-        enum Call {
-            Save,
-            Restore,
-            /// `..rrect(style:, color:, rrect:)`.
-            RRect(Style, Option<Color>, Option<RRect>),
-            /// `..drrect(style:, outer:, inner:)`.
-            DRRect(Option<Style>, RRect, RRect),
-            /// `..path(style:, includes:, excludes:)`.
-            Path(Option<Style>, Vec<Offset>, Vec<Offset>),
-            /// `..line(p1:, p2:, strokeWidth:)`.
-            Line(Offset, Offset, f64),
-        }
-
-        fn call_matches(call: &Call, op: &Op) -> bool {
-            match (call, op) {
-                (Call::Save, Op::Save) => true,
-                (Call::Restore, Op::Restore) => true,
-                (Call::RRect(style, color, rrect), Op::DrawPath { path, paint, .. }) => {
-                    let shape_matches = match rrect {
-                        Some(rrect) => {
-                            **path
-                                == *path_drawn_by(|canvas| {
-                                    draw_rrect(canvas, *rrect, &waft_embedder::Paint::default())
-                                })
-                        }
-                        None => path.as_round_rect().is_some(),
-                    };
-                    shape_matches && style_matches(*style, paint) && color_matches(*color, paint)
-                }
-                (
-                    Call::DRRect(style, outer, inner),
-                    Op::DrawPath {
-                        path,
-                        fill_rule,
-                        paint,
-                        ..
-                    },
-                ) => {
-                    let ring = path_drawn_by(|canvas| {
-                        draw_drrect(canvas, *outer, *inner, &waft_embedder::Paint::default())
-                    });
-                    **path == *ring
-                        && *fill_rule == FillRule::EvenOdd
-                        && style.is_none_or(|style| style_matches(style, paint))
-                }
-                (Call::Path(style, includes, excludes), Op::DrawPath { path, paint, .. }) => {
-                    style.is_none_or(|style| style_matches(style, paint))
-                        && includes
-                            .iter()
-                            .all(|point| path.contains((*point).into(), FillRule::NonZero))
-                        && excludes
-                            .iter()
-                            .all(|point| !path.contains((*point).into(), FillRule::NonZero))
-                }
-                (Call::Line(p1, p2, width), Op::DrawPath { path, paint, .. }) => {
-                    let mut line = waft_embedder::PathBuilder::new();
-                    line.move_to(*p1);
-                    line.line_to(*p2);
-                    **path == *line.build() && style_matches(Style::Stroke(Some(*width)), paint)
-                }
-                _ => false,
-            }
-        }
-
-        /// Dart's `paints` matcher: `ops` makes the `calls` in order, other ops between them.
-        fn paints(ops: &[Op], calls: &[Call]) -> bool {
-            let mut ops = ops.iter();
-            calls
-                .iter()
-                .all(|call| ops.by_ref().any(|op| call_matches(call, op)))
         }
 
         // input_decorator_test.dart 'Material3 - InputDecoration container - for filled text field
@@ -9809,23 +9696,29 @@ pub(crate) mod tests {
         ) {
             pump(tester, decorator);
             let color = color(&theme_of(tester));
-            assert!(paints(
+            assert_paints(
                 &border_painter_ops(tester),
-                &[Call::RRect(Style::Fill, Some(color), None)]
-            ));
+                &[PaintCall::RRect {
+                    rrect: None,
+                    color: Some(color),
+                    style: Some(PaintedStyle::Fill),
+                    has_mask_filter: None,
+                }],
+            );
         }
 
         /// Dart's `expect(findBorderPainter(), paints..path(style: PaintingStyle.stroke))`.
         fn check_outlined_painted(tester: &mut WidgetTester, decorator: BuildInputDecorator) {
             pump(tester, decorator);
-            assert!(paints(
+            assert_paints(
                 &border_painter_ops(tester),
-                &[Call::Path(
-                    Some(Style::Stroke(None)),
-                    Vec::new(),
-                    Vec::new()
-                )]
-            ));
+                &[PaintCall::Path {
+                    color: None,
+                    style: Some(PaintedStyle::Stroke(None)),
+                    includes: Vec::new(),
+                    excludes: Vec::new(),
+                }],
+            );
         }
 
         fn check_border(
@@ -9927,17 +9820,18 @@ pub(crate) mod tests {
                 );
                 let theme = theme_of(tester);
                 assert_eq!(theme.hover_color, Colors::BLACK.with_opacity(0.04));
-                assert!(paints(
+                assert_paints(
                     &border_painter_ops(tester),
-                    &[Call::RRect(
-                        Style::Fill,
-                        Some(Color::alpha_blend(
+                    &[PaintCall::RRect {
+                        rrect: None,
+                        color: Some(Color::alpha_blend(
                             theme.hover_color,
-                            theme.color_scheme.surface_container_highest()
+                            theme.color_scheme.surface_container_highest(),
                         )),
-                        None
-                    )]
-                ));
+                        style: Some(PaintedStyle::Fill),
+                        has_mask_filter: None,
+                    }],
+                );
             });
         }
 
@@ -10750,23 +10644,24 @@ pub(crate) mod tests {
                             .border(OutlineInputBorder::new().border_radius(border_radius)),
                     ),
                 );
-                assert!(paints(
+                assert_paints(
                     &border_painter_ops(tester),
                     &[
-                        Call::Save,
-                        Call::RRect(
-                            Style::Fill,
-                            Some(Color::new(0xFF00FF00)),
-                            Some(border_radius.to_rrect(Rect::from_ltwh(
+                        PaintCall::Save,
+                        PaintCall::RRect {
+                            rrect: Some(border_radius.to_rrect(Rect::from_ltwh(
                                 0.0,
                                 0.0,
                                 INPUT_DECORATOR_WIDTH,
-                                INPUT_DECORATOR_HEIGHT
-                            )))
-                        ),
-                        Call::Restore,
-                    ]
-                ));
+                                INPUT_DECORATOR_HEIGHT,
+                            ))),
+                            color: Some(Color::new(0xFF00FF00)),
+                            style: Some(PaintedStyle::Fill),
+                            has_mask_filter: None,
+                        },
+                        PaintCall::Restore,
+                    ],
+                );
             });
         }
 
@@ -10795,26 +10690,29 @@ pub(crate) mod tests {
                             ),
                     ),
                 );
-                assert_eq!(tester.find_text(LABEL).len(), 1);
-                assert!(paints(
+                expect(tester, &find::text(LABEL), finds_one_widget());
+                assert_paints(
                     &border_painter_ops(tester),
                     &[
-                        Call::Save,
-                        Call::RRect(
-                            Style::Fill,
-                            Some(Color::new(0xFF00FF00)),
-                            Some(BorderRadius::all(Radius::circular(BORDER_RADIUS)).to_rrect(
-                                Rect::from_ltwh(
-                                    0.0,
-                                    0.0,
-                                    INPUT_DECORATOR_WIDTH,
-                                    INPUT_DECORATOR_HEIGHT
-                                )
-                            ))
-                        ),
-                        Call::Restore,
-                    ]
-                ));
+                        PaintCall::Save,
+                        PaintCall::RRect {
+                            rrect: Some(
+                                BorderRadius::all(Radius::circular(BORDER_RADIUS)).to_rrect(
+                                    Rect::from_ltwh(
+                                        0.0,
+                                        0.0,
+                                        INPUT_DECORATOR_WIDTH,
+                                        INPUT_DECORATOR_HEIGHT,
+                                    ),
+                                ),
+                            ),
+                            color: Some(Color::new(0xFF00FF00)),
+                            style: Some(PaintedStyle::Fill),
+                            has_mask_filter: None,
+                        },
+                        PaintCall::Restore,
+                    ],
+                );
             });
         }
 
@@ -10845,14 +10743,15 @@ pub(crate) mod tests {
                     )
                     .is_focused(true),
                 );
-                assert_eq!(tester.find_text(LABEL).len(), 1);
-                assert!(paints(
+                expect(tester, &find::text(LABEL), finds_one_widget());
+                assert_paints(
                     &border_painter_ops(tester),
                     &[
-                        Call::Save,
-                        Call::Path(
-                            None,
-                            vec![
+                        PaintCall::Save,
+                        PaintCall::Path {
+                            color: None,
+                            style: None,
+                            includes: vec![
                                 // Corner points in the middle of the border line should be in the path.
                                 // The path is not filled and borderWidth is 4.0 so Offset(2.0, 2.0) is in the path and Offset(1.0, 1.0) is not.
                                 // See Skia SkPath::contains method.
@@ -10862,20 +10761,20 @@ pub(crate) mod tests {
                                 // Top-right.
                                 Offset::new(
                                     INPUT_DECORATOR_WIDTH - 1.0 - BORDER_WIDTH / 2.0,
-                                    BORDER_WIDTH / 2.0
+                                    BORDER_WIDTH / 2.0,
                                 ),
                                 // Bottom-left.
                                 Offset::new(
                                     BORDER_WIDTH / 2.0,
-                                    INPUT_DECORATOR_HEIGHT - 1.0 - BORDER_WIDTH / 2.0
+                                    INPUT_DECORATOR_HEIGHT - 1.0 - BORDER_WIDTH / 2.0,
                                 ),
                                 // Bottom-right.
                                 Offset::new(
                                     INPUT_DECORATOR_WIDTH - 1.0 - BORDER_WIDTH / 2.0,
-                                    INPUT_DECORATOR_HEIGHT - 1.0 - BORDER_WIDTH / 2.0
+                                    INPUT_DECORATOR_HEIGHT - 1.0 - BORDER_WIDTH / 2.0,
                                 ),
                             ],
-                            vec![
+                            excludes: vec![
                                 // The path is not filled and borderWidth is 4.0 so the path should not contains the corner points.
                                 // See Skia SkPath::contains method.
 
@@ -10888,13 +10787,13 @@ pub(crate) mod tests {
                                 // Bottom-right.
                                 Offset::new(
                                     INPUT_DECORATOR_WIDTH - 1.0,
-                                    INPUT_DECORATOR_HEIGHT - 1.0
+                                    INPUT_DECORATOR_HEIGHT - 1.0,
                                 ),
                             ],
-                        ),
-                        Call::Restore,
-                    ]
-                ));
+                        },
+                        PaintCall::Restore,
+                    ],
+                );
             });
         }
 
@@ -10915,32 +10814,34 @@ pub(crate) mod tests {
                             ),
                     ),
                 );
-                assert!(paints(
+                assert_paints(
                     &decorator_ops(tester),
                     &[
                         // The border's outer path, a rounded rectangle.
-                        Call::RRect(
-                            Style::Fill,
-                            Some(Color::new(0xFF00FF00)),
-                            Some(
+                        PaintCall::RRect {
+                            rrect: Some(
                                 BorderRadius::all(Radius::circular(12.0))
-                                    .to_rrect(Rect::from_ltwh(0.0, 0.0, 800.0, 56.0))
-                            )
-                        ),
+                                    .to_rrect(Rect::from_ltwh(0.0, 0.0, 800.0, 56.0)),
+                            ),
+                            color: Some(Color::new(0xFF00FF00)),
+                            style: Some(PaintedStyle::Fill),
+                            has_mask_filter: None,
+                        },
                         // Border outline. The rrect is the -center- of the 1.0 stroked outline.
-                        Call::RRect(
-                            Style::Stroke(Some(1.0)),
-                            None,
-                            Some(RRect::from_ltrbr(
+                        PaintCall::RRect {
+                            rrect: Some(RRect::from_ltrbr(
                                 0.5,
                                 0.5,
                                 799.5,
                                 55.5,
-                                Radius::circular(11.5)
-                            ))
-                        ),
-                    ]
-                ));
+                                Radius::circular(11.5),
+                            )),
+                            color: None,
+                            style: Some(PaintedStyle::Stroke(Some(1.0))),
+                            has_mask_filter: None,
+                        },
+                    ],
+                );
             });
         }
 
@@ -10970,29 +10871,31 @@ pub(crate) mod tests {
                         ),
                 ),
             );
-            assert!(paints(
+            assert_paints(
                 &decorator_ops(tester),
                 &[
                     // Background fill of the InputDecorator.
-                    Call::RRect(
-                        Style::Fill,
-                        Some(Color::new(0xFF00FF00)),
-                        Some(RRect::from_ltrbr(
+                    PaintCall::RRect {
+                        rrect: Some(RRect::from_ltrbr(
                             0.0,
                             0.0,
                             STROKE_DECORATOR_WIDTH,
                             STROKE_DECORATOR_HEIGHT,
                             Radius::circular(STROKE_BORDER_RADIUS),
-                        ))
-                    ),
+                        )),
+                        color: Some(Color::new(0xFF00FF00)),
+                        style: Some(PaintedStyle::Fill),
+                        has_mask_filter: None,
+                    },
                     // The stroked OutlineInputBorder.
-                    Call::RRect(
-                        Style::Stroke(Some(STROKE_BORDER_WIDTH)),
-                        None,
-                        Some(expected_rrect)
-                    ),
-                ]
-            ));
+                    PaintCall::RRect {
+                        rrect: Some(expected_rrect),
+                        color: None,
+                        style: Some(PaintedStyle::Stroke(Some(STROKE_BORDER_WIDTH))),
+                        has_mask_filter: None,
+                    },
+                ],
+            );
         }
 
         // input_decorator_test.dart 'Material3 - InputDecoration container - OutlineInputBorder
@@ -11074,11 +10977,10 @@ pub(crate) mod tests {
                     ),
                 );
                 // Fill is the border's outer path, a rounded rectangle.
-                assert!(paints(
+                assert_paints(
                     &decorator_ops(tester),
-                    &[Call::DRRect(
-                        Some(Style::Fill),
-                        RRect::from_ltrb_and_corners(
+                    &[PaintCall::DRRect {
+                        outer: Some(RRect::from_ltrb_and_corners(
                             0.0,
                             0.0,
                             800.0,
@@ -11087,8 +10989,8 @@ pub(crate) mod tests {
                             Radius::ZERO,
                             Radius::elliptical(12.0, 12.0),
                             Radius::elliptical(12.0, 12.0),
-                        ),
-                        RRect::from_ltrb_and_corners(
+                        )),
+                        inner: Some(RRect::from_ltrb_and_corners(
                             0.0,
                             0.0,
                             800.0,
@@ -11097,9 +10999,11 @@ pub(crate) mod tests {
                             Radius::ZERO,
                             Radius::elliptical(12.0, 11.0),
                             Radius::elliptical(12.0, 11.0),
-                        ),
-                    )]
-                ));
+                        )),
+                        color: None,
+                        style: Some(PaintedStyle::Fill),
+                    }],
+                );
             });
         }
 
@@ -11117,11 +11021,10 @@ pub(crate) mod tests {
             let canvas_rect = Rect::from_ltwh(0.0, 0.0, 100.0, 100.0);
             let border = UnderlineInputBorder::new()
                 .border_radius(BorderRadius::all(Radius::circular(12.0)));
-            assert!(paints(
+            assert_paints(
                 &ops_of_border(&border, canvas_rect),
-                &[Call::DRRect(
-                    None,
-                    RRect::from_ltrb_and_corners(
+                &[PaintCall::DRRect {
+                    outer: Some(RRect::from_ltrb_and_corners(
                         0.0,
                         0.0,
                         100.0,
@@ -11130,8 +11033,8 @@ pub(crate) mod tests {
                         Radius::ZERO,
                         Radius::elliptical(12.0, 12.0),
                         Radius::elliptical(12.0, 12.0),
-                    ),
-                    RRect::from_ltrb_and_corners(
+                    )),
+                    inner: Some(RRect::from_ltrb_and_corners(
                         0.0,
                         0.0,
                         100.0,
@@ -11140,18 +11043,19 @@ pub(crate) mod tests {
                         Radius::ZERO,
                         Radius::elliptical(12.0, 11.0),
                         Radius::elliptical(12.0, 11.0),
-                    ),
-                )]
-            ));
+                    )),
+                    color: None,
+                    style: None,
+                }],
+            );
 
             let border2 = UnderlineInputBorder::new()
                 .border_radius(BorderRadius::all(Radius::circular(60.0)));
             assert!(
                 paints(
                     &ops_of_border(&border2, canvas_rect),
-                    &[Call::DRRect(
-                        None,
-                        RRect::from_ltrb_and_corners(
+                    &[PaintCall::DRRect {
+                        outer: Some(RRect::from_ltrb_and_corners(
                             0.0,
                             0.0,
                             100.0,
@@ -11160,8 +11064,8 @@ pub(crate) mod tests {
                             Radius::ZERO,
                             Radius::elliptical(50.0, 50.0),
                             Radius::elliptical(50.0, 50.0),
-                        ),
-                        RRect::from_ltrb_and_corners(
+                        )),
+                        inner: Some(RRect::from_ltrb_and_corners(
                             0.0,
                             0.0,
                             100.0,
@@ -11170,9 +11074,12 @@ pub(crate) mod tests {
                             Radius::ZERO,
                             Radius::elliptical(50.0, 49.0),
                             Radius::elliptical(50.0, 49.0),
-                        ),
-                    )]
-                ),
+                        )),
+                        color: None,
+                        style: None
+                    }]
+                )
+                .is_ok(),
                 "clamp is expected"
             );
         }
@@ -11187,14 +11094,14 @@ pub(crate) mod tests {
                 width: BORDER_WIDTH,
                 ..BorderSide::default()
             });
-            assert!(paints(
+            assert_paints(
                 &ops_of_border(&border, canvas_rect),
-                &[Call::Line(
+                &[PaintCall::line(
                     Offset::new(0.0, canvas_rect.height() - BORDER_WIDTH / 2.0),
                     Offset::new(100.0, canvas_rect.height() - BORDER_WIDTH / 2.0),
-                    BORDER_WIDTH,
-                )]
-            ));
+                    Some(BORDER_WIDTH),
+                )],
+            );
         }
 
         /// The `buildFrame` of the label-gap cases: a `RepaintBoundary` around `decorator` in a
@@ -11244,45 +11151,37 @@ pub(crate) mod tests {
                 // Convert label bottom left offset to border path coordinate system.
                 let label_bottom_left_local_to_border =
                     border_local(tester, get_label_rect(tester).bottom_left());
-                assert!(paints(
+                assert_paints(
                     &border_painter_ops(tester),
                     &[
-                        Call::Save,
-                        Call::Path(
-                            None,
-                            // The points just before the label bottom left corner should be part of the border.
+                        PaintCall::Save,
+                        PaintCall::Path { color: None, style: None, includes: // The points just before the label bottom left corner should be part of the border.
                             vec![
                                 label_bottom_left_local_to_border + Offset::new(-1.0, 0.0),
                                 label_bottom_left_local_to_border + Offset::new(-1.0, -1.0),
-                            ],
-                            // The label bottom left corner should not be part of the border.
-                            vec![label_bottom_left_local_to_border],
-                        ),
-                        Call::Restore,
-                    ]
-                ));
+                            ], excludes: // The label bottom left corner should not be part of the border.
+                            vec![label_bottom_left_local_to_border] },
+                        PaintCall::Restore,
+                    ],
+                );
 
                 tester.pump_widget(gap_frame(TextDirection::Rtl, decorator()));
                 // Convert label bottom right offset to border path coordinate system.
                 let label_bottom_right_local_to_border =
                     border_local(tester, get_label_rect(tester).bottom_right());
-                assert!(paints(
+                assert_paints(
                     &border_painter_ops(tester),
                     &[
-                        Call::Save,
-                        Call::Path(
-                            None,
-                            // The points just after the label bottom right corner should be part of the border.
+                        PaintCall::Save,
+                        PaintCall::Path { color: None, style: None, includes: // The points just after the label bottom right corner should be part of the border.
                             vec![
                                 label_bottom_right_local_to_border + Offset::new(1.0, 0.0),
                                 label_bottom_right_local_to_border + Offset::new(1.0, -1.0),
-                            ],
-                            // The label bottom right corner should not be part of the border.
-                            vec![label_bottom_right_local_to_border],
-                        ),
-                        Call::Restore,
-                    ]
-                ));
+                            ], excludes: // The label bottom right corner should not be part of the border.
+                            vec![label_bottom_right_local_to_border] },
+                        PaintCall::Restore,
+                    ],
+                );
             });
         }
 
@@ -11308,20 +11207,17 @@ pub(crate) mod tests {
                         paints(
                             &border_painter_ops(tester),
                             &[
-                                Call::Save,
-                                Call::Path(
-                                    None,
-                                    // The points of the label edge should be part of the border.
-                                    vec![center_left, center_right],
-                                    // The points inside the label should not be part of the border.
+                                PaintCall::Save,
+                                PaintCall::Path { color: None, style: None, includes: // The points of the label edge should be part of the border.
+                                    vec![center_left, center_right], excludes: // The points inside the label should not be part of the border.
                                     vec![
                                         center_left + Offset::new(1.0, 0.0),
                                         center_right + Offset::new(-1.0, 0.0),
-                                    ],
-                                ),
-                                Call::Restore,
+                                    ] },
+                                PaintCall::Restore,
                             ]
-                        ),
+                        )
+                        .is_ok(),
                         "{text_direction:?}"
                     );
                 }
@@ -11352,11 +11248,17 @@ pub(crate) mod tests {
                         paints(
                             &border_painter_ops(tester),
                             &[
-                                Call::Save,
-                                Call::Path(None, Vec::new(), vec![center_left, center_right]),
-                                Call::Restore,
+                                PaintCall::Save,
+                                PaintCall::Path {
+                                    color: None,
+                                    style: None,
+                                    includes: Vec::new(),
+                                    excludes: vec![center_left, center_right]
+                                },
+                                PaintCall::Restore,
                             ]
-                        ),
+                        )
+                        .is_ok(),
                         "{text_direction:?}"
                     );
                 }
@@ -11393,7 +11295,7 @@ pub(crate) mod tests {
 
         /// Dart's `Theme.of(tester.element(findDecorator()))`.
         fn decorator_theme(tester: &WidgetTester) -> Rc<ThemeData> {
-            let element = tester.find_by_type::<InputDecorator>()[0];
+            let element = tester.element(find::by_type::<InputDecorator>());
             let mut app = tester.cell.borrow_mut();
             Theme::of(&mut app, element)
         }
@@ -11404,21 +11306,17 @@ pub(crate) mod tests {
 
         /// Dart's `getInputRect(tester)`.
         fn get_input_rect(tester: &WidgetTester) -> Rect {
-            text_rect(tester, INPUT_TEXT)
+            tester.get_rect(find::text(INPUT_TEXT))
         }
 
         /// Dart's `getHintRect(tester)`.
         fn get_hint_rect(tester: &WidgetTester) -> Rect {
-            text_rect(tester, HINT_TEXT)
+            tester.get_rect(find::text(HINT_TEXT))
         }
 
         /// The hint's `Text`.
         fn find_hint(tester: &WidgetTester) -> AnyElement {
-            tester
-                .find_text(HINT_TEXT)
-                .into_iter()
-                .next()
-                .expect("a hint")
+            tester.element(find::text(HINT_TEXT))
         }
 
         /// Dart's `getHintOpacity(tester)`: the opacity of the nearest `FadeTransition` above the
@@ -11440,8 +11338,10 @@ pub(crate) mod tests {
 
         /// Dart's `getHintStyle(tester)`: the style of the `RichText` the hint's `Text` builds.
         fn get_hint_style(tester: &WidgetTester) -> TextStyle {
-            let hint = tester.find_text(HINT_TEXT)[0];
-            let rich_text = tester.descendants_of_type::<RichText>(hint)[0];
+            let rich_text = tester.element(find::descendant(
+                find::text(HINT_TEXT),
+                find::by_type::<RichText>(),
+            ));
             tester.widget(rich_text, |rich_text: &RichText| {
                 rich_text.text.style().cloned().expect("a style")
             })
@@ -12092,14 +11992,14 @@ pub(crate) mod tests {
 
         fn large_label_rect(tester: &mut WidgetTester, decoration: InputDecoration) -> Rect {
             pump(tester, BuildInputDecorator::new(decoration).is_empty(true));
-            let large = tester
-                .find_by_type::<SizedBox>()
-                .into_iter()
-                .find(|element| {
-                    tester.widget(*element, |sized: &SizedBox| sized.width == Some(1000.0))
-                })
-                .expect("the large label");
-            rect_of(tester, large)
+            let large = tester.element(find::by_widget_predicate(
+                "a SizedBox 1000 wide",
+                |_app, widget| {
+                    downcast_widget::<SizedBox>(widget)
+                        .is_some_and(|sized| sized.width == Some(1000.0))
+                },
+            ));
+            tester.get_rect(large)
         }
 
         // input_decorator_test.dart 'Material3 - InputDecoration labelText layout - When the label
@@ -12224,13 +12124,6 @@ pub(crate) mod tests {
             });
         }
 
-        fn assert_close_to(actual: f64, expected: f64, delta: f64) {
-            assert!(
-                (actual - expected).abs() <= delta,
-                "{actual} is not within {delta} of {expected}"
-            );
-        }
-
         // input_decorator_test.dart 'Material3 - InputDecoration labelText layout - Floating label
         // animation duration and curve' and its label layout twin.
         #[test]
@@ -12254,11 +12147,11 @@ pub(crate) mod tests {
                 // The animation duration is 167ms and the curve is fastOutSlowIn.
                 tester.pump_widget(build(true));
                 tester.pump_by(ms(42));
-                assert_close_to(get_label_rect(tester).top, 17.09, 0.5);
+                assert_more_or_less_equals_within(get_label_rect(tester).top, 17.09, 0.5);
                 tester.pump_by(ms(42));
-                assert_close_to(get_label_rect(tester).top, 10.66, 0.5);
+                assert_more_or_less_equals_within(get_label_rect(tester).top, 10.66, 0.5);
                 tester.pump_by(ms(42));
-                assert_close_to(get_label_rect(tester).top, 8.47, 0.5);
+                assert_more_or_less_equals_within(get_label_rect(tester).top, 8.47, 0.5);
                 tester.pump_by(ms(41));
                 assert_eq!(get_label_rect(tester).top, 8.0);
 
@@ -12272,11 +12165,11 @@ pub(crate) mod tests {
                 // The animation duration is 167ms and the curve is fastOutSlowIn.
                 tester.pump_widget(build(false));
                 tester.pump_by(ms(42));
-                assert_close_to(get_label_rect(tester).top, 10.90, 0.5);
+                assert_more_or_less_equals_within(get_label_rect(tester).top, 10.90, 0.5);
                 tester.pump_by(ms(42));
-                assert_close_to(get_label_rect(tester).top, 17.34, 0.5);
+                assert_more_or_less_equals_within(get_label_rect(tester).top, 17.34, 0.5);
                 tester.pump_by(ms(42));
-                assert_close_to(get_label_rect(tester).top, 19.69, 0.5);
+                assert_more_or_less_equals_within(get_label_rect(tester).top, 19.69, 0.5);
                 tester.pump_by(ms(41));
                 assert_eq!(get_label_rect(tester).top, 20.0);
             });
@@ -12303,7 +12196,7 @@ pub(crate) mod tests {
                         .build(),
                     );
                     tester.pump_by(K_TRANSITION_DURATION);
-                    let rect = text_rect(tester, "Label");
+                    let rect = tester.get_rect(find::text("Label"));
                     (rect.top_left(), rect.size())
                 };
 
@@ -12342,12 +12235,8 @@ pub(crate) mod tests {
                         )
                         .into_widget()
                 };
-                let label_size = |tester: &WidgetTester, text: &str| {
-                    let element = tester.find_text(text)[0];
-                    let render = tester.render_box_of(element);
-                    let app = tester.cell.borrow();
-                    render.size(&app)
-                };
+                let label_size =
+                    |tester: &WidgetTester, text: &str| tester.get_size(find::text(text));
 
                 tester.pump_widget(build(&long_string_a, false));
                 assert_eq!(label_size(tester, &long_string_a), Size::new(100.0, 16.0));
@@ -13057,7 +12946,7 @@ pub(crate) mod tests {
                     tester,
                     BuildInputDecorator::new(InputDecoration::new().hint(Text::new("hint"))),
                 );
-                assert_eq!(tester.find_text("hint").len(), 1);
+                expect(tester, &find::text("hint"), finds_one_widget());
             });
         }
 
@@ -13075,7 +12964,7 @@ pub(crate) mod tests {
                 pump(tester, BuildInputDecorator::new(decoration.clone()));
                 tester.pump_by(K_TRANSITION_DURATION);
 
-                let hint = tester.find_text(&hint_text)[0];
+                let hint = tester.element(find::text(&hint_text));
                 let overflow = tester.widget(hint, |text: &Text| {
                     text.style.as_ref().and_then(|style| style.overflow)
                 });
@@ -13116,7 +13005,7 @@ pub(crate) mod tests {
                     .hint_max_lines(3)
                     .hint_text(hint_text.clone());
                 pump(tester, BuildInputDecorator::new(decoration));
-                let hint_height = text_rect(tester, &hint_text).height();
+                let hint_height = tester.get_rect(find::text(&hint_text)).height();
                 let input_height = get_decorator_rect(tester).height();
                 assert_eq!(input_height, hint_height + 16.0);
             });
@@ -13124,7 +13013,7 @@ pub(crate) mod tests {
 
         /// Dart's `find.text(hintText)` count.
         fn hint_count(tester: &WidgetTester) -> usize {
-            tester.find_text(HINT_TEXT).len()
+            find::text(HINT_TEXT).evaluate(tester).len()
         }
 
         fn fading_hint_decoration() -> InputDecoration {
@@ -13301,7 +13190,7 @@ pub(crate) mod tests {
 
         /// Dart's `Theme.of(tester.element(findDecorator()))`.
         fn decorator_theme(tester: &WidgetTester) -> Rc<ThemeData> {
-            let element = tester.find_by_type::<InputDecorator>()[0];
+            let element = tester.element(find::by_type::<InputDecorator>());
             let mut app = tester.cell.borrow_mut();
             Theme::of(&mut app, element)
         }
@@ -13309,9 +13198,10 @@ pub(crate) mod tests {
         /// Dart's `tester.widget<RichText>(find.descendant(of: find.text(text), matching:
         /// find.byType(RichText))).text.style!`.
         fn text_style(tester: &WidgetTester, text: &str) -> TextStyle {
-            let found = tester.find_text(text);
-            assert_eq!(found.len(), 1, "one {text:?}");
-            let rich_text = tester.descendants_of_type::<RichText>(found[0])[0];
+            let rich_text = tester.element(find::descendant(
+                find::text(text),
+                find::by_type::<RichText>(),
+            ));
             tester.widget(rich_text, |rich_text: &RichText| {
                 rich_text.text.style().cloned().expect("a styled text")
             })
@@ -13319,9 +13209,7 @@ pub(crate) mod tests {
 
         /// Dart's `tester.getRect(find.text(text))` over a `Text`.
         fn string_rect(tester: &WidgetTester, text: &str) -> Rect {
-            let found = tester.find_text(text);
-            assert_eq!(found.len(), 1, "one {text:?}");
-            rect_of(tester, found[0])
+            tester.get_rect(find::text(text))
         }
 
         fn body_small_with(theme: &ThemeData, color: Color) -> TextStyle {
@@ -13360,29 +13248,29 @@ pub(crate) mod tests {
         fn check_helper_and_counter_positions(tester: &WidgetTester) {
             assert_eq!(get_decorator_rect(tester).height(), FULL_HEIGHT);
             assert_eq!(get_border_bottom(tester), CONTAINER_HEIGHT);
-            let helper = text_rect(tester, HELPER_TEXT);
+            let helper = tester.get_rect(find::text(HELPER_TEXT));
             assert_eq!(helper.top, CONTAINER_HEIGHT + HELPER_GAP);
             assert_eq!(helper.height(), HELPER_HEIGHT);
             assert_eq!(helper.left, HELPER_START_PADDING);
-            let counter = text_rect(tester, COUNTER_TEXT);
+            let counter = tester.get_rect(find::text(COUNTER_TEXT));
             assert_eq!(counter.top, CONTAINER_HEIGHT + HELPER_GAP);
             assert_eq!(counter.height(), HELPER_HEIGHT);
             // The global transform is f32, which leaves the counter's right a rounding off 784.
-            assert_close(counter.right, 800.0 - COUNTER_END_PADDING, 1e-4);
+            assert_f32_equals(counter.right, 800.0 - COUNTER_END_PADDING);
         }
 
         fn check_error_and_counter_positions(tester: &WidgetTester) {
             assert_eq!(get_decorator_rect(tester).height(), FULL_HEIGHT);
             assert_eq!(get_border_bottom(tester), CONTAINER_HEIGHT);
-            let error = text_rect(tester, ERROR_TEXT);
+            let error = tester.get_rect(find::text(ERROR_TEXT));
             assert_eq!(error.top, CONTAINER_HEIGHT + HELPER_GAP);
             assert_eq!(error.height(), ERROR_HEIGHT);
             assert_eq!(error.left, HELPER_START_PADDING);
-            let counter = text_rect(tester, COUNTER_TEXT);
+            let counter = tester.get_rect(find::text(COUNTER_TEXT));
             assert_eq!(counter.top, CONTAINER_HEIGHT + HELPER_GAP);
             assert_eq!(counter.height(), ERROR_HEIGHT);
             // The global transform is f32, which leaves the counter's right a rounding off 784.
-            assert_close(counter.right, 800.0 - COUNTER_END_PADDING, 1e-4);
+            assert_f32_equals(counter.right, 800.0 - COUNTER_END_PADDING);
         }
 
         fn check_helper_and_counter_style(
@@ -13525,9 +13413,9 @@ pub(crate) mod tests {
                 BuildInputDecorator::new(styled_supporting(base).error_text(ERROR_TEXT))
                     .is_focused(true),
             );
-            assert_eq!(tester.find_text(ERROR_TEXT).len(), 1);
-            assert_eq!(tester.find_text(COUNTER_TEXT).len(), 1);
-            assert!(tester.find_text(HELPER_TEXT).is_empty());
+            expect(tester, &find::text(ERROR_TEXT), finds_one_widget());
+            expect(tester, &find::text(COUNTER_TEXT), finds_one_widget());
+            expect(tester, &find::text(HELPER_TEXT), finds_nothing());
         }
 
         fn check_error_positions(tester: &mut WidgetTester, base: InputDecoration) {
@@ -13694,13 +13582,6 @@ pub(crate) mod tests {
             test_widgets(|tester| check_error_style(tester, outlined()));
         }
 
-        fn assert_close(actual: f64, expected: f64, tolerance: f64) {
-            assert!(
-                (actual - expected).abs() <= tolerance,
-                "{actual} is not within {tolerance} of {expected}"
-            );
-        }
-
         /// The error or helper `text`, `lines` lines high, and the decorator below it.
         fn check_supporting_lines(
             tester: &mut WidgetTester,
@@ -13709,12 +13590,12 @@ pub(crate) mod tests {
             lines: f64,
         ) {
             pump(tester, BuildInputDecorator::new(decoration));
-            assert_close(
+            assert_more_or_less_equals_within(
                 string_rect(tester, text).height(),
                 ERROR_HEIGHT * lines,
                 0.25,
             );
-            assert_close(
+            assert_more_or_less_equals_within(
                 get_decorator_rect(tester).height(),
                 CONTAINER_HEIGHT + HELPER_GAP + ERROR_HEIGHT * lines,
                 0.25,
@@ -13796,12 +13677,12 @@ pub(crate) mod tests {
                     BuildInputDecorator::new(InputDecoration::new().hint_text(THREE_LINES))
                         .input_decoration_theme(InputDecorationThemeData::new().hint_max_lines(2)),
                 );
-                assert_close(
+                assert_more_or_less_equals_within(
                     string_rect(tester, THREE_LINES).height(),
                     HINT_HEIGHT * 2.0,
                     0.25,
                 );
-                assert_close(
+                assert_more_or_less_equals_within(
                     get_decorator_rect(tester).height(),
                     TOP_PADDING + HINT_HEIGHT * 2.0 + BOTTOM_PADDING,
                     0.25,
@@ -13902,7 +13783,7 @@ pub(crate) mod tests {
                             .helper(Text::new("helper").style(TextStyle::new().font_size(20.0))),
                     ),
                 );
-                assert_eq!(tester.find_text("helper").len(), 1);
+                expect(tester, &find::text("helper"), finds_one_widget());
             });
         }
 
@@ -13934,7 +13815,7 @@ pub(crate) mod tests {
                             .error(Text::new("error").style(TextStyle::new().font_size(20.0))),
                     ),
                 );
-                assert_eq!(tester.find_text("error").len(), 1);
+                expect(tester, &find::text("error"), finds_one_widget());
             });
         }
 
@@ -13964,7 +13845,7 @@ pub(crate) mod tests {
                     tester,
                     BuildInputDecorator::new(InputDecoration::new().error(Text::new(ERROR_TEXT))),
                 );
-                assert_eq!(tester.find_text(ERROR_TEXT).len(), 1);
+                expect(tester, &find::text(ERROR_TEXT), finds_one_widget());
                 let theme = decorator_theme(tester);
                 assert_eq!(
                     text_style(tester, ERROR_TEXT),
@@ -13992,10 +13873,12 @@ pub(crate) mod tests {
                 );
                 tester.pump_by(K_TRANSITION_DURATION);
 
-                assert_eq!(tester.find_by_type::<InputDecorator>().len(), 1);
-                let counter = tester.find_text("COUNTER")[0];
-                let render = tester.render_box_of(counter);
-                assert_eq!(render.size(&tester.cell.borrow()), Size::ZERO);
+                expect(
+                    tester,
+                    &find::by_type::<InputDecorator>(),
+                    finds_one_widget(),
+                );
+                assert_eq!(tester.get_size(find::text("COUNTER")), Size::ZERO);
             });
         }
 
@@ -14069,22 +13952,24 @@ pub(crate) mod tests {
 
         /// Dart's `getPrefixIconRect` / `getSuffixIconRect`: the rect of the `Icon`.
         fn icon_rect(tester: &WidgetTester, icon: &IconData) -> Rect {
-            rect_of(tester, tester.find_by_icon(icon))
+            tester.get_rect(find::by_icon(icon))
         }
 
         /// Dart's `tester.getRect(findPrefixIconInnerRichText())`.
         fn icon_inner_rect(tester: &WidgetTester, icon: &IconData) -> Rect {
-            let rich_text = tester.descendants_of_type::<RichText>(tester.find_by_icon(icon))[0];
-            rect_of(tester, rich_text)
+            tester.get_rect(find::descendant(
+                find::by_icon(icon),
+                find::by_type::<RichText>(),
+            ))
         }
 
         /// Dart's `getPrefixIconStyle` / `getSuffixIconStyle`.
         fn icon_style(tester: &WidgetTester, icon: &IconData) -> TextStyle {
-            tester.glyph_style(tester.find_by_icon(icon))
+            tester.glyph_style(tester.element(find::by_icon(icon)))
         }
 
         fn input_rect(tester: &WidgetTester) -> Rect {
-            text_rect(tester, INPUT_TEXT)
+            tester.get_rect(find::text(INPUT_TEXT))
         }
 
         /// The checks every 'prefixIcon is correctly positioned' case makes, in `text_direction`.
@@ -14367,7 +14252,7 @@ pub(crate) mod tests {
         /// The colour of the nearest `IconTheme` above the `Icon` showing `icon`: Dart's
         /// `tester.widget<IconTheme>(find.widgetWithIcon(IconTheme, icon).first).data.color`.
         fn icon_theme_color(tester: &WidgetTester, icon: &IconData) -> Option<Color> {
-            let icon_element = tester.find_by_icon(icon);
+            let icon_element = tester.element(find::by_icon(icon));
             let icon_theme = tester
                 .ancestors(icon_element)
                 .into_iter()
@@ -14417,7 +14302,7 @@ pub(crate) mod tests {
 
         /// The target opacity of the `AnimatedOpacity` above the only `Icon`.
         fn affix_opacity(tester: &WidgetTester) -> f64 {
-            let icon = tester.find_by_type::<Icon>()[0];
+            let icon = tester.element(find::by_type::<Icon>());
             let opacity = tester
                 .ancestors(icon)
                 .into_iter()
@@ -14456,8 +14341,8 @@ pub(crate) mod tests {
             // Initially the affix icon should be hidden.
             assert_eq!(affix_opacity(tester), 0.0);
 
-            let icon_center = rect_of(tester, tester.find_by_type::<Icon>()[0]).center();
-            tester.tap(icon_center, 1);
+            let icon_center = tester.get_rect(find::by_type::<Icon>()).center();
+            tester.tap_at(icon_center, 1);
             tester.pump();
 
             // The affix icon should ignore pointer events when hidden.
@@ -14470,8 +14355,8 @@ pub(crate) mod tests {
             assert_eq!(affix_opacity(tester), 1.0);
 
             // Tap the affix icon.
-            let icon_center = rect_of(tester, tester.find_by_type::<Icon>()[0]).center();
-            tester.tap(icon_center, 2);
+            let icon_center = tester.get_rect(find::by_type::<Icon>()).center();
+            tester.tap_at(icon_center, 2);
             tester.pump();
 
             // The affix icon should be tapped.
@@ -14502,7 +14387,7 @@ pub(crate) mod tests {
 
         /// Dart's `getHintOpacity(tester)`: the value of the first `FadeTransition` above the hint.
         fn hint_opacity(tester: &WidgetTester) -> f64 {
-            let hint = tester.find_text(HINT_TEXT)[0];
+            let hint = tester.element(find::text(HINT_TEXT));
             let fade = tester
                 .ancestors(hint)
                 .into_iter()
@@ -14551,10 +14436,10 @@ pub(crate) mod tests {
             assert_eq!(input_rect(tester).top, 0.0);
             assert_eq!(hint_opacity(tester), 1.0);
             assert_eq!(
-                text_rect(tester, HINT_TEXT).height(),
+                tester.get_rect(find::text(HINT_TEXT)).height(),
                 COLLAPSED_INPUT_HEIGHT
             );
-            assert_eq!(text_rect(tester, HINT_TEXT).top, 0.0);
+            assert_eq!(tester.get_rect(find::text(HINT_TEXT)).top, 0.0);
         }
 
         // input_decorator_test.dart 'Material3 - InputDecoration collapsed - Decoration height is
@@ -14956,8 +14841,8 @@ pub(crate) mod tests {
         use waft_painting::OutlinedBorderRef;
         use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
 
-        use waft_embedder::valo::Op;
-        use waft_embedder::{Color, Offset, PaintStyle, Radius, Size};
+        use crate::test_support::PaintInspection;
+        use waft_embedder::{Color, Offset, Radius, Size};
         use waft_foundation::Listener;
         use waft_painting::{
             AlignmentGeometry, BorderRadius, BorderSide, EdgeInsets, EdgeInsetsDirectional,
@@ -14985,7 +14870,6 @@ pub(crate) mod tests {
         use crate::material::Material;
         use crate::material_state::WidgetStateInputBorder;
         use crate::scaffold::Scaffold;
-        use crate::test_support::{Drawn, PaintInspection};
         use crate::theme::Theme;
         use crate::theme_data::VisualDensity;
 
@@ -15001,14 +14885,10 @@ pub(crate) mod tests {
         /// `tester.widget<RichText>(find.descendant(of: find.text(text), matching:
         /// find.byType(RichText))).text.style!`.
         fn rich_text_style(tester: &WidgetTester, text: &str) -> TextStyle {
-            let found = *tester
-                .find_text(text)
-                .first()
-                .expect("a Text showing the text");
-            let rich_text = *tester
-                .descendants_of_type::<RichText>(found)
-                .first()
-                .expect("the Text's RichText");
+            let rich_text = tester.element(find::descendant(
+                find::text(text),
+                find::by_type::<RichText>(),
+            ));
             tester.widget(rich_text, |rich_text: &RichText| {
                 rich_text.text.style().cloned().expect("a styled text")
             })
@@ -15021,10 +14901,7 @@ pub(crate) mod tests {
         /// Dart's `getOpacity(tester, text)`: the value of the nearest `FadeTransition` above the
         /// `Text` showing `text`.
         fn get_opacity(tester: &WidgetTester, text: &str) -> f64 {
-            let found = *tester
-                .find_text(text)
-                .first()
-                .expect("a Text showing the text");
+            let found = tester.element(find::text(text));
             let fade = tester
                 .ancestors(found)
                 .into_iter()
@@ -15041,7 +14918,7 @@ pub(crate) mod tests {
         /// The colour of the `IconTheme` nearest the `Icon` showing `icon`: Dart's
         /// `tester.widget<IconTheme>(find.widgetWithIcon(IconTheme, icon).first).data.color`.
         fn icon_theme_color(tester: &WidgetTester, icon: &IconData) -> Option<Color> {
-            let found = tester.find_by_icon(icon);
+            let found = tester.element(find::by_icon(icon));
             let icon_theme = tester
                 .ancestors(found)
                 .into_iter()
@@ -15057,48 +14934,13 @@ pub(crate) mod tests {
 
         /// Dart's `tester.getSize(find.byIcon(icon))`.
         fn icon_size(tester: &WidgetTester, icon: &IconData) -> Size {
-            let found = tester.find_by_icon(icon);
-            let render = tester.render_box_of(found);
-            render.size(&tester.cell.borrow())
+            tester.get_size(find::by_icon(icon))
         }
 
         /// Dart's `getIconStyle(tester, icon)?.color`.
         fn icon_glyph_color(tester: &WidgetTester, icon: &IconData) -> Option<Color> {
-            let found = tester.find_by_icon(icon);
+            let found = tester.element(find::by_icon(icon));
             style_color(&tester.glyph_style(found))
-        }
-
-        /// Dart's `getBorderRadius`'s render object, the `CustomPaint` of the border: what it
-        /// paints, as Dart's `paints` matcher records it.
-        fn border_painted(tester: &WidgetTester) -> Vec<Drawn> {
-            let element = find_border_painter(tester).expect("a border painter");
-            let render = tester.render_box_of(element);
-            tester.painted(render.as_object())
-        }
-
-        /// Dart's `paints..rrect(style: PaintingStyle.fill, color: color)` on the border painter.
-        fn paints_fill(tester: &WidgetTester, color: Color) -> bool {
-            border_painted(tester)
-                .iter()
-                .any(|drawn| matches!(drawn, Drawn::Path(argb, _) if *argb == color.to_argb32()))
-        }
-
-        /// The strokes the border painter paints, as (colour, width): what Dart's
-        /// `paints..rrect(color:, strokeWidth:)` matches.
-        fn border_strokes(tester: &WidgetTester) -> Vec<(waft_embedder::valo::Color, f32)> {
-            let element = find_border_painter(tester).expect("a border painter");
-            let render = tester.render_box_of(element);
-            tester
-                .painted_ops(render.as_object())
-                .into_iter()
-                .filter_map(|op| match op {
-                    Op::DrawPath { paint, .. } => match paint.style {
-                        PaintStyle::Stroke(stroke) => Some((paint.color, stroke.width)),
-                        PaintStyle::Fill => None,
-                    },
-                    _ => None,
-                })
-                .collect()
         }
 
         fn outline(color: Color, width: f64) -> OutlineInputBorder {
@@ -15128,7 +14970,10 @@ pub(crate) mod tests {
         }
 
         fn decorator_render(tester: &WidgetTester) -> waft_rendering::AnyRenderBox {
-            tester.render_box_of(tester.find_by_type::<InputDecorator>()[0])
+            tester
+                .render_object(find::by_type::<InputDecorator>())
+                .as_box()
+                .expect("a render box")
         }
 
         fn key_size(tester: &WidgetTester, key: &GlobalKey) -> Size {
@@ -15304,28 +15149,40 @@ pub(crate) mod tests {
                         .build()
                 };
                 tester.pump_widget(build(false, false));
-                assert!(
-                    border_strokes(tester)
-                        .iter()
-                        .any(|(_, width)| *width == 1.0)
+                assert_paints(
+                    &border_painter_ops(tester),
+                    &[PaintCall::RRect {
+                        rrect: None,
+                        color: None,
+                        style: Some(PaintedStyle::Stroke(Some(1.0))),
+                        has_mask_filter: None,
+                    }],
                 );
 
                 tester.pump_widget(build(true, false));
                 tester.pump_and_settle();
-                let blue: waft_embedder::valo::Color = Colors::BLUE.primary().into();
-                assert!(
-                    border_strokes(tester)
-                        .iter()
-                        .any(|(color, width)| *color == blue && *width == 4.0)
+                assert_paints(
+                    &border_painter_ops(tester),
+                    &[PaintCall::RRect {
+                        rrect: None,
+                        color: Some(Colors::BLUE.primary()),
+                        style: Some(PaintedStyle::Stroke(Some(4.0))),
+                        has_mask_filter: None,
+                    }],
                 );
 
                 tester.pump_widget(build(false, true));
                 tester.pump_and_settle();
-                let cyan: waft_embedder::valo::Color = Colors::CYAN.primary().into();
-                assert!(
-                    border_strokes(tester)
-                        .iter()
-                        .any(|(color, width)| *color == cyan && *width == 8.0)
+                // The 8-wide side deflates the 4-radius corners to nothing, so valo records the
+                // stroked rrect as a plain path where Dart's `drawRRect` stays an rrect call.
+                assert_paints(
+                    &border_painter_ops(tester),
+                    &[PaintCall::Path {
+                        color: Some(Colors::CYAN.primary()),
+                        style: Some(PaintedStyle::Stroke(Some(8.0))),
+                        includes: Vec::new(),
+                        excludes: Vec::new(),
+                    }],
                 );
             });
         }
@@ -15384,11 +15241,7 @@ pub(crate) mod tests {
         }
 
         fn text_size(tester: &WidgetTester, text: &str) -> Size {
-            let found = *tester
-                .find_text(text)
-                .first()
-                .expect("a Text showing the text");
-            tester.render_box_of(found).size(&tester.cell.borrow())
+            tester.get_size(find::text(text))
         }
 
         // input_decorator_test.dart "InputDecorator label width isn't affected by prefix or
@@ -15402,8 +15255,8 @@ pub(crate) mod tests {
                 tester.pump_widget(labeled_input_decorator(false, false));
 
                 // Get the width of the label when there is no prefix/suffix.
-                assert!(tester.find_text(PREFIX_TEXT).is_empty());
-                assert!(tester.find_text(SUFFIX_TEXT).is_empty());
+                expect(tester, &find::text(PREFIX_TEXT), finds_nothing());
+                expect(tester, &find::text(SUFFIX_TEXT), finds_nothing());
                 let label_width = text_size(tester, "My Label").width();
 
                 // Build with a prefix and suffix.
@@ -15411,9 +15264,9 @@ pub(crate) mod tests {
 
                 // The prefix and suffix exist but aren't visible. They have not affected
                 // the width of the label.
-                assert_eq!(tester.find_text(PREFIX_TEXT).len(), 1);
+                expect(tester, &find::text(PREFIX_TEXT), finds_one_widget());
                 assert_eq!(get_opacity(tester, PREFIX_TEXT), 0.0);
-                assert_eq!(tester.find_text(SUFFIX_TEXT).len(), 1);
+                expect(tester, &find::text(SUFFIX_TEXT), finds_one_widget());
                 assert_eq!(get_opacity(tester, SUFFIX_TEXT), 0.0);
                 assert_eq!(text_size(tester, "My Label").width(), label_width);
 
@@ -15644,7 +15497,7 @@ pub(crate) mod tests {
                 );
 
                 let field = get_decorator_rect(tester);
-                let text = text_rect(tester, "A");
+                let text = tester.get_rect(find::text("A"));
 
                 // The text is inside the field.
                 assert!(text.height() < field.bottom - field.top);
@@ -16058,8 +15911,7 @@ pub(crate) mod tests {
                     .text_direction(direction)
                     .build(),
             );
-            let found = tester.find_text(INPUT_TEXT)[0];
-            tester.render_box_of(found).size(&tester.cell.borrow())
+            tester.get_size(find::text(INPUT_TEXT))
         }
 
         fn without_icons() -> InputDecoration {
@@ -16423,11 +16275,7 @@ pub(crate) mod tests {
 
         /// Dart's `tester.getRect(find.text(text))` of a `Text`.
         fn string_rect(tester: &WidgetTester, text: &str) -> waft_embedder::Rect {
-            let found = *tester
-                .find_text(text)
-                .first()
-                .expect("a Text showing the text");
-            rect_of(tester, found)
+            tester.get_rect(find::text(text))
         }
 
         // input_decorator_test.dart 'Local InputDecorationTheme overrides default -
@@ -16696,8 +16544,8 @@ pub(crate) mod tests {
                     get_container_rect(tester).height(),
                     TOP + LABEL_HEIGHT + INPUT_HEIGHT + BOTTOM
                 );
-                assert_eq!(text_rect(tester, INPUT_TEXT).left, START);
-                assert_eq!(text_rect(tester, INPUT_TEXT).right, 800.0 - END);
+                assert_eq!(tester.get_rect(find::text(INPUT_TEXT)).left, START);
+                assert_eq!(tester.get_rect(find::text(INPUT_TEXT)).right, 800.0 - END);
             });
         }
 
@@ -16889,10 +16737,14 @@ pub(crate) mod tests {
                             .counter_text(COUNTER_TEXT),
                     ),
                 );
-                assert!(
-                    paints_fill(tester, indigo()),
-                    "{:?}",
-                    border_painted(tester)
+                assert_paints(
+                    &border_painter_ops(tester),
+                    &[PaintCall::RRect {
+                        rrect: None,
+                        color: Some(indigo()),
+                        style: Some(PaintedStyle::Fill),
+                        has_mask_filter: None,
+                    }],
                 );
             });
         }
@@ -16941,15 +16793,19 @@ pub(crate) mod tests {
                 );
 
                 let theme = {
-                    let decorator = tester.find_by_type::<InputDecorator>()[0];
+                    let decorator = tester.element(find::by_type::<InputDecorator>());
                     let mut app = tester.cell.borrow_mut();
                     Theme::of(&mut app, decorator)
                 };
                 let focus_color = theme.color_scheme.surface_container_highest();
-                assert!(
-                    paints_fill(tester, Color::alpha_blend(indigo(), focus_color)),
-                    "{:?}",
-                    border_painted(tester)
+                assert_paints(
+                    &border_painter_ops(tester),
+                    &[PaintCall::RRect {
+                        rrect: None,
+                        color: Some(Color::alpha_blend(indigo(), focus_color)),
+                        style: Some(PaintedStyle::Fill),
+                        has_mask_filter: None,
+                    }],
                 );
             });
         }
@@ -17089,7 +16945,7 @@ pub(crate) mod tests {
                 );
                 assert_eq!(
                     get_label_rect(tester).left,
-                    text_rect(tester, INPUT_TEXT).left
+                    tester.get_rect(find::text(INPUT_TEXT)).left
                 );
             });
         }
@@ -17159,7 +17015,7 @@ pub(crate) mod tests {
                 );
 
                 let theme = {
-                    let decorator = tester.find_by_type::<InputDecorator>()[0];
+                    let decorator = tester.element(find::by_type::<InputDecorator>());
                     let mut app = tester.cell.borrow_mut();
                     Theme::of(&mut app, decorator)
                 };
@@ -17219,15 +17075,14 @@ pub(crate) mod tests {
                 .into_widget(),
             );
 
-            let icon_button = tester
-                .ancestors(tester.find_by_icon(&button_icon))
-                .into_iter()
-                .find(|element| {
-                    let app = tester.cell.borrow();
-                    waft_widgets::downcast_widget::<IconButton>(&**element.widget(&app)).is_some()
-                })
-                .expect("the IconButton");
-            let material = tester.descendants_of_type::<Material>(icon_button)[0];
+            let material = tester.element(
+                find::descendant(
+                    find::ancestor(find::by_icon(&button_icon), find::by_type::<IconButton>())
+                        .first(),
+                    find::by_type::<Material>(),
+                )
+                .first(),
+            );
             tester.widget(material, |material: &Material| {
                 assert_eq!(material.color, Some(background_color));
                 assert_eq!(material.shadow_color, Some(shadow_color));
@@ -17240,25 +17095,16 @@ pub(crate) mod tests {
                 Some(foreground_color)
             );
 
-            let center = {
-                let render = tester.render_box_of(tester.find_by_icon(&button_icon));
-                let rect = tester.get_rect(render);
-                rect.center()
-            };
+            let center = { tester.get_center(find::by_icon(&button_icon)) };
             let mut gesture = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut gesture, Offset::ZERO);
             tester.move_to(&mut gesture, center, false);
             tester.pump_and_settle();
             let ink = tester.first::<crate::material::RenderInkFeatures>();
-            let rects: Vec<u32> = tester
-                .painted(waft_rendering::RenderBox::as_object(ink))
-                .into_iter()
-                .filter_map(|drawn| match drawn {
-                    Drawn::Rect(color, _) => Some(color),
-                    _ => None,
-                })
-                .collect();
-            assert!(rects.contains(&overlay_color.to_argb32()), "{rects:x?}");
+            assert_paints(
+                &tester.painted_ops(waft_rendering::RenderBox::as_object(ink)),
+                &[PaintCall::rect(Some(overlay_color))],
+            );
         }
 
         // input_decorator_test.dart 'Prefix IconButton inherits IconButtonTheme'.
@@ -17456,7 +17302,7 @@ pub(crate) mod tests {
         use crate::icons::Icons;
         use crate::input_border::{InputBorderRef, OutlineInputBorder, UnderlineInputBorder};
         use crate::material::Material;
-        use crate::test_support::{PaintInspection, material_app};
+        use crate::test_support::material_app;
         use crate::text_theme::TextTheme;
         use crate::theme::Theme;
         use crate::theme_data::{ThemeData, VisualDensity};
@@ -17628,11 +17474,11 @@ pub(crate) mod tests {
         }
 
         fn top(tester: &WidgetTester, text: &str) -> f64 {
-            text_rect(tester, text).top
+            tester.get_rect(find::text(text)).top
         }
 
         fn bottom(tester: &WidgetTester, text: &str) -> f64 {
-            text_rect(tester, text).bottom
+            tester.get_rect(find::text(text)).bottom
         }
 
         fn decorator_size(tester: &WidgetTester) -> Size {
@@ -17653,14 +17499,13 @@ pub(crate) mod tests {
         }
 
         fn icon_rect(tester: &WidgetTester, icon: &waft_widgets::IconData) -> Rect {
-            rect_of(tester, tester.find_by_icon(icon))
+            tester.get_rect(find::by_icon(icon))
         }
 
         /// Dart's `getOpacity(tester, text)`: the value of the nearest `FadeTransition` above the
         /// `Text` showing `text`.
         fn get_opacity(tester: &WidgetTester, text: &str) -> f64 {
-            let found = tester.find_text(text);
-            let element = found[0];
+            let element = tester.element(find::text(text));
             let fade = tester
                 .ancestors(element)
                 .into_iter()
@@ -17860,13 +17705,6 @@ pub(crate) mod tests {
             .pump(tester);
         }
 
-        fn assert_close(value: f64, expected: f64, delta: f64) {
-            assert!(
-                (value - expected).abs() <= delta,
-                "{value} is not within {delta} of {expected}"
-            );
-        }
-
         // input_decorator_test.dart 'Material2 - InputDecorator floating label animation duration
         // and curve'.
         #[test]
@@ -17879,11 +17717,11 @@ pub(crate) mod tests {
                 // The animation duration is 167ms and the curve is fastOutSlowIn.
                 pump_floating_label(tester, true);
                 tester.pump_by(Duration::from_millis(42));
-                assert_close(top(tester, LABEL_TEXT), 18.06, 0.5);
+                assert_more_or_less_equals_within(top(tester, LABEL_TEXT), 18.06, 0.5);
                 tester.pump_by(Duration::from_millis(42));
-                assert_close(top(tester, LABEL_TEXT), 13.78, 0.5);
+                assert_more_or_less_equals_within(top(tester, LABEL_TEXT), 13.78, 0.5);
                 tester.pump_by(Duration::from_millis(42));
-                assert_close(top(tester, LABEL_TEXT), 12.31, 0.5);
+                assert_more_or_less_equals_within(top(tester, LABEL_TEXT), 12.31, 0.5);
                 tester.pump_by(Duration::from_millis(41));
                 assert_eq!(top(tester, LABEL_TEXT), 12.0);
 
@@ -17897,11 +17735,11 @@ pub(crate) mod tests {
                 // The animation duration is 167ms and the curve is fastOutSlowIn.
                 pump_floating_label(tester, false);
                 tester.pump_by(Duration::from_millis(42));
-                assert_close(top(tester, LABEL_TEXT), 13.94, 0.5);
+                assert_more_or_less_equals_within(top(tester, LABEL_TEXT), 13.94, 0.5);
                 tester.pump_by(Duration::from_millis(42));
-                assert_close(top(tester, LABEL_TEXT), 18.22, 0.5);
+                assert_more_or_less_equals_within(top(tester, LABEL_TEXT), 18.22, 0.5);
                 tester.pump_by(Duration::from_millis(42));
-                assert_close(top(tester, LABEL_TEXT), 19.69, 0.5);
+                assert_more_or_less_equals_within(top(tester, LABEL_TEXT), 19.69, 0.5);
                 tester.pump_by(Duration::from_millis(41));
                 assert_eq!(top(tester, LABEL_TEXT), 20.0);
             });
@@ -17928,8 +17766,8 @@ pub(crate) mod tests {
                 assert_eq!(get_border_weight(tester), 1.0);
 
                 assert_eq!(
-                    text_rect(tester, HINT_TEXT).width(),
-                    text_rect(tester, INPUT_TEXT).width()
+                    tester.get_rect(find::text(HINT_TEXT)).width(),
+                    tester.get_rect(find::text(INPUT_TEXT)).width()
                 );
             });
         }
@@ -18167,11 +18005,11 @@ pub(crate) mod tests {
                 assert_eq!(get_border_bottom(tester), 56.0);
                 assert_eq!(get_border_weight(tester), 1.0);
                 assert_eq!(
-                    text_rect(tester, HELPER_TEXT).top_left(),
+                    tester.get_rect(find::text(HELPER_TEXT)).top_left(),
                     Offset::new(12.0, 64.0)
                 );
                 assert_eq!(
-                    text_rect(tester, COUNTER_TEXT).top_right(),
+                    tester.get_rect(find::text(COUNTER_TEXT)).top_right(),
                     Offset::new(788.0, 64.0)
                 );
 
@@ -18196,14 +18034,14 @@ pub(crate) mod tests {
                 assert_eq!(get_border_bottom(tester), 56.0);
                 assert_eq!(get_border_weight(tester), 1.0);
                 assert_eq!(
-                    text_rect(tester, ERROR_TEXT).top_left(),
+                    tester.get_rect(find::text(ERROR_TEXT)).top_left(),
                     Offset::new(12.0, 64.0)
                 );
                 assert_eq!(
-                    text_rect(tester, COUNTER_TEXT).top_right(),
+                    tester.get_rect(find::text(COUNTER_TEXT)).top_right(),
                     Offset::new(788.0, 64.0)
                 );
-                assert!(tester.find_text(HELPER_TEXT).is_empty());
+                expect(tester, &find::text(HELPER_TEXT), finds_nothing());
 
                 // The layout of the error/helper/counter supportingText doesn't change for dense
                 // layout.
@@ -18228,11 +18066,11 @@ pub(crate) mod tests {
                 assert_eq!(get_border_bottom(tester), 48.0);
                 assert_eq!(get_border_weight(tester), 1.0);
                 assert_eq!(
-                    text_rect(tester, ERROR_TEXT).top_left(),
+                    tester.get_rect(find::text(ERROR_TEXT)).top_left(),
                     Offset::new(12.0, 56.0)
                 );
                 assert_eq!(
-                    text_rect(tester, COUNTER_TEXT).top_right(),
+                    tester.get_rect(find::text(COUNTER_TEXT)).top_right(),
                     Offset::new(788.0, 56.0)
                 );
 
@@ -18258,11 +18096,11 @@ pub(crate) mod tests {
                 assert_eq!(get_border_bottom(tester), 48.0);
                 assert_eq!(get_border_weight(tester), 1.0);
                 assert_eq!(
-                    text_rect(tester, ERROR_TEXT).top_left(),
+                    tester.get_rect(find::text(ERROR_TEXT)).top_left(),
                     Offset::new(12.0, 56.0)
                 );
                 assert_eq!(
-                    text_rect(tester, COUNTER_TEXT).top_right(),
+                    tester.get_rect(find::text(COUNTER_TEXT)).top_right(),
                     Offset::new(788.0, 56.0)
                 );
             });
@@ -18335,19 +18173,25 @@ pub(crate) mod tests {
                     decorator_size(tester),
                     Size::new(800.0, K_MIN_INTERACTIVE_DIMENSION)
                 );
-                assert_eq!(text_rect(tester, INPUT_TEXT).height(), 16.0);
-                assert_eq!(text_rect(tester, "p").height(), 16.0);
-                assert_eq!(text_rect(tester, "s").height(), 16.0);
+                assert_eq!(tester.get_rect(find::text(INPUT_TEXT)).height(), 16.0);
+                assert_eq!(tester.get_rect(find::text("p")).height(), 16.0);
+                assert_eq!(tester.get_rect(find::text("s")).height(), 16.0);
                 assert_eq!(top(tester, INPUT_TEXT), 16.0);
                 assert_eq!(top(tester, "p"), 16.0);
-                assert_eq!(text_rect(tester, "p").left, 12.0);
+                assert_eq!(tester.get_rect(find::text("p")).left, 12.0);
                 assert_eq!(top(tester, "s"), 16.0);
-                assert_eq!(text_rect(tester, "s").right, 788.0);
+                assert_eq!(tester.get_rect(find::text("s")).right, 788.0);
 
                 // layout is a row: [p text s]
-                assert_eq!(text_rect(tester, "p").left, 12.0);
-                assert!(text_rect(tester, "p").right <= text_rect(tester, INPUT_TEXT).left);
-                assert!(text_rect(tester, INPUT_TEXT).right <= text_rect(tester, "s").left);
+                assert_eq!(tester.get_rect(find::text("p")).left, 12.0);
+                assert!(
+                    tester.get_rect(find::text("p")).right
+                        <= tester.get_rect(find::text(INPUT_TEXT)).left
+                );
+                assert!(
+                    tester.get_rect(find::text(INPUT_TEXT)).right
+                        <= tester.get_rect(find::text("s")).left
+                );
             });
         }
 
@@ -18368,13 +18212,13 @@ pub(crate) mod tests {
                     decorator_size(tester),
                     Size::new(800.0, K_MIN_INTERACTIVE_DIMENSION)
                 );
-                assert_eq!(text_rect(tester, INPUT_TEXT).height(), 16.0);
-                assert_eq!(text_rect(tester, "p").height(), 16.0);
-                assert_eq!(text_rect(tester, "s").height(), 16.0);
+                assert_eq!(tester.get_rect(find::text(INPUT_TEXT)).height(), 16.0);
+                assert_eq!(tester.get_rect(find::text("p")).height(), 16.0);
+                assert_eq!(tester.get_rect(find::text("s")).height(), 16.0);
                 assert_eq!(top(tester, INPUT_TEXT), 16.0);
                 assert_eq!(top(tester, "p"), 16.0);
                 assert_eq!(top(tester, "s"), 16.0);
-                assert_eq!(text_rect(tester, "s").right, 788.0);
+                assert_eq!(tester.get_rect(find::text("s")).right, 788.0);
                 let icon = icon_rect(tester, &Icons::android());
                 assert_eq!(icon.height(), 24.0);
 
@@ -18383,9 +18227,15 @@ pub(crate) mod tests {
 
                 // layout is a row: [icon, p text s]
                 assert_eq!(icon.left, 0.0);
-                assert!(icon.right <= text_rect(tester, "p").left);
-                assert!(text_rect(tester, "p").right <= text_rect(tester, INPUT_TEXT).left);
-                assert!(text_rect(tester, INPUT_TEXT).right <= text_rect(tester, "s").left);
+                assert!(icon.right <= tester.get_rect(find::text("p")).left);
+                assert!(
+                    tester.get_rect(find::text("p")).right
+                        <= tester.get_rect(find::text(INPUT_TEXT)).left
+                );
+                assert!(
+                    tester.get_rect(find::text(INPUT_TEXT)).right
+                        <= tester.get_rect(find::text("s")).left
+                );
             });
         }
 
@@ -18419,26 +18269,28 @@ pub(crate) mod tests {
                 //    4 - bottom prefix/suffix padding
                 //   12 - bottom padding
                 assert_eq!(decorator_size(tester), Size::new(800.0, 48.0));
-                assert_eq!(text_rect(tester, INPUT_TEXT).height(), 16.0);
+                assert_eq!(tester.get_rect(find::text(INPUT_TEXT)).height(), 16.0);
                 assert_eq!(key_rect(tester, &p_key).height(), 24.0);
-                assert_eq!(text_rect(tester, "p").height(), 16.0);
+                assert_eq!(tester.get_rect(find::text("p")).height(), 16.0);
                 assert_eq!(key_rect(tester, &s_key).height(), 24.0);
-                assert_eq!(text_rect(tester, "s").height(), 16.0);
+                assert_eq!(tester.get_rect(find::text("s")).height(), 16.0);
                 assert_eq!(top(tester, INPUT_TEXT), 16.0);
                 assert_eq!(key_rect(tester, &p_key).top, 12.0);
                 assert_eq!(top(tester, "p"), 16.0);
                 assert_eq!(key_rect(tester, &s_key).top, 12.0);
                 assert_eq!(top(tester, "s"), 16.0);
                 assert_eq!(key_rect(tester, &s_key).right, 788.0);
-                assert_eq!(text_rect(tester, "s").right, 784.0);
+                assert_eq!(tester.get_rect(find::text("s")).right, 784.0);
 
                 // layout is a row: [prefix text suffix]
                 assert_eq!(key_rect(tester, &p_key).left, 12.0);
                 assert_eq!(
                     key_rect(tester, &p_key).right,
-                    text_rect(tester, INPUT_TEXT).left
+                    tester.get_rect(find::text(INPUT_TEXT)).left
                 );
-                assert!(text_rect(tester, INPUT_TEXT).right <= key_rect(tester, &s_key).right);
+                assert!(
+                    tester.get_rect(find::text(INPUT_TEXT)).right <= key_rect(tester, &s_key).right
+                );
             });
         }
 
@@ -18462,7 +18314,7 @@ pub(crate) mod tests {
 
                 assert_eq!(decorator_size(tester).width(), 800.0);
                 assert_eq!(decorator_size(tester).height(), 129.0);
-                assert_eq!(text_rect(tester, INPUT_TEXT).height(), 20.0);
+                assert_eq!(tester.get_rect(find::text(INPUT_TEXT)).height(), 20.0);
                 assert_eq!(key_rect(tester, &p_key).height(), 100.0);
                 assert_eq!(top(tester, INPUT_TEXT), 97.0); // 12 + 100 - 15
                 assert_eq!(key_rect(tester, &p_key).top, 12.0);
@@ -18471,7 +18323,7 @@ pub(crate) mod tests {
                 assert_eq!(key_rect(tester, &p_key).left, 12.0);
                 assert_eq!(
                     key_rect(tester, &p_key).right,
-                    text_rect(tester, INPUT_TEXT).left
+                    tester.get_rect(find::text(INPUT_TEXT)).left
                 );
             });
         }
@@ -18502,7 +18354,7 @@ pub(crate) mod tests {
                 // 20+100-15=105.
                 assert_eq!(decorator_size(tester).width(), 800.0);
                 assert_eq!(decorator_size(tester).height(), 145.0);
-                assert_eq!(text_rect(tester, INPUT_TEXT).height(), 20.0);
+                assert_eq!(tester.get_rect(find::text(INPUT_TEXT)).height(), 20.0);
                 assert_eq!(key_rect(tester, &p_key).height(), 100.0);
                 assert_eq!(top(tester, INPUT_TEXT), 105.0);
                 assert_eq!(key_rect(tester, &p_key).top, 20.0);
@@ -18511,7 +18363,7 @@ pub(crate) mod tests {
                 assert_eq!(key_rect(tester, &p_key).left, 12.0);
                 assert_eq!(
                     key_rect(tester, &p_key).right,
-                    text_rect(tester, INPUT_TEXT).left
+                    tester.get_rect(find::text(INPUT_TEXT)).left
                 );
             });
         }
@@ -18531,7 +18383,7 @@ pub(crate) mod tests {
                 // Overall height for this InputDecorator is 48dps because the prefix icon's minimum
                 // size is 48x48 and the rest of the elements only require 40dps.
                 assert_eq!(decorator_size(tester), Size::new(800.0, 48.0));
-                assert_eq!(text_rect(tester, INPUT_TEXT).height(), 16.0);
+                assert_eq!(tester.get_rect(find::text(INPUT_TEXT)).height(), 16.0);
                 let pages = icon_rect(tester, &Icons::pages());
                 let satellite = icon_rect(tester, &Icons::satellite());
                 assert_eq!(pages.height(), 48.0);
@@ -18543,8 +18395,8 @@ pub(crate) mod tests {
 
                 // layout is a row: [icon text icon]
                 assert_eq!(pages.left, 0.0);
-                assert!(pages.right <= text_rect(tester, INPUT_TEXT).left);
-                assert!(text_rect(tester, INPUT_TEXT).right <= satellite.left);
+                assert!(pages.right <= tester.get_rect(find::text(INPUT_TEXT)).left);
+                assert!(tester.get_rect(find::text(INPUT_TEXT)).right <= satellite.left);
             });
         }
 
@@ -18574,7 +18426,7 @@ pub(crate) mod tests {
                 // Overall height for this InputDecorator is 32px because the prefix icon
                 // is now a custom value
                 assert_eq!(decorator_size(tester), Size::new(800.0, 32.0));
-                assert_eq!(text_rect(tester, INPUT_TEXT).height(), 16.0);
+                assert_eq!(tester.get_rect(find::text(INPUT_TEXT)).height(), 16.0);
                 let pages = icon_rect(tester, &Icons::pages());
                 let satellite = icon_rect(tester, &Icons::satellite());
                 assert_eq!(pages.height(), 32.0);
@@ -19095,8 +18947,8 @@ pub(crate) mod tests {
                     tall_prefix_tops(tester, true, true, TextAlignVertical::new(0.1));
                 // Waft's `Matrix4` is f32, so a position read through `local_to_global` keeps f32
                 // precision where Dart's is a double.
-                assert_close(input_top, 355.65, 1e-4);
-                assert_close(prefix_top, 270.65, 1e-4);
+                assert_f32_equals(input_top, 355.65);
+                assert_f32_equals(prefix_top, 270.65);
             });
         }
 
@@ -19267,8 +19119,8 @@ pub(crate) mod tests {
                 .pump(tester);
 
                 assert_eq!(decorator_size(tester), Size::new(800.0, 56.0));
-                assert_eq!(text_rect(tester, LABEL_TEXT).left, 48.0);
-                assert_eq!(text_rect(tester, INPUT_TEXT).left, 48.0);
+                assert_eq!(tester.get_rect(find::text(LABEL_TEXT)).left, 48.0);
+                assert_eq!(tester.get_rect(find::text(INPUT_TEXT)).left, 48.0);
                 assert_eq!(get_border_weight(tester), 2.0);
             });
         }
@@ -19288,8 +19140,8 @@ pub(crate) mod tests {
                 .pump(tester);
 
                 assert_eq!(decorator_size(tester), Size::new(800.0, 56.0));
-                assert_eq!(text_rect(tester, LABEL_TEXT).left, 48.0);
-                assert_eq!(text_rect(tester, INPUT_TEXT).left, 48.0);
+                assert_eq!(tester.get_rect(find::text(LABEL_TEXT)).left, 48.0);
+                assert_eq!(tester.get_rect(find::text(INPUT_TEXT)).left, 48.0);
                 assert_eq!(get_border_weight(tester), 2.0);
             });
         }
@@ -19395,7 +19247,7 @@ pub(crate) mod tests {
             (
                 decorator_size(tester),
                 get_decorator_rect(tester),
-                text_rect(tester, "test"),
+                tester.get_rect(find::text("test")),
             )
         }
 
@@ -19468,11 +19320,11 @@ pub(crate) mod tests {
                 assert_eq!(get_border_bottom(tester), 56.0);
                 assert_eq!(get_border_weight(tester), 1.0);
                 assert_eq!(
-                    text_rect(tester, COUNTER_TEXT).top_left(),
+                    tester.get_rect(find::text(COUNTER_TEXT)).top_left(),
                     Offset::new(12.0, 64.0)
                 );
                 assert_eq!(
-                    text_rect(tester, HELPER_TEXT).top_right(),
+                    tester.get_rect(find::text(HELPER_TEXT)).top_right(),
                     Offset::new(788.0, 64.0)
                 );
 
@@ -19489,14 +19341,14 @@ pub(crate) mod tests {
                 .pump(tester);
                 tester.pump_and_settle();
                 assert_eq!(
-                    text_rect(tester, COUNTER_TEXT).top_left(),
+                    tester.get_rect(find::text(COUNTER_TEXT)).top_left(),
                     Offset::new(12.0, 64.0)
                 );
                 assert_eq!(
-                    text_rect(tester, ERROR_TEXT).top_right(),
+                    tester.get_rect(find::text(ERROR_TEXT)).top_right(),
                     Offset::new(788.0, 64.0)
                 );
-                assert!(tester.find_text(HELPER_TEXT).is_empty());
+                expect(tester, &find::text(HELPER_TEXT), finds_nothing());
             });
         }
 
@@ -19517,17 +19369,23 @@ pub(crate) mod tests {
                     decorator_size(tester),
                     Size::new(800.0, K_MIN_INTERACTIVE_DIMENSION)
                 ); // 40 bumped up to minimum.
-                assert_eq!(text_rect(tester, INPUT_TEXT).height(), 16.0);
-                assert_eq!(text_rect(tester, "p").height(), 16.0);
-                assert_eq!(text_rect(tester, "s").height(), 16.0);
+                assert_eq!(tester.get_rect(find::text(INPUT_TEXT)).height(), 16.0);
+                assert_eq!(tester.get_rect(find::text("p")).height(), 16.0);
+                assert_eq!(tester.get_rect(find::text("s")).height(), 16.0);
                 assert_eq!(top(tester, INPUT_TEXT), 16.0);
                 assert_eq!(top(tester, "p"), 16.0);
                 assert_eq!(top(tester, "s"), 16.0);
 
                 // layout is a row: [s text p]
-                assert_eq!(text_rect(tester, "s").left, 12.0);
-                assert!(text_rect(tester, "s").right <= text_rect(tester, INPUT_TEXT).left);
-                assert!(text_rect(tester, INPUT_TEXT).right <= text_rect(tester, "p").left);
+                assert_eq!(tester.get_rect(find::text("s")).left, 12.0);
+                assert!(
+                    tester.get_rect(find::text("s")).right
+                        <= tester.get_rect(find::text(INPUT_TEXT)).left
+                );
+                assert!(
+                    tester.get_rect(find::text(INPUT_TEXT)).right
+                        <= tester.get_rect(find::text("p")).left
+                );
             });
         }
 
@@ -19547,9 +19405,9 @@ pub(crate) mod tests {
                 // LTR: content left edge is contentPadding.start: 40.0
                 M2::new(decoration()).pump(tester);
                 assert_eq!(decorator_size(tester), Size::new(800.0, 56.0));
-                assert_eq!(text_rect(tester, INPUT_TEXT).left, 40.0);
-                assert_eq!(text_rect(tester, LABEL_TEXT).left, 40.0);
-                assert_eq!(text_rect(tester, HINT_TEXT).left, 40.0);
+                assert_eq!(tester.get_rect(find::text(INPUT_TEXT)).left, 40.0);
+                assert_eq!(tester.get_rect(find::text(LABEL_TEXT)).left, 40.0);
+                assert_eq!(tester.get_rect(find::text(HINT_TEXT)).left, 40.0);
 
                 // RTL: content right edge is 800 - contentPadding.start: 760.0.
                 M2::new(decoration())
@@ -19557,9 +19415,9 @@ pub(crate) mod tests {
                     .text_direction(TextDirection::Rtl)
                     .pump(tester);
                 assert_eq!(decorator_size(tester), Size::new(800.0, 56.0));
-                assert_eq!(text_rect(tester, INPUT_TEXT).right, 760.0);
-                assert_eq!(text_rect(tester, LABEL_TEXT).right, 760.0);
-                assert_eq!(text_rect(tester, HINT_TEXT).right, 760.0);
+                assert_eq!(tester.get_rect(find::text(INPUT_TEXT)).right, 760.0);
+                assert_eq!(tester.get_rect(find::text(LABEL_TEXT)).right, 760.0);
+                assert_eq!(tester.get_rect(find::text(HINT_TEXT)).right, 760.0);
             });
         }
 
@@ -19572,8 +19430,8 @@ pub(crate) mod tests {
         ) {
             M2::new(decoration).pump(tester);
             assert_eq!(decorator_size(tester), Size::new(800.0, height));
-            assert_eq!(text_rect(tester, INPUT_TEXT).left, left);
-            assert_eq!(text_rect(tester, INPUT_TEXT).right, right);
+            assert_eq!(tester.get_rect(find::text(INPUT_TEXT)).left, left);
+            assert_eq!(tester.get_rect(find::text(INPUT_TEXT)).right, right);
         }
 
         // input_decorator_test.dart 'Material2 - inputText width - outline textField'.
@@ -19838,19 +19696,25 @@ pub(crate) mod tests {
                 // The only difference from normal layout for this case is that the
                 // padding above and below the prefix, input text, suffix, is 8 instead of 12.
                 assert_eq!(decorator_size(tester), Size::new(800.0, 32.0));
-                assert_eq!(text_rect(tester, INPUT_TEXT).height(), 16.0);
-                assert_eq!(text_rect(tester, "p").height(), 16.0);
-                assert_eq!(text_rect(tester, "s").height(), 16.0);
+                assert_eq!(tester.get_rect(find::text(INPUT_TEXT)).height(), 16.0);
+                assert_eq!(tester.get_rect(find::text("p")).height(), 16.0);
+                assert_eq!(tester.get_rect(find::text("s")).height(), 16.0);
                 assert_eq!(top(tester, INPUT_TEXT), 8.0);
                 assert_eq!(top(tester, "p"), 8.0);
-                assert_eq!(text_rect(tester, "p").left, 12.0);
+                assert_eq!(tester.get_rect(find::text("p")).left, 12.0);
                 assert_eq!(top(tester, "s"), 8.0);
-                assert_eq!(text_rect(tester, "s").right, 788.0);
+                assert_eq!(tester.get_rect(find::text("s")).right, 788.0);
 
                 // layout is a row: [p text s]
-                assert_eq!(text_rect(tester, "p").left, 12.0);
-                assert!(text_rect(tester, "p").right <= text_rect(tester, INPUT_TEXT).left);
-                assert!(text_rect(tester, INPUT_TEXT).right <= text_rect(tester, "s").left);
+                assert_eq!(tester.get_rect(find::text("p")).left, 12.0);
+                assert!(
+                    tester.get_rect(find::text("p")).right
+                        <= tester.get_rect(find::text(INPUT_TEXT)).left
+                );
+                assert!(
+                    tester.get_rect(find::text(INPUT_TEXT)).right
+                        <= tester.get_rect(find::text("s")).left
+                );
 
                 assert_eq!(get_border_bottom(tester), 32.0);
                 assert_eq!(get_border_weight(tester), 2.0);
@@ -19867,7 +19731,7 @@ pub(crate) mod tests {
                     decorator_size(tester),
                     Size::new(800.0, K_MIN_INTERACTIVE_DIMENSION)
                 ); // 40 bumped up to minimum.
-                assert_eq!(text_rect(tester, INPUT_TEXT).height(), 16.0);
+                assert_eq!(tester.get_rect(find::text(INPUT_TEXT)).height(), 16.0);
                 assert_eq!(top(tester, INPUT_TEXT), 16.0);
                 assert_eq!(get_border_bottom(tester), K_MIN_INTERACTIVE_DIMENSION); // 40 bumped up to minimum.
                 assert_eq!(get_border_weight(tester), 1.0);
@@ -19895,7 +19759,7 @@ pub(crate) mod tests {
                 // kMinInteractiveDimension, but because isDense is true, the minimum is
                 // ignored.
                 assert_eq!(decorator_size(tester), Size::new(800.0, 18.0));
-                assert_eq!(text_rect(tester, INPUT_TEXT).height(), 16.0);
+                assert_eq!(tester.get_rect(find::text(INPUT_TEXT)).height(), 16.0);
                 assert_eq!(top(tester, INPUT_TEXT), 1.0);
                 assert_eq!(get_opacity(tester, HINT_TEXT), 0.0);
                 assert_eq!(get_border_weight(tester), 1.0);
@@ -19908,7 +19772,7 @@ pub(crate) mod tests {
                 // ignored. There is no padding at all, because isCollapsed doesn't support
                 // contentPadding.
                 assert_eq!(decorator_size(tester), Size::new(800.0, 16.0));
-                assert_eq!(text_rect(tester, INPUT_TEXT).height(), 16.0);
+                assert_eq!(tester.get_rect(find::text(INPUT_TEXT)).height(), 16.0);
                 assert_eq!(top(tester, INPUT_TEXT), 0.0);
                 assert_eq!(get_opacity(tester, HINT_TEXT), 0.0);
                 assert_eq!(get_border_weight(tester), 1.0);
@@ -19924,7 +19788,7 @@ pub(crate) mod tests {
                     decorator_size(tester),
                     Size::new(800.0, K_MIN_INTERACTIVE_DIMENSION)
                 );
-                assert_eq!(text_rect(tester, INPUT_TEXT).height(), 16.0);
+                assert_eq!(tester.get_rect(find::text(INPUT_TEXT)).height(), 16.0);
                 assert_eq!(top(tester, INPUT_TEXT), 16.0);
                 assert_eq!(get_opacity(tester, HINT_TEXT), 0.0);
                 assert_eq!(get_border_weight(tester), 0.0);
@@ -19940,7 +19804,7 @@ pub(crate) mod tests {
                 // Overall height for this InputDecorator is 16dps. There is no minimum
                 // height when InputDecoration.collapsed is used.
                 assert_eq!(decorator_size(tester), Size::new(800.0, 16.0));
-                assert_eq!(text_rect(tester, INPUT_TEXT).height(), 16.0);
+                assert_eq!(tester.get_rect(find::text(INPUT_TEXT)).height(), 16.0);
                 assert_eq!(top(tester, INPUT_TEXT), 0.0);
                 assert_eq!(get_opacity(tester, HINT_TEXT), 0.0);
                 assert_eq!(get_border_weight(tester), 0.0);
@@ -19953,9 +19817,9 @@ pub(crate) mod tests {
                 tester.pump_and_settle();
 
                 assert_eq!(decorator_size(tester), Size::new(800.0, 16.0));
-                assert_eq!(text_rect(tester, INPUT_TEXT).height(), 16.0);
+                assert_eq!(tester.get_rect(find::text(INPUT_TEXT)).height(), 16.0);
                 assert_eq!(top(tester, INPUT_TEXT), 0.0);
-                assert_eq!(text_rect(tester, HINT_TEXT).height(), 16.0);
+                assert_eq!(tester.get_rect(find::text(HINT_TEXT)).height(), 16.0);
                 assert_eq!(top(tester, HINT_TEXT), 0.0);
                 assert_eq!(get_border_weight(tester), 0.0);
             });
@@ -19982,9 +19846,9 @@ pub(crate) mod tests {
                     decorator_size(tester),
                     Size::new(800.0, K_MIN_INTERACTIVE_DIMENSION)
                 ); // 45.5 bumped up to minimum.
-                assert_eq!(text_rect(tester, HINT_TEXT).height(), 10.0);
-                assert_eq!(text_rect(tester, LABEL_TEXT).height(), 10.0);
-                assert_eq!(text_rect(tester, INPUT_TEXT).height(), 10.0);
+                assert_eq!(tester.get_rect(find::text(HINT_TEXT)).height(), 10.0);
+                assert_eq!(tester.get_rect(find::text(LABEL_TEXT)).height(), 10.0);
+                assert_eq!(tester.get_rect(find::text(INPUT_TEXT)).height(), 10.0);
                 assert_eq!(top(tester, HINT_TEXT), 24.75);
                 assert_eq!(top(tester, LABEL_TEXT), 19.0);
                 assert_eq!(top(tester, INPUT_TEXT), 24.75);
@@ -20019,11 +19883,11 @@ pub(crate) mod tests {
                 assert_eq!(get_border_bottom(tester), 56.0);
                 assert_eq!(get_border_weight(tester), 1.0);
                 assert_eq!(
-                    text_rect(tester, HELPER_TEXT).top_left(),
+                    tester.get_rect(find::text(HELPER_TEXT)).top_left(),
                     Offset::new(12.0, 64.0)
                 );
                 assert_eq!(
-                    text_rect(tester, COUNTER_TEXT).top_right(),
+                    tester.get_rect(find::text(COUNTER_TEXT)).top_right(),
                     Offset::new(788.0, 64.0)
                 );
             });
@@ -20158,7 +20022,7 @@ pub(crate) mod tests {
         }
 
         fn text_style_color(tester: &WidgetTester, text: &str) -> Option<Color> {
-            let element = tester.find_text(text)[0];
+            let element = tester.element(find::text(text));
             tester.widget(element, |text: &waft_widgets::Text| {
                 text.style
                     .as_ref()
@@ -20202,11 +20066,11 @@ pub(crate) mod tests {
             assert_eq!(get_border_bottom(tester), 56.0);
             assert_eq!(get_border_weight(tester), weight);
             assert_eq!(
-                text_rect(tester, HELPER_TEXT).top_left(),
+                tester.get_rect(find::text(HELPER_TEXT)).top_left(),
                 Offset::new(0.0, 64.0)
             );
             assert_eq!(
-                text_rect(tester, COUNTER_TEXT).top_right(),
+                tester.get_rect(find::text(COUNTER_TEXT)).top_right(),
                 Offset::new(800.0, 64.0)
             );
 
@@ -20717,21 +20581,13 @@ pub(crate) mod tests {
                 };
 
                 pump(tester, &long_string_a, false);
-                let label = tester.find_text(&long_string_a)[0];
-                let size = {
-                    let render = tester.render_box_of(label);
-                    render.size(&tester.cell.borrow())
-                };
+                let size = tester.get_size(find::text(&long_string_a));
                 assert_eq!(size, Size::new(100.0, 16.0));
 
                 pump(tester, &long_string_b, true);
-                let label = tester.find_text(&long_string_b)[0];
-                let size = {
-                    let render = tester.render_box_of(label);
-                    render.size(&tester.cell.borrow())
-                };
+                let size = tester.get_size(find::text(&long_string_b));
                 // _kFinalLabelScale = 0.75
-                assert_close(size.width(), 100.0 / 0.75, 1e-5);
+                assert_f32_equals(size.width(), 100.0 / 0.75);
                 assert_eq!(size.height(), 16.0);
             });
         }
@@ -20762,8 +20618,7 @@ pub(crate) mod tests {
                 };
                 let theme = m2(&tester.cell.borrow());
                 tester.pump_widget(material_app(theme, home));
-                let hint_top =
-                    |tester: &WidgetTester| rect_of(tester, tester.find_text(HINT_TEXT)[0]).top;
+                let hint_top = |tester: &WidgetTester| tester.get_rect(find::text(HINT_TEXT)).top;
                 let set = |tester: &mut WidgetTester, value: Option<TextAlignVertical>| {
                     let set_state = setter.borrow().clone().expect("built");
                     let alignment = Rc::clone(&alignment);
@@ -20857,11 +20712,15 @@ pub(crate) mod tests {
                 .pump(tester);
                 tester.pump_and_settle();
 
-                assert_eq!(tester.find_by_type::<InputDecorator>().len(), 1);
-                assert_eq!(tester.find_by_type::<Icon>().len(), 1);
+                expect(
+                    tester,
+                    &find::by_type::<InputDecorator>(),
+                    finds_one_widget(),
+                );
+                expect(tester, &find::by_type::<Icon>(), finds_one_widget());
 
                 let decorator_right = get_decorator_rect(tester).right;
-                let prefix_right = rect_of(tester, tester.find_by_type::<Icon>()[0]).right;
+                let prefix_right = tester.get_rect(find::by_type::<Icon>()).right;
 
                 // The prefix is inside the decorator.
                 assert!(decorator_right <= prefix_right);
@@ -20880,8 +20739,8 @@ pub(crate) mod tests {
                             .text_direction(direction)
                             .pump(tester);
                         tester.pump_and_settle();
-                        assert_eq!(tester.find_text(INPUT_TEXT).len(), 1);
-                        text_rect(tester, INPUT_TEXT).size()
+                        expect(tester, &find::text(INPUT_TEXT), finds_one_widget());
+                        tester.get_rect(find::text(INPUT_TEXT)).size()
                     };
                     let padding = || EdgeInsetsDirectional::only(12.0, 0.0, 24.0, 0.0);
                     let icon =
@@ -20936,24 +20795,7 @@ pub(crate) mod tests {
                     )
                     .build(),
                 );
-                let render = tester
-                    .render_box_of(tester.find_by_type::<InputDecorator>()[0])
-                    .as_object();
-                // Dart's `paints..drrect()`: a ring is an even-odd path here.
-                let rings = tester
-                    .painted_ops(render)
-                    .into_iter()
-                    .filter(|op| {
-                        matches!(
-                            op,
-                            waft_embedder::valo::Op::DrawPath {
-                                fill_rule: waft_embedder::FillRule::EvenOdd,
-                                ..
-                            }
-                        )
-                    })
-                    .count();
-                assert_eq!(rings, 0);
+                assert!(paints(&decorator_ops(tester), &[PaintCall::drrect(None)]).is_err());
             });
         }
 
@@ -20974,13 +20816,13 @@ pub(crate) mod tests {
                 };
                 pump(tester, Some("initial error"));
 
-                assert_eq!(tester.find_onstage_text("initial error").len(), 1);
-                assert!(tester.find_onstage_text(HELPER_TEXT_VALUE).is_empty());
+                expect(tester, &find::text("initial error"), finds_one_widget());
+                expect(tester, &find::text(HELPER_TEXT_VALUE), finds_nothing());
 
                 pump(tester, None);
 
-                assert!(tester.find_onstage_text("initial error").is_empty());
-                assert_eq!(tester.find_onstage_text(HELPER_TEXT_VALUE).len(), 1);
+                expect(tester, &find::text("initial error"), finds_nothing());
+                expect(tester, &find::text(HELPER_TEXT_VALUE), finds_one_widget());
             });
         }
 
@@ -21006,12 +20848,7 @@ pub(crate) mod tests {
         }
 
         fn string_rect(tester: &WidgetTester, text: &str) -> Rect {
-            if !tester.find_text(text).is_empty() {
-                return text_rect(tester, text);
-            }
-            let found = tester.find_onstage_text(text);
-            assert_eq!(found.len(), 1, "one {text:?}");
-            rect_of(tester, found[0])
+            tester.get_rect(find::text(text))
         }
 
         // input_decorator_test.dart 'helper/error text default padding is correct'. The case keeps
@@ -21088,7 +20925,7 @@ pub(crate) mod tests {
         /// An edge read through the page's transforms, which Waft's f32 `Matrix4` rounds where
         /// Dart's doubles do not.
         fn edge_eq(actual: f64, expected: f64) {
-            assert_close(actual, expected, 1e-4);
+            assert_f32_equals(actual, expected);
         }
 
         const INPUT_GAP: f64 = 4.0; // _kInputExtraPadding in Material 3 filled field.
@@ -21387,7 +21224,7 @@ pub(crate) mod tests {
                 tester.pump_widget(material_app(theme, home.into_widget()));
 
                 let direction_of = |text: &str| {
-                    let element = tester.find_text(text)[0];
+                    let element = tester.element(find::text(text));
                     tester.widget(element, |text: &waft_widgets::Text| text.text_direction)
                 };
                 assert_eq!(direction_of(HINT), Some(TextDirection::Rtl));
@@ -21425,12 +21262,12 @@ pub(crate) mod tests {
             assert_eq!(label_rect.width(), 75.0);
 
             // Taps at the painted label hit the label.
-            tester.tap(label_rect.center(), 1);
-            tester.tap(label_rect.bottom_left() + Offset::new(1.0, -1.0), 2);
+            tester.tap_at(label_rect.center(), 1);
+            tester.tap_at(label_rect.bottom_left() + Offset::new(1.0, -1.0), 2);
             assert_eq!(tap_count.get(), 2);
 
             // A tap below the painted label, inside its layout position, misses the label.
-            tester.tap(label_rect.bottom_center() + Offset::new(0.0, 10.0), 3);
+            tester.tap_at(label_rect.bottom_center() + Offset::new(0.0, 10.0), 3);
             assert_eq!(tap_count.get(), 2);
         }
 

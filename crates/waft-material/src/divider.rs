@@ -484,17 +484,17 @@ pub(crate) mod tests {
     use waft_painting::BorderRadius;
     use waft_widgets::{AnyElement, DecoratedBox, Directionality, Row, Text};
 
-    use waft_widgets::testing::{WidgetTester, test_widgets};
+    use waft_widgets::testing::{WidgetTester, find, test_widgets};
 
     use super::*;
     use crate::material::Material;
-    use crate::test_support::{Drawn, PaintInspection};
+    use crate::test_support::{PaintInspection, path_like};
     use crate::theme_data::ThemeData;
     use crate::tooltip::tests::{m2, m3, pump_app};
 
     /// Dart's `tester.widget<Container>(find.byType(Container))`, which expects one `Container`.
     pub(crate) fn only_container(tester: &WidgetTester) -> AnyElement {
-        let mut containers = tester.find_by_type::<Container>();
+        let mut containers = find::by_type::<Container>().evaluate(tester);
         assert_eq!(containers.len(), 1, "one Container");
         containers.remove(0)
     }
@@ -526,11 +526,11 @@ pub(crate) mod tests {
 
     /// Dart's `tester.getRect(find.byType(W))`.
     pub(crate) fn rect_of<W: 'static>(tester: &WidgetTester) -> Rect {
-        let element = *tester
-            .find_by_type::<W>()
+        let element = *find::by_type::<W>()
+            .evaluate(tester)
             .first()
             .expect("a widget of that type");
-        tester.global_rect(tester.render_box_of(element))
+        tester.get_rect(element)
     }
 
     /// The border radius of [`decoration`], which is a `BorderRadius`.
@@ -657,23 +657,24 @@ pub(crate) mod tests {
                     ])))
                     .into_widget()
             });
-            let container_box = *tester
-                .find_by_type::<Container>()
+            let container_box = *find::by_type::<Container>()
+                .evaluate(tester)
                 .last()
                 .expect("a Container");
-            let container_size: Size = tester
-                .render_box_of(container_box)
-                .size(&tester.cell.borrow());
+            let container_size: Size = tester.get_size(container_box);
 
             assert_eq!(rect_of::<VerticalDivider>(tester).width(), 16.0);
             assert_eq!(container_size.height(), 600.0);
-            // Dart: `paints..path(strokeWidth: 0.0)`; `Drawn` does not carry the stroke width.
-            let divider = *tester
-                .find_by_type::<VerticalDivider>()
+            // Dart: `paints..path(strokeWidth: 0.0)`.
+            let divider = *find::by_type::<VerticalDivider>()
+                .evaluate(tester)
                 .first()
                 .expect("a VerticalDivider");
-            let drawn = tester.painted(tester.render_box_of(divider).as_object());
-            assert!(matches!(drawn.as_slice(), [Drawn::Path(..)]), "{drawn:?}");
+            let drawn = tester.painted_calls(tester.render_object(divider));
+            assert!(
+                drawn.len() == 1 && path_like(&drawn[0]).is_some(),
+                "{drawn:?}"
+            );
         });
     }
 

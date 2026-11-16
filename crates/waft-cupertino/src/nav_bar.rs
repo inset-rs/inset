@@ -4840,13 +4840,15 @@ mod tests {
 
     use waft_embedder::Locale;
     use waft_painting::EdgeInsets;
-    use waft_rendering::{AnyRenderObject, RenderDecoratedBox, RenderParagraph};
-    use waft_widgets::testing::{WidgetTester, test_widgets};
+    use waft_rendering::RenderDecoratedBox;
+    use waft_widgets::testing::{
+        WidgetTester, expect, find, finds_n_widgets, finds_nothing, finds_one_widget,
+        finds_widgets, test_widgets,
+    };
     use waft_widgets::{
-        AnyElement, CustomScrollView, DefaultWidgetsLocalizations, FixedScrollMetrics,
-        Localizations, MediaQueryData, NavigatorState, Notification, PreferredSize,
-        ScrollController, ScrollControllerLeaf, ScrollMetrics, SliverToBoxAdapter, WidgetBuilder,
-        WidgetsBinding,
+        CustomScrollView, DefaultWidgetsLocalizations, FixedScrollMetrics, Localizations,
+        MediaQueryData, NavigatorState, Notification, PreferredSize, ScrollController,
+        ScrollControllerLeaf, ScrollMetrics, SliverToBoxAdapter, WidgetBuilder,
     };
 
     use super::*;
@@ -4858,81 +4860,6 @@ mod tests {
 
     /// The tester's view width, in logical pixels.
     const VIEW_WIDTH: f64 = 800.0;
-
-    fn root_element(app: &mut App) -> AnyElement {
-        WidgetsBinding::instance(app)
-            .root_element(app)
-            .expect("a mounted app")
-    }
-
-    /// Every element of the mounted tree, parents before children.
-    fn elements(app: &App, root: AnyElement) -> Vec<AnyElement> {
-        let mut all = vec![root];
-        let mut visited = 0;
-        while visited < all.len() {
-            let element = all[visited];
-            element.visit_children(app, &mut |child| all.push(child));
-            visited += 1;
-        }
-        all
-    }
-
-    fn has_widget<W: 'static>(app: &mut App) -> bool {
-        let root = root_element(app);
-        elements(app, root)
-            .into_iter()
-            .any(|element| downcast_widget::<W>(&**element.widget(app)).is_some())
-    }
-
-    /// Every render object of the mounted tree, parents before children.
-    fn render_objects(app: &mut App) -> Vec<AnyRenderObject> {
-        let root = root_element(app)
-            .find_render_object(app)
-            .expect("a mounted view has a render object");
-        let mut all = vec![root];
-        let mut visited = 0;
-        while visited < all.len() {
-            let object = all[visited];
-            object.visit_children(app, &mut |child| all.push(child));
-            visited += 1;
-        }
-        all
-    }
-
-    fn paragraphs(app: &mut App) -> Vec<RenderHandle<RenderParagraph>> {
-        render_objects(app)
-            .into_iter()
-            .filter_map(|object| object.downcast::<RenderParagraph>(app))
-            .collect()
-    }
-
-    fn texts(app: &mut App) -> Vec<String> {
-        paragraphs(app)
-            .into_iter()
-            .map(|paragraph| paragraph.text(app).to_plain_text(true, true))
-            .collect()
-    }
-
-    /// The paragraph showing `text`, if the tree has one.
-    fn paragraph_of(app: &mut App, text: &str) -> Option<RenderHandle<RenderParagraph>> {
-        paragraphs(app)
-            .into_iter()
-            .find(|paragraph| paragraph.text(app).to_plain_text(true, true) == text)
-    }
-
-    /// The render box of the widget the global `key` is on.
-    fn keyed_box(app: &mut App, key: &GlobalKey) -> AnyRenderBox {
-        key.current_context(app)
-            .expect("the keyed widget is mounted")
-            .find_render_object(app)
-            .expect("the keyed widget is laid out")
-            .as_box()
-            .expect("a box")
-    }
-
-    fn global_rect(app: &mut App, object: AnyRenderBox) -> Rect {
-        object.local_to_global(app, Offset::ZERO, None) & object.size(app)
-    }
 
     /// Mounts a bare navigation bar under the chrome it reads: a media query with `padding`,
     /// the Cupertino localizations, and a text direction.
@@ -4972,13 +4899,12 @@ mod tests {
 
     /// Pushes the app's `/second` route through its navigator.
     fn push_second(tester: &mut WidgetTester) {
+        let navigator = tester.element(find::by_type::<Navigator>());
         tester.update(|app| {
-            let root = root_element(app);
-            let navigator = elements(app, root)
-                .into_iter()
-                .find_map(|element| element.state_handle::<NavigatorState>(app))
-                .expect("the app has a navigator");
-            navigator.push_named(app, "/second", None);
+            navigator
+                .state_handle::<NavigatorState>(app)
+                .expect("a Navigator has a NavigatorState")
+                .push_named(app, "/second", None);
         });
     }
 
@@ -5001,10 +4927,8 @@ mod tests {
                 "a bar without a bottom or a large title prefers the persistent height"
             );
             let key = mount_bar(tester, EdgeInsets::from_ltrb(0.0, 20.0, 0.0, 0.0), bar);
-            let mut app = tester.cell.borrow_mut();
 
-            let middle = paragraph_of(&mut app, "Title").expect("the middle is shown");
-            let rect = global_rect(&mut app, middle.as_box());
+            let rect = tester.get_rect(find::text("Title"));
             assert!(
                 (rect.left + rect.width() / 2.0 - VIEW_WIDTH / 2.0).abs() < 0.5,
                 "the middle is horizontally centred: {rect:?}"
@@ -5014,9 +4938,8 @@ mod tests {
                 "the middle sits below the status bar padding: {rect:?}"
             );
 
-            let bar_box = keyed_box(&mut app, &key);
             assert_eq!(
-                bar_box.size(&app).height(),
+                tester.get_size(&key).height(),
                 K_NAV_BAR_PERSISTENT_HEIGHT + 20.0,
                 "the persistent bar takes the top padding on top of its own height"
             );
@@ -5071,22 +4994,15 @@ mod tests {
                     Some(route.clone().into_erased())
                 })
             });
-            let mut app = tester.cell.borrow_mut();
-            let count =
-                |app: &mut App, text: &str| texts(app).iter().filter(|t| *t == text).count();
-            assert_eq!(count(&mut app, "Start"), 1, "the first route's middle");
+            let start = || find::text("Start").skip_offstage(false);
+            // The first route's middle.
+            expect(tester, &start(), finds_one_widget());
 
-            drop(app);
             push_second(tester);
             tester.pump_and_settle();
-            let mut app = tester.cell.borrow_mut();
 
-            assert_eq!(
-                count(&mut app, "Start"),
-                2,
-                "the previous route's title is read off the route as the back label: {:?}",
-                texts(&mut app)
-            );
+            // The previous route's title is read off the route as the back label.
+            expect(tester, &start(), finds_n_widgets(2));
         });
     }
 
@@ -5107,48 +5023,31 @@ mod tests {
                     Some(route.clone().into_erased())
                 })
             });
-            let mut app = tester.cell.borrow_mut();
+            // The first route's title is implied as the middle.
+            expect(tester, &find::text("Home"), finds_widgets());
 
-            assert!(
-                texts(&mut app).iter().any(|text| text == "Home"),
-                "the first route's title is implied as the middle: {:?}",
-                texts(&mut app)
-            );
-
-            drop(app);
             push_second(tester);
             tester.pump_and_settle();
-            let mut app = tester.cell.borrow_mut();
 
-            let shown = texts(&mut app);
-            assert!(
-                shown.iter().any(|text| text == "Second"),
-                "the pushed route's title is implied as the middle: {shown:?}"
-            );
-            assert!(
-                shown.iter().any(|text| text == "Home"),
-                "the previous page title is shown as the back label: {shown:?}"
-            );
+            // The pushed route's title is implied as the middle.
+            expect(tester, &find::text("Second"), finds_widgets());
+            // The previous page title is shown as the back label.
+            expect(tester, &find::text("Home"), finds_widgets());
+            // The back chevron is shown.
             let chevron = char::from_u32(CupertinoIcons::back().code_point)
                 .expect("a codepoint")
                 .to_string();
-            assert!(
-                shown.contains(&chevron),
-                "the back chevron is shown: {shown:?}"
-            );
+            let chevron = find::text(&chevron);
+            expect(tester, &chevron, finds_one_widget());
 
-            let chevron_box = paragraph_of(&mut app, &chevron)
-                .expect("the back chevron is laid out")
-                .as_box();
-            let rect = global_rect(&mut app, chevron_box);
-            drop(app);
-            tester.tap(rect.center(), 1);
+            tester.tap(chevron);
             tester.pump_and_settle();
-            let mut app = tester.cell.borrow_mut();
 
-            assert!(
-                !texts(&mut app).iter().any(|text| text == "Second"),
-                "tapping the back button popped the route"
+            // Tapping the back button popped the route.
+            expect(
+                tester,
+                &find::text("Second").skip_offstage(false),
+                finds_nothing(),
             );
         });
     }
@@ -5169,10 +5068,11 @@ mod tests {
                     Some(route.title(app, "Home".to_string()).into_erased())
                 })
             });
-            let mut app = tester.cell.borrow_mut();
-            assert!(
-                !texts(&mut app).iter().any(|text| text == "Home"),
-                "automaticallyImplyMiddle false leaves the middle empty"
+            // automaticallyImplyMiddle false leaves the middle empty.
+            expect(
+                tester,
+                &find::text("Home").skip_offstage(false),
+                finds_nothing(),
             );
         });
     }
@@ -5215,22 +5115,18 @@ mod tests {
                 )
                 .child(Directionality::new(TextDirection::Ltr, tree)),
             );
-            let mut app = tester.cell.borrow_mut();
-
             assert_eq!(
-                bar_background(&mut app, &key),
+                bar_background(tester, &key),
                 SCAFFOLD,
                 "with nothing scrolled under, the bar wears the scaffold's colour"
             );
 
             let context = inner.get().expect("the bar built");
-            notify_scrolled(&mut app, context, 40.0);
-            drop(app);
+            tester.update(|app| notify_scrolled(app, context, 40.0));
             tester.pump_by(Duration::from_millis(20));
-            let mut app = tester.cell.borrow_mut();
 
             assert_eq!(
-                bar_background(&mut app, &key),
+                bar_background(tester, &key),
                 BAR,
                 "past the animation extent the bar wears its own colour"
             );
@@ -5238,8 +5134,9 @@ mod tests {
     }
 
     /// The colour of the bar's own `DecoratedBox`, the one `wrap_with_background` builds.
-    fn bar_background(app: &mut App, key: &GlobalKey) -> Color {
-        let bar = keyed_box(app, key).as_object();
+    fn bar_background(tester: &WidgetTester, key: &GlobalKey) -> Color {
+        let bar = tester.render_object(key);
+        let app = &*tester.cell.borrow();
         let mut found = None;
         let mut stack = vec![bar];
         while let Some(object) = stack.pop() {
@@ -5303,44 +5200,39 @@ mod tests {
                 )
                 .child(Directionality::new(TextDirection::Ltr, tree)),
             );
-            let mut app = tester.cell.borrow_mut();
-
-            let large = paragraph_of(&mut app, "Large").expect("the large title is built");
-            let expanded = global_rect(&mut app, large.as_box());
+            let expanded = tester.get_rect(find::text("Large"));
             assert!(
                 expanded.top > K_NAV_BAR_PERSISTENT_HEIGHT,
                 "at scroll 0 the large title sits below the persistent bar: {expanded:?}"
             );
             assert_eq!(
-                large_title_opacity(&mut app),
+                large_title_opacity(tester),
                 1.0,
                 "the large title is fully visible at scroll 0"
             );
 
-            controller.jump_to(&mut app, K_NAV_BAR_LARGE_TITLE_HEIGHT_EXTENSION + 20.0);
-            drop(app);
+            controller.jump_to(
+                &mut tester.cell.borrow_mut(),
+                K_NAV_BAR_LARGE_TITLE_HEIGHT_EXTENSION + 20.0,
+            );
             tester.pump_and_settle();
-            let mut app = tester.cell.borrow_mut();
 
             assert_eq!(
-                large_title_opacity(&mut app),
+                large_title_opacity(tester),
                 0.0,
                 "past the extension the large title has faded out"
             );
-            let middle = paragraph_of(&mut app, "Middle").expect("the middle is built");
             assert!(
-                global_rect(&mut app, middle.as_box()).top < K_NAV_BAR_PERSISTENT_HEIGHT,
+                tester.get_rect(find::text("Middle")).top < K_NAV_BAR_PERSISTENT_HEIGHT,
                 "the middle takes the persistent bar"
             );
         });
     }
 
     /// The opacity the sliver bar's large title fades with.
-    fn large_title_opacity(app: &mut App) -> f64 {
-        let large_title = render_objects(app)
-            .into_iter()
-            .find(|object| object.downcast::<RenderLargeTitle>(app).is_some())
-            .expect("the large title is in the tree");
+    fn large_title_opacity(tester: &WidgetTester) -> f64 {
+        let large_title = tester.first::<RenderLargeTitle>().as_object();
+        let app = &*tester.cell.borrow();
         let mut ancestor = large_title.parent(app);
         while let Some(object) = ancestor {
             if let Some(opacity) = object.downcast::<RenderAnimatedOpacity>(app) {
@@ -5369,17 +5261,23 @@ mod tests {
             // flight from the two mounted nav bars.
             tester.pump_by(Duration::from_millis(20));
             tester.pump_by(Duration::from_millis(120));
-            let mut app = tester.cell.borrow_mut();
 
-            assert!(
-                has_widget::<NavigationBarTransition>(&mut app),
-                "the flight shuttle is the navigation bar transition"
+            // The flight shuttle is the navigation bar transition.
+            expect(
+                tester,
+                &find::by_type::<NavigationBarTransition>().skip_offstage(false),
+                finds_widgets(),
             );
-            let shown = texts(&mut app);
-            assert!(
-                shown.iter().filter(|text| *text == "Home").count() >= 1
-                    && shown.iter().any(|text| text == "Second"),
-                "the transition carries both routes' components: {shown:?}"
+            // The transition carries both routes' components.
+            expect(
+                tester,
+                &find::text("Home").skip_offstage(false),
+                finds_widgets(),
+            );
+            expect(
+                tester,
+                &find::text("Second").skip_offstage(false),
+                finds_widgets(),
             );
         });
     }
@@ -5406,16 +5304,23 @@ mod tests {
             tester.pump_by(Duration::from_millis(20));
 
             let driven: Vec<waft_foundation::HandleId> = {
-                let mut app = tester.cell.borrow_mut();
-                let root = root_element(&mut app);
-                let transition = elements(&app, root)
-                    .into_iter()
-                    .find(|element| {
-                        downcast_widget::<NavigationBarTransition>(&**element.widget(&app))
-                            .is_some()
-                    })
-                    .expect("the flight shows the navigation bar transition");
-                elements(&app, transition)
+                let transition = find::by_type::<NavigationBarTransition>()
+                    .skip_offstage(false)
+                    .first();
+                let components = find::descendant(
+                    transition,
+                    find::by_widget_predicate(
+                        "a FadeTransition or a PositionedTransition",
+                        |_, widget| {
+                            downcast_widget::<FadeTransition>(widget).is_some()
+                                || downcast_widget::<PositionedTransition>(widget).is_some()
+                        },
+                    ),
+                )
+                .skip_offstage(false)
+                .evaluate(tester);
+                let app = tester.cell.borrow();
+                components
                     .into_iter()
                     .filter_map(|element| {
                         let widget = element.widget(&app);
@@ -5444,11 +5349,13 @@ mod tests {
             assert_no_new_objects(&tester.cell.borrow(), &snapshot);
 
             tester.pump_and_settle();
-            let mut app = tester.cell.borrow_mut();
-            assert!(
-                !has_widget::<NavigationBarTransition>(&mut app),
-                "the flight has ended"
+            // The flight has ended.
+            expect(
+                tester,
+                &find::by_type::<NavigationBarTransition>().skip_offstage(false),
+                finds_nothing(),
             );
+            let app = tester.cell.borrow();
             for id in driven {
                 assert!(!app.contains(id), "{id:?} is freed with its component");
             }
@@ -5474,13 +5381,12 @@ mod tests {
             tester.pump_by(Duration::from_millis(20));
             tester.pump_by(Duration::from_millis(120));
             tester.pump_by(Duration::from_millis(20));
-            {
-                let mut app = tester.cell.borrow_mut();
-                assert!(
-                    has_widget::<NavigationBarTransition>(&mut app),
-                    "the flight is on"
-                );
-            }
+            // The flight is on.
+            expect(
+                tester,
+                &find::by_type::<NavigationBarTransition>().skip_offstage(false),
+                finds_widgets(),
+            );
             // Far enough into the flight that no component's fade starts or ends in the frame
             // measured, which would add or drop an opacity layer.
             tester.pump_by(Duration::from_millis(140));
@@ -5501,10 +5407,8 @@ mod tests {
                 Size::from_height(K_NAV_BAR_PERSISTENT_HEIGHT + 30.0)
             );
             let key = mount_bar(tester, EdgeInsets::ZERO, bar);
-            let mut app = tester.cell.borrow_mut();
-            let bar_box = keyed_box(&mut app, &key);
             assert_eq!(
-                bar_box.size(&app).height(),
+                tester.get_size(&key).height(),
                 K_NAV_BAR_PERSISTENT_HEIGHT + 30.0,
                 "the bottom sits under the persistent bar"
             );

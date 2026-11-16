@@ -139,7 +139,7 @@ mod tests {
     use waft_foundation::Listener;
     use waft_widgets::{Center, Text};
 
-    use waft_widgets::testing::{WidgetTester, test_widgets};
+    use waft_widgets::testing::{WidgetTester, find, test_widgets};
 
     use super::*;
     use crate::desktop_text_selection_toolbar_button::DesktopTextSelectionToolbarButton;
@@ -176,10 +176,8 @@ mod tests {
                 ),
             );
 
-            let buttons = tester.find_by_type::<DesktopTextSelectionToolbarButton>();
-            let top_left = tester
-                .global_rect(tester.render_box_of(buttons[0]))
-                .top_left();
+            let buttons = find::by_type::<DesktopTextSelectionToolbarButton>().evaluate(tester);
+            let top_left = tester.get_rect(buttons[0]).top_left();
             assert_eq!(top_left, anchor);
         });
     }
@@ -194,7 +192,7 @@ mod tests {
                     [Text::new("X").into_widget()],
                 )),
             );
-            let toolbars = tester.find_by_type::<DesktopTextSelectionToolbar>();
+            let toolbars = find::by_type::<DesktopTextSelectionToolbar>().evaluate(tester);
             let render = tester.render_box_of(toolbars[0]);
             assert!(render.size(&tester.cell.borrow()).is_empty());
         });

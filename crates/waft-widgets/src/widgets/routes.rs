@@ -4451,7 +4451,7 @@ mod tests {
 
             // The dialog's own content is the 10x10 box in the corner, so a tap away from it
             // is on the barrier.
-            tester.tap(Offset::new(150.0, 100.0), 1);
+            tester.tap_at(Offset::new(150.0, 100.0), 1);
             tester.pump();
             tester.pump_and_settle();
             assert!(
@@ -4602,7 +4602,7 @@ mod tests {
             tester.update(|app| navigator_state.push(app, dialog.clone()));
             tester.pump_and_settle();
 
-            tester.tap(Offset::new(150.0, 100.0), 1);
+            tester.tap_at(Offset::new(150.0, 100.0), 1);
             tester.pump();
             tester.pump_and_settle();
             assert!(

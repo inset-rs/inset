@@ -1431,10 +1431,9 @@ impl CheckboxThemeDataGetters for CheckboxDefaultsM2 {
 #[allow(deprecated)]
 pub(crate) mod tests {
     use std::rc::Rc;
-    use std::sync::Arc;
     use waft_widgets::AnyFocusNode;
 
-    use waft_embedder::valo::{Op, Path};
+    use waft_embedder::valo::Op;
     use waft_embedder::{PointerChange, RRect};
     use waft_foundation::K_IS_WEB;
     use waft_rendering::{
@@ -1446,8 +1445,10 @@ pub(crate) mod tests {
         StatefulBuilder,
     };
 
+    use waft_rendering::testing::{CanvasMethod, PaintCall, PaintedStyle, RecordedCall, draws};
     use waft_widgets::testing::{
-        TargetPlatformVariant, TestPointer, WidgetTester, test_widgets, test_widgets_variant,
+        TargetPlatformVariant, TestPointer, WidgetTester, expect, find, finds_nothing,
+        finds_one_widget, test_widgets, test_widgets_variant,
     };
 
     use super::*;
@@ -1502,16 +1503,14 @@ pub(crate) mod tests {
 
     /// Dart's `find.byType(Checkbox)`, which expects one.
     pub(crate) fn checkbox_element(tester: &WidgetTester) -> AnyElement {
-        let checkboxes = tester.find_by_type::<Checkbox>();
+        let checkboxes = find::by_type::<Checkbox>().evaluate(tester);
         assert_eq!(checkboxes.len(), 1, "one Checkbox");
         checkboxes[0]
     }
 
     /// Dart's `tester.getCenter(find.byType(Checkbox))`.
     pub(crate) fn checkbox_center(tester: &WidgetTester) -> Offset {
-        tester
-            .global_rect(tester.render_box_of(checkbox_element(tester)))
-            .center()
+        tester.get_rect(checkbox_element(tester)).center()
     }
 
     /// Dart's `tester.getSize(find.byType(Checkbox))`.
@@ -1548,180 +1547,17 @@ pub(crate) mod tests {
         canvas.build().ops().to_vec()
     }
 
-    /// One op the checkbox's painter records, reduced to what Dart's `paints` matchers compare.
-    ///
-    /// A draw with a transparent paint is not recorded at all, so Dart's
-    /// `rrect(color: Colors.transparent)` has no entry: the case asserts that no other fill is
-    /// drawn instead.
-    #[derive(Clone, Debug, PartialEq)]
-    pub(crate) enum Drawn {
-        /// A filled oval (Dart's `circle`): its colour as `0xAARRGGBB` and its bounds.
-        Circle(u32, Rect),
-        /// Any other filled path (Dart's `rrect`): its colour and its bounds.
-        Fill(u32, Rect),
-        /// A filled ring (Dart's `drrect`): its colour and its even-odd path.
-        Ring(u32, Arc<Path>),
-        /// A stroked path (Dart's `path`, and `line` when its bounds have no height): its
-        /// colour, its stroke width and the path's bounds.
-        Stroke(u32, f32, Rect),
+    /// Dart's `expect(renderer, paints..a..b)` on what the checkbox's painter draws.
+    pub(crate) fn assert_paints(tester: &WidgetTester, expected: &[PaintCall]) {
+        waft_rendering::testing::assert_paints(&ops(tester), expected);
     }
 
-    fn argb(color: waft_embedder::valo::Color) -> u32 {
-        let channel = |value: f32| (value * 255.0).round() as u32;
-        (channel(color.a) << 24)
-            | (channel(color.r) << 16)
-            | (channel(color.g) << 8)
-            | channel(color.b)
-    }
-
-    fn rect_of(rect: waft_embedder::valo::Rect) -> Rect {
-        Rect::from_ltwh(
-            f64::from(rect.x),
-            f64::from(rect.y),
-            f64::from(rect.width),
-            f64::from(rect.height),
-        )
-    }
-
-    impl Drawn {
-        fn of(op: &Op) -> Option<Drawn> {
-            let Op::DrawPath {
-                paint,
-                path,
-                fill_rule,
-                content_bounds,
-                ..
-            } = op
-            else {
-                return None;
-            };
-            Some(match &paint.style {
-                PaintStyle::Stroke(stroke) => {
-                    Drawn::Stroke(argb(paint.color), stroke.width, rect_of(path.bounds()))
-                }
-                PaintStyle::Fill if *fill_rule == FillRule::EvenOdd => {
-                    Drawn::Ring(argb(paint.color), Arc::clone(path))
-                }
-                PaintStyle::Fill if path.as_oval().is_some() => {
-                    Drawn::Circle(argb(paint.color), rect_of(*content_bounds))
-                }
-                PaintStyle::Fill => Drawn::Fill(argb(paint.color), rect_of(*content_bounds)),
-            })
-        }
-    }
-
-    /// What the checkbox's painter draws, in paint order.
-    pub(crate) fn drawn(tester: &WidgetTester) -> Vec<Drawn> {
-        ops(tester).iter().filter_map(Drawn::of).collect()
-    }
-
-    /// One call of Dart's `paints` matcher.
-    #[derive(Debug)]
-    pub(crate) enum Paints {
-        /// `circle(color:)`.
-        Circle(Color),
-        /// `circle(color:, radius:)`.
-        CircleRadius(Color, f64),
-        /// `circle(x:, y:)`.
-        CircleAt(Offset),
-        /// `rrect(color:)`: the box's fill.
-        Rrect(Color),
-        /// `path(color:)`: the check mark.
-        Path(Color),
-        /// `path(color:, style: PaintingStyle.stroke, strokeWidth:)`.
-        PathStroke(Color, f32),
-        /// `path(strokeWidth:)` or `line(strokeWidth:)`.
-        StrokeWidth(f32),
-        /// `line()`: the dash.
-        Line,
-        /// `line(strokeWidth:)`.
-        LineWidth(f32),
-        /// `drrect(color:)`: the border.
-        Ring(Color),
-        /// `drrect(color:, outer:, inner:)`.
-        RingAt(Color, RRect, RRect),
-        /// `drrect(outer:, inner:)`: a ring of any colour.
-        RingShape(RRect, RRect),
-    }
-
-    /// The ring `RoundedRectangleBorder.paint` draws between `outer` and `inner`.
-    fn ring_path(outer: RRect, inner: RRect) -> Arc<Path> {
-        let mut canvas = Canvas::new();
-        waft_painting::draw_drrect(
-            &mut canvas,
-            outer,
-            inner,
-            &Paint::from_color(Color::new(0xFF000000).into()),
-        );
-        match &canvas.build().ops()[0] {
-            Op::DrawPath { path, .. } => Arc::clone(path),
-            _ => panic!("draw_drrect records a path"),
-        }
-    }
-
-    impl Paints {
-        fn matches(&self, drawn: &Drawn) -> bool {
-            match (self, drawn) {
-                (Paints::Circle(color), Drawn::Circle(c, bounds)) => {
-                    *c == color.to_argb32() && bounds.width() == bounds.height()
-                }
-                (Paints::CircleRadius(color, radius), Drawn::Circle(c, bounds)) => {
-                    *c == color.to_argb32()
-                        && bounds.width() == bounds.height()
-                        && (bounds.width() - radius * 2.0).abs() < 1e-3
-                }
-                (Paints::CircleAt(center), Drawn::Circle(_, bounds)) => {
-                    (bounds.center() - *center).distance() < 1e-3
-                }
-                (Paints::Rrect(color), Drawn::Fill(c, bounds)) => {
-                    *c == color.to_argb32() && bounds.width() <= K_EDGE_SIZE + 1e-3
-                }
-                (Paints::Path(color), Drawn::Stroke(c, _, bounds)) => {
-                    *c == color.to_argb32() && bounds.height() > 0.0
-                }
-                (Paints::PathStroke(color, width), Drawn::Stroke(c, w, bounds)) => {
-                    *c == color.to_argb32() && w == width && bounds.height() > 0.0
-                }
-                (Paints::StrokeWidth(width), Drawn::Stroke(_, w, _)) => w == width,
-                (Paints::Line, Drawn::Stroke(_, _, bounds)) => bounds.height() == 0.0,
-                (Paints::LineWidth(width), Drawn::Stroke(_, w, bounds)) => {
-                    w == width && bounds.height() == 0.0
-                }
-                (Paints::Ring(color), Drawn::Ring(c, _)) => *c == color.to_argb32(),
-                (Paints::RingAt(color, outer, inner), Drawn::Ring(c, path)) => {
-                    *c == color.to_argb32() && *path == ring_path(*outer, *inner)
-                }
-                (Paints::RingShape(outer, inner), Drawn::Ring(_, path)) => {
-                    *path == ring_path(*outer, *inner)
-                }
-                _ => false,
-            }
-        }
-    }
-
-    /// Dart's `expect(renderer, paints..a..b)`: the calls are drawn in this order, others
-    /// between them allowed.
-    pub(crate) fn paints(tester: &WidgetTester, expected: &[Paints]) -> bool {
-        let drawn = drawn(tester);
-        let mut rest = drawn.iter();
-        expected
-            .iter()
-            .all(|expected| rest.by_ref().any(|drawn| expected.matches(drawn)))
-    }
-
-    pub(crate) fn assert_paints(tester: &WidgetTester, expected: &[Paints]) {
+    /// Dart's `expect(renderer, isNot(paints..a..b))`.
+    pub(crate) fn assert_does_not_paint(tester: &WidgetTester, expected: &[PaintCall]) {
+        let ops = ops(tester);
         assert!(
-            paints(tester, expected),
-            "expected {expected:?} in {:?}",
-            drawn(tester)
-        );
-    }
-
-    pub(crate) fn assert_does_not_paint(tester: &WidgetTester, expected: &[Paints]) {
-        assert!(
-            !paints(tester, expected),
-            "did not expect {expected:?} in {:?}",
-            drawn(tester)
+            waft_rendering::testing::paints(&ops, expected).is_err(),
+            "did not expect the pattern in {ops:?}"
         );
     }
 
@@ -1796,7 +1632,7 @@ pub(crate) mod tests {
             assert_eq!(shown(tester), None);
             for expected in [Some(false), Some(true), None] {
                 let center = checkbox_center(tester);
-                tester.tap(center, 1);
+                tester.tap_at(center, 1);
                 tester.pump_and_settle();
                 assert_eq!(value.get(), expected);
             }
@@ -1820,13 +1656,20 @@ pub(crate) mod tests {
             };
             let assert_empty = |tester: &WidgetTester| {
                 // The transparent fill is not recorded: the ring is the first draw.
-                assert!(
-                    matches!(drawn(tester).first(), Some(Drawn::Ring(..))),
-                    "{:?}",
-                    drawn(tester)
+                assert_eq!(
+                    draws(&ops(tester)).first().map(CanvasMethod::of),
+                    Some(CanvasMethod::DrawDRRect)
                 );
                 // null is rendered as a line (a "dash")
-                assert_does_not_paint(tester, &[Paints::Line]);
+                assert_does_not_paint(
+                    tester,
+                    &[PaintCall::Line {
+                        p1: None,
+                        p2: None,
+                        color: None,
+                        stroke_width: None,
+                    }],
+                );
             };
 
             frame(tester, Some(false));
@@ -1834,19 +1677,41 @@ pub(crate) mod tests {
 
             frame(tester, Some(true));
             // checkmark is rendered as a path
-            assert_paints(tester, &[Paints::Rrect(fill), Paints::Path(check)]);
+            assert_paints(
+                tester,
+                &[PaintCall::rrect(Some(fill)), PaintCall::path(Some(check))],
+            );
 
             frame(tester, Some(false));
             assert_empty(tester);
 
             frame(tester, None);
-            assert_paints(tester, &[Paints::Line]);
+            assert_paints(
+                tester,
+                &[PaintCall::Line {
+                    p1: None,
+                    p2: None,
+                    color: None,
+                    stroke_width: None,
+                }],
+            );
 
             frame(tester, Some(true));
-            assert_paints(tester, &[Paints::Rrect(fill), Paints::Path(check)]);
+            assert_paints(
+                tester,
+                &[PaintCall::rrect(Some(fill)), PaintCall::path(Some(check))],
+            );
 
             frame(tester, None);
-            assert_paints(tester, &[Paints::Line]);
+            assert_paints(
+                tester,
+                &[PaintCall::Line {
+                    p1: None,
+                    p2: None,
+                    color: None,
+                    stroke_width: None,
+                }],
+            );
         });
     }
 
@@ -1882,7 +1747,10 @@ pub(crate) mod tests {
             frame(tester, &theme, None, Some(check_color));
             assert_paints(
                 tester,
-                &[Paints::Rrect(border_color), Paints::Path(check_color)],
+                &[
+                    PaintCall::rrect(Some(border_color)),
+                    PaintCall::path(Some(check_color)),
+                ],
             );
 
             // paints's color is 0xFF000000 (params)
@@ -1890,7 +1758,10 @@ pub(crate) mod tests {
             frame(tester, &theme, None, Some(check_color));
             assert_paints(
                 tester,
-                &[Paints::Rrect(border_color), Paints::Path(check_color)],
+                &[
+                    PaintCall::rrect(Some(border_color)),
+                    PaintCall::path(Some(check_color)),
+                ],
             );
 
             // paints's color is 0xFF00FF00 (theme)
@@ -1904,11 +1775,11 @@ pub(crate) mod tests {
                 theme(app).copy_with().color_scheme(color_scheme).build()
             };
             frame(tester, &themed, None, None);
-            assert_paints(tester, &[Paints::Rrect(active_color)]);
+            assert_paints(tester, &[PaintCall::rrect(Some(active_color))]);
 
             let active_color = Color::new(0xFF000000);
             frame(tester, &theme, Some(active_color), None);
-            assert_paints(tester, &[Paints::Rrect(active_color)]);
+            assert_paints(tester, &[PaintCall::rrect(Some(active_color))]);
         });
     }
 
@@ -1953,9 +1824,9 @@ pub(crate) mod tests {
             assert_paints(
                 tester,
                 &[
-                    Paints::Circle(orange()),
-                    Paints::Rrect(Color::new(0xff2196f3)),
-                    Paints::Path(Colors::WHITE),
+                    PaintCall::circle(Some(orange())),
+                    PaintCall::rrect(Some(Color::new(0xff2196f3))),
+                    PaintCall::path(Some(Colors::WHITE)),
                 ],
             );
 
@@ -1965,11 +1836,11 @@ pub(crate) mod tests {
             assert_paints(
                 tester,
                 &[
-                    Paints::Circle(orange()),
-                    Paints::RingAt(
-                        Color::new(0x8a000000),
+                    PaintCall::circle(Some(orange())),
+                    PaintCall::drrect_between(
                         rrect(15.0, 15.0, 33.0, 33.0, 1.0),
                         rrect(17.0, 17.0, 31.0, 31.0, 0.0),
+                        Some(Color::new(0x8a000000)),
                     ),
                 ],
             );
@@ -1979,10 +1850,10 @@ pub(crate) mod tests {
             assert!(!has_primary_focus(tester, node.handle()));
             assert_paints(
                 tester,
-                &[Paints::RingAt(
-                    Color::new(0x61000000),
+                &[PaintCall::drrect_between(
                     rrect(15.0, 15.0, 33.0, 33.0, 1.0),
                     rrect(17.0, 17.0, 31.0, 31.0, 0.0),
+                    Some(Color::new(0x61000000)),
                 )],
             );
         });
@@ -2000,9 +1871,9 @@ pub(crate) mod tests {
             assert_paints(
                 tester,
                 &[
-                    Paints::Circle(orange()),
-                    Paints::Rrect(colors.primary),
-                    Paints::Path(colors.on_primary),
+                    PaintCall::circle(Some(orange())),
+                    PaintCall::rrect(Some(colors.primary)),
+                    PaintCall::path(Some(colors.on_primary)),
                 ],
             );
 
@@ -2012,11 +1883,11 @@ pub(crate) mod tests {
             assert_paints(
                 tester,
                 &[
-                    Paints::Circle(orange()),
-                    Paints::RingAt(
-                        colors.on_surface,
+                    PaintCall::circle(Some(orange())),
+                    PaintCall::drrect_between(
                         rrect(15.0, 15.0, 33.0, 33.0, 2.0),
                         rrect(17.0, 17.0, 31.0, 31.0, 0.0),
+                        Some(colors.on_surface),
                     ),
                 ],
             );
@@ -2026,10 +1897,10 @@ pub(crate) mod tests {
             assert!(!has_primary_focus(tester, node.handle()));
             assert_paints(
                 tester,
-                &[Paints::RingAt(
-                    colors.on_surface.with_opacity(0.38),
+                &[PaintCall::drrect_between(
                     rrect(15.0, 15.0, 33.0, 33.0, 2.0),
                     rrect(17.0, 17.0, 31.0, 31.0, 0.0),
+                    Some(colors.on_surface.with_opacity(0.38)),
                 )],
             );
         });
@@ -2048,7 +1919,16 @@ pub(crate) mod tests {
                     .into_widget()
             });
             tester.pump_and_settle();
-            assert_paints(tester, &[Paints::CircleRadius(orange(), SPLASH_RADIUS)]);
+            assert_paints(
+                tester,
+                &[PaintCall::Circle {
+                    x: None,
+                    y: None,
+                    radius: Some(SPLASH_RADIUS),
+                    color: Some(orange()),
+                    style: None,
+                }],
+            );
         });
     }
 
@@ -2058,7 +1938,7 @@ pub(crate) mod tests {
             pump_checkbox(tester, m3, |_| {
                 Checkbox::new(Some(false), ignore()).into_widget()
             });
-            let rect = tester.global_rect(tester.render_box_of(checkbox_element(tester)));
+            let rect = tester.get_rect(checkbox_element(tester));
             let checkbox_center_local = rect.center() - rect.top_left();
             let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, rect.top_left());
@@ -2066,7 +1946,16 @@ pub(crate) mod tests {
             // Wait for the splash to be drawn, but not long enough for it to animate towards
             // the center, since we want to catch it in its starting position.
             tester.pump_by(Duration::from_millis(1));
-            assert_paints(tester, &[Paints::CircleAt(checkbox_center_local)]);
+            assert_paints(
+                tester,
+                &[PaintCall::Circle {
+                    x: Some((checkbox_center_local).dx()),
+                    y: Some((checkbox_center_local).dy()),
+                    radius: None,
+                    color: None,
+                    style: None,
+                }],
+            );
 
             // Finish gesture to release resources.
             tester.up(&gesture);
@@ -2096,7 +1985,15 @@ pub(crate) mod tests {
             frame(tester, true);
             assert_paints(
                 tester,
-                &[Paints::Rrect(fill), Paints::PathStroke(check, 2.0)],
+                &[
+                    PaintCall::rrect(Some(fill)),
+                    PaintCall::Path {
+                        color: Some(check),
+                        style: Some(PaintedStyle::Stroke(Some(2.0))),
+                        includes: vec![],
+                        excludes: vec![],
+                    },
+                ],
             );
 
             // Start hovering
@@ -2109,9 +2006,14 @@ pub(crate) mod tests {
             assert_paints(
                 tester,
                 &[
-                    Paints::Circle(orange()),
-                    Paints::Rrect(fill),
-                    Paints::PathStroke(check, 2.0),
+                    PaintCall::circle(Some(orange())),
+                    PaintCall::rrect(Some(fill)),
+                    PaintCall::Path {
+                        color: Some(check),
+                        style: Some(PaintedStyle::Stroke(Some(2.0))),
+                        includes: vec![],
+                        excludes: vec![],
+                    },
                 ],
             );
 
@@ -2125,8 +2027,13 @@ pub(crate) mod tests {
             assert_paints(
                 tester,
                 &[
-                    Paints::Rrect(disabled_fill),
-                    Paints::PathStroke(disabled_check, 2.0),
+                    PaintCall::rrect(Some(disabled_fill)),
+                    PaintCall::Path {
+                        color: Some(disabled_check),
+                        style: Some(PaintedStyle::Stroke(Some(2.0))),
+                        includes: vec![],
+                        excludes: vec![],
+                    },
                 ],
             );
             tester.send(&gesture, PointerChange::Remove);
@@ -2358,7 +2265,7 @@ pub(crate) mod tests {
                         .into_widget()
                 });
                 tester.pump_and_settle();
-                assert_paints(tester, &[Paints::Rrect(expected)]);
+                assert_paints(tester, &[PaintCall::rrect(Some(expected))]);
             }
         });
     }
@@ -2391,12 +2298,12 @@ pub(crate) mod tests {
             });
             tester.pump_and_settle();
             assert!(has_primary_focus(tester, node.handle()));
-            assert_paints(tester, &[Paints::Rrect(FOCUSED_FILL_COLOR)]);
+            assert_paints(tester, &[PaintCall::rrect(Some(FOCUSED_FILL_COLOR))]);
 
             // Start hovering
             let gesture = hover(tester);
             tester.pump_and_settle();
-            assert_paints(tester, &[Paints::Rrect(HOVERED_FILL_COLOR)]);
+            assert_paints(tester, &[PaintCall::rrect(Some(HOVERED_FILL_COLOR))]);
             tester.send(&gesture, PointerChange::Remove);
         });
     }
@@ -2429,10 +2336,10 @@ pub(crate) mod tests {
             });
             assert_paints(
                 tester,
-                &[Paints::RingAt(
-                    Color::new(0xfff44336),
+                &[PaintCall::drrect_between(
                     rrect(15.0, 15.0, 33.0, 33.0, 5.0),
                     rrect(19.0, 19.0, 29.0, 29.0, 1.0),
+                    Some(Color::new(0xfff44336)),
                 )],
             );
         });
@@ -2501,7 +2408,7 @@ pub(crate) mod tests {
             tester.pump_and_settle();
             // Default inactive pressed Checkbox should have overlay color from default
             // fillColor
-            assert_paints(tester, &[Paints::Circle(inactive_pressed(&data))]);
+            assert_paints(tester, &[PaintCall::circle(Some(inactive_pressed(&data)))]);
 
             overlay_frame(
                 tester,
@@ -2514,7 +2421,7 @@ pub(crate) mod tests {
             let gesture2 = press(tester, 2);
             tester.pump_and_settle();
             // Default active pressed Checkbox should have overlay color from default fillColor
-            assert_paints(tester, &[Paints::Circle(active_pressed(&data))]);
+            assert_paints(tester, &[PaintCall::circle(Some(active_pressed(&data)))]);
 
             reset(tester);
             overlay_frame(
@@ -2528,7 +2435,7 @@ pub(crate) mod tests {
             tester.pump_and_settle();
             assert!(has_primary_focus(tester, node.handle()));
             // Focused Checkbox should use default focused overlay color
-            assert_paints(tester, &[Paints::Circle(focused(&data))]);
+            assert_paints(tester, &[PaintCall::circle(Some(focused(&data)))]);
 
             reset(tester);
             overlay_frame(
@@ -2542,7 +2449,7 @@ pub(crate) mod tests {
             let gesture3 = hover(tester);
             tester.pump_and_settle();
             // Hovered Checkbox should use default hovered overlay color
-            assert_paints(tester, &[Paints::Circle(hovered(&data))]);
+            assert_paints(tester, &[PaintCall::circle(Some(hovered(&data)))]);
 
             // Finish gestures to release resources.
             finish_gestures(tester, &[&gesture1, &gesture2]);
@@ -2643,10 +2550,13 @@ pub(crate) mod tests {
             // Default inactive pressed Checkbox should have overlay color from fillColor
             assert_paints(
                 tester,
-                &[Paints::CircleRadius(
-                    FILL_COLOR.with_alpha(K_RADIAL_REACTION_ALPHA),
-                    SPLASH_RADIUS,
-                )],
+                &[PaintCall::Circle {
+                    x: None,
+                    y: None,
+                    radius: Some(SPLASH_RADIUS),
+                    color: Some(FILL_COLOR.with_alpha(K_RADIAL_REACTION_ALPHA)),
+                    style: None,
+                }],
             );
 
             frame(tester, true, false, false);
@@ -2655,10 +2565,13 @@ pub(crate) mod tests {
             // Default active pressed Checkbox should have overlay color from fillColor
             assert_paints(
                 tester,
-                &[Paints::CircleRadius(
-                    FILL_COLOR.with_alpha(K_RADIAL_REACTION_ALPHA),
-                    SPLASH_RADIUS,
-                )],
+                &[PaintCall::Circle {
+                    x: None,
+                    y: None,
+                    radius: Some(SPLASH_RADIUS),
+                    color: Some(FILL_COLOR.with_alpha(K_RADIAL_REACTION_ALPHA)),
+                    style: None,
+                }],
             );
 
             frame(tester, false, false, true);
@@ -2666,10 +2579,13 @@ pub(crate) mod tests {
             tester.pump_and_settle();
             assert_paints(
                 tester,
-                &[Paints::CircleRadius(
-                    INACTIVE_PRESSED_OVERLAY_COLOR,
-                    SPLASH_RADIUS,
-                )],
+                &[PaintCall::Circle {
+                    x: None,
+                    y: None,
+                    radius: Some(SPLASH_RADIUS),
+                    color: Some(INACTIVE_PRESSED_OVERLAY_COLOR),
+                    style: None,
+                }],
             );
 
             frame(tester, true, false, true);
@@ -2677,10 +2593,13 @@ pub(crate) mod tests {
             tester.pump_and_settle();
             assert_paints(
                 tester,
-                &[Paints::CircleRadius(
-                    ACTIVE_PRESSED_OVERLAY_COLOR,
-                    SPLASH_RADIUS,
-                )],
+                &[PaintCall::Circle {
+                    x: None,
+                    y: None,
+                    radius: Some(SPLASH_RADIUS),
+                    color: Some(ACTIVE_PRESSED_OVERLAY_COLOR),
+                    style: None,
+                }],
             );
 
             reset(tester);
@@ -2690,7 +2609,13 @@ pub(crate) mod tests {
             // Focused Checkbox should use overlay color over focusColor
             assert_paints(
                 tester,
-                &[Paints::CircleRadius(FOCUS_OVERLAY_COLOR, SPLASH_RADIUS)],
+                &[PaintCall::Circle {
+                    x: None,
+                    y: None,
+                    radius: Some(SPLASH_RADIUS),
+                    color: Some(FOCUS_OVERLAY_COLOR),
+                    style: None,
+                }],
             );
 
             // Start hovering
@@ -2699,7 +2624,13 @@ pub(crate) mod tests {
             // Hovered Checkbox should use overlay color over hoverColor
             assert_paints(
                 tester,
-                &[Paints::CircleRadius(HOVER_OVERLAY_COLOR, SPLASH_RADIUS)],
+                &[PaintCall::Circle {
+                    x: None,
+                    y: None,
+                    radius: Some(SPLASH_RADIUS),
+                    color: Some(HOVER_OVERLAY_COLOR),
+                    style: None,
+                }],
             );
 
             // Finish gestures to release resources.
@@ -2745,10 +2676,13 @@ pub(crate) mod tests {
             assert_eq!(value.get(), Some(false));
             assert_paints(
                 tester,
-                &[Paints::CircleRadius(
-                    INACTIVE_PRESSED_OVERLAY_COLOR,
-                    SPLASH_RADIUS,
-                )],
+                &[PaintCall::Circle {
+                    x: None,
+                    y: None,
+                    radius: Some(SPLASH_RADIUS),
+                    color: Some(INACTIVE_PRESSED_OVERLAY_COLOR),
+                    style: None,
+                }],
             );
 
             for (pointer, expected_value, expected_color) in [
@@ -2765,7 +2699,13 @@ pub(crate) mod tests {
                 assert_eq!(value.get(), expected_value);
                 assert_paints(
                     tester,
-                    &[Paints::CircleRadius(expected_color, SPLASH_RADIUS)],
+                    &[PaintCall::Circle {
+                        x: None,
+                        y: None,
+                        radius: Some(SPLASH_RADIUS),
+                        color: Some(expected_color),
+                        style: None,
+                    }],
                 );
             }
 
@@ -2784,7 +2724,7 @@ pub(crate) mod tests {
             tester.pump();
             // While the pointer is down, the widget disappears.
             pump_checkbox(tester, m3, |_| Container::new().into_widget());
-            assert!(tester.find_by_type::<Checkbox>().is_empty());
+            expect(tester, &find::by_type::<Checkbox>(), finds_nothing());
             // Release pointer after widget disappeared.
             tester.up(&gesture);
         });
@@ -2813,10 +2753,10 @@ pub(crate) mod tests {
             let expect_border = |tester: &WidgetTester| {
                 assert_paints(
                     tester,
-                    &[Paints::RingAt(
-                        BORDER_COLOR,
+                    &[PaintCall::drrect_between(
                         rrect(15.0, 15.0, 33.0, 33.0, 1.0),
                         rrect(19.0, 19.0, 29.0, 29.0, 0.0),
+                        Some(BORDER_COLOR),
                     )],
                 );
             };
@@ -2831,8 +2771,8 @@ pub(crate) mod tests {
             // which is not recorded.
             for value in [Some(true), None] {
                 frame(tester, value, true);
-                assert_does_not_paint(tester, &[Paints::Ring(BORDER_COLOR)]);
-                assert_paints(tester, &[Paints::Rrect(ACTIVE_COLOR)]); // checkbox fill
+                assert_does_not_paint(tester, &[PaintCall::drrect(Some(BORDER_COLOR))]);
+                assert_paints(tester, &[PaintCall::rrect(Some(ACTIVE_COLOR))]); // checkbox fill
             }
         });
     }
@@ -2860,10 +2800,10 @@ pub(crate) mod tests {
                 tester.pump_and_settle();
                 assert_paints(
                     tester,
-                    &[Paints::RingAt(
-                        BORDER_COLOR,
+                    &[PaintCall::drrect_between(
                         rrect(15.0, 15.0, 33.0, 33.0, radius),
                         rrect(19.0, 19.0, 29.0, 29.0, 0.0),
+                        Some(BORDER_COLOR),
                     )],
                 );
             }
@@ -2893,8 +2833,8 @@ pub(crate) mod tests {
                 );
             };
             let tooltip_center = |tester: &WidgetTester| {
-                let tooltip = tester.find_by_type::<crate::tooltip::Tooltip>()[0];
-                tester.global_rect(tester.render_box_of(tooltip)).center()
+                let tooltip = find::by_type::<crate::tooltip::Tooltip>().evaluate(tester)[0];
+                tester.get_rect(tooltip).center()
             };
             frame(
                 tester,
@@ -2902,12 +2842,12 @@ pub(crate) mod tests {
             );
 
             // Default tooltip shows up after long pressed.
-            assert!(tester.find_text(LONG_PRESS_TOOLTIP).is_empty());
+            expect(tester, &find::text(LONG_PRESS_TOOLTIP), finds_nothing());
 
             let center = tooltip_center(tester);
-            tester.tap(center, 1);
+            tester.tap_at(center, 1);
             tester.pump_by(Duration::from_millis(10));
-            assert!(tester.find_text(LONG_PRESS_TOOLTIP).is_empty());
+            expect(tester, &find::text(LONG_PRESS_TOOLTIP), finds_nothing());
 
             let mut gesture_long_press = TestPointer::touch(2);
             tester.down(&mut gesture_long_press, center);
@@ -2916,7 +2856,7 @@ pub(crate) mod tests {
             tester.up(&gesture_long_press);
             tester.pump();
 
-            assert_eq!(tester.find_text(LONG_PRESS_TOOLTIP).len(), 1);
+            expect(tester, &find::text(LONG_PRESS_TOOLTIP), finds_one_widget());
 
             // Tooltip shows up after tapping when set triggerMode to TooltipTriggerMode.tap.
             frame(
@@ -2928,13 +2868,13 @@ pub(crate) mod tests {
 
             tester.pump_by(Duration::from_secs(24 * 60 * 60));
             tester.pump_and_settle();
-            assert!(tester.find_text(TAP_TOOLTIP).is_empty());
-            assert!(tester.find_text(LONG_PRESS_TOOLTIP).is_empty());
+            expect(tester, &find::text(TAP_TOOLTIP), finds_nothing());
+            expect(tester, &find::text(LONG_PRESS_TOOLTIP), finds_nothing());
 
             let center = tooltip_center(tester);
-            tester.tap(center, 3);
+            tester.tap_at(center, 3);
             tester.pump_by(Duration::from_millis(10));
-            assert_eq!(tester.find_text(TAP_TOOLTIP).len(), 1);
+            expect(tester, &find::text(TAP_TOOLTIP), finds_one_widget());
         });
     }
 
@@ -2965,9 +2905,9 @@ pub(crate) mod tests {
             assert_paints(
                 tester,
                 &[
-                    Paints::Circle(colors.error.with_opacity(0.1)),
-                    Paints::Rrect(colors.error),
-                    Paints::Path(colors.on_error),
+                    PaintCall::circle(Some(colors.error.with_opacity(0.1))),
+                    PaintCall::rrect(Some(colors.error)),
+                    PaintCall::path(Some(colors.on_error)),
                 ],
             );
 
@@ -2977,7 +2917,10 @@ pub(crate) mod tests {
             assert!(!has_primary_focus(tester, node.handle()));
             assert_paints(
                 tester,
-                &[Paints::Rrect(colors.error), Paints::Path(colors.on_error)],
+                &[
+                    PaintCall::rrect(Some(colors.error)),
+                    PaintCall::path(Some(colors.on_error)),
+                ],
             );
 
             // Start hovering
@@ -2986,8 +2929,8 @@ pub(crate) mod tests {
             assert_paints(
                 tester,
                 &[
-                    Paints::Circle(colors.error.with_opacity(0.08)),
-                    Paints::Rrect(colors.error),
+                    PaintCall::circle(Some(colors.error.with_opacity(0.08))),
+                    PaintCall::rrect(Some(colors.error)),
                 ],
             );
 
@@ -2997,8 +2940,8 @@ pub(crate) mod tests {
             assert_paints(
                 tester,
                 &[
-                    Paints::Circle(colors.error.with_opacity(0.1)),
-                    Paints::Rrect(colors.error),
+                    PaintCall::circle(Some(colors.error.with_opacity(0.1))),
+                    PaintCall::rrect(Some(colors.error)),
                 ],
             );
             tester.up(&gesture_long_press);
@@ -3044,10 +2987,10 @@ pub(crate) mod tests {
             let expect_border = |tester: &WidgetTester| {
                 assert_paints(
                     tester,
-                    &[Paints::RingAt(
-                        BORDER_COLOR,
+                    &[PaintCall::drrect_between(
                         rrect(15.0, 15.0, 33.0, 33.0, 2.0),
                         rrect(19.0, 19.0, 29.0, 29.0, 0.0),
+                        Some(BORDER_COLOR),
                     )],
                 );
             };
@@ -3096,9 +3039,10 @@ pub(crate) mod tests {
             });
             assert_paints(
                 tester,
-                &[Paints::RingShape(
+                &[PaintCall::drrect_between(
                     rrect(15.0, 15.0, 33.0, 33.0, 2.0),
                     rrect(17.0, 17.0, 31.0, 31.0, 0.0),
+                    None,
                 )],
             );
         });
@@ -3118,10 +3062,10 @@ pub(crate) mod tests {
 
             for platform in [TargetPlatform::IOS, TargetPlatform::MacOS] {
                 frame(tester, platform);
-                assert_eq!(
-                    tester.find_by_type::<CupertinoCheckbox>().len(),
-                    1,
-                    "{platform:?}"
+                expect(
+                    tester,
+                    &find::by_type::<CupertinoCheckbox>(),
+                    finds_one_widget(),
                 );
             }
 
@@ -3133,7 +3077,9 @@ pub(crate) mod tests {
             ] {
                 frame(tester, platform);
                 assert!(
-                    tester.find_by_type::<CupertinoCheckbox>().is_empty(),
+                    find::by_type::<CupertinoCheckbox>()
+                        .evaluate(tester)
+                        .is_empty(),
                     "{platform:?}"
                 );
             }
@@ -3158,8 +3104,8 @@ pub(crate) mod tests {
                 };
 
                 frame(tester, None);
-                let cupertino = tester.find_by_type::<CupertinoCheckbox>()[0];
-                let center = tester.global_rect(tester.render_box_of(cupertino)).center();
+                let cupertino = find::by_type::<CupertinoCheckbox>().evaluate(tester)[0];
+                let center = tester.get_rect(cupertino).center();
                 let mut gesture = TestPointer::mouse(1, 0);
                 tester.add_pointer(&mut gesture, center);
                 tester.pump();
@@ -3224,12 +3170,12 @@ pub(crate) mod tests {
             // Checkbox is unselected, so the default BorderSide appears and fillColor is
             // checkbox's background color.
             frame(tester, true);
-            assert_paints(tester, &[Paints::Ring(enabled_border(&data))]);
-            assert_paints(tester, &[Paints::Rrect(INACTIVE_BACKGROUND_COLOR)]);
+            assert_paints(tester, &[PaintCall::drrect(Some(enabled_border(&data)))]);
+            assert_paints(tester, &[PaintCall::rrect(Some(INACTIVE_BACKGROUND_COLOR))]);
 
             frame(tester, false);
-            assert_paints(tester, &[Paints::Ring(disabled_border(&data))]);
-            assert_paints(tester, &[Paints::Rrect(INACTIVE_BACKGROUND_COLOR)]);
+            assert_paints(tester, &[PaintCall::drrect(Some(disabled_border(&data)))]);
+            assert_paints(tester, &[PaintCall::rrect(Some(INACTIVE_BACKGROUND_COLOR))]);
         });
     }
 
@@ -3284,10 +3230,14 @@ pub(crate) mod tests {
 
     /// Dart's `_paintedCheckBounds`: the bounds of the check mark path.
     fn painted_check_bounds(tester: &WidgetTester) -> Rect {
-        drawn(tester)
-            .into_iter()
-            .find_map(|drawn| match drawn {
-                Drawn::Stroke(_, _, bounds) => Some(bounds),
+        ops(tester)
+            .iter()
+            .find_map(|op| match RecordedCall::of(op) {
+                RecordedCall::Path {
+                    bounds,
+                    stroke_width: Some(_),
+                    ..
+                } => Some(bounds),
                 _ => None,
             })
             .expect("No check mark was painted.")
@@ -3295,10 +3245,10 @@ pub(crate) mod tests {
 
     /// Dart's `_paintedDashLength`: the length of the indeterminate dash.
     fn painted_dash_length(tester: &WidgetTester) -> f64 {
-        drawn(tester)
-            .into_iter()
-            .find_map(|drawn| match drawn {
-                Drawn::Stroke(_, _, bounds) if bounds.height() == 0.0 => Some(bounds.width()),
+        ops(tester)
+            .iter()
+            .find_map(|op| match RecordedCall::of(op) {
+                RecordedCall::Line { p1, p2, .. } => Some((p2.dx() - p1.dx()).abs()),
                 _ => None,
             })
             .expect("No indeterminate dash was painted.")
@@ -3320,7 +3270,15 @@ pub(crate) mod tests {
             pad_frame(tester, Some(true), None, false);
             tester.pump_and_settle();
             // default: scale == 1.0, so strokeWidth stays at _kStrokeWidth (2.0)
-            assert_paints(tester, &[Paints::StrokeWidth(2.0)]);
+            assert_paints(
+                tester,
+                &[PaintCall::Path {
+                    color: None,
+                    style: Some(PaintedStyle::Stroke(Some(2.0))),
+                    includes: vec![],
+                    excludes: vec![],
+                }],
+            );
         });
     }
 
@@ -3330,7 +3288,15 @@ pub(crate) mod tests {
             pad_frame(tester, Some(true), Some(EdgeInsets::all(4.5)), false);
             tester.pump_and_settle();
             // inner = 18 - 9 = 9, scale = 9/18 = 0.5, strokeWidth = 2.0 * 0.5 = 1.0
-            assert_paints(tester, &[Paints::StrokeWidth(1.0)]);
+            assert_paints(
+                tester,
+                &[PaintCall::Path {
+                    color: None,
+                    style: Some(PaintedStyle::Stroke(Some(1.0))),
+                    includes: vec![],
+                    excludes: vec![],
+                }],
+            );
         });
     }
 
@@ -3339,7 +3305,15 @@ pub(crate) mod tests {
         test_widgets(|tester| {
             pad_frame(tester, None, Some(EdgeInsets::all(4.5)), true);
             tester.pump_and_settle();
-            assert_paints(tester, &[Paints::LineWidth(1.0)]);
+            assert_paints(
+                tester,
+                &[PaintCall::Line {
+                    p1: None,
+                    p2: None,
+                    color: None,
+                    stroke_width: Some(1.0),
+                }],
+            );
         });
     }
 
@@ -3350,11 +3324,16 @@ pub(crate) mod tests {
             tester.pump_and_settle();
             // mark collapsed away
             assert!(
-                !drawn(tester)
-                    .iter()
-                    .any(|drawn| matches!(drawn, Drawn::Stroke(..))),
+                !ops(tester).iter().any(|op| matches!(
+                    RecordedCall::of(op),
+                    RecordedCall::Line { .. }
+                        | RecordedCall::Path {
+                            stroke_width: Some(_),
+                            ..
+                        }
+                )),
                 "{:?}",
-                drawn(tester)
+                ops(tester)
             );
         });
     }
@@ -3472,7 +3451,15 @@ pub(crate) mod tests {
             );
             tester.pump_and_settle();
             // theme markInsets applied
-            assert_paints(tester, &[Paints::StrokeWidth(1.0)]);
+            assert_paints(
+                tester,
+                &[PaintCall::Path {
+                    color: None,
+                    style: Some(PaintedStyle::Stroke(Some(1.0))),
+                    includes: vec![],
+                    excludes: vec![],
+                }],
+            );
         });
     }
 
@@ -3486,7 +3473,15 @@ pub(crate) mod tests {
             );
             tester.pump_and_settle();
             // widget value wins
-            assert_paints(tester, &[Paints::StrokeWidth(1.0)]);
+            assert_paints(
+                tester,
+                &[PaintCall::Path {
+                    color: None,
+                    style: Some(PaintedStyle::Stroke(Some(1.0))),
+                    includes: vec![],
+                    excludes: vec![],
+                }],
+            );
         });
     }
 }

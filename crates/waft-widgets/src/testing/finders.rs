@@ -1,28 +1,98 @@
 //! What a [`WidgetTester`] finds in the tree: elements and render objects by type, text, key
 //! or icon, whether one is onstage, and where it is.
 //!
-//! The finders are eager `Vec`s under Dart's names. `find_text` and `find_by_type` report
-//! offstage elements too, and the `find_onstage_*` ones skip them, as Dart's finders do by
-//! default (`skipOffstage: true`).
+//! Dart's tester methods take a [`Finder`](super::Finder) ([`element`](WidgetTester::element),
+//! [`widget`](WidgetTester::widget), [`render_object`](WidgetTester::render_object), the `get_*`
+//! geometry), through [`FindsOne`] and [`RenderTarget`], which an element, a global key and a
+//! render box satisfy too.
+//!
+//! The eager methods left (`find_onstage_by_key`, `descendants_of_type`, `ancestor_of_type`,
+//! `center_of`, `global_rect`, `render_box_of`) are older helpers that harness C's sweep moves
+//! onto [`find`](super::find) and the `get_*` geometry; the onstage ones skip what Dart's finders
+//! skip, by the same walk (`Element::debug_visit_onstage_children`).
+
+use std::collections::HashSet;
 
 use waft_foundation::App;
 
-use super::WidgetTester;
+use super::{FindsOne, RenderTarget, WidgetTester};
 
 impl WidgetTester {
-    /// The render object of `key`'s widget.
-    pub fn render_object(&self, key: &crate::GlobalKey) -> waft_rendering::AnyRenderObject {
-        let app = self.cell.borrow();
-        key.current_context(&app)
-            .expect("the keyed widget is mounted")
-            .find_render_object(&app)
-            .expect("the keyed widget has a render object")
+    /// Dart's `tester.element(finder)`: the one element `target` finds.
+    pub fn element(&self, target: impl FindsOne) -> crate::AnyElement {
+        target.find_one(self, "element")
     }
 
-    /// The size of `key`'s render box: Dart's `tester.getSize(find.byKey(key))`.
-    pub fn size_of(&self, key: &crate::GlobalKey) -> waft_embedder::Size {
-        let render = self.render_object(key).as_box().expect("a render box");
+    /// Dart's `tester.renderObject(finder)`: the render object of the one element `target`
+    /// finds.
+    pub fn render_object(&self, target: impl FindsOne) -> waft_rendering::AnyRenderObject {
+        let element = target.find_one(self, "renderObject");
+        let app = self.cell.borrow();
+        element
+            .find_render_object(&app)
+            .expect("the widget found has a render object")
+    }
+
+    /// Dart's `tester.getSize(finder)`.
+    pub fn get_size(&self, target: impl RenderTarget) -> waft_embedder::Size {
+        let render = target.render_box(self, "getSize");
         render.size(&self.cell.borrow())
+    }
+
+    /// Dart's `tester.getCenter(finder)`: the global position of the centre of the one render
+    /// box `target` finds.
+    pub fn get_center(&self, target: impl RenderTarget) -> waft_embedder::Offset {
+        self.center_for(target, "getCenter")
+    }
+
+    /// Dart's `getCenter(finder, callee: callee)`: the centre, a failure naming `callee`.
+    pub(super) fn center_for(
+        &self,
+        target: impl RenderTarget,
+        callee: &str,
+    ) -> waft_embedder::Offset {
+        self.global_point(target, callee, |size| {
+            size.center(waft_embedder::Offset::ZERO)
+        })
+    }
+
+    /// Dart's `tester.getTopLeft(finder)`.
+    pub fn get_top_left(&self, target: impl RenderTarget) -> waft_embedder::Offset {
+        self.global_point(target, "getTopLeft", |_| waft_embedder::Offset::ZERO)
+    }
+
+    /// Dart's `tester.getTopRight(finder)`.
+    pub fn get_top_right(&self, target: impl RenderTarget) -> waft_embedder::Offset {
+        self.global_point(target, "getTopRight", |size| {
+            size.top_right(waft_embedder::Offset::ZERO)
+        })
+    }
+
+    /// Dart's `tester.getBottomLeft(finder)`.
+    pub fn get_bottom_left(&self, target: impl RenderTarget) -> waft_embedder::Offset {
+        self.global_point(target, "getBottomLeft", |size| {
+            size.bottom_left(waft_embedder::Offset::ZERO)
+        })
+    }
+
+    /// Dart's `tester.getBottomRight(finder)`.
+    pub fn get_bottom_right(&self, target: impl RenderTarget) -> waft_embedder::Offset {
+        self.global_point(target, "getBottomRight", |size| {
+            size.bottom_right(waft_embedder::Offset::ZERO)
+        })
+    }
+
+    /// The global position of the point `at` names in the size of `target`'s render box.
+    fn global_point(
+        &self,
+        target: impl RenderTarget,
+        callee: &str,
+        at: impl FnOnce(waft_embedder::Size) -> waft_embedder::Offset,
+    ) -> waft_embedder::Offset {
+        let render = target.render_box(self, callee);
+        let app = self.cell.borrow();
+        let point = at(render.size(&app));
+        render.local_to_global(&app, point, None)
     }
 
     /// Every render object of type `T` in the view, in paint order.
@@ -68,151 +138,17 @@ impl WidgetTester {
         all
     }
 
-    /// Dart's `find.byType(W)`: every element whose widget is a `W`.
-    pub fn find_by_type<W: 'static>(&self) -> Vec<crate::AnyElement> {
-        let found = self.elements();
-        let app = self.cell.borrow();
-        found
-            .into_iter()
-            .filter(|element| crate::downcast_widget::<W>(&**element.widget(&app)).is_some())
-            .collect()
-    }
-
-    /// Dart's `find.text(text)`: every `Text` whose data, or its span's plain text, is `text`.
-    pub fn find_text(&self, text: &str) -> Vec<crate::AnyElement> {
-        let found = self.find_by_type::<crate::Text>();
-        let app = self.cell.borrow();
-        found
-            .into_iter()
-            .filter(|element| {
-                let widget = crate::downcast_widget::<crate::Text>(&**element.widget(&app))
-                    .expect("found by type");
-                match (&widget.data, &widget.text_span) {
-                    (Some(data), _) => data == text,
-                    (None, Some(span)) => span.to_plain_text(true, true) == text,
-                    (None, None) => false,
-                }
-            })
-            .collect()
-    }
-
-    /// Whether `element` is onstage, as the `debugVisitOnstageChildren` overrides of the
-    /// elements above it answer: in an entry each `Overlay` keeps onstage, under no `Offstage`
-    /// that hides it, at each `IndexedStack`'s index, a toolbar item that is painted, and in a
-    /// viewport's visible sliver and a lazy sliver's painted window. Dart's finders skip the
-    /// rest (`skipOffstage: true`).
+    /// Whether `element` is onstage: whether Dart's finders, walking the tree with
+    /// `debugVisitOnstageChildren` (`skipOffstage: true`), reach it.
     pub fn is_onstage(&self, element: crate::AnyElement) -> bool {
-        use waft_rendering::ContainerRenderObjectMixin as _;
-        let app = self.cell.borrow();
-        let Some(mut object) = element.find_render_object(&app) else {
-            return false;
-        };
-        while let Some(parent) = object.parent(&app) {
-            if let Some(theater) = parent.downcast::<crate::RenderTheater>(&app) {
-                let mut child = theater.first_child(&app);
-                for _ in 0..theater.skip_count(&app) {
-                    child = child.and_then(|current| theater.child_after(&app, current));
-                }
-                let mut onstage = false;
-                while let Some(current) = child {
-                    if current.as_object() == object {
-                        onstage = true;
-                        break;
-                    }
-                    child = theater.child_after(&app, current);
-                }
-                if !onstage {
-                    return false;
-                }
-            }
-            if parent
-                .downcast::<waft_rendering::RenderOffstage>(&app)
-                .is_some_and(|offstage| offstage.offstage(&app))
-            {
-                return false;
-            }
-            // Dart's `_IndexedStackElement.debugVisitOnstageChildren`: only the child at the
-            // stack's index is onstage, and none when the index is null.
-            if let Some(stack) = parent.downcast::<waft_rendering::RenderIndexedStack>(&app) {
-                let Some(index) = stack.index(&app) else {
-                    return false;
-                };
-                let mut child = stack.first_child(&app);
-                for _ in 0..index {
-                    child = child.and_then(|current| stack.child_after(&app, current));
-                }
-                if child.is_none_or(|current| current.as_object() != object) {
-                    return false;
-                }
-            }
-            // Dart's `debugVisitOnstageChildren` of Material's
-            // `_TextSelectionToolbarItemsLayoutElement` and Cupertino's
-            // `_CupertinoTextSelectionToolbarItemsElement`: a child the items layout does not
-            // paint is offstage. A single-child box that keeps its child's offset in
-            // `ToolbarItemsParentData` too (Material's trailing-edge align) paints its child,
-            // and the items layout always has its overflow buttons beside the items, so the rule
-            // reads only a child with a sibling. Until `Element::debug_visit_onstage_children`.
-            if let Some(data) = object
-                .parent_data(&app)
-                .and_then(|data| data.part::<crate::ToolbarItemsParentData>())
-                && !data.should_paint
-                && has_sibling(&app, parent)
-            {
-                return false;
-            }
-            // Dart's `_ViewportElement.debugVisitOnstageChildren`: a viewport's sliver is onstage
-            // only while its geometry is visible.
-            if parent.as_sliver().is_none()
-                && let Some(sliver) = object.as_sliver()
-                && !sliver.geometry(&app).visible
-            {
-                return false;
-            }
-            // Dart's `SliverMultiBoxAdaptorElement.debugVisitOnstageChildren`: a lazy sliver's
-            // child is onstage only while its layout offset falls in the sliver's painted
-            // window, which a kept-alive child's does not.
-            if let Some(sliver) = parent.as_sliver()
-                && let Some(child_parent_data) = object
-                    .parent_data(&app)
-                    .and_then(|data| data.part::<waft_rendering::SliverMultiBoxAdaptorParentData>())
-            {
-                let constraints = sliver.constraints(&app);
-                let paint_bounds = object.paint_bounds(&app);
-                let item_extent = match constraints.axis() {
-                    waft_painting::Axis::Horizontal => paint_bounds.width(),
-                    waft_painting::Axis::Vertical => paint_bounds.height(),
-                };
-                let onstage = child_parent_data
-                    .layout_offset()
-                    .is_some_and(|layout_offset| {
-                        layout_offset
-                            < constraints.scroll_offset + constraints.remaining_paint_extent
-                            && layout_offset + item_extent > constraints.scroll_offset
-                    });
-                if !onstage {
-                    return false;
-                }
-            }
-            object = parent;
-        }
-        true
+        self.onstage_elements().contains(&element)
     }
 
-    /// Dart's `find.text(text)` with its default `skipOffstage`: [`find_text`](Self::find_text)
-    /// without the offstage ones.
-    pub fn find_onstage_text(&self, text: &str) -> Vec<crate::AnyElement> {
-        self.find_text(text)
+    /// Every element the onstage walk reaches.
+    fn onstage_elements(&self) -> HashSet<crate::AnyElement> {
+        super::find::by_element_predicate("any element", |_, _| true)
+            .evaluate(self)
             .into_iter()
-            .filter(|element| self.is_onstage(*element))
-            .collect()
-    }
-
-    /// Dart's `find.byType(W)` with its default `skipOffstage`:
-    /// [`find_by_type`](Self::find_by_type) without the offstage ones.
-    pub fn find_onstage_by_type<W: 'static>(&self) -> Vec<crate::AnyElement> {
-        self.find_by_type::<W>()
-            .into_iter()
-            .filter(|element| self.is_onstage(*element))
             .collect()
     }
 
@@ -227,18 +163,17 @@ impl WidgetTester {
                 .filter(|element| element.widget(&app).key() == Some(key))
                 .collect()
         };
+        let onstage = self.onstage_elements();
         keyed
             .into_iter()
-            .filter(|element| self.is_onstage(*element))
+            .filter(|element| onstage.contains(element))
             .collect()
     }
 
-    /// Reads the widget of `element` as a `W`: Dart's `tester.widget<W>(finder)`.
-    pub fn widget<W: 'static, R>(
-        &self,
-        element: crate::AnyElement,
-        read: impl FnOnce(&W) -> R,
-    ) -> R {
+    /// Reads the widget of the one element `target` finds as a `W`: Dart's
+    /// `tester.widget<W>(finder)`.
+    pub fn widget<W: 'static, R>(&self, target: impl FindsOne, read: impl FnOnce(&W) -> R) -> R {
+        let element = target.find_one(self, "widget");
         let app = self.cell.borrow();
         read(
             crate::downcast_widget::<W>(&**element.widget(&app))
@@ -255,7 +190,9 @@ impl WidgetTester {
     /// Dart's `find.descendant(of: of, matching: find.byType(W))`: every element under `of`
     /// whose widget is a `W`.
     pub fn descendants_of_type<W: 'static>(&self, of: crate::AnyElement) -> Vec<crate::AnyElement> {
-        self.find_by_type::<W>()
+        super::find::by_type::<W>()
+            .skip_offstage(false)
+            .evaluate(self)
             .into_iter()
             .filter(|element| self.ancestors(*element).contains(&of))
             .collect()
@@ -291,7 +228,8 @@ impl WidgetTester {
     /// Dart's `tester.getRect(finder)`: the rect between the global positions of `render`'s
     /// top left and bottom right corners, so a box painted scaled has its scaled size, where
     /// [`global_rect`](Self::global_rect) keeps the box's own size.
-    pub fn get_rect(&self, render: waft_rendering::AnyRenderBox) -> waft_embedder::Rect {
+    pub fn get_rect(&self, target: impl RenderTarget) -> waft_embedder::Rect {
+        let render = target.render_box(self, "getRect");
         let app = self.cell.borrow();
         let size = render.size(&app);
         let top_left = render.local_to_global(&app, waft_embedder::Offset::ZERO, None);
@@ -324,8 +262,9 @@ impl WidgetTester {
     /// The color of the first `Text` showing `text`, as its paragraph paints it: Dart's
     /// `tester.renderObject<RenderParagraph>(find.text(text)).text.style!.color!`.
     pub fn text_color(&self, text: &str) -> waft_embedder::Color {
-        let element = *self
-            .find_text(text)
+        let element = *super::find::text(text)
+            .skip_offstage(false)
+            .evaluate(self)
             .first()
             .expect("a Text showing the text");
         let render = self.render_box_of(element);
@@ -344,26 +283,19 @@ impl WidgetTester {
     /// The style of the first `Icon`'s glyph: Dart's `tester.widget<RichText>(find.descendant(
     /// of: find.byIcon(icon), matching: find.byType(RichText))).text.style!`.
     pub fn icon_style(&self) -> waft_painting::TextStyle {
-        let icon = *self.find_by_type::<crate::Icon>().first().expect("an Icon");
+        let icon = *super::find::by_type::<crate::Icon>()
+            .skip_offstage(false)
+            .evaluate(self)
+            .first()
+            .expect("an Icon");
         self.glyph_style(icon)
-    }
-
-    /// Dart's `find.byIcon(icon)`: the first `Icon` showing `icon`.
-    pub fn find_by_icon(&self, icon: &crate::IconData) -> crate::AnyElement {
-        self.find_by_type::<crate::Icon>()
-            .into_iter()
-            .find(|element| {
-                self.widget(*element, |widget: &crate::Icon| {
-                    widget.icon.as_ref() == Some(icon)
-                })
-            })
-            .expect("an Icon showing the icon")
     }
 
     /// The style of the glyph of the `Icon` `icon` is: the `RichText` below it.
     pub fn glyph_style(&self, icon: crate::AnyElement) -> waft_painting::TextStyle {
-        let rich_text = self
-            .find_by_type::<crate::RichText>()
+        let rich_text = super::find::by_type::<crate::RichText>()
+            .skip_offstage(false)
+            .evaluate(self)
             .into_iter()
             .find(|rich_text| self.ancestors(*rich_text).contains(&icon))
             .expect("the Icon's RichText");
@@ -391,13 +323,6 @@ impl WidgetTester {
         let mut app = self.cell.borrow_mut();
         crate::FocusManager::instance(&mut app).set_highlight_strategy(&mut app, strategy);
     }
-}
-
-/// Whether `parent` lays out more than one child.
-fn has_sibling(app: &App, parent: waft_rendering::AnyRenderObject) -> bool {
-    let mut children = 0;
-    parent.visit_children(app, &mut |_| children += 1);
-    children > 1
 }
 
 /// Adds `layer` and the layers under it to `layers`, depth first with a parent before its

@@ -38,8 +38,6 @@ mod sheet;
 mod slider;
 mod spell_check_suggestions_toolbar;
 mod switch;
-#[cfg(test)]
-mod test_support;
 mod text_field;
 mod text_selection;
 mod text_selection_toolbar;

@@ -4436,9 +4436,13 @@ pub(crate) mod tests {
     //! golden and leak-tracking cases are not ported.
 
     use waft_embedder::{Locale, TargetPlatform};
+    use waft_rendering::testing::RecordedCall;
     use waft_widgets::{AnyElement, DefaultWidgetsLocalizations, Localizations, RichText};
 
-    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+    use waft_widgets::testing::{
+        TestPointer, WidgetTester, expect, find, finds_n_widgets, finds_nothing, finds_one_widget,
+        test_widgets,
+    };
 
     use super::*;
     use crate::app_bar::AppBar;
@@ -4624,37 +4628,21 @@ pub(crate) mod tests {
 
     /// The first element showing `text`: Dart's `find.text(text)`.
     pub(crate) fn text(tester: &WidgetTester, text: &str) -> AnyElement {
-        *tester
-            .find_text(text)
+        *find::text(text)
+            .evaluate(tester)
             .first()
             .unwrap_or_else(|| panic!("a Text showing {text:?}"))
     }
 
-    /// Dart's `tester.getSize(finder)`.
-    pub(crate) fn size_of(tester: &WidgetTester, element: AnyElement) -> Size {
-        let render = tester.render_box_of(element);
-        render.size(&tester.cell.borrow())
-    }
-
-    /// Dart's `tester.getRect(finder)`.
-    pub(crate) fn rect_of(tester: &WidgetTester, element: AnyElement) -> Rect {
-        tester.get_rect(tester.render_box_of(element))
-    }
-
-    /// Dart's `tester.getCenter(finder)`.
-    pub(crate) fn center_of(tester: &WidgetTester, element: AnyElement) -> Offset {
-        rect_of(tester, element).center()
-    }
-
     /// Dart's `tester.tap(finder)`.
     pub(crate) fn tap(tester: &mut WidgetTester, element: AnyElement) {
-        let center = center_of(tester, element);
-        tester.tap(center, 1);
+        let center = tester.get_center(element);
+        tester.tap_at(center, 1);
     }
 
     /// The only element whose widget is a `W`: Dart's `find.byType(W)` with `findsOneWidget`.
     pub(crate) fn only<W: 'static>(tester: &WidgetTester) -> AnyElement {
-        let found = tester.find_by_type::<W>();
+        let found = find::by_type::<W>().evaluate(tester);
         assert_eq!(found.len(), 1, "one {}", std::any::type_name::<W>());
         found[0]
     }
@@ -4672,7 +4660,7 @@ pub(crate) mod tests {
                     )
                     .into_widget(),
             ));
-            assert_eq!(size_of(tester, only::<Tab>(tester)), Size::new(10.0, 46.0));
+            assert_eq!(tester.get_size(only::<Tab>(tester)), Size::new(10.0, 46.0));
         });
     }
 
@@ -4689,7 +4677,7 @@ pub(crate) mod tests {
                     )
                     .into_widget(),
             ));
-            assert_eq!(size_of(tester, only::<Tab>(tester)), Size::new(10.0, 46.0));
+            assert_eq!(tester.get_size(only::<Tab>(tester)), Size::new(10.0, 46.0));
         });
     }
 
@@ -4729,7 +4717,7 @@ pub(crate) mod tests {
             } else {
                 Size::new(14.0, 46.0)
             };
-            assert_eq!(size_of(tester, only::<Tab>(tester)), expected);
+            assert_eq!(tester.get_size(only::<Tab>(tester)), expected);
         });
     }
 
@@ -4741,9 +4729,9 @@ pub(crate) mod tests {
 
             let frame = Frame::new(tabs.clone(), "C").build(tester);
             tester.pump_widget(frame);
-            assert!(!tester.find_text("A").is_empty());
-            assert!(!tester.find_text("B").is_empty());
-            assert!(!tester.find_text("C").is_empty());
+            expect(tester, &find::text("A"), finds_one_widget());
+            expect(tester, &find::text("B"), finds_one_widget());
+            expect(tester, &find::text("C"), finds_one_widget());
             let controller = default_controller_of(tester, text(tester, "A"));
             {
                 let app = tester.cell.borrow();
@@ -4803,41 +4791,34 @@ pub(crate) mod tests {
         pub(crate) p2: Offset,
     }
 
-    /// Every line `render` and its subtree paint, in order: a stroked path of two points,
-    /// read back from its bounds, which is exact for the horizontal lines the cases draw.
     pub(crate) fn painted_lines(
         tester: &WidgetTester,
         render: AnyRenderObject,
     ) -> Vec<PaintedLine> {
-        use waft_embedder::valo::{Op, PaintStyle as ValoPaintStyle};
-        tester
-            .painted_ops(render)
-            .into_iter()
-            .filter_map(|op| match op {
-                Op::DrawPath { path, paint, .. } => {
-                    let ValoPaintStyle::Stroke(stroke) = paint.style else {
-                        return None;
-                    };
-                    if path.elements().count() != 2 {
-                        return None;
-                    }
-                    let bounds = path.bounds();
-                    Some(PaintedLine {
-                        color: Color::new(argb32(paint.color)),
-                        stroke_width: f64::from(stroke.width),
-                        p1: Offset::new(f64::from(bounds.x), f64::from(bounds.y)),
-                        p2: Offset::new(
-                            f64::from(bounds.x + bounds.width),
-                            f64::from(bounds.y + bounds.height),
-                        ),
-                    })
-                }
+        lines_of(&tester.painted_ops(render))
+    }
+
+    /// The lines among `ops`, as `paints..line` reads them.
+    pub(crate) fn lines_of(ops: &[waft_embedder::valo::Op]) -> Vec<PaintedLine> {
+        ops.iter()
+            .filter_map(|op| match RecordedCall::of(op) {
+                RecordedCall::Line {
+                    p1,
+                    p2,
+                    color,
+                    stroke_width,
+                } => Some(PaintedLine {
+                    color,
+                    stroke_width: stroke_width.expect("a stroked line"),
+                    p1,
+                    p2,
+                }),
                 _ => None,
             })
             .collect()
     }
 
-    fn argb32(color: waft_embedder::valo::Color) -> u32 {
+    pub(crate) fn argb32(color: waft_embedder::valo::Color) -> u32 {
         let channel = |value: f32| (value * 255.0).round() as u32;
         (channel(color.a) << 24)
             | (channel(color.r) << 16)
@@ -4867,8 +4848,8 @@ pub(crate) mod tests {
 
     /// The render box of the first `W`: Dart's `tester.firstRenderObject<RenderBox>(find.byType(W))`.
     pub(crate) fn first_render_box<W: 'static>(tester: &WidgetTester) -> AnyRenderBox {
-        let element = *tester
-            .find_by_type::<W>()
+        let element = *find::by_type::<W>()
+            .evaluate(tester)
             .first()
             .unwrap_or_else(|| panic!("a {}", std::any::type_name::<W>()));
         tester.render_box_of(element)
@@ -4894,14 +4875,14 @@ pub(crate) mod tests {
             let tab_bar = tester.render_object(&tab_bar_key).as_box().expect("a box");
             assert_eq!(tab_bar.size(&tester.cell.borrow()).width(), 800.0);
             // The center of the FFFFFF item is to the right of the TabBar's center
-            assert!(center_of(tester, text(tester, "FFFFFF")).dx() > 401.0);
+            assert!(tester.get_center(text(tester, "FFFFFF")).dx() > 401.0);
 
             let f = text(tester, "FFFFFF");
             tap(tester, f);
             tester.pump_and_settle();
             assert_eq!(controller.index(&tester.cell.borrow()), 5);
             // The center of the FFFFFF item is now at the TabBar's center
-            let center = center_of(tester, text(tester, "FFFFFF")).dx();
+            let center = tester.get_center(text(tester, "FFFFFF")).dx();
             assert!(close(center, 452.0, 1.0), "{center}");
         });
     }
@@ -4936,8 +4917,8 @@ pub(crate) mod tests {
             tester.move_to(&mut gesture, Offset::new(0.0, 100.0), true);
             tester.move_to(&mut gesture, Offset::new(100.0, 100.0), true);
             assert_eq!(index(tester), 0);
-            assert_eq!(tester.find_text("First").len(), 1);
-            assert!(tester.find_text("Second").is_empty());
+            expect(tester, &find::text("First"), finds_one_widget());
+            expect(tester, &find::text("Second"), finds_nothing());
 
             // Drag more than the TabBarView's width to the right. This forces
             // the selected index to change to 1.
@@ -4946,8 +4927,8 @@ pub(crate) mod tests {
             tester.pump(); // start the scroll animation
             tester.pump_by(Duration::from_secs(1)); // finish the scroll animation
             assert_eq!(index(tester), 1);
-            assert!(tester.find_text("First").is_empty());
-            assert_eq!(tester.find_text("Second").len(), 1);
+            expect(tester, &find::text("First"), finds_nothing());
+            expect(tester, &find::text("Second"), finds_one_widget());
 
             let mut gesture = TestPointer::touch(2);
             tester.down(&mut gesture, Offset::new(100.0, 100.0));
@@ -4956,8 +4937,8 @@ pub(crate) mod tests {
             tester.move_to(&mut gesture, Offset::new(0.0, 100.0), true);
             tester.move_to(&mut gesture, Offset::new(100.0, 100.0), true);
             assert_eq!(index(tester), 1);
-            assert!(tester.find_text("First").is_empty());
-            assert_eq!(tester.find_text("Second").len(), 1);
+            expect(tester, &find::text("First"), finds_nothing());
+            expect(tester, &find::text("Second"), finds_one_widget());
 
             // Drag more than the TabBarView's width to the left. This forces
             // the selected index to change back to 0.
@@ -4966,8 +4947,8 @@ pub(crate) mod tests {
             tester.pump(); // start the scroll animation
             tester.pump_by(Duration::from_secs(1)); // finish the scroll animation
             assert_eq!(index(tester), 0);
-            assert_eq!(tester.find_text("First").len(), 1);
-            assert!(tester.find_text("Second").is_empty());
+            expect(tester, &find::text("First"), finds_one_widget());
+            expect(tester, &find::text("Second"), finds_nothing());
         });
     }
 
@@ -5077,15 +5058,17 @@ pub(crate) mod tests {
         use crate::icons::Icons;
         use crate::material::RenderInkFeatures;
         use crate::scaffold::Scaffold;
-        use crate::test_support::{Drawn, PaintInspection, is_same_color_as};
+        use crate::test_support::PaintInspection;
+        use waft_embedder::valo::Op;
+        use waft_rendering::testing::{PaintCall, paints};
         use waft_widgets::testing::TestVSync;
 
         /// The style of the `Text` showing `text` under a tab's `_TabStyle`: Dart's `getTabText`'s
         /// paragraph's `text.style`.
         fn tab_text_style(tester: &WidgetTester, label: &str) -> TextStyle {
-            let styles = tester.find_by_type::<waft_widgets::Animated<TabStyle>>();
-            let element = tester
-                .find_text(label)
+            let styles = find::by_type::<waft_widgets::Animated<TabStyle>>().evaluate(tester);
+            let element = find::text(label)
+                .evaluate(tester)
                 .into_iter()
                 .find(|element| {
                     let ancestors = tester.ancestors(*element);
@@ -5134,26 +5117,17 @@ pub(crate) mod tests {
             TabController::new(&mut app, 0, None, length, TestVSync)
         }
 
-        /// Whether `drawn` has a rect of `color`: Dart's `paints..rect(color:)`.
-        fn has_rect(drawn: &[Drawn], color: Color) -> bool {
-            drawn
-                .iter()
-                .any(|drawn| matches!(drawn, Drawn::Rect(argb, _) if is_same_color_as(Color::new(*argb), color)))
+        fn has_rect(ops: &[Op], color: Color) -> bool {
+            paints(ops, &[PaintCall::rect(Some(color))]).is_ok()
         }
 
-        /// Whether `drawn` has a rect, then a rect of `color`: Dart's `paints..rect()..rect(color:)`.
-        fn has_rect_then_rect(drawn: &[Drawn], color: Color) -> bool {
-            drawn
-                .iter()
-                .position(|drawn| matches!(drawn, Drawn::Rect(..)))
-                .is_some_and(|first| has_rect(&drawn[first + 1..], color))
+        fn has_rect_then_rect(ops: &[Op], color: Color) -> bool {
+            paints(ops, &[PaintCall::rect(None), PaintCall::rect(Some(color))]).is_ok()
         }
 
-        /// What the first material and its subtree paint: Dart's `paints` on
-        /// `tester.allRenderObjects.firstWhere(_RenderInkFeatures)`.
-        fn first_material_paints(tester: &WidgetTester) -> Vec<Drawn> {
+        fn first_material_paints(tester: &WidgetTester) -> Vec<Op> {
             let render = tester.first::<RenderInkFeatures>();
-            tester.painted(render.as_object())
+            tester.painted_ops(render.as_object())
         }
 
         // 'Tab sizing - icon and text'.
@@ -5183,7 +5157,7 @@ pub(crate) mod tests {
                 } else {
                     Size::new(14.0, 72.0)
                 };
-                assert_eq!(size_of(tester, only::<Tab>(tester)), expected);
+                assert_eq!(tester.get_size(only::<Tab>(tester)), expected);
             });
         }
 
@@ -5209,7 +5183,7 @@ pub(crate) mod tests {
                     rich_text_font_family(tester).as_deref(),
                     Some("FlutterTest")
                 );
-                assert_eq!(size_of(tester, only::<Tab>(tester)), Size::new(210.0, 72.0));
+                assert_eq!(tester.get_size(only::<Tab>(tester)), Size::new(210.0, 72.0));
             });
         }
 
@@ -5240,14 +5214,14 @@ pub(crate) mod tests {
                 } else {
                     Size::new(14.0, 72.0)
                 };
-                assert_eq!(size_of(tester, only::<Tab>(tester)), expected);
+                assert_eq!(tester.get_size(only::<Tab>(tester)), expected);
             });
         }
 
         /// Dart's `getIconMargin`: from the bottom of the house icon to the top of the label.
         fn icon_margin(tester: &WidgetTester) -> f64 {
-            let icon_rect = rect_of(tester, tester.find_by_icon(&Icons::house()));
-            let label_rect = rect_of(tester, text(tester, "x"));
+            let icon_rect = tester.get_rect(tester.element(find::by_icon(&Icons::house()).first()));
+            let label_rect = tester.get_rect(text(tester, "x"));
             label_rect.top - icon_rect.bottom
         }
 
@@ -5281,12 +5255,18 @@ pub(crate) mod tests {
             });
         }
 
-        /// Whether the only `TabBar` paints a line of `color`: Dart's `paints..line(color:)`.
         fn tab_bar_paints_line_of(tester: &WidgetTester, color: Color) -> bool {
             let tab_bar = first_render_box::<TabBar>(tester);
-            painted_lines(tester, tab_bar.as_object())
-                .iter()
-                .any(|line| line.color.to_argb32() == color.to_argb32())
+            paints(
+                &tester.painted_ops(tab_bar.as_object()),
+                &[PaintCall::Line {
+                    p1: None,
+                    p2: None,
+                    color: Some(color),
+                    stroke_width: None,
+                }],
+            )
+            .is_ok()
         }
 
         // 'Tab color - normal'.
@@ -5371,9 +5351,9 @@ pub(crate) mod tests {
             unselected: &str,
             unselected_color: Color,
         ) {
-            assert_eq!(tester.find_text("A").len(), 1);
-            assert_eq!(tester.find_text("B").len(), 1);
-            assert_eq!(tester.find_text("C").len(), 1);
+            expect(tester, &find::text("A"), finds_one_widget());
+            expect(tester, &find::text("B"), finds_one_widget());
+            expect(tester, &find::text("C"), finds_one_widget());
 
             // Test selected label text style.
             let selected_label = tab_text_style(tester, selected);
@@ -5541,7 +5521,7 @@ pub(crate) mod tests {
         ) {
             let mut gesture = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
             tester.add_pointer(&mut gesture, Offset::ZERO);
-            let selected = center_of(tester, text(tester, "A"));
+            let selected = tester.get_center(text(tester, "A"));
             tester.move_to(&mut gesture, selected, false);
             tester.pump_and_settle();
             assert!(has_rect(&first_material_paints(tester), selected_hovered));
@@ -5555,7 +5535,7 @@ pub(crate) mod tests {
             tester.up(&gesture);
             tester.pump_and_settle();
 
-            let unselected = center_of(tester, text(tester, "B"));
+            let unselected = tester.get_center(text(tester, "B"));
             tester.move_to(&mut gesture, unselected, false);
             tester.pump_and_settle();
             assert!(has_rect(&first_material_paints(tester), unselected_hovered));
@@ -5632,9 +5612,9 @@ pub(crate) mod tests {
                 frame.is_scrollable = true;
                 let frame = frame.build(tester);
                 tester.pump_widget(frame);
-                assert_eq!(tester.find_text("A").len(), 1);
-                assert_eq!(tester.find_text("B").len(), 1);
-                assert_eq!(tester.find_text("C").len(), 1);
+                expect(tester, &find::text("A"), finds_one_widget());
+                expect(tester, &find::text("B"), finds_one_widget());
+                expect(tester, &find::text("C"), finds_one_widget());
                 let controller = default_controller_of(tester, text(tester, "A"));
                 assert_eq!(index_of(tester, controller.handle()), 2);
                 assert_eq!(controller.previous_index(&tester.cell.borrow()), 2);
@@ -5671,7 +5651,7 @@ pub(crate) mod tests {
 
             let tab_bar = tester.render_object(&tab_bar_key).as_box().expect("a box");
             assert_eq!(tab_bar.size(&tester.cell.borrow()).width(), 800.0);
-            let center = center_of(tester, text(tester, "FFFFFF")).dx();
+            let center = tester.get_center(text(tester, "FFFFFF")).dx();
             match text_direction {
                 // The center of the FFFFFF item is to the right of the TabBar's center
                 TextDirection::Ltr => assert!(center > 401.0, "{center}"),
@@ -5684,7 +5664,7 @@ pub(crate) mod tests {
             tester.pump_and_settle();
             assert_eq!(index_of(tester, controller.handle()), 5);
             // The center of the FFFFFF item is now at the TabBar's center
-            let center = center_of(tester, text(tester, "FFFFFF")).dx();
+            let center = tester.get_center(text(tester, "FFFFFF")).dx();
             assert!(close(center, expected, 1.0), "{center}");
         }
 
@@ -5777,12 +5757,12 @@ pub(crate) mod tests {
             assert_eq!(index_of(tester, controller.handle()), 0);
 
             // Fling-scroll the TabBar to the left
-            assert!(center_of(tester, text(tester, "HHHH")).dx() < start_limit);
-            let tab_bar_center = tester.center_of(&tab_bar_key);
+            assert!(tester.get_center(text(tester, "HHHH")).dx() < start_limit);
+            let tab_bar_center = tester.get_center(&tab_bar_key);
             tester.fling_from(tab_bar_center, Offset::new(-200.0, 0.0), 10000.0, 1);
             tester.pump();
             tester.pump_by(Duration::from_secs(1)); // finish the scroll animation
-            assert!(center_of(tester, text(tester, "HHHH")).dx() < 500.0);
+            assert!(tester.get_center(text(tester, "HHHH")).dx() < 500.0);
 
             // Scrolling the TabBar doesn't change the selection
             assert_eq!(index_of(tester, controller.handle()), 0);
@@ -5861,12 +5841,12 @@ pub(crate) mod tests {
                 };
                 // Dart's `find.widgetWithText(TabStateMarker, name, skipOffstage: false)`'s state.
                 let find_state_marker_state = |tester: &WidgetTester, name: &str| {
-                    let marker = tester
-                        .find_by_type::<TabStateMarker>()
+                    let marker = find::by_type::<TabStateMarker>()
+                        .evaluate(tester)
                         .into_iter()
                         .find(|marker| {
-                            tester
-                                .find_text(name)
+                            find::text(name)
+                                .evaluate(tester)
                                 .iter()
                                 .any(|text| tester.ancestors(*text).contains(marker))
                         })
@@ -5881,7 +5861,7 @@ pub(crate) mod tests {
                 let controller = default_controller_of(tester, text(tester, "AAAAAA"));
 
                 let mut gesture = TestPointer::touch(1);
-                let start = center_of(tester, text(tester, tabs[0]));
+                let start = tester.get_center(text(tester, tabs[0]));
                 tester.down(&mut gesture, start);
                 tester.move_to(&mut gesture, start + Offset::new(-600.0, 0.0), true);
                 tester.pump();
@@ -5903,7 +5883,7 @@ pub(crate) mod tests {
                 // Move to the third tab.
 
                 let mut gesture = TestPointer::touch(2);
-                let start = center_of(tester, text(tester, tabs[1]));
+                let start = tester.get_center(text(tester, tabs[1]));
                 tester.down(&mut gesture, start);
                 tester.move_to(&mut gesture, start + Offset::new(-600.0, 0.0), true);
                 tester.up(&gesture);
@@ -5920,12 +5900,12 @@ pub(crate) mod tests {
 
                 // The state is now gone.
 
-                assert!(tester.find_onstage_text(tabs[1]).is_empty());
+                expect(tester, &find::text(tabs[1]), finds_nothing());
 
                 // Move back to the second tab.
 
                 let mut gesture = TestPointer::touch(3);
-                let start = center_of(tester, text(tester, tabs[2]));
+                let start = tester.get_center(text(tester, tabs[2]));
                 tester.down(&mut gesture, start);
                 tester.move_to(&mut gesture, start + Offset::new(600.0, 0.0), true);
                 tester.pump();
@@ -5951,10 +5931,10 @@ pub(crate) mod tests {
         fn pump_left_right_app(tester: &mut WidgetTester) -> Ref<TabController> {
             let app = build_left_right_app(tester, vec!["LEFT", "RIGHT"], "LEFT", true, None);
             tester.pump_widget(app);
-            assert_eq!(tester.find_onstage_text("LEFT").len(), 1);
-            assert_eq!(tester.find_onstage_text("RIGHT").len(), 1);
-            assert_eq!(tester.find_onstage_text("LEFT CHILD").len(), 1);
-            assert!(tester.find_onstage_text("RIGHT CHILD").is_empty());
+            expect(tester, &find::text("LEFT"), finds_one_widget());
+            expect(tester, &find::text("RIGHT"), finds_one_widget());
+            expect(tester, &find::text("LEFT CHILD"), finds_one_widget());
+            expect(tester, &find::text("RIGHT CHILD"), finds_nothing());
 
             let controller = default_controller_of(tester, text(tester, "LEFT"));
             assert_eq!(index_of(tester, controller.handle()), 0);
@@ -5963,11 +5943,11 @@ pub(crate) mod tests {
 
         fn assert_page(tester: &WidgetTester, left: bool) {
             assert_eq!(
-                tester.find_onstage_text("LEFT CHILD").len(),
+                find::text("LEFT CHILD").evaluate(tester).len(),
                 usize::from(left)
             );
             assert_eq!(
-                tester.find_onstage_text("RIGHT CHILD").len(),
+                find::text("RIGHT CHILD").evaluate(tester).len(),
                 usize::from(!left)
             );
         }
@@ -5979,14 +5959,14 @@ pub(crate) mod tests {
                 let controller = pump_left_right_app(tester);
 
                 // Fling to the left, switch from the 'LEFT' tab to the 'RIGHT'
-                let fling_start = center_of(tester, text(tester, "LEFT CHILD"));
+                let fling_start = tester.get_center(text(tester, "LEFT CHILD"));
                 tester.fling_from(fling_start, Offset::new(-200.0, 0.0), 10000.0, 1);
                 tester.pump_and_settle();
                 assert_eq!(index_of(tester, controller.handle()), 1);
                 assert_page(tester, false);
 
                 // Fling to the right, switch back to the 'LEFT' tab
-                let fling_start = center_of(tester, text(tester, "RIGHT CHILD"));
+                let fling_start = tester.get_center(text(tester, "RIGHT CHILD"));
                 tester.fling_from(fling_start, Offset::new(200.0, 0.0), 10000.0, 2);
                 tester.pump_and_settle();
                 assert_eq!(index_of(tester, controller.handle()), 0);
@@ -6000,7 +5980,7 @@ pub(crate) mod tests {
             test_widgets(|tester| {
                 let controller = pump_left_right_app(tester);
 
-                let fling_start = center_of(tester, text(tester, "LEFT CHILD"));
+                let fling_start = tester.get_center(text(tester, "LEFT CHILD"));
                 tester.fling_from(fling_start, Offset::new(200.0, 0.0), 10000.0, 1);
                 tester.pump();
                 tester.pump_by(Duration::from_secs(1)); // finish the scroll animation
@@ -6015,7 +5995,7 @@ pub(crate) mod tests {
             test_widgets(|tester| {
                 let controller = pump_left_right_app(tester);
 
-                let fling_start = center_of(tester, text(tester, "LEFT CHILD"));
+                let fling_start = tester.get_center(text(tester, "LEFT CHILD"));
                 tester.fling_from(fling_start, Offset::new(-200.0, 0.0), 10000.0, 1);
                 tester.pump();
                 // this is similar to a test above, but that one does many more pumps
@@ -6033,7 +6013,7 @@ pub(crate) mod tests {
             test_widgets(|tester| {
                 let controller = pump_left_right_app(tester);
 
-                let fling_start = center_of(tester, text(tester, "LEFT CHILD"));
+                let fling_start = tester.get_center(text(tester, "LEFT CHILD"));
                 let mut gesture = TestPointer::touch(1);
                 tester.down(&mut gesture, fling_start);
                 // End the fling by reversing direction. This should cause not cause
@@ -6128,7 +6108,7 @@ pub(crate) mod tests {
                         notified_in_listener.borrow_mut().push(listened.index(app));
                     }),
                 );
-                let fling_start = center_of(tester, text(tester, "CHILD C"));
+                let fling_start = tester.get_center(text(tester, "CHILD C"));
                 tester.fling_from(fling_start, Offset::new(600.0, 0.0), 10000.0, 1);
                 tester.pump_and_settle();
                 let index_of_b = 1;
@@ -6172,7 +6152,7 @@ pub(crate) mod tests {
                 ));
 
                 // After a small slow fling to the left, we expect the second item to still be visible.
-                let start = center_of(tester, text(tester, "AAAAAA"));
+                let start = tester.get_center(text(tester, "AAAAAA"));
                 tester.fling_from(start, Offset::new(-25.0, 0.0), 100.0, 1);
                 tester.pump();
                 tester.pump_by(Duration::from_secs(1)); // finish the scroll animation
@@ -6212,12 +6192,12 @@ pub(crate) mod tests {
                 tester.pump_and_settle();
                 assert_eq!(*value.borrow(), Some("LEFT"));
 
-                let left_fling_start = center_of(tester, text(tester, "LEFT CHILD"));
+                let left_fling_start = tester.get_center(text(tester, "LEFT CHILD"));
                 tester.fling_from(left_fling_start, Offset::new(-200.0, 0.0), 10000.0, 1);
                 tester.pump_and_settle();
                 assert_eq!(*value.borrow(), Some("RIGHT"));
 
-                let right_fling_start = center_of(tester, text(tester, "RIGHT CHILD"));
+                let right_fling_start = tester.get_center(text(tester, "RIGHT CHILD"));
                 tester.fling_from(right_fling_start, Offset::new(200.0, 0.0), 10000.0, 2);
                 tester.pump_and_settle();
                 assert_eq!(*value.borrow(), Some("LEFT"));
@@ -6241,8 +6221,8 @@ pub(crate) mod tests {
                         )
                     });
 
-                assert_eq!(tester.find_onstage_text("LEFT").len(), 1);
-                assert_eq!(tester.find_onstage_text("RIGHT").len(), 1);
+                expect(tester, &find::text("LEFT"), finds_one_widget());
+                expect(tester, &find::text("RIGHT"), finds_one_widget());
                 assert_page(tester, false);
                 {
                     let app = tester.cell.borrow();
@@ -6437,7 +6417,7 @@ pub(crate) mod tests {
                             .into_widget()]),
                     ),
                 ));
-                assert_eq!(tester.find_onstage_by_type::<Tab>().len(), 1);
+                expect(tester, &find::by_type::<Tab>(), finds_one_widget());
             });
         }
     }
@@ -6445,6 +6425,8 @@ pub(crate) mod tests {
     mod tab_bar_views_and_scroll_controllers {
         //! tabs_test.dart cases, part b: `ensureVisible does not move TabViews` through
         //! `Indicator elastic animation`.
+
+        use waft_rendering::testing::{PaintCall, assert_paints};
 
         use super::*;
 
@@ -6842,8 +6824,8 @@ pub(crate) mod tests {
                 let frame = frame.build(tester);
                 tester.pump_widget(frame);
                 assert!(
-                    tester
-                        .find_onstage_by_type::<waft_widgets::GlowingOverscrollIndicator>()
+                    find::by_type::<waft_widgets::GlowingOverscrollIndicator>()
+                        .evaluate(tester)
                         .is_empty()
                 );
             });
@@ -6916,11 +6898,6 @@ pub(crate) mod tests {
             tab_controller
         }
 
-        fn tap_text(tester: &mut WidgetTester, label: &str) {
-            let element = text(tester, label);
-            tap(tester, element);
-        }
-
         // 'TabBarView skips animation when disabled in controller'.
         #[test]
         fn a_tab_bar_view_jumps_when_its_controller_does_not_animate() {
@@ -6934,7 +6911,7 @@ pub(crate) mod tests {
                 // The TabBarView's page width is 400, so page 0 is at scroll offset 0.0,
                 // page 1 is at 400.0, page 2 is at 800.0.
                 assert_eq!(pixels(tester, page_controller.handle()), 400.0);
-                tap_text(tester, "C");
+                tester.tap(find::text("C"));
                 tester.pump();
                 assert_eq!(pixels(tester, page_controller.handle()), 800.0);
             });
@@ -6953,7 +6930,7 @@ pub(crate) mod tests {
                 // The TabBarView's page width is 400, so page 0 is at scroll offset 0.0,
                 // page 1 is at 400.0, page 2 is at 800.0.
                 assert_eq!(pixels(tester, page_controller.handle()), 0.0);
-                tap_text(tester, "C");
+                tester.tap(find::text("C"));
                 tester.pump();
                 assert_eq!(pixels(tester, page_controller.handle()), 800.0);
             });
@@ -6972,11 +6949,11 @@ pub(crate) mod tests {
                 // The TabBarView's page width is 400, so page 0 is at scroll offset 0.0,
                 // page 1 is at 400.0, page 2 is at 800.0.
                 assert_eq!(pixels(tester, page_controller.handle()), 0.0);
-                tap_text(tester, "C");
+                tester.tap(find::text("C"));
                 tester.pump();
                 assert_eq!(pixels(tester, page_controller.handle()), 800.0);
 
-                tap_text(tester, "A");
+                tester.tap(find::text("A"));
                 tester.pump();
                 assert_eq!(pixels(tester, page_controller.handle()), 0.0);
             });
@@ -6996,15 +6973,15 @@ pub(crate) mod tests {
                 // The TabBarView's page width is 400, so page 0 is at scroll offset 0.0,
                 // page 1 is at 400.0, page 2 is at 800.0.
                 assert_eq!(pixels(tester, page_controller.handle()), 0.0);
-                tap_text(tester, "C");
+                tester.tap(find::text("C"));
                 tester.pump();
                 assert_eq!(pixels(tester, page_controller.handle()), 800.0);
 
-                tap_text(tester, "B");
+                tester.tap(find::text("B"));
                 tester.pump();
                 assert_eq!(pixels(tester, page_controller.handle()), 400.0);
 
-                tap_text(tester, "A");
+                tester.tap(find::text("A"));
                 tester.pump();
                 assert_eq!(pixels(tester, page_controller.handle()), 0.0);
             });
@@ -7023,7 +7000,7 @@ pub(crate) mod tests {
                 // The TabBarView's page width is 400, so page 0 is at scroll offset 0.0,
                 // page 1 is at 400.0, page 2 is at 800.0.
                 assert_eq!(pixels(tester, page_controller.handle()), 0.0);
-                tap_text(tester, "B");
+                tester.tap(find::text("B"));
                 tester.pump();
                 assert_eq!(pixels(tester, page_controller.handle()), 400.0);
             });
@@ -7047,7 +7024,7 @@ pub(crate) mod tests {
                 assert_eq!(indicator_rect0.width(), 400.0);
                 assert_eq!(indicator_rect0.height(), 2.0);
 
-                tap_text(tester, "B");
+                tester.tap(find::text("B"));
                 tester.pump();
                 tester.pump_by(Duration::from_millis(50));
                 let indicator_rect1 = recorded_indicator_rect(tester, render, indicator_color);
@@ -7197,10 +7174,10 @@ pub(crate) mod tests {
                 let frame = build_frame_with_marker(tester, &log, initial_marker);
                 tester.pump_widget(frame);
                 assert_eq!(*log.borrow(), ["init: 0"]);
-                assert_eq!(tester.find_onstage_text("0-before").len(), 1);
+                expect(tester, &find::text("0-before"), finds_one_widget());
 
                 // Select the second tab and wait until the transition starts
-                tap_text(tester, "B");
+                tester.tap(find::text("B"));
                 tester.pump_by(Duration::from_millis(100));
 
                 // Check that both TabBody's are instantiated while the transition is animating
@@ -7216,8 +7193,8 @@ pub(crate) mod tests {
                 tester.pump_and_settle();
 
                 // The TabBody state of the second TabBar should have been updated
-                assert!(tester.find_onstage_text("1-before").is_empty());
-                assert_eq!(tester.find_onstage_text("1-after").len(), 1);
+                expect(tester, &find::text("1-before"), finds_nothing());
+                expect(tester, &find::text("1-after"), finds_one_widget());
             });
         }
 
@@ -7231,10 +7208,10 @@ pub(crate) mod tests {
                 let frame = build_frame_with_marker(tester, &log, initial_marker);
                 tester.pump_widget(frame);
                 assert_eq!(*log.borrow(), ["init: 0"]);
-                assert_eq!(tester.find_onstage_text("0-before").len(), 1);
+                expect(tester, &find::text("0-before"), finds_one_widget());
 
                 // Select the third tab and wait until the transition starts
-                tap_text(tester, "C");
+                tester.tap(find::text("C"));
                 tester.pump_by(Duration::from_millis(100));
 
                 // Check that both TabBody's are instantiated while the transition is animating
@@ -7250,8 +7227,8 @@ pub(crate) mod tests {
                 tester.pump_and_settle();
 
                 // The TabBody state of the third TabBar should have been updated
-                assert!(tester.find_onstage_text("2-before").is_empty());
-                assert_eq!(tester.find_onstage_text("2-after").len(), 1);
+                expect(tester, &find::text("2-before"), finds_nothing());
+                expect(tester, &find::text("2-after"), finds_one_widget());
             });
         }
 
@@ -7333,8 +7310,8 @@ pub(crate) mod tests {
 
                 // First page is visible.
                 assert_eq!(index(tester, tab_controller.handle()), 0);
-                assert_eq!(tester.find_onstage_text("0").len(), 1);
-                assert!(tester.find_onstage_text("1").is_empty());
+                expect(tester, &find::text("0"), finds_one_widget());
+                expect(tester, &find::text("1"), finds_nothing());
 
                 // Animate to the second page.
                 tab_controller.animate_to(&mut tester.cell.borrow_mut(), 1, None, None);
@@ -7347,8 +7324,8 @@ pub(crate) mod tests {
 
                 // First page should be visible.
                 assert_eq!(index(tester, tab_controller.handle()), 0);
-                assert_eq!(tester.find_onstage_text("0").len(), 1);
-                assert!(tester.find_onstage_text("1").is_empty());
+                expect(tester, &find::text("0"), finds_one_widget());
+                expect(tester, &find::text("1"), finds_nothing());
             });
         }
 
@@ -7412,7 +7389,7 @@ pub(crate) mod tests {
                 assert_eq!(index(tester, main_tab_controller.handle()), 0);
 
                 // tap on third tab
-                tap_text(tester, "C");
+                tester.tap(find::text("C"));
                 tester.pump_and_settle();
 
                 // expect third tab to be selected without exceptions
@@ -7503,18 +7480,18 @@ pub(crate) mod tests {
                 tester.pump_widget(frame);
 
                 assert_eq!(index(tester, controller.handle()), 0);
-                assert_eq!(tester.find_onstage_text("Page 1").len(), 1);
-                assert!(tester.find_onstage_text("Page 3").is_empty());
+                expect(tester, &find::text("Page 1"), finds_one_widget());
+                expect(tester, &find::text("Page 3"), finds_nothing());
 
                 controller.set_index(&mut tester.cell.borrow_mut(), 2);
                 tester.pump_and_settle();
-                assert!(tester.find_onstage_text("Page 1").is_empty());
-                assert_eq!(tester.find_onstage_text("Page 3").len(), 1);
+                expect(tester, &find::text("Page 1"), finds_nothing());
+                expect(tester, &find::text("Page 3"), finds_one_widget());
 
                 controller.set_index(&mut tester.cell.borrow_mut(), 0);
                 tester.pump_and_settle();
-                assert_eq!(tester.find_onstage_text("Page 1").len(), 1);
-                assert!(tester.find_onstage_text("Page 3").is_empty());
+                expect(tester, &find::text("Page 1"), finds_one_widget());
+                expect(tester, &find::text("Page 3"), finds_nothing());
             });
         }
 
@@ -7838,13 +7815,13 @@ pub(crate) mod tests {
                 // Regression test for https://github.com/flutter/flutter/issues/124608
                 pump_tab_bar_in_raw_scrollbar(tester);
 
-                let tab1 = tester.find_onstage_text("TAB #1");
+                let tab1 = find::text("TAB #1").evaluate(tester);
                 assert_eq!(tab1.len(), 1);
 
                 // Hover over the tab bar and verify that the scrollbar is shown.
                 let mut gesture = TestPointer::mouse(1, 0);
                 tester.add_pointer(&mut gesture, Offset::ZERO);
-                let center = center_of(tester, tab1[0]);
+                let center = tester.get_center(tab1[0]);
                 tester.move_to(&mut gesture, center, false);
                 tester.pump_and_settle();
 
@@ -7857,7 +7834,7 @@ pub(crate) mod tests {
                     .first()
                     .expect("the scrollbar's CustomPaint");
                 let painter = tester.render_box_of(custom_paint);
-                let mut drawn = tester.painted(painter.as_object());
+                let mut ops = tester.painted_ops(painter.as_object());
                 let scrollbar_render = tester.render_box_of(scrollbar).as_object();
                 for material in tester.all::<crate::material::RenderInkFeatures>() {
                     let under_scrollbar = {
@@ -7878,15 +7855,10 @@ pub(crate) mod tests {
                             &mut canvas,
                             Offset::ZERO,
                         );
-                        drawn.extend(crate::test_support::Drawn::draws(&canvas.build()));
+                        ops.extend(canvas.build().ops().iter().cloned());
                     }
                 }
-                assert!(
-                    drawn
-                        .iter()
-                        .any(|drawn| matches!(drawn, crate::test_support::Drawn::Rect(..))),
-                    "the scrollbar paints a rect: {drawn:?}"
-                );
+                assert_paints(&ops, &[PaintCall::rect(None)]);
             });
         }
 
@@ -7905,7 +7877,7 @@ pub(crate) mod tests {
                 tester.pump_widget(frame);
 
                 // The initialIndex tab should be visible and right justified
-                let label = tester.find_onstage_text("TAB #19");
+                let label = find::text("TAB #19").evaluate(tester);
                 assert_eq!(label.len(), 1);
 
                 // Tabs have a minimum width of 72.0 and 'TAB #19' is wider than
@@ -7913,7 +7885,7 @@ pub(crate) mod tests {
                 let tab_right = 800.0 - K_TAB_LABEL_PADDING.right;
 
                 let tab = tester.ancestor_of_type::<Tab>(label[0]);
-                let right = rect_of(tester, tab).right;
+                let right = tester.get_rect(tab).right;
                 // Dart's `moreOrLessEquals` epsilon is 1e-10; the global rect goes through valo's f32
                 // `Matrix4` at a scroll offset near 1725, which rounds it to about 1e-4.
                 assert!(close(right, tab_right, 1e-4), "{right}");
@@ -8046,10 +8018,10 @@ pub(crate) mod tests {
                 );
 
                 let found = |tester: &WidgetTester, name: &str| {
-                    tester.find_onstage_by_key(&key(name)).len()
+                    find::by_key(key(name)).evaluate(tester).len()
                 };
                 let ensure_visible = |tester: &mut WidgetTester, name: &str| {
-                    let element = tester.find_onstage_by_key(&key(name))[0];
+                    let element = tester.element(find::by_key(key(name)));
                     let mut app = tester.cell.borrow_mut();
                     drop(waft_widgets::Scrollable::ensure_visible(
                         &mut app,
@@ -8106,7 +8078,8 @@ pub(crate) mod tests {
 
         use waft_painting::EdgeInsets;
 
-        use crate::test_support::Drawn;
+        use waft_embedder::valo::Op;
+        use waft_rendering::testing::{PaintCall, assert_paints, paints};
         use waft_widgets::testing::TestVSync;
 
         /// Dart's `createTabController(length:, vsync: const TestVSync())`.
@@ -8152,82 +8125,10 @@ pub(crate) mod tests {
             tester.get_rect(tester.render_object(key).as_box().expect("a render box"))
         }
 
-        /// The pictures `render` and its subtree record, painted at the origin, the ones in nested
-        /// layers (a scroll view's clip) included: Dart's `paints` records what a pushed layer paints
-        /// on its one canvas.
-        fn deep_pictures(
-            tester: &WidgetTester,
-            render: AnyRenderObject,
-        ) -> Vec<std::sync::Arc<waft_embedder::Picture>> {
-            use waft_rendering::ContainerLayer;
-            fn collect(
-                app: &App,
-                layer: waft_rendering::AnyContainerLayer,
-                pictures: &mut Vec<std::sync::Arc<waft_embedder::Picture>>,
-            ) {
-                let mut child = layer.first_child(app);
-                while let Some(current) = child {
-                    if let Some(picture) = app
-                        .handle::<waft_rendering::PictureLayer>(current.id())
-                        .and_then(|picture| picture.picture(app))
-                    {
-                        pictures.push(std::sync::Arc::clone(picture));
-                    } else if let Some(container) = current.as_container_layer() {
-                        collect(app, container, pictures);
-                    }
-                    child = current.next_sibling(app);
-                }
-            }
-            let mut app = tester.cell.borrow_mut();
-            let layer = waft_rendering::OffsetLayer::new(&mut app, Offset::ZERO);
-            let container = layer.as_container_layer();
-            let bounds = render.paint_bounds(&app);
-            let mut context = PaintingContext::new(container, bounds);
-            context.paint_child(&mut app, render, Offset::ZERO);
-            context.stop_recording_if_needed(&mut app);
-            let mut pictures = Vec::new();
-            collect(&app, container, &mut pictures);
-            pictures
-        }
-
-        /// The lines of [`deep_pictures`], as `painted_lines` reads them.
         fn deep_lines(tester: &WidgetTester, render: AnyRenderObject) -> Vec<PaintedLine> {
-            use waft_embedder::valo::{Op, PaintStyle as ValoPaintStyle};
-            deep_pictures(tester, render)
-                .iter()
-                .flat_map(|picture| waft_embedder::flattened_ops(picture))
-                .filter_map(|op| match op {
-                    Op::DrawPath { path, paint, .. } => {
-                        let ValoPaintStyle::Stroke(stroke) = paint.style else {
-                            return None;
-                        };
-                        if path.elements().count() != 2 {
-                            return None;
-                        }
-                        let bounds = path.bounds();
-                        let channel = |value: f32| (value * 255.0).round() as u32;
-                        let color = paint.color;
-                        Some(PaintedLine {
-                            color: Color::new(
-                                (channel(color.a) << 24)
-                                    | (channel(color.r) << 16)
-                                    | (channel(color.g) << 8)
-                                    | channel(color.b),
-                            ),
-                            stroke_width: f64::from(stroke.width),
-                            p1: Offset::new(f64::from(bounds.x), f64::from(bounds.y)),
-                            p2: Offset::new(
-                                f64::from(bounds.x + bounds.width),
-                                f64::from(bounds.y + bounds.height),
-                            ),
-                        })
-                    }
-                    _ => None,
-                })
-                .collect()
+            lines_of(&tester.painted_ops_deep(render))
         }
 
-        /// Dart's `paints..line(color:, strokeWidth:, p1:, p2:)`, `color` left out when `None`.
         fn paints_line(
             tester: &WidgetTester,
             render: AnyRenderBox,
@@ -8236,40 +8137,35 @@ pub(crate) mod tests {
             p1: Offset,
             p2: Offset,
         ) -> bool {
-            let lines = deep_lines(tester, render.as_object());
-            let found = lines.iter().any(|line| {
-                color.is_none_or(|color| line.color.to_argb32() == color.to_argb32())
-                    && line.stroke_width == stroke_width
-                    && line.p1 == p1
-                    && line.p2 == p2
-            });
-            if !found {
-                eprintln!("lines painted: {lines:?}");
+            let result = paints(
+                &tester.painted_ops_deep(render.as_object()),
+                &[PaintCall::Line {
+                    p1: Some(p1),
+                    p2: Some(p2),
+                    color,
+                    stroke_width: Some(stroke_width),
+                }],
+            );
+            if let Err(mismatch) = &result {
+                eprintln!("{mismatch}");
             }
-            found
+            result.is_ok()
         }
 
-        /// What [`deep_pictures`] draws, reduced.
-        fn deep_painted(tester: &WidgetTester, render: AnyRenderObject) -> Vec<Drawn> {
-            deep_pictures(tester, render)
-                .iter()
-                .flat_map(|picture| Drawn::draws(picture))
-                .collect()
-        }
-
-        /// Dart's `paints..rect(rect:, color:)`.
         fn paints_rect(
             tester: &WidgetTester,
             render: AnyRenderBox,
             rect: Rect,
             color: Color,
         ) -> bool {
-            let painted = deep_painted(tester, render.as_object());
-            let found = painted.contains(&Drawn::Rect(color.to_argb32(), rect));
-            if !found {
-                eprintln!("painted: {painted:?}");
+            let result = paints(
+                &tester.painted_ops_deep(render.as_object()),
+                &[PaintCall::rect_at(rect, Some(color))],
+            );
+            if let Err(mismatch) = &result {
+                eprintln!("{mismatch}");
             }
-            found
+            result.is_ok()
         }
 
         fn tab_bar_height(tester: &WidgetTester) -> f64 {
@@ -9333,20 +9229,20 @@ pub(crate) mod tests {
 
                 assert_eq!(controller.index(&tester.cell.borrow()), 0);
                 assert_eq!(
-                    size_of(tester, only::<TabBar>(tester)),
+                    tester.get_size(only::<TabBar>(tester)),
                     Size::new(800.0, 48.0)
                 );
                 assert_eq!(
-                    size_of(tester, only::<TabBarView>(tester)),
+                    tester.get_size(only::<TabBarView>(tester)),
                     Size::new(800.0, 600.0 - 48.0)
                 );
 
                 // A fling in the TabBar or TabBarView, shouldn't do anything.
-                let bar = center_of(tester, only::<TabBar>(tester));
+                let bar = tester.get_center(only::<TabBar>(tester));
                 tester.fling_from(bar, Offset::new(-100.0, 0.0), 5000.0, 1);
                 tester.pump_and_settle();
 
-                let view = center_of(tester, only::<TabBarView>(tester));
+                let view = tester.get_center(only::<TabBarView>(tester));
                 tester.fling_from(view, Offset::new(100.0, 0.0), 5000.0, 2);
                 tester.pump_and_settle();
 
@@ -9372,21 +9268,22 @@ pub(crate) mod tests {
                 ));
 
                 assert_eq!(controller.index(&tester.cell.borrow()), 0);
-                assert_eq!(tester.find_text("TAB").len(), 1);
-                assert_eq!(tester.find_text("PAGE").len(), 1);
+                expect(tester, &find::text("TAB"), finds_one_widget());
+                expect(tester, &find::text("PAGE"), finds_one_widget());
                 assert_eq!(
-                    size_of(tester, only::<TabBar>(tester)),
+                    tester.get_size(only::<TabBar>(tester)),
                     Size::new(800.0, 48.0)
                 );
                 assert_eq!(
-                    size_of(tester, only::<TabBarView>(tester)),
+                    tester.get_size(only::<TabBarView>(tester)),
                     Size::new(800.0, 600.0 - 48.0)
                 );
 
                 // The one tab should be center vis the app's width (800).
                 let tab_rect = |tester: &WidgetTester| {
-                    let tab = tester.ancestor_of_type::<Tab>(text(tester, "TAB"));
-                    rect_of(tester, tab)
+                    let tab = tester
+                        .element(find::ancestor(find::text("TAB"), find::by_type::<Tab>()).first());
+                    tester.get_rect(tab)
                 };
                 let tab_left = tab_rect(tester).left;
                 let tab_right = tab_rect(tester).right;
@@ -9395,14 +9292,14 @@ pub(crate) mod tests {
                 assert!(close(tab_center, 400.0, 1e-4), "{tab_center}");
 
                 // A fling in the TabBar or TabBarView, shouldn't move the tab.
-                let bar = center_of(tester, only::<TabBar>(tester));
+                let bar = tester.get_center(only::<TabBar>(tester));
                 tester.fling_from(bar, Offset::new(-100.0, 0.0), 5000.0, 1);
                 tester.pump_by(Duration::from_millis(50));
                 assert_eq!(tab_rect(tester).left, tab_left);
                 assert_eq!(tab_rect(tester).right, tab_right);
                 tester.pump_and_settle();
 
-                let view = center_of(tester, only::<TabBarView>(tester));
+                let view = tester.get_center(only::<TabBarView>(tester));
                 tester.fling_from(view, Offset::new(100.0, 0.0), 5000.0, 2);
                 tester.pump_by(Duration::from_millis(50));
                 assert_eq!(tab_rect(tester).left, tab_left);
@@ -9410,8 +9307,8 @@ pub(crate) mod tests {
                 tester.pump_and_settle();
 
                 assert_eq!(controller.index(&tester.cell.borrow()), 0);
-                assert_eq!(tester.find_text("TAB").len(), 1);
-                assert_eq!(tester.find_text("PAGE").len(), 1);
+                expect(tester, &find::text("TAB"), finds_one_widget());
+                expect(tester, &find::text("PAGE"), finds_one_widget());
             });
         }
 
@@ -9442,7 +9339,7 @@ pub(crate) mod tests {
                 assert_eq!(controller.index(&tester.cell.borrow()), 0);
 
                 let bottom_right =
-                    rect_of(tester, only::<TabBar>(tester)).bottom_right() - Offset::new(1.0, 1.0);
+                    tester.get_rect(only::<TabBar>(tester)).bottom_right() - Offset::new(1.0, 1.0);
                 let mut gesture = TestPointer::touch(1);
                 tester.down(&mut gesture, bottom_right);
                 tester.up(&gesture);
@@ -9479,9 +9376,9 @@ pub(crate) mod tests {
 
                 let frame = build_frame(tester);
                 tester.pump_widget(frame);
-                assert_eq!(tester.find_text("A").len(), 1);
-                assert_eq!(tester.find_text("B").len(), 1);
-                assert_eq!(tester.find_text("C").len(), 1);
+                expect(tester, &find::text("A"), finds_one_widget());
+                expect(tester, &find::text("B"), finds_one_widget());
+                expect(tester, &find::text("C"), finds_one_widget());
                 assert_eq!(index(tester), 2);
                 assert_eq!(tab_index.get(), -1); // no tap so far so tabIndex should reflect that
 
@@ -9598,8 +9495,8 @@ pub(crate) mod tests {
                 tester.pump_widget(frame);
 
                 let mut mouse = TestPointer::mouse(1, 0);
-                let first_tab = tester.find_by_type::<Tab>()[0];
-                let center = center_of(tester, first_tab);
+                let first_tab = find::by_type::<Tab>().evaluate(tester)[0];
+                let center = tester.get_center(first_tab);
                 tester.add_pointer(&mut mouse, center);
                 tester.pump();
 
@@ -9723,7 +9620,7 @@ pub(crate) mod tests {
 
                 let frame = build_frame(tester, controller1.clone());
                 tester.pump_widget(frame);
-                let fling_start = center_of(tester, text(tester, "CHILD A"));
+                let fling_start = tester.get_center(text(tester, "CHILD A"));
                 tester.fling_from(fling_start, Offset::new(-200.0, 0.0), 10000.0, 1);
                 tester.pump_by(Duration::from_millis(10)); // start the fling animation
 
@@ -9771,14 +9668,14 @@ pub(crate) mod tests {
                 let (controller, frame) = build_frame(tester, 10);
                 tester.pump_widget(frame);
                 assert_eq!(controller.index(&tester.cell.borrow()), 9);
-                assert_eq!(tester.center_of(&last_tab_key).dx(), 750.0);
+                assert_eq!(tester.get_center(&last_tab_key).dx(), 750.0);
 
                 // Rebuild with a new controller with more tabs and last tab selected.
                 // Last tab should be visible and on the right of the window.
                 let (controller, frame) = build_frame(tester, 15);
                 tester.pump_widget(frame);
                 assert_eq!(controller.index(&tester.cell.borrow()), 14);
-                assert_eq!(tester.center_of(&last_tab_key).dx(), 750.0);
+                assert_eq!(tester.get_center(&last_tab_key).dx(), 750.0);
             });
         }
 
@@ -10041,8 +9938,8 @@ pub(crate) mod tests {
                 tester.pump_by(Duration::from_secs(1));
                 assert_eq!(feedback.haptics.borrow().len(), 0);
 
-                let center = center_of(tester, ink_well);
-                tester.long_press(center, 1);
+                let center = tester.get_center(ink_well);
+                tester.long_press_at(center, 1);
                 tester.pump_by(Duration::from_secs(1));
                 assert_eq!(feedback.haptics.borrow().len(), 0);
             });
@@ -10061,11 +9958,9 @@ pub(crate) mod tests {
             })
         }
 
-        /// What the first material's ink features render object and its subtree paint: Dart's
-        /// `paints` on `allRenderObjects.firstWhere(_RenderInkFeatures)`.
-        fn ink_features_painted(tester: &WidgetTester) -> Vec<Drawn> {
+        fn ink_features_painted(tester: &WidgetTester) -> Vec<Op> {
             let ink_features = tester.first::<crate::material::RenderInkFeatures>();
-            deep_painted(tester, ink_features.as_object())
+            tester.painted_ops_deep(ink_features.as_object())
         }
 
         // "Tab's ink well changes color on hover with Tab overlayColor".
@@ -10084,16 +9979,16 @@ pub(crate) mod tests {
                 ));
                 let mut mouse = TestPointer::mouse(1, 0);
                 tester.add_pointer(&mut mouse, Offset::ZERO);
-                let center = center_of(tester, only::<Tab>(tester));
+                let center = tester.get_center(only::<Tab>(tester));
                 tester.move_to(&mut mouse, center, false);
                 tester.pump_and_settle();
                 let painted = ink_features_painted(tester);
-                assert!(
-                    painted.contains(&Drawn::Rect(
-                        0xff00ff00,
-                        Rect::from_ltrb(0.0, 276.0, 800.0, 324.0)
-                    )),
-                    "{painted:?}"
+                assert_paints(
+                    &painted,
+                    &[PaintCall::rect_at(
+                        Rect::from_ltrb(0.0, 276.0, 800.0, 324.0),
+                        Some(Color::new(0xff00ff00)),
+                    )],
                 );
             });
         }
@@ -10142,14 +10037,14 @@ pub(crate) mod tests {
                     .to_vec();
                 let frame = skipping_app(tester, controller.clone(), &tabs, children);
                 tester.pump_widget(frame);
-                assert_eq!(tester.find_text("1").len(), 1);
-                assert!(tester.find_text("4").is_empty());
+                expect(tester, &find::text("1"), finds_one_widget());
+                expect(tester, &find::text("4"), finds_nothing());
                 let tab4 = text(tester, "Tab4");
                 tap(tester, tab4);
                 tester.pump_and_settle();
                 assert_eq!(controller.index(&tester.cell.borrow()), 3);
-                assert_eq!(tester.find_text("4").len(), 1);
-                assert!(tester.find_text("1").is_empty());
+                expect(tester, &find::text("4"), finds_one_widget());
+                expect(tester, &find::text("1"), finds_nothing());
             });
         }
 
@@ -10241,19 +10136,23 @@ pub(crate) mod tests {
                 let frame = skipping_app(tester, controller.clone(), &tabs, children);
                 tester.pump_widget(frame);
                 assert_eq!(
-                    tester
-                        .find_onstage_text(TabAlwaysKeepAliveWidget::TEXT)
+                    find::text(TabAlwaysKeepAliveWidget::TEXT)
+                        .evaluate(tester)
                         .len(),
                     1
                 );
-                assert!(tester.find_onstage_text("4").is_empty());
+                expect(tester, &find::text("4"), finds_nothing());
                 let tab4 = text(tester, "Tab4");
                 tap(tester, tab4);
                 tester.pump_and_settle();
                 tester.pump();
                 assert_eq!(controller.index(&tester.cell.borrow()), 3);
-                assert_eq!(tester.find_text(TabAlwaysKeepAliveWidget::TEXT).len(), 1);
-                assert_eq!(tester.find_onstage_text("4").len(), 1);
+                expect(
+                    tester,
+                    &find::text(TabAlwaysKeepAliveWidget::TEXT).skip_offstage(false),
+                    finds_one_widget(),
+                );
+                expect(tester, &find::text("4"), finds_one_widget());
             });
         }
 
@@ -10372,6 +10271,8 @@ pub(crate) mod tests {
     mod label_colors_lengths_and_alignments {
         //! tabs_test.dart cases, part d: from 'TabBar with one tab has correct color' through
         //! 'Material3 - Scrollable TabBar without a divider does not expand to full width'.
+        use waft_embedder::valo::Op;
+        use waft_rendering::testing::{PaintCall, paints};
 
         use std::cell::{Cell, RefCell};
         use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -10443,19 +10344,19 @@ pub(crate) mod tests {
 
         /// Dart's `find.byKey(key)` tapped at its centre.
         fn tap_key(tester: &mut WidgetTester, key: &GlobalKey) {
-            let center = tester.center_of(key);
-            tester.tap(center, 1);
+            let center = tester.get_center(key);
+            tester.tap_at(center, 1);
         }
 
         /// Dart's `find.widgetWithIcon(Tab, icon)`.
         fn tab_with_icon(tester: &WidgetTester, icon: &waft_widgets::IconData) -> AnyElement {
-            let icon = tester.find_by_icon(icon);
+            let icon = tester.element(find::by_icon(icon).first());
             tester.ancestor_of_type::<Tab>(icon)
         }
 
         /// Dart's `find.widgetWithText(W, text).first`: the nearest `W` above the text.
         fn nearest_with_text<W: 'static>(tester: &WidgetTester, label: &str) -> AnyElement {
-            tester.ancestor_of_type::<W>(text(tester, label))
+            tester.element(find::ancestor(find::text(label), find::by_type::<W>()).first())
         }
 
         /// The `PageController` of the only `PageView`: Dart's
@@ -10722,9 +10623,9 @@ pub(crate) mod tests {
                     assert_eq!(controller.borrow().index(&app), 0);
                     assert_eq!(controller.borrow().length(&app), 2);
                 }
-                assert_eq!(tester.find_text("Tab0").len(), 1);
-                assert_eq!(tester.find_text("Tab1").len(), 1);
-                assert!(tester.find_text("Tab2").is_empty());
+                expect(tester, &find::text("Tab0"), finds_one_widget());
+                expect(tester, &find::text("Tab1"), finds_one_widget());
+                expect(tester, &find::text("Tab2"), finds_nothing());
 
                 let button = text(tester, "Change TabController length");
                 tap(tester, button);
@@ -10734,9 +10635,9 @@ pub(crate) mod tests {
                     assert_eq!(controller.borrow().index(&app), 0);
                     assert_eq!(controller.borrow().length(&app), 3);
                 }
-                assert_eq!(tester.find_text("Tab0").len(), 1);
-                assert_eq!(tester.find_text("Tab1").len(), 1);
-                assert_eq!(tester.find_text("Tab2").len(), 1);
+                expect(tester, &find::text("Tab0"), finds_one_widget());
+                expect(tester, &find::text("Tab1"), finds_one_widget());
+                expect(tester, &find::text("Tab2"), finds_one_widget());
             });
         }
 
@@ -10843,16 +10744,16 @@ pub(crate) mod tests {
                 tester.pump_widget(app);
 
                 // Initializes with zero tabs properly
-                assert_eq!(tester.find_text("No tabs").len(), 1);
+                expect(tester, &find::text("No tabs"), finds_one_widget());
                 tap_key(tester, &add_key);
                 tester.pump_and_settle();
-                assert_eq!(tester.find_text("Tab 1").len(), 1);
-                assert_eq!(tester.find_text("Tab 1's view").len(), 1);
+                expect(tester, &find::text("Tab 1"), finds_one_widget());
+                expect(tester, &find::text("Tab 1's view"), finds_one_widget());
 
                 // Dynamically updates to zero tabs properly
                 tap_key(tester, &delete_key);
                 tester.pump_and_settle();
-                assert_eq!(tester.find_text("No tabs").len(), 1);
+                expect(tester, &find::text("No tabs"), finds_one_widget());
             });
         }
 
@@ -10950,24 +10851,24 @@ pub(crate) mod tests {
                 let app = add_remove_app(tester, titles, None, add_key.clone(), remove_key.clone());
                 tester.pump_widget(app);
 
-                assert!(tester.find_text("Tab 1").is_empty());
-                assert!(tester.find_text("Tab 2").is_empty());
+                expect(tester, &find::text("Tab 1"), finds_nothing());
+                expect(tester, &find::text("Tab 2"), finds_nothing());
 
                 tap_key(tester, &add_key); // +1
                 tester.pump_and_settle();
-                assert_eq!(tester.find_text("Tab 1").len(), 1);
-                assert!(tester.find_text("Tab 2").is_empty());
+                expect(tester, &find::text("Tab 1"), finds_one_widget());
+                expect(tester, &find::text("Tab 2"), finds_nothing());
 
                 tap_key(tester, &add_key); // +2
                 tester.pump_and_settle();
-                assert_eq!(tester.find_text("Tab 1").len(), 1);
-                assert_eq!(tester.find_text("Tab 2").len(), 1);
+                expect(tester, &find::text("Tab 1"), finds_one_widget());
+                expect(tester, &find::text("Tab 2"), finds_one_widget());
 
                 tap_key(tester, &remove_key); // -2
                 tap_key(tester, &remove_key); // -1
                 tester.pump_and_settle();
-                assert!(tester.find_text("Tab 1").is_empty());
-                assert!(tester.find_text("Tab 2").is_empty());
+                expect(tester, &find::text("Tab 1"), finds_nothing());
+                expect(tester, &find::text("Tab 2"), finds_nothing());
             });
         }
 
@@ -10989,15 +10890,15 @@ pub(crate) mod tests {
                 );
                 tester.pump_widget(app);
 
-                assert!(tester.find_text("Tab 1").is_empty());
-                assert_eq!(tester.find_text("Add tab").len(), 1);
+                expect(tester, &find::text("Tab 1"), finds_nothing());
+                expect(tester, &find::text("Add tab"), finds_one_widget());
                 tap_key(tester, &add_key);
                 tester.pump_and_settle();
-                assert_eq!(tester.find_text("Tab 1").len(), 1);
+                expect(tester, &find::text("Tab 1"), finds_one_widget());
 
                 tap_key(tester, &remove_key);
                 tester.pump_and_settle();
-                assert!(tester.find_text("Tab 1").is_empty());
+                expect(tester, &find::text("Tab 1"), finds_nothing());
             });
         }
 
@@ -11294,7 +11195,7 @@ pub(crate) mod tests {
                     )
                     .into_widget(),
                 ));
-                let bike = tester.find_by_icon(&Icons::directions_bike());
+                let bike = tester.element(find::by_icon(&Icons::directions_bike()).first());
                 // No crash on dispose.
                 let tapped = catch_unwind(AssertUnwindSafe(|| tap(tester, bike)));
                 assert!(tapped.is_ok());
@@ -11349,7 +11250,7 @@ pub(crate) mod tests {
 
                 // Touch TabBarView while ballistic scrolling is happening and
                 // check if tabController's animation value properly follows page value.
-                let center = center_of(tester, only::<PageView>(tester));
+                let center = tester.get_center(only::<PageView>(tester));
                 let mut gesture = TestPointer::touch(1);
                 tester.down(&mut gesture, center);
                 tester.pump();
@@ -11396,16 +11297,16 @@ pub(crate) mod tests {
                     .into_widget(),
                 ));
 
-                assert_eq!(tester.find_text("0").len(), 1);
-                assert!(tester.find_text("3").is_empty());
+                expect(tester, &find::text("0"), finds_one_widget());
+                expect(tester, &find::text("3"), finds_nothing());
                 assert_eq!(*log.borrow(), vec!["init: 0"]);
 
                 let boat = text(tester, "boat");
                 tap(tester, boat);
                 tester.pump_and_settle();
 
-                assert!(tester.find_text("0").is_empty());
-                assert_eq!(tester.find_text("3").len(), 1);
+                expect(tester, &find::text("0"), finds_nothing());
+                expect(tester, &find::text("3"), finds_one_widget());
 
                 // No other tab got instantiated during the animation.
                 assert_eq!(*log.borrow(), vec!["init: 0", "init: 3", "dispose: 0"]);
@@ -12012,12 +11913,12 @@ pub(crate) mod tests {
                 ));
                 tester.pump_and_settle();
                 let mut gesture = TestPointer::mouse(1, 0);
-                let center = center_of(tester, only::<Tab>(tester));
+                let center = tester.get_center(only::<Tab>(tester));
                 tester.add_pointer(&mut gesture, Offset::ZERO);
                 tester.move_to(&mut gesture, center, false);
                 tester.pump_and_settle();
                 let object = tester.first::<crate::material::RenderInkFeatures>();
-                let ink_well_rect = rect_of(tester, only::<InkWell>(tester));
+                let ink_well_rect = tester.get_rect(only::<InkWell>(tester));
                 waft_rendering::testing::assert_paints(
                     &tester.painted_ops(object.as_object()),
                     &[waft_rendering::testing::PaintCall::rrect_at(
@@ -12074,8 +11975,8 @@ pub(crate) mod tests {
                 ));
 
                 // Initializes with zero tabs.
-                assert!(tester.find_text("Tab 1").is_empty());
-                assert!(tester.find_text("Tab 2").is_empty());
+                expect(tester, &find::text("Tab 1"), finds_nothing());
+                expect(tester, &find::text("Tab 2"), finds_nothing());
 
                 // No crash after tabs added.
                 let add = text(tester, "Add Tab");
@@ -12084,8 +11985,8 @@ pub(crate) mod tests {
                     tester.pump_and_settle();
                 }));
                 assert!(added.is_ok());
-                assert_eq!(tester.find_text("Tab 1").len(), 1);
-                assert!(tester.find_text("Tab 2").is_empty());
+                expect(tester, &find::text("Tab 1"), finds_one_widget());
+                expect(tester, &find::text("Tab 2"), finds_nothing());
             });
         }
 
@@ -12101,16 +12002,16 @@ pub(crate) mod tests {
                 tester.pump_widget(app);
 
                 // Initializes with zero tabs properly
-                assert_eq!(tester.find_text("No tabs").len(), 1);
+                expect(tester, &find::text("No tabs"), finds_one_widget());
                 tap_key(tester, &add_key);
                 tester.pump_and_settle();
-                assert_eq!(tester.find_text("Tab 1").len(), 1);
-                assert_eq!(tester.find_text("Tab 1's view").len(), 1);
+                expect(tester, &find::text("Tab 1"), finds_one_widget());
+                expect(tester, &find::text("Tab 1's view"), finds_one_widget());
 
                 // Dynamically updates to zero tabs properly
                 tap_key(tester, &delete_key);
                 tester.pump_and_settle();
-                assert_eq!(tester.find_text("No tabs").len(), 1);
+                expect(tester, &find::text("No tabs"), finds_one_widget());
             });
         }
 
@@ -12189,18 +12090,13 @@ pub(crate) mod tests {
             });
         }
 
-        /// Whether `drawn` has a rect of `color`: Dart's `paints..rect(color: color)`.
-        fn paints_rect_of(drawn: &[crate::test_support::Drawn], color: Color) -> bool {
-            drawn.iter().any(|drawn| {
-                matches!(drawn, crate::test_support::Drawn::Rect(argb, _)
-                    if crate::test_support::is_same_color_as(Color::new(*argb), color))
-            })
+        fn paints_rect_of(ops: &[Op], color: Color) -> bool {
+            paints(ops, &[PaintCall::rect(Some(color))]).is_ok()
         }
 
-        /// What the first ink-features render object and its subtree paint.
-        fn ink_features_painted(tester: &WidgetTester) -> Vec<crate::test_support::Drawn> {
+        fn ink_features_painted(tester: &WidgetTester) -> Vec<Op> {
             let ink_features = tester.first::<crate::material::RenderInkFeatures>();
-            tester.painted(ink_features.as_object())
+            tester.painted_ops_deep(ink_features.as_object())
         }
 
         #[allow(deprecated)]
@@ -12230,15 +12126,18 @@ pub(crate) mod tests {
                 // Start hovering unselected tab.
                 let mut gesture = TestPointer::mouse(1, 0);
                 tester.add_pointer(&mut gesture, Offset::ZERO);
-                let first = tester.find_by_type::<Tab>()[0];
-                let first_center = center_of(tester, first);
+                let first = find::by_type::<Tab>().evaluate(tester)[0];
+                let first_center = tester.get_center(first);
                 tester.move_to(&mut gesture, first_center, false);
                 tester.pump_and_settle();
                 assert!(paints_rect_of(&ink_features_painted(tester), unselected));
 
                 // Start hovering selected tab.
-                let last = *tester.find_by_type::<Tab>().last().expect("tabs");
-                let last_center = center_of(tester, last);
+                let last = *find::by_type::<Tab>()
+                    .evaluate(tester)
+                    .last()
+                    .expect("tabs");
+                let last_center = tester.get_center(last);
                 tester.move_to(&mut gesture, last_center, false);
                 tester.pump_and_settle();
                 assert!(paints_rect_of(&ink_features_painted(tester), selected));
@@ -12308,7 +12207,7 @@ pub(crate) mod tests {
 
                 // Press unselected tab.
                 let mut gesture = TestPointer::touch(1);
-                let a = center_of(tester, text(tester, "A"));
+                let a = tester.get_center(text(tester, "A"));
                 tester.down(&mut gesture, a);
                 tester.pump_and_settle(); // Let the press highlight animation finish.
                 assert!(paints_rect_of(&ink_features_painted(tester), pressed));
@@ -12319,7 +12218,7 @@ pub(crate) mod tests {
 
                 // Press selected tab.
                 let mut gesture = TestPointer::touch(2);
-                let b = center_of(tester, text(tester, "B"));
+                let b = tester.get_center(text(tester, "B"));
                 tester.down(&mut gesture, b);
                 tester.pump_and_settle(); // Let the press highlight animation finish.
                 assert!(paints_rect_of(&ink_features_painted(tester), pressed));
@@ -12338,10 +12237,10 @@ pub(crate) mod tests {
 
         /// The rects of the first and the last `Tab`.
         fn first_and_last_tab_rects(tester: &WidgetTester) -> (Rect, Rect) {
-            let tabs = tester.find_by_type::<Tab>();
+            let tabs = find::by_type::<Tab>().evaluate(tester);
             (
-                rect_of(tester, tabs[0]),
-                rect_of(tester, *tabs.last().expect("tabs")),
+                tester.get_rect(tabs[0]),
+                tester.get_rect(*tabs.last().expect("tabs")),
             )
         }
 
@@ -12356,7 +12255,7 @@ pub(crate) mod tests {
                 let frame = Frame::new(vec!["A", "B"], "B").build(tester);
                 tester.pump_widget(frame);
 
-                let tab_bar = rect_of(tester, only::<TabBar>(tester));
+                let tab_bar = tester.get_rect(only::<TabBar>(tester));
                 let (tab_one_rect, tab_two_rect) = first_and_last_tab_rects(tester);
 
                 // Tabs should fill the width of the TabBar.
@@ -12529,7 +12428,7 @@ pub(crate) mod tests {
                 let frame = alignment_frame(tester, true, None, TextDirection::Ltr);
                 tester.pump_widget(frame);
 
-                let tab_bar = rect_of(tester, only::<TabBar>(tester));
+                let tab_bar = tester.get_rect(only::<TabBar>(tester));
                 let (tab_one_rect, tab_two_rect) = first_and_last_tab_rects(tester);
 
                 // By default tabs should be aligned to the start of the TabBar with
@@ -12610,7 +12509,7 @@ pub(crate) mod tests {
                 let frame = alignment_frame(tester, true, None, TextDirection::Rtl);
                 tester.pump_widget(frame);
 
-                let tab_bar = rect_of(tester, only::<TabBar>(tester));
+                let tab_bar = tester.get_rect(only::<TabBar>(tester));
                 let (tab_one_rect, tab_two_rect) = first_and_last_tab_rects(tester);
 
                 // Tabs should be aligned to the start of the TabBar with an
@@ -12694,8 +12593,8 @@ pub(crate) mod tests {
                 ));
 
                 // Test painter's divider color.
-                let paint = *tester
-                    .find_by_type::<CustomPaint>()
+                let paint = *find::by_type::<CustomPaint>()
+                    .evaluate(tester)
                     .last()
                     .expect("a CustomPaint");
                 let painter_divider_color = tester.widget(paint, |paint: &CustomPaint| {
@@ -12746,10 +12645,10 @@ pub(crate) mod tests {
                 ));
 
                 // Test tab bar width.
-                assert_eq!(size_of(tester, only::<TabBar>(tester)).width(), 360.0);
+                assert_eq!(tester.get_size(only::<TabBar>(tester)).width(), 360.0);
                 // Test divider width.
-                let divider = tester.find_by_type::<CustomPaint>()[1];
-                assert_eq!(size_of(tester, divider).width(), 360.0);
+                let divider = find::by_type::<CustomPaint>().evaluate(tester)[1];
+                assert_eq!(tester.get_size(divider).width(), 360.0);
             });
         }
 
@@ -12916,7 +12815,7 @@ pub(crate) mod tests {
                 let mut width_with = |divider_height: Option<f64>, tab_alignment: TabAlignment| {
                     let frame = build_tab_bar(tester, divider_height, tab_alignment);
                     tester.pump_widget(frame);
-                    size_of(tester, only::<TabBar>(tester)).width()
+                    tester.get_size(only::<TabBar>(tester)).width()
                 };
 
                 // Test default tab bar width when there is a divider and tabAlignment
@@ -13002,7 +12901,7 @@ pub(crate) mod tests {
 
         /// The tabs' elements, in order: Dart's `find.byType(Tab)`.
         fn tabs_of(tester: &WidgetTester) -> Vec<AnyElement> {
-            tester.find_by_type::<Tab>()
+            find::by_type::<Tab>().evaluate(tester)
         }
 
         /// Dart's `RRect.fromLTRBAndCorners(left, top, right, bottom, topLeft: 3, topRight: 3)`.
@@ -13148,9 +13047,9 @@ pub(crate) mod tests {
                 frame.use_material3 = Some(false);
                 let frame = frame.build(tester);
                 tester.pump_widget(frame);
-                assert_eq!(tester.find_text("A").len(), 1);
-                assert_eq!(tester.find_text("B").len(), 1);
-                assert_eq!(tester.find_text("C").len(), 1);
+                expect(tester, &find::text("A"), finds_one_widget());
+                expect(tester, &find::text("B"), finds_one_widget());
+                expect(tester, &find::text("C"), finds_one_widget());
 
                 let body_large_color = theme
                     .primary_text_theme
@@ -13186,9 +13085,9 @@ pub(crate) mod tests {
                 frame.tab_bar_theme = Some(TabBarThemeData::new().label_color(LABEL_COLOR));
                 let frame = frame.build(tester);
                 tester.pump_widget(frame);
-                assert_eq!(tester.find_text("A").len(), 1);
-                assert_eq!(tester.find_text("B").len(), 1);
-                assert_eq!(tester.find_text("C").len(), 1);
+                expect(tester, &find::text("A"), finds_one_widget());
+                expect(tester, &find::text("B"), finds_one_widget());
+                expect(tester, &find::text("C"), finds_one_widget());
 
                 // Test selected label color.
                 assert_eq!(paragraph_color(tester, "A"), Some(LABEL_COLOR));
@@ -13210,10 +13109,10 @@ pub(crate) mod tests {
                 let frame = frame.build(tester);
                 tester.pump_widget(frame);
 
-                let tab_bar = rect_of(tester, only::<TabBar>(tester));
+                let tab_bar = tester.get_rect(only::<TabBar>(tester));
                 let tabs = tabs_of(tester);
-                let tab_one_rect = rect_of(tester, tabs[0]);
-                let tab_two_rect = rect_of(tester, tabs[1]);
+                let tab_one_rect = tester.get_rect(tabs[0]);
+                let tab_two_rect = tester.get_rect(tabs[1]);
 
                 // Tabs should fill the width of the TabBar.
                 let tab_one_left = ((tab_bar.width() / 2.0) - tab_one_rect.width()) / 2.0;
@@ -13230,8 +13129,8 @@ pub(crate) mod tests {
                 tester.pump_widget(frame);
 
                 let tabs = tabs_of(tester);
-                let tab_one_rect = rect_of(tester, tabs[0]);
-                let tab_two_rect = rect_of(tester, tabs[1]);
+                let tab_one_rect = tester.get_rect(tabs[0]);
+                let tab_two_rect = tester.get_rect(tabs[1]);
 
                 // Tabs should be aligned to the start of the TabBar.
                 let padding =
@@ -13398,10 +13297,10 @@ pub(crate) mod tests {
                 let frame = Frame::new(vec!["A", "B"], "B").build(tester);
                 tester.pump_widget(material_app(theme.clone(), frame));
 
-                let tab_bar = rect_of(tester, only::<TabBar>(tester));
+                let tab_bar = tester.get_rect(only::<TabBar>(tester));
                 let tabs = tabs_of(tester);
-                let tab_one_rect = rect_of(tester, tabs[0]);
-                let tab_two_rect = rect_of(tester, tabs[1]);
+                let tab_one_rect = tester.get_rect(tabs[0]);
+                let tab_two_rect = tester.get_rect(tabs[1]);
 
                 // Within f32: global positions go through valo's f32 matrices (waft-gestures'
                 // `Matrix4` entry), where Dart's are f64 and compare within 1e-10.
@@ -13422,8 +13321,8 @@ pub(crate) mod tests {
                 tester.pump_and_settle();
 
                 let tabs = tabs_of(tester);
-                let tab_one_rect = rect_of(tester, tabs[0]);
-                let tab_two_rect = rect_of(tester, tabs[1]);
+                let tab_one_rect = tester.get_rect(tabs[0]);
+                let tab_two_rect = tester.get_rect(tabs[1]);
 
                 // Tabs should not fill the width of the TabBar.
                 let padding =
@@ -13482,13 +13381,13 @@ pub(crate) mod tests {
                 tester.pump_widget(widget);
                 assert_eq!(tabs_of(tester).len(), 3);
 
-                assert_eq!(tester.find_onstage_text("View 0").len(), 1);
-                assert!(tester.find_onstage_text("View 2").is_empty());
+                expect(tester, &find::text("View 0"), finds_one_widget());
+                expect(tester, &find::text("View 2"), finds_nothing());
                 let tab_2 = text(tester, "Tab 2");
                 tap(tester, tab_2);
                 tester.pump_and_settle();
-                assert!(tester.find_onstage_text("View 0").is_empty());
-                assert_eq!(tester.find_onstage_text("View 2").len(), 1);
+                expect(tester, &find::text("View 0"), finds_nothing());
+                expect(tester, &find::text("View 2"), finds_one_widget());
             });
         }
 
@@ -13634,21 +13533,21 @@ pub(crate) mod tests {
                 let widget = build_tabs(tester, TextScaler::NO_SCALING);
                 tester.pump_widget(widget);
                 assert_eq!(
-                    size_of(tester, text(tester, "Tab 1")),
+                    tester.get_size(text(tester, "Tab 1")),
                     Size::new(70.5, 20.0)
                 );
 
                 let widget = build_tabs(tester, TextScaler::linear(1.75));
                 tester.pump_widget(widget);
                 assert_eq!(
-                    size_of(tester, text(tester, "Tab 1")),
+                    tester.get_size(text(tester, "Tab 1")),
                     Size::new(123.0, 35.0)
                 );
 
                 let widget = build_tabs(tester, TextScaler::linear(2.0));
                 tester.pump_widget(widget);
                 assert_eq!(
-                    size_of(tester, text(tester, "Tab 1")),
+                    tester.get_size(text(tester, "Tab 1")),
                     Size::new(140.5, 40.0)
                 );
             });
@@ -13701,19 +13600,19 @@ pub(crate) mod tests {
                 let widget = twenty_scrollable_tabs(tester, 10);
                 tester.pump_widget(widget);
 
-                assert_eq!(tester.find_onstage_text("Page 10").len(), 1);
-                assert!(tester.find_onstage_text("Page 11").is_empty());
+                expect(tester, &find::text("Page 10"), finds_one_widget());
+                expect(tester, &find::text("Page 11"), finds_nothing());
                 let pixels = scroll_view_pixels(tester);
                 assert!(close(pixels, 683.2, 0.1), "{pixels}");
 
                 // Drag the TabBarView to the left.
-                let view = center_of(tester, only::<TabBarView>(tester));
+                let view = tester.get_center(only::<TabBarView>(tester));
                 tester.drag_from(view, Offset::new(-800.0, 0.0), 1);
                 tester.pump();
                 tester.pump_by(Duration::from_millis(200));
 
-                assert!(tester.find_onstage_text("Page 10").is_empty());
-                assert_eq!(tester.find_onstage_text("Page 11").len(), 1);
+                expect(tester, &find::text("Page 10"), finds_nothing());
+                expect(tester, &find::text("Page 11"), finds_one_widget());
                 let pixels = scroll_view_pixels(tester);
                 assert!(close(pixels, 799.8, 0.1), "{pixels}");
             });
@@ -13726,13 +13625,13 @@ pub(crate) mod tests {
                 let widget = twenty_scrollable_tabs(tester, 4);
                 tester.pump_widget(widget);
 
-                assert_eq!(tester.find_onstage_text("Page 4").len(), 1);
-                assert!(tester.find_onstage_text("Page 3").is_empty());
+                expect(tester, &find::text("Page 4"), finds_one_widget());
+                expect(tester, &find::text("Page 3"), finds_nothing());
                 let pixels = scroll_view_pixels(tester);
                 assert!(close(pixels, 61.25, 0.1), "{pixels}");
 
                 // Drag the TabBarView to the right.
-                let start = center_of(tester, text(tester, "Page 4"));
+                let start = tester.get_center(text(tester, "Page 4"));
                 let mut gesture = TestPointer::touch(1);
                 tester.down(&mut gesture, start);
                 tester.move_to(&mut gesture, start + Offset::new(600.0, 0.0), true);
@@ -13740,14 +13639,14 @@ pub(crate) mod tests {
                 tester.pump();
                 tester.pump_by(Duration::from_millis(500));
 
-                assert_eq!(tester.find_onstage_text("Page 4").len(), 1);
-                assert_eq!(tester.find_onstage_text("Page 3").len(), 1);
+                expect(tester, &find::text("Page 4"), finds_one_widget());
+                expect(tester, &find::text("Page 3"), finds_one_widget());
                 let pixels = scroll_view_pixels(tester);
                 assert!(close(pixels, 0.2, 0.1), "{pixels}");
 
                 tester.pump_and_settle();
-                assert!(tester.find_onstage_text("Page 4").is_empty());
-                assert_eq!(tester.find_onstage_text("Page 3").len(), 1);
+                expect(tester, &find::text("Page 4"), finds_nothing());
+                expect(tester, &find::text("Page 3"), finds_one_widget());
                 assert_eq!(scroll_view_pixels(tester), 0.0);
             });
         }
@@ -13774,7 +13673,7 @@ pub(crate) mod tests {
                         )),
                     ));
                     assert_eq!(
-                        size_of(tester, only::<TabBar>(tester)).width(),
+                        tester.get_size(only::<TabBar>(tester)).width(),
                         800.0,
                         "{tab_alignment:?}"
                     );
@@ -13905,7 +13804,7 @@ pub(crate) mod tests {
                 ));
 
                 let icon_color = |tester: &WidgetTester, icon| {
-                    let element = tester.find_by_icon(icon);
+                    let element = tester.element(find::by_icon(icon).first());
                     tester
                         .glyph_style(element)
                         .color
@@ -13926,10 +13825,10 @@ pub(crate) mod tests {
 
                 // Both selected and unselected icons should have the iconTheme size.
                 let size = theme.icon_theme.size.expect("a size");
-                let selected = tester.find_by_icon(&selected_icon);
-                assert_eq!(size_of(tester, selected), Size::new(size, size));
-                let unselected = tester.find_by_icon(&unselected_icon);
-                assert_eq!(size_of(tester, unselected), Size::new(size, size));
+                let selected = tester.element(find::by_icon(&selected_icon).first());
+                assert_eq!(tester.get_size(selected), Size::new(size, size));
+                let unselected = tester.element(find::by_icon(&unselected_icon).first());
+                assert_eq!(tester.get_size(unselected), Size::new(size, size));
             });
         }
 
@@ -13980,7 +13879,7 @@ pub(crate) mod tests {
         }
 
         fn tab_rect(tester: &WidgetTester, index: usize) -> Rect {
-            rect_of(tester, tabs_of(tester)[index])
+            tester.get_rect(tabs_of(tester)[index])
         }
 
         /// The cases on a fixed tab bar: the indicator at two points of the animation to tab 2, kept
@@ -14383,7 +14282,7 @@ pub(crate) mod tests {
                         assert!(hover_events.borrow().is_empty());
                     }
                     for (index, label) in ["Tab 1", "Tab 2", "Tab 3"].into_iter().enumerate() {
-                        let at = center_of(tester, text(tester, label));
+                        let at = tester.get_center(text(tester, label));
                         tester.move_to(&mut gesture, at, false);
                         tester.pump();
                         if index > 0 {
@@ -14392,7 +14291,7 @@ pub(crate) mod tests {
                         expected.push((true, index));
                         assert_eq!(*hover_events.borrow(), expected);
                     }
-                    let at = center_of(tester, only::<TabBarView>(tester));
+                    let at = tester.get_center(only::<TabBarView>(tester));
                     tester.move_to(&mut gesture, at, false);
                     tester.pump();
                     expected.push((false, 2));
@@ -14478,7 +14377,7 @@ pub(crate) mod tests {
                         .into_widget(),
                 ));
 
-                assert_eq!(tester.find_by_type::<Material>().len(), 2);
+                expect(tester, &find::by_type::<Material>(), finds_n_widgets(2));
 
                 let tab_bar = only::<TabBar>(tester);
                 let semantics = *tester
@@ -14507,7 +14406,7 @@ pub(crate) mod tests {
 
                 // Hover over the first tab to trigger the ink highlight.
                 let mut gesture = TestPointer::mouse(1, 0);
-                let at = center_of(tester, text(tester, "Tab 1"));
+                let at = tester.get_center(text(tester, "Tab 1"));
                 tester.add_pointer(&mut gesture, at);
                 tester.pump();
 
@@ -14566,7 +14465,7 @@ pub(crate) mod tests {
                         .child(TabPageSelector::new().controller(controller.clone()))
                         .into_widget(),
                 ));
-                assert_eq!(size_of(tester, only::<TabPageSelector>(tester)), Size::ZERO);
+                assert_eq!(tester.get_size(only::<TabPageSelector>(tester)), Size::ZERO);
                 controller.animate_to(&mut tester.cell.borrow_mut(), 1, None, None);
                 tester.pump();
                 tester.pump_and_settle();
@@ -14593,7 +14492,7 @@ pub(crate) mod tests {
                         )
                         .into_widget(),
                 ));
-                assert_eq!(size_of(tester, only::<TabBarView>(tester)), Size::ZERO);
+                assert_eq!(tester.get_size(only::<TabBarView>(tester)), Size::ZERO);
                 controller.animate_to(&mut tester.cell.borrow_mut(), 1, None, None);
                 tester.pump();
                 tester.pump_and_settle();
@@ -14616,7 +14515,7 @@ pub(crate) mod tests {
                         .into_widget(),
                 ));
                 assert_eq!(
-                    size_of(tester, only::<TabPageSelectorIndicator>(tester)),
+                    tester.get_size(only::<TabPageSelectorIndicator>(tester)),
                     Size::ZERO
                 );
             });
@@ -14636,7 +14535,7 @@ pub(crate) mod tests {
                         .into_widget(),
                 ));
                 assert_eq!(
-                    size_of(tester, only::<DefaultTabController>(tester)),
+                    tester.get_size(only::<DefaultTabController>(tester)),
                     Size::ZERO
                 );
             });
@@ -14656,7 +14555,7 @@ pub(crate) mod tests {
                         )
                         .into_widget(),
                 ));
-                assert_eq!(size_of(tester, only::<Tab>(tester)), Size::ZERO);
+                assert_eq!(tester.get_size(only::<Tab>(tester)), Size::ZERO);
             });
         }
 
@@ -14680,7 +14579,7 @@ pub(crate) mod tests {
                         )
                         .into_widget(),
                 ));
-                assert_eq!(size_of(tester, only::<TabBar>(tester)), Size::ZERO);
+                assert_eq!(tester.get_size(only::<TabBar>(tester)), Size::ZERO);
                 controller.animate_to(&mut tester.cell.borrow_mut(), 1, None, None);
                 tester.pump();
                 tester.pump_and_settle();

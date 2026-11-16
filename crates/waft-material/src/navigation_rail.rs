@@ -1906,7 +1906,10 @@ mod tests {
 
     use waft_painting::EdgeInsets;
 
-    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+    use waft_widgets::testing::{
+        TestPointer, WidgetTester, expect, find, finds_nothing, finds_one_widget, finds_widgets,
+        test_widgets,
+    };
 
     use super::*;
     use crate::colors::Colors;
@@ -2024,11 +2027,7 @@ mod tests {
     }
 
     fn rail_box(tester: &WidgetTester) -> AnyRenderBox {
-        tester.render_box_of(tester.find_by_type::<NavigationRail>()[0])
-    }
-
-    fn size_of(tester: &WidgetTester, render: AnyRenderBox) -> Size {
-        render.size(&tester.cell.borrow())
+        tester.render_box_of(find::by_type::<NavigationRail>().evaluate(tester)[0])
     }
 
     fn global_top_left(tester: &WidgetTester, render: AnyRenderBox) -> Offset {
@@ -2042,19 +2041,19 @@ mod tests {
 
     /// Dart's `_iconRenderBox`.
     fn icon_render_box(tester: &WidgetTester, icon: IconData) -> AnyRenderBox {
-        let icon = tester.find_by_icon(&icon);
+        let icon = tester.element(find::by_icon(&icon).first());
         tester.render_box_of(rich_text_below(tester, icon))
     }
 
     /// Dart's `_labelRenderBox`.
     fn label_render_box(tester: &WidgetTester, text: &str) -> AnyRenderBox {
-        let text = tester.find_text(text)[0];
+        let text = find::text(text).evaluate(tester)[0];
         tester.render_box_of(rich_text_below(tester, text))
     }
 
     /// Dart's `_iconStyle`.
     fn icon_style(tester: &WidgetTester, icon: IconData) -> TextStyle {
-        tester.glyph_style(tester.find_by_icon(&icon))
+        tester.glyph_style(tester.element(find::by_icon(&icon).first()))
     }
 
     /// Dart's `tester.renderObject<RenderParagraph>(find.text(text)).text.style!`.
@@ -2073,7 +2072,7 @@ mod tests {
 
     /// Dart's `_labelOpacity`. Only valid when labelType != all.
     fn label_opacity(tester: &WidgetTester, text: &str) -> f64 {
-        let text = tester.find_text(text)[0];
+        let text = find::text(text).evaluate(tester)[0];
         let ancestors = tester.ancestors(text);
         let app = tester.cell.borrow();
         // We search for both Visibility and FadeTransition since in some
@@ -2097,7 +2096,7 @@ mod tests {
 
     /// Dart's `_opacityAboveLabel(text)` found anything.
     fn has_opacity_above_label(tester: &WidgetTester, text: &str) -> bool {
-        let text = tester.find_text(text)[0];
+        let text = find::text(text).evaluate(tester)[0];
         let ancestors = tester.ancestors(text);
         let app = tester.cell.borrow();
         ancestors.iter().any(|element| {
@@ -2109,7 +2108,7 @@ mod tests {
     /// Dart's `_railMaterial`: the first material is for the rail, and the rest are for the
     /// destinations.
     fn rail_material<R>(tester: &WidgetTester, read: impl FnOnce(&Material) -> R) -> R {
-        let rail = tester.find_by_type::<NavigationRail>()[0];
+        let rail = find::by_type::<NavigationRail>().evaluate(tester)[0];
         let material = tester.descendants_of_type::<Material>(rail)[0];
         tester.widget(material, read)
     }
@@ -2137,7 +2136,7 @@ mod tests {
         destination_height: f64,
         next_destination_y: f64,
     ) {
-        let size = size_of(tester, render);
+        let size = tester.get_size(render);
         assert_offset(
             global_top_left(tester, render),
             Offset::new(
@@ -2225,8 +2224,8 @@ mod tests {
         test_widgets(|tester| {
             pump_navigation_rail(tester, NavigationRail::new(destinations(), None));
 
-            let selected = tester
-                .find_by_type::<Semantics>()
+            let selected = find::by_type::<Semantics>()
+                .evaluate(tester)
                 .into_iter()
                 .filter(|element| {
                     tester.widget(*element, |semantics: &Semantics| {
@@ -2294,7 +2293,7 @@ mod tests {
         test_widgets(|tester| {
             pump_navigation_rail(tester, NavigationRail::new(destinations(), Some(0)));
 
-            assert_eq!(size_of(tester, rail_box(tester)).width(), 80.0);
+            assert_eq!(tester.get_size(rail_box(tester)).width(), 80.0);
         });
     }
 
@@ -2307,7 +2306,7 @@ mod tests {
                     .label_type(NavigationRailLabelType::Selected),
             );
 
-            assert_eq!(size_of(tester, rail_box(tester)).width(), 80.0);
+            assert_eq!(tester.get_size(rail_box(tester)).width(), 80.0);
         });
     }
 
@@ -2320,7 +2319,7 @@ mod tests {
                     .label_type(NavigationRailLabelType::All),
             );
 
-            assert_eq!(size_of(tester, rail_box(tester)).width(), 80.0);
+            assert_eq!(tester.get_size(rail_box(tester)).width(), 80.0);
         });
     }
 
@@ -2392,7 +2391,7 @@ mod tests {
             };
             let leading_at = |tester: &WidgetTester, key: &GlobalKey| {
                 let render = render_box_of_key(tester, key);
-                (global_top_left(tester, render), size_of(tester, render))
+                (global_top_left(tester, render), tester.get_size(render))
             };
 
             pump_rail_in_app(tester, NavigationRail::new(Vec::new(), None));
@@ -2516,7 +2515,7 @@ mod tests {
     }
 
     fn rail_widget<R>(tester: &WidgetTester, read: impl FnOnce(&NavigationRail) -> R) -> R {
-        tester.widget(tester.find_by_type::<NavigationRail>()[0], read)
+        tester.widget(find::by_type::<NavigationRail>().evaluate(tester)[0], read)
     }
 
     #[test]
@@ -2580,15 +2579,18 @@ mod tests {
 
             // Total padding is 16 (8 on each side).
             assert_eq!(
-                size_of(tester, rail_box(tester)).width(),
-                size_of(tester, label_render_box(tester, "Longer Label")).width() + 16.0
+                tester.get_size(rail_box(tester)).width(),
+                tester
+                    .get_size(label_render_box(tester, "Longer Label"))
+                    .width()
+                    + 16.0
             );
         });
     }
 
     fn finds_one_icon(tester: &WidgetTester, icon: IconData) -> bool {
-        tester
-            .find_by_type::<Icon>()
+        find::by_type::<Icon>()
+            .evaluate(tester)
             .into_iter()
             .filter(|element| {
                 tester.widget(*element, |widget: &Icon| {
@@ -2632,7 +2634,7 @@ mod tests {
             assert!(finds_one_icon(tester, Icons::hotel()));
 
             for label in ["Abc", "Def", "Ghi", "Jkl"] {
-                assert_eq!(tester.find_text(label).len(), 1);
+                expect(tester, &find::text(label), finds_one_widget());
                 // When displaying all labels, there is no opacity.
                 assert!(!has_opacity_above_label(tester, label));
             }
@@ -2685,7 +2687,7 @@ mod tests {
 
             pump_navigation_rail(tester, NavigationRail::new(destinations(), Some(0)));
 
-            assert_eq!(size_of(tester, rail_box(tester)).width(), destination_width);
+            assert_eq!(tester.get_size(rail_box(tester)).width(), destination_width);
 
             // The first destination below the rail top by some padding.
             let mut next_destination_y = top_padding + destination_padding / 2.0;
@@ -2740,7 +2742,7 @@ mod tests {
     /// Asserts the label `text` centred `destination_width` wide with its top at `y`.
     fn expect_label_at(tester: &WidgetTester, text: &str, destination_width: f64, y: f64) {
         let render = label_render_box(tester, text);
-        let size = size_of(tester, render);
+        let size = tester.get_size(render);
         assert_offset(
             global_top_left(tester, render),
             Offset::new((destination_width - size.width()) / 2.0, y),
@@ -2775,7 +2777,7 @@ mod tests {
                 },
             );
 
-            assert_eq!(size_of(tester, rail_box(tester)).width(), destination_width);
+            assert_eq!(tester.get_size(rail_box(tester)).width(), destination_width);
 
             // The first destination below the rail top by some padding; each next one is
             // one height below the one before.
@@ -2848,7 +2850,7 @@ mod tests {
                 },
             );
 
-            assert_eq!(size_of(tester, rail_box(tester)).width(), destination_width);
+            assert_eq!(tester.get_size(rail_box(tester)).width(), destination_width);
 
             // The first destination topPadding below the rail top.
             let next_destination_y = top_padding;
@@ -2923,7 +2925,7 @@ mod tests {
             }
             pump_navigation_rail(tester, rail);
 
-            assert_eq!(size_of(tester, rail_box(tester)).width(), destination_width);
+            assert_eq!(tester.get_size(rail_box(tester)).width(), destination_width);
 
             // The first destination below the rail top by some padding with an offset for the
             // alignment.
@@ -2966,16 +2968,16 @@ mod tests {
                     .trailing(fab()),
             );
 
-            let fabs = tester.find_by_type::<FloatingActionButton>();
+            let fabs = find::by_type::<FloatingActionButton>().evaluate(tester);
             let leading = tester.render_box_of(fabs[0]);
             let trailing = tester.render_box_of(fabs[1]);
             assert_eq!(
                 global_top_left(tester, leading),
-                Offset::new((80.0 - size_of(tester, leading).width()) / 2.0, 8.0)
+                Offset::new((80.0 - tester.get_size(leading).width()) / 2.0, 8.0)
             );
             assert_eq!(
                 global_top_left(tester, trailing),
-                Offset::new((80.0 - size_of(tester, trailing).width()) / 2.0, 248.0)
+                Offset::new((80.0 - tester.get_size(trailing).width()) / 2.0, 248.0)
             );
         });
     }
@@ -3001,17 +3003,17 @@ mod tests {
             pump_rail_in_app(tester, NavigationRail::new(destinations(), Some(0)));
 
             let rail = rail_box(tester);
-            assert_eq!(size_of(tester, rail).width(), destination_width);
+            assert_eq!(tester.get_size(rail).width(), destination_width);
 
             set_rail(
                 tester,
                 NavigationRail::new(destinations(), Some(0)).extended(true),
             );
             tester.pump_by(Duration::from_millis(100));
-            assert_eq!(size_of(tester, rail).width(), 168.0);
+            assert_eq!(tester.get_size(rail).width(), 168.0);
 
             tester.pump_and_settle();
-            assert_eq!(size_of(tester, rail).width(), 256.0);
+            assert_eq!(tester.get_size(rail).width(), 256.0);
 
             // The first destination below the rail top by some padding.
             let mut next_destination_y = top_padding + destination_padding / 2.0;
@@ -3032,7 +3034,7 @@ mod tests {
                     Offset::new(
                         destination_width,
                         next_destination_y
-                            + (destination_height - size_of(tester, label).height()) / 2.0,
+                            + (destination_height - tester.get_size(label).height()) / 2.0,
                     ),
                 );
                 // The next destination is one height below this destination.
@@ -3081,7 +3083,7 @@ mod tests {
             pump_rtl_rail(tester, NavigationRail::new(destinations(), Some(0)));
 
             let rail = rail_box(tester);
-            assert_eq!(size_of(tester, rail).width(), destination_width);
+            assert_eq!(tester.get_size(rail).width(), destination_width);
             assert_eq!(global_top_left(tester, rail), Offset::new(720.0, 0.0));
 
             pump_rtl_rail(
@@ -3089,11 +3091,11 @@ mod tests {
                 NavigationRail::new(destinations(), Some(0)).extended(true),
             );
             tester.pump_by(Duration::from_millis(100));
-            assert_eq!(size_of(tester, rail).width(), 168.0);
+            assert_eq!(tester.get_size(rail).width(), 168.0);
             assert_eq!(global_top_left(tester, rail), Offset::new(632.0, 0.0));
 
             tester.pump_and_settle();
-            assert_eq!(size_of(tester, rail).width(), 256.0);
+            assert_eq!(tester.get_size(rail).width(), 256.0);
             assert_eq!(global_top_left(tester, rail), Offset::new(544.0, 0.0));
 
             // The first destination below the rail top by some padding.
@@ -3103,7 +3105,7 @@ mod tests {
                 .zip(["Abc", "Def", "Ghi", "Jkl"])
             {
                 let icon = icon_render_box(tester, icon);
-                let icon_size = size_of(tester, icon);
+                let icon_size = tester.get_size(icon);
                 assert_offset(
                     global_top_left(tester, icon),
                     Offset::new(
@@ -3112,7 +3114,7 @@ mod tests {
                     ),
                 );
                 let label = label_render_box(tester, label);
-                let label_size = size_of(tester, label);
+                let label_size = tester.get_size(label);
                 assert_offset(
                     global_top_left(tester, label),
                     Offset::new(
@@ -3162,14 +3164,14 @@ mod tests {
             pump(tester, false);
 
             let rail = rail_box(tester);
-            assert_eq!(size_of(tester, rail).width(), 80.0);
+            assert_eq!(tester.get_size(rail).width(), 80.0);
 
             pump(tester, true);
             tester.pump_by(Duration::from_millis(100));
-            assert_eq!(size_of(tester, rail).width(), 303.0);
+            assert_eq!(tester.get_size(rail).width(), 303.0);
 
             tester.pump_and_settle();
-            assert_eq!(size_of(tester, rail).width(), 526.0);
+            assert_eq!(tester.get_size(rail).width(), 526.0);
         });
     }
 
@@ -3182,7 +3184,7 @@ mod tests {
             );
 
             let rail = rail_box(tester);
-            assert_eq!(size_of(tester, rail).width(), 80.0);
+            assert_eq!(tester.get_size(rail).width(), 80.0);
 
             set_rail(
                 tester,
@@ -3191,7 +3193,7 @@ mod tests {
                     .extended(true),
             );
             tester.pump_and_settle();
-            assert_eq!(size_of(tester, rail).width(), 300.0);
+            assert_eq!(tester.get_size(rail).width(), 300.0);
         });
     }
 
@@ -3202,7 +3204,7 @@ mod tests {
             pump_rail_in_app(tester, NavigationRail::new(abc_and_longer_label(), Some(0)));
 
             // Before starting the animation, the rail has a width of 80.
-            assert_eq!(size_of(tester, rail_box(tester)).width(), 80.0);
+            assert_eq!(tester.get_size(rail_box(tester)).width(), 80.0);
 
             set_rail(
                 tester,
@@ -3210,7 +3212,7 @@ mod tests {
             );
             // Create very close to 0, but non-zero, animation value.
             tester.pump_by(Duration::from_millis(1));
-            let width = size_of(tester, rail_box(tester)).width();
+            let width = tester.get_size(rail_box(tester)).width();
             // Expect that it has started to extend.
             assert!(width > 80.0, "{width}");
             // Expect that it has only extended by a small amount, or that the first
@@ -3250,15 +3252,15 @@ mod tests {
     }
 
     fn center_of_element(tester: &WidgetTester, element: AnyElement) -> Offset {
-        tester.global_rect(tester.render_box_of(element)).center()
+        tester.get_rect(element).center()
     }
 
     fn center_of_text(tester: &WidgetTester, text: &str) -> Offset {
-        center_of_element(tester, tester.find_text(text)[0])
+        center_of_element(tester, find::text(text).evaluate(tester)[0])
     }
 
     fn center_of_icon(tester: &WidgetTester, icon: IconData) -> Offset {
-        center_of_element(tester, tester.find_by_icon(&icon))
+        center_of_element(tester, tester.element(find::by_icon(&icon).first()))
     }
 
     #[test]
@@ -3273,10 +3275,10 @@ mod tests {
                     .label_type(NavigationRailLabelType::All),
             );
 
-            tester.tap(center_of_text(tester, "Def"), 1);
+            tester.tap_at(center_of_text(tester, "Def"), 1);
             assert_eq!(selected_index.get(), Some(1));
 
-            tester.tap(center_of_text(tester, "Ghi"), 2);
+            tester.tap_at(center_of_text(tester, "Ghi"), 2);
             assert_eq!(selected_index.get(), Some(2));
 
             // Wait for any pending shader compilation.
@@ -3294,7 +3296,7 @@ mod tests {
                     .label_type(NavigationRailLabelType::All),
             );
 
-            tester.tap(center_of_text(tester, "Def"), 1);
+            tester.tap_at(center_of_text(tester, "Def"), 1);
             assert_eq!(selected_index, 0);
 
             // Wait for any pending shader compilation.
@@ -3334,7 +3336,7 @@ mod tests {
             tester.pump_widget(root);
 
             // Tap the second destination.
-            tester.tap(center_of_icon(tester, Icons::bookmark_border()), 1);
+            tester.tap_at(center_of_icon(tester, Icons::bookmark_border()), 1);
             assert_eq!(selected_index.get(), 1);
 
             // The second destination animates in.
@@ -3346,7 +3348,7 @@ mod tests {
             assert_eq!(label_opacity(tester, "Def"), 1.0);
 
             // Tap the third destination.
-            tester.tap(center_of_icon(tester, Icons::star_border()), 2);
+            tester.tap_at(center_of_icon(tester, Icons::star_border()), 2);
             assert_eq!(selected_index.get(), 2);
 
             // The second destination animates out quickly and the third destination
@@ -3497,7 +3499,7 @@ mod tests {
     /// _IndicatorInkWell, text), matching: find.widgetWithText(Padding, text))).padding`: the
     /// one `Padding` between the destination's ink well and its label.
     fn destination_padding(tester: &WidgetTester, text: &str) -> EdgeInsetsGeometry {
-        let text = tester.find_text(text)[0];
+        let text = find::text(text).evaluate(tester)[0];
         let ancestors = tester.ancestors(text);
         let app = tester.cell.borrow();
         let below_ink_well: Vec<&AnyElement> = ancestors
@@ -3583,7 +3585,11 @@ mod tests {
                     .label_type(NavigationRailLabelType::Selected),
             );
 
-            assert!(!tester.find_by_type::<NavigationIndicator>().is_empty());
+            expect(
+                tester,
+                &find::by_type::<NavigationIndicator>(),
+                finds_widgets(),
+            );
         });
     }
 
@@ -3597,7 +3603,11 @@ mod tests {
                     .label_type(NavigationRailLabelType::Selected),
             );
 
-            assert!(!tester.find_by_type::<NavigationIndicator>().is_empty());
+            expect(
+                tester,
+                &find::by_type::<NavigationIndicator>(),
+                finds_widgets(),
+            );
         });
     }
 
@@ -3611,7 +3621,11 @@ mod tests {
                     .label_type(NavigationRailLabelType::Selected),
             );
 
-            assert!(tester.find_by_type::<NavigationIndicator>().is_empty());
+            expect(
+                tester,
+                &find::by_type::<NavigationIndicator>(),
+                finds_nothing(),
+            );
         });
     }
 
@@ -3624,7 +3638,7 @@ mod tests {
                     .label_type(label_type),
             );
 
-            let indicator = tester.find_by_type::<NavigationIndicator>()[0];
+            let indicator = find::by_type::<NavigationIndicator>().evaluate(tester)[0];
             let (width, height) = tester.widget(indicator, |indicator: &NavigationIndicator| {
                 (indicator.width, indicator.height)
             });
@@ -3689,7 +3703,7 @@ mod tests {
                     ..Pump::default()
                 },
             );
-            let icons = tester.find_by_type::<Icon>();
+            let icons = find::by_type::<Icon>().evaluate(tester);
             // Indicator with Stack widget
             let first_indicator = tester.render_box_of(icons[0]);
             assert_eq!(global_top_left(tester, first_indicator).dx(), dx);
@@ -3728,7 +3742,7 @@ mod tests {
                 use_material3,
                 false,
             );
-            let default_width = size_of(tester, rail_box(tester)).width();
+            let default_width = tester.get_size(rail_box(tester)).width();
             assert_eq!(default_width, default_rail_width);
 
             pump_built_widget(
@@ -3737,7 +3751,7 @@ mod tests {
                 use_material3,
                 false,
             );
-            let updated_width = size_of(tester, rail_box(tester)).width();
+            let updated_width = tester.get_size(rail_box(tester)).width();
             assert_eq!(updated_width, default_width + safe_area_padding);
 
             // test width when text direction is RTL.
@@ -3747,7 +3761,7 @@ mod tests {
                 use_material3,
                 true,
             );
-            let updated_width_rtl = size_of(tester, rail_box(tester)).width();
+            let updated_width_rtl = tester.get_size(rail_box(tester)).width();
             assert_eq!(updated_width_rtl, default_width + safe_area_padding);
         });
     }
@@ -4012,7 +4026,7 @@ mod tests {
 
             // The navigation rail width is larger than default because of the first
             // destination long label.
-            let rail_width = size_of(tester, rail_box(tester)).width();
+            let rail_width = tester.get_size(rail_box(tester)).width();
 
             // Expected indicator position.
             let indicator_left = (rail_width - indicator_width) / 2.0;
@@ -4070,7 +4084,7 @@ mod tests {
             let indicator_width = destination_width - 2.0 * destination_horizontal_padding; // 56.0
 
             // The navigation rail width is the default one because labels are short.
-            let rail_width = size_of(tester, rail_box(tester)).width();
+            let rail_width = tester.get_size(rail_box(tester)).width();
             assert_eq!(rail_width, rail_min_width);
 
             // Expected indicator position.
@@ -4134,7 +4148,7 @@ mod tests {
             let vertical_destination_spacing_m3 = 12.0;
 
             // The navigation rail width is the default one because labels are short.
-            let rail_width = size_of(tester, rail_box(tester)).width();
+            let rail_width = tester.get_size(rail_box(tester)).width();
             assert_eq!(rail_width, rail_min_extended_width);
 
             // Expected indicator position.
@@ -4181,7 +4195,7 @@ mod tests {
             tester.pump_and_settle();
             // Dart's `.last` Transform under the indicators: the second destination's.
             let second_scale = |tester: &WidgetTester| {
-                let indicator = tester.find_by_type::<NavigationIndicator>()[1];
+                let indicator = find::by_type::<NavigationIndicator>().evaluate(tester)[1];
                 let transform = *tester
                     .descendants_of_type::<waft_widgets::Transform>(indicator)
                     .last()
@@ -4209,8 +4223,8 @@ mod tests {
         tester: &WidgetTester,
         read: impl FnOnce(&waft_painting::ShapeDecoration) -> R,
     ) -> R {
-        let ink = tester
-            .find_by_type::<waft_widgets::FadeTransition>()
+        let ink = find::by_type::<waft_widgets::FadeTransition>()
+            .evaluate(tester)
             .into_iter()
             .find_map(|fade| {
                 tester
@@ -4292,13 +4306,13 @@ mod tests {
                 .label_type(NavigationRailLabelType::All),
             );
 
-            tester.tap(center_of_text(tester, "Abc"), 1);
+            tester.tap_at(center_of_text(tester, "Abc"), 1);
             assert_eq!(selected_index.get(), Some(0));
 
-            tester.tap(center_of_text(tester, "Bcd"), 2);
+            tester.tap_at(center_of_text(tester, "Bcd"), 2);
             assert_eq!(selected_index.get(), Some(1));
 
-            tester.tap(center_of_text(tester, "Cde"), 3);
+            tester.tap_at(center_of_text(tester, "Cde"), 3);
             assert_eq!(selected_index.get(), Some(1));
 
             // Wait for any pending shader compilation.
@@ -4330,8 +4344,8 @@ mod tests {
             tester.pump_and_settle();
 
             let default_text_style_opacity = |text: &str| {
-                let element =
-                    tester.ancestor_of_type::<DefaultTextStyle>(tester.find_text(text)[0]);
+                let element = tester
+                    .ancestor_of_type::<DefaultTextStyle>(find::text(text).evaluate(tester)[0]);
                 tester.widget(element, |style: &DefaultTextStyle| {
                     style.style.color.as_deref().map(|color| color.opacity())
                 })
@@ -4486,9 +4500,13 @@ mod tests {
             };
             tester.pump_widget(root);
 
-            assert_eq!(tester.find_by_type::<NavigationRail>().len(), 1);
-            assert_eq!(tester.find_text(normal_label).len(), 1);
-            assert_eq!(tester.find_text(long_label).len(), 1);
+            expect(
+                tester,
+                &find::by_type::<NavigationRail>(),
+                finds_one_widget(),
+            );
+            expect(tester, &find::text(normal_label), finds_one_widget());
+            expect(tester, &find::text(long_label), finds_one_widget());
 
             // If the widget manages to layout without throwing an overflow exception,
             // the test passes.
@@ -4529,7 +4547,7 @@ mod tests {
             };
             tester.pump_widget(root);
 
-            let scrollable = tester.find_by_type::<waft_widgets::Scrollable>()[0];
+            let scrollable = find::by_type::<waft_widgets::Scrollable>().evaluate(tester)[0];
             let mut app = tester.cell.borrow_mut();
             let state = scrollable
                 .state_handle::<waft_widgets::ScrollableState>(&app)
@@ -4597,7 +4615,8 @@ mod tests {
     /// Dart's `tester.getRect(find.ancestor(of: find.byIcon(icon), matching:
     /// find.byType(Semantics)).first)`.
     fn destination_rect(tester: &WidgetTester, icon: IconData) -> Rect {
-        let semantics = tester.ancestor_of_type::<Semantics>(tester.find_by_icon(&icon));
+        let semantics = tester
+            .element(find::ancestor(find::by_icon(&icon), find::by_type::<Semantics>()).first());
         tester.get_rect(tester.render_box_of(semantics))
     }
 
@@ -4657,7 +4676,7 @@ mod tests {
                 )
             };
             tester.pump_widget(root);
-            assert_eq!(size_of(tester, rail_box(tester)), Size::ZERO);
+            assert_eq!(tester.get_size(rail_box(tester)), Size::ZERO);
         });
     }
 
@@ -4671,8 +4690,8 @@ mod tests {
             );
 
             // Find the exact column by checking both alignment and size
-            let columns = tester
-                .find_by_type::<Column>()
+            let columns = find::by_type::<Column>()
+                .evaluate(tester)
                 .into_iter()
                 .filter(|element| {
                     tester.widget(*element, |column: &Column| {
@@ -4704,7 +4723,7 @@ mod tests {
             }
             pump_navigation_rail_with(tester, rail, m2());
 
-            assert_eq!(size_of(tester, rail_box(tester)).width(), 72.0);
+            assert_eq!(tester.get_size(rail_box(tester)).width(), 72.0);
         });
     }
 
@@ -4742,7 +4761,7 @@ mod tests {
                 },
             );
 
-            assert_eq!(size_of(tester, rail_box(tester)).width(), destination_width);
+            assert_eq!(tester.get_size(rail_box(tester)).width(), destination_width);
 
             // The first destination is 8 from the top because of the default vertical
             // padding at the to of the rail; each next one is one width below the one before.
@@ -4787,15 +4806,15 @@ mod tests {
                 },
             );
 
-            assert_eq!(size_of(tester, rail_box(tester)).width(), 72.0);
+            assert_eq!(tester.get_size(rail_box(tester)).width(), 72.0);
 
             // The first destination is 8 from the top because of the default vertical
             // padding at the to of the rail.
             let next_destination_y = 8.0;
             let icon = icon_render_box(tester, Icons::favorite());
             let label = label_render_box(tester, "Abc");
-            let icon_size = size_of(tester, icon);
-            let label_size = size_of(tester, label);
+            let icon_size = tester.get_size(icon);
+            let label_size = tester.get_size(label);
             assert_offset(
                 global_top_left(tester, icon),
                 Offset::new(
@@ -4850,7 +4869,7 @@ mod tests {
                 },
             );
 
-            assert_eq!(size_of(tester, rail_box(tester)).width(), 142.0);
+            assert_eq!(tester.get_size(rail_box(tester)).width(), 142.0);
 
             // The first destination is 8 from the top because of the default vertical
             // padding at the to of the rail.
@@ -4861,7 +4880,7 @@ mod tests {
                 .enumerate()
             {
                 let icon = icon_render_box(tester, icon);
-                let icon_size = size_of(tester, icon);
+                let icon_size = tester.get_size(icon);
                 let labelled = i == 0 || label_type == NavigationRailLabelType::All;
                 if !labelled {
                     // An unselected destination is 72 high with its icon 24 below its top.
@@ -4878,7 +4897,7 @@ mod tests {
                 );
                 // The label sits right below the icon.
                 let label = label_render_box(tester, label);
-                let label_size = size_of(tester, label);
+                let label_size = tester.get_size(label);
                 assert_offset(
                     global_top_left(tester, label),
                     Offset::new(
@@ -4925,7 +4944,7 @@ mod tests {
                 },
             );
 
-            assert_eq!(size_of(tester, rail_box(tester)).width(), 72.0);
+            assert_eq!(tester.get_size(rail_box(tester)).width(), 72.0);
 
             // The first destination is 8 from the top because of the default vertical
             // padding at the to of the rail; each next one is 72 below the one before.
@@ -4936,7 +4955,7 @@ mod tests {
             {
                 let icon = icon_render_box(tester, icon);
                 let label = label_render_box(tester, label);
-                let icon_size = size_of(tester, icon);
+                let icon_size = tester.get_size(icon);
                 assert_offset(
                     global_top_left(tester, icon),
                     Offset::new((72.0 - icon_size.width()) / 2.0, next_destination_y + 16.0),
@@ -4944,7 +4963,7 @@ mod tests {
                 assert_offset(
                     global_top_left(tester, label),
                     Offset::new(
-                        (72.0 - size_of(tester, label).width()) / 2.0,
+                        (72.0 - tester.get_size(label).width()) / 2.0,
                         next_destination_y + 16.0 + icon_size.height(),
                     ),
                 );
@@ -5011,11 +5030,11 @@ mod tests {
             pump_navigation_rail_with(tester, rail(false), m2());
 
             let rail_render = rail_box(tester);
-            assert_eq!(size_of(tester, rail_render).width(), 72.0);
+            assert_eq!(tester.get_size(rail_render).width(), 72.0);
 
             pump_navigation_rail_with(tester, rail(true), m2());
             tester.pump_and_settle();
-            assert_eq!(size_of(tester, rail_render).width(), 300.0);
+            assert_eq!(tester.get_size(rail_render).width(), 300.0);
         });
     }
 
@@ -5199,16 +5218,16 @@ mod tests {
                 m2(),
             );
 
-            let fabs = tester.find_by_type::<FloatingActionButton>();
+            let fabs = find::by_type::<FloatingActionButton>().evaluate(tester);
             let leading = tester.render_box_of(fabs[0]);
             let trailing = tester.render_box_of(fabs[1]);
             assert_eq!(
                 global_top_left(tester, leading),
-                Offset::new((72.0 - size_of(tester, leading).width()) / 2.0, 8.0)
+                Offset::new((72.0 - tester.get_size(leading).width()) / 2.0, 8.0)
             );
             assert_eq!(
                 global_top_left(tester, trailing),
-                Offset::new((72.0 - size_of(tester, trailing).width()) / 2.0, 360.0)
+                Offset::new((72.0 - tester.get_size(trailing).width()) / 2.0, 360.0)
             );
         });
     }
@@ -5219,7 +5238,7 @@ mod tests {
             pump_rtl_rail_with(tester, NavigationRail::new(destinations(), Some(0)), false);
 
             let rail = rail_box(tester);
-            assert_eq!(size_of(tester, rail).width(), 72.0);
+            assert_eq!(tester.get_size(rail).width(), 72.0);
             assert_eq!(global_top_left(tester, rail), Offset::new(728.0, 0.0));
 
             pump_rtl_rail_with(
@@ -5228,11 +5247,11 @@ mod tests {
                 false,
             );
             tester.pump_by(Duration::from_millis(100));
-            assert_eq!(size_of(tester, rail).width(), 164.0);
+            assert_eq!(tester.get_size(rail).width(), 164.0);
             assert_eq!(global_top_left(tester, rail), Offset::new(636.0, 0.0));
 
             tester.pump_and_settle();
-            assert_eq!(size_of(tester, rail).width(), 256.0);
+            assert_eq!(tester.get_size(rail).width(), 256.0);
             assert_eq!(global_top_left(tester, rail), Offset::new(544.0, 0.0));
 
             // The first destination is 8 from the top because of the default vertical
@@ -5243,7 +5262,7 @@ mod tests {
                 .zip(["Abc", "Def", "Ghi", "Jkl"])
             {
                 let icon = icon_render_box(tester, icon);
-                let icon_size = size_of(tester, icon);
+                let icon_size = tester.get_size(icon);
                 assert_offset(
                     global_top_left(tester, icon),
                     Offset::new(
@@ -5252,7 +5271,7 @@ mod tests {
                     ),
                 );
                 let label = label_render_box(tester, label);
-                let label_size = size_of(tester, label);
+                let label_size = tester.get_size(label);
                 assert_offset(
                     global_top_left(tester, label),
                     Offset::new(
@@ -5294,14 +5313,14 @@ mod tests {
             pump(tester, false);
 
             let rail = rail_box(tester);
-            assert_eq!(size_of(tester, rail).width(), 72.0);
+            assert_eq!(tester.get_size(rail).width(), 72.0);
 
             pump(tester, true);
             tester.pump_by(Duration::from_millis(100));
-            assert_eq!(size_of(tester, rail).width(), 328.0);
+            assert_eq!(tester.get_size(rail).width(), 328.0);
 
             tester.pump_and_settle();
-            assert_eq!(size_of(tester, rail).width(), 584.0);
+            assert_eq!(tester.get_size(rail).width(), 584.0);
         });
     }
 
@@ -5316,7 +5335,7 @@ mod tests {
             );
 
             // Before starting the animation, the rail has a width of 72.
-            assert_eq!(size_of(tester, rail_box(tester)).width(), 72.0);
+            assert_eq!(tester.get_size(rail_box(tester)).width(), 72.0);
 
             pump_rail_in_app_with(
                 tester,
@@ -5325,7 +5344,7 @@ mod tests {
             );
             // Create very close to 0, but non-zero, animation value.
             tester.pump_by(Duration::from_millis(1));
-            let width = size_of(tester, rail_box(tester)).width();
+            let width = tester.get_size(rail_box(tester)).width();
             // Expect that it has started to extend.
             assert!(width > 72.0, "{width}");
             // Expect that it has only extended by a small amount, or that the first
@@ -5359,14 +5378,14 @@ mod tests {
             pump(tester, false);
 
             let rail = rail_box(tester);
-            assert_eq!(size_of(tester, rail).width(), 72.0);
+            assert_eq!(tester.get_size(rail).width(), 72.0);
 
             pump(tester, true);
             tester.pump_by(Duration::from_millis(100));
-            assert_eq!(size_of(tester, rail).width(), 164.0);
+            assert_eq!(tester.get_size(rail).width(), 164.0);
 
             tester.pump_and_settle();
-            assert_eq!(size_of(tester, rail).width(), 256.0);
+            assert_eq!(tester.get_size(rail).width(), 256.0);
 
             // The first destination is 8 from the top because of the default vertical
             // padding at the to of the rail; each next one is 72 below the one before.
@@ -5387,7 +5406,7 @@ mod tests {
                     global_top_left(tester, label),
                     Offset::new(
                         72.0,
-                        next_destination_y + (72.0 - size_of(tester, label).height()) / 2.0,
+                        next_destination_y + (72.0 - tester.get_size(label).height()) / 2.0,
                     ),
                 );
                 next_destination_y += 72.0;
@@ -5406,7 +5425,7 @@ mod tests {
                 m2(),
             );
 
-            let indicator = tester.find_by_type::<NavigationIndicator>()[0];
+            let indicator = find::by_type::<NavigationIndicator>().evaluate(tester)[0];
             let (width, height) = tester.widget(indicator, |indicator: &NavigationIndicator| {
                 (indicator.width, indicator.height)
             });

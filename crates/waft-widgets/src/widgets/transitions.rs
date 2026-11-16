@@ -1685,6 +1685,7 @@ mod tests {
     use super::*;
     use crate::framework::LeafRenderObjectWidget;
     use crate::test_harness::Harness;
+    use crate::testing::assert_f32_equals;
     use crate::widgets::basic::{Builder, Directionality, SizedBox, Stack};
 
     /// flutter_test's `TestVSync`: vends ordinary tickers, in no view.
@@ -1785,14 +1786,6 @@ mod tests {
         }
     }
 
-    fn assert_close(actual: Offset, expected: Offset) {
-        assert!(
-            (actual.dx() - expected.dx()).abs() < 1e-4
-                && (actual.dy() - expected.dy()).abs() < 1e-4,
-            "{actual:?} is not {expected:?}"
-        );
-    }
-
     // transitions_test.dart 'SlideTransition transformHitTests'
     #[test]
     fn a_slide_transition_translates_by_the_animation_and_flips_in_rtl() {
@@ -1854,7 +1847,7 @@ mod tests {
         controller.set_value(&mut app, 0.5);
         harness.pump(&mut app);
         let child = transform.child(&app).expect("the sized child");
-        assert_close(
+        assert_f32_equals(
             child.local_to_global(&app, Offset::ZERO, None),
             Offset::new(50.0, 0.0),
         );
@@ -1882,14 +1875,14 @@ mod tests {
         );
         let child = transform.child(&app).expect("the sized child");
         // Half size about the 10x10 child's centre: its top-left lands at (2.5, 2.5).
-        assert_close(
+        assert_f32_equals(
             child.local_to_global(&app, Offset::ZERO, None),
             Offset::new(2.5, 2.5),
         );
 
         controller.set_value(&mut app, 1.0);
         harness.pump(&mut app);
-        assert_close(
+        assert_f32_equals(
             child.local_to_global(&app, Offset::ZERO, None),
             Offset::ZERO,
         );
@@ -1913,14 +1906,14 @@ mod tests {
         let transform: RenderHandle<RenderTransform> = under_root(&harness, &app);
         let child = transform.child(&app).expect("the sized child");
         // A quarter turn clockwise about the 10x10 child's centre.
-        assert_close(
+        assert_f32_equals(
             child.local_to_global(&app, Offset::ZERO, None),
             Offset::new(10.0, 0.0),
         );
 
         controller.set_value(&mut app, 0.5);
         harness.pump(&mut app);
-        assert_close(
+        assert_f32_equals(
             child.local_to_global(&app, Offset::ZERO, None),
             Offset::new(10.0, 10.0),
         );
@@ -2068,7 +2061,7 @@ mod tests {
 
         let stack: RenderHandle<waft_rendering::RenderStack> = under_root(&harness, &app);
         let child = stack.first_child(&app).expect("the positioned child");
-        assert_close(
+        assert_f32_equals(
             child.local_to_global(&app, Offset::ZERO, None),
             Offset::new(50.0, 25.0),
         );
@@ -2104,7 +2097,7 @@ mod tests {
         let stack: RenderHandle<waft_rendering::RenderStack> = under_root(&harness, &app);
         let child = stack.first_child(&app).expect("the positioned child");
         // The rect (20, 10, 50, 25) inside a 100x100 box, applied to the 300x200 stack.
-        assert_close(
+        assert_f32_equals(
             child.local_to_global(&app, Offset::ZERO, None),
             Offset::new(20.0, 10.0),
         );

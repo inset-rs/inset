@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use waft_embedder::{ViewId, ViewRef};
 use waft_foundation::{App, AppCell};
+use waft_rendering::testing::RecordedCall;
 use waft_scheduler::SchedulerBinding;
 use waft_test::TestView;
 use waft_widgets::{BuildContext, Builder, IntoWidget, SizedBox, View, WidgetRef, run_widget};
@@ -100,8 +101,7 @@ pub(crate) fn material_page_app(
 
 /// What a case reads of what the tree painted, through the harness tester in
 /// `waft_widgets::testing`: the ops `waft_rendering::testing` paints a render object into, for its
-/// `paints` matcher, and Material's ink. `painted` and `ink_drawn` are the `Drawn` reading, which
-/// harness C's sweep moves onto that matcher.
+/// `paints` matcher, and Material's ink.
 pub(crate) trait PaintInspection {
     /// The app the tester runs.
     fn app_cell(&self) -> &AppCell;
@@ -119,17 +119,15 @@ pub(crate) trait PaintInspection {
         canvas.build()
     }
 
-    /// The draws of [`ink_list`](Self::ink_list).
-    fn ink_drawn(&self) -> Vec<Drawn> {
-        Drawn::draws(&self.ink_list())
+    /// The draws of [`ink_list`](Self::ink_list) as the canvas calls they stand for, without
+    /// clips and canvas state.
+    fn ink_calls(&self) -> Vec<RecordedCall> {
+        draw_calls(self.ink_list().ops())
     }
 
-    /// What `render` and its subtree draw, painted at the origin: Dart's `paints` matcher.
-    fn painted(&self, render: waft_rendering::AnyRenderObject) -> Vec<Drawn> {
-        self.pictures(render)
-            .iter()
-            .flat_map(|picture| Drawn::draws(picture))
-            .collect()
+    /// The draws `render` and its subtree record, as the canvas calls they stand for.
+    fn painted_calls(&self, render: waft_rendering::AnyRenderObject) -> Vec<RecordedCall> {
+        draw_calls(&self.painted_ops(render))
     }
 
     /// Every op `render` and its subtree record, painted at the origin, for a case that reads
@@ -137,15 +135,6 @@ pub(crate) trait PaintInspection {
     /// path that `as_oval` answers, `drawShadow` an `Op::DrawShadow`).
     fn painted_ops(&self, render: waft_rendering::AnyRenderObject) -> Vec<waft_embedder::valo::Op> {
         waft_rendering::testing::painted_ops(&mut self.app_cell().borrow_mut(), render)
-    }
-
-    /// The pictures `render` and its subtree record, painted at the origin: the top-level
-    /// pictures only, not those of the layers `render` pushes.
-    fn pictures(
-        &self,
-        render: waft_rendering::AnyRenderObject,
-    ) -> Vec<std::sync::Arc<waft_embedder::Picture>> {
-        waft_rendering::testing::pictures(&mut self.app_cell().borrow_mut(), render)
     }
 
     /// Dart's `Material.of(tester.element(finder))` read by `paints`: what the ink features of
@@ -204,6 +193,45 @@ fn first_render<T: waft_rendering::RenderObject>(
         .expect("a render object of that type")
 }
 
+/// The draws among `ops`, as the canvas calls they stand for: no clips, no canvas state.
+pub(crate) fn draw_calls(ops: &[waft_embedder::valo::Op]) -> Vec<RecordedCall> {
+    waft_rendering::testing::draws(ops)
+        .iter()
+        .map(RecordedCall::of)
+        .collect()
+}
+
+/// The colour and bounds of a call that draws a path of any kind: a circle, a rounded rect, a
+/// line or any other path.
+pub(crate) fn path_like(
+    call: &RecordedCall,
+) -> Option<(waft_embedder::Color, waft_embedder::Rect)> {
+    match call {
+        RecordedCall::Circle {
+            center,
+            radius,
+            color,
+            ..
+        } => Some((
+            *color,
+            waft_embedder::Rect::from_ltwh(
+                center.dx() - radius,
+                center.dy() - radius,
+                radius * 2.0,
+                radius * 2.0,
+            ),
+        )),
+        RecordedCall::RRect { bounds, color, .. } | RecordedCall::Path { bounds, color, .. } => {
+            Some((*color, *bounds))
+        }
+        RecordedCall::Line { p1, p2, color, .. } => {
+            Some((*color, waft_embedder::Rect::from_points(*p1, *p2)))
+        }
+        RecordedCall::DRRect { color } => Some((*color, waft_embedder::Rect::ZERO)),
+        _ => None,
+    }
+}
+
 /// Dart's `isSameColorAs` matcher, with its default threshold.
 pub(crate) fn is_same_color_as(a: waft_embedder::Color, b: waft_embedder::Color) -> bool {
     const THRESHOLD: f64 = 0.004;
@@ -222,65 +250,4 @@ fn collect<T: waft_rendering::RenderObject>(
         found.push(typed);
     }
     node.visit_children(app, &mut |child| collect(app, child, found));
-}
-
-/// One recorded canvas op, reduced to what Dart's `paints` matchers compare.
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum Drawn {
-    /// `drawRect`: its colour as `0xAARRGGBB` and its rect.
-    Rect(u32, waft_embedder::Rect),
-    /// A path (`drawCircle`, `drawRRect`, `drawPath`): its colour and its local bounds.
-    Path(u32, waft_embedder::Rect),
-    /// `drawPaint`: its colour.
-    Paint(u32),
-    /// A clip.
-    Clip,
-    /// `save` / `restore` / a transform.
-    State,
-}
-
-fn argb(color: waft_embedder::valo::Color) -> u32 {
-    let channel = |value: f32| (value * 255.0).round() as u32;
-    (channel(color.a) << 24) | (channel(color.r) << 16) | (channel(color.g) << 8) | channel(color.b)
-}
-
-fn rect_of(rect: waft_embedder::valo::Rect) -> waft_embedder::Rect {
-    waft_embedder::Rect::from_ltwh(
-        f64::from(rect.x),
-        f64::from(rect.y),
-        f64::from(rect.width),
-        f64::from(rect.height),
-    )
-}
-
-impl Drawn {
-    /// The ops of `list`, reduced.
-    pub(crate) fn all(list: &waft_embedder::valo::DisplayList) -> Vec<Drawn> {
-        use waft_embedder::valo::Op;
-        list.ops()
-            .iter()
-            .filter_map(|op| match op {
-                Op::DrawRect { paint, rect, .. } => {
-                    Some(Drawn::Rect(argb(paint.color), rect_of(*rect)))
-                }
-                Op::DrawPath {
-                    paint,
-                    content_bounds,
-                    ..
-                } => Some(Drawn::Path(argb(paint.color), rect_of(*content_bounds))),
-                Op::DrawPaint { paint, .. } => Some(Drawn::Paint(argb(paint.color))),
-                Op::ClipPath { .. } => Some(Drawn::Clip),
-                Op::Save | Op::Restore | Op::Transform(_) => Some(Drawn::State),
-                _ => None,
-            })
-            .collect()
-    }
-
-    /// The draws of `list`, without clips and canvas state.
-    pub(crate) fn draws(list: &waft_embedder::valo::DisplayList) -> Vec<Drawn> {
-        Drawn::all(list)
-            .into_iter()
-            .filter(|drawn| !matches!(drawn, Drawn::Clip | Drawn::State))
-            .collect()
-    }
 }

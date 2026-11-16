@@ -507,7 +507,9 @@ mod tests {
 
     use super::*;
     use crate::framework::GlobalKey;
-    use crate::testing::{WidgetTester, test_widgets};
+    use crate::testing::{
+        WidgetTester, expect, find, finds_nothing, finds_one_widget, test_widgets,
+    };
     use crate::widgets::basic::{Center, Directionality};
     use crate::widgets::navigator::{Navigator, NavigatorState, RouteRef, RouteSettings};
     use crate::widgets::pages::{PageRoute, PageRouteBuilder};
@@ -597,17 +599,6 @@ mod tests {
     fn state(key: &GlobalKey, tester: &WidgetTester) -> Handle<NavigatorState> {
         key.current_state::<NavigatorState>(&tester.cell.borrow())
             .expect("a mounted navigator")
-    }
-
-    /// Dart's `tester.getTopLeft(find.byKey(key))`.
-    fn top_left(tester: &WidgetTester, key: &GlobalKey) -> Offset {
-        let render = tester.render_object(key).as_box().expect("a box");
-        tester.global_rect(render).top_left()
-    }
-
-    /// How many onstage texts show `text`: Dart's `find.text(text)`, which skips offstage ones.
-    fn shown(tester: &WidgetTester, text: &str) -> usize {
-        tester.find_onstage_text(text).len()
     }
 
     /// The opacity of the `FadeTransition` nearest above the widget under `key`.
@@ -719,16 +710,16 @@ mod tests {
                     )
                 }
             }));
-            assert_eq!(shown(tester, "Navigate"), 1);
-            assert_eq!(shown(tester, "Second Page"), 0);
+            expect(tester, &find::text("Navigate"), finds_one_widget());
+            expect(tester, &find::text("Second Page"), finds_nothing());
 
             // Flutter taps the "Navigate" box, whose handler pushes `/second`.
             let navigator_state = state(&key, tester);
             tester.update(|app| navigator_state.push_named(app, "/second", None));
             tester.pump();
 
-            assert_eq!(shown(tester, "Navigate"), 1);
-            assert_eq!(shown(tester, "Second Page"), 1);
+            expect(tester, &find::text("Navigate"), finds_one_widget());
+            expect(tester, &find::text("Second Page"), finds_one_widget());
 
             tester.pump_by(Duration::from_millis(50));
 
@@ -749,8 +740,8 @@ mod tests {
 
             tester.pump_and_settle();
 
-            assert_eq!(shown(tester, "Navigate"), 0);
-            assert_eq!(shown(tester, "Second Page"), 1);
+            expect(tester, &find::text("Navigate"), finds_nothing());
+            expect(tester, &find::text("Second Page"), finds_one_widget());
         });
     }
 
@@ -781,7 +772,7 @@ mod tests {
             let page_2 = GlobalKey::new();
             let builder = PageTransitionsBuilderRef::new(FadeUpwardsPageTransitionsBuilder::new());
             let navigator_state = pump_two_pages(tester, builder, &page_1, &page_2);
-            let widget_1_top_left = top_left(tester, &page_1);
+            let widget_1_top_left = tester.get_top_left(&page_1);
 
             // Flutter taps "Page 1", whose handler pushes `/second`.
             tester.update(|app| navigator_state.push_named(app, "/second", None));
@@ -789,7 +780,7 @@ mod tests {
             tester.pump_by(Duration::from_millis(1));
 
             let widget_2_opacity = opacity_above(tester, &page_2);
-            let widget_2_top_left = top_left(tester, &page_2);
+            let widget_2_top_left = tester.get_top_left(&page_2);
 
             assert!(widget_1_top_left.dx() == widget_2_top_left.dx());
             assert!(widget_1_top_left.dy() < widget_2_top_left.dy());
@@ -797,23 +788,23 @@ mod tests {
 
             tester.pump_by(Duration::from_millis(300));
 
-            assert_eq!(shown(tester, "Page 1"), 0);
-            assert_eq!(shown(tester, "Page 2"), 1);
+            expect(tester, &find::text("Page 1"), finds_nothing());
+            expect(tester, &find::text("Page 2"), finds_one_widget());
 
             tester.update(|app| navigator_state.pop(app, None));
             tester.pump();
             tester.pump_by(Duration::from_millis(1));
 
             let widget_2_opacity = opacity_above(tester, &page_2);
-            let widget_2_top_left = top_left(tester, &page_2);
+            let widget_2_top_left = tester.get_top_left(&page_2);
 
             assert!(widget_1_top_left.dy() < widget_2_top_left.dy());
             assert!(widget_2_opacity < 1.0);
 
             tester.pump_by(Duration::from_millis(300));
 
-            assert_eq!(shown(tester, "Page 1"), 1);
-            assert_eq!(shown(tester, "Page 2"), 0);
+            expect(tester, &find::text("Page 1"), finds_one_widget());
+            expect(tester, &find::text("Page 2"), finds_nothing());
         });
     }
 
@@ -855,17 +846,17 @@ mod tests {
             let page_2 = GlobalKey::new();
             let builder = PageTransitionsBuilderRef::new(OpenUpwardsPageTransitionsBuilder::new());
             let navigator_state = pump_two_pages(tester, builder, &page_1, &page_2);
-            let widget_1_top_left = top_left(tester, &page_1);
+            let widget_1_top_left = tester.get_top_left(&page_1);
 
             // Flutter taps "Page 1", whose handler pushes `/second`.
             tester.update(|app| navigator_state.push_named(app, "/second", None));
             tester.pump();
             tester.pump_by(Duration::from_millis(1));
 
-            assert_eq!(shown(tester, "Page 1"), 1);
-            assert_eq!(shown(tester, "Page 2"), 1);
+            expect(tester, &find::text("Page 1"), finds_one_widget());
+            expect(tester, &find::text("Page 2"), finds_one_widget());
 
-            let widget_2_top_left = top_left(tester, &page_2);
+            let widget_2_top_left = tester.get_top_left(&page_2);
 
             assert_eq!(widget_1_top_left.dx(), widget_2_top_left.dx());
             assert!(widget_1_top_left.dy() <= widget_2_top_left.dy());
@@ -873,21 +864,21 @@ mod tests {
             tester.pump_by(Duration::from_millis(300));
 
             // After animation, only Page 2 should be visible.
-            assert_eq!(shown(tester, "Page 1"), 0);
-            assert_eq!(shown(tester, "Page 2"), 1);
+            expect(tester, &find::text("Page 1"), finds_nothing());
+            expect(tester, &find::text("Page 2"), finds_one_widget());
 
             tester.update(|app| navigator_state.pop(app, None));
             tester.pump();
             tester.pump_by(Duration::from_millis(1));
 
-            assert_eq!(shown(tester, "Page 1"), 1);
-            assert_eq!(shown(tester, "Page 2"), 1);
+            expect(tester, &find::text("Page 1"), finds_one_widget());
+            expect(tester, &find::text("Page 2"), finds_one_widget());
 
             tester.pump_by(Duration::from_millis(300));
 
             // After reverse animation, only Page 1 should be visible.
-            assert_eq!(shown(tester, "Page 1"), 1);
-            assert_eq!(shown(tester, "Page 2"), 0);
+            expect(tester, &find::text("Page 1"), finds_one_widget());
+            expect(tester, &find::text("Page 2"), finds_nothing());
         });
     }
 }

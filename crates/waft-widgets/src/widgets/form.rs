@@ -1650,8 +1650,10 @@ mod tests {
     use waft_services::RestorationMap;
 
     use super::*;
-    use crate::framework::{GlobalKey, downcast_widget};
-    use crate::testing::{WidgetTester, test_widgets};
+    use crate::framework::GlobalKey;
+    use crate::testing::{
+        WidgetTester, expect, find, finds_n_widgets, finds_nothing, finds_one_widget, test_widgets,
+    };
     use crate::widgets::basic::{Center, Column, Directionality, SizedBox, StatefulBuilder};
     use crate::widgets::focus_manager::{AnyFocusNode, FocusNodeRef};
     use crate::widgets::restoration::RootRestorationScope;
@@ -1662,11 +1664,6 @@ mod tests {
     /// `MaterialApp` of Dart's cases gives it.
     fn pump_ltr(tester: &mut WidgetTester, widget: WidgetRef) {
         tester.pump_widget(Directionality::new(TextDirection::Ltr, widget));
-    }
-
-    /// How many onstage `Text`s show `text`: Dart's `find.text(text)`.
-    fn count_text(tester: &WidgetTester, text: &str) -> usize {
-        tester.find_onstage_text(text).len()
     }
 
     fn form_state(tester: &WidgetTester, key: &GlobalKey) -> Handle<FormState> {
@@ -1801,10 +1798,10 @@ mod tests {
                 tester.pump();
 
                 // We have to manually validate if we're not autovalidating.
-                assert_eq!(count_text(tester, &expected), 0);
+                expect(tester, &find::text(&expected), finds_nothing());
                 form.validate(&mut tester.cell.borrow_mut());
                 tester.pump();
-                assert_eq!(count_text(tester, &expected), 1);
+                expect(tester, &find::text(&expected), finds_one_widget());
 
                 // Try again with autovalidation. Should validate immediately.
                 form.reset(&mut tester.cell.borrow_mut());
@@ -1812,7 +1809,7 @@ mod tests {
                 enter_text(tester, &field_key, test_value);
                 tester.pump();
 
-                assert_eq!(count_text(tester, &expected), 1);
+                expect(tester, &find::text(&expected), finds_one_widget());
             }
         });
     }
@@ -1958,7 +1955,11 @@ mod tests {
                 tester.pump();
 
                 // Check for a new Text widget with our error text.
-                assert_eq!(count_text(tester, &format!("{test_value}/error")), 1);
+                expect(
+                    tester,
+                    &find::text(&format!("{test_value}/error")),
+                    finds_one_widget(),
+                );
             }
         });
     }
@@ -2053,7 +2054,7 @@ mod tests {
             // The form field has no error.
             assert!(!field.has_error(&tester.cell.borrow_mut()));
             // No error widget is visible.
-            assert_eq!(count_text(tester, "foo/error"), 0);
+            expect(tester, &find::text("foo/error"), finds_nothing());
         });
     }
 
@@ -2073,7 +2074,7 @@ mod tests {
             // The form field has no error.
             assert!(!field.has_error(&tester.cell.borrow_mut()));
             // No "Required" error is visible.
-            assert_eq!(count_text(tester, "Required"), 0);
+            expect(tester, &find::text("Required"), finds_nothing());
         });
     }
 
@@ -2092,14 +2093,14 @@ mod tests {
             let field = recorded.get().expect("built");
 
             assert!(!field.has_error(&tester.cell.borrow_mut()));
-            assert_eq!(count_text(tester, "Required"), 0);
+            expect(tester, &find::text("Required"), finds_nothing());
             assert_eq!(field.error_text(&tester.cell.borrow_mut()), None);
 
             field.validate(&mut tester.cell.borrow_mut());
             tester.pump();
 
             assert!(field.has_error(&tester.cell.borrow_mut()));
-            assert_eq!(count_text(tester, "Required"), 1);
+            expect(tester, &find::text("Required"), finds_one_widget());
         });
     }
 
@@ -2148,7 +2149,7 @@ mod tests {
             pump_ltr(tester, builder());
 
             // We expect no validation error text being shown.
-            assert_eq!(count_text(tester, "error/foo"), 0);
+            expect(tester, &find::text("error/foo"), finds_nothing());
 
             // Set a empty string into the first form field to
             // trigger the fields validators.
@@ -2157,8 +2158,8 @@ mod tests {
 
             // Now we expect the errors to be shown for the first Text Field and
             // for the next two form fields that have their contents unchanged.
-            assert_eq!(count_text(tester, "error/"), 1);
-            assert_eq!(count_text(tester, "error/foo"), 2);
+            expect(tester, &find::text("error/"), finds_one_widget());
+            expect(tester, &find::text("error/foo"), finds_n_widgets(2));
         });
     }
 
@@ -2183,7 +2184,7 @@ mod tests {
             pump_ltr(tester, builder());
 
             // We expect validation error text being shown.
-            assert_eq!(count_text(tester, "error/"), 1);
+            expect(tester, &find::text("error/"), finds_one_widget());
         });
     }
 
@@ -2205,18 +2206,18 @@ mod tests {
             );
 
             // No error text is visible yet.
-            assert_eq!(count_text(tester, "foo/error"), 0);
+            expect(tester, &find::text("foo/error"), finds_nothing());
 
             enter_text(tester, &field_key, "bar");
             tester.pump();
             tester.pump();
-            assert_eq!(count_text(tester, "bar/error"), 1);
+            expect(tester, &find::text("bar/error"), finds_one_widget());
 
             // Resetting the form state should remove the error text.
             let form = form_state(tester, &form_key);
             form.reset(&mut tester.cell.borrow_mut());
             tester.pump();
-            assert_eq!(count_text(tester, "bar/error"), 0);
+            expect(tester, &find::text("bar/error"), finds_nothing());
         });
     }
 
@@ -2239,12 +2240,12 @@ mod tests {
             let form = form_state(tester, &form_key);
 
             // No error text is visible yet. (Initial valid state).
-            assert_eq!(count_text(tester, "Required"), 0);
+            expect(tester, &find::text("Required"), finds_nothing());
 
             // User types valid input 'bar' → autovalidate is disabled → still no error.
             enter_text(tester, &field_key, "bar");
             tester.pump();
-            assert_eq!(count_text(tester, "Required"), 0);
+            expect(tester, &find::text("Required"), finds_nothing());
 
             // Clear the input (invalid).
             enter_text(tester, &field_key, "");
@@ -2252,29 +2253,29 @@ mod tests {
 
             // Manually submit form to show the initial error (AutovalidateMode is now active).
             form.validate(&mut tester.cell.borrow_mut());
-            assert_eq!(count_text(tester, "Required"), 0);
+            expect(tester, &find::text("Required"), finds_nothing());
             tester.pump();
 
             // Verify error is shown.
-            assert_eq!(count_text(tester, "Required"), 1);
+            expect(tester, &find::text("Required"), finds_one_widget());
 
             // Now user interacts again with valid text ('baz') → validation auto-runs and clears
             // the error.
             enter_text(tester, &field_key, "baz");
             tester.pump();
-            assert_eq!(count_text(tester, "Required"), 0);
+            expect(tester, &find::text("Required"), finds_nothing());
 
             // Check the behavior of a manual validate when the text is already valid.
             // This should *confirm* the error is cleared, not re-introduce it.
             form.validate(&mut tester.cell.borrow_mut());
             tester.pump();
-            assert_eq!(count_text(tester, "Required"), 0);
+            expect(tester, &find::text("Required"), finds_nothing());
 
             // Resetting should clear form (already cleared, but a safety check).
             enter_text(tester, &field_key, "");
             form.reset(&mut tester.cell.borrow_mut());
             tester.pump();
-            assert_eq!(count_text(tester, "Required"), 0);
+            expect(tester, &find::text("Required"), finds_nothing());
         });
     }
 
@@ -2335,7 +2336,7 @@ mod tests {
                     .autovalidate_mode(AutovalidateMode::Disabled)
                     .into_widget(),
             );
-            assert_eq!(count_text(tester, "Forcing error."), 1);
+            expect(tester, &find::text("Forcing error."), finds_one_widget());
         });
     }
 
@@ -2355,13 +2356,13 @@ mod tests {
                 .into_widget(),
             );
 
-            assert_eq!(count_text(tester, "Forcing error"), 1);
+            expect(tester, &find::text("Forcing error"), finds_one_widget());
             let form = form_state(tester, &form_key);
             let is_valid = form.validate(&mut tester.cell.borrow_mut());
             assert!(!is_valid);
 
             tester.pump();
-            assert_eq!(count_text(tester, "Forcing error"), 1);
+            expect(tester, &find::text("Forcing error"), finds_one_widget());
         });
     }
 
@@ -2385,9 +2386,13 @@ mod tests {
             let form = form_state(tester, &form_key);
             let is_valid = form.validate(&mut tester.cell.borrow_mut());
             assert!(is_valid);
-            assert_eq!(count_text(tester, "Forcing Error Text"), 0);
+            expect(tester, &find::text("Forcing Error Text"), finds_nothing());
             pump_ltr(tester, builder(Some("Forcing Error Text")));
-            assert_eq!(count_text(tester, "Forcing Error Text"), 1);
+            expect(
+                tester,
+                &find::text("Forcing Error Text"),
+                finds_one_widget(),
+            );
         });
     }
 
@@ -2417,29 +2422,29 @@ mod tests {
 
             // Start off not autovalidating.
             pump_ltr(tester, builder(AutovalidateMode::Disabled));
-            assert_eq!(count_text(tester, force_error_text), 1);
-            assert_eq!(count_text(tester, validator_error_text), 0);
+            expect(tester, &find::text(force_error_text), finds_one_widget());
+            expect(tester, &find::text(validator_error_text), finds_nothing());
 
             let form = form_state(tester, &form_key);
             form.reset(&mut tester.cell.borrow_mut());
             tester.pump();
-            assert_eq!(count_text(tester, force_error_text), 0);
-            assert_eq!(count_text(tester, validator_error_text), 0);
+            expect(tester, &find::text(force_error_text), finds_nothing());
+            expect(tester, &find::text(validator_error_text), finds_nothing());
 
             // We have to manually validate if we're not autovalidating.
             form.validate(&mut tester.cell.borrow_mut());
             tester.pump();
 
             assert!(!did_call_validator.get());
-            assert_eq!(count_text(tester, force_error_text), 1);
-            assert_eq!(count_text(tester, validator_error_text), 0);
+            expect(tester, &find::text(force_error_text), finds_one_widget());
+            expect(tester, &find::text(validator_error_text), finds_nothing());
 
             // Try again with autovalidation. Should validate immediately.
             pump_ltr(tester, builder(AutovalidateMode::Always));
 
             assert!(!did_call_validator.get());
-            assert_eq!(count_text(tester, force_error_text), 1);
-            assert_eq!(count_text(tester, validator_error_text), 0);
+            expect(tester, &find::text(force_error_text), finds_one_widget());
+            expect(tester, &find::text(validator_error_text), finds_nothing());
         });
     }
 
@@ -2482,19 +2487,19 @@ mod tests {
             tester.pump();
             form.validate(&mut tester.cell.borrow_mut());
             tester.pump();
-            assert_eq!(count_text(tester, "test_error"), 0);
+            expect(tester, &find::text("test_error"), finds_nothing());
 
             // Now use the validator.
             set_use_validator(tester, true);
             form.validate(&mut tester.cell.borrow_mut());
             tester.pump();
-            assert_eq!(count_text(tester, "test_error"), 1);
+            expect(tester, &find::text("test_error"), finds_one_widget());
 
             // Remove the validator again and expect the error to disappear.
             set_use_validator(tester, false);
             form.validate(&mut tester.cell.borrow_mut());
             tester.pump();
-            assert_eq!(count_text(tester, "test_error"), 0);
+            expect(tester, &find::text("test_error"), finds_nothing());
         });
     }
 
@@ -2533,7 +2538,7 @@ mod tests {
             );
 
             // No error text is visible yet.
-            assert_eq!(count_text(tester, "foo/error"), 0);
+            expect(tester, &find::text("foo/error"), finds_nothing());
 
             // Enter text in the first TextFormField.
             focus(tester, node1.handle());
@@ -2541,22 +2546,22 @@ mod tests {
             tester.pump();
 
             // No error text is visible yet.
-            assert_eq!(count_text(tester, "foo/error"), 0);
+            expect(tester, &find::text("foo/error"), finds_nothing());
 
             // Tap on the second TextFormField to trigger validation.
             // This should trigger validation for the first TextFormField as well.
             focus(tester, node2.handle());
 
             // Verify that the error text is displayed for the first TextFormField.
-            assert_eq!(count_text(tester, "foo/error"), 1);
-            assert_eq!(count_text(tester, "bar/error"), 0);
+            expect(tester, &find::text("foo/error"), finds_one_widget());
+            expect(tester, &find::text("bar/error"), finds_nothing());
 
             // Tap on the first TextFormField to trigger validation.
             focus(tester, node1.handle());
 
             // Verify that the both error texts are displayed.
-            assert_eq!(count_text(tester, "foo/error"), 1);
-            assert_eq!(count_text(tester, "bar/error"), 1);
+            expect(tester, &find::text("foo/error"), finds_one_widget());
+            expect(tester, &find::text("bar/error"), finds_one_widget());
         });
     }
 
@@ -2592,7 +2597,7 @@ mod tests {
             );
 
             // Verify that the error text is displayed for the first TextFormField.
-            assert_eq!(count_text(tester, "foo/error"), 1);
+            expect(tester, &find::text("foo/error"), finds_one_widget());
 
             // Enter text in the TextFormField.
             focus(tester, node1.handle());
@@ -2603,14 +2608,14 @@ mod tests {
             focus(tester, node2.handle());
 
             // No error text is visible yet for the second TextFormField.
-            assert_eq!(count_text(tester, "bar/error"), 0);
+            expect(tester, &find::text("bar/error"), finds_nothing());
 
             // Now click in the first TextFormField to trigger validation for the second
             // TextFormField.
             focus(tester, node1.handle());
 
             // Verify that the error text is displayed for the second TextFormField.
-            assert_eq!(count_text(tester, "bar/error"), 1);
+            expect(tester, &find::text("bar/error"), finds_one_widget());
         });
     }
 
@@ -2649,8 +2654,8 @@ mod tests {
             focus(tester, node1.handle());
 
             // Check no error messages are displayed initially.
-            assert_eq!(count_text(tester, "foo/error"), 0);
-            assert_eq!(count_text(tester, "bar/error"), 0);
+            expect(tester, &find::text("foo/error"), finds_nothing());
+            expect(tester, &find::text("bar/error"), finds_nothing());
 
             // Validate all fields manually using FormState.
             let form = form_state(tester, &form_key);
@@ -2658,8 +2663,8 @@ mod tests {
             tester.pump();
 
             // Check error messages are displayed.
-            assert_eq!(count_text(tester, "foo/error"), 1);
-            assert_eq!(count_text(tester, "bar/error"), 1);
+            expect(tester, &find::text("foo/error"), finds_one_widget());
+            expect(tester, &find::text("bar/error"), finds_one_widget());
         });
     }
 
@@ -2687,31 +2692,15 @@ mod tests {
 
             // The validation happens in a post frame callback, so the error
             // doesn't show up until the second frame.
-            assert_eq!(count_text(tester, "foo/error"), 0);
-            assert_eq!(count_text(tester, "bar/error"), 0);
+            expect(tester, &find::text("foo/error"), finds_nothing());
+            expect(tester, &find::text("bar/error"), finds_nothing());
 
             tester.pump();
 
             // The error shows up on the second frame.
-            assert_eq!(count_text(tester, "foo/error"), 1);
-            assert_eq!(count_text(tester, "bar/error"), 1);
+            expect(tester, &find::text("foo/error"), finds_one_widget());
+            expect(tester, &find::text("bar/error"), finds_one_widget());
         });
-    }
-
-    /// `tester.getSize(find.byType(W))`: the size of the first box at or below the one `W`.
-    fn size_of_widget<W: 'static>(tester: &WidgetTester) -> Size {
-        let elements = tester.elements();
-        let app = tester.cell.borrow();
-        let mut found = elements
-            .into_iter()
-            .filter(|element| downcast_widget::<W>(&**element.widget(&app)).is_some());
-        let element = found.next().expect("one widget of the type");
-        assert!(found.next().is_none(), "one widget of the type");
-        element
-            .render_object(&app)
-            .and_then(|object| object.as_box())
-            .expect("a box below the widget")
-            .size(&app)
     }
 
     /// `Text('X')`: a box that would be bigger than zero, which zero constraints squeeze.
@@ -2728,7 +2717,7 @@ mod tests {
                     .child(SizedBox::shrink().child(Form::new(sized_text())))
                     .into_widget(),
             );
-            assert_eq!(size_of_widget::<Form>(tester), Size::ZERO);
+            assert_eq!(tester.get_size(find::by_type::<Form>()), Size::ZERO);
         });
     }
 
@@ -2744,7 +2733,10 @@ mod tests {
                     )
                     .into_widget(),
             );
-            assert_eq!(size_of_widget::<FormField<String>>(tester), Size::ZERO);
+            assert_eq!(
+                tester.get_size(find::by_type::<FormField<String>>()),
+                Size::ZERO
+            );
         });
     }
 
@@ -2765,15 +2757,15 @@ mod tests {
 
             field.validate(&mut tester.cell.borrow_mut());
             tester.pump();
-            assert_eq!(count_text(tester, "foo/error"), 1);
+            expect(tester, &find::text("foo/error"), finds_one_widget());
 
             field.clear_error(&mut tester.cell.borrow_mut());
             tester.pump();
 
-            assert_eq!(count_text(tester, "foo/error"), 0);
+            expect(tester, &find::text("foo/error"), finds_nothing());
 
             // Value is preserved.
-            assert_eq!(count_text(tester, "foo"), 1);
+            expect(tester, &find::text("foo"), finds_one_widget());
         });
     }
 
@@ -2804,16 +2796,16 @@ mod tests {
             form.validate(&mut tester.cell.borrow_mut());
             tester.pump();
 
-            assert_eq!(count_text(tester, "foo/error"), 1);
-            assert_eq!(count_text(tester, "bar/error"), 1);
+            expect(tester, &find::text("foo/error"), finds_one_widget());
+            expect(tester, &find::text("bar/error"), finds_one_widget());
 
             form.clear_error(&mut tester.cell.borrow_mut());
             tester.pump();
 
-            assert_eq!(count_text(tester, "foo/error"), 0);
-            assert_eq!(count_text(tester, "bar/error"), 0);
-            assert_eq!(count_text(tester, "foo"), 1);
-            assert_eq!(count_text(tester, "bar"), 1);
+            expect(tester, &find::text("foo/error"), finds_nothing());
+            expect(tester, &find::text("bar/error"), finds_nothing());
+            expect(tester, &find::text("foo"), finds_one_widget());
+            expect(tester, &find::text("bar"), finds_one_widget());
         });
     }
 
@@ -2883,8 +2875,8 @@ mod tests {
             form.validate(&mut tester.cell.borrow_mut());
             tester.pump();
 
-            assert_eq!(count_text(tester, "foo/error"), 1);
-            assert_eq!(count_text(tester, "bar/error"), 1);
+            expect(tester, &find::text("foo/error"), finds_one_widget());
+            expect(tester, &find::text("bar/error"), finds_one_widget());
 
             let mut app = tester.cell.borrow_mut();
             let fields = form.fields(&app);
@@ -2918,7 +2910,7 @@ mod tests {
             assert!(!field.is_valid(&mut tester.cell.borrow_mut()));
 
             // No error UI should be shown.
-            assert_eq!(count_text(tester, "foo/error"), 0);
+            expect(tester, &find::text("foo/error"), finds_nothing());
             assert!(!field.has_error(&tester.cell.borrow_mut()));
         });
     }
@@ -3154,31 +3146,31 @@ mod tests {
         pump_ltr(&mut tester, builder());
 
         // No error text is visible yet.
-        assert_eq!(count_text(&tester, "foo/error"), 0);
+        expect(&tester, &find::text("foo/error"), finds_nothing());
 
         let field = key_state::<RestorableTextFieldState>(&tester, &field_key);
         field.did_change(&mut tester.cell.borrow_mut(), Some("bar".to_string()));
         tester.pump();
         tester.pump();
-        assert_eq!(count_text(&tester, "bar/error"), 1);
+        expect(&tester, &find::text("bar/error"), finds_one_widget());
 
         let data = tester.restoration_data();
         let mut tester = restart_and_restore(data.clone());
         // Error text should be present after restart and restore.
-        assert_eq!(count_text(&tester, "bar/error"), 1);
+        expect(&tester, &find::text("bar/error"), finds_one_widget());
 
         // Resetting the form state should remove the error text.
         let field = key_state::<RestorableTextFieldState>(&tester, &field_key);
         field.reset(&mut tester.cell.borrow_mut());
         tester.pump();
         tester.pump();
-        assert_eq!(count_text(&tester, "bar/error"), 0);
+        expect(&tester, &find::text("bar/error"), finds_nothing());
         let tester = restart_and_restore(tester.restoration_data());
         // Error text should still be removed after restart and restore.
-        assert_eq!(count_text(&tester, "bar/error"), 0);
+        expect(&tester, &find::text("bar/error"), finds_nothing());
 
         let tester = restart_and_restore(data);
-        assert_eq!(count_text(&tester, "bar/error"), 1);
+        expect(&tester, &find::text("bar/error"), finds_one_widget());
     }
 
     fn key_state<S: State>(tester: &WidgetTester, key: &GlobalKey) -> Handle<S> {
@@ -3193,27 +3185,13 @@ mod tests {
                 tester,
                 Form::new(SizedBox::shrink()).can_pop(false).into_widget(),
             );
-            let pop_scopes: Vec<bool> = {
-                let elements = tester.elements();
-                let app = tester.cell.borrow_mut();
-                elements
-                    .into_iter()
-                    .filter_map(|element| {
-                        downcast_widget::<PopScope>(&**element.widget(&app))
-                            .map(|scope| scope.can_pop)
-                    })
-                    .collect()
-            };
-            assert_eq!(pop_scopes, [false]);
+            expect(tester, &find::by_type::<PopScope>(), finds_one_widget());
+            tester.widget(find::by_type::<PopScope>(), |scope: &PopScope| {
+                assert!(!scope.can_pop);
+            });
 
             pump_ltr(tester, Form::new(SizedBox::shrink()).into_widget());
-            let elements = tester.elements();
-            let app = tester.cell.borrow_mut();
-            assert!(
-                elements
-                    .into_iter()
-                    .all(|element| downcast_widget::<PopScope>(&**element.widget(&app)).is_none())
-            );
+            expect(tester, &find::by_type::<PopScope>(), finds_nothing());
         });
     }
 }

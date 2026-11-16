@@ -126,7 +126,7 @@ mod tests {
     use std::rc::Rc;
 
     use waft_widgets::Center;
-    use waft_widgets::testing::{WidgetTester, test_widgets};
+    use waft_widgets::testing::{WidgetTester, find, test_widgets};
 
     use super::*;
     use crate::button_style_button::ButtonStyleButton;
@@ -160,11 +160,9 @@ mod tests {
 
             assert!(!pressed.get());
 
-            let buttons = tester.find_by_type::<DesktopTextSelectionToolbarButton>();
-            let center = tester
-                .global_rect(tester.render_box_of(buttons[0]))
-                .center();
-            tester.tap(center, 1);
+            let buttons = find::by_type::<DesktopTextSelectionToolbarButton>().evaluate(tester);
+            let center = tester.get_rect(buttons[0]).center();
+            tester.tap_at(center, 1);
             assert!(pressed.get());
         });
     }
@@ -177,7 +175,7 @@ mod tests {
                 DesktopTextSelectionToolbarButton::new(None, Text::new("Cannot tap me")),
             );
 
-            let buttons = tester.find_by_type::<TextButton>();
+            let buttons = find::by_type::<TextButton>().evaluate(tester);
             assert_eq!(buttons.len(), 1);
             assert!(!tester.widget(buttons[0], |button: &TextButton| button.enabled()));
         });
@@ -191,9 +189,8 @@ mod tests {
                 SizedBox::shrink()
                     .child(DesktopTextSelectionToolbarButton::new(None, Text::new("X"))),
             );
-            let buttons = tester.find_by_type::<DesktopTextSelectionToolbarButton>();
-            let render = tester.render_box_of(buttons[0]);
-            assert_eq!(render.size(&tester.cell.borrow()), Size::ZERO);
+            let buttons = find::by_type::<DesktopTextSelectionToolbarButton>().evaluate(tester);
+            assert_eq!(tester.get_size(buttons[0]), Size::ZERO);
         });
     }
 }

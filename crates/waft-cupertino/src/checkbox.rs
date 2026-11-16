@@ -1072,7 +1072,7 @@ mod tests {
     };
     use waft_services::{LogicalKeyboardKey, PhysicalKeyboardKey};
     use waft_widgets::testing::{
-        TargetPlatformVariant, TestPointer, WidgetTester, test_widgets, test_widgets_variant,
+        TargetPlatformVariant, TestPointer, WidgetTester, find, test_widgets, test_widgets_variant,
     };
     use waft_widgets::{
         AnyFocusNode, Center, FocusHighlightStrategy, FocusNode, GlobalKey, IntoWidget, SizedBox,
@@ -1255,9 +1255,9 @@ mod tests {
             self.tester.pump();
         }
 
-        /// Dart's `tester.tap` at the checkbox's centre.
+        /// Dart's `tester.tap(find.byType(CupertinoCheckbox))`.
         fn tap(&mut self) {
-            self.tester.tap(VIEW_CENTER, 1);
+            self.tester.tap(find::by_type::<CupertinoCheckbox>());
         }
 
         /// Dart's `gesture.addPointer(location: center)`, `pump` and `gesture.moveTo(center)`:
@@ -1875,7 +1875,7 @@ mod tests {
                     ),
                 ),
             );
-            assert_eq!(tester.size_of(&key), Size::ZERO);
+            assert_eq!(tester.get_size(&key), Size::ZERO);
         });
     }
 

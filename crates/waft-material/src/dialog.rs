@@ -2630,7 +2630,9 @@ pub(crate) mod tests {
     use waft_rendering::RenderParagraph;
     use waft_widgets::{AnyElement, Center, Container, GlobalKey, MediaQueryData, SizedBox, Text};
 
-    use waft_widgets::testing::{WidgetTester, test_widgets};
+    use waft_widgets::testing::{
+        WidgetTester, assert_f32_equals, expect, find, finds_one_widget, test_widgets,
+    };
 
     use super::*;
     use crate::elevated_button::ElevatedButton;
@@ -2788,38 +2790,18 @@ pub(crate) mod tests {
 
     /// Dart's `tester.tap(find.text('X'))` then `tester.pumpAndSettle()`.
     pub(crate) fn open(tester: &mut WidgetTester) {
-        tap_text(tester, "X");
+        tester.tap(find::text("X"));
         tester.pump_and_settle();
-    }
-
-    pub(crate) fn only(found: Vec<AnyElement>) -> AnyElement {
-        assert_eq!(found.len(), 1, "one widget found");
-        found[0]
-    }
-
-    pub(crate) fn rect_of(tester: &WidgetTester, element: AnyElement) -> Rect {
-        tester.get_rect(tester.render_box_of(element))
-    }
-
-    /// Dart's `tester.getRect(find.text(text))`.
-    fn text_rect(tester: &WidgetTester, text: &str) -> Rect {
-        rect_of(tester, only(tester.find_onstage_text(text)))
     }
 
     /// Dart's `find.text(text)` with `findsOneWidget` or `findsNothing`.
     pub(crate) fn shows(tester: &WidgetTester, text: &str) -> usize {
-        tester.find_onstage_text(text).len()
-    }
-
-    /// Dart's `tester.tap(find.text(text))`.
-    pub(crate) fn tap_text(tester: &mut WidgetTester, text: &str) {
-        let center = text_rect(tester, text).center();
-        tester.tap(center, 1);
+        find::text(text).evaluate(tester).len()
     }
 
     /// Dart's `tester.tapAt(at)`.
     pub(crate) fn tap_at(tester: &mut WidgetTester, at: Offset) {
-        tester.tap(at, 1);
+        tester.tap_at(at, 1);
     }
 
     pub(crate) fn rect_of_key(tester: &WidgetTester, key: &GlobalKey) -> Rect {
@@ -2829,7 +2811,7 @@ pub(crate) mod tests {
     /// Dart's `find.descendant(of: find.byType(Dialog), matching: find.byType(Material))`, the
     /// first.
     pub(crate) fn dialog_material(tester: &WidgetTester) -> AnyElement {
-        let dialog = tester.find_by_type::<Dialog>()[0];
+        let dialog = find::by_type::<Dialog>().evaluate(tester)[0];
         tester.descendants_of_type::<Material>(dialog)[0]
     }
 
@@ -2843,9 +2825,9 @@ pub(crate) mod tests {
 
     /// Dart's `_getTextRenderObjectFromDialog(tester, text).text.style`.
     pub(crate) fn text_style_in_dialog(tester: &WidgetTester, text: &str) -> Option<TextStyle> {
-        let dialog = tester.find_by_type::<Dialog>()[0];
-        let element = tester
-            .find_text(text)
+        let dialog = find::by_type::<Dialog>().evaluate(tester)[0];
+        let element = find::text(text)
+            .evaluate(tester)
             .into_iter()
             .find(|element| tester.ancestors(*element).contains(&dialog))
             .expect("the text is in the dialog");
@@ -2859,8 +2841,8 @@ pub(crate) mod tests {
 
     /// Dart's `_findOverflowBar()`: the `Padding` the `OverflowBar` is the child of.
     fn overflow_bar_padding(tester: &WidgetTester) -> Rect {
-        let bar = tester.find_by_type::<OverflowBar>()[0];
-        rect_of(tester, tester.ancestor_of_type::<Padding>(bar))
+        let bar = find::by_type::<OverflowBar>().evaluate(tester)[0];
+        tester.get_rect(tester.ancestor_of_type::<Padding>(bar))
     }
 
     fn green_box(height: f64, width: f64) -> WidgetRef {
@@ -2879,7 +2861,7 @@ pub(crate) mod tests {
                 .child(Center::new().child(ElevatedButton::new(None, Some(Text::new(text)))))
                 .into_widget()
         });
-        tester.find_text(text)[0]
+        find::text(text).evaluate(tester)[0]
     }
 
     /// Records the value `future` resolves with: Dart's `await result`.
@@ -2907,7 +2889,7 @@ pub(crate) mod tests {
             pump_with_dialog(tester, m3, AlertDialog::new().content(Text::new("Body")));
             tester.assert_leaves_nothing_behind(|tester| {
                 open(tester);
-                let body = only(tester.find_onstage_text("Body"));
+                let body = tester.element(find::text("Body"));
                 Navigator::pop(&mut tester.cell.borrow_mut(), body, None);
                 tester.pump_and_settle();
                 assert_eq!(shows(tester, "Body"), 0);
@@ -2934,7 +2916,7 @@ pub(crate) mod tests {
             open(tester);
 
             assert!(!did_press_ok.get());
-            tap_text(tester, "OK");
+            tester.tap(find::text("OK"));
             assert!(did_press_ok.get());
         });
     }
@@ -3018,7 +3000,7 @@ pub(crate) mod tests {
                 24.0
             );
 
-            let bottom_left = rect_of(tester, dialog_material(tester)).bottom_left();
+            let bottom_left = tester.get_rect(dialog_material(tester)).bottom_left();
             assert_eq!(bottom_left.dy(), 360.0);
         });
     }
@@ -3351,7 +3333,7 @@ pub(crate) mod tests {
 
             open(tester);
 
-            let bottom_left = rect_of(tester, dialog_material(tester)).bottom_left();
+            let bottom_left = tester.get_rect(dialog_material(tester)).bottom_left();
             assert_eq!(bottom_left.dx(), 40.0);
             assert_eq!(bottom_left.dy(), 576.0);
         });
@@ -3390,7 +3372,7 @@ pub(crate) mod tests {
 
             tester.pump_and_settle_by(Duration::from_secs(1));
             assert_eq!(shows(tester, "Title"), 1);
-            tap_text(tester, "First option");
+            tester.tap(find::text("First option"));
 
             assert_eq!(result.get(), Some(Some(42)));
         });
@@ -3420,7 +3402,7 @@ pub(crate) mod tests {
 
             tester.pump_and_settle_by(Duration::from_secs(1));
             assert_eq!(shows(tester, "Title"), 1);
-            tap_text(tester, "First option");
+            tester.tap(find::text("First option"));
 
             assert_eq!(result.get(), Some(Some(42)));
         });
@@ -3441,11 +3423,9 @@ pub(crate) mod tests {
             pump_with_dialog(tester, m3, dialog);
             open(tester);
 
-            let dialog_rect = rect_of(
-                tester,
-                only(tester.find_onstage_by_type::<SimpleDialogOption>()),
-            );
-            let text_rect = text_rect(tester, "First option");
+            let dialog_rect =
+                tester.get_rect(tester.element(find::by_type::<SimpleDialogOption>()));
+            let text_rect = tester.get_rect(find::text("First option"));
 
             assert_eq!(text_rect.left, dialog_rect.left + custom_padding.left);
             assert_eq!(text_rect.top, dialog_rect.top + custom_padding.top);
@@ -3501,7 +3481,7 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn last_barrier_color(tester: &WidgetTester) -> Option<Color> {
-        let barriers = tester.find_by_type::<waft_widgets::ModalBarrier>();
+        let barriers = find::by_type::<waft_widgets::ModalBarrier>().evaluate(tester);
         tester.widget::<waft_widgets::ModalBarrier, _>(
             *barriers.last().expect("a modal barrier"),
             |barrier| barrier.color,
@@ -3514,7 +3494,7 @@ pub(crate) mod tests {
             pump_app(tester, m3, |_app| {
                 Center::new().child(Text::new("Test")).into_widget()
             });
-            let context = tester.find_text("Test")[0];
+            let context = find::text("Test").evaluate(tester)[0];
             let dialog: WidgetBuilder = Rc::new(|_app, _context| Text::new("Dialog").into_widget());
 
             // Test default barrier color
@@ -3534,16 +3514,6 @@ pub(crate) mod tests {
         });
     }
 
-    /// Dart's `expect(actual, expected)` and `moreOrLessEquals` on positions that went through
-    /// a render object's transform: `Matrix4` is valo's f32 matrix, so they carry f32 rounding
-    /// that Dart's f64 has not, and nothing more.
-    fn assert_near(actual: f64, expected: f64) {
-        assert!(
-            (actual - expected).abs() <= f64::from(f32::EPSILON) * expected.abs().max(1.0),
-            "{actual} is not {expected}"
-        );
-    }
-
     /// Dart's `ElevatedButton(key: key, onPressed: () {}, child: Text(text))`.
     fn button(key: Option<&GlobalKey>, text: &str) -> WidgetRef {
         let button = ElevatedButton::new(
@@ -3558,8 +3528,10 @@ pub(crate) mod tests {
 
     /// The size of the first `Material` under the `AlertDialog`: the dialog itself.
     fn alert_dialog_material_size(tester: &WidgetTester) -> Size {
-        let dialog = tester.find_by_type::<AlertDialog>()[0];
-        rect_of(tester, tester.descendants_of_type::<Material>(dialog)[0]).size()
+        let dialog = find::by_type::<AlertDialog>().evaluate(tester)[0];
+        tester
+            .get_rect(tester.descendants_of_type::<Material>(dialog)[0])
+            .size()
     }
 
     #[test]
@@ -3596,7 +3568,9 @@ pub(crate) mod tests {
             open(tester);
 
             let dialog_size = alert_dialog_material_size(tester);
-            let actions_size = rect_of(tester, tester.find_by_type::<OverflowBar>()[0]).size();
+            let actions_size = tester
+                .get_rect(find::by_type::<OverflowBar>().evaluate(tester)[0])
+                .size();
 
             assert_eq!(actions_size.width(), dialog_size.width() - (30.0 * 2.0));
         });
@@ -3631,20 +3605,20 @@ pub(crate) mod tests {
         let bar = overflow_bar_padding(tester);
 
         // Padding between both buttons
-        assert_near(
+        assert_f32_equals(
             rect2.bottom_left().dx(),
             rect1.bottom_right().dx() + spacing,
         );
 
         // Padding between button and edges of the button bar
         // First button
-        assert_near(rect1.top_right().dy(), bar.top_right().dy() + top);
-        assert_near(rect1.bottom_right().dy(), bar.bottom_right().dy() - bottom);
+        assert_f32_equals(rect1.top_right().dy(), bar.top_right().dy() + top);
+        assert_f32_equals(rect1.bottom_right().dy(), bar.bottom_right().dy() - bottom);
 
         // Second button
-        assert_near(rect2.top_right().dy(), bar.top_right().dy() + top);
-        assert_near(rect2.bottom_right().dy(), bar.bottom_right().dy() - bottom);
-        assert_near(rect2.bottom_right().dx(), bar.bottom_right().dx() - right);
+        assert_f32_equals(rect2.top_right().dy(), bar.top_right().dy() + top);
+        assert_f32_equals(rect2.bottom_right().dy(), bar.bottom_right().dy() - bottom);
+        assert_f32_equals(rect2.bottom_right().dx(), bar.bottom_right().dx() - right);
     }
 
     #[test]
@@ -3759,7 +3733,7 @@ pub(crate) mod tests {
         }
 
         fn dialog_rect(tester: &WidgetTester) -> Rect {
-            rect_of(tester, dialog_material(tester))
+            tester.get_rect(dialog_material(tester))
         }
 
         /// Dart's `openDialog(tester, dialog, textScaleFactor, isM3:)`.
@@ -3788,8 +3762,8 @@ pub(crate) mod tests {
             let dialog = dialog_rect(tester);
             let found = rect(tester, finder);
             let padding = unscaled_value * padding_scale_factor(text_scale_factor);
-            assert_near(dialog.top_left().dx(), found.top_left().dx() - padding);
-            assert_near(
+            assert_f32_equals(dialog.top_left().dx(), found.top_left().dx() - padding);
+            assert_f32_equals(
                 dialog.bottom_left().dx(),
                 found.bottom_left().dx() - padding,
             );
@@ -3804,8 +3778,8 @@ pub(crate) mod tests {
             let dialog = dialog_rect(tester);
             let found = rect(tester, finder);
             let padding = unscaled_value * padding_scale_factor(text_scale_factor);
-            assert_near(dialog.top_right().dx(), found.top_right().dx() + padding);
-            assert_near(
+            assert_f32_equals(dialog.top_right().dx(), found.top_right().dx() + padding);
+            assert_f32_equals(
                 dialog.bottom_right().dx(),
                 found.bottom_right().dx() + padding,
             );
@@ -3820,8 +3794,8 @@ pub(crate) mod tests {
             let dialog = dialog_rect(tester);
             let found = rect(tester, finder);
             let padding = unscaled_value * padding_scale_factor(text_scale_factor);
-            assert_near(dialog.top_left().dy(), found.top_left().dy() - padding);
-            assert_near(dialog.top_right().dy(), found.top_right().dy() - padding);
+            assert_f32_equals(dialog.top_left().dy(), found.top_left().dy() - padding);
+            assert_f32_equals(dialog.top_right().dy(), found.top_right().dy() - padding);
         }
 
         fn expect_bottom_edge_padding(
@@ -3833,11 +3807,11 @@ pub(crate) mod tests {
             let dialog = dialog_rect(tester);
             let found = rect(tester, finder);
             let padding = unscaled_value * padding_scale_factor(text_scale_factor);
-            assert_near(
+            assert_f32_equals(
                 dialog.bottom_left().dy(),
                 found.bottom_right().dy() + padding,
             );
-            assert_near(
+            assert_f32_equals(
                 dialog.bottom_right().dy(),
                 found.bottom_right().dy() + padding,
             );
@@ -3851,8 +3825,8 @@ pub(crate) mod tests {
         ) {
             let top = rect(tester, top);
             let bottom = rect(tester, bottom);
-            assert_near(top.bottom_left().dy(), bottom.top_left().dy() - value);
-            assert_near(top.bottom_right().dy(), bottom.top_right().dy() - value);
+            assert_f32_equals(top.bottom_left().dy(), bottom.top_left().dy() - value);
+            assert_f32_equals(top.bottom_right().dy(), bottom.top_right().dy() - value);
         }
 
         fn expect_actions_at_the_edges(tester: &WidgetTester, text_scale_factor: f64) {
@@ -4091,7 +4065,7 @@ pub(crate) mod tests {
 
             let button_one_rect = rect_of_key(tester, &key1);
             let button_two_rect = rect_of_key(tester, &key2);
-            assert_near(button_one_rect.bottom, button_two_rect.top);
+            assert_f32_equals(button_one_rect.bottom, button_two_rect.top);
         });
     }
 
@@ -4105,7 +4079,7 @@ pub(crate) mod tests {
 
             let button_one_rect = rect_of_key(tester, &key1);
             let button_two_rect = rect_of_key(tester, &key2);
-            assert_near(button_one_rect.bottom, button_two_rect.top - 10.0);
+            assert_f32_equals(button_one_rect.bottom, button_two_rect.top - 10.0);
         });
     }
 
@@ -4128,7 +4102,7 @@ pub(crate) mod tests {
 
             let button_one_rect = rect_of_key(tester, &key1);
             let button_two_rect = rect_of_key(tester, &key2);
-            assert_near(button_one_rect.center().dx(), button_two_rect.center().dx());
+            assert_f32_equals(button_one_rect.center().dx(), button_two_rect.center().dx());
         });
     }
 
@@ -4329,7 +4303,7 @@ pub(crate) mod tests {
                     placeholder(&key)
                 }))
             };
-            let material_rect = |tester: &WidgetTester| rect_of(tester, dialog_material(tester));
+            let material_rect = |tester: &WidgetTester| tester.get_rect(dialog_material(tester));
 
             tester.pump_widget(
                 MediaQuery::new(
@@ -4374,7 +4348,7 @@ pub(crate) mod tests {
     /// Dart's `AlertDialog.scrollable` cases: drags `drag` by `dy` and expects every one of
     /// `moved` to have moved by `dy` from where it was.
     fn drag_key(tester: &mut WidgetTester, key: &GlobalKey, dy: f64) {
-        let start = tester.center_of(key);
+        let start = tester.get_center(key);
         tester.drag_from(start, Offset::new(0.0, dy), 1);
     }
 
@@ -4544,7 +4518,7 @@ pub(crate) mod tests {
             };
             tester.pump_widget(root);
 
-            let context = tester.find_text("Go")[0];
+            let context = find::text("Go").evaluate(tester)[0];
             let example_setting =
                 RouteSettingsRef::Settings(waft_widgets::RouteSettings::default().name("simple"));
 
@@ -4578,7 +4552,7 @@ pub(crate) mod tests {
                 Some(example_setting)
             );
 
-            tap_text(tester, "X");
+            tester.tap(find::text("X"));
             tester.pump_and_settle();
 
             assert_eq!(result.get(), Some(None));
@@ -4613,8 +4587,9 @@ pub(crate) mod tests {
                     crate::scaffold::Scaffold::new().body(dialog).into_widget()
                 });
             };
-            let alert_dialog =
-                |tester: &WidgetTester| rect_of(tester, tester.find_by_type::<AlertDialog>()[0]);
+            let alert_dialog = |tester: &WidgetTester| {
+                tester.get_rect(find::by_type::<AlertDialog>().evaluate(tester)[0])
+            };
             let action = |tester: &WidgetTester| rect_of_key(tester, &action_key);
 
             // Default configuration
@@ -4622,7 +4597,9 @@ pub(crate) mod tests {
             assert_eq!(alert_dialog(tester).top_left().dx(), 0.0);
             assert_eq!(alert_dialog(tester).top_right().dx(), 800.0);
             assert_eq!(
-                rect_of(tester, tester.find_by_type::<OverflowBar>()[0]).width(),
+                tester
+                    .get_rect(find::by_type::<OverflowBar>().evaluate(tester)[0])
+                    .width(),
                 800.0
             );
             assert_eq!(action(tester).top_left().dx(), 800.0 - 20.0);
@@ -4789,7 +4766,9 @@ pub(crate) mod tests {
                 open(tester);
 
                 assert_eq!(
-                    tester.find_onstage_by_type::<CupertinoAlertDialog>().len(),
+                    find::by_type::<CupertinoAlertDialog>()
+                        .evaluate(tester)
+                        .len(),
                     cupertino,
                     "on {platform:?}"
                 );
@@ -4843,7 +4822,7 @@ pub(crate) mod tests {
                         .into_widget()
                 },
             );
-            let context = tester.find_text("Go")[0];
+            let context = find::text("Go").evaluate(tester)[0];
 
             drop(Show::default().on(tester, context, hundred_square("Dialog1")));
 
@@ -5037,7 +5016,7 @@ pub(crate) mod tests {
 
             let dialog_scope_has_focus = |tester: &WidgetTester| {
                 use waft_widgets::FocusNodeLeaf;
-                let element = tester.find_text("dialog")[0];
+                let element = find::text("dialog").evaluate(tester)[0];
                 let mut app = tester.cell.borrow_mut();
                 let scope = waft_widgets::FocusScope::of(&mut app, element, true);
                 scope.as_node().has_focus(&mut app)
@@ -5219,14 +5198,14 @@ pub(crate) mod tests {
             open(tester);
 
             assert_eq!(
-                tester
-                    .find_onstage_by_type::<crate::action_buttons::BackButton>()
+                find::by_type::<crate::action_buttons::BackButton>()
+                    .evaluate(tester)
                     .len(),
                 0
             );
             assert_eq!(
-                tester
-                    .find_onstage_by_type::<crate::action_buttons::CloseButton>()
+                find::by_type::<crate::action_buttons::CloseButton>()
+                    .evaluate(tester)
                     .len(),
                 1
             );
@@ -5234,7 +5213,7 @@ pub(crate) mod tests {
     }
 
     fn size_of_only<W: 'static>(tester: &WidgetTester) -> Size {
-        rect_of(tester, only(tester.find_by_type::<W>())).size()
+        tester.get_rect(tester.element(find::by_type::<W>())).size()
     }
 
     #[test]
@@ -5292,7 +5271,7 @@ pub(crate) mod tests {
     fn route_semantics_hit_test_behavior(
         tester: &WidgetTester,
     ) -> Option<SemanticsHitTestBehavior> {
-        let dialog = only(tester.find_by_type::<Dialog>());
+        let dialog = tester.element(find::by_type::<Dialog>());
         let semantics = tester.ancestor_of_type::<Semantics>(dialog);
         tester.widget::<Semantics, _>(semantics, |semantics| {
             semantics.properties.hit_test_behavior
@@ -5331,10 +5310,10 @@ pub(crate) mod tests {
                 }),
             );
 
-            tap_text(tester, "Show Dialog");
+            tester.tap(find::text("Show Dialog"));
             tester.pump_and_settle();
 
-            assert_eq!(tester.find_onstage_by_type::<Dialog>().len(), 1);
+            expect(tester, &find::by_type::<Dialog>(), finds_one_widget());
             assert_eq!(
                 route_semantics_hit_test_behavior(tester),
                 Some(SemanticsHitTestBehavior::Opaque)
@@ -5362,11 +5341,11 @@ pub(crate) mod tests {
                 }),
             );
 
-            tap_text(tester, "Show Dialog");
+            tester.tap(find::text("Show Dialog"));
             tester.pump_and_settle();
 
-            assert_eq!(tester.find_onstage_by_type::<AlertDialog>().len(), 1);
-            assert_eq!(tester.find_onstage_by_type::<Dialog>().len(), 1);
+            expect(tester, &find::by_type::<AlertDialog>(), finds_one_widget());
+            expect(tester, &find::by_type::<Dialog>(), finds_one_widget());
             // Find the route-level Semantics with hitTestBehavior.opaque
             // (wraps the entire dialog content, above the Dialog widget)
             assert_eq!(
@@ -5466,7 +5445,7 @@ pub(crate) mod tests {
             };
 
             let dismiss_item = |tester: &mut WidgetTester, item: i32| {
-                let start = text_rect(tester, &item.to_string()).center();
+                let start = tester.get_rect(find::text(&item.to_string())).center();
                 tester.fling_from(start, Offset::new(300.0, 0.0), 1000.0, 1); // fling to the right
                 tester.pump(); // start the slide
                 tester.pump_by(Duration::from_secs(1)); // finish the slide and start shrinking...
@@ -5481,7 +5460,7 @@ pub(crate) mod tests {
             assert!(dismissed().is_empty());
             dismiss_item(tester, 0); // Causes the AlertDialog to appear per confirmDismiss
             tester.pump_and_settle();
-            tap_text(tester, "TRUE"); // AlertDialog action
+            tester.tap(find::text("TRUE")); // AlertDialog action
             tester.pump_and_settle();
             assert_eq!(shows(tester, "TRUE"), 0); // Dialog was dismissed
             assert_eq!(shows(tester, "FALSE"), 0);
@@ -5493,7 +5472,7 @@ pub(crate) mod tests {
             assert_eq!(dismissed(), vec![0]);
             dismiss_item(tester, 1); // Causes the AlertDialog to appear per confirmDismiss
             tester.pump_and_settle();
-            tap_text(tester, "FALSE"); // AlertDialog action
+            tester.tap(find::text("FALSE")); // AlertDialog action
             tester.pump_and_settle();
             assert_eq!(shows(tester, "TRUE"), 0); // Dialog was dismissed
             assert_eq!(shows(tester, "FALSE"), 0);
@@ -5521,7 +5500,7 @@ pub(crate) mod tests {
             assert_eq!(dismissed(), vec![0]);
             dismiss_item(tester, 1); // Causes the AlertDialog to appear per confirmDismiss
             tester.pump_and_settle();
-            tap_text(tester, "TRUE"); // AlertDialog action
+            tester.tap(find::text("TRUE")); // AlertDialog action
             tester.pump_and_settle();
             assert_eq!(shows(tester, "TRUE"), 0); // Dialog was dismissed
             assert_eq!(shows(tester, "FALSE"), 0);
@@ -5565,9 +5544,9 @@ pub(crate) mod tests {
             build_frame(tester, waft_foundation::UniqueKey::new().into());
 
             // Open the dialog.
-            let button = only(tester.find_by_type::<ElevatedButton>());
-            let center = rect_of(tester, button).center();
-            tester.tap(center, 1);
+            let button = tester.element(find::by_type::<ElevatedButton>());
+            let center = tester.get_rect(button).center();
+            tester.tap_at(center, 1);
             tester.pump_and_settle();
 
             // Force the Builder to be recreated (new key) which causes outerContext to
@@ -5597,7 +5576,7 @@ pub(crate) mod tests {
                     .into_widget()
             };
             tester.pump_widget(root);
-            let context = tester.find_text("Test")[0];
+            let context = find::text("Test").evaluate(tester)[0];
             let key = GlobalKey::new();
             let page = {
                 let key = key.clone();
@@ -5713,9 +5692,9 @@ pub(crate) mod tests {
         tester.pump_widget(root);
 
         // Open the dialog.
-        let button = only(tester.find_by_type::<ElevatedButton>());
-        let center = rect_of(tester, button).center();
-        tester.tap(center, 1);
+        let button = tester.element(find::by_type::<ElevatedButton>());
+        let center = tester.get_rect(button).center();
+        tester.tap_at(center, 1);
 
         let app = tester.cell.borrow();
         (
@@ -5745,7 +5724,7 @@ pub(crate) mod tests {
             pump_app(tester, m3, |_app| {
                 Center::new().child(Text::new("Test")).into_widget()
             });
-            let context = tester.find_text("Test")[0];
+            let context = find::text("Test").evaluate(tester)[0];
 
             pump_app(tester, m3, |_app| Center::new().into_widget());
 

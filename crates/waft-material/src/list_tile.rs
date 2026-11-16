@@ -2259,7 +2259,7 @@ pub(crate) mod tests {
     use std::time::Duration;
     use waft_painting::OutlinedBorderRef;
 
-    use waft_embedder::Rect;
+    use waft_embedder::{RRect, Rect};
     use waft_foundation::{Listenable, Listener};
     use waft_painting::{
         AlignmentGeometry, EdgeInsetsDirectional, RoundedRectangleBorder, StadiumBorder, TextScaler,
@@ -2270,12 +2270,15 @@ pub(crate) mod tests {
         MediaQuery, MediaQueryData, MouseRegion, StatefulBuilder, Text,
     };
 
-    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+    use waft_widgets::testing::{
+        TestPointer, WidgetTester, expect, find, finds_one_widget, test_widgets,
+    };
 
     use super::*;
     use crate::colors::Colors;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{Drawn, PaintInspection, material_app};
+    use crate::test_support::{PaintInspection, material_app};
+    use waft_rendering::testing::{PaintCall, assert_paints, draws, paints_exactly};
     use waft_widgets::AnyFocusNode;
 
     /// Dart's `ThemeData()`.
@@ -2316,26 +2319,14 @@ pub(crate) mod tests {
         );
     }
 
-    fn rect_of(tester: &WidgetTester, element: waft_widgets::AnyElement) -> Rect {
-        tester.global_rect(tester.render_box_of(element))
-    }
-
     /// Dart's `tester.getRect(find.byType(ListTile).at(index))`.
     pub(crate) fn tile_rect(tester: &WidgetTester, index: usize) -> Rect {
-        rect_of(tester, tester.find_by_type::<ListTile>()[index])
-    }
-
-    /// Dart's `tester.getRect(find.text(text))`, over `Text`s.
-    pub(crate) fn text_rect(tester: &WidgetTester, text: &str) -> Rect {
-        let found = tester.find_text(text);
-        assert_eq!(found.len(), 1, "one {text:?}");
-        rect_of(tester, found[0])
+        tester.get_rect(tester.element(find::by_type::<ListTile>().at(index)))
     }
 
     /// Dart's `tester.getRect(find.byKey(key))`.
     pub(crate) fn key_rect(tester: &WidgetTester, key: &GlobalKey) -> Rect {
-        let render = tester.render_object(key).as_box().expect("a render box");
-        tester.global_rect(render)
+        tester.get_rect(key)
     }
 
     pub(crate) fn sized(key: &GlobalKey, width: f64, height: f64) -> WidgetRef {
@@ -2417,12 +2408,12 @@ pub(crate) mod tests {
         // Material 2).
         let leading = key_rect(tester, leading_key);
         let trailing = key_rect(tester, trailing_key);
-        let title = text_rect(tester, "title");
+        let title = tester.get_rect(find::text("title"));
         assert_eq!(leading.left, 16.0_f64.max(LEFT_PADDING));
         assert_eq!(title.left, title_offset + 16.0_f64.max(LEFT_PADDING));
         if has_subtitle {
             assert_eq!(
-                text_rect(tester, "subtitle").left,
+                tester.get_rect(find::text("subtitle")).left,
                 title_offset + 16.0_f64.max(LEFT_PADDING)
             );
         }
@@ -2437,7 +2428,7 @@ pub(crate) mod tests {
         assert_eq!(tile.size(), Size::new(800.0, expected_height));
         assert!(title.top >= tile.top);
         if has_subtitle {
-            let subtitle = text_rect(tester, "subtitle");
+            let subtitle = tester.get_rect(find::text("subtitle"));
             assert!(subtitle.top >= title.bottom);
             assert!(subtitle.bottom < tile.bottom);
         } else {
@@ -2535,14 +2526,17 @@ pub(crate) mod tests {
                 .into_widget()
             });
             assert_eq!(
-                text_rect(tester, "L").right,
+                tester.get_rect(find::text("L")).right,
                 800.0 - 16.0_f64.max(RIGHT_PADDING)
             );
             assert_eq!(
-                text_rect(tester, "title").right,
+                tester.get_rect(find::text("title")).right,
                 800.0 - 40.0 - 16.0_f64.max(RIGHT_PADDING)
             );
-            assert_eq!(text_rect(tester, "T").left, 24.0_f64.max(LEFT_PADDING));
+            assert_eq!(
+                tester.get_rect(find::text("T")).left,
+                24.0_f64.max(LEFT_PADDING)
+            );
         });
     }
 
@@ -2562,9 +2556,9 @@ pub(crate) mod tests {
                     }))
                     .into_widget()
             });
-            assert_eq!(tester.find_text("first").len(), 1);
-            assert_eq!(tester.find_text("second").len(), 1);
-            assert_eq!(tester.find_text("third").len(), 1);
+            expect(tester, &find::text("first"), finds_one_widget());
+            expect(tester, &find::text("second"), finds_one_widget());
+            expect(tester, &find::text("third"), finds_one_widget());
         });
     }
 
@@ -2662,14 +2656,14 @@ pub(crate) mod tests {
             check(tester, TextDirection::Ltr);
             // 126 = 56 + 30 + 40
             assert_eq!(tile_rect(tester, 0).size(), Size::new(800.0, 126.0));
-            assert_eq!(text_rect(tester, "L").left, 10.0); // contentPadding.start = 10
-            assert_eq!(text_rect(tester, "T").right, 780.0); // 800 - contentPadding.end
+            assert_eq!(tester.get_rect(find::text("L")).left, 10.0); // contentPadding.start = 10
+            assert_eq!(tester.get_rect(find::text("T")).right, 780.0); // 800 - contentPadding.end
 
             check(tester, TextDirection::Rtl);
             // 126 = 56 + 30 + 40
             assert_eq!(tile_rect(tester, 0).size(), Size::new(800.0, 126.0));
-            assert_eq!(text_rect(tester, "T").left, 20.0); // contentPadding.end = 20
-            assert_eq!(text_rect(tester, "L").right, 790.0); // 800 - contentPadding.start
+            assert_eq!(tester.get_rect(find::text("T")).left, 20.0); // contentPadding.end = 20
+            assert_eq!(tester.get_rect(find::text("L")).right, 790.0); // 800 - contentPadding.start
         });
     }
 
@@ -2722,8 +2716,8 @@ pub(crate) mod tests {
         // Leading widget's width is 20, so default layout: the left edges of the
         // title and subtitle are at 40dps, leading widget width is 24dp and 16dp
         // is horizontalTitleGap (contentPadding is zero).
-        assert_eq!(text_rect(tester, "title").left, narrow_title);
-        assert_eq!(text_rect(tester, "subtitle").left, narrow_title);
+        assert_eq!(tester.get_rect(find::text("title")).left, narrow_title);
+        assert_eq!(tester.get_rect(find::text("subtitle")).left, narrow_title);
 
         // If the leading widget is wider than 40 it is separated from the
         // title and subtitle by 16.
@@ -2737,8 +2731,8 @@ pub(crate) mod tests {
             key_rect(tester, &key).bottom_right(),
             Offset::new(56.0, leading_top + 32.0)
         );
-        assert_eq!(text_rect(tester, "title").left, 72.0);
-        assert_eq!(text_rect(tester, "subtitle").left, 72.0);
+        assert_eq!(tester.get_rect(find::text("title")).left, 72.0);
+        assert_eq!(tester.get_rect(find::text("subtitle")).left, 72.0);
 
         // Same tests, textDirection = RTL
 
@@ -2752,8 +2746,14 @@ pub(crate) mod tests {
             key_rect(tester, &key).bottom_left(),
             Offset::new(800.0 - 24.0, leading_top + 32.0)
         );
-        assert_eq!(text_rect(tester, "title").right, 800.0 - narrow_title);
-        assert_eq!(text_rect(tester, "subtitle").right, 800.0 - narrow_title);
+        assert_eq!(
+            tester.get_rect(find::text("title")).right,
+            800.0 - narrow_title
+        );
+        assert_eq!(
+            tester.get_rect(find::text("subtitle")).right,
+            800.0 - narrow_title
+        );
 
         let key = wide_leading(tester, theme, 56.0, TextDirection::Rtl);
         assert_eq!(tile_rect(tester, 0).size(), Size::new(800.0, 72.0));
@@ -2765,8 +2765,8 @@ pub(crate) mod tests {
             key_rect(tester, &key).bottom_left(),
             Offset::new(800.0 - 56.0, leading_top + 32.0)
         );
-        assert_eq!(text_rect(tester, "title").right, 800.0 - 72.0);
-        assert_eq!(text_rect(tester, "subtitle").right, 800.0 - 72.0);
+        assert_eq!(tester.get_rect(find::text("title")).right, 800.0 - 72.0);
+        assert_eq!(tester.get_rect(find::text("subtitle")).right, 800.0 - 72.0);
     }
 
     /// "ListTile wide leading Widget".
@@ -3181,7 +3181,7 @@ pub(crate) mod tests {
 
     const SQUARE: Rect = Rect::from_ltwh(0.0, 0.0, 100.0, 100.0);
 
-    /// "ListTile is focusable and has correct focus color". `ink_drawn` holds what the ink
+    /// "ListTile is focusable and has correct focus color". The ink list holds what the ink
     /// features paint, which leaves out the material's own white rounded rectangle; valo
     /// records no transparent draw, so the tile's transparent `Ink` rect is checked on its
     /// decoration instead.
@@ -3207,10 +3207,11 @@ pub(crate) mod tests {
             tester.pump_and_settle();
             assert!(focus_node.has_primary_focus(&tester.cell.borrow()));
             assert_eq!(ink_tile_color(tester), Some(Color::new(0x00000000)));
-            assert_eq!(
-                tester.ink_drawn(),
-                vec![Drawn::Rect(Colors::ORANGE.shade500().value(), SQUARE)]
-            );
+            paints_exactly(
+                &draws(tester.ink_list().ops()),
+                &[PaintCall::rect_at(SQUARE, Some(Colors::ORANGE.shade500()))],
+            )
+            .unwrap();
 
             // Check when the list tile is disabled.
             let second = frame(tester, false);
@@ -3218,7 +3219,7 @@ pub(crate) mod tests {
             tester.pump_and_settle();
             assert!(!focus_node.has_primary_focus(&tester.cell.borrow()));
             assert_eq!(ink_tile_color(tester), Some(Color::new(0x00000000)));
-            assert_eq!(tester.ink_drawn(), vec![]);
+            paints_exactly(&draws(tester.ink_list().ops()), &[]).unwrap();
         });
     }
 
@@ -3244,7 +3245,11 @@ pub(crate) mod tests {
             tester.pump();
             tester.pump_and_settle();
             assert_eq!(ink_tile_color(tester), Some(Color::new(0x00000000)));
-            assert_eq!(tester.ink_drawn(), vec![Drawn::Rect(0x1f000000, SQUARE)]);
+            paints_exactly(
+                &draws(tester.ink_list().ops()),
+                &[PaintCall::rect_at(SQUARE, Some(Color::new(0x1f000000)))],
+            )
+            .unwrap();
 
             // Start hovering
             let mut gesture = TestPointer::mouse(1, 0);
@@ -3256,20 +3261,21 @@ pub(crate) mod tests {
             tester.pump_widget(again);
             tester.pump();
             tester.pump_and_settle();
-            assert_eq!(
-                tester.ink_drawn(),
-                vec![
-                    Drawn::Rect(0x1f000000, SQUARE),
-                    Drawn::Rect(Colors::ORANGE.shade500().value(), SQUARE)
-                ]
-            );
+            paints_exactly(
+                &draws(tester.ink_list().ops()),
+                &[
+                    PaintCall::rect_at(SQUARE, Some(Color::new(0x1f000000))),
+                    PaintCall::rect_at(SQUARE, Some(Colors::ORANGE.shade500())),
+                ],
+            )
+            .unwrap();
 
             let disabled = frame(tester, false);
             tester.pump_widget(disabled);
             tester.pump();
             tester.pump_and_settle();
             assert_eq!(ink_tile_color(tester), Some(Color::new(0x00000000)));
-            assert_eq!(tester.ink_drawn(), vec![]);
+            paints_exactly(&draws(tester.ink_list().ops()), &[]).unwrap();
         });
     }
 
@@ -3298,16 +3304,16 @@ pub(crate) mod tests {
             // valo records no circle of radius 0, which the splash has until its first frame
             // after this one; Flutter's `paints` sees the zero circle.
             tester.pump_by(Duration::from_millis(16));
-            let circles: Vec<(u32, Rect)> = tester
-                .ink_drawn()
-                .into_iter()
-                .filter_map(|drawn| match drawn {
-                    Drawn::Path(color, bounds) => Some((color, bounds)),
-                    _ => None,
-                })
-                .collect();
-            assert!(circles.iter().any(|(color, bounds)| *color == 0xff88ff88
-                && bounds.center() == Offset::new(50.0, 50.0)));
+            assert_paints(
+                tester.ink_list().ops(),
+                &[PaintCall::Circle {
+                    x: Some(50.0),
+                    y: Some(50.0),
+                    radius: None,
+                    color: Some(Color::new(0xff88ff88)),
+                    style: None,
+                }],
+            );
             tester.up(&gesture);
         });
     }
@@ -3379,20 +3385,24 @@ pub(crate) mod tests {
             );
             let rect = tile_rect(tester, 0);
             // Check if a rounded rectangle was painted with the correct color and shape
-            assert!(
-                tester
-                    .ink_drawn()
-                    .contains(&Drawn::Rect(tile_color.value(), rect))
+            assert_paints(
+                tester.ink_list().ops(),
+                &[PaintCall::rect_at(rect, Some(tile_color))],
             );
 
             // Test stadium shape
             pump_shape(tester, ShapeBorderRef::new(StadiumBorder::default()));
             let rect = tile_rect(tester, 0);
             // Check if a rounded rectangle was painted with the correct color and shape
-            assert!(
-                tester
-                    .ink_drawn()
-                    .contains(&Drawn::Path(tile_color.value(), rect))
+            assert_paints(
+                tester.ink_list().ops(),
+                &[PaintCall::rrect_at(
+                    RRect::from_rect_and_radius(
+                        rect,
+                        waft_embedder::Radius::circular(rect.width().min(rect.height()) / 2.0),
+                    ),
+                    Some(tile_color),
+                )],
             );
         });
     }
@@ -3500,7 +3510,7 @@ pub(crate) mod tests {
     /// The colour of the tile's `Ink` decoration: what Flutter's `paints..rect(color:)` sees
     /// for a transparent tile, which valo does not record.
     pub(crate) fn ink_tile_color(tester: &WidgetTester) -> Option<Color> {
-        let ink = tester.find_by_type::<Ink>()[0];
+        let ink = tester.element(find::by_type::<Ink>().at(0));
         tester.widget(ink, |ink: &Ink| {
             ink.effective_decoration().and_then(|decoration| {
                 decoration
@@ -3509,18 +3519,6 @@ pub(crate) mod tests {
                     .and_then(|decoration| decoration.color.as_ref().map(AnyColor::color))
             })
         })
-    }
-
-    /// The colours of the rects the first material's ink features draw.
-    pub(crate) fn ink_rect_colors(tester: &WidgetTester) -> Vec<u32> {
-        tester
-            .ink_drawn()
-            .into_iter()
-            .filter_map(|drawn| match drawn {
-                Drawn::Rect(color, _) => Some(color),
-                _ => None,
-            })
-            .collect()
     }
 
     /// A tile in a `StatefulBuilder` whose tap toggles `selected`: the tile-colour cases.
@@ -3562,15 +3560,21 @@ pub(crate) mod tests {
             });
 
             // Initially, when isSelected is false, the ListTile should respect tileColor.
-            assert!(ink_rect_colors(tester).contains(&tile_color.value()));
+            assert_paints(
+                tester.ink_list().ops(),
+                &[PaintCall::rect(Some(tile_color))],
+            );
 
             // Tap on tile to change isSelected.
             let center = tile_rect(tester, 0).center();
-            tester.tap(center, 1);
+            tester.tap_at(center, 1);
             tester.pump_and_settle();
 
             // When isSelected is true, the ListTile should respect selectedTileColor.
-            assert!(ink_rect_colors(tester).contains(&selected_tile_color.value()));
+            assert_paints(
+                tester.ink_list().ops(),
+                &[PaintCall::rect(Some(selected_tile_color))],
+            );
         });
     }
 
@@ -3594,28 +3598,23 @@ pub(crate) mod tests {
             });
 
             // Before ListTile is tapped, it should be tileColor
-            assert!(ink_rect_colors(tester).contains(&tile_color.value()));
+            assert_paints(
+                tester.ink_list().ops(),
+                &[PaintCall::rect(Some(tile_color))],
+            );
 
             // Tap on tile to trigger ink effect and wait for it to be underway.
             let center = tile_rect(tester, 0).center();
-            tester.tap(center, 1);
+            tester.tap_at(center, 1);
             tester.pump_by(Duration::from_millis(200));
             // valo records no circle of radius 0, which the ripple has until its first frame
             // after this one; Flutter's `paints` sees the zero circle.
             tester.pump_by(Duration::from_millis(16));
 
             // After tap, the tile could be drawn in tileColor, with the ripple (circle) on top
-            let drawn = tester.ink_drawn();
-            let rect = drawn
-                .iter()
-                .position(
-                    |drawn| matches!(drawn, Drawn::Rect(color, _) if *color == tile_color.value()),
-                )
-                .expect("the tile colour");
-            assert!(
-                drawn[rect + 1..]
-                    .iter()
-                    .any(|drawn| matches!(drawn, Drawn::Path(..)))
+            assert_paints(
+                tester.ink_list().ops(),
+                &[PaintCall::rect(Some(tile_color)), PaintCall::circle(None)],
             );
         });
     }
@@ -3630,7 +3629,7 @@ pub(crate) mod tests {
 
             // Tap on tile to change isSelected.
             let center = tile_rect(tester, 0).center();
-            tester.tap(center, 1);
+            tester.tap_at(center, 1);
             tester.pump_and_settle();
 
             assert_eq!(ink_tile_color(tester), Some(Colors::TRANSPARENT));
@@ -3746,7 +3745,7 @@ pub(crate) mod tests {
 
     /// Where the title starts (LTR) or ends (RTL), and the tile's size.
     fn title_edge(tester: &WidgetTester, text_direction: TextDirection) -> (f64, Size) {
-        let title = text_rect(tester, "title");
+        let title = tester.get_rect(find::text("title"));
         let edge = match text_direction {
             TextDirection::Ltr => title.left,
             TextDirection::Rtl => title.right,
@@ -4235,8 +4234,8 @@ pub(crate) mod tests {
     /// `tester.widget<RichText>(find.descendant(of: find.byIcon(icon), matching:
     /// find.byType(RichText))).text.style?.color`.
     fn glyph_color(tester: &WidgetTester, icon: &waft_widgets::IconData) -> Option<Color> {
-        let icon_element = tester
-            .find_by_type::<waft_widgets::Icon>()
+        let icon_element = find::by_type::<waft_widgets::Icon>()
+            .evaluate(tester)
             .into_iter()
             .find(|element| {
                 tester.widget(*element, |widget: &waft_widgets::Icon| {
@@ -4244,8 +4243,8 @@ pub(crate) mod tests {
                 })
             })
             .expect("the icon");
-        let rich_text = tester
-            .find_by_type::<waft_widgets::RichText>()
+        let rich_text = find::by_type::<waft_widgets::RichText>()
+            .evaluate(tester)
             .into_iter()
             .find(|rich_text| tester.ancestors(*rich_text).contains(&icon_element))
             .expect("the icon's RichText");
@@ -4387,7 +4386,7 @@ pub(crate) mod tests {
             );
 
             // Verify that the merged theme retains the parent shape and other critical fields.
-            for icon_button in tester.find_by_type::<IconButton>() {
+            for icon_button in find::by_type::<IconButton>().evaluate(tester) {
                 let merged_theme = IconButtonTheme::of(&mut tester.cell.borrow_mut(), icon_button);
                 let style = merged_theme.style.expect("a style");
                 assert!(Rc::ptr_eq(
@@ -4743,7 +4742,7 @@ pub(crate) mod tests {
                     )
                     .into_widget()
             });
-            assert_eq!(tester.find_by_type::<ListTile>().len(), 1);
+            expect(tester, &find::by_type::<ListTile>(), finds_one_widget());
         });
     }
 
@@ -4788,7 +4787,9 @@ pub(crate) mod tests {
             assert_eq!(value(tester), states(&[]));
             assert_eq!(count.get(), 0);
 
-            let center = rect_of(tester, tester.find_text("title")[0]).center();
+            let center = tester
+                .get_rect(find::text("title").evaluate(tester)[0])
+                .center();
             let mut gesture = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
             tester.add_pointer(&mut gesture, Offset::ZERO);
             tester.move_to(&mut gesture, center, false);
@@ -5128,14 +5129,17 @@ pub(crate) mod tests {
                 .into_widget()
             });
             assert_eq!(
-                text_rect(tester, "L").right,
+                tester.get_rect(find::text("L")).right,
                 800.0 - 16.0_f64.max(RIGHT_PADDING)
             );
             assert_eq!(
-                text_rect(tester, "title").right,
+                tester.get_rect(find::text("title")).right,
                 800.0 - 56.0 - 16.0_f64.max(RIGHT_PADDING)
             );
-            assert_eq!(text_rect(tester, "T").left, 16.0_f64.max(LEFT_PADDING));
+            assert_eq!(
+                tester.get_rect(find::text("T")).left,
+                16.0_f64.max(LEFT_PADDING)
+            );
         });
     }
 
@@ -5608,7 +5612,7 @@ pub(crate) mod tests {
 
             // Tap on tile to change isSelected.
             let center = tile_rect(tester, 0).center();
-            tester.tap(center, 1);
+            tester.tap_at(center, 1);
             tester.pump_and_settle();
 
             assert_eq!(ink_tile_color(tester), Some(Colors::TRANSPARENT));
@@ -5771,7 +5775,7 @@ pub(crate) mod tests {
             };
             Material::new().child(child).into_widget()
         });
-        let ink_well = tester.find_by_type::<InkWell>()[0];
+        let ink_well = tester.element(find::by_type::<InkWell>().at(0));
         tester.widget(ink_well, |ink_well: &InkWell| {
             ink_well.ink_response.enable_feedback
         })

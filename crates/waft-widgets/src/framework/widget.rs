@@ -628,6 +628,22 @@ pub trait RenderObjectWidget: Debug + 'static {
     /// See [`StatelessWidget::debug_check_constructor`].
     fn debug_check_constructor(&self) {}
 
+    /// Dart's `debugVisitOnstageChildren` of the element this widget makes, for a widget whose
+    /// Dart element subclass overrides it only to hide children (`_OffstageElement`,
+    /// `_IndexedStackElement`): calls `visitor` for each of `children`, in order, that is
+    /// onstage. Waft's generic single- and multi-child elements stand in for those subclasses
+    /// and ask their widget here; an element of a widget's own overrides
+    /// [`Element::debug_visit_onstage_children`] instead.
+    fn debug_visit_onstage_children(
+        &self,
+        app: &App,
+        children: &[AnyElement],
+        visitor: &mut dyn FnMut(AnyElement),
+    ) {
+        let _ = app;
+        children.iter().for_each(|child| visitor(*child));
+    }
+
     /// Creates an instance of the `RenderObject` class that this widget represents, using the
     /// configuration described by this widget.
     ///

@@ -866,7 +866,8 @@ mod tests {
         Text, WidgetStateProperty,
     };
 
-    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+    use waft_rendering::testing::PaintCall;
+    use waft_widgets::testing::{TestPointer, WidgetTester, find, test_widgets};
 
     use super::*;
     use crate::checkbox_list_tile::tests::{
@@ -875,20 +876,20 @@ mod tests {
         check_horizontal_title_gap_with_visual_density, check_min_leading_width_60,
         check_min_tile_height, check_min_vertical_padding_80, check_on_focus_change,
         check_title_alignment, expected_three_line_rects, focus_of, has_primary_focus,
-        ink_rect_colors, ink_well_custom_border, ink_well_enable_feedback, is_three_line_rects,
-        nth, pump_in_forbidden_region, pump_in_material, pump_wrapped, rect_of,
-        right_rounded_border, text_center,
+        ink_well_custom_border, ink_well_enable_feedback, is_three_line_rects, nth,
+        pump_in_forbidden_region, pump_in_material, pump_wrapped, rect_of, right_rounded_border,
     };
     use crate::colors::Colors;
     use crate::constants::K_RADIAL_REACTION_ALPHA;
-    use crate::list_tile::tests::{m2, m3, text_rect};
+    use crate::list_tile::tests::{m2, m3};
     use crate::list_tile_theme::ListTileThemeData;
     use crate::radio::tests::{
-        Paints, any_rect, assert_paints, center_of_radio, circle, colors, hover_at, no_op,
+        CircleArguments, any_rect, assert_paints, center_of_radio, circle, colors, hover_at, no_op,
         press_at, radio_material,
     };
     use crate::radio_theme::RadioThemeData;
     use crate::scaffold::Scaffold;
+    use crate::test_support::PaintInspection;
     use crate::theme_data::ThemeData;
     use crate::tooltip::tests::pump_app;
 
@@ -898,12 +899,8 @@ mod tests {
     }
 
     /// Dart's `circle()`: a circle of any colour.
-    fn any_circle() -> Paints {
-        Paints::Circle {
-            color: None,
-            radius: None,
-            stroke_width: None,
-        }
+    fn any_circle() -> PaintCall {
+        PaintCall::circle(None)
     }
 
     /// Dart's three-tile `buildFrame`: `wrap(StatefulBuilder(Scaffold(ListView.builder(..))))`
@@ -940,14 +937,9 @@ mod tests {
         .into_widget()
     }
 
-    fn tap_text(tester: &mut WidgetTester, text: &str) {
-        let at = text_center(tester, text);
-        tester.tap(at, 1);
-    }
-
     fn tap_radio(tester: &mut WidgetTester, index: usize) {
         let at = rect_of::<Radio<i32>>(tester, index).center();
-        tester.tap(at, 1);
+        tester.tap_at(at, 1);
     }
 
     /// 'RadioListTile can be toggled when toggleable is set': Dart's case drives a bare
@@ -973,7 +965,7 @@ mod tests {
                     .on_changed(log_into(&log))
                     .toggleable(true),
             ));
-            tester.tap(tester.center_of(&key), 1);
+            tester.tap_at(tester.get_center(&key), 1);
             assert_eq!(*log.borrow(), [Some(1)]);
             log.borrow_mut().clear();
 
@@ -983,14 +975,14 @@ mod tests {
                     .on_changed(log_into(&log))
                     .toggleable(true),
             ));
-            tester.tap(tester.center_of(&key), 2);
+            tester.tap_at(tester.get_center(&key), 2);
             assert_eq!(*log.borrow(), [None]);
             log.borrow_mut().clear();
 
             tester.pump_widget(wrap(
                 Radio::new(1).on_changed(log_into(&log)).toggleable(true),
             ));
-            tester.tap(tester.center_of(&key), 3);
+            tester.tap_at(tester.get_center(&key), 3);
             assert_eq!(*log.borrow(), [Some(1)]);
         });
     }
@@ -1060,11 +1052,11 @@ mod tests {
                         tile.into_widget()
                     });
                     let at = if tap_title {
-                        tester.center_of(&title_key)
+                        tester.get_center(&title_key)
                     } else {
-                        tester.center_of(&key)
+                        tester.get_center(&key)
                     };
-                    tester.tap(at, 1);
+                    tester.tap_at(at, 1);
                 };
 
             frame(tester, 2, true, false);
@@ -1095,12 +1087,12 @@ mod tests {
 
             // Tests for tapping between [Radio] and [ListTile]
             frame(tester);
-            tap_text(tester, "1");
+            tester.tap(find::text("1"));
             separator();
             tap_radio(tester, 2);
             assert_eq!(*log.borrow(), [Some(1), Some(-1), Some(2)]);
             separator();
-            tap_text(tester, "1");
+            tester.tap(find::text("1"));
 
             log.borrow_mut().clear();
             selected_value.set(None);
@@ -1117,9 +1109,9 @@ mod tests {
 
             // Tests for tapping across [ListTile]s exclusively
             frame(tester);
-            tap_text(tester, "1");
+            tester.tap(find::text("1"));
             separator();
-            tap_text(tester, "2");
+            tester.tap(find::text("2"));
             assert_eq!(*log.borrow(), [Some(1), Some(-1), Some(2)]);
         });
     }
@@ -1137,11 +1129,11 @@ mod tests {
         let frame = three_tiles(&selected_value, &log, toggleable);
         pump_wrapped(tester, |_app| frame);
 
-        tap_text(tester, "0");
+        tester.tap(find::text("0"));
         tester.pump();
         assert_eq!(*log.borrow(), expected[0]);
 
-        tap_text(tester, "0");
+        tester.tap(find::text("0"));
         tester.pump();
         assert_eq!(*log.borrow(), expected[1]);
 
@@ -1207,7 +1199,7 @@ mod tests {
             });
             let padding_rect = rect_of::<waft_widgets::SafeArea>(tester, 0);
             let radio_rect = rect_of::<Radio<bool>>(tester, 0);
-            let title_rect = text_rect(tester, "Title");
+            let title_rect = tester.get_rect(find::text("Title"));
 
             // Get the taller Rect of the Radio and Text widgets
             let taller_rect = if radio_rect.height() > title_rect.height() {
@@ -1264,7 +1256,10 @@ mod tests {
                     )
                     .into_widget()
             });
-            assert!(ink_rect_colors(tester).contains(&tile_color.to_argb32()));
+            waft_rendering::testing::assert_paints(
+                tester.ink_list().ops(),
+                &[waft_rendering::testing::PaintCall::rect(Some(tile_color))],
+            );
         });
     }
 
@@ -1283,7 +1278,12 @@ mod tests {
                     )
                     .into_widget()
             });
-            assert!(ink_rect_colors(tester).contains(&selected_tile_color.to_argb32()));
+            waft_rendering::testing::assert_paints(
+                tester.ink_list().ops(),
+                &[waft_rendering::testing::PaintCall::rect(Some(
+                    selected_tile_color,
+                ))],
+            );
         });
     }
 
@@ -1618,10 +1618,7 @@ mod tests {
             let reaction = FILL_COLOR.with_alpha(K_RADIAL_REACTION_ALPHA);
             let pressed = |color: Color| {
                 [
-                    Paints::Rect {
-                        color: Some(Color::new(0x66bcbcbc)),
-                        rect: None,
-                    },
+                    PaintCall::rect(Some(Color::new(0x66bcbcbc))),
                     circle(color).radius(20.0),
                 ]
             };
@@ -1653,10 +1650,7 @@ mod tests {
                 tester,
                 radio_material::<bool>(tester),
                 &[
-                    Paints::Rect {
-                        color: Some(Color::new(0x0a000000)),
-                        rect: None,
-                    },
+                    PaintCall::rect(Some(Color::new(0x0a000000))),
                     circle(HOVER_OVERLAY_COLOR).radius(20.0),
                 ],
             );
@@ -1880,8 +1874,8 @@ mod tests {
                 );
                 tester.pump_and_settle();
                 assert_eq!(
-                    tester
-                        .find_by_type::<waft_cupertino::CupertinoRadio<i32>>()
+                    find::by_type::<waft_cupertino::CupertinoRadio<i32>>()
+                        .evaluate(tester)
                         .len(),
                     cupertino,
                     "{platform:?}"
@@ -1928,7 +1922,10 @@ mod tests {
                     .data(ListTileThemeData::new().control_affinity(control_affinity))
                     .into_widget()
                 });
-                assert_eq!(text_rect(tester, "RadioListTile").top_left(), expected);
+                assert_eq!(
+                    tester.get_rect(find::text("RadioListTile")).top_left(),
+                    expected
+                );
             }
         });
     }
@@ -1957,7 +1954,13 @@ mod tests {
                     .radio_scale_factor(SCALE)
                     .into_widget()
             });
-            let transform = tester.ancestor_of_type::<Transform>(nth::<Radio<bool>>(tester, 0));
+            let transform = tester.element(
+                find::ancestor(
+                    find::by_type::<Radio<bool>>().at(0),
+                    find::by_type::<Transform>(),
+                )
+                .first(),
+            );
             let matrix = tester.widget(transform, |transform: &Transform| transform.transform);
             assert_eq!(matrix, Matrix4::scale(SCALE as f32, SCALE as f32));
         });

@@ -579,14 +579,14 @@ mod tests {
     use waft_foundation::AppCell;
 
     use waft_embedder::{Color, Paint, valo};
-    use waft_foundation::{Ref, ValueNotifier};
+    use waft_foundation::ValueNotifier;
     use waft_gestures::HitTestResult;
+    use waft_painting::AlignmentGeometry;
 
     use super::*;
     use crate::box_::BoxHitTestResult;
-    use crate::layer::{ContainerLayer, ErasedLayer, OffsetLayer, PictureLayer};
     use crate::object::AnyRenderObject;
-    use crate::proxy_box::RenderRepaintBoundary;
+    use crate::testing::{EnginePhase, layout_with, painted_ops, pump_frame};
 
     const RED: Color = Color::from_argb(255, 255, 0, 0);
     const BLUE: Color = Color::from_argb(255, 0, 0, 255);
@@ -643,40 +643,10 @@ mod tests {
         }
     }
 
-    fn schedule_root_paint(app: &mut App, node: AnyRenderObject) {
-        let root = OffsetLayer::new(app, Offset::ZERO);
-        root.as_layer().attach(app, node.id());
-        node.schedule_initial_paint(app, root.as_container_layer());
-    }
-
-    /// The test binding's first frame: attach, lay the root out, schedule and flush paint.
-    fn first_frame(app: &mut App, root: AnyRenderBox) -> Ref<PipelineOwner> {
-        let owner = PipelineOwner::new(app, None, None);
-        owner.set_root_node(app, Some(root.as_object()));
-        root.layout(app, BoxConstraints::tight(Size::new(100.0, 100.0)), false);
-        schedule_root_paint(app, root.as_object());
-        owner.flush_compositing_bits(app);
-        owner.flush_paint(app);
-        owner
-    }
-
-    fn pump_frame(app: &mut App, owner: Handle<PipelineOwner>) {
-        owner.flush_layout(app);
-        owner.flush_compositing_bits(app);
-        owner.flush_paint(app);
-    }
-
-    /// The color of every fill in a repaint boundary's recording, in paint order.
-    fn drawn_colors(app: &App, boundary: AnyRenderObject) -> Vec<valo::Color> {
-        let layer = boundary.debug_layer(app).expect("painted");
-        layer
-            .depth_first_iterate_children(app)
+    /// The color of every fill `render` paints, in paint order.
+    fn drawn_colors(app: &mut App, render: AnyRenderObject) -> Vec<valo::Color> {
+        painted_ops(app, render)
             .into_iter()
-            .filter_map(|child| {
-                app.handle::<PictureLayer>(child.id())
-                    .and_then(|picture| picture.picture(app).map(|p| p.ops().to_vec()))
-            })
-            .flatten()
             .filter_map(|op| match op {
                 valo::Op::DrawRect { paint, .. } => Some(paint.color),
                 _ => None,
@@ -706,12 +676,17 @@ mod tests {
             false,
             Some(child.as_box()),
         );
-        let root = RenderRepaintBoundary::new(&mut app, Some(custom.as_box()));
-        let _owner = first_frame(&mut app, root.as_box());
+        layout_with(
+            &mut app,
+            custom.as_box(),
+            None,
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
+        );
 
         assert_eq!((background.paints.get(), foreground.paints.get()), (1, 1));
         assert_eq!(
-            drawn_colors(&app, root.as_object()),
+            drawn_colors(&mut app, custom.as_object()),
             [RED.into(), GREEN.into(), BLUE.into()],
             "background, child, foreground"
         );
@@ -735,14 +710,19 @@ mod tests {
             false,
             None,
         );
-        let root = RenderRepaintBoundary::new(&mut app, Some(custom.as_box()));
-        let owner = first_frame(&mut app, root.as_box());
+        layout_with(
+            &mut app,
+            custom.as_box(),
+            None,
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
+        );
         assert_eq!(painter.paints.get(), 1);
         assert!(!custom.as_object().debug_needs_paint(&app));
 
         notifier.set_value(&mut app, 1);
         assert!(custom.as_object().debug_needs_paint(&app));
-        pump_frame(&mut app, owner.handle());
+        pump_frame(&mut app, EnginePhase::Paint);
         assert_eq!(painter.paints.get(), 2);
     }
 
@@ -765,8 +745,13 @@ mod tests {
             false,
             None,
         );
-        let root = RenderRepaintBoundary::new(&mut app, Some(custom.as_box()));
-        let owner = first_frame(&mut app, root.as_box());
+        layout_with(
+            &mut app,
+            custom.as_box(),
+            None,
+            AlignmentGeometry::CENTER,
+            EnginePhase::Paint,
+        );
 
         let quiet = Rc::new(Recorder::new(BLUE));
         custom.set_painter(&mut app, Some(quiet.clone()));
@@ -786,7 +771,7 @@ mod tests {
         });
         custom.set_painter(&mut app, Some(eager.clone()));
         assert!(custom.as_object().debug_needs_paint(&app));
-        pump_frame(&mut app, owner.handle());
+        pump_frame(&mut app, EnginePhase::Paint);
         assert_eq!((quiet.paints.get(), eager.paints.get()), (0, 1));
 
         custom.set_painter(&mut app, None);

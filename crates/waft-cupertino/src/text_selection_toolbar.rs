@@ -1196,6 +1196,33 @@ impl Element for CupertinoTextSelectionToolbarItemsElement {
         }
     }
 
+    /// Dart's `_CupertinoTextSelectionToolbarItemsElement.debugVisitOnstageChildren`: the slot
+    /// and list children the layout paints.
+    fn debug_visit_onstage_children(
+        self: Handle<Self>,
+        app: &App,
+        visitor: &mut dyn FnMut(AnyElement),
+    ) {
+        let should_paint = |child: AnyElement| {
+            child
+                .render_object(app)
+                .and_then(|render| render.parent_data(app))
+                .and_then(|data| data.part::<waft_widgets::ToolbarItemsParentData>())
+                .is_some_and(|data| data.should_paint)
+        };
+        let forgotten = &app.get(self).forgotten_children;
+        for child in app.get(self).slot_to_child.values().copied() {
+            if should_paint(child) && !forgotten.contains(&child) {
+                visitor(child);
+            }
+        }
+        for child in &app.get(self).children {
+            if !forgotten.contains(child) && should_paint(*child) {
+                visitor(*child);
+            }
+        }
+    }
+
     fn forget_child(self: Handle<Self>, app: &mut App, child: AnyElement) {
         let slot = child.slot(app);
         if self.toolbar_items_slot(app, slot.as_ref()).is_some() {

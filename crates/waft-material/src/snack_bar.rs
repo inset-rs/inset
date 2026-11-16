@@ -1531,7 +1531,10 @@ mod tests {
     use waft_embedder::{Offset, Rect, TargetPlatform};
     use waft_widgets::{Builder, Directionality, GestureDetector, GlobalKey, SizedBox};
 
-    use waft_widgets::testing::{WidgetTester, test_widgets};
+    use waft_widgets::testing::{
+        WidgetTester, assert_f32_equals, expect, find, finds_n_widgets, finds_nothing,
+        finds_one_widget, test_widgets,
+    };
 
     use super::*;
     use crate::scaffold::{Scaffold, ScaffoldFeatureController};
@@ -1582,33 +1585,13 @@ mod tests {
 
     /// Dart's `tester.tap(find.byKey(key))`.
     fn tap_key(tester: &mut WidgetTester, key: &GlobalKey) {
-        let center = tester.center_of(key);
-        tester.tap(center, 1);
-    }
-
-    /// Dart's `find.text(text)`, counted over `Text`s.
-    fn count_text(tester: &WidgetTester, text: &str) -> usize {
-        tester.find_text(text).len()
-    }
-
-    /// Dart's `tester.getRect(find.text(text))`.
-    fn text_rect(tester: &WidgetTester, text: &str) -> Rect {
-        let element = *tester
-            .find_text(text)
-            .first()
-            .expect("a Text showing the text");
-        tester.global_rect(tester.render_box_of(element))
-    }
-
-    /// Dart's `tester.tap(find.text(text))`.
-    fn tap_text(tester: &mut WidgetTester, text: &str) {
-        let center = text_rect(tester, text).center();
-        tester.tap(center, 1);
+        let center = tester.get_center(key);
+        tester.tap_at(center, 1);
     }
 
     /// Dart's `tester.drag(find.text(text), offset)`.
     fn drag_text(tester: &mut WidgetTester, text: &str, offset: Offset) {
-        let center = text_rect(tester, text).center();
+        let center = tester.get_rect(find::text(text)).center();
         tester.drag_from(center, offset, 1);
     }
 
@@ -1632,7 +1615,7 @@ mod tests {
     /// Dart's `tester.tap(find.text('X')); tester.pump(); tester.pump_by(750ms)`: shows the snack
     /// bar and runs its entrance to the end.
     fn tap_x_and_settle_entrance(tester: &mut WidgetTester) {
-        tap_text(tester, "X");
+        tester.tap(find::text("X"));
         tester.pump(); // start animation
         tester.pump_by(ms(750));
     }
@@ -1640,9 +1623,9 @@ mod tests {
     /// Dart's `find.descendant(of: find.byType(SnackBar), matching: find.byType(Material))`,
     /// first.
     fn snack_bar_material(tester: &WidgetTester) -> waft_widgets::AnyElement {
-        let snack_bar = tester.find_by_type::<SnackBar>()[0];
-        tester
-            .find_by_type::<Material>()
+        let snack_bar = find::by_type::<SnackBar>().evaluate(tester)[0];
+        find::by_type::<Material>()
+            .evaluate(tester)
             .into_iter()
             .find(|material| tester.ancestors(*material).contains(&snack_bar))
             .expect("a SnackBar builds a Material")
@@ -1650,7 +1633,7 @@ mod tests {
 
     /// Dart's `tester.getRect(materialFinder)` of [`snack_bar_material`].
     fn snack_bar_material_rect(tester: &WidgetTester) -> Rect {
-        tester.global_rect(tester.render_box_of(snack_bar_material(tester)))
+        tester.get_rect(snack_bar_material(tester))
     }
 
     /// Dart's `tester.renderObject<RenderPhysicalModel>(find.widgetWithText(Material,
@@ -1687,24 +1670,24 @@ mod tests {
                 );
             });
             pump_app(tester, m3, home.into_widget());
-            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 0);
+            expect(tester, &find::text(HELLO_SNACK_BAR), finds_nothing());
             tap_key(tester, &tap_target);
-            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 0);
+            expect(tester, &find::text(HELLO_SNACK_BAR), finds_nothing());
             tester.pump(); // schedule animation
-            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 1);
+            expect(tester, &find::text(HELLO_SNACK_BAR), finds_one_widget());
             tester.pump(); // begin animation
-            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 1);
+            expect(tester, &find::text(HELLO_SNACK_BAR), finds_one_widget());
             tester.pump_by(ms(750)); // 0.75s // animation last frame; two second timer starts here
-            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 1);
+            expect(tester, &find::text(HELLO_SNACK_BAR), finds_one_widget());
             tester.pump_by(ms(750)); // 1.50s
-            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 1);
+            expect(tester, &find::text(HELLO_SNACK_BAR), finds_one_widget());
             tester.pump_by(ms(750)); // 2.25s
-            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 1);
+            expect(tester, &find::text(HELLO_SNACK_BAR), finds_one_widget());
             tester.pump_by(ms(750)); // 3.00s // timer triggers to dismiss snackbar, reverse animation is scheduled
             tester.pump(); // begin animation
-            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 1); // frame 0 of dismiss animation
+            expect(tester, &find::text(HELLO_SNACK_BAR), finds_one_widget()); // frame 0 of dismiss animation
             tester.pump_by(ms(750)); // 3.75s // last frame of animation, snackbar removed from build
-            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 0);
+            expect(tester, &find::text(HELLO_SNACK_BAR), finds_nothing());
         });
     }
 
@@ -1727,42 +1710,42 @@ mod tests {
                 }
             });
             pump_app(tester, m3, home.into_widget());
-            let expect = |tester: &WidgetTester, bar1: usize, bar2: usize| {
-                assert_eq!(count_text(tester, "bar1"), bar1);
-                assert_eq!(count_text(tester, "bar2"), bar2);
+            let expect_counts = |tester: &WidgetTester, bar1: usize, bar2: usize| {
+                expect(tester, &find::text("bar1"), finds_n_widgets(bar1));
+                expect(tester, &find::text("bar2"), finds_n_widgets(bar2));
             };
-            expect(tester, 0, 0);
+            expect_counts(tester, 0, 0);
             tap_key(tester, &tap_target); // queue bar1
             tap_key(tester, &tap_target); // queue bar2
-            expect(tester, 0, 0);
+            expect_counts(tester, 0, 0);
             tester.pump(); // schedule animation for bar1
-            expect(tester, 1, 0);
+            expect_counts(tester, 1, 0);
             tester.pump(); // begin animation
-            expect(tester, 1, 0);
+            expect_counts(tester, 1, 0);
             tester.pump_by(ms(750)); // 0.75s // animation last frame; two second timer starts here
-            expect(tester, 1, 0);
+            expect_counts(tester, 1, 0);
             tester.pump_by(ms(750)); // 1.50s
-            expect(tester, 1, 0);
+            expect_counts(tester, 1, 0);
             tester.pump_by(ms(750)); // 2.25s
-            expect(tester, 1, 0);
+            expect_counts(tester, 1, 0);
             tester.pump_by(ms(750)); // 3.00s // timer triggers to dismiss snackbar, reverse animation is scheduled
             tester.pump(); // begin animation
-            expect(tester, 1, 0);
+            expect_counts(tester, 1, 0);
             tester.pump_by(ms(750)); // 3.75s // last frame of animation, snackbar removed from build, new snack bar put in its place
-            expect(tester, 0, 1);
+            expect_counts(tester, 0, 1);
             tester.pump(); // begin animation
-            expect(tester, 0, 1);
+            expect_counts(tester, 0, 1);
             tester.pump_by(ms(750)); // 4.50s // animation last frame; two second timer starts here
-            expect(tester, 0, 1);
+            expect_counts(tester, 0, 1);
             tester.pump_by(ms(750)); // 5.25s
-            expect(tester, 0, 1);
+            expect_counts(tester, 0, 1);
             tester.pump_by(ms(750)); // 6.00s
-            expect(tester, 0, 1);
+            expect_counts(tester, 0, 1);
             tester.pump_by(ms(750)); // 6.75s // timer triggers to dismiss snackbar, reverse animation is scheduled
             tester.pump(); // begin animation
-            expect(tester, 0, 1);
+            expect_counts(tester, 0, 1);
             tester.pump_by(ms(750)); // 7.50s // last frame of animation, snackbar removed from build, new snack bar put in its place
-            expect(tester, 0, 0);
+            expect_counts(tester, 0, 0);
         });
     }
 
@@ -1791,50 +1774,50 @@ mod tests {
                 }
             });
             pump_app(tester, m3, home.into_widget());
-            let expect = |tester: &WidgetTester, bar1: usize, bar2: usize| {
-                assert_eq!(count_text(tester, "bar1"), bar1);
-                assert_eq!(count_text(tester, "bar2"), bar2);
+            let expect_counts = |tester: &WidgetTester, bar1: usize, bar2: usize| {
+                expect(tester, &find::text("bar1"), finds_n_widgets(bar1));
+                expect(tester, &find::text("bar2"), finds_n_widgets(bar2));
             };
-            expect(tester, 0, 0);
+            expect_counts(tester, 0, 0);
             time.set(1000);
             tap_key(tester, &tap_target); // queue bar1
             let first_controller = last_controller.borrow().clone().expect("shown");
             time.set(2);
             tap_key(tester, &tap_target); // queue bar2
-            expect(tester, 0, 0);
+            expect_counts(tester, 0, 0);
             tester.pump(); // schedule animation for bar1
-            expect(tester, 1, 0);
+            expect_counts(tester, 1, 0);
             tester.pump(); // begin animation
-            expect(tester, 1, 0);
+            expect_counts(tester, 1, 0);
             tester.pump_by(ms(750)); // 0.75s // animation last frame; two second timer starts here
-            expect(tester, 1, 0);
+            expect_counts(tester, 1, 0);
             tester.pump_by(ms(750)); // 1.50s
-            expect(tester, 1, 0);
+            expect_counts(tester, 1, 0);
             tester.pump_by(ms(750)); // 2.25s
-            expect(tester, 1, 0);
+            expect_counts(tester, 1, 0);
             tester.pump_by(ms(10000)); // 12.25s
-            expect(tester, 1, 0);
+            expect_counts(tester, 1, 0);
 
             (first_controller.close)(&mut tester.cell.borrow_mut()); // snackbar is manually dismissed
 
             tester.pump_by(ms(750)); // 13.00s // reverse animation is scheduled
             tester.pump(); // begin animation
-            expect(tester, 1, 0);
+            expect_counts(tester, 1, 0);
             tester.pump_by(ms(750)); // 13.75s // last frame of animation, snackbar removed from build, new snack bar put in its place
-            expect(tester, 0, 1);
+            expect_counts(tester, 0, 1);
             tester.pump(); // begin animation
-            expect(tester, 0, 1);
+            expect_counts(tester, 0, 1);
             tester.pump_by(ms(750)); // 14.50s // animation last frame; two second timer starts here
-            expect(tester, 0, 1);
+            expect_counts(tester, 0, 1);
             tester.pump_by(ms(750)); // 15.25s
-            expect(tester, 0, 1);
+            expect_counts(tester, 0, 1);
             tester.pump_by(ms(750)); // 16.00s
-            expect(tester, 0, 1);
+            expect_counts(tester, 0, 1);
             tester.pump_by(ms(750)); // 16.75s // timer triggers to dismiss snackbar, reverse animation is scheduled
             tester.pump(); // begin animation
-            expect(tester, 0, 1);
+            expect_counts(tester, 0, 1);
             tester.pump_by(ms(750)); // 17.50s // last frame of animation, snackbar removed from build, new snack bar put in its place
-            expect(tester, 0, 0);
+            expect_counts(tester, 0, 0);
         });
     }
 
@@ -1910,34 +1893,26 @@ mod tests {
                 dismiss_direction.set(direction);
                 for drag_gesture in gestures {
                     snack_bar_count.set(0);
-                    let expect = |tester: &WidgetTester, bar1: usize, bar2: usize| {
-                        assert_eq!(
-                            count_text(tester, "bar1"),
-                            bar1,
-                            "{direction:?} {drag_gesture:?}"
-                        );
-                        assert_eq!(
-                            count_text(tester, "bar2"),
-                            bar2,
-                            "{direction:?} {drag_gesture:?}"
-                        );
+                    let expect_counts = |tester: &WidgetTester, bar1: usize, bar2: usize| {
+                        expect(tester, &find::text("bar1"), finds_n_widgets(bar1));
+                        expect(tester, &find::text("bar2"), finds_n_widgets(bar2));
                     };
-                    expect(tester, 0, 0);
+                    expect_counts(tester, 0, 0);
                     tap_key(tester, &tap_target); // queue bar1
                     tap_key(tester, &tap_target); // queue bar2
-                    expect(tester, 0, 0);
+                    expect_counts(tester, 0, 0);
                     tester.pump(); // schedule animation for bar1
-                    expect(tester, 1, 0);
+                    expect_counts(tester, 1, 0);
                     tester.pump(); // begin animation
-                    expect(tester, 1, 0);
+                    expect_counts(tester, 1, 0);
                     tester.pump_by(ms(750)); // 0.75s // animation last frame; two second timer starts here
                     drag_text(tester, "bar1", drag_gesture);
                     tester.pump(); // bar1 dismissed, bar2 begins animating
-                    expect(tester, 0, 1);
+                    expect_counts(tester, 0, 1);
                     tester.pump_by(ms(750)); // 0.75s // animation last frame; two second timer starts here
                     drag_text(tester, "bar2", drag_gesture);
                     tester.pump(); // bar2 dismissed
-                    expect(tester, 0, 0);
+                    expect_counts(tester, 0, 0);
                 }
             }
         });
@@ -1966,17 +1941,17 @@ mod tests {
             },
             home.into_widget(),
         );
-        assert_eq!(count_text(tester, label), 0);
+        expect(tester, &find::text(label), finds_nothing());
         tap_key(tester, &tap_target);
-        assert_eq!(count_text(tester, label), 0);
+        expect(tester, &find::text(label), finds_nothing());
         tester.pump(); // schedule animation for snack bar
-        assert_eq!(count_text(tester, label), 1);
+        expect(tester, &find::text(label), finds_one_widget());
         tester.pump(); // begin animation
-        assert_eq!(count_text(tester, label), 1);
+        expect(tester, &find::text(label), finds_one_widget());
         tester.pump_by(ms(750));
         drag_text(tester, label, Offset::new(drag * 800.0, 0.0));
         tester.pump(); // snack bar dismissed
-        assert_eq!(count_text(tester, label), 0);
+        expect(tester, &find::text(label), finds_nothing());
     }
 
     // Dart: 'SnackBar dismissDirection can be customised from SnackBarThemeData'.
@@ -2041,12 +2016,12 @@ mod tests {
             tap_x_and_settle_entrance(tester);
 
             assert_eq!(tap_count.get(), 0);
-            tap_text(tester, "ACTION");
+            tester.tap(find::text("ACTION"));
             assert_eq!(tap_count.get(), 1);
-            tap_text(tester, "ACTION");
+            tester.tap(find::text("ACTION"));
             assert_eq!(tap_count.get(), 1);
             tester.pump();
-            tap_text(tester, "ACTION");
+            tester.tap(find::text("ACTION"));
             assert_eq!(tap_count.get(), 1);
         });
     }
@@ -2251,7 +2226,7 @@ mod tests {
             showing(tester, m3, || {
                 SnackBar::new(Text::new("I am a snack bar.")).padding(EdgeInsets::all(PADDING))
             });
-            let text = text_rect(tester, "I am a snack bar.");
+            let text = tester.get_rect(find::text("I am a snack bar."));
             let material = snack_bar_material_rect(tester);
             assert_eq!(
                 text.bottom_left().dx() - material.bottom_left().dx(),
@@ -2335,7 +2310,7 @@ mod tests {
     /// Dart's `tester.widget<TextButton>(find.widgetWithText(TextButton, 'ACTION')).style!`.
     fn action_button_style(tester: &WidgetTester) -> crate::button_style::ButtonStyle {
         use crate::button_style_button::ButtonStyleButton;
-        let action = tester.find_text("ACTION")[0];
+        let action = find::text("ACTION").evaluate(tester)[0];
         let button = tester.ancestor_of_type::<TextButton>(action);
         tester.widget(button, |button: &TextButton| {
             button
@@ -2440,9 +2415,9 @@ mod tests {
             );
             pump_app(tester, m3, home.into_widget());
             let fab_rect = |tester: &WidgetTester| {
-                let fab =
-                    tester.find_by_type::<crate::floating_action_button::FloatingActionButton>()[0];
-                tester.global_rect(tester.render_box_of(fab))
+                let fab = find::by_type::<crate::floating_action_button::FloatingActionButton>()
+                    .evaluate(tester)[0];
+                tester.get_rect(fab)
             };
 
             // Get the Rect of the FAB to compare after the SnackBar appears.
@@ -2455,18 +2430,17 @@ mod tests {
             // FAB should shift upwards after SnackBar appears.
             assert!(fab_rect.center().dy() < original_fab_rect.center().dy());
 
-            let snack_bar = tester.find_by_type::<SnackBar>()[0];
-            let snack_bar_top_right = tester
-                .global_rect(tester.render_box_of(snack_bar))
-                .top_right();
+            let snack_bar = find::by_type::<SnackBar>().evaluate(tester)[0];
+            let snack_bar_top_right = tester.get_rect(snack_bar).top_right();
 
             // FAB's surrounding padding is set to [kFloatingActionButtonMargin] in floating_action_button_location.dart by default.
             const DEFAULT_FAB_PADDING: f64 = 16.0;
 
             // FAB should be positioned above the SnackBar by the default padding.
-            assert_eq!(
+            // Within f32: global positions go through valo's f32 matrices (waft-gestures' Matrix4 entry), where Dart's are f64 and compare equal.
+            assert_f32_equals(
                 fab_rect.bottom_right().dy(),
-                snack_bar_top_right.dy() - DEFAULT_FAB_PADDING
+                snack_bar_top_right.dy() - DEFAULT_FAB_PADDING,
             );
         });
     }
@@ -2516,7 +2490,7 @@ mod tests {
             // Pop up the snack bar and then press its action button.
             tap_x_and_settle_entrance(tester);
             assert!(!action_pressed.get());
-            tap_text(tester, "ACTION");
+            tester.tap(find::text("ACTION"));
             assert!(action_pressed.get());
             // Closed reason is only set when the animation is complete.
             tester.pump_by(ms(250));
@@ -2526,7 +2500,7 @@ mod tests {
             assert_eq!(closed_reason.get(), Some(SnackBarClosedReason::Action));
 
             // Pop up the snack bar and then swipe downwards to dismiss it.
-            tap_text(tester, "X");
+            tester.tap(find::text("X"));
             tester.pump_by(ms(750));
             tester.pump_by(ms(750));
             drag_text(tester, "snack", Offset::new(0.0, 50.0));
@@ -2534,7 +2508,7 @@ mod tests {
             assert_eq!(closed_reason.get(), Some(SnackBarClosedReason::Swipe));
 
             // Pop up the snack bar and then remove it.
-            tap_text(tester, "X");
+            tester.tap(find::text("X"));
             tester.pump_by(ms(750));
             let scaffold_messenger = messenger(tester);
             scaffold_messenger.remove_current_snack_bar(
@@ -2545,7 +2519,7 @@ mod tests {
             assert_eq!(closed_reason.get(), Some(SnackBarClosedReason::Remove));
 
             // Pop up the snack bar and then hide it.
-            tap_text(tester, "X");
+            tester.tap(find::text("X"));
             tester.pump_by(ms(750));
             let scaffold_messenger = messenger(tester);
             scaffold_messenger
@@ -2558,7 +2532,7 @@ mod tests {
             pump_app(tester, m3, home(false).into_widget());
 
             // Pop up the snack bar and then let it time out.
-            tap_text(tester, "X");
+            tester.tap(find::text("X"));
             tester.pump_by(ms(750));
             tester.pump_by(ms(750));
             tester.pump_by(ms(1500));
@@ -2598,17 +2572,17 @@ mod tests {
                 })),
             );
             pump_app(tester, m3, home.into_widget());
-            tap_text(tester, "X");
+            tester.tap(find::text("X"));
             tester.pump();
             // Find action immediately
-            assert_eq!(count_text(tester, "ACTION"), 1);
+            expect(tester, &find::text("ACTION"), finds_one_widget());
             // Snackbar doesn't close
             tester.pump_by(Duration::from_secs(10));
-            assert_eq!(count_text(tester, "ACTION"), 1);
-            tap_text(tester, "ACTION");
+            expect(tester, &find::text("ACTION"), finds_one_widget());
+            tester.tap(find::text("ACTION"));
             tester.pump();
             // Snackbar closes immediately
-            assert_eq!(count_text(tester, "ACTION"), 0);
+            expect(tester, &find::text("ACTION"), finds_nothing());
         });
     }
 
@@ -2622,28 +2596,28 @@ mod tests {
                 show(app, context, SnackBar::new(Text::new(HELLO_SNACK_BAR)));
             });
             pump_app(tester, m3, home.into_widget());
-            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 0);
+            expect(tester, &find::text(HELLO_SNACK_BAR), finds_nothing());
             tap_key(tester, &tap_target);
-            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 0);
+            expect(tester, &find::text(HELLO_SNACK_BAR), finds_nothing());
             tester.pump(); // schedule animation
-            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 1);
+            expect(tester, &find::text(HELLO_SNACK_BAR), finds_one_widget());
             tester.pump(); // begin animation
-            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 1);
+            expect(tester, &find::text(HELLO_SNACK_BAR), finds_one_widget());
             tester.pump_by(ms(750)); // 0.75s // animation last frame; four second timer starts here
-            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 1);
+            expect(tester, &find::text(HELLO_SNACK_BAR), finds_one_widget());
             tester.pump_by(ms(750)); // 1.50s
-            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 1);
+            expect(tester, &find::text(HELLO_SNACK_BAR), finds_one_widget());
             tester.pump_by(ms(750)); // 2.25s
-            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 1);
+            expect(tester, &find::text(HELLO_SNACK_BAR), finds_one_widget());
             tester.pump_by(ms(750)); // 3.00s
-            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 1);
+            expect(tester, &find::text(HELLO_SNACK_BAR), finds_one_widget());
             tester.pump_by(ms(750)); // 3.75s
-            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 1);
+            expect(tester, &find::text(HELLO_SNACK_BAR), finds_one_widget());
             tester.pump_by(ms(1000)); // 4.75s // timer triggers to dismiss snackbar, reverse animation is scheduled
             tester.pump(); // begin animation
-            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 1); // frame 0 of dismiss animation
+            expect(tester, &find::text(HELLO_SNACK_BAR), finds_one_widget()); // frame 0 of dismiss animation
             tester.pump_by(ms(750)); // 5.50s // last frame of animation, snackbar removed from build
-            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 0);
+            expect(tester, &find::text(HELLO_SNACK_BAR), finds_nothing());
         });
     }
 
@@ -2682,29 +2656,29 @@ mod tests {
             };
 
             boilerplate(tester, false);
-            assert_eq!(count_text(tester, "test"), 0);
-            tap_text(tester, "X");
+            expect(tester, &find::text("test"), finds_nothing());
+            tester.tap(find::text("X"));
             tester.pump(); // schedule animation
-            assert_eq!(count_text(tester, "test"), 1);
+            expect(tester, &find::text("test"), finds_one_widget());
             tester.pump(); // begin animation
             tester.pump_by(ms(4750)); // 4.75s
-            assert_eq!(count_text(tester, "test"), 1);
+            expect(tester, &find::text("test"), finds_one_widget());
 
             // Enabled accessible navigation
             boilerplate(tester, true);
 
             tester.pump_by(ms(4000)); // 8.75s
             tester.pump();
-            assert_eq!(count_text(tester, "test"), 1);
+            expect(tester, &find::text("test"), finds_one_widget());
 
             // disable accessible navigation
             boilerplate(tester, false);
             tester.pump_and_settle_by(ms(5750));
-            assert_eq!(count_text(tester, "test"), 1);
+            expect(tester, &find::text("test"), finds_one_widget());
 
-            tap_text(tester, "foo");
+            tester.tap(find::text("foo"));
             tester.pump_and_settle();
-            assert_eq!(count_text(tester, "test"), 0);
+            expect(tester, &find::text("test"), finds_nothing());
         });
     }
 
@@ -2743,7 +2717,7 @@ mod tests {
     fn a_snack_bar_calls_on_visible_once() {
         test_widgets(|tester| {
             let called = count_on_visible(tester, &["hello"]);
-            assert_eq!(count_text(tester, "hello"), 1);
+            expect(tester, &find::text("hello"), finds_one_widget());
             assert_eq!(called.get(), 1);
         });
     }
@@ -2753,7 +2727,7 @@ mod tests {
     fn a_queued_snack_bar_does_not_call_on_visible() {
         test_widgets(|tester| {
             let called = count_on_visible(tester, &["hello", "hello 2"]);
-            assert_eq!(count_text(tester, "hello"), 1);
+            expect(tester, &find::text("hello"), finds_one_widget());
             assert_eq!(called.get(), 1);
         });
     }
@@ -2762,19 +2736,19 @@ mod tests {
 
     /// Dart's `tester.getRect(find.byType(W))`, of the first `W`.
     fn rect_of_type<W: 'static>(tester: &WidgetTester) -> Rect {
-        let element = tester.find_by_type::<W>()[0];
-        tester.global_rect(tester.render_box_of(element))
+        let element = find::by_type::<W>().evaluate(tester)[0];
+        tester.get_rect(element)
     }
 
     /// Dart's `tester.getRect(find.byKey(key))`.
     fn rect_of_key(tester: &WidgetTester, key: &GlobalKey) -> Rect {
-        tester.global_rect(tester.render_object(key).as_box().expect("a render box"))
+        tester.get_rect(key)
     }
 
     /// Dart's `tester.state<ScaffoldMessengerState>(find.byType(ScaffoldMessenger))
     /// .showSnackBar(snackBar)`, then `tester.pumpAndSettle()`.
     fn show_from_messenger_and_settle(tester: &mut WidgetTester, snack_bar: SnackBar) {
-        let messenger = tester.find_by_type::<ScaffoldMessenger>()[0];
+        let messenger = find::by_type::<ScaffoldMessenger>().evaluate(tester)[0];
         {
             let mut app = tester.cell.borrow_mut();
             let state = messenger
@@ -2892,7 +2866,7 @@ mod tests {
                 )
                 .into_widget(),
             );
-            tap_text(tester, "X");
+            tester.tap(find::text("X"));
             tester.pump_and_settle(); // Show snackbar
             let initial = rect_of_type::<SnackBar>(tester);
             // Consume bottom padding - as if by the keyboard opening
@@ -2906,7 +2880,7 @@ mod tests {
                 )
                 .into_widget(),
             );
-            tap_text(tester, "X");
+            tester.tap(find::text("X"));
             tester.pump_and_settle(); // Have the SnackBar fully animate out.
             let last = rect_of_type::<SnackBar>(tester);
             assert_eq!(initial.bottom_left(), last.bottom_left());
@@ -2958,7 +2932,7 @@ mod tests {
             scaffold = scaffold.floating_action_button_location(fab_location);
         }
         pump_app(tester, m3, scaffold.into_widget());
-        tap_text(tester, "X");
+        tester.tap(find::text("X"));
         tester.pump_and_settle(); // Have the SnackBar fully animate out.
     }
 
@@ -3355,7 +3329,7 @@ mod tests {
             );
         });
         pump_app(tester, m3, home.into_widget());
-        tap_text(tester, "X");
+        tester.tap(find::text("X"));
         tester.pump_and_settle();
         rect_of_type::<SnackBar>(tester).top_right().dx()
             - rect_of_type::<SnackBarAction>(tester).top_right().dx()
@@ -3472,8 +3446,12 @@ mod tests {
             tap_key(tester, &material_banner_tap_target);
             tester.pump_and_settle();
 
-            assert_eq!(count_text(tester, SNACK_BAR_TEXT), 1);
-            assert_eq!(count_text(tester, MATERIAL_BANNER_TEXT), 1);
+            expect(tester, &find::text(SNACK_BAR_TEXT), finds_one_widget());
+            expect(
+                tester,
+                &find::text(MATERIAL_BANNER_TEXT),
+                finds_one_widget(),
+            );
         });
     }
 
@@ -3497,7 +3475,7 @@ mod tests {
                 .action(SnackBarAction::new("ACTION", |_app| {}))
                 .behavior(SnackBarBehavior::Floating),
         );
-        assert_eq!(tester.find_by_type::<SnackBar>().len(), 1);
+        expect(tester, &find::by_type::<SnackBar>(), finds_one_widget());
         // The FloatingActionButton helps us identify which Scaffold has the
         // SnackBar here. Since the outer Scaffold contains a FAB, the SnackBar
         // should be above it. If the inner Scaffold had the SnackBar, it would be
@@ -3546,18 +3524,18 @@ mod tests {
             }))
             .key(scaffold_messenger_key.clone().into());
             pump_app(tester, m3, home.into_widget());
-            let expect = |tester: &WidgetTester, counts: [usize; 3]| {
+            let expect_counts = |tester: &WidgetTester, counts: [usize; 3]| {
                 for (text, count) in SNACK_BARS.iter().zip(counts) {
-                    assert_eq!(count_text(tester, text), count, "{text}");
+                    expect(tester, &find::text(text), finds_n_widgets(count));
                 }
             };
-            expect(tester, [0, 0, 0]);
+            expect_counts(tester, [0, 0, 0]);
             tap_key(tester, &tap_target);
             tap_key(tester, &tap_target);
             tap_key(tester, &tap_target);
-            expect(tester, [0, 0, 0]);
+            expect_counts(tester, [0, 0, 0]);
             tester.pump(); // schedule animation
-            assert_eq!(count_text(tester, SNACK_BARS[0]), 1);
+            expect(tester, &find::text(SNACK_BARS[0]), finds_one_widget());
             {
                 let mut app = tester.cell.borrow_mut();
                 let messenger = scaffold_messenger_key
@@ -3565,9 +3543,9 @@ mod tests {
                     .expect("mounted");
                 messenger.clear_snack_bars(&mut app);
             }
-            assert_eq!(count_text(tester, SNACK_BARS[0]), 1);
+            expect(tester, &find::text(SNACK_BARS[0]), finds_one_widget());
             tester.pump_by(Duration::from_secs(2));
-            expect(tester, [0, 0, 0]);
+            expect_counts(tester, [0, 0, 0]);
         });
     }
 
@@ -3698,7 +3676,7 @@ mod tests {
                     .show_close_icon(true),
             ); // Have the SnackBar fully animate in.
             let close_button_label = {
-                let messenger = tester.find_by_type::<ScaffoldMessenger>()[0];
+                let messenger = find::by_type::<ScaffoldMessenger>().evaluate(tester)[0];
                 let mut app = tester.cell.borrow_mut();
                 let context = messenger
                     .state_handle::<crate::scaffold::ScaffoldMessengerState>(&app)
@@ -3706,7 +3684,7 @@ mod tests {
                     .context(&app);
                 <dyn MaterialLocalizations>::of(&mut app, context).close_button_label()
             };
-            let tooltips = tester.find_by_type::<crate::tooltip::Tooltip>();
+            let tooltips = find::by_type::<crate::tooltip::Tooltip>().evaluate(tester);
             let with_label = tooltips
                 .into_iter()
                 .filter(|tooltip| {
@@ -3728,7 +3706,7 @@ mod tests {
     fn showing_a_snack_bar_with_no_scaffold_to_present_it_asserts() {
         test_widgets(|tester| {
             pump_app(tester, m3, waft_widgets::Center::new().into_widget());
-            let messenger = tester.find_by_type::<ScaffoldMessenger>()[0];
+            let messenger = find::by_type::<ScaffoldMessenger>().evaluate(tester)[0];
             let mut app = tester.cell.borrow_mut();
             let state = messenger
                 .state_handle::<crate::scaffold::ScaffoldMessengerState>(&app)
@@ -3740,10 +3718,10 @@ mod tests {
     /// Dart's `tester.widget<Material>(find.descendant(of: find.widgetWithText(TextButton,
     /// 'ACTION'), matching: find.byType(Material))).color`.
     fn action_material_color(tester: &WidgetTester) -> Option<Color> {
-        let action = tester.find_text("ACTION")[0];
+        let action = find::text("ACTION").evaluate(tester)[0];
         let button = tester.ancestor_of_type::<TextButton>(action);
-        let material = tester
-            .find_by_type::<Material>()
+        let material = find::by_type::<Material>()
+            .evaluate(tester)
             .into_iter()
             .find(|material| tester.ancestors(*material).contains(&button))
             .expect("a TextButton builds a Material");
@@ -3775,10 +3753,10 @@ mod tests {
             }
         }));
         pump_app(tester, m3, home.into_widget());
-        tap_text(tester, "Tap");
+        tester.tap(find::text("Tap"));
         tester.pump_and_settle();
         let before = action_material_color(tester);
-        tap_text(tester, "ACTION");
+        tester.tap(find::text("ACTION"));
         tester.pump();
         let after = action_material_color(tester);
         (before, after)
@@ -3873,7 +3851,7 @@ mod tests {
             show_from_messenger_and_settle(tester, SnackBar::new(Text::new("I am a snack bar.")));
             assert_eq!(clip_behavior(tester), Clip::HardEdge);
             {
-                let messenger = tester.find_by_type::<ScaffoldMessenger>()[0];
+                let messenger = find::by_type::<ScaffoldMessenger>().evaluate(tester)[0];
                 let mut app = tester.cell.borrow_mut();
                 let state = messenger
                     .state_handle::<crate::scaffold::ScaffoldMessengerState>(&app)
@@ -3932,12 +3910,12 @@ mod tests {
             }
         }));
         pump_app(tester, theme, home.into_widget());
-        tap_text(tester, BUTTON_TEXT);
+        tester.tap(find::text(BUTTON_TEXT));
         tester.pump_and_settle();
-        assert_eq!(count_text(tester, SNACKBAR_CONTENT), 1);
-        let top_left = text_rect(tester, BUTTON_TEXT2).top_left();
-        tester.tap(top_left, 1);
-        assert_eq!(count_text(tester, SNACKBAR_CONTENT), 1);
+        expect(tester, &find::text(SNACKBAR_CONTENT), finds_one_widget());
+        let top_left = tester.get_rect(find::text(BUTTON_TEXT2)).top_left();
+        tester.tap_at(top_left, 1);
+        expect(tester, &find::text(SNACKBAR_CONTENT), finds_one_widget());
         completed.get()
     }
 
@@ -4011,7 +3989,7 @@ mod tests {
                 );
             });
             pump_app(tester, m3, home.into_widget());
-            tap_text(tester, "X");
+            tester.tap(find::text("X"));
             tester.pump_and_settle();
             let theme = m3(&tester.cell.borrow());
             let overlay_color = action_button_style(tester)
@@ -4052,20 +4030,20 @@ mod tests {
                     .show_close_icon(true)
             });
             pump_app(tester, m3, home.into_widget());
-            tap_text(tester, "Show snackbar");
+            tester.tap(find::text("Show snackbar"));
             tester.pump_by(ms(750));
             // The snackbar shows up before the timeout.
-            assert_eq!(count_text(tester, SNACKBAR_CONTENT), 1);
+            expect(tester, &find::text(SNACKBAR_CONTENT), finds_one_widget());
             tester.pump_by(ms(1500));
             tester.pump_and_settle();
             // The snackbar is still there after the timeout.
-            assert_eq!(count_text(tester, SNACKBAR_CONTENT), 1);
-            let close = tester.find_by_icon(&Icons::close());
-            let center = tester.global_rect(tester.render_box_of(close)).center();
-            tester.tap(center, 1);
+            expect(tester, &find::text(SNACKBAR_CONTENT), finds_one_widget());
+            let close = tester.element(find::by_icon(&Icons::close()).first());
+            let center = tester.get_rect(close).center();
+            tester.tap_at(center, 1);
             tester.pump_and_settle();
             // The snackbar is dismissed.
-            assert_eq!(count_text(tester, SNACKBAR_CONTENT), 0);
+            expect(tester, &find::text(SNACKBAR_CONTENT), finds_nothing());
         });
     }
 
@@ -4082,15 +4060,15 @@ mod tests {
             });
             pump_app(tester, m3, home.into_widget());
             let button = rect_of_type::<crate::elevated_button::ElevatedButton>(tester).center();
-            tester.tap(button, 1);
+            tester.tap_at(button, 1);
             tester.pump();
             tester.pump_by(ms(750));
             // The snackbar shows up before the timeout.
-            assert_eq!(count_text(tester, SNACKBAR_CONTENT), 1);
+            expect(tester, &find::text(SNACKBAR_CONTENT), finds_one_widget());
             tester.pump_by(ms(1500));
             tester.pump_and_settle();
             // The snackbar auto dismisses after the timeout.
-            assert_eq!(count_text(tester, SNACKBAR_CONTENT), 0);
+            expect(tester, &find::text(SNACKBAR_CONTENT), finds_nothing());
         });
     }
 
@@ -4117,13 +4095,13 @@ mod tests {
                 .into_widget(),
             );
             let button = rect_of_type::<crate::elevated_button::ElevatedButton>(tester).center();
-            tester.tap(button, 1);
+            tester.tap_at(button, 1);
             tester.pump_and_settle();
-            assert_eq!(count_text(tester, SNACKBAR_CONTENT), 1);
+            expect(tester, &find::text(SNACKBAR_CONTENT), finds_one_widget());
             tester.pump_by(Duration::from_secs(10));
             tester.pump_and_settle();
             // The snackbar auto dismisses after the timeout.
-            assert_eq!(count_text(tester, SNACKBAR_CONTENT), 0);
+            expect(tester, &find::text(SNACKBAR_CONTENT), finds_nothing());
         });
     }
 
@@ -4174,13 +4152,15 @@ mod tests {
 
             // With no scaling, the action label fits on the same row as content.
             build_snack_bar(tester, waft_painting::TextScaler::NO_SCALING);
-            tap_text(tester, "Show");
+            tester.tap(find::text("Show"));
             tester.pump_and_settle();
-            let action_top_left1 = text_rect(tester, "Action Label").top_left();
+            let action_top_left1 = tester.get_rect(find::text("Action Label")).top_left();
             // Action and content are on the same line (action is not below content).
-            assert!(action_top_left1.dy() <= text_rect(tester, "Message").bottom_left().dy());
+            assert!(
+                action_top_left1.dy() <= tester.get_rect(find::text("Message")).bottom_left().dy()
+            );
             {
-                let show = tester.find_text("Show")[0];
+                let show = find::text("Show").evaluate(tester)[0];
                 let mut app = tester.cell.borrow_mut();
                 let context = show;
                 ScaffoldMessenger::of(&mut app, context).clear_snack_bars(&mut app);
@@ -4190,10 +4170,10 @@ mod tests {
             // With a large text scaler, the action button width is scaled up and overflows
             // to a separate row below the content.
             build_snack_bar(tester, waft_painting::TextScaler::linear(3.0));
-            tap_text(tester, "Show");
+            tester.tap(find::text("Show"));
             tester.pump_and_settle();
-            let content_bottom_left2 = text_rect(tester, "Message").bottom_left();
-            let action_top_left2 = text_rect(tester, "Action Label").top_left();
+            let content_bottom_left2 = tester.get_rect(find::text("Message")).bottom_left();
+            let action_top_left2 = tester.get_rect(find::text("Action Label")).top_left();
             // Action overflows and is positioned below the content text.
             assert!(action_top_left2.dy() >= content_bottom_left2.dy());
         });
@@ -4229,7 +4209,7 @@ mod tests {
             }
         }));
         pump_app(tester, m3, home.into_widget());
-        tap_text(tester, "Show");
+        tester.tap(find::text("Show"));
         tester.pump_and_settle();
         let content = rect_of_key(tester, &content_key);
         (owned, content)
@@ -4238,9 +4218,9 @@ mod tests {
     /// Dart's `tester.widget<Row>(find.descendant(of: find.byType(SnackBar), matching:
     /// find.byType(Row)).first).children`.
     fn content_row_children(tester: &WidgetTester) -> Vec<WidgetRef> {
-        let snack_bar = tester.find_by_type::<SnackBar>()[0];
-        let row = tester
-            .find_by_type::<Row>()
+        let snack_bar = find::by_type::<SnackBar>().evaluate(tester)[0];
+        let row = find::by_type::<Row>()
+            .evaluate(tester)
             .into_iter()
             .find(|row| tester.ancestors(*row).contains(&snack_bar))
             .expect("a SnackBar lays its content out in a Row");
@@ -4318,7 +4298,7 @@ mod tests {
 
     /// Dart's `_getSnackBarTextRenderObject(tester, text).text.style`.
     fn paragraph_style(tester: &WidgetTester, text: &str) -> Option<waft_painting::TextStyle> {
-        let element = tester.find_text(text)[0];
+        let element = find::text(text).evaluate(tester)[0];
         let render = tester.render_box_of(element);
         let app = tester.cell.borrow();
         let paragraph = render
@@ -4330,9 +4310,9 @@ mod tests {
 
     /// Dart's `_getSnackBarIconFinder(tester)`, counted.
     fn close_icons_in_snack_bar(tester: &WidgetTester) -> usize {
-        let snack_bar = tester.find_by_type::<SnackBar>()[0];
-        tester
-            .find_by_type::<Icon>()
+        let snack_bar = find::by_type::<SnackBar>().evaluate(tester)[0];
+        find::by_type::<Icon>()
+            .evaluate(tester)
             .into_iter()
             .filter(|icon| {
                 tester.ancestors(*icon).contains(&snack_bar)
@@ -4356,7 +4336,7 @@ mod tests {
                 );
             });
             pump_app(tester, m2, home.into_widget());
-            tap_text(tester, "X");
+            tester.tap(find::text("X"));
             tester.pump_and_settle();
             assert_eq!(
                 paragraph_style(tester, TEXT),
@@ -4391,7 +4371,7 @@ mod tests {
                 );
             });
             pump_app(tester, m3, home.into_widget());
-            tap_text(tester, "X");
+            tester.tap(find::text("X"));
             tester.pump_and_settle();
             let theme = m3(&tester.cell.borrow());
             let typography = crate::typography::Typography::material2021().build();
@@ -4439,7 +4419,7 @@ mod tests {
                 },
                 home.into_widget(),
             );
-            tap_text(tester, "X");
+            tester.tap(find::text("X"));
             tester.pump_and_settle();
             let theme = snack_bar_theme(Some(true));
             assert_eq!(paragraph_style(tester, TEXT), theme.content_text_style);
@@ -4491,7 +4471,7 @@ mod tests {
             );
         });
         pump_app(tester, theme, wrap(home));
-        tap_text(tester, "X");
+        tester.tap(find::text("X"));
         tester.pump_and_settle();
         with_snack_bar_material(tester, |material| {
             assert_eq!(material.color, Some(background_color));
@@ -4605,10 +4585,10 @@ mod tests {
             |app| ThemeData::builder().snack_bar_theme(theme).build(app),
             home.into_widget(),
         );
-        tap_text(tester, "X");
+        tester.tap(find::text("X"));
         tester.pump_and_settle();
         let before = action_material_color(tester);
-        tap_text(tester, "ACTION");
+        tester.tap(find::text("ACTION"));
         tester.pump();
         let after = action_material_color(tester);
         (before, after)
@@ -4711,7 +4691,7 @@ mod tests {
     fn a_theme_floating_snack_bar_sits_on_top_of_the_button() {
         test_widgets(|tester| {
             themed_behavior(tester, SnackBarBehavior::Floating);
-            tap_text(tester, "X");
+            tester.tap(find::text("X"));
             tester.pump_and_settle();
             let snack_bar_bottom_center = first_box_rect::<SnackBar>(tester).bottom_center();
             let floating_action_button_top_center =
@@ -4731,7 +4711,7 @@ mod tests {
             let floating_action_button_origin_bottom_center =
                 first_box_rect::<crate::floating_action_button::FloatingActionButton>(tester)
                     .bottom_center();
-            tap_text(tester, "X");
+            tester.tap(find::text("X"));
             tester.pump_and_settle();
             let snack_bar_top_center = first_box_rect::<SnackBar>(tester).top_center();
             let floating_action_button_bottom_center =
@@ -4831,7 +4811,7 @@ mod tests {
             pump_app(tester, m3, home.into_widget());
             tap_x_and_settle_entrance(tester);
             let animations = {
-                let snack_bar = tester.find_by_type::<SnackBar>()[0];
+                let snack_bar = find::by_type::<SnackBar>().evaluate(tester)[0];
                 let app = tester.cell.borrow();
                 let state = app.get(
                     snack_bar
@@ -4851,7 +4831,7 @@ mod tests {
             tester.pump_by(ms(1500)); // the timer dismisses the snack bar
             tester.pump(); // begin the reverse animation
             tester.pump_by(ms(750)); // its last frame removes the snack bar
-            assert!(tester.find_by_type::<SnackBar>().is_empty());
+            expect(tester, &find::by_type::<SnackBar>(), finds_nothing());
             tester.cell.checkpoint();
             let app = tester.cell.borrow();
             assert!(animations.iter().all(|animation| !app.contains(*animation)));

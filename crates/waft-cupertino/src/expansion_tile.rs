@@ -469,7 +469,7 @@ mod tests {
 
     /// The header's tap: down and up, then the frame they ask for.
     fn tap_header(tester: &mut WidgetTester) {
-        tester.tap(Offset::new(20.0, 20.0), 1);
+        tester.tap_at(Offset::new(20.0, 20.0), 1);
         tester.pump();
     }
 

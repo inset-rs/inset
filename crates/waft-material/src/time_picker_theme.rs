@@ -653,10 +653,9 @@ mod tests {
         WidgetStates,
     };
 
-    use waft_widgets::testing::{WidgetTester, test_widgets};
+    use waft_widgets::testing::{WidgetTester, find, test_widgets};
 
     use super::*;
-    use crate::chip::tests::{center_of, size_of};
     use crate::dialog::Dialog;
     use crate::elevated_button::ElevatedButton;
     use crate::icon_button::IconButton;
@@ -674,7 +673,7 @@ mod tests {
     use crate::time_picker::{TimePickerEntryMode, show_time_picker};
     use crate::tooltip::tests::{m2, m3};
     use crate::typography::Typography;
-    use waft_rendering::testing::{PaintCall, paints};
+    use waft_rendering::testing::{PaintCall, assert_paints};
 
     fn resolve(color: &AnyColor, states: &WidgetStates) -> Color {
         <dyn WidgetStateProperty<Color>>::resolve_as(color, states).color()
@@ -872,23 +871,24 @@ mod tests {
             })))
             .into_widget();
         tester.pump_widget(material_app(theme, launcher));
-        let x = *tester.find_onstage_text("X").first().expect("the X button");
-        let center = center_of(tester, x);
-        tester.tap(center, 1);
+        let x = *find::text("X")
+            .evaluate(tester)
+            .first()
+            .expect("the X button");
+        let center = tester.get_center(x);
+        tester.tap_at(center, 1);
         tester.pump_and_settle_by(Duration::from_secs(1));
     }
 
     fn text_element(tester: &WidgetTester, text: &str) -> AnyElement {
-        *tester
-            .find_text(text)
-            .first()
-            .unwrap_or_else(|| panic!("a Text showing {text:?}"))
+        tester.element(find::text(text).first())
     }
 
     /// Dart's `_dialogMaterial`.
     fn dialog_material(tester: &WidgetTester) -> (Option<Color>, Option<ShapeBorderRef>) {
-        let dialog = tester.find_by_type::<Dialog>()[0];
-        let material = tester.descendants_of_type::<Material>(dialog)[0];
+        let material = tester.element(
+            find::descendant(find::by_type::<Dialog>().at(0), find::by_type::<Material>()).first(),
+        );
         tester.widget(material, |material: &Material| {
             (material.color, material.shape.clone())
         })
@@ -896,7 +896,8 @@ mod tests {
 
     /// Dart's `_textMaterial`: the first `Material` above the text.
     fn text_material(tester: &WidgetTester, text: &str) -> (Option<Color>, Option<ShapeBorderRef>) {
-        let material = tester.ancestor_of_type::<Material>(text_element(tester, text));
+        let material =
+            tester.element(find::ancestor(find::text(text), find::by_type::<Material>()).first());
         tester.widget(material, |material: &Material| {
             (material.color, material.shape.clone())
         })
@@ -908,19 +909,26 @@ mod tests {
 
     /// Dart's `_textField(tester, text).decoration` and `.style`.
     fn text_field(tester: &WidgetTester, text: &str) -> TextField {
-        let field = tester.ancestor_of_type::<TextField>(text_element(tester, text));
+        let field =
+            tester.element(find::ancestor(find::text(text), find::by_type::<TextField>()).first());
         tester.widget(field, |field: &TextField| field.clone())
     }
 
     fn entry_mode_icon_color(tester: &WidgetTester) -> Option<Color> {
-        let dialog = tester.find_by_type::<Dialog>()[0];
-        let button = tester.descendants_of_type::<IconButton>(dialog)[0];
+        let button = tester.element(
+            find::descendant(
+                find::by_type::<Dialog>().at(0),
+                find::by_type::<IconButton>(),
+            )
+            .first(),
+        );
         tester.widget(button, |button: &IconButton| button.color)
     }
 
     /// Dart's `_actionButtonStyle`.
     fn action_button_style(tester: &WidgetTester, text: &str) -> ButtonStyle {
-        let button = tester.ancestor_of_type::<TextButton>(text_element(tester, text));
+        let button =
+            tester.element(find::ancestor(find::text(text), find::by_type::<TextButton>()).first());
         tester.widget(button, |button: &TextButton| {
             crate::button_style_button::ButtonStyleButton::button_style_button_data(button)
                 .style
@@ -929,13 +937,9 @@ mod tests {
         })
     }
 
-    fn painted_circles(tester: &WidgetTester, colors: &[Color]) -> bool {
-        let render = tester.render_box_of(dial_paint(tester)).as_object();
-        let calls: Vec<PaintCall> = colors
-            .iter()
-            .map(|color| PaintCall::circle(Some(*color)))
-            .collect();
-        paints(&tester.painted_ops_deep(render), &calls).is_ok()
+    /// What the dial's `CustomPaint` paints: Dart's `paints` on its render object.
+    fn dial_ops(tester: &WidgetTester) -> Vec<waft_embedder::valo::Op> {
+        tester.painted_ops_deep(tester.render_object(dial_paint(tester)))
     }
 
     /// The style a text gets from a typography: Dart's
@@ -989,10 +993,13 @@ mod tests {
             assert_eq!(color, Some(scheme.surface));
             assert_eq!(shape, Some(ShapeBorderRef::new(rounded(4.0))));
 
-            assert!(painted_circles(
-                tester,
-                &[opacity(scheme.on_surface, 0.08), scheme.primary]
-            ));
+            assert_paints(
+                &dial_ops(tester),
+                &[
+                    PaintCall::circle(Some(opacity(scheme.on_surface, 0.08))),
+                    PaintCall::circle(Some(scheme.primary)),
+                ],
+            );
 
             let display_medium =
                 |white| base_style(&typography, white, |theme| &theme.display_medium);
@@ -1087,10 +1094,13 @@ mod tests {
             assert_eq!(color, Some(scheme.surface_container_high()));
             assert_eq!(shape, Some(ShapeBorderRef::new(rounded(28.0))));
 
-            assert!(painted_circles(
-                tester,
-                &[scheme.surface_container_highest(), scheme.primary]
-            ));
+            assert_paints(
+                &dial_ops(tester),
+                &[
+                    PaintCall::circle(Some(scheme.surface_container_highest())),
+                    PaintCall::circle(Some(scheme.primary)),
+                ],
+            );
 
             assert_eq!(
                 paragraph_style(tester, "7"),
@@ -1342,13 +1352,17 @@ mod tests {
         assert_eq!(color, resolved_color(&theme.background_color));
         assert_eq!(shape, theme.shape.clone());
 
-        assert!(painted_circles(
-            tester,
+        assert_paints(
+            &dial_ops(tester),
             &[
-                resolved_color(&theme.dial_background_color).expect("a dial color"),
-                resolved_color(&theme.dial_hand_color).expect("a hand color"),
-            ]
-        ));
+                PaintCall::circle(Some(
+                    resolved_color(&theme.dial_background_color).expect("a dial color"),
+                )),
+                PaintCall::circle(Some(
+                    resolved_color(&theme.dial_hand_color).expect("a hand color"),
+                )),
+            ],
+        );
 
         let (color, shape) = text_material(tester, "7");
         assert_eq!(color, Some(selected_color()));
@@ -1623,13 +1637,17 @@ mod tests {
     }
 
     fn border_painter_size(tester: &WidgetTester) -> Size {
-        let decorator = tester.find_by_type::<crate::input_decorator::InputDecorator>()[0];
-        let paint = tester.descendants_of_type::<waft_widgets::CustomPaint>(decorator)[0];
-        size_of(tester, paint)
+        tester.get_size(
+            find::descendant(
+                find::by_type::<crate::input_decorator::InputDecorator>().first(),
+                find::by_type::<waft_widgets::CustomPaint>(),
+            )
+            .first(),
+        )
     }
 
     fn enter_invalid_hour_and_tap_ok(tester: &mut WidgetTester) {
-        let editable = tester.find_by_type::<waft_widgets::EditableText>()[0];
+        let editable = tester.element(find::by_type::<waft_widgets::EditableText>().at(0));
         let state = editable
             .state_handle::<waft_widgets::EditableTextState>(&tester.cell.borrow())
             .expect("an EditableText state");
@@ -1644,8 +1662,8 @@ mod tests {
         );
         tester.cell.checkpoint();
         let ok = text_element(tester, "OK");
-        let center = center_of(tester, ok);
-        tester.tap(center, 1);
+        let center = tester.get_center(ok);
+        tester.tap_at(center, 1);
     }
 
     #[test]

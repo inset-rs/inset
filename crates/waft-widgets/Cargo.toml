@@ -26,7 +26,7 @@ waft-test = { workspace = true, optional = true }
 [features]
 # `testing`: flutter_test's `WidgetTester` and `testWidgets`, for the tests of a crate above this
 # one; this crate's own tests have it without the feature.
-test-support = ["dep:waft-test"]
+test-support = ["dep:waft-test", "waft-rendering/test-support"]
 
 [dev-dependencies]
 waft-test.workspace = true

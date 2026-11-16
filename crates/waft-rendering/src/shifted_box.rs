@@ -2376,9 +2376,8 @@ mod tests {
     use waft_foundation::AppCell;
 
     use crate::box_::BoxConstraints;
-    use crate::layer::{ContainerLayer, ErasedLayer, OffsetLayer, PictureLayer};
-    use crate::pipeline_owner::PipelineOwner;
-    use crate::proxy_box::{RenderConstrainedBox, RenderRepaintBoundary};
+    use crate::proxy_box::RenderConstrainedBox;
+    use crate::testing::{EnginePhase, layout_with, painted_ops};
     use waft_embedder::valo::Op;
 
     /// `padding_test.dart`: the padding is added to the child's intrinsics, and taken off the
@@ -2484,33 +2483,17 @@ mod tests {
             Some(child.as_box()),
         );
         unconstrained.set_clip_behavior(&mut app, Clip::HardEdge);
-        let root = RenderRepaintBoundary::new(&mut app, Some(unconstrained.as_box()));
-        let owner = PipelineOwner::new(&mut app, None, None);
-        owner.set_root_node(&mut app, Some(root.as_object()));
-        root.layout(
+        layout_with(
             &mut app,
-            BoxConstraints::tight(Size::new(100.0, 100.0)),
-            false,
+            unconstrained.as_box(),
+            Some(BoxConstraints::tight(Size::new(100.0, 100.0))),
+            AlignmentGeometry::CENTER,
+            EnginePhase::Layout,
         );
-        let paint_root = OffsetLayer::new(&mut app, Offset::ZERO);
-        paint_root
-            .as_layer()
-            .attach(&mut app, root.as_object().id());
-        root.as_object()
-            .schedule_initial_paint(&mut app, paint_root.as_container_layer());
-        owner.flush_compositing_bits(&mut app);
-        owner.flush_paint(&mut app);
 
         assert_eq!(unconstrained.size(&app), Size::new(100.0, 100.0));
-        let layer = root.as_object().debug_layer(&app).expect("painted");
-        let clipped = layer
-            .depth_first_iterate_children(&app)
-            .into_iter()
-            .filter_map(|child| {
-                app.handle::<PictureLayer>(child.id())
-                    .and_then(|picture| picture.picture(&app).map(|p| p.ops().to_vec()))
-            })
-            .flatten()
+        let clipped = painted_ops(&mut app, unconstrained.as_object())
+            .iter()
             .any(|op| matches!(op, Op::ClipPath { .. }));
         assert!(clipped, "the overflowing child is clipped");
     }

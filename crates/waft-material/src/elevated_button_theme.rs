@@ -244,8 +244,8 @@ impl InheritedWidget for ElevatedButtonTheme {
 #[cfg(test)]
 mod tests {
     #![allow(deprecated)]
-    use crate::drawer_theme::tests::assert_near;
     use waft_widgets::Text;
+    use waft_widgets::testing::assert_f32_equals;
 
     use std::cell::Cell;
     use std::rc::Rc;
@@ -264,7 +264,7 @@ mod tests {
         WidgetStates,
     };
 
-    use waft_widgets::testing::{WidgetTester, test_widgets};
+    use waft_widgets::testing::{WidgetTester, find, test_widgets};
 
     use super::*;
     use crate::button_style::{ButtonShapeVariant, ButtonSizeVariant};
@@ -300,8 +300,8 @@ mod tests {
 
     /// The first `W` below an `ElevatedButton`.
     fn in_button<W: 'static>(tester: &WidgetTester) -> AnyElement {
-        tester
-            .find_by_type::<W>()
+        find::by_type::<W>()
+            .evaluate(tester)
             .into_iter()
             .find(|element| is_inside::<ElevatedButton>(tester, *element))
             .expect("a descendant of the button")
@@ -554,8 +554,8 @@ mod tests {
             );
             assert_eq!(response.enable_feedback, ENABLE_FEEDBACK);
         });
-        let button = tester.find_by_type::<ElevatedButton>()[0];
-        let size = tester.render_box_of(button).size(&tester.cell.borrow());
+        let button = find::by_type::<ElevatedButton>().evaluate(tester)[0];
+        let size = tester.get_size(button);
         assert_eq!(size, Size::new(200.0, 200.0));
         let align = in_button::<Align>(tester);
         tester.widget::<Align, _>(align, |align| assert!(align.alignment == ALIGNMENT));
@@ -694,10 +694,8 @@ mod tests {
                 icon_button_frame(tester, theme)
             };
             let rects = |tester: &WidgetTester| {
-                let material =
-                    tester.global_rect(tester.render_box_of(in_button::<Material>(tester)));
-                let icon =
-                    tester.global_rect(tester.render_box_of(tester.find_by_type::<Icon>()[0]));
+                let material = tester.get_rect(in_button::<Material>(tester));
+                let icon = tester.get_rect(find::by_type::<Icon>().evaluate(tester)[0]);
                 (material, icon)
             };
 
@@ -710,7 +708,7 @@ mod tests {
             tester.pump_widget(frame);
             tester.pump_and_settle();
             let (button, icon) = rects(tester);
-            assert_near(button.right, icon.right + 24.0);
+            assert_f32_equals(button.right, icon.right + 24.0);
         });
     }
 

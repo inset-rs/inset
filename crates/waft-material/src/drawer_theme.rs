@@ -288,16 +288,6 @@ pub(crate) mod tests {
     use crate::colors::Colors;
     use crate::theme_data::ThemeData;
 
-    /// Asserts two f64 positions equal within f32 rounding.
-    pub(crate) fn assert_near(actual: f64, expected: f64) {
-        // Within f32: global positions go through valo's f32 matrices (waft-gestures' Matrix4
-        // entry), where Dart's are f64 and compare equal.
-        assert!(
-            (actual - expected).abs() <= f64::from(f32::EPSILON) * expected.abs().max(1.0),
-            "{actual} is not {expected}"
-        );
-    }
-
     /// Builds `wrap(probe)` and returns what `read` saw at the probe's context.
     pub(crate) fn probe<T: 'static>(
         tester: &mut WidgetTester,

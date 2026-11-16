@@ -3610,7 +3610,10 @@ mod tests {
 
     use waft_widgets::{Center, StatefulBuilder};
 
-    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+    use waft_widgets::testing::{
+        TestPointer, WidgetTester, assert_more_or_less_equals_within, expect, find, finds_nothing,
+        finds_one_widget, test_widgets,
+    };
 
     use super::*;
     use crate::material::Material;
@@ -3620,7 +3623,7 @@ mod tests {
 
     use crate::theme_data::ThemeData;
     use waft_rendering::testing::{
-        CanvasMethod, PaintCall, assert_paints, colors_match, count_calls, paints,
+        CanvasMethod, PaintCall, RecordedCall, assert_paints, count_calls, paints,
     };
 
     /// What a test's range slider callbacks heard.
@@ -3713,8 +3716,8 @@ mod tests {
     }
 
     fn slider_rect(tester: &WidgetTester) -> Rect {
-        let slider = tester.find_by_type::<RangeSlider>()[0];
-        tester.global_rect(tester.render_box_of(slider))
+        let slider = find::by_type::<RangeSlider>().evaluate(tester)[0];
+        tester.get_rect(slider)
     }
 
     /// The bounds of the track: the slider's edges translated inwards by the overlay radius.
@@ -3724,10 +3727,6 @@ mod tests {
             rect.top_left() + Offset::new(24.0, 0.0),
             rect.bottom_right() + Offset::new(-24.0, 0.0),
         )
-    }
-
-    fn near(actual: f64, expected: f64, epsilon: f64) -> bool {
-        (actual - expected).abs() <= epsilon
     }
 
     // 'Range Slider can move when tapped (continuous LTR)'.
@@ -3741,7 +3740,7 @@ mod tests {
             // boundaries
             assert_eq!(heard.values.get(), RangeValues::new(0.3, 0.8));
             //  taps at 0.5
-            tester.tap(slider_rect(tester).center(), 1);
+            tester.tap_at(slider_rect(tester).center(), 1);
             tester.pump();
             assert_eq!(heard.values.get(), RangeValues::new(0.5, 0.8));
 
@@ -3751,16 +3750,16 @@ mod tests {
 
             // The start thumb is selected when tapping the left inactive track.
             let left_target = top_left + (bottom_right - top_left) * 0.1;
-            tester.tap(left_target, 2);
-            assert!(near(heard.values.get().start, 0.1, 0.01));
+            tester.tap_at(left_target, 2);
+            assert_more_or_less_equals_within(heard.values.get().start, 0.1, 0.01);
             assert_eq!(heard.values.get().end, 0.8);
 
             // The end thumb is selected when tapping the right inactive track.
             tester.pump();
             let right_target = top_left + (bottom_right - top_left) * 0.9;
-            tester.tap(right_target, 3);
-            assert!(near(heard.values.get().start, 0.1, 0.01));
-            assert!(near(heard.values.get().end, 0.9, 0.01));
+            tester.tap_at(right_target, 3);
+            assert_more_or_less_equals_within(heard.values.get().start, 0.1, 0.01);
+            assert_more_or_less_equals_within(heard.values.get().end, 0.9, 0.01);
         });
     }
 
@@ -3775,7 +3774,7 @@ mod tests {
             // boundaries
             assert_eq!(heard.values.get(), RangeValues::new(0.3, 1.0));
             // taps at 0.5
-            tester.tap(slider_rect(tester).center(), 1);
+            tester.tap_at(slider_rect(tester).center(), 1);
             tester.pump();
             assert_eq!(heard.values.get(), RangeValues::new(0.5, 1.0));
 
@@ -3783,16 +3782,16 @@ mod tests {
 
             // The end thumb is selected when tapping the left inactive track.
             let left_target = top_left + (bottom_right - top_left) * 0.1;
-            tester.tap(left_target, 2);
+            tester.tap_at(left_target, 2);
             assert_eq!(heard.values.get().start, 0.5);
-            assert!(near(heard.values.get().end, 0.9, 0.01));
+            assert_more_or_less_equals_within(heard.values.get().end, 0.9, 0.01);
 
             // The start thumb is selected when tapping the right inactive track.
             tester.pump();
             let right_target = top_left + (bottom_right - top_left) * 0.9;
-            tester.tap(right_target, 3);
-            assert!(near(heard.values.get().start, 0.1, 0.01));
-            assert!(near(heard.values.get().end, 0.9, 0.01));
+            tester.tap_at(right_target, 3);
+            assert_more_or_less_equals_within(heard.values.get().start, 0.1, 0.01);
+            assert_more_or_less_equals_within(heard.values.get().end, 0.9, 0.01);
         });
     }
 
@@ -3809,7 +3808,7 @@ mod tests {
             // boundaries
             assert_eq!(heard.values.get(), RangeValues::new(30.0, 80.0));
             // taps at 0.5
-            tester.tap(slider_rect(tester).center(), 1);
+            tester.tap_at(slider_rect(tester).center(), 1);
             tester.pump_and_settle();
             assert_eq!(heard.values.get(), RangeValues::new(50.0, 80.0));
 
@@ -3817,7 +3816,7 @@ mod tests {
 
             // The start thumb is selected when tapping the left inactive track.
             let left_target = top_left + (bottom_right - top_left) * 0.1;
-            tester.tap(left_target, 2);
+            tester.tap_at(left_target, 2);
             tester.pump_and_settle();
             assert_eq!(heard.values.get().start.round(), 10.0);
             assert_eq!(heard.values.get().end.round(), 80.0);
@@ -3825,7 +3824,7 @@ mod tests {
             // The end thumb is selected when tapping the right inactive track.
             tester.pump();
             let right_target = top_left + (bottom_right - top_left) * 0.9;
-            tester.tap(right_target, 3);
+            tester.tap_at(right_target, 3);
             tester.pump_and_settle();
             assert_eq!(heard.values.get().start.round(), 10.0);
             assert_eq!(heard.values.get().end.round(), 90.0);
@@ -3845,7 +3844,7 @@ mod tests {
             // boundaries
             assert_eq!(heard.values.get(), RangeValues::new(30.0, 80.0));
             // taps at 0.5
-            tester.tap(slider_rect(tester).center(), 1);
+            tester.tap_at(slider_rect(tester).center(), 1);
             tester.pump_and_settle();
             assert_eq!(heard.values.get(), RangeValues::new(50.0, 80.0));
 
@@ -3853,7 +3852,7 @@ mod tests {
 
             // The start thumb is selected when tapping the left inactive track.
             let left_target = top_left + (bottom_right - top_left) * 0.1;
-            tester.tap(left_target, 2);
+            tester.tap_at(left_target, 2);
             tester.pump_and_settle();
             assert_eq!(heard.values.get().start.round(), 50.0);
             assert_eq!(heard.values.get().end.round(), 90.0);
@@ -3861,7 +3860,7 @@ mod tests {
             // The end thumb is selected when tapping the right inactive track.
             tester.pump();
             let right_target = top_left + (bottom_right - top_left) * 0.9;
-            tester.tap(right_target, 3);
+            tester.tap_at(right_target, 3);
             tester.pump_and_settle();
             assert_eq!(heard.values.get().start.round(), 10.0);
             assert_eq!(heard.values.get().end.round(), 90.0);
@@ -4041,15 +4040,15 @@ mod tests {
         // Drag the first thumb towards the center.
         let left_target = top_left + span * 0.3;
         tester.drag_from(left_target, middle - left_target, 1);
-        assert!(near(read(first_is_start), 0.5 * scale, epsilon));
+        assert_more_or_less_equals_within(read(first_is_start), 0.5 * scale, epsilon);
 
         // Drag the second thumb towards the center.
         tester.pump_and_settle();
         let right_target = top_left + span * 0.7;
         tester.drag_from(right_target, middle - right_target, 2);
-        assert!(near(read(second_is_start), 0.5 * scale, epsilon));
+        assert_more_or_less_equals_within(read(second_is_start), 0.5 * scale, epsilon);
         if discrete && text_direction == TextDirection::Rtl && drag_start_apart {
-            assert!(near(heard.values.get().end, 50.0, epsilon));
+            assert_more_or_less_equals_within(heard.values.get().end, 50.0, epsilon);
         }
 
         // Drag a thumb apart.
@@ -4060,9 +4059,9 @@ mod tests {
         };
         tester.drag_from(middle, span * (0.3 * toward_start), 3);
         if drag_start_apart {
-            assert!(near(heard.values.get().start, 0.2 * scale, epsilon));
+            assert_more_or_less_equals_within(heard.values.get().start, 0.2 * scale, epsilon);
         } else {
-            assert!(near(heard.values.get().end, 0.8 * scale, epsilon));
+            assert_more_or_less_equals_within(heard.values.get().end, 0.8 * scale, epsilon);
         }
     }
 
@@ -4173,12 +4172,12 @@ mod tests {
             tester.drag_from(left_target, (bottom_right - top_left) * 0.2, 1);
             let start_values = heard.start_values.get().expect("onChangeStart ran");
             let end_values = heard.end_values.get().expect("onChangeEnd ran");
-            assert!(near(start_values.start, 30.0, 1.0));
-            assert!(near(start_values.end, 70.0, 1.0));
-            assert!(near(heard.values.get().start, 50.0, 1.0));
-            assert!(near(heard.values.get().end, 70.0, 1.0));
-            assert!(near(end_values.start, 50.0, 1.0));
-            assert!(near(end_values.end, 70.0, 1.0));
+            assert_more_or_less_equals_within(start_values.start, 30.0, 1.0);
+            assert_more_or_less_equals_within(start_values.end, 70.0, 1.0);
+            assert_more_or_less_equals_within(heard.values.get().start, 50.0, 1.0);
+            assert_more_or_less_equals_within(heard.values.get().end, 70.0, 1.0);
+            assert_more_or_less_equals_within(end_values.start, 50.0, 1.0);
+            assert_more_or_less_equals_within(end_values.end, 70.0, 1.0);
         });
     }
 
@@ -4201,8 +4200,8 @@ mod tests {
             let right_target = top_left + span * 0.7;
             tester.drag_from(right_target, span * -0.2, 2);
             tester.pump_and_settle();
-            assert!(near(heard.values.get().start, 50.0, 1.0));
-            assert!(near(heard.values.get().end, 51.0, 1.0));
+            assert_more_or_less_equals_within(heard.values.get().start, 50.0, 1.0);
+            assert_more_or_less_equals_within(heard.values.get().end, 51.0, 1.0);
 
             // Drag the end thumb to the right.
             let middle_target = top_left + span * 0.5;
@@ -4210,10 +4209,10 @@ mod tests {
             tester.pump_and_settle();
             let start_values = heard.start_values.get().expect("onChangeStart ran");
             let end_values = heard.end_values.get().expect("onChangeEnd ran");
-            assert!(near(start_values.start, 50.0, 1.0));
-            assert!(near(start_values.end, 51.0, 1.0));
-            assert!(near(end_values.start, 50.0, 1.0));
-            assert!(near(end_values.end, 90.0, 1.0));
+            assert_more_or_less_equals_within(start_values.start, 50.0, 1.0);
+            assert_more_or_less_equals_within(start_values.end, 51.0, 1.0);
+            assert_more_or_less_equals_within(end_values.start, 50.0, 1.0);
+            assert_more_or_less_equals_within(end_values.end, 90.0, 1.0);
         });
     }
 
@@ -4290,13 +4289,8 @@ mod tests {
         )
     }
 
-    /// Dart's `paints..rect(color:)`: whether `render` draws a rect in `color`; a rounded rect
-    /// is another canvas call.
     fn paints_rect(tester: &WidgetTester, render: AnyRenderObject, color: Option<Color>) -> bool {
-        tester.painted_ops(render).iter().any(|op| {
-            matches!(op, waft_embedder::valo::Op::DrawRect { paint, .. }
-                if color.is_none_or(|color| colors_match(paint.color, color)))
-        })
+        paints(&tester.painted_ops(render), &[PaintCall::rect(color)]).is_ok()
     }
 
     fn rrect(color: Option<Color>) -> PaintCall {
@@ -4897,7 +4891,7 @@ mod tests {
 
     /// The pair of live focus nodes a mounted range slider owns.
     fn thumb_focus_nodes(tester: &WidgetTester) -> (AnyFocusNode, AnyFocusNode) {
-        let element = tester.find_by_type::<RangeSlider>()[0];
+        let element = find::by_type::<RangeSlider>().evaluate(tester)[0];
         let state = element
             .state_handle::<RangeSliderState>(&tester.cell.borrow())
             .expect("a range slider state");
@@ -4938,7 +4932,7 @@ mod tests {
             });
 
             // Focus on the start thumb
-            assert_eq!(tester.find_by_type::<RangeSlider>().len(), 1);
+            expect(tester, &find::by_type::<RangeSlider>(), finds_one_widget());
             let (start_focus_node, end_focus_node) = thumb_focus_nodes(tester);
             start_focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
             tester.pump_and_settle();
@@ -5141,7 +5135,7 @@ mod tests {
             assert_eq!(fixture.heard.values.get().end, 80.0);
 
             send_key(tester, LogicalKeyboardKey::ARROW_LEFT);
-            assert!(near(fixture.heard.values.get().start, 40.0, 1e-9));
+            assert_more_or_less_equals_within(fixture.heard.values.get().start, 40.0, 1e-9);
             assert_eq!(fixture.heard.values.get().end, 80.0);
         });
     }
@@ -5382,7 +5376,8 @@ mod tests {
                 .into_widget(),
             ));
 
-            assert_eq!(tester.find_by_type::<RangeSlider>().len(), 1);
+            // No exception should be thrown: Dart's `expect(tester.takeException(), null)`; a
+            // panic here fails the case.
         });
     }
 
@@ -5421,8 +5416,8 @@ mod tests {
             tester.pump_and_settle();
             let right_target = top_left + span * 0.7;
             tester.drag_from(right_target, middle - right_target, 2);
-            assert!(near(heard.values.get().start, 0.5, 0.03));
-            assert!(near(heard.values.get().end, 0.5, 0.03));
+            assert_more_or_less_equals_within(heard.values.get().start, 0.5, 0.03);
+            assert_more_or_less_equals_within(heard.values.get().end, 0.5, 0.03);
             tester.pump_and_settle();
 
             // The drag gesture has finished, so no overlayColor should show up.
@@ -5482,8 +5477,8 @@ mod tests {
             let right_target = top_left + span * 0.7;
             tester.drag_from(right_target, middle - right_target, 2);
             tester.pump_and_settle();
-            assert!(near(heard.values.get().start, 0.5, 0.03));
-            assert!(near(heard.values.get().end, 0.5, 0.03));
+            assert_more_or_less_equals_within(heard.values.get().start, 0.5, 0.03);
+            assert_more_or_less_equals_within(heard.values.get().end, 0.5, 0.03);
 
             let mut gesture = TestPointer::touch(3);
             tester.down(&mut gesture, middle);
@@ -5713,7 +5708,7 @@ mod tests {
 
     fn range_slider_size(tester: &WidgetTester) -> Size {
         tester
-            .render_box_of(tester.find_by_type::<RangeSlider>()[0])
+            .render_box_of(find::by_type::<RangeSlider>().evaluate(tester)[0])
             .size(&tester.cell.borrow())
     }
 
@@ -5906,16 +5901,25 @@ mod tests {
             // position.
             tester.pump_widget(build_frame(15.0));
             tester.pump_and_settle(); // Finish the animation.
-            let track_bounds: Vec<Rect> = tester
-                .painted(render)
-                .into_iter()
-                .filter_map(|drawn| match drawn {
-                    crate::test_support::Drawn::Path(_, bounds) => Some(bounds),
-                    _ => None,
-                })
-                .collect();
-            // The third path is the active track's rounded rect.
-            let active_track = track_bounds[2];
+            let active_track_rrect = Rc::new(Cell::new(None));
+            assert_paints(
+                &tester.painted_ops(render),
+                &[
+                    PaintCall::rrect(None),
+                    PaintCall::rrect(None),
+                    PaintCall::something({
+                        let active_track_rrect = Rc::clone(&active_track_rrect);
+                        move |call| match call {
+                            RecordedCall::RRect { bounds, .. } => {
+                                active_track_rrect.set(Some(*bounds));
+                                Ok(true)
+                            }
+                            _ => Ok(false),
+                        }
+                    }),
+                ],
+            );
+            let active_track = active_track_rrect.get().expect("the active track's rrect");
 
             const PADDING: f64 = 4.0;
             // The 1st thumb should at one-third(5 / 15) of the Slider.
@@ -5924,16 +5928,16 @@ mod tests {
             // The right of the active track shape is the position of the 2nd thumb.
             // 24.0 is the default margin, (800.0 - 24.0 - 24.0 - padding) is the slider's width.
             // Where the padding value equals to the track height.
-            assert!(near(
+            assert_more_or_less_equals_within(
                 active_track.left,
                 (800.0 - 24.0 - 24.0 - PADDING) * (5.0 / 15.0) + 24.0,
-                0.01
-            ));
-            assert!(near(
+                0.01,
+            );
+            assert_more_or_less_equals_within(
                 active_track.right,
                 (800.0 - 24.0 - 24.0 - PADDING) * (8.0 / 15.0) + 24.0 + PADDING,
-                0.01
-            ));
+                0.01,
+            );
         });
     }
 
@@ -6013,7 +6017,7 @@ mod tests {
                     .into_widget(),
             ));
 
-            tester.tap(slider_rect(tester).center(), 1);
+            tester.tap_at(slider_rect(tester).center(), 1);
             tester.pump_and_settle();
 
             assert!(overlay_paints_shadows_and_indicator(
@@ -6214,14 +6218,14 @@ mod tests {
 
             // Taps in the lower half move the start thumb.
             for i in 0..4 {
-                tester.tap(
+                tester.tap_at(
                     Offset::new(midpoint_dx(i) - MIDPOINT_OFFSET, ticks[i].dy()),
                     1,
                 );
                 tester.pump();
                 // Just left of the midpoint of ticks i and i + 1
                 assert_eq!(values.get().start, i as f64);
-                tester.tap(
+                tester.tap_at(
                     Offset::new(midpoint_dx(i) + MIDPOINT_OFFSET, ticks[i].dy()),
                     2,
                 );
@@ -6233,13 +6237,13 @@ mod tests {
             // Taps closer to the end thumb than the start thumb (which is now at 4) move
             // the end thumb.
             for i in (DIVISIONS - 3)..DIVISIONS {
-                tester.tap(
+                tester.tap_at(
                     Offset::new(midpoint_dx(i) - MIDPOINT_OFFSET, ticks[i].dy()),
                     3,
                 );
                 tester.pump();
                 assert_eq!(values.get().end, i as f64);
-                tester.tap(
+                tester.tap_at(
                     Offset::new(midpoint_dx(i) + MIDPOINT_OFFSET, ticks[i].dy()),
                     4,
                 );
@@ -6384,7 +6388,7 @@ mod tests {
             let span = rect.bottom_right() - rect.top_left();
 
             // Tap near the start thumb (0.3)
-            tester.tap(rect.top_left() + span * 0.3, 1);
+            tester.tap_at(rect.top_left() + span * 0.3, 1);
             tester.pump();
 
             // Verify focus changed to start thumb
@@ -6400,7 +6404,7 @@ mod tests {
             tester.pump();
 
             // Tap near the end thumb (0.7)
-            tester.tap(rect.top_left() + span * 0.7, 2);
+            tester.tap_at(rect.top_left() + span * 0.7, 2);
             tester.pump();
 
             // Verify focus changed to end thumb
@@ -6466,7 +6470,7 @@ mod tests {
             let span = rect.bottom_right() - rect.top_left();
 
             // Tap near the start thumb (0.3)
-            tester.tap(rect.top_left() + span * 0.3, 1);
+            tester.tap_at(rect.top_left() + span * 0.3, 1);
             tester.pump();
 
             // Verify start thumb has focus
@@ -6644,8 +6648,8 @@ mod tests {
         let right_target = top_left + span * 0.7;
         tester.drag_from(right_target, middle - right_target, 2);
         tester.pump_and_settle();
-        assert!(near(heard.values.get().start, 0.5, 0.03));
-        assert!(near(heard.values.get().end, 0.5, 0.03));
+        assert_more_or_less_equals_within(heard.values.get().start, 0.5, 0.03);
+        assert_more_or_less_equals_within(heard.values.get().end, 0.5, 0.03);
 
         let mut gesture = TestPointer::touch(3);
         tester.down(&mut gesture, middle);
@@ -6799,7 +6803,7 @@ mod tests {
                 tester,
                 EdgeInsetsGeometry::directional(0.0, TOP_PADDING, 0.0, BOTTOM_PADDING),
             );
-            let range_slider = tester.find_by_type::<RangeSlider>()[0];
+            let range_slider = find::by_type::<RangeSlider>().evaluate(tester)[0];
             assert_eq!(
                 tester
                     .render_box_of(range_slider)
@@ -7033,7 +7037,7 @@ mod tests {
             // Wait for value indicator animation to finish.
             tester.pump_and_settle();
 
-            assert_eq!(tester.find_by_type::<RangeSlider>().len(), 1);
+            expect(tester, &find::by_type::<RangeSlider>(), finds_one_widget());
             let sequence = [
                 // Represents the raised button with next text.
                 any_thumb_shadow(),
@@ -7051,19 +7055,19 @@ mod tests {
                 3
             );
 
-            let next = tester.find_onstage_text("Next")[0];
-            let next = tester.global_rect(tester.render_box_of(next)).center();
-            tester.tap(next, 2);
+            let next = find::text("Next").evaluate(tester)[0];
+            let next = tester.get_rect(next).center();
+            tester.tap_at(next, 2);
             tester.pump_and_settle();
 
-            assert!(tester.find_by_type::<RangeSlider>().is_empty());
+            expect(tester, &find::by_type::<RangeSlider>(), finds_nothing());
             assert!(paints(&overlay_ops(tester), &sequence[2..]).is_err());
             // Represents the raised button with inner page text.
             assert_eq!(
                 count_calls(&overlay_ops(tester), CanvasMethod::DrawParagraph),
                 1
             );
-            assert_eq!(tester.find_onstage_text("Inner page").len(), 1);
+            expect(tester, &find::text("Inner page"), finds_one_widget());
 
             // Don't stop holding the value indicator.
             tester.up(&gesture);
@@ -7116,7 +7120,7 @@ mod tests {
                 None,
             ));
 
-            let range_slider = tester.find_by_type::<RangeSlider>()[0];
+            let range_slider = find::by_type::<RangeSlider>().evaluate(tester)[0];
             assert_paints(
                 &tester.nearest_material_ops(range_slider),
                 &[
@@ -7208,7 +7212,7 @@ mod tests {
                 tester,
                 EdgeInsetsGeometry::directional(0.0, 100.0, 0.0, 20.0),
             );
-            let range_slider = tester.find_by_type::<RangeSlider>()[0];
+            let range_slider = find::by_type::<RangeSlider>().evaluate(tester)[0];
             assert_eq!(
                 tester
                     .render_box_of(range_slider)
@@ -7246,10 +7250,8 @@ mod tests {
                 None,
             ));
 
-            let range_slider = tester.find_by_type::<RangeSlider>()[0];
-            let center = tester
-                .global_rect(tester.render_box_of(range_slider))
-                .center();
+            let range_slider = find::by_type::<RangeSlider>().evaluate(tester)[0];
+            let center = tester.get_rect(range_slider).center();
             let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, center);
             // Wait for value indicator animation to finish.

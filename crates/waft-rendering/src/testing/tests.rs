@@ -91,20 +91,100 @@ fn a_rounded_rect_matches_within_darts_tolerance_and_as_the_oval_its_corners_mak
 }
 
 #[test]
+fn a_record_two_methods_share_is_taken_only_with_the_steps_arguments() {
+    let mut canvas = Canvas::new();
+    // A hover highlight's rect, then a corner-less rounded rect: valo records both as rects.
+    canvas.draw_rect(Rect::from_ltwh(0.0, 0.0, 30.0, 10.0), &paint(BLUE));
+    let square = RRect::from_rect_and_radius(Rect::from_ltwh(0.0, 20.0, 30.0, 10.0), Radius::ZERO);
+    waft_painting::draw_rrect(&mut canvas, square, &paint(RED));
+    // A rounded rect whose corners are not circular, which valo records as a path.
+    let elliptical = RRect::from_rect_and_radius(
+        Rect::from_ltwh(0.0, 40.0, 30.0, 20.0),
+        Radius::elliptical(6.0, 3.0),
+    );
+    waft_painting::draw_rrect(&mut canvas, elliptical, &paint(BLUE));
+    // A path of one straight run, which valo records as a line.
+    let mut line = waft_embedder::PathBuilder::new();
+    line.move_to(Offset::new(0.0, 70.0));
+    line.line_to(Offset::new(30.0, 70.0));
+    let stroked = Paint {
+        color: RED.into(),
+        style: PaintStyle::Stroke(Stroke::new(2.0)),
+        ..Paint::default()
+    };
+    canvas.draw_path(
+        &line.build(),
+        waft_embedder::valo::FillRule::NonZero,
+        &stroked,
+    );
+    let ops = canvas.build().ops().to_vec();
+
+    assert_paints(
+        &ops,
+        &[
+            PaintCall::rrect(Some(RED)),
+            PaintCall::rrect(Some(BLUE)),
+            PaintCall::Path {
+                color: Some(RED),
+                style: Some(PaintedStyle::Stroke(Some(2.0))),
+                includes: Vec::new(),
+                excludes: Vec::new(),
+            },
+        ],
+    );
+    assert_paints(
+        &ops,
+        &[PaintCall::rect(Some(BLUE)), PaintCall::rect(Some(RED))],
+    );
+    // The red rect could be a corner-less rounded rect too, so a red `rect` step skips the blue.
+    assert_paints(&ops, &[PaintCall::rect(Some(RED))]);
+    assert!(paints(&ops, &[PaintCall::rrect(Some(Color::new(0xFF00FF00)))]).is_err());
+}
+
+#[test]
+fn a_blurred_rect_or_rounded_rect_reads_as_its_method() {
+    let mut canvas = Canvas::new();
+    let blurred = |color: Color| Paint {
+        color: color.into(),
+        mask_blur: Some(waft_embedder::MaskBlur::new(2.0)),
+        ..Paint::default()
+    };
+    canvas.draw_rect(Rect::from_ltwh(0.0, 0.0, 30.0, 10.0), &blurred(BLUE));
+    waft_painting::draw_rrect(&mut canvas, rounded(), &blurred(RED));
+    let ops = canvas.build().ops().to_vec();
+    assert_eq!(count_calls(&ops, CanvasMethod::DrawRect), 1);
+    assert_eq!(count_calls(&ops, CanvasMethod::DrawRRect), 1);
+    assert_paints(
+        &ops,
+        &[
+            PaintCall::rect_at(Rect::from_ltwh(0.0, 0.0, 30.0, 10.0), Some(BLUE)),
+            PaintCall::rrect_at(rounded(), Some(RED)),
+        ],
+    );
+    assert!(matches!(
+        RecordedCall::of(&ops[1]),
+        RecordedCall::RRect { .. }
+    ));
+}
+
+#[test]
 fn a_mismatch_names_the_step_the_call_and_the_log() {
     let ops = recorded();
-    let mismatch = paints(&ops, &[PaintCall::circle(None), PaintCall::rect(Some(RED))])
-        .expect_err("the rect is blue");
+    let mismatch = paints(
+        &ops,
+        &[PaintCall::circle(None), PaintCall::rrect(Some(RED))],
+    )
+    .expect_err("the rounded rect is blue");
     assert_eq!(mismatch.step, 1);
-    assert_eq!(mismatch.found.as_ref().map(|(index, _)| *index), Some(4));
+    assert_eq!(mismatch.found.as_ref().map(|(index, _)| *index), Some(5));
     assert!(matches!(
         mismatch.found,
-        Some((_, RecordedCall::Rect { .. }))
+        Some((_, RecordedCall::RRect { .. }))
     ));
     assert_eq!(mismatch.log.len(), ops.len());
     let message = mismatch.to_string();
-    assert!(message.contains("step 1 (rect("), "{message}");
-    assert!(message.contains("#4 Rect"), "{message}");
+    assert!(message.contains("step 1 (rrect("), "{message}");
+    assert!(message.contains("#5 RRect"), "{message}");
 }
 
 #[test]

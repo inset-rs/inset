@@ -1778,16 +1778,17 @@ mod tests {
     use waft_gestures::{GestureBinding, PointerEvent, PointerScrollEvent};
     use waft_painting::{AlignmentGeometry, Axis, BoxDecoration, EdgeInsetsGeometry};
     use waft_rendering::{
-        AnyRenderBox, AnyRenderObject, BoxConstraints, MainAxisSize, RenderHandle, RenderParagraph,
-        RendererBinding,
+        AnyRenderObject, BoxConstraints, MainAxisSize, RenderHandle, RendererBinding,
     };
     use waft_services::{KeyEventManager, LogicalKeyboardKey, PhysicalKeyboardKey};
     use waft_test::TestPlatform;
 
     use super::*;
-    use crate::binding::WidgetsBinding;
-    use crate::framework::{AnyElement, StatelessWidget, downcast_widget};
-    use crate::testing::{TestPointer, WidgetTester, test_widgets};
+    use crate::framework::StatelessWidget;
+    use crate::testing::{
+        TestPointer, WidgetTester, expect, find, finds_n_widgets, finds_nothing, finds_one_widget,
+        test_widgets,
+    };
     use crate::widgets::actions::{
         ActionDispatcher, CallbackAction, Intent, IntentRef, PlainActionDispatcher,
         VoidCallbackIntent,
@@ -1815,7 +1816,8 @@ mod tests {
 
     // ---- the tester: Flutter's `WidgetTester` and what these cases read of it ----
 
-    /// A case's [`WidgetTester`] with the finders and gestures Dart's cases use on it.
+    /// A case's [`WidgetTester`] with the view resizes, key events and focus reads Dart's cases
+    /// use on it.
     struct Tester<'t> {
         tester: &'t mut WidgetTester,
     }
@@ -1851,17 +1853,6 @@ mod tests {
             RendererBinding::instance(&mut app).handle_metrics_changed(&mut app);
         }
 
-        /// `tester.tapAt(position)`.
-        fn tap_at(&mut self, position: Offset) {
-            self.tester.tap(position, 1);
-        }
-
-        /// `tester.tap(find.text(text))`.
-        fn tap(&mut self, text: &str) {
-            let center = self.rect_of_text(text).center();
-            self.tap_at(center);
-        }
-
         /// `tester.sendKeyDownEvent(key)` and `sendKeyUpEvent(key)`.
         fn send_key(
             &self,
@@ -1890,98 +1881,6 @@ mod tests {
             let mut app = self.app();
             primary_focus(&mut app).and_then(|node| node.debug_label(&app))
         }
-
-        /// Every element of the mounted tree, parents before children.
-        fn elements(&self, app: &mut App) -> Vec<AnyElement> {
-            let root = WidgetsBinding::instance(app)
-                .root_element(app)
-                .expect("a mounted tree");
-            let mut all = vec![root];
-            let mut visited = 0;
-            while visited < all.len() {
-                let element = all[visited];
-                element.visit_children(app, &mut |child| all.push(child));
-                visited += 1;
-            }
-            all
-        }
-
-        /// Every render object of the mounted tree, parents before children.
-        fn render_objects(&self, app: &mut App) -> Vec<AnyRenderObject> {
-            let root = WidgetsBinding::instance(app)
-                .root_element(app)
-                .expect("a mounted tree")
-                .find_render_object(app)
-                .expect("a mounted tree has a render object");
-            let mut all = vec![root];
-            let mut visited = 0;
-            while visited < all.len() {
-                let object = all[visited];
-                object.visit_children(app, &mut |child| all.push(child));
-                visited += 1;
-            }
-            all
-        }
-
-        /// The paragraphs showing `text`: `find.text(text)`.
-        fn paragraphs_of(&self, text: &str) -> Vec<AnyRenderObject> {
-            let mut app = self.app();
-            self.render_objects(&mut app)
-                .into_iter()
-                .filter(|object| {
-                    object
-                        .downcast::<RenderParagraph>(&app)
-                        .is_some_and(|paragraph| {
-                            paragraph.text(&app).to_plain_text(true, true) == text
-                        })
-                })
-                .collect()
-        }
-
-        /// How many paragraphs show `text`.
-        fn count_text(&self, text: &str) -> usize {
-            self.paragraphs_of(text).len()
-        }
-
-        /// `tester.getRect(find.text(text))`.
-        fn rect_of_text(&self, text: &str) -> Rect {
-            let paragraphs = self.paragraphs_of(text);
-            assert_eq!(paragraphs.len(), 1, "one paragraph shows {text:?}");
-            let app = self.app();
-            global_rect(&app, paragraphs[0].as_box().expect("a paragraph is a box"))
-        }
-
-        /// `tester.getRect(find.byType(W))`: the first `W` of the tree.
-        fn rect_of<W: 'static>(&self) -> Rect {
-            let mut app = self.app();
-            let element = self
-                .elements(&mut app)
-                .into_iter()
-                .find(|element| downcast_widget::<W>(&**element.widget(&app)).is_some())
-                .expect("a mounted widget of the type");
-            let object = element.find_render_object(&app).expect("laid out");
-            global_rect(&app, object.as_box().expect("a box"))
-        }
-
-        /// `tester.getRect(find.byKey(key))`.
-        fn rect_of_key(&self, key: &GlobalKey) -> Rect {
-            let app = self.app();
-            let context = key
-                .current_context(&app)
-                .expect("the keyed widget is mounted");
-            let object = context.find_render_object(&app).expect("laid out");
-            global_rect(&app, object.as_box().expect("a box"))
-        }
-    }
-
-    /// Flutter's `tester.getRect`: the box's top-left and bottom-right corners in global
-    /// coordinates.
-    fn global_rect(app: &App, object: AnyRenderBox) -> Rect {
-        let size = object.size(app);
-        Rect::from_points(
-            object.local_to_global(app, Offset::ZERO, None),
-            object.local_to_global(app, Offset::new(size.width(), size.height()), None),
-        )
     }
 
     /// A list the callbacks of a test write to.
@@ -2463,17 +2362,17 @@ mod tests {
                     .child(AnchorButton::new("anchor")),
             ));
 
-            tester.tap("anchor");
+            tester.tap(find::text("anchor"));
             tester.pump();
 
             assert!(controller.is_open(&tester.app()));
-            assert_eq!(tester.count_text("a"), 1);
+            expect(&tester, &find::text("a"), finds_one_widget());
 
-            tester.tap("anchor");
+            tester.tap(find::text("anchor"));
             tester.pump();
 
             assert!(!controller.is_open(&tester.app()));
-            assert_eq!(tester.count_text("a"), 0);
+            expect(&tester, &find::text("a"), finds_nothing());
         });
     }
 
@@ -2502,8 +2401,8 @@ mod tests {
             // Create the menu. The menu is closed, so no menu items should be found in the widget
             // tree.
             assert!(!controller.is_open(&tester.app()));
-            assert_eq!(tester.count_text("anchor"), 1);
-            assert_eq!(tester.count_text("a"), 0);
+            expect(&tester, &find::text("anchor"), finds_one_widget());
+            expect(&tester, &find::text("a"), finds_nothing());
 
             // Open the menu.
             controller.open(&mut tester.app(), None);
@@ -2511,8 +2410,8 @@ mod tests {
 
             assert!(controller.is_open(&tester.app()));
             assert!(!nested_controller.is_open(&tester.app()));
-            assert_eq!(tester.count_text("a"), 1);
-            assert_eq!(tester.count_text("b.a"), 0);
+            expect(&tester, &find::text("a"), finds_one_widget());
+            expect(&tester, &find::text("b.a"), finds_nothing());
 
             // Open the nested menu.
             nested_controller.open(&mut tester.app(), None);
@@ -2520,8 +2419,8 @@ mod tests {
 
             assert!(controller.is_open(&tester.app()));
             assert!(nested_controller.is_open(&tester.app()));
-            assert_eq!(tester.count_text("a"), 1);
-            assert_eq!(tester.count_text("b.a"), 1);
+            expect(&tester, &find::text("a"), finds_one_widget());
+            expect(&tester, &find::text("b.a"), finds_one_widget());
 
             // Close the menu from the root controller.
             controller.close(&mut tester.app());
@@ -2529,8 +2428,8 @@ mod tests {
 
             // All menus should be closed.
             assert!(!controller.is_open(&tester.app()));
-            assert_eq!(tester.count_text("a"), 0);
-            assert_eq!(tester.count_text("b.a"), 0);
+            expect(&tester, &find::text("a"), finds_nothing());
+            expect(&tester, &find::text("b.a"), finds_nothing());
 
             // Open the nested menu.
             controller.open(&mut tester.app(), None);
@@ -2541,8 +2440,8 @@ mod tests {
 
             assert!(controller.is_open(&tester.app()));
             assert!(nested_controller.is_open(&tester.app()));
-            assert_eq!(tester.count_text("a"), 1);
-            assert_eq!(tester.count_text("b.a"), 1);
+            expect(&tester, &find::text("a"), finds_one_widget());
+            expect(&tester, &find::text("b.a"), finds_one_widget());
 
             // Close the nested menu, but not the root menu.
             nested_controller.close(&mut tester.app());
@@ -2550,8 +2449,8 @@ mod tests {
 
             assert!(controller.is_open(&tester.app()));
             assert!(!nested_controller.is_open(&tester.app()));
-            assert_eq!(tester.count_text("a"), 1);
-            assert_eq!(tester.count_text("b.a"), 0);
+            expect(&tester, &find::text("a"), finds_one_widget());
+            expect(&tester, &find::text("b.a"), finds_nothing());
         });
     }
 
@@ -2576,24 +2475,24 @@ mod tests {
                     .child(AnchorButton::new("anchor")),
             ));
 
-            tester.tap("anchor");
+            tester.tap(find::text("anchor"));
             tester.pump();
 
-            tester.tap("b");
+            tester.tap(find::text("b"));
             tester.pump();
 
             focus_node.request_focus(&mut tester.app(), None);
             tester.pump();
 
-            assert_eq!(tester.count_text("b"), 1);
-            assert_eq!(tester.count_text("b.a"), 1);
+            expect(&tester, &find::text("b"), finds_one_widget());
+            expect(&tester, &find::text("b.a"), finds_one_widget());
 
             controller.close_children(&mut tester.app());
             tester.pump();
 
             assert!(controller.is_open(&tester.app()));
-            assert_eq!(tester.count_text("b"), 1);
-            assert_eq!(tester.count_text("b.a"), 0);
+            expect(&tester, &find::text("b"), finds_one_widget());
+            expect(&tester, &find::text("b.a"), finds_nothing());
 
             // Focus should stay on the anchor button.
             assert_eq!(primary_focus(&mut tester.app()), Some(focus_node.handle()));
@@ -2624,25 +2523,25 @@ mod tests {
                 .child(AnchorButton::new("anchor")),
             ));
 
-            tester.tap("anchor");
+            tester.tap(find::text("anchor"));
             tester.pump();
 
-            assert_eq!(tester.count_text("a"), 1);
-            assert_eq!(tester.count_text("b"), 1);
-            assert_eq!(tester.count_text("a.a"), 0);
-            assert_eq!(tester.count_text("b.a"), 0);
+            expect(&tester, &find::text("a"), finds_one_widget());
+            expect(&tester, &find::text("b"), finds_one_widget());
+            expect(&tester, &find::text("a.a"), finds_nothing());
+            expect(&tester, &find::text("b.a"), finds_nothing());
 
-            tester.tap("a");
+            tester.tap(find::text("a"));
             tester.pump();
 
-            assert_eq!(tester.count_text("a.a"), 1);
-            assert_eq!(tester.count_text("b.a"), 0);
+            expect(&tester, &find::text("a.a"), finds_one_widget());
+            expect(&tester, &find::text("b.a"), finds_nothing());
 
-            tester.tap("b");
+            tester.tap(find::text("b"));
             tester.pump();
 
-            assert_eq!(tester.count_text("a.a"), 0);
-            assert_eq!(tester.count_text("b.a"), 1);
+            expect(&tester, &find::text("a.a"), finds_nothing());
+            expect(&tester, &find::text("b.a"), finds_one_widget());
         });
     }
 
@@ -2667,15 +2566,15 @@ mod tests {
                     }),
             ));
 
-            tester.tap("a");
+            tester.tap(find::text("a"));
             tester.pump();
 
-            assert_eq!(tester.count_text("a.a"), 1);
+            expect(&tester, &find::text("a.a"), finds_one_widget());
 
-            tester.tap("b");
+            tester.tap(find::text("b"));
             tester.pump();
 
-            assert_eq!(tester.count_text("b.a"), 1);
+            expect(&tester, &find::text("b.a"), finds_one_widget());
         });
     }
 
@@ -2705,26 +2604,26 @@ mod tests {
 
             assert!(!controller.is_open(&tester.app()));
 
-            tester.tap("a");
+            tester.tap(find::text("a"));
             tester.pump();
 
             assert!(controller.is_open(&tester.app()));
-            assert_eq!(tester.count_text("a.a"), 1);
-            assert_eq!(tester.count_text("b.a"), 0);
+            expect(&tester, &find::text("a.a"), finds_one_widget());
+            expect(&tester, &find::text("b.a"), finds_nothing());
 
-            tester.tap("b");
+            tester.tap(find::text("b"));
             tester.pump();
             tester.pump();
 
             assert!(controller.is_open(&tester.app()));
-            assert_eq!(tester.count_text("a.a"), 0);
-            assert_eq!(tester.count_text("b.a"), 1);
+            expect(&tester, &find::text("a.a"), finds_nothing());
+            expect(&tester, &find::text("b.a"), finds_one_widget());
 
-            tester.tap("b");
+            tester.tap(find::text("b"));
             tester.pump();
 
             assert!(!controller.is_open(&tester.app()));
-            assert_eq!(tester.count_text("b.a"), 0);
+            expect(&tester, &find::text("b.a"), finds_nothing());
         });
     }
 
@@ -2748,8 +2647,8 @@ mod tests {
             // Create the menu. The menu is closed, so no menu items should be found in the widget
             // tree.
             assert!(!controller.is_open(&tester.app()));
-            assert_eq!(tester.count_text("b"), 1);
-            assert_eq!(tester.count_text("b.a"), 0);
+            expect(&tester, &find::text("b"), finds_one_widget());
+            expect(&tester, &find::text("b.a"), finds_nothing());
 
             // Open the menu (which should do nothing).
             controller.open(&mut tester.app(), None);
@@ -2757,8 +2656,8 @@ mod tests {
 
             assert!(!controller.is_open(&tester.app()));
             assert!(!nested_controller.is_open(&tester.app()));
-            assert_eq!(tester.count_text("b"), 1);
-            assert_eq!(tester.count_text("b.a"), 0);
+            expect(&tester, &find::text("b"), finds_one_widget());
+            expect(&tester, &find::text("b.a"), finds_nothing());
         });
     }
 
@@ -2785,8 +2684,8 @@ mod tests {
 
         assert!(controller.is_open(&tester.app()));
         assert!(nested_controller.is_open(&tester.app()));
-        assert_eq!(tester.count_text("b"), 1);
-        assert_eq!(tester.count_text("b.a"), 1);
+        expect(&tester, &find::text("b"), finds_one_widget());
+        expect(&tester, &find::text("b.a"), finds_one_widget());
 
         // Close the root menu panel.
         close(controller.handle(), &mut tester.app());
@@ -2794,8 +2693,8 @@ mod tests {
 
         assert!(!controller.is_open(&tester.app()));
         assert!(!nested_controller.is_open(&tester.app()));
-        assert_eq!(tester.count_text("b"), 1);
-        assert_eq!(tester.count_text("b.a"), 0);
+        expect(&tester, &find::text("b"), finds_one_widget());
+        expect(&tester, &find::text("b.a"), finds_nothing());
     }
 
     #[test]
@@ -2834,7 +2733,7 @@ mod tests {
             tester.pump();
 
             // Open child menu.
-            tester.tap("a.a");
+            tester.tap(find::text("a.a"));
             tester.pump();
 
             // Close the root menu panel, which should close all submenus.
@@ -2871,10 +2770,10 @@ mod tests {
             tester.pump();
 
             // Open child menu.
-            tester.tap("a");
+            tester.tap(find::text("a"));
             tester.pump();
 
-            tester.tap("a.a");
+            tester.tap(find::text("a.a"));
             tester.pump();
 
             // Close the group, which should close all submenus.
@@ -2905,22 +2804,22 @@ mod tests {
                 controller,
             )));
 
-            assert_eq!(tester.count_text("a"), 1);
-            assert_eq!(tester.count_text("b"), 1);
-            assert_eq!(tester.count_text("a.a"), 0);
-            assert_eq!(tester.count_text("b.a"), 0);
+            expect(&tester, &find::text("a"), finds_one_widget());
+            expect(&tester, &find::text("b"), finds_one_widget());
+            expect(&tester, &find::text("a.a"), finds_nothing());
+            expect(&tester, &find::text("b.a"), finds_nothing());
 
-            tester.tap("a");
+            tester.tap(find::text("a"));
             tester.pump();
 
-            assert_eq!(tester.count_text("a.a"), 1);
-            assert_eq!(tester.count_text("b.a"), 0);
+            expect(&tester, &find::text("a.a"), finds_one_widget());
+            expect(&tester, &find::text("b.a"), finds_nothing());
 
-            tester.tap("b");
+            tester.tap(find::text("b"));
             tester.pump();
 
-            assert_eq!(tester.count_text("a.a"), 0);
-            assert_eq!(tester.count_text("b.a"), 1);
+            expect(&tester, &find::text("a.a"), finds_nothing());
+            expect(&tester, &find::text("b.a"), finds_one_widget());
         });
     }
 
@@ -3039,10 +2938,10 @@ mod tests {
             };
             tester.pump_widget(tree(controller.clone(), group_controller.clone()));
 
-            tester.tap("anchor");
+            tester.tap(find::text("anchor"));
             tester.pump();
 
-            assert_eq!(tester.count_text("a"), 1);
+            expect(&tester, &find::text("a"), finds_one_widget());
             assert!(controller.is_open(&tester.app()));
             assert!(group_controller.is_open(&tester.app()));
             assert!(!new_controller.is_open(&tester.app()));
@@ -3051,7 +2950,7 @@ mod tests {
             // Swap the controllers.
             tester.pump_widget(tree(new_controller.clone(), new_group_controller.clone()));
 
-            assert_eq!(tester.count_text("a"), 1);
+            expect(&tester, &find::text("a"), finds_one_widget());
             assert!(!controller.is_open(&tester.app()));
             assert!(!group_controller.is_open(&tester.app()));
             assert!(new_controller.is_open(&tester.app()));
@@ -3063,7 +2962,7 @@ mod tests {
 
             assert!(!new_controller.is_open(&tester.app()));
             assert!(!new_group_controller.is_open(&tester.app()));
-            assert_eq!(tester.count_text("a"), 0);
+            expect(&tester, &find::text("a"), finds_nothing());
         });
     }
 
@@ -3088,22 +2987,22 @@ mod tests {
             };
             tester.pump_widget(tree(None));
 
-            tester.tap("anchor");
+            tester.tap(find::text("anchor"));
             tester.pump();
 
-            assert_eq!(tester.count_text("a"), 1);
+            expect(&tester, &find::text("a"), finds_one_widget());
             assert!(controller.is_open(&tester.app()));
 
             // Swap the menus.
             tester.pump_widget(tree(Some(UniqueKey::new().into())));
 
-            assert_eq!(tester.count_text("a"), 0);
+            expect(&tester, &find::text("a"), finds_nothing());
             assert!(!controller.is_open(&tester.app()));
 
-            tester.tap("anchor");
+            tester.tap(find::text("anchor"));
             tester.pump();
 
-            assert_eq!(tester.count_text("a"), 1);
+            expect(&tester, &find::text("a"), finds_one_widget());
             assert!(controller.is_open(&tester.app()));
 
             // Close the menu.
@@ -3111,7 +3010,7 @@ mod tests {
             tester.pump();
 
             assert!(!controller.is_open(&tester.app()));
-            assert_eq!(tester.count_text("a"), 0);
+            expect(&tester, &find::text("a"), finds_nothing());
         });
     }
 
@@ -3135,22 +3034,22 @@ mod tests {
             };
             tester.pump_widget(tree(None));
 
-            tester.tap("anchor");
+            tester.tap(find::text("anchor"));
             tester.pump();
 
-            assert_eq!(tester.count_text("a"), 1);
+            expect(&tester, &find::text("a"), finds_one_widget());
             assert!(controller.is_open(&tester.app()));
 
             // Swap the controllers.
             tester.pump_widget(tree(Some(UniqueKey::new().into())));
 
-            assert_eq!(tester.count_text("a"), 0);
+            expect(&tester, &find::text("a"), finds_nothing());
             assert!(!controller.is_open(&tester.app()));
 
-            tester.tap("anchor");
+            tester.tap(find::text("anchor"));
             tester.pump();
 
-            assert_eq!(tester.count_text("a"), 1);
+            expect(&tester, &find::text("a"), finds_one_widget());
             assert!(controller.is_open(&tester.app()));
 
             // Close the menu.
@@ -3158,7 +3057,7 @@ mod tests {
             tester.pump();
 
             assert!(!controller.is_open(&tester.app()));
-            assert_eq!(tester.count_text("a"), 0);
+            expect(&tester, &find::text("a"), finds_nothing());
         });
     }
 
@@ -3416,7 +3315,7 @@ mod tests {
             drop(old);
             tester.pump_widget(anchor(new.clone()));
 
-            tester.tap("anchor");
+            tester.tap(find::text("anchor"));
             tester.pump();
             assert!(new.is_open(&tester.app()));
         });
@@ -3470,7 +3369,7 @@ mod tests {
             tester.pump();
 
             assert_eq!(
-                Some(tester.rect_of::<AnchorButton>()),
+                Some(tester.get_rect(find::by_type::<AnchorButton>())),
                 builder_position.get().map(|info| info.anchor_rect)
             );
         });
@@ -3519,17 +3418,17 @@ mod tests {
                 primary_focus(&mut tester.app()),
                 Some(a_focus_node.handle())
             );
-            assert_eq!(tester.count_text("b.a"), 1);
+            expect(&tester, &find::text("b.a"), finds_one_widget());
 
             // Test panel child can close siblings with escape key.
             tester.send_key_event(PhysicalKeyboardKey::ESCAPE, LogicalKeyboardKey::ESCAPE);
             tester.pump();
 
-            assert_eq!(tester.count_text("b.a"), 0);
+            expect(&tester, &find::text("b.a"), finds_nothing());
 
-            tester.tap("b");
+            tester.tap(find::text("b"));
             tester.pump();
-            tester.tap("b.a");
+            tester.tap(find::text("b.a"));
             tester.pump();
             baa_focus_node.request_focus(&mut tester.app(), None);
             tester.pump();
@@ -3543,7 +3442,7 @@ mod tests {
             tester.send_key_event(PhysicalKeyboardKey::ESCAPE, LogicalKeyboardKey::ESCAPE);
             tester.pump();
 
-            assert_eq!(tester.count_text("b.a"), 0);
+            expect(&tester, &find::text("b.a"), finds_nothing());
         });
     }
 
@@ -3671,11 +3570,11 @@ mod tests {
                     .child(AnchorButton::new("anchor")),
             ));
 
-            tester.tap("anchor");
+            tester.tap(find::text("anchor"));
             tester.pump();
-            tester.tap("b");
+            tester.tap(find::text("b"));
             tester.pump();
-            tester.tap("b.b");
+            tester.tap(find::text("b.b"));
             tester.pump();
 
             assert!(controller.is_open(&tester.app()));
@@ -3697,7 +3596,7 @@ mod tests {
 
             tester.pump();
 
-            assert_eq!(tester.count_text("a"), 0);
+            expect(&tester, &find::text("a"), finds_nothing());
         });
     }
 
@@ -3733,7 +3632,7 @@ mod tests {
             });
 
             assert_eq!(
-                tester.rect_of_key(&key),
+                tester.get_rect(&key),
                 Rect::from_ltwh(0.0, 0.0, 216.0, 116.0)
             );
         });
@@ -3755,12 +3654,12 @@ mod tests {
                 .child(AnchorButton::new("anchor")),
             ));
 
-            tester.tap("anchor");
+            tester.tap(find::text("anchor"));
             tester.pump();
 
             assert_eq!(
                 overlay_position.get().map(|info| info.anchor_rect),
-                Some(tester.rect_of::<Button>())
+                Some(tester.get_rect(find::by_type::<Button>()))
             );
         });
     }
@@ -3789,11 +3688,11 @@ mod tests {
                 .child(AnchorButton::new("anchor")),
             ));
 
-            tester.tap("anchor");
+            tester.tap(find::text("anchor"));
             tester.pump();
 
-            let anchor_corner = tester.rect_of::<Button>().top_left();
-            let content_rect = tester.rect_of_key(&key);
+            let anchor_corner = tester.get_top_left(find::by_type::<Button>());
+            let content_rect = tester.get_rect(&key);
 
             assert_eq!(content_rect, anchor_corner & Size::new(200.0, 200.0));
         });
@@ -3823,27 +3722,27 @@ mod tests {
                 .child(AnchorButton::new("anchor")),
             ));
 
-            tester.tap("anchor");
+            tester.tap(find::text("anchor"));
             tester.pump();
 
-            assert_eq!(tester.count_text("a"), 1);
+            expect(&tester, &find::text("a"), finds_one_widget());
 
             // Start by testing that the tap region has the correct group ID.
-            tester.tap("anchor");
+            tester.tap(find::text("anchor"));
             tester.pump();
 
             assert_eq!(inside_tap.get(), Some(true));
 
             // The menu should close when the tap region is tapped, so we need to reopen.
-            tester.tap("anchor");
+            tester.tap(find::text("anchor"));
             tester.pump();
 
-            assert_eq!(tester.count_text("a"), 1);
+            expect(&tester, &find::text("a"), finds_one_widget());
             assert_eq!(inside_tap.get(), Some(true));
 
             // Now test that setting the tap region group ID to None will cause the tap to be
             // considered outside the tap region.
-            tester.tap("anchor");
+            tester.tap(find::text("anchor"));
             tester.pump();
 
             assert_eq!(inside_tap.get(), Some(false));
@@ -3901,15 +3800,15 @@ mod tests {
         assert!(closed.borrow().is_empty());
 
         // Doesn't consume tap when the menu is closed.
-        tester.tap("outside");
+        tester.tap(find::text("outside"));
         tester.pump();
 
         assert_eq!(*selected.borrow(), ["outside"]);
         selected.borrow_mut().clear();
 
-        tester.tap("anchor");
+        tester.tap(find::text("anchor"));
         tester.pump();
-        tester.tap("a");
+        tester.tap(find::text("a"));
         tester.pump();
 
         assert_eq!(*opened.borrow(), ["anchor", "a"]);
@@ -3919,7 +3818,7 @@ mod tests {
         closed.borrow_mut().clear();
         selected.borrow_mut().clear();
 
-        tester.tap("outside");
+        tester.tap(find::text("outside"));
         tester.pump();
 
         assert!(opened.borrow().is_empty());
@@ -3960,13 +3859,13 @@ mod tests {
                     .menu_panel(panel(Vec::new()))
                     .child(AnchorButton::new("anchor")),
             ));
-            tester.tap("anchor");
+            tester.tap(find::text("anchor"));
             tester.pump();
 
             assert!(opened.get());
 
             opened.set(false);
-            tester.tap("anchor");
+            tester.tap(find::text("anchor"));
             tester.pump();
 
             // on_open should not be called again.
@@ -3996,12 +3895,12 @@ mod tests {
                     .child(AnchorButton::new("anchor")),
             ));
 
-            tester.tap("anchor");
+            tester.tap(find::text("anchor"));
             tester.pump();
 
             assert!(!closed.get());
 
-            tester.tap("anchor");
+            tester.tap(find::text("anchor"));
             tester.pump();
 
             assert!(closed.get());
@@ -4052,7 +3951,7 @@ mod tests {
             };
 
             tester.pump_widget(tree());
-            tester.tap("anchor");
+            tester.tap(find::text("anchor"));
             tester.pump();
 
             assert!(opened.get());
@@ -4102,7 +4001,7 @@ mod tests {
                     ),
             ));
 
-            tester.tap("anchor");
+            tester.tap(find::text("anchor"));
             tester.pump();
 
             assert!(!opened.borrow().is_empty());
@@ -4185,23 +4084,23 @@ mod tests {
                     .on_close(bump(&close_count)),
             ));
 
-            assert_eq!(tester.count_text("open"), 1);
+            expect(&tester, &find::text("open"), finds_one_widget());
             assert!(!is_open.get());
             assert_eq!(open_count.get(), 0);
             assert_eq!(close_count.get(), 0);
 
-            tester.tap("open");
+            tester.tap(find::text("open"));
             tester.pump();
 
-            assert_eq!(tester.count_text("close"), 1);
+            expect(&tester, &find::text("close"), finds_one_widget());
             assert!(is_open.get());
             assert_eq!(open_count.get(), 1);
             assert_eq!(close_count.get(), 0);
 
-            tester.tap("close");
+            tester.tap(find::text("close"));
             tester.pump();
 
-            assert_eq!(tester.count_text("open"), 1);
+            expect(&tester, &find::text("open"), finds_one_widget());
             assert!(!is_open.get());
             assert_eq!(open_count.get(), 1);
             assert_eq!(close_count.get(), 1);
@@ -4258,28 +4157,26 @@ mod tests {
                 .initial_entries(vec![overlay_entry.clone()]),
         ));
 
-        assert_eq!(tester.count_text("a"), 0);
+        expect(&tester, &find::text("a"), finds_nothing());
 
         // Open the menu.
         controller.open(&mut tester.app(), None);
         tester.pump();
-        tester.tap("a");
+        tester.tap(find::text("a"));
         tester.pump();
 
-        assert_eq!(tester.count_text("a"), 1);
-        assert_eq!(tester.count_text("a.a"), 1);
+        expect(&tester, &find::text("a"), finds_one_widget());
+        expect(&tester, &find::text("a.a"), finds_one_widget());
 
-        let (a, aa) = (tester.paragraphs_of("a")[0], tester.paragraphs_of("a.a")[0]);
-        let mut app = tester.app();
         // Expect two overlays: the root overlay created by WidgetsApp and the overlay created
         // by the boilerplate code.
-        let theaters = tester
-            .render_objects(&mut app)
-            .into_iter()
-            .filter(|object| object.downcast::<RenderTheater>(&app).is_some())
-            .count();
-        assert_eq!(theaters, 2);
+        expect(&tester, &find::by_type::<Overlay>(), finds_n_widgets(2));
 
+        let (a, aa) = (
+            tester.render_object(find::text("a")),
+            tester.render_object(find::text("a.a")),
+        );
+        let app = tester.app();
         let inner_theater = overlay_key
             .current_context(&app)
             .and_then(|context| context.find_render_object(&app))
@@ -4323,7 +4220,7 @@ mod tests {
 
             tester.pump_widget(tree());
 
-            tester.tap("anchor");
+            tester.tap(find::text("anchor"));
             tester.pump();
 
             tester.resize(200.0, 200.0);
@@ -4367,12 +4264,12 @@ mod tests {
                 },
             )));
 
-            tester.tap("anchor");
+            tester.tap(find::text("anchor"));
             tester.pump();
 
             assert_eq!(
                 overlay_position.get().map(|info| info.anchor_rect),
-                Some(tester.rect_of::<Button>())
+                Some(tester.get_rect(find::by_type::<Button>()))
             );
 
             {
@@ -4386,7 +4283,7 @@ mod tests {
 
             assert_eq!(
                 overlay_position.get().map(|info| info.anchor_rect),
-                Some(tester.rect_of::<Button>())
+                Some(tester.get_rect(find::by_type::<Button>()))
             );
         });
     }
@@ -4404,7 +4301,10 @@ mod tests {
                 |_app, _context, _info| Text::new("X").into_widget(),
             )),
         ));
-        assert_eq!(tester.rect_of::<RawMenuAnchor>().size(), Size::ZERO);
+        assert_eq!(
+            tester.get_size(find::by_type::<RawMenuAnchor>()),
+            Size::ZERO
+        );
         controller.open(&mut tester.app(), None);
     }
 
@@ -4418,7 +4318,10 @@ mod tests {
             TextDirection::Ltr,
             Center::new().child(RawMenuAnchorGroup::new(Text::new("X"), controller.clone())),
         ));
-        assert_eq!(tester.rect_of::<RawMenuAnchorGroup>().size(), Size::ZERO);
+        assert_eq!(
+            tester.get_size(find::by_type::<RawMenuAnchorGroup>()),
+            Size::ZERO
+        );
         controller.open(&mut tester.app(), None);
     }
 
@@ -4466,7 +4369,7 @@ mod tests {
 
             assert!(custom_controller.is_open(&tester.app()));
             assert_eq!(tester.app().get(&custom_controller).open_call_count, 1);
-            assert_eq!(tester.count_text("a"), 1);
+            expect(&tester, &find::text("a"), finds_one_widget());
 
             custom_controller
                 .as_menu_controller()
@@ -4475,7 +4378,7 @@ mod tests {
 
             assert!(!custom_controller.is_open(&tester.app()));
             assert_eq!(tester.app().get(&custom_controller).close_call_count, 1);
-            assert_eq!(tester.count_text("a"), 0);
+            expect(&tester, &find::text("a"), finds_nothing());
         });
     }
 
@@ -4643,13 +4546,13 @@ mod tests {
 
             tester.pump_by(Duration::from_millis(101));
 
-            assert_eq!(tester.rect_of_key(&key).top_left(), Offset::ZERO);
+            assert_eq!(tester.get_top_left(&key), Offset::ZERO);
 
             controller.open(&mut tester.app(), Some(Offset::new(50.0, 50.0)));
             tester.pump();
             tester.pump_by(Duration::from_millis(101));
 
-            assert_eq!(tester.rect_of_key(&key).top_left(), Offset::new(50.0, 50.0));
+            assert_eq!(tester.get_top_left(&key), Offset::new(50.0, 50.0));
         });
     }
 
@@ -4683,7 +4586,7 @@ mod tests {
             tester.pump();
 
             assert_eq!(on_open_called.get(), 1);
-            assert_eq!(tester.count_text("Overlay"), 1);
+            expect(&tester, &find::text("Overlay"), finds_one_widget());
 
             controller.close(&mut tester.app());
             tester.pump();
@@ -4789,22 +4692,22 @@ mod tests {
                     .child(AnchorButton::new("anchor")),
             ));
 
-            assert_eq!(tester.count_text("Overlay"), 0);
+            expect(&tester, &find::text("Overlay"), finds_nothing());
 
             controller.open(&mut tester.app(), None);
             tester.pump();
 
-            assert_eq!(tester.count_text("Overlay"), 1);
+            expect(&tester, &find::text("Overlay"), finds_one_widget());
 
             controller.close(&mut tester.app());
             tester.pump();
             tester.pump_by(Duration::from_millis(99));
 
-            assert_eq!(tester.count_text("Overlay"), 1);
+            expect(&tester, &find::text("Overlay"), finds_one_widget());
 
             tester.pump_by(Duration::from_millis(2));
 
-            assert_eq!(tester.count_text("Overlay"), 0);
+            expect(&tester, &find::text("Overlay"), finds_nothing());
         });
     }
 
@@ -4835,7 +4738,7 @@ mod tests {
             controller.open(&mut tester.app(), None);
             tester.pump();
 
-            assert_eq!(tester.count_text("Overlay"), 1);
+            expect(&tester, &find::text("Overlay"), finds_one_widget());
 
             controller.close(&mut tester.app());
             let hide = hide_menu_overlay.borrow().clone().expect("requested");
@@ -4843,12 +4746,12 @@ mod tests {
             tester.pump();
 
             assert_eq!(on_close_called.get(), 1);
-            assert_eq!(tester.count_text("Overlay"), 0);
+            expect(&tester, &find::text("Overlay"), finds_nothing());
 
             controller.open(&mut tester.app(), None);
             tester.pump();
 
-            assert_eq!(tester.count_text("Overlay"), 1);
+            expect(&tester, &find::text("Overlay"), finds_one_widget());
 
             tester.pump_widget(TestApp::new(SizedBox::new()));
 
@@ -4895,11 +4798,11 @@ mod tests {
             tester.pump();
 
             // Open submenu.
-            tester.tap("a.a");
+            tester.tap(find::text("a.a"));
             tester.pump();
 
             // Open sub-submenu.
-            tester.tap("a.a.a");
+            tester.tap(find::text("a.a.a"));
             tester.pump();
 
             // Menus call on_close_requested on their children when opening, so clear previous
@@ -4958,14 +4861,14 @@ mod tests {
             tester.pump();
 
             // Open submenu.
-            tester.tap("a.a");
+            tester.tap(find::text("a.a"));
             tester.pump();
 
             // Open sub-submenu.
-            tester.tap("a.a.a");
+            tester.tap(find::text("a.a.a"));
             tester.pump();
 
-            tester.tap("a.a.a.a");
+            tester.tap(find::text("a.a.a.a"));
             tester.pump();
 
             // Menus call on_close_requested on their children when opening, so clear previous
@@ -5034,17 +4937,17 @@ mod tests {
                     .child(AnchorButton::new("a")),
             ));
 
-            tester.tap("a");
+            tester.tap(find::text("a"));
             tester.pump();
-            tester.tap("a.a");
+            tester.tap(find::text("a.a"));
             tester.pump();
-            tester.tap("a.a.a");
+            tester.tap(find::text("a.a.a"));
             tester.pump();
 
             focus_node.request_focus(&mut tester.app(), None);
             tester.pump();
 
-            assert_eq!(tester.count_text("a.a.a.a"), 1);
+            expect(&tester, &find::text("a.a.a.a"), finds_one_widget());
             assert_eq!(*close_requests.borrow(), ["a.a", "a.a.a"]);
 
             close_requests.borrow_mut().clear();
@@ -5064,7 +4967,7 @@ mod tests {
             tester.pump();
 
             assert_eq!(*close_requests.borrow(), ["a", "a.a", "a.a.a"]);
-            assert_eq!(tester.count_text("a.a.a.a"), 1);
+            expect(&tester, &find::text("a.a.a.a"), finds_one_widget());
         });
     }
 
@@ -5098,18 +5001,19 @@ mod tests {
                     }),
             ));
 
-            tester.tap("anchor");
+            tester.tap(find::text("anchor"));
             tester.pump();
 
-            assert_eq!(tester.count_text("a"), 1);
+            expect(&tester, &find::text("a"), finds_one_widget());
             assert_eq!(close_requests.get(), 0);
 
             // Tap outside the menu to trigger the close request.
-            tester.tap_at(Offset::ZERO);
+            let pointer = tester.next_pointer();
+            tester.tap_at(Offset::ZERO, pointer);
             tester.pump();
 
             assert_eq!(close_requests.get(), 1);
-            assert_eq!(tester.count_text("a"), 0);
+            expect(&tester, &find::text("a"), finds_nothing());
         });
     }
 
@@ -5145,11 +5049,11 @@ mod tests {
             // Test menu resize before first open.
             tester.resize(250.0, 250.0);
             tester.pump_widget(tree());
-            tester.tap("anchor");
+            tester.tap(find::text("anchor"));
             tester.pump();
 
             assert_eq!(on_close_requested_called.get(), 0);
-            assert_eq!(tester.count_text("a"), 1);
+            expect(&tester, &find::text("a"), finds_one_widget());
 
             tester.resize(200.0, 200.0);
             tester.pump_widget(tree());
@@ -5202,24 +5106,24 @@ mod tests {
             // The menu is not open, so on_close_requested should not be called.
             assert_eq!(on_close_requested_called.get(), 0);
 
-            tester.tap("anchor");
+            tester.tap(find::text("anchor"));
             tester.pump();
 
-            assert_eq!(tester.count_text("a"), 1);
+            expect(&tester, &find::text("a"), finds_one_widget());
             assert_eq!(on_close_requested_called.get(), 0);
 
             scroll_controller.jump_to(&mut tester.app(), 500.0);
             tester.pump();
 
             // Make sure we didn't just scroll the menu off-screen.
-            assert_eq!(tester.count_text("anchor"), 1);
+            expect(&tester, &find::text("anchor"), finds_one_widget());
             assert_eq!(on_close_requested_called.get(), 1);
-            assert_eq!(tester.count_text("a"), 0);
+            expect(&tester, &find::text("a"), finds_nothing());
 
             scroll_controller.jump_to(&mut tester.app(), 5.0);
             tester.pump();
 
-            assert_eq!(tester.count_text("anchor"), 1);
+            expect(&tester, &find::text("anchor"), finds_one_widget());
             assert_eq!(on_close_requested_called.get(), 1);
         });
     }
@@ -5448,7 +5352,7 @@ mod tests {
             assert_eq!(tester.focused_label(), Some(focus_label("b")));
 
             // Open and move focus to nested menu
-            tester.tap("b");
+            tester.tap(find::text("b"));
             tester.pump();
             bb_focus_node.request_focus(&mut tester.app(), None);
             tester.pump();
@@ -5503,7 +5407,7 @@ mod tests {
                     .child(AnchorButton::new("anchor").focus_node(anchor_focus_node.clone())),
             )));
 
-            tester.tap("anchor");
+            tester.tap(find::text("anchor"));
             tester.pump();
 
             {
@@ -5587,13 +5491,13 @@ mod tests {
                     ),
             ));
 
-            tester.tap("anchor");
+            tester.tap(find::text("anchor"));
             tester.pump();
             assert!(root_opened.get());
 
             // Hover the first submenu anchor.
-            tester.tap("a");
-            let a_center = tester.rect_of_text("a").center();
+            tester.tap(find::text("a"));
+            let a_center = tester.get_center(find::text("a"));
             {
                 let mut mouse = TestPointer::mouse(2, 0);
                 tester.move_to(&mut mouse, a_center, false);
