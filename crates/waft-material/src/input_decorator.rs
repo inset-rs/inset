@@ -25,8 +25,8 @@ use waft_foundation::{
 };
 use waft_painting::{
     AnyBorderSide, AnyColor, AnyTextStyle, BorderSide, EdgeInsets, EdgeInsetsDirectional,
-    EdgeInsetsGeometry, ShapeBorder, ShapeBorderRef, TextAlign, TextAlignVertical, TextDirection,
-    TextOverflow, TextStyle,
+    EdgeInsetsGeometry, ShapeBorderRef, TextAlign, TextAlignVertical, TextDirection, TextOverflow,
+    TextStyle,
 };
 use waft_rendering::{
     AnyRenderBox, AnyRenderObject, BoxConstraints, BoxHitTestResult, BoxParentData,
@@ -54,7 +54,9 @@ use crate::colors::Colors;
 use crate::constants::K_MIN_INTERACTIVE_DIMENSION;
 use crate::generated::input_decorator_defaults_m3::InputDecoratorDefaultsM3;
 use crate::icon_button_theme::{IconButtonTheme, IconButtonThemeData};
-use crate::input_border::{InputBorder, OutlineInputBorder, UnderlineInputBorder, input_border_of};
+use crate::input_border::{
+    InputBorder, InputBorderRef, OutlineInputBorder, UnderlineInputBorder, input_border_of,
+};
 use crate::theme::Theme;
 use crate::theme_data::{ThemeData, VisualDensity};
 use crate::theme_data_getters::DefaultsContext;
@@ -158,19 +160,19 @@ impl Debug for InputBorderGap {
 // it in an `Rc`, whose identity is Dart's `Tween ==`.
 #[derive(Clone, Debug)]
 struct InputBorderTween {
-    begin: Box<dyn InputBorder>,
-    end: Box<dyn InputBorder>,
+    begin: InputBorderRef,
+    end: InputBorderRef,
 }
 
 impl InputBorderTween {
-    fn new(begin: Box<dyn InputBorder>, end: Box<dyn InputBorder>) -> InputBorderTween {
+    fn new(begin: InputBorderRef, end: InputBorderRef) -> InputBorderTween {
         InputBorderTween { begin, end }
     }
 
     /// Dart's `ShapeBorder.lerp(begin, end, t)! as InputBorder`.
-    fn lerp(&self, t: f64) -> Box<dyn InputBorder> {
-        let begin = ShapeBorderRef::from(self.begin.clone() as Box<dyn ShapeBorder>);
-        let end = ShapeBorderRef::from(self.end.clone() as Box<dyn ShapeBorder>);
+    fn lerp(&self, t: f64) -> InputBorderRef {
+        let begin = ShapeBorderRef::from(self.begin.clone());
+        let end = ShapeBorderRef::from(self.end.clone());
         let lerped = ShapeBorderRef::lerp(Some(&begin), Some(&end), t)
             .expect("lerping two borders gives a border");
         input_border_of(&*lerped).unwrap_or_else(|| {
@@ -184,8 +186,8 @@ impl InputBorderTween {
 }
 
 /// Dart's `Tween.transform`, which hands back the endpoints themselves at 0 and 1.
-impl Animatable<Box<dyn InputBorder>> for InputBorderTween {
-    fn transform(&self, _app: &App, t: f64) -> Box<dyn InputBorder> {
+impl Animatable<InputBorderRef> for InputBorderTween {
+    fn transform(&self, _app: &App, t: f64) -> InputBorderRef {
         if t == 0.0 {
             return self.begin.clone();
         }
@@ -286,7 +288,7 @@ impl Debug for InputBorderPainter {
 // _InputBorder's paint method.
 #[derive(Debug)]
 struct BorderContainer {
-    border: Box<dyn InputBorder>,
+    border: InputBorderRef,
     gap: Ref<InputBorderGap>,
     gap_animation: AnimationRef<f64>,
     fill_color: Color,
@@ -971,7 +973,7 @@ struct Decoration {
     floating_label_height: f64,
     floating_label_progress: f64,
     floating_label_alignment: FloatingLabelAlignment,
-    border: Box<dyn InputBorder>,
+    border: InputBorderRef,
     border_gap: Ref<InputBorderGap>,
     align_label_with_hint: bool,
     is_dense: Option<bool>,
@@ -3340,15 +3342,14 @@ impl InputDecoratorState {
         app: &mut App,
         theme_data: &ThemeData,
         defaults: &dyn InputDecorationThemeDataGetters,
-    ) -> Box<dyn InputBorder> {
+    ) -> InputBorderRef {
         let widget_state = self.widget_state(app);
         let decoration = self.decoration(app).clone();
-        let border: Box<dyn InputBorder> =
-            <dyn WidgetStateProperty<Box<dyn InputBorder>>>::resolve_as(
-                &decoration.border,
-                &widget_state,
-            )
-            .unwrap_or_else(|| Box::new(UnderlineInputBorder::new()));
+        let border: InputBorderRef = <dyn WidgetStateProperty<InputBorderRef>>::resolve_as(
+            &decoration.border,
+            &widget_state,
+        )
+        .unwrap_or_else(|| InputBorderRef::new(UnderlineInputBorder::new()));
 
         if decoration
             .border
@@ -3395,7 +3396,7 @@ impl InputDecoratorState {
                 || decoration
                     .border
                     .as_ref()
-                    .is_some_and(|border| **border == *<dyn InputBorder>::none())
+                    .is_some_and(|border| **border == *InputBorderRef::none())
                 || !decoration.enabled
             {
                 0.0
@@ -3663,7 +3664,7 @@ impl State for InputDecoratorState {
 
         let is_focused = self.is_focused(app);
         let has_error = self.has_error(app);
-        let mut border: Option<Box<dyn InputBorder>> = if !decoration.enabled {
+        let mut border: Option<InputBorderRef> = if !decoration.enabled {
             if has_error {
                 decoration.error_border.clone()
             } else {
@@ -4814,7 +4815,7 @@ pub struct InputDecoration {
     ///    line at the bottom of the input decorator's container.
     ///  * `OutlineInputBorder`, an `InputDecorator` border which draws a
     ///    rounded rectangle around the input decorator's container.
-    ///  * `<dyn InputBorder>::none()`, which doesn't draw a border.
+    ///  * `InputBorderRef::none()`, which doesn't draw a border.
     ///  * `focused_border`, displayed when `InputDecorator::is_focused` is true
     ///    and `InputDecoration::error_text` is null.
     ///  * `focused_error_border`, displayed when `InputDecorator::is_focused` is true
@@ -4823,7 +4824,7 @@ pub struct InputDecoration {
     ///    and `InputDecoration::error_text` is null.
     ///  * `enabled_border`, displayed when `InputDecoration::enabled` is true
     ///    and `InputDecoration::error_text` is null.
-    pub error_border: Option<Box<dyn InputBorder>>,
+    pub error_border: Option<InputBorderRef>,
 
     /// The border to display when the `InputDecorator` has the focus and is not
     /// showing an error.
@@ -4838,7 +4839,7 @@ pub struct InputDecoration {
     ///    line at the bottom of the input decorator's container.
     ///  * `OutlineInputBorder`, an `InputDecorator` border which draws a
     ///    rounded rectangle around the input decorator's container.
-    ///  * `<dyn InputBorder>::none()`, which doesn't draw a border.
+    ///  * `InputBorderRef::none()`, which doesn't draw a border.
     ///  * `error_border`, displayed when `InputDecorator::is_focused` is false
     ///    and `InputDecoration::error_text` is non-null.
     ///  * `focused_error_border`, displayed when `InputDecorator::is_focused` is true
@@ -4847,7 +4848,7 @@ pub struct InputDecoration {
     ///    and `InputDecoration::error_text` is null.
     ///  * `enabled_border`, displayed when `InputDecoration::enabled` is true
     ///    and `InputDecoration::error_text` is null.
-    pub focused_border: Option<Box<dyn InputBorder>>,
+    pub focused_border: Option<InputBorderRef>,
 
     /// The border to display when the `InputDecorator` has the focus and is
     /// showing an error.
@@ -4862,7 +4863,7 @@ pub struct InputDecoration {
     ///    line at the bottom of the input decorator's container.
     ///  * `OutlineInputBorder`, an `InputDecorator` border which draws a
     ///    rounded rectangle around the input decorator's container.
-    ///  * `<dyn InputBorder>::none()`, which doesn't draw a border.
+    ///  * `InputBorderRef::none()`, which doesn't draw a border.
     ///  * `error_border`, displayed when `InputDecorator::is_focused` is false
     ///    and `InputDecoration::error_text` is non-null.
     ///  * `focused_border`, displayed when `InputDecorator::is_focused` is true
@@ -4871,7 +4872,7 @@ pub struct InputDecoration {
     ///    and `InputDecoration::error_text` is null.
     ///  * `enabled_border`, displayed when `InputDecoration::enabled` is true
     ///    and `InputDecoration::error_text` is null.
-    pub focused_error_border: Option<Box<dyn InputBorder>>,
+    pub focused_error_border: Option<InputBorderRef>,
 
     /// The border to display when the `InputDecorator` is disabled and is not
     /// showing an error.
@@ -4885,7 +4886,7 @@ pub struct InputDecoration {
     ///    line at the bottom of the input decorator's container.
     ///  * `OutlineInputBorder`, an `InputDecorator` border which draws a
     ///    rounded rectangle around the input decorator's container.
-    ///  * `<dyn InputBorder>::none()`, which doesn't draw a border.
+    ///  * `InputBorderRef::none()`, which doesn't draw a border.
     ///  * `error_border`, displayed when `InputDecorator::is_focused` is false
     ///    and `InputDecoration::error_text` is non-null.
     ///  * `focused_border`, displayed when `InputDecorator::is_focused` is true
@@ -4894,7 +4895,7 @@ pub struct InputDecoration {
     ///    and `InputDecoration::error_text` is non-null.
     ///  * `enabled_border`, displayed when `InputDecoration::enabled` is true
     ///    and `InputDecoration::error_text` is null.
-    pub disabled_border: Option<Box<dyn InputBorder>>,
+    pub disabled_border: Option<InputBorderRef>,
 
     /// The border to display when the `InputDecorator` is enabled and is not
     /// showing an error.
@@ -4908,7 +4909,7 @@ pub struct InputDecoration {
     ///    line at the bottom of the input decorator's container.
     ///  * `OutlineInputBorder`, an `InputDecorator` border which draws a
     ///    rounded rectangle around the input decorator's container.
-    ///  * `<dyn InputBorder>::none()`, which doesn't draw a border.
+    ///  * `InputBorderRef::none()`, which doesn't draw a border.
     ///  * `error_border`, displayed when `InputDecorator::is_focused` is false
     ///    and `InputDecoration::error_text` is non-null.
     ///  * `focused_border`, displayed when `InputDecorator::is_focused` is true
@@ -4917,7 +4918,7 @@ pub struct InputDecoration {
     ///    and `InputDecoration::error_text` is non-null.
     ///  * `disabled_border`, displayed when `InputDecoration::enabled` is false
     ///    and `InputDecoration::error_text` is null.
-    pub enabled_border: Option<Box<dyn InputBorder>>,
+    pub enabled_border: Option<InputBorderRef>,
 
     /// The shape of the border to draw around the decoration's container.
     ///
@@ -4955,12 +4956,12 @@ pub struct InputDecoration {
     ///
     /// See also:
     ///
-    ///  * `<dyn InputBorder>::none()`, which doesn't draw a border.
+    ///  * `InputBorderRef::none()`, which doesn't draw a border.
     ///  * `UnderlineInputBorder`, which draws a horizontal line at the
     ///    bottom of the input decorator's container.
     ///  * `OutlineInputBorder`, an `InputDecorator` border which draws a
     ///    rounded rectangle around the input decorator's container.
-    pub border: Option<Box<dyn InputBorder>>,
+    pub border: Option<InputBorderRef>,
 
     /// If false the opacity of the visual elements is reduced, including `helper_text`,`error_text`, and `counter_text`.
     ///
@@ -5060,7 +5061,7 @@ impl InputDecoration {
     ///
     /// Unless specified by the ambient `InputDecorationThemeData`, `InputDecorator`
     /// defaults `is_dense` to false and `filled` to false. The default border is
-    /// an instance of `UnderlineInputBorder`. If `border` is `<dyn InputBorder>::none()`
+    /// an instance of `UnderlineInputBorder`. If `border` is `InputBorderRef::none()`
     /// then no border is drawn.
     ///
     /// Only one of `prefix` and `prefix_text` can be specified.
@@ -5195,7 +5196,7 @@ impl InputDecoration {
             focused_error_border: None,
             disabled_border: None,
             enabled_border: None,
-            border: Some(<dyn InputBorder>::none()),
+            border: Some(InputBorderRef::none()),
             enabled: true,
             semantic_counter_text: None,
             align_label_with_hint: Some(false),
@@ -5512,19 +5513,13 @@ impl InputDecoration {
     }
 
     /// Dart `InputDecoration(errorBorder:)`.
-    pub fn error_border(
-        mut self,
-        error_border: impl Into<Box<dyn InputBorder>>,
-    ) -> InputDecoration {
+    pub fn error_border(mut self, error_border: impl Into<InputBorderRef>) -> InputDecoration {
         self.error_border = Some(error_border.into());
         self
     }
 
     /// Dart `InputDecoration(focusedBorder:)`.
-    pub fn focused_border(
-        mut self,
-        focused_border: impl Into<Box<dyn InputBorder>>,
-    ) -> InputDecoration {
+    pub fn focused_border(mut self, focused_border: impl Into<InputBorderRef>) -> InputDecoration {
         self.focused_border = Some(focused_border.into());
         self
     }
@@ -5532,7 +5527,7 @@ impl InputDecoration {
     /// Dart `InputDecoration(focusedErrorBorder:)`.
     pub fn focused_error_border(
         mut self,
-        focused_error_border: impl Into<Box<dyn InputBorder>>,
+        focused_error_border: impl Into<InputBorderRef>,
     ) -> InputDecoration {
         self.focused_error_border = Some(focused_error_border.into());
         self
@@ -5541,23 +5536,20 @@ impl InputDecoration {
     /// Dart `InputDecoration(disabledBorder:)`.
     pub fn disabled_border(
         mut self,
-        disabled_border: impl Into<Box<dyn InputBorder>>,
+        disabled_border: impl Into<InputBorderRef>,
     ) -> InputDecoration {
         self.disabled_border = Some(disabled_border.into());
         self
     }
 
     /// Dart `InputDecoration(enabledBorder:)`.
-    pub fn enabled_border(
-        mut self,
-        enabled_border: impl Into<Box<dyn InputBorder>>,
-    ) -> InputDecoration {
+    pub fn enabled_border(mut self, enabled_border: impl Into<InputBorderRef>) -> InputDecoration {
         self.enabled_border = Some(enabled_border.into());
         self
     }
 
     /// Dart `InputDecoration(border:)`.
-    pub fn border(mut self, border: impl Into<Box<dyn InputBorder>>) -> InputDecoration {
+    pub fn border(mut self, border: impl Into<InputBorderRef>) -> InputDecoration {
         self.border = Some(border.into());
         self
     }
@@ -6068,12 +6060,12 @@ pub struct InputDecorationTheme {
     outline_border: Option<AnyBorderSide>,
     focus_color: Option<Color>,
     hover_color: Option<Color>,
-    error_border: Option<Box<dyn InputBorder>>,
-    focused_border: Option<Box<dyn InputBorder>>,
-    focused_error_border: Option<Box<dyn InputBorder>>,
-    disabled_border: Option<Box<dyn InputBorder>>,
-    enabled_border: Option<Box<dyn InputBorder>>,
-    border: Option<Box<dyn InputBorder>>,
+    error_border: Option<InputBorderRef>,
+    focused_border: Option<InputBorderRef>,
+    focused_error_border: Option<InputBorderRef>,
+    disabled_border: Option<InputBorderRef>,
+    enabled_border: Option<InputBorderRef>,
+    border: Option<InputBorderRef>,
     align_label_with_hint: Option<bool>,
     constraints: Option<BoxConstraints>,
     visual_density: Option<VisualDensity>,
@@ -6394,7 +6386,7 @@ impl InputDecorationTheme {
     /// Dart `InputDecorationTheme(errorBorder:)`.
     pub fn with_error_border(
         mut self,
-        error_border: impl Into<Box<dyn InputBorder>>,
+        error_border: impl Into<InputBorderRef>,
     ) -> InputDecorationTheme {
         debug_assert!(self.data.is_none());
         self.error_border = Some(error_border.into());
@@ -6404,7 +6396,7 @@ impl InputDecorationTheme {
     /// Dart `InputDecorationTheme(focusedBorder:)`.
     pub fn with_focused_border(
         mut self,
-        focused_border: impl Into<Box<dyn InputBorder>>,
+        focused_border: impl Into<InputBorderRef>,
     ) -> InputDecorationTheme {
         debug_assert!(self.data.is_none());
         self.focused_border = Some(focused_border.into());
@@ -6414,7 +6406,7 @@ impl InputDecorationTheme {
     /// Dart `InputDecorationTheme(focusedErrorBorder:)`.
     pub fn with_focused_error_border(
         mut self,
-        focused_error_border: impl Into<Box<dyn InputBorder>>,
+        focused_error_border: impl Into<InputBorderRef>,
     ) -> InputDecorationTheme {
         debug_assert!(self.data.is_none());
         self.focused_error_border = Some(focused_error_border.into());
@@ -6424,7 +6416,7 @@ impl InputDecorationTheme {
     /// Dart `InputDecorationTheme(disabledBorder:)`.
     pub fn with_disabled_border(
         mut self,
-        disabled_border: impl Into<Box<dyn InputBorder>>,
+        disabled_border: impl Into<InputBorderRef>,
     ) -> InputDecorationTheme {
         debug_assert!(self.data.is_none());
         self.disabled_border = Some(disabled_border.into());
@@ -6434,7 +6426,7 @@ impl InputDecorationTheme {
     /// Dart `InputDecorationTheme(enabledBorder:)`.
     pub fn with_enabled_border(
         mut self,
-        enabled_border: impl Into<Box<dyn InputBorder>>,
+        enabled_border: impl Into<InputBorderRef>,
     ) -> InputDecorationTheme {
         debug_assert!(self.data.is_none());
         self.enabled_border = Some(enabled_border.into());
@@ -6442,7 +6434,7 @@ impl InputDecorationTheme {
     }
 
     /// Dart `InputDecorationTheme(border:)`.
-    pub fn with_border(mut self, border: impl Into<Box<dyn InputBorder>>) -> InputDecorationTheme {
+    pub fn with_border(mut self, border: impl Into<InputBorderRef>) -> InputDecorationTheme {
         debug_assert!(self.data.is_none());
         self.border = Some(border.into());
         self
@@ -6788,10 +6780,10 @@ impl InputDecorationTheme {
     ///
     /// This property is obsolete and will be deprecated in a future release:
     /// please use the `InputDecorationThemeData::error_border` property in `data` instead.
-    pub fn error_border(&self) -> Option<&dyn InputBorder> {
+    pub fn error_border(&self) -> Option<&InputBorderRef> {
         match &self.data {
-            Some(data) => data.error_border.as_deref(),
-            None => self.error_border.as_deref(),
+            Some(data) => data.error_border.as_ref(),
+            None => self.error_border.as_ref(),
         }
     }
 
@@ -6799,10 +6791,10 @@ impl InputDecorationTheme {
     ///
     /// This property is obsolete and will be deprecated in a future release:
     /// please use the `InputDecorationThemeData::focused_border` property in `data` instead.
-    pub fn focused_border(&self) -> Option<&dyn InputBorder> {
+    pub fn focused_border(&self) -> Option<&InputBorderRef> {
         match &self.data {
-            Some(data) => data.focused_border.as_deref(),
-            None => self.focused_border.as_deref(),
+            Some(data) => data.focused_border.as_ref(),
+            None => self.focused_border.as_ref(),
         }
     }
 
@@ -6810,10 +6802,10 @@ impl InputDecorationTheme {
     ///
     /// This property is obsolete and will be deprecated in a future release:
     /// please use the `InputDecorationThemeData::focused_error_border` property in `data` instead.
-    pub fn focused_error_border(&self) -> Option<&dyn InputBorder> {
+    pub fn focused_error_border(&self) -> Option<&InputBorderRef> {
         match &self.data {
-            Some(data) => data.focused_error_border.as_deref(),
-            None => self.focused_error_border.as_deref(),
+            Some(data) => data.focused_error_border.as_ref(),
+            None => self.focused_error_border.as_ref(),
         }
     }
 
@@ -6821,10 +6813,10 @@ impl InputDecorationTheme {
     ///
     /// This property is obsolete and will be deprecated in a future release:
     /// please use the `InputDecorationThemeData::disabled_border` property in `data` instead.
-    pub fn disabled_border(&self) -> Option<&dyn InputBorder> {
+    pub fn disabled_border(&self) -> Option<&InputBorderRef> {
         match &self.data {
-            Some(data) => data.disabled_border.as_deref(),
-            None => self.disabled_border.as_deref(),
+            Some(data) => data.disabled_border.as_ref(),
+            None => self.disabled_border.as_ref(),
         }
     }
 
@@ -6832,10 +6824,10 @@ impl InputDecorationTheme {
     ///
     /// This property is obsolete and will be deprecated in a future release:
     /// please use the `InputDecorationThemeData::enabled_border` property in `data` instead.
-    pub fn enabled_border(&self) -> Option<&dyn InputBorder> {
+    pub fn enabled_border(&self) -> Option<&InputBorderRef> {
         match &self.data {
-            Some(data) => data.enabled_border.as_deref(),
-            None => self.enabled_border.as_deref(),
+            Some(data) => data.enabled_border.as_ref(),
+            None => self.enabled_border.as_ref(),
         }
     }
 
@@ -6843,10 +6835,10 @@ impl InputDecorationTheme {
     ///
     /// This property is obsolete and will be deprecated in a future release:
     /// please use the `InputDecorationThemeData::border` property in `data` instead.
-    pub fn border(&self) -> Option<&dyn InputBorder> {
+    pub fn border(&self) -> Option<&InputBorderRef> {
         match &self.data {
-            Some(data) => data.border.as_deref(),
-            None => self.border.as_deref(),
+            Some(data) => data.border.as_ref(),
+            None => self.border.as_ref(),
         }
     }
 
@@ -6991,14 +6983,12 @@ impl InputDecorationTheme {
             outline_border: self.outline_border(),
             focus_color: self.focus_color(),
             hover_color: self.hover_color(),
-            error_border: self.error_border().map(InputBorder::clone_input_border),
-            focused_border: self.focused_border().map(InputBorder::clone_input_border),
-            focused_error_border: self
-                .focused_error_border()
-                .map(InputBorder::clone_input_border),
-            disabled_border: self.disabled_border().map(InputBorder::clone_input_border),
-            enabled_border: self.enabled_border().map(InputBorder::clone_input_border),
-            border: self.border().map(InputBorder::clone_input_border),
+            error_border: self.error_border().cloned(),
+            focused_border: self.focused_border().cloned(),
+            focused_error_border: self.focused_error_border().cloned(),
+            disabled_border: self.disabled_border().cloned(),
+            enabled_border: self.enabled_border().cloned(),
+            border: self.border().cloned(),
             align_label_with_hint: Some(self.align_label_with_hint()),
             constraints: self.constraints(),
             visual_density: self.visual_density(),
@@ -7057,30 +7047,15 @@ impl InputDecorationTheme {
         merged.outline_border = self.outline_border().or_else(|| other.outline_border());
         merged.focus_color = self.focus_color().or_else(|| other.focus_color());
         merged.hover_color = self.hover_color().or_else(|| other.hover_color());
-        merged.error_border = self
-            .error_border()
-            .or(other.error_border())
-            .map(InputBorder::clone_input_border);
-        merged.focused_border = self
-            .focused_border()
-            .or(other.focused_border())
-            .map(InputBorder::clone_input_border);
+        merged.error_border = self.error_border().or(other.error_border()).cloned();
+        merged.focused_border = self.focused_border().or(other.focused_border()).cloned();
         merged.focused_error_border = self
             .focused_error_border()
             .or(other.focused_error_border())
-            .map(InputBorder::clone_input_border);
-        merged.disabled_border = self
-            .disabled_border()
-            .or(other.disabled_border())
-            .map(InputBorder::clone_input_border);
-        merged.enabled_border = self
-            .enabled_border()
-            .or(other.enabled_border())
-            .map(InputBorder::clone_input_border);
-        merged.border = self
-            .border()
-            .or(other.border())
-            .map(InputBorder::clone_input_border);
+            .cloned();
+        merged.disabled_border = self.disabled_border().or(other.disabled_border()).cloned();
+        merged.enabled_border = self.enabled_border().or(other.enabled_border()).cloned();
+        merged.border = self.border().or(other.border()).cloned();
         merged.constraints = self.constraints().or_else(|| other.constraints());
         merged.visual_density = self.visual_density().or_else(|| other.visual_density());
         merged
@@ -7493,7 +7468,7 @@ pub struct InputDecorationThemeData {
     ///    line at the bottom of the input decorator's container.
     ///  * `OutlineInputBorder`, an `InputDecorator` border which draws a
     ///    rounded rectangle around the input decorator's container.
-    ///  * `<dyn InputBorder>::none()`, which doesn't draw a border.
+    ///  * `InputBorderRef::none()`, which doesn't draw a border.
     ///  * `focused_border`, displayed when `InputDecorator::is_focused` is true
     ///    and `InputDecoration::error_text` is null.
     ///  * `focused_error_border`, displayed when `InputDecorator::is_focused` is true
@@ -7502,7 +7477,7 @@ pub struct InputDecorationThemeData {
     ///    and `InputDecoration::error_text` is null.
     ///  * `enabled_border`, displayed when `InputDecoration::enabled` is true
     ///    and `InputDecoration::error_text` is null.
-    pub error_border: Option<Box<dyn InputBorder>>,
+    pub error_border: Option<InputBorderRef>,
 
     /// The border to display when the `InputDecorator` has the focus and is not
     /// showing an error.
@@ -7517,7 +7492,7 @@ pub struct InputDecorationThemeData {
     ///    line at the bottom of the input decorator's container.
     ///  * `OutlineInputBorder`, an `InputDecorator` border which draws a
     ///    rounded rectangle around the input decorator's container.
-    ///  * `<dyn InputBorder>::none()`, which doesn't draw a border.
+    ///  * `InputBorderRef::none()`, which doesn't draw a border.
     ///  * `error_border`, displayed when `InputDecorator::is_focused` is false
     ///    and `InputDecoration::error_text` is non-null.
     ///  * `focused_error_border`, displayed when `InputDecorator::is_focused` is true
@@ -7526,7 +7501,7 @@ pub struct InputDecorationThemeData {
     ///    and `InputDecoration::error_text` is null.
     ///  * `enabled_border`, displayed when `InputDecoration::enabled` is true
     ///    and `InputDecoration::error_text` is null.
-    pub focused_border: Option<Box<dyn InputBorder>>,
+    pub focused_border: Option<InputBorderRef>,
 
     /// The border to display when the `InputDecorator` has the focus and is
     /// showing an error.
@@ -7541,7 +7516,7 @@ pub struct InputDecorationThemeData {
     ///    line at the bottom of the input decorator's container.
     ///  * `OutlineInputBorder`, an `InputDecorator` border which draws a
     ///    rounded rectangle around the input decorator's container.
-    ///  * `<dyn InputBorder>::none()`, which doesn't draw a border.
+    ///  * `InputBorderRef::none()`, which doesn't draw a border.
     ///  * `error_border`, displayed when `InputDecorator::is_focused` is false
     ///    and `InputDecoration::error_text` is non-null.
     ///  * `focused_border`, displayed when `InputDecorator::is_focused` is true
@@ -7550,7 +7525,7 @@ pub struct InputDecorationThemeData {
     ///    and `InputDecoration::error_text` is null.
     ///  * `enabled_border`, displayed when `InputDecoration::enabled` is true
     ///    and `InputDecoration::error_text` is null.
-    pub focused_error_border: Option<Box<dyn InputBorder>>,
+    pub focused_error_border: Option<InputBorderRef>,
 
     /// The border to display when the `InputDecorator` is disabled and is not
     /// showing an error.
@@ -7564,7 +7539,7 @@ pub struct InputDecorationThemeData {
     ///    line at the bottom of the input decorator's container.
     ///  * `OutlineInputBorder`, an `InputDecorator` border which draws a
     ///    rounded rectangle around the input decorator's container.
-    ///  * `<dyn InputBorder>::none()`, which doesn't draw a border.
+    ///  * `InputBorderRef::none()`, which doesn't draw a border.
     ///  * `error_border`, displayed when `InputDecorator::is_focused` is false
     ///    and `InputDecoration::error_text` is non-null.
     ///  * `focused_border`, displayed when `InputDecorator::is_focused` is true
@@ -7573,7 +7548,7 @@ pub struct InputDecorationThemeData {
     ///    and `InputDecoration::error_text` is non-null.
     ///  * `enabled_border`, displayed when `InputDecoration::enabled` is true
     ///    and `InputDecoration::error_text` is null.
-    pub disabled_border: Option<Box<dyn InputBorder>>,
+    pub disabled_border: Option<InputBorderRef>,
 
     /// The border to display when the `InputDecorator` is enabled and is not
     /// showing an error.
@@ -7587,7 +7562,7 @@ pub struct InputDecorationThemeData {
     ///    line at the bottom of the input decorator's container.
     ///  * `OutlineInputBorder`, an `InputDecorator` border which draws a
     ///    rounded rectangle around the input decorator's container.
-    ///  * `<dyn InputBorder>::none()`, which doesn't draw a border.
+    ///  * `InputBorderRef::none()`, which doesn't draw a border.
     ///  * `error_border`, displayed when `InputDecorator::is_focused` is false
     ///    and `InputDecoration::error_text` is non-null.
     ///  * `focused_border`, displayed when `InputDecorator::is_focused` is true
@@ -7596,7 +7571,7 @@ pub struct InputDecorationThemeData {
     ///    and `InputDecoration::error_text` is non-null.
     ///  * `disabled_border`, displayed when `InputDecoration::enabled` is false
     ///    and `InputDecoration::error_text` is null.
-    pub enabled_border: Option<Box<dyn InputBorder>>,
+    pub enabled_border: Option<InputBorderRef>,
 
     /// The shape of the border to draw around the decoration's container.
     ///
@@ -7625,12 +7600,12 @@ pub struct InputDecorationThemeData {
     ///
     /// See also:
     ///
-    ///  * `<dyn InputBorder>::none()`, which doesn't draw a border.
+    ///  * `InputBorderRef::none()`, which doesn't draw a border.
     ///  * `UnderlineInputBorder`, which draws a horizontal line at the
     ///    bottom of the input decorator's container.
     ///  * `OutlineInputBorder`, an `InputDecorator` border which draws a
     ///    rounded rectangle around the input decorator's container.
-    pub border: Option<Box<dyn InputBorder>>,
+    pub border: Option<InputBorderRef>,
 
     /// Typically set to true when the `InputDecorator` contains a multiline
     /// `TextField` (`TextField::max_lines` is null or > 1) to override the default
@@ -7741,12 +7716,12 @@ crate::theme_data_getters::theme_data_getters! {
         active_indicator_border: Option<AnyBorderSide>,
         focus_color: Option<Color>,
         hover_color: Option<Color>,
-        error_border: Option<Box<dyn InputBorder>>,
-        focused_border: Option<Box<dyn InputBorder>>,
-        focused_error_border: Option<Box<dyn InputBorder>>,
-        disabled_border: Option<Box<dyn InputBorder>>,
-        enabled_border: Option<Box<dyn InputBorder>>,
-        border: Option<Box<dyn InputBorder>>,
+        error_border: Option<InputBorderRef>,
+        focused_border: Option<InputBorderRef>,
+        focused_error_border: Option<InputBorderRef>,
+        disabled_border: Option<InputBorderRef>,
+        enabled_border: Option<InputBorderRef>,
+        border: Option<InputBorderRef>,
         align_label_with_hint: bool,
         constraints: Option<BoxConstraints>,
         visual_density: Option<VisualDensity>,
@@ -8013,7 +7988,7 @@ impl InputDecorationThemeData {
     /// Dart `InputDecorationThemeData(errorBorder:)`.
     pub fn error_border(
         mut self,
-        error_border: impl Into<Box<dyn InputBorder>>,
+        error_border: impl Into<InputBorderRef>,
     ) -> InputDecorationThemeData {
         self.error_border = Some(error_border.into());
         self
@@ -8022,7 +7997,7 @@ impl InputDecorationThemeData {
     /// Dart `InputDecorationThemeData(focusedBorder:)`.
     pub fn focused_border(
         mut self,
-        focused_border: impl Into<Box<dyn InputBorder>>,
+        focused_border: impl Into<InputBorderRef>,
     ) -> InputDecorationThemeData {
         self.focused_border = Some(focused_border.into());
         self
@@ -8031,7 +8006,7 @@ impl InputDecorationThemeData {
     /// Dart `InputDecorationThemeData(focusedErrorBorder:)`.
     pub fn focused_error_border(
         mut self,
-        focused_error_border: impl Into<Box<dyn InputBorder>>,
+        focused_error_border: impl Into<InputBorderRef>,
     ) -> InputDecorationThemeData {
         self.focused_error_border = Some(focused_error_border.into());
         self
@@ -8040,7 +8015,7 @@ impl InputDecorationThemeData {
     /// Dart `InputDecorationThemeData(disabledBorder:)`.
     pub fn disabled_border(
         mut self,
-        disabled_border: impl Into<Box<dyn InputBorder>>,
+        disabled_border: impl Into<InputBorderRef>,
     ) -> InputDecorationThemeData {
         self.disabled_border = Some(disabled_border.into());
         self
@@ -8049,14 +8024,14 @@ impl InputDecorationThemeData {
     /// Dart `InputDecorationThemeData(enabledBorder:)`.
     pub fn enabled_border(
         mut self,
-        enabled_border: impl Into<Box<dyn InputBorder>>,
+        enabled_border: impl Into<InputBorderRef>,
     ) -> InputDecorationThemeData {
         self.enabled_border = Some(enabled_border.into());
         self
     }
 
     /// Dart `InputDecorationThemeData(border:)`.
-    pub fn border(mut self, border: impl Into<Box<dyn InputBorder>>) -> InputDecorationThemeData {
+    pub fn border(mut self, border: impl Into<InputBorderRef>) -> InputDecorationThemeData {
         self.border = Some(border.into());
         self
     }
@@ -8564,7 +8539,7 @@ mod tests {
         use super::super::*;
         use crate::app::MaterialApp;
         use crate::icon_button_theme::IconButtonThemeData;
-        use crate::input_border::{InputBorder, OutlineInputBorder, UnderlineInputBorder};
+        use crate::input_border::{InputBorderRef, OutlineInputBorder, UnderlineInputBorder};
         use crate::material::Material;
         use crate::test_support::{AhemText, WidgetTester};
         use crate::theme::Theme;
@@ -8902,7 +8877,7 @@ mod tests {
         }
 
         /// Dart's `getBorder(tester)`: the border the painter paints now.
-        pub(super) fn get_border(tester: &WidgetTester) -> Option<Box<dyn InputBorder>> {
+        pub(super) fn get_border(tester: &WidgetTester) -> Option<InputBorderRef> {
             find_border_painter(tester)?;
             Some(with_border_painter(tester, |app, painter| {
                 painter
@@ -9023,7 +8998,7 @@ mod tests {
 
         use super::super::*;
         use crate::colors::Colors;
-        use crate::input_border::{InputBorder, OutlineInputBorder, UnderlineInputBorder};
+        use crate::input_border::{InputBorderRef, OutlineInputBorder, UnderlineInputBorder};
         use crate::test_support::{test_cell, with_main_thread_stack};
         use crate::theme_data::ThemeData;
 
@@ -9047,7 +9022,7 @@ mod tests {
             }
         }
 
-        fn border(border: impl Into<Box<dyn InputBorder>>) -> Option<Box<dyn InputBorder>> {
+        fn border(border: impl Into<InputBorderRef>) -> Option<InputBorderRef> {
             Some(border.into())
         }
 
@@ -9140,7 +9115,7 @@ mod tests {
                     .focused_error_border(theme_input_border)
                     .disabled_border(theme_input_border)
                     .enabled_border(theme_input_border)
-                    .border(<dyn InputBorder>::none())
+                    .border(InputBorderRef::none())
                     .align_label_with_hint(true)
                     .constraints(constraints(10.0, 20.0, 30.0, 40.0)),
             );
@@ -9188,7 +9163,7 @@ mod tests {
             assert_eq!(decoration.focused_error_border, border(theme_input_border));
             assert_eq!(decoration.disabled_border, border(theme_input_border));
             assert_eq!(decoration.enabled_border, border(theme_input_border));
-            assert_eq!(decoration.border, Some(<dyn InputBorder>::none()));
+            assert_eq!(decoration.border, Some(InputBorderRef::none()));
             assert_eq!(decoration.align_label_with_hint, Some(true));
             assert_eq!(
                 decoration.constraints,
@@ -9267,7 +9242,7 @@ mod tests {
                         .focused_error_border(theme_input_border)
                         .disabled_border(theme_input_border)
                         .enabled_border(theme_input_border)
-                        .border(<dyn InputBorder>::none())
+                        .border(InputBorderRef::none())
                         .align_label_with_hint(true)
                         .constraints(constraints(10.0, 20.0, 30.0, 40.0)),
                 );
@@ -9625,7 +9600,7 @@ mod tests {
         use crate::app::MaterialApp;
         use crate::colors::Colors;
         use crate::icons::Icons;
-        use crate::input_border::{InputBorder, OutlineInputBorder, UnderlineInputBorder};
+        use crate::input_border::{InputBorderRef, OutlineInputBorder, UnderlineInputBorder};
         use crate::scaffold::Scaffold;
         use crate::test_support::WidgetTester;
         use crate::theme::Theme;
@@ -10617,10 +10592,8 @@ mod tests {
         fn a_decorator_with_no_input_border_has_a_zero_border_weight() {
             case(|| {
                 let tester = pump(
-                    BuildInputDecorator::new(
-                        InputDecoration::new().border(<dyn InputBorder>::none()),
-                    )
-                    .is_empty(true),
+                    BuildInputDecorator::new(InputDecoration::new().border(InputBorderRef::none()))
+                        .is_empty(true),
                 );
                 assert_eq!(get_border_weight(&tester), 0.0);
             });
@@ -14904,7 +14877,7 @@ mod tests {
         use crate::icon_button::IconButton;
         use crate::icon_button_theme::{IconButtonTheme, IconButtonThemeData};
         use crate::icons::Icons;
-        use crate::input_border::{InputBorder, OutlineInputBorder};
+        use crate::input_border::{InputBorderRef, OutlineInputBorder};
         use crate::material::Material;
         use crate::material_state::WidgetStateInputBorder;
         use crate::scaffold::Scaffold;
@@ -15079,7 +15052,7 @@ mod tests {
                         TextStyle::new().color(Colors::BLUE.primary())
                     })
                     .into_any();
-                let none = <dyn InputBorder>::none();
+                let none = InputBorderRef::none();
 
                 // InputDecorationThemeData arguments define InputDecoration properties.
                 let decoration = InputDecoration::new().apply_defaults(
@@ -15096,7 +15069,7 @@ mod tests {
                         .filled(true)
                         .fill_color(Colors::RED.primary())
                         .focus_color(Colors::BLUE.primary())
-                        .border(<dyn InputBorder>::none())
+                        .border(InputBorderRef::none())
                         .align_label_with_hint(true)
                         .constraints(constraints(10.0, 20.0, 30.0, 40.0)),
                 );
@@ -15127,7 +15100,7 @@ mod tests {
 
                 // InputDecoration (baseDecoration) defines InputDecoration properties
                 let border = WidgetStateInputBorder::resolve_with(|_states: &WidgetStates| {
-                    Box::new(OutlineInputBorder::new()) as Box<dyn InputBorder>
+                    InputBorderRef::new(OutlineInputBorder::new())
                 });
                 let decoration = InputDecoration::new()
                     .label_style(decoration_style.clone())
@@ -15160,7 +15133,7 @@ mod tests {
                             .filled(true)
                             .fill_color(Colors::RED.primary())
                             .focus_color(Colors::BLUE.primary())
-                            .border(<dyn InputBorder>::none())
+                            .border(InputBorderRef::none())
                             .align_label_with_hint(true)
                             .constraints(constraints(40.0, 30.0, 20.0, 10.0)),
                     );
@@ -15210,15 +15183,15 @@ mod tests {
                     WidgetStateInputBorder::from_map(vec![
                         (
                             WidgetState::Focused.into(),
-                            Box::new(outline(Colors::BLUE.primary(), 4.0)) as Box<dyn InputBorder>,
+                            InputBorderRef::new(outline(Colors::BLUE.primary(), 4.0)),
                         ),
                         (
                             WidgetState::Hovered.into(),
-                            Box::new(outline(Colors::CYAN.primary(), 8.0)) as Box<dyn InputBorder>,
+                            InputBorderRef::new(outline(Colors::CYAN.primary(), 8.0)),
                         ),
                         (
                             WidgetState::any(),
-                            Box::new(OutlineInputBorder::new()) as Box<dyn InputBorder>,
+                            InputBorderRef::new(OutlineInputBorder::new()),
                         ),
                     ])
                 };
@@ -15767,7 +15740,7 @@ mod tests {
                     .is_dense(true)
                     .is_collapsed(true)
                     .content_padding(EdgeInsets::ZERO.into())
-                    .border(<dyn InputBorder>::none())
+                    .border(InputBorderRef::none())
                     .hint(ahem_hint(HINT_TEXT)),
                 "isDense with zero content padding" => InputDecoration::new()
                     .is_dense(true)
@@ -15931,7 +15904,7 @@ mod tests {
                                                             .content_padding(
                                                                 EdgeInsets::ZERO.into(),
                                                             )
-                                                            .border(<dyn InputBorder>::none())
+                                                            .border(InputBorderRef::none())
                                                             .hint(ahem_hint(HINT_TEXT)),
                                                     )
                                                     .is_empty(true)
@@ -17246,7 +17219,7 @@ mod tests {
 
         use crate::colors::Colors;
         use crate::icons::Icons;
-        use crate::input_border::{InputBorder, OutlineInputBorder, UnderlineInputBorder};
+        use crate::input_border::{InputBorderRef, OutlineInputBorder, UnderlineInputBorder};
         use crate::material::Material;
         use crate::test_support::{AhemText, WidgetTester, material_app};
         use crate::text_theme::TextTheme;
@@ -17960,7 +17933,7 @@ mod tests {
         fn material2_decorator_with_no_input_border_has_a_zero_weight_border() {
             case(|| {
                 let mut tester = tester();
-                M2::new(InputDecoration::new().border(<dyn InputBorder>::none()))
+                M2::new(InputDecoration::new().border(InputBorderRef::none()))
                     .is_empty(true)
                     .pump(&mut tester);
                 assert_eq!(get_border_weight(&tester), 0.0);
@@ -18092,16 +18065,16 @@ mod tests {
             });
         }
 
-        fn error_border() -> Box<dyn InputBorder> {
-            Box::new(OutlineInputBorder::new().border_side(BorderSide {
+        fn error_border() -> InputBorderRef {
+            InputBorderRef::new(OutlineInputBorder::new().border_side(BorderSide {
                 color: Colors::RED.primary(),
                 width: 1.5,
                 ..BorderSide::default()
             }))
         }
 
-        fn focused_error_border() -> Box<dyn InputBorder> {
-            Box::new(OutlineInputBorder::new().border_side(BorderSide {
+        fn focused_error_border() -> InputBorderRef {
+            InputBorderRef::new(OutlineInputBorder::new().border_side(BorderSide {
                 color: Colors::TEAL.primary(),
                 width: 5.0,
                 ..BorderSide::default()
@@ -18721,7 +18694,7 @@ mod tests {
 
                 let decorator = M2::new(
                     InputDecoration::new()
-                        .border(<dyn InputBorder>::none())
+                        .border(InputBorderRef::none())
                         .content_padding(EdgeInsetsGeometry::from(content_padding)),
                 )
                 .expands(true)
@@ -20063,7 +20036,7 @@ mod tests {
                 M2::new(
                     InputDecoration::new()
                         .label(label())
-                        .border(<dyn InputBorder>::none()),
+                        .border(InputBorderRef::none()),
                 )
                 .pump(&mut tester);
 
@@ -20074,8 +20047,8 @@ mod tests {
             });
         }
 
-        fn outline_with(color: Color) -> Box<dyn InputBorder> {
-            Box::new(OutlineInputBorder::new().border_side(BorderSide {
+        fn outline_with(color: Color) -> InputBorderRef {
+            InputBorderRef::new(OutlineInputBorder::new().border_side(BorderSide {
                 color,
                 ..BorderSide::default()
             }))
@@ -20359,8 +20332,8 @@ mod tests {
             });
         }
 
-        fn outline(color: Color, width: f64) -> Box<dyn InputBorder> {
-            Box::new(OutlineInputBorder::new().border_side(BorderSide {
+        fn outline(color: Color, width: f64) -> InputBorderRef {
+            InputBorderRef::new(OutlineInputBorder::new().border_side(BorderSide {
                 color,
                 width,
                 ..BorderSide::default()

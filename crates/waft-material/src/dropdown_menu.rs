@@ -2787,8 +2787,13 @@ pub(crate) mod tests {
     //! not ported.
 
     use waft_embedder::Rect;
+    use waft_embedder::{Matrix4, TextBaseline};
+    use waft_rendering::{
+        RenderObjectWithChildData, RenderObjectWithChildMixin, RenderProxyBoxMixin,
+    };
     use waft_services::PhysicalKeyboardKey;
     use waft_services::TextInputClient;
+    use waft_widgets::SingleChildRenderObjectWidget;
     use waft_widgets::{AnyElement, EditableText, EditableTextState};
 
     use super::*;
@@ -8087,6 +8092,215 @@ pub(crate) mod tests {
                 tester.pump_and_settle();
                 assert_eq!(controller_text(&tester, controller.handle()), ""); // nothing selected
             }
+        });
+    }
+
+    // `_TestDryLayout`: a proxy that asks its child for a dry layout, then lays it out, to test
+    // that the child's `computeDryLayout` is valid.
+    #[derive(Debug)]
+    struct TestDryLayout {
+        child: WidgetRef,
+    }
+
+    impl RenderObjectWidget for TestDryLayout {
+        type RenderObject = RenderTestDryLayout;
+
+        fn create_render_object(&self, app: &mut App, _context: BuildContext) -> AnyRenderObject {
+            RenderTestDryLayout::new(app).as_object()
+        }
+
+        fn update_render_object(
+            &self,
+            _app: &mut App,
+            _context: BuildContext,
+            _render_object: RenderHandle<RenderTestDryLayout>,
+        ) {
+        }
+    }
+
+    impl SingleChildRenderObjectWidget for TestDryLayout {
+        fn child(&self) -> Option<&WidgetRef> {
+            Some(&self.child)
+        }
+    }
+
+    struct RenderTestDryLayout {
+        render_object: RenderObjectData,
+        render_box: RenderBoxData,
+        child: RenderObjectWithChildData<AnyRenderBox>,
+    }
+
+    impl RenderTestDryLayout {
+        fn new(app: &mut App) -> RenderHandle<RenderTestDryLayout> {
+            RenderHandle::new_box(
+                app,
+                RenderTestDryLayout {
+                    render_object: RenderObjectData::new(),
+                    render_box: RenderBoxData::new(),
+                    child: RenderObjectWithChildData::new(),
+                },
+            )
+        }
+    }
+
+    impl RenderObjectWithChildMixin for RenderTestDryLayout {
+        type ChildType = AnyRenderBox;
+
+        fn child_data(
+            self: RenderHandle<Self>,
+            app: &App,
+        ) -> &RenderObjectWithChildData<AnyRenderBox> {
+            &self.get(app).child
+        }
+
+        fn child_data_mut(
+            self: RenderHandle<Self>,
+            app: &mut App,
+        ) -> &mut RenderObjectWithChildData<AnyRenderBox> {
+            &mut self.get_mut(app).child
+        }
+    }
+
+    impl RenderProxyBoxMixin for RenderTestDryLayout {}
+
+    impl RenderObject for RenderTestDryLayout {
+        waft_rendering::render_object_accessors!();
+
+        fn perform_layout(self: RenderHandle<Self>, app: &mut App) {
+            let constraints = self.constraints(app);
+            let Some(child) = self.child(app) else {
+                self.set_size(app, constraints.smallest());
+                return;
+            };
+            child.get_dry_layout(app, constraints);
+            child.layout(app, constraints, true);
+            let size = child.size(app);
+            self.set_size(app, size);
+        }
+
+        fn paint(
+            self: RenderHandle<Self>,
+            app: &mut App,
+            context: &mut PaintingContext,
+            offset: Offset,
+        ) {
+            RenderProxyBoxMixin::paint(self, app, context, offset);
+        }
+
+        fn visit_children(
+            self: RenderHandle<Self>,
+            app: &App,
+            visitor: &mut dyn FnMut(AnyRenderObject),
+        ) {
+            if let Some(child) = self.child(app) {
+                visitor(child.as_object());
+            }
+        }
+    }
+
+    impl RenderBox for RenderTestDryLayout {
+        waft_rendering::render_box_accessors!();
+
+        fn setup_parent_data(self: RenderHandle<Self>, app: &mut App, child: AnyRenderObject) {
+            RenderProxyBoxMixin::setup_parent_data(self, app, child);
+        }
+
+        fn apply_paint_transform(
+            self: RenderHandle<Self>,
+            app: &App,
+            child: AnyRenderObject,
+            transform: &mut Matrix4,
+        ) {
+            RenderProxyBoxMixin::apply_paint_transform(self, app, child, transform);
+        }
+
+        fn hit_test_children(
+            self: RenderHandle<Self>,
+            app: &mut App,
+            result: &mut BoxHitTestResult<'_>,
+            position: Offset,
+        ) -> bool {
+            RenderProxyBoxMixin::hit_test_children(self, app, result, position)
+        }
+
+        fn compute_min_intrinsic_width(
+            self: RenderHandle<Self>,
+            app: &mut App,
+            height: f64,
+        ) -> f64 {
+            RenderProxyBoxMixin::compute_min_intrinsic_width(self, app, height)
+        }
+
+        fn compute_max_intrinsic_width(
+            self: RenderHandle<Self>,
+            app: &mut App,
+            height: f64,
+        ) -> f64 {
+            RenderProxyBoxMixin::compute_max_intrinsic_width(self, app, height)
+        }
+
+        fn compute_min_intrinsic_height(
+            self: RenderHandle<Self>,
+            app: &mut App,
+            width: f64,
+        ) -> f64 {
+            RenderProxyBoxMixin::compute_min_intrinsic_height(self, app, width)
+        }
+
+        fn compute_max_intrinsic_height(
+            self: RenderHandle<Self>,
+            app: &mut App,
+            width: f64,
+        ) -> f64 {
+            RenderProxyBoxMixin::compute_max_intrinsic_height(self, app, width)
+        }
+
+        fn compute_distance_to_actual_baseline(
+            self: RenderHandle<Self>,
+            app: &mut App,
+            baseline: TextBaseline,
+        ) -> Option<f64> {
+            RenderProxyBoxMixin::compute_distance_to_actual_baseline(self, app, baseline)
+        }
+
+        fn compute_dry_layout(
+            self: RenderHandle<Self>,
+            app: &mut App,
+            constraints: BoxConstraints,
+        ) -> Size {
+            RenderProxyBoxMixin::compute_dry_layout(self, app, constraints)
+        }
+
+        fn compute_dry_baseline(
+            self: RenderHandle<Self>,
+            app: &mut App,
+            constraints: BoxConstraints,
+            baseline: TextBaseline,
+        ) -> Option<f64> {
+            RenderProxyBoxMixin::compute_dry_baseline(self, app, constraints, baseline)
+        }
+    }
+
+    // '_RenderDropdownMenuBody.computeDryLayout does not access this.constraints'. Dart ends on
+    // `takeException()` being null; here an exception during layout panics the test.
+    #[test]
+    fn the_dropdown_menu_body_dry_layout_does_not_access_its_constraints() {
+        with_main_thread_stack(|| {
+            let mut tester = tester();
+            let theme = theme(&tester);
+            let menu = DropdownMenu::new(vec![
+                DropdownMenuEntry::new(1, "One"),
+                DropdownMenuEntry::new(2, "Two"),
+            ]);
+            let body = waft_widgets::Center::new().child(TestDryLayout {
+                child: menu.into_widget(),
+            });
+            tester.pump_widget(material_app(
+                theme,
+                Scaffold::new().body(body).into_widget(),
+            ));
+
+            assert_eq!(tester.find_by_type::<DropdownMenu<i32>>().len(), 1);
         });
     }
 }

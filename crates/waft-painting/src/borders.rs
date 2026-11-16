@@ -392,8 +392,15 @@ pub trait ShapeBorder: Any + Debug {
         None
     }
 
-    /// `BoxBorder` downcast for [`dyn BoxBorder::lerp`].
+    /// `BoxBorder` downcast for `BoxBorderRef::lerp`.
     fn as_box_border(&self) -> Option<&dyn crate::box_border::BoxBorder> {
+        None
+    }
+
+    /// [`BoxBorder`](crate::box_border::BoxBorder) downcast of the shared border
+    /// ([`ShapeBorderRef::as_box_border_ref`]). A box border answers `Some(self)`, as it
+    /// answers [`as_box_border`](Self::as_box_border).
+    fn into_box_border(self: Rc<Self>) -> Option<Rc<dyn crate::box_border::BoxBorder>> {
         None
     }
 
@@ -417,6 +424,19 @@ impl ShapeBorderRef {
     /// Erases a [`ShapeBorder`].
     pub fn new(border: impl ShapeBorder) -> ShapeBorderRef {
         ShapeBorderRef(Rc::new(border))
+    }
+
+    /// Shares an already shared border.
+    pub fn from_shared(border: Rc<dyn ShapeBorder>) -> ShapeBorderRef {
+        ShapeBorderRef(border)
+    }
+
+    /// The border as a [`BoxBorderRef`](crate::box_border::BoxBorderRef), sharing it, when it
+    /// is a [`BoxBorder`](crate::box_border::BoxBorder).
+    pub fn as_box_border_ref(&self) -> Option<crate::box_border::BoxBorderRef> {
+        Rc::clone(&self.0)
+            .into_box_border()
+            .map(crate::box_border::BoxBorderRef::from_rc)
     }
 
     /// The border as an [`OutlinedBorderRef`], sharing it, when it is an [`OutlinedBorder`].

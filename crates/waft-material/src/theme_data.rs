@@ -3635,7 +3635,7 @@ mod tests {
     use crate::elevated_button::ElevatedButton;
     use crate::filled_button::FilledButton;
     use crate::icon_button::IconButton;
-    use crate::input_border::{InputBorder, OutlineInputBorder};
+    use crate::input_border::{InputBorderRef, OutlineInputBorder};
     use crate::material_state::MaterialStatePropertyAll;
     use crate::menu_anchor::MenuItemButton;
     use crate::menu_style::MenuStyle;
@@ -4992,7 +4992,7 @@ mod tests {
             input_decoration_theme: light
                 .input_decoration_theme
                 .copy_with()
-                .border(<dyn InputBorder>::none()),
+                .border(InputBorderRef::none()),
             material_tap_target_size: MaterialTapTargetSize::Padded,
             page_transitions_theme: PageTransitionsTheme::new(),
             platform: TargetPlatform::Android,

@@ -2106,6 +2106,26 @@ impl RenderBox for RenderEditable {
         Size::new(width, constraints.constrain_height(height))
     }
 
+    fn compute_dry_baseline(
+        self: RenderHandle<Self>,
+        app: &mut App,
+        constraints: BoxConstraints,
+        baseline: TextBaseline,
+    ) -> Option<f64> {
+        let (min_width, max_width) =
+            self.adjust_constraints(app, constraints.min_width, constraints.max_width);
+        let placeholder_dimensions = self.layout_inline_children(
+            app,
+            constraints.max_width,
+            ChildLayoutHelper::dry_layout_child,
+            ChildLayoutHelper::get_dry_baseline,
+        );
+        let (intrinsics, fonts) = self.text_intrinsics_with_fonts(app);
+        intrinsics.set_placeholder_dimensions(Some(placeholder_dimensions));
+        intrinsics.layout(fonts, min_width, max_width);
+        Some(intrinsics.compute_distance_to_actual_baseline(baseline))
+    }
+
     fn compute_distance_to_actual_baseline(
         self: RenderHandle<Self>,
         app: &mut App,
@@ -2415,6 +2435,36 @@ mod tests {
         let size = editable.size(&app);
         assert!(size.width() > 0.0);
         assert!(size.height() > 0.0);
+    }
+
+    // 'does not skip TextPainter.layout because of invalid cache': a dry layout lays the text out
+    // again after `forceLine` changes.
+    #[test]
+    fn a_dry_layout_follows_force_line() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let editable = laid_out(&mut app, "A");
+        let constraints = BoxConstraints::new().min_width(100.0).max_width(500.0);
+
+        let initial_width = editable.get_dry_layout(&mut app, constraints).width();
+        assert_eq!(initial_width, 500.0);
+
+        editable.set_force_line(&mut app, false);
+        assert!(editable.get_dry_layout(&mut app, constraints).width() < initial_width);
+    }
+
+    // `computeDryBaseline` answers the baseline the layout under the same constraints finds.
+    #[test]
+    fn a_dry_baseline_is_the_baseline_of_the_layout() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let editable = laid_out(&mut app, "hi");
+        let constraints = BoxConstraints::tight_for(Some(200.0), Some(40.0));
+
+        let dry = editable.get_dry_baseline(&mut app, constraints, TextBaseline::Alphabetic);
+        let laid_out = editable.get_distance_to_baseline(&mut app, TextBaseline::Alphabetic, false);
+        assert!(dry.is_some_and(|dry| dry > 0.0));
+        assert_eq!(dry, laid_out);
     }
 
     #[test]
