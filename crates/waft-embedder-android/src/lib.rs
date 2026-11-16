@@ -79,6 +79,8 @@ mod input_queues;
 #[cfg(target_os = "android")]
 mod intents;
 #[cfg(target_os = "android")]
+mod local_time;
+#[cfg(target_os = "android")]
 mod log;
 #[cfg(target_os = "android")]
 mod loop_waker;

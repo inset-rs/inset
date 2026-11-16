@@ -315,7 +315,7 @@ pub trait MaterialLocalizations: 'static {
     ///
     /// See also:
     ///   * [`format_compact_date`](Self::format_compact_date), which will convert a [`DateTime`] into a string in the compact format.
-    fn parse_compact_date(&self, input_string: Option<&str>) -> Option<DateTime>;
+    fn parse_compact_date(&self, app: &App, input_string: Option<&str>) -> Option<DateTime>;
 
     /// List of week day names in narrow format, usually 1- or 2-letter
     /// abbreviations of full names.
@@ -871,11 +871,11 @@ fn try_parse_int(source: &str) -> Option<i64> {
 
 /// Dart's `DateTime(year, month, day)` for a valid date from year 1 on, with the
 /// `ArgumentError` it throws past the last day a `DateTime` can represent as `None`.
-fn date_time_or_none(year: i64, month: i64, day: i64) -> Option<DateTime> {
+fn date_time_or_none(app: &App, year: i64, month: i64, day: i64) -> Option<DateTime> {
     // The last instant a `DateTime` holds, 100,000,000 days after the epoch, read in the local
     // zone: a local midnight after its date is out of range.
     const LAST_MILLISECOND: i64 = 8_640_000_000_000_000;
-    let last = DateTime::from_milliseconds_since_epoch(LAST_MILLISECOND, false);
+    let last = DateTime::from_milliseconds_since_epoch(app, LAST_MILLISECOND, false);
     let last_day = (
         i64::from(last.year()),
         i64::from(last.month()),
@@ -885,7 +885,7 @@ fn date_time_or_none(year: i64, month: i64, day: i64) -> Option<DateTime> {
         return None;
     }
     let field = |value: i64| i32::try_from(value).expect("within the representable range");
-    Some(DateTime::new(field(year), field(month), field(day)))
+    Some(DateTime::new(app, field(year), field(month), field(day)))
 }
 
 impl MaterialLocalizations for DefaultMaterialLocalizations {
@@ -962,7 +962,7 @@ impl MaterialLocalizations for DefaultMaterialLocalizations {
         format!("{month} {}", date.day())
     }
 
-    fn parse_compact_date(&self, input_string: Option<&str>) -> Option<DateTime> {
+    fn parse_compact_date(&self, app: &App, input_string: Option<&str>) -> Option<DateTime> {
         let input_string = input_string?;
 
         // Assumes US mm/dd/yyyy format
@@ -978,7 +978,7 @@ impl MaterialLocalizations for DefaultMaterialLocalizations {
         let day = try_parse_int(input_parts[1])
             .filter(|&day| day >= 1 && day <= Self::get_days_in_month(year, month))?;
 
-        date_time_or_none(year, month, day)
+        date_time_or_none(app, year, month, day)
     }
 
     fn narrow_weekdays(&self) -> Vec<String> {
@@ -1646,6 +1646,8 @@ pub(crate) mod tests {
 
     use waft_widgets::{Builder, DefaultWidgetsLocalizations, IntoWidget, SizedBox, WidgetRef};
 
+    use waft_foundation::AppCell;
+
     use super::*;
     use crate::test_support::{build, test_cell};
 
@@ -1936,13 +1938,15 @@ pub(crate) mod tests {
 
     #[test]
     fn a_date_formats_in_us_english() {
+        let cell = AppCell::new();
+        let app = cell.borrow();
         let strings = DefaultMaterialLocalizations::new();
-        let date = DateTime::new(2019, 2, 21);
+        let date = DateTime::new(&app, 2019, 2, 21);
 
         assert_eq!(strings.format_year(&date), "2019");
         assert_eq!(strings.format_compact_date(&date), "02/21/2019");
         assert_eq!(
-            strings.format_compact_date(&DateTime::new(5, 1, 2)),
+            strings.format_compact_date(&DateTime::new(&app, 5, 1, 2)),
             "01/02/0005"
         );
         assert_eq!(strings.format_short_date(&date), "Feb 21, 2019");
@@ -1955,7 +1959,7 @@ pub(crate) mod tests {
         assert_eq!(strings.format_short_month_day(&date), "Feb 21");
 
         // The examples of the interface's documentation.
-        let example = DateTime::new(2017, 9, 27);
+        let example = DateTime::new(&app, 2017, 9, 27);
         assert_eq!(strings.format_medium_date(&example), "Wed, Sep 27");
         assert_eq!(
             strings.format_full_date(&example),
@@ -1967,29 +1971,34 @@ pub(crate) mod tests {
     // and the Dart VM's answers for the other strings.
     #[test]
     fn parse_compact_date_reads_a_us_date_and_rejects_the_rest() {
+        let cell = AppCell::new();
+        let app = cell.borrow();
         let strings = DefaultMaterialLocalizations::new();
-        let parse = |text| strings.parse_compact_date(Some(text));
+        let parse = |text| strings.parse_compact_date(&app, Some(text));
 
-        assert_eq!(parse("10/05/2023"), Some(DateTime::new(2023, 10, 5)));
+        assert_eq!(parse("10/05/2023"), Some(DateTime::new(&app, 2023, 10, 5)));
         assert_eq!(parse("10/05/2023666777889"), None);
 
-        assert_eq!(strings.parse_compact_date(None), None);
-        assert_eq!(parse("02/21/2019"), Some(DateTime::new(2019, 2, 21)));
-        assert_eq!(parse(" 02/ 21/+2019"), Some(DateTime::new(2019, 2, 21)));
-        assert_eq!(parse("1/1/1"), Some(DateTime::new(1, 1, 1)));
+        assert_eq!(strings.parse_compact_date(&app, None), None);
+        assert_eq!(parse("02/21/2019"), Some(DateTime::new(&app, 2019, 2, 21)));
+        assert_eq!(
+            parse(" 02/ 21/+2019"),
+            Some(DateTime::new(&app, 2019, 2, 21))
+        );
+        assert_eq!(parse("1/1/1"), Some(DateTime::new(&app, 1, 1, 1)));
         assert_eq!(parse("02/21"), None);
         assert_eq!(parse("a/b/c"), None);
         assert_eq!(parse("0x1/01/2019"), None);
         assert_eq!(parse("13/01/2019"), None);
         assert_eq!(parse("01/01/0"), None);
         assert_eq!(parse("02/29/2019"), None);
-        assert_eq!(parse("02/29/2020"), Some(DateTime::new(2020, 2, 29)));
+        assert_eq!(parse("02/29/2020"), Some(DateTime::new(&app, 2020, 2, 29)));
         assert_eq!(parse("02/29/1900"), None);
-        assert_eq!(parse("02/29/2000"), Some(DateTime::new(2000, 2, 29)));
+        assert_eq!(parse("02/29/2000"), Some(DateTime::new(&app, 2000, 2, 29)));
         // The last day a `DateTime` holds is a valid local date only east of UTC, where its
         // midnight comes before the last instant.
-        let last = DateTime::from_milliseconds_since_epoch(8_640_000_000_000_000, false);
-        let last_day = (last.day() == 13).then(|| DateTime::new(275760, 9, 13));
+        let last = DateTime::from_milliseconds_since_epoch(&app, 8_640_000_000_000_000, false);
+        let last_day = (last.day() == 13).then(|| DateTime::new(&app, 275760, 9, 13));
         assert_eq!(parse("09/13/275760"), last_day);
         assert_eq!(parse("09/14/275760"), None);
     }

@@ -102,6 +102,44 @@ pub(crate) fn probe<T: 'static>(
     value.expect("the probe built")
 }
 
+/// Dart's `DateTime(year, month, day)` in a case: a local date in the zone a [`TestPlatform`]
+/// starts in, UTC, which a tester's app is in unless the case sets another. A case that sets a
+/// zone makes its dates with its own app.
+pub(crate) fn local_date(year: i32, month: i32, day: i32) -> waft_foundation::DateTime {
+    local_date_time(year, month, day, 0, 0, 0, 0, 0)
+}
+
+/// Dart's `DateTime(year, month, day, hour, minute, second, millisecond, microsecond)` in a
+/// case, in the zone [`local_date`] makes its dates in.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Dart's positional constructor; each field may overflow into the next"
+)]
+pub(crate) fn local_date_time(
+    year: i32,
+    month: i32,
+    day: i32,
+    hour: i32,
+    minute: i32,
+    second: i32,
+    millisecond: i32,
+    microsecond: i32,
+) -> waft_foundation::DateTime {
+    let zone = AppCell::with_platform(Rc::new(TestPlatform::new()));
+    let app = zone.borrow();
+    waft_foundation::DateTime::new_with_time(
+        &app,
+        year,
+        month,
+        day,
+        hour,
+        minute,
+        second,
+        millisecond,
+        microsecond,
+    )
+}
+
 /// flutter_test's `TestVSync`: vends ordinary tickers, in no view.
 pub(crate) struct TestVSync;
 

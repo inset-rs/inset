@@ -9,7 +9,8 @@ use crate::calendar_date_picker::{
     CalendarDatePicker, CalendarDatePickerDayBuilder, CalendarDatePickerWeekdayBuilder,
 };
 use crate::date::{
-    CalendarDelegate, DatePickerEntryMode, DatePickerMode, DateTimeRange, GregorianCalendarDelegate,
+    CalendarDelegate, DatePickerEntryMode, DatePickerMode, DateTimeRange,
+    GregorianCalendarDelegate, is_day_before,
 };
 use crate::date_picker_theme::DatePickerTheme;
 use crate::dialog::Dialog;
@@ -179,9 +180,9 @@ pub fn show_date_picker(
     weekday_builder: Option<CalendarDatePickerWeekdayBuilder>,
     calendar_delegate: Rc<dyn CalendarDelegate>,
 ) -> CompleterFuture<RouteResult> {
-    let initial_date = initial_date.map(|date| calendar_delegate.date_only(&date));
-    let first_date = calendar_delegate.date_only(&first_date);
-    let last_date = calendar_delegate.date_only(&last_date);
+    let initial_date = initial_date.map(|date| calendar_delegate.date_only(app, &date));
+    let first_date = calendar_delegate.date_only(app, &first_date);
+    let last_date = calendar_delegate.date_only(app, &last_date);
     assert!(
         !last_date.is_before(&first_date),
         "lastDate {last_date} must be on or after firstDate {first_date}."
@@ -210,8 +211,7 @@ pub fn show_date_picker(
         .initial_calendar_mode(initial_date_picker_mode)
         .calendar_delegate(Rc::clone(&calendar_delegate));
     dialog.initial_date = initial_date;
-    dialog.current_date =
-        calendar_delegate.date_only(&current_date.unwrap_or_else(|| calendar_delegate.now()));
+    dialog.current_date = current_date;
     dialog.selectable_day_predicate = selectable_day_predicate;
     dialog.help_text = help_text;
     dialog.cancel_text = cancel_text;
@@ -306,8 +306,9 @@ pub struct DatePickerDialog {
     /// The latest allowable [`DateTime`] that the user can select.
     pub last_date: DateTime,
 
-    /// The [`DateTime`] representing today. It will be highlighted in the day grid.
-    pub current_date: DateTime,
+    /// The [`DateTime`] representing today. It will be highlighted in the day grid. If null,
+    /// the date of the calendar delegate's [`now`](CalendarDelegate::now) is used.
+    pub current_date: Option<DateTime>,
 
     /// The initial mode of date entry method for the date picker dialog.
     ///
@@ -393,17 +394,16 @@ pub struct DatePickerDialog {
 impl DatePickerDialog {
     /// Creates a [`DatePickerDialog`]. Dart's optional named arguments are the fluent setters.
     ///
-    /// [`initial_date`](Self::initial_date), [`first_date`](Self::first_date),
-    /// [`last_date`](Self::last_date) and [`current_date`](Self::current_date) are truncated to
-    /// the date by the calendar delegate; set the delegate first.
+    /// The dates are kept as given; the calendar delegate truncates each to its day where the
+    /// dialog reads it, as Dart's constructor truncates them.
     pub fn new(first_date: DateTime, last_date: DateTime) -> DatePickerDialog {
         let calendar_delegate: Rc<dyn CalendarDelegate> = Rc::new(GregorianCalendarDelegate);
         let dialog = DatePickerDialog {
             key: None,
             initial_date: None,
-            first_date: calendar_delegate.date_only(&first_date),
-            last_date: calendar_delegate.date_only(&last_date),
-            current_date: calendar_delegate.date_only(&calendar_delegate.now()),
+            first_date,
+            last_date,
+            current_date: None,
             initial_entry_mode: DatePickerEntryMode::Calendar,
             selectable_day_predicate: None,
             cancel_text: None,
@@ -428,34 +428,47 @@ impl DatePickerDialog {
         dialog
     }
 
+    /// Dart's constructor asserts on the dates, by their days; the one on
+    /// `selectableDayPredicate`, which takes the day itself, runs in `init_state`.
     fn debug_check_dates(&self) {
         debug_assert!(
-            !self.last_date.is_before(&self.first_date),
+            !is_day_before(&self.last_date, &self.first_date),
             "lastDate {} must be on or after firstDate {}.",
             self.last_date,
             self.first_date
         );
         debug_assert!(
             self.initial_date
-                .is_none_or(|date| !date.is_before(&self.first_date)),
+                .is_none_or(|date| !is_day_before(&date, &self.first_date)),
             "initialDate {:?} must be on or after firstDate {}.",
             self.initial_date,
             self.first_date
         );
         debug_assert!(
             self.initial_date
-                .is_none_or(|date| !date.is_after(&self.last_date)),
+                .is_none_or(|date| !is_day_before(&self.last_date, &date)),
             "initialDate {:?} must be on or before lastDate {}.",
             self.initial_date,
             self.last_date
         );
+    }
+
+    /// Dart's `initialDate` field, as its constructor fills it: the day of the date given.
+    pub fn effective_initial_date(&self, app: &App) -> Option<DateTime> {
+        self.initial_date
+            .map(|date| self.calendar_delegate.date_only(app, &date))
+    }
+
+    /// Dart's constructor assert that the initial day satisfies `selectableDayPredicate`, which
+    /// takes the day `date_only` makes, so it runs once the `App` is at hand.
+    fn debug_check_initial_date_is_selectable(&self, app: &App) {
         debug_assert!(
             self.selectable_day_predicate
                 .as_ref()
-                .zip(self.initial_date)
+                .zip(self.effective_initial_date(app))
                 .is_none_or(|(predicate, date)| predicate(date)),
             "Provided initialDate {:?} must satisfy provided selectableDayPredicate",
-            self.initial_date
+            self.effective_initial_date(app)
         );
     }
 
@@ -467,13 +480,13 @@ impl DatePickerDialog {
 
     /// Dart `DatePickerDialog(initialDate:)`.
     pub fn initial_date(mut self, initial_date: DateTime) -> DatePickerDialog {
-        self.initial_date = Some(self.calendar_delegate.date_only(&initial_date));
+        self.initial_date = Some(initial_date);
         self
     }
 
     /// Dart `DatePickerDialog(currentDate:)`.
     pub fn current_date(mut self, current_date: DateTime) -> DatePickerDialog {
-        self.current_date = self.calendar_delegate.date_only(&current_date);
+        self.current_date = Some(current_date);
         self
     }
 
@@ -516,17 +529,11 @@ impl DatePickerDialog {
         self
     }
 
-    /// Dart `DatePickerDialog(calendarDelegate:)`. It truncates the dates already set.
+    /// Dart `DatePickerDialog(calendarDelegate:)`.
     pub fn calendar_delegate(
         mut self,
         calendar_delegate: Rc<dyn CalendarDelegate>,
     ) -> DatePickerDialog {
-        self.initial_date = self
-            .initial_date
-            .map(|date| calendar_delegate.date_only(&date));
-        self.first_date = calendar_delegate.date_only(&self.first_date);
-        self.last_date = calendar_delegate.date_only(&self.last_date);
-        self.current_date = calendar_delegate.date_only(&self.current_date);
         self.calendar_delegate = calendar_delegate;
         self
     }
@@ -720,7 +727,9 @@ impl State for DatePickerDialogState {
 
     fn init_state(self: Handle<Self>, app: &mut App) {
         let widget = self.widget(app).clone();
-        let selected_date = RestorableDateTimeN::new(app, widget.initial_date);
+        widget.debug_check_initial_date_is_selectable(app);
+        let initial_date = widget.effective_initial_date(app);
+        let selected_date = RestorableDateTimeN::new(app, initial_date);
         let entry_mode = RestorableEnum::new(app, widget.initial_entry_mode, ENTRY_MODES);
         let autovalidate_mode =
             RestorableEnum::new(app, AutovalidateMode::Disabled, AUTOVALIDATE_MODES);
@@ -735,6 +744,7 @@ impl State for DatePickerDialogState {
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, _old_widget: &DatePickerDialog) {
+        self.widget(app).debug_check_initial_date_is_selectable(app);
         self.did_update_restoration_id(app);
     }
 
@@ -859,8 +869,10 @@ impl State for DatePickerDialogState {
                 )
                 .calendar_delegate(Rc::clone(&widget.calendar_delegate))
                 .key(calendar_picker_key.clone().into())
-                .current_date(widget.current_date)
                 .initial_calendar_mode(widget.initial_calendar_mode);
+                if let Some(current_date) = widget.current_date {
+                    picker = picker.current_date(current_date);
+                }
                 if let Some(predicate) = widget.selectable_day_predicate.clone() {
                     picker = picker.selectable_day_predicate(predicate);
                 }
@@ -1406,9 +1418,10 @@ pub fn show_date_range_picker(
     selectable_day_predicate: Option<SelectableDayForRangePredicate>,
     calendar_delegate: Rc<dyn CalendarDelegate>,
 ) -> CompleterFuture<RouteResult> {
-    let initial_date_range = initial_date_range.map(|range| calendar_delegate.dates_only(&range));
-    let first_date = calendar_delegate.date_only(&first_date);
-    let last_date = calendar_delegate.date_only(&last_date);
+    let initial_date_range =
+        initial_date_range.map(|range| calendar_delegate.dates_only(app, &range));
+    let first_date = calendar_delegate.date_only(app, &first_date);
+    let last_date = calendar_delegate.date_only(app, &last_date);
     assert!(
         !last_date.is_before(&first_date),
         "lastDate {last_date} must be on or after firstDate {first_date}."
@@ -1441,8 +1454,10 @@ pub fn show_date_range_picker(
             );
         }
     }
-    let current_date =
-        calendar_delegate.date_only(&current_date.unwrap_or_else(|| calendar_delegate.now()));
+    let current_date = calendar_delegate.date_only(
+        app,
+        &current_date.unwrap_or_else(|| calendar_delegate.now(app)),
+    );
     debug_assert!(crate::debug::debug_check_has_material_localizations(
         app, context
     ));
@@ -1650,11 +1665,12 @@ impl DateRangePickerDialog {
     }
 
     /// The [`DateTime`] representing today. It will be highlighted in the day grid.
-    pub fn current_date(&self) -> DateTime {
+    pub fn current_date(&self, app: &App) -> DateTime {
         self.calendar_delegate.date_only(
+            app,
             &self
                 .current_date_value
-                .unwrap_or_else(|| self.calendar_delegate.now()),
+                .unwrap_or_else(|| self.calendar_delegate.now(app)),
         )
     }
 
@@ -2015,7 +2031,7 @@ impl State for DateRangePickerDialogState {
                     first_date: widget.first_date,
                     last_date: widget.last_date,
                     selectable_day_predicate: widget.selectable_day_predicate.clone(),
-                    current_date: widget.current_date(),
+                    current_date: widget.current_date(app),
                     on_start_date_changed: Rc::new(move |app, date| {
                         self.handle_start_date_changed(app, date);
                     }),
@@ -2126,7 +2142,7 @@ impl State for DateRangePickerDialogState {
                     calendar_delegate: Rc::clone(&widget.calendar_delegate),
                     selected_start_date: selected_start,
                     selected_end_date: selected_end,
-                    current_date: widget.current_date(),
+                    current_date: widget.current_date(app),
                     picker,
                     on_confirm: Listener::new(move |app| self.handle_ok(app)),
                     on_cancel: Listener::new(move |app| self.handle_cancel(app)),
@@ -2321,7 +2337,7 @@ impl StatelessWidget for CalendarRangePickerDialog {
             &*self.calendar_delegate,
             self.selected_start_date.as_ref(),
             self.selected_end_date.as_ref(),
-            &self.calendar_delegate.now(),
+            &self.calendar_delegate.now(app),
         );
         let start_date_style = apply_color(
             headline_style.clone(),
@@ -2623,9 +2639,10 @@ impl CalendarDateRangePickerState {
             initial_month_index + index
         };
         let widget = self.widget(app).clone();
-        let month = widget
-            .calendar_delegate
-            .add_months_to_month_date(&widget.first_date, month_index);
+        let month =
+            widget
+                .calendar_delegate
+                .add_months_to_month_date(app, &widget.first_date, month_index);
         MonthItem {
             calendar_delegate: Rc::clone(&widget.calendar_delegate),
             selected_date_start: app.get(self).start_date,
@@ -2862,9 +2879,11 @@ impl CalendarKeyboardNavigatorState {
         let context = self.context(app);
         let text_direction = Directionality::of(app, context);
         let widget = self.widget(app);
-        let next_date = widget
-            .calendar_delegate
-            .add_days_to_date(date, Self::day_direction_offset(direction, text_direction));
+        let next_date = widget.calendar_delegate.add_days_to_date(
+            app,
+            date,
+            Self::day_direction_offset(direction, text_direction),
+        );
         if !next_date.is_before(&widget.first_date) && !next_date.is_after(&widget.last_date) {
             return Some(next_date);
         }
@@ -3388,7 +3407,7 @@ impl State for MonthItemState {
             if day < 1 {
                 day_items.push(empty());
             } else {
-                let day_to_build = delegate.get_day(year, month, day);
+                let day_to_build = delegate.get_day(app, year, month, day);
                 day_items.push(self.build_day_item(app, context, day_to_build));
             }
         }
@@ -3402,7 +3421,7 @@ impl State for MonthItemState {
             let mut week_list: Vec<WidgetRef> = day_items[start..end].to_vec();
 
             let date_after_leading_padding =
-                delegate.get_day(year, month, start as i32 - day_offset + 1);
+                delegate.get_day(app, year, month, start as i32 - day_offset + 1);
             // Only color the edge container if it is after the start date and on/before the
             // end date.
             let is_leading_in_range = !(day_offset > 0 && i == 0)
@@ -3424,7 +3443,7 @@ impl State for MonthItemState {
                         .is_multiple_of(DateTime::DAYS_PER_WEEK as usize))
             {
                 let date_before_trailing_padding =
-                    delegate.get_day(year, month, end as i32 - day_offset);
+                    delegate.get_day(app, year, month, end as i32 - day_offset);
                 // Only color the edge container if it is on/after the start date and before
                 // the end date.
                 let is_trailing_in_range =
@@ -4067,12 +4086,9 @@ impl StatefulWidget for InputDateRangePicker {
             state: StateData::new(),
             start_controller: None,
             end_controller: None,
-            start_date: self
-                .initial_start_date
-                .map(|date| self.calendar_delegate.date_only(&date)),
-            end_date: self
-                .initial_end_date
-                .map(|date| self.calendar_delegate.date_only(&date)),
+            // Dart's initializers, which `init_state` runs with the `App`.
+            start_date: None,
+            end_date: None,
             start_error_text: None,
             end_error_text: None,
             auto_selected: false,
@@ -4143,7 +4159,7 @@ impl InputDateRangePickerState {
         let localizations = <dyn MaterialLocalizations>::of(app, context);
         self.widget(app)
             .calendar_delegate
-            .parse_compact_date(Some(text), &*localizations)
+            .parse_compact_date(app, Some(text), &*localizations)
     }
 
     fn validate_date(self: Handle<Self>, app: &mut App, date: Option<DateTime>) -> Option<String> {
@@ -4240,9 +4256,19 @@ impl State for InputDateRangePickerState {
     waft_widgets::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
+        let (start_date, end_date) = {
+            let widget = self.widget(app);
+            let day = |date: DateTime| widget.calendar_delegate.date_only(app, &date);
+            (
+                widget.initial_start_date.map(day),
+                widget.initial_end_date.map(day),
+            )
+        };
         let start_controller = TextEditingController::new(app);
         let end_controller = TextEditingController::new(app);
         let state = app.get_mut(self);
+        state.start_date = start_date;
+        state.end_date = end_date;
         state.start_controller = Some(start_controller);
         state.end_controller = Some(end_controller);
     }
@@ -4368,6 +4394,7 @@ mod tests {
     use crate::elevated_button::ElevatedButton;
     use crate::icons::Icons;
     use crate::material::Material;
+    use crate::test_support::local_date;
     use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
     use crate::text_field::TextField;
     use crate::theme_data::ThemeData;
@@ -4433,10 +4460,10 @@ mod tests {
     impl DatePickerOptions {
         pub(super) fn new() -> DatePickerOptions {
             DatePickerOptions {
-                first_date: DateTime::new(2001, 1, 1),
-                last_date: DateTime::new(2031, 12, 31),
-                initial_date: Some(DateTime::new(2016, 1, 15)),
-                today: DateTime::new(2016, 1, 3),
+                first_date: local_date(2001, 1, 1),
+                last_date: local_date(2031, 12, 31),
+                initial_date: Some(local_date(2016, 1, 15)),
+                today: local_date(2016, 1, 3),
                 selectable_day_predicate: None,
                 initial_entry_mode: DatePickerEntryMode::Calendar,
                 initial_calendar_mode: DatePickerMode::Day,
@@ -4665,7 +4692,7 @@ mod tests {
             let result = prepare_date_picker(&mut tester, &DatePickerOptions::new());
             tap_text(&mut tester, "OK");
             tester.pump_and_settle();
-            assert_eq!(picked_date(&result), Some(DateTime::new(2016, 1, 15)));
+            assert_eq!(picked_date(&result), Some(local_date(2016, 1, 15)));
         });
     }
 
@@ -4742,7 +4769,7 @@ mod tests {
             tap_icon(&mut tester, &Icons::edit());
             tap_text(&mut tester, "OK");
             tester.pump_and_settle();
-            assert_eq!(picked_date(&result), Some(DateTime::new(2016, 1, 12)));
+            assert_eq!(picked_date(&result), Some(local_date(2016, 1, 12)));
         });
     }
 
@@ -4772,7 +4799,7 @@ mod tests {
             tap_text(&mut tester, "12");
             tap_text(&mut tester, "OK");
             tester.pump_and_settle();
-            assert_eq!(picked_date(&result), Some(DateTime::new(2016, 1, 12)));
+            assert_eq!(picked_date(&result), Some(local_date(2016, 1, 12)));
         });
     }
 
@@ -4786,7 +4813,7 @@ mod tests {
             tap_text(&mut tester, "12");
             tap_text(&mut tester, "OK");
             tester.pump_and_settle();
-            assert_eq!(picked_date(&result), Some(DateTime::new(2016, 1, 12)));
+            assert_eq!(picked_date(&result), Some(local_date(2016, 1, 12)));
         });
     }
 
@@ -4795,9 +4822,9 @@ mod tests {
         with_main_thread_stack(|| {
             let mut tester = tester_of_size(DEFAULT_WINDOW_SIZE);
             let mut options = DatePickerOptions::new();
-            options.initial_date = Some(DateTime::new(2017, 1, 16));
-            options.first_date = DateTime::new(2017, 1, 10);
-            options.last_date = DateTime::new(2017, 1, 20);
+            options.initial_date = Some(local_date(2017, 1, 16));
+            options.first_date = local_date(2017, 1, 10);
+            options.last_date = local_date(2017, 1, 20);
             options.selectable_day_predicate = Some(Rc::new(|day| day.day() % 2 == 0));
             let result = prepare_date_picker(&mut tester, &options);
             tap_text(&mut tester, "13"); // Odd, doesn't work.
@@ -4805,7 +4832,7 @@ mod tests {
             tap_text(&mut tester, "17"); // Odd, doesn't work.
             tap_text(&mut tester, "OK");
             tester.pump_and_settle();
-            assert_eq!(picked_date(&result), Some(DateTime::new(2017, 1, 10)));
+            assert_eq!(picked_date(&result), Some(local_date(2017, 1, 10)));
         });
     }
 
@@ -4849,7 +4876,7 @@ mod tests {
             let result = prepare_date_picker(&mut tester, &options);
             tap_text(&mut tester, "OK");
             tester.pump_and_settle();
-            assert_eq!(picked_date(&result), Some(DateTime::new(2016, 1, 15)));
+            assert_eq!(picked_date(&result), Some(local_date(2016, 1, 15)));
         });
     }
 
@@ -4864,7 +4891,7 @@ mod tests {
             tap_icon(&mut tester, &Icons::calendar_today());
             tap_text(&mut tester, "OK");
             tester.pump_and_settle();
-            assert_eq!(picked_date(&result), Some(DateTime::new(2016, 12, 25)));
+            assert_eq!(picked_date(&result), Some(local_date(2016, 12, 25)));
         });
     }
 
@@ -4878,7 +4905,7 @@ mod tests {
             enter_text(&mut tester, "12/25/2016");
             tap_text(&mut tester, "OK");
             tester.pump_and_settle();
-            assert_eq!(picked_date(&result), Some(DateTime::new(2016, 12, 25)));
+            assert_eq!(picked_date(&result), Some(local_date(2016, 12, 25)));
         });
     }
 
@@ -4982,8 +5009,8 @@ mod tests {
 
     pub(super) fn range(start: (i32, i32, i32), end: (i32, i32, i32)) -> DateTimeRange {
         DateTimeRange::new(
-            DateTime::new(start.0, start.1, start.2),
-            DateTime::new(end.0, end.1, end.2),
+            local_date(start.0, start.1, start.2),
+            local_date(end.0, end.1, end.2),
         )
     }
 
@@ -5112,6 +5139,7 @@ mod tests {
         //! date_picker_test.dart: the dialog's properties, its routes and barrier, its layout, the
         //! selection of days, months and years, the keyboard navigation and the calendar delegates.
 
+        use crate::test_support::local_date;
         use std::cell::Cell;
         use std::rc::Rc;
 
@@ -5185,9 +5213,9 @@ mod tests {
             /// lastDate: DateTime(2030), ...)`.
             fn show(&self, app: &mut App, context: BuildContext) -> CompleterFuture<RouteResult> {
                 let (initial_date, first_date, last_date) = self.dates.unwrap_or((
-                    DateTime::now(),
-                    DateTime::new(2018, 1, 1),
-                    DateTime::new(2030, 1, 1),
+                    DateTime::now(app),
+                    DateTime::new(app, 2018, 1, 1),
+                    DateTime::new(app, 2030, 1, 1),
                 ));
                 let future = show_date_picker(
                     app,
@@ -5922,7 +5950,7 @@ mod tests {
                     tap_previous_month(tester);
                     tap_text(tester, "25");
                 });
-                assert_eq!(date, Some(DateTime::new(2015, 12, 25)));
+                assert_eq!(date, Some(local_date(2015, 12, 25)));
             });
         }
 
@@ -5948,7 +5976,7 @@ mod tests {
                     tap_previous_month(tester);
                     tap_text(tester, "25");
                 });
-                assert_eq!(date, Some(DateTime::new(2015, 12, 25)));
+                assert_eq!(date, Some(local_date(2015, 12, 25)));
             });
         }
 
@@ -5971,7 +5999,7 @@ mod tests {
         fn selecting_date_does_not_change_displayed_month() {
             with_main_thread_stack(|| {
                 let mut options = DatePickerOptions::new();
-                options.initial_date = Some(DateTime::new(2020, 3, 15));
+                options.initial_date = Some(local_date(2020, 3, 15));
                 prepared(&options, |tester| {
                     tap_next_month(tester);
                     assert_eq!(count_text(tester, "April 2020"), 1);
@@ -5993,7 +6021,7 @@ mod tests {
                     tap_text(tester, "2018");
                     pump_zero(tester);
                 });
-                assert_eq!(date, Some(DateTime::new(2018, 1, 15)));
+                assert_eq!(date, Some(local_date(2018, 1, 15)));
             });
         }
 
@@ -6022,7 +6050,7 @@ mod tests {
                     pump_zero(tester);
                     tap_text(tester, "19");
                 });
-                assert_eq!(date, Some(DateTime::new(2017, 1, 19)));
+                assert_eq!(date, Some(local_date(2017, 1, 19)));
             });
         }
 
@@ -6041,7 +6069,7 @@ mod tests {
         fn cannot_select_a_day_outside_bounds() {
             with_main_thread_stack(|| {
                 let mut options = DatePickerOptions::new();
-                let initial = DateTime::new(2017, 1, 15);
+                let initial = local_date(2017, 1, 15);
                 options.initial_date = Some(initial);
                 options.first_date = initial;
                 options.last_date = initial;
@@ -6060,9 +6088,9 @@ mod tests {
         fn cannot_select_a_month_past_last_date() {
             with_main_thread_stack(|| {
                 let mut options = DatePickerOptions::new();
-                options.initial_date = Some(DateTime::new(2017, 1, 15));
-                options.first_date = DateTime::new(2017, 1, 15);
-                options.last_date = DateTime::new(2017, 2, 20);
+                options.initial_date = Some(local_date(2017, 1, 15));
+                options.first_date = local_date(2017, 1, 15);
+                options.last_date = local_date(2017, 2, 20);
                 prepared(&options, |tester| {
                     tap_next_month(tester);
                     // Shouldn't be possible to keep going into March.
@@ -6075,9 +6103,9 @@ mod tests {
         fn cannot_select_a_month_before_first_date() {
             with_main_thread_stack(|| {
                 let mut options = DatePickerOptions::new();
-                options.initial_date = Some(DateTime::new(2017, 1, 15));
-                options.first_date = DateTime::new(2016, 12, 10);
-                options.last_date = DateTime::new(2017, 1, 15);
+                options.initial_date = Some(local_date(2017, 1, 15));
+                options.first_date = local_date(2016, 12, 10);
+                options.last_date = local_date(2017, 1, 15);
                 prepared(&options, |tester| {
                     tap_previous_month(tester);
                     // Shouldn't be possible to keep going into November.
@@ -6090,16 +6118,16 @@ mod tests {
         fn cannot_select_disabled_year() {
             with_main_thread_stack(|| {
                 let mut options = DatePickerOptions::new();
-                options.initial_date = Some(DateTime::new(2018, 7, 4));
-                options.first_date = DateTime::new(2018, 6, 9);
-                options.last_date = DateTime::new(2018, 12, 15);
+                options.initial_date = Some(local_date(2018, 7, 4));
+                options.first_date = local_date(2018, 6, 9);
+                options.last_date = local_date(2018, 12, 15);
                 let date = pick(options, |tester| {
                     tap_text(tester, "July 2018"); // Switch to year mode.
                     tester.pump_and_settle();
                     tap_text(tester, "2016"); // Disabled, doesn't change the year.
                     tester.pump_and_settle();
                 });
-                assert_eq!(date, Some(DateTime::new(2018, 7, 4)));
+                assert_eq!(date, Some(local_date(2018, 7, 4)));
             });
         }
 
@@ -6107,9 +6135,9 @@ mod tests {
         fn selecting_first_date_year_respects_first_date() {
             with_main_thread_stack(|| {
                 let mut options = DatePickerOptions::new();
-                options.initial_date = Some(DateTime::new(2018, 5, 4));
-                options.first_date = DateTime::new(2016, 6, 9);
-                options.last_date = DateTime::new(2019, 1, 15);
+                options.initial_date = Some(local_date(2018, 5, 4));
+                options.first_date = local_date(2016, 6, 9);
+                options.last_date = local_date(2019, 1, 15);
                 prepared(&options, |tester| {
                     tap_text(tester, "May 2018");
                     tester.pump_and_settle();
@@ -6125,9 +6153,9 @@ mod tests {
         fn selecting_last_date_year_respects_last_date() {
             with_main_thread_stack(|| {
                 let mut options = DatePickerOptions::new();
-                options.initial_date = Some(DateTime::new(2018, 5, 4));
-                options.first_date = DateTime::new(2016, 6, 9);
-                options.last_date = DateTime::new(2019, 1, 15);
+                options.initial_date = Some(local_date(2018, 5, 4));
+                options.first_date = local_date(2016, 6, 9);
+                options.last_date = local_date(2019, 1, 15);
                 prepared(&options, |tester| {
                     tap_text(tester, "May 2018");
                     tester.pump_and_settle();
@@ -6143,7 +6171,7 @@ mod tests {
         fn can_select_initial_calendar_picker_mode() {
             with_main_thread_stack(|| {
                 let mut options = DatePickerOptions::new();
-                options.initial_date = Some(DateTime::new(2014, 1, 15));
+                options.initial_date = Some(local_date(2014, 1, 15));
                 options.initial_calendar_mode = DatePickerMode::Year;
                 prepared(&options, |tester| {
                     pump_zero(tester);
@@ -6240,7 +6268,7 @@ mod tests {
             with_main_thread_stack(|| {
                 let mut tester = tester_of_size(DEFAULT_WINDOW_SIZE);
                 let mut options = DatePickerOptions::new();
-                options.today = DateTime::new(2016, 1, 2);
+                options.today = local_date(2016, 1, 2);
                 prepare_date_picker(&mut tester, &options);
                 pump_zero(&mut tester);
                 let today_color = waft_embedder::Color::new(0xff2196f3); // default primary color
@@ -6424,7 +6452,7 @@ mod tests {
         fn selecting_date_does_not_switch_picker_to_year_selection() {
             with_main_thread_stack(|| {
                 let mut options = DatePickerOptions::new();
-                options.initial_date = Some(DateTime::new(2020, 5, 10));
+                options.initial_date = Some(local_date(2020, 5, 10));
                 options.initial_calendar_mode = DatePickerMode::Year;
                 prepared(&options, |tester| {
                     pump_zero(tester);
@@ -6448,8 +6476,8 @@ mod tests {
         }
 
         fn layout_dialog() -> DatePickerDialog {
-            DatePickerDialog::new(DateTime::new(2001, 1, 1), DateTime::new(2031, 12, 31))
-                .initial_date(DateTime::new(2016, 1, 15))
+            DatePickerDialog::new(local_date(2001, 1, 1), local_date(2031, 12, 31))
+                .initial_date(local_date(2016, 1, 15))
         }
 
         /// Dart's `tester.view.physicalSize = size` at the default pixel ratio of 3.
@@ -6712,12 +6740,12 @@ mod tests {
         }
 
         impl CalendarDelegate for TestDelegate {
-            fn now(&self) -> DateTime {
-                GregorianCalendarDelegate.now()
+            fn now(&self, app: &App) -> DateTime {
+                GregorianCalendarDelegate.now(app)
             }
 
-            fn date_only(&self, date: &DateTime) -> DateTime {
-                GregorianCalendarDelegate.date_only(date)
+            fn date_only(&self, app: &App, date: &DateTime) -> DateTime {
+                GregorianCalendarDelegate.date_only(app, date)
             }
 
             fn month_delta(&self, start_date: &DateTime, end_date: &DateTime) -> i32 {
@@ -6726,14 +6754,15 @@ mod tests {
 
             fn add_months_to_month_date(
                 &self,
+                app: &App,
                 month_date: &DateTime,
                 months_to_add: i32,
             ) -> DateTime {
-                GregorianCalendarDelegate.add_months_to_month_date(month_date, months_to_add)
+                GregorianCalendarDelegate.add_months_to_month_date(app, month_date, months_to_add)
             }
 
-            fn add_days_to_date(&self, date: &DateTime, days: i32) -> DateTime {
-                GregorianCalendarDelegate.add_days_to_date(date, days)
+            fn add_days_to_date(&self, app: &App, date: &DateTime, days: i32) -> DateTime {
+                GregorianCalendarDelegate.add_days_to_date(app, date, days)
             }
 
             fn first_day_offset(
@@ -6765,12 +6794,12 @@ mod tests {
                 }
             }
 
-            fn get_month(&self, year: i32, month: i32) -> DateTime {
-                GregorianCalendarDelegate.get_month(year, month)
+            fn get_month(&self, app: &App, year: i32, month: i32) -> DateTime {
+                GregorianCalendarDelegate.get_month(app, year, month)
             }
 
-            fn get_day(&self, year: i32, month: i32, day: i32) -> DateTime {
-                GregorianCalendarDelegate.get_day(year, month, day)
+            fn get_day(&self, app: &App, year: i32, month: i32, day: i32) -> DateTime {
+                GregorianCalendarDelegate.get_day(app, year, month, day)
             }
 
             fn format_month_year(
@@ -6830,19 +6859,22 @@ mod tests {
 
             fn parse_compact_date(
                 &self,
+                app: &App,
                 input_string: Option<&str>,
                 localizations: &dyn MaterialLocalizations,
             ) -> Option<DateTime> {
                 match self {
-                    TestDelegate::Calendar => {
-                        GregorianCalendarDelegate.parse_compact_date(input_string, localizations)
-                    }
+                    TestDelegate::Calendar => GregorianCalendarDelegate.parse_compact_date(
+                        app,
+                        input_string,
+                        localizations,
+                    ),
                     TestDelegate::DateInput => {
                         let input = input_string.filter(|input| input.len() == 8)?;
                         let year: i32 = input.get(0..4)?.parse().ok()?;
                         let month: i32 = input.get(4..6)?.parse().ok()?;
                         let day: i32 = input.get(6..8)?.parse().ok()?;
-                        let date = DateTime::new(year, month, day);
+                        let date = DateTime::new(app, year, month, day);
                         (date.year() == year && date.month() == month && date.day() == day)
                             .then_some(date)
                     }
@@ -6965,7 +6997,7 @@ mod tests {
                 tester.pump_and_settle();
 
                 // Should have selected Jan 18
-                assert_eq!(picked_date(&result), Some(DateTime::new(2016, 1, 18)));
+                assert_eq!(picked_date(&result), Some(local_date(2016, 1, 18)));
             });
         }
 
@@ -7004,7 +7036,7 @@ mod tests {
                 space(&mut tester);
                 tester.pump_and_settle();
 
-                assert_eq!(picked_date(&result), Some(DateTime::new(2015, 11, 26)));
+                assert_eq!(picked_date(&result), Some(local_date(2015, 11, 26)));
             });
         }
 
@@ -7045,15 +7077,15 @@ mod tests {
                 space(&mut tester);
                 tester.pump_and_settle();
 
-                assert_eq!(picked_date(&result), Some(DateTime::new(2016, 1, 19)));
+                assert_eq!(picked_date(&result), Some(local_date(2016, 1, 19)));
             });
         }
 
         fn input_group_options() -> DatePickerOptions {
             let mut options = DatePickerOptions::new();
-            options.first_date = DateTime::new(2015, 1, 1);
-            options.last_date = DateTime::new(2017, 12, 31);
-            options.initial_date = Some(DateTime::new(2016, 1, 15));
+            options.first_date = local_date(2015, 1, 1);
+            options.last_date = local_date(2017, 12, 31);
+            options.initial_date = Some(local_date(2016, 1, 15));
             options.initial_entry_mode = DatePickerEntryMode::Input;
             options
         }
@@ -7189,7 +7221,7 @@ mod tests {
                     tester.pump_and_settle();
                     assert_eq!(
                         picked_date(&result),
-                        Some(DateTime::new(2016, 1, 15)),
+                        Some(local_date(2016, 1, 15)),
                         "{size:?}"
                     );
                 }
@@ -7222,8 +7254,8 @@ mod tests {
                     theme,
                     Center::new()
                         .child(SizedBox::shrink().child(DatePickerDialog::new(
-                            DateTime::new(2001, 1, 1),
-                            DateTime::new(2031, 12, 31),
+                            local_date(2001, 1, 1),
+                            local_date(2031, 12, 31),
                         )))
                         .into_widget(),
                 ));
@@ -7276,9 +7308,9 @@ mod tests {
             show.initial_entry_mode = DatePickerEntryMode::Input;
             show.calendar_delegate = Rc::new(TestDelegate::DateInput);
             show.dates = Some((
-                DateTime::new(2016, 1, 15),
-                DateTime::new(2001, 1, 1),
-                DateTime::new(2031, 12, 31),
+                local_date(2016, 1, 15),
+                local_date(2001, 1, 1),
+                local_date(2031, 12, 31),
             ));
             show.result = Some(Rc::clone(&result));
             open_app(tester, false, "Open", show);
@@ -7299,7 +7331,7 @@ mod tests {
                 tap_text(&mut tester, "OK");
                 tester.pump_and_settle();
 
-                assert_eq!(picked_date(&result), Some(DateTime::new(2024, 6, 20)));
+                assert_eq!(picked_date(&result), Some(local_date(2024, 6, 20)));
             });
         }
 
@@ -7337,6 +7369,7 @@ mod tests {
         //! of a range, the validation of typed dates, the keyboard navigation and the calendar
         //! delegates.
 
+        use crate::test_support::local_date;
         use std::rc::Rc;
 
         use waft_embedder::{Size, TargetPlatform};
@@ -7397,8 +7430,8 @@ mod tests {
         impl Prepare {
             fn new() -> Prepare {
                 Prepare {
-                    first_date: DateTime::new(2015, 1, 1),
-                    last_date: DateTime::new(2016, 12, 31),
+                    first_date: local_date(2015, 1, 1),
+                    last_date: local_date(2016, 12, 31),
                     current_date: None,
                     initial_date_range: Some(range((2016, 1, 15), (2016, 1, 25))),
                     initial_entry_mode: DatePickerEntryMode::Calendar,
@@ -7425,8 +7458,8 @@ mod tests {
             /// The `setUp` of the 'Input mode' groups.
             fn input_mode() -> Prepare {
                 let mut prepare = Prepare::new();
-                prepare.first_date = DateTime::new(2015, 1, 1);
-                prepare.last_date = DateTime::new(2017, 12, 31);
+                prepare.first_date = local_date(2015, 1, 1);
+                prepare.last_date = local_date(2017, 12, 31);
                 prepare.initial_date_range = Some(range((2017, 1, 15), (2017, 1, 17)));
                 prepare.initial_entry_mode = DatePickerEntryMode::Input;
                 prepare
@@ -7626,7 +7659,7 @@ mod tests {
             with_main_thread_stack(|| {
                 let mut tester = tester_of_size(default_size());
                 let mut prepare = Prepare::new();
-                prepare.current_date = Some(DateTime::new(2016, 9, 1));
+                prepare.current_date = Some(local_date(2016, 9, 1));
                 prepare.initial_date_range = None;
                 prepare_picker(&mut tester, &prepare);
                 // September and October headers should be showing, but no August
@@ -7701,8 +7734,8 @@ mod tests {
             with_main_thread_stack(|| {
                 let mut prepare = Prepare::new();
                 prepare.initial_date_range = Some(range((2017, 1, 13), (2017, 1, 15)));
-                prepare.first_date = DateTime::new(2017, 1, 12);
-                prepare.last_date = DateTime::new(2017, 1, 16);
+                prepare.first_date = local_date(2017, 1, 12);
+                prepare.last_date = local_date(2017, 1, 16);
                 let result = pick_range(
                     &prepare,
                     default_size(),
@@ -7743,8 +7776,8 @@ mod tests {
             with_main_thread_stack(|| {
                 let mut prepare = Prepare::new();
                 prepare.initial_date_range = Some(range((2017, 1, 13), (2017, 1, 14)));
-                prepare.first_date = DateTime::new(2017, 1, 12);
-                prepare.last_date = DateTime::new(2017, 1, 16);
+                prepare.first_date = local_date(2017, 1, 12);
+                prepare.last_date = local_date(2017, 1, 16);
                 prepare.selectable_day_predicate = Some(Rc::new(|day, _, _| day.day() != 15));
                 let result = pick_range(
                     &prepare,
@@ -7794,14 +7827,14 @@ mod tests {
                 let mut tester = tester_of_size(default_size());
                 let mut prepare = Prepare::new();
                 prepare.initial_date_range = Some(range((2017, 1, 13), (2017, 1, 15)));
-                prepare.first_date = DateTime::new(2017, 1, 12);
-                prepare.last_date = DateTime::new(2017, 1, 16);
+                prepare.first_date = local_date(2017, 1, 12);
+                prepare.last_date = local_date(2017, 1, 16);
                 let calls = Rc::new(std::cell::Cell::new(0));
                 prepare.selectable_day_predicate = Some({
                     let calls = Rc::clone(&calls);
                     Rc::new(move |_day, selected_start_date, selected_end_date| {
-                        assert_eq!(selected_start_date, Some(DateTime::new(2017, 1, 13)));
-                        assert_eq!(selected_end_date, Some(DateTime::new(2017, 1, 15)));
+                        assert_eq!(selected_start_date, Some(local_date(2017, 1, 13)));
+                        assert_eq!(selected_end_date, Some(local_date(2017, 1, 15)));
                         calls.set(calls.get() + 1);
                         true
                     })
@@ -8590,7 +8623,7 @@ mod tests {
                 let tester = toggled_calendar_texts(
                     |prepare| {
                         prepare.selectable_day_predicate =
-                            Some(Rc::new(|day, _, _| day != DateTime::new(2016, 12, 24)));
+                            Some(Rc::new(|day, _, _| day != local_date(2016, 12, 24)));
                     },
                     "12/24/2016",
                     "12/25/2016",
@@ -8617,7 +8650,7 @@ mod tests {
                 let tester = toggled_calendar_texts(
                     |prepare| {
                         prepare.selectable_day_predicate =
-                            Some(Rc::new(|day, _, _| day != DateTime::new(2016, 12, 25)));
+                            Some(Rc::new(|day, _, _| day != local_date(2016, 12, 25)));
                     },
                     "12/24/2016",
                     "12/25/2016",
@@ -8643,8 +8676,8 @@ mod tests {
                 let show_ok_cancel_dialog =
                     |tester: &mut WidgetTester, text_direction: TextDirection| {
                         let mut prepare = Prepare::new();
-                        prepare.first_date = DateTime::new(2001, 1, 1);
-                        prepare.last_date = DateTime::new(2031, 12, 31);
+                        prepare.first_date = local_date(2001, 1, 1);
+                        prepare.last_date = local_date(2031, 12, 31);
                         prepare.initial_date_range = None;
                         prepare.text_direction = text_direction;
                         prepare_picker(tester, &prepare);
@@ -8884,8 +8917,8 @@ mod tests {
         fn haptic_prepare() -> Prepare {
             let mut prepare = Prepare::new();
             prepare.initial_date_range = Some(range((2017, 1, 15), (2017, 1, 17)));
-            prepare.first_date = DateTime::new(2017, 1, 10);
-            prepare.last_date = DateTime::new(2018, 1, 20);
+            prepare.first_date = local_date(2017, 1, 10);
+            prepare.last_date = local_date(2018, 1, 20);
             prepare
         }
 
@@ -8986,8 +9019,8 @@ mod tests {
         ) {
             let mut prepare = Prepare::new();
             prepare.use_material3 = use_material3;
-            prepare.first_date = DateTime::new(2020, 1, 1);
-            prepare.last_date = DateTime::new(2030, 1, 1);
+            prepare.first_date = local_date(2020, 1, 1);
+            prepare.last_date = local_date(2030, 1, 1);
             prepare.initial_date_range = None;
             prepare.initial_entry_mode = initial_entry_mode;
             prepare.cancel_text = Some("CANCEL".to_string());
@@ -9148,7 +9181,7 @@ mod tests {
         }
 
         fn dialog_first_last() -> (DateTime, DateTime) {
-            (DateTime::new(2015, 1, 1), DateTime::new(2016, 12, 31))
+            (local_date(2015, 1, 1), local_date(2016, 12, 31))
         }
 
         #[test]
@@ -9246,7 +9279,7 @@ mod tests {
                                 )
                                 .child(
                                     DateRangePickerDialog::new(first_date, last_date)
-                                        .with_current_date(DateTime::new(2016, 1, 30))
+                                        .with_current_date(local_date(2016, 1, 30))
                                         .initial_entry_mode(DatePickerEntryMode::InputOnly),
                                 ),
                         )
@@ -9306,8 +9339,8 @@ mod tests {
                         .build(&app)
                 };
                 let mut prepare = Prepare::new();
-                prepare.first_date = DateTime::new(2023, 1, 1);
-                prepare.last_date = DateTime::new(2024, 1, 1);
+                prepare.first_date = local_date(2023, 1, 1);
+                prepare.last_date = local_date(2024, 1, 1);
                 prepare.initial_date_range = Some(range((2023, 1, 15), (2023, 1, 20)));
                 let launcher = Material::new()
                     .child(Builder::new(move |_app, context| {

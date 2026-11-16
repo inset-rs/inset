@@ -575,6 +575,17 @@ Ported against: 34b89b2086d4
 - Change: `CalendarDelegate` and `DateTimeRange` have no type parameter: their dates are `waft_foundation::DateTime`.
   Reason: language — Rust has no subclasses of `DateTime`, which Dart's `CalendarDelegate<T extends DateTime>` ranges over.
   Affect: a non-Gregorian calendar maps its dates onto `DateTime`, and a delegate is held as an `Rc<dyn CalendarDelegate>`.
+- Change: what makes a local date takes the `App`: `CalendarDelegate`'s `now`, `date_only`, `dates_only`, `add_months_to_month_date`, `add_days_to_date`, `get_month`, `get_day`, `format_year` and `parse_compact_date`, `DateUtils`' `date_only`, `dates_only`, `add_months_to_month_date` and `add_days_to_date`, `MaterialLocalizations::parse_compact_date` and `TimeOfDay::now`.
+  Reason: language — a local `DateTime` is made with the `App`, whose platform gives the zone (waft-foundation's `date_time.rs`).
+  Affect: a delegate of an app's own takes the app in these methods and passes it on.
+
+## calendar_date_picker.rs, date_picker.rs, input_date_picker_form_field.rs → calendar_date_picker.dart, date_picker.dart, input_date_picker_form_field.dart
+- Change: `CalendarDatePicker`, `InputDatePickerFormField`, `DatePickerDialog`, `DateRangePickerDialog` and `InputDateRangePicker` keep the dates they are given and truncate them to their day where they read them with the `App` (`effective_initial_date(app)` and its siblings, `DateRangePickerDialog::current_date(app)`), where Dart's constructors truncate them; `DatePickerDialog::current_date` is `None` for the delegate's `now`.
+  Reason: language — truncating makes a local `DateTime`, which needs the `App`, and a widget's constructor and setters have none.
+  Affect: a public date field reads the date as given, with its time of day.
+- Change: the constructor asserts on the dates compare their days, and the one that the initial day satisfies `selectableDayPredicate` runs in the picker's `init_state` and `did_update_widget`.
+  Reason: language — `into_widget`, where the constructor asserts run, has no `App` to make the day the predicate takes.
+  Affect: an initial date the predicate rejects panics when the picker is mounted or rebuilt with it, not where it is handed to the tree.
 
 ## calendar_date_picker.rs → calendar_date_picker.dart
 - Change: `YearPicker::new` has no `initial_date`, Dart's deprecated parameter that has no effect.

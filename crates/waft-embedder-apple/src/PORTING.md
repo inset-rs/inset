@@ -2,6 +2,10 @@
 
 Embedder implementation references: Flutter's C++ engine under `flutter/engine/src/flutter`, and the Flutter plugins named below.
 
+## Identical
+
+- local_time.rs → the Dart VM's `os_macos.cc` (`OS::GetTimeZoneOffsetInSeconds`, `OS::GetTimeZoneName`), which `DateTime`'s natives call
+
 ## composition/ → the macOS and iOS embedders' platform views (`FlutterSurfaceManager`, `FlutterMutatorView`, `FlutterPlatformViewsController`)
 
 - Change: each composition layer is a Core Animation layer beneath the framework's layer, showing its producer's buffer directly, on macOS and iOS alike.

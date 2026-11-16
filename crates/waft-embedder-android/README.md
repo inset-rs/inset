@@ -2,6 +2,10 @@
 
 Waft's Android host: `NativeActivity` with Waft's own glue, the app's loop on a thread of its own, and each activity's window as a view of the app. It takes an app's entry, `android_main`, which `#[waft::main]` writes, and Android 12 (API 31) or later. It provides `AndroidPlatform`, Waft's `Platform` on Android; `src/lib.rs` says how the host is built. `waft-embedder-default` uses it, and `cargo waft` packages it.
 
+## Local time
+
+`Platform::time_zone_offset` and `time_zone_name` are the C library's `localtime_r` after `tzset`, asked on every call (`src/local_time.rs`), so a zone the user changes shows in the next date the app makes.
+
 ## Cameras
 
 `Platform::cameras` is the NDK's own camera API, `ACameraManager` and `ACameraDevice`, with no Java but the permission's question (`src/media/`); `Platform::video_frame_readers` the readers a camera's frames go to.

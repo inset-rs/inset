@@ -3,12 +3,13 @@
 //! The calendar arithmetic the date pickers share: [`DateUtils`], the [`CalendarDelegate`] a
 //! picker asks for dates, and the two modes and the range value the pickers pass around. Dates
 //! are local [`DateTime`](waft_foundation::DateTime)s, as Dart's `DateTime(year, month, day)`
-//! makes them, so a "day" here is a calendar day in the local time zone.
+//! makes them, so a "day" here is a calendar day in the local time zone, and what makes one takes
+//! the [`App`] whose platform gives the zone.
 
 use std::fmt;
 use std::time::Duration;
 
-use waft_foundation::DateTime;
+use waft_foundation::{App, DateTime};
 use waft_services::TextInputFormatterRef;
 
 use crate::material_localizations::MaterialLocalizations;
@@ -21,14 +22,17 @@ use crate::material_localizations::MaterialLocalizations;
 /// values; a non-Gregorian calendar maps its dates onto them.
 pub trait CalendarDelegate: fmt::Debug {
     /// Returns a [`DateTime`] representing the current moment.
-    fn now(&self) -> DateTime;
+    fn now(&self, app: &App) -> DateTime;
 
     /// Returns a [`DateTime`] with the date of the original, but time set to midnight.
-    fn date_only(&self, date: &DateTime) -> DateTime;
+    fn date_only(&self, app: &App, date: &DateTime) -> DateTime;
 
     /// Returns a [`DateTimeRange`] with the dates of the original, but times set to midnight.
-    fn dates_only(&self, range: &DateTimeRange) -> DateTimeRange {
-        DateTimeRange::new(self.date_only(&range.start), self.date_only(&range.end))
+    fn dates_only(&self, app: &App, range: &DateTimeRange) -> DateTimeRange {
+        DateTimeRange::new(
+            self.date_only(app, &range.start),
+            self.date_only(app, &range.end),
+        )
     }
 
     /// Returns true if the two [`DateTime`] objects have the same day, month, and year, or are
@@ -50,10 +54,15 @@ pub trait CalendarDelegate: fmt::Debug {
 
     /// Returns a [`DateTime`] with the added number of months and the day set to 1 and time
     /// set to midnight.
-    fn add_months_to_month_date(&self, month_date: &DateTime, months_to_add: i32) -> DateTime;
+    fn add_months_to_month_date(
+        &self,
+        app: &App,
+        month_date: &DateTime,
+        months_to_add: i32,
+    ) -> DateTime;
 
     /// Returns a [`DateTime`] with the added number of days and time set to midnight.
-    fn add_days_to_date(&self, date: &DateTime, days: i32) -> DateTime;
+    fn add_days_to_date(&self, app: &App, date: &DateTime, days: i32) -> DateTime;
 
     /// Computes the offset from the first day of the week that the first day of the `month`
     /// falls on.
@@ -68,10 +77,10 @@ pub trait CalendarDelegate: fmt::Debug {
     fn get_days_in_month(&self, year: i32, month: i32) -> i32;
 
     /// Returns a [`DateTime`] with the given `year` and `month`, on the first day of the month.
-    fn get_month(&self, year: i32, month: i32) -> DateTime;
+    fn get_month(&self, app: &App, year: i32, month: i32) -> DateTime;
 
     /// Returns a [`DateTime`] with the given `year`, `month` and `day`.
-    fn get_day(&self, year: i32, month: i32, day: i32) -> DateTime;
+    fn get_day(&self, app: &App, year: i32, month: i32, day: i32) -> DateTime;
 
     /// Formats the month and the year of the given [`DateTime`].
     fn format_month_year(
@@ -81,8 +90,13 @@ pub trait CalendarDelegate: fmt::Debug {
     ) -> String;
 
     /// Formats the given `year` as a year.
-    fn format_year(&self, year: i32, localizations: &dyn MaterialLocalizations) -> String {
-        localizations.format_year(&DateTime::new(year, 1, 1))
+    fn format_year(
+        &self,
+        app: &App,
+        year: i32,
+        localizations: &dyn MaterialLocalizations,
+    ) -> String {
+        localizations.format_year(&DateTime::new(app, year, 1, 1))
     }
 
     /// Formats the given [`DateTime`] as a medium-length date.
@@ -123,6 +137,7 @@ pub trait CalendarDelegate: fmt::Debug {
     /// Parses the given input string as a compact date.
     fn parse_compact_date(
         &self,
+        app: &App,
         input_string: Option<&str>,
         localizations: &dyn MaterialLocalizations,
     ) -> Option<DateTime>;
@@ -144,24 +159,29 @@ pub trait CalendarDelegate: fmt::Debug {
 pub struct GregorianCalendarDelegate;
 
 impl CalendarDelegate for GregorianCalendarDelegate {
-    fn now(&self) -> DateTime {
-        DateTime::now()
+    fn now(&self, app: &App) -> DateTime {
+        DateTime::now(app)
     }
 
-    fn date_only(&self, date: &DateTime) -> DateTime {
-        DateUtils::date_only(date)
+    fn date_only(&self, app: &App, date: &DateTime) -> DateTime {
+        DateUtils::date_only(app, date)
     }
 
     fn month_delta(&self, start_date: &DateTime, end_date: &DateTime) -> i32 {
         DateUtils::month_delta(start_date, end_date)
     }
 
-    fn add_months_to_month_date(&self, month_date: &DateTime, months_to_add: i32) -> DateTime {
-        DateUtils::add_months_to_month_date(month_date, months_to_add)
+    fn add_months_to_month_date(
+        &self,
+        app: &App,
+        month_date: &DateTime,
+        months_to_add: i32,
+    ) -> DateTime {
+        DateUtils::add_months_to_month_date(app, month_date, months_to_add)
     }
 
-    fn add_days_to_date(&self, date: &DateTime, days: i32) -> DateTime {
-        DateUtils::add_days_to_date(date, days)
+    fn add_days_to_date(&self, app: &App, date: &DateTime, days: i32) -> DateTime {
+        DateUtils::add_days_to_date(app, date, days)
     }
 
     fn first_day_offset(
@@ -177,12 +197,12 @@ impl CalendarDelegate for GregorianCalendarDelegate {
         DateUtils::get_days_in_month(year, month)
     }
 
-    fn get_month(&self, year: i32, month: i32) -> DateTime {
-        DateTime::new(year, month, 1)
+    fn get_month(&self, app: &App, year: i32, month: i32) -> DateTime {
+        DateTime::new(app, year, month, 1)
     }
 
-    fn get_day(&self, year: i32, month: i32, day: i32) -> DateTime {
-        DateTime::new(year, month, day)
+    fn get_day(&self, app: &App, year: i32, month: i32, day: i32) -> DateTime {
+        DateTime::new(app, year, month, day)
     }
 
     fn format_month_year(
@@ -235,10 +255,11 @@ impl CalendarDelegate for GregorianCalendarDelegate {
 
     fn parse_compact_date(
         &self,
+        app: &App,
         input_string: Option<&str>,
         localizations: &dyn MaterialLocalizations,
     ) -> Option<DateTime> {
-        localizations.parse_compact_date(input_string)
+        localizations.parse_compact_date(app, input_string)
     }
 
     fn date_help_text(&self, localizations: &dyn MaterialLocalizations) -> String {
@@ -251,16 +272,19 @@ pub struct DateUtils;
 
 impl DateUtils {
     /// Returns a [`DateTime`] with the date of the original, but time set to midnight.
-    pub fn date_only(date: &DateTime) -> DateTime {
-        DateTime::new(date.year(), date.month(), date.day())
+    pub fn date_only(app: &App, date: &DateTime) -> DateTime {
+        DateTime::new(app, date.year(), date.month(), date.day())
     }
 
     /// Returns a [`DateTimeRange`] with the dates of the original, but with times set to
     /// midnight.
     ///
     /// See also: [`date_only`](Self::date_only), which does the same thing for a single date.
-    pub fn dates_only(range: &DateTimeRange) -> DateTimeRange {
-        DateTimeRange::new(Self::date_only(&range.start), Self::date_only(&range.end))
+    pub fn dates_only(app: &App, range: &DateTimeRange) -> DateTimeRange {
+        DateTimeRange::new(
+            Self::date_only(app, &range.start),
+            Self::date_only(app, &range.end),
+        )
     }
 
     /// Returns true if the two [`DateTime`] objects have the same day, month, and year, or are
@@ -280,10 +304,12 @@ impl DateUtils {
     /// For example:
     ///
     /// ```
-    /// # use waft_foundation::DateTime;
+    /// # use waft_foundation::{AppCell, DateTime};
     /// # use waft_material::DateUtils;
-    /// let date1 = DateTime::new(2019, 6, 15);
-    /// let date2 = DateTime::new(2020, 1, 15);
+    /// # let cell = AppCell::new();
+    /// # let app = cell.borrow();
+    /// let date1 = DateTime::new(&app, 2019, 6, 15);
+    /// let date2 = DateTime::new(&app, 2020, 1, 15);
     /// let difference = DateUtils::month_delta(&date1, &date2);
     /// assert_eq!(difference, 7);
     /// ```
@@ -300,21 +326,32 @@ impl DateUtils {
     /// For example:
     ///
     /// ```
-    /// # use waft_foundation::DateTime;
+    /// # use waft_foundation::{AppCell, DateTime};
     /// # use waft_material::DateUtils;
-    /// let date = DateTime::new(2019, 1, 15);
-    /// let next_month = DateUtils::add_months_to_month_date(&date, 1);
-    /// assert_eq!(next_month, DateTime::new(2019, 2, 1));
+    /// # let cell = AppCell::new();
+    /// # let app = cell.borrow();
+    /// let date = DateTime::new(&app, 2019, 1, 15);
+    /// let next_month = DateUtils::add_months_to_month_date(&app, &date, 1);
+    /// assert_eq!(next_month, DateTime::new(&app, 2019, 2, 1));
     /// ```
     ///
     /// `month_date` is assumed to already be on the first of the month.
-    pub fn add_months_to_month_date(month_date: &DateTime, months_to_add: i32) -> DateTime {
-        DateTime::new(month_date.year(), month_date.month() + months_to_add, 1)
+    pub fn add_months_to_month_date(
+        app: &App,
+        month_date: &DateTime,
+        months_to_add: i32,
+    ) -> DateTime {
+        DateTime::new(
+            app,
+            month_date.year(),
+            month_date.month() + months_to_add,
+            1,
+        )
     }
 
     /// Returns a [`DateTime`] with the added number of days and time set to midnight.
-    pub fn add_days_to_date(date: &DateTime, days: i32) -> DateTime {
-        DateTime::new(date.year(), date.month(), date.day() + days)
+    pub fn add_days_to_date(app: &App, date: &DateTime, days: i32) -> DateTime {
+        DateTime::new(app, date.year(), date.month(), date.day() + days)
     }
 
     /// Computes the offset from the first day of the week that the first day of the `month`
@@ -354,8 +391,10 @@ impl DateUtils {
         month: i32,
         localizations: &dyn MaterialLocalizations,
     ) -> i32 {
-        // 0-based day of week for the month and year, with 0 representing Monday.
-        let weekday_from_monday = DateTime::new(year, month, 1).weekday() - 1;
+        // 0-based day of week for the month and year, with 0 representing Monday. Dart reads it
+        // from the local `DateTime(year, month)`; a calendar date's weekday is the same in every
+        // zone, so the UTC date gives it without asking the platform.
+        let weekday_from_monday = DateTime::utc(year, month, 1).weekday() - 1;
 
         // 0-based start of week depending on the locale, with 0 representing Sunday.
         let first_day_of_week_index = localizations.first_day_of_week_index();
@@ -381,6 +420,14 @@ impl DateUtils {
         const DAYS_IN_MONTH: [i32; 12] = [31, -1, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
         DAYS_IN_MONTH[(month - 1) as usize]
     }
+}
+
+/// Whether `a`'s calendar day comes before `b`'s: how the pickers' constructor checks compare
+/// the days [`CalendarDelegate::date_only`] gives, which they cannot make without the [`App`]
+/// (`into_widget` has none). Local midnights are in the order of their dates, so the dates'
+/// fields order them.
+pub(crate) fn is_day_before(a: &DateTime, b: &DateTime) -> bool {
+    (a.year(), a.month(), a.day()) < (b.year(), b.month(), b.day())
 }
 
 /// Initial display mode of the date picker dialog.
@@ -463,32 +510,78 @@ impl fmt::Display for DateTimeRange {
 
 #[cfg(test)]
 mod tests {
+    use waft_foundation::AppCell;
+
     use super::*;
     use crate::material_localizations::DefaultMaterialLocalizations;
 
+    /// Not in Flutter's file: in a zone with daylight saving, a day is the local calendar day,
+    /// so the day the clocks spring forward is 23 hours long and still starts at midnight.
+    #[test]
+    fn date_utils_count_local_calendar_days_across_a_change_of_offset() {
+        use std::rc::Rc;
+        use waft_embedder::{PlatformRef, SignedDuration};
+        use waft_test::{TestPlatform, TestTimeZone};
+        /// 2026-03-29T01:00:00Z: clocks in Central Europe go from 2:00 to 3:00.
+        const SPRING_FORWARD: i64 = 1_774_746_000;
+        let central_europe = TestTimeZone::new(|seconds| {
+            if seconds >= SPRING_FORWARD {
+                (SignedDuration::from_hours(2), "CEST".to_string())
+            } else {
+                (SignedDuration::from_hours(1), "CET".to_string())
+            }
+        });
+        let platform: PlatformRef = Rc::new(TestPlatform::new().with_time_zone(central_europe));
+        let cell = AppCell::with_platform(platform);
+        let app = cell.borrow();
+
+        let late_evening = DateTime::new_with_time(&app, 2026, 3, 28, 23, 30, 0, 0, 0);
+        let day = DateUtils::date_only(&app, &late_evening);
+        assert_eq!((day.day(), day.hour()), (28, 0));
+        let next = DateUtils::add_days_to_date(&app, &day, 1);
+        let after = DateUtils::add_days_to_date(&app, &day, 2);
+        assert_eq!((next.day(), next.hour()), (29, 0));
+        assert_eq!((after.day(), after.hour()), (30, 0));
+        assert_eq!(
+            after.microseconds_since_epoch() - next.microseconds_since_epoch(),
+            23 * 60 * 60 * 1_000_000,
+            "the day the clocks go forward has 23 hours"
+        );
+        assert!(DateUtils::is_same_day(Some(&late_evening), Some(&day)));
+    }
+
     #[test]
     fn date_utils_date_only_drops_the_time() {
-        let date = DateTime::new_with_time(2019, 6, 15, 13, 45, 30, 0, 0);
-        assert_eq!(DateUtils::date_only(&date), DateTime::new(2019, 6, 15));
+        let cell = AppCell::new();
+        let app = cell.borrow();
+        let date = DateTime::new_with_time(&app, 2019, 6, 15, 13, 45, 30, 0, 0);
+        assert_eq!(
+            DateUtils::date_only(&app, &date),
+            DateTime::new(&app, 2019, 6, 15)
+        );
     }
 
     #[test]
     fn date_utils_dates_only_drops_the_times_of_a_range() {
+        let cell = AppCell::new();
+        let app = cell.borrow();
         let range = DateTimeRange::new(
-            DateTime::new_with_time(2019, 6, 15, 13, 0, 0, 0, 0),
-            DateTime::new_with_time(2019, 6, 20, 1, 0, 0, 0, 0),
+            DateTime::new_with_time(&app, 2019, 6, 15, 13, 0, 0, 0, 0),
+            DateTime::new_with_time(&app, 2019, 6, 20, 1, 0, 0, 0, 0),
         );
-        let dates = DateUtils::dates_only(&range);
-        assert_eq!(dates.start, DateTime::new(2019, 6, 15));
-        assert_eq!(dates.end, DateTime::new(2019, 6, 20));
+        let dates = DateUtils::dates_only(&app, &range);
+        assert_eq!(dates.start, DateTime::new(&app, 2019, 6, 15));
+        assert_eq!(dates.end, DateTime::new(&app, 2019, 6, 20));
     }
 
     #[test]
     fn date_utils_is_same_day_and_month_compare_the_calendar_fields() {
-        let morning = DateTime::new_with_time(2019, 6, 15, 1, 0, 0, 0, 0);
-        let evening = DateTime::new_with_time(2019, 6, 15, 23, 0, 0, 0, 0);
-        let next_day = DateTime::new(2019, 6, 16);
-        let next_year = DateTime::new(2020, 6, 15);
+        let cell = AppCell::new();
+        let app = cell.borrow();
+        let morning = DateTime::new_with_time(&app, 2019, 6, 15, 1, 0, 0, 0, 0);
+        let evening = DateTime::new_with_time(&app, 2019, 6, 15, 23, 0, 0, 0, 0);
+        let next_day = DateTime::new(&app, 2019, 6, 16);
+        let next_year = DateTime::new(&app, 2020, 6, 15);
         assert!(DateUtils::is_same_day(Some(&morning), Some(&evening)));
         assert!(!DateUtils::is_same_day(Some(&morning), Some(&next_day)));
         assert!(!DateUtils::is_same_day(Some(&morning), Some(&next_year)));
@@ -501,30 +594,34 @@ mod tests {
 
     #[test]
     fn date_utils_month_delta_counts_whole_months() {
-        let date1 = DateTime::new(2019, 6, 15);
-        let date2 = DateTime::new(2020, 1, 15);
+        let cell = AppCell::new();
+        let app = cell.borrow();
+        let date1 = DateTime::new(&app, 2019, 6, 15);
+        let date2 = DateTime::new(&app, 2020, 1, 15);
         assert_eq!(DateUtils::month_delta(&date1, &date2), 7);
         assert_eq!(DateUtils::month_delta(&date2, &date1), -7);
     }
 
     #[test]
     fn date_utils_adds_months_and_days_across_year_ends() {
-        let december = DateTime::new(2019, 12, 1);
+        let cell = AppCell::new();
+        let app = cell.borrow();
+        let december = DateTime::new(&app, 2019, 12, 1);
         assert_eq!(
-            DateUtils::add_months_to_month_date(&december, 1),
-            DateTime::new(2020, 1, 1)
+            DateUtils::add_months_to_month_date(&app, &december, 1),
+            DateTime::new(&app, 2020, 1, 1)
         );
         assert_eq!(
-            DateUtils::add_months_to_month_date(&DateTime::new(2020, 1, 1), -1),
+            DateUtils::add_months_to_month_date(&app, &DateTime::new(&app, 2020, 1, 1), -1),
             december
         );
         assert_eq!(
-            DateUtils::add_days_to_date(&DateTime::new(2019, 12, 31), 1),
-            DateTime::new(2020, 1, 1)
+            DateUtils::add_days_to_date(&app, &DateTime::new(&app, 2019, 12, 31), 1),
+            DateTime::new(&app, 2020, 1, 1)
         );
         assert_eq!(
-            DateUtils::add_days_to_date(&DateTime::new(2020, 3, 1), -1),
-            DateTime::new(2020, 2, 29)
+            DateUtils::add_days_to_date(&app, &DateTime::new(&app, 2020, 3, 1), -1),
+            DateTime::new(&app, 2020, 2, 29)
         );
     }
 
@@ -548,7 +645,12 @@ mod tests {
 
     #[test]
     fn date_time_range_has_the_duration_between_its_dates() {
-        let range = DateTimeRange::new(DateTime::new(2019, 6, 15), DateTime::new(2019, 6, 20));
+        let cell = AppCell::new();
+        let app = cell.borrow();
+        let range = DateTimeRange::new(
+            DateTime::new(&app, 2019, 6, 15),
+            DateTime::new(&app, 2019, 6, 20),
+        );
         assert_eq!(range.duration(), Duration::from_secs(5 * 24 * 60 * 60));
         assert_eq!(
             range.to_string(),
@@ -559,14 +661,27 @@ mod tests {
     #[test]
     #[should_panic]
     fn date_time_range_asserts_that_start_is_not_after_end() {
-        DateTimeRange::new(DateTime::new(2019, 6, 20), DateTime::new(2019, 6, 15));
+        let cell = AppCell::new();
+        let app = cell.borrow();
+        DateTimeRange::new(
+            DateTime::new(&app, 2019, 6, 20),
+            DateTime::new(&app, 2019, 6, 15),
+        );
     }
 
     #[test]
     fn the_gregorian_delegate_builds_months_and_days() {
+        let cell = AppCell::new();
+        let app = cell.borrow();
         let delegate = GregorianCalendarDelegate;
-        assert_eq!(delegate.get_month(2019, 3), DateTime::new(2019, 3, 1));
-        assert_eq!(delegate.get_day(2019, 3, 4), DateTime::new(2019, 3, 4));
+        assert_eq!(
+            delegate.get_month(&app, 2019, 3),
+            DateTime::new(&app, 2019, 3, 1)
+        );
+        assert_eq!(
+            delegate.get_day(&app, 2019, 3, 4),
+            DateTime::new(&app, 2019, 3, 4)
+        );
         assert_eq!(delegate.get_days_in_month(2020, 2), 29);
     }
 }

@@ -12,7 +12,7 @@ use std::ops::{Add, Neg, Sub};
 /// every `use waft::*`.
 ///
 /// ```
-/// # use waft_foundation::SignedDuration;
+/// # use waft_embedder::SignedDuration;
 /// let west = SignedDuration::from_hours(-8);
 /// assert_eq!(west.in_minutes(), -480);
 /// assert_eq!(west.to_string(), "-8:00:00.000000");

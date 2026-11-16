@@ -2,6 +2,10 @@
 
 Host implementation. Flutter analogue: the web engine under `engine/lib/web_ui`.
 
+## Identical
+
+- local_time.rs → dart2js and dart2wasm's `DateTime` zone queries over JS `Date` (`_internal/wasm/js_common/date_patch_patch.dart`)
+
 ## gpu.rs
 
 - Change: the valo context hides missing glyphs.

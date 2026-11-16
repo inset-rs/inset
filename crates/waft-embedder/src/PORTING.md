@@ -6,6 +6,7 @@ No Flutter crate in this shape. Closest analogue: dart:ui `PlatformDispatcher` /
 - key.rs → dart:ui key.dart
 - text.rs → dart:ui text.dart (the text and font enums, `FontFeature`, `FontVariation`)
 - locale.rs → dart:ui `Locale`
+- signed_duration.rs → dart:core `Duration`, as `SignedDuration` (its name has its entry in waft-foundation's `date_time.rs`)
 - `AppLifecycleState`, `AppExitResponse`, `AppExitType` in platform.rs → dart:ui `platform_dispatcher.dart`
 - painting.rs's aliases of Valo's types under dart:ui's names → dart:ui `PathFillType` (valo's `FillRule`: `NonZero`, `EvenOdd`), `StrokeCap` (valo's `Cap`), `Canvas` and `Picture`; `PaintingStyle` (valo's `PaintStyle`) has its entry under painting.rs
 - semantics.rs → lib/ui/semantics.dart (SemanticsAction, SemanticsRole, SemanticsInputType, SemanticsHitTestBehavior, SemanticsValidationResult, StringAttribute, SpellOutStringAttribute, LocaleStringAttribute)
@@ -102,6 +103,10 @@ Ported against Flutter `9c427b5d7b`.
   Affect: setting them on a `TextStyle` changes nothing on screen.
 
 ## platform.rs → dart:ui `platform_dispatcher.dart`
+
+- Change: the local time zone is the host's: `Platform::time_zone_offset` and `time_zone_name` answer the offset and name at an instant in seconds, the two natives `DateTime` calls in the Dart VM (`DateTime_timeZoneOffsetInSeconds`, `DateTime_timeZoneName`), with UTC's answers by default.
+  Reason: platform — the host is what calls the system in Waft, and there is no VM beneath dart:ui to ask it.
+  Affect: each embedder asks its system on every call (the C library's `localtime_r`, Win32, JS `Date`), a host that answers nothing reads local time as UTC, and a test chooses its zone on its `TestPlatform`.
 
 - Change: `Picture.toImageSync` is `Platform::picture_to_image_sync(picture, width, height)`, which draws the picture into an image on the host's device at once (`SnapshotDelegate`, valo's `display_list_to_image`), with no target format, and answers `None` on a host with no renderer.
   Reason: platform — a picture here is valo's display list, which holds no device, and a valo image is a texture already drawn, where Impeller's is a deferred image it rasterizes at its first draw.

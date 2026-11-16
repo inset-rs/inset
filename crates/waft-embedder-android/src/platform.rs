@@ -22,8 +22,8 @@ use waft_embedder::{
     Brightness, Clipboard, Compositor, Dispatcher, FileDialogs, FontSource, HardwareBuffer,
     HardwareBufferAllocator, ImageCodec, ImageCodecFuture, ImageDecodeError, ImageFrame,
     ImageFrameFuture, ImageRepetition, Locale, Notifications, Offset, Opener, Platform, RequestId,
-    Screen, Screens, SnapshotDelegate, SystemChrome, SystemFontSource, TargetPlatform, ViewError,
-    ViewRef, WindowConfig,
+    Screen, Screens, SignedDuration, SnapshotDelegate, SystemChrome, SystemFontSource,
+    TargetPlatform, ViewError, ViewRef, WindowConfig,
 };
 
 use crate::activity::Activity;
@@ -336,6 +336,15 @@ impl Platform for AndroidPlatform {
 
     fn locales(&self) -> Vec<Locale> {
         self.locales.borrow().clone()
+    }
+
+    /// The C library's zone, asked on every call (`local_time.rs`).
+    fn time_zone_offset(&self, seconds_since_epoch: i64) -> SignedDuration {
+        crate::local_time::time_zone_offset(seconds_since_epoch)
+    }
+
+    fn time_zone_name(&self, seconds_since_epoch: i64) -> String {
+        crate::local_time::time_zone_name(seconds_since_epoch)
     }
 
     /// The platform's fonts, as its own configuration lists them.

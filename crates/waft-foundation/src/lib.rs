@@ -14,9 +14,7 @@ mod erased;
 mod executor;
 mod handle_map;
 mod key;
-mod local_time;
 mod observer_list;
-mod signed_duration;
 mod timers;
 
 pub use app::*;
@@ -32,6 +30,5 @@ pub use executor::Task;
 pub use handle_map::DebugObject;
 pub use key::*;
 pub use observer_list::*;
-pub use signed_duration::SignedDuration;
 pub use timers::Timer;
-pub use waft_embedder::TargetPlatform;
+pub use waft_embedder::{SignedDuration, TargetPlatform};

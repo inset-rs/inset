@@ -37,10 +37,13 @@ pub enum DayPeriod {
 /// Hours are specified between 0 and 23, as in a 24-hour clock.
 ///
 /// ```
-/// # use waft_foundation::DateTime;
+/// # use waft_foundation::{AppCell, DateTime};
 /// # use waft_material::TimeOfDay;
+/// # let cell = AppCell::new();
+/// # let app = cell.borrow();
 /// let release_time = TimeOfDay::new(15, 0); // 3:00pm
-/// let room_booked = TimeOfDay::from_date_time(&DateTime::new_with_time(2018, 10, 20, 16, 30, 4, 0, 0)); // 4:30pm
+/// let booking = DateTime::new_with_time(&app, 2018, 10, 20, 16, 30, 4, 0, 0);
+/// let room_booked = TimeOfDay::from_date_time(&booking); // 4:30pm
 /// ```
 ///
 /// See also:
@@ -69,8 +72,8 @@ impl TimeOfDay {
     }
 
     /// Creates a time of day based on the current time, in the local time zone.
-    pub fn now() -> TimeOfDay {
-        TimeOfDay::from_date_time(&DateTime::now())
+    pub fn now(app: &App) -> TimeOfDay {
+        TimeOfDay::from_date_time(&DateTime::now(app))
     }
 
     /// Creates a time of day based on the given time.
@@ -529,6 +532,8 @@ mod tests {
 
     #[test]
     fn replacing_keeps_what_it_is_not_given_and_the_period_follows_the_hour() {
+        let cell = AppCell::new();
+        let app = cell.borrow();
         let time = TimeOfDay::new(9, 30);
         assert_eq!(time.replacing(Some(21), None), TimeOfDay::new(21, 30));
         assert_eq!(time.replacing(None, Some(5)), TimeOfDay::new(9, 5));
@@ -538,7 +543,9 @@ mod tests {
         assert_eq!(TimeOfDay::new(12, 0).period(), DayPeriod::Pm);
         assert_eq!(TimeOfDay::new(21, 0).period_offset(), 12);
         assert_eq!(
-            TimeOfDay::from_date_time(&DateTime::new_with_time(2018, 10, 20, 16, 30, 4, 0, 0)),
+            TimeOfDay::from_date_time(&DateTime::new_with_time(
+                &app, 2018, 10, 20, 16, 30, 4, 0, 0
+            )),
             TimeOfDay::new(16, 30)
         );
         assert_eq!(format!("{:?}", TimeOfDay::new(7, 5)), "TimeOfDay(07:05)");

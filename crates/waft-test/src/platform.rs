@@ -10,16 +10,16 @@ use waft_embedder::{
     Compositor, Dispatcher, DockMenu, FileDialogs, FontSource, Haptics, HardwareBuffer,
     HardwareBufferAllocator, Image, ImageCodecFuture, ImageDecodeError, Instant, MediaAssets,
     MenuBar, Notifications, Opener, Picture, Platform, Players, PointerReport, PopupMenus,
-    RequestId, Restoration, SystemChrome, SystemContextMenu, TargetPlatform, TextServices,
-    TrayIcons, VideoFrame, VideoFrameReaders, View, ViewEmbedder, ViewError, ViewFocusEvent,
-    ViewHost, ViewId, ViewMetrics, ViewRef, WindowConfig,
+    RequestId, Restoration, SignedDuration, SystemChrome, SystemContextMenu, TargetPlatform,
+    TextServices, TrayIcons, VideoFrame, VideoFrameReaders, View, ViewEmbedder, ViewError,
+    ViewFocusEvent, ViewHost, ViewId, ViewMetrics, ViewRef, WindowConfig,
 };
 
 use waft_embedder::image_codecs::ImageCodecs;
 use waft_embedder::valo;
 
 use crate::windows::view_of_request;
-use crate::{TestFontSource, TestView, TestWindows};
+use crate::{TestFontSource, TestTimeZone, TestView, TestWindows};
 
 type FontSourceMaker = Rc<dyn Fn() -> Box<dyn FontSource>>;
 type ImageCodecOpener = Rc<dyn Fn(Arc<[u8]>) -> ImageCodecFuture>;
@@ -43,6 +43,7 @@ pub struct TestPlatform {
     target: Cell<TargetPlatform>,
     briefly_show_password: Cell<bool>,
     brightness: Cell<Brightness>,
+    time_zone: RefCell<TestTimeZone>,
     default_route: String,
     /// The views the platform gave the app, as a phone gives its screen.
     views: RefCell<Vec<ViewRef>>,
@@ -98,6 +99,7 @@ impl TestPlatform {
             target: Cell::new(TargetPlatform::Android),
             briefly_show_password: Cell::new(true),
             brightness: Cell::new(Brightness::Light),
+            time_zone: RefCell::default(),
             default_route: "/".into(),
             views: RefCell::default(),
             test_views: Vec::new(),
@@ -395,6 +397,12 @@ impl TestPlatform {
         self
     }
 
+    /// The platform in `zone`, which is UTC unless a test says otherwise.
+    pub fn with_time_zone(self, zone: TestTimeZone) -> TestPlatform {
+        self.set_time_zone(zone);
+        self
+    }
+
     /// Changes which host the platform claims to be, for a test that switches mid-way.
     pub fn set_target(&self, target: TargetPlatform) {
         self.target.set(target);
@@ -405,6 +413,12 @@ impl TestPlatform {
     /// it needs it.
     pub fn set_briefly_show_password(&self, shown: bool) {
         self.briefly_show_password.set(shown);
+    }
+
+    /// Changes the local time zone, as the user changes the system's; a `DateTime` made after it
+    /// reads the new zone.
+    pub fn set_time_zone(&self, zone: TestTimeZone) {
+        *self.time_zone.borrow_mut() = zone;
     }
 
     /// Changes the brightness; the client hears of it as it would from a host.
@@ -510,6 +524,14 @@ impl Platform for TestPlatform {
 
     fn briefly_show_password(&self) -> bool {
         self.briefly_show_password.get()
+    }
+
+    fn time_zone_offset(&self, seconds_since_epoch: i64) -> SignedDuration {
+        self.time_zone.borrow().offset(seconds_since_epoch)
+    }
+
+    fn time_zone_name(&self, seconds_since_epoch: i64) -> String {
+        self.time_zone.borrow().name(seconds_since_epoch)
     }
 
     fn platform_brightness(&self) -> Brightness {

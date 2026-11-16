@@ -208,6 +208,10 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 - `Platform::briefly_show_password`, `platform_brightness`, `locales`, `set_application_locale`, `EmbedderClient::platform_brightness_changed`, `locales_changed`
 - Update what `Platform` answers before calling its change hook, and list the locales most preferred first; answer `briefly_show_password` as the system's setting is now, which has no change hook.
 
+**Local time zone**
+- `Platform::time_zone_offset`, `time_zone_name`, `SignedDuration`
+- Answer the offset from UTC and the zone's name at the instant given, in seconds since the epoch, as the system says them now: ask on every call and keep nothing, so a change of zone shows in the next date the app makes. Answer an instant the system cannot represent as zero and an empty name, as the Dart VM does; the defaults are UTC's, for a host with no zone.
+
 **Fonts and images**
 - `Platform::font_source`, `open_image_codec`, `import_pixels`, `import_video_frame`, `picture_to_image_sync`, `SnapshotDelegate`, `EmbedderClient::system_fonts_changed`
 - Call `system_fonts_changed` after registering faces that arrive late, and answer every decode, off the main thread, with its frames or an error; import a frame the app holds as an image with no copy, its hardware buffer imported as a texture on the device your images are drawn with, and `None` where that device cannot take the frame's memory; draw a picture the app asks for into an image on that device at once, with a `SnapshotDelegate` on your image store.

@@ -78,25 +78,21 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## date_time.rs → dart:core `DateTime`
 
-- Change: local time comes from a module inside waft-foundation with one backend per target, not from the host's `Platform`: `localtime_r` on macOS, iOS, Linux and Android, the Win32 zone calls on Windows, JS `Date` on the web, and WASI 0.3's `wasi:clocks/timezone` inside a component; a target with none of these reads local time as UTC.
-  Reason: platform — Dart's two natives sit in the runtime beneath dart:ui and `DateTime.now()` takes no context, so there is no `App` to reach a host through.
-  Affect: a host does nothing for local time, and a WASI host that does not serve `wasi:clocks/timezone` cannot instantiate a component that reads it.
+- Change: what makes a local value takes the `App` (`DateTime::now(app)`, `new(app, ..)`, `new_with_time(app, ..)`, `from_milliseconds_since_epoch(app, ..)`, `from_microseconds_since_epoch(app, ..)`, `to_local(app)`, `add(app, ..)`, `subtract(app, ..)`), and so do `time_zone_offset(app)` and `time_zone_name(app)`; its platform answers the local zone's offset and name at an instant (`Platform::time_zone_offset`, `Platform::time_zone_name`), where Dart's natives ask the VM.
+  Reason: language — Dart's `DateTime` reaches the VM's natives from anywhere, and Waft has no global to reach the host through but the `App`, as for its clock.
+  Affect: a caller that makes a local date passes the app, a test sets its zone on its `TestPlatform` and never reads the machine's, and a UTC value (`utc`, `utc_with_time`, `timestamp`, `to_utc`) needs none.
 
-- Change: a local value asks the system for its offset once, when it is made, for its fields; `time_zone_offset` and `time_zone_name` ask again on every call, as Dart's do.
-  Reason: language — Dart works its fields out lazily and keeps them in the object; a `Copy` value works them out when it is made.
-  Affect: a local value made before the zone changed keeps the old zone's fields, as Dart's does once read, while `time_zone_offset` answers the new zone's.
+- Change: a local value works its fields out in the offset its platform gave when it was made, where Dart works them out at their first read and keeps them; `time_zone_offset` and `time_zone_name` ask the platform again for the value's instant, as Dart's do.
+  Reason: language — `DateTime` is a `Copy` value that cannot reach the platform without the `App`, so it cannot work its fields out at a later read.
+  Affect: a value made before the zone changed reads the old zone's fields and answers the new zone's offset and name, as a Dart value whose fields were read before the change does.
 
 - Change: `time_zone_offset` is a `SignedDuration`, Waft's port of Dart's `Duration` where it can be negative, under its own name; everywhere else a Dart `Duration` is `std::time::Duration`.
   Reason: language — std's duration is unsigned and cannot hold a zone west of UTC, and a second type named `Duration` would shadow std's in every `use waft::*`.
-  Affect: `time_zone_offset()` reads as Dart's (`-8:00:00.000000` west of UTC), and a caller that adds it to an instant converts with its `in_microseconds`.
+  Affect: `time_zone_offset(app)` reads as Dart's (`-8:00:00.000000` west of UTC), and a caller that adds it to an instant converts with its `in_microseconds`.
 
 - Change: `DateTime`'s `Ord` orders by the instant and then puts a local value before the UTC value of the same instant; `compare_to` is Dart's `compareTo`, which answers equal for the two.
   Reason: language — Rust's `Ord` must agree with `==`, and Dart's `==` tells the two apart where its `compareTo` does not.
   Affect: sorting a local and a UTC value of one instant puts the local one first, and `<` holds between them where `compare_to` answers `Equal`.
-
-- Change: inside a WASI component, `time_zone_name` is the zone's IANA identifier, such as `Europe/Paris`; for a zone the host gives an offset but no IANA id for, the host's `to-debug-string`, shown and never parsed; and `UTC` when the host gives no zone.
-  Reason: platform — WASI 0.3's time zone interface gives an IANA id and no abbreviation.
-  Affect: a program inside WaOS reads "Europe/Paris" where the same program on macOS reads "CET".
 
 ## change_notifier.rs → change_notifier.dart
 
