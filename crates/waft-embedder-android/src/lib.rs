@@ -81,6 +81,8 @@ mod intents;
 #[cfg(any(target_os = "android", test))]
 mod lifecycle;
 #[cfg(target_os = "android")]
+mod local_time;
+#[cfg(target_os = "android")]
 mod log;
 #[cfg(target_os = "android")]
 mod loop_waker;

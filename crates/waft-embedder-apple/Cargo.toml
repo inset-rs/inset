@@ -18,6 +18,8 @@ waft-embedder.workspace = true
 valo.workspace = true
 valo-codec.workspace = true
 valo-codec-apple = { version = "0.25.0", optional = true }
+# The local time zone, from the C library's `localtime_r`.
+libc = "0.2"
 # The steps of a clip's path, handed to Core Animation as a mask.
 valo-geometry.workspace = true
 wgpu.workspace = true
@@ -65,6 +67,7 @@ pollster.workspace = true
 # Core Animation's layers, IOSurfaces, AVFoundation, Media Accessibility, Image I/O and the
 # notification center's delegate and completion handlers need `unsafe`, which the workspace
 # forbids; here it is denied instead, and `composition`, `hardware_buffers`, `gpu_interop`,
-# `media`, `image_codecs`, `caption_appearance` and `notifications` alone allow it.
+# `media`, `image_codecs`, `caption_appearance`, `notifications` and `local_time` (the C library's
+# `localtime_r`) alone allow it.
 [lints.rust]
 unsafe_code = "deny"

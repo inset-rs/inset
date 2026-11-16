@@ -6,7 +6,7 @@ What is there:
 
 - The scene lifecycle: the app starts as the launch finishes, with Flutter's implicit view and no window for it; each scene that connects shows a view in a window of its own, the implicit view in the first; a scene disconnected and connected again by its session gets its view back; the app's lifecycle state is its most forward scene's. One scene at a time for now (`UIApplicationSupportsMultipleScenes` is off), the registry shaped for more.
 - Drawing: each view draws with valo into a `CAMetalLayer` of its own, with the composition layers its scenes place beneath it, at a display link's ticks, at the screen's highest rate; a resize draws its new layout before UIKit commits it.
-- Metrics: the view's bounds and safe area in physical pixels, the docked keyboard as `view_insets`, the user's appearance and languages.
+- Metrics: the view's bounds and safe area in physical pixels, the docked keyboard as `view_insets`, the user's appearance and languages, and the local time zone (`waft-embedder-apple`'s `local_time`).
 - Input: touches and the Apple Pencil as pointers; a hardware keyboard's presses as `KeyData`, handed back to UIKit where the framework leaves them.
 - Text input: the system's keyboards, their autocorrection, suggestions and marked text, through a `UITextInput` field per connection, configured from the field's configuration as Flutter's iOS embedding configures its own.
 - The general pasteboard, document pickers, opening links and files, the files and links the app is opened with, notifications, AVFoundation's players, media assets and cameras, Image I/O's codecs, `IOSurface` buffers.

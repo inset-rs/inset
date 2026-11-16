@@ -13,8 +13,8 @@ use waft_embedder::{
     Cameras, CaptionSettings, Clipboard, CompositionLayer, Compositor, DataTransferItem, DockMenu,
     FileDialogs, HardwareBuffer, HardwareBufferAllocator, IconImage, KeyData, MediaAssets, MenuBar,
     MenuEntry, MenuId, Notifications, Offset, Opener, Placement, Players, Rect, Screen, ScreenId,
-    TargetPlatform, TitleBarAction, TrayIcons, VideoFrameReaders, ViewId, ViewPadding, VsyncWaiter,
-    WindowConfig,
+    SignedDuration, TargetPlatform, TitleBarAction, TrayIcons, VideoFrameReaders, ViewId,
+    ViewPadding, VsyncWaiter, WindowConfig,
 };
 use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopBuilder};
 use winit::icon::Icon;
@@ -64,6 +64,7 @@ pub(crate) trait OperatingSystem:
     + ApplicationLifecycle
     + ApplicationIdentity
     + StandardStreams
+    + LocalTimeZone
 {
     /// The platform the framework is told it runs on, where Flutter's `defaultTargetPlatform`
     /// bottoms out in `dart:io`'s `Platform.isAndroid` chain.
@@ -640,6 +641,20 @@ pub(crate) trait ApplicationLifecycle {
 pub(crate) trait ApplicationIdentity {
     /// Gives the process the shell's identity `settings` names, before any window shows.
     fn set_identity(_settings: &WindowsSettings) {}
+}
+
+/// The local time zone, which `Platform::time_zone_offset` and `time_zone_name` answer from, asked
+/// of the system on every call: UTC on a system with no zone to ask.
+pub(crate) trait LocalTimeZone {
+    /// The local zone's offset from UTC at `seconds_since_epoch`, positive east of UTC.
+    fn time_zone_offset(_seconds_since_epoch: i64) -> SignedDuration {
+        SignedDuration::ZERO
+    }
+
+    /// The local zone's name at `seconds_since_epoch`, as the system gives it.
+    fn time_zone_name(_seconds_since_epoch: i64) -> String {
+        "UTC".to_string()
+    }
 }
 
 pub(crate) trait StandardStreams {

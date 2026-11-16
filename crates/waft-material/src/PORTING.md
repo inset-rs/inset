@@ -575,9 +575,20 @@ Ported against: 34b89b2086d4
 - Change: `CalendarDelegate` and `DateTimeRange` have no type parameter: their dates are `waft_foundation::DateTime`.
   Reason: language — Rust has no subclasses of `DateTime`, which Dart's `CalendarDelegate<T extends DateTime>` ranges over.
   Affect: a non-Gregorian calendar maps its dates onto `DateTime`, and a delegate is held as an `Rc<dyn CalendarDelegate>`.
-- Change: "today" is `DateTime::now()`, the UTC date.
-  Reason: platform — waft-foundation's `DateTime` is UTC only, and no host gives a time zone.
-  Affect: near midnight the highlighted day follows UTC, not the local zone.
+- Change: what makes or reads a local date takes the `App`: every `CalendarDelegate` method that takes or makes a date, and `first_day_offset`; every `DateUtils` function but `get_days_in_month`; the date formatters and `parse_compact_date` of `MaterialLocalizations` and `CupertinoLocalizations::date_picker_medium_date`; `TimeOfDay::now` and `from_date_time`; `DateTimeRange::to_string`, in place of `toString`; and the `SelectableDayPredicate` and `SelectableDayForRangePredicate` a picker calls.
+  Reason: language — a local `DateTime` asks the `App`'s platform for the zone at each read (waft-foundation's `date_time.rs`), where Dart's reach the VM.
+  Affect: a delegate or a predicate of an app's own takes the app and passes it on.
+
+## calendar_date_picker.rs, date_picker.rs, input_date_picker_form_field.rs → calendar_date_picker.dart, date_picker.dart, input_date_picker_form_field.dart
+- Change: `CalendarDatePicker`, `InputDatePickerFormField`, `DatePickerDialog`, `DateRangePickerDialog` and `InputDateRangePicker` keep the dates they are given and truncate them to their day where they read them with the `App` (`effective_initial_date(app)` and its siblings, `DateRangePickerDialog::current_date(app)`), where Dart's constructors truncate them; `DatePickerDialog::current_date` is `None` for the delegate's `now`.
+  Reason: language — truncating makes a local `DateTime`, which needs the `App`, and a widget's constructor and setters have none.
+  Affect: a public date field reads the date as given, with its time of day.
+- Change: the constructor asserts on the dates of `CalendarDatePicker`, `InputDatePickerFormField` and `DatePickerDialog`, which compare their days, and the one that the initial day satisfies `selectableDayPredicate`, run in the picker's `init_state` and `did_update_widget`.
+  Reason: language — `into_widget`, where the constructor asserts run, has no `App` to read a day with.
+  Affect: dates out of order, or an initial date the predicate rejects, panic when the picker is mounted or rebuilt with them, not where they are handed to the tree.
+- Change: the `_FocusedDate` of the calendar and of the range calendar keeps its date's day, made with the delegate's `date_only` where it is built, and notifies its dependents when that day changes, where Dart's asks `calendarDelegate.isSameDay` of the two dates.
+  Reason: language — `InheritedWidget::update_should_notify` has no `App` to read the dates' days with.
+  Affect: the Gregorian delegate notifies as Dart's; a delegate of an app's own whose `is_same_day` disagrees with its `date_only` notifies as `date_only` says.
 
 ## calendar_date_picker.rs → calendar_date_picker.dart
 - Change: `YearPicker::new` has no `initial_date`, Dart's deprecated parameter that has no effect.
@@ -654,8 +665,6 @@ Ported against: 34b89b2086d4
 - button_theme.rs: `ButtonThemeData`'s methods that take a `MaterialButton` (`getBrightness`, `getTextTheme`, `getDisabledTextColor`, `getDisabledFillColor`, `getFillColor`, `getTextColor`, `getSplashColor`, `getFocusColor`, `getHoverColor`, `getHighlightColor`, the five elevation getters, `getPadding`, `getShape`, `getAnimationDuration`, `getConstraints`, `getMaterialTapTargetSize`). Trigger: material_button.dart.
 - theme_data.rs: `ThemeData(useSystemColors:)` and `_overrideWithSystemColors`. Trigger: dart:ui `SystemColor` in waft-embedder, with `floating_action_button_theme`.
 - theme_data.rs: `ThemeData`'s `hashCode` (`Hash`). Trigger: the first map or set keyed by a `ThemeData`.
-- date.rs: "today" in the local zone (`DateTime.now()` and `DateUtils.dateOnly` in local time). Trigger: local time in Waft (waft-foundation's `DateTime` is UTC only and no host gives a time zone).
-- time.rs: `TimeOfDay.now`. Trigger: local time in Waft (waft-foundation's `DateTime` is UTC only and no host gives a time zone).
 - `ColorScheme.fromImageProvider` with `_extractColorsFromImageProvider`, `_imageProviderToScaled` and `_getArgbFromAbgr`. Trigger: reading an image's pixels back (`Image.toByteData`, deferred in waft-embedder) and `Picture.toImage`.
 - `ColorScheme`'s `hashCode` (`Hash`). Trigger: the first map or set keyed by a `ColorScheme`.
 - input_decorator.rs: the `Semantics` wrappers and what feeds them (helper/error containers and live region, the counter's wrapper, the affixes' `sortKey`/`tagForChildren` with the state's `OrdinalSortKey`s and `SemanticsTag`s, the prefix/suffix icon tags, the error `hint`, `_RenderDecoration.visitChildrenForSemantics`, `_childSemanticsConfigurationDelegate`, `describeSemanticsConfiguration`, `markNeedsSemanticsUpdate` in `isFocused`, the counter's `semanticsLabel`, `copyWith(semanticsService:)`). Trigger: the next edit of input_decorator.rs for the wrappers (the semantics widgets exist); the semantics tree for the rest.

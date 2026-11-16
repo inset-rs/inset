@@ -6,6 +6,8 @@ An application depends on `waft-embedder-default`, not this crate. That crate pi
 
 Chrome or Edge with WebGPU.
 
+The local time zone is the browser's, read from JS `Date` on every call (`src/local_time.rs`), as dart2js reads it.
+
 ## Run the gallery
 
 From the repository root:

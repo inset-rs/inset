@@ -78,9 +78,17 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## date_time.rs → dart:core `DateTime`
 
-- Change: only UTC exists: `DateTime::utc(..)`, `now()` read as UTC, and epoch constructors with no `isUtc`.
-  Reason: platform — the standard library has no time zone database, and its duration is unsigned.
-  Affect: every `DateTime` reads as UTC whatever the host's zone; local time, `parse` and `difference` are absent, so a difference is a subtraction of `microseconds_since_epoch()`.
+- Change: every call that asks the local time zone takes the `App`, whose platform answers the zone's offset and name at an instant (`Platform::time_zone_offset`, `Platform::time_zone_name`) where Dart's natives ask the VM: the local constructors `new(app, ..)` and `new_with_time(app, ..)`, which probe for a wall time's instant, and every read of the fields, the offset, the zone's name and the text (`year(app)` … `microsecond(app)`, `weekday(app)`, `time_zone_offset(app)`, `time_zone_name(app)`, `to_iso8601_string(app)`, `to_string(app)` in place of `toString`, so there is no `Display`). A UTC value's reads take it too and do not ask.
+  Reason: language — Dart's `DateTime` reaches the VM's natives from anywhere, and Waft has no global to reach the host through but the `App`, as for its clock.
+  Affect: a caller that reads a date passes the app, and a test sets its zone on its `TestPlatform` and never reads the machine's; what only moves the instant (`now`, `timestamp`, `from_*_since_epoch`, `to_local`, `to_utc`, `add`, `subtract`) needs none.
+
+- Change: `time_zone_offset` is a `SignedDuration`, Waft's port of Dart's `Duration` where it can be negative, under its own name; everywhere else a Dart `Duration` is `std::time::Duration`.
+  Reason: language — std's duration is unsigned and cannot hold a zone west of UTC, and a second type named `Duration` would shadow std's in every `use waft::*`.
+  Affect: `time_zone_offset(app)` reads as Dart's (`-8:00:00.000000` west of UTC), and a caller that adds it to an instant converts with its `in_microseconds`.
+
+- Change: `DateTime`'s `Ord` orders by the instant and then puts a local value before the UTC value of the same instant; `compare_to` is Dart's `compareTo`, which answers equal for the two.
+  Reason: language — Rust's `Ord` must agree with `==`, and Dart's `==` tells the two apart where its `compareTo` does not.
+  Affect: sorting a local and a UTC value of one instant puts the local one first, and `<` holds between them where `compare_to` answers `Equal`.
 
 ## change_notifier.rs → change_notifier.dart
 
@@ -106,7 +114,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## Deferred
 
-- date_time.rs: local time, `parse` / `tryParse`, `difference`. Trigger: a host with a time zone database; a signed duration.
+- date_time.rs: `parse` / `tryParse`, `difference`. Trigger: a caller that parses a date or measures between two (`difference` would return a `SignedDuration`).
 - `ChangeNotifier.maybeDispatchObjectCreation` / `memory_allocations`. Trigger: leak tracker / devtools.
 - Diagnostics / `FlutterError` structured trees; messages are `debug_assert!` strings meanwhile. Trigger: porting diagnostics.
 - `IterableFilter`. Trigger: the first iterable-filter call site.

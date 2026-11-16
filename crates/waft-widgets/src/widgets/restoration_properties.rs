@@ -908,11 +908,11 @@ impl RestorableProperty for RestorableDateTime {
         app.get(self).default_value
     }
 
-    fn from_primitives(self: Handle<Self>, app: &mut App, data: &RestorationData) -> DateTime {
-        let _ = app;
+    fn from_primitives(self: Handle<Self>, _app: &mut App, data: &RestorationData) -> DateTime {
         DateTime::from_milliseconds_since_epoch(
             data.as_int()
                 .expect("the restoration data of a DateTime property is an int"),
+            false,
         )
     }
 
@@ -984,11 +984,11 @@ impl RestorableProperty for RestorableDateTimeN {
 
     fn from_primitives(
         self: Handle<Self>,
-        app: &mut App,
+        _app: &mut App,
         data: &RestorationData,
     ) -> Option<DateTime> {
-        let _ = app;
-        data.as_int().map(DateTime::from_milliseconds_since_epoch)
+        data.as_int()
+            .map(|milliseconds| DateTime::from_milliseconds_since_epoch(milliseconds, false))
     }
 
     fn init_with_value(self: Handle<Self>, app: &mut App, value: Option<DateTime>) {
@@ -1620,7 +1620,7 @@ mod tests {
                 bool_n: RestorableBoolN::new(app, Some(false)),
                 date_time: RestorableDateTime::new(
                     app,
-                    DateTime::from_milliseconds_since_epoch(1000),
+                    DateTime::from_milliseconds_since_epoch(1000, false),
                 ),
                 date_time_n: RestorableDateTimeN::new(app, None),
                 direction: RestorableEnum::new(app, Direction::Up, DIRECTIONS),
@@ -1805,7 +1805,7 @@ mod tests {
         assert_eq!(*properties.bool_n.value(app), Some(false));
         assert_eq!(
             *properties.date_time.value(app),
-            DateTime::from_milliseconds_since_epoch(1000)
+            DateTime::from_milliseconds_since_epoch(1000, false)
         );
         assert_eq!(*properties.date_time_n.value(app), None);
         assert_eq!(*properties.direction.value(app), Direction::Up);
@@ -1846,11 +1846,11 @@ mod tests {
         assert_eq!(*properties.bool_n.value(app), None);
         assert_eq!(
             *properties.date_time.value(app),
-            DateTime::from_milliseconds_since_epoch(2000)
+            DateTime::from_milliseconds_since_epoch(2000, false)
         );
         assert_eq!(
             *properties.date_time_n.value(app),
-            Some(DateTime::from_milliseconds_since_epoch(3000))
+            Some(DateTime::from_milliseconds_since_epoch(3000, false))
         );
         assert_eq!(*properties.direction.value(app), Direction::Down);
         assert_eq!(*properties.direction_n.value(app), Some(Direction::Up));
@@ -1870,9 +1870,8 @@ mod tests {
             properties.double_n.set_value(app, None);
             properties.string_n.set_value(app, Some("nine".to_string()));
             properties.bool_n.set_value(app, Some(true));
-            properties
-                .date_time
-                .set_value(app, DateTime::from_milliseconds_since_epoch(4000));
+            let date_time = DateTime::from_milliseconds_since_epoch(4000, false);
+            properties.date_time.set_value(app, date_time);
             properties.date_time_n.set_value(app, None);
             properties.direction.set_value(app, Direction::Up);
             properties.direction_n.set_value(app, Some(Direction::Down));

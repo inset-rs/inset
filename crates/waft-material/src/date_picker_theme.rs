@@ -1363,6 +1363,7 @@ impl DatePickerThemeDataGetters for DatePickerDefaultsM2 {
 #[cfg(test)]
 #[allow(deprecated)]
 mod tests {
+    use crate::test_support::local_date;
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -1895,7 +1896,6 @@ mod tests {
         });
     }
 
-    use waft_foundation::DateTime;
     use waft_painting::{BorderSide, CircleBorder};
     use waft_widgets::{MediaQuery, SizedBox};
 
@@ -1930,12 +1930,12 @@ mod tests {
             text_scale_factor,
             Scaffold::new().body(
                 YearPicker::new(
-                    DateTime::utc(2021, 1, 1),
-                    DateTime::utc(2030, 1, 1),
-                    Some(DateTime::utc(2025, 1, 1)),
+                    local_date(2021, 1, 1),
+                    local_date(2030, 1, 1),
+                    Some(local_date(2025, 1, 1)),
                     Rc::new(|_app, _date| {}),
                 )
-                .current_date(DateTime::utc(2025, 1, 1)),
+                .current_date(local_date(2025, 1, 1)),
             ),
         )
     }
@@ -1995,12 +1995,12 @@ mod tests {
                 theme,
                 waft_material_material_center(
                     YearPicker::new(
-                        DateTime::utc(2021, 1, 1),
-                        DateTime::utc(2030, 1, 1),
-                        Some(DateTime::utc(2025, 1, 1)),
+                        local_date(2021, 1, 1),
+                        local_date(2030, 1, 1),
+                        Some(local_date(2025, 1, 1)),
                         Rc::new(|_app, _date| {}),
                     )
-                    .current_date(DateTime::utc(2025, 1, 1)),
+                    .current_date(local_date(2025, 1, 1)),
                 ),
             ));
 
@@ -2147,18 +2147,18 @@ mod tests {
     }
 
     fn calendar_dialog() -> DatePickerDialog {
-        DatePickerDialog::new(DateTime::utc(2022, 1, 1), DateTime::utc(2024, 12, 31))
-            .initial_date(DateTime::utc(2023, 1, 25))
-            .current_date(DateTime::utc(2023, 1, 24))
+        DatePickerDialog::new(local_date(2022, 1, 1), local_date(2024, 12, 31))
+            .initial_date(local_date(2023, 1, 25))
+            .current_date(local_date(2023, 1, 24))
     }
 
     fn range_dialog() -> DateRangePickerDialog {
-        DateRangePickerDialog::new(DateTime::utc(2023, 1, 1), DateTime::utc(2023, 1, 31))
+        DateRangePickerDialog::new(local_date(2023, 1, 1), local_date(2023, 1, 31))
             .initial_date_range(DateTimeRange::new(
-                DateTime::utc(2023, 1, 17),
-                DateTime::utc(2023, 1, 20),
+                local_date(2023, 1, 17),
+                local_date(2023, 1, 20),
             ))
-            .with_current_date(DateTime::utc(2023, 1, 23))
+            .with_current_date(local_date(2023, 1, 23))
     }
 
     fn text_of(tester: &WidgetTester, text: &str) -> AnyElement {

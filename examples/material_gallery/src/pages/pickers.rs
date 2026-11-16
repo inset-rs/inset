@@ -137,10 +137,13 @@ fn date_button(
                 );
                 future.then(app, move |app, result| {
                     if let Some(date) = answer::<DateTime>(&result) {
-                        demo.set_state(app, |state| {
-                            state.date =
-                                format!("{}-{:02}-{:02}", date.year(), date.month(), date.day());
-                        });
+                        let text = format!(
+                            "{}-{:02}-{:02}",
+                            date.year(app),
+                            date.month(app),
+                            date.day(app)
+                        );
+                        demo.set_state(app, |state| state.date = text);
                     }
                 });
             })),
@@ -194,17 +197,16 @@ fn range_button(
                 );
                 future.then(app, move |app, result| {
                     if let Some(range) = answer::<DateTimeRange>(&result) {
-                        demo.set_state(app, |state| {
-                            state.range = format!(
-                                "{}-{:02}-{:02} to {}-{:02}-{:02}",
-                                range.start.year(),
-                                range.start.month(),
-                                range.start.day(),
-                                range.end.year(),
-                                range.end.month(),
-                                range.end.day()
-                            );
-                        });
+                        let text = format!(
+                            "{}-{:02}-{:02} to {}-{:02}-{:02}",
+                            range.start.year(app),
+                            range.start.month(app),
+                            range.start.day(app),
+                            range.end.year(app),
+                            range.end.month(app),
+                            range.end.day(app)
+                        );
+                        demo.set_state(app, |state| state.range = text);
                     }
                 });
             })),

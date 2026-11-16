@@ -52,15 +52,16 @@ use objc2_app_kit::{NSView, NSWindow};
 use valo_codec::Decoder;
 use waft_embedder::image_codecs::ImageCodecs;
 use waft_embedder::{
-    Cameras, CaptionSettings, HardwareBuffer, MediaAssets, Notifications, Players, TargetPlatform,
-    VideoFrameReaders,
+    Cameras, CaptionSettings, HardwareBuffer, MediaAssets, Notifications, Players, SignedDuration,
+    TargetPlatform, VideoFrameReaders,
 };
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
 
 use super::capabilities::{
-    ApplicationIdentity, GpuInterop, ImageDecoding, OperatingSystem, StandardStreams,
-    SystemImageCodecs, SystemMedia, SystemNotifications, WindowGeometry, WorkQueue,
+    ApplicationIdentity, GpuInterop, ImageDecoding, LocalTimeZone, OperatingSystem,
+    StandardStreams, SystemImageCodecs, SystemMedia, SystemNotifications, WindowGeometry,
+    WorkQueue,
 };
 use crate::notifications::NotificationActivations;
 use waft_embedder_apple::{abort_on_panic, image_io_decoders, notifications};
@@ -84,6 +85,17 @@ impl OperatingSystem for AppKit {
 impl WindowGeometry for AppKit {}
 impl StandardStreams for AppKit {}
 impl ApplicationIdentity for AppKit {}
+
+/// The C library's zone, which iOS shares.
+impl LocalTimeZone for AppKit {
+    fn time_zone_offset(seconds_since_epoch: i64) -> SignedDuration {
+        waft_embedder_apple::local_time::time_zone_offset(seconds_since_epoch)
+    }
+
+    fn time_zone_name(seconds_since_epoch: i64) -> String {
+        waft_embedder_apple::local_time::time_zone_name(seconds_since_epoch)
+    }
+}
 
 /// AVFoundation's players and cameras, and Media Accessibility's caption settings, which iOS
 /// shares.

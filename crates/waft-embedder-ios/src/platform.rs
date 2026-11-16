@@ -21,9 +21,9 @@ use waft_embedder::{
     Brightness, Cameras, CaptionSettings, Clipboard, Compositor, Dispatcher, FileDialogs,
     FontSource, HardwareBuffer, HardwareBufferAllocator, ImageCodec, ImageCodecFuture,
     ImageDecodeError, ImageFrame, ImageFrameFuture, ImageRepetition, Locale, MediaAssets,
-    Notifications, Offset, Opener, Platform, Players, RequestId, Screen, Screens, SnapshotDelegate,
-    SystemFontSource, TargetPlatform, VideoFrame, VideoFrameReaders, ViewError, ViewId, ViewRef,
-    VsyncWaiter, WindowConfig,
+    Notifications, Offset, Opener, Platform, Players, RequestId, Screen, Screens, SignedDuration,
+    SnapshotDelegate, SystemFontSource, TargetPlatform, VideoFrame, VideoFrameReaders, ViewError,
+    ViewId, ViewRef, VsyncWaiter, WindowConfig,
 };
 use waft_embedder_apple::composition::CoreAnimationCompositor;
 use waft_embedder_apple::hardware_buffers::SurfaceBufferAllocator;
@@ -245,6 +245,16 @@ impl Platform for IosPlatform {
     /// The user's languages, as the app was last told them.
     fn locales(&self) -> Vec<Locale> {
         self.locales.borrow().clone()
+    }
+
+    /// The C library's zone, asked on every call, as on macOS (`waft-embedder-apple`'s
+    /// `local_time`).
+    fn time_zone_offset(&self, seconds_since_epoch: i64) -> SignedDuration {
+        waft_embedder_apple::local_time::time_zone_offset(seconds_since_epoch)
+    }
+
+    fn time_zone_name(&self, seconds_since_epoch: i64) -> String {
+        waft_embedder_apple::local_time::time_zone_name(seconds_since_epoch)
     }
 
     /// The system's fonts, as its own configuration lists them.

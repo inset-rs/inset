@@ -4,6 +4,7 @@ Embedder implementation references: Flutter's C++ engine under `flutter/engine/s
 
 ## Identical
 
+- os/linux/local_time.rs, os/windows/local_time.rs → the Dart VM's `OS::GetTimeZoneOffsetInSeconds` and `OS::GetTimeZoneName` (`os_linux.cc`, `os_win.cc`), which `DateTime`'s natives call; macOS's is waft-embedder-apple's
 - app_exit.rs → how Flutter's desktop embedders quit for a required `System.exitApplication`, and hear the framework's reply to `System.requestAppExit`
 - lifecycle.rs, os/macos/app_lifecycle.rs → the macOS embedder's lifecycle states (`FlutterEngine`)
 - os/macos/app_delegate.rs, quitting → the macOS embedder's `FlutterAppDelegate`, which asks the framework before the app quits

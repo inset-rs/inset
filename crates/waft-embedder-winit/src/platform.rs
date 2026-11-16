@@ -23,7 +23,7 @@ use crate::main_loop::MainLoopProxy;
 use crate::menus::MenuEvents;
 use crate::notifications::NotificationActivations;
 use crate::os::capabilities::{
-    FramePresentation, GpuInterop, NativeComposition, NativeMenus, OperatingSystem,
+    FramePresentation, GpuInterop, LocalTimeZone, NativeComposition, NativeMenus, OperatingSystem,
     SystemClipboard, SystemFileDialogs, SystemImageCodecs, SystemMedia, SystemNotifications,
     SystemOpener,
 };
@@ -38,9 +38,9 @@ use waft_embedder::{
     AppExit, Brightness, Cameras, CaptionSettings, Clipboard, CompositionLayer, Compositor,
     Dispatcher, DockMenu, FileDialogs, FontSource, HardwareBuffer, HardwareBufferAllocator,
     ImageCodecFuture, Locale, MediaAssets, MenuBar, Notifications, Opener, Platform, Players,
-    PointerReport, PopupMenus, RequestId, Screens, SystemFontSource, TargetPlatform, TrayIcons,
-    VideoFrame, VideoFrameReaders, ViewEmbedder, ViewError, ViewFocusEvent, ViewHost, ViewId,
-    ViewMetrics, ViewRef, VsyncWaiter, WindowConfig,
+    PointerReport, PopupMenus, RequestId, Screens, SignedDuration, SystemFontSource,
+    TargetPlatform, TrayIcons, VideoFrame, VideoFrameReaders, ViewEmbedder, ViewError,
+    ViewFocusEvent, ViewHost, ViewId, ViewMetrics, ViewRef, VsyncWaiter, WindowConfig,
 };
 
 /// The long-lived embedder capability held by `App`.
@@ -226,6 +226,15 @@ impl Platform for WinitPlatform {
     /// The system's list, as the app was last told it (`locales.rs`).
     fn locales(&self) -> Vec<Locale> {
         self.state.locales().locales()
+    }
+
+    /// Asked of the system on every call (`os::capabilities::LocalTimeZone`).
+    fn time_zone_offset(&self, seconds_since_epoch: i64) -> SignedDuration {
+        System::time_zone_offset(seconds_since_epoch)
+    }
+
+    fn time_zone_name(&self, seconds_since_epoch: i64) -> String {
+        System::time_zone_name(seconds_since_epoch)
     }
 
     /// Drawn at the next vsync of the screen the view's window is on, and held while the window

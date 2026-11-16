@@ -5168,6 +5168,7 @@ version = "0.5.0"
 dependencies = [
  "block2",
  "dispatch2",
+ "libc",
  "objc2",
  "objc2-av-foundation",
  "objc2-core-foundation",
@@ -5289,6 +5290,7 @@ dependencies = [
  "indexmap",
  "slotmap",
  "waft-embedder",
+ "web-time",
 ]
 
 [[package]]
