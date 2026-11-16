@@ -1000,7 +1000,8 @@ mod tests {
     };
     use crate::slider_parts::{RectangularSliderTrackShape, SliderTrackShape};
     use crate::test_support::{
-        PaintCall, WidgetTester, is_same_color_as, material_app, with_main_thread_stack,
+        PaintCall, PaintInspection, WidgetTester, is_same_color_as, material_app,
+        with_main_thread_stack,
     };
     use crate::theme_data::ThemeData;
 
@@ -1278,8 +1279,6 @@ mod tests {
     #[test]
     fn slider_parameters_override_theme_properties() {
         with_main_thread_stack(|| {
-            let shadows = waft_painting::debug_disable_shadows();
-            waft_painting::set_debug_disable_shadows(false);
             const ACTIVE_TRACK_COLOR: Color = Color::new(0xffff0001);
             const INACTIVE_TRACK_COLOR: Color = Color::new(0xffff0002);
             const SECONDARY_ACTIVE_TRACK_COLOR: Color = Color::new(0xffff0003);
@@ -1328,7 +1327,6 @@ mod tests {
                 ],
             ));
             assert!(paints_circle(&tester, slider_render(&tester), THUMB_COLOR));
-            waft_painting::set_debug_disable_shadows(shadows);
         });
     }
 
@@ -1831,8 +1829,6 @@ mod tests {
     #[expect(deprecated, reason = "Dart's case calls the deprecated `withOpacity`")]
     fn slider_defaults() {
         with_main_thread_stack(|| {
-            let shadows = waft_painting::debug_disable_shadows();
-            waft_painting::set_debug_disable_shadows(false);
             let mut tester = tester_on(TargetPlatform::Android);
             let theme = ThemeData::builder().build(&tester.cell.borrow());
             let color_scheme = theme.color_scheme.clone();
@@ -1869,7 +1865,6 @@ mod tests {
                 )
             };
             expect_slider_defaults(&mut tester, &colors, &build_app);
-            waft_painting::set_debug_disable_shadows(shadows);
         });
     }
 
@@ -1878,8 +1873,6 @@ mod tests {
     #[expect(deprecated, reason = "Dart's case calls the deprecated `withOpacity`")]
     fn material2_slider_defaults() {
         with_main_thread_stack(|| {
-            let shadows = waft_painting::debug_disable_shadows();
-            waft_painting::set_debug_disable_shadows(false);
             let mut tester = tester_on(TargetPlatform::Android);
             let theme = ThemeData::builder()
                 .use_material3(false)
@@ -1945,7 +1938,6 @@ mod tests {
             tester.up(&gesture);
             // Wait for value indicator animation to finish.
             tester.pump_and_settle();
-            waft_painting::set_debug_disable_shadows(shadows);
         });
     }
 
@@ -1954,8 +1946,6 @@ mod tests {
     #[expect(deprecated, reason = "Dart's case calls the deprecated `withOpacity`")]
     fn a_slider_uses_the_right_theme_colors_for_the_right_components() {
         with_main_thread_stack(|| {
-            let shadows = waft_painting::debug_disable_shadows();
-            waft_painting::set_debug_disable_shadows(false);
             const CUSTOM_COLOR1: Color = Color::new(0xcafefeed);
             const CUSTOM_COLOR2: Color = Color::new(0xdeadbeef);
             const CUSTOM_COLOR3: Color = Color::new(0xdecaface);
@@ -2374,7 +2364,6 @@ mod tests {
                 &[PaintCall::path(slider_theme.value_indicator_color)] // indicator
             ));
             tester.up(&gesture);
-            waft_painting::set_debug_disable_shadows(shadows);
         });
     }
 
@@ -2569,8 +2558,6 @@ mod tests {
         slider: &[PaintCall],
         indicator: Color,
     ) {
-        let shadows = waft_painting::debug_disable_shadows();
-        waft_painting::set_debug_disable_shadows(false);
         let mut tester = tester_on(TargetPlatform::Android);
         let theme = theme(&tester);
         tester.pump_widget(material_app(
@@ -2610,7 +2597,6 @@ mod tests {
         // Finish gesture to release resources.
         tester.up(&gesture);
         tester.pump_and_settle();
-        waft_painting::set_debug_disable_shadows(shadows);
     }
 
     // 'Default value indicator color'.

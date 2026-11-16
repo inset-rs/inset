@@ -2248,7 +2248,7 @@ impl Layer for ClipRectLayer {
         debug_assert!(self.clip_rect(app).is_some());
         let mut enabled = true;
         if cfg!(debug_assertions) {
-            enabled = !crate::debug::debug_disable_clip_layers();
+            enabled = !crate::debug::debug_disable_clip_layers(app);
         }
         if enabled {
             let clip_rect = self
@@ -2383,7 +2383,7 @@ impl Layer for ClipRRectLayer {
         debug_assert!(self.clip_rrect(app).is_some());
         let mut enabled = true;
         if cfg!(debug_assertions) {
-            enabled = !crate::debug::debug_disable_clip_layers();
+            enabled = !crate::debug::debug_disable_clip_layers(app);
         }
         if enabled {
             let clip_rrect = self
@@ -2517,7 +2517,7 @@ impl Layer for ClipPathLayer {
         debug_assert!(app.get(self).clip_path.is_some());
         let mut enabled = true;
         if cfg!(debug_assertions) {
-            enabled = !crate::debug::debug_disable_clip_layers();
+            enabled = !crate::debug::debug_disable_clip_layers(app);
         }
         if enabled {
             let clip_path = app
@@ -2928,7 +2928,7 @@ impl Layer for OpacityLayer {
         }
 
         if cfg!(debug_assertions) {
-            enabled = enabled && !crate::debug::debug_disable_opacity_layers();
+            enabled = enabled && !crate::debug::debug_disable_opacity_layers(app);
         }
 
         let realized_alpha = self

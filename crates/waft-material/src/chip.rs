@@ -3829,7 +3829,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::circle_avatar::CircleAvatar;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{PaintCall, WidgetTester, paints_calls, with_main_thread_stack};
+    use crate::test_support::{
+        PaintCall, PaintInspection, WidgetTester, paints_calls, with_main_thread_stack,
+    };
     use crate::tooltip::tests::m3;
 
     pub(crate) fn tester() -> WidgetTester {
@@ -7387,7 +7389,8 @@ pub(crate) mod tests {
         use crate::ink_decoration::Ink;
         use crate::material::Material;
         use crate::test_support::{
-            PaintCall, WidgetTester, material_app, paints_calls, with_main_thread_stack,
+            PaintCall, PaintInspection, WidgetTester, material_app, paints_calls,
+            with_main_thread_stack,
         };
         use crate::theme_data::ThemeData;
         use crate::tooltip::tests::{m2, m3};

@@ -952,7 +952,9 @@ pub(crate) mod tests {
     };
 
     use super::*;
-    use crate::test_support::{Drawn, WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::{
+        Drawn, PaintInspection, WidgetTester, material_app, with_main_thread_stack,
+    };
     use crate::theme_data::ThemeData;
 
     pub(crate) const TOOLTIP_TEXT: &str = "TIP";

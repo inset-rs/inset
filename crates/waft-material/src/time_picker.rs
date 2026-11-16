@@ -5144,7 +5144,9 @@ pub(crate) mod tests {
     use crate::chip::tests::{center_of, size_of};
     use crate::dialog::Dialog;
     use crate::material::Material;
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::{
+        PaintInspection, WidgetTester, material_app, with_main_thread_stack,
+    };
     use crate::text_button::TextButton;
     use crate::theme_data::ThemeData;
     use crate::time::TimeOfDay;

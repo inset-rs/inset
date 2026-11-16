@@ -2208,7 +2208,7 @@ pub(crate) mod tests {
     use crate::colors::Colors;
     use crate::icons::Icons;
     use crate::material::{Material, MaterialType};
-    use crate::test_support::{Drawn, WidgetTester, with_main_thread_stack};
+    use crate::test_support::{Drawn, PaintInspection, WidgetTester, with_main_thread_stack};
     use crate::theme_data::ThemeData;
     use crate::tooltip::tests::tester;
     use std::time::Duration;

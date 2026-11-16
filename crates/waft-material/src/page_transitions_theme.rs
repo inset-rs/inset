@@ -1902,7 +1902,9 @@ mod tests {
     use crate::app::MaterialApp;
     use crate::material::Material;
     use crate::page::MaterialPageRoute;
-    use crate::test_support::{WidgetTester, material_page_app, with_main_thread_stack};
+    use crate::test_support::{
+        PaintInspection, WidgetTester, material_page_app, with_main_thread_stack,
+    };
     use crate::text_button::TextButton;
     use crate::theme_data::ThemeData;
     use waft_animation::AnyAnimation;

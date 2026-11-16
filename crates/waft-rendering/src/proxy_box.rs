@@ -19,9 +19,9 @@ use std::rc::Rc;
 use waft_animation::{AnimationRef, AnyAnimation};
 use waft_embedder::Locale;
 use waft_embedder::{
-    BlendMode, Clip, Color, FillRule, FilterQuality, ImageFilter, Matrix4, Offset, Paint,
-    PaintStyle, Path, PathBuilder, RRect, RSuperellipse, Rect, Size, Stroke, TextBaseline,
-    rrect_radii_elliptical, rsuperellipse_radii_elliptical, valo,
+    BlendMode, Clip, Color, FillRule, FilterQuality, ImageFilter, Matrix4, Offset, Paint, Path,
+    PathBuilder, RRect, RSuperellipse, Rect, Size, TextBaseline, rrect_radii_elliptical,
+    rsuperellipse_radii_elliptical, valo,
 };
 use waft_foundation::{App, Handle, Listenable, Listener, OptionRetained};
 use waft_gestures::{
@@ -33,7 +33,7 @@ use waft_gestures::{
 use waft_painting::{
     Alignment, AlignmentGeometry, BorderRadius, BorderRadiusGeometry, BoxFit, BoxPainter, BoxShape,
     ClipContext, DecorationRef, ImageConfiguration, ShapeBorderRef, TextDirection, apply_box_fit,
-    debug_disable_shadows, draw_rrect, get_as_translation,
+    draw_rrect, get_as_translation,
 };
 use waft_services::{MouseCursor, MouseCursorRef, MouseTrackerAnnotation};
 
@@ -5567,25 +5567,10 @@ impl RenderObject for RenderPhysicalModel {
         let elevation = self.elevation(app);
         let shadow_color = self.shadow_color(app);
         let color = self.color(app);
-        let mut paint_shadows = true;
-        if cfg!(debug_assertions) && debug_disable_shadows() {
-            if elevation > 0.0 {
-                draw_rrect(
-                    context.canvas(),
-                    offset_rrect,
-                    &Paint {
-                        color: shadow_color.into(),
-                        style: PaintStyle::Stroke(Stroke::new((elevation * 2.0) as f32)),
-                        ..Paint::default()
-                    },
-                );
-            }
-            paint_shadows = false;
-        }
 
         let device_pixel_ratio = device_pixel_ratio_of_view(app, self.as_object());
         let canvas = context.canvas();
-        if elevation != 0.0 && paint_shadows {
+        if elevation != 0.0 {
             let mut offset_rrect_as_path = PathBuilder::new();
             offset_rrect_as_path.rrect_radii_elliptical(
                 valo::Rect::from(offset_rrect.outer_rect()),
@@ -5870,25 +5855,10 @@ impl RenderObject for RenderPhysicalShape {
         let elevation = self.elevation(app);
         let shadow_color = self.shadow_color(app);
         let color = self.color(app);
-        let mut paint_shadows = true;
-        if cfg!(debug_assertions) && debug_disable_shadows() {
-            if elevation > 0.0 {
-                context.canvas().draw_path(
-                    offset_path.as_valo(),
-                    offset_path.fill_type,
-                    &Paint {
-                        color: shadow_color.into(),
-                        style: PaintStyle::Stroke(Stroke::new((elevation * 2.0) as f32)),
-                        ..Paint::default()
-                    },
-                );
-            }
-            paint_shadows = false;
-        }
 
         let device_pixel_ratio = device_pixel_ratio_of_view(app, self.as_object());
         let canvas = context.canvas();
-        if elevation != 0.0 && paint_shadows {
+        if elevation != 0.0 {
             #[expect(deprecated, reason = "Dart's paint reads the deprecated `Color.alpha`")]
             let transparent_occluder = color.alpha() != 0xFF;
             canvas.draw_shadow(

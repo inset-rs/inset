@@ -2801,7 +2801,9 @@ pub(crate) mod tests {
     use crate::material::Material;
     use crate::menu_anchor::MenuPanel;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::{
+        PaintInspection, WidgetTester, material_app, with_main_thread_stack,
+    };
     use crate::theme_data::ThemeData;
     use crate::tooltip::tests::{m3, tester, tester_on};
     use waft_widgets::FocusNodeLeaf;

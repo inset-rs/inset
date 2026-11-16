@@ -158,15 +158,16 @@ mod tests {
     use std::rc::Rc;
     use std::time::Duration;
 
-    use waft_embedder::{Color, FontWeight, Radius, Size, TargetPlatform};
+    use waft_embedder::{Color, FontWeight, Radius, Size};
     use waft_foundation::Listener;
     use waft_painting::{
         Alignment, AlignmentGeometry, BorderRadius, BorderSide, BorderStyle, EdgeInsetsGeometry,
         OutlinedBorderRef, RoundedRectangleBorder, ShapeBorder, StadiumBorder, TextStyle,
     };
     use waft_services::{MouseCursorRef, SystemMouseCursors};
+    use waft_widgets::testing::{WidgetTester, test_widgets};
     use waft_widgets::{
-        Align, AnyElement, Builder, Center, Column, Icon, IconTheme, SizedBox, WidgetState,
+        Align, AnyElement, Builder, Center, Column, Icon, IconTheme, SizedBox, Text, WidgetState,
         WidgetStateProperty, WidgetStates, downcast_widget,
     };
 
@@ -178,22 +179,15 @@ mod tests {
     use crate::icons::Icons;
     use crate::ink_well::InkWell;
     use crate::material::Material;
-    use crate::test_support::{WidgetTester, ahem_text, material_app, with_main_thread_stack};
+    use crate::test_support::material_app;
     use crate::theme_data::{MaterialTapTargetSize, ThemeData};
-
-    fn tester() -> WidgetTester {
-        let tester = WidgetTester::on(TargetPlatform::Android);
-        tester.install_fonts();
-        crate::icons::install_material_icon_font(&mut tester.cell.borrow_mut());
-        tester
-    }
 
     fn pressed() -> Option<Listener> {
         Some(Listener::new(|_app| {}))
     }
 
     fn text(text: &str) -> WidgetRef {
-        ahem_text(text).into_widget()
+        Text::new(text).into_widget()
     }
 
     fn states(states: &[WidgetState]) -> WidgetStates {
@@ -243,8 +237,7 @@ mod tests {
     // filled_button_theme_test.dart 'Passing no FilledButtonTheme returns defaults'.
     #[test]
     fn without_a_button_theme_the_button_shows_its_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let color_scheme = ColorScheme::light();
             let theme = ThemeData::from(color_scheme.clone()).build(&tester.cell.borrow());
             tester.pump_widget(material_app(
@@ -254,7 +247,7 @@ mod tests {
                     .into_widget(),
             ));
 
-            material(&tester, |material| {
+            material(tester, |material| {
                 assert_eq!(material.animation_duration, Duration::from_millis(200));
                 assert!(material.border_radius.is_none());
                 assert_eq!(material.color, Some(color_scheme.primary));
@@ -268,7 +261,7 @@ mod tests {
                 assert_eq!(text_style.font_size, Some(14.0));
                 assert_eq!(text_style.font_weight, Some(FontWeight::W500));
             });
-            let align = in_button::<Align>(&tester);
+            let align = in_button::<Align>(tester);
             tester.widget::<Align, _>(align, |align| {
                 assert!(align.alignment == AlignmentGeometry::from(Alignment::CENTER));
             });
@@ -420,10 +413,10 @@ mod tests {
     // overrides]': each of its six cases.
     #[test]
     fn the_button_style_the_button_theme_and_the_overall_theme_each_override_the_defaults() {
-        with_main_thread_stack(|| {
+        // Each case is [button style, button theme style, overall theme style].
+        let cases = || -> [[Option<ButtonStyle>; 3]; 6] {
             let empty = || Some(ButtonStyle::new());
-            // Each case is [button style, button theme style, overall theme style].
-            let cases: [[Option<ButtonStyle>; 3]; 6] = [
+            [
                 // Button style overrides defaults.
                 [Some(override_style()), None, None],
                 // Button theme style overrides defaults.
@@ -438,24 +431,25 @@ mod tests {
                 // Overall Theme button theme style overrides defaults, null theme and empty
                 // overall style.
                 [empty(), None, Some(override_style())],
-            ];
-            for [button_style, theme_style, overall_style] in cases {
-                let mut tester = tester();
-                let frame = override_frame(&tester, button_style, theme_style, overall_style);
+            ]
+        };
+        for case in 0..cases().len() {
+            test_widgets(|tester| {
+                let [button_style, theme_style, overall_style] = cases()[case].clone();
+                let frame = override_frame(tester, button_style, theme_style, overall_style);
                 tester.pump_widget(frame);
                 tester.pump_and_settle(); // allow the animations to finish
-                check_button(&tester);
-            }
-        });
+                check_button(tester);
+            });
+        }
     }
 
     // filled_button_theme_test.dart 'FilledButton respects Theme shadowColor'.
     #[test]
     fn the_shadow_color_comes_from_the_button_then_its_theme() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let shadow_color = Color::new(0xff000001);
             let overridden_color = Color::new(0xff000002);
-            let mut tester = tester();
             let build_frame = |tester: &WidgetTester,
                                overall_shadow_color: Option<Color>,
                                theme_shadow_color: Option<Color>,
@@ -489,9 +483,9 @@ mod tests {
             };
             let shadow = |tester: &WidgetTester| material(tester, |material| material.shadow_color);
 
-            let frame = build_frame(&tester, None, None, None);
+            let frame = build_frame(tester, None, None, None);
             tester.pump_widget(frame);
-            assert_eq!(shadow(&tester), Some(Colors::BLACK)); //default
+            assert_eq!(shadow(tester), Some(Colors::BLACK)); //default
 
             for (overall, theme, button) in [
                 (None, Some(shadow_color), None),
@@ -499,10 +493,10 @@ mod tests {
                 (Some(overridden_color), Some(shadow_color), None),
                 (None, Some(overridden_color), Some(shadow_color)),
             ] {
-                let frame = build_frame(&tester, overall, theme, button);
+                let frame = build_frame(tester, overall, theme, button);
                 tester.pump_widget(frame);
                 tester.pump_and_settle(); // theme animation
-                assert_eq!(shadow(&tester), Some(shadow_color));
+                assert_eq!(shadow(tester), Some(shadow_color));
             }
         });
     }
@@ -522,9 +516,8 @@ mod tests {
     // ButtonStyle.iconAlignment'.
     #[test]
     fn an_icon_button_takes_its_icon_alignment_from_the_theme() {
-        with_main_thread_stack(|| {
-            for tonal in [false, true] {
-                let mut tester = tester();
+        for tonal in [false, true] {
+            test_widgets(|tester| {
                 let build = |tester: &WidgetTester, icon_alignment: Option<IconAlignment>| {
                     let mut style = ButtonStyle::new();
                     style.icon_alignment = icon_alignment;
@@ -541,26 +534,33 @@ mod tests {
                     (material, icon)
                 };
 
-                let frame = build(&tester, None);
+                let frame = build(tester, None);
                 tester.pump_widget(frame);
-                let (button, icon) = rects(&tester);
+                let (button, icon) = rects(tester);
                 assert_eq!(button.left, icon.left - 16.0);
 
-                let frame = build(&tester, Some(IconAlignment::End));
+                let frame = build(tester, Some(IconAlignment::End));
                 tester.pump_widget(frame);
                 tester.pump_and_settle();
-                let (button, icon) = rects(&tester);
-                assert_eq!(button.right, icon.right + 24.0);
-            }
-        });
+                let (button, icon) = rects(tester);
+                // Within f32: global positions go through valo's f32 matrices (waft-gestures'
+                // `Matrix4` entry), where Dart's are f64 and compare equal.
+                let expected = icon.right + 24.0;
+                assert!(
+                    (button.right - expected).abs()
+                        <= f64::from(f32::EPSILON) * expected.abs().max(1.0),
+                    "{} is not {expected}",
+                    button.right
+                );
+            });
+        }
     }
 
     // filled_button_theme_test.dart 'FilledButton icon uses provided FilledButtonTheme
     // foregroundColor over default icon color'.
     #[test]
     fn each_icon_takes_the_theme_foreground_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let foreground_color = Color::new(0xFFFFA500);
             let seen = Rc::new(RefCell::new(Vec::new()));
             let probe = || {

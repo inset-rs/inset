@@ -578,7 +578,9 @@ mod tests {
     use crate::input_decorator::InputDecorationThemeData;
     use crate::material::Material;
     use crate::material_localizations::MaterialLocalizations;
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::{
+        PaintInspection, WidgetTester, material_app, with_main_thread_stack,
+    };
     use crate::text_field::TextField;
     use crate::theme_data::ThemeData;
 

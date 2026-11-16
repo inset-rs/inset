@@ -1303,7 +1303,9 @@ mod tests {
     use crate::icons::Icons;
     use crate::ink_well::InkWell;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{TestPointer, WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::{
+        PaintInspection, TestPointer, WidgetTester, material_app, with_main_thread_stack,
+    };
     use crate::theme_data::ThemeData;
 
     fn tester() -> WidgetTester {

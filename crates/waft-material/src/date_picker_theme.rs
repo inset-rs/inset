@@ -1372,7 +1372,9 @@ mod tests {
 
     use super::*;
     use crate::color_scheme::ColorScheme;
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::{
+        PaintInspection, WidgetTester, material_app, with_main_thread_stack,
+    };
     use crate::text_theme::TextTheme;
     use crate::theme_data::ThemeData;
     use crate::tooltip::tests::{m2, m3};

@@ -923,13 +923,7 @@ impl WidgetTester {
     pub(crate) fn all<T: waft_rendering::RenderObject>(
         &self,
     ) -> Vec<waft_rendering::RenderHandle<T>> {
-        let mut app = self.cell.borrow_mut();
-        let binding = waft_rendering::RendererBinding::instance(&mut app);
-        let mut found = Vec::new();
-        for render_view in binding.render_views(&app) {
-            collect(&app, render_view.as_object(), &mut found);
-        }
-        found
+        render_objects(&self.cell)
     }
 
     /// The first render object of type `T` in the view.
@@ -938,24 +932,6 @@ impl WidgetTester {
             .into_iter()
             .next()
             .expect("a render object of that type")
-    }
-
-    /// What the ink features of the first material draw, painted as its `paint` paints them
-    /// at the origin: Dart's `paints` matcher on `Material.of(context)`.
-    pub(crate) fn ink_list(&self) -> waft_embedder::valo::DisplayList {
-        let render = self.first::<crate::material::RenderInkFeatures>();
-        let mut canvas = waft_embedder::Canvas::new();
-        render.paint_ink_features(
-            &mut self.cell.borrow_mut(),
-            &mut canvas,
-            waft_embedder::Offset::ZERO,
-        );
-        canvas.build()
-    }
-
-    /// The draws of [`ink_list`](Self::ink_list).
-    pub(crate) fn ink_drawn(&self) -> Vec<Drawn> {
-        Drawn::draws(&self.ink_list())
     }
 
     /// The centre of `key`'s render box, in the view's coordinates.
@@ -1395,9 +1371,36 @@ impl WidgetTester {
         let mut app = self.cell.borrow_mut();
         waft_widgets::FocusManager::instance(&mut app).set_highlight_strategy(&mut app, strategy);
     }
+}
+
+/// What a case reads of what the tree painted, from valo's display lists: Dart's `paints`
+/// matcher, until the recording canvas replaces it (the harness upgrade's step 4). Both testers
+/// read it, the one in `waft_widgets::testing` and this crate's old one, which files leave as
+/// they move over.
+pub(crate) trait PaintInspection {
+    /// The app the tester runs.
+    fn app_cell(&self) -> &AppCell;
+
+    /// What the ink features of the first material draw, painted as its `paint` paints them
+    /// at the origin: Dart's `paints` matcher on `Material.of(context)`.
+    fn ink_list(&self) -> waft_embedder::valo::DisplayList {
+        let render = first_render::<crate::material::RenderInkFeatures>(self.app_cell());
+        let mut canvas = waft_embedder::Canvas::new();
+        render.paint_ink_features(
+            &mut self.app_cell().borrow_mut(),
+            &mut canvas,
+            waft_embedder::Offset::ZERO,
+        );
+        canvas.build()
+    }
+
+    /// The draws of [`ink_list`](Self::ink_list).
+    fn ink_drawn(&self) -> Vec<Drawn> {
+        Drawn::draws(&self.ink_list())
+    }
 
     /// What `render` and its subtree draw, painted at the origin: Dart's `paints` matcher.
-    pub(crate) fn painted(&self, render: waft_rendering::AnyRenderObject) -> Vec<Drawn> {
+    fn painted(&self, render: waft_rendering::AnyRenderObject) -> Vec<Drawn> {
         self.pictures(render)
             .iter()
             .flat_map(|picture| Drawn::draws(picture))
@@ -1407,10 +1410,7 @@ impl WidgetTester {
     /// Every op `render` and its subtree record, painted at the origin, for a case that reads
     /// a path or a shadow: Dart's `paints` matcher with the calls it names (`drawCircle` is a
     /// path that `as_oval` answers, `drawShadow` an `Op::DrawShadow`).
-    pub(crate) fn painted_ops(
-        &self,
-        render: waft_rendering::AnyRenderObject,
-    ) -> Vec<waft_embedder::valo::Op> {
+    fn painted_ops(&self, render: waft_rendering::AnyRenderObject) -> Vec<waft_embedder::valo::Op> {
         self.pictures(render)
             .iter()
             .flat_map(|picture| waft_embedder::flattened_ops(picture))
@@ -1420,7 +1420,7 @@ impl WidgetTester {
     /// Dart's `paints..drrect(color:, outer:, inner:)`: whether `render` or its subtree paints
     /// the ring between `outer` and `inner` in `color` that a `RoundedRectangleBorder` with a
     /// side paints.
-    pub(crate) fn paints_drrect(
+    fn paints_drrect(
         &self,
         render: waft_rendering::AnyRenderObject,
         color: waft_embedder::Color,
@@ -1459,7 +1459,7 @@ impl WidgetTester {
 
     /// Dart's `paints..rrect(rrect:, color:)`: whether `render` or its subtree fills `rrect`,
     /// in `color` when it is given.
-    pub(crate) fn paints_rrect(
+    fn paints_rrect(
         &self,
         render: waft_rendering::AnyRenderObject,
         rrect: waft_embedder::RRect,
@@ -1493,32 +1493,32 @@ impl WidgetTester {
 
     /// The pictures `render` and its subtree record, painted at the origin: the top-level
     /// pictures only, not those of the layers `render` pushes.
-    pub(crate) fn pictures(
+    fn pictures(
         &self,
         render: waft_rendering::AnyRenderObject,
     ) -> Vec<std::sync::Arc<waft_embedder::Picture>> {
-        self.pictures_painted(render, false)
+        pictures_painted(self.app_cell(), render, false)
     }
 
     /// Every picture `render` records and every picture of the layers it pushes (repaint
     /// boundaries, transforms, clips and the rest), depth first in paint order: what Dart's
     /// `paints` reads from a `TestRecordingCanvas`, which paints a child that is a repaint
     /// boundary inline. Coordinates are those of each picture's own layer.
-    pub(crate) fn pictures_deep(
+    fn pictures_deep(
         &self,
         render: waft_rendering::AnyRenderObject,
     ) -> Vec<std::sync::Arc<waft_embedder::Picture>> {
-        self.pictures_painted(render, true)
+        pictures_painted(self.app_cell(), render, true)
     }
 
     /// Dart's `Material.of(tester.element(finder))` read by `paints`: what the ink features of
     /// the `Material` nearest above `element`, and their subtree, draw.
-    pub(crate) fn nearest_material_ops(
+    fn nearest_material_ops(
         &self,
         element: waft_widgets::AnyElement,
     ) -> Vec<waft_embedder::valo::Op> {
         let ink_features = {
-            let app = self.cell.borrow();
+            let app = self.app_cell().borrow();
             waft_widgets::LookupBoundary::find_ancestor_render_object_of_type::<
                 crate::material::RenderInkFeatures,
             >(&app, element)
@@ -1529,7 +1529,7 @@ impl WidgetTester {
     }
 
     /// The ops of [`pictures_deep`](Self::pictures_deep), flattened.
-    pub(crate) fn painted_ops_deep(
+    fn painted_ops_deep(
         &self,
         render: waft_rendering::AnyRenderObject,
     ) -> Vec<waft_embedder::valo::Op> {
@@ -1538,30 +1538,65 @@ impl WidgetTester {
             .flat_map(|picture| waft_embedder::flattened_ops(picture))
             .collect()
     }
+}
 
-    /// Paints `render` at the origin into a layer of its own and collects the pictures under
-    /// it, descending into pushed layers when `deep`.
-    fn pictures_painted(
-        &self,
-        render: waft_rendering::AnyRenderObject,
-        deep: bool,
-    ) -> Vec<std::sync::Arc<waft_embedder::Picture>> {
-        let mut app = self.cell.borrow_mut();
-        assert!(
-            !render.is_repaint_boundary(&app),
-            "a repaint boundary would move its layer out of the scene"
-        );
-        use waft_rendering::ContainerLayer;
-        let layer = waft_rendering::OffsetLayer::new(&mut app, waft_embedder::Offset::ZERO);
-        let container = layer.as_container_layer();
-        let bounds = render.paint_bounds(&app);
-        let mut context = waft_rendering::PaintingContext::new(container, bounds);
-        context.paint_child(&mut app, render, waft_embedder::Offset::ZERO);
-        context.stop_recording_if_needed(&mut app);
-        let mut pictures = Vec::new();
-        collect_pictures(&app, container, deep, &mut pictures);
-        pictures
+impl PaintInspection for WidgetTester {
+    fn app_cell(&self) -> &AppCell {
+        &self.cell
     }
+}
+
+impl PaintInspection for waft_widgets::testing::WidgetTester {
+    fn app_cell(&self) -> &AppCell {
+        &self.cell
+    }
+}
+
+/// Every render object of type `T` in the views of `cell`, in paint order.
+fn render_objects<T: waft_rendering::RenderObject>(
+    cell: &AppCell,
+) -> Vec<waft_rendering::RenderHandle<T>> {
+    let mut app = cell.borrow_mut();
+    let binding = waft_rendering::RendererBinding::instance(&mut app);
+    let mut found = Vec::new();
+    for render_view in binding.render_views(&app) {
+        collect(&app, render_view.as_object(), &mut found);
+    }
+    found
+}
+
+/// The first render object of type `T` in the views of `cell`.
+fn first_render<T: waft_rendering::RenderObject>(
+    cell: &AppCell,
+) -> waft_rendering::RenderHandle<T> {
+    render_objects(cell)
+        .into_iter()
+        .next()
+        .expect("a render object of that type")
+}
+
+/// Paints `render` at the origin into a layer of its own and collects the pictures under
+/// it, descending into pushed layers when `deep`.
+fn pictures_painted(
+    cell: &AppCell,
+    render: waft_rendering::AnyRenderObject,
+    deep: bool,
+) -> Vec<std::sync::Arc<waft_embedder::Picture>> {
+    let mut app = cell.borrow_mut();
+    assert!(
+        !render.is_repaint_boundary(&app),
+        "a repaint boundary would move its layer out of the scene"
+    );
+    use waft_rendering::ContainerLayer;
+    let layer = waft_rendering::OffsetLayer::new(&mut app, waft_embedder::Offset::ZERO);
+    let container = layer.as_container_layer();
+    let bounds = render.paint_bounds(&app);
+    let mut context = waft_rendering::PaintingContext::new(container, bounds);
+    context.paint_child(&mut app, render, waft_embedder::Offset::ZERO);
+    context.stop_recording_if_needed(&mut app);
+    let mut pictures = Vec::new();
+    collect_pictures(&app, container, deep, &mut pictures);
+    pictures
 }
 
 /// Adds the pictures of the layers under `container` to `pictures`, in order, and those of the
@@ -1589,8 +1624,7 @@ fn collect_pictures(
 
 /// The canvas method a recorded op stands for, as flutter_test's `TestRecordingCanvas` names
 /// it. Valo records `drawCircle`, `drawRRect`, `drawPath` and `drawOval` as one op; they are
-/// told apart by the path (an oval, a rounded rect, any other), and a stroked oval is the
-/// `drawPath` of `debugDisableShadows`' stand-in shadow. A `drawDRRect` is the even-odd path
+/// told apart by the path (an oval, a rounded rect, any other). A `drawDRRect` is the even-odd path
 /// between two contours that `draw_drrect` records, and a `drawRRect` of a rounded rect without
 /// corners a `drawRect` (`draw_rrect`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1608,16 +1642,12 @@ pub(crate) enum CanvasCall {
 
 /// What `op` records, as the canvas method that made it.
 pub(crate) fn canvas_call_of(op: &waft_embedder::valo::Op) -> CanvasCall {
-    use waft_embedder::valo::{Op, PaintStyle};
+    use waft_embedder::valo::Op;
     match op {
         Op::DrawPath {
-            path,
-            fill_rule,
-            paint,
-            ..
+            path, fill_rule, ..
         } => {
-            let stroked = matches!(paint.style, PaintStyle::Stroke(_));
-            if path.as_oval().is_some() && !stroked {
+            if path.as_oval().is_some() {
                 CanvasCall::DrawCircle
             } else if path.as_round_rect().is_some() {
                 CanvasCall::DrawRRect
@@ -1705,15 +1735,6 @@ impl PaintCall {
         }
     }
 
-    /// `..path(color:, style: PaintingStyle.stroke, strokeWidth:)`.
-    pub(crate) fn stroked_path(color: waft_embedder::Color, stroke_width: f64) -> PaintCall {
-        PaintCall::Path {
-            color: Some(color),
-            stroke_width: Some(stroke_width),
-            stroked: Some(true),
-        }
-    }
-
     /// `..rect(color:)`.
     pub(crate) fn rect(color: Option<waft_embedder::Color>) -> PaintCall {
         PaintCall::Rect { rect: None, color }
@@ -1777,16 +1798,9 @@ impl PaintCall {
         }
     }
 
-    /// Whether `op` is a call of this method, whatever its arguments. A stroked oval is either
-    /// call: `drawCircle` with a stroke paint, or the `drawPath` of a shadow's stand-in.
+    /// Whether `op` is a call of this method, whatever its arguments.
     fn is_call(&self, op: &waft_embedder::valo::Op) -> bool {
         let call = canvas_call_of(op);
-        let stroked_oval = matches!(
-            op,
-            waft_embedder::valo::Op::DrawPath { path, paint, .. }
-                if path.as_oval().is_some()
-                    && matches!(paint.style, waft_embedder::valo::PaintStyle::Stroke(_))
-        );
         match self {
             PaintCall::Path { .. } => call == CanvasCall::DrawPath,
             PaintCall::Rect { .. } => call == CanvasCall::DrawRect,
@@ -1796,8 +1810,9 @@ impl PaintCall {
                     || (call == CanvasCall::DrawRect && rrect.is_none_or(drawn_as_rect))
             }
             PaintCall::DRRect { .. } => call == CanvasCall::DrawDRRect,
-            PaintCall::Circle { .. } => call == CanvasCall::DrawCircle || stroked_oval,
-            PaintCall::StrokedCircle { .. } => stroked_oval,
+            PaintCall::Circle { .. } | PaintCall::StrokedCircle { .. } => {
+                call == CanvasCall::DrawCircle
+            }
             PaintCall::Shadow { .. } => call == CanvasCall::DrawShadow,
             PaintCall::Paragraph => call == CanvasCall::DrawParagraph,
             PaintCall::Scale => call == CanvasCall::Scale,

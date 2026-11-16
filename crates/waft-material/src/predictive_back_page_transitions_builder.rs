@@ -1142,7 +1142,9 @@ mod tests {
     use crate::page_transitions_theme::{
         FadeForwardsPageTransition, PageTransitionsTheme, ZoomEnterTransition, ZoomPageTransition,
     };
-    use crate::test_support::{Drawn, WidgetTester, material_page_app, with_main_thread_stack};
+    use crate::test_support::{
+        Drawn, PaintInspection, WidgetTester, material_page_app, with_main_thread_stack,
+    };
     use crate::text_button::TextButton;
     use crate::theme::Theme;
     use crate::theme_data::ThemeData;

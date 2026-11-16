@@ -486,7 +486,7 @@ pub(crate) mod tests {
 
     use super::*;
     use crate::material::Material;
-    use crate::test_support::{Drawn, WidgetTester, with_main_thread_stack};
+    use crate::test_support::{Drawn, PaintInspection, WidgetTester, with_main_thread_stack};
     use crate::theme_data::ThemeData;
     pub(crate) use crate::tooltip::tests::tester;
     use crate::tooltip::tests::{m2, m3, pump_app};

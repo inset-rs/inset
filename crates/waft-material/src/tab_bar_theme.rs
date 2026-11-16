@@ -1342,7 +1342,9 @@ mod tests {
             close, first_render_box, is_line, only, painted_lines, rect_of, size_of, tester, text,
         };
         use crate::tabs::{Tab, TabAlignment, TabBar, TabBarIndicatorSize, TabIndicatorAnimation};
-        use crate::test_support::{TestVSync, WidgetTester, material_app, with_main_thread_stack};
+        use crate::test_support::{
+            PaintInspection, TestVSync, WidgetTester, material_app, with_main_thread_stack,
+        };
         use crate::theme_data::ThemeData;
 
         const TAB_1_TEXT: &str = "tab 1";

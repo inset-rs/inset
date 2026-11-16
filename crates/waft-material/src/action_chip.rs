@@ -251,7 +251,8 @@ pub(crate) mod tests {
     use crate::motion::Durations;
     use crate::scaffold::Scaffold;
     use crate::test_support::{
-        PaintCall, TestPointer, WidgetTester, material_app, paints_calls, with_main_thread_stack,
+        PaintCall, PaintInspection, TestPointer, WidgetTester, material_app, paints_calls,
+        with_main_thread_stack,
     };
     use crate::theme_data::ThemeData;
     use crate::tooltip::tests::{m2, m3};

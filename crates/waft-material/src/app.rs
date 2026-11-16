@@ -1247,7 +1247,9 @@ mod tests {
     use crate::material::Material;
     use crate::material_localizations::MaterialLocalizations;
     use crate::scaffold::{Scaffold, ScaffoldMessengerState};
-    use crate::test_support::{WidgetTester, is_same_color_as, with_main_thread_stack};
+    use crate::test_support::{
+        PaintInspection, WidgetTester, is_same_color_as, with_main_thread_stack,
+    };
     use waft_cupertino::CupertinoLocalizations;
 
     const ALL_PLATFORMS: [TargetPlatform; 6] = [

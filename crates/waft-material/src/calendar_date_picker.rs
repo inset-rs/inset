@@ -2700,7 +2700,9 @@ pub(crate) mod tests {
 
     use super::*;
     use crate::chip::tests::{center_of, tester};
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::{
+        PaintInspection, WidgetTester, material_app, with_main_thread_stack,
+    };
     use crate::theme_data::ThemeData;
 
     /// The options of Dart's test helper `calendarDatePicker(..)`.

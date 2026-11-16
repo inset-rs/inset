@@ -713,7 +713,7 @@ mod tests {
     use crate::elevated_button::ElevatedButton;
     use crate::ink_well::{InkResponse, InkWell};
     use crate::material::{Material, RenderInkFeatures};
-    use crate::test_support::{WidgetTester, with_main_thread_stack};
+    use crate::test_support::{PaintInspection, WidgetTester, with_main_thread_stack};
 
     fn tester() -> WidgetTester {
         WidgetTester::on(TargetPlatform::Android)

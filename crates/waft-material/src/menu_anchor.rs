@@ -10105,7 +10105,7 @@ mod tests {
         use crate::filled_button::FilledButton;
         use crate::material_state::MaterialStatePropertyAll;
         use crate::scaffold::Scaffold;
-        use crate::test_support::Drawn;
+        use crate::test_support::{Drawn, PaintInspection};
         use crate::text_theme::TextTheme;
         use crate::tooltip::tests::{m2, tester_on};
 

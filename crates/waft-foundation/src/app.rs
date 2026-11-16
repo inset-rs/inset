@@ -180,6 +180,9 @@ pub struct App {
     skipped_tear_offs: Vec<String>,
     microtasks: VecDeque<Listener>,
     timers: Timers,
+    /// The debug flags set on this app ([`set_debug_flag`](App::set_debug_flag)); one absent is
+    /// off.
+    debug_flags: HashMap<std::any::TypeId, bool>,
     executor: ForegroundExecutor,
     platform: PlatformRef,
     /// The host's threads, told when to wake this application for its next timer.
@@ -188,6 +191,11 @@ pub struct App {
     open_requests: UntilHandled<OpenRequest>,
     notification_activations: UntilHandled<NotificationActivation>,
 }
+
+/// A debug flag an [`App`] keeps: a marker type per Dart `debug…` bool, declared in the crate
+/// that reads it (`waft_painting::DebugDisableShadows`), so this crate needs to know none of
+/// them. Each crate keeps Dart's name as a function over the app.
+pub trait DebugFlag: 'static {}
 
 /// What hears one kind of what the system asks of the app, and what it asked before there was a
 /// handler, which waits for one, as a launch's requests do.
@@ -308,6 +316,7 @@ impl App {
             skipped_tear_offs: Vec::new(),
             microtasks: VecDeque::new(),
             timers: Timers::default(),
+            debug_flags: HashMap::new(),
             executor,
             dispatcher: platform.dispatcher(),
             platform,
@@ -502,9 +511,30 @@ impl App {
         self.timers.is_active(timer)
     }
 
-    /// The App clock: what [`AppCell::elapse`] has advanced it to.
-    pub(crate) fn clock(&self) -> Duration {
+    /// The App clock: what [`AppCell::elapse`] has advanced it to. Flutter's test binding's
+    /// `clock`; a frame a test pumps is stamped with it.
+    pub fn clock(&self) -> Duration {
         self.timers.now()
+    }
+
+    /// Whether a [`Timer`] is waiting to fire: what flutter_test checks has not happened once a
+    /// test's tree is disposed.
+    pub fn has_pending_timers(&self) -> bool {
+        self.timers.has_pending()
+    }
+
+    /// Whether the debug flag `F` is on for this app: Dart's library-level `debug…` bools, kept
+    /// per app as its clock is, so two tests, or two apps, never share one. Off until set.
+    pub fn debug_flag<F: DebugFlag>(&self) -> bool {
+        self.debug_flags
+            .get(&std::any::TypeId::of::<F>())
+            .copied()
+            .unwrap_or(false)
+    }
+
+    /// Turns the debug flag `F` on or off for this app; see [`debug_flag`](Self::debug_flag).
+    pub fn set_debug_flag<F: DebugFlag>(&mut self, value: bool) {
+        self.debug_flags.insert(std::any::TypeId::of::<F>(), value);
     }
 
     /// Fires the next timer due by `target`, if any.

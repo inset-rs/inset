@@ -274,7 +274,9 @@ mod tests {
     use crate::icons::Icons;
     use crate::ink_well::InkWell;
     use crate::material::{Material, MaterialType};
-    use crate::test_support::{Drawn, WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::{
+        Drawn, PaintInspection, WidgetTester, material_app, with_main_thread_stack,
+    };
     use crate::theme_data::{MaterialTapTargetSize, ThemeData};
 
     fn tester() -> WidgetTester {

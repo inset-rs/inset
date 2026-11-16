@@ -6,7 +6,6 @@ use std::collections::HashMap;
 use std::fmt::{self, Debug};
 use std::marker::PhantomData;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use waft_animation::{AnimationBehavior, AnimationController, Curve, Curves};
@@ -1001,7 +1000,10 @@ pub type EditableTextContextMenuBuilder =
 const K_CURSOR_BLINK_HALF_PERIOD: Duration = Duration::from_millis(500);
 const K_OBSCURE_SHOW_LATEST_CHAR_CURSOR_TICKS: i32 = 3;
 
-static DEBUG_DETERMINISTIC_CURSOR: AtomicBool = AtomicBool::new(false);
+/// The [`App`] debug flag of [`EditableText::debug_deterministic_cursor`].
+pub struct DebugDeterministicCursor;
+
+impl waft_foundation::DebugFlag for DebugDeterministicCursor {}
 
 /// A time-value pair that represents a key frame in an animation.
 #[derive(Clone, Copy, Debug)]
@@ -1218,14 +1220,15 @@ impl EditableText {
     /// The default value for [`stylus_handwriting_enabled`](Self::stylus_handwriting_enabled).
     pub const DEFAULT_STYLUS_HANDWRITING_ENABLED: bool = true;
 
-    /// Whether the blinking cursor should be drawn as always-on for tests.
-    pub fn debug_deterministic_cursor() -> bool {
-        DEBUG_DETERMINISTIC_CURSOR.load(Ordering::Relaxed)
+    /// Whether the blinking cursor should be drawn as always-on for tests: Dart's static
+    /// `EditableText.debugDeterministicCursor`, kept on the [`App`] (see [`App::debug_flag`]).
+    pub fn debug_deterministic_cursor(app: &App) -> bool {
+        app.debug_flag::<DebugDeterministicCursor>()
     }
 
-    /// Dart's `EditableText.debugDeterministicCursor` setter.
-    pub fn set_debug_deterministic_cursor(value: bool) {
-        DEBUG_DETERMINISTIC_CURSOR.store(value, Ordering::Relaxed);
+    /// Dart's `EditableText.debugDeterministicCursor` setter, for this app.
+    pub fn set_debug_deterministic_cursor(app: &mut App, value: bool) {
+        app.set_debug_flag::<DebugDeterministicCursor>(value);
     }
 
     /// Creates a basic text input field.
@@ -4500,7 +4503,7 @@ impl EditableTextState {
             .set_cursor_color(app, Some(cursor_color));
         let show_cursor = self.widget(app).effective_show_cursor();
         let visible = show_cursor
-            && (EditableText::debug_deterministic_cursor()
+            && (EditableText::debug_deterministic_cursor(app)
                 || self.cursor_blink_opacity_controller(app).value(app) > 0.0);
         self.cursor_visibility_notifier(app).set_value(app, visible);
     }
@@ -4526,7 +4529,7 @@ impl EditableTextState {
         }
         self.cursor_blink_opacity_controller(app)
             .set_value(app, 1.0);
-        if EditableText::debug_deterministic_cursor() {
+        if EditableText::debug_deterministic_cursor(app) {
             return;
         }
         if self.widget(app).cursor_opacity_animates {

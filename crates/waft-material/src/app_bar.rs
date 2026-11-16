@@ -3521,7 +3521,9 @@ mod tests {
     use crate::icons::Icons;
     use crate::tab_controller::DefaultTabController;
     use crate::tabs::{Tab, TabBar};
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::{
+        PaintInspection, WidgetTester, material_app, with_main_thread_stack,
+    };
 
     /// `kTextTabBarHeight`: the height of the `TabBar` Dart's sliver cases put in `bottom`.
     const K_TEXT_TAB_BAR_HEIGHT: f64 = 48.0;

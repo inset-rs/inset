@@ -411,19 +411,14 @@ mod tests {
     use std::rc::Rc;
 
     use waft_embedder::Size;
+    use waft_widgets::testing::{WidgetTester, test_widgets};
     use waft_widgets::{Animated, Center, IconTheme, SizedBox, StatefulBuilder};
 
     use super::*;
     use crate::material::Material;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::material_app;
     use crate::theme_data::ThemeData;
-
-    fn tester() -> WidgetTester {
-        let tester = WidgetTester::on(waft_embedder::TargetPlatform::Android);
-        tester.install_fonts();
-        tester
-    }
 
     /// Dart's `ThemeData()`.
     fn m3(app: &App) -> ThemeData {
@@ -473,68 +468,62 @@ mod tests {
     /// "ExpandIcon test".
     #[test]
     fn expand_icon_test() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let expanded = Rc::new(Cell::new(false));
-            let mut tester = tester();
 
             // Light mode tests
-            wrap(&mut tester, m3, ExpandIcon::new(Some(toggling(&expanded))));
+            wrap(tester, m3, ExpandIcon::new(Some(toggling(&expanded))));
             tester.pump_and_settle();
 
             assert!(!expanded.get());
-            assert_eq!(last_icon_theme_color(&tester), Some(Colors::BLACK54));
+            assert_eq!(last_icon_theme_color(tester), Some(Colors::BLACK54));
 
-            tap_expand_icon(&mut tester);
+            tap_expand_icon(tester);
             tester.pump_and_settle();
             assert!(expanded.get());
-            assert_eq!(last_icon_theme_color(&tester), Some(Colors::BLACK54));
+            assert_eq!(last_icon_theme_color(tester), Some(Colors::BLACK54));
 
-            tap_expand_icon(&mut tester);
+            tap_expand_icon(tester);
             tester.pump_and_settle();
             assert!(!expanded.get());
-            assert_eq!(last_icon_theme_color(&tester), Some(Colors::BLACK54));
+            assert_eq!(last_icon_theme_color(tester), Some(Colors::BLACK54));
 
             // Dark mode tests
-            wrap(
-                &mut tester,
-                m3_dark,
-                ExpandIcon::new(Some(toggling(&expanded))),
-            );
+            wrap(tester, m3_dark, ExpandIcon::new(Some(toggling(&expanded))));
             tester.pump_and_settle();
 
             assert!(!expanded.get());
-            assert_eq!(last_icon_theme_color(&tester), Some(Colors::WHITE60));
+            assert_eq!(last_icon_theme_color(tester), Some(Colors::WHITE60));
 
-            tap_expand_icon(&mut tester);
+            tap_expand_icon(tester);
             tester.pump_and_settle();
             assert!(expanded.get());
-            assert_eq!(last_icon_theme_color(&tester), Some(Colors::WHITE60));
+            assert_eq!(last_icon_theme_color(tester), Some(Colors::WHITE60));
 
-            tap_expand_icon(&mut tester);
+            tap_expand_icon(tester);
             tester.pump_and_settle();
             assert!(!expanded.get());
-            assert_eq!(last_icon_theme_color(&tester), Some(Colors::WHITE60));
+            assert_eq!(last_icon_theme_color(tester), Some(Colors::WHITE60));
         });
     }
 
     /// "Material2 - ExpandIcon disabled".
     #[test]
     fn material2_expand_icon_disabled() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             // Test light mode.
             wrap(
-                &mut tester,
+                tester,
                 |app| ThemeData::builder().use_material3(false).build(app),
                 ExpandIcon::new(None),
             );
             tester.pump_and_settle();
 
-            assert_eq!(last_icon_theme_color(&tester), Some(Colors::BLACK38));
+            assert_eq!(last_icon_theme_color(tester), Some(Colors::BLACK38));
 
             // Test dark mode.
             wrap(
-                &mut tester,
+                tester,
                 |app| {
                     ThemeData::builder()
                         .use_material3(false)
@@ -545,7 +534,7 @@ mod tests {
             );
             tester.pump_and_settle();
 
-            assert_eq!(last_icon_theme_color(&tester), Some(Colors::WHITE38));
+            assert_eq!(last_icon_theme_color(tester), Some(Colors::WHITE38));
         });
     }
 
@@ -553,25 +542,24 @@ mod tests {
     #[test]
     #[allow(deprecated)]
     fn material3_expand_icon_disabled() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             // Test light mode.
-            wrap(&mut tester, m3, ExpandIcon::new(None));
+            wrap(tester, m3, ExpandIcon::new(None));
             tester.pump_and_settle();
 
             let theme = m3(&tester.cell.borrow());
             assert_eq!(
-                last_icon_theme_color(&tester),
+                last_icon_theme_color(tester),
                 Some(theme.color_scheme.on_surface.with_opacity(0.38))
             );
 
             // Test dark mode.
-            wrap(&mut tester, m3_dark, ExpandIcon::new(None));
+            wrap(tester, m3_dark, ExpandIcon::new(None));
             tester.pump_and_settle();
 
             let theme = m3_dark(&tester.cell.borrow());
             assert_eq!(
-                last_icon_theme_color(&tester),
+                last_icon_theme_color(tester),
                 Some(theme.color_scheme.on_surface.with_opacity(0.38))
             );
         });
@@ -580,14 +568,13 @@ mod tests {
     /// "ExpandIcon test isExpanded does not trigger callback".
     #[test]
     fn expand_icon_test_is_expanded_does_not_trigger_callback() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let expanded = Rc::new(Cell::new(false));
-            let mut tester = tester();
 
-            wrap(&mut tester, m3, ExpandIcon::new(Some(toggling(&expanded))));
+            wrap(tester, m3, ExpandIcon::new(Some(toggling(&expanded))));
 
             wrap(
-                &mut tester,
+                tester,
                 m3,
                 ExpandIcon::new(Some(toggling(&expanded))).is_expanded(true),
             );
@@ -599,11 +586,9 @@ mod tests {
     /// "ExpandIcon is rotated initially if isExpanded is true on first build".
     #[test]
     fn expand_icon_is_rotated_initially_if_is_expanded_is_true_on_first_build() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-
+        test_widgets(|tester| {
             wrap(
-                &mut tester,
+                tester,
                 m3,
                 ExpandIcon::new(Some(Rc::new(|_app, _is_expanded| {}))).is_expanded(true),
             );
@@ -618,11 +603,9 @@ mod tests {
     /// "ExpandIcon default size is 24".
     #[test]
     fn expand_icon_default_size_is_24() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-
+        test_widgets(|tester| {
             wrap(
-                &mut tester,
+                tester,
                 m3,
                 ExpandIcon::new(Some(Rc::new(|_app, _is_expanded| {}))),
             );
@@ -635,11 +618,9 @@ mod tests {
     /// "ExpandIcon has the correct given size".
     #[test]
     fn expand_icon_has_the_correct_given_size() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-
+        test_widgets(|tester| {
             wrap(
-                &mut tester,
+                tester,
                 m3,
                 ExpandIcon::new(Some(Rc::new(|_app, _is_expanded| {}))).size(36.0),
             );
@@ -648,7 +629,7 @@ mod tests {
             assert_eq!(tester.widget(icon, |icon: &ExpandIcon| icon.size), 36.0);
 
             wrap(
-                &mut tester,
+                tester,
                 m3,
                 ExpandIcon::new(Some(Rc::new(|_app, _is_expanded| {}))).size(48.0),
             );
@@ -679,32 +660,31 @@ mod tests {
     /// "ExpandIcon uses custom icon color and expanded icon color".
     #[test]
     fn expand_icon_uses_custom_icon_color_and_expanded_icon_color() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let expanded = Rc::new(Cell::new(false));
-            let mut tester = tester();
 
             wrap(
-                &mut tester,
+                tester,
                 m3,
                 stateful_expand_icon(&expanded, |icon| icon.color(Colors::INDIGO.primary())),
             );
             tester.pump_and_settle();
             assert_eq!(
-                last_icon_theme_color(&tester),
+                last_icon_theme_color(tester),
                 Some(Colors::INDIGO.primary())
             );
 
-            tap_expand_icon(&mut tester);
+            tap_expand_icon(tester);
             tester.pump_and_settle();
             assert_eq!(
-                last_icon_theme_color(&tester),
+                last_icon_theme_color(tester),
                 Some(Colors::INDIGO.primary())
             );
 
             expanded.set(false);
 
             wrap(
-                &mut tester,
+                tester,
                 m3,
                 stateful_expand_icon(&expanded, |icon| {
                     icon.color(Colors::INDIGO.primary())
@@ -713,18 +693,18 @@ mod tests {
             );
             tester.pump_and_settle();
             assert_eq!(
-                last_icon_theme_color(&tester),
+                last_icon_theme_color(tester),
                 Some(Colors::INDIGO.primary())
             );
 
-            tap_expand_icon(&mut tester);
+            tap_expand_icon(tester);
             tester.pump_and_settle();
-            assert_eq!(last_icon_theme_color(&tester), Some(Colors::TEAL.primary()));
+            assert_eq!(last_icon_theme_color(tester), Some(Colors::TEAL.primary()));
 
-            tap_expand_icon(&mut tester);
+            tap_expand_icon(tester);
             tester.pump_and_settle();
             assert_eq!(
-                last_icon_theme_color(&tester),
+                last_icon_theme_color(tester),
                 Some(Colors::INDIGO.primary())
             );
         });
@@ -733,36 +713,34 @@ mod tests {
     /// "ExpandIcon uses custom disabled icon color".
     #[test]
     fn expand_icon_uses_custom_disabled_icon_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-
+        test_widgets(|tester| {
             wrap(
-                &mut tester,
+                tester,
                 m3,
                 ExpandIcon::new(None).disabled_color(Colors::CYAN.primary()),
             );
             tester.pump_and_settle();
-            assert_eq!(last_icon_theme_color(&tester), Some(Colors::CYAN.primary()));
+            assert_eq!(last_icon_theme_color(tester), Some(Colors::CYAN.primary()));
 
             wrap(
-                &mut tester,
+                tester,
                 m3,
                 ExpandIcon::new(None)
                     .color(Colors::INDIGO.primary())
                     .disabled_color(Colors::CYAN.primary()),
             );
             tester.pump_and_settle();
-            assert_eq!(last_icon_theme_color(&tester), Some(Colors::CYAN.primary()));
+            assert_eq!(last_icon_theme_color(tester), Some(Colors::CYAN.primary()));
 
             wrap(
-                &mut tester,
+                tester,
                 m3,
                 ExpandIcon::new(None)
                     .is_expanded(true)
                     .disabled_color(Colors::CYAN.primary()),
             );
             wrap(
-                &mut tester,
+                tester,
                 m3,
                 ExpandIcon::new(None)
                     .is_expanded(true)
@@ -770,15 +748,14 @@ mod tests {
                     .disabled_color(Colors::CYAN.primary()),
             );
             tester.pump_and_settle();
-            assert_eq!(last_icon_theme_color(&tester), Some(Colors::CYAN.primary()));
+            assert_eq!(last_icon_theme_color(tester), Some(Colors::CYAN.primary()));
         });
     }
 
     /// "Expand icon does not crash at zero area".
     #[test]
     fn expand_icon_does_not_crash_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = m3(&tester.cell.borrow());
             tester.pump_widget(material_app(
                 theme,

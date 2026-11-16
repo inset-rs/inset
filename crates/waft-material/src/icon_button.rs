@@ -1411,7 +1411,9 @@ mod tests {
     use crate::icon_button_theme::IconButtonThemeData;
     use crate::icons::Icons;
     use crate::material::{Material, MaterialType};
-    use crate::test_support::{Drawn, WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::{
+        Drawn, PaintInspection, WidgetTester, material_app, with_main_thread_stack,
+    };
     use crate::theme_data::ThemeData;
 
     /// `IconButton::new` or one of its named constructors.

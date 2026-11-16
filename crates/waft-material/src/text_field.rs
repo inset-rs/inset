@@ -2348,7 +2348,9 @@ mod tests {
     use crate::input_decorator::InputDecorationThemeData;
     use crate::material::Material;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::{
+        PaintInspection, WidgetTester, material_app, with_main_thread_stack,
+    };
     use crate::text_selection::material_text_selection_controls;
     use crate::text_theme::TextTheme;
     use crate::theme_data::ThemeData;

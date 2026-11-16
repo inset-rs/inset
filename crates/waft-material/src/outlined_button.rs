@@ -669,7 +669,7 @@ mod tests {
     use crate::no_splash::NoSplash;
     use crate::outlined_button_theme::OutlinedButtonThemeData;
     use crate::test_support::{
-        Drawn, WidgetTester, ahem_text, material_app, with_main_thread_stack,
+        Drawn, PaintInspection, WidgetTester, ahem_text, material_app, with_main_thread_stack,
     };
     use crate::text_theme::TextTheme;
     use crate::theme_data::ThemeData;

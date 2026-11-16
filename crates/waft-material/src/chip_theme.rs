@@ -719,7 +719,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::test_support::{WidgetTester, is_same_color_as};
+    use crate::test_support::{PaintInspection, WidgetTester, is_same_color_as};
 
     fn fallback_body_large(color: Color) -> TextStyle {
         let tester = WidgetTester::on(TargetPlatform::Android);

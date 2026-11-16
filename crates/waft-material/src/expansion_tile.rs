@@ -1511,7 +1511,8 @@ pub(crate) mod tests {
     use crate::motion::Easing;
     use crate::scaffold::Scaffold;
     use crate::test_support::{
-        AhemText, Drawn, WidgetTester, is_same_color_as, material_app, with_main_thread_stack,
+        AhemText, Drawn, PaintInspection, WidgetTester, is_same_color_as, material_app,
+        with_main_thread_stack,
     };
     use crate::text_theme::TextTheme;
     use waft_foundation::HandleId;

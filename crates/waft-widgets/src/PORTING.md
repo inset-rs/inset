@@ -525,6 +525,10 @@ Flutter folded `visibility.dart` into `indexed_stack.dart`; this file keeps the 
 
 ## widgets/editable_text.rs → editable_text.dart
 
+- Change: `EditableText.debugDeterministicCursor` is kept per `App`, read with `EditableText::debug_deterministic_cursor(app)` and set with `set_debug_deterministic_cursor(app, value)`, not in a static.
+  Reason: language — Dart's statics are isolate-global, and an `App` is Waft's isolate.
+  Affect: setting it changes only the app it is passed to, so a test that sets it needs no reset.
+
 - Change: an app private command arrives with its action string only; the argument map Flutter sends is dropped.
   Reason: platform — the host's `perform_private_command` carries no map.
   Affect: a private command handler cannot read the arguments the platform sent with it.

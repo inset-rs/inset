@@ -746,7 +746,7 @@ mod tests {
     use crate::material::{Material, MaterialType};
     use crate::material_state::MaterialStatesController;
     use crate::test_support::{
-        Drawn, WidgetTester, ahem_text, material_app, with_main_thread_stack,
+        Drawn, PaintInspection, WidgetTester, ahem_text, material_app, with_main_thread_stack,
     };
     use crate::theme_data::ThemeData;
     use waft_widgets::FocusNodeRef;

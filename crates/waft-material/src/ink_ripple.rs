@@ -433,7 +433,7 @@ mod tests {
 
     use crate::ink_well::{InkResponse, InkWell};
     use crate::material::{Material, RenderInkFeatures};
-    use crate::test_support::{Drawn, WidgetTester, with_main_thread_stack};
+    use crate::test_support::{Drawn, PaintInspection, WidgetTester, with_main_thread_stack};
     use crate::theme::Theme;
     use crate::theme_data::ThemeData;
 

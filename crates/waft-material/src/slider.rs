@@ -3421,10 +3421,10 @@ pub(crate) mod tests {
     use crate::material::Material;
     use crate::slider_parts::SliderTickMarkShape;
     use crate::slider_value_indicator_shape::SliderComponentShape;
-    pub(crate) use crate::test_support::colors_match;
     use crate::test_support::{
         PaintCall, WidgetTester, material_app, paints_calls, with_main_thread_stack,
     };
+    pub(crate) use crate::test_support::{PaintInspection, colors_match};
     use crate::theme_data::ThemeData;
 
     /// Dart's `LoggingThumbShape`: a thumb shape that also logs its repaint center.
@@ -6175,8 +6175,6 @@ pub(crate) mod tests {
     #[expect(deprecated, reason = "Dart's case calls the deprecated `withOpacity`")]
     fn the_default_slider_when_year2023_is_false() {
         with_main_thread_stack(|| {
-            let shadows = waft_painting::debug_disable_shadows();
-            waft_painting::set_debug_disable_shadows(false);
             let mut tester = tester_on(TargetPlatform::Android);
             let theme = default_theme(&tester);
             let color_scheme = theme.color_scheme.clone();
@@ -6460,7 +6458,6 @@ pub(crate) mod tests {
                 &[PaintCall::rrect(Some(value_indicator_color))]
             ));
             tester.up(&gesture);
-            waft_painting::set_debug_disable_shadows(shadows);
         });
     }
 

@@ -3615,8 +3615,8 @@ mod tests {
     use crate::range_slider_parts::{RangeSliderTickMarkShape, RangeSliderValueIndicatorShape};
     use crate::slider::tests::{default_theme, tester_on};
     use crate::test_support::{
-        CanvasCall, PaintCall, WidgetTester, colors_match, count_calls, material_app, paints_calls,
-        with_main_thread_stack,
+        CanvasCall, PaintCall, PaintInspection, WidgetTester, colors_match, count_calls,
+        material_app, paints_calls, with_main_thread_stack,
     };
     use crate::theme_data::ThemeData;
 
@@ -7230,16 +7230,12 @@ mod tests {
     }
 
     /// Dart's `path(color: black, style: stroke, strokeWidth: 2 * elevation)` of a thumb's
-    /// shadow: a `DrawShadow` of `elevation` while shadows show, and the stroked path
-    /// `debugDisableShadows` draws instead when it is set.
+    /// shadow, which Dart draws with `debugDisableShadows` set: here the shadow's own
+    /// `DrawShadow` of `elevation`.
     fn thumb_shadow_call(elevation: f64) -> PaintCall {
-        if waft_painting::debug_disable_shadows() {
-            PaintCall::stroked_path(crate::colors::Colors::BLACK, elevation * 2.0)
-        } else {
-            PaintCall::Shadow {
-                elevation: Some(elevation),
-                color: None,
-            }
+        PaintCall::Shadow {
+            elevation: Some(elevation),
+            color: None,
         }
     }
 
@@ -7370,19 +7366,12 @@ mod tests {
             .as_object()
     }
 
-    /// A thumb's shadow as Dart's `path(color: Colors.black)`, of either kind.
+    /// A thumb's shadow, Dart's `path(color: Colors.black)` under `debugDisableShadows`: here
+    /// its `DrawShadow`.
     fn any_thumb_shadow() -> PaintCall {
-        if waft_painting::debug_disable_shadows() {
-            PaintCall::Path {
-                color: Some(crate::colors::Colors::BLACK),
-                stroke_width: None,
-                stroked: None,
-            }
-        } else {
-            PaintCall::Shadow {
-                elevation: None,
-                color: None,
-            }
+        PaintCall::Shadow {
+            elevation: None,
+            color: None,
         }
     }
 

@@ -538,8 +538,8 @@ pub(crate) fn binding_pump_view(app: &mut App, view: ViewId, at: std::time::Dura
     pump_frame(app, &[view], at);
 }
 
-/// A frame at `at` of every view the platform has, asked for or not, as Flutter's tests pump
-/// one; a frame of none on a platform with none.
+/// A frame at `at` of every view the platform has, asked for or not, where flutter_test's `pump`
+/// frames only when one is scheduled; a frame of none on a platform with none.
 pub(crate) fn pump_every_view(app: &mut App, at: std::time::Duration) {
     let views: Vec<ViewId> = app
         .platform()

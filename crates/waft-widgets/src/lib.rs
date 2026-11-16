@@ -10,6 +10,8 @@ mod media;
 mod multi_view_app;
 #[cfg(test)]
 mod test_harness;
+#[cfg(any(test, feature = "test-support"))]
+pub mod testing;
 mod view;
 mod widgets;
 mod window;

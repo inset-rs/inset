@@ -1704,7 +1704,7 @@ impl AnyRenderObject {
             self.set_debug_doing_this_layout(app, true);
             let previous = AnyRenderObject::debug_active_layout();
             AnyRenderObject::set_debug_active_layout(Some(self));
-            if crate::debug::debug_print_layouts() {
+            if crate::debug::debug_print_layouts(app) {
                 eprintln!("Laying out (without resize) {self:?}");
             }
             previous
@@ -1767,7 +1767,7 @@ impl AnyRenderObject {
             self.set_debug_doing_this_layout(app, true);
             let previous = AnyRenderObject::debug_active_layout();
             AnyRenderObject::set_debug_active_layout(Some(self));
-            if crate::debug::debug_print_layouts() {
+            if crate::debug::debug_print_layouts(app) {
                 eprintln!(
                     "Laying out ({}) {self:?}",
                     if sized_by_parent {
@@ -2201,7 +2201,7 @@ impl AnyRenderObject {
         }
         self.set_needs_paint(app, true);
         if self.is_repaint_boundary(app) && self.was_repaint_boundary(app) {
-            if crate::debug::debug_print_mark_needs_paint_stacks() {
+            if crate::debug::debug_print_mark_needs_paint_stacks(app) {
                 eprintln!("markNeedsPaint() called for {self:?}");
             }
             debug_assert!(
@@ -2215,7 +2215,7 @@ impl AnyRenderObject {
         } else if let Some(parent) = self.parent(app) {
             parent.mark_needs_paint(app);
         } else {
-            if crate::debug::debug_print_mark_needs_paint_stacks() {
+            if crate::debug::debug_print_mark_needs_paint_stacks(app) {
                 eprintln!("markNeedsPaint() called for {self:?} (root of render tree)");
             }
             if let Some(owner) = self.owner(app) {
@@ -2397,7 +2397,7 @@ pub trait RenderObjectBase: RenderObject {
         if let Some(owner) = this.owner(app)
             && this.is_relayout_boundary(app).unwrap_or(false)
         {
-            if crate::debug::debug_print_mark_needs_layout_stacks() {
+            if crate::debug::debug_print_mark_needs_layout_stacks(app) {
                 eprintln!("markNeedsLayout() called for {this:?}");
             }
             owner.add_node_needing_layout(app, this);

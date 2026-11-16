@@ -3504,7 +3504,9 @@ mod tests {
     use super::*;
     use crate::material_localizations::DefaultMaterialLocalizations;
     use crate::page::MaterialPageRoute;
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::{
+        PaintInspection, WidgetTester, material_app, with_main_thread_stack,
+    };
     use crate::theme_data::ThemeData;
     use crate::tooltip::tests::{m2, tester, tester_on};
     use waft_widgets::AnyFocusNode;

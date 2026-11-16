@@ -4442,7 +4442,9 @@ pub(crate) mod tests {
     use crate::app_bar::AppBar;
     use crate::material_localizations::DefaultMaterialLocalizations;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::{
+        PaintInspection, WidgetTester, material_app, with_main_thread_stack,
+    };
     use crate::theme_data::ThemeData;
     use waft_widgets::ScrollControllerLeaf;
 
@@ -5096,7 +5098,7 @@ pub(crate) mod tests {
         use crate::icons::Icons;
         use crate::material::RenderInkFeatures;
         use crate::scaffold::Scaffold;
-        use crate::test_support::{Drawn, TestVSync, is_same_color_as};
+        use crate::test_support::{Drawn, PaintInspection, TestVSync, is_same_color_as};
 
         /// The style of the `Text` showing `text` under a tab's `_TabStyle`: Dart's `getTabText`'s
         /// paragraph's `text.style`.
@@ -6489,7 +6491,7 @@ pub(crate) mod tests {
         use waft_foundation::ValueKey;
         use waft_widgets::ScrollableState;
 
-        use crate::test_support::TestVSync;
+        use crate::test_support::{PaintInspection, TestVSync};
 
         /// Dart's `createTabController(length:, vsync: const TestVSync(), initialIndex:,
         /// animationDuration:)`.
@@ -10484,7 +10486,7 @@ pub(crate) mod tests {
         use super::*;
         use crate::icon_button::IconButton;
         use crate::icons::Icons;
-        use crate::test_support::TestVSync;
+        use crate::test_support::{PaintInspection, TestVSync};
         use crate::text_button::TextButton;
 
         /// Dart's `createTabController(length:, vsync: const TestVSync())`.
@@ -13113,7 +13115,9 @@ pub(crate) mod tests {
         use crate::app_bar::AppBar;
         use crate::icons::Icons;
         use crate::scaffold::Scaffold;
-        use crate::test_support::{TestVSync, WidgetTester, material_app, with_main_thread_stack};
+        use crate::test_support::{
+            PaintInspection, TestVSync, WidgetTester, material_app, with_main_thread_stack,
+        };
         use crate::theme_data::ThemeData;
 
         /// Dart's `tester.renderObject<RenderParagraph>(find.text(text)).text.style!`.

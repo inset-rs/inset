@@ -9635,7 +9635,7 @@ pub(crate) mod tests {
         use crate::icons::Icons;
         use crate::input_border::{InputBorderRef, OutlineInputBorder, UnderlineInputBorder};
         use crate::scaffold::Scaffold;
-        use crate::test_support::WidgetTester;
+        use crate::test_support::{PaintInspection, WidgetTester};
         use crate::theme::Theme;
         use crate::theme_data::{ThemeData, VisualDensity};
 
@@ -14914,7 +14914,7 @@ pub(crate) mod tests {
         use crate::material::Material;
         use crate::material_state::WidgetStateInputBorder;
         use crate::scaffold::Scaffold;
-        use crate::test_support::{Drawn, WidgetTester};
+        use crate::test_support::{Drawn, PaintInspection, WidgetTester};
         use crate::theme::Theme;
         use crate::theme_data::VisualDensity;
 
@@ -17254,7 +17254,7 @@ pub(crate) mod tests {
         use crate::icons::Icons;
         use crate::input_border::{InputBorderRef, OutlineInputBorder, UnderlineInputBorder};
         use crate::material::Material;
-        use crate::test_support::{AhemText, WidgetTester, material_app};
+        use crate::test_support::{AhemText, PaintInspection, WidgetTester, material_app};
         use crate::text_theme::TextTheme;
         use crate::theme::Theme;
         use crate::theme_data::{ThemeData, VisualDensity};

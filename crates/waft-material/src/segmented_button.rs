@@ -1898,7 +1898,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::icons::Icons;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{Drawn, WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::{
+        Drawn, PaintInspection, WidgetTester, material_app, with_main_thread_stack,
+    };
     use crate::theme_data::ThemeData;
     use crate::tooltip::tests::{m3, tester};
 

@@ -880,7 +880,9 @@ pub(crate) mod tests {
     use super::*;
     use crate::colors::Colors;
     use crate::icons::Icons;
-    use crate::test_support::{AhemText, Drawn, WidgetTester, with_main_thread_stack};
+    use crate::test_support::{
+        AhemText, Drawn, PaintInspection, WidgetTester, with_main_thread_stack,
+    };
     use crate::theme::Theme;
     use crate::theme_data::ThemeData;
     use crate::tooltip::tests::{m3, pump_app, tester};

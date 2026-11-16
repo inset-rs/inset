@@ -2274,7 +2274,7 @@ pub(crate) mod tests {
     use crate::colors::Colors;
     use crate::scaffold::Scaffold;
     use crate::test_support::{
-        AhemText, Drawn, WidgetTester, material_app, with_main_thread_stack,
+        AhemText, Drawn, PaintInspection, WidgetTester, material_app, with_main_thread_stack,
     };
     use waft_widgets::AnyFocusNode;
 

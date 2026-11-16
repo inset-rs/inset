@@ -662,7 +662,8 @@ mod tests {
     use crate::input_decorator::InputDecorationThemeData;
     use crate::material::Material;
     use crate::test_support::{
-        PaintCall, WidgetTester, material_app, paints_calls, with_main_thread_stack,
+        PaintCall, PaintInspection, WidgetTester, material_app, paints_calls,
+        with_main_thread_stack,
     };
     use crate::text_button::TextButton;
     use crate::text_field::TextField;

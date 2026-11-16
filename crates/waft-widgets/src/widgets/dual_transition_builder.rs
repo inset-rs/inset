@@ -326,27 +326,16 @@ mod tests {
     use std::cell::Cell;
     use std::time::Duration;
     use waft_animation::Drive;
-    use waft_foundation::AppCell;
     use waft_foundation::Ref;
 
     use waft_animation::{AnimationBehavior, AnimationController, AnyAnimation, Tween};
     use waft_embedder::Color;
-    use waft_scheduler::{Ticker, TickerCallback, TickerProvider};
 
     use super::*;
-    use crate::test_harness::{binding_cell, binding_mount, binding_pump};
+    use crate::testing::{TestVSync, WidgetTester, test_widgets};
     use crate::widgets::basic::{Center, SizedBox};
     use crate::widgets::container::Container;
     use crate::widgets::transitions::{FadeTransition, ScaleTransition};
-
-    /// flutter_test's `TestVSync`: vends ordinary tickers, in no view.
-    struct TestVSync;
-
-    impl TickerProvider for TestVSync {
-        fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
-            Ticker::new(app, on_tick, None)
-        }
-    }
 
     /// What the two builders were last given: Dart's `_getScale` and `_getOpacity` read the
     /// `ScaleTransition` and `FadeTransition` the builders return, whose animations these are.
@@ -414,178 +403,187 @@ mod tests {
             .into_widget()
     }
 
-    fn pump(cell: &AppCell, at: u64) {
-        binding_pump(&mut cell.borrow_mut(), Duration::from_millis(at));
+    fn ms(millis: u64) -> Duration {
+        Duration::from_millis(millis)
     }
 
-    fn assert_scale_and_opacity(cell: &AppCell, observed: &Observed, scale: f64, opacity: f64) {
-        let app = cell.borrow();
+    fn assert_scale_and_opacity(
+        tester: &WidgetTester,
+        observed: &Observed,
+        scale: f64,
+        opacity: f64,
+    ) {
+        let app = tester.cell.borrow();
         assert_eq!(observed.scale(&app), scale);
         assert_eq!(observed.opacity(&app), opacity);
     }
 
-    /// Mounts the tree for `controller` and runs the frame that builds it.
-    fn mount(cell: &AppCell, controller: &Ref<AnimationController>, child: WidgetRef) -> Observed {
+    /// Pumps the tree for `controller`.
+    fn pump_tree(
+        tester: &mut WidgetTester,
+        controller: &Ref<AnimationController>,
+        child: WidgetRef,
+    ) -> Observed {
         let observed = Observed::default();
-        binding_mount(cell, tree(controller.erase(), &observed, child));
+        tester.pump_widget(tree(controller.erase(), &observed, child));
         observed
     }
 
     #[test]
     fn runs_animations() {
-        let cell = binding_cell();
-        let controller = controller(&mut cell.borrow_mut(), None);
-        let observed = mount(&cell, &controller, green_box());
-        assert_scale_and_opacity(&cell, &observed, 0.0, 1.0);
+        test_widgets(|tester| {
+            let controller = tester.update(|app| controller(app, None));
+            let observed = pump_tree(tester, &controller, green_box());
+            assert_scale_and_opacity(tester, &observed, 0.0, 1.0);
 
-        controller.forward(&mut cell.borrow_mut(), None);
-        pump(&cell, 0);
-        pump(&cell, 150);
-        assert_scale_and_opacity(&cell, &observed, 0.5, 1.0);
+            tester.update(|app| controller.forward(app, None));
+            tester.pump();
+            tester.pump_by(ms(150));
+            assert_scale_and_opacity(tester, &observed, 0.5, 1.0);
 
-        pump(&cell, 300);
-        assert_scale_and_opacity(&cell, &observed, 1.0, 1.0);
+            tester.pump_by(ms(150));
+            assert_scale_and_opacity(tester, &observed, 1.0, 1.0);
 
-        pump(&cell, 600);
-        assert_scale_and_opacity(&cell, &observed, 1.0, 1.0);
+            tester.pump_by(ms(300));
+            assert_scale_and_opacity(tester, &observed, 1.0, 1.0);
 
-        controller.reverse(&mut cell.borrow_mut(), None);
-        pump(&cell, 600);
-        pump(&cell, 750);
-        assert_scale_and_opacity(&cell, &observed, 1.0, 0.5);
+            tester.update(|app| controller.reverse(app, None));
+            tester.pump();
+            tester.pump_by(ms(150));
+            assert_scale_and_opacity(tester, &observed, 1.0, 0.5);
 
-        pump(&cell, 900);
-        assert_scale_and_opacity(&cell, &observed, 1.0, 0.0);
+            tester.pump_by(ms(150));
+            assert_scale_and_opacity(tester, &observed, 1.0, 0.0);
 
-        pump(&cell, 1200);
-        assert_scale_and_opacity(&cell, &observed, 0.0, 1.0);
-        controller.dispose(&mut cell.borrow_mut());
+            tester.pump_by(ms(300));
+            assert_scale_and_opacity(tester, &observed, 0.0, 1.0);
+            tester.update(|app| controller.dispose(app));
+        });
     }
 
     /// Not a Dart case: the proxies and the `ReverseAnimation` a state made are freed once the
     /// unmounted tree lets go of them, as Dart's collector frees them.
     #[test]
     fn a_disposed_state_frees_its_proxies_and_reverse_animation() {
-        let cell = binding_cell();
-        let controller = controller(&mut cell.borrow_mut(), Some(1.0));
-        let forward: Rc<Cell<Option<AnyAnimation<f64>>>> = Rc::default();
-        let reverse: Rc<Cell<Option<AnyAnimation<f64>>>> = Rc::default();
-        let tree = {
-            let (forward, reverse) = (Rc::clone(&forward), Rc::clone(&reverse));
-            DualTransitionBuilder::new(
-                controller.erase(),
-                move |_app, _context, animation, child| {
-                    forward.set(Some(animation.handle()));
-                    child.cloned().expect("a child")
-                },
-                move |_app, _context, animation, child| {
-                    reverse.set(Some(animation.handle()));
-                    child.cloned().expect("a child")
-                },
-            )
-            .child(green_box())
-            .into_widget()
-        };
-        binding_mount(&cell, Center::new().child(tree).into_widget());
-        let proxies = [forward, reverse].map(|built| built.get().expect("the builder ran"));
-        let reverse_parent = {
-            let app = cell.borrow();
-            let reverse = app
-                .handle::<ProxyAnimation>(proxies[1].id())
-                .expect("the reverse proxy");
-            reverse
-                .parent(&app)
-                .expect("a completed animation is reversed")
-        };
+        test_widgets(|tester| {
+            let controller = tester.update(|app| controller(app, Some(1.0)));
+            let forward: Rc<Cell<Option<AnyAnimation<f64>>>> = Rc::default();
+            let reverse: Rc<Cell<Option<AnyAnimation<f64>>>> = Rc::default();
+            let tree = {
+                let (forward, reverse) = (Rc::clone(&forward), Rc::clone(&reverse));
+                DualTransitionBuilder::new(
+                    controller.erase(),
+                    move |_app, _context, animation, child| {
+                        forward.set(Some(animation.handle()));
+                        child.cloned().expect("a child")
+                    },
+                    move |_app, _context, animation, child| {
+                        reverse.set(Some(animation.handle()));
+                        child.cloned().expect("a child")
+                    },
+                )
+                .child(green_box())
+                .into_widget()
+            };
+            tester.pump_widget(Center::new().child(tree));
+            let proxies = [forward, reverse].map(|built| built.get().expect("the builder ran"));
+            let reverse_parent = {
+                let app = tester.cell.borrow();
+                let reverse = app
+                    .handle::<ProxyAnimation>(proxies[1].id())
+                    .expect("the reverse proxy");
+                reverse
+                    .parent(&app)
+                    .expect("a completed animation is reversed")
+            };
 
-        binding_mount(&cell, SizedBox::new().into_widget());
-        cell.checkpoint();
-        let app = cell.borrow();
-        for freed in [proxies[0].id(), proxies[1].id(), reverse_parent.id()] {
-            assert!(!app.contains(freed), "{freed:?} is freed");
-        }
-        assert!(
-            app.contains(&controller),
-            "the widget's animation is its owner's"
-        );
+            tester.pump_widget(SizedBox::new());
+            let app = tester.cell.borrow();
+            for freed in [proxies[0].id(), proxies[1].id(), reverse_parent.id()] {
+                assert!(!app.contains(freed), "{freed:?} is freed");
+            }
+            assert!(
+                app.contains(&controller),
+                "the widget's animation is its owner's"
+            );
+        });
     }
 
     #[test]
     fn keeps_state() {
-        let cell = binding_cell();
-        let controller = controller(&mut cell.borrow_mut(), None);
-        let probe = Probe::default();
-        mount(&cell, &controller, probe.widget());
-        assert_eq!((probe.inits.get(), probe.disposes.get()), (1, 0));
-
-        controller.forward(&mut cell.borrow_mut(), None);
-        for at in [0, 150, 300, 600] {
-            pump(&cell, at);
+        test_widgets(|tester| {
+            let controller = tester.update(|app| controller(app, None));
+            let probe = Probe::default();
+            pump_tree(tester, &controller, probe.widget());
             assert_eq!((probe.inits.get(), probe.disposes.get()), (1, 0));
-        }
 
-        controller.reverse(&mut cell.borrow_mut(), None);
-        for at in [600, 750, 900, 1200] {
-            pump(&cell, at);
-            assert_eq!((probe.inits.get(), probe.disposes.get()), (1, 0));
-        }
-        controller.dispose(&mut cell.borrow_mut());
+            for direction in [AnimationController::forward, AnimationController::reverse] {
+                tester.update(|app| direction(controller.handle(), app, None));
+                for step in [0, 150, 150, 300] {
+                    tester.pump_by(ms(step));
+                    assert_eq!((probe.inits.get(), probe.disposes.get()), (1, 0));
+                }
+            }
+            tester.update(|app| controller.dispose(app));
+        });
     }
 
     #[test]
     fn does_not_jump_when_interrupted_forward() {
-        let cell = binding_cell();
-        let controller = controller(&mut cell.borrow_mut(), None);
-        let observed = mount(&cell, &controller, green_box());
-        assert_scale_and_opacity(&cell, &observed, 0.0, 1.0);
+        test_widgets(|tester| {
+            let controller = tester.update(|app| controller(app, None));
+            let observed = pump_tree(tester, &controller, green_box());
+            assert_scale_and_opacity(tester, &observed, 0.0, 1.0);
 
-        controller.forward(&mut cell.borrow_mut(), None);
-        pump(&cell, 0);
-        pump(&cell, 150);
-        assert_scale_and_opacity(&cell, &observed, 0.5, 1.0);
+            tester.update(|app| controller.forward(app, None));
+            tester.pump();
+            tester.pump_by(ms(150));
+            assert_scale_and_opacity(tester, &observed, 0.5, 1.0);
 
-        controller.reverse(&mut cell.borrow_mut(), None);
-        assert_scale_and_opacity(&cell, &observed, 0.5, 1.0);
-        pump(&cell, 150);
-        assert_scale_and_opacity(&cell, &observed, 0.5, 1.0);
+            tester.update(|app| controller.reverse(app, None));
+            assert_scale_and_opacity(tester, &observed, 0.5, 1.0);
+            tester.pump();
+            assert_scale_and_opacity(tester, &observed, 0.5, 1.0);
 
-        pump(&cell, 225);
-        assert_scale_and_opacity(&cell, &observed, 0.25, 1.0);
+            tester.pump_by(ms(75));
+            assert_scale_and_opacity(tester, &observed, 0.25, 1.0);
 
-        pump(&cell, 300);
-        assert_scale_and_opacity(&cell, &observed, 0.0, 1.0);
+            tester.pump_by(ms(75));
+            assert_scale_and_opacity(tester, &observed, 0.0, 1.0);
 
-        pump(&cell, 600);
-        assert_scale_and_opacity(&cell, &observed, 0.0, 1.0);
-        controller.dispose(&mut cell.borrow_mut());
+            tester.pump_by(ms(300));
+            assert_scale_and_opacity(tester, &observed, 0.0, 1.0);
+            tester.update(|app| controller.dispose(app));
+        });
     }
 
     #[test]
     fn does_not_jump_when_interrupted_reverse() {
-        let cell = binding_cell();
-        let controller = controller(&mut cell.borrow_mut(), Some(1.0));
-        let observed = mount(&cell, &controller, green_box());
-        assert_scale_and_opacity(&cell, &observed, 1.0, 1.0);
+        test_widgets(|tester| {
+            let controller = tester.update(|app| controller(app, Some(1.0)));
+            let observed = pump_tree(tester, &controller, green_box());
+            assert_scale_and_opacity(tester, &observed, 1.0, 1.0);
 
-        controller.reverse(&mut cell.borrow_mut(), None);
-        pump(&cell, 0);
-        pump(&cell, 150);
-        assert_scale_and_opacity(&cell, &observed, 1.0, 0.5);
+            tester.update(|app| controller.reverse(app, None));
+            tester.pump();
+            tester.pump_by(ms(150));
+            assert_scale_and_opacity(tester, &observed, 1.0, 0.5);
 
-        controller.forward(&mut cell.borrow_mut(), None);
-        assert_scale_and_opacity(&cell, &observed, 1.0, 0.5);
-        pump(&cell, 150);
-        assert_scale_and_opacity(&cell, &observed, 1.0, 0.5);
+            tester.update(|app| controller.forward(app, None));
+            assert_scale_and_opacity(tester, &observed, 1.0, 0.5);
+            tester.pump();
+            assert_scale_and_opacity(tester, &observed, 1.0, 0.5);
 
-        pump(&cell, 225);
-        assert_scale_and_opacity(&cell, &observed, 1.0, 0.75);
+            tester.pump_by(ms(75));
+            assert_scale_and_opacity(tester, &observed, 1.0, 0.75);
 
-        pump(&cell, 300);
-        assert_scale_and_opacity(&cell, &observed, 1.0, 1.0);
+            tester.pump_by(ms(75));
+            assert_scale_and_opacity(tester, &observed, 1.0, 1.0);
 
-        pump(&cell, 600);
-        assert_scale_and_opacity(&cell, &observed, 1.0, 1.0);
-        controller.dispose(&mut cell.borrow_mut());
+            tester.pump_by(ms(300));
+            assert_scale_and_opacity(tester, &observed, 1.0, 1.0);
+            tester.update(|app| controller.dispose(app));
+        });
     }
 
     /// Dart's `_StatefulTestWidget`, counting its state's life: `same(state)` is one `init_state`
