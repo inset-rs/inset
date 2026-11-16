@@ -432,7 +432,11 @@ async fn animation(
     let ImagePictures::Animation(animation) = image.pictures() else {
         return failed(report, &format!("not an animation: {:?}", image.pictures()));
     };
-    let found: Vec<_> = animation.frames.iter().map(|frame| frame.duration).collect();
+    let found: Vec<_> = animation
+        .frames
+        .iter()
+        .map(|frame| frame.duration)
+        .collect();
     let expected = durations.map(|milliseconds| Some(Duration::from_millis(milliseconds)));
     report.expect(
         found == expected,
