@@ -90,6 +90,12 @@ permissions = ["android.permission.INTERNET"]  # what the app asks for besides W
 adaptive_icon = { foreground = "assets/icon-foreground.png", background = "#ffffff" }  # the launcher icon on API 26 and up, two 108 dp layers the launcher cuts to its shape; background is #rrggbb or a PNG; without it, `icon` is shrunk into the shape
 dependencies = ["android/some-library-1.0.aar", "android/kotlin-stdlib-2.2.10.jar"]  # Android libraries merged into the package, as Gradle merges a module's; see Android libraries
 
+[package.metadata.waft.android.release]  # the key a release build is signed with; see Signing
+keystore = "android/upload.jks"
+alias = "upload"
+store_password = { env = "WAFT_ANDROID_STORE_PASSWORD" }  # or { file = "path" }; never the password itself
+key_password = { file = "../secrets/upload-key-password" }  # where the key's own password differs
+
 [[package.metadata.waft.file_associations]]  # a kind of file this app defines
 extensions = ["mydoc"]
 name = "My document"
@@ -155,7 +161,7 @@ Signing happens when credentials are present, never by flag.
 
   `run` is never notarized.
 - Windows: `certificate_thumbprint` or a custom sign command, through cargo-packager.
-- Android: the debug key in `~/.android/debug.keystore`, made with `keytool` when the machine has none, for `run` and `build apk` alike. A release key is not here yet.
+- Android: a debug build, and a release build of an app that names no release key, is signed with the debug key in `~/.android/debug.keystore`, made with `keytool` when the machine has none; the release build with a warning, since a store refuses it, as a new Flutter app's release build is. A release build, `run --release` and `build apk` alike, of an app with `[package.metadata.waft.android.release]` is signed with that key: the keystore and alias it names, and its passwords from where it says, an environment variable or a file, which apksigner reads itself (`env:` and `file:`), so they never pass through the CLI or sit in `Cargo.toml`.
 
 ## Size
 

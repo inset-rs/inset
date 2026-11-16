@@ -45,10 +45,12 @@ mod java_resources;
 mod library;
 mod manifest_merger;
 mod native_libraries;
+mod signing;
 mod xml;
 
 use library::AndroidLibrary;
 use manifest_merger::LibraryManifest;
+use signing::Signing;
 
 use crate::cargo::{self, Artifact, Build};
 use crate::icons;
@@ -463,13 +465,7 @@ pub fn build(project: &Project, profile: Profile, abi: Abi) -> Result<Apk> {
         "zipalign",
     )?;
     let apk = out.join(format!("{}.apk", project.package));
-    sign(&sdk, java, &aligned, &apk)?;
-    if profile.is_release() {
-        eprintln!(
-            "warning: signed with the debug key, whose password is public. \
-             A store will not take this apk."
-        );
-    }
+    Signing::for_build(project, profile).sign(&sdk, java, &aligned, &apk)?;
     Ok(Apk { path: apk, package })
 }
 
@@ -1128,68 +1124,6 @@ fn add_to_package(apk: &Path, entries: &[(String, PathBuf)]) -> Result<()> {
 
 /// `apksigner` with the debug key, the one Android Studio and Gradle sign debug builds
 /// with, made here when the machine has none yet.
-fn sign(sdk: &Sdk, java: &Java, aligned: &Path, out: &Path) -> Result<()> {
-    let keystore = debug_keystore(java)?;
-    tools::run(
-        java.bin("java")
-            .arg("-jar")
-            .arg(sdk.build_tools.join("lib/apksigner.jar"))
-            .args([
-                "sign",
-                "--ks-pass",
-                "pass:android",
-                "--ks-key-alias",
-                "androiddebugkey",
-                "--key-pass",
-                "pass:android",
-                "--ks",
-            ])
-            .arg(&keystore)
-            .arg("--out")
-            .arg(out)
-            .arg(aligned),
-        "apksigner",
-    )
-}
-
-/// `~/.android/debug.keystore`, as Android Studio writes it.
-fn debug_keystore(java: &Java) -> Result<PathBuf> {
-    let home = std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(PathBuf::from)
-        .context("HOME is not set")?;
-    let dir = home.join(".android");
-    let keystore = dir.join("debug.keystore");
-    if keystore.is_file() {
-        return Ok(keystore);
-    }
-    fs::create_dir_all(&dir)?;
-    println!("creating the debug keystore at {}", keystore.display());
-    tools::run(
-        java.bin("keytool")
-            .args(["-genkeypair", "-keystore"])
-            .arg(&keystore)
-            .args([
-                "-storepass",
-                "android",
-                "-alias",
-                "androiddebugkey",
-                "-keypass",
-                "android",
-                "-keyalg",
-                "RSA",
-                "-keysize",
-                "2048",
-                "-validity",
-                "10000",
-                "-dname",
-                "CN=Android Debug,O=Android,C=US",
-            ]),
-        "keytool",
-    )?;
-    Ok(keystore)
-}
-
 /// A device `adb` can reach, running or booting.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Device {
