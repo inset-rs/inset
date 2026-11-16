@@ -246,7 +246,7 @@ pub trait MaterialLocalizations: 'static {
     ) -> String;
 
     /// Full unabbreviated year format, e.g. 2017 rather than 17.
-    fn format_year(&self, date: &DateTime) -> String;
+    fn format_year(&self, app: &App, date: &DateTime) -> String;
 
     /// Formats the date in a compact format.
     ///
@@ -259,7 +259,7 @@ pub trait MaterialLocalizations: 'static {
     ///
     /// See also:
     ///   * [`parse_compact_date`](Self::parse_compact_date), which will convert a compact date string to a [`DateTime`].
-    fn format_compact_date(&self, date: &DateTime) -> String;
+    fn format_compact_date(&self, app: &App, date: &DateTime) -> String;
 
     /// Formats the date using a short-width format.
     ///
@@ -269,7 +269,7 @@ pub trait MaterialLocalizations: 'static {
     ///
     /// - US English: Feb 21, 2019
     /// - Russian: 21 февр. 2019 г.
-    fn format_short_date(&self, date: &DateTime) -> String;
+    fn format_short_date(&self, app: &App, date: &DateTime) -> String;
 
     /// Formats the date using a medium-width format.
     ///
@@ -280,7 +280,7 @@ pub trait MaterialLocalizations: 'static {
     ///
     /// - US English: Wed, Sep 27
     /// - Russian: ср, сент. 27
-    fn format_medium_date(&self, date: &DateTime) -> String;
+    fn format_medium_date(&self, app: &App, date: &DateTime) -> String;
 
     /// Formats day of week, month, day of month and year in a long-width format.
     ///
@@ -291,13 +291,13 @@ pub trait MaterialLocalizations: 'static {
     ///
     /// - US English: Wednesday, September 27, 2017
     /// - Russian: Среда, Сентябрь 27, 2017
-    fn format_full_date(&self, date: &DateTime) -> String;
+    fn format_full_date(&self, app: &App, date: &DateTime) -> String;
 
     /// Formats the month and the year of the given `date`.
     ///
     /// The returned string does not contain the day of the month. This appears
     /// in the date picker invoked using `showDatePicker`.
-    fn format_month_year(&self, date: &DateTime) -> String;
+    fn format_month_year(&self, app: &App, date: &DateTime) -> String;
 
     /// Formats the month and day of the given `date`.
     ///
@@ -305,7 +305,7 @@ pub trait MaterialLocalizations: 'static {
     ///
     /// - US English: Feb 21
     /// - Russian: 21 февр.
-    fn format_short_month_day(&self, date: &DateTime) -> String;
+    fn format_short_month_day(&self, app: &App, date: &DateTime) -> String;
 
     /// Converts the given compact date formatted string into a [`DateTime`].
     ///
@@ -851,13 +851,13 @@ impl DefaultMaterialLocalizations {
 }
 
 /// The index of `date`'s month in a table that starts with January.
-fn month_index(date: &DateTime) -> usize {
-    usize::try_from(date.month() - DateTime::JANUARY).expect("a month in 1..=12")
+fn month_index(app: &App, date: &DateTime) -> usize {
+    usize::try_from(date.month(app) - DateTime::JANUARY).expect("a month in 1..=12")
 }
 
 /// The index of `date`'s weekday in a table that starts with Monday.
-fn weekday_index(date: &DateTime) -> usize {
-    usize::try_from(date.weekday() - DateTime::MONDAY).expect("a weekday in 1..=7")
+fn weekday_index(app: &App, date: &DateTime) -> usize {
+    usize::try_from(date.weekday(app) - DateTime::MONDAY).expect("a weekday in 1..=7")
 }
 
 /// Dart's `int.tryParse(source, radix: 10)`: surrounding whitespace (Dart's, which counts
@@ -875,11 +875,11 @@ fn date_time_or_none(app: &App, year: i64, month: i64, day: i64) -> Option<DateT
     // The last instant a `DateTime` holds, 100,000,000 days after the epoch, read in the local
     // zone: a local midnight after its date is out of range.
     const LAST_MILLISECOND: i64 = 8_640_000_000_000_000;
-    let last = DateTime::from_milliseconds_since_epoch(app, LAST_MILLISECOND, false);
+    let last = DateTime::from_milliseconds_since_epoch(LAST_MILLISECOND, false);
     let last_day = (
-        i64::from(last.year()),
-        i64::from(last.month()),
-        i64::from(last.day()),
+        i64::from(last.year(app)),
+        i64::from(last.month(app)),
+        i64::from(last.day(app)),
     );
     if (year, month, day) > last_day {
         return None;
@@ -918,48 +918,48 @@ impl MaterialLocalizations for DefaultMaterialLocalizations {
         }
     }
 
-    fn format_year(&self, date: &DateTime) -> String {
-        date.year().to_string()
+    fn format_year(&self, app: &App, date: &DateTime) -> String {
+        date.year(app).to_string()
     }
 
-    fn format_compact_date(&self, date: &DateTime) -> String {
+    fn format_compact_date(&self, app: &App, date: &DateTime) -> String {
         // Assumes US mm/dd/yyyy format
-        let month = Self::format_two_digit_zero_pad(date.month());
-        let day = Self::format_two_digit_zero_pad(date.day());
-        let year = format!("{:0>4}", date.year().to_string());
+        let month = Self::format_two_digit_zero_pad(date.month(app));
+        let day = Self::format_two_digit_zero_pad(date.day(app));
+        let year = format!("{:0>4}", date.year(app).to_string());
         format!("{month}/{day}/{year}")
     }
 
-    fn format_short_date(&self, date: &DateTime) -> String {
-        let month = Self::SHORT_MONTHS[month_index(date)];
-        format!("{month} {}, {}", date.day(), date.year())
+    fn format_short_date(&self, app: &App, date: &DateTime) -> String {
+        let month = Self::SHORT_MONTHS[month_index(app, date)];
+        format!("{month} {}, {}", date.day(app), date.year(app))
     }
 
-    fn format_medium_date(&self, date: &DateTime) -> String {
-        let day = Self::SHORT_WEEKDAYS[weekday_index(date)];
-        let month = Self::SHORT_MONTHS[month_index(date)];
-        format!("{day}, {month} {}", date.day())
+    fn format_medium_date(&self, app: &App, date: &DateTime) -> String {
+        let day = Self::SHORT_WEEKDAYS[weekday_index(app, date)];
+        let month = Self::SHORT_MONTHS[month_index(app, date)];
+        format!("{day}, {month} {}", date.day(app))
     }
 
-    fn format_full_date(&self, date: &DateTime) -> String {
-        let month = Self::MONTHS[month_index(date)];
+    fn format_full_date(&self, app: &App, date: &DateTime) -> String {
+        let month = Self::MONTHS[month_index(app, date)];
         format!(
             "{}, {month} {}, {}",
-            Self::WEEKDAYS[weekday_index(date)],
-            date.day(),
-            date.year()
+            Self::WEEKDAYS[weekday_index(app, date)],
+            date.day(app),
+            date.year(app)
         )
     }
 
-    fn format_month_year(&self, date: &DateTime) -> String {
-        let year = self.format_year(date);
-        let month = Self::MONTHS[month_index(date)];
+    fn format_month_year(&self, app: &App, date: &DateTime) -> String {
+        let year = self.format_year(app, date);
+        let month = Self::MONTHS[month_index(app, date)];
         format!("{month} {year}")
     }
 
-    fn format_short_month_day(&self, date: &DateTime) -> String {
-        let month = Self::SHORT_MONTHS[month_index(date)];
-        format!("{month} {}", date.day())
+    fn format_short_month_day(&self, app: &App, date: &DateTime) -> String {
+        let month = Self::SHORT_MONTHS[month_index(app, date)];
+        format!("{month} {}", date.day(app))
     }
 
     fn parse_compact_date(&self, app: &App, input_string: Option<&str>) -> Option<DateTime> {
@@ -1943,26 +1943,26 @@ pub(crate) mod tests {
         let strings = DefaultMaterialLocalizations::new();
         let date = DateTime::new(&app, 2019, 2, 21);
 
-        assert_eq!(strings.format_year(&date), "2019");
-        assert_eq!(strings.format_compact_date(&date), "02/21/2019");
+        assert_eq!(strings.format_year(&app, &date), "2019");
+        assert_eq!(strings.format_compact_date(&app, &date), "02/21/2019");
         assert_eq!(
-            strings.format_compact_date(&DateTime::new(&app, 5, 1, 2)),
+            strings.format_compact_date(&app, &DateTime::new(&app, 5, 1, 2)),
             "01/02/0005"
         );
-        assert_eq!(strings.format_short_date(&date), "Feb 21, 2019");
-        assert_eq!(strings.format_medium_date(&date), "Thu, Feb 21");
+        assert_eq!(strings.format_short_date(&app, &date), "Feb 21, 2019");
+        assert_eq!(strings.format_medium_date(&app, &date), "Thu, Feb 21");
         assert_eq!(
-            strings.format_full_date(&date),
+            strings.format_full_date(&app, &date),
             "Thursday, February 21, 2019"
         );
-        assert_eq!(strings.format_month_year(&date), "February 2019");
-        assert_eq!(strings.format_short_month_day(&date), "Feb 21");
+        assert_eq!(strings.format_month_year(&app, &date), "February 2019");
+        assert_eq!(strings.format_short_month_day(&app, &date), "Feb 21");
 
         // The examples of the interface's documentation.
         let example = DateTime::new(&app, 2017, 9, 27);
-        assert_eq!(strings.format_medium_date(&example), "Wed, Sep 27");
+        assert_eq!(strings.format_medium_date(&app, &example), "Wed, Sep 27");
         assert_eq!(
-            strings.format_full_date(&example),
+            strings.format_full_date(&app, &example),
             "Wednesday, September 27, 2017"
         );
     }
@@ -1997,8 +1997,8 @@ pub(crate) mod tests {
         assert_eq!(parse("02/29/2000"), Some(DateTime::new(&app, 2000, 2, 29)));
         // The last day a `DateTime` holds is a valid local date only east of UTC, where its
         // midnight comes before the last instant.
-        let last = DateTime::from_milliseconds_since_epoch(&app, 8_640_000_000_000_000, false);
-        let last_day = (last.day() == 13).then(|| DateTime::new(&app, 275760, 9, 13));
+        let last = DateTime::from_milliseconds_since_epoch(8_640_000_000_000_000, false);
+        let last_day = (last.day(&app) == 13).then(|| DateTime::new(&app, 275760, 9, 13));
         assert_eq!(parse("09/13/275760"), last_day);
         assert_eq!(parse("09/14/275760"), None);
     }

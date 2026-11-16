@@ -109,7 +109,7 @@ pub trait CupertinoLocalizations: 'static {
     ///
     /// - US English: Wed Sep 27
     /// - Russian: ср сент. 27
-    fn date_picker_medium_date(&self, date: &DateTime) -> String;
+    fn date_picker_medium_date(&self, app: &App, date: &DateTime) -> String;
 
     /// Hour that is shown in `CupertinoDatePicker` spinner corresponding
     /// to the given hour value.
@@ -441,12 +441,12 @@ impl CupertinoLocalizations for DefaultCupertinoLocalizations {
         Some(format!("{minute} minutes"))
     }
 
-    fn date_picker_medium_date(&self, date: &DateTime) -> String {
+    fn date_picker_medium_date(&self, app: &App, date: &DateTime) -> String {
         format!(
             "{} {} {:<2}",
-            short_weekday(date.weekday()),
-            month_name(&SHORT_MONTHS, date.month()),
-            date.day()
+            short_weekday(date.weekday(app)),
+            month_name(&SHORT_MONTHS, date.month(app)),
+            date.day(app)
         )
     }
 
@@ -590,11 +590,11 @@ mod tests {
         let app = cell.borrow();
         let strings = DefaultCupertinoLocalizations::new();
         assert_eq!(
-            strings.date_picker_medium_date(&DateTime::new(&app, 2026, 9, 5)),
+            strings.date_picker_medium_date(&app, &DateTime::new(&app, 2026, 9, 5)),
             "Sat Sep 5 "
         );
         assert_eq!(
-            strings.date_picker_medium_date(&DateTime::new(&app, 2026, 12, 25)),
+            strings.date_picker_medium_date(&app, &DateTime::new(&app, 2026, 12, 25)),
             "Fri Dec 25"
         );
         assert_eq!(

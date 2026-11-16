@@ -43,7 +43,7 @@ pub enum DayPeriod {
 /// # let app = cell.borrow();
 /// let release_time = TimeOfDay::new(15, 0); // 3:00pm
 /// let booking = DateTime::new_with_time(&app, 2018, 10, 20, 16, 30, 4, 0, 0);
-/// let room_booked = TimeOfDay::from_date_time(&booking); // 4:30pm
+/// let room_booked = TimeOfDay::from_date_time(&app, &booking); // 4:30pm
 /// ```
 ///
 /// See also:
@@ -73,17 +73,17 @@ impl TimeOfDay {
 
     /// Creates a time of day based on the current time, in the local time zone.
     pub fn now(app: &App) -> TimeOfDay {
-        TimeOfDay::from_date_time(&DateTime::now(app))
+        TimeOfDay::from_date_time(app, &DateTime::now())
     }
 
     /// Creates a time of day based on the given time.
     ///
     /// The [`hour`](Self::hour) is set to the time's hour and the [`minute`](Self::minute) is
     /// set to the time's minute in the timezone of the given [`DateTime`].
-    pub fn from_date_time(time: &DateTime) -> TimeOfDay {
+    pub fn from_date_time(app: &App, time: &DateTime) -> TimeOfDay {
         TimeOfDay {
-            hour: time.hour(),
-            minute: time.minute(),
+            hour: time.hour(app),
+            minute: time.minute(app),
         }
     }
 
@@ -543,9 +543,10 @@ mod tests {
         assert_eq!(TimeOfDay::new(12, 0).period(), DayPeriod::Pm);
         assert_eq!(TimeOfDay::new(21, 0).period_offset(), 12);
         assert_eq!(
-            TimeOfDay::from_date_time(&DateTime::new_with_time(
-                &app, 2018, 10, 20, 16, 30, 4, 0, 0
-            )),
+            TimeOfDay::from_date_time(
+                &app,
+                &DateTime::new_with_time(&app, 2018, 10, 20, 16, 30, 4, 0, 0)
+            ),
             TimeOfDay::new(16, 30)
         );
         assert_eq!(format!("{:?}", TimeOfDay::new(7, 5)), "TimeOfDay(07:05)");

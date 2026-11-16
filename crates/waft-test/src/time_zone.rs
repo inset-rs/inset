@@ -83,8 +83,12 @@ mod tests {
             in_paris.time_zone_offset(&app),
             SignedDuration::from_hours(1)
         );
-        assert_eq!(in_paris.to_utc().hour(), 23);
-        assert_eq!(new_year.hour(), 0, "the fields are kept from creation");
+        assert_eq!(in_paris.to_utc().hour(&app), 23);
+        assert_eq!(
+            new_year.hour(&app),
+            1,
+            "the fields read the zone the platform answers now"
+        );
         assert_eq!(
             new_year.time_zone_offset(&app),
             SignedDuration::from_hours(1),

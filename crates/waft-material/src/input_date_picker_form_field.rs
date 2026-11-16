@@ -172,7 +172,7 @@ impl InputDatePickerFormField {
                 .as_ref()
                 .is_none_or(|predicate| self
                     .effective_initial_date(app)
-                    .is_none_or(|date| predicate(date))),
+                    .is_none_or(|date| predicate(app, date))),
             "Provided initialDate {:?} must satisfy provided selectableDayPredicate.",
             self.effective_initial_date(app)
         );
@@ -299,36 +299,39 @@ impl fmt::Debug for InputDatePickerFormField {
     }
 }
 
+impl InputDatePickerFormField {
+    /// Dart's constructor asserts on the dates, by their days, which are read in the local time
+    /// zone: run in `init_state` and `did_update_widget`, for every widget the state is given,
+    /// since a constructor has no [`App`].
+    fn debug_check_dates(&self, app: &App) {
+        debug_assert!(
+            !is_day_before(app, &self.last_date, &self.first_date),
+            "lastDate {} must be on or after firstDate {}.",
+            self.last_date.to_string(app),
+            self.first_date.to_string(app)
+        );
+        debug_assert!(
+            self.initial_date
+                .is_none_or(|date| !is_day_before(app, &date, &self.first_date)),
+            "initialDate {:?} must be on or after firstDate {}.",
+            self.initial_date.map(|date| date.to_string(app)),
+            self.first_date.to_string(app)
+        );
+        debug_assert!(
+            self.initial_date
+                .is_none_or(|date| !is_day_before(app, &self.last_date, &date)),
+            "initialDate {:?} must be on or before lastDate {}.",
+            self.initial_date.map(|date| date.to_string(app)),
+            self.last_date.to_string(app)
+        );
+    }
+}
+
 impl StatefulWidget for InputDatePickerFormField {
     type State = InputDatePickerFormFieldState;
 
     fn key(&self) -> Option<&KeyRef> {
         self.key.as_ref()
-    }
-
-    /// Dart's constructor asserts on the dates, by their days; the one on
-    /// `selectableDayPredicate`, which takes the day itself, runs in `init_state`.
-    fn debug_check_constructor(&self) {
-        debug_assert!(
-            !is_day_before(&self.last_date, &self.first_date),
-            "lastDate {} must be on or after firstDate {}.",
-            self.last_date,
-            self.first_date
-        );
-        debug_assert!(
-            self.initial_date
-                .is_none_or(|date| !is_day_before(&date, &self.first_date)),
-            "initialDate {:?} must be on or after firstDate {}.",
-            self.initial_date,
-            self.first_date
-        );
-        debug_assert!(
-            self.initial_date
-                .is_none_or(|date| !is_day_before(&self.last_date, &date)),
-            "initialDate {:?} must be on or before lastDate {}.",
-            self.initial_date,
-            self.last_date
-        );
     }
 
     fn create_state(&self) -> InputDatePickerFormFieldState {
@@ -367,9 +370,10 @@ impl InputDatePickerFormFieldState {
             let localizations = <dyn MaterialLocalizations>::of(app, context);
             let widget = self.widget(app);
             let autofocus = widget.autofocus;
-            let input_text = widget
-                .calendar_delegate
-                .format_compact_date(&selected_date, &*localizations);
+            let input_text =
+                widget
+                    .calendar_delegate
+                    .format_compact_date(app, &selected_date, &*localizations);
             let mut text_editing_value = TextEditingValue::new().text(input_text.clone());
             // Select the new text if we are auto focused and haven't selected the text before.
             if autofocus && !app.get(self).auto_selected {
@@ -403,7 +407,7 @@ impl InputDatePickerFormFieldState {
                 && widget
                     .selectable_day_predicate
                     .as_ref()
-                    .is_none_or(|predicate| predicate(*date))
+                    .is_none_or(|predicate| predicate(app, *date))
         })
     }
 
@@ -466,6 +470,7 @@ impl State for InputDatePickerFormFieldState {
     waft_widgets::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
+        self.widget(app).debug_check_dates(app);
         self.widget(app).debug_check_initial_date_is_selectable(app);
         let controller = TextEditingController::new(app);
         let initial_date = self.widget(app).effective_initial_date(app);
@@ -483,6 +488,7 @@ impl State for InputDatePickerFormFieldState {
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &InputDatePickerFormField) {
+        self.widget(app).debug_check_dates(app);
         self.widget(app).debug_check_initial_date_is_selectable(app);
         if self.widget(app).effective_initial_date(app) != old_widget.effective_initial_date(app) {
             // Can't update the form field in the middle of a build, so do it next frame
@@ -885,7 +891,9 @@ mod tests {
                 FieldOptions {
                     initial_date: Some(local_date(2016, 1, 16)),
                     on_date_saved: Some(on_date_saved),
-                    selectable_day_predicate: Some(Rc::new(|date: DateTime| date.day() % 2 == 0)),
+                    selectable_day_predicate: Some(Rc::new(|app: &App, date: DateTime| {
+                        date.day(app) % 2 == 0
+                    })),
                     form_key: Some(form_key.clone()),
                     ..FieldOptions::default()
                 },
@@ -1166,8 +1174,8 @@ mod tests {
         fn date_only(&self, app: &App, date: &DateTime) -> DateTime {
             GregorianCalendarDelegate.date_only(app, date)
         }
-        fn month_delta(&self, start_date: &DateTime, end_date: &DateTime) -> i32 {
-            GregorianCalendarDelegate.month_delta(start_date, end_date)
+        fn month_delta(&self, app: &App, start_date: &DateTime, end_date: &DateTime) -> i32 {
+            GregorianCalendarDelegate.month_delta(app, start_date, end_date)
         }
         fn add_months_to_month_date(
             &self,
@@ -1182,11 +1190,12 @@ mod tests {
         }
         fn first_day_offset(
             &self,
+            app: &App,
             year: i32,
             month: i32,
             localizations: &dyn MaterialLocalizations,
         ) -> i32 {
-            GregorianCalendarDelegate.first_day_offset(year, month, localizations)
+            GregorianCalendarDelegate.first_day_offset(app, year, month, localizations)
         }
         fn get_days_in_month(&self, year: i32, month: i32) -> i32 {
             GregorianCalendarDelegate.get_days_in_month(year, month)
@@ -1199,45 +1208,51 @@ mod tests {
         }
         fn format_month_year(
             &self,
+            app: &App,
             date: &DateTime,
             localizations: &dyn MaterialLocalizations,
         ) -> String {
-            GregorianCalendarDelegate.format_month_year(date, localizations)
+            GregorianCalendarDelegate.format_month_year(app, date, localizations)
         }
         fn format_medium_date(
             &self,
+            app: &App,
             date: &DateTime,
             localizations: &dyn MaterialLocalizations,
         ) -> String {
-            GregorianCalendarDelegate.format_medium_date(date, localizations)
+            GregorianCalendarDelegate.format_medium_date(app, date, localizations)
         }
         fn format_short_month_day(
             &self,
+            app: &App,
             date: &DateTime,
             localizations: &dyn MaterialLocalizations,
         ) -> String {
-            GregorianCalendarDelegate.format_short_month_day(date, localizations)
+            GregorianCalendarDelegate.format_short_month_day(app, date, localizations)
         }
         fn format_short_date(
             &self,
+            app: &App,
             date: &DateTime,
             localizations: &dyn MaterialLocalizations,
         ) -> String {
-            GregorianCalendarDelegate.format_short_date(date, localizations)
+            GregorianCalendarDelegate.format_short_date(app, date, localizations)
         }
         fn format_full_date(
             &self,
+            app: &App,
             date: &DateTime,
             localizations: &dyn MaterialLocalizations,
         ) -> String {
-            GregorianCalendarDelegate.format_full_date(date, localizations)
+            GregorianCalendarDelegate.format_full_date(app, date, localizations)
         }
         fn format_compact_date(
             &self,
+            app: &App,
             date: &DateTime,
             _localizations: &dyn MaterialLocalizations,
         ) -> String {
-            format!("{}..{}..{}", date.year(), date.month(), date.day())
+            format!("{}..{}..{}", date.year(app), date.month(app), date.day(app))
         }
         fn parse_compact_date(
             &self,

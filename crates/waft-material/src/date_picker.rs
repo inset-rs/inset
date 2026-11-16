@@ -185,21 +185,27 @@ pub fn show_date_picker(
     let last_date = calendar_delegate.date_only(app, &last_date);
     assert!(
         !last_date.is_before(&first_date),
-        "lastDate {last_date} must be on or after firstDate {first_date}."
+        "lastDate {} must be on or after firstDate {}.",
+        last_date.to_string(app),
+        first_date.to_string(app)
     );
     assert!(
         initial_date.is_none_or(|date| !date.is_before(&first_date)),
-        "initialDate {initial_date:?} must be on or after firstDate {first_date}."
+        "initialDate {:?} must be on or after firstDate {}.",
+        initial_date.map(|date| date.to_string(app)),
+        first_date.to_string(app)
     );
     assert!(
         initial_date.is_none_or(|date| !date.is_after(&last_date)),
-        "initialDate {initial_date:?} must be on or before lastDate {last_date}."
+        "initialDate {:?} must be on or before lastDate {}.",
+        initial_date.map(|date| date.to_string(app)),
+        last_date.to_string(app)
     );
     assert!(
         selectable_day_predicate
             .as_ref()
             .zip(initial_date)
-            .is_none_or(|(predicate, date)| predicate(date)),
+            .is_none_or(|(predicate, date)| predicate(app, date)),
         "Provided initialDate {initial_date:?} must satisfy provided selectableDayPredicate."
     );
     debug_assert!(crate::debug::debug_check_has_material_localizations(
@@ -398,7 +404,7 @@ impl DatePickerDialog {
     /// dialog reads it, as Dart's constructor truncates them.
     pub fn new(first_date: DateTime, last_date: DateTime) -> DatePickerDialog {
         let calendar_delegate: Rc<dyn CalendarDelegate> = Rc::new(GregorianCalendarDelegate);
-        let dialog = DatePickerDialog {
+        DatePickerDialog {
             key: None,
             initial_date: None,
             first_date,
@@ -423,33 +429,32 @@ impl DatePickerDialog {
             day_builder: None,
             weekday_builder: None,
             calendar_delegate,
-        };
-        dialog.debug_check_dates();
-        dialog
+        }
     }
 
-    /// Dart's constructor asserts on the dates, by their days; the one on
-    /// `selectableDayPredicate`, which takes the day itself, runs in `init_state`.
-    fn debug_check_dates(&self) {
+    /// Dart's constructor asserts on the dates, by their days, which are read in the local time
+    /// zone: run in `init_state` and `did_update_widget`, for every widget the state is given,
+    /// since a constructor has no [`App`].
+    fn debug_check_dates(&self, app: &App) {
         debug_assert!(
-            !is_day_before(&self.last_date, &self.first_date),
+            !is_day_before(app, &self.last_date, &self.first_date),
             "lastDate {} must be on or after firstDate {}.",
-            self.last_date,
-            self.first_date
+            self.last_date.to_string(app),
+            self.first_date.to_string(app)
         );
         debug_assert!(
             self.initial_date
-                .is_none_or(|date| !is_day_before(&date, &self.first_date)),
+                .is_none_or(|date| !is_day_before(app, &date, &self.first_date)),
             "initialDate {:?} must be on or after firstDate {}.",
-            self.initial_date,
-            self.first_date
+            self.initial_date.map(|date| date.to_string(app)),
+            self.first_date.to_string(app)
         );
         debug_assert!(
             self.initial_date
-                .is_none_or(|date| !is_day_before(&self.last_date, &date)),
+                .is_none_or(|date| !is_day_before(app, &self.last_date, &date)),
             "initialDate {:?} must be on or before lastDate {}.",
-            self.initial_date,
-            self.last_date
+            self.initial_date.map(|date| date.to_string(app)),
+            self.last_date.to_string(app)
         );
     }
 
@@ -466,7 +471,7 @@ impl DatePickerDialog {
             self.selectable_day_predicate
                 .as_ref()
                 .zip(self.effective_initial_date(app))
-                .is_none_or(|(predicate, date)| predicate(date)),
+                .is_none_or(|(predicate, date)| predicate(app, date)),
             "Provided initialDate {:?} must satisfy provided selectableDayPredicate",
             self.effective_initial_date(app)
         );
@@ -727,6 +732,7 @@ impl State for DatePickerDialogState {
 
     fn init_state(self: Handle<Self>, app: &mut App) {
         let widget = self.widget(app).clone();
+        widget.debug_check_dates(app);
         widget.debug_check_initial_date_is_selectable(app);
         let initial_date = widget.effective_initial_date(app);
         let selected_date = RestorableDateTimeN::new(app, initial_date);
@@ -744,7 +750,9 @@ impl State for DatePickerDialogState {
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, _old_widget: &DatePickerDialog) {
-        self.widget(app).debug_check_initial_date_is_selectable(app);
+        let widget = self.widget(app);
+        widget.debug_check_dates(app);
+        widget.debug_check_initial_date_is_selectable(app);
         self.did_update_restoration_id(app);
     }
 
@@ -997,9 +1005,11 @@ impl State for DatePickerDialogState {
             }),
             title_text: match selected_date {
                 None => String::new(),
-                Some(date) => widget
-                    .calendar_delegate
-                    .format_medium_date(&date, &*localizations),
+                Some(date) => {
+                    widget
+                        .calendar_delegate
+                        .format_medium_date(app, &date, &*localizations)
+                }
             },
             title_semantics_label: None,
             title_style: headline_style,
@@ -1364,7 +1374,7 @@ impl StatelessWidget for DatePickerHeader {
 /// It receives the day, and the start and end of the selected range (either may be null).
 /// Days for which it returns false are not selectable.
 pub type SelectableDayForRangePredicate =
-    Rc<dyn Fn(DateTime, Option<DateTime>, Option<DateTime>) -> bool>;
+    Rc<dyn Fn(&App, DateTime, Option<DateTime>, Option<DateTime>) -> bool>;
 
 /// Shows a full screen modal dialog containing a Material Design date range picker.
 ///
@@ -1424,32 +1434,38 @@ pub fn show_date_range_picker(
     let last_date = calendar_delegate.date_only(app, &last_date);
     assert!(
         !last_date.is_before(&first_date),
-        "lastDate {last_date} must be on or after firstDate {first_date}."
+        "lastDate {} must be on or after firstDate {}.",
+        last_date.to_string(app),
+        first_date.to_string(app)
     );
     if let Some(range) = &initial_date_range {
         assert!(
             !range.start.is_before(&first_date),
-            "initialDateRange's start date must be on or after firstDate {first_date}."
+            "initialDateRange's start date must be on or after firstDate {}.",
+            first_date.to_string(app)
         );
         assert!(
             !range.end.is_before(&first_date),
-            "initialDateRange's end date must be on or after firstDate {first_date}."
+            "initialDateRange's end date must be on or after firstDate {}.",
+            first_date.to_string(app)
         );
         assert!(
             !range.start.is_after(&last_date),
-            "initialDateRange's start date must be on or before lastDate {last_date}."
+            "initialDateRange's start date must be on or before lastDate {}.",
+            last_date.to_string(app)
         );
         assert!(
             !range.end.is_after(&last_date),
-            "initialDateRange's end date must be on or before lastDate {last_date}."
+            "initialDateRange's end date must be on or before lastDate {}.",
+            last_date.to_string(app)
         );
         if let Some(predicate) = &selectable_day_predicate {
             assert!(
-                predicate(range.start, Some(range.start), Some(range.end)),
+                predicate(app, range.start, Some(range.start), Some(range.end)),
                 "initialDateRange's start date must be selectable."
             );
             assert!(
-                predicate(range.end, Some(range.start), Some(range.end)),
+                predicate(app, range.end, Some(range.start), Some(range.end)),
                 "initialDateRange's end date must be selectable."
             );
         }
@@ -1519,6 +1535,7 @@ pub fn show_date_range_picker(
 
 /// Dart's `_formatRangeStartDate`.
 fn format_range_start_date(
+    app: &App,
     localizations: &dyn MaterialLocalizations,
     calendar_delegate: &dyn CalendarDelegate,
     start_date: Option<&DateTime>,
@@ -1526,15 +1543,16 @@ fn format_range_start_date(
 ) -> String {
     match start_date {
         None => localizations.date_range_start_label(),
-        Some(start) if end_date.is_none_or(|end| start.year() == end.year()) => {
-            calendar_delegate.format_short_month_day(start, localizations)
+        Some(start) if end_date.is_none_or(|end| start.year(app) == end.year(app)) => {
+            calendar_delegate.format_short_month_day(app, start, localizations)
         }
-        Some(start) => calendar_delegate.format_short_date(start, localizations),
+        Some(start) => calendar_delegate.format_short_date(app, start, localizations),
     }
 }
 
 /// Dart's `_formatRangeEndDate`.
 fn format_range_end_date(
+    app: &App,
     localizations: &dyn MaterialLocalizations,
     calendar_delegate: &dyn CalendarDelegate,
     start_date: Option<&DateTime>,
@@ -1545,12 +1563,12 @@ fn format_range_end_date(
         None => localizations.date_range_end_label(),
         Some(end)
             if start_date.is_some_and(|start| {
-                start.year() == end.year() && start.year() == current_date.year()
+                start.year(app) == end.year(app) && start.year(app) == current_date.year(app)
             }) =>
         {
-            calendar_delegate.format_short_month_day(end, localizations)
+            calendar_delegate.format_short_month_day(app, end, localizations)
         }
-        Some(end) => calendar_delegate.format_short_date(end, localizations),
+        Some(end) => calendar_delegate.format_short_date(app, end, localizations),
     }
 }
 
@@ -1857,6 +1875,7 @@ impl DateRangePickerDialogState {
         match &widget.selectable_day_predicate {
             None => true,
             Some(predicate) => predicate(
+                app,
                 day,
                 *self.selected_start(app).value(app),
                 *self.selected_end(app).value(app),
@@ -2327,12 +2346,14 @@ impl StatelessWidget for CalendarRangePickerDialog {
             header_foreground,
         );
         let start_date_text = format_range_start_date(
+            app,
             &*localizations,
             &*self.calendar_delegate,
             self.selected_start_date.as_ref(),
             self.selected_end_date.as_ref(),
         );
         let end_date_text = format_range_end_date(
+            app,
             &*localizations,
             &*self.calendar_delegate,
             self.selected_start_date.as_ref(),
@@ -2578,7 +2599,7 @@ impl CalendarDateRangePickerState {
         let widget = self.widget(app);
         widget
             .calendar_delegate
-            .month_delta(&widget.first_date, &widget.last_date)
+            .month_delta(app, &widget.first_date, &widget.last_date)
             + 1
     }
 
@@ -2685,9 +2706,10 @@ impl State for CalendarDateRangePickerState {
         let mut initial_month_index = 0;
         if !initial_date.is_before(&widget.first_date) && !initial_date.is_after(&widget.last_date)
         {
-            initial_month_index = widget
-                .calendar_delegate
-                .month_delta(&widget.first_date, &initial_date);
+            initial_month_index =
+                widget
+                    .calendar_delegate
+                    .month_delta(app, &widget.first_date, &initial_date);
         }
         let state = app.get_mut(self);
         state.initial_month_index = initial_month_index;
@@ -2971,8 +2993,8 @@ impl State for CalendarKeyboardNavigatorState {
         );
         FocusableActionDetector::new(FocusedDate {
             child: widget.child.clone(),
-            calendar_delegate: Rc::clone(&widget.calendar_delegate),
             date,
+            day: date.map(|date| widget.calendar_delegate.date_only(app, &date)),
             scroll_direction,
         })
         .shortcuts(shortcuts)
@@ -2987,8 +3009,10 @@ impl State for CalendarKeyboardNavigatorState {
 #[derive(Debug)]
 struct FocusedDate {
     child: WidgetRef,
-    calendar_delegate: Rc<dyn CalendarDelegate>,
     date: Option<DateTime>,
+    /// `date`'s day, `calendarDelegate.dateOnly(date)`, made where the widget is built: two of
+    /// them are equal where Dart's `calendarDelegate.isSameDay` holds for the dates.
+    day: Option<DateTime>,
     scroll_direction: Option<TraversalDirection>,
 }
 
@@ -3013,10 +3037,7 @@ impl InheritedWidget for FocusedDate {
     }
 
     fn update_should_notify(&self, old_widget: &FocusedDate) -> bool {
-        !self
-            .calendar_delegate
-            .is_same_day(self.date.as_ref(), old_widget.date.as_ref())
-            || self.scroll_direction != old_widget.scroll_direction
+        self.day != old_widget.day || self.scroll_direction != old_widget.scroll_direction
     }
 }
 
@@ -3256,7 +3277,7 @@ impl MonthItemState {
         day_to_build: DateTime,
     ) -> WidgetRef {
         let widget = self.widget(app).clone();
-        let day = day_to_build.day();
+        let day = day_to_build.day(app);
         let is_disabled = day_to_build.is_after(&widget.last_date)
             || day_to_build.is_before(&widget.first_date)
             || widget
@@ -3264,6 +3285,7 @@ impl MonthItemState {
                 .as_ref()
                 .is_some_and(|predicate| {
                     !predicate(
+                        app,
                         day_to_build,
                         widget.selected_date_start,
                         widget.selected_date_end,
@@ -3285,9 +3307,11 @@ impl MonthItemState {
         };
         let is_one_day_range =
             is_range_selected && widget.selected_date_start == widget.selected_date_end;
-        let is_today = widget
-            .calendar_delegate
-            .is_same_day(Some(&widget.current_date), Some(&day_to_build));
+        let is_today = widget.calendar_delegate.is_same_day(
+            app,
+            Some(&widget.current_date),
+            Some(&day_to_build),
+        );
         let highlight_color = self.highlight_color(app, context);
         let focus_node = app.get(self).day_focus_nodes[(day - 1) as usize].clone();
 
@@ -3343,8 +3367,8 @@ impl State for MonthItemState {
     fn init_state(self: Handle<Self>, app: &mut App) {
         let widget = self.widget(app).clone();
         let days_in_month = widget.calendar_delegate.get_days_in_month(
-            widget.displayed_month.year(),
-            widget.displayed_month.month(),
+            widget.displayed_month.year(app),
+            widget.displayed_month.month(app),
         );
         let nodes: Vec<Ref<FocusNode>> = (0..days_in_month)
             .map(|index| {
@@ -3364,11 +3388,13 @@ impl State for MonthItemState {
         let focused_date = FocusedDate::maybe_of(app, context).and_then(|(date, _)| date);
         let widget = self.widget(app).clone();
         if let Some(focused_date) = focused_date
-            && widget
-                .calendar_delegate
-                .is_same_month(Some(&widget.displayed_month), Some(&focused_date))
+            && widget.calendar_delegate.is_same_month(
+                app,
+                Some(&widget.displayed_month),
+                Some(&focused_date),
+            )
         {
-            let node = app.get(self).day_focus_nodes[(focused_date.day() - 1) as usize].clone();
+            let node = app.get(self).day_focus_nodes[(focused_date.day(app) - 1) as usize].clone();
             node.handle().request_focus(app, None);
         }
     }
@@ -3385,10 +3411,10 @@ impl State for MonthItemState {
         let localizations = <dyn MaterialLocalizations>::of(app, context);
         let widget = self.widget(app).clone();
         let delegate = Rc::clone(&widget.calendar_delegate);
-        let year = widget.displayed_month.year();
-        let month = widget.displayed_month.month();
+        let year = widget.displayed_month.year(app);
+        let month = widget.displayed_month.month(app);
         let days_in_month = delegate.get_days_in_month(year, month);
-        let day_offset = delegate.first_day_offset(year, month, &*localizations);
+        let day_offset = delegate.first_day_offset(app, year, month, &*localizations);
         let weeks = ((days_in_month + day_offset) as f64 / f64::from(DateTime::DAYS_PER_WEEK))
             .ceil() as i32;
         let grid_height = f64::from(weeks) * MONTH_ITEM_ROW_HEIGHT
@@ -3485,6 +3511,7 @@ impl State for MonthItemState {
                             .child(
                                 ExcludeSemantics::new().child(
                                     Text::new(delegate.format_month_year(
+                                        app,
                                         &widget.displayed_month,
                                         &*localizations,
                                     ))
@@ -3714,7 +3741,7 @@ impl State for DayItemState {
             )));
         }
 
-        let day_text = localizations.format_decimal(i64::from(widget.day.day()));
+        let day_text = localizations.format_decimal(i64::from(widget.day.day(app)));
 
         // We want the day of month to be spoken first irrespective of the locale-specific
         // preferences or TextDirection. This is because an accessibility user is more likely
@@ -3730,7 +3757,7 @@ impl State for DayItemState {
             "{day_text}, {}{semantic_label_suffix}",
             widget
                 .calendar_delegate
-                .format_full_date(&widget.day, &*localizations)
+                .format_full_date(app, &widget.day, &*localizations)
         );
         if widget.is_selected_day_start {
             semantic_label = localizations.date_range_start_date_semantic_label(&semantic_label);
@@ -3892,9 +3919,15 @@ impl InputDateRangePickerDialog {
     ) -> String {
         let localizations = <dyn MaterialLocalizations>::of(app, context);
         let start_text =
-            format_range_start_date(&*localizations, &*self.calendar_delegate, start, end);
-        let end_text =
-            format_range_end_date(&*localizations, &*self.calendar_delegate, start, end, now);
+            format_range_start_date(app, &*localizations, &*self.calendar_delegate, start, end);
+        let end_text = format_range_end_date(
+            app,
+            &*localizations,
+            &*self.calendar_delegate,
+            start,
+            end,
+            now,
+        );
         if start.is_none() || end.is_none() {
             return localizations.unspecified_date_range();
         }
@@ -3944,9 +3977,9 @@ impl StatelessWidget for InputDateRangePickerDialog {
             (Some(start), Some(end)) => format!(
                 "{} \u{2013} {}",
                 self.calendar_delegate
-                    .format_medium_date(&start, &*localizations),
+                    .format_medium_date(app, &start, &*localizations),
                 self.calendar_delegate
-                    .format_medium_date(&end, &*localizations)
+                    .format_medium_date(app, &end, &*localizations)
             ),
             _ => String::new(),
         };
@@ -4194,7 +4227,7 @@ impl InputDateRangePickerState {
             None => true,
             Some(predicate) => {
                 let state = app.get(self);
-                predicate(day, state.start_date, state.end_date)
+                predicate(app, day, state.start_date, state.end_date)
             }
         }
     }
@@ -4286,14 +4319,14 @@ impl State for InputDateRangePickerState {
             (Rc::clone(&widget.calendar_delegate), widget.autofocus)
         };
         if let Some(start_date) = app.get(self).start_date {
-            let text = calendar_delegate.format_compact_date(&start_date, &*localizations);
+            let text = calendar_delegate.format_compact_date(app, &start_date, &*localizations);
             let select_text = autofocus && !app.get(self).auto_selected;
             let controller = self.start_controller(app);
             self.update_controller(app, controller, &text, select_text);
             app.get_mut(self).auto_selected = select_text;
         }
         if let Some(end_date) = app.get(self).end_date {
-            let text = calendar_delegate.format_compact_date(&end_date, &*localizations);
+            let text = calendar_delegate.format_compact_date(app, &end_date, &*localizations);
             let controller = self.end_controller(app);
             self.update_controller(app, controller, &text, false);
         }
@@ -4825,7 +4858,7 @@ mod tests {
             options.initial_date = Some(local_date(2017, 1, 16));
             options.first_date = local_date(2017, 1, 10);
             options.last_date = local_date(2017, 1, 20);
-            options.selectable_day_predicate = Some(Rc::new(|day| day.day() % 2 == 0));
+            options.selectable_day_predicate = Some(Rc::new(|app, day| day.day(app) % 2 == 0));
             let result = prepare_date_picker(&mut tester, &options);
             tap_text(&mut tester, "13"); // Odd, doesn't work.
             tap_text(&mut tester, "10"); // Even, works.
@@ -5213,7 +5246,7 @@ mod tests {
             /// lastDate: DateTime(2030), ...)`.
             fn show(&self, app: &mut App, context: BuildContext) -> CompleterFuture<RouteResult> {
                 let (initial_date, first_date, last_date) = self.dates.unwrap_or((
-                    DateTime::now(app),
+                    DateTime::now(),
                     DateTime::new(app, 2018, 1, 1),
                     DateTime::new(app, 2030, 1, 1),
                 ));
@@ -5340,8 +5373,8 @@ mod tests {
             with_main_thread_stack(|| {
                 let mut tester = tester_of_size(DEFAULT_WINDOW_SIZE);
                 let mut options = DatePickerOptions::new();
-                options.day_builder = Some(Rc::new(|_app, _context, details| {
-                    if details.day.day() == 1 {
+                options.day_builder = Some(Rc::new(|app, _context, details| {
+                    if details.day.day(app) == 1 {
                         Text::new("Custom day 1").into_widget()
                     } else {
                         details.child
@@ -6748,8 +6781,8 @@ mod tests {
                 GregorianCalendarDelegate.date_only(app, date)
             }
 
-            fn month_delta(&self, start_date: &DateTime, end_date: &DateTime) -> i32 {
-                GregorianCalendarDelegate.month_delta(start_date, end_date)
+            fn month_delta(&self, app: &App, start_date: &DateTime, end_date: &DateTime) -> i32 {
+                GregorianCalendarDelegate.month_delta(app, start_date, end_date)
             }
 
             fn add_months_to_month_date(
@@ -6767,6 +6800,7 @@ mod tests {
 
             fn first_day_offset(
                 &self,
+                app: &App,
                 year: i32,
                 month: i32,
                 localizations: &dyn MaterialLocalizations,
@@ -6774,7 +6808,7 @@ mod tests {
                 match self {
                     TestDelegate::Calendar => 1,
                     TestDelegate::DateInput => {
-                        GregorianCalendarDelegate.first_day_offset(year, month, localizations)
+                        GregorianCalendarDelegate.first_day_offset(app, year, month, localizations)
                     }
                 }
             }
@@ -6804,55 +6838,66 @@ mod tests {
 
             fn format_month_year(
                 &self,
+                app: &App,
                 date: &DateTime,
                 localizations: &dyn MaterialLocalizations,
             ) -> String {
-                GregorianCalendarDelegate.format_month_year(date, localizations)
+                GregorianCalendarDelegate.format_month_year(app, date, localizations)
             }
 
             fn format_medium_date(
                 &self,
+                app: &App,
                 date: &DateTime,
                 localizations: &dyn MaterialLocalizations,
             ) -> String {
-                GregorianCalendarDelegate.format_medium_date(date, localizations)
+                GregorianCalendarDelegate.format_medium_date(app, date, localizations)
             }
 
             fn format_short_month_day(
                 &self,
+                app: &App,
                 date: &DateTime,
                 localizations: &dyn MaterialLocalizations,
             ) -> String {
-                GregorianCalendarDelegate.format_short_month_day(date, localizations)
+                GregorianCalendarDelegate.format_short_month_day(app, date, localizations)
             }
 
             fn format_short_date(
                 &self,
+                app: &App,
                 date: &DateTime,
                 localizations: &dyn MaterialLocalizations,
             ) -> String {
-                GregorianCalendarDelegate.format_short_date(date, localizations)
+                GregorianCalendarDelegate.format_short_date(app, date, localizations)
             }
 
             fn format_full_date(
                 &self,
+                app: &App,
                 date: &DateTime,
                 localizations: &dyn MaterialLocalizations,
             ) -> String {
-                GregorianCalendarDelegate.format_full_date(date, localizations)
+                GregorianCalendarDelegate.format_full_date(app, date, localizations)
             }
 
             fn format_compact_date(
                 &self,
+                app: &App,
                 date: &DateTime,
                 localizations: &dyn MaterialLocalizations,
             ) -> String {
                 match self {
                     TestDelegate::Calendar => {
-                        GregorianCalendarDelegate.format_compact_date(date, localizations)
+                        GregorianCalendarDelegate.format_compact_date(app, date, localizations)
                     }
                     TestDelegate::DateInput => {
-                        format!("{:04}{:02}{:02}", date.year(), date.month(), date.day())
+                        format!(
+                            "{:04}{:02}{:02}",
+                            date.year(app),
+                            date.month(app),
+                            date.day(app)
+                        )
                     }
                 }
             }
@@ -6875,7 +6920,7 @@ mod tests {
                         let month: i32 = input.get(4..6)?.parse().ok()?;
                         let day: i32 = input.get(6..8)?.parse().ok()?;
                         let date = DateTime::new(app, year, month, day);
-                        (date.year() == year && date.month() == month && date.day() == day)
+                        (date.year(app) == year && date.month(app) == month && date.day(app) == day)
                             .then_some(date)
                     }
                 }
@@ -7756,7 +7801,8 @@ mod tests {
         fn can_select_a_range_even_if_the_range_includes_non_selectable_days() {
             with_main_thread_stack(|| {
                 let mut prepare = Prepare::new();
-                prepare.selectable_day_predicate = Some(Rc::new(|day, _, _| day.day() != 13));
+                prepare.selectable_day_predicate =
+                    Some(Rc::new(|app, day, _, _| day.day(app) != 13));
                 let result = pick_range(
                     &prepare,
                     default_size(),
@@ -7778,7 +7824,8 @@ mod tests {
                 prepare.initial_date_range = Some(range((2017, 1, 13), (2017, 1, 14)));
                 prepare.first_date = local_date(2017, 1, 12);
                 prepare.last_date = local_date(2017, 1, 16);
-                prepare.selectable_day_predicate = Some(Rc::new(|day, _, _| day.day() != 15));
+                prepare.selectable_day_predicate =
+                    Some(Rc::new(|app, day, _, _| day.day(app) != 15));
                 let result = pick_range(
                     &prepare,
                     default_size(),
@@ -7798,7 +7845,7 @@ mod tests {
             with_main_thread_stack(|| {
                 let mut prepare = Prepare::new();
                 prepare.selectable_day_predicate =
-                    Some(Rc::new(|day, selected_start, selected_end| {
+                    Some(Rc::new(|_app, day, selected_start, selected_end| {
                         if selected_end.is_none()
                             && let Some(selected_start) = selected_start
                         {
@@ -7832,7 +7879,7 @@ mod tests {
                 let calls = Rc::new(std::cell::Cell::new(0));
                 prepare.selectable_day_predicate = Some({
                     let calls = Rc::clone(&calls);
-                    Rc::new(move |_day, selected_start_date, selected_end_date| {
+                    Rc::new(move |_app, _day, selected_start_date, selected_end_date| {
                         assert_eq!(selected_start_date, Some(local_date(2017, 1, 13)));
                         assert_eq!(selected_end_date, Some(local_date(2017, 1, 15)));
                         calls.set(calls.get() + 1);
@@ -8623,7 +8670,7 @@ mod tests {
                 let tester = toggled_calendar_texts(
                     |prepare| {
                         prepare.selectable_day_predicate =
-                            Some(Rc::new(|day, _, _| day != local_date(2016, 12, 24)));
+                            Some(Rc::new(|_app, day, _, _| day != local_date(2016, 12, 24)));
                     },
                     "12/24/2016",
                     "12/25/2016",
@@ -8650,7 +8697,7 @@ mod tests {
                 let tester = toggled_calendar_texts(
                     |prepare| {
                         prepare.selectable_day_predicate =
-                            Some(Rc::new(|day, _, _| day != local_date(2016, 12, 25)));
+                            Some(Rc::new(|_app, day, _, _| day != local_date(2016, 12, 25)));
                     },
                     "12/24/2016",
                     "12/25/2016",

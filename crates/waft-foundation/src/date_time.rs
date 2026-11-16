@@ -1,22 +1,21 @@
 //! dart:core `DateTime`, in UTC or in the local time zone.
 //!
-//! Local time comes from the app's platform (`Platform::time_zone_offset` and
-//! `Platform::time_zone_name`), the two calls Dart's natives make of the VM, which asks the system
-//! each time. A local value asks for its offset once, when it is made, and keeps it for its fields;
-//! `time_zone_offset` and `time_zone_name` ask again for the value's instant, as Dart's do. So a
-//! call that makes or asks about a local value takes the `App` (`DateTime::now(app)`), as Waft's
-//! clock does.
+//! A value is an instant and whether it is UTC, as Dart's. Local time comes from the app's
+//! platform (`Platform::time_zone_offset` and `Platform::time_zone_name`), the two calls Dart's
+//! natives make of the VM, which asks the system each time: every read of a local value's fields,
+//! its offset or its zone's name asks again for its instant. So those reads take the `App`
+//! (`date.year(app)`), as Waft's clock does, and so does the local constructor, which probes the
+//! zone for the instant of a wall time; a UTC value's reads take it too and ask nothing.
 //!
 //! The platform is asked about an instant in whole seconds within the range of a 32-bit `time_t`:
 //! Dart's equivalent-year mapping is done here, and so is its probing for the offset of a wall time
 //! (`to_local_time_offset`), over the offsets the platform answers.
 
 use std::cmp::Ordering;
-use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::time::Duration;
 
-use waft_embedder::{Platform, PlatformRef, SignedDuration};
+use waft_embedder::{Platform, SignedDuration};
 use web_time::{SystemTime, UNIX_EPOCH};
 
 use crate::App;
@@ -30,14 +29,17 @@ use crate::App;
 /// correctly formatted string, which complies with a subset of ISO 8601.
 ///
 /// ```
-/// # use waft_foundation::DateTime;
+/// # use waft_foundation::{AppCell, DateTime};
+/// # let cell = AppCell::new();
+/// # let app = cell.borrow();
 /// let moon_landing = DateTime::utc_with_time(1969, 7, 20, 20, 18, 4, 0, 0);
-/// assert_eq!(moon_landing.weekday(), DateTime::SUNDAY);
+/// assert_eq!(moon_landing.weekday(&app), DateTime::SUNDAY);
 /// ```
 ///
-/// A local value is made with the [`App`], whose platform gives the local time zone's offset at
-/// its instant; it keeps that offset, so its fields read the zone as it was when the value was
-/// made, while [`time_zone_offset`] asks the platform again.
+/// A local value's fields are read in the local time zone as the [`App`]'s platform answers it
+/// at the time of the read, so a change of the system's zone shows in every later read,
+/// [`time_zone_offset`] included. (Dart works the fields out at their first read and keeps them,
+/// so there a change after that read shows only in the offset and the name.)
 ///
 /// A value is UTC or local. Dart's `==` compares the instant and whether it is UTC, so a local
 /// value and the UTC value of the same instant are not equal; [`is_at_same_moment_as`] compares
@@ -49,9 +51,6 @@ use crate::App;
 pub struct DateTime {
     microseconds_since_epoch: i64,
     is_utc: bool,
-    /// The local time's offset from UTC at this instant, in microseconds, asked of the platform
-    /// once when the value is made: zero for UTC.
-    local_offset: i64,
 }
 
 const MICROSECONDS_PER_MILLISECOND: i64 = 1000;
@@ -99,7 +98,7 @@ impl DateTime {
     /// # let app = cell.borrow();
     /// let annual_meeting = DateTime::new(&app, 2023, 9, 25);
     /// assert!(!annual_meeting.is_utc());
-    /// assert_eq!((annual_meeting.month(), annual_meeting.hour()), (9, 0));
+    /// assert_eq!((annual_meeting.month(&app), annual_meeting.hour(&app)), (9, 0));
     /// ```
     pub fn new(app: &App, year: i32, month: i32, day: i32) -> DateTime {
         DateTime::new_with_time(app, year, month, day, 0, 0, 0, 0, 0)
@@ -199,14 +198,12 @@ impl DateTime {
     /// Constructs a [`DateTime`] instance with current date and time in the local time zone.
     ///
     /// ```
-    /// # use waft_foundation::{AppCell, DateTime};
-    /// # let cell = AppCell::new();
-    /// # let app = cell.borrow();
-    /// let now = DateTime::now(&app);
+    /// # use waft_foundation::DateTime;
+    /// let now = DateTime::now();
     /// assert!(!now.is_utc());
     /// ```
-    pub fn now(app: &App) -> DateTime {
-        DateTime::from_value(current_microseconds(), Some(&*app.platform()))
+    pub fn now() -> DateTime {
+        DateTime::from_value(current_microseconds(), false)
     }
 
     /// Constructs a [`DateTime`] with the current UTC date and time: Dart's
@@ -218,7 +215,7 @@ impl DateTime {
     /// assert!(now.is_utc());
     /// ```
     pub fn timestamp() -> DateTime {
-        DateTime::from_value(current_microseconds(), None)
+        DateTime::from_value(current_microseconds(), true)
     }
 
     /// Constructs a new [`DateTime`] instance with the given `milliseconds_since_epoch`.
@@ -233,25 +230,21 @@ impl DateTime {
     /// # use waft_foundation::{AppCell, DateTime};
     /// # let cell = AppCell::new();
     /// # let app = cell.borrow();
-    /// let new_year_utc = DateTime::from_milliseconds_since_epoch(&app, 1_640_995_200_000, true);
-    /// assert_eq!(new_year_utc.year(), 2022);
+    /// let new_year_utc = DateTime::from_milliseconds_since_epoch(1_640_995_200_000, true);
+    /// assert_eq!(new_year_utc.year(&app), 2022);
     /// ```
     ///
     /// # Panics
     ///
     /// If `milliseconds_since_epoch` is outside the range a [`DateTime`] holds.
-    pub fn from_milliseconds_since_epoch(
-        app: &App,
-        milliseconds_since_epoch: i64,
-        is_utc: bool,
-    ) -> DateTime {
+    pub fn from_milliseconds_since_epoch(milliseconds_since_epoch: i64, is_utc: bool) -> DateTime {
         assert!(
             milliseconds_since_epoch.abs() <= MAX_MILLISECONDS_SINCE_EPOCH,
             "DateTime is outside valid range: {milliseconds_since_epoch}"
         );
         DateTime::from_value(
             milliseconds_since_epoch * MICROSECONDS_PER_MILLISECOND,
-            local_zone(app, is_utc).as_deref(),
+            is_utc,
         )
     }
 
@@ -266,29 +259,20 @@ impl DateTime {
     /// # Panics
     ///
     /// If `microseconds_since_epoch` is outside the range a [`DateTime`] holds.
-    pub fn from_microseconds_since_epoch(
-        app: &App,
-        microseconds_since_epoch: i64,
-        is_utc: bool,
-    ) -> DateTime {
-        DateTime::from_value(microseconds_since_epoch, local_zone(app, is_utc).as_deref())
+    pub fn from_microseconds_since_epoch(microseconds_since_epoch: i64, is_utc: bool) -> DateTime {
+        DateTime::from_value(microseconds_since_epoch, is_utc)
     }
 
-    /// The value at `microseconds_since_epoch`: local in `zone`, whose offset at the instant it
-    /// keeps for its fields, or UTC for `None`.
-    fn from_value(microseconds_since_epoch: i64, zone: Option<&dyn Platform>) -> DateTime {
+    /// Dart's `_withValue`: the value at `microseconds_since_epoch`, UTC or local.
+    fn from_value(microseconds_since_epoch: i64, is_utc: bool) -> DateTime {
         assert!(
             microseconds_since_epoch.abs()
                 <= MAX_MILLISECONDS_SINCE_EPOCH * MICROSECONDS_PER_MILLISECOND,
             "DateTime is outside valid range: {microseconds_since_epoch}"
         );
-        let local_offset = zone.map_or(0, |zone| {
-            local_offset_microseconds(zone, microseconds_since_epoch)
-        });
         DateTime {
             microseconds_since_epoch,
-            is_utc: zone.is_none(),
-            local_offset,
+            is_utc,
         }
     }
 
@@ -296,7 +280,7 @@ impl DateTime {
     fn from_fields(fields: [i32; 8], zone: Option<&dyn Platform>) -> DateTime {
         let value = broken_down_date_to_value(fields, zone)
             .unwrap_or_else(|| panic!("DateTime is outside valid range: {fields:?}"));
-        DateTime::from_value(value, zone)
+        DateTime::from_value(value, zone.is_none())
     }
 
     /// True if this [`DateTime`] is set to UTC time.
@@ -334,55 +318,64 @@ impl DateTime {
     /// The year.
     ///
     /// ```
-    /// # use waft_foundation::DateTime;
+    /// # use waft_foundation::{AppCell, DateTime};
+    /// # let cell = AppCell::new();
+    /// # let app = cell.borrow();
     /// let moon_landing = DateTime::utc(1969, 7, 20);
-    /// assert_eq!(moon_landing.year(), 1969);
+    /// assert_eq!(moon_landing.year(&app), 1969);
     /// ```
-    pub fn year(&self) -> i32 {
-        self.civil().0
+    pub fn year(&self, app: &App) -> i32 {
+        self.civil(app).0
     }
 
     /// The month `[1..12]`.
     ///
     /// ```
-    /// # use waft_foundation::DateTime;
+    /// # use waft_foundation::{AppCell, DateTime};
+    /// # let cell = AppCell::new();
+    /// # let app = cell.borrow();
     /// let moon_landing = DateTime::utc(1969, 7, 20);
-    /// assert_eq!(moon_landing.month(), 7);
-    /// assert_eq!(moon_landing.month(), DateTime::JULY);
+    /// assert_eq!(moon_landing.month(&app), 7);
+    /// assert_eq!(moon_landing.month(&app), DateTime::JULY);
     /// ```
-    pub fn month(&self) -> i32 {
-        self.civil().1
+    pub fn month(&self, app: &App) -> i32 {
+        self.civil(app).1
     }
 
     /// The day of the month `[1..31]`.
     ///
     /// ```
-    /// # use waft_foundation::DateTime;
+    /// # use waft_foundation::{AppCell, DateTime};
+    /// # let cell = AppCell::new();
+    /// # let app = cell.borrow();
     /// let moon_landing = DateTime::utc(1969, 7, 20);
-    /// assert_eq!(moon_landing.day(), 20);
+    /// assert_eq!(moon_landing.day(&app), 20);
     /// ```
-    pub fn day(&self) -> i32 {
-        self.civil().2
+    pub fn day(&self, app: &App) -> i32 {
+        self.civil(app).2
     }
 
     /// The hour of the day, expressed as in a 24-hour clock `[0..23]`.
-    pub fn hour(&self) -> i32 {
-        self.time_of_day_part(MICROSECONDS_PER_HOUR, 24)
+    pub fn hour(&self, app: &App) -> i32 {
+        self.time_of_day_part(app, MICROSECONDS_PER_HOUR, 24)
     }
 
     /// The minute `[0...59]`.
-    pub fn minute(&self) -> i32 {
-        self.time_of_day_part(MICROSECONDS_PER_MINUTE, 60)
+    pub fn minute(&self, app: &App) -> i32 {
+        self.time_of_day_part(app, MICROSECONDS_PER_MINUTE, 60)
     }
 
     /// The second `[0...59]`.
-    pub fn second(&self) -> i32 {
-        self.time_of_day_part(MICROSECONDS_PER_SECOND, 60)
+    pub fn second(&self, app: &App) -> i32 {
+        self.time_of_day_part(app, MICROSECONDS_PER_SECOND, 60)
     }
 
     /// The millisecond `[0...999]`.
-    pub fn millisecond(&self) -> i32 {
-        // From the instant, as Dart's: every zone's offset is a whole number of seconds.
+    ///
+    /// Read from the instant, as Dart's is, without asking the platform: every zone's offset is
+    /// a whole number of seconds. `app` is taken as every field read takes it.
+    pub fn millisecond(&self, app: &App) -> i32 {
+        let _ = app;
         let part = self
             .microseconds_since_epoch
             .div_euclid(MICROSECONDS_PER_MILLISECOND)
@@ -390,8 +383,10 @@ impl DateTime {
         i32::try_from(part).expect("below a thousand")
     }
 
-    /// The microsecond `[0...999]`.
-    pub fn microsecond(&self) -> i32 {
+    /// The microsecond `[0...999]`, read from the instant as [`millisecond`](Self::millisecond)
+    /// is.
+    pub fn microsecond(&self, app: &App) -> i32 {
+        let _ = app;
         let part = self
             .microseconds_since_epoch
             .rem_euclid(MICROSECONDS_PER_MILLISECOND);
@@ -403,14 +398,16 @@ impl DateTime {
     /// In accordance with ISO 8601 a week starts with Monday, which has the value 1.
     ///
     /// ```
-    /// # use waft_foundation::DateTime;
+    /// # use waft_foundation::{AppCell, DateTime};
+    /// # let cell = AppCell::new();
+    /// # let app = cell.borrow();
     /// let moon_landing = DateTime::utc(1969, 7, 20);
-    /// assert_eq!(moon_landing.weekday(), 7);
-    /// assert_eq!(moon_landing.weekday(), DateTime::SUNDAY);
+    /// assert_eq!(moon_landing.weekday(&app), 7);
+    /// assert_eq!(moon_landing.weekday(&app), DateTime::SUNDAY);
     /// ```
-    pub fn weekday(&self) -> i32 {
+    pub fn weekday(&self, app: &App) -> i32 {
         // The epoch was a Thursday.
-        let days = self.days_since_epoch();
+        let days = self.days_since_epoch(app);
         i32::try_from((days + 3).rem_euclid(7)).expect("a weekday") + 1
     }
 
@@ -447,15 +444,9 @@ impl DateTime {
     /// ```
     ///
     /// For a local date, the app's platform is asked for the offset at this instant on every
-    /// call, as Dart asks the VM; the fields keep the offset the value was made with.
+    /// call, as Dart asks the VM.
     pub fn time_zone_offset(&self, app: &App) -> SignedDuration {
-        if self.is_utc {
-            return SignedDuration::ZERO;
-        }
-        SignedDuration::from_microseconds(local_offset_microseconds(
-            &*app.platform(),
-            self.microseconds_since_epoch,
-        ))
+        SignedDuration::from_microseconds(self.offset_microseconds(app))
     }
 
     /// Returns this DateTime value in the local time zone.
@@ -464,19 +455,16 @@ impl DateTime {
     /// equivalent to:
     ///
     /// ```
-    /// # use waft_foundation::{AppCell, DateTime};
-    /// # let cell = AppCell::new();
-    /// # let app = cell.borrow();
+    /// # use waft_foundation::DateTime;
     /// # let date = DateTime::utc(2026, 1, 1);
-    /// let local =
-    ///     DateTime::from_microseconds_since_epoch(&app, date.microseconds_since_epoch(), false);
-    /// assert_eq!(local, date.to_local(&app));
+    /// let local = DateTime::from_microseconds_since_epoch(date.microseconds_since_epoch(), false);
+    /// assert_eq!(local, date.to_local());
     /// ```
-    pub fn to_local(&self, app: &App) -> DateTime {
+    pub fn to_local(&self) -> DateTime {
         if !self.is_utc {
             return *self;
         }
-        DateTime::from_value(self.microseconds_since_epoch, Some(&*app.platform()))
+        DateTime::from_value(self.microseconds_since_epoch, false)
     }
 
     /// Returns this DateTime value in the UTC time zone.
@@ -488,15 +476,14 @@ impl DateTime {
     /// # let cell = AppCell::new();
     /// # let app = cell.borrow();
     /// # let date = DateTime::new(&app, 2026, 1, 1);
-    /// let utc =
-    ///     DateTime::from_microseconds_since_epoch(&app, date.microseconds_since_epoch(), true);
+    /// let utc = DateTime::from_microseconds_since_epoch(date.microseconds_since_epoch(), true);
     /// assert_eq!(utc, date.to_utc());
     /// ```
     pub fn to_utc(&self) -> DateTime {
         if self.is_utc {
             return *self;
         }
-        DateTime::from_value(self.microseconds_since_epoch, None)
+        DateTime::from_value(self.microseconds_since_epoch, true)
     }
 
     /// Returns a new [`DateTime`] instance with `duration` added to `self`.
@@ -507,8 +494,8 @@ impl DateTime {
     /// # let cell = AppCell::new();
     /// # let app = cell.borrow();
     /// let today = DateTime::utc(2022, 1, 1);
-    /// let fifty_days_from_now = today.add(&app, Duration::from_secs(50 * 24 * 60 * 60));
-    /// assert_eq!(fifty_days_from_now.month(), 2);
+    /// let fifty_days_from_now = today.add(Duration::from_secs(50 * 24 * 60 * 60));
+    /// assert_eq!(fifty_days_from_now.month(&app), 2);
     /// ```
     ///
     /// Notice that the duration being added is actually 50 * 24 * 60 * 60
@@ -517,8 +504,8 @@ impl DateTime {
     /// may not even hit the calendar date 50 days later.
     ///
     /// Be careful when working with dates in local time.
-    pub fn add(&self, app: &App, duration: Duration) -> DateTime {
-        self.offset(app, duration_microseconds(duration))
+    pub fn add(&self, duration: Duration) -> DateTime {
+        self.moved_by(duration_microseconds(duration))
     }
 
     /// Returns a new [`DateTime`] instance with `duration` subtracted from `self`.
@@ -529,8 +516,8 @@ impl DateTime {
     /// # let cell = AppCell::new();
     /// # let app = cell.borrow();
     /// let today = DateTime::utc(2022, 1, 1);
-    /// let fifty_days_ago = today.subtract(&app, Duration::from_secs(50 * 24 * 60 * 60));
-    /// assert_eq!(fifty_days_ago.year(), 2021);
+    /// let fifty_days_ago = today.subtract(Duration::from_secs(50 * 24 * 60 * 60));
+    /// assert_eq!(fifty_days_ago.year(&app), 2021);
     /// ```
     ///
     /// Notice that the duration being subtracted is actually 50 * 24 * 60 * 60
@@ -539,8 +526,8 @@ impl DateTime {
     /// may not even hit the calendar date 50 days earlier.
     ///
     /// Be careful when working with dates in local time.
-    pub fn subtract(&self, app: &App, duration: Duration) -> DateTime {
-        self.offset(app, -duration_microseconds(duration))
+    pub fn subtract(&self, duration: Duration) -> DateTime {
+        self.moved_by(-duration_microseconds(duration))
     }
 
     /// Returns true if `self` occurs before `other`.
@@ -597,56 +584,74 @@ impl DateTime {
     /// * `mmm` are milliseconds in the range 000 to 999, and
     /// * `uuu` are microseconds in the range 001 to 999. If
     ///   [`microsecond`](Self::microsecond) equals 0, then this part is omitted.
-    pub fn to_iso8601_string(&self) -> String {
-        self.format('T')
+    pub fn to_iso8601_string(&self, app: &App) -> String {
+        self.format(app, 'T')
     }
 
-    fn format(&self, separator: char) -> String {
-        let year = self.year();
+    /// Returns a human-readable string for this instance: Dart's `toString`.
+    ///
+    /// The returned string is constructed for the time zone of this instance.
+    ///
+    /// * UTC dates end with 'Z'.
+    /// * Local dates have no suffix.
+    ///
+    /// For example, `yyyy-MM-dd HH:mm:ss.mmmuuuZ` for UTC time.
+    pub fn to_string(&self, app: &App) -> String {
+        self.format(app, ' ')
+    }
+
+    fn format(&self, app: &App, separator: char) -> String {
+        let wall = self.wall_microseconds(app);
+        let (year, month, day) = civil_from_days(wall.div_euclid(MICROSECONDS_PER_DAY));
+        let part = |unit: i64, modulus: i64| wall.div_euclid(unit).rem_euclid(modulus);
         let y = if (-9999..=9999).contains(&year) {
             four_digits(year)
         } else {
             six_digits(year)
         };
-        let us = match self.microsecond() {
+        let us = match part(1, MICROSECONDS_PER_MILLISECOND) {
             0 => String::new(),
-            microsecond => three_digits(microsecond),
+            microsecond => format!("{microsecond:03}"),
         };
         let z = if self.is_utc { "Z" } else { "" };
         format!(
-            "{y}-{:02}-{:02}{separator}{:02}:{:02}:{:02}.{:03}{us}{z}",
-            self.month(),
-            self.day(),
-            self.hour(),
-            self.minute(),
-            self.second(),
-            self.millisecond()
+            "{y}-{month:02}-{day:02}{separator}{:02}:{:02}:{:02}.{:03}{us}{z}",
+            part(MICROSECONDS_PER_HOUR, 24),
+            part(MICROSECONDS_PER_MINUTE, 60),
+            part(MICROSECONDS_PER_SECOND, 60),
+            part(MICROSECONDS_PER_MILLISECOND, 1000),
         )
     }
 
-    fn offset(&self, app: &App, microseconds: i64) -> DateTime {
-        DateTime::from_value(
-            self.microseconds_since_epoch + microseconds,
-            local_zone(app, self.is_utc).as_deref(),
-        )
+    fn moved_by(&self, microseconds: i64) -> DateTime {
+        DateTime::from_value(self.microseconds_since_epoch + microseconds, self.is_utc)
+    }
+
+    /// The offset of this value's zone at its instant, in microseconds: zero for UTC, and for a
+    /// local value what the app's platform answers now.
+    fn offset_microseconds(&self, app: &App) -> i64 {
+        if self.is_utc {
+            return 0;
+        }
+        local_offset_microseconds(&*app.platform(), self.microseconds_since_epoch)
     }
 
     /// Dart's `_localDateInUtcMicros`: the instant whose UTC fields are this value's fields.
-    fn local_microseconds(&self) -> i64 {
-        self.microseconds_since_epoch + self.local_offset
+    fn wall_microseconds(&self, app: &App) -> i64 {
+        self.microseconds_since_epoch + self.offset_microseconds(app)
     }
 
-    fn days_since_epoch(&self) -> i64 {
-        self.local_microseconds().div_euclid(MICROSECONDS_PER_DAY)
+    fn days_since_epoch(&self, app: &App) -> i64 {
+        self.wall_microseconds(app).div_euclid(MICROSECONDS_PER_DAY)
     }
 
-    fn civil(&self) -> (i32, i32, i32) {
-        civil_from_days(self.days_since_epoch())
+    fn civil(&self, app: &App) -> (i32, i32, i32) {
+        civil_from_days(self.days_since_epoch(app))
     }
 
-    fn time_of_day_part(&self, unit: i64, modulus: i64) -> i32 {
+    fn time_of_day_part(&self, app: &App, unit: i64, modulus: i64) -> i32 {
         let part = self
-            .local_microseconds()
+            .wall_microseconds(app)
             .div_euclid(unit)
             .rem_euclid(modulus);
         i32::try_from(part).expect("below the modulus")
@@ -685,32 +690,12 @@ impl Ord for DateTime {
     }
 }
 
-/// Returns a human-readable string for this instance.
-///
-/// The returned string is constructed for the time zone of this instance.
-/// The `toString` method on:
-///
-/// * UTC dates ends with 'Z'.
-/// * Local dates have no suffix.
-///
-/// For example, `yyyy-MM-dd HH:mm:ss.mmmuuuZ` for UTC time.
-impl fmt::Display for DateTime {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.format(' '))
-    }
-}
-
 /// The system clock now, in microseconds since the epoch: Dart's `_getCurrentMicros`.
 fn current_microseconds() -> i64 {
     let since_epoch = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("the clock is past 1970");
     i64::try_from(since_epoch.as_micros()).expect("within range")
-}
-
-/// The app's platform, which gives the local zone, for a value that is not UTC.
-fn local_zone(app: &App, is_utc: bool) -> Option<PlatformRef> {
-    (!is_utc).then(|| app.platform())
 }
 
 /// `zone`'s offset at the instant, in microseconds: Dart's `_timeZoneOffsetInSeconds`.
@@ -841,10 +826,6 @@ fn six_digits(n: i32) -> String {
     format!("{sign}{:06}", n.abs())
 }
 
-fn three_digits(n: i32) -> String {
-    format!("{n:03}")
-}
-
 /// Days since the epoch of the given proleptic Gregorian date; the month rolls into the
 /// year and the day into the month, as Dart's constructors let them.
 fn days_from_civil(year: i32, month: i32, day: i32) -> i64 {
@@ -889,7 +870,9 @@ mod tests {
     use std::sync::Arc;
     use std::time::Instant;
 
-    use waft_embedder::{Dispatcher, InertDispatcher, TargetPlatform, ViewId, ViewRef};
+    use waft_embedder::{
+        Dispatcher, InertDispatcher, PlatformRef, TargetPlatform, ViewId, ViewRef,
+    };
 
     use super::*;
     use crate::AppCell;
@@ -946,16 +929,20 @@ mod tests {
     #[test]
     fn the_epoch_is_a_thursday_and_the_fields_read_back() {
         let cell = utc_app();
-        let epoch = DateTime::from_microseconds_since_epoch(&cell.borrow(), 0, true);
+        let app = cell.borrow();
+        let epoch = DateTime::from_microseconds_since_epoch(0, true);
         assert_eq!(
-            (epoch.year(), epoch.month(), epoch.day()),
+            (epoch.year(&app), epoch.month(&app), epoch.day(&app)),
             (1970, DateTime::JANUARY, 1)
         );
-        assert_eq!(epoch.weekday(), DateTime::THURSDAY);
+        assert_eq!(epoch.weekday(&app), DateTime::THURSDAY);
         let moon = DateTime::utc_with_time(1969, 7, 20, 20, 18, 4, 5, 6);
-        assert_eq!((moon.hour(), moon.minute(), moon.second()), (20, 18, 4));
-        assert_eq!((moon.millisecond(), moon.microsecond()), (5, 6));
-        assert_eq!(moon.weekday(), DateTime::SUNDAY);
+        assert_eq!(
+            (moon.hour(&app), moon.minute(&app), moon.second(&app)),
+            (20, 18, 4)
+        );
+        assert_eq!((moon.millisecond(&app), moon.microsecond(&app)), (5, 6));
+        assert_eq!(moon.weekday(&app), DateTime::SUNDAY);
         assert!(moon.is_before(&epoch));
         assert!(epoch.is_after(&moon));
         assert_eq!(moon.compare_to(&epoch), Ordering::Less);
@@ -963,26 +950,31 @@ mod tests {
 
     #[test]
     fn leap_years_and_out_of_range_fields_roll_over_like_dart() {
-        assert_eq!(DateTime::utc(2024, 2, 29).day(), 29);
-        assert_eq!(DateTime::utc(2024, 2, 30).month(), DateTime::MARCH);
-        assert_eq!(DateTime::utc(1900, 2, 29).month(), DateTime::MARCH);
-        assert_eq!(DateTime::utc(2000, 2, 29).month(), DateTime::FEBRUARY);
+        let cell = utc_app();
+        let app = cell.borrow();
+        assert_eq!(DateTime::utc(2024, 2, 29).day(&app), 29);
+        assert_eq!(DateTime::utc(2024, 2, 30).month(&app), DateTime::MARCH);
+        assert_eq!(DateTime::utc(1900, 2, 29).month(&app), DateTime::MARCH);
+        assert_eq!(DateTime::utc(2000, 2, 29).month(&app), DateTime::FEBRUARY);
         let thirteenth_month = DateTime::utc(2025, 13, 1);
         assert_eq!(
-            (thirteenth_month.year(), thirteenth_month.month()),
+            (thirteenth_month.year(&app), thirteenth_month.month(&app)),
             (2026, DateTime::JANUARY)
         );
         let zeroth_day = DateTime::utc(2026, 3, 0);
         assert_eq!(
-            (zeroth_day.month(), zeroth_day.day()),
+            (zeroth_day.month(&app), zeroth_day.day(&app)),
             (DateTime::FEBRUARY, 28)
         );
         let negative_month = DateTime::utc(2026, -1, 1);
         assert_eq!(
-            (negative_month.year(), negative_month.month()),
+            (negative_month.year(&app), negative_month.month(&app)),
             (2025, DateTime::NOVEMBER)
         );
-        assert_eq!(DateTime::utc_with_time(2026, 1, 1, 25, 0, 0, 0, 0).day(), 2);
+        assert_eq!(
+            DateTime::utc_with_time(2026, 1, 1, 25, 0, 0, 0, 0).day(&app),
+            2
+        );
     }
 
     #[test]
@@ -992,33 +984,38 @@ mod tests {
         let fifty_days = Duration::from_secs(50 * 24 * 60 * 60);
         let today = DateTime::utc(2022, 1, 1);
         assert_eq!(
-            today.add(&app, fifty_days).to_string(),
+            today.add(fifty_days).to_string(&app),
             "2022-02-20 00:00:00.000Z"
         );
         assert_eq!(
-            today.subtract(&app, fifty_days).to_string(),
+            today.subtract(fifty_days).to_string(&app),
             "2021-11-12 00:00:00.000Z"
         );
         assert_eq!(today.milliseconds_since_epoch(), 1_640_995_200_000);
         assert_eq!(
-            DateTime::from_milliseconds_since_epoch(&app, 1_640_995_200_000, true),
+            DateTime::from_milliseconds_since_epoch(1_640_995_200_000, true),
             today
         );
     }
 
     #[test]
     fn formatting_follows_dart() {
+        let cell = utc_app();
+        let app = cell.borrow();
         let moon = DateTime::utc_with_time(1969, 7, 20, 20, 18, 4, 0, 0);
-        assert_eq!(moon.to_string(), "1969-07-20 20:18:04.000Z");
-        assert_eq!(moon.to_iso8601_string(), "1969-07-20T20:18:04.000Z");
+        assert_eq!(moon.to_string(&app), "1969-07-20 20:18:04.000Z");
+        assert_eq!(moon.to_iso8601_string(&app), "1969-07-20T20:18:04.000Z");
         let precise = DateTime::utc_with_time(2026, 9, 5, 1, 2, 3, 4, 5);
-        assert_eq!(precise.to_iso8601_string(), "2026-09-05T01:02:03.004005Z");
         assert_eq!(
-            DateTime::utc(-44, 3, 15).to_string(),
+            precise.to_iso8601_string(&app),
+            "2026-09-05T01:02:03.004005Z"
+        );
+        assert_eq!(
+            DateTime::utc(-44, 3, 15).to_string(&app),
             "-0044-03-15 00:00:00.000Z"
         );
         assert_eq!(
-            DateTime::utc(12345, 1, 1).to_iso8601_string(),
+            DateTime::utc(12345, 1, 1).to_iso8601_string(&app),
             "+012345-01-01T00:00:00.000Z"
         );
     }
@@ -1026,12 +1023,19 @@ mod tests {
     #[test]
     fn dates_before_the_epoch_read_back_their_fields() {
         let cell = utc_app();
+        let app = cell.borrow();
         let date = DateTime::utc_with_time(1960, 12, 31, 23, 59, 59, 999, 999);
-        assert_eq!((date.year(), date.month(), date.day()), (1960, 12, 31));
-        assert_eq!((date.hour(), date.minute(), date.second()), (23, 59, 59));
-        assert_eq!((date.millisecond(), date.microsecond()), (999, 999));
         assert_eq!(
-            date.add(&cell.borrow(), Duration::from_micros(1)),
+            (date.year(&app), date.month(&app), date.day(&app)),
+            (1960, 12, 31)
+        );
+        assert_eq!(
+            (date.hour(&app), date.minute(&app), date.second(&app)),
+            (23, 59, 59)
+        );
+        assert_eq!((date.millisecond(&app), date.microsecond(&app)), (999, 999));
+        assert_eq!(
+            date.add(Duration::from_micros(1)),
             DateTime::utc(1961, 1, 1)
         );
     }
@@ -1062,12 +1066,15 @@ mod tests {
         {
             let cell = app_in(central_europe);
             let app = cell.borrow();
-            let epoch = DateTime::from_microseconds_since_epoch(&app, 0, false);
+            let epoch = DateTime::from_microseconds_since_epoch(0, false);
             assert!(!epoch.is_utc());
-            assert_eq!((epoch.year(), epoch.month(), epoch.day()), (1970, 1, 1));
-            assert_eq!(epoch.hour(), 1);
-            assert_eq!(epoch.to_string(), "1970-01-01 01:00:00.000");
-            assert_eq!(epoch.to_utc().to_string(), "1970-01-01 00:00:00.000Z");
+            assert_eq!(
+                (epoch.year(&app), epoch.month(&app), epoch.day(&app)),
+                (1970, 1, 1)
+            );
+            assert_eq!(epoch.hour(&app), 1);
+            assert_eq!(epoch.to_string(&app), "1970-01-01 01:00:00.000");
+            assert_eq!(epoch.to_utc().to_string(&app), "1970-01-01 00:00:00.000Z");
             assert_eq!(epoch.time_zone_name(&app), "CET");
             assert_eq!(epoch.time_zone_offset(&app), SignedDuration::from_hours(1));
             assert_eq!(epoch.to_utc().time_zone_offset(&app), SignedDuration::ZERO);
@@ -1075,23 +1082,25 @@ mod tests {
         }
     }
 
-    /// The fields are read in the offset the value was made with; the offset and the name are
-    /// asked again, as Dart asks the VM, so a change of zone shows in both.
+    /// Every read of a local value asks the platform: a change of the system's zone shows in the
+    /// fields, the offset and the name alike, and the instant stays.
     #[test]
-    fn a_local_value_keeps_its_fields_and_asks_again_for_its_offset_and_name() {
+    fn a_local_value_reads_the_zone_the_platform_answers_now() {
         let platform = Rc::new(ZonePlatform(Cell::new(central_europe)));
         let cell = AppCell::with_platform(Rc::clone(&platform) as PlatformRef);
         let app = cell.borrow();
         let made_in_paris = DateTime::new_with_time(&app, 2026, 1, 1, 12, 0, 0, 0, 0);
+        let instant = made_in_paris.microseconds_since_epoch();
         platform.0.set(pacific);
-        assert_eq!(made_in_paris.hour(), 12);
+        assert_eq!(made_in_paris.hour(&app), 3);
         assert_eq!(
             made_in_paris.time_zone_offset(&app),
             SignedDuration::from_hours(-8)
         );
         assert_eq!(made_in_paris.time_zone_name(&app), "PST");
-        let made_in_san_francisco = made_in_paris.to_utc().to_local(&app);
-        assert_eq!(made_in_san_francisco.hour(), 3);
+        assert_eq!(made_in_paris.to_string(&app), "2026-01-01 03:00:00.000");
+        assert_eq!(made_in_paris.microseconds_since_epoch(), instant);
+        assert_eq!(made_in_paris.to_utc().hour(&app), 11);
     }
 
     #[test]
@@ -1101,7 +1110,7 @@ mod tests {
             let app = cell.borrow();
             let date = DateTime::new_with_time(&app, 2021, 11, 9, 10, 0, 0, 0, 0);
             assert_eq!(date.time_zone_offset(&app).to_string(), "-8:00:00.000000");
-            assert_eq!(date.to_utc().hour(), 18);
+            assert_eq!(date.to_utc().hour(&app), 18);
             assert_eq!(date.milliseconds_since_epoch(), 1_636_480_800_000);
         }
     }
@@ -1116,24 +1125,28 @@ mod tests {
             let local = DateTime::new_with_time(&app, 2026, 7, 1, 12, 30, 15, 250, 7);
             assert_eq!(
                 (
-                    local.year(),
-                    local.month(),
-                    local.day(),
-                    local.hour(),
-                    local.minute()
+                    local.year(&app),
+                    local.month(&app),
+                    local.day(&app),
+                    local.hour(&app),
+                    local.minute(&app)
                 ),
                 (2026, 7, 1, 12, 30)
             );
             assert_eq!(
-                (local.second(), local.millisecond(), local.microsecond()),
+                (
+                    local.second(&app),
+                    local.millisecond(&app),
+                    local.microsecond(&app)
+                ),
                 (15, 250, 7)
             );
             let utc = local.to_utc();
-            assert_eq!(utc.hour(), 10);
+            assert_eq!(utc.hour(&app), 10);
             assert!(utc.is_at_same_moment_as(&local));
             assert_ne!(utc, local);
-            assert_eq!(utc.to_local(&app), local);
-            assert_eq!(local.to_local(&app), local);
+            assert_eq!(utc.to_local(), local);
+            assert_eq!(local.to_local(), local);
         }
     }
 
@@ -1145,9 +1158,9 @@ mod tests {
             let cell = app_in(central_europe);
             let app = cell.borrow();
             let skipped = DateTime::new_with_time(&app, 2026, 3, 29, 2, 30, 0, 0, 0);
-            assert_eq!((skipped.hour(), skipped.minute()), (3, 30));
+            assert_eq!((skipped.hour(&app), skipped.minute(&app)), (3, 30));
             assert_eq!(skipped.time_zone_name(&app), "CEST");
-            assert_eq!(skipped.to_utc().to_string(), "2026-03-29 01:30:00.000Z");
+            assert_eq!(skipped.to_utc().to_string(&app), "2026-03-29 01:30:00.000Z");
         }
     }
 
@@ -1159,10 +1172,16 @@ mod tests {
             let cell = app_in(central_europe);
             let app = cell.borrow();
             let repeated = DateTime::new_with_time(&app, 2026, 10, 25, 2, 30, 0, 0, 0);
-            assert_eq!(repeated.to_utc().to_string(), "2026-10-25 00:30:00.000Z");
+            assert_eq!(
+                repeated.to_utc().to_string(&app),
+                "2026-10-25 00:30:00.000Z"
+            );
             assert_eq!(repeated.time_zone_name(&app), "CEST");
-            let an_hour_later = repeated.add(&app, Duration::from_secs(60 * 60));
-            assert_eq!((an_hour_later.hour(), an_hour_later.minute()), (2, 30));
+            let an_hour_later = repeated.add(Duration::from_secs(60 * 60));
+            assert_eq!(
+                (an_hour_later.hour(&app), an_hour_later.minute(&app)),
+                (2, 30)
+            );
             assert_eq!(an_hour_later.time_zone_name(&app), "CET");
         }
     }
@@ -1180,13 +1199,13 @@ mod tests {
             let app = cell.borrow();
             let summer = DateTime::new_with_time(&app, 2500, 7, 1, 12, 0, 0, 0, 0);
             assert_eq!(
-                (summer.year(), summer.month(), summer.hour()),
+                (summer.year(&app), summer.month(&app), summer.hour(&app)),
                 (2500, 7, 12)
             );
             assert_eq!(summer.time_zone_offset(&app), SignedDuration::from_hours(2));
             let winter = DateTime::new_with_time(&app, 1800, 1, 1, 12, 0, 0, 0, 0);
             assert_eq!(winter.time_zone_offset(&app), SignedDuration::from_hours(1));
-            assert_eq!(winter.to_utc().hour(), 11);
+            assert_eq!(winter.to_utc().hour(&app), 11);
         }
     }
 
@@ -1202,6 +1221,8 @@ mod tests {
 
     #[test]
     fn equivalent_years_keep_the_calendar() {
+        let cell = utc_app();
+        let app = cell.borrow();
         for year in [1600, 1800, 1900, 2100, 2400, 2500, 9999] {
             let equivalent = equivalent_year(year);
             assert!(
@@ -1210,8 +1231,8 @@ mod tests {
             );
             assert_eq!(is_leap_year(year), is_leap_year(equivalent), "{year}");
             assert_eq!(
-                DateTime::utc(year, 1, 1).weekday(),
-                DateTime::utc(equivalent, 1, 1).weekday(),
+                DateTime::utc(year, 1, 1).weekday(&app),
+                DateTime::utc(equivalent, 1, 1).weekday(&app),
                 "{year}"
             );
         }
@@ -1222,7 +1243,7 @@ mod tests {
         {
             let cell = app_in(pacific);
             let app = cell.borrow();
-            let now = DateTime::now(&app);
+            let now = DateTime::now();
             let timestamp = DateTime::timestamp();
             assert!(!now.is_utc());
             assert!(timestamp.is_utc());
@@ -1244,8 +1265,8 @@ mod tests {
             assert_eq!(local.compare_to(&utc), Ordering::Equal);
             assert_ne!(local, utc);
             assert_eq!(local.cmp(&utc), Ordering::Less);
-            assert_eq!(local.cmp(&local.to_local(&app)), Ordering::Equal);
-            assert!(utc < local.add(&app, Duration::from_micros(1)));
+            assert_eq!(local.cmp(&local.to_local()), Ordering::Equal);
+            assert!(utc < local.add(Duration::from_micros(1)));
         }
     }
 
@@ -1255,10 +1276,10 @@ mod tests {
             let cell = app_in(central_europe);
             let app = cell.borrow();
             let local = DateTime::new(&app, 2026, 1, 1);
-            assert!(!local.add(&app, Duration::from_secs(1)).is_utc());
+            assert!(!local.add(Duration::from_secs(1)).is_utc());
             assert!(
                 DateTime::utc(2026, 1, 1)
-                    .add(&app, Duration::from_secs(1))
+                    .add(Duration::from_secs(1))
                     .is_utc()
             );
         }

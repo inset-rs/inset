@@ -78,13 +78,9 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 
 ## date_time.rs → dart:core `DateTime`
 
-- Change: what makes a local value takes the `App` (`DateTime::now(app)`, `new(app, ..)`, `new_with_time(app, ..)`, `from_milliseconds_since_epoch(app, ..)`, `from_microseconds_since_epoch(app, ..)`, `to_local(app)`, `add(app, ..)`, `subtract(app, ..)`), and so do `time_zone_offset(app)` and `time_zone_name(app)`; its platform answers the local zone's offset and name at an instant (`Platform::time_zone_offset`, `Platform::time_zone_name`), where Dart's natives ask the VM.
+- Change: every call that asks the local time zone takes the `App`, whose platform answers the zone's offset and name at an instant (`Platform::time_zone_offset`, `Platform::time_zone_name`) where Dart's natives ask the VM: the local constructors `new(app, ..)` and `new_with_time(app, ..)`, which probe for a wall time's instant, and every read of the fields, the offset, the zone's name and the text (`year(app)` … `microsecond(app)`, `weekday(app)`, `time_zone_offset(app)`, `time_zone_name(app)`, `to_iso8601_string(app)`, `to_string(app)` in place of `toString`, so there is no `Display`). A UTC value's reads take it too and do not ask.
   Reason: language — Dart's `DateTime` reaches the VM's natives from anywhere, and Waft has no global to reach the host through but the `App`, as for its clock.
-  Affect: a caller that makes a local date passes the app, a test sets its zone on its `TestPlatform` and never reads the machine's, and a UTC value (`utc`, `utc_with_time`, `timestamp`, `to_utc`) needs none.
-
-- Change: a local value works its fields out in the offset its platform gave when it was made, where Dart works them out at their first read and keeps them; `time_zone_offset` and `time_zone_name` ask the platform again for the value's instant, as Dart's do.
-  Reason: language — `DateTime` is a `Copy` value that cannot reach the platform without the `App`, so it cannot work its fields out at a later read.
-  Affect: a value made before the zone changed reads the old zone's fields and answers the new zone's offset and name, as a Dart value whose fields were read before the change does.
+  Affect: a caller that reads a date passes the app, and a test sets its zone on its `TestPlatform` and never reads the machine's; what only moves the instant (`now`, `timestamp`, `from_*_since_epoch`, `to_local`, `to_utc`, `add`, `subtract`) needs none.
 
 - Change: `time_zone_offset` is a `SignedDuration`, Waft's port of Dart's `Duration` where it can be negative, under its own name; everywhere else a Dart `Duration` is `std::time::Duration`.
   Reason: language — std's duration is unsigned and cannot hold a zone west of UTC, and a second type named `Duration` would shadow std's in every `use waft::*`.
