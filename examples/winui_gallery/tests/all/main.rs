@@ -22,6 +22,7 @@ mod button_family;
 mod check_box;
 mod color_picker;
 mod combo_box;
+mod command_bar;
 mod content_dialog;
 mod control_border;
 mod drag_drop;

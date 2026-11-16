@@ -137,6 +137,8 @@ pub enum FluentSymbol {
     List,
     /// Rows and columns of a table.
     Table,
+    /// A box of tools: a bar of commands.
+    Toolbox,
     /// A camera; WinUI's `Symbol.Camera`.
     Camera,
     /// A microphone; WinUI's `Symbol.Microphone`.
@@ -208,6 +210,7 @@ impl FluentSymbol {
             Self::Document => 62329,
             Self::List => 62702,
             Self::Table => 63326,
+            Self::Toolbox => 63534,
             Self::Camera => 62036,
             Self::Mic => 59385,
             Self::Folder => 62488,
