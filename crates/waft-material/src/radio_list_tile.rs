@@ -13,10 +13,10 @@ use waft_gestures::GestureTapCallback;
 use waft_painting::{AnyBorderSide, EdgeInsetsGeometry, ShapeBorderRef};
 use waft_services::MouseCursorRef;
 use waft_widgets::{
-    AnyFocusNode, AnyRadioClient, AnyRadioGroupRegistry, BuildContext, ExcludeFocus, FocusNode,
-    FocusNodeLeaf, FocusNodeRef, IntoWidget, KeyRef, MergeSemantics, RadioClient, RadioClientData,
-    RadioGroup, RadioGroupRegistry, State, StateData, StatefulWidget, Transform, WidgetRef,
-    WidgetState, WidgetStatePropertyRef, WidgetStates, WidgetStatesController,
+    AnyFocusNode, AnyRadioClient, BuildContext, ExcludeFocus, FocusNode, FocusNodeLeaf,
+    FocusNodeRef, IntoWidget, KeyRef, MergeSemantics, RadioClient, RadioClientData, RadioGroup,
+    RadioGroupRegistry, RadioGroupRegistryRef, State, StateData, StatefulWidget, Transform,
+    WidgetRef, WidgetState, WidgetStatePropertyRef, WidgetStates, WidgetStatesController,
 };
 
 use crate::list_tile::{ListTile, ListTileControlAffinity, ListTileTitleAlignment};
@@ -615,16 +615,16 @@ impl<T: Clone + PartialEq + 'static> RadioListTileState<T> {
     }
 
     /// Dart's `_radioRegistry`, made on first read as Dart's `late final` is.
-    fn radio_registry(self: Handle<Self>, app: &mut App) -> AnyRadioGroupRegistry<T> {
-        let registry = match app.get(self).radio_registry.handle() {
+    fn radio_registry(self: Handle<Self>, app: &mut App) -> RadioGroupRegistryRef<T> {
+        let registry = match app.get(self).radio_registry.as_ref().cloned() {
             Some(registry) => registry,
             None => {
                 let registry = app.create(RadioRegistry { state: self });
                 app.get_mut(self).radio_registry = Some(registry.clone());
-                registry.handle()
+                registry
             }
         };
-        registry.as_radio_group_registry()
+        registry.erase()
     }
 
     fn checked(self: Handle<Self>, app: &App) -> bool {
