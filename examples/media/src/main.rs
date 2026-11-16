@@ -209,7 +209,6 @@ fn described(format: &CameraFormat) -> String {
 
 /// Prints `session`'s state now and each time it changes.
 fn print_states(app: &mut App, session: &Ref<CameraSession>) {
-    // The listener is kept by the session, so it names the session without keeping it.
     let handle = session.handle();
     println!("  state: {:?}", CameraSession::state(handle, app));
     let listenable: Rc<dyn Listenable> = Rc::new(session.clone());

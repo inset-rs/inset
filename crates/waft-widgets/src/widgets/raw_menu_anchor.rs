@@ -748,11 +748,7 @@ trait RawMenuAnchorBaseMixin: State {
             }
             let position =
                 Scrollable::maybe_of(app, context, None).map(|state| state.position(app));
-            let kept_position = position.map(|position| {
-                position
-                    .upgrade(app)
-                    .expect("the scroll position is kept by its Scrollable")
-            });
+            let kept_position = position.map(|position| position.keep(app));
             self.raw_menu_anchor_base_data_mut(app).scroll_position = kept_position;
             if let Some(position) = position {
                 position
@@ -930,7 +926,7 @@ trait RawMenuAnchorBaseMixin: State {
     /// Dart's `build`, which no leaf overrides.
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
         let is_open = self.is_open(app);
-        let controller = self.menu_controller(app).kept(app);
+        let controller = self.menu_controller(app).keep(app);
         let mut actions: HashMap<TypeId, ActionRef> = HashMap::new();
         // Check if open to allow DismissIntent to bubble when the menu is closed.
         if is_open {
@@ -1232,7 +1228,7 @@ impl State for RawMenuAnchorState {
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &RawMenuAnchor) {
         let controller = self.widget(app).controller.handle();
-        if old_widget.controller.handle() != controller {
+        if old_widget.controller != controller {
             let anchor = self.as_raw_menu_anchor_base();
             old_widget.controller.detach(app, anchor);
             controller.attach(app, anchor);
@@ -1413,7 +1409,7 @@ impl State for RawMenuAnchorGroupState {
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &RawMenuAnchorGroup) {
         let controller = self.widget(app).controller.handle();
-        if old_widget.controller.handle() != controller {
+        if old_widget.controller != controller {
             let anchor = self.as_raw_menu_anchor_base();
             old_widget.controller.detach(app, anchor);
             controller.attach(app, anchor);
@@ -1667,29 +1663,12 @@ pub struct AnyMenuController {
 /// A field Dart types as the erased object, kept: AnyMenuController with its count.
 pub type MenuControllerRef = Retained<AnyMenuController>;
 
-/// A kept object erases to a [`MenuControllerRef`] with [`Retained::erase`]: Dart's upcast.
-impl<T: MenuControllerLeaf> From<Handle<T>> for AnyMenuController {
-    fn from(handle: Handle<T>) -> AnyMenuController {
-        handle.as_menu_controller()
-    }
-}
+waft_foundation::erased_handle!(AnyMenuController: MenuControllerLeaf => MenuControllerLeaf::as_menu_controller);
 
 impl AnyMenuController {
     /// The controller's arena id, which is also its anchors' [`TapRegion::group_id`].
     pub fn id(self) -> HandleId {
         self.id
-    }
-
-    /// A [`MenuControllerRef`] while something still keeps the controller; see
-    /// [`Handle::upgrade`].
-    pub fn upgrade(self, app: &App) -> Option<MenuControllerRef> {
-        Retained::upgrade(app, self)
-    }
-
-    /// The [`MenuControllerRef`] a widget keeps of the controller its anchor was given.
-    fn kept(self, app: &App) -> MenuControllerRef {
-        self.upgrade(app)
-            .expect("the controller is kept by the widget it was given to")
     }
 
     fn anchor(self, app: &App) -> Option<AnyRawMenuAnchorBase> {
@@ -1730,25 +1709,11 @@ impl AnyMenuController {
     }
 }
 
-impl PartialEq for AnyMenuController {
-    fn eq(&self, other: &AnyMenuController) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Eq for AnyMenuController {}
-
 impl Debug for AnyMenuController {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let name = (self.vtable.type_name)();
         let short = name.rsplit("::").next().unwrap_or(name);
         write!(f, "{short}({:?})", self.id)
-    }
-}
-
-impl From<AnyMenuController> for HandleId {
-    fn from(controller: AnyMenuController) -> HandleId {
-        controller.id
     }
 }
 
@@ -2470,7 +2435,7 @@ mod tests {
     impl StatelessWidget for AnchorButton {
         fn build(&self, app: &mut App, context: BuildContext) -> WidgetRef {
             let controller =
-                MenuController::maybe_of(app, context).map(|controller| controller.kept(app));
+                MenuController::maybe_of(app, context).map(|controller| controller.keep(app));
             let tag = self.tag;
             let on_pressed = self.on_pressed.clone();
             let mut button = Button::tag(tag).on_pressed(Rc::new(move |app: &mut App| {

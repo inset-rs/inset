@@ -2748,7 +2748,7 @@ mod tests {
             );
 
             assert_eq!(tester.find_onstage_text("Home").len(), 1);
-            FocusNodeLeaf::dispose(focus_scope_node.handle(), &mut tester.cell.borrow_mut());
+            focus_scope_node.dispose(&mut tester.cell.borrow_mut());
         });
     }
 

@@ -10,6 +10,7 @@ mod completer;
 mod constants;
 mod date_time;
 mod entity;
+mod erased;
 mod executor;
 mod handle_map;
 mod key;

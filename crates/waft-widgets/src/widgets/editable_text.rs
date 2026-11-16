@@ -425,29 +425,10 @@ pub struct AnyTextEditingController {
     vtable: &'static TextEditingControllerVTable,
 }
 
-impl From<AnyTextEditingController> for HandleId {
-    fn from(handle: AnyTextEditingController) -> HandleId {
-        handle.id
-    }
-}
-
 /// A field Dart types as the erased object, kept: AnyTextEditingController with its count.
 pub type TextEditingControllerRef = Retained<AnyTextEditingController>;
 
-impl AnyTextEditingController {
-    /// A [`TextEditingControllerRef`] while something still keeps the object; see
-    /// [`Handle::upgrade`](waft_foundation::Handle::upgrade).
-    pub fn upgrade(self, app: &App) -> Option<TextEditingControllerRef> {
-        Retained::upgrade(app, self)
-    }
-}
-
-/// A kept object erases to a [`TextEditingControllerRef`] with [`Retained::erase`]: Dart's upcast.
-impl<T: TextEditingControllerLeaf> From<Handle<T>> for AnyTextEditingController {
-    fn from(handle: Handle<T>) -> AnyTextEditingController {
-        handle.as_controller()
-    }
-}
+waft_foundation::erased_handle!(AnyTextEditingController: TextEditingControllerLeaf => TextEditingControllerLeaf::as_controller);
 
 impl AnyTextEditingController {
     fn data(self, app: &App) -> &TextEditingControllerData {
@@ -581,23 +562,9 @@ impl AnyTextEditingController {
     }
 }
 
-impl PartialEq for AnyTextEditingController {
-    fn eq(&self, other: &AnyTextEditingController) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Eq for AnyTextEditingController {}
-
 impl Debug for AnyTextEditingController {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "AnyTextEditingController({:?})", self.id)
-    }
-}
-
-impl std::hash::Hash for AnyTextEditingController {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
     }
 }
 

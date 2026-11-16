@@ -407,9 +407,7 @@ impl ImageProvider for AssetImage {
         };
         let loading = bundle.load(&key.name);
         let scale = key.scale;
-        let retained = completer
-            .upgrade(app)
-            .expect("the object is kept by its owner");
+        let retained = completer.keep(app);
         // Not held: dropping the task does not cancel it, and the completer is what carries the
         // answer onwards.
         let _loading = app.spawn(async move |async_app| {
@@ -562,9 +560,7 @@ impl ImagePlayback {
         let Some(mut codec) = app.get_mut(self).codec.take() else {
             return;
         };
-        let retained = self
-            .upgrade(app)
-            .expect("a playback that decodes is kept by its completer");
+        let retained = self.keep(app);
         let _decoding = app.spawn(async move |async_app| {
             let frame = codec.next_frame().await;
             async_app.update(move |app| {

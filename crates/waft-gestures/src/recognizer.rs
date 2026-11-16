@@ -11,7 +11,6 @@
 use std::any::TypeId;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -574,20 +573,7 @@ pub trait GestureRecognizerLeaf: Sized + 'static {
 /// A field Dart types as `GestureRecognizer`, kept: the erased recognizer with its count.
 pub type RecognizerRef = Retained<AnyGestureRecognizer>;
 
-impl AnyGestureRecognizer {
-    /// A [`RecognizerRef`] while something still keeps the object; see
-    /// [`Handle::upgrade`](waft_foundation::Handle::upgrade).
-    pub fn upgrade(self, app: &App) -> Option<RecognizerRef> {
-        Retained::upgrade(app, self)
-    }
-}
-
-/// A kept recognizer erases to a [`RecognizerRef`] with [`Retained::erase`].
-impl<R: GestureRecognizerLeaf> From<Handle<R>> for AnyGestureRecognizer {
-    fn from(recognizer: Handle<R>) -> AnyGestureRecognizer {
-        recognizer.as_recognizer()
-    }
-}
+waft_foundation::erased_handle!(AnyGestureRecognizer: GestureRecognizerLeaf => GestureRecognizerLeaf::as_recognizer);
 
 impl<R: RecognizerLeaf> GestureRecognizerLeaf for R {
     fn as_recognizer(self: Handle<Self>) -> AnyGestureRecognizer {
@@ -655,26 +641,6 @@ impl GestureRecognizerVTable {
 pub struct AnyGestureRecognizer {
     id: HandleId,
     vtable: &'static GestureRecognizerVTable,
-}
-
-impl From<AnyGestureRecognizer> for HandleId {
-    fn from(recognizer: AnyGestureRecognizer) -> HandleId {
-        recognizer.id
-    }
-}
-
-impl PartialEq for AnyGestureRecognizer {
-    fn eq(&self, other: &AnyGestureRecognizer) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Eq for AnyGestureRecognizer {}
-
-impl Hash for AnyGestureRecognizer {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
-    }
 }
 
 impl fmt::Debug for AnyGestureRecognizer {

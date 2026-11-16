@@ -103,8 +103,7 @@ impl Autofocus {
     /// which are no longer attached to the original manager.
     fn apply_if_valid(self, app: &mut App, manager: Handle<FocusManager>) {
         let scope = self.scope.as_node();
-        let should_apply = (scope.parent(app).is_some()
-            || self.scope.handle() == manager.root_scope(app).handle())
+        let should_apply = (scope.parent(app).is_some() || self.scope == *manager.root_scope(app))
             && scope.manager(app) == Some(manager)
             && self.scope.focused_child(app).is_none()
             && self.autofocus_node.ancestors(app).contains(&scope);
@@ -632,35 +631,10 @@ pub struct AnyFocusNode {
     vtable: &'static FocusNodeVTable,
 }
 
-impl From<AnyFocusNode> for HandleId {
-    fn from(handle: AnyFocusNode) -> HandleId {
-        handle.id
-    }
-}
-
 /// A field Dart types as the erased object, kept: AnyFocusNode with its count.
 pub type FocusNodeRef = Retained<AnyFocusNode>;
 
-/// A kept object erases to a [`FocusNodeRef`] with [`Retained::erase`]: Dart's upcast.
-impl<T: FocusNodeLeaf> From<Handle<T>> for AnyFocusNode {
-    fn from(handle: Handle<T>) -> AnyFocusNode {
-        handle.as_node()
-    }
-}
-
-impl PartialEq for AnyFocusNode {
-    fn eq(&self, other: &AnyFocusNode) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Eq for AnyFocusNode {}
-
-impl std::hash::Hash for AnyFocusNode {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
-    }
-}
+waft_foundation::erased_handle!(AnyFocusNode: FocusNodeLeaf => FocusNodeLeaf::as_node);
 
 impl fmt::Debug for AnyFocusNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -682,18 +656,6 @@ impl AnyFocusNode {
     /// Dart's `node is FocusScopeNode`.
     pub fn as_scope(self) -> Option<Handle<FocusScopeNode>> {
         (self.vtable.as_scope)(self.id)
-    }
-
-    /// A [`FocusNodeRef`] while something still keeps the node; see [`Handle::upgrade`].
-    pub fn upgrade(self, app: &App) -> Option<FocusNodeRef> {
-        Retained::upgrade(app, self)
-    }
-
-    /// The [`FocusNodeRef`] a field keeps of a node whose owner holds it while a method of the
-    /// node, or one it was handed to, runs.
-    fn kept(self, app: &App) -> FocusNodeRef {
-        self.upgrade(app)
-            .expect("the focus node is kept by its owner")
     }
 
     /// Dart's `FocusNode` fields.
@@ -1293,7 +1255,7 @@ impl AnyFocusNode {
             let nearest_scope = self.nearest_scope(app);
             parent.remove_child(app, child, old_scope != nearest_scope);
         }
-        let kept_child = child.kept(app);
+        let kept_child = child.keep(app);
         self.data_mut(app).children.push(kept_child);
         let child_data = child.data_mut(app);
         child_data.parent = Some(self);
@@ -1430,7 +1392,7 @@ impl AnyFocusNode {
             remove_focused_child(app, ancestor, scope_focus);
             // Add it to the end of the list, which is also the top of the queue: the end of the
             // list represents the currently focused child.
-            let kept = scope_focus.kept(app);
+            let kept = scope_focus.keep(app);
             app.get_mut(ancestor).scope.focused_children.push(kept);
             scope_focus = ancestor.as_node();
         }
@@ -1795,10 +1757,8 @@ impl FocusScopeNode {
         debug_assert!(self.as_node().manager(app).is_some());
         if let Some(manager) = self.as_node().manager(app) {
             let autofocus = Autofocus {
-                scope: self
-                    .upgrade(app)
-                    .expect("the focus scope is kept by its owner"),
-                autofocus_node: node.kept(app),
+                scope: self.keep(app),
+                autofocus_node: node.keep(app),
             };
             app.get_mut(manager).pending_autofocuses.push(autofocus);
             manager.mark_needs_update(app);
@@ -2276,7 +2236,7 @@ impl FocusManager {
             // didn't happen.
             app.get_mut(self).marked_for_focus = None;
         } else {
-            let node = node.kept(app);
+            let node = node.keep(app);
             app.get_mut(self).marked_for_focus = Some(node);
             self.mark_needs_update(app);
         }
@@ -2383,7 +2343,7 @@ fn add_dirty_node(app: &mut App, manager: Handle<FocusManager>, node: AnyFocusNo
         .iter()
         .all(|dirty| dirty.handle() != node)
     {
-        let node = node.kept(app);
+        let node = node.keep(app);
         app.get_mut(manager).dirty_nodes.push(node);
     }
 }

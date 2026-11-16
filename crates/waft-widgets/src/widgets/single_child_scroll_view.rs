@@ -659,7 +659,7 @@ impl RenderSingleChildViewport {
     /// Sets [`offset`](Self::offset).
     pub fn set_offset(self: RenderHandle<Self>, app: &mut App, value: ViewportOffsetRef) {
         let old = self.offset(app);
-        if value.handle() == old {
+        if value == old {
             return;
         }
         if self.attached(app) {

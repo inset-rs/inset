@@ -2035,7 +2035,7 @@ impl<T: Clone + PartialEq + 'static> State for DropdownMenuState<T> {
             .local_trailing_icon_button_focus_node
             .take()
         {
-            FocusNodeLeaf::as_node(focus_node.handle()).dispose(app);
+            focus_node.as_node().dispose(app);
         }
         if let Some(states_controller) = app.get_mut(self).highlighted_item_states_controller.take()
         {
@@ -4198,19 +4198,16 @@ pub(crate) mod tests {
                     state
                         .local_text_editing_controller
                         .as_ref()
-                        .map(|node| node.handle().into()),
-                    state
-                        .internal_focus_node
-                        .as_ref()
-                        .map(|node| node.handle().into()),
+                        .map(|node| node.into()),
+                    state.internal_focus_node.as_ref().map(|node| node.into()),
                     state
                         .local_trailing_icon_button_focus_node
                         .as_ref()
-                        .map(|node| node.handle().into()),
+                        .map(|node| node.into()),
                     state
                         .internal_menu_controller
                         .as_ref()
-                        .map(|node| node.handle().into()),
+                        .map(|node| node.into()),
                 ]
                 .into_iter()
                 .collect::<Option<Vec<_>>>()
@@ -6087,7 +6084,8 @@ pub(crate) mod tests {
                 theme.color_scheme.outline()
             ));
 
-            FocusNodeLeaf::as_node(focus_node.handle())
+            focus_node
+                .as_node()
                 .request_focus(&mut tester.cell.borrow_mut(), None);
             pump(&mut tester);
             // Advance input decorator animation.
@@ -6145,7 +6143,8 @@ pub(crate) mod tests {
             primary_focus_next(&mut tester);
             pump(&mut tester);
             assert!(
-                FocusNodeLeaf::as_node(text_field_focus_node.handle())
+                text_field_focus_node
+                    .as_node()
                     .has_focus(&mut tester.cell.borrow_mut())
             );
 
@@ -6153,7 +6152,8 @@ pub(crate) mod tests {
             primary_focus_next(&mut tester);
             pump(&mut tester);
             assert!(
-                FocusNodeLeaf::as_node(button_focus_node.handle())
+                button_focus_node
+                    .as_node()
                     .has_focus(&mut tester.cell.borrow_mut())
             );
         });
@@ -7154,7 +7154,8 @@ pub(crate) mod tests {
         if given_trailing_icon_focus_node {
             // Ensure the trailing icon has focus.
             assert!(
-                FocusNodeLeaf::as_node(trailing_icon_focus_node.handle())
+                trailing_icon_focus_node
+                    .as_node()
                     .has_focus(&mut tester.cell.borrow_mut())
             );
         } else {
@@ -7169,7 +7170,8 @@ pub(crate) mod tests {
         primary_focus_next(&mut tester);
         pump(&mut tester);
         assert!(
-            FocusNodeLeaf::as_node(text_field_focus_node.handle())
+            text_field_focus_node
+                .as_node()
                 .has_focus(&mut tester.cell.borrow_mut())
         );
 
@@ -7177,7 +7179,8 @@ pub(crate) mod tests {
         primary_focus_next(&mut tester);
         pump(&mut tester);
         assert!(
-            FocusNodeLeaf::as_node(button_focus_node.handle())
+            button_focus_node
+                .as_node()
                 .has_focus(&mut tester.cell.borrow_mut())
         );
     }
@@ -7598,7 +7601,8 @@ pub(crate) mod tests {
 
             // Focus the dropdownMenu.
             assert!(!editable_has_focus(&tester));
-            FocusNodeLeaf::as_node(focus_node.handle())
+            focus_node
+                .as_node()
                 .request_focus(&mut tester.cell.borrow_mut(), None);
             pump(&mut tester);
             assert!(editable_has_focus(&tester));
@@ -7936,7 +7940,7 @@ pub(crate) mod tests {
             let (focus_node1, focus_node2) = {
                 let mut app = tester.cell.borrow_mut();
                 let focus_node2 = FocusNode::new(&mut app);
-                FocusNodeLeaf::as_node(focus_node2.handle()).set_can_request_focus(&mut app, false);
+                focus_node2.as_node().set_can_request_focus(&mut app, false);
                 (FocusNode::new(&mut app), focus_node2)
             };
             let current_focus_node = Rc::new(std::cell::RefCell::new(
@@ -7975,10 +7979,7 @@ pub(crate) mod tests {
                         let focus_node = focus_node.clone();
                         move |menu| menu.focus_node(focus_node.erase())
                     },
-                    move |app| {
-                        FocusNodeLeaf::as_node(focus_node.handle())
-                            .set_can_request_focus(app, false)
-                    },
+                    move |app| focus_node.as_node().set_can_request_focus(app, false),
                 ),
             );
 
@@ -8017,14 +8018,16 @@ pub(crate) mod tests {
             });
 
             // set canRequestFocus
-            FocusNodeLeaf::as_node(focus_node.handle())
+            focus_node
+                .as_node()
                 .set_can_request_focus(&mut tester.cell.borrow_mut(), false);
             // Opens the menu.
             tap_first::<IconButton>(&mut tester);
             pump(&mut tester);
 
             assert!(
-                !FocusNodeLeaf::as_node(focus_node.handle())
+                !focus_node
+                    .as_node()
                     .can_request_focus(&mut tester.cell.borrow_mut())
             );
             text_field(&tester, |text_field| assert!(text_field.read_only));

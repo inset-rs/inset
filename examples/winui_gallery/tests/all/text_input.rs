@@ -37,7 +37,7 @@ fn editor(f: &Fixture, controller: AnyTextEditingController) -> (AnyFocusNode, O
     let app = f.cell.borrow();
     for element in elements {
         if let Some(editable) = downcast_widget::<EditableText>(element.widget(&app).as_ref())
-            && editable.controller.handle() == controller
+            && editable.controller == controller
         {
             let render = element.find_render_object(&app).unwrap().as_box().unwrap();
             return (

@@ -872,37 +872,10 @@ pub struct AnyFocusTraversalPolicy {
     vtable: &'static FocusTraversalPolicyVTable,
 }
 
-impl From<AnyFocusTraversalPolicy> for HandleId {
-    fn from(handle: AnyFocusTraversalPolicy) -> HandleId {
-        handle.id
-    }
-}
-
 /// A field Dart types as the erased object, kept: AnyFocusTraversalPolicy with its count.
 pub type FocusTraversalPolicyRef = Retained<AnyFocusTraversalPolicy>;
 
-impl AnyFocusTraversalPolicy {
-    /// A [`FocusTraversalPolicyRef`] while something still keeps the object; see
-    /// [`Handle::upgrade`](waft_foundation::Handle::upgrade).
-    pub fn upgrade(self, app: &App) -> Option<FocusTraversalPolicyRef> {
-        Retained::upgrade(app, self)
-    }
-}
-
-/// A kept object erases to a [`FocusTraversalPolicyRef`] with [`Retained::erase`]: Dart's upcast.
-impl<T: FocusTraversalPolicy> From<Handle<T>> for AnyFocusTraversalPolicy {
-    fn from(handle: Handle<T>) -> AnyFocusTraversalPolicy {
-        handle.as_policy()
-    }
-}
-
-impl PartialEq for AnyFocusTraversalPolicy {
-    fn eq(&self, other: &AnyFocusTraversalPolicy) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Eq for AnyFocusTraversalPolicy {}
+waft_foundation::erased_handle!(AnyFocusTraversalPolicy: FocusTraversalPolicy => FocusTraversalPolicy::as_policy);
 
 impl fmt::Debug for AnyFocusTraversalPolicy {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1341,14 +1314,10 @@ pub trait DirectionalFocusTraversalPolicyMixin: FocusTraversalPolicy {
         focused_child: AnyFocusNode,
     ) {
         let new_entry = DirectionalPolicyDataEntry {
-            node: focused_child
-                .upgrade(app)
-                .expect("the focused child is kept by its owner"),
+            node: focused_child.keep(app),
             direction,
         };
-        let nearest_scope = nearest_scope
-            .upgrade(app)
-            .expect("the nearest scope is kept by its owner");
+        let nearest_scope = nearest_scope.keep(app);
         self.directional_data_mut(app)
             .policy_data
             .entry(nearest_scope)
@@ -1417,9 +1386,7 @@ pub trait DirectionalFocusTraversalPolicyMixin: FocusTraversalPolicy {
         group_node: Option<Handle<FocusTraversalGroupNode>>,
     ) {
         if let Some(group_node) = group_node {
-            let node = node
-                .upgrade(app)
-                .expect("a traversed node is kept by its owner");
+            let node = node.keep(app);
             app.get_mut(group_node).last_requested_focus = Some(node);
         }
         let request_focus_callback = self.request_focus_callback(app);

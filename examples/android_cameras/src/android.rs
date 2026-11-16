@@ -155,8 +155,7 @@ async fn run_camera(cx: &AsyncApp, shown: &Entity<Shown>, camera: &Camera) -> St
     };
     cx.update(|app| {
         log_states(app, &session);
-        let kept = session.clone();
-        change(app, shown, |shown| shown.session = Some(kept));
+        change(app, shown, |shown| shown.session = Some(session.clone()));
         let shooting = shown.clone();
         let _first = app.schedule_timer(
             FIRST_PHOTO,
@@ -325,7 +324,6 @@ fn take_photo(app: &mut App, shown: &Entity<Shown>) {
 /// Logs `session`'s state now and each time it changes.
 fn log_states(app: &mut App, session: &Ref<CameraSession>) {
     crate::log::info(&format!("state: {:?}", session.state(app)));
-    // The listener is kept by the session, so it names the session without keeping it.
     let handle = session.handle();
     let listenable: std::rc::Rc<dyn Listenable> = std::rc::Rc::new(session.clone());
     listenable.add_listener(

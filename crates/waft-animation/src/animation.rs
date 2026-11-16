@@ -361,12 +361,6 @@ impl<T: 'static> AnyAnimation<T> {
         app.handle::<A>(self.id)
     }
 
-    /// An [`AnimationRef`] while something still keeps the animation; see
-    /// [`Handle::upgrade`].
-    pub fn upgrade(self, app: &App) -> Option<AnimationRef<T>> {
-        Retained::upgrade(app, self)
-    }
-
     /// Calls the listener every time the value of the animation changes.
     ///
     /// Listeners can be removed with [`remove_listener`](AnyAnimation::remove_listener).
@@ -435,13 +429,7 @@ impl<T: 'static> AnyAnimation<T> {
 /// [`Listenable`](waft_foundation::Listenable) that keeps what it listens to.
 pub type AnimationRef<T> = Retained<AnyAnimation<T>>;
 
-/// A kept animation erases to an [`AnimationRef`] with [`Retained::erase`]: Dart's upcast to
-/// `Animation<T>`.
-impl<T: 'static, A: Animation<T>> From<Handle<A>> for AnyAnimation<T> {
-    fn from(animation: Handle<A>) -> AnyAnimation<T> {
-        animation.as_animation()
-    }
-}
+waft_foundation::erased_handle!(AnyAnimation<T>: Animation => Animation::as_animation);
 
 /// Dart's `Animation<double>.drive`, on a kept animation, since the animation it makes keeps
 /// this one.
@@ -498,24 +486,6 @@ impl<T> Clone for AnyAnimation<T> {
 }
 
 impl<T> Copy for AnyAnimation<T> {}
-
-impl<T> From<AnyAnimation<T>> for HandleId {
-    fn from(animation: AnyAnimation<T>) -> HandleId {
-        animation.id
-    }
-}
-
-impl<T> PartialEq for AnyAnimation<T> {
-    fn eq(&self, other: &AnyAnimation<T>) -> bool {
-        // The id alone. Dart's `==` on an `Animation` is object identity,
-        // which the id carries; the vtable address is excluded because Rust
-        // does not promise one address per instantiation across codegen
-        // units.
-        self.id == other.id
-    }
-}
-
-impl<T> Eq for AnyAnimation<T> {}
 
 impl<T> Debug for AnyAnimation<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -596,21 +566,19 @@ mod tests {
 
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let a_ref = app.create(Host);
-        let a = a_ref.handle();
-        let b_ref = app.create(Host);
-        let b = b_ref.handle();
+        let a = app.create(Host);
+        let b = app.create(Host);
 
         assert_eq!(
-            AnimationStatusListener::handle_method(a, hook),
-            AnimationStatusListener::handle_method(a, hook)
+            AnimationStatusListener::handle_method(a.handle(), hook),
+            AnimationStatusListener::handle_method(a.handle(), hook)
         );
         assert_ne!(
-            AnimationStatusListener::handle_method(a, hook),
-            AnimationStatusListener::handle_method(b, hook)
+            AnimationStatusListener::handle_method(a.handle(), hook),
+            AnimationStatusListener::handle_method(b.handle(), hook)
         );
         assert_ne!(
-            AnimationStatusListener::handle_method(a, hook),
+            AnimationStatusListener::handle_method(a.handle(), hook),
             AnimationStatusListener::new(|_status, _app| {})
         );
     }
@@ -708,13 +676,12 @@ mod tests {
     fn an_erased_handle_does_not_consume_the_typed_one() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let counter_ref = app.create(Counter(1));
-        let counter = counter_ref.handle();
-        let erased: AnimationRef<f64> = counter_ref.erase();
+        let counter = app.create(Counter(1));
+        let erased: AnimationRef<f64> = counter.erase();
 
         // The concrete member stays reachable after erasing — the failure that
         // killed the owned `Box<dyn>` shape.
-        app.get_mut(counter).0 = 2;
+        app.get_mut(&counter).0 = 2;
         assert_eq!(erased.value(&app), 2.0);
     }
 

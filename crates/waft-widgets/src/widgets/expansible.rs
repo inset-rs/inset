@@ -620,7 +620,7 @@ impl State for ExpansibleState {
             app.get_mut(self.animation_controller(app)).duration = Some(duration);
         }
         let controller = self.widget(app).controller.handle();
-        if controller != old_widget.controller.handle() {
+        if controller != old_widget.controller {
             old_widget
                 .controller
                 .remove_listener(app, &Listener::handle_method(self, Self::toggle_expansion));

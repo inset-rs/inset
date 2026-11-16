@@ -216,7 +216,7 @@ impl TabController {
             );
             // Dart's closure captures `this`, so the controller stays alive until the
             // animation ends, even if it was disposed and every other reference went.
-            let this = self.upgrade(app).expect("a live TabController");
+            let this = self.keep(app);
             future.when_complete_or_cancel(
                 app,
                 Listener::new(move |app| {

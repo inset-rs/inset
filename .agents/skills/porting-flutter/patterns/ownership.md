@@ -24,10 +24,11 @@ A constructor is `new`. One that makes an arena object takes `&mut App` and retu
 
 ## Reading, converting, upgrading
 
-- **`.handle()`** is the bare handle inside a `Ref` or an `Option<Ref>` (`OptionRetained::handle`). A method is called on a `Ref` directly; `app.get` takes a `Handle`, a `&Handle` or a `&Ref`.
+- **`.handle()`** is the bare handle inside a `Ref` or an `Option<Ref>` (`OptionRetained::handle`). A method is called on a `Ref` directly; `app.get` takes a `Handle`, a `&Handle` or a `&Ref`; a `Ref` compares equal to a bare handle of the same object, either way round.
 - **A getter returns the bare handle, or `&Ref` where a caller must clone** (to keep it, or to hand it to something that keeps it).
 - **To the erased form:** `.erase()` (clone) or `.into_erased()` (move), through the erased type's `From<Handle<T>>`; `.to_any()` for an `AnyRef`. There is no other conversion.
-- **From a bare handle back to a `Ref`:** `handle.upgrade(app)`, on a typed or an erased handle, `None` once nothing keeps the object.
+- **From a bare handle back to a `Ref`:** `handle.upgrade(app)`, on a typed or an erased handle, `None` once nothing keeps the object; `handle.keep(app)` where something is known to keep it (an object keeping itself in its own field or in a closure it stores), which panics naming the object if nothing does.
+- **An erased type** (`AnyFoo { id: HandleId, vtable }`) gets what every erased type shares from one line after its alias, `waft_foundation::erased_handle!(AnyFoo: FooLeaf => FooLeaf::as_foo);`: `From<AnyFoo> for HandleId`, equality and hashing by id, equality with its `Ref`, `From<Handle<T>>` for each leaf (so `erase` works), `upgrade` and `keep`. Its own members, `Debug` and `downcast` stay hand-written.
 
 ## A listener that removes itself
 

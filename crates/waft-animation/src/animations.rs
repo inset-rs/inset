@@ -59,10 +59,7 @@ pub fn k_always_complete_animation(app: &mut App) -> AnimationRef<f64> {
 
 /// The App's singleton `A`, as an animation a field can keep.
 fn singleton_animation<A: Animation<f64> + Default>(app: &mut App) -> AnimationRef<f64> {
-    app.singleton::<A>()
-        .upgrade(app)
-        .expect("the App keeps its singletons")
-        .into_erased()
+    app.singleton::<A>().keep(app).into_erased()
 }
 
 /// Dart's `_AlwaysDismissedAnimation`. Private like the original; reach it

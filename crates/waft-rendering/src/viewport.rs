@@ -490,7 +490,7 @@ pub trait RenderViewportBase:
     /// Sets [`offset`](Self::offset).
     fn set_offset(self: RenderHandle<Self>, app: &mut App, value: ViewportOffsetRef) {
         let old = self.offset(app);
-        if value.handle() == old {
+        if value == old {
             return;
         }
         if self.attached(app) {

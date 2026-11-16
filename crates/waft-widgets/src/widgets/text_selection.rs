@@ -2606,9 +2606,7 @@ impl SelectionOverlay {
 
     fn build_start_handle(self: Handle<Self>, app: &App, _context: BuildContext) -> WidgetRef {
         // The handle's callbacks keep this overlay, as Dart's closures do.
-        let overlay = self
-            .upgrade(app)
-            .expect("the selection overlay is kept by its text field");
+        let overlay = self.keep(app);
         let this = app.get(self);
         let handle = match this.selection_controls.clone() {
             Some(selection_controls)
@@ -2653,9 +2651,7 @@ impl SelectionOverlay {
 
     fn build_end_handle(self: Handle<Self>, app: &App, _context: BuildContext) -> WidgetRef {
         // The handle's callbacks keep this overlay, as Dart's closures do.
-        let overlay = self
-            .upgrade(app)
-            .expect("the selection overlay is kept by its text field");
+        let overlay = self.keep(app);
         let this = app.get(self);
         let collapsed = this.end_handle_type == TextSelectionHandleType::Collapsed;
         let handle = match this.selection_controls.clone() {
@@ -4562,9 +4558,7 @@ pub trait TextSelectionGestureDetectorBuilderBase: TextSelectionGestureDetectorB
         child: WidgetRef,
     ) -> TextSelectionGestureDetector {
         // The detector's callbacks keep the builder, as Dart's tear-offs do.
-        let this = self
-            .upgrade(_app)
-            .expect("the builder is kept by the state that builds with it");
+        let this = self.keep(_app);
         let force_press = self.builder_data(_app).delegate.force_press_enabled(_app);
         let mut detector = TextSelectionGestureDetector::new(child)
             .on_tap_track_start(Listener::new({

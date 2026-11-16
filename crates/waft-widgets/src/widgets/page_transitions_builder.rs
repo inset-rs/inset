@@ -426,8 +426,8 @@ impl State for OpenUpwardsPageTransitionState {
         old_widget: &OpenUpwardsPageTransition,
     ) {
         let widget = self.widget(app);
-        if old_widget.animation.handle() != widget.animation.handle()
-            || old_widget.secondary_animation.handle() != widget.secondary_animation.handle()
+        if old_widget.animation != widget.animation
+            || old_widget.secondary_animation != widget.secondary_animation
         {
             self.dispose_animations(app);
             self.set_animations(app);
@@ -518,6 +518,7 @@ mod tests {
     use crate::widgets::pages::{PageRoute, PageRouteBuilder};
     use crate::widgets::text::Text;
     use crate::widgets::transitions::ScaleTransition;
+    use waft_test::{assert_no_new_objects, object_snapshot};
 
     /// An [`App`] over one 800x600 view, flutter_test's default surface.
     fn app_with_view() -> Rc<AppCell> {
@@ -867,8 +868,8 @@ mod tests {
         assert!(!is_onstage(&mut app, &page_2));
     }
 
-    /// The arena objects a frame 100 ms into a push leaves behind with `builder`.
-    fn objects_a_mid_push_frame_leaves(builder: PageTransitionsBuilderRef) -> isize {
+    /// Checks that a frame 100 ms into a push with `builder` leaves no new arena objects.
+    fn assert_a_mid_push_frame_leaves_nothing(builder: PageTransitionsBuilderRef) {
         let cell = app_with_view();
         let key = GlobalKey::new();
         let page_1 = GlobalKey::new();
@@ -891,10 +892,10 @@ mod tests {
             pump_every_view(&mut app, Duration::from_millis(100));
         }
         cell.checkpoint();
-        let before = cell.borrow().debug_object_count() as isize;
+        let snapshot = object_snapshot(&cell.borrow());
         pump_every_view(&mut cell.borrow_mut(), Duration::from_millis(116));
         cell.checkpoint();
-        cell.borrow().debug_object_count() as isize - before
+        assert_no_new_objects(&cell.borrow(), &snapshot);
     }
 
     /// Not a Dart case: the animations each frame's `_FadeUpwardsPageTransition` drives go with
@@ -902,7 +903,7 @@ mod tests {
     #[test]
     fn a_frame_of_a_fade_upwards_push_leaves_no_new_arena_objects() {
         let builder = PageTransitionsBuilderRef::new(FadeUpwardsPageTransitionsBuilder::new());
-        assert_eq!(objects_a_mid_push_frame_leaves(builder), 0);
+        assert_a_mid_push_frame_leaves_nothing(builder);
     }
 
     /// Not a Dart case: the animations each layout of `_OpenUpwardsPageTransition` drives go
@@ -910,7 +911,7 @@ mod tests {
     #[test]
     fn a_frame_of_an_open_upwards_push_leaves_no_new_arena_objects() {
         let builder = PageTransitionsBuilderRef::new(OpenUpwardsPageTransitionsBuilder::new());
-        assert_eq!(objects_a_mid_push_frame_leaves(builder), 0);
+        assert_a_mid_push_frame_leaves_nothing(builder);
     }
 
     #[test]

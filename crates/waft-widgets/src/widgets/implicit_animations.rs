@@ -2635,10 +2635,7 @@ impl ImplicitlyAnimatedWidgetState for AnimatedScaleState {
             .scale
             .clone()
             .expect("for_each_tween made the tween");
-        let animation = self
-            .animation(app)
-            .upgrade(app)
-            .expect("the state keeps its animation");
+        let animation = self.animation(app).keep(app);
         let scale_animation = animation.drive(app, scale);
         app.get_mut(self).scale_animation = Some(scale_animation);
     }
@@ -2821,10 +2818,7 @@ impl ImplicitlyAnimatedWidgetState for AnimatedRotationState {
             .turns
             .clone()
             .expect("for_each_tween made the tween");
-        let animation = self
-            .animation(app)
-            .upgrade(app)
-            .expect("the state keeps its animation");
+        let animation = self.animation(app).keep(app);
         let turns_animation = animation.drive(app, turns);
         app.get_mut(self).turns_animation = Some(turns_animation);
     }
@@ -2986,10 +2980,7 @@ impl ImplicitlyAnimatedWidgetState for AnimatedSlideState {
             .offset
             .clone()
             .expect("for_each_tween made the tween");
-        let animation = self
-            .animation(app)
-            .upgrade(app)
-            .expect("the state keeps its animation");
+        let animation = self.animation(app).keep(app);
         let offset_animation = animation.drive(app, offset);
         app.get_mut(self).offset_animation = Some(offset_animation);
     }
@@ -3159,10 +3150,7 @@ impl ImplicitlyAnimatedWidgetState for AnimatedOpacityState {
             .opacity
             .clone()
             .expect("for_each_tween made the tween");
-        let animation = self
-            .animation(app)
-            .upgrade(app)
-            .expect("the state keeps its animation");
+        let animation = self.animation(app).keep(app);
         let opacity_animation = animation.drive(app, opacity);
         app.get_mut(self).opacity_animation = Some(opacity_animation);
     }

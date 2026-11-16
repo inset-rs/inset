@@ -93,12 +93,30 @@ impl<T: 'static> Handle<T> {
     pub fn upgrade(self, app: &App) -> Option<Ref<T>> {
         app.handles.upgrade(self)
     }
+
+    /// A [`Ref`] to an object something is known to keep: an object keeping itself in a field
+    /// of its own or in a closure it stores, while its owner holds it.
+    ///
+    /// # Panics
+    ///
+    /// If nothing keeps the object, naming its type and where it was created, or with the
+    /// stale-read message if it is freed.
+    #[track_caller]
+    pub fn keep(self, app: &App) -> Ref<T> {
+        Retained::keep(app, self)
+    }
 }
 
 impl HandleId {
     /// An [`AnyRef`] while something still keeps the object; see [`Handle::upgrade`].
     pub fn upgrade(self, app: &App) -> Option<AnyRef> {
         app.handles.upgrade_id(self)
+    }
+
+    /// An [`AnyRef`] to an object something is known to keep; see [`Handle::keep`].
+    #[track_caller]
+    pub fn keep(self, app: &App) -> AnyRef {
+        Retained::keep(app, self)
     }
 }
 
@@ -539,6 +557,11 @@ impl App {
         self.handles.release_tree_node(node.into());
     }
 
+    /// Why [`Retained::keep`] found no keeper for `id`.
+    pub(crate) fn not_kept(&self, id: HandleId) -> String {
+        self.handles.not_kept(id)
+    }
+
     /// Whether the entry exists: kept, or let go and waiting for the next checkpoint.
     pub fn contains(&self, handle: impl Into<HandleId>) -> bool {
         self.handles.contains(handle.into())
@@ -612,20 +635,6 @@ impl App {
     #[cfg(debug_assertions)]
     pub fn debug_take_skipped_tear_offs(&mut self) -> Vec<String> {
         std::mem::take(&mut self.skipped_tear_offs)
-    }
-
-    /// How many objects the arena holds, kept or waiting for the next checkpoint: what Flutter's
-    /// leak tracking counts, for a test that a frame leaves nothing behind.
-    #[cfg(debug_assertions)]
-    pub fn debug_object_count(&self) -> usize {
-        self.handles.debug_entry_count()
-    }
-
-    /// [`debug_object_count`](Self::debug_object_count) by the type each object was created as,
-    /// so a test that finds objects left behind can say which.
-    #[cfg(debug_assertions)]
-    pub fn debug_object_counts_by_type(&self) -> std::collections::BTreeMap<&'static str, usize> {
-        self.handles.debug_entry_counts_by_type()
     }
 
     /// A checkpoint begins: the frees from here on are dated by it in the stale-read message.
@@ -768,17 +777,15 @@ mod tests {
         let cell = AppCell::new();
         let counter_ref = cell.borrow_mut().create(Counter(3));
         let counter = counter_ref.handle();
-        let before = cell.borrow().debug_object_count();
 
         drop(counter_ref);
         {
             let app = cell.borrow();
             assert_eq!(app.get(counter), &Counter(3), "still readable");
-            assert_eq!(app.debug_object_count(), before, "still counted");
+            assert!(app.contains(counter), "still in the arena");
         }
         cell.checkpoint();
         assert!(!cell.borrow().contains(counter), "freed at the checkpoint");
-        assert_eq!(cell.borrow().debug_object_count(), before - 1);
     }
 
     #[test]

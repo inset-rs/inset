@@ -2280,10 +2280,7 @@ impl RenderSlider {
                     let time_dilation = SchedulerBinding::time_dilation(app);
                     // The timer keeps the render slider, as Dart's closure does: a slider
                     // replaced before it fires still reads `active`.
-                    let this = self
-                        .handle()
-                        .upgrade(app)
-                        .expect("a render object in the tree is kept");
+                    let this = self.handle().keep(app);
                     let timer = Timer::new(
                         app,
                         Self::MINIMUM_INTERACTION_TIME.mul_f64(time_dilation),

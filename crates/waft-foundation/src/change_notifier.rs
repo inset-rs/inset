@@ -863,55 +863,54 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let log = Log::default();
-        let host_ref = app.create(TestNotifier::default());
-        let host = host_ref.handle();
+        let host = app.create(TestNotifier::default());
 
         let listener = recording(&log, "listener");
-        add(&mut app, host, listener.clone());
-        add(&mut app, host, listener.clone());
-        notify(&mut app, host);
+        add(&mut app, host.handle(), listener.clone());
+        add(&mut app, host.handle(), listener.clone());
+        notify(&mut app, host.handle());
         assert_eq!(fired(&log), ["listener", "listener"]);
         log.borrow_mut().clear();
 
-        remove(&mut app, host, &listener);
-        notify(&mut app, host);
+        remove(&mut app, host.handle(), &listener);
+        notify(&mut app, host.handle());
         assert_eq!(fired(&log), ["listener"]);
         log.borrow_mut().clear();
 
-        remove(&mut app, host, &listener);
-        notify(&mut app, host);
+        remove(&mut app, host.handle(), &listener);
+        notify(&mut app, host.handle());
         assert_eq!(fired(&log), Vec::<String>::new());
         log.borrow_mut().clear();
 
-        remove(&mut app, host, &listener);
-        notify(&mut app, host);
+        remove(&mut app, host.handle(), &listener);
+        notify(&mut app, host.handle());
         assert_eq!(fired(&log), Vec::<String>::new());
         log.borrow_mut().clear();
 
-        add(&mut app, host, listener.clone());
-        notify(&mut app, host);
+        add(&mut app, host.handle(), listener.clone());
+        notify(&mut app, host.handle());
         assert_eq!(fired(&log), ["listener"]);
         log.borrow_mut().clear();
 
         let listener1 = recording(&log, "listener1");
-        add(&mut app, host, listener1.clone());
-        notify(&mut app, host);
+        add(&mut app, host.handle(), listener1.clone());
+        notify(&mut app, host.handle());
         assert_eq!(fired(&log), ["listener", "listener1"]);
         log.borrow_mut().clear();
 
         let listener2 = recording(&log, "listener2");
-        add(&mut app, host, listener2.clone());
-        notify(&mut app, host);
+        add(&mut app, host.handle(), listener2.clone());
+        notify(&mut app, host.handle());
         assert_eq!(fired(&log), ["listener", "listener1", "listener2"]);
         log.borrow_mut().clear();
 
-        remove(&mut app, host, &listener1);
-        notify(&mut app, host);
+        remove(&mut app, host.handle(), &listener1);
+        notify(&mut app, host.handle());
         assert_eq!(fired(&log), ["listener", "listener2"]);
         log.borrow_mut().clear();
 
-        add(&mut app, host, listener1.clone());
-        notify(&mut app, host);
+        add(&mut app, host.handle(), listener1.clone());
+        notify(&mut app, host.handle());
         assert_eq!(fired(&log), ["listener", "listener2", "listener1"]);
     }
 
@@ -921,8 +920,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let log = Log::default();
-        let host_ref = app.create(TestNotifier::default());
-        let host = host_ref.handle();
+        let host = app.create(TestNotifier::default());
 
         let listener1 = recording(&log, "listener1");
         let listener3 = recording(&log, "listener3");
@@ -930,6 +928,7 @@ mod tests {
         let listener2 = {
             let log = Rc::clone(&log);
             let (one, three, four) = (listener1.clone(), listener3.clone(), listener4.clone());
+            let host = host.handle();
             Listener::new(move |app: &mut App| {
                 log.borrow_mut().push("listener2".to_string());
                 let notifier = &mut app.get_mut(host).change_notifier;
@@ -939,19 +938,19 @@ mod tests {
             })
         };
 
-        add(&mut app, host, listener1);
-        add(&mut app, host, listener2);
-        add(&mut app, host, listener3);
+        add(&mut app, host.handle(), listener1);
+        add(&mut app, host.handle(), listener2);
+        add(&mut app, host.handle(), listener3);
 
-        notify(&mut app, host);
+        notify(&mut app, host.handle());
         assert_eq!(fired(&log), ["listener1", "listener2"]);
 
         log.borrow_mut().clear();
-        notify(&mut app, host);
+        notify(&mut app, host.handle());
         assert_eq!(fired(&log), ["listener2", "listener4"]);
 
         log.borrow_mut().clear();
-        notify(&mut app, host);
+        notify(&mut app, host.handle());
         assert_eq!(fired(&log), ["listener2", "listener4", "listener4"]);
     }
 
@@ -961,8 +960,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let log = Log::default();
-        let host_ref = app.create(TestNotifier::default());
-        let host = host_ref.handle();
+        let host = app.create(TestNotifier::default());
 
         let listener2 = recording(&log, "listener2");
         let listener3 = recording(&log, "listener3");
@@ -970,6 +968,7 @@ mod tests {
             let log = Rc::clone(&log);
             let two = listener2.clone();
             let three = listener3.clone();
+            let host = host.handle();
             Listener::new(move |app: &mut App| {
                 log.borrow_mut().push("listener1".to_string());
                 let notifier = &mut app.get_mut(host).change_notifier;
@@ -979,8 +978,8 @@ mod tests {
             })
         };
 
-        add(&mut app, host, listener1);
-        notify(&mut app, host);
+        add(&mut app, host.handle(), listener1);
+        notify(&mut app, host.handle());
         assert_eq!(fired(&log), ["listener1"]);
     }
 
@@ -990,14 +989,14 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let log = Log::default();
-        let host_ref = app.create(TestNotifier::default());
-        let host = host_ref.handle();
+        let host = app.create(TestNotifier::default());
 
         let listener1 = recording(&log, "listener1");
         let self_removing_slot: Rc<RefCell<Option<Listener>>> = Rc::new(RefCell::new(None));
         let self_removing = {
             let log = Rc::clone(&log);
             let slot = Rc::clone(&self_removing_slot);
+            let host = host.handle();
             Listener::new(move |app: &mut App| {
                 log.borrow_mut().push("selfRemovingListener".to_string());
                 let me = slot.borrow().clone().unwrap();
@@ -1006,11 +1005,11 @@ mod tests {
         };
         *self_removing_slot.borrow_mut() = Some(self_removing.clone());
 
-        add(&mut app, host, listener1.clone());
-        add(&mut app, host, self_removing);
-        add(&mut app, host, listener1);
+        add(&mut app, host.handle(), listener1.clone());
+        add(&mut app, host.handle(), self_removing);
+        add(&mut app, host.handle(), listener1);
 
-        notify(&mut app, host);
+        notify(&mut app, host.handle());
         assert_eq!(
             fired(&log),
             ["listener1", "selfRemovingListener", "listener1"]
@@ -1023,13 +1022,13 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let log = Log::default();
-        let host_ref = app.create(TestNotifier::default());
-        let host = host_ref.handle();
+        let host = app.create(TestNotifier::default());
 
         let self_removing_slot: Rc<RefCell<Option<Listener>>> = Rc::new(RefCell::new(None));
         let self_removing = {
             let log = Rc::clone(&log);
             let slot = Rc::clone(&self_removing_slot);
+            let host = host.handle();
             Listener::new(move |app: &mut App| {
                 log.borrow_mut().push("selfRemovingListener".to_string());
                 let me = slot.borrow().clone().unwrap();
@@ -1039,10 +1038,10 @@ mod tests {
         *self_removing_slot.borrow_mut() = Some(self_removing.clone());
         let listener1 = recording(&log, "listener1");
 
-        add(&mut app, host, self_removing);
-        add(&mut app, host, listener1);
+        add(&mut app, host.handle(), self_removing);
+        add(&mut app, host.handle(), listener1);
 
-        notify(&mut app, host);
+        notify(&mut app, host.handle());
         assert_eq!(fired(&log), ["selfRemovingListener", "listener1"]);
     }
 
@@ -1063,24 +1062,25 @@ mod tests {
 
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let a_ref = app.create(Host);
-        let a = a_ref.handle();
-        let b_ref = app.create(Host);
-        let b = b_ref.handle();
+        let a = app.create(Host);
+        let b = app.create(Host);
 
         assert_eq!(
-            Listener::handle_method(a, hook),
-            Listener::handle_method(a, hook)
+            Listener::handle_method(a.handle(), hook),
+            Listener::handle_method(a.handle(), hook)
         );
         assert_ne!(
-            Listener::handle_method(a, hook),
-            Listener::handle_method(b, hook)
+            Listener::handle_method(a.handle(), hook),
+            Listener::handle_method(b.handle(), hook)
         );
         assert_ne!(
-            Listener::handle_method(a, hook),
-            Listener::handle_method(a, other_hook)
+            Listener::handle_method(a.handle(), hook),
+            Listener::handle_method(a.handle(), other_hook)
         );
-        assert_ne!(Listener::handle_method(a, hook), Listener::new(|_app| {}));
+        assert_ne!(
+            Listener::handle_method(a.handle(), hook),
+            Listener::new(|_app| {})
+        );
     }
 
     #[test]
@@ -1095,9 +1095,8 @@ mod tests {
 
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let host_ref = app.create(Host);
-        let host = host_ref.handle();
-        Listener::handle_method(host, hook).call(&mut app);
+        let host = app.create(Host);
+        Listener::handle_method(host.handle(), hook).call(&mut app);
         assert_eq!(CALLED_WITH.with(Cell::get), Some(host.id()));
     }
 
@@ -1133,13 +1132,12 @@ mod tests {
             let cell = AppCell::new();
             let mut app = cell.borrow_mut();
             let log = Log::default();
-            let host_ref = app.create(TestNotifier::default());
-            let host = host_ref.handle();
+            let host = app.create(TestNotifier::default());
 
             let names = ["0", "1", "2", "3", "4", "5", "6", "7"];
             let listeners: Vec<Listener> = names.iter().map(|name| recording(&log, name)).collect();
             for listener in &listeners {
-                add(&mut app, host, listener.clone());
+                add(&mut app, host.handle(), listener.clone());
             }
 
             let mut survivors: Vec<String> = names.iter().map(|n| n.to_string()).collect();
@@ -1147,14 +1145,14 @@ mod tests {
 
             for step in 0..8 {
                 let index = (first + step) % 8;
-                remove(&mut app, host, &listeners[index]);
+                remove(&mut app, host.handle(), &listeners[index]);
                 survivors.retain(|s| s != names[index]);
-                saw_realloc |= app.get(host).change_notifier.listeners.len() < 8;
+                saw_realloc |= app.get(&host).change_notifier.listeners.len() < 8;
 
                 log.borrow_mut().clear();
-                notify(&mut app, host);
+                notify(&mut app, host.handle());
                 assert_eq!(fired(&log), survivors, "after removing {index}");
-                assert_eq!(app.get(host).change_notifier.count, survivors.len());
+                assert_eq!(app.get(&host).change_notifier.count, survivors.len());
             }
 
             assert!(saw_realloc, "the shrink branch never ran");
@@ -1167,15 +1165,16 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let log = Log::default();
-        let host_ref = app.create(TestNotifier::default());
-        let host = host_ref.handle();
+        let host = app.create(TestNotifier::default());
 
         let listener = recording(&log, "a");
-        add(&mut app, host, listener.clone());
-        ChangeNotifierData::dispose(&mut app, host);
+        add(&mut app, host.handle(), listener.clone());
+        ChangeNotifierData::dispose(&mut app, host.handle());
 
-        assert!(!app.get(host).change_notifier.has_listeners());
-        app.get_mut(host).change_notifier.remove_listener(&listener);
+        assert!(!app.get(&host).change_notifier.has_listeners());
+        app.get_mut(&host)
+            .change_notifier
+            .remove_listener(&listener);
         assert_eq!(fired(&log), Vec::<String>::new());
     }
 
@@ -1194,10 +1193,9 @@ mod tests {
     fn notifying_after_dispose_panics_in_debug() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let host_ref = app.create(TestNotifier::default());
-        let host = host_ref.handle();
-        ChangeNotifierData::dispose(&mut app, host);
-        notify(&mut app, host);
+        let host = app.create(TestNotifier::default());
+        ChangeNotifierData::dispose(&mut app, host.handle());
+        notify(&mut app, host.handle());
     }
 
     #[test]
@@ -1243,12 +1241,11 @@ mod tests {
     fn has_listeners_is_false_after_dispose() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let counter_ref = app.create(ValueNotifier::new(0i32));
-        let counter = counter_ref.handle();
+        let counter = app.create(ValueNotifier::new(0i32));
         counter.add_listener(&mut app, recording(&Log::default(), "a"));
-        assert!(app.get(counter).change_notifier.has_listeners());
+        assert!(app.get(&counter).change_notifier.has_listeners());
         counter.dispose(&mut app);
-        assert!(!app.get(counter).change_notifier.has_listeners());
+        assert!(!app.get(&counter).change_notifier.has_listeners());
     }
 
     /// `change_notifier_test.dart`: "Value notifier".
@@ -1257,11 +1254,11 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let log = Log::default();
-        let notifier_ref = app.create(ValueNotifier::new(2.0));
-        let notifier = notifier_ref.handle();
+        let notifier = app.create(ValueNotifier::new(2.0));
 
         notifier.add_listener(&mut app, {
             let log = Rc::clone(&log);
+            let notifier = notifier.handle();
             Listener::new(move |app: &mut App| {
                 log.borrow_mut().push(app.get(notifier).value().to_string());
             })
@@ -1280,29 +1277,28 @@ mod tests {
     fn has_listeners() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let notifier_ref = app.create(ValueNotifier::new(true));
-        let notifier = notifier_ref.handle();
-        assert!(!app.get(notifier).change_notifier.has_listeners());
+        let notifier = app.create(ValueNotifier::new(true));
+        assert!(!app.get(&notifier).change_notifier.has_listeners());
 
         let test1 = recording(&Log::default(), "test1");
         let test2 = recording(&Log::default(), "test2");
 
         notifier.add_listener(&mut app, test1.clone());
-        assert!(app.get(notifier).change_notifier.has_listeners());
+        assert!(app.get(&notifier).change_notifier.has_listeners());
         notifier.add_listener(&mut app, test1.clone());
-        assert!(app.get(notifier).change_notifier.has_listeners());
+        assert!(app.get(&notifier).change_notifier.has_listeners());
         notifier.remove_listener(&mut app, &test1);
-        assert!(app.get(notifier).change_notifier.has_listeners());
+        assert!(app.get(&notifier).change_notifier.has_listeners());
         notifier.remove_listener(&mut app, &test1);
-        assert!(!app.get(notifier).change_notifier.has_listeners());
+        assert!(!app.get(&notifier).change_notifier.has_listeners());
         notifier.add_listener(&mut app, test1.clone());
-        assert!(app.get(notifier).change_notifier.has_listeners());
+        assert!(app.get(&notifier).change_notifier.has_listeners());
         notifier.add_listener(&mut app, test2.clone());
-        assert!(app.get(notifier).change_notifier.has_listeners());
+        assert!(app.get(&notifier).change_notifier.has_listeners());
         notifier.remove_listener(&mut app, &test1);
-        assert!(app.get(notifier).change_notifier.has_listeners());
+        assert!(app.get(&notifier).change_notifier.has_listeners());
         notifier.remove_listener(&mut app, &test2);
-        assert!(!app.get(notifier).change_notifier.has_listeners());
+        assert!(!app.get(&notifier).change_notifier.has_listeners());
     }
 
     /// `change_notifier_test.dart`: "Calling debugAssertNotDisposed works as intended".
@@ -1327,11 +1323,11 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let log = Log::default();
-        let counter_ref = app.create(ValueNotifier::new(0i32));
-        let counter = counter_ref.handle();
+        let counter = app.create(ValueNotifier::new(0i32));
 
         let listener1 = {
             let log = Rc::clone(&log);
+            let counter = counter.handle();
             Listener::new(move |app: &mut App| {
                 log.borrow_mut().push("listener1".to_string());
                 if *app.get(counter).value() < 0 {
@@ -1351,7 +1347,7 @@ mod tests {
         log.borrow_mut().clear();
         counter.set_value(&mut app, -2);
         assert_eq!(fired(&log), ["listener1", "listener1"]);
-        assert_eq!(*app.get(counter).value(), 0);
+        assert_eq!(*app.get(&counter).value(), 0);
     }
 
     /// `change_notifier_test.dart`: "Remove Listeners while notifying on a list which will not resize".
@@ -1360,8 +1356,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let log = Log::default();
-        let host_ref = app.create(TestNotifier::default());
-        let host = host_ref.handle();
+        let host = app.create(TestNotifier::default());
 
         let names = [
             "listener0",
@@ -1387,6 +1382,7 @@ mod tests {
             ];
             let auto_remove_slot: Rc<RefCell<Option<Listener>>> = Rc::new(RefCell::new(None));
             let slot = Rc::clone(&auto_remove_slot);
+            let host = host.handle();
             let listener = Listener::new(move |app: &mut App| {
                 let notifier = &mut app.get_mut(host).change_notifier;
                 notifier.remove_listener(&to_remove[0]);
@@ -1399,9 +1395,9 @@ mod tests {
             listener
         };
 
-        add(&mut app, host, auto_remove);
+        add(&mut app, host.handle(), auto_remove);
         for listener in &listeners {
-            add(&mut app, host, listener.clone());
+            add(&mut app, host.handle(), listener.clone());
         }
 
         let remaining = [
@@ -1416,18 +1412,18 @@ mod tests {
             "listener11",
         ];
 
-        notify(&mut app, host);
+        notify(&mut app, host.handle());
         assert_eq!(fired(&log), remaining);
 
         log.borrow_mut().clear();
-        notify(&mut app, host);
+        notify(&mut app, host.handle());
         assert_eq!(fired(&log), remaining);
 
         for i in [0, 2, 5, 6, 7, 8, 9, 10, 11] {
-            remove(&mut app, host, &listeners[i]);
+            remove(&mut app, host.handle(), &listeners[i]);
         }
         log.borrow_mut().clear();
-        notify(&mut app, host);
+        notify(&mut app, host.handle());
         assert_eq!(fired(&log), Vec::<String>::new());
     }
 
@@ -1437,29 +1433,28 @@ mod tests {
     fn dispose_during_notify_panics_and_does_not_finish_the_callback() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let host_ref = app.create(TestNotifier::default());
-        let host = host_ref.handle();
+        let host = app.create(TestNotifier::default());
         let finished = Rc::new(Cell::new(false));
         let finished_flag = Rc::clone(&finished);
-        add(
-            &mut app,
-            host,
+        let listener = {
+            let host = host.handle();
             Listener::new(move |app: &mut App| {
                 ChangeNotifierData::dispose(app, host);
                 finished_flag.set(true);
-            }),
-        );
+            })
+        };
+        add(&mut app, host.handle(), listener);
 
         let hook = silence_panic_hook();
         let panicked = catch_unwind(AssertUnwindSafe(|| {
-            notify(&mut app, host);
+            notify(&mut app, host.handle());
         }))
         .is_err();
         std::panic::set_hook(hook);
 
         assert!(panicked);
         assert!(!finished.get());
-        ChangeNotifierData::dispose(&mut app, host);
+        ChangeNotifierData::dispose(&mut app, host.handle());
     }
 
     #[test]
@@ -1467,8 +1462,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let log = Log::default();
-        let on_undo_ref = app.create(ChangeNotifierData::new());
-        let on_undo = on_undo_ref.handle();
+        let on_undo = app.create(ChangeNotifierData::new());
 
         on_undo.add_listener(&mut app, recording(&log, "undo"));
         on_undo.notify_listeners(&mut app);
@@ -1481,8 +1475,7 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let log = Log::default();
-        let host_ref = app.create(TestNotifier::default());
-        let host = host_ref.handle();
+        let host = app.create(TestNotifier::default());
 
         let l0 = recording(&log, "l0");
         let l2 = recording(&log, "l2");
@@ -1490,6 +1483,7 @@ mod tests {
         let l1 = {
             let log = Rc::clone(&log);
             let (zero, two) = (l0.clone(), l2.clone());
+            let host = host.handle();
             Listener::new(move |app: &mut App| {
                 log.borrow_mut().push("l1".to_string());
                 let notifier = &mut app.get_mut(host).change_notifier;
@@ -1498,14 +1492,14 @@ mod tests {
             })
         };
 
-        add(&mut app, host, l0);
-        add(&mut app, host, l1);
-        add(&mut app, host, l2);
-        add(&mut app, host, l3.clone());
+        add(&mut app, host.handle(), l0);
+        add(&mut app, host.handle(), l1);
+        add(&mut app, host.handle(), l2);
+        add(&mut app, host.handle(), l3.clone());
 
         let hook = silence_panic_hook();
         let panicked = catch_unwind(AssertUnwindSafe(|| {
-            notify(&mut app, host);
+            notify(&mut app, host.handle());
         }))
         .is_err();
         std::panic::set_hook(hook);
@@ -1513,32 +1507,32 @@ mod tests {
         assert!(panicked);
         assert_eq!(fired(&log), ["l0", "l1"]);
         assert_eq!(
-            app.get(host)
+            app.get(&host)
                 .change_notifier
                 .notification_call_stack_depth
                 .get(),
             0
         );
-        assert_eq!(app.get(host).change_notifier.count, 4);
+        assert_eq!(app.get(&host).change_notifier.count, 4);
 
-        app.get_mut(host).change_notifier.remove_listener(&l3);
-        assert_eq!(app.get(host).change_notifier.count, 3);
+        app.get_mut(&host).change_notifier.remove_listener(&l3);
+        assert_eq!(app.get(&host).change_notifier.count, 3);
         assert_eq!(
-            app.get(host).change_notifier.reentrantly_removed_listeners,
+            app.get(&host).change_notifier.reentrantly_removed_listeners,
             2
         );
 
         log.borrow_mut().clear();
-        notify(&mut app, host);
+        notify(&mut app, host.handle());
         assert_eq!(fired(&log), ["l1"]);
-        assert_eq!(app.get(host).change_notifier.count, 1);
+        assert_eq!(app.get(&host).change_notifier.count, 1);
         assert_eq!(
-            app.get(host).change_notifier.reentrantly_removed_listeners,
+            app.get(&host).change_notifier.reentrantly_removed_listeners,
             0
         );
 
         log.borrow_mut().clear();
-        notify(&mut app, host);
+        notify(&mut app, host.handle());
         assert_eq!(fired(&log), ["l1"]);
     }
 
@@ -1547,21 +1541,21 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let log = Log::default();
-        let host_ref = app.create(TestNotifier::default());
-        let host = host_ref.handle();
-        let inner_host_ref = app.create(TestNotifier::default());
-        let inner_host = inner_host_ref.handle();
+        let host = app.create(TestNotifier::default());
+        let inner_host = app.create(TestNotifier::default());
 
         let doomed = recording(&log, "doomed");
         add(
             &mut app,
-            inner_host,
+            inner_host.handle(),
             Listener::new(|_app: &mut App| panic!("inner listener")),
         );
 
         let outer = {
             let log = Rc::clone(&log);
             let doomed = doomed.clone();
+            let host = host.handle();
+            let inner_host = inner_host.handle();
             Listener::new(move |app: &mut App| {
                 log.borrow_mut().push("outer".to_string());
                 app.get_mut(host).change_notifier.remove_listener(&doomed);
@@ -1569,41 +1563,41 @@ mod tests {
             })
         };
 
-        add(&mut app, host, outer);
-        add(&mut app, host, doomed);
+        add(&mut app, host.handle(), outer);
+        add(&mut app, host.handle(), doomed);
 
         let hook = silence_panic_hook();
         let panicked = catch_unwind(AssertUnwindSafe(|| {
-            notify(&mut app, host);
+            notify(&mut app, host.handle());
         }))
         .is_err();
         std::panic::set_hook(hook);
 
         assert!(panicked);
         assert_eq!(
-            app.get(host)
+            app.get(&host)
                 .change_notifier
                 .notification_call_stack_depth
                 .get(),
             0
         );
         assert_eq!(
-            app.get(inner_host)
+            app.get(&inner_host)
                 .change_notifier
                 .notification_call_stack_depth
                 .get(),
             0
         );
 
-        let survivor = app.get(host).change_notifier.listeners[0].clone().unwrap();
-        remove(&mut app, host, &survivor);
+        let survivor = app.get(&host).change_notifier.listeners[0].clone().unwrap();
+        remove(&mut app, host.handle(), &survivor);
         log.borrow_mut().clear();
-        notify(&mut app, host);
+        notify(&mut app, host.handle());
         assert_eq!(
-            app.get(host).change_notifier.reentrantly_removed_listeners,
+            app.get(&host).change_notifier.reentrantly_removed_listeners,
             0
         );
-        assert!(!app.get(host).change_notifier.has_listeners());
+        assert!(!app.get(&host).change_notifier.has_listeners());
     }
 
     #[test]
@@ -1611,37 +1605,37 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let log = Log::default();
-        let host_ref = app.create(TestNotifier::default());
-        let host = host_ref.handle();
+        let host = app.create(TestNotifier::default());
 
         let doomed = recording(&log, "doomed");
         let saboteur = {
             let doomed = doomed.clone();
+            let host = host.handle();
             Listener::new(move |app: &mut App| {
                 app.get_mut(host).change_notifier.remove_listener(&doomed);
                 panic!("bad listener");
             })
         };
-        add(&mut app, host, saboteur);
-        add(&mut app, host, doomed);
+        add(&mut app, host.handle(), saboteur);
+        add(&mut app, host.handle(), doomed);
 
         let hook = silence_panic_hook();
         let _ = catch_unwind(AssertUnwindSafe(|| {
-            notify(&mut app, host);
+            notify(&mut app, host.handle());
         }));
         std::panic::set_hook(hook);
 
         assert_eq!(
-            app.get(host).change_notifier.reentrantly_removed_listeners,
+            app.get(&host).change_notifier.reentrantly_removed_listeners,
             1
         );
 
-        ChangeNotifierData::dispose(&mut app, host);
+        ChangeNotifierData::dispose(&mut app, host.handle());
         assert_eq!(
-            app.get(host).change_notifier.reentrantly_removed_listeners,
+            app.get(&host).change_notifier.reentrantly_removed_listeners,
             0
         );
-        assert_eq!(app.get(host).change_notifier.count, 0);
+        assert_eq!(app.get(&host).change_notifier.count, 0);
     }
 
     #[test]
@@ -1650,32 +1644,32 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let log = Log::default();
-        let host_ref = app.create(TestNotifier::default());
-        let host = *host_ref;
+        let host = app.create(TestNotifier::default());
 
         let doomed = recording(&log, "doomed");
         let saboteur = {
             let doomed = doomed.clone();
+            let host = host.handle();
             Listener::new(move |app: &mut App| {
                 app.get_mut(host).change_notifier.remove_listener(&doomed);
                 panic!("bad listener");
             })
         };
-        add(&mut app, host, saboteur);
-        add(&mut app, host, doomed);
+        add(&mut app, host.handle(), saboteur);
+        add(&mut app, host.handle(), doomed);
 
         let hook = silence_panic_hook();
         let _ = catch_unwind(AssertUnwindSafe(|| {
-            notify(&mut app, host);
+            notify(&mut app, host.handle());
         }));
         std::panic::set_hook(hook);
 
-        ChangeNotifierData::dispose(&mut app, host);
-        add(&mut app, host, recording(&log, "after"));
+        ChangeNotifierData::dispose(&mut app, host.handle());
+        add(&mut app, host.handle(), recording(&log, "after"));
 
         log.borrow_mut().clear();
-        notify(&mut app, host);
+        notify(&mut app, host.handle());
         assert_eq!(fired(&log), ["after"]);
-        assert_eq!(app.get(host).change_notifier.count, 1);
+        assert_eq!(app.get(&host).change_notifier.count, 1);
     }
 }

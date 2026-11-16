@@ -69,24 +69,27 @@ pub(crate) fn run(presentation: Presentation) {
 
 /// Plays the video as `presentation` says: the window's content.
 fn playing(app: &mut App, presentation: &Presentation) -> WidgetRef {
-    let kept = Player::new(app, &presentation.url).expect("macOS has players");
-    let player = kept.handle();
-    Player::set_looping(player, app, true);
+    let player = Player::new(app, &presentation.url).expect("macOS has players");
+    Player::set_looping(player.handle(), app, true);
     let reader = app
         .platform()
         .video_frame_readers()
         .expect("macOS hands out frames")
         .make_reader();
-    Player::set_video_output(player, app, Some(VideoOutput::Frames(Arc::clone(&reader))));
+    Player::set_video_output(
+        player.handle(),
+        app,
+        Some(VideoOutput::Frames(Arc::clone(&reader))),
+    );
     let video = VideoFrameView::new(reader).into_widget();
-    follow_tracks(app, player, presentation.subtitles.clone());
-    Player::play(player, app);
+    follow_tracks(app, player.handle(), presentation.subtitles.clone());
+    Player::play(player.handle(), app);
     let presentation = presentation.clone();
-    let listenable: Rc<dyn Listenable> = Rc::new(kept.clone());
+    let listenable: Rc<dyn Listenable> = Rc::new(player.clone());
     ListenableBuilder::new(listenable, move |app, _, _| {
-        let subtitled = with_subtitles(video.clone(), Player::cues(kept.handle(), app).to_vec());
-        let state = Player::state(kept.handle(), app);
-        page(kept.clone(), subtitled, state, &presentation)
+        let subtitled = with_subtitles(video.clone(), Player::cues(player.handle(), app).to_vec());
+        let state = Player::state(player.handle(), app);
+        page(player.clone(), subtitled, state, &presentation)
     })
     .into_widget()
 }
@@ -96,7 +99,6 @@ fn playing(app: &mut App, presentation: &Presentation) -> WidgetRef {
 fn follow_tracks(app: &mut App, player: Handle<Player>, language: Option<String>) {
     let printed = RefCell::new(Vec::new());
     let chosen = Cell::new(false);
-    // The listener is kept by the player, so it names the player without keeping it.
     player.add_listener(
         app,
         Listener::new(move |app| {

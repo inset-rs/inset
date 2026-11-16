@@ -1,7 +1,7 @@
 //! Flutter counterpart: `rendering/viewport_offset.dart`.
 
 use std::fmt::{self, Debug};
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -382,20 +382,6 @@ impl AnyViewportOffset {
     }
 }
 
-impl PartialEq for AnyViewportOffset {
-    fn eq(&self, other: &AnyViewportOffset) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Eq for AnyViewportOffset {}
-
-impl Hash for AnyViewportOffset {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
-    }
-}
-
 impl Debug for AnyViewportOffset {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "AnyViewportOffset({:?})", self.id)
@@ -412,29 +398,10 @@ impl ListenableHandle for AnyViewportOffset {
     }
 }
 
-impl From<AnyViewportOffset> for HandleId {
-    fn from(offset: AnyViewportOffset) -> HandleId {
-        offset.id
-    }
-}
-
 /// A field Dart types as `ViewportOffset`, kept: a viewport keeps the scroll position it shows.
 pub type ViewportOffsetRef = Retained<AnyViewportOffset>;
 
-impl AnyViewportOffset {
-    /// A [`ViewportOffsetRef`] while something still keeps the object; see
-    /// [`Handle::upgrade`](waft_foundation::Handle::upgrade).
-    pub fn upgrade(self, app: &App) -> Option<ViewportOffsetRef> {
-        Retained::upgrade(app, self)
-    }
-}
-
-/// A kept viewport offset erases to a [`ViewportOffsetRef`] with [`Retained::erase`].
-impl<T: ViewportOffset> From<Handle<T>> for AnyViewportOffset {
-    fn from(offset: Handle<T>) -> AnyViewportOffset {
-        offset.as_viewport_offset()
-    }
-}
+waft_foundation::erased_handle!(AnyViewportOffset: ViewportOffset => ViewportOffset::as_viewport_offset);
 
 /// A [`ViewportOffset`] whose [`pixels`](ViewportOffset::pixels) value does not change unless
 /// the viewport issues a correction.

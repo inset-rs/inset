@@ -423,11 +423,7 @@ impl RootRestorationScopeState {
         if self.is_waiting_for_root_bucket(app) && !app.get(self).is_loading_root_bucket {
             app.get_mut(self).is_loading_root_bucket = true;
             let manager = RestorationManager::instance(app);
-            let bucket = manager.root_bucket(app).map(|bucket| {
-                bucket
-                    .upgrade(app)
-                    .expect("the manager keeps its root bucket")
-            });
+            let bucket = manager.root_bucket(app).map(|bucket| bucket.keep(app));
             app.get_mut(self).is_loading_root_bucket = false;
             if self.mounted(app) {
                 manager.add_listener(
@@ -465,11 +461,8 @@ impl State for RootRestorationScopeState {
 
     fn did_change_dependencies(self: Handle<Self>, app: &mut App) {
         let context = self.context(app);
-        let ancestor_bucket = RestorationScope::maybe_of(app, context).map(|bucket| {
-            bucket
-                .upgrade(app)
-                .expect("a scope's bucket is kept by its widget")
-        });
+        let ancestor_bucket =
+            RestorationScope::maybe_of(app, context).map(|bucket| bucket.keep(app));
         app.get_mut(self).ancestor_bucket = ancestor_bucket;
         self.load_root_bucket_if_necessary(app);
         if app.get(self).ok_to_render_blank_container.is_none() {
@@ -815,35 +808,10 @@ pub struct AnyRestorableProperty {
     vtable: &'static RestorablePropertyVTable,
 }
 
-impl From<AnyRestorableProperty> for HandleId {
-    fn from(handle: AnyRestorableProperty) -> HandleId {
-        handle.id
-    }
-}
-
 /// A field Dart types as the erased object, kept: AnyRestorableProperty with its count.
 pub type RestorablePropertyRef = Retained<AnyRestorableProperty>;
 
-/// A kept object erases to a [`RestorablePropertyRef`] with [`Retained::erase`]: Dart's upcast.
-impl<T: RestorableProperty> From<Handle<T>> for AnyRestorableProperty {
-    fn from(handle: Handle<T>) -> AnyRestorableProperty {
-        handle.as_property()
-    }
-}
-
-impl PartialEq for AnyRestorableProperty {
-    fn eq(&self, other: &AnyRestorableProperty) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Eq for AnyRestorableProperty {}
-
-impl std::hash::Hash for AnyRestorableProperty {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
-    }
-}
+waft_foundation::erased_handle!(AnyRestorableProperty: RestorableProperty => RestorableProperty::as_property);
 
 impl Debug for AnyRestorableProperty {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -855,12 +823,6 @@ impl AnyRestorableProperty {
     /// The arena id behind this handle.
     pub fn id(self) -> HandleId {
         self.id
-    }
-
-    /// A [`RestorablePropertyRef`] while something still keeps the property; see
-    /// [`Handle::upgrade`].
-    pub fn upgrade(self, app: &App) -> Option<RestorablePropertyRef> {
-        Retained::upgrade(app, self)
     }
 
     /// Dart's `property as T`: the typed handle when this property is a `T`, else `None`.
@@ -1243,9 +1205,7 @@ pub trait RestorationMixin: State + Sized + 'static {
                 self.update_property(app, property);
             });
             property.add_listener(app, listener.clone());
-            let kept = property
-                .upgrade(app)
-                .expect("a registered property is kept by its state");
+            let kept = property.keep(app);
             self.restoration_mixin_data_mut(app)
                 .properties
                 .insert(kept, listener);
@@ -1363,11 +1323,7 @@ pub trait RestorationMixin: State + Sized + 'static {
         let needs_restore = self.restore_pending(app);
         let context = self.context(app);
         let current_parent = RestorationScope::maybe_of(app, context);
-        let kept_parent = current_parent.map(|parent| {
-            parent
-                .upgrade(app)
-                .expect("a scope's bucket is kept by its widget")
-        });
+        let kept_parent = current_parent.map(|parent| parent.keep(app));
         self.restoration_mixin_data_mut(app).current_parent = kept_parent;
 
         let did_replace_bucket =

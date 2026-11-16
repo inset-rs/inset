@@ -637,10 +637,7 @@ impl AnyLayer {
         let callback_id = NEXT_CALLBACK_ID.fetch_add(1, Ordering::Relaxed) + 1;
         self.data_mut(app).callbacks.push((callback_id, callback));
         // Dart's closure keeps the layer it names alive, disposed or not.
-        let layer = self
-            .id
-            .upgrade(app)
-            .expect("a layer that takes a callback is kept");
+        let layer = self.id.keep(app);
         Box::new(move |app: &mut App| {
             let index = self
                 .data(app)
@@ -3245,7 +3242,7 @@ impl LeaderLayer {
     /// See [`link`](Self::link).
     pub fn set_link(self: Handle<Self>, app: &mut App, value: Ref<LayerLink>) {
         let current = self.link(app);
-        if current == value.handle() {
+        if current == value {
             return;
         }
         if self.as_layer().attached(app) {
@@ -3416,7 +3413,7 @@ impl FollowerLayer {
 
     /// See [`link`](Self::link).
     pub fn set_link(self: Handle<Self>, app: &mut App, value: Ref<LayerLink>) {
-        if self.link(app) == value.handle() {
+        if self.link(app) == value {
             return;
         }
         app.get_mut(self).link = value;
@@ -4543,7 +4540,7 @@ mod tests {
         let link2 = LayerLink::new(&mut app);
         leader.set_link(&mut app, link2.clone());
         leader.as_layer().detach(&mut app);
-        assert_eq!(leader.link(&app), link2.handle());
+        assert_eq!(leader.link(&app), link2);
         assert!(link.leader(&app).is_none());
         assert!(link2.leader(&app).is_none());
     }

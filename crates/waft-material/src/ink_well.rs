@@ -7,7 +7,7 @@
 use std::any::TypeId;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -117,25 +117,7 @@ pub trait InteractiveInkFeatureObject: Sized + 'static {
 /// What a field Dart types as `InteractiveInkFeature` holds: an ink response's splashes.
 pub type InteractiveInkFeatureRef = Retained<AnyInteractiveInkFeature>;
 
-impl AnyInteractiveInkFeature {
-    /// A [`InteractiveInkFeatureRef`] while something still keeps the object; see
-    /// [`Handle::upgrade`](waft_foundation::Handle::upgrade).
-    pub fn upgrade(self, app: &App) -> Option<InteractiveInkFeatureRef> {
-        Retained::upgrade(app, self)
-    }
-}
-
-impl<F: InteractiveInkFeatureLeaf> From<Handle<F>> for AnyInteractiveInkFeature {
-    fn from(feature: Handle<F>) -> AnyInteractiveInkFeature {
-        feature.as_interactive_ink_feature()
-    }
-}
-
-impl From<AnyInteractiveInkFeature> for HandleId {
-    fn from(feature: AnyInteractiveInkFeature) -> HandleId {
-        feature.id
-    }
-}
+waft_foundation::erased_handle!(AnyInteractiveInkFeature: InteractiveInkFeatureLeaf => InteractiveInkFeatureObject::as_interactive_ink_feature);
 
 impl<F: InteractiveInkFeatureLeaf> InteractiveInkFeatureObject for F {
     fn as_interactive_ink_feature(self: Handle<Self>) -> AnyInteractiveInkFeature {
@@ -189,20 +171,6 @@ impl InteractiveInkFeatureVTable {
 pub struct AnyInteractiveInkFeature {
     id: HandleId,
     vtable: &'static InteractiveInkFeatureVTable,
-}
-
-impl PartialEq for AnyInteractiveInkFeature {
-    fn eq(&self, other: &AnyInteractiveInkFeature) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Eq for AnyInteractiveInkFeature {}
-
-impl Hash for AnyInteractiveInkFeature {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
-    }
 }
 
 impl fmt::Debug for AnyInteractiveInkFeature {

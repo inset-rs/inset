@@ -690,12 +690,11 @@ impl State for CupertinoCheckboxState {
             ))
         });
 
-        let painter_ref = app
+        let painter = app
             .get(self)
             .painter
             .clone()
             .expect("created in init_state");
-        let painter = painter_ref.handle();
         painter.set_position(app, self.position(app).erase());
         painter.set_reaction(app, self.reaction(app).erase());
         painter.set_focus_color(app, effective_focus_overlay_color);
@@ -727,7 +726,7 @@ impl State for CupertinoCheckboxState {
                 widget.autofocus,
                 Some(effective_mouse_cursor),
                 effective_size,
-                ToggleablePainterRef::new(painter_ref),
+                ToggleablePainterRef::new(painter),
             ))
             .into_widget()
     }

@@ -2449,6 +2449,7 @@ mod tests {
     use crate::scaffold::ScaffoldState;
     use crate::test_support::{AhemText, WidgetTester, material_app, with_main_thread_stack};
     use crate::theme_data::ThemeData;
+    use waft_test::{assert_no_new_objects, object_snapshot};
 
     fn tester() -> WidgetTester {
         let tester = WidgetTester::on(TargetPlatform::Android);
@@ -3686,9 +3687,10 @@ mod tests {
             };
             rebuild_barrier(&mut tester);
 
-            let before = tester.cell.borrow().debug_object_count();
+            let snapshot = object_snapshot(&tester.cell.borrow());
             rebuild_barrier(&mut tester);
-            assert_eq!(tester.cell.borrow().debug_object_count(), before);
+            tester.cell.checkpoint();
+            assert_no_new_objects(&tester.cell.borrow(), &snapshot);
         });
     }
 

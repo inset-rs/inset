@@ -673,9 +673,7 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
                     if current_train.value(app) == next_train.value(app)
                         || !next_train.is_animating(app)
                     {
-                        let next_train = next_train
-                            .upgrade(app)
-                            .expect("an installed route keeps its animation");
+                        let next_train = next_train.keep(app);
                         TransitionRoute::set_secondary_animation(
                             self,
                             app,
@@ -770,12 +768,8 @@ pub trait TransitionRoute: OverlayRoute + PredictiveBackRoute {
                                 }
                             })
                         };
-                        let current_train = current_train
-                            .upgrade(app)
-                            .expect("the secondary animation keeps its parent");
-                        let kept_next_train = next_train
-                            .upgrade(app)
-                            .expect("an installed route keeps its animation");
+                        let current_train = current_train.keep(app);
+                        let kept_next_train = next_train.keep(app);
                         let new_animation = TrainHoppingAnimation::new(
                             app,
                             current_train,
@@ -1083,29 +1077,10 @@ impl From<AnyTransitionRoute> for AnyRoute {
     }
 }
 
-impl From<AnyTransitionRoute> for HandleId {
-    fn from(handle: AnyTransitionRoute) -> HandleId {
-        handle.id
-    }
-}
-
 /// A field Dart types as the erased object, kept: AnyTransitionRoute with its count.
 pub type TransitionRouteRef = Retained<AnyTransitionRoute>;
 
-/// A kept object erases to a [`TransitionRouteRef`] with [`Retained::erase`]: Dart's upcast.
-impl<T: TransitionRoute> From<Handle<T>> for AnyTransitionRoute {
-    fn from(handle: Handle<T>) -> AnyTransitionRoute {
-        TransitionRoute::as_transition_route(handle)
-    }
-}
-
-impl PartialEq for AnyTransitionRoute {
-    fn eq(&self, other: &AnyTransitionRoute) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Eq for AnyTransitionRoute {}
+waft_foundation::erased_handle!(AnyTransitionRoute: TransitionRoute => TransitionRoute::as_transition_route);
 
 impl Debug for AnyTransitionRoute {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1114,11 +1089,6 @@ impl Debug for AnyTransitionRoute {
 }
 
 impl AnyTransitionRoute {
-    /// A [`TransitionRouteRef`] while something still keeps the route; see [`Handle::upgrade`].
-    pub fn upgrade(self, app: &App) -> Option<TransitionRouteRef> {
-        Retained::upgrade(app, self)
-    }
-
     /// This transition route as the erased [`AnyRoute`].
     pub fn as_route(self) -> AnyRoute {
         (self.vtable.route)(self.id)
@@ -1611,7 +1581,6 @@ impl InheritedModel for ModalScopeStatus {
 #[derive(Debug)]
 struct ModalScope {
     key: Option<KeyRef>,
-    /// Named bare: the route holds this widget in its `modal_scope_cache`.
     route: AnyModalRoute,
 }
 
@@ -1790,9 +1759,7 @@ impl State for ModalScopeState {
     fn build(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
         // The widgets built here keep the route, as Dart's closures over `widget.route` do.
         let route = self.route(app);
-        let route_kept = route
-            .upgrade(app)
-            .expect("a route building its scope is kept by its navigator");
+        let route_kept = route.keep(app);
         let node = app
             .get(self)
             .focus_scope_node
@@ -1818,21 +1785,18 @@ impl State for ModalScopeState {
             }
         };
 
-        let gesture_notifier: Rc<dyn waft_foundation::Listenable> =
-            match route.as_route().navigator(app) {
-                Some(navigator) => Rc::new(
-                    navigator
-                        .user_gesture_in_progress_notifier(app)
-                        .upgrade(app)
-                        .expect("a navigator keeps its gesture notifier"),
-                ),
-                None => Rc::new(
-                    app.get(self)
-                        .no_gesture_in_progress
-                        .clone()
-                        .expect("init_state"),
-                ),
-            };
+        let gesture_notifier: Rc<dyn waft_foundation::Listenable> = match route
+            .as_route()
+            .navigator(app)
+        {
+            Some(navigator) => Rc::new(navigator.user_gesture_in_progress_notifier(app).keep(app)),
+            None => Rc::new(
+                app.get(self)
+                    .no_gesture_in_progress
+                    .clone()
+                    .expect("init_state"),
+            ),
+        };
         let listenable = app.get(self).listenable.clone().expect("init_state");
 
         let transitions_route = route_kept.clone();
@@ -1889,10 +1853,7 @@ impl State for ModalScopeState {
             .into_widget()
         });
 
-        let storage_bucket = route
-            .storage_bucket(app)
-            .upgrade(app)
-            .expect("a route keeps its storage bucket");
+        let storage_bucket = route.storage_bucket(app).keep(app);
         let status = ModalScopeStatus {
             route: route_kept,
             // `route_set_state` is called if any of these update.
@@ -1906,11 +1867,7 @@ impl State for ModalScopeState {
                 .into_widget(),
         };
 
-        let restoration_scope_id = route
-            .as_route()
-            .restoration_scope_id(app)
-            .upgrade(app)
-            .expect("a route keeps its restoration scope id");
+        let restoration_scope_id = route.as_route().restoration_scope_id(app).keep(app);
         AnimatedBuilder::new(
             Rc::new(restoration_scope_id.clone()),
             move |app, _context, child| {
@@ -2646,7 +2603,6 @@ pub trait ModalRoute: LocalHistoryRoute {
 
     /// Dart's `ModalRoute.createOverlayEntries`.
     fn create_overlay_entries(self: Handle<Self>, app: &mut App) -> Vec<Ref<OverlayEntry>> {
-        // The entries' builders name this route bare: the route holds its entries.
         let barrier = OverlayEntry::new(
             app,
             Rc::new(move |app, context| ModalRoute::build_modal_barrier_entry(self, app, context)),
@@ -2838,35 +2794,10 @@ impl From<AnyModalRoute> for AnyTransitionRoute {
     }
 }
 
-impl From<AnyModalRoute> for HandleId {
-    fn from(handle: AnyModalRoute) -> HandleId {
-        handle.id
-    }
-}
-
 /// A field Dart types as the erased object, kept: AnyModalRoute with its count.
 pub type ModalRouteRef = Retained<AnyModalRoute>;
 
-/// A kept object erases to a [`ModalRouteRef`] with [`Retained::erase`]: Dart's upcast.
-impl<T: ModalRoute> From<Handle<T>> for AnyModalRoute {
-    fn from(handle: Handle<T>) -> AnyModalRoute {
-        ModalRoute::as_modal_route(handle)
-    }
-}
-
-impl PartialEq for AnyModalRoute {
-    fn eq(&self, other: &AnyModalRoute) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Eq for AnyModalRoute {}
-
-impl std::hash::Hash for AnyModalRoute {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
-    }
-}
+waft_foundation::erased_handle!(AnyModalRoute: ModalRoute => ModalRoute::as_modal_route);
 
 impl Debug for AnyModalRoute {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -2875,11 +2806,6 @@ impl Debug for AnyModalRoute {
 }
 
 impl AnyModalRoute {
-    /// A [`ModalRouteRef`] while something still keeps the route; see [`Handle::upgrade`].
-    pub fn upgrade(self, app: &App) -> Option<ModalRouteRef> {
-        Retained::upgrade(app, self)
-    }
-
     /// The route's [`animation`](Self::animation) and
     /// [`secondary_animation`](Self::secondary_animation), kept, for the builders that take them.
     ///
@@ -3453,9 +3379,7 @@ impl RouteObserver {
         route_aware: Rc<dyn RouteAware>,
         route: AnyRoute,
     ) {
-        let kept = route
-            .upgrade(app)
-            .expect("a route subscribed to is kept by its navigator");
+        let kept = route.keep(app);
         let listeners = &mut app.get_mut(self).listeners;
         let subscribers = match listeners
             .iter_mut()
@@ -4330,6 +4254,7 @@ mod tests {
     use crate::widgets::navigator::{NavigatorState, RouteSettings};
     use crate::widgets::pages::PageRouteBuilder;
     use crate::widgets::pop_scope::PopScope;
+    use waft_test::{assert_no_new_objects, object_snapshot};
 
     const VIEW_WIDTH: f64 = 300.0;
     const VIEW_HEIGHT: f64 = 200.0;
@@ -4624,10 +4549,10 @@ mod tests {
         drop(app);
         cell.checkpoint();
 
-        let before = cell.borrow().debug_object_count();
+        let snapshot = object_snapshot(&cell.borrow());
         rebuild_barrier(&mut cell.borrow_mut(), &mut at);
         cell.checkpoint();
-        assert_eq!(cell.borrow().debug_object_count(), before);
+        assert_no_new_objects(&cell.borrow(), &snapshot);
     }
 
     /// Not a Dart case: Dart's collector frees a popped route, and what its barrier drove, once
@@ -4673,7 +4598,6 @@ mod tests {
     /// once it is done with, as Dart's collector would.
     #[test]
     fn a_finished_train_hop_leaves_the_secondary_animation_on_the_new_route_and_frees_it() {
-        const HOPPER: &str = "waft_animation::animations::TrainHoppingAnimation";
         let cell = app_with_view();
         let key = GlobalKey::new();
         mount(
@@ -4726,9 +4650,8 @@ mod tests {
         assert_eq!(secondary_parent(&app), three_animation);
         drop(app);
         cell.checkpoint();
-        assert_eq!(
-            cell.borrow().debug_object_counts_by_type().get(HOPPER),
-            None,
+        assert!(
+            !cell.borrow().contains(hopper),
             "the finished hop's animation is freed"
         );
 

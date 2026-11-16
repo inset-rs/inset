@@ -851,12 +851,11 @@ impl State for CheckboxState {
             .expect("the defaults give a shape");
 
         let states = self.states(app);
-        let painter_ref = app
+        let painter = app
             .get(self)
             .painter
             .clone()
             .expect("created in init_state");
-        let painter = painter_ref.handle();
         painter.set_position(app, self.position(app).erase());
         painter.set_reaction(app, self.reaction(app).erase());
         painter.set_reaction_focus_fade(app, self.reaction_focus_fade(app).erase());
@@ -894,7 +893,7 @@ impl State for CheckboxState {
                 widget.autofocus,
                 Some(effective_mouse_cursor),
                 size,
-                ToggleablePainterRef::new(painter_ref),
+                ToggleablePainterRef::new(painter),
             ))
             .into_widget()
     }

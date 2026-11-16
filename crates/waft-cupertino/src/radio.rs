@@ -690,12 +690,11 @@ impl State for RadioPaintState {
 
         let effective_border_color = Self::default_border_color(app, context, &current_states);
 
-        let painter_ref = app
+        let painter = app
             .get(self)
             .painter
             .clone()
             .expect("created in init_state");
-        let painter = painter_ref.handle();
         painter.set_position(app, toggleable_state.position(app).erase());
         painter.set_reaction(app, toggleable_state.reaction(app).erase());
         painter.set_focus_color(app, effective_focus_overlay_color);
@@ -713,7 +712,7 @@ impl State for RadioPaintState {
 
         CustomPaint::new()
             .size(SIZE)
-            .painter(ToggleablePainterRef::new(painter_ref))
+            .painter(ToggleablePainterRef::new(painter))
             .into_widget()
     }
 }

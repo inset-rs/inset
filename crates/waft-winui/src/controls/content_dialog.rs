@@ -470,9 +470,7 @@ impl ContentDialog {
         resources: &ThemeResources,
     ) -> Ref<ContentDialogRoute> {
         let smoke = resources.content_dialog_smoke_fill;
-        let dialog = self
-            .upgrade(app)
-            .expect("the caller holds the dialog it shows");
+        let dialog = self.keep(app);
         ContentDialogRoute::new(app, dialog, smoke)
     }
 
@@ -926,9 +924,7 @@ impl RawDialogRouteLeaf for ContentDialogRoute {
     /// `SmokeLayerBackground`: blocks input to the page beneath and fades with the dialog.
     fn build_modal_barrier(self: Handle<Self>, app: &mut App, _context: BuildContext) -> WidgetRef {
         let animation = TransitionRoute::animation(self, app).expect("an installed route");
-        let kept = animation
-            .upgrade(app)
-            .expect("the route keeps its animation");
+        let kept = animation.keep(app);
         let smoke = self
             .raw_dialog_route_data(app)
             .barrier_color

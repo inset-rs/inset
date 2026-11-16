@@ -165,6 +165,25 @@ impl<H: Copy> Retained<H> {
             .map(|retained| retained.into_map(|_| handle))
     }
 
+    /// [`upgrade`](Self::upgrade) for an object something is known to keep: the body of an
+    /// erased handle's own `keep`, as [`Handle::keep`] is a typed handle's.
+    ///
+    /// # Panics
+    ///
+    /// If nothing keeps the object, naming its type and where it was created, or with the
+    /// stale-read message if it is freed.
+    #[track_caller]
+    pub fn keep(app: &App, handle: H) -> Retained<H>
+    where
+        H: Into<HandleId>,
+    {
+        // A `panic!` in a closure would report the closure's line, not the caller's.
+        match Retained::upgrade(app, handle) {
+            Some(kept) => kept,
+            None => panic!("{}", app.not_kept(handle.into())),
+        }
+    }
+
     /// Gives this reference's part of the count to the tree code, for a tree node (an element, a
     /// state, a render object, a layer), and answers the bare handle the tree keeps. The node then
     /// lives until [`App::release_tree_node`], or past it while another [`Retained`] keeps it.
@@ -210,6 +229,27 @@ impl<H> Deref for Retained<H> {
 impl<H: Copy + Into<HandleId>> PartialEq for Retained<H> {
     fn eq(&self, other: &Retained<H>) -> bool {
         self.handle.into() == other.handle.into()
+    }
+}
+
+/// A reference equals a bare handle to the same object.
+impl<H: Copy + Into<HandleId>> PartialEq<H> for Retained<H> {
+    fn eq(&self, other: &H) -> bool {
+        self.handle.into() == (*other).into()
+    }
+}
+
+/// A bare handle equals a reference to the same object.
+impl<T> PartialEq<Ref<T>> for Handle<T> {
+    fn eq(&self, other: &Ref<T>) -> bool {
+        *self == other.handle
+    }
+}
+
+/// A bare id equals an [`AnyRef`] to the same object.
+impl PartialEq<AnyRef> for HandleId {
+    fn eq(&self, other: &AnyRef) -> bool {
+        *self == other.handle
     }
 }
 
@@ -564,24 +604,6 @@ impl HandleMap {
         self.stale(id)
     }
 
-    /// The number of entries, kept or waiting for the next checkpoint.
-    #[cfg(debug_assertions)]
-    pub(crate) fn debug_entry_count(&self) -> usize {
-        self.entries.len()
-    }
-
-    /// The number of entries of each type, kept or waiting for the next checkpoint.
-    #[cfg(debug_assertions)]
-    pub(crate) fn debug_entry_counts_by_type(
-        &self,
-    ) -> std::collections::BTreeMap<&'static str, usize> {
-        let mut counts = std::collections::BTreeMap::new();
-        for entry in self.entries.values() {
-            *counts.entry(entry.type_name).or_insert(0) += 1;
-        }
-        counts
-    }
-
     /// Narrow an id. `None` if freed or the wrong type; [`get`](HandleMap::get) panics instead.
     pub(crate) fn handle<T: 'static>(&self, id: HandleId) -> Option<Handle<T>> {
         if !self.entries.get(id)?.state.is::<T>() {
@@ -656,6 +678,21 @@ impl HandleMap {
             panic!("{}", self.stale(id));
         }
         self.entries.get_mut(id).expect("checked above")
+    }
+
+    /// Why [`Retained::keep`] found no keeper: the object's type and creation site while it is
+    /// in the arena, or the stale-read message once it is freed.
+    pub(crate) fn not_kept(&self, id: HandleId) -> String {
+        let Some(entry) = self.entries.get(id) else {
+            return self.stale(id);
+        };
+        #[cfg(debug_assertions)]
+        return format!(
+            "a `{}` created at {} is not kept by anything",
+            entry.type_name, entry.created_at
+        );
+        #[cfg(not(debug_assertions))]
+        format!("a `{}` is not kept by anything", entry.type_name)
     }
 
     /// The stale-read message: the object's type, where it was made and when it was freed, while
@@ -761,7 +798,7 @@ mod tests {
         let cell = crate::AppCell::new();
         let mut app = cell.borrow_mut();
         let node = app.create(5u16).into_tree_node(&mut app);
-        let kept = node.upgrade(&app).expect("the tree keeps it");
+        let kept = node.keep(&app);
         app.release_tree_node(node);
         drop(app);
         cell.checkpoint();
@@ -836,5 +873,26 @@ mod tests {
         assert!(reports[0].contains("ValueNotifier<i32>"), "{reports:?}");
         assert!(reports[0].contains("still kept"), "{reports:?}");
         drop(kept);
+    }
+
+    #[test]
+    fn keep_answers_a_ref_while_kept_and_a_ref_equals_its_bare_handle() {
+        let cell = crate::AppCell::new();
+        let kept = cell.borrow_mut().create(5u8);
+        let handle = kept.handle();
+        let again = handle.keep(&cell.borrow());
+        assert!(
+            again == handle && handle == again,
+            "a Ref equals its bare handle"
+        );
+        assert_eq!(again, kept);
+    }
+
+    #[test]
+    #[should_panic(expected = "is not kept by anything")]
+    fn keep_panics_once_nothing_keeps_the_object() {
+        let cell = crate::AppCell::new();
+        let handle = cell.borrow_mut().create(5u8).handle();
+        let _ = handle.keep(&cell.borrow());
     }
 }

@@ -942,12 +942,11 @@ impl State for CupertinoSwitchState {
         let icon_theme = IconTheme::of(app, context);
         let states = self.states(app);
 
-        let painter_ref = app
+        let painter = app
             .get(self)
             .painter
             .clone()
             .expect("created in init_state");
-        let painter = painter_ref.handle();
         painter.set_position(app, self.position(app).erase());
         painter.set_reaction(app, self.reaction(app).erase());
         painter.set_reaction_focus_fade(app, self.reaction_focus_fade(app).erase());
@@ -977,10 +976,7 @@ impl State for CupertinoSwitchState {
         painter.set_inactive_icon(app, effective_inactive_icon);
         painter.set_icon_theme(app, Some(icon_theme));
         painter.set_surface_color(app, theme.scaffold_background_color().color());
-        let position_controller = self
-            .position_controller(app)
-            .upgrade(app)
-            .expect("created in init_state");
+        let position_controller = self.position_controller(app).keep(app);
         painter.set_position_controller(app, position_controller);
 
         let opacity = if ToggleableStateMixin::on_changed(self, app).is_none() {
@@ -995,7 +991,7 @@ impl State for CupertinoSwitchState {
             widget.autofocus,
             Some(effective_mouse_cursor),
             K_SWITCH_SIZE,
-            ToggleablePainterRef::new(painter_ref),
+            ToggleablePainterRef::new(painter),
         );
         // The detector's `excludeFromSemantics` waits with accessibility.
         let detector = GestureDetector::new()

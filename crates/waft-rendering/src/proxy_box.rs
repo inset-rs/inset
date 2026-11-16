@@ -799,7 +799,7 @@ impl RenderLeaderLayer {
     /// Sets [`link`](Self::link).
     pub fn set_link(self: RenderHandle<Self>, app: &mut App, value: Ref<LayerLink>) {
         let link = self.link(app);
-        if link == value.handle() {
+        if link == value {
             return;
         }
         let old = app.get_mut(link);

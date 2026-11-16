@@ -2417,9 +2417,7 @@ mod tests {
             .expect("the focus node");
         let actions = WidgetsApp::default_actions(&mut app);
         let action = actions[&TypeId::of::<RequestFocusIntent>()].handle();
-        let kept_node = node
-            .upgrade(&app)
-            .expect("the node is kept by its Focus widget");
+        let kept_node = node.keep(&app);
         action.invoke(&mut app, &RequestFocusIntent::new(kept_node), None);
         app.drain_microtasks();
         assert_eq!(primary_focus(&mut app), Some(node));

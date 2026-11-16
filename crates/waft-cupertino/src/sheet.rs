@@ -1380,9 +1380,7 @@ fn start_pop_gesture<R: ModalRoute>(
         .and_then(|controller| controller.upgrade(app))
         .expect("an installed route has a controller");
     // Dart's closures keep the route for as long as the gesture lasts.
-    let kept_route = this
-        .upgrade(app)
-        .expect("the navigator keeps an installed route");
+    let kept_route = this.keep(app);
     let kept_for_is_active = kept_route.clone();
     CupertinoDragGestureController::new(
         app,
@@ -1476,7 +1474,7 @@ struct CupertinoDragGestureDetectorState {
     state: StateData<CupertinoDragGestureDetector>,
     drag_gesture_controller: Option<Ref<CupertinoDragGestureController>>,
     recognizer: Option<Ref<VerticalDragGestureRecognizer>>,
-    /// The enclosing transition's controller: an ancestor's, so a bare handle.
+    /// The enclosing transition's controller, an ancestor's.
     stretch_drag_controller: Option<Handle<AnimationController>>,
 }
 
@@ -1620,9 +1618,7 @@ impl State for CupertinoDragGestureDetectorState {
         // If this is disposed during a drag, call navigator.didStopUserGesture.
         if app.get(self).drag_gesture_controller.is_some() {
             // The callback keeps the disposed state, as Dart's closure keeps `this`.
-            let this = self
-                .upgrade(app)
-                .expect("the tree keeps the state while it disposes");
+            let this = self.keep(app);
             SchedulerBinding::add_post_frame_callback(
                 app,
                 FrameCallback::new(move |app, _timestamp| {
@@ -2148,9 +2144,7 @@ impl State for CupertinoDraggableScrollableSheetState {
         // If this is disposed during a drag, call `navigator.did_stop_user_gesture`.
         if app.get(self).drag_gesture_controller.is_some() {
             // The callback keeps the disposed state, as Dart's closure keeps `this`.
-            let this = self
-                .upgrade(app)
-                .expect("the tree keeps the state while it disposes");
+            let this = self.keep(app);
             SchedulerBinding::add_post_frame_callback(
                 app,
                 FrameCallback::new(move |app, _timestamp| {
@@ -2198,6 +2192,7 @@ mod tests {
     use crate::localizations::DefaultCupertinoLocalizations;
     use crate::route::CupertinoPageRoute;
     use crate::test_support::{build, pump, test_cell};
+    use waft_test::{assert_no_new_objects, object_snapshot};
 
     /// The test view is 800x600 physical at 2x.
     const VIEW_WIDTH: f64 = 400.0;
@@ -2387,10 +2382,10 @@ mod tests {
             }
         }
         cell.checkpoint();
-        let before = cell.borrow().debug_object_count();
+        let snapshot = object_snapshot(&cell.borrow());
         pump(&mut cell.borrow_mut(), at + Duration::from_millis(20));
         cell.checkpoint();
-        assert_eq!(cell.borrow().debug_object_count(), before);
+        assert_no_new_objects(&cell.borrow(), &snapshot);
     }
 
     #[test]

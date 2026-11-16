@@ -356,7 +356,7 @@ impl State for PlayerPictureState {
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &PlayerPicture) {
         let player = self.widget(app).player.handle();
-        if player == old_widget.player.handle() {
+        if player == old_widget.player {
             return;
         }
         let listener = Listener::handle_method(self, Self::player_changed);

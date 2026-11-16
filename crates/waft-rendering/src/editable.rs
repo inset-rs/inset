@@ -448,7 +448,7 @@ impl RenderEditable {
         value: Ref<ValueNotifier<bool>>,
     ) {
         let old = self.get(app).show_cursor.handle();
-        if old == value.handle() {
+        if old == value {
             return;
         }
         if self.attached(app) {
@@ -612,7 +612,7 @@ impl RenderEditable {
     /// Sets [`offset`](Self::offset).
     pub fn set_offset(self: RenderHandle<Self>, app: &mut App, value: ViewportOffsetRef) {
         let old = self.offset(app);
-        if old == value.handle() {
+        if old == value {
             return;
         }
         if self.attached(app) {

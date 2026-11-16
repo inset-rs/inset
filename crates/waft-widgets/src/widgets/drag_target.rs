@@ -742,9 +742,7 @@ impl<W: DraggableWidget> DraggableState<W> {
         let context = self.context(app);
         let start = (widget.drag_anchor_strategy)(app, &widget, context, position);
         self.set_state(app, |state| state.active_count += 1);
-        let retained = self
-            .upgrade(app)
-            .expect("a dragged draggable's state is kept by its element");
+        let retained = self.keep(app);
         let overlay = Overlay::of(app, context, widget.root_overlay);
         let view_id = View::of(app, context).id();
         let avatar = DragAvatar::new(
@@ -1097,9 +1095,7 @@ impl<T: 'static> DragTargetHandler for Ref<DragTargetState<T>> {
                 )
             }),
         };
-        let kept = avatar
-            .upgrade(app)
-            .expect("an entering avatar is kept by its overlay entry");
+        let kept = avatar.keep(app);
         self.set_state(app, |state| {
             if accepted {
                 state.candidate_avatars.push(kept)
@@ -1207,10 +1203,7 @@ impl<T: 'static> State for DragTargetState<T> {
         let child = builder(app, context, candidates, rejected);
         MetaData::new()
             .meta_data(Rc::new(DragTargetMetadata {
-                handler: Rc::new(
-                    self.upgrade(app)
-                        .expect("a building state is kept by its element"),
-                ),
+                handler: Rc::new(self.keep(app)),
             }))
             .behavior(self.widget(app).hit_test_behavior)
             .child(child)

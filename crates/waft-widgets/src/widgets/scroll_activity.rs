@@ -451,29 +451,10 @@ pub struct AnyScrollActivity {
     vtable: &'static ScrollActivityVTable,
 }
 
-impl From<AnyScrollActivity> for HandleId {
-    fn from(handle: AnyScrollActivity) -> HandleId {
-        handle.id
-    }
-}
-
 /// A field Dart types as the erased object, kept: AnyScrollActivity with its count.
 pub type ScrollActivityRef = Retained<AnyScrollActivity>;
 
-impl AnyScrollActivity {
-    /// A [`ScrollActivityRef`] while something still keeps the object; see
-    /// [`Handle::upgrade`](waft_foundation::Handle::upgrade).
-    pub fn upgrade(self, app: &App) -> Option<ScrollActivityRef> {
-        Retained::upgrade(app, self)
-    }
-}
-
-/// A kept object erases to a [`ScrollActivityRef`] with [`Retained::erase`]: Dart's upcast.
-impl<T: ScrollActivity> From<Handle<T>> for AnyScrollActivity {
-    fn from(handle: Handle<T>) -> AnyScrollActivity {
-        handle.as_activity()
-    }
-}
+waft_foundation::erased_handle!(AnyScrollActivity: ScrollActivity => ScrollActivity::as_activity);
 
 impl AnyScrollActivity {
     /// See [`ScrollActivity::delegate`].
@@ -579,14 +560,6 @@ impl AnyScrollActivity {
         (self.vtable.as_hold_controller)(self.id)
     }
 }
-
-impl PartialEq for AnyScrollActivity {
-    fn eq(&self, other: &AnyScrollActivity) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Eq for AnyScrollActivity {}
 
 /// A scroll activity that does nothing.
 ///

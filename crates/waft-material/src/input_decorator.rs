@@ -3422,7 +3422,7 @@ impl InputDecoratorState {
         animation: AnimationRef<f64>,
     ) -> WidgetRef {
         let current = app.get(self).curved_animation.handle();
-        if current.is_none_or(|curved| curved.parent(app) != animation.handle()) {
+        if current.is_none_or(|curved| curved.parent(app) != animation) {
             if let Some(curved) = current {
                 curved.dispose(app);
             }

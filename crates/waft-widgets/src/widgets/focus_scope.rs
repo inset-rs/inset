@@ -519,8 +519,7 @@ pub trait FocusStateLeaf: State + Sized + 'static {
     /// [`focus_node`](Self::focus_node) as the reference a widget built from this state keeps.
     fn kept_focus_node(self: Handle<Self>, app: &mut App) -> FocusNodeRef {
         let node = self.focus_node(app);
-        node.upgrade(app)
-            .expect("the focus node is kept by its widget or this state")
+        node.keep(app)
     }
 
     /// Dart's `_FocusState._initNode`.
@@ -1209,7 +1208,7 @@ impl ProxyElement for FocusInheritedScopeElement {
         let old_node = FocusInheritedScopeElement::widget_of(&old_widget)
             .node
             .handle();
-        if old_node != self.widget(app).node.handle() {
+        if old_node != self.widget(app).node {
             FocusInheritedScopeElement::notify_clients(self, app, old_widget);
         }
     }

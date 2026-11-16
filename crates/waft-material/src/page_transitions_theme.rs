@@ -1906,6 +1906,7 @@ mod tests {
     use crate::text_button::TextButton;
     use crate::theme_data::ThemeData;
     use waft_animation::AnyAnimation;
+    use waft_test::{assert_no_new_objects, object_snapshot};
 
     fn tester_on(platform: TargetPlatform) -> WidgetTester {
         let tester = WidgetTester::on(platform);
@@ -2351,74 +2352,64 @@ mod tests {
             for reverse in [false, true] {
                 tester.pump_widget(zoom(first.clone(), reverse));
                 tester.pump_widget(zoom(second.clone(), reverse));
-                let before = tester.cell.borrow().debug_object_count();
+                let snapshot = object_snapshot(&tester.cell.borrow());
                 tester.pump_widget(zoom(first.clone(), reverse));
                 tester.pump_widget(zoom(second.clone(), reverse));
-                assert_eq!(
-                    tester.cell.borrow().debug_object_count(),
-                    before,
-                    "{reverse}"
-                );
+                tester.cell.checkpoint();
+                assert_no_new_objects(&tester.cell.borrow(), &snapshot);
             }
         });
     }
 
-    /// The arena objects the frame `at` into a push, and the one `at` into the pop that
-    /// follows, leave behind with `builder`: Dart's collector frees what each frame's build
-    /// replaces, and here the transitions free what they make once they hand it on. `at` lies
-    /// between the bounds of the intervals the transitions fade over, so the frame adds and
-    /// drops no layer.
-    fn objects_a_mid_transition_frame_leaves(
+    /// Checks that the frame `at` into a push, and the one `at` into the pop that follows, leave
+    /// no new arena objects with `builder`: Dart's collector frees what each frame's build
+    /// replaces. `at` lies between the bounds of the intervals the transitions fade over, so the
+    /// frame adds and drops no layer.
+    fn assert_mid_transition_frames_leave_nothing(
         platform: TargetPlatform,
         builder: impl PageTransitionsBuilder,
         at: Duration,
-    ) -> [isize; 2] {
+    ) {
         let mut tester = tester_on(platform);
         pump_app(&mut tester, theme_with(platform, builder), |app| {
             app.routes(push_routes())
         });
-        let objects_a_frame_leaves = |tester: &mut WidgetTester| {
+        let assert_a_frame_leaves_nothing = |tester: &mut WidgetTester| {
             tester.pump(Duration::ZERO);
             tester.pump(at);
-            let before = tester.cell.borrow().debug_object_count() as isize;
+            let snapshot = object_snapshot(&tester.cell.borrow());
             tester.pump(Duration::from_millis(16));
-            tester.cell.borrow().debug_object_count() as isize - before
+            tester.cell.checkpoint();
+            assert_no_new_objects(&tester.cell.borrow(), &snapshot);
         };
         tap_text(&mut tester, "push");
-        let push = objects_a_frame_leaves(&mut tester);
+        assert_a_frame_leaves_nothing(&mut tester);
         tester.pump_and_settle();
         let page_b = *tester.find_onstage_text("page b").first().expect("page b");
         Navigator::pop(&mut tester.cell.borrow_mut(), page_b, None);
-        let pop = objects_a_frame_leaves(&mut tester);
-        [push, pop]
+        assert_a_frame_leaves_nothing(&mut tester);
     }
 
-    /// Not a Dart case: see [`objects_a_mid_transition_frame_leaves`].
+    /// Not a Dart case: see [`assert_mid_transition_frames_leave_nothing`].
     #[test]
     fn a_frame_of_a_zoom_push_or_pop_leaves_no_new_arena_objects() {
         with_main_thread_stack(|| {
-            assert_eq!(
-                objects_a_mid_transition_frame_leaves(
-                    TargetPlatform::Android,
-                    ZoomPageTransitionsBuilder::new(),
-                    Duration::from_millis(100),
-                ),
-                [0, 0]
+            assert_mid_transition_frames_leave_nothing(
+                TargetPlatform::Android,
+                ZoomPageTransitionsBuilder::new(),
+                Duration::from_millis(100),
             );
         });
     }
 
-    /// Not a Dart case: see [`objects_a_mid_transition_frame_leaves`].
+    /// Not a Dart case: see [`assert_mid_transition_frames_leave_nothing`].
     #[test]
     fn a_frame_of_a_fade_forwards_push_or_pop_leaves_no_new_arena_objects() {
         with_main_thread_stack(|| {
-            assert_eq!(
-                objects_a_mid_transition_frame_leaves(
-                    TargetPlatform::Android,
-                    FadeForwardsPageTransitionsBuilder::new(),
-                    Duration::from_millis(200),
-                ),
-                [0, 0]
+            assert_mid_transition_frames_leave_nothing(
+                TargetPlatform::Android,
+                FadeForwardsPageTransitionsBuilder::new(),
+                Duration::from_millis(200),
             );
         });
     }

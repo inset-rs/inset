@@ -1239,12 +1239,11 @@ impl State for MaterialSwitchState {
         let states = self.states(app);
         let is_cupertino = app.get(self).is_cupertino;
 
-        let painter_ref = app
+        let painter = app
             .get(self)
             .painter
             .clone()
             .expect("created in init_state");
-        let painter = painter_ref.handle();
         painter.set_position(app, self.position(app).erase());
         painter.set_reaction(app, self.reaction(app).erase());
         painter.set_reaction_focus_fade(app, self.reaction_focus_fade(app).erase());
@@ -1285,12 +1284,7 @@ impl State for MaterialSwitchState {
         painter.set_icon_theme(app, Some(icon_theme));
         painter.set_thumb_shadow(app, switch_config.thumb_shadow());
         painter.set_transitional_thumb_size(app, switch_config.transitional_thumb_size());
-        painter.set_position_controller(
-            app,
-            position_controller
-                .upgrade(app)
-                .expect("the toggleable state keeps its position controller"),
-        );
+        painter.set_position_controller(app, position_controller.keep(app));
         painter.set_is_cupertino(app, is_cupertino);
 
         let opacity = if ToggleableStateMixin::on_changed(self, app).is_none() {
@@ -1305,7 +1299,7 @@ impl State for MaterialSwitchState {
             widget.autofocus,
             Some(effective_mouse_cursor),
             widget.size,
-            ToggleablePainterRef::new(painter_ref),
+            ToggleablePainterRef::new(painter),
         );
         // The detector's `excludeFromSemantics` waits with the semantics tree.
         let detector = GestureDetector::new()

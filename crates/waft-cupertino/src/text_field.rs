@@ -1057,8 +1057,7 @@ impl CupertinoTextFieldState {
             .handle()
             .expect("a local controller exists when the widget does not supply one");
         RestorableListenable::value(restorable, app)
-            .upgrade(app)
-            .expect("the restorable controller keeps its value")
+            .keep(app)
             .into_erased()
     }
 

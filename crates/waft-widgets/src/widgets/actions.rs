@@ -203,10 +203,7 @@ macro_rules! context_action_overrides {
             app: &mut ::waft_foundation::App,
             context: $crate::BuildContext,
         ) -> $crate::ActionRef {
-            let default_action: $crate::ActionRef = self
-                .upgrade(app)
-                .expect("the default action is kept by its caller")
-                .into_erased();
+            let default_action: $crate::ActionRef = self.keep(app).into_erased();
             $crate::OverridableContextAction::<Self::Intent>::new(app, default_action, context)
                 .into_erased()
         }
@@ -445,10 +442,7 @@ pub trait Action: Sized + 'static {
         app: &mut App,
         context: BuildContext,
     ) -> ActionRef {
-        let default_action: ActionRef = self
-            .upgrade(app)
-            .expect("the default action is kept by its caller")
-            .into_erased();
+        let default_action: ActionRef = self.keep(app).into_erased();
         OverridableAction::<Self::Intent>::new(app, default_action, context).into_erased()
     }
 }
@@ -608,35 +602,10 @@ pub struct AnyAction {
     vtable: &'static ActionVTable,
 }
 
-impl From<AnyAction> for HandleId {
-    fn from(handle: AnyAction) -> HandleId {
-        handle.id
-    }
-}
-
 /// A field Dart types as the erased object, kept: AnyAction with its count.
 pub type ActionRef = Retained<AnyAction>;
 
-/// A kept object erases to a [`ActionRef`] with [`Retained::erase`]: Dart's upcast.
-impl<T: Action> From<Handle<T>> for AnyAction {
-    fn from(handle: Handle<T>) -> AnyAction {
-        handle.as_action()
-    }
-}
-
-impl PartialEq for AnyAction {
-    fn eq(&self, other: &AnyAction) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Eq for AnyAction {}
-
-impl std::hash::Hash for AnyAction {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
-    }
-}
+waft_foundation::erased_handle!(AnyAction: Action => Action::as_action);
 
 impl fmt::Debug for AnyAction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -700,11 +669,6 @@ impl AnyAction {
     /// Dart's `action as T`: the typed handle when this action is a `T`, else `None`.
     pub fn downcast<T: 'static>(self, app: &App) -> Option<Handle<T>> {
         app.handle::<T>(self.id)
-    }
-
-    /// An [`ActionRef`] while something still keeps the action; see [`Handle::upgrade`].
-    pub fn upgrade(self, app: &App) -> Option<ActionRef> {
-        Retained::upgrade(app, self)
     }
 
     /// See [`Action::intent_type`].
@@ -876,7 +840,7 @@ impl State for ActionListenerState {
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &ActionListener) {
         let widget = self.widget(app);
         let (action, listener) = (widget.action.handle(), Rc::clone(&widget.listener));
-        if old_widget.action.handle() == action && Rc::ptr_eq(&old_widget.listener, &listener) {
+        if old_widget.action == action && Rc::ptr_eq(&old_widget.listener, &listener) {
             return;
         }
         let (old_action, old_listener) =
@@ -1172,9 +1136,7 @@ impl Actions {
     pub fn handler(app: &mut App, context: BuildContext, intent: IntentRef) -> Option<Listener> {
         let action = Actions::maybe_find(app, context, intent.intent_type())?;
         if action.is_enabled(app, &*intent, Some(context)) {
-            let action = action
-                .upgrade(app)
-                .expect("the action is kept by its Actions widget");
+            let action = action.keep(app);
             return Some(Listener::new(move |app| {
                 // Could be that the action was enabled when the closure was created, but is now
                 // no longer enabled, so check again.
@@ -2340,9 +2302,7 @@ impl ContextAction for PrioritizedAction {
             if let Some(candidate_action) = candidate_action
                 && candidate_action.is_enabled(app, &**candidate_intent, context)
             {
-                let candidate_action = candidate_action
-                    .upgrade(app)
-                    .expect("the action is kept by its Actions widget");
+                let candidate_action = candidate_action.keep(app);
                 let this = app.get_mut(self);
                 this.selected_action = Some(candidate_action);
                 this.selected_intent = Some(Rc::clone(candidate_intent));

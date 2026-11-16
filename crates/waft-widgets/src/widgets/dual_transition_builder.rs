@@ -278,7 +278,7 @@ impl State for DualTransitionBuilderState {
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &DualTransitionBuilder) {
         let animation = self.widget(app).animation.handle();
-        if old_widget.animation.handle() != animation {
+        if old_widget.animation != animation {
             old_widget.animation.remove_status_listener(
                 app,
                 &AnimationStatusListener::handle_method(self, Self::animation_listener),

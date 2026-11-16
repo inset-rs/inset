@@ -2251,7 +2251,7 @@ impl SliverPersistentHeaderDelegate for LargeTitleNavigationBarSliverDelegate {
             || self.enable_background_filter_blur != old_delegate.enable_background_filter_blur
             || self.bottom_mode != old_delegate.bottom_mode
             || self.bottom_height != old_delegate.bottom_height
-            || self.controller.handle() != old_delegate.controller.handle()
+            || self.controller != old_delegate.controller
             || self.searchable != old_delegate.searchable
     }
 
@@ -3363,12 +3363,8 @@ impl StatelessWidget for BackLabel {
             // There is no timing issue because the previousTitle Listenable changes
             // happen during route modifications before the ValueListenableBuilder
             // is built.
-            let previous_title: Rc<dyn ValueListenable<Option<String>>> = Rc::new(
-                cupertino_route
-                    .previous_title(app)
-                    .upgrade(app)
-                    .expect("the route keeps its previous title"),
-            );
+            let previous_title: Rc<dyn ValueListenable<Option<String>>> =
+                Rc::new(cupertino_route.previous_title(app).keep(app));
             return ValueListenableBuilder::new(previous_title, |app, context, title, _child| {
                 BackLabel::build_previous_title_widget(app, context, title.clone())
             })
@@ -3952,9 +3948,7 @@ impl NavigationBarComponentsTransition {
             .downcast::<CurvedAnimation>(app)
             .expect("the hero flight drives a CurvedAnimation");
         let parent = AnimationWithParent::parent(curved, app);
-        parent
-            .upgrade(app)
-            .expect("the hero animation keeps its parent")
+        parent.keep(app)
     }
 
     fn bottom_nav_bar_background(&self, app: &mut App) -> Option<WidgetRef> {
@@ -4864,6 +4858,7 @@ mod tests {
     use crate::page_scaffold::CupertinoPageScaffold;
     use crate::route::CupertinoPageRoute;
     use crate::test_support::{build, pump, test_cell};
+    use waft_test::{assert_no_new_objects, object_snapshot};
 
     /// The test view is 800x600 physical at 2x.
     const VIEW_WIDTH: f64 = 400.0;
@@ -5498,14 +5493,10 @@ mod tests {
         // measured, which would add or drop an opacity layer.
         pump(&mut cell.borrow_mut(), Duration::from_millis(1500));
         cell.checkpoint();
-        let before = cell.borrow().debug_object_count();
+        let snapshot = object_snapshot(&cell.borrow());
         pump(&mut cell.borrow_mut(), Duration::from_millis(1520));
         cell.checkpoint();
-        assert_eq!(
-            cell.borrow().debug_object_count(),
-            before,
-            "a frame of the flight leaves no new arena objects"
-        );
+        assert_no_new_objects(&cell.borrow(), &snapshot);
 
         settle(&mut cell.borrow_mut());
         cell.checkpoint();
@@ -5552,10 +5543,10 @@ mod tests {
         // measured, which would add or drop an opacity layer.
         pump(&mut cell.borrow_mut(), Duration::from_millis(1500));
         cell.checkpoint();
-        let before = cell.borrow().debug_object_count();
+        let snapshot = object_snapshot(&cell.borrow());
         pump(&mut cell.borrow_mut(), Duration::from_millis(1520));
         cell.checkpoint();
-        assert_eq!(cell.borrow().debug_object_count(), before);
+        assert_no_new_objects(&cell.borrow(), &snapshot);
     }
 
     #[test]

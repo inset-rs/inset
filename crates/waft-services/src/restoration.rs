@@ -983,7 +983,7 @@ impl RestorationBucket {
         let Some(pending) = app.get_mut(self).children_to_add.get_mut(&child_id) else {
             return;
         };
-        if let Some(index) = pending.iter().position(|bucket| bucket.handle() == child) {
+        if let Some(index) = pending.iter().position(|bucket| *bucket == child) {
             pending.remove(index);
         }
         if pending.is_empty() {

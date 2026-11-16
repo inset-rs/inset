@@ -590,7 +590,7 @@ impl State for SplitButtonState {
             app.get_mut(self).primary_pressed = false;
             app.get_mut(self).secondary_pressed = false;
         }
-        if old.focus_node.handle() != self.widget(app).focus_node.handle() {
+        if old.focus_node != self.widget(app).focus_node {
             let node = app.get(self).focus.clone().unwrap();
             node.set_on_key_event(app, None);
             if app.get(self).owns_focus {

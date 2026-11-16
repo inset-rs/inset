@@ -798,9 +798,7 @@ impl ItemsViewState {
             let listener = Listener::new(move |app| self.selection_heard(app));
             selection.add_listener(app, listener.clone());
             let revision = selection.revision(app);
-            let kept = selection
-                .upgrade(app)
-                .expect("the widget or the state keeps the selection");
+            let kept = selection.keep(app);
             let state = app.get_mut(self);
             state.listening = Some((kept, listener));
             state.seen_revision = revision;

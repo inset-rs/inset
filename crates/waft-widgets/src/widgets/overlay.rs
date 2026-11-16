@@ -1357,10 +1357,7 @@ impl Element for TheaterElement {
             child,
             slot.clone(),
         );
-        let entry = self
-            .entry_at_slot(app, slot.as_ref())
-            .upgrade(app)
-            .expect("an entry in the overlay is kept by it");
+        let entry = self.entry_at_slot(app, slot.as_ref()).keep(app);
         child
             .parent_data_of_mut::<TheaterParentData>(app)
             .overlay_entry = Some(entry);
@@ -2873,7 +2870,6 @@ impl OverlayEntryLocation {
             slot_token: None,
             debug_location_invalid: false,
         });
-        // The slot names the location bare: the element in it does not keep it.
         app.get_mut(&this).slot_token = Some(Rc::new(this.handle()));
         this
     }
@@ -2912,9 +2908,7 @@ impl OverlayEntryLocation {
             let location = app.get(self);
             (location.child_model, location.theater)
         };
-        let kept = self
-            .upgrade(app)
-            .expect("a location is kept by its overlay portal");
+        let kept = self.keep(app);
         child_model.add(app, kept);
         theater.mark_needs_paint(app);
     }
@@ -4512,7 +4506,7 @@ mod tests {
         assert_eq!(theater.skip_count(&app), 1);
         let painted = RenderTheaterMixin::children_in_paint_order(theater, &app).collect(&app);
         assert_eq!(painted.len(), 1);
-        assert_eq!(entry_of(&app, painted[0]), top.handle());
+        assert_eq!(entry_of(&app, painted[0]), top);
 
         // Without maintain_state an offstage entry is not built at all.
         bottom.set_maintain_state(&mut app, false);

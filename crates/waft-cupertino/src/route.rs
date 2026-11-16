@@ -380,9 +380,7 @@ fn start_pop_gesture(route: AnyPageRoute, app: &mut App) -> Ref<CupertinoBackGes
         .and_then(|controller| controller.upgrade(app))
         .expect("an installed route has a controller");
     // Dart's closures keep the route for as long as the gesture lasts.
-    let kept_route = transition_route
-        .upgrade(app)
-        .expect("the navigator keeps an installed route");
+    let kept_route = transition_route.keep(app);
     let kept_for_is_active = kept_route.clone();
     CupertinoBackGestureController::new(
         app,
@@ -1785,9 +1783,7 @@ impl State for CupertinoBackGestureDetectorState {
         // If this is disposed during a drag, call navigator.didStopUserGesture.
         if app.get(self).back_gesture_controller.is_some() {
             // The callback keeps the disposed state, as Dart's closure keeps `this`.
-            let this = self
-                .upgrade(app)
-                .expect("the tree keeps the state while it disposes");
+            let this = self.keep(app);
             SchedulerBinding::add_post_frame_callback(
                 app,
                 FrameCallback::new(move |app, _timestamp| {
@@ -2905,6 +2901,7 @@ mod tests {
     use super::*;
     use crate::localizations::DefaultCupertinoLocalizations;
     use crate::test_support::{build, pump, test_cell};
+    use waft_test::{assert_no_new_objects, object_snapshot};
 
     /// The test view is 800x600 physical at 2x.
     const VIEW_WIDTH: f64 = 400.0;
@@ -3014,12 +3011,11 @@ mod tests {
             .dy()
     }
 
-    /// The arena objects a frame part way into `push` leaves behind, over a settled page:
-    /// Dart's collector frees what each frame's build replaces, and here the transitions free
-    /// what they make once they hand it on.
-    fn objects_a_mid_push_frame_leaves(
+    /// Checks that a frame part way into `push`, over a settled page, leaves no new arena
+    /// objects: Dart's collector frees what each frame's build replaces.
+    fn assert_a_mid_push_frame_leaves_nothing(
         push: impl FnOnce(&mut App, BuildContext, Handle<NavigatorState>),
-    ) -> isize {
+    ) {
         let cell = test_cell();
         let navigator_key = GlobalKey::new();
         let page_context: Rc<Cell<Option<BuildContext>>> = Rc::default();
@@ -3045,10 +3041,10 @@ mod tests {
             }
         }
         cell.checkpoint();
-        let before = cell.borrow().debug_object_count() as isize;
+        let snapshot = object_snapshot(&cell.borrow());
         pump(&mut cell.borrow_mut(), at + Duration::from_millis(20));
         cell.checkpoint();
-        cell.borrow().debug_object_count() as isize - before
+        assert_no_new_objects(&cell.borrow(), &snapshot);
     }
 
     /// Not a Dart case: a controller disposed before its status changes takes the back
@@ -3100,30 +3096,28 @@ mod tests {
         assert!(listener.upgrade().is_none(), "nothing else holds it");
     }
 
-    /// Not a Dart case: see [`objects_a_mid_push_frame_leaves`].
+    /// Not a Dart case: see [`assert_a_mid_push_frame_leaves_nothing`].
     #[test]
     fn a_frame_of_a_cupertino_page_push_leaves_no_new_arena_objects() {
-        let left = objects_a_mid_push_frame_leaves(|app, _context, state| {
+        assert_a_mid_push_frame_leaves_nothing(|app, _context, state| {
             let pushed = CupertinoPageRoute::new(app, plain_page());
             state.push(app, pushed.clone().into_erased());
         });
-        assert_eq!(left, 0);
     }
 
-    /// Not a Dart case: see [`objects_a_mid_push_frame_leaves`].
+    /// Not a Dart case: see [`assert_a_mid_push_frame_leaves_nothing`].
     #[test]
     fn a_frame_of_a_fullscreen_dialog_push_leaves_no_new_arena_objects() {
-        let left = objects_a_mid_push_frame_leaves(|app, _context, state| {
+        assert_a_mid_push_frame_leaves_nothing(|app, _context, state| {
             let pushed = CupertinoPageRoute::new(app, plain_page()).fullscreen_dialog(app, true);
             state.push(app, pushed.clone().into_erased());
         });
-        assert_eq!(left, 0);
     }
 
-    /// Not a Dart case: see [`objects_a_mid_push_frame_leaves`].
+    /// Not a Dart case: see [`assert_a_mid_push_frame_leaves_nothing`].
     #[test]
     fn a_frame_of_a_cupertino_dialog_leaves_no_new_arena_objects() {
-        let left = objects_a_mid_push_frame_leaves(|app, context, _state| {
+        assert_a_mid_push_frame_leaves_nothing(|app, context, _state| {
             let _popped = show_cupertino_dialog(
                 app,
                 context,
@@ -3136,7 +3130,6 @@ mod tests {
                 None,
             );
         });
-        assert_eq!(left, 0);
     }
 
     #[test]

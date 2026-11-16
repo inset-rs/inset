@@ -10,7 +10,7 @@
 
 use std::any::TypeId;
 use std::fmt::{self, Debug};
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 
 use waft_embedder::valo::Sampling;
 use waft_embedder::{Image, Matrix4, Offset, Paint, Rect, Size, TextBaseline};
@@ -234,8 +234,7 @@ impl SnapshotWidget {
     pub fn effective_painter(&self, app: &mut App) -> SnapshotPainterRef {
         self.painter.clone().unwrap_or_else(|| {
             app.singleton::<DefaultSnapshotPainter>()
-                .upgrade(app)
-                .expect("the app keeps its singletons")
+                .keep(app)
                 .into_erased()
         })
     }
@@ -360,7 +359,7 @@ impl RenderSnapshotWidget {
 
     /// Sets [`painter`](Self::painter).
     pub fn set_painter(self: RenderHandle<Self>, app: &mut App, value: SnapshotPainterRef) {
-        if value.handle() == self.painter(app) {
+        if value == self.painter(app) {
             return;
         }
         let old_painter = self.painter(app);
@@ -385,7 +384,7 @@ impl RenderSnapshotWidget {
 
     /// Sets [`controller`](Self::controller).
     pub fn set_controller(self: RenderHandle<Self>, app: &mut App, value: Ref<SnapshotController>) {
-        if value.handle() == self.controller(app) {
+        if value == self.controller(app) {
             return;
         }
         self.controller(app)
@@ -820,29 +819,10 @@ pub struct AnySnapshotPainter {
     vtable: &'static SnapshotPainterVTable,
 }
 
-impl From<AnySnapshotPainter> for HandleId {
-    fn from(handle: AnySnapshotPainter) -> HandleId {
-        handle.id
-    }
-}
-
 /// A field Dart types as the erased object, kept: AnySnapshotPainter with its count.
 pub type SnapshotPainterRef = Retained<AnySnapshotPainter>;
 
-impl AnySnapshotPainter {
-    /// A [`SnapshotPainterRef`] while something still keeps the object; see
-    /// [`Handle::upgrade`](waft_foundation::Handle::upgrade).
-    pub fn upgrade(self, app: &App) -> Option<SnapshotPainterRef> {
-        Retained::upgrade(app, self)
-    }
-}
-
-/// A kept object erases to a [`SnapshotPainterRef`] with [`Retained::erase`]: Dart's upcast.
-impl<T: SnapshotPainter> From<Handle<T>> for AnySnapshotPainter {
-    fn from(handle: Handle<T>) -> AnySnapshotPainter {
-        handle.as_snapshot_painter()
-    }
-}
+waft_foundation::erased_handle!(AnySnapshotPainter: SnapshotPainter => SnapshotPainter::as_snapshot_painter);
 
 impl AnySnapshotPainter {
     /// The arena id behind this handle.
@@ -899,20 +879,6 @@ impl AnySnapshotPainter {
     /// See [`SnapshotPainter::should_repaint`].
     pub fn should_repaint(self, app: &App, old_painter: AnySnapshotPainter) -> bool {
         (self.vtable.should_repaint)(app, self.id, old_painter)
-    }
-}
-
-impl PartialEq for AnySnapshotPainter {
-    fn eq(&self, other: &AnySnapshotPainter) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Eq for AnySnapshotPainter {}
-
-impl Hash for AnySnapshotPainter {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
     }
 }
 

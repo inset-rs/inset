@@ -1148,6 +1148,7 @@ mod tests {
     use crate::theme_data::ThemeData;
     use waft_animation::AnimationWithParent;
     use waft_foundation::HandleId;
+    use waft_test::{assert_no_new_objects, object_snapshot};
 
     /// Not a Dart case: Dart's collector frees a disposed shared-element transition's proxies
     /// and animations; here they are freed with the state's references to them.
@@ -1235,10 +1236,11 @@ mod tests {
             };
             tester.pump_widget(transition(800.0));
             tester.pump_widget(transition(700.0));
-            let before = tester.cell.borrow().debug_object_count();
+            let snapshot = object_snapshot(&tester.cell.borrow());
             tester.pump_widget(transition(800.0));
             tester.pump_widget(transition(700.0));
-            assert_eq!(tester.cell.borrow().debug_object_count(), before);
+            tester.cell.checkpoint();
+            assert_no_new_objects(&tester.cell.borrow(), &snapshot);
         });
     }
 

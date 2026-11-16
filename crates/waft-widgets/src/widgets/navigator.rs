@@ -688,10 +688,7 @@ pub trait RouteBase: Route {
     fn did_push(self: Handle<Self>, app: &mut App) -> TickerFuture {
         let future = TickerFuture::complete();
         // The completion keeps the route, as Dart's closure over `this` does.
-        let route: RouteRef = self
-            .upgrade(app)
-            .expect("a pushed route is kept by its entry")
-            .into_erased();
+        let route: RouteRef = self.keep(app).into_erased();
         future.when_complete(
             app,
             Listener::new(move |app| {
@@ -717,10 +714,7 @@ pub trait RouteBase: Route {
         // triggered by other operations will finish before focusing the navigator. Second,
         // `navigator.focus_node` might acquire more focused children in `install`
         // asynchronously.
-        let route: RouteRef = self
-            .upgrade(app)
-            .expect("an added route is kept by its entry")
-            .into_erased();
+        let route: RouteRef = self.keep(app).into_erased();
         let future = TickerFuture::complete();
         future.when_complete(
             app,
@@ -922,35 +916,10 @@ pub struct AnyRoute {
     vtable: &'static RouteVTable,
 }
 
-impl From<AnyRoute> for HandleId {
-    fn from(handle: AnyRoute) -> HandleId {
-        handle.id
-    }
-}
-
 /// A field Dart types as the erased object, kept: AnyRoute with its count.
 pub type RouteRef = Retained<AnyRoute>;
 
-/// A kept object erases to a [`RouteRef`] with [`Retained::erase`]: Dart's upcast.
-impl<T: Route> From<Handle<T>> for AnyRoute {
-    fn from(handle: Handle<T>) -> AnyRoute {
-        handle.as_route()
-    }
-}
-
-impl PartialEq for AnyRoute {
-    fn eq(&self, other: &AnyRoute) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Eq for AnyRoute {}
-
-impl std::hash::Hash for AnyRoute {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
-    }
-}
+waft_foundation::erased_handle!(AnyRoute: Route => Route::as_route);
 
 impl Debug for AnyRoute {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -962,11 +931,6 @@ impl AnyRoute {
     /// The arena id behind this handle.
     pub fn id(self) -> HandleId {
         self.id
-    }
-
-    /// A [`RouteRef`] while something still keeps the route; see [`Handle::upgrade`].
-    pub fn upgrade(self, app: &App) -> Option<RouteRef> {
-        Retained::upgrade(app, self)
     }
 
     /// Dart's `route as T`: the typed handle when this route is a `T`, else `None`.
@@ -1192,7 +1156,7 @@ impl AnyRoute {
         };
         match navigator.last_route_entry_where_or_null(app, RouteEntry::is_present_predicate) {
             None => false,
-            Some(entry) => app.get(entry).route.handle() == self,
+            Some(entry) => app.get(entry).route == self,
         }
     }
 
@@ -1206,7 +1170,7 @@ impl AnyRoute {
         };
         match navigator.first_route_entry_where_or_null(app, RouteEntry::is_present_predicate) {
             None => false,
-            Some(entry) => app.get(entry).route.handle() == self,
+            Some(entry) => app.get(entry).route == self,
         }
     }
 
@@ -1216,7 +1180,7 @@ impl AnyRoute {
             return false;
         };
         for entry in navigator.history_entries(app) {
-            if app.get(entry).route.handle() == self {
+            if app.get(entry).route == self {
                 return false;
             }
             if RouteEntry::is_present_predicate(app, entry) {
@@ -1236,9 +1200,7 @@ impl AnyRoute {
             return false;
         };
         navigator
-            .first_route_entry_where_or_null(app, move |app, entry| {
-                app.get(entry).route.handle() == self
-            })
+            .first_route_entry_where_or_null(app, move |app, entry| app.get(entry).route == self)
             .is_some_and(|entry| RouteEntry::is_present_predicate(app, entry))
     }
 }
@@ -1438,43 +1400,10 @@ pub struct AnyNavigatorObserver {
     vtable: &'static NavigatorObserverVTable,
 }
 
-impl From<AnyNavigatorObserver> for HandleId {
-    fn from(handle: AnyNavigatorObserver) -> HandleId {
-        handle.id
-    }
-}
-
 /// A field Dart types as the erased object, kept: AnyNavigatorObserver with its count.
 pub type NavigatorObserverRef = Retained<AnyNavigatorObserver>;
 
-impl AnyNavigatorObserver {
-    /// A [`NavigatorObserverRef`] while something still keeps the object; see
-    /// [`Handle::upgrade`](waft_foundation::Handle::upgrade).
-    pub fn upgrade(self, app: &App) -> Option<NavigatorObserverRef> {
-        Retained::upgrade(app, self)
-    }
-}
-
-/// A kept object erases to a [`NavigatorObserverRef`] with [`Retained::erase`]: Dart's upcast.
-impl<T: NavigatorObserver> From<Handle<T>> for AnyNavigatorObserver {
-    fn from(handle: Handle<T>) -> AnyNavigatorObserver {
-        handle.as_observer()
-    }
-}
-
-impl PartialEq for AnyNavigatorObserver {
-    fn eq(&self, other: &AnyNavigatorObserver) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Eq for AnyNavigatorObserver {}
-
-impl std::hash::Hash for AnyNavigatorObserver {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
-    }
-}
+waft_foundation::erased_handle!(AnyNavigatorObserver: NavigatorObserver => NavigatorObserver::as_observer);
 
 impl Debug for AnyNavigatorObserver {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -3014,9 +2943,7 @@ impl RouteEntry {
         }
 
         let navigator = route.navigator(app).expect("an installed route");
-        let kept = self
-            .upgrade(app)
-            .expect("a disposing entry is kept by its navigator");
+        let kept = self.keep(app);
         app.get_mut(navigator)
             .entry_waiting_for_subtree_disposal
             .insert(kept);
@@ -3550,11 +3477,7 @@ impl NavigatorState {
         {
             previous.as_observer().set_navigator(app, None);
         }
-        let kept = new_hero_controller.map(|controller| {
-            controller
-                .upgrade(app)
-                .expect("a scope's hero controller is kept by its widget")
-        });
+        let kept = new_hero_controller.map(|controller| controller.keep(app));
         app.get_mut(self).hero_controller_from_scope = kept;
         self.update_effective_observers(app);
     }
@@ -3593,11 +3516,12 @@ impl NavigatorState {
         let mut entries = Vec::new();
         for entry in self.history_entries(app) {
             let route = app.get(entry).route.handle();
-            entries.extend(route.overlay_entries(app).into_iter().map(|overlay_entry| {
-                overlay_entry
-                    .upgrade(app)
-                    .expect("a route keeps its overlay entries")
-            }));
+            entries.extend(
+                route
+                    .overlay_entries(app)
+                    .into_iter()
+                    .map(|overlay_entry| overlay_entry.keep(app)),
+            );
         }
         entries
     }
@@ -3933,14 +3857,7 @@ impl NavigatorState {
         let previous: Vec<Ref<RouteEntry>> = app.get(history).value.clone();
         history.clear(app);
         let kept = |app: &App, entries: Vec<Handle<RouteEntry>>| -> Vec<Ref<RouteEntry>> {
-            entries
-                .into_iter()
-                .map(|entry| {
-                    entry
-                        .upgrade(app)
-                        .expect("an entry of the diff is kept by the old history or the diff")
-                })
-                .collect()
+            entries.into_iter().map(|entry| entry.keep(app)).collect()
         };
         // Adds the leading pageless routes if there is any.
         if let Some(pageless) = page_route_to_pageless_routes.get(&None).cloned() {
@@ -4152,11 +4069,7 @@ impl NavigatorState {
                 observer.did_change_top(app, top_route, previous_top_route);
             }
         }
-        let last_topmost_route = last_entry.map(|entry| {
-            entry
-                .upgrade(app)
-                .expect("an entry in the history is kept by it")
-        });
+        let last_topmost_route = last_entry.map(|entry| entry.keep(app));
         app.get_mut(self).last_topmost_route = last_topmost_route;
 
         if self.widget(app).reports_route_update_to_engine {
@@ -4649,7 +4562,7 @@ impl NavigatorState {
     ) {
         let entry = kept.handle();
         debug_assert!(!app.get(self).debug_locked);
-        if old_route == app.get(entry).route.handle() {
+        if old_route == app.get(entry).route {
             return;
         }
         app.get_mut(self).debug_locked = true;
@@ -4657,7 +4570,7 @@ impl NavigatorState {
         debug_assert!(!app.get(entry).route.installed(app));
         let history = self.history(app);
         let index = history
-            .index_where(app, |app, other| app.get(other).route.handle() == old_route)
+            .index_where(app, |app, other| app.get(other).route == old_route)
             .expect("This Navigator does not contain the specified old_route.");
         debug_assert!(
             history.at(app, index).is_present(app),
@@ -4719,9 +4632,7 @@ impl NavigatorState {
         app.get_mut(self).debug_locked = true;
         let history = self.history(app);
         let anchor_index = history
-            .index_where(app, |app, other| {
-                app.get(other).route.handle() == anchor_route
-            })
+            .index_where(app, |app, other| app.get(other).route == anchor_route)
             .expect("This Navigator does not contain the specified anchor_route.");
         debug_assert!(
             history.at(app, anchor_index).is_present(app),
@@ -4894,9 +4805,7 @@ impl NavigatorState {
         debug_assert!(route.is_installed_in(app, self));
         let was_current = route.is_current(app);
         let entry = self
-            .first_route_entry_where_or_null(app, move |app, entry| {
-                app.get(entry).route.handle() == route
-            })
+            .first_route_entry_where_or_null(app, move |app, entry| app.get(entry).route == route)
             .expect("This Navigator does not contain the specified route.");
         entry.complete(app, result, false, true);
         self.flush_history_updates(app, false);
@@ -4922,9 +4831,7 @@ impl NavigatorState {
         debug_assert!(anchor_route.is_installed_in(app, self));
         let history = self.history(app);
         let anchor_index = history
-            .index_where(app, move |app, entry| {
-                app.get(entry).route.handle() == anchor_route
-            })
+            .index_where(app, move |app, entry| app.get(entry).route == anchor_route)
             .expect("This Navigator does not contain the specified anchor_route.");
         debug_assert!(
             history.at(app, anchor_index).is_present(app),
@@ -4965,14 +4872,12 @@ impl NavigatorState {
             history
                 .entries(app)
                 .iter()
-                .filter(|entry| app.get(**entry).route.handle() == route)
+                .filter(|entry| app.get(**entry).route == route)
                 .count()
                 == 1
         );
         let index = history
-            .index_where(app, move |app, entry| {
-                app.get(entry).route.handle() == route
-            })
+            .index_where(app, move |app, entry| app.get(entry).route == route)
             .expect("This Navigator does not contain the specified route.");
         let entry = history.at(app, index);
 
@@ -5392,11 +5297,7 @@ impl State for NavigatorState {
             None => self.all_route_overlay_entries(app),
             Some(_) => Vec::new(),
         };
-        let bucket = self.bucket(app).map(|bucket| {
-            bucket
-                .upgrade(app)
-                .expect("the restoration mixin keeps its bucket")
-        });
+        let bucket = self.bucket(app).map(|bucket| bucket.keep(app));
         let clip_behavior = self.widget(app).clip_behavior;
         let focus_node: FocusNodeRef = app
             .get(self)
@@ -5404,11 +5305,7 @@ impl State for NavigatorState {
             .as_ref()
             .expect("init_state has run")
             .erase();
-        let policy = FocusTraversalGroup::maybe_of(app, context).map(|policy| {
-            policy
-                .upgrade(app)
-                .expect("a group's policy is kept by its widget")
-        });
+        let policy = FocusTraversalGroup::maybe_of(app, context).map(|policy| policy.keep(app));
 
         let overlay = Overlay::new()
             .key(overlay_key)
@@ -5428,9 +5325,7 @@ impl State for NavigatorState {
         let absorb = AbsorbPointer::new().absorbing(false).child(group);
         // The callbacks keep the state, as Dart's tear-offs keep `this`: a pointer that went
         // down before the navigator was disposed still ends on it.
-        let this = self
-            .upgrade(app)
-            .expect("a building state is kept by its element");
+        let this = self.keep(app);
         let on_up = this.clone();
         let on_cancel = this.clone();
         let listener = crate::widgets::basic::Listener::new()
@@ -5989,18 +5884,15 @@ impl RestorableRouteFuture {
         let route = navigator
             .get_route_by_id(app, id)
             .expect("the restorable method's route is in the navigator");
-        app.get_mut(self).route = Some(
-            route
-                .upgrade(app)
-                .expect("a route in the navigator is kept by it"),
-        );
+        app.get_mut(self).route = Some(route.keep(app));
         let notifier = route.restoration_scope_id(app);
         notifier.add_listener(
             app,
             Listener::handle_method(self, RestorableRouteFuture::notify),
         );
         route.popped(app).then(app, move |app, result| {
-            // The route's future names this property bare: the property keeps the route.
+            // Named bare and checked: the property keeps the route, so a `Ref` here would be a
+            // ring that outlives the property's dispose.
             if !app.contains(self) || app.get(self).disposed {
                 return;
             }

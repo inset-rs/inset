@@ -192,11 +192,7 @@ impl ImageCache {
         load: impl FnOnce(&mut App) -> Ref<ImageStreamCompleter>,
     ) -> Ref<ImageStreamCompleter> {
         // Every completer the cache tracks is kept by an entry's keep-alive handle.
-        let kept = |app: &App, completer: Handle<ImageStreamCompleter>| {
-            completer
-                .upgrade(app)
-                .expect("the cache keeps the completers it tracks")
-        };
+        let kept = |app: &App, completer: Handle<ImageStreamCompleter>| completer.keep(app);
         if let Some(image) = app.get(self).pending_images.get(&key) {
             return kept(app, image.completer);
         }

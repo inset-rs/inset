@@ -965,37 +965,10 @@ pub struct AnyShortcutManager {
     vtable: &'static ShortcutManagerVTable,
 }
 
-impl From<AnyShortcutManager> for HandleId {
-    fn from(handle: AnyShortcutManager) -> HandleId {
-        handle.id
-    }
-}
-
 /// A field Dart types as the erased object, kept: AnyShortcutManager with its count.
 pub type ShortcutManagerRef = Retained<AnyShortcutManager>;
 
-impl AnyShortcutManager {
-    /// A [`ShortcutManagerRef`] while something still keeps the object; see
-    /// [`Handle::upgrade`](waft_foundation::Handle::upgrade).
-    pub fn upgrade(self, app: &App) -> Option<ShortcutManagerRef> {
-        Retained::upgrade(app, self)
-    }
-}
-
-/// A kept object erases to a [`ShortcutManagerRef`] with [`Retained::erase`]: Dart's upcast.
-impl<T: ShortcutManagerBase> From<Handle<T>> for AnyShortcutManager {
-    fn from(handle: Handle<T>) -> AnyShortcutManager {
-        handle.as_shortcut_manager()
-    }
-}
-
-impl PartialEq for AnyShortcutManager {
-    fn eq(&self, other: &AnyShortcutManager) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Eq for AnyShortcutManager {}
+waft_foundation::erased_handle!(AnyShortcutManager: ShortcutManagerBase => ShortcutManagerBase::as_shortcut_manager);
 
 impl fmt::Debug for AnyShortcutManager {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1574,9 +1547,7 @@ impl ShortcutRegistry {
             !value.is_empty(),
             "Cannot register an empty map of shortcuts"
         );
-        let registry = self
-            .upgrade(app)
-            .expect("the registry is kept by its registrar");
+        let registry = self.keep(app);
         let entry = app.create(ShortcutRegistryEntry { registry });
         app.get_mut(self)
             .registered_shortcuts
@@ -1591,9 +1562,7 @@ impl ShortcutRegistry {
     /// `notification_scheduled` check makes sure we only notify once per frame.
     fn notify_listeners_next_frame(self: Handle<Self>, app: &mut App) {
         if !app.get(self).notification_scheduled {
-            let this = self
-                .upgrade(app)
-                .expect("the registry is kept by its registrar or an entry");
+            let this = self.keep(app);
             SchedulerBinding::add_post_frame_callback(
                 app,
                 FrameCallback::new(move |app, _duration| {
@@ -1680,7 +1649,7 @@ impl ShortcutRegistry {
             .any(|(registered, _)| *registered == entry)
         {
             assert!(
-                app.get(entry).registry.handle() != self,
+                app.get(entry).registry != self,
                 "entry {entry:?} is invalid.\nThe entry has already been disposed of. Tokens \
                  are not valid after dispose is called on them, and should no longer be used."
             );

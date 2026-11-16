@@ -566,11 +566,11 @@ impl AnimatedSwitcherState {
                             state
                                 .outgoing_entries
                                 .iter()
-                                .any(|entry| entry.controller.handle() == controller)
+                                .any(|entry| entry.controller == controller)
                         );
                         state
                             .outgoing_entries
-                            .retain(|entry| entry.controller.handle() != controller);
+                            .retain(|entry| entry.controller != controller);
                         state.outgoing_widgets = None;
                     });
                     controller.dispose(app);

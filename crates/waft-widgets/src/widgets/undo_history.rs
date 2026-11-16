@@ -447,7 +447,7 @@ impl<T: Clone + PartialEq + 'static, V: ValueListenable<T> + Clone + PartialEq +
             value.add_listener(app, Listener::handle_method(self, Self::push));
         }
         let focus_node = self.widget(app).focus_node.handle();
-        if focus_node != old_widget.focus_node.handle() {
+        if focus_node != old_widget.focus_node {
             old_widget
                 .focus_node
                 .remove_listener(app, &Listener::handle_method(self, Self::handle_focus));

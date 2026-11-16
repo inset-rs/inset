@@ -2,7 +2,7 @@
 
 use std::any::Any;
 use std::fmt;
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -920,10 +920,7 @@ impl RenderInkFeatures {
             .ink_features
             .as_mut()
             .expect("a feature was added");
-        if let Some(index) = ink_features
-            .iter()
-            .position(|added| added.handle() == feature)
-        {
+        if let Some(index) = ink_features.iter().position(|added| *added == feature) {
             ink_features.remove(index);
         }
         self.mark_needs_paint(app);
@@ -1218,25 +1215,7 @@ pub trait InkFeatureObject: Sized + 'static {
 /// What a field Dart types as `InkFeature` holds: the material's list, an ink well's state.
 pub type InkFeatureRef = Retained<AnyInkFeature>;
 
-impl AnyInkFeature {
-    /// A [`InkFeatureRef`] while something still keeps the object; see
-    /// [`Handle::upgrade`](waft_foundation::Handle::upgrade).
-    pub fn upgrade(self, app: &App) -> Option<InkFeatureRef> {
-        Retained::upgrade(app, self)
-    }
-}
-
-impl<F: InkFeatureLeaf> From<Handle<F>> for AnyInkFeature {
-    fn from(feature: Handle<F>) -> AnyInkFeature {
-        feature.as_ink_feature()
-    }
-}
-
-impl From<AnyInkFeature> for HandleId {
-    fn from(feature: AnyInkFeature) -> HandleId {
-        feature.id
-    }
-}
+waft_foundation::erased_handle!(AnyInkFeature: InkFeatureLeaf => InkFeatureObject::as_ink_feature);
 
 impl<F: InkFeatureLeaf> InkFeatureObject for F {
     fn as_ink_feature(self: Handle<Self>) -> AnyInkFeature {
@@ -1277,20 +1256,6 @@ impl InkFeatureVTable {
 pub struct AnyInkFeature {
     id: HandleId,
     vtable: &'static InkFeatureVTable,
-}
-
-impl PartialEq for AnyInkFeature {
-    fn eq(&self, other: &AnyInkFeature) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Eq for AnyInkFeature {}
-
-impl Hash for AnyInkFeature {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
-    }
 }
 
 impl fmt::Debug for AnyInkFeature {

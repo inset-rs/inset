@@ -5501,7 +5501,7 @@ impl State for MenuPanelState {
 
     fn dispose(self: Handle<Self>, app: &mut App) {
         if let Some(scroll_controller) = app.get_mut(self).scroll_controller.take() {
-            ScrollControllerLeaf::dispose(scroll_controller.handle(), app);
+            scroll_controller.dispose(app);
         }
     }
 

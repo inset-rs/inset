@@ -1901,10 +1901,7 @@ impl<T: Clone + PartialEq + 'static> PopupMenuRoute<T> {
         );
         let controller =
             TransitionRoute::controller(self, app).expect("createAnimationController ran first");
-        controller
-            .upgrade(app)
-            .expect("the route keeps its controller")
-            .into_erased()
+        controller.keep(app).into_erased()
     }
 }
 

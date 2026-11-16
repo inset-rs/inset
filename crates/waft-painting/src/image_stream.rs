@@ -202,9 +202,7 @@ impl ImageStreamCompleter {
         debug_assert!(!app.is_disposed(self));
         app.get_mut(self).keep_alive_handles += 1;
         ImageStreamCompleterHandle {
-            completer: self
-                .upgrade(app)
-                .expect("a completer kept alive is kept by its owner"),
+            completer: self.keep(app),
         }
     }
 
@@ -573,25 +571,25 @@ mod tests {
     fn a_listener_can_dispose_its_stream_during_frame_delivery() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let stream_ref = ImageStream::new(&mut app);
-        let stream = stream_ref.handle();
-        let completer_ref = ImageStreamCompleter::new(&mut app);
-        let completer = completer_ref.handle();
-        stream.set_completer(&mut app, completer_ref.clone());
-        stream.add_listener(
-            &mut app,
+        let stream = ImageStream::new(&mut app);
+        let completer = ImageStreamCompleter::new(&mut app);
+        stream.set_completer(&mut app, completer.clone());
+        let listener = {
+            let stream = stream.handle();
             ImageStreamListener::new(Rc::new(move |app, _, _| {
                 stream.dispose(app);
-            })),
-        );
+            }))
+        };
+        stream.add_listener(&mut app, listener);
         completer.set_image(&mut app, an_image());
-        assert!(app.is_disposed(completer));
+        assert!(app.is_disposed(&completer));
         assert!(completer.current_image(&app).is_none());
-        drop((stream_ref, completer_ref));
+        let (stream_handle, completer_handle) = (stream.handle(), completer.handle());
+        drop((stream, completer));
         drop(app);
         cell.checkpoint();
         let app = cell.borrow();
-        assert!(!app.contains(stream));
-        assert!(!app.contains(completer));
+        assert!(!app.contains(stream_handle));
+        assert!(!app.contains(completer_handle));
     }
 }

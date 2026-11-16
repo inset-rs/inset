@@ -177,29 +177,10 @@ impl From<AnyPageRoute> for AnyModalRoute {
     }
 }
 
-impl From<AnyPageRoute> for HandleId {
-    fn from(handle: AnyPageRoute) -> HandleId {
-        handle.id
-    }
-}
-
 /// A field Dart types as the erased object, kept: AnyPageRoute with its count.
 pub type PageRouteRef = Retained<AnyPageRoute>;
 
-/// A kept object erases to a [`PageRouteRef`] with [`Retained::erase`]: Dart's upcast.
-impl<T: PageRoute> From<Handle<T>> for AnyPageRoute {
-    fn from(handle: Handle<T>) -> AnyPageRoute {
-        PageRoute::as_page_route(handle)
-    }
-}
-
-impl PartialEq for AnyPageRoute {
-    fn eq(&self, other: &AnyPageRoute) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Eq for AnyPageRoute {}
+waft_foundation::erased_handle!(AnyPageRoute: PageRoute => PageRoute::as_page_route);
 
 impl Debug for AnyPageRoute {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -208,11 +189,6 @@ impl Debug for AnyPageRoute {
 }
 
 impl AnyPageRoute {
-    /// A [`PageRouteRef`] while something still keeps the route; see [`Handle::upgrade`].
-    pub fn upgrade(self, app: &App) -> Option<PageRouteRef> {
-        Retained::upgrade(app, self)
-    }
-
     /// This page route as the erased [`AnyRoute`].
     pub fn as_route(self) -> AnyRoute {
         (self.vtable.route)(self.id)

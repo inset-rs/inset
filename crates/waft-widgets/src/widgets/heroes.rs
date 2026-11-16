@@ -699,12 +699,8 @@ impl HeroFlightManifest {
         is_diverted: bool,
     ) -> Ref<HeroFlightManifest> {
         debug_assert!(*from_hero.widget(app).tag == *to_hero.widget(app).tag);
-        let from_hero = from_hero
-            .upgrade(app)
-            .expect("a hero found in a route's subtree is kept by its element");
-        let to_hero = to_hero
-            .upgrade(app)
-            .expect("a hero found in a route's subtree is kept by its element");
+        let from_hero = from_hero.keep(app);
+        let to_hero = to_hero.keep(app);
         app.create(HeroFlightManifest {
             r#type,
             overlay,
@@ -765,9 +761,7 @@ impl HeroFlightManifest {
             }
         };
 
-        let parent = parent
-            .upgrade(app)
-            .expect("an installed route keeps its animation");
+        let parent = parent.keep(app);
         let reverse_curve = (!app.get(self).is_diverted).then_some(reverse_curve);
         let animation = CurvedAnimation::new(app, parent, curve, reverse_curve);
         let erased = animation.erase();
@@ -1435,12 +1429,8 @@ impl HeroController {
             && to_route.as_modal_route().maintain_state(app)
             && has_valid_size
         {
-            let from_route = from_route
-                .upgrade(app)
-                .expect("a route in transition is kept by its navigator");
-            let to_route = to_route
-                .upgrade(app)
-                .expect("a route in transition is kept by its navigator");
+            let from_route = from_route.keep(app);
+            let to_route = to_route.keep(app);
             self.start_hero_transition(
                 app,
                 from_route,
@@ -1459,15 +1449,9 @@ impl HeroController {
             to_route.as_modal_route().set_offstage(app, offstage);
             // The callback keeps both routes and this controller until the frame ends, as
             // Dart's closure does.
-            let from_route = from_route
-                .upgrade(app)
-                .expect("a route in transition is kept by its navigator");
-            let to_route = to_route
-                .upgrade(app)
-                .expect("a route in transition is kept by its navigator");
-            let this = self
-                .upgrade(app)
-                .expect("an observing hero controller is kept by its navigator");
+            let from_route = from_route.keep(app);
+            let to_route = to_route.keep(app);
+            let this = self.keep(app);
             SchedulerBinding::add_post_frame_callback(
                 app,
                 FrameCallback::new(move |app, _| {

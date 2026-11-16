@@ -3,7 +3,7 @@
 use std::any::{Any, TypeId};
 use std::cell::Cell;
 use std::fmt::{self, Debug};
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -1046,9 +1046,7 @@ impl ScrollPositionBase {
                 // (scroll_position.dart:678-680): a scrollable disposed in this frame stays
                 // readable, its notification context `null` (scrollable.dart:603), so nothing is
                 // sent (scroll_position.dart:1089).
-                let position = this
-                    .upgrade(app)
-                    .expect("a position laid out is kept by its owner");
+                let position = this.keep(app);
                 let context = this.context(app).handle_id().upgrade(app);
                 app.schedule_microtask(Listener::new(move |app| {
                     let _context = &context;
@@ -1593,29 +1591,10 @@ pub struct AnyScrollPosition {
     vtable: &'static ScrollPositionVTable,
 }
 
-impl From<AnyScrollPosition> for HandleId {
-    fn from(handle: AnyScrollPosition) -> HandleId {
-        handle.id
-    }
-}
-
 /// A field Dart types as the erased object, kept: AnyScrollPosition with its count.
 pub type ScrollPositionRef = Retained<AnyScrollPosition>;
 
-impl AnyScrollPosition {
-    /// A [`ScrollPositionRef`] while something still keeps the object; see
-    /// [`Handle::upgrade`](waft_foundation::Handle::upgrade).
-    pub fn upgrade(self, app: &App) -> Option<ScrollPositionRef> {
-        Retained::upgrade(app, self)
-    }
-}
-
-/// A kept object erases to a [`ScrollPositionRef`] with [`Retained::erase`]: Dart's upcast.
-impl<T: ScrollPosition> From<Handle<T>> for AnyScrollPosition {
-    fn from(handle: Handle<T>) -> AnyScrollPosition {
-        handle.as_scroll_position()
-    }
-}
+waft_foundation::erased_handle!(AnyScrollPosition: ScrollPosition => ScrollPosition::as_scroll_position);
 
 /// A kept position erases to a `ViewportOffsetRef` with [`Retained::erase`]: Dart's upcast of a
 /// `ScrollPosition` to the `ViewportOffset` a viewport keeps.
@@ -1954,20 +1933,6 @@ impl AnyScrollPosition {
     /// See [`ScrollPosition::describe`].
     pub fn describe(self, app: &App) -> String {
         (self.vtable.describe)(app, self.id)
-    }
-}
-
-impl PartialEq for AnyScrollPosition {
-    fn eq(&self, other: &AnyScrollPosition) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Eq for AnyScrollPosition {}
-
-impl Hash for AnyScrollPosition {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
     }
 }
 

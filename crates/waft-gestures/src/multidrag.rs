@@ -189,27 +189,7 @@ pub struct AnyMultiDragPointerState {
     table: &'static PointerStateVTable,
 }
 
-impl AnyMultiDragPointerState {
-    /// The kept state while something still keeps the object; see
-    /// [`Handle::upgrade`](waft_foundation::Handle::upgrade).
-    pub fn upgrade(self, app: &App) -> Option<Retained<AnyMultiDragPointerState>> {
-        Retained::upgrade(app, self)
-    }
-}
-
-/// A kept pointer state erases to `Retained<AnyMultiDragPointerState>` with
-/// [`Retained::into_erased`](waft_foundation::Retained::into_erased).
-impl<S: MultiDragPointerState> From<Handle<S>> for AnyMultiDragPointerState {
-    fn from(state: Handle<S>) -> AnyMultiDragPointerState {
-        state.as_pointer_state()
-    }
-}
-
-impl From<AnyMultiDragPointerState> for HandleId {
-    fn from(state: AnyMultiDragPointerState) -> HandleId {
-        state.id
-    }
-}
+waft_foundation::erased_handle!(AnyMultiDragPointerState: MultiDragPointerState => MultiDragPointerState::as_pointer_state);
 
 struct PointerStateVTable {
     set_entry: fn(&mut App, HandleId, GestureArenaEntry),

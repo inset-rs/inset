@@ -339,9 +339,7 @@ impl EdgeDraggingAutoScroller {
         let duration = Duration::from_millis((1000.0 / velocity_scalar).round() as u64);
         let animated = position.animate_to(app, new_offset, duration, Curves::linear());
         // Dart's closure keeps the auto scroller until the animation it awaits ends.
-        let kept = self
-            .upgrade(app)
-            .expect("an auto scroller that scrolls is kept by its owner");
+        let kept = self.keep(app);
         app.spawn(async move |cx| {
             let _kept = kept;
             animated.await;

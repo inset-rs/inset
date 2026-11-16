@@ -1037,12 +1037,11 @@ impl State for RadioPaintState {
             .or(radio_theme.splash_radius)
             .unwrap_or(K_RADIAL_REACTION_RADIUS);
         let current_states = toggleable_state.states(app);
-        let painter_ref = app
+        let painter = app
             .get(self)
             .painter
             .clone()
             .expect("created in init_state");
-        let painter = painter_ref.handle();
         painter.set_position(app, toggleable_state.position(app).erase());
         painter.set_reaction(app, toggleable_state.reaction(app).erase());
         painter.set_reaction_focus_fade(app, toggleable_state.reaction_focus_fade(app).erase());
@@ -1065,7 +1064,7 @@ impl State for RadioPaintState {
 
         CustomPaint::new()
             .size(size)
-            .painter(ToggleablePainterRef::new(painter_ref))
+            .painter(ToggleablePainterRef::new(painter))
             .into_widget()
     }
 }

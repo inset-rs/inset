@@ -2,7 +2,6 @@
 
 use std::any::TypeId;
 use std::fmt::{self, Debug};
-use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -631,29 +630,10 @@ pub struct AnyScrollController {
     vtable: &'static ScrollControllerVTable,
 }
 
-impl From<AnyScrollController> for HandleId {
-    fn from(handle: AnyScrollController) -> HandleId {
-        handle.id
-    }
-}
-
 /// A field Dart types as the erased object, kept: AnyScrollController with its count.
 pub type ScrollControllerRef = Retained<AnyScrollController>;
 
-impl AnyScrollController {
-    /// A [`ScrollControllerRef`] while something still keeps the object; see
-    /// [`Handle::upgrade`](waft_foundation::Handle::upgrade).
-    pub fn upgrade(self, app: &App) -> Option<ScrollControllerRef> {
-        Retained::upgrade(app, self)
-    }
-}
-
-/// A kept object erases to a [`ScrollControllerRef`] with [`Retained::erase`]: Dart's upcast.
-impl<T: ScrollControllerLeaf> From<Handle<T>> for AnyScrollController {
-    fn from(handle: Handle<T>) -> AnyScrollController {
-        handle.as_controller()
-    }
-}
+waft_foundation::erased_handle!(AnyScrollController: ScrollControllerLeaf => ScrollControllerLeaf::as_controller);
 
 impl AnyScrollController {
     fn data(self, app: &App) -> &ScrollControllerData {
@@ -868,23 +848,9 @@ impl AnyScrollController {
     }
 }
 
-impl PartialEq for AnyScrollController {
-    fn eq(&self, other: &AnyScrollController) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Eq for AnyScrollController {}
-
 impl Debug for AnyScrollController {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "AnyScrollController({:?})", self.id)
-    }
-}
-
-impl Hash for AnyScrollController {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
     }
 }
 

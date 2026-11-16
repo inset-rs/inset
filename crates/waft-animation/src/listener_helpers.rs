@@ -645,9 +645,8 @@ mod tests {
     fn a_lazy_host_starts_listening_on_the_first_listener_and_stops_on_the_last() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let host_ref = app.create(LazyHost::default());
-        let host = host_ref.handle();
-        let log = Rc::clone(&app.get(host).log);
+        let host = app.create(LazyHost::default());
+        let log = Rc::clone(&app.get(&host).log);
 
         let first = recording(&log, "first");
         let second = recording(&log, "second");
@@ -671,9 +670,8 @@ mod tests {
     fn removing_an_unregistered_listener_does_not_reach_did_unregister_listener() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let host_ref = app.create(LazyHost::default());
-        let host = host_ref.handle();
-        let log = Rc::clone(&app.get(host).log);
+        let host = app.create(LazyHost::default());
+        let log = Rc::clone(&app.get(&host).log);
 
         let registered = recording(&log, "registered");
         host.add_listener(&mut app, registered);
@@ -688,9 +686,8 @@ mod tests {
     fn a_lazy_host_starts_again_after_going_empty() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let host_ref = app.create(LazyHost::default());
-        let host = host_ref.handle();
-        let log = Rc::clone(&app.get(host).log);
+        let host = app.create(LazyHost::default());
+        let log = Rc::clone(&app.get(&host).log);
 
         let listener = recording(&log, "listener");
         host.add_listener(&mut app, listener.clone());
@@ -704,15 +701,14 @@ mod tests {
     fn an_eager_host_never_starts_or_stops_but_disposes() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let host_ref = app.create(EagerHost::default());
-        let host = host_ref.handle();
+        let host = app.create(EagerHost::default());
         let log: Log = Log::default();
 
         host.add_listener(&mut app, recording(&log, "listener"));
         assert!(!host.local_listeners_data(&app).is_empty());
 
-        AnimationEagerListenerMixin::dispose(host, &mut app);
-        assert!(app.get(host).disposed);
+        AnimationEagerListenerMixin::dispose(host.handle(), &mut app);
+        assert!(app.get(&host).disposed);
         assert!(
             host.local_listeners_data(&app).is_empty(),
             "dispose cleared the listeners"
@@ -723,8 +719,7 @@ mod tests {
     fn notify_listeners_calls_every_registered_listener() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let host_ref = app.create(EagerHost::default());
-        let host = host_ref.handle();
+        let host = app.create(EagerHost::default());
         let log: Log = Log::default();
 
         host.add_listener(&mut app, recording(&log, "one"));
@@ -747,14 +742,14 @@ mod tests {
     fn a_listener_removed_mid_dispatch_is_not_called() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let host_ref = app.create(EagerHost::default());
-        let host = host_ref.handle();
+        let host = app.create(EagerHost::default());
         let log: Log = Log::default();
 
         let doomed = recording(&log, "doomed");
         let remover = {
             let log = Rc::clone(&log);
             let doomed = doomed.clone();
+            let host = host.handle();
             Listener::new(move |app: &mut App| {
                 log.borrow_mut().push("remover".to_string());
                 host.remove_listener(app, &doomed);
@@ -777,9 +772,8 @@ mod tests {
     fn a_lazy_status_only_host_starts_and_stops_on_its_status_listeners() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let host_ref = app.create(ReverseHost::default());
-        let host = host_ref.handle();
-        let log = Rc::clone(&app.get(host).log);
+        let host = app.create(ReverseHost::default());
+        let log = Rc::clone(&app.get(&host).log);
 
         let listener = recording_status(&log, "status");
         host.add_status_listener(&mut app, listener.clone());
@@ -804,14 +798,14 @@ mod tests {
     fn a_status_listener_removed_mid_dispatch_is_not_called() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let host_ref = app.create(ReverseHost::default());
-        let host = host_ref.handle();
-        let log = Rc::clone(&app.get(host).log);
+        let host = app.create(ReverseHost::default());
+        let log = Rc::clone(&app.get(&host).log);
 
         let doomed = recording_status(&log, "doomed");
         let remover = {
             let log = Rc::clone(&log);
             let doomed = doomed.clone();
+            let host = host.handle();
             AnimationStatusListener::new(move |_status, app: &mut App| {
                 log.borrow_mut().push("remover".to_string());
                 host.remove_status_listener(app, &doomed);
@@ -841,12 +835,10 @@ mod tests {
     fn a_start_hook_can_register_on_another_host_through_the_app() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let parent_ref = app.create(EagerHost::default());
-        let parent = parent_ref.handle();
-        let proxy_ref = app.create(ProxyLikeHost::default());
-        let proxy = proxy_ref.handle();
-        let log = Rc::clone(&app.get(proxy).log);
-        app.get_mut(proxy).parent = Some(parent);
+        let parent = app.create(EagerHost::default());
+        let proxy = app.create(ProxyLikeHost::default());
+        let log = Rc::clone(&app.get(&proxy).log);
+        app.get_mut(&proxy).parent = Some(parent.handle());
 
         // No listeners yet, so the proxy has not subscribed to its parent.
         assert!(parent.local_listeners_data(&app).is_empty());
@@ -873,9 +865,8 @@ mod tests {
     fn clear_listeners_does_not_reach_did_unregister_listener() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
-        let host_ref = app.create(LazyHost::default());
-        let host = host_ref.handle();
-        let log = Rc::clone(&app.get(host).log);
+        let host = app.create(LazyHost::default());
+        let log = Rc::clone(&app.get(&host).log);
 
         host.add_listener(&mut app, recording(&log, "listener"));
         host.clear_listeners(&mut app);

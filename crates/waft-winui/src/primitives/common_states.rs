@@ -297,7 +297,7 @@ impl State for CommonStatesData {
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &CommonStates) {
-        if old_widget.focus_node.handle() != self.widget(app).focus_node.handle() {
+        if old_widget.focus_node != self.widget(app).focus_node {
             if let Some(node) = app.get_mut(self).focus_node.take() {
                 if app.get(self).owns_focus_node {
                     node.dispose(app);

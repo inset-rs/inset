@@ -79,9 +79,7 @@ fn mixin_counter() {
         counter: counter.clone(),
         shown: 0,
     });
-    // Closure listener: keep the listener; a second `Listener::new` would not match. It is
-    // registered on the counter, so it names the counter by its bare handle: a `Ref` captured
-    // here would keep the counter until the listener is removed.
+    // Closure listener: keep the listener; a second `Listener::new` would not match.
     let counter_handle = counter.handle();
     let on_print = Listener::new(move |app| {
         println!("  print       = {}", app.get(counter_handle).count);

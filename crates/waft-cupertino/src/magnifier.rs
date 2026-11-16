@@ -350,7 +350,7 @@ impl State for CupertinoTextMagnifierState {
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, old_widget: &CupertinoTextMagnifier) {
         let magnifier_info = self.widget(app).magnifier_info.clone();
-        if old_widget.magnifier_info.handle() != magnifier_info.handle() {
+        if old_widget.magnifier_info != magnifier_info {
             old_widget.magnifier_info.remove_listener(
                 app,
                 &Listener::handle_method(self, Self::determine_magnifier_position_and_focal_point),
