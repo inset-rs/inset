@@ -195,9 +195,9 @@ fn run_on(
             let app = ios::build(&project, profile, Destination::Simulator)?;
             ios::run_simulator(&app, &simulator)
         }
-        Target::IosDevice(id) => {
-            let app = ios::build(&project, profile, Destination::Device)?;
-            ios::run_device(&app, &id)
+        Target::IosDevice(device) => {
+            let app = ios::build(&project, profile, Destination::Device(Some(&device)))?;
+            ios::run_device(&app, &device)
         }
         Target::AndroidEmulator(avd) => {
             let device = android::boot_emulator(&avd)?;
@@ -235,12 +235,12 @@ fn build(
             let destination = if simulator {
                 Destination::Simulator
             } else {
-                Destination::Device
+                Destination::Device(None)
             };
             vec![ios::build(&project, profile, destination)?.path]
         }
         BuildTarget::Ipa => {
-            let app = ios::build(&project, profile, Destination::Device)?;
+            let app = ios::build(&project, profile, Destination::Device(None))?;
             vec![ios::ipa(&app, &project.out_dir("ipa", profile))?]
         }
         BuildTarget::Apk => vec![android::build(&project, profile, android::Abi::Arm64)?.path],

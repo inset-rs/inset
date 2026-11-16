@@ -94,6 +94,18 @@ pub fn pick_simulator<'a>(
     }
 }
 
+/// An iPhone or iPad `devicectl` reaches.
+#[derive(Clone, Debug)]
+pub struct IosDevice {
+    /// `devicectl`'s identifier, which it installs and launches by.
+    pub id: String,
+    /// The hardware's UDID, which Apple registers a device and a profile lists it by.
+    pub udid: String,
+    pub name: String,
+    /// `devicectl`'s tunnel state: `connected`, `disconnected` until it is reached, `unavailable`.
+    pub state: String,
+}
+
 /// Everything iOS that `run -d` can name: the simulators, and the devices attached now.
 pub fn listed_devices() -> Result<Vec<Device>> {
     let mut devices: Vec<Device> = simulators()?
@@ -105,12 +117,17 @@ pub fn listed_devices() -> Result<Vec<Device>> {
             state: simulator.state,
         })
         .collect();
-    devices.extend(connected_iphones());
+    devices.extend(connected_iphones().into_iter().map(|device| Device {
+        id: device.id,
+        name: device.name,
+        platform: "ios device",
+        state: device.state,
+    }));
     Ok(devices)
 }
 
-/// iPhones and iPads `devicectl` can reach. Empty when Xcode 15+ is absent.
-pub fn connected_iphones() -> Vec<Device> {
+/// The iPhones and iPads `devicectl` knows of, simulators aside. Empty when Xcode 15+ is absent.
+pub fn connected_iphones() -> Vec<IosDevice> {
     if !cfg!(target_os = "macos") || tools::which("xcrun").is_none() {
         return Vec::new();
     }
@@ -133,7 +150,7 @@ pub fn connected_iphones() -> Vec<Device> {
     parse_devicectl(&json)
 }
 
-fn parse_devicectl(json: &str) -> Vec<Device> {
+fn parse_devicectl(json: &str) -> Vec<IosDevice> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
         return Vec::new();
     };
@@ -143,17 +160,19 @@ fn parse_devicectl(json: &str) -> Vec<Device> {
         .into_iter()
         .flatten()
         .filter_map(|device| {
-            let platform = device.pointer("/hardwareProperties/platform")?.as_str()?;
-            if platform != "iOS" {
+            let hardware = device.get("hardwareProperties")?;
+            let platform = hardware.get("platform")?.as_str()?;
+            let reality = hardware.get("reality")?.as_str()?;
+            if platform != "iOS" || reality != "physical" {
                 return None;
             }
-            Some(Device {
+            Some(IosDevice {
                 id: device.get("identifier")?.as_str()?.to_owned(),
+                udid: hardware.get("udid")?.as_str()?.to_owned(),
                 name: device
                     .pointer("/deviceProperties/name")?
                     .as_str()?
                     .to_owned(),
-                platform: "ios device",
                 state: device
                     .pointer("/connectionProperties/tunnelState")
                     .and_then(|s| s.as_str())
@@ -169,13 +188,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn devicectl_listing_keeps_ios_devices() {
+    fn devicectl_listing_keeps_physical_ios_devices_with_their_udid() {
         let json = r#"{"result":{"devices":[
-            {"identifier":"ID1","hardwareProperties":{"platform":"iOS"},"deviceProperties":{"name":"Jane's iPhone"},"connectionProperties":{"tunnelState":"connected"}},
-            {"identifier":"ID2","hardwareProperties":{"platform":"macOS"},"deviceProperties":{"name":"Mac"}}]}}"#;
+            {"identifier":"ID1","hardwareProperties":{"platform":"iOS","reality":"physical","udid":"00008160-0001"},"deviceProperties":{"name":"Jane's iPhone"},"connectionProperties":{"tunnelState":"connected"}},
+            {"identifier":"ID2","hardwareProperties":{"platform":"macOS","reality":"physical","udid":"M"},"deviceProperties":{"name":"Mac"}},
+            {"identifier":"ID3","hardwareProperties":{"platform":"iOS","reality":"simulated","udid":"ID3"},"deviceProperties":{"name":"iPhone 16"}}]}}"#;
         let devices = parse_devicectl(json);
         assert_eq!(devices.len(), 1);
         assert_eq!(devices[0].id, "ID1");
+        assert_eq!(devices[0].udid, "00008160-0001");
         assert_eq!(devices[0].state, "connected");
     }
 

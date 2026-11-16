@@ -4,7 +4,7 @@
 use anyhow::{Result, bail};
 
 use crate::android;
-use crate::ios::{self, Simulator};
+use crate::ios::{self, IosDevice, Simulator};
 use crate::serve::Browser;
 
 pub struct Device {
@@ -20,8 +20,8 @@ pub enum Target {
         browser: Browser,
     },
     IosSimulator(Simulator),
-    /// An iPhone or iPad `devicectl` reaches, by identifier.
-    IosDevice(String),
+    /// An iPhone or iPad `devicectl` reaches.
+    IosDevice(IosDevice),
     /// An Android emulator to boot, by AVD name.
     AndroidEmulator(String),
     /// An Android device or emulator `adb` already reaches.
@@ -95,11 +95,12 @@ pub fn resolve(wanted: Option<&str>) -> Result<Target> {
     if let Some(simulator) = simulator {
         return Ok(Target::IosSimulator(simulator.clone()));
     }
-    if let Some(iphone) = ios::connected_iphones()
-        .into_iter()
-        .find(|d| d.id.eq_ignore_ascii_case(wanted) || d.name.eq_ignore_ascii_case(wanted))
-    {
-        return Ok(Target::IosDevice(iphone.id));
+    if let Some(iphone) = ios::connected_iphones().into_iter().find(|d| {
+        d.id.eq_ignore_ascii_case(wanted)
+            || d.udid.eq_ignore_ascii_case(wanted)
+            || d.name.eq_ignore_ascii_case(wanted)
+    }) {
+        return Ok(Target::IosDevice(iphone));
     }
     if let Some(target) = android::target_for(wanted)? {
         return Ok(target);

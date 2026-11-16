@@ -6,6 +6,7 @@
 
 mod devices;
 mod profiles;
+mod provisioning;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -14,49 +15,54 @@ use std::process::Command;
 use anyhow::{Context, Result, bail};
 use plist::{Dictionary, Value};
 
-pub use devices::{Simulator, connected_iphones, listed_devices, pick_simulator, simulators};
+pub use devices::{
+    IosDevice, Simulator, connected_iphones, listed_devices, pick_simulator, simulators,
+};
 
 use crate::apple::{self, SigningIdentity, SigningSettings};
 use crate::cargo::{self, Artifact, Build};
 use crate::icons;
 use crate::project::{Profile, Project};
 use crate::tools;
+use profiles::Signed;
+use provisioning::Request;
 
 const DEFAULT_MINIMUM_VERSION: &str = "15.0";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Destination {
+/// Where the app is built to run: a simulator, or a device, the one named or any of the team's.
+#[derive(Clone, Copy, Debug)]
+pub enum Destination<'a> {
     Simulator,
-    Device,
+    Device(Option<&'a IosDevice>),
 }
 
-impl Destination {
+impl Destination<'_> {
     fn triple(self) -> &'static str {
         match self {
             Destination::Simulator if cfg!(target_arch = "aarch64") => "aarch64-apple-ios-sim",
             Destination::Simulator => "x86_64-apple-ios",
-            Destination::Device => "aarch64-apple-ios",
+            Destination::Device(_) => "aarch64-apple-ios",
         }
     }
 
     fn dir_name(self) -> &'static str {
         match self {
             Destination::Simulator => "ios-simulator",
-            Destination::Device => "ios",
+            Destination::Device(_) => "ios",
         }
     }
 
     fn platform_name(self) -> &'static str {
         match self {
             Destination::Simulator => "iphonesimulator",
-            Destination::Device => "iphoneos",
+            Destination::Device(_) => "iphoneos",
         }
     }
 
     fn supported_platform(self) -> &'static str {
         match self {
             Destination::Simulator => "iPhoneSimulator",
-            Destination::Device => "iPhoneOS",
+            Destination::Device(_) => "iPhoneOS",
         }
     }
 }
@@ -70,11 +76,7 @@ pub fn build(project: &Project, profile: Profile, destination: Destination) -> R
     if !cfg!(target_os = "macos") {
         bail!("iOS builds need macOS with the Xcode command line tools");
     }
-    let minimum_version = project
-        .ios
-        .minimum_version
-        .clone()
-        .unwrap_or_else(|| DEFAULT_MINIMUM_VERSION.to_owned());
+    let minimum_version = minimum_version(project);
     tools::ensure_rust_target(&project.root, destination.triple())?;
     let executable = cargo::build(&Build {
         project,
@@ -107,12 +109,21 @@ pub fn build(project: &Project, profile: Profile, destination: Destination) -> R
     }
     match destination {
         Destination::Simulator => sign_ad_hoc(&app)?,
-        Destination::Device => sign_for_device(project, &app, &out)?,
+        Destination::Device(device) => sign_for_device(project, &app, &out, device)?,
     }
     Ok(App {
         path: app,
         bundle_id: project.identifier.clone(),
     })
+}
+
+/// `MinimumOSVersion`: the project's, or iOS 15.
+fn minimum_version(project: &Project) -> String {
+    project
+        .ios
+        .minimum_version
+        .clone()
+        .unwrap_or_else(|| DEFAULT_MINIMUM_VERSION.to_owned())
 }
 
 /// `Payload/<name>.app` zipped, the shape TestFlight and device installers take.
@@ -191,7 +202,7 @@ fn info_plist(
             .collect(),
         ),
     );
-    if destination == Destination::Device {
+    if matches!(destination, Destination::Device(_)) {
         put(
             "UIRequiredDeviceCapabilities",
             Value::Array(vec![text("arm64")]),
@@ -274,9 +285,39 @@ fn sign_ad_hoc(app: &Path) -> Result<()> {
     )
 }
 
-fn sign_for_device(project: &Project, app: &Path, out: &Path) -> Result<()> {
+/// Signs `app` with the keychain's Apple Development certificate and a profile that lets it run on
+/// `device`, or on the team's devices where none is named: one Xcode stored, or else one Xcode gets
+/// now, as `flutter run` has Xcode get it.
+fn sign_for_device(
+    project: &Project,
+    app: &Path,
+    out: &Path,
+    device: Option<&IosDevice>,
+) -> Result<()> {
     let identity = apple::development_identity(project.ios.team.as_deref())?;
-    let profile = profiles::provisioning_profile(&project.identifier, &identity.team)?;
+    let signed = Signed {
+        bundle_id: &project.identifier,
+        team: &identity.team,
+        device: device.map(|device| device.udid.as_str()),
+    };
+    let profile = match profiles::stored_profile(&signed) {
+        Some(profile) => profile,
+        None => {
+            let request = Request {
+                bundle_id: signed.bundle_id,
+                team: signed.team,
+                device: signed.device,
+                minimum_version: &minimum_version(project),
+            };
+            provisioning::obtain_profile(&request, &out.join("provisioning"))?;
+            profiles::stored_profile(&signed).with_context(|| {
+                format!(
+                    "Xcode got no provisioning profile for {} (team {}) that Waft finds among those it stores",
+                    signed.bundle_id, signed.team
+                )
+            })?
+        }
+    };
     fs::copy(&profile.path, app.join("embedded.mobileprovision"))?;
     let entitlements = out.join("entitlements.plist");
     plist::to_file_xml(
@@ -345,7 +386,8 @@ pub fn run_simulator(app: &App, simulator: &Simulator) -> Result<()> {
     )
 }
 
-pub fn run_device(app: &App, device: &str) -> Result<()> {
+pub fn run_device(app: &App, device: &IosDevice) -> Result<()> {
+    let device = device.id.as_str();
     tools::run(
         Command::new("xcrun")
             .args(["devicectl", "device", "install", "app", "--device", device])
@@ -431,7 +473,7 @@ mod tests {
     fn info_plist_says_why_the_app_uses_the_camera() {
         let mut project = test_project();
         project.usage_descriptions.camera = Some("Scans the code on a ticket.".into());
-        let plist = info_plist(&project, Destination::Device, "15.0", &[]);
+        let plist = info_plist(&project, Destination::Device(None), "15.0", &[]);
         let dict = plist.as_dictionary().unwrap();
         assert_eq!(
             dict.get("NSCameraUsageDescription").unwrap().as_string(),
