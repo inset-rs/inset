@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use super::{Java, Sdk};
+use super::sdk::{Java, Sdk};
 use crate::project::{Profile, Project, ReleaseKey, Secret};
 use crate::tools;
 
