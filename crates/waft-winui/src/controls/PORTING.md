@@ -738,9 +738,17 @@ TableView keeps WinUI's own structure, its rows on the kit's lazy list as `Items
 
 ## table_view/source.rs → `TableViewSource`
 
-- Change: `TableViewSource` holds the items it is given and takes the collection's changes as calls, `insert`, `remove` and `replace` for one item and `set_items` for a reset, and names a row by its item's index, which it moves as items are inserted and removed.
-  Reason: language — WinUI's source observes an `IObservableVector` of objects and follows each row by its object's identity, and Rust items are values with no identity.
-  Affect: An application changes the items through the source, and a value it updates is a `replace`, which deselects the row, where a WinUI item would raise `PropertyChanged` and stay selected.
+- Change: `TableViewSource` holds the items it is given and takes the collection's changes as calls, `insert`, `remove` and `replace` for one item, `update` for an item's values and `set_items` for a reset, and names a row by its item's index, which it moves as items are inserted and removed.
+  Reason: language — WinUI's source observes an `IObservableVector` of objects that raise `PropertyChanged`, and follows each row by its object's identity, and Rust items are values with no identity to observe.
+  Affect: An application changes the items through the source: `update` changes an item's values and keeps its row selected, as `PropertyChanged` does, and `replace` puts a new item in its place and deselects its row.
+
+- Change: `TableViewSource` places every inserted, removed, replaced or updated item at its exact row, among a filter's rows and within a sort's ties by source order, where WinUI's shaping rebuilds the whole view for a change under a filter without a sort, for an item that ties with a sorted row unless it is the last item, and for removing an item the filter left out.
+  Reason: deliberate improvement — each row of the view knows its item's source index, which WinUI's projection of objects does not carry, so the place source order gives can always be found.
+  Affect: The selection stays on its item through those changes, where WinUI's rebuild clears it.
+
+- Change: `TableViewSource::update` moves an updated item's row to its new place when a sort key changed, and adds or removes the row when the filter's answer changed, where WinUI's shaping sorts and filters again only on a collection change and leaves a row whose sort key changed through `PropertyChanged` at its old place until the next one (`ShapedItemsSource::ApplyIncrementalChange`, and the limitation `TableView_Sort.cpp` notes).
+  Reason: deliberate improvement — an update is a call on the source, so the source knows which item changed and can place it, where WinUI's source hears no `PropertyChanged`.
+  Affect: A live table stays sorted and filtered as its values change, and a row that moves keeps its selection without a `SelectionChanged`.
 
 - Change: `TableViewSource::sort` adds a sort axis on every call, where WinUI's `Sort` replaces the axis an earlier call declared with the same key selector.
   Reason: language — a Rust closure has no identity by which a later call could name an earlier axis.

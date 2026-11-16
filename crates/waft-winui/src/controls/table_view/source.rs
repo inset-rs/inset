@@ -1,6 +1,6 @@
 //! `TableViewSource` (`controls/dev/TableView/TableViewSource.cpp`) over the shaping engine it fronts (`controls/dev/ShapedItemsSource/ShapedItemsSource.cpp`, `controls/dev/TabularShaping/ShapingPipeline.cpp`): the application's items, one filter predicate, and sort axes in the order they were declared, projected as the view a `TableView` shows.
 //!
-//! The view is rebuilt from the items whenever a verb changes the shape: the filter runs first, over the items in source order, then a stable sort over the active axes, the first declared primary and each later one breaking ties within the earlier. An item inserted, removed or replaced in place is spliced into the view where the engine's incremental path can place it exactly (`ShapedItemsSource::ApplyIncrementalChange`, `TryApplyIncrementalSortedChange`), and rebuilds it where it cannot. Every operation notifies once, with the [`ViewChange`]s it made in order, which a `TableView` reads to move its selection as `SelectionNode::OnSourceListChanged` does; a verb that changes nothing (clearing an absent filter) does not notify. A later editor who changes the view without recording the change leaves a `TableView`'s selection on the wrong row.
+//! The view is rebuilt from the items whenever a verb changes the shape: the filter runs first, over the items in source order, then a stable sort over the active axes, the first declared primary and each later one breaking ties within the earlier. An item inserted, removed, replaced or updated in place is spliced into the view at its place (`ShapedItemsSource::ApplyIncrementalChange`, `TryApplyIncrementalSortedChange`), always exactly, for each row knows its item's source index: source order settles a tie and places a row among a filter's. Every operation notifies once, with the [`ViewChange`]s it made in order, which a `TableView` reads to move its selection as `SelectionNode::OnSourceListChanged` does; a verb that changes nothing (clearing an absent filter) does not notify. A later editor who changes the view without recording the change leaves a `TableView`'s selection on the wrong row.
 
 use std::cmp::Ordering;
 use std::fmt;
@@ -22,7 +22,7 @@ type ItemPredicate<T> = Rc<dyn Fn(&T) -> bool>;
 /// Orders two items: a key selector's comparison, or a column's `CustomSortComparer`.
 pub(crate) type SortComparer<T> = Rc<dyn Fn(&T, &T) -> Ordering>;
 
-/// One change an operation made, in order: the items' indices shifting (`ItemInserted`, `ItemRemoved`), and the view's rows changing as its `IObservableVector` raises them (`RowInserted`, `RowRemoved`, `RowReplaced`, `Reset`).
+/// One change an operation made, in order: the items' indices shifting (`ItemInserted`, `ItemRemoved`), and the view's rows changing as its `IObservableVector` raises them (`RowInserted`, `RowRemoved`, `RowReplaced`, `Reset`), and a row moving with its item (`RowMoved`), which an `IObservableVector` raises as a removal and an insertion.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ViewChange {
     /// An item was inserted at this index of the items; those at and after it moved up one.
@@ -35,6 +35,8 @@ pub(crate) enum ViewChange {
     RowRemoved(usize),
     /// The row at this index of the view shows a new item.
     RowReplaced(usize),
+    /// The row at the first index of the view moved to the second, its item the same.
+    RowMoved(usize, usize),
     /// The view was rebuilt.
     Reset,
 }
@@ -105,21 +107,31 @@ impl<T: 'static> TableViewSource<T> {
         self.notify_listeners(app);
     }
 
-    /// Inserts `item` at `index` of the items, as the collection raising `Add`: unshaped, the row is inserted at the same index; sorted, at its place among the rows, unless the filter leaves it out or an equal row makes source order decide where, when the view is rebuilt. A filter without a sort rebuilds the view.
+    /// Inserts `item` at `index` of the items, as the collection raising `Add`: its row goes to its place in the view, unless the filter leaves it out.
     pub fn insert(self: Handle<Self>, app: &mut App, index: usize, item: T) {
         app.get_mut(self).insert_item(index, Rc::new(item));
         self.notify_listeners(app);
     }
 
-    /// Removes the item at `index`, as the collection raising `Remove`: its row is removed, or the view rebuilt when it is filtered or sorted without that row.
+    /// Removes the item at `index`, as the collection raising `Remove`: its row, if shown, is removed.
     pub fn remove(self: Handle<Self>, app: &mut App, index: usize) {
         app.get_mut(self).remove_item(index);
         self.notify_listeners(app);
     }
 
-    /// Replaces the item at `index` with `item`, as the collection raising `Replace`: unshaped, its row shows the new item; sorted, the row is removed and the new item inserted at its place. A row replaced is no longer selected, as `SelectionNode` treats a replacement as a removal and an insertion.
+    /// Replaces the item at `index` with `item`, as the collection raising `Replace`: without a sort its row shows the new item; with one the row is removed and the new item inserted at its place. A row replaced is no longer selected, as `SelectionNode` treats a replacement as a removal and an insertion; [`update`](Self::update) keeps it.
     pub fn replace(self: Handle<Self>, app: &mut App, index: usize, item: T) {
         app.get_mut(self).replace_item(index, Rc::new(item));
+        self.notify_listeners(app);
+    }
+
+    /// Changes the item at `index` in place, as an item raising `PropertyChanged`: its row shows the new values and stays selected, and moves to its new place if a sort key changed, or leaves or joins the view if the filter's answer did.
+    pub fn update(self: Handle<Self>, app: &mut App, index: usize, change: impl FnOnce(&mut T)) {
+        let source = app.get_mut(self);
+        let item = Rc::get_mut(&mut source.items[index])
+            .expect("a cell holds an item only while it is built");
+        change(item);
+        source.update_item(index);
         self.notify_listeners(app);
     }
 
@@ -303,23 +315,35 @@ impl<T> TableViewSource<T> {
         Ordering::Equal
     }
 
-    /// `ShapingPipeline::SortedInsertPlacementFor`: the row after every row that sorts at or before the item, and whether a row sorts equal to it, when source order decides its place.
-    fn sorted_insert_placement(&self, index: usize) -> (usize, bool) {
-        let placement = self
-            .view
-            .partition_point(|&row| self.compare(index, row) != Ordering::Less);
-        let tied =
-            placement > 0 && self.compare(index, self.view[placement - 1]) == Ordering::Equal;
-        (placement, tied)
+    /// The view's order: the active axes, ties in source order as the stable sort leaves them; source order alone without a sort.
+    fn view_order(&self, a: usize, b: usize) -> Ordering {
+        self.compare(a, b).then(a.cmp(&b))
     }
 
-    /// Rebuilds the view in place of a splice the incremental path cannot make exactly.
-    fn refresh(&mut self) {
-        self.rebuild_view();
-        self.changes.push(ViewChange::Reset);
+    /// Where the item at `index` belongs among the view's rows: after every row the view's order puts before it. Exact because each row knows its source index, which settles a tie where WinUI's `SortedInsertPlacementFor` cannot.
+    fn placement(&self, index: usize) -> usize {
+        self.view
+            .partition_point(|&row| self.view_order(row, index) == Ordering::Less)
     }
 
-    /// `ApplyIncrementalChange` for `Add`.
+    /// Puts the item at `index` into the view if the filter keeps it.
+    fn insert_row(&mut self, index: usize) {
+        if self.passes_filter(index) {
+            let row = self.placement(index);
+            self.view.insert(row, index);
+            self.changes.push(ViewChange::RowInserted(row));
+        }
+    }
+
+    /// Takes the item at `index` out of the view, if it is shown.
+    fn remove_row(&mut self, index: usize) -> Option<usize> {
+        let row = self.view.iter().position(|&row| row == index)?;
+        self.view.remove(row);
+        self.changes.push(ViewChange::RowRemoved(row));
+        Some(row)
+    }
+
+    /// `Add`: the items after `index` move up one, and the new item's row goes to its place.
     fn insert_item(&mut self, index: usize, item: Rc<T>) {
         self.items.insert(index, item);
         for row in &mut self.view {
@@ -328,70 +352,57 @@ impl<T> TableViewSource<T> {
             }
         }
         self.changes = vec![ViewChange::ItemInserted(index)];
-        if !self.sorts.is_empty() {
-            self.try_insert_sorted(index);
-        } else if self.filter.is_some() {
-            // The projection is source order among the kept items, which an insertion index does not give.
-            self.refresh();
-        } else {
-            self.view.insert(index, index);
-            self.changes.push(ViewChange::RowInserted(index));
-        }
+        self.insert_row(index);
     }
 
-    /// `ApplyIncrementalChange` for `Remove`.
+    /// `Remove`: the item's row goes, if shown, and the items after it move down one.
     fn remove_item(&mut self, index: usize) {
-        let row = self.view.iter().position(|&row| row == index);
         self.changes = vec![ViewChange::ItemRemoved(index)];
-        let spliced = match row {
-            Some(row) if self.filter.is_none() || !self.sorts.is_empty() => {
-                self.view.remove(row);
-                self.changes.push(ViewChange::RowRemoved(row));
-                true
-            }
-            _ => false,
-        };
+        self.remove_row(index);
         self.items.remove(index);
         for row in &mut self.view {
             if *row > index {
                 *row -= 1;
             }
         }
-        if !spliced {
-            self.refresh();
-        }
     }
 
-    /// `ApplyIncrementalChange` for `Replace`: unshaped the row is set; sorted it is removed and the new item inserted at its place (`TryApplyIncrementalSortedChange`).
+    /// `Replace`: a new item in the old one's place. Without a sort its row keeps its place (`SetAt`); with one the old row is removed and the new item's inserted at its place, as `TryApplyIncrementalSortedChange` does.
     fn replace_item(&mut self, index: usize, item: Rc<T>) {
         self.items[index] = item;
         self.changes = Vec::new();
-        let row = self.view.iter().position(|&row| row == index);
-        match row {
-            Some(row) if self.sorts.is_empty() && self.filter.is_none() => {
+        let shown = self.view.iter().position(|&row| row == index);
+        match shown {
+            Some(row) if self.sorts.is_empty() && self.passes_filter(index) => {
                 self.changes.push(ViewChange::RowReplaced(row));
             }
-            Some(row) if !self.sorts.is_empty() => {
-                self.view.remove(row);
-                self.changes.push(ViewChange::RowRemoved(row));
-                self.try_insert_sorted(index);
+            _ => {
+                self.remove_row(index);
+                self.insert_row(index);
             }
-            _ => self.refresh(),
         }
     }
 
-    /// `TryApplyIncrementalSortedChange`'s `tryInsert`: a filtered-out item leaves the view as it is; an item that ties with a row is placed only when it is the last item, where source order puts it after every equal row, and the view is rebuilt otherwise.
-    fn try_insert_sorted(&mut self, index: usize) {
-        if !self.passes_filter(index) {
-            return;
+    /// An item's values changed in place, `PropertyChanged` without a collection change: its row stays and keeps its selection, moving to its new place if a sort key changed and leaving or joining the view if the filter's answer did.
+    fn update_item(&mut self, index: usize) {
+        self.changes = Vec::new();
+        let shown = self.view.iter().position(|&row| row == index);
+        let kept = self.passes_filter(index);
+        match (shown, kept) {
+            (Some(from), true) => {
+                self.view.remove(from);
+                let to = self.placement(index);
+                self.view.insert(to, index);
+                if to != from {
+                    self.changes.push(ViewChange::RowMoved(from, to));
+                }
+            }
+            (Some(_), false) => {
+                self.remove_row(index);
+            }
+            (None, true) => self.insert_row(index),
+            (None, false) => {}
         }
-        let (placement, tied) = self.sorted_insert_placement(index);
-        if tied && index + 1 != self.items.len() {
-            self.refresh();
-            return;
-        }
-        self.view.insert(placement, index);
-        self.changes.push(ViewChange::RowInserted(placement));
     }
 }
 
@@ -552,10 +563,11 @@ mod tests {
         assert_eq!(source.view(&app), [0, 1, 2, 3]);
     }
 
-    // `TryApplyIncrementalSortedChange`: an item goes in at its sorted place, one the filter
-    // leaves out changes no row, and an item tying with a row is placed only when it is last.
+    // `TryApplyIncrementalSortedChange`: an item goes in at its sorted place and one the filter
+    // leaves out changes no row; where WinUI rebuilds for an item tying with a row, source order
+    // places it.
     #[test]
-    fn sorted_changes_place_the_item_or_rebuild_on_a_tie() {
+    fn sorted_changes_place_the_item_and_source_order_settles_a_tie() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let source = people(&mut app);
@@ -589,8 +601,15 @@ mod tests {
         source.insert(&mut app, 0, ("Ann", 25));
         assert_eq!(
             changes(&app, &source),
-            [ViewChange::ItemInserted(0), ViewChange::Reset]
+            [ViewChange::ItemInserted(0), ViewChange::RowInserted(0)]
         );
+        assert_eq!(
+            names(&app, &source),
+            ["Ann", "Asha", "Lea", "Zed", "Bo", "Mina", "Diego"]
+        );
+        // Removing a filtered-out item moves the items after it and no row.
+        source.remove(&mut app, 1);
+        assert_eq!(changes(&app, &source), [ViewChange::ItemRemoved(1)]);
         assert_eq!(
             names(&app, &source),
             ["Ann", "Asha", "Lea", "Zed", "Bo", "Mina", "Diego"]
@@ -598,7 +617,7 @@ mod tests {
     }
 
     #[test]
-    fn a_sorted_replace_moves_the_row_and_a_filter_alone_rebuilds() {
+    fn a_sorted_replace_moves_the_row_and_a_filter_alone_places_it_in_source_order() {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let source = people(&mut app);
@@ -613,8 +632,41 @@ mod tests {
         source.remove(&mut app, 3);
         assert_eq!(
             changes(&app, &source),
-            [ViewChange::ItemRemoved(3), ViewChange::Reset]
+            [ViewChange::ItemRemoved(3), ViewChange::RowRemoved(1)]
         );
         assert_eq!(names(&app, &source), ["Zoe"]);
+        source.insert(&mut app, 0, ("Ann", 25));
+        assert_eq!(
+            changes(&app, &source),
+            [ViewChange::ItemInserted(0), ViewChange::RowInserted(0)]
+        );
+        source.insert(&mut app, 3, ("Kai", 25));
+        assert_eq!(
+            changes(&app, &source),
+            [ViewChange::ItemInserted(3), ViewChange::RowInserted(2)]
+        );
+        assert_eq!(names(&app, &source), ["Ann", "Zoe", "Kai"]);
+    }
+
+    // `update` is `PropertyChanged`: the row stays where it is unless a sort key moved it, and
+    // leaves or joins the view as the filter's answer changes.
+    #[test]
+    fn an_update_moves_a_row_only_when_its_place_changes() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let source = people(&mut app);
+        source.sort(&mut app, |p| p.1, SortDirection::Ascending);
+        assert_eq!(names(&app, &source), ["Asha", "Lea", "Mina", "Diego"]);
+        source.update(&mut app, 0, |p| p.0 = "Mia");
+        assert_eq!(changes(&app, &source), []);
+        source.update(&mut app, 0, |p| p.1 = 20);
+        assert_eq!(names(&app, &source), ["Mia", "Asha", "Lea", "Diego"]);
+        assert_eq!(changes(&app, &source), [ViewChange::RowMoved(2, 0)]);
+        source.filter(&mut app, |p| p.1 < 30);
+        source.update(&mut app, 2, |p| p.1 = 10);
+        assert_eq!(changes(&app, &source), [ViewChange::RowInserted(0)]);
+        source.update(&mut app, 2, |p| p.1 = 99);
+        assert_eq!(changes(&app, &source), [ViewChange::RowRemoved(0)]);
+        assert_eq!(names(&app, &source), ["Mia", "Asha", "Lea"]);
     }
 }

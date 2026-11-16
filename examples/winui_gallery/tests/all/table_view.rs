@@ -619,6 +619,83 @@ fn in_a_sorted_table_an_inserted_item_goes_to_its_place_and_the_selection_follow
     assert_eq!(t.selection.selected_item(&f.cell.borrow()), Some(4), "Lea");
 }
 
+#[test]
+fn an_update_keeps_the_selection_and_a_sort_key_moves_the_row_with_it() {
+    let (mut f, t) = fixture(Setup::default());
+    f.tap("Age");
+    settle(&mut f);
+    assert_eq!(order(&f), ["Mina", "Diego", "Asha", "Lea"]);
+    tap_label(&mut f, "Asha");
+    let events = t.selection_changes.borrow().len();
+    t.source
+        .update(&mut f.cell.borrow_mut(), 1, |p| p.city = "Pune");
+    f.cell.checkpoint();
+    settle(&mut f);
+    assert!(label(&f, "Pune").is_some(), "the row shows the new values");
+    assert_eq!(t.selection.selected_index(&f.cell.borrow()), Some(2));
+    t.source.update(&mut f.cell.borrow_mut(), 1, |p| p.age = 60);
+    f.cell.checkpoint();
+    settle(&mut f);
+    assert_eq!(
+        order(&f),
+        ["Asha", "Mina", "Diego", "Lea"],
+        "Age sorts descending"
+    );
+    assert_eq!(t.selection.selected_index(&f.cell.borrow()), Some(0));
+    assert_eq!(
+        t.selection.selected_item(&f.cell.borrow()),
+        Some(1),
+        "still Asha"
+    );
+    assert_eq!(
+        t.selection_changes.borrow().len(),
+        events,
+        "no SelectionChanged"
+    );
+}
+
+#[test]
+fn with_a_filter_or_a_tie_the_selection_still_follows_its_item() {
+    let (mut f, t) = fixture(Setup::default());
+    t.source.filter(&mut f.cell.borrow_mut(), |p| p.age < 40);
+    f.cell.checkpoint();
+    settle(&mut f);
+    tap_label(&mut f, "Lea");
+    t.source
+        .insert(&mut f.cell.borrow_mut(), 0, person("Bo", 29));
+    f.cell.checkpoint();
+    settle(&mut f);
+    assert_eq!(
+        t.selection.selected_item(&f.cell.borrow()),
+        Some(4),
+        "Lea, past Bo"
+    );
+    // Age sorts descending; Bo ties with Asha and Lea, and source order puts him first.
+    f.tap("Age");
+    settle(&mut f);
+    tap_label(&mut f, "Lea");
+    t.source
+        .insert(&mut f.cell.borrow_mut(), 0, person("Cy", 29));
+    f.cell.checkpoint();
+    settle(&mut f);
+    let cy = rect(&f, "Cy").top;
+    assert!(rect(&f, "Diego").top < cy && cy < rect(&f, "Bo").top);
+    assert_eq!(
+        t.selection.selected_item(&f.cell.borrow()),
+        Some(5),
+        "still Lea"
+    );
+    // A filtered-out item leaves without disturbing the selection.
+    t.source.remove(&mut f.cell.borrow_mut(), 2);
+    f.cell.checkpoint();
+    settle(&mut f);
+    assert_eq!(
+        t.selection.selected_item(&f.cell.borrow()),
+        Some(4),
+        "Lea, Mina gone"
+    );
+}
+
 // MARK: Empty state
 
 #[test]

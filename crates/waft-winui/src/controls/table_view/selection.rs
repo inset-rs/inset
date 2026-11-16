@@ -142,7 +142,7 @@ impl TableViewSelection {
         }
     }
 
-    /// `SelectionNode::OnSourceListChanged` for each change the source made, in order, notifying once: the item `SelectionChanged` last reported keeps naming the same item as the items move, a row inserted or removed moves the selection with its row and a removed selected row is deselected, and a rebuilt view starts over. The view has `row_count` rows after the changes.
+    /// `SelectionNode::OnSourceListChanged` for each change the source made, in order, notifying once: the item `SelectionChanged` last reported keeps naming the same item as the items move, a row inserted or removed moves the selection with its row and a removed selected row is deselected, a row moved keeps its selection, and a rebuilt view starts over. The view has `row_count` rows after the changes.
     pub(crate) fn source_changed(
         self: Handle<Self>,
         app: &mut App,
@@ -172,6 +172,16 @@ impl TableViewSelection {
                 }
                 ViewChange::RowInserted(row) => selection.model.on_items_added(row, 1),
                 ViewChange::RowRemoved(row) => selection.model.on_items_removed(row, 1),
+                ViewChange::RowMoved(from, to) => {
+                    // The row's item is the same, so the selection moves with it.
+                    let was_selected = selection.model.is_selected(from);
+                    selection.model.on_items_removed(from, 1);
+                    selection.model.on_items_added(to, 1);
+                    if was_selected {
+                        selection.model.select(to);
+                    }
+                    true
+                }
                 ViewChange::RowReplaced(row) => {
                     let removed = selection.model.on_items_removed(row, 1);
                     selection.model.on_items_added(row, 1) | removed
@@ -395,5 +405,18 @@ mod tests {
         assert_eq!(selection.take_change(&mut app), None);
         selection.set_source(&mut app, 3);
         assert_eq!(selection.take_change(&mut app), Some((Some(10), None)));
+    }
+
+    // A row the source moved keeps its selection; one moved across it shifts it.
+    #[test]
+    fn a_moved_row_keeps_its_selection() {
+        let cell = AppCell::new();
+        let mut app = cell.borrow_mut();
+        let selection = bound(&mut app, 3, true);
+        selection.select(&mut app, 2);
+        selection.source_changed(&mut app, &[ViewChange::RowMoved(2, 0)], 3);
+        assert_eq!(selection.selected_index(&app), Some(0));
+        selection.source_changed(&mut app, &[ViewChange::RowMoved(2, 0)], 3);
+        assert_eq!(selection.selected_index(&app), Some(1));
     }
 }
