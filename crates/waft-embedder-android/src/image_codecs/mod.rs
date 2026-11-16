@@ -1,16 +1,16 @@
 //! The system's image codecs on Android: the NDK's own decoder and encoder, `AImageDecoder` and
-//! `AndroidBitmap_compress`, which Java's `ImageDecoder` and `Bitmap.compress` stand on, and
-//! Java's `ExifInterface` for what neither reads. An image opens as a decoder over its bytes or
-//! over its file, which it reads only as far as it is asked, and reads what its header says, its
-//! format and size, and an animation's frames with their durations (`source`, over the NDK's
-//! decoder in `image_decoder`); and what its EXIF says, its orientation and how it was taken,
-//! through `ExifInterface` over JNI (`exif_interface`, `exif`). A frame decodes upright, as the
-//! decoder applies the file's orientation, at the size asked, into the app's memory in RGBA,
-//! premultiplied, in sRGB (`decoding`, `target_size`). Pixels encode from the app's memory as
-//! JPEG, PNG or lossy WebP (`encoding`, over the NDK's encoder in `bitmap_compress`). What a device
+//! `AndroidBitmap_compress`, which Java's `ImageDecoder` and `Bitmap.compress` stand on, and Java's
+//! `ExifInterface` for what neither reads. An image opens as a decoder over its bytes or over its
+//! file, which it reads only as far as it is asked, and reads what its header says, its format and
+//! size, and an animation's frames with their durations and how many times it plays (`source`, over
+//! the NDK's decoder in `image_decoder`); and what its EXIF says, its orientation and how it was
+//! taken, through `ExifInterface` over JNI (`exif_interface`, `exif`). A picture decodes upright,
+//! as the decoder applies the file's orientation, at the size asked, into the app's memory in RGBA,
+//! premultiplied, in sRGB (`decoding`, `target_size`). Pixels encode from the app's memory as JPEG,
+//! PNG or lossy WebP (`encoding`, over the NDK's encoder in `bitmap_compress`). What a device
 //! decodes beyond what every Android device does, and which formats' pictures its decoder turns
-//! upright itself, the host turning the others (`orienting`), are found by decoding a small
-//! picture of each such format, once, as the codecs are made (`abilities`, `formats`).
+//! upright itself, the host turning the others (`orienting`), are found by decoding a small picture
+//! of each such format, once, as the codecs are made (`abilities`, `formats`).
 //!
 //! There are no hardware codecs: `AImageDecoder` writes only memory its caller holds, and only
 //! Java's `ImageDecoder` makes a hardware bitmap, whose buffer the host does not reach.

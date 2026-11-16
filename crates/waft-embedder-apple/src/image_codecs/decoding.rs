@@ -1,9 +1,9 @@
-//! A frame decoded: Image I/O's thumbnail of it, made from the image itself rather than a small
-//! picture the file carries, with the file's orientation applied, and no larger than the size
-//! asked, which Image I/O takes as the length of the longer side. The thumbnail is drawn into the
-//! app's memory, in RGBA, premultiplied, in sRGB; or into an `IOSurface` of the app's own, a
-//! hardware buffer that holds no decoder's frame (`media::drawn_frames`), refused where it would
-//! be larger than an `IOSurface` the system makes.
+//! A picture decoded, a still image's, an animation's frame or a page: Image I/O's thumbnail of
+//! it, made from the image itself rather than a small picture the file carries, with the file's
+//! orientation applied, and no larger than the size asked, which Image I/O takes as the length of
+//! the longer side. The thumbnail is drawn into the app's memory, in RGBA, premultiplied, in sRGB;
+//! or into an `IOSurface` of the app's own, a hardware buffer that holds no decoder's frame
+//! (`media::drawn_frames`), refused where it would be larger than an `IOSurface` the system makes.
 
 use std::sync::Arc;
 
@@ -29,10 +29,10 @@ use crate::hardware_buffers::SurfaceBuffer;
 use crate::media::as_ns_string;
 use crate::media::drawn_frames::buffer_of;
 
-/// The work of decoding one frame at a size.
+/// The work of decoding one picture at a size.
 pub(super) struct Decoding {
     source: Arc<Source>,
-    frame: u32,
+    index: u32,
     /// The size it decodes at, upright.
     size: [usize; 2],
     /// The longest side Image I/O is asked for; none for the full size.
@@ -40,11 +40,11 @@ pub(super) struct Decoding {
 }
 
 impl Decoding {
-    /// Frame `frame` of `source`, whose image is `size` upright, scaled down to fit `max_size`;
+    /// Picture `index` of `source`, which is `size` upright, scaled down to fit `max_size`;
     /// why not, for a size of no pixels.
     pub(super) fn new(
         source: Arc<Source>,
-        frame: u32,
+        index: u32,
         size: Size,
         max_size: Option<Size>,
     ) -> Result<Decoding, ImageError> {
@@ -64,19 +64,19 @@ impl Decoding {
         let longer = size.width().max(size.height());
         Ok(Decoding {
             source,
-            frame,
+            index,
             size: [side(size.width()), side(size.height())],
             max_pixel_size: (scale < 1.0).then(|| side(longer)),
         })
     }
 
-    /// The frame in the app's memory, in RGBA, premultiplied.
+    /// The picture in the app's memory, in RGBA, premultiplied.
     pub(super) fn pixels(self) -> Result<PixelBuffer, ImageError> {
         let image = self.thumbnail()?;
         pixels_of(&image)
     }
 
-    /// The frame in a hardware buffer of the app's own, an `IOSurface` in BGRA, premultiplied:
+    /// The picture in a hardware buffer of the app's own, an `IOSurface` in BGRA, premultiplied:
     /// [`ImageErrorKind::TooLarge`] where it is larger than an `IOSurface` the system makes.
     pub(super) fn buffer(self) -> Result<SurfaceBuffer, ImageError> {
         // SAFETY: constants IOSurface exports for the life of the process.
@@ -99,23 +99,23 @@ impl Decoding {
         buffer_of(&image).map_err(|message| ImageError::new(ImageErrorKind::Other, message))
     }
 
-    /// Image I/O's thumbnail of the frame, at the size asked, upright.
+    /// Image I/O's thumbnail of the picture, at the size asked, upright.
     fn thumbnail(&self) -> Result<CFRetained<CGImage>, ImageError> {
         let options = self.thumbnail_options();
         let options: *const _ = &*options;
         // SAFETY: an NSDictionary is the CFDictionary it is toll-free bridged to.
         let options = unsafe { &*options.cast::<CFDictionary>() };
         // SAFETY: options of the types Image I/O's keys name, on a source of at least this many
-        // frames.
+        // pictures.
         let image = unsafe {
             self.source
                 .get()
-                .thumbnail_at_index(self.frame as usize, Some(options))
+                .thumbnail_at_index(self.index as usize, Some(options))
         };
         image.ok_or_else(|| {
             ImageError::new(
                 ImageErrorKind::Damaged,
-                format!("Image I/O decoded no picture of frame {}", self.frame),
+                format!("Image I/O decoded no picture {}", self.index),
             )
         })
     }
