@@ -1,5 +1,6 @@
 //! What only macOS offers an app, beyond `Platform`: hearing the system ask the app to show itself
-//! again, a window that slides in, hiding the whole app, a composition layer placed in a
+//! again, a window that slides in, hiding the whole app, keeping the app from being throttled
+//! while it does work the user is waiting on, a composition layer placed in a
 //! `CALayer` the app holds, and a layer the system draws shown as a composition layer's content.
 //! Flutter's framework has no API for any of them, so they are this embedder's own, and an app
 //! reaches them through [`WinitPlatform::macos`](crate::WinitPlatform::macos).
@@ -18,6 +19,8 @@ use waft_embedder::{Offset, WindowRef};
 #[cfg(target_os = "macos")]
 use crate::os;
 use crate::os::System;
+#[cfg(target_os = "macos")]
+use crate::os::UserActivity;
 use crate::os::capabilities::{ApplicationControl, WindowMotion};
 use crate::state::EmbedderState;
 use crate::system_requests::ReopenHandler;
@@ -59,6 +62,16 @@ impl MacOs {
     /// switcher, shows the windows that were visible.
     pub fn hide_application(&self) {
         System::hide_application();
+    }
+
+    /// Tells macOS the app is doing work the user is waiting on, such as compiling or running
+    /// another program, until the value is dropped, so App Nap does not throttle it:
+    /// `NSProcessInfo.beginActivityWithOptions:reason:` with
+    /// `NSActivityUserInitiatedAllowingIdleSystemSleep`, which still lets the system sleep while
+    /// idle. `reason` is kept for the system's logs.
+    #[cfg(target_os = "macos")]
+    pub fn begin_user_activity(&self, reason: &str) -> UserActivity {
+        UserActivity::begin(reason)
     }
 
     /// Places `layer` in `parent`, a `CALayer` the app holds, such as the root of a `CAContext`

@@ -14,7 +14,8 @@
 //! point, the Dock icon's and the status items), its pasteboard, a display link, composition
 //! layers, a view drawn into a composition layer of its own, its own answers about
 //! its screens, whether a window is occluded and its notices that a window was minimized, the
-//! fingers coming down on a trackpad, and the requests it makes of the application and what it says
+//! fingers coming down on a trackpad, the app's work macOS must not throttle, and the requests it
+//! makes of the application and what it says
 //! changed, among others (`macos`); Windows tells the clipboard's changes by its
 //! sequence number, and has a menu at a point, icons in the notification area, toasts, a display
 //! link and DirectComposition's composition layers, a view drawn on a visual of its own
@@ -31,6 +32,8 @@
 mod absent;
 #[cfg(target_os = "linux")]
 pub use linux::DmabufBuffer;
+#[cfg(target_os = "macos")]
+pub use macos::UserActivity;
 #[cfg(target_os = "macos")]
 pub(crate) use waft_embedder_apple::composition::{place_layer_in, show_system_layer};
 #[cfg(target_os = "macos")]

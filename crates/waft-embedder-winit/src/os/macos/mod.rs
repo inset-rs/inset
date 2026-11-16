@@ -4,7 +4,8 @@
 //! display (`frame_presentation`, `display_links`) and how a wait on a screen's vsync is served
 //! (`vsync_waiter`), the pointer (`pointer`), composition layers, a window's view's own among them,
 //! in its view's layer (`composition`, over the compositor iOS shares, `waft-embedder-apple`'s `composition`),
-//! whether a window is visible, for the app (`visibility`), the menus: the menu bar, pop-up menus,
+//! whether a window is visible, for the app (`visibility`), work macOS must not throttle while the
+//! user waits on it (`user_activity`), the menus: the menu bar, pop-up menus,
 //! the Dock icon's menu and the status items (`menus`), work off the main thread
 //! (`waft-embedder-apple`'s `work_queue`),
 //! what AppKit asks of the application through its delegate, how it quits and hiding it
@@ -39,9 +40,12 @@ mod screens;
 mod system_changes;
 mod title_bar;
 mod trackpad_touches;
+mod user_activity;
 mod visibility;
 mod vsync_waiter;
 mod window_chrome;
+
+pub use user_activity::UserActivity;
 
 use std::rc::Rc;
 use std::sync::Arc;
