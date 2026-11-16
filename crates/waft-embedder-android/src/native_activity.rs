@@ -16,10 +16,11 @@
 //! manager (the one the activity's resources hold now, where the glue reads the one it was
 //! handed), the saved state answered in memory `malloc` gave, and the waits where a window or an
 //! input queue is taken away. What is dropped: a thread for each activity and its pipe of
-//! commands; the waits at start, resume, pause and stop, which Android does not require, as the
-//! host takes no lifecycle; the wait at saving the state, since the glue knows the view the
-//! activity saves without asking the app; the wait at destruction for that thread to end; and the
-//! low memory callback, which the host takes no more than it did.
+//! commands; the start, which the host takes nothing from, as Flutter's `onStart` reports no
+//! lifecycle state; the waits at resume, pause and stop, which Android does not require, so the
+//! app hears them as it hears the rest (`lifecycle.rs`); the wait at saving the state, since the
+//! glue knows the view the activity saves without asking the app; the wait at destruction for that
+//! thread to end; and the low memory callback, which the host takes no more than it did.
 //!
 //! The invariants a later editor will break: a callback never calls the framework, and waits for
 //! the app only where `activity_events.rs` says; and nothing here keeps the `ANativeActivity`
@@ -45,6 +46,7 @@ use waft_embedder::ViewId;
 
 use crate::activity::Activity;
 use crate::activity_events::{ActivityEvent, tell, tell_and_wait};
+use crate::lifecycle::ActivityState;
 use crate::log::warn_to_log;
 
 /// What the glue keeps of an activity, from its creation to its destruction, as the activity's
@@ -113,9 +115,12 @@ unsafe fn saved_state_of<'a>(saved: *const c_void, size: usize) -> &'a [u8] {
     unsafe { std::slice::from_raw_parts(saved.cast(), size) }
 }
 
-/// Has Android call the host for what it tells `callbacks`' activity. The lifecycle's own steps,
-/// start, resume, pause and stop, and low memory are left unset: the host takes none of them.
+/// Has Android call the host for what it tells `callbacks`' activity. The start and low memory are
+/// left unset: the host takes neither.
 fn set_callbacks(callbacks: &mut ndk_sys::ANativeActivityCallbacks) {
+    callbacks.onResume = Some(on_resume);
+    callbacks.onPause = Some(on_pause);
+    callbacks.onStop = Some(on_stop);
     callbacks.onDestroy = Some(on_destroy);
     callbacks.onSaveInstanceState = Some(on_save_instance_state);
     callbacks.onConfigurationChanged = Some(on_configuration_changed);
@@ -201,6 +206,24 @@ fn current_configuration(
     // SAFETY: the same.
     let assets = unsafe { AssetManager::from_ptr(manager) };
     Ok(Configuration::from_asset_manager(&assets))
+}
+
+unsafe extern "C" fn on_resume(native: *mut ANativeActivity) {
+    // SAFETY: Android's, between the activity's creation and destruction.
+    let view = unsafe { view_of(native) };
+    tell(view, ActivityEvent::StateChanged(ActivityState::Resumed));
+}
+
+unsafe extern "C" fn on_pause(native: *mut ANativeActivity) {
+    // SAFETY: Android's, between the activity's creation and destruction.
+    let view = unsafe { view_of(native) };
+    tell(view, ActivityEvent::StateChanged(ActivityState::Paused));
+}
+
+unsafe extern "C" fn on_stop(native: *mut ANativeActivity) {
+    // SAFETY: Android's, between the activity's creation and destruction.
+    let view = unsafe { view_of(native) };
+    tell(view, ActivityEvent::StateChanged(ActivityState::Stopped));
 }
 
 /// Android destroys the activity: gone for good where it is finishing, and otherwise to be made

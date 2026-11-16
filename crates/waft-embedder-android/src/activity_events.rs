@@ -24,6 +24,7 @@ use ndk::native_window::NativeWindow;
 use waft_embedder::ViewId;
 
 use crate::activity::Activity;
+use crate::lifecycle::ActivityState;
 use crate::loop_waker::wake_app_loop;
 
 /// What was told since the loop last took it; `None` once the app's entry has returned.
@@ -65,6 +66,8 @@ pub(crate) enum ActivityEvent {
     ConfigurationChanged(Configuration),
     /// The activity's window gained or lost the focus.
     FocusChanged(bool),
+    /// The activity resumed, paused or stopped: `onResume`, `onPause` or `onStop`.
+    StateChanged(ActivityState),
     /// Android destroyed the activity: `finishing` where it is gone for good, as `isFinishing`
     /// says, and otherwise to make it again, as for a change the manifest does not absorb.
     Destroyed { finishing: bool },
