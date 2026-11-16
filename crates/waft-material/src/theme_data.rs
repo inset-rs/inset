@@ -32,6 +32,7 @@ use crate::chip_theme::ChipThemeData;
 use crate::color_scheme::ColorScheme;
 use crate::colors::{Colors, MaterialColor};
 use crate::constants::{K_DEFAULT_ICON_DARK_COLOR, K_DEFAULT_ICON_LIGHT_COLOR};
+use crate::date_picker_theme::DatePickerThemeData;
 use crate::dialog_theme::DialogThemeData;
 use crate::divider_theme::DividerThemeData;
 use crate::drawer_theme::DrawerThemeData;
@@ -72,6 +73,7 @@ use crate::tab_bar_theme::TabBarThemeData;
 use crate::text_button_theme::TextButtonThemeData;
 use crate::text_selection_theme::TextSelectionThemeData;
 use crate::text_theme::TextTheme;
+use crate::time_picker_theme::TimePickerThemeData;
 use crate::toggle_buttons_theme::ToggleButtonsThemeData;
 use crate::tooltip_theme::TooltipThemeData;
 use crate::typography::Typography;
@@ -634,6 +636,10 @@ pub struct ThemeData {
     ///
     /// This is the value returned from `ChipTheme::of`.
     pub chip_theme: ChipThemeData,
+    /// A theme for customizing the appearance and layout of [`DatePickerDialog`](crate::DatePickerDialog) widgets.
+    ///
+    /// This is the value returned from `DatePickerTheme::of`.
+    pub date_picker_theme: DatePickerThemeData,
     /// A theme for customizing the shape of a dialog.
     pub dialog_theme: DialogThemeData,
     /// A theme for customizing the appearance of [`Divider`](crate::Divider)s,
@@ -706,6 +712,8 @@ pub struct ThemeData {
     /// A theme for customizing the appearance for text selection in `TextField` and
     /// `SelectableText` widgets.
     pub text_selection_theme: TextSelectionThemeData,
+    /// A theme for customizing the appearance and layout of time pickers (`showTimePicker`).
+    pub time_picker_theme: TimePickerThemeData,
     /// Defines the default configuration of `ToggleButtons` widgets.
     pub toggle_buttons_theme: ToggleButtonsThemeData,
     /// A theme for customizing the appearance and layout of `Tooltip` widgets.
@@ -1148,6 +1156,11 @@ impl ThemeData {
             ),
             chip_theme: ChipThemeData::lerp(Some(&a.chip_theme), Some(&b.chip_theme), t)
                 .expect("both sides"),
+            date_picker_theme: DatePickerThemeData::lerp(
+                Some(&a.date_picker_theme),
+                Some(&b.date_picker_theme),
+                t,
+            ),
             dialog_theme: DialogThemeData::lerp(Some(&a.dialog_theme), Some(&b.dialog_theme), t),
             divider_theme: DividerThemeData::lerp(
                 Some(&a.divider_theme),
@@ -1273,6 +1286,11 @@ impl ThemeData {
                 t,
             )
             .expect("both sides"),
+            time_picker_theme: TimePickerThemeData::lerp(
+                Some(&a.time_picker_theme),
+                Some(&b.time_picker_theme),
+                t,
+            ),
             toggle_buttons_theme: ToggleButtonsThemeData::lerp(
                 Some(&a.toggle_buttons_theme),
                 Some(&b.toggle_buttons_theme),
@@ -1358,6 +1376,7 @@ impl PartialEq for ThemeData {
             && other.card_theme == self.card_theme
             && other.checkbox_theme == self.checkbox_theme
             && other.chip_theme == self.chip_theme
+            && other.date_picker_theme == self.date_picker_theme
             && other.dialog_theme == self.dialog_theme
             && other.divider_theme == self.divider_theme
             && other.drawer_theme == self.drawer_theme
@@ -1385,6 +1404,7 @@ impl PartialEq for ThemeData {
             && other.tab_bar_theme == self.tab_bar_theme
             && other.text_button_theme == self.text_button_theme
             && other.text_selection_theme == self.text_selection_theme
+            && other.time_picker_theme == self.time_picker_theme
             && other.toggle_buttons_theme == self.toggle_buttons_theme
             && other.tooltip_theme == self.tooltip_theme
             // DEPRECATED (newest deprecations at the bottom)
@@ -1460,6 +1480,7 @@ pub struct ThemeDataBuilder {
     card_theme: Option<Box<CardThemeData>>,
     checkbox_theme: Option<Box<CheckboxThemeData>>,
     chip_theme: Option<Box<ChipThemeData>>,
+    date_picker_theme: Option<Box<DatePickerThemeData>>,
     dialog_theme: Option<Box<DialogThemeData>>,
     divider_theme: Option<Box<DividerThemeData>>,
     drawer_theme: Option<Box<DrawerThemeData>>,
@@ -1487,6 +1508,7 @@ pub struct ThemeDataBuilder {
     tab_bar_theme: Option<Box<TabBarThemeData>>,
     text_button_theme: Option<Box<TextButtonThemeData>>,
     text_selection_theme: Option<Box<TextSelectionThemeData>>,
+    time_picker_theme: Option<Box<TimePickerThemeData>>,
     toggle_buttons_theme: Option<Box<ToggleButtonsThemeData>>,
     tooltip_theme: Option<Box<TooltipThemeData>>,
     // DEPRECATED (newest deprecations at the bottom)
@@ -1830,6 +1852,12 @@ impl ThemeDataBuilder {
         self
     }
 
+    /// Dart `ThemeData(datePickerTheme:)`.
+    pub fn date_picker_theme(mut self, date_picker_theme: DatePickerThemeData) -> ThemeDataBuilder {
+        self.date_picker_theme = Some(Box::new(date_picker_theme));
+        self
+    }
+
     /// Dart `ThemeData(dialogTheme:)`.
     pub fn dialog_theme(mut self, dialog_theme: DialogThemeData) -> ThemeDataBuilder {
         self.dialog_theme = Some(Box::new(dialog_theme));
@@ -2028,6 +2056,12 @@ impl ThemeDataBuilder {
         self
     }
 
+    /// Dart `ThemeData(timePickerTheme:)`.
+    pub fn time_picker_theme(mut self, time_picker_theme: TimePickerThemeData) -> ThemeDataBuilder {
+        self.time_picker_theme = Some(Box::new(time_picker_theme));
+        self
+    }
+
     /// Dart `ThemeData(toggleButtonsTheme:)`.
     pub fn toggle_buttons_theme(
         mut self,
@@ -2117,6 +2151,7 @@ impl ThemeDataBuilder {
             card_theme,
             checkbox_theme,
             chip_theme,
+            date_picker_theme,
             dialog_theme,
             divider_theme,
             drawer_theme,
@@ -2144,6 +2179,7 @@ impl ThemeDataBuilder {
             tab_bar_theme,
             text_button_theme,
             text_selection_theme,
+            time_picker_theme,
             toggle_buttons_theme,
             tooltip_theme,
             mut dialog_background_color,
@@ -2531,6 +2567,7 @@ impl ThemeDataBuilder {
             card_theme: unboxed_or_default(card_theme),
             checkbox_theme: unboxed_or_default(checkbox_theme),
             chip_theme: unboxed_or_default(chip_theme),
+            date_picker_theme: unboxed_or_default(date_picker_theme),
             dialog_theme: unboxed_or_default(dialog_theme),
             divider_theme: unboxed_or_default(divider_theme),
             drawer_theme: unboxed_or_default(drawer_theme),
@@ -2558,6 +2595,7 @@ impl ThemeDataBuilder {
             tab_bar_theme: unboxed_or_default(tab_bar_theme),
             text_button_theme: unboxed_or_default(text_button_theme),
             text_selection_theme: unboxed_or_default(text_selection_theme),
+            time_picker_theme: unboxed_or_default(time_picker_theme),
             toggle_buttons_theme: unboxed_or_default(toggle_buttons_theme),
             tooltip_theme: unboxed_or_default(tooltip_theme),
             // DEPRECATED (newest deprecations at the bottom)
@@ -2945,6 +2983,15 @@ impl ThemeDataCopyWith {
         self
     }
 
+    /// Dart `copyWith(datePickerTheme:)`.
+    pub fn date_picker_theme(
+        mut self,
+        date_picker_theme: DatePickerThemeData,
+    ) -> ThemeDataCopyWith {
+        self.theme.date_picker_theme = date_picker_theme;
+        self
+    }
+
     /// Dart `copyWith(dialogTheme:)`.
     pub fn dialog_theme(mut self, dialog_theme: DialogThemeData) -> ThemeDataCopyWith {
         self.theme.dialog_theme = dialog_theme;
@@ -3149,6 +3196,15 @@ impl ThemeDataCopyWith {
         text_selection_theme: TextSelectionThemeData,
     ) -> ThemeDataCopyWith {
         self.theme.text_selection_theme = text_selection_theme;
+        self
+    }
+
+    /// Dart `copyWith(timePickerTheme:)`.
+    pub fn time_picker_theme(
+        mut self,
+        time_picker_theme: TimePickerThemeData,
+    ) -> ThemeDataCopyWith {
+        self.theme.time_picker_theme = time_picker_theme;
         self
     }
 
@@ -4996,6 +5052,7 @@ mod tests {
                 Colors::WHITE,
                 TextStyle::new().color(Colors::BLACK),
             ),
+            date_picker_theme: DatePickerThemeData::new(),
             dialog_theme: DialogThemeData::new().background_color(Colors::BLACK),
             divider_theme: DividerThemeData::new().color(Colors::BLACK),
             drawer_theme: DrawerThemeData::new().elevation(1.0),
@@ -5059,6 +5116,7 @@ mod tests {
                     .build(),
             ),
             text_selection_theme: TextSelectionThemeData::new().cursor_color(Colors::BLACK),
+            time_picker_theme: TimePickerThemeData::new().background_color(Colors::BLACK),
             toggle_buttons_theme: ToggleButtonsThemeData::new()
                 .text_style(TextStyle::new().color(Colors::BLACK)),
             tooltip_theme: TooltipThemeData::new().height(100.0),
@@ -5137,6 +5195,7 @@ mod tests {
                 Colors::BLACK,
                 TextStyle::new().color(Colors::WHITE),
             ),
+            date_picker_theme: DatePickerThemeData::new().background_color(Colors::AMBER.primary()),
             dialog_theme: DialogThemeData::new().background_color(Colors::WHITE),
             divider_theme: DividerThemeData::new().color(Colors::WHITE),
             drawer_theme: DrawerThemeData::new().elevation(2.0),
@@ -5180,6 +5239,7 @@ mod tests {
             tab_bar_theme: TabBarThemeData::new().label_color(Colors::WHITE),
             text_button_theme: TextButtonThemeData::new(),
             text_selection_theme: TextSelectionThemeData::new().cursor_color(Colors::WHITE),
+            time_picker_theme: TimePickerThemeData::new().background_color(Colors::WHITE),
             toggle_buttons_theme: ToggleButtonsThemeData::new()
                 .text_style(TextStyle::new().color(Colors::WHITE)),
             tooltip_theme: TooltipThemeData::new().height(100.0),
@@ -5245,6 +5305,7 @@ mod tests {
             .card_theme(other_theme.card_theme.clone())
             .checkbox_theme(other_theme.checkbox_theme.clone())
             .chip_theme(other_theme.chip_theme.clone())
+            .date_picker_theme(other_theme.date_picker_theme.clone())
             .dialog_theme(other_theme.dialog_theme.clone())
             .divider_theme(other_theme.divider_theme.clone())
             .drawer_theme(other_theme.drawer_theme.clone())
@@ -5272,6 +5333,7 @@ mod tests {
             .tab_bar_theme(other_theme.tab_bar_theme.clone())
             .text_button_theme(other_theme.text_button_theme.clone())
             .text_selection_theme(other_theme.text_selection_theme.clone())
+            .time_picker_theme(other_theme.time_picker_theme.clone())
             .toggle_buttons_theme(other_theme.toggle_buttons_theme.clone())
             .tooltip_theme(other_theme.tooltip_theme.clone())
             // DEPRECATED (newest deprecations at the bottom)
@@ -5393,6 +5455,10 @@ mod tests {
             assert_eq!(theme_data_copy.card_theme, other_theme.card_theme);
             assert_eq!(theme_data_copy.checkbox_theme, other_theme.checkbox_theme);
             assert_eq!(theme_data_copy.chip_theme, other_theme.chip_theme);
+            assert_eq!(
+                theme_data_copy.date_picker_theme,
+                other_theme.date_picker_theme
+            );
             assert_eq!(theme_data_copy.dialog_theme, other_theme.dialog_theme);
             assert_eq!(theme_data_copy.divider_theme, other_theme.divider_theme);
             assert_eq!(theme_data_copy.drawer_theme, other_theme.drawer_theme);
@@ -5479,6 +5545,10 @@ mod tests {
             assert_eq!(
                 theme_data_copy.text_selection_theme.selection_handle_color,
                 other_theme.text_selection_theme.selection_handle_color
+            );
+            assert_eq!(
+                theme_data_copy.time_picker_theme,
+                other_theme.time_picker_theme
             );
             assert_eq!(
                 theme_data_copy.toggle_buttons_theme,

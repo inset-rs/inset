@@ -8514,8 +8514,8 @@ impl InputDecorationThemeDataGetters for InputDecoratorDefaultsM2 {
 }
 
 #[cfg(test)]
-mod tests {
-    mod common {
+pub(crate) mod tests {
+    pub(crate) mod common {
         // The helpers of input_decorator_test.dart.
         //
         // Flutter's cases measure text in flutter_test's FlutterTest font, which the test platform does
@@ -8911,6 +8911,39 @@ mod tests {
         /// Dart's `getBorderColor(tester)`.
         pub(super) fn get_border_color(tester: &WidgetTester) -> Color {
             get_border_side(tester).color
+        }
+
+        /// The border each `_BorderContainer`'s `_InputBorderPainter` paints now and its
+        /// `blendedColor`, in tree order: what Dart's tests read through the painter.
+        pub(crate) fn borders_and_container_colors(
+            tester: &WidgetTester,
+        ) -> Vec<(InputBorderRef, Color)> {
+            tester
+                .find_by_type::<BorderContainer>()
+                .into_iter()
+                .filter_map(|container| {
+                    tester
+                        .descendants_of_type::<CustomPaint>(container)
+                        .into_iter()
+                        .next()
+                })
+                .map(|element| {
+                    let app = tester.cell.borrow();
+                    let custom_paint = downcast_widget::<CustomPaint>(&**element.widget(&app))
+                        .expect("a CustomPaint");
+                    let painter = custom_paint
+                        .foreground_painter
+                        .as_ref()
+                        .and_then(|painter| painter.as_any().downcast_ref::<InputBorderPainter>())
+                        .expect("an _InputBorderPainter");
+                    (
+                        painter
+                            .border
+                            .evaluate(&app, painter.border_animation.handle()),
+                        painter.blended_color(&app),
+                    )
+                })
+                .collect()
         }
 
         /// Dart's `getContainerColor(tester)`: the painter's `blendedColor`.
