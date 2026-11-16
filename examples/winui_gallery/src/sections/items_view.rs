@@ -19,10 +19,10 @@ struct ItemsViewDemo;
 /// One selection per example, and what was last invoked.
 struct ItemsViewDemoState {
     state: StateData<ItemsViewDemo>,
-    single: Option<Ref<ItemsViewSelection>>,
-    multiple: Option<Ref<ItemsViewSelection>>,
-    extended: Option<Ref<ItemsViewSelection>>,
-    long: Option<Ref<ItemsViewSelection>>,
+    single: Option<Ref<ItemsViewSource>>,
+    multiple: Option<Ref<ItemsViewSource>>,
+    extended: Option<Ref<ItemsViewSource>>,
+    long: Option<Ref<ItemsViewSource>>,
     /// The row last invoked in the single-selection example.
     invoked: Option<usize>,
 }
@@ -65,8 +65,8 @@ impl ItemsViewDemoState {
     fn selection(
         self: Handle<Self>,
         app: &App,
-        pick: fn(&ItemsViewDemoState) -> Option<Ref<ItemsViewSelection>>,
-    ) -> Ref<ItemsViewSelection> {
+        pick: fn(&ItemsViewDemoState) -> Option<Ref<ItemsViewSource>>,
+    ) -> Ref<ItemsViewSource> {
         pick(app.get(self)).expect("made in `init_state`")
     }
 
@@ -79,16 +79,15 @@ impl ItemsViewDemoState {
     fn feeds(
         self: Handle<Self>,
         mode: ItemsViewSelectionMode,
-        selection: Ref<ItemsViewSelection>,
+        selection: Ref<ItemsViewSource>,
     ) -> WidgetRef {
-        let view = ItemsView::new(FEEDS.len(), |_, _, index| feed_row(index))
+        let view = ItemsView::new(selection, |_, _, index| feed_row(index))
             .selection_mode(mode)
-            .selection(selection)
             .selection_changed(move |app| self.changed().call(app));
         SizedBox::new().height(200.0).child(view).into_widget()
     }
 
-    fn caption(self: Handle<Self>, app: &App, selection: Ref<ItemsViewSelection>) -> String {
+    fn caption(self: Handle<Self>, app: &App, selection: Ref<ItemsViewSource>) -> String {
         let selected: Vec<&str> = selection
             .selected_indices(app)
             .into_iter()
@@ -145,7 +144,11 @@ impl State for ItemsViewDemoState {
     waft_widgets::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
-        let made: Vec<_> = (0..4).map(|_| ItemsViewSelection::new(app)).collect();
+        let counts = [FEEDS.len(), FEEDS.len(), FEEDS.len(), LONG_COUNT];
+        let made: Vec<_> = counts
+            .into_iter()
+            .map(|count| ItemsViewSource::new(app, count))
+            .collect();
         let state = app.get_mut(self);
         state.single = Some(made[0].clone());
         state.multiple = Some(made[1].clone());
@@ -182,8 +185,7 @@ impl State for ItemsViewDemoState {
         let single_view = SizedBox::new()
             .height(200.0)
             .child(
-                ItemsView::new(FEEDS.len(), |_, _, index| feed_row(index))
-                    .selection(single.clone())
+                ItemsView::new(single.clone(), |_, _, index| feed_row(index))
                     .is_item_invoked_enabled(true)
                     .item_invoked(move |app, index| {
                         self.set_state(app, |state| state.invoked = Some(index))
@@ -194,14 +196,13 @@ impl State for ItemsViewDemoState {
         let long_view = SizedBox::new()
             .height(240.0)
             .child(
-                ItemsView::new(LONG_COUNT, |_, _, index| {
+                ItemsView::new(long.clone(), |_, _, index| {
                     ItemContainer::new(SizedBox::new().height(LONG_ROW).child(row_content(
                         format!("Item {}", index + 1),
                         format!("Row {index} of {LONG_COUNT}"),
                     )))
                 })
                 .selection_mode(ItemsViewSelectionMode::Extended)
-                .selection(long.clone())
                 .item_extent(LONG_ROW)
                 .selection_changed(move |app| self.changed().call(app)),
             )

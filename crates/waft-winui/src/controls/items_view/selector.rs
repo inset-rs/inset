@@ -191,7 +191,7 @@ mod tests {
 
     fn with(mode: ItemsViewSelectionMode, count: usize) -> (Selector, SelectionModel) {
         let mut model = SelectionModel::default();
-        model.set_item_count(count);
+        model.set_source(count);
         let (selector, _) = Selector::for_mode(mode, &mut model);
         (selector, model)
     }

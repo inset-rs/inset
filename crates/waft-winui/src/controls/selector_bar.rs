@@ -134,6 +134,7 @@ impl StatefulWidget for SelectorBar {
             selection: None,
             listener: None,
             asked: None,
+            updating_items_view_selection: false,
         }
     }
 }
@@ -143,16 +144,19 @@ pub struct SelectorBarState {
     state: StateData<SelectorBar>,
 
     /// `PART_ItemsView`'s selection, which follows `SelectedItem` both ways.
-    selection: Option<Ref<ItemsViewSelection>>,
+    selection: Option<Ref<ItemsViewSource>>,
     listener: Option<Listener>,
 
     /// The selection asked for since the application last built the bar, so that a click and the
     /// focus it brings ask once.
     asked: Option<Option<usize>>,
+
+    /// Whether `UpdateItemsViewSelectionFromSelectedItem` is changing `PART_ItemsView`'s selection, which it must not ask the application about.
+    updating_items_view_selection: bool,
 }
 
 impl SelectorBarState {
-    fn items_view_selection(self: Handle<Self>, app: &App) -> Handle<ItemsViewSelection> {
+    fn items_view_selection(self: Handle<Self>, app: &App) -> Handle<ItemsViewSource> {
         app.get(self)
             .selection
             .handle()
@@ -167,16 +171,24 @@ impl SelectorBarState {
     /// `UpdateItemsViewSelectionFromSelectedItem`.
     fn update_items_view_selection_from_selected_item(self: Handle<Self>, app: &mut App) {
         let selection = self.items_view_selection(app);
-        selection.set_item_count(app, self.widget(app).items.len());
+        app.get_mut(self).updating_items_view_selection = true;
+        let count = self.widget(app).items.len();
+        if selection.item_count(app) != count {
+            selection.set_items(app, count);
+        }
         selection.set_selection_mode(app, ItemsViewSelectionMode::Single);
         match self.selected_item(app) {
             Some(index) => selection.select(app, index),
             None => selection.deselect_all(app),
         }
+        app.get_mut(self).updating_items_view_selection = false;
     }
 
     /// `UpdateSelectedItemFromItemsView`: asks the application to select what `PART_ItemsView` selected.
     fn update_selected_item_from_items_view(self: Handle<Self>, app: &mut App) {
+        if app.get(self).updating_items_view_selection {
+            return;
+        }
         let selected = self.items_view_selection(app).selected_index(app);
         if selected == self.selected_item(app) {
             return;
@@ -224,7 +236,8 @@ impl State for SelectorBarState {
     waft_widgets::state_accessors!();
 
     fn init_state(self: Handle<Self>, app: &mut App) {
-        let selection = ItemsViewSelection::new(app);
+        let count = self.widget(app).items.len();
+        let selection = ItemsViewSource::new(app, count);
         let listener = Listener::new(move |app| self.update_selected_item_from_items_view(app));
         app.get_mut(self).selection = Some(selection.clone());
         self.update_items_view_selection_from_selected_item(app);
@@ -251,20 +264,18 @@ impl State for SelectorBarState {
         let items = widget.items.clone();
         // `PART_ItemsView`: the items in a horizontal `StackLayout`, at the bar's `Padding`, in a
         // scroll view that scrolls sideways.
-        let items_view = ItemsView::new(items.len(), move |_, _, index| {
-            Self::item_container(&items[index])
-        })
+        let items_view = ItemsView::new(
+            app.get(self)
+                .selection
+                .clone()
+                .expect("made in `init_state`"),
+            move |_, _, index| Self::item_container(&items[index]),
+        )
         .layout(StackLayout {
             orientation: Axis::Horizontal,
             spacing: 0.0,
         })
         .selection_mode(ItemsViewSelectionMode::Single)
-        .selection(
-            app.get(self)
-                .selection
-                .clone()
-                .expect("made in `init_state`"),
-        )
         .padding(widget.padding.unwrap_or(resources.selector_bar_padding));
         let bar = Focus::new(items_view)
             .can_request_focus(false)

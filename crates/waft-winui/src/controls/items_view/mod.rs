@@ -6,7 +6,7 @@ mod selection;
 mod selection_model;
 mod selector;
 
-pub use selection::ItemsViewSelection;
+pub use selection::ItemsViewSource;
 pub use selector::ItemsViewSelectionMode;
 
 use crate::FocusState;
@@ -47,8 +47,8 @@ impl Default for StackLayout {
 /// XAML `ItemsView`.
 #[derive(Clone)]
 pub struct ItemsView {
-    /// How many items there are: `ItemsSource`'s count.
-    pub item_count: usize,
+    /// `ItemsSource` and the selection over it: the items' count, what is selected and the current item.
+    pub items_source: Ref<ItemsViewSource>,
     /// `ItemTemplate`.
     pub item_template: ItemsViewItemTemplate,
     /// `Layout`.
@@ -57,8 +57,6 @@ pub struct ItemsView {
     pub selection_mode: ItemsViewSelectionMode,
     /// `IsItemInvokedEnabled`.
     pub is_item_invoked_enabled: bool,
-    /// The selection and current item; `None` makes the view keep its own.
-    pub selection: Option<Ref<ItemsViewSelection>>,
     /// `ItemInvoked`.
     pub item_invoked: Option<ItemsViewItemInvoked>,
     /// `SelectionChanged`.
@@ -72,18 +70,17 @@ pub struct ItemsView {
 }
 
 impl ItemsView {
-    /// Creates a view of `item_count` items, each the container `item_template` builds.
+    /// Creates a view of the items of `items_source`, each the container `item_template` builds. A view whose application does not care about selection still gives a source, for the count, and sets [`selection_mode`](Self::selection_mode) to [`ItemsViewSelectionMode::None`].
     pub fn new(
-        item_count: usize,
+        items_source: Ref<ItemsViewSource>,
         item_template: impl Fn(&mut App, BuildContext, usize) -> ItemContainer + 'static,
     ) -> Self {
         Self {
-            item_count,
+            items_source,
             item_template: Rc::new(item_template),
             layout: StackLayout::default(),
             selection_mode: ItemsViewSelectionMode::default(),
             is_item_invoked_enabled: false,
-            selection: None,
             item_invoked: None,
             selection_changed: None,
             padding: [0.0; 4],
@@ -107,12 +104,6 @@ impl ItemsView {
     /// Sets the XAML `IsItemInvokedEnabled`.
     pub fn is_item_invoked_enabled(mut self, value: bool) -> Self {
         self.is_item_invoked_enabled = value;
-        self
-    }
-
-    /// Gives the view the application's selection.
-    pub fn selection(mut self, value: Ref<ItemsViewSelection>) -> Self {
-        self.selection = Some(value);
         self
     }
 
@@ -150,7 +141,7 @@ impl ItemsView {
 impl fmt::Debug for ItemsView {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ItemsView")
-            .field("item_count", &self.item_count)
+            .field("items_source", &self.items_source)
             .field("layout", &self.layout)
             .field("selection_mode", &self.selection_mode)
             .field("is_item_invoked_enabled", &self.is_item_invoked_enabled)
@@ -168,9 +159,9 @@ impl StatefulWidget for ItemsView {
     fn create_state(&self) -> ItemsViewState {
         ItemsViewState {
             state: StateData::new(),
-            own_selection: None,
             listening: None,
             seen_revision: 0,
+            shown_count: 0,
             scroll: None,
             items: HashMap::new(),
             extents: HashMap::new(),
@@ -223,12 +214,12 @@ struct BuiltItem {
 /// The selection the view listens to, the built items, their measured extents and the scrolling.
 pub struct ItemsViewState {
     state: StateData<ItemsView>,
-    /// The selection made for a view given none.
-    own_selection: Option<Ref<ItemsViewSelection>>,
     /// The selection listened to, and the listener.
-    listening: Option<(Ref<ItemsViewSelection>, Listener)>,
+    listening: Option<(Ref<ItemsViewSource>, Listener)>,
     /// The selection's revision `SelectionChanged` was last raised for.
     seen_revision: u64,
+    /// The count the list was last built for.
+    shown_count: usize,
     scroll: Option<Ref<ScrollViewportController>>,
     /// The built containers by index.
     items: HashMap<usize, BuiltItem>,
@@ -243,16 +234,17 @@ pub struct ItemsViewState {
 // MARK: The containers' view of the view
 
 impl ItemsViewState {
-    pub(crate) fn selection(self: Handle<Self>, app: &App) -> Handle<ItemsViewSelection> {
-        self.widget(app)
-            .selection
-            .handle()
-            .or(app.get(self).own_selection.handle())
-            .expect("made in `init_state`")
+    /// The view's `ItemsSource`, which also holds the selection over the items.
+    pub(crate) fn items_source(self: Handle<Self>, app: &App) -> Handle<ItemsViewSource> {
+        self.widget(app).items_source.handle()
+    }
+
+    fn item_count(self: Handle<Self>, app: &App) -> usize {
+        self.items_source(app).item_count(app)
     }
 
     pub(crate) fn is_selected(self: Handle<Self>, app: &App, index: usize) -> bool {
-        self.selection(app).is_selected(app, index)
+        self.items_source(app).is_selected(app, index)
     }
 
     pub(crate) fn is_tab_stop(self: Handle<Self>, app: &App, index: usize) -> bool {
@@ -360,7 +352,8 @@ impl ItemsViewState {
 
     /// `OnItemsViewElementGettingFocus`: the focused item becomes the current one.
     pub(crate) fn item_got_focus(self: Handle<Self>, app: &mut App, index: usize) {
-        self.selection(app).set_current_item_index(app, Some(index));
+        self.items_source(app)
+            .set_current_item_index(app, Some(index));
         self.sync_tab_stop(app);
     }
 }
@@ -398,7 +391,7 @@ impl ItemsViewState {
             self.bring_item_into_view(app, index, None);
         }
         let (ctrl, shift) = modifiers(app);
-        let selection = self.selection(app);
+        let selection = self.items_source(app);
         selection.interacted(app, index, ctrl, shift);
         self.deselect_unselectable_items(app);
         handled
@@ -406,7 +399,7 @@ impl ItemsViewState {
 
     /// `ApplySelectionModelSelectionChange` while processing an interaction: a built item that cannot be selected is deselected, the anchor kept.
     fn deselect_unselectable_items(self: Handle<Self>, app: &mut App) {
-        let selection = self.selection(app);
+        let selection = self.items_source(app);
         let items: Vec<(usize, BuiltItem)> = app
             .get(self)
             .items
@@ -430,7 +423,8 @@ impl ItemsViewState {
         index: usize,
         focus: FocusState,
     ) -> bool {
-        self.selection(app).set_current_item_index(app, Some(index));
+        self.items_source(app)
+            .set_current_item_index(app, Some(index));
         self.sync_tab_stop(app);
         let Some(item) = app.get(self).items.get(&index).copied() else {
             return false;
@@ -474,7 +468,7 @@ impl ItemsViewState {
             ItemsViewSelectionMode::Multiple | ItemsViewSelectionMode::Extended
         );
         if multiple && HardwareKeyboard::instance(app).is_control_pressed(app) {
-            self.selection(app).select_all(app);
+            self.items_source(app).select_all(app);
             KeyEventResult::Handled
         } else {
             KeyEventResult::Ignored
@@ -487,7 +481,7 @@ impl ItemsViewState {
         app: &mut App,
         key: LogicalKeyboardKey,
     ) -> Option<Navigation> {
-        let count = self.widget(app).item_count;
+        let count = self.item_count(app);
         if count == 0 {
             return None;
         }
@@ -515,8 +509,8 @@ impl ItemsViewState {
 
     /// `GetAdjacentFocusableElementByIndex`: the nearest item before or after the current one that can take the focus; an item not built is taken to be able to.
     fn adjacent_focusable_index(self: Handle<Self>, app: &App, previous: bool) -> Option<usize> {
-        let count = self.widget(app).item_count;
-        let current = self.selection(app).current_item_index(app)?;
+        let count = self.item_count(app);
+        let current = self.items_source(app).current_item_index(app)?;
         let mut index = current;
         loop {
             index = if previous {
@@ -559,7 +553,7 @@ impl ItemsViewState {
             self.set_current_element_index(app, index, FocusState::Keyboard);
             self.bring_item_into_view(app, index, None);
             let (ctrl, shift) = modifiers(app);
-            self.selection(app).focused(app, index, ctrl, shift);
+            self.items_source(app).focused(app, index, ctrl, shift);
             self.deselect_unselectable_items(app);
             return;
         }
@@ -573,7 +567,7 @@ impl ItemsViewState {
 
     /// Page Up and Page Down: the last item wholly in view in that direction, or when the current item already is, the last a page further.
     fn page(self: Handle<Self>, app: &mut App, forward: bool) {
-        let current = self.selection(app).current_item_index(app);
+        let current = self.items_source(app).current_item_index(app);
         if let Some(target) = self.last_visible_index(app, forward)
             && Some(target) != current
         {
@@ -747,7 +741,7 @@ fn global_rect(app: &mut App, context: BuildContext) -> Option<Rect> {
 impl ItemsViewState {
     /// `TabNavigation="Once"`: Tab stops at the current item, else at the selected one in `Single` mode, else at the first built.
     fn tab_stop_index(self: Handle<Self>, app: &App) -> Option<usize> {
-        let selection = self.selection(app);
+        let selection = self.items_source(app);
         if let Some(current) = selection.current_item_index(app) {
             return Some(current);
         }
@@ -761,7 +755,7 @@ impl ItemsViewState {
         let tab_stop = self.tab_stop_index(app);
         if app.get(self).tab_stop != tab_stop {
             app.get_mut(self).tab_stop = tab_stop;
-            self.selection(app).notify_items(app);
+            self.items_source(app).notify_items(app);
         }
     }
 
@@ -772,11 +766,17 @@ impl ItemsViewState {
 
     /// The selection heard: `SelectionChanged` is raised for a change of the selection, not of the current item.
     fn selection_heard(self: Handle<Self>, app: &mut App) {
-        let revision = self.selection(app).revision(app);
+        let source = self.items_source(app);
+        let revision = source.revision(app);
         if revision == app.get(self).seen_revision {
             return;
         }
         app.get_mut(self).seen_revision = revision;
+        let count = source.item_count(app);
+        if count != app.get(self).shown_count {
+            app.get_mut(self).shown_count = count;
+            self.set_state(app, |_| {});
+        }
         if let Some(changed) = self.widget(app).selection_changed.clone() {
             changed.call(app);
         }
@@ -784,7 +784,7 @@ impl ItemsViewState {
 
     /// Listens to the selection in use, and gives it the view's mode and count.
     fn sync_selection(self: Handle<Self>, app: &mut App) {
-        let selection = self.selection(app);
+        let selection = self.items_source(app);
         if app
             .get(self)
             .listening
@@ -804,7 +804,7 @@ impl ItemsViewState {
             state.seen_revision = revision;
         }
         let widget = self.widget(app).clone();
-        selection.set_item_count(app, widget.item_count);
+        app.get_mut(self).shown_count = selection.item_count(app);
         selection.set_selection_mode(app, widget.selection_mode);
     }
 
@@ -842,7 +842,7 @@ impl ItemsViewState {
             scoped,
             Rc::new(move |app, _, size| self.item_measured(app, index, size)),
         );
-        let spacing = if index + 1 < widget.item_count {
+        let spacing = if index + 1 < self.item_count(app) {
             widget.layout.spacing
         } else {
             0.0
@@ -865,7 +865,7 @@ impl ItemsViewState {
                 let list = ListView::builder(move |app, context, index| {
                     Some(self.item(app, context, index as usize))
                 })
-                .item_count(widget.item_count as i32)
+                .item_count(self.item_count(app) as i32)
                 .build()
                 .controller(scroll.native_controller(app))
                 .padding(padding);
@@ -881,7 +881,7 @@ impl ItemsViewState {
             }
             Axis::Horizontal => {
                 let context = self.context(app);
-                let items: Vec<WidgetRef> = (0..widget.item_count)
+                let items: Vec<WidgetRef> = (0..self.item_count(app))
                     .map(|index| self.item(app, context, index))
                     .collect();
                 let row = Padding::new(padding)
@@ -905,27 +905,16 @@ impl State for ItemsViewState {
         InputDevice::initialize(app);
         let scroll = ScrollViewportController::new(app);
         app.get_mut(self).scroll = Some(scroll);
-        if self.widget(app).selection.is_none() {
-            let own = ItemsViewSelection::new(app);
-            app.get_mut(self).own_selection = Some(own);
-        }
         self.sync_selection(app);
     }
 
     fn did_update_widget(self: Handle<Self>, app: &mut App, _old: &ItemsView) {
-        if self.widget(app).selection.is_none() && app.get(self).own_selection.is_none() {
-            let own = ItemsViewSelection::new(app);
-            app.get_mut(self).own_selection = Some(own);
-        }
         self.sync_selection(app);
     }
 
     fn dispose(self: Handle<Self>, app: &mut App) {
         if let Some((selection, listener)) = app.get_mut(self).listening.take() {
             selection.remove_listener(app, &listener);
-        }
-        if let Some(own) = app.get_mut(self).own_selection.take() {
-            own.dispose(app);
         }
         if let Some(scroll) = app.get_mut(self).scroll.take() {
             scroll.dispose(app);
