@@ -2721,9 +2721,15 @@ pub(crate) mod tests {
     }
 
     impl TextInputHost for TestView {
-        fn start(&self, _configuration: &TextInputConfiguration) {}
+        fn set_client(&self, _configuration: &TextInputConfiguration) {}
 
-        fn stop(&self) {}
+        fn show(&self) {}
+
+        fn update_config(&self, _configuration: &TextInputConfiguration) {}
+
+        fn clear_client(&self) {}
+
+        fn hide(&self) {}
 
         fn set_editing_state(&self, _value: &TextEditingValue) {}
 

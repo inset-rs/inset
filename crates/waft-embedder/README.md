@@ -144,6 +144,7 @@ Every embedder takes the same shape, whatever its system; the winit embedder (`c
 **Text input**
 - `ViewHost::text_input`, `TextInputHost`, `EmbedderClient::text_input_*`
 - Input methods can read and change the text around the caret, so composing, dead keys and accents work.
+- Hear the framework's calls as Flutter's engine does: a new client, show, the client's configuration changed, the client cleared, hide; a host whose input method keeps its state by the field it edits, as UIKit does, gives each new client a field of its own.
 
 **Cursor**
 - `ViewHost::activate_system_cursor`

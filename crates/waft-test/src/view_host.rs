@@ -77,8 +77,11 @@ impl ViewHost for TestViewHost {
 /// What a [`TestViewHost`]'s text input was asked.
 #[derive(Clone, Debug, PartialEq)]
 pub enum TextInputCall {
-    Start(TextInputConfiguration),
-    Stop,
+    SetClient(TextInputConfiguration),
+    Show,
+    UpdateConfig(TextInputConfiguration),
+    ClearClient,
+    Hide,
     SetEditingState(TextEditingValue),
     SetComposingRect(Rect),
     SetCaretRect(Rect),
@@ -99,12 +102,24 @@ impl RecordingTextInput {
 }
 
 impl TextInputHost for RecordingTextInput {
-    fn start(&self, configuration: &TextInputConfiguration) {
-        self.record(TextInputCall::Start(configuration.clone()));
+    fn set_client(&self, configuration: &TextInputConfiguration) {
+        self.record(TextInputCall::SetClient(configuration.clone()));
     }
 
-    fn stop(&self) {
-        self.record(TextInputCall::Stop);
+    fn show(&self) {
+        self.record(TextInputCall::Show);
+    }
+
+    fn update_config(&self, configuration: &TextInputConfiguration) {
+        self.record(TextInputCall::UpdateConfig(configuration.clone()));
+    }
+
+    fn clear_client(&self) {
+        self.record(TextInputCall::ClearClient);
+    }
+
+    fn hide(&self) {
+        self.record(TextInputCall::Hide);
     }
 
     fn set_editing_state(&self, value: &TextEditingValue) {
