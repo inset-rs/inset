@@ -941,4 +941,3 @@ fn a_carousel_item_reports_its_tap() {
         );
     });
 }
-

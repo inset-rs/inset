@@ -162,7 +162,9 @@ pub fn debug_check_has_widgets_localizations(app: &mut App, context: BuildContex
 pub fn debug_check_has_table(app: &App, context: BuildContext) -> bool {
     if cfg!(debug_assertions)
         && downcast_widget::<Table>(&**context.widget(app)).is_none()
-        && context.find_ancestor_widget_of_exact_type::<Table>(app).is_none()
+        && context
+            .find_ancestor_widget_of_exact_type::<Table>(app)
+            .is_none()
     {
         panic!(
             "No Table widget found.\n{} widgets require a Table widget ancestor.",
