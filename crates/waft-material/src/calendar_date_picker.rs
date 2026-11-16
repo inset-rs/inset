@@ -4160,8 +4160,7 @@ pub(crate) mod tests {
 
     use crate::colors::Colors;
     use crate::date_picker_theme::DatePickerThemeData;
-    use crate::test_support::{PaintCall, paints_calls};
-
+    use waft_rendering::testing::{PaintCall, assert_paints, paints};
     fn states_of(
         states_for_day: &Rc<RefCell<HashMap<DateTime, WidgetStates>>>,
         day: DateTime,
@@ -4282,7 +4281,7 @@ pub(crate) mod tests {
         let ops = tester.nearest_material_ops(text(tester, "2"));
         // The current day is painted with a circle outline.
         assert!(
-            paints_calls(&ops, &[PaintCall::stroked_circle(color, 1.0)]),
+            paints(&ops, &[PaintCall::stroked_circle(color, 1.0)]).is_ok(),
             "no 1px outline of {color:?} among {} ops",
             ops.len()
         );
@@ -4443,10 +4442,7 @@ pub(crate) mod tests {
             assert_eq!(tester.find_text("January 2020").len(), 1);
             // Selected date should be painted with a colored circle.
             let ops = tester.nearest_material_ops(text(tester, "21"));
-            assert!(paints_calls(
-                &ops,
-                &[PaintCall::circle(Some(selected_color))]
-            ));
+            assert_paints(&ops, &[PaintCall::circle(Some(selected_color))]);
 
             // Change to the updated initialDate.
             // This should have no effect, the initialDate is only the _initial_ date.
@@ -4459,10 +4455,7 @@ pub(crate) mod tests {
             assert!(!has_text(tester, "February 1976"));
             // Selected date should be painted with a colored circle.
             let ops = tester.nearest_material_ops(text(tester, "21"));
-            assert!(paints_calls(
-                &ops,
-                &[PaintCall::circle(Some(selected_color))]
-            ));
+            assert_paints(&ops, &[PaintCall::circle(Some(selected_color))]);
         });
     }
 
@@ -4627,6 +4620,7 @@ pub(crate) mod tests {
                 y: None,
                 radius: Some(35.0),
                 color: Some(overlay_color),
+                style: None,
             };
             // Dart's `paintsExactlyCountTimes(#clipPath, n)`: Waft records every clip, a
             // `clipRect` as well, as a path, so this counts the clips of the size of a day's
@@ -4643,7 +4637,7 @@ pub(crate) mod tests {
             };
 
             let ops = tester.painted_ops_deep(outer_ink_features(tester).as_object());
-            assert!(!paints_calls(&ops, std::slice::from_ref(&overlay)));
+            assert!(paints(&ops, std::slice::from_ref(&overlay)).is_err());
             assert_eq!(clips(&ops), 0);
 
             let mut mouse = TestPointer::mouse(1, 0);
@@ -4653,10 +4647,7 @@ pub(crate) mod tests {
             tester.move_to(&mut mouse, at, false);
             tester.pump_and_settle();
             let ops = tester.painted_ops_deep(outer_ink_features(tester).as_object());
-            assert!(paints_calls(
-                &ops,
-                &[PaintCall::circle(None), overlay.clone()]
-            ));
+            assert_paints(&ops, &[PaintCall::circle(None), overlay.clone()]);
             assert_eq!(clips(&ops), 1);
         });
     }

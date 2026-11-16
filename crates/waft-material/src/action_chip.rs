@@ -251,9 +251,11 @@ pub(crate) mod tests {
     use crate::material::Material;
     use crate::motion::Durations;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{PaintCall, PaintInspection, material_app, paints_calls};
+    use crate::test_support::{PaintInspection, material_app};
+
     use crate::theme_data::ThemeData;
     use crate::tooltip::tests::{m2, m3};
+    use waft_rendering::testing::{PaintCall, paints};
 
     const LABEL: &str = "action chip";
 
@@ -425,16 +427,17 @@ pub(crate) mod tests {
     ) -> bool {
         let render = tester.render_box_of(material_box(tester, chip)).as_object();
         let ops = tester.painted_ops_deep(render);
-        paints_calls(&ops, &[PaintCall::rrect(Some(color))])
+        paints(&ops, &[PaintCall::rrect(Some(color))]).is_ok()
     }
 
     /// Dart's `paints..path(color: color)` on `getMaterialBox(tester, chip)`.
     pub(crate) fn paints_path_color(tester: &WidgetTester, chip: AnyElement, color: Color) -> bool {
         let render = tester.render_box_of(material_box(tester, chip)).as_object();
-        paints_calls(
+        paints(
             &tester.painted_ops_deep(render),
             &[PaintCall::path(Some(color))],
         )
+        .is_ok()
     }
 
     pub(crate) fn raw_chips(tester: &WidgetTester) -> Vec<AnyElement> {

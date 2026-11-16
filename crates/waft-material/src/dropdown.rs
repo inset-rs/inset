@@ -6325,11 +6325,16 @@ mod tests {
             tester.pump(); // Pump a frame for autofocus to take effect (although it shouldn't).
             assert!(!has_primary_focus(tester, focus_node.handle()));
             let button = tester.render_object(&button_key);
-            assert!(!tester.paints_rrect(
-                button,
-                waft_embedder::RRect::from_ltrbxy(0.0, 0.0, 104.0, 48.0, 4.0, 4.0),
-                Some(Color::new(0xff00ff00)),
-            ));
+            assert!(
+                waft_rendering::testing::paints(
+                    &tester.painted_ops(button),
+                    &[waft_rendering::testing::PaintCall::rrect_at(
+                        waft_embedder::RRect::from_ltrbxy(0.0, 0.0, 104.0, 48.0, 4.0, 4.0),
+                        Some(Color::new(0xff00ff00))
+                    )]
+                )
+                .is_err()
+            );
         });
     }
 
@@ -7199,11 +7204,13 @@ mod tests {
                 panic!("the fourth rrect is the menu's fill, with no mask filter");
             };
             assert_eq!(paint.color, Colors::GREY.shade50().into());
-            assert!(tester.paints_rrect(
-                tester.render_box_of(custom_paint).as_object(),
-                waft_embedder::RRect::from_ltrbxy(0.0, 0.0, 112.0, 47.0, 2.0, 2.0),
-                Some(Colors::GREY.shade50()),
-            ));
+            waft_rendering::testing::assert_paints(
+                &tester.painted_ops(tester.render_box_of(custom_paint).as_object()),
+                &[waft_rendering::testing::PaintCall::rrect_at(
+                    waft_embedder::RRect::from_ltrbxy(0.0, 0.0, 112.0, 47.0, 2.0, 2.0),
+                    Some(Colors::GREY.shade50()),
+                )],
+            );
         });
     }
 
@@ -7572,7 +7579,10 @@ mod tests {
             .filter(|op| matches!(op, Op::DrawPath { .. } | Op::RRectBlur { .. }))
             .count();
         assert!(rrects >= 4);
-        assert!(tester.paints_rrect(render, rrect, None));
+        waft_rendering::testing::assert_paints(
+            &tester.painted_ops(render),
+            &[waft_rendering::testing::PaintCall::rrect_at(rrect, None)],
+        );
     }
 
     #[test]

@@ -1747,7 +1747,6 @@ impl Debug for OverscrollIndicatorNotification {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
     use waft_foundation::OptionRetained;
 
     use waft_embedder::TextDirection;
@@ -1784,6 +1783,7 @@ mod tests {
     use crate::widgets::single_child_scroll_view::SingleChildScrollView;
     use crate::widgets::sliver::SliverList;
     use crate::widgets::text::Text;
+    use waft_rendering::testing::{PaintCall, RecordedCall, assert_paints, paints};
 
     // ---- what these tests read from a `WidgetTester` ----
 
@@ -1868,7 +1868,7 @@ mod tests {
     /// The calls `custom_paint` makes for its foreground painter when it paints at offset
     /// zero, the recording Flutter's `paints` matcher walks; the child's own calls, which
     /// these patterns skip over, are left out.
-    fn painted(tester: &WidgetTester, custom_paint: RenderHandle<RenderCustomPaint>) -> Vec<Call> {
+    fn painted(tester: &WidgetTester, custom_paint: RenderHandle<RenderCustomPaint>) -> Vec<Op> {
         let mut app = tester.cell.borrow_mut();
         let painter = custom_paint
             .foreground_painter(&app)
@@ -1878,7 +1878,7 @@ mod tests {
         canvas.save();
         painter.paint(&mut app, &mut canvas, size);
         canvas.restore();
-        canvas.build().ops().iter().map(Call::of).collect()
+        canvas.build().ops().to_vec()
     }
 
     /// `box.localToGlobal(Offset.zero)` for the box under `key`.
@@ -1898,175 +1898,24 @@ mod tests {
         (0.0..WidgetTester::SIZE.height()).contains(&top)
     }
 
-    // ---- flutter_test's `paints` matcher, over the calls a recording canvas keeps ----
-
-    /// One recorded canvas call, as the matcher sees it.
-    #[derive(Clone, Debug)]
-    enum Call {
-        Save,
-        Restore,
-        Translate(f64, f64),
-        Scale(f64, f64),
-        Rotate(f64),
-        ClipRect,
-        Circle { x: f64, color: u32 },
-        Other,
-    }
-
-    impl Call {
-        fn of(op: &Op) -> Call {
-            match op {
-                Op::Save | Op::SaveLayer { .. } => Call::Save,
-                Op::Restore => Call::Restore,
-                Op::Transform(matrix) => {
-                    let [a, b, c, d, tx, ty] = matrix.to_affine().map(f64::from);
-                    if b == 0.0 && c == 0.0 && a == 1.0 && d == 1.0 {
-                        Call::Translate(tx, ty)
-                    } else if b == 0.0 && c == 0.0 && tx == 0.0 && ty == 0.0 {
-                        Call::Scale(a, d)
-                    } else {
-                        Call::Rotate(b.atan2(a))
-                    }
-                }
-                Op::ClipPath { .. } => Call::ClipRect,
-                Op::DrawPath { path, paint, .. } => {
-                    let bounds = path.bounds();
-                    let channel = |value: f32| (value * 255.0).round() as u32;
-                    Call::Circle {
-                        x: f64::from(bounds.x + bounds.width / 2.0),
-                        color: channel(paint.color.a) << 24
-                            | channel(paint.color.r) << 16
-                            | channel(paint.color.g) << 8
-                            | channel(paint.color.b),
-                    }
-                }
-                _ => Call::Other,
-            }
-        }
-    }
-
-    /// Equal to within what the f32 a canvas transform and Waft's `Matrix4` keep, where
-    /// Dart's are f64.
-    fn near(actual: f64, expected: f64) -> bool {
-        (actual - expected).abs() < 1e-4
-    }
-
-    type SomethingPredicate<'a> = Box<dyn FnMut(&Call) -> Result<bool, String> + 'a>;
-
-    /// One step of a `paints` pattern.
-    enum Paints<'a> {
-        Save,
-        Restore,
-        Translate(Option<f64>, Option<f64>),
-        Scale(Option<f64>, Option<f64>),
-        Rotate(Option<f64>),
-        Circle { x: Option<f64>, color: Option<u32> },
-        SaveRestore,
-        Something(SomethingPredicate<'a>),
-    }
-
-    fn circle() -> Paints<'static> {
-        Paints::Circle {
-            x: None,
-            color: None,
-        }
-    }
-
-    /// The method a step looks for, by its call's variant.
-    fn same_method(step: &Paints, call: &Call) -> bool {
-        matches!(
-            (step, call),
-            (Paints::Save, Call::Save)
-                | (Paints::Restore, Call::Restore)
-                | (Paints::Translate(..), Call::Translate(..))
-                | (Paints::Scale(..), Call::Scale(..))
-                | (Paints::Rotate(..), Call::Rotate(..))
-                | (Paints::Circle { .. }, Call::Circle { .. })
-        )
-    }
-
-    /// Flutter's `paints` matcher: each step looks forward from where the last one stopped
-    /// for its method, and fails on that call if its arguments differ.
-    fn paints(calls: &[Call], pattern: Vec<Paints>) -> Result<(), String> {
-        if calls.is_empty() {
-            return Err("it painted nothing".to_string());
-        }
-        let mut index = 0;
-        for mut step in pattern {
-            if index >= calls.len() {
-                return Err(format!("it painted less than expected: {calls:?}"));
-            }
-            match &mut step {
-                Paints::SaveRestore => {
-                    while !matches!(calls[index], Call::Save) {
-                        index += 1;
-                        if index >= calls.len() {
-                            return Err(format!("no save: {calls:?}"));
-                        }
-                    }
-                    let mut depth = 1;
-                    while depth > 0 {
-                        index += 1;
-                        if index >= calls.len() {
-                            return Err(format!("no matching restore: {calls:?}"));
-                        }
-                        match calls[index] {
-                            Call::Save => depth += 1,
-                            Call::Restore => depth -= 1,
-                            _ => {}
-                        }
-                    }
-                    index += 1;
-                }
-                Paints::Something(predicate) => loop {
-                    if index >= calls.len() {
-                        return Err(format!("nothing matched the predicate: {calls:?}"));
-                    }
-                    let result = predicate(&calls[index])?;
-                    index += 1;
-                    if result {
-                        break;
-                    }
-                },
-                _ => {
-                    while !same_method(&step, &calls[index]) {
-                        index += 1;
-                        if index >= calls.len() {
-                            return Err(format!("the method was not called: {calls:?}"));
-                        }
-                    }
-                    let fits = match (&step, &calls[index]) {
-                        (Paints::Translate(x, y), Call::Translate(tx, ty))
-                        | (Paints::Scale(x, y), Call::Scale(tx, ty)) => {
-                            x.is_none_or(|x| near(*tx, x)) && y.is_none_or(|y| near(*ty, y))
-                        }
-                        (Paints::Rotate(angle), Call::Rotate(actual)) => {
-                            angle.is_none_or(|angle| near(*actual, angle))
-                        }
-                        (Paints::Circle { x, color }, Call::Circle { x: cx, color: c }) => {
-                            x.is_none_or(|x| near(*cx, x)) && color.is_none_or(|color| color == *c)
-                        }
-                        _ => true,
-                    };
-                    if !fits {
-                        return Err(format!("call {index} has other arguments: {calls:?}"));
-                    }
-                    index += 1;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn assert_paints(calls: &[Call], pattern: Vec<Paints>) {
-        if let Err(message) = paints(calls, pattern) {
-            panic!("{message}");
-        }
-    }
-
     /// The glow tests' `doesNotOverscroll`: `isNot(paints..circle())`.
-    fn does_not_overscroll(calls: &[Call]) -> bool {
-        paints(calls, vec![circle()]).is_err()
+    fn does_not_overscroll(ops: &[Op]) -> bool {
+        paints(ops, &[circle()]).is_err()
+    }
+
+    fn circle() -> PaintCall {
+        PaintCall::circle(None)
+    }
+
+    /// `..circle(x:, color:)`.
+    fn circle_with(x: Option<f64>, color: Option<u32>) -> PaintCall {
+        PaintCall::Circle {
+            x,
+            y: None,
+            radius: None,
+            color: color.map(Color::new),
+            style: None,
+        }
     }
 
     // ---- the trees the tests build ----
@@ -2163,10 +2012,7 @@ mod tests {
             slow_drag(tester, Offset::new(200.0, 200.0), Offset::new(0.0, 5.0), 3);
             assert_paints(
                 &painted(tester, painter),
-                vec![Paints::Circle {
-                    x: None,
-                    color: Some(0x0DFFFFFF),
-                }],
+                &[circle_with(None, Some(0x0DFFFFFF))],
             );
 
             tester.pump_and_settle_by(Duration::from_secs(1));
@@ -2198,8 +2044,8 @@ mod tests {
             let inner_painter = *paints_found.last().expect("two CustomPaints");
 
             slow_drag(tester, Offset::new(200.0, 200.0), Offset::new(0.0, 5.0), 1);
-            assert_paints(&painted(tester, outer_painter), vec![circle()]);
-            assert_paints(&painted(tester, inner_painter), vec![circle()]);
+            assert_paints(&painted(tester, outer_painter), &[circle()]);
+            assert_paints(&painted(tester, inner_painter), &[circle()]);
         });
     }
 
@@ -2211,34 +2057,28 @@ mod tests {
             let painter = custom_paint(tester);
 
             slow_drag(tester, Offset::new(400.0, 200.0), Offset::new(0.0, 10.0), 1);
-            assert_paints(
-                &painted(tester, painter),
-                vec![Paints::Circle {
-                    x: Some(400.0),
-                    color: None,
-                }],
-            );
+            assert_paints(&painted(tester, painter), &[circle_with(Some(400.0), None)]);
             slow_drag(tester, Offset::new(100.0, 200.0), Offset::new(0.0, 10.0), 2);
             assert_paints(
                 &painted(tester, painter),
-                vec![Paints::Something(Box::new(|call| match call {
-                    Call::Circle { x, .. } if *x < 400.0 => Ok(true),
-                    Call::Circle { .. } => Err(
+                &[PaintCall::something(|call| match call {
+                    RecordedCall::Circle { center, .. } if center.dx() < 400.0 => Ok(true),
+                    RecordedCall::Circle { .. } => Err(
                         "Dragging on left hand side did not overscroll on left hand side.".into(),
                     ),
                     _ => Ok(false),
-                }))],
+                })],
             );
             slow_drag(tester, Offset::new(700.0, 200.0), Offset::new(0.0, 10.0), 3);
             assert_paints(
                 &painted(tester, painter),
-                vec![Paints::Something(Box::new(|call| match call {
-                    Call::Circle { x, .. } if *x > 400.0 => Ok(true),
-                    Call::Circle { .. } => Err(
+                &[PaintCall::something(|call| match call {
+                    RecordedCall::Circle { center, .. } if center.dx() > 400.0 => Ok(true),
+                    RecordedCall::Circle { .. } => Err(
                         "Dragging on right hand side did not overscroll on right hand side.".into(),
                     ),
                     _ => Ok(false),
-                }))],
+                })],
             );
 
             tester.pump_and_settle_by(Duration::from_secs(1));
@@ -2256,24 +2096,27 @@ mod tests {
             tester.down(&mut gesture, Offset::new(300.0, 200.0));
             move_by(tester, &mut gesture, Offset::new(0.0, 10.0));
             tester.pump_by(Duration::from_millis(20));
-            let old_x = RefCell::new(0.0);
+            let old_x = Rc::new(std::cell::Cell::new(0.0));
             for _ in 0..10 {
                 move_by(tester, &mut gesture, Offset::new(50.0, 50.0));
                 tester.pump_by(Duration::from_millis(20));
                 assert_paints(
                     &painted(tester, painter),
-                    vec![Paints::Something(Box::new(|call| match call {
-                        Call::Circle { x, .. } => {
-                            if *x <= *old_x.borrow() {
-                                return Err("Sliding to the right did not make the center of the \
-                                            radius slide to the right."
-                                    .into());
+                    &[PaintCall::something({
+                        let old_x = Rc::clone(&old_x);
+                        move |call| match call {
+                            RecordedCall::Circle { center, .. } => {
+                                if center.dx() <= old_x.get() {
+                                    return Err("Sliding to the right did not make the center of \
+                                                the radius slide to the right."
+                                        .into());
+                                }
+                                old_x.set(center.dx());
+                                Ok(true)
                             }
-                            *old_x.borrow_mut() = *x;
-                            Ok(true)
+                            _ => Ok(false),
                         }
-                        _ => Ok(false),
-                    }))],
+                    })],
                 );
             }
             tester.up(&gesture);
@@ -2292,14 +2135,14 @@ mod tests {
             slow_drag(tester, Offset::new(200.0, 200.0), Offset::new(0.0, 5.0), 1);
             assert_paints(
                 &painted(tester, painter),
-                vec![
-                    Paints::Save,
+                &[
+                    PaintCall::Save,
                     circle(),
-                    Paints::Restore,
-                    Paints::Save,
-                    Paints::Scale(None, Some(-1.0)),
-                    Paints::Restore,
-                    Paints::Restore,
+                    PaintCall::Restore,
+                    PaintCall::Save,
+                    PaintCall::scale(None, Some(-1.0)),
+                    PaintCall::Restore,
+                    PaintCall::Restore,
                 ],
             );
 
@@ -2319,14 +2162,14 @@ mod tests {
             slow_drag(tester, Offset::new(200.0, 200.0), Offset::new(0.0, 5.0), 1);
             assert_paints(
                 &painted(tester, painter),
-                vec![
-                    Paints::Save,
-                    Paints::Scale(None, Some(-1.0)),
-                    Paints::Restore,
-                    Paints::Save,
+                &[
+                    PaintCall::Save,
+                    PaintCall::scale(None, Some(-1.0)),
+                    PaintCall::Restore,
+                    PaintCall::Save,
                     circle(),
-                    Paints::Restore,
-                    Paints::Restore,
+                    PaintCall::Restore,
+                    PaintCall::Restore,
                 ],
             );
 
@@ -2342,10 +2185,10 @@ mod tests {
             tester.pump_widget(ltr(sized_scroll_view(20.0).physics(always_scrollable())));
             let painter = custom_paint(tester);
             slow_drag(tester, Offset::new(200.0, 200.0), Offset::new(0.0, 5.0), 1);
-            assert_paints(&painted(tester, painter), vec![circle()]);
-            assert!(paints(&painted(tester, painter), vec![circle(), circle()]).is_err());
+            assert_paints(&painted(tester, painter), &[circle()]);
+            assert!(paints(&painted(tester, painter), &[circle(), circle()]).is_err());
             slow_drag(tester, Offset::new(200.0, 200.0), Offset::new(0.0, -5.0), 2);
-            assert_paints(&painted(tester, painter), vec![circle(), circle()]);
+            assert_paints(&painted(tester, painter), &[circle(), circle()]);
 
             tester.pump_and_settle_by(Duration::from_secs(1));
             assert!(does_not_overscroll(&painted(tester, painter)));
@@ -2384,16 +2227,20 @@ mod tests {
             slow_drag(tester, Offset::new(200.0, 200.0), Offset::new(5.0, 0.0), 1);
             assert_paints(
                 &painted(tester, painter),
-                vec![Paints::Rotate(Some(quarter)), circle(), Paints::SaveRestore],
+                &[
+                    PaintCall::rotate(Some(quarter)),
+                    circle(),
+                    PaintCall::SaveRestore,
+                ],
             );
-            assert!(paints(&painted(tester, painter), vec![circle(), circle()]).is_err());
+            assert!(paints(&painted(tester, painter), &[circle(), circle()]).is_err());
             slow_drag(tester, Offset::new(200.0, 200.0), Offset::new(-5.0, 0.0), 2);
             assert_paints(
                 &painted(tester, painter),
-                vec![
-                    Paints::Rotate(Some(quarter)),
+                &[
+                    PaintCall::rotate(Some(quarter)),
                     circle(),
-                    Paints::Rotate(Some(quarter)),
+                    PaintCall::rotate(Some(quarter)),
                     circle(),
                 ],
             );
@@ -2436,15 +2283,12 @@ mod tests {
             slow_drag(tester, Offset::new(200.0, 200.0), Offset::new(5.0, 0.0), 1);
             assert_paints(
                 &painted(tester, painter),
-                vec![
-                    Paints::Rotate(Some(quarter)),
-                    Paints::Circle {
-                        x: None,
-                        color: Some(0x0A00FF00),
-                    },
+                &[
+                    PaintCall::rotate(Some(quarter)),
+                    circle_with(None, Some(0x0A00FF00)),
                 ],
             );
-            assert!(paints(&painted(tester, painter), vec![circle(), circle()]).is_err());
+            assert!(paints(&painted(tester, painter), &[circle(), circle()]).is_err());
 
             tester.pump_and_settle_by(Duration::from_secs(1));
             tester.pump_widget(ltr(ScrollConfiguration::new(
@@ -2457,16 +2301,13 @@ mod tests {
             slow_drag(tester, Offset::new(200.0, 200.0), Offset::new(5.0, 0.0), 2);
             assert_paints(
                 &painted(tester, painter),
-                vec![
-                    Paints::Rotate(Some(quarter)),
-                    Paints::Circle {
-                        x: None,
-                        color: Some(0x0A0000FF),
-                    },
-                    Paints::SaveRestore,
+                &[
+                    PaintCall::rotate(Some(quarter)),
+                    circle_with(None, Some(0x0A0000FF)),
+                    PaintCall::SaveRestore,
                 ],
             );
-            assert!(paints(&painted(tester, painter), vec![circle(), circle()]).is_err());
+            assert!(paints(&painted(tester, painter), &[circle(), circle()]).is_err());
         });
     }
 
@@ -2522,10 +2363,10 @@ mod tests {
             // The scroll offset and paint extend should cancel out each other.
             assert_paints(
                 &painted(tester, painter),
-                vec![
-                    Paints::Save,
-                    Paints::Translate(None, Some(0.0)),
-                    Paints::Scale(None, None),
+                &[
+                    PaintCall::Save,
+                    PaintCall::translate(None, Some(0.0)),
+                    PaintCall::scale(None, None),
                     circle(),
                 ],
             );
@@ -2556,31 +2397,31 @@ mod tests {
             // The OverscrollIndicator should respect the [OverscrollIndicatorNotification.paintOffset] setting.
             assert_paints(
                 &painted(tester, painter),
-                vec![
-                    Paints::Save,
-                    Paints::Translate(None, Some(50.0)),
-                    Paints::Scale(None, None),
+                &[
+                    PaintCall::Save,
+                    PaintCall::translate(None, Some(50.0)),
+                    PaintCall::scale(None, None),
                     circle(),
                 ],
             );
         });
     }
 
-    fn translated_glow(y: f64) -> Vec<Paints<'static>> {
+    fn translated_glow(y: f64) -> Vec<PaintCall> {
         vec![
-            Paints::Save,
-            Paints::Translate(None, Some(y)),
-            Paints::Scale(None, None),
+            PaintCall::Save,
+            PaintCall::translate(None, Some(y)),
+            PaintCall::scale(None, None),
             circle(),
         ]
     }
 
-    fn flipped_translated_glow(y: f64) -> Vec<Paints<'static>> {
+    fn flipped_translated_glow(y: f64) -> Vec<PaintCall> {
         vec![
-            Paints::Scale(None, Some(-1.0)),
-            Paints::Save,
-            Paints::Translate(None, Some(y)),
-            Paints::Scale(None, None),
+            PaintCall::scale(None, Some(-1.0)),
+            PaintCall::Save,
+            PaintCall::translate(None, Some(y)),
+            PaintCall::scale(None, None),
             circle(),
         ]
     }
@@ -2598,29 +2439,29 @@ mod tests {
             let painter = custom_paint(tester);
             let start = Offset::new(200.0, 200.0);
             slow_drag(tester, start, Offset::new(0.0, 5.0), 1);
-            assert_paints(&painted(tester, painter), translated_glow(50.0));
+            assert_paints(&painted(tester, painter), &translated_glow(50.0));
             // Reverse scroll (30 pixels), and the offset < notification.paintOffset.
             tester.drag_from(start, Offset::new(0.0, -30.0), 2);
             tester.pump();
             // The OverscrollIndicator should move with the CustomScrollView.
-            assert_paints(&painted(tester, painter), translated_glow(50.0 - 30.0));
+            assert_paints(&painted(tester, painter), &translated_glow(50.0 - 30.0));
 
             // Reverse scroll (30+20 pixels) and offset == notification.paintOffset.
             tester.drag_from(start, Offset::new(0.0, -20.0), 3);
             tester.pump();
-            assert_paints(&painted(tester, painter), translated_glow(50.0 - 50.0));
+            assert_paints(&painted(tester, painter), &translated_glow(50.0 - 50.0));
 
             // Reverse scroll (30+20+10 pixels) and offset > notification.paintOffset.
             tester.drag_from(start, Offset::new(0.0, -10.0), 4);
             tester.pump();
             // The OverscrollIndicator should not overflow the CustomScrollView's edge.
-            assert_paints(&painted(tester, painter), translated_glow(50.0 - 50.0));
+            assert_paints(&painted(tester, painter), &translated_glow(50.0 - 50.0));
 
             tester.pump_and_settle(); // Finish the leading indicator.
 
             // trigger the trailing indicator
             slow_drag(tester, start, Offset::new(0.0, -200.0), 5);
-            assert_paints(&painted(tester, painter), flipped_translated_glow(50.0));
+            assert_paints(&painted(tester, painter), &flipped_translated_glow(50.0));
 
             // Reverse scroll (30 pixels), and the offset < notification.paintOffset.
             tester.drag_from(start, Offset::new(0.0, 30.0), 6);
@@ -2628,7 +2469,7 @@ mod tests {
             // The OverscrollIndicator should move with the CustomScrollView.
             assert_paints(
                 &painted(tester, painter),
-                flipped_translated_glow(50.0 - 30.0),
+                &flipped_translated_glow(50.0 - 30.0),
             );
 
             // Reverse scroll (30+20 pixels) and offset == notification.paintOffset.
@@ -2636,7 +2477,7 @@ mod tests {
             tester.pump();
             assert_paints(
                 &painted(tester, painter),
-                flipped_translated_glow(50.0 - 50.0),
+                &flipped_translated_glow(50.0 - 50.0),
             );
 
             // Reverse scroll (30+20+10 pixels) and offset > notification.paintOffset.
@@ -2645,7 +2486,7 @@ mod tests {
             // The OverscrollIndicator should not overflow the CustomScrollView's edge.
             assert_paints(
                 &painted(tester, painter),
-                flipped_translated_glow(50.0 - 50.0),
+                &flipped_translated_glow(50.0 - 50.0),
             );
         });
     }
@@ -2662,12 +2503,12 @@ mod tests {
             let painter = custom_paint(tester);
             slow_drag(tester, Offset::new(200.0, 200.0), Offset::new(0.0, 5.0), 1);
             // The OverscrollIndicator should respect the [OverscrollIndicatorNotification.paintOffset] setting.
-            assert_paints(&painted(tester, painter), translated_glow(50.0));
+            assert_paints(&painted(tester, painter), &translated_glow(50.0));
             // Reverse scroll direction.
             tester.drag_from(Offset::new(200.0, 200.0), Offset::new(0.0, -30.0), 2);
             tester.pump();
             // The OverscrollIndicator should move with the CustomScrollView.
-            assert_paints(&painted(tester, painter), translated_glow(50.0 - 30.0));
+            assert_paints(&painted(tester, painter), &translated_glow(50.0 - 30.0));
         });
     }
 
@@ -2685,14 +2526,14 @@ mod tests {
             tester.pump();
             slow_drag(tester, Offset::new(200.0, 200.0), Offset::new(0.0, -5.0), 2);
             // The OverscrollIndicator should respect the [OverscrollIndicatorNotification.paintOffset] setting.
-            assert_paints(&painted(tester, painter), flipped_translated_glow(50.0));
+            assert_paints(&painted(tester, painter), &flipped_translated_glow(50.0));
             // Reverse scroll direction.
             tester.drag_from(Offset::new(200.0, 200.0), Offset::new(0.0, 30.0), 3);
             tester.pump();
             // The OverscrollIndicator should move with the CustomScrollView.
             assert_paints(
                 &painted(tester, painter),
-                flipped_translated_glow(50.0 - 30.0),
+                &flipped_translated_glow(50.0 - 30.0),
             );
         });
     }
@@ -3040,6 +2881,11 @@ mod tests {
             assert_eq!(origin_of(tester, &boxes.box1), Offset::ZERO);
             assert_eq!(origin_of(tester, &boxes.box2), Offset::new(0.0, 250.0));
         });
+    }
+
+    /// Equal within what Waft's f32 `Matrix4` keeps, where Dart's is f64.
+    fn near(actual: f64, expected: f64) -> bool {
+        (actual - expected).abs() < 1e-4
     }
 
     /// [`near`] for both coordinates: the stretch is an f32 `Matrix4`.

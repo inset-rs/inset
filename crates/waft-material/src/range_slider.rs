@@ -3615,12 +3615,13 @@ mod tests {
     use super::*;
     use crate::material::Material;
     use crate::range_slider_parts::{RangeSliderTickMarkShape, RangeSliderValueIndicatorShape};
-    use crate::slider::tests::default_theme;
-    use crate::test_support::{
-        CanvasCall, PaintCall, PaintInspection, colors_match, count_calls, material_app,
-        paints_calls,
-    };
+    use crate::slider::tests::{default_theme, overlay_render};
+    use crate::test_support::{PaintInspection, material_app};
+
     use crate::theme_data::ThemeData;
+    use waft_rendering::testing::{
+        CanvasMethod, PaintCall, assert_paints, colors_match, count_calls, paints,
+    };
 
     /// What a test's range slider callbacks heard.
     struct Heard {
@@ -4307,8 +4308,8 @@ mod tests {
     }
 
     /// Dart's `expect(render, paints..calls)`.
-    fn paints(tester: &WidgetTester, render: AnyRenderObject, calls: &[PaintCall]) -> bool {
-        paints_calls(&tester.painted_ops(render), calls)
+    fn render_paints(tester: &WidgetTester, render: AnyRenderObject, calls: &[PaintCall]) -> bool {
+        paints(&tester.painted_ops(render), calls).is_ok()
     }
 
     // 'Range Slider uses the right theme colors for the right shapes for a default enabled
@@ -4322,7 +4323,7 @@ mod tests {
 
             // Check default theme for enabled widget.
             let render = range_render(tester);
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 render,
                 &[
@@ -4331,7 +4332,7 @@ mod tests {
                     rrect(slider_theme.active_track_color),
                 ]
             ));
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 render,
                 &[
@@ -4339,7 +4340,7 @@ mod tests {
                     circle(slider_theme.thumb_color)
                 ]
             ));
-            assert!(!paints(
+            assert!(!render_paints(
                 tester,
                 render,
                 &[circle(slider_theme.disabled_thumb_color)]
@@ -4354,12 +4355,12 @@ mod tests {
                 render,
                 slider_theme.disabled_inactive_track_color
             ));
-            assert!(!paints(
+            assert!(!render_paints(
                 tester,
                 render,
                 &[circle(slider_theme.active_tick_mark_color)]
             ));
-            assert!(!paints(
+            assert!(!render_paints(
                 tester,
                 render,
                 &[circle(slider_theme.inactive_tick_mark_color)]
@@ -4384,7 +4385,7 @@ mod tests {
             ));
 
             let render = range_render(tester);
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 render,
                 &[
@@ -4393,13 +4394,17 @@ mod tests {
                     rrect(Some(ACTIVE_COLOR)),
                 ]
             ));
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 render,
                 &[circle(Some(ACTIVE_COLOR)), circle(Some(ACTIVE_COLOR))]
             ));
-            assert!(!paints(tester, render, &[circle(slider_theme.thumb_color)]));
-            assert!(!paints(
+            assert!(!render_paints(
+                tester,
+                render,
+                &[circle(slider_theme.thumb_color)]
+            ));
+            assert!(!render_paints(
                 tester,
                 render,
                 &[circle(slider_theme.disabled_thumb_color)]
@@ -4434,7 +4439,7 @@ mod tests {
             ));
 
             let render = range_render(tester);
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 render,
                 &[
@@ -4443,7 +4448,7 @@ mod tests {
                     rrect(slider_theme.active_track_color),
                 ]
             ));
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 render,
                 &[
@@ -4451,7 +4456,7 @@ mod tests {
                     circle(slider_theme.thumb_color)
                 ]
             ));
-            assert!(!paints(
+            assert!(!render_paints(
                 tester,
                 render,
                 &[circle(slider_theme.disabled_thumb_color)]
@@ -4488,7 +4493,7 @@ mod tests {
             ));
 
             let render = range_render(tester);
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 render,
                 &[
@@ -4497,13 +4502,17 @@ mod tests {
                     rrect(Some(ACTIVE_COLOR)),
                 ]
             ));
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 render,
                 &[circle(Some(ACTIVE_COLOR)), circle(Some(ACTIVE_COLOR))]
             ));
-            assert!(!paints(tester, render, &[circle(slider_theme.thumb_color)]));
-            assert!(!paints(
+            assert!(!render_paints(
+                tester,
+                render,
+                &[circle(slider_theme.thumb_color)]
+            ));
+            assert!(!render_paints(
                 tester,
                 render,
                 &[circle(slider_theme.disabled_thumb_color)]
@@ -4536,7 +4545,7 @@ mod tests {
             ));
 
             let render = range_render(tester);
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 render,
                 &[
@@ -4545,7 +4554,7 @@ mod tests {
                     rrect(slider_theme.active_track_color),
                 ]
             ));
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 render,
                 &[
@@ -4557,7 +4566,7 @@ mod tests {
                     circle(slider_theme.thumb_color),
                 ]
             ));
-            assert!(!paints(
+            assert!(!render_paints(
                 tester,
                 render,
                 &[circle(slider_theme.disabled_thumb_color)]
@@ -4595,7 +4604,7 @@ mod tests {
             ));
 
             let render = range_render(tester);
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 render,
                 &[
@@ -4604,7 +4613,7 @@ mod tests {
                     rrect(Some(ACTIVE_COLOR)),
                 ]
             ));
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 render,
                 &[
@@ -4616,8 +4625,12 @@ mod tests {
                     circle(Some(ACTIVE_COLOR)),
                 ]
             ));
-            assert!(!paints(tester, render, &[circle(slider_theme.thumb_color)]));
-            assert!(!paints(
+            assert!(!render_paints(
+                tester,
+                render,
+                &[circle(slider_theme.thumb_color)]
+            ));
+            assert!(!render_paints(
                 tester,
                 render,
                 &[circle(slider_theme.disabled_thumb_color)]
@@ -4632,12 +4645,12 @@ mod tests {
                 render,
                 slider_theme.disabled_inactive_track_color
             ));
-            assert!(!paints(
+            assert!(!render_paints(
                 tester,
                 render,
                 &[circle(slider_theme.active_tick_mark_color)]
             ));
-            assert!(!paints(
+            assert!(!render_paints(
                 tester,
                 render,
                 &[circle(slider_theme.inactive_tick_mark_color)]
@@ -4661,7 +4674,7 @@ mod tests {
             ));
 
             let render = range_render(tester);
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 render,
                 &[
@@ -4670,7 +4683,11 @@ mod tests {
                     rrect(slider_theme.disabled_active_track_color),
                 ]
             ));
-            assert!(!paints(tester, render, &[circle(slider_theme.thumb_color)]));
+            assert!(!render_paints(
+                tester,
+                render,
+                &[circle(slider_theme.thumb_color)]
+            ));
             assert!(!paints_rect(
                 tester,
                 render,
@@ -4702,7 +4719,7 @@ mod tests {
             ));
 
             let render = range_render(tester);
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 render,
                 &[
@@ -4711,7 +4728,11 @@ mod tests {
                     rrect(slider_theme.disabled_active_track_color),
                 ]
             ));
-            assert!(!paints(tester, render, &[circle(slider_theme.thumb_color)]));
+            assert!(!render_paints(
+                tester,
+                render,
+                &[circle(slider_theme.thumb_color)]
+            ));
             assert!(!paints_rect(
                 tester,
                 render,
@@ -5405,7 +5426,7 @@ mod tests {
             tester.pump_and_settle();
 
             // The drag gesture has finished, so no overlayColor should show up.
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 range_render(tester),
                 &[
@@ -5471,13 +5492,13 @@ mod tests {
             // The first circle is the thumb, the second one is the overlapping shape
             // circle, and the last one is the second thumb.
             let stroke = theme.slider_theme.overlapping_shape_stroke_color;
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 range_render(tester),
                 &[circle(None), circle(stroke), circle(None)]
             ));
             tester.up(&gesture);
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 range_render(tester),
                 &[circle(None), circle(stroke), circle(None)]
@@ -5491,7 +5512,7 @@ mod tests {
     /// ..path(color: valueIndicatorColor)..paragraph())`: the thumbs' two shadows, then the
     /// value indicator's fill and label.
     fn overlay_paints_shadows_and_indicator(tester: &WidgetTester, color: Color) -> bool {
-        paints_calls(
+        paints(
             &tester.painted_ops_deep(overlay_render(tester)),
             &[
                 any_thumb_shadow(),
@@ -5500,6 +5521,7 @@ mod tests {
                 PaintCall::Paragraph,
             ],
         )
+        .is_ok()
     }
 
     /// Dart's `expectValueIndicator` in 'Value indicator appears when it should': whether the
@@ -5511,7 +5533,7 @@ mod tests {
             return false;
         };
         let render = value_indicator_box.as_render_object(&tester.cell.borrow());
-        paints(
+        render_paints(
             tester,
             render,
             &[PaintCall::path(Some(color)), PaintCall::Paragraph],
@@ -5733,7 +5755,7 @@ mod tests {
 
             let render = range_render(tester);
             let circular = Radius::circular(2.0);
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 render,
                 &[
@@ -5772,13 +5794,15 @@ mod tests {
                         x: Some(-12.0),
                         y: Some(5.0),
                         radius: Some(10.0),
-                        color: None
+                        color: None,
+                        style: None
                     },
                     PaintCall::Circle {
                         x: Some(0.0),
                         y: Some(5.0),
                         radius: Some(10.0),
-                        color: None
+                        color: None,
+                        style: None
                     },
                 ]
             ));
@@ -5831,7 +5855,7 @@ mod tests {
                 ]
             );
             // thumbs
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 render,
                 &[
@@ -5839,13 +5863,15 @@ mod tests {
                         x: Some(-12.0),
                         y: Some(5.0),
                         radius: Some(10.0),
-                        color: None
+                        color: None,
+                        style: None
                     },
                     PaintCall::Circle {
                         x: Some(0.0),
                         y: Some(5.0),
                         radius: Some(10.0),
-                        color: None
+                        color: None,
+                        style: None
                     },
                 ]
             ));
@@ -6678,7 +6704,7 @@ mod tests {
             ));
 
             let render = range_render(tester);
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 render,
                 &[
@@ -6687,17 +6713,101 @@ mod tests {
                         x: Some(SLIDER_PADDING),
                         y: Some(300.0),
                         radius: None,
-                        color: Some(primary)
+                        color: Some(primary),
+                        style: None
                     },
                     // End thumb.
                     PaintCall::Circle {
                         x: Some(800.0 - SLIDER_PADDING),
                         y: Some(300.0),
                         radius: None,
-                        color: Some(primary)
+                        color: Some(primary),
+                        style: None
                     },
                 ]
             ));
+        });
+    }
+
+    // 'RangeSlider.padding can override the default RangeSlider padding': the sizes and the
+    // active track. Its zero-width inactive tracks are draws with no effect (PORTING.md,
+    // `## Skipped`).
+    #[test]
+    fn a_range_slider_padding_overrides_the_default_padding() {
+        test_widgets(|tester| {
+            let pump_padded = |tester: &mut WidgetTester, padding: EdgeInsetsGeometry| {
+                let theme = ThemeData::new(&tester.cell.borrow());
+                tester.pump_widget(material_app(
+                    theme,
+                    Material::new()
+                        .child(
+                            Center::new().child(
+                                waft_widgets::IntrinsicHeight::new().child(
+                                    RangeSlider::new(RangeValues::new(0.0, 1.0), noop())
+                                        .padding(padding),
+                                ),
+                            ),
+                        )
+                        .into_widget(),
+                ));
+                tester.pump_and_settle();
+            };
+            let slider_size = |tester: &WidgetTester| {
+                let render = range_render(tester).as_box().expect("a render box");
+                render.size(&tester.cell.borrow())
+            };
+            let active_track = |tester: &WidgetTester, right: f64| {
+                render_paints(
+                    tester,
+                    range_render(tester),
+                    &[PaintCall::rrect_at(
+                        waft_embedder::RRect::from_ltrbr(
+                            8.0,
+                            7.0,
+                            right,
+                            13.0,
+                            waft_embedder::Radius::circular(2.0),
+                        ),
+                        None,
+                    )],
+                )
+            };
+
+            // Zero padding: the height is the default thumb height.
+            pump_padded(tester, EdgeInsetsGeometry::ZERO);
+            assert_eq!(slider_size(tester), Size::new(800.0, 20.0));
+            assert!(active_track(tester, 792.0));
+
+            // Directional padding.
+            const START_PADDING: f64 = 100.0;
+            const END_PADDING: f64 = 20.0;
+            pump_padded(
+                tester,
+                EdgeInsetsGeometry::directional(START_PADDING, 0.0, END_PADDING, 0.0),
+            );
+            assert_eq!(
+                slider_size(tester),
+                Size::new(800.0 - START_PADDING - END_PADDING, 20.0)
+            );
+            assert!(active_track(tester, 672.0));
+
+            // Top and bottom padding.
+            const TOP_PADDING: f64 = 100.0;
+            const BOTTOM_PADDING: f64 = 20.0;
+            const TRACK_HEIGHT: f64 = 20.0;
+            pump_padded(
+                tester,
+                EdgeInsetsGeometry::directional(0.0, TOP_PADDING, 0.0, BOTTOM_PADDING),
+            );
+            let range_slider = tester.find_by_type::<RangeSlider>()[0];
+            assert_eq!(
+                tester
+                    .render_box_of(range_slider)
+                    .size(&tester.cell.borrow()),
+                Size::new(800.0, TOP_PADDING + TRACK_HEIGHT + BOTTOM_PADDING)
+            );
+            assert_eq!(slider_size(tester), Size::new(800.0, 20.0));
+            assert!(active_track(tester, 792.0));
         });
     }
 
@@ -6742,7 +6852,7 @@ mod tests {
                 .last()
                 .expect("a value indicator")
                 .as_render_object(&tester.cell.borrow());
-            assert!(paints(
+            assert!(render_paints(
                 tester,
                 value_indicator,
                 &[PaintCall::path(Some(VALUE_INDICATOR_COLOR))]
@@ -6934,10 +7044,10 @@ mod tests {
                 PaintCall::path(Some(FILL_COLOR)),
                 PaintCall::Paragraph,
             ];
-            assert!(paints_calls(&overlay_ops(tester), &sequence));
+            assert_paints(&overlay_ops(tester), &sequence);
             // Represents the Raised Button and Range Slider.
             assert_eq!(
-                count_calls(&overlay_ops(tester), CanvasCall::DrawParagraph),
+                count_calls(&overlay_ops(tester), CanvasMethod::DrawParagraph),
                 3
             );
 
@@ -6947,10 +7057,10 @@ mod tests {
             tester.pump_and_settle();
 
             assert!(tester.find_by_type::<RangeSlider>().is_empty());
-            assert!(!paints_calls(&overlay_ops(tester), &sequence[2..]));
+            assert!(paints(&overlay_ops(tester), &sequence[2..]).is_err());
             // Represents the raised button with inner page text.
             assert_eq!(
-                count_calls(&overlay_ops(tester), CanvasCall::DrawParagraph),
+                count_calls(&overlay_ops(tester), CanvasMethod::DrawParagraph),
                 1
             );
             assert_eq!(tester.find_onstage_text("Inner page").len(), 1);
@@ -6985,6 +7095,213 @@ mod tests {
                 .body(Center::new().child(SliderTheme::new(slider_theme, slider)))
                 .into_widget(),
         )
+    }
+
+    /// slider_theme_test's 'The RangeSlider track layout correctly when the overlay size is
+    /// smaller than the thumb size': the active track and the thumbs, centred on the screen.
+    /// Its zero-width inactive tracks are draws with no effect (PORTING.md, `## Skipped`).
+    #[test]
+    fn the_range_slider_track_is_centred_when_the_overlay_is_smaller_than_the_thumb() {
+        test_widgets(|tester| {
+            use crate::slider_value_indicator_shape::SliderComponentShape;
+            let theme = ThemeData::new(&tester.cell.borrow());
+            let slider_theme = theme
+                .slider_theme
+                .copy_with()
+                .overlay_shape(<dyn SliderComponentShape>::no_overlay());
+            tester.pump_widget(build_range_app(
+                theme,
+                slider_theme,
+                RangeValues::new(0.0, 1.0),
+                None,
+            ));
+
+            let range_slider = tester.find_by_type::<RangeSlider>()[0];
+            assert_paints(
+                &tester.nearest_material_ops(range_slider),
+                &[
+                    PaintCall::rrect_at(
+                        waft_embedder::RRect::from_ltrbr(
+                            8.0,
+                            297.0,
+                            792.0,
+                            303.0,
+                            waft_embedder::Radius::circular(2.0),
+                        ),
+                        None,
+                    ),
+                    PaintCall::Circle {
+                        x: Some(10.0),
+                        y: Some(300.0),
+                        radius: Some(10.0),
+                        color: None,
+                        style: None,
+                    },
+                    PaintCall::Circle {
+                        x: Some(790.0),
+                        y: Some(300.0),
+                        radius: Some(10.0),
+                        color: None,
+                        style: None,
+                    },
+                ],
+            );
+        });
+    }
+
+    /// slider_theme_test's 'SliderThemeData.padding can override the default RangeSlider
+    /// padding': the sizes and the active track. Its zero-width inactive tracks are draws with no
+    /// effect (PORTING.md, `## Skipped`).
+    #[test]
+    fn the_slider_theme_padding_overrides_the_default_range_slider_padding() {
+        test_widgets(|tester| {
+            let pump_padded = |tester: &mut WidgetTester, padding: EdgeInsetsGeometry| {
+                let theme = ThemeData::builder()
+                    .slider_theme(SliderThemeData::new().padding(padding))
+                    .build(&tester.cell.borrow());
+                tester.pump_widget(material_app(
+                    theme,
+                    Material::new()
+                        .child(
+                            Center::new().child(
+                                waft_widgets::IntrinsicHeight::new()
+                                    .child(RangeSlider::new(RangeValues::new(0.0, 1.0), noop())),
+                            ),
+                        )
+                        .into_widget(),
+                ));
+                tester.pump_and_settle();
+            };
+            let slider_size = |tester: &WidgetTester| {
+                let render = range_render(tester).as_box().expect("a render box");
+                render.size(&tester.cell.borrow())
+            };
+            let active_track = |tester: &WidgetTester, right: f64| {
+                render_paints(
+                    tester,
+                    range_render(tester),
+                    &[PaintCall::rrect_at(
+                        waft_embedder::RRect::from_ltrbr(
+                            8.0,
+                            7.0,
+                            right,
+                            13.0,
+                            waft_embedder::Radius::circular(2.0),
+                        ),
+                        None,
+                    )],
+                )
+            };
+
+            pump_padded(tester, EdgeInsetsGeometry::ZERO);
+            assert_eq!(slider_size(tester), Size::new(800.0, 20.0));
+            assert!(active_track(tester, 792.0));
+
+            pump_padded(
+                tester,
+                EdgeInsetsGeometry::directional(100.0, 0.0, 20.0, 0.0),
+            );
+            assert_eq!(slider_size(tester), Size::new(680.0, 20.0));
+            assert!(active_track(tester, 672.0));
+
+            pump_padded(
+                tester,
+                EdgeInsetsGeometry::directional(0.0, 100.0, 0.0, 20.0),
+            );
+            let range_slider = tester.find_by_type::<RangeSlider>()[0];
+            assert_eq!(
+                tester
+                    .render_box_of(range_slider)
+                    .size(&tester.cell.borrow()),
+                Size::new(800.0, 140.0)
+            );
+            assert_eq!(slider_size(tester), Size::new(800.0, 20.0));
+            assert!(active_track(tester, 792.0));
+        });
+    }
+
+    /// slider_theme_test's 'Default paddle range slider value indicator shape draws correctly',
+    /// off the `Overlay`: the physical model, the inactive track to the end thumb, the active
+    /// track between the thumbs, and each thumb with its shadows. Its zero-width inactive track
+    /// at x 24 is a draw with no effect (PORTING.md, `## Skipped`).
+    #[test]
+    #[expect(deprecated, reason = "Dart's case passes the deprecated `always`")]
+    fn the_default_paddle_range_value_indicator_draws_its_parts() {
+        test_widgets(|tester| {
+            use crate::slider_value_indicator_shape::PaddleRangeSliderValueIndicatorShape;
+            let theme = ThemeData::builder()
+                .platform(TargetPlatform::Android)
+                .primary_swatch(crate::colors::Colors::BLUE)
+                .build(&tester.cell.borrow());
+            let slider_theme = theme
+                .slider_theme
+                .copy_with()
+                .thumb_color(crate::colors::Colors::RED.shade500())
+                .show_value_indicator(ShowValueIndicator::Always)
+                .range_value_indicator_shape(Rc::new(PaddleRangeSliderValueIndicatorShape::new()));
+            tester.pump_widget(build_range_app(
+                theme,
+                slider_theme,
+                RangeValues::new(0.0, 0.0),
+                None,
+            ));
+
+            let range_slider = tester.find_by_type::<RangeSlider>()[0];
+            let center = tester
+                .global_rect(tester.render_box_of(range_slider))
+                .center();
+            let mut gesture = TestPointer::touch(1);
+            tester.down(&mut gesture, center);
+            // Wait for value indicator animation to finish.
+            tester.pump_and_settle();
+            let thumb = || PaintCall::Circle {
+                x: Some(24.0),
+                y: Some(300.0),
+                radius: None,
+                color: None,
+                style: None,
+            };
+            let shadow = |elevation: f64| PaintCall::Shadow {
+                elevation: Some(elevation),
+                color: None,
+            };
+            assert_paints(
+                &tester.painted_ops_deep(overlay_render(tester)),
+                &[
+                    // physical model
+                    PaintCall::rrect(None),
+                    PaintCall::rrect_at(
+                        waft_embedder::RRect::from_ltrb_and_corners(
+                            24.0,
+                            298.0,
+                            776.0,
+                            302.0,
+                            waft_embedder::Radius::ZERO,
+                            waft_embedder::Radius::circular(2.0),
+                            waft_embedder::Radius::circular(2.0),
+                            waft_embedder::Radius::ZERO,
+                        ),
+                        None,
+                    ),
+                    PaintCall::rrect_at(
+                        waft_embedder::RRect::from_ltrbr(
+                            22.0,
+                            297.0,
+                            26.0,
+                            303.0,
+                            waft_embedder::Radius::circular(2.0),
+                        ),
+                        None,
+                    ),
+                    thumb(),
+                    shadow(1.0),
+                    thumb(),
+                    shadow(6.0),
+                    thumb(),
+                ],
+            );
+            tester.up(&gesture);
+        });
     }
 
     /// Dart's `paintsExactlyCountTimes(#drawPath, n)` counted over the range slider and its
@@ -7116,7 +7433,7 @@ mod tests {
         };
         // Dart's `paints` sequence off the `Overlay`: the thumbs' two shadows, then each
         // indicator's stroke and fill.
-        assert!(paints_calls(
+        assert_paints(
             &tester.painted_ops_deep(overlay_render(tester)),
             &[
                 any_thumb_shadow(),
@@ -7125,8 +7442,8 @@ mod tests {
                 PaintCall::path(Some(VALUE_INDICATOR_COLOR)),
                 PaintCall::path(Some(second_stroke)),
                 PaintCall::path(Some(VALUE_INDICATOR_COLOR)),
-            ]
-        ));
+            ],
+        );
         tester.up(&gesture);
     }
 
@@ -7198,7 +7515,7 @@ mod tests {
     }
 
     fn range_paints(tester: &WidgetTester, calls: &[PaintCall]) -> bool {
-        paints_calls(&tester.painted_ops(range_render(tester)), calls)
+        paints(&tester.painted_ops(range_render(tester)), calls).is_ok()
     }
 
     // 'RangeSlider overlay appears correctly for specific thumb interactions'.
@@ -7302,7 +7619,7 @@ mod tests {
             assert_eq!(
                 count_calls(
                     &tester.painted_ops(range_render(tester)),
-                    CanvasCall::DrawCircle
+                    CanvasMethod::DrawCircle
                 ),
                 4
             );
@@ -7314,13 +7631,6 @@ mod tests {
             // Verify overlay disappears
             assert!(!paints_circle_of_color(tester, HOVER_COLOR));
         });
-    }
-
-    /// The value indicator box of Dart's cases: `tester.renderObject(find.byType(Overlay))`.
-    fn overlay_render(tester: &WidgetTester) -> AnyRenderObject {
-        tester
-            .render_box_of(tester.find_by_type::<waft_widgets::Overlay>()[0])
-            .as_object()
     }
 
     /// A thumb's shadow, Dart's `path(color: Colors.black)` under `debugDisableShadows`: here
@@ -7356,15 +7666,15 @@ mod tests {
             tester.pump_and_settle();
             assert_eq!(recorded.get().end, 1.0);
 
-            assert!(paints_calls(
+            assert_paints(
                 &tester.painted_ops_deep(overlay_render(tester)),
                 &[
                     any_thumb_shadow(), // shadow
                     any_thumb_shadow(), // shadow
                     PaintCall::path(Some(slider_theme.value_indicator_color.expect("a color"))),
                     PaintCall::Paragraph,
-                ]
-            ));
+                ],
+            );
             tester.up(&gesture);
             // Wait for value indicator animation to finish.
             tester.pump_and_settle();
@@ -7548,10 +7858,10 @@ mod tests {
             tester.down(&mut gesture, slider_rect(tester).top_left());
             // Wait for value indicator animation to finish.
             tester.pump_and_settle();
-            assert!(paints_calls(
+            assert_paints(
                 &tester.painted_ops_deep(overlay_render(tester)),
-                &[PaintCall::Scale, rrect(value_indicator_color)]
-            ));
+                &[PaintCall::scale(None, None), rrect(value_indicator_color)],
+            );
             tester.up(&gesture);
         });
     }

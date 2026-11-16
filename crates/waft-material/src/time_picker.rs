@@ -7171,11 +7171,11 @@ pub(crate) mod tests {
         let dial = tester.find_by_type::<Dial>()[0];
         let paint = tester.descendants_of_type::<waft_widgets::CustomPaint>(dial)[0];
         let render = tester.render_box_of(paint).as_object();
-        let calls: Vec<crate::test_support::PaintCall> = colors
+        let calls: Vec<waft_rendering::testing::PaintCall> = colors
             .iter()
-            .map(|color| crate::test_support::PaintCall::circle(Some(*color)))
+            .map(|color| waft_rendering::testing::PaintCall::circle(Some(*color)))
             .collect();
-        crate::test_support::paints_calls(&tester.painted_ops_deep(render), &calls)
+        waft_rendering::testing::paints(&tester.painted_ops_deep(render), &calls).is_ok()
     }
 
     fn open_default_picker(tester: &mut WidgetTester, theme: ThemeData) {

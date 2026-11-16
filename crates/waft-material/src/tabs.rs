@@ -5019,11 +5019,13 @@ pub(crate) mod tests {
                 waft_embedder::Radius::ZERO,
                 waft_embedder::Radius::ZERO,
             );
-            assert!(tester.paints_rrect(
-                tab_bar_box.as_object(),
-                rrect,
-                Some(theme.color_scheme.primary)
-            ));
+            waft_rendering::testing::assert_paints(
+                &tester.painted_ops(tab_bar_box.as_object()),
+                &[waft_rendering::testing::PaintCall::rrect_at(
+                    rrect,
+                    Some(theme.color_scheme.primary),
+                )],
+            );
 
             // Test default tab indicator (TabBarIndicatorSize.tab).
             tester.pump_widget(build_tab(Some(TabBarIndicatorSize::Tab)));
@@ -5460,17 +5462,19 @@ pub(crate) mod tests {
                     tab_bar_height,
                 );
 
-                assert!(tester.paints_rrect(
-                    tab_bar_box.as_object(),
-                    RRect::from_rect_and_corners(
-                        expected_indicator,
-                        Radius::circular(3.0),
-                        Radius::circular(3.0),
-                        Radius::ZERO,
-                        Radius::ZERO,
-                    ),
-                    Some(primary),
-                ));
+                waft_rendering::testing::assert_paints(
+                    &tester.painted_ops(tab_bar_box.as_object()),
+                    &[waft_rendering::testing::PaintCall::rrect_at(
+                        RRect::from_rect_and_corners(
+                            expected_indicator,
+                            Radius::circular(3.0),
+                            Radius::circular(3.0),
+                            Radius::ZERO,
+                            Radius::ZERO,
+                        ),
+                        Some(primary),
+                    )],
+                );
             });
         }
 
@@ -7969,7 +7973,11 @@ pub(crate) mod tests {
                 let from_rect = Rect::from_ltrb(75.0, 0.0, 125.0, 48.0);
                 let mut to_rect = Rect::from_ltrb(75.0, 0.0, 125.0, 48.0);
                 let paints = |tester: &WidgetTester, rrect| {
-                    tester.paints_rrect(tab_bar_box.as_object(), rrect, None)
+                    waft_rendering::testing::paints(
+                        &tester.painted_ops(tab_bar_box.as_object()),
+                        &[waft_rendering::testing::PaintCall::rrect_at(rrect, None)],
+                    )
+                    .is_ok()
                 };
                 assert!(paints(
                     tester,
@@ -12010,14 +12018,16 @@ pub(crate) mod tests {
                 tester.pump_and_settle();
                 let object = tester.first::<crate::material::RenderInkFeatures>();
                 let ink_well_rect = rect_of(tester, only::<InkWell>(tester));
-                assert!(tester.paints_rrect(
-                    object.as_object(),
-                    waft_embedder::RRect::from_rect_and_radius(
-                        ink_well_rect,
-                        waft_embedder::Radius::circular(RADIUS),
-                    ),
-                    Some(HOVER_COLOR),
-                ));
+                waft_rendering::testing::assert_paints(
+                    &tester.painted_ops(object.as_object()),
+                    &[waft_rendering::testing::PaintCall::rrect_at(
+                        waft_embedder::RRect::from_rect_and_radius(
+                            ink_well_rect,
+                            waft_embedder::Radius::circular(RADIUS),
+                        ),
+                        Some(HOVER_COLOR),
+                    )],
+                );
             });
         }
 
@@ -13033,7 +13043,11 @@ pub(crate) mod tests {
 
         /// Dart's `expect(find.byType(TabBar), paints..rrect(rrect: rrect))`.
         fn paints_rrect(tester: &WidgetTester, rrect: RRect) -> bool {
-            tester.paints_rrect(indicator_paint(tester), rrect, None)
+            waft_rendering::testing::paints(
+                &tester.painted_ops(indicator_paint(tester)),
+                &[waft_rendering::testing::PaintCall::rrect_at(rrect, None)],
+            )
+            .is_ok()
         }
 
         /// [`paints_rrect`] with the rrect's edges within `epsilon` of what is painted.

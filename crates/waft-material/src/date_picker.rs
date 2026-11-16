@@ -5165,10 +5165,12 @@ pub(crate) mod tests {
         use crate::icons::Icons;
         use crate::material::Material;
         use crate::material_localizations::MaterialLocalizations;
-        use crate::test_support::{PaintCall, PaintInspection, material_app, paints_calls};
+        use crate::test_support::{PaintInspection, material_app};
+
         use crate::text_field::TextField;
         use crate::theme_data::ThemeData;
         use crate::tooltip::tests::{m2, m3};
+        use waft_rendering::testing::{PaintCall, assert_paints, paints};
 
         /// The arguments of the `showDatePicker` calls that are not `prepareDatePicker`'s.
         #[derive(Clone)]
@@ -6206,7 +6208,7 @@ pub(crate) mod tests {
             }
             calls.push(PaintCall::circle(Some(overlay)));
             assert!(
-                paints_calls(&day_grid_material_ops(tester), &calls),
+                paints(&day_grid_material_ops(tester), &calls).is_ok(),
                 "the day grid's Material does not paint {calls:?}"
             );
         }
@@ -6246,10 +6248,10 @@ pub(crate) mod tests {
                 pump_zero(tester);
                 let today_color = waft_embedder::Color::new(0xff2196f3); // default primary color
                 // The current day should be painted with a circle outline.
-                assert!(paints_calls(
+                assert_paints(
                     &day_grid_material_ops(tester),
-                    &[PaintCall::stroked_circle(today_color, 1.0)]
-                ));
+                    &[PaintCall::stroked_circle(today_color, 1.0)],
+                );
             });
         }
 
@@ -7376,10 +7378,12 @@ pub(crate) mod tests {
         use crate::elevated_button::ElevatedButton;
         use crate::icons::Icons;
         use crate::material::Material;
-        use crate::test_support::{PaintCall, PaintInspection, material_app, paints_calls};
+        use crate::test_support::{PaintInspection, material_app};
+
         use crate::text_field::TextField;
         use crate::theme_data::ThemeData;
         use crate::tooltip::tests::{m2, m3};
+        use waft_rendering::testing::{PaintCall, assert_paints};
 
         /// The variables of date_range_picker_test.dart's `setUp`, and `preparePicker`'s arguments.
         #[derive(Clone)]
@@ -8927,13 +8931,13 @@ pub(crate) mod tests {
                 #[allow(deprecated)]
                 let hover_color = theme.color_scheme.on_surface_variant().with_opacity(0.08);
                 let render = tester.render_box_of(button).as_object();
-                assert!(paints_calls(
+                assert_paints(
                     &tester.painted_ops_deep(render),
                     &[PaintCall::rect_at(
                         waft_embedder::Rect::from_ltrb(0.0, 0.0, 40.0, 40.0),
                         Some(hover_color),
-                    )]
-                ));
+                    )],
+                );
             });
         }
 

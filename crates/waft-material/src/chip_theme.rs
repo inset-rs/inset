@@ -1294,10 +1294,11 @@ mod tests {
     use crate::material::Material;
     use waft_embedder::valo::Op;
 
-    use crate::test_support::{
-        CanvasCall, PaintCall, canvas_call_of, colors_match, material_app, paints_calls,
-    };
+    use crate::test_support::material_app;
 
+    use waft_rendering::testing::{
+        CanvasMethod, PaintCall, PaintedStyle, assert_paints, colors_match, paints,
+    };
     fn pump_app(tester: &mut WidgetTester, theme: ThemeData, home: WidgetRef) {
         tester.pump_widget(material_app(theme, home));
     }
@@ -1341,7 +1342,7 @@ mod tests {
     /// Dart's `paints..rect(color:)`: the first `drawRect` is of `color`.
     fn paints_rect(ops: &[Op], color: Color) -> bool {
         ops.iter()
-            .find(|op| canvas_call_of(op) == CanvasCall::DrawRect)
+            .find(|op| CanvasMethod::of(op) == CanvasMethod::DrawRect)
             .is_some_and(
                 |op| matches!(op, Op::DrawRect { paint, .. } if colors_match(paint.color, color)),
             )
@@ -1526,10 +1527,10 @@ mod tests {
         shape: CircleBorder,
         icon_color_expected: Color,
     ) {
-        assert!(paints_calls(
+        assert_paints(
             &material_box_ops(tester),
-            &[PaintCall::circle(Some(background_color))]
-        ));
+            &[PaintCall::circle(Some(background_color))],
+        );
         assert_eq!(size_of(tester, only::<RawChip>(tester)), size); // label + padding + labelPadding
         assert_eq!(material_elevation(tester), 3.0);
         assert_eq!(material_shape(tester), Some(ShapeBorderRef::new(shape)));
@@ -1810,31 +1811,31 @@ mod tests {
 
             // Enabled chip should have the provided backgroundColor.
             build_app(tester, true, false);
-            assert!(paints_calls(
+            assert_paints(
                 &material_box_ops(tester),
-                &[PaintCall::rrect(Some(background_color))]
-            ));
+                &[PaintCall::rrect(Some(background_color))],
+            );
 
             // Disabled chip should have the provided disabledColor.
             build_app(tester, false, false);
-            assert!(paints_calls(
+            assert_paints(
                 &material_box_ops(tester),
-                &[PaintCall::rrect(Some(disabled_color))]
-            ));
+                &[PaintCall::rrect(Some(disabled_color))],
+            );
 
             // Enabled & selected chip should have the provided selectedColor.
             build_app(tester, true, true);
-            assert!(paints_calls(
+            assert_paints(
                 &material_box_ops(tester),
-                &[PaintCall::rrect(Some(selected_color))]
-            ));
+                &[PaintCall::rrect(Some(selected_color))],
+            );
 
             // Disabled & selected chip should have the provided disabledSelectedColor.
             build_app(tester, false, true);
-            assert!(paints_calls(
+            assert_paints(
                 &material_box_ops(tester),
-                &[PaintCall::rrect(Some(disabled_selected_color))]
-            ));
+                &[PaintCall::rrect(Some(disabled_selected_color))],
+            );
         });
     }
 
@@ -1862,24 +1863,24 @@ mod tests {
 
             // Enabled chip should have the provided backgroundColor.
             build_app(tester, true, false);
-            assert!(paints_calls(
+            assert_paints(
                 &material_box_ops(tester),
-                &[PaintCall::rrect(Some(background_color))]
-            ));
+                &[PaintCall::rrect(Some(background_color))],
+            );
 
             // Disabled chip should have the provided disabledColor.
             build_app(tester, false, false);
-            assert!(paints_calls(
+            assert_paints(
                 &material_box_ops(tester),
-                &[PaintCall::rrect(Some(disabled_color))]
-            ));
+                &[PaintCall::rrect(Some(disabled_color))],
+            );
 
             // Enabled & selected chip should have the provided selectedColor.
             build_app(tester, true, true);
-            assert!(paints_calls(
+            assert_paints(
                 &material_box_ops(tester),
-                &[PaintCall::rrect(Some(selected_color))]
-            ));
+                &[PaintCall::rrect(Some(selected_color))],
+            );
         });
     }
 
@@ -1897,14 +1898,15 @@ mod tests {
 
             // Test that the checkmark is painted.
             build_raw_chip(tester, ChipThemeData::new().checkmark_color(red));
-            assert!(paints_calls(
+            assert_paints(
                 &material_box_ops(tester),
                 &[PaintCall::Path {
                     color: Some(red),
-                    stroke_width: None,
-                    stroked: Some(true),
-                }]
-            ));
+                    style: Some(PaintedStyle::Stroke(None)),
+                    includes: Vec::new(),
+                    excludes: Vec::new(),
+                }],
+            );
 
             // Test that the checkmark is not painted when ChipThemeData.showCheckmark is false.
             build_raw_chip(
@@ -1914,14 +1916,18 @@ mod tests {
                     .checkmark_color(red),
             );
             tester.pump_and_settle();
-            assert!(!paints_calls(
-                &material_box_ops(tester),
-                &[PaintCall::Path {
-                    color: Some(red),
-                    stroke_width: None,
-                    stroked: Some(true),
-                }]
-            ));
+            assert!(
+                paints(
+                    &material_box_ops(tester),
+                    &[PaintCall::Path {
+                        color: Some(red),
+                        style: Some(PaintedStyle::Stroke(None)),
+                        includes: Vec::new(),
+                        excludes: Vec::new(),
+                    }]
+                )
+                .is_err()
+            );
         });
     }
 
@@ -2240,17 +2246,17 @@ mod tests {
 
             build_chip(tester, Colors::RED.primary());
             tester.pump_and_settle();
-            assert!(paints_calls(
+            assert_paints(
                 &raw_chip_ops(tester),
-                &[PaintCall::drrect(Some(primary.get()))]
-            ));
+                &[PaintCall::drrect(Some(primary.get()))],
+            );
 
             build_chip(tester, Colors::BLUE.primary());
             tester.pump_by(Duration::from_millis(100));
-            assert!(paints_calls(
+            assert_paints(
                 &raw_chip_ops(tester),
-                &[PaintCall::drrect(Some(primary.get()))]
-            ));
+                &[PaintCall::drrect(Some(primary.get()))],
+            );
         });
     }
 }

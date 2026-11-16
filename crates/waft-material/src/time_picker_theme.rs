@@ -663,7 +663,8 @@ mod tests {
     use crate::input_border::OutlineInputBorder;
     use crate::input_decorator::InputDecorationThemeData;
     use crate::material::Material;
-    use crate::test_support::{PaintCall, PaintInspection, material_app, paints_calls};
+    use crate::test_support::{PaintInspection, material_app};
+
     use crate::text_button::TextButton;
     use crate::text_field::TextField;
     use crate::text_theme::TextTheme;
@@ -673,6 +674,7 @@ mod tests {
     use crate::time_picker::{TimePickerEntryMode, show_time_picker};
     use crate::tooltip::tests::{m2, m3};
     use crate::typography::Typography;
+    use waft_rendering::testing::{PaintCall, paints};
 
     fn resolve(color: &AnyColor, states: &WidgetStates) -> Color {
         <dyn WidgetStateProperty<Color>>::resolve_as(color, states).color()
@@ -933,7 +935,7 @@ mod tests {
             .iter()
             .map(|color| PaintCall::circle(Some(*color)))
             .collect();
-        paints_calls(&tester.painted_ops_deep(render), &calls)
+        paints(&tester.painted_ops_deep(render), &calls).is_ok()
     }
 
     /// The style a text gets from a typography: Dart's
