@@ -1,0 +1,436 @@
+//! iOS: the `.app` folder Xcode would produce, assembled from a cargo binary.
+//!
+//! No Xcode project. The binary, an `Info.plist`, icons, and resources go into a
+//! folder, signed as [`Signing`] says (`signing.rs`): ad hoc for the simulator, with a
+//! development identity and profile for a device, or left for Xcode to sign as it exports the
+//! app for distribution (`export.rs`); `simctl` or `devicectl` installs and launches it.
+
+mod devices;
+mod export;
+mod profiles;
+mod provisioning;
+mod signing;
+
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use anyhow::{Result, bail};
+use plist::{Dictionary, Value};
+
+pub use devices::{IosDevice, Simulator, default_simulator, listed_devices};
+pub use signing::ExportMethod;
+use signing::Signing;
+
+use crate::apple;
+use crate::cargo::{self, Artifact, Build};
+use crate::file_associations;
+use crate::icons;
+use crate::project::{Profile, Project};
+use crate::tools;
+
+const DEFAULT_MINIMUM_VERSION: &str = "15.0";
+
+pub struct App {
+    pub path: PathBuf,
+    pub bundle_id: String,
+}
+
+/// `build ios`: the `.app` for a device, signed for the team's development devices, or for the
+/// simulator.
+pub fn build_app(project: &Project, profile: Profile, simulator: bool) -> Result<PathBuf> {
+    let signing = if simulator {
+        Signing::Simulator
+    } else {
+        Signing::Development(None)
+    };
+    Ok(build(project, profile, signing)?.path)
+}
+
+/// `build ipa`: the `.ipa` Xcode signs as it exports the app for `method`.
+pub fn build_ipa(project: &Project, profile: Profile, method: ExportMethod) -> Result<PathBuf> {
+    let app = build(project, profile, Signing::Distribution)?;
+    export::export_ipa(project, &app, method, &project.out_dir("ipa", profile))
+}
+
+/// `run` on `simulator`: the app built for it, installed, and launched there.
+pub fn run_on_simulator(project: &Project, profile: Profile, simulator: &Simulator) -> Result<()> {
+    let app = build(project, profile, Signing::Simulator)?;
+    run_simulator(&app, simulator)
+}
+
+/// `run` on `device`: the app built and signed for it, installed, and launched there.
+pub fn run_on_device(project: &Project, profile: Profile, device: &IosDevice) -> Result<()> {
+    let app = build(project, profile, Signing::Development(Some(device)))?;
+    run_device(&app, device)
+}
+
+fn build(project: &Project, profile: Profile, signing: Signing) -> Result<App> {
+    if !cfg!(target_os = "macos") {
+        bail!("iOS builds need macOS with the Xcode command line tools");
+    }
+    let minimum_version = minimum_version(project);
+    tools::ensure_rust_target(&project.root, signing.triple())?;
+    let executable = cargo::build(&Build {
+        project,
+        package: &project.package,
+        profile,
+        triple: Some(signing.triple()),
+        artifact: Artifact::Executable(&project.bin),
+        env: vec![("IPHONEOS_DEPLOYMENT_TARGET", minimum_version.clone())],
+        link_inputs: Vec::new(),
+    })?;
+
+    let out = project.out_dir(signing.dir_name(), profile);
+    let app = out.join(format!("{}.app", project.name));
+    if app.exists() {
+        fs::remove_dir_all(&app)?;
+    }
+    fs::create_dir_all(&app)?;
+    fs::copy(&executable, app.join(&project.bin))?;
+    let icon_names = write_icons(project, &app)?;
+    plist::to_file_xml(
+        app.join("Info.plist"),
+        &info_plist(project, signing, &minimum_version, &icon_names),
+    )?;
+    for (source, relative) in project.resource_files()? {
+        let dest = app.join(relative);
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::copy(source, dest)?;
+    }
+    signing::sign(project, &app, &out, signing)?;
+    Ok(App {
+        path: app,
+        bundle_id: project.identifier.clone(),
+    })
+}
+
+/// `MinimumOSVersion`: the project's, or iOS 15.
+fn minimum_version(project: &Project) -> String {
+    project
+        .ios
+        .minimum_version
+        .clone()
+        .unwrap_or_else(|| DEFAULT_MINIMUM_VERSION.to_owned())
+}
+
+fn info_plist(
+    project: &Project,
+    signing: Signing,
+    minimum_version: &str,
+    icon_names: &[String],
+) -> Value {
+    let mut info = apple::info_plist(project);
+    let mut put = |key: &str, value: Value| {
+        info.insert(key.to_owned(), value);
+    };
+    let text = |s: &str| Value::String(s.to_owned());
+    put(
+        "CFBundleSupportedPlatforms",
+        Value::Array(vec![text(signing.supported_platform())]),
+    );
+    put("DTPlatformName", text(signing.platform_name()));
+    put("DTSDKName", text(signing.platform_name()));
+    put("LSRequiresIPhoneOS", Value::Boolean(true));
+    put("MinimumOSVersion", text(minimum_version));
+    put(
+        "UIDeviceFamily",
+        Value::Array(vec![Value::Integer(1.into()), Value::Integer(2.into())]),
+    );
+    // Without a launch screen entry iOS runs the app letterboxed at a legacy size.
+    put("UILaunchScreen", Value::Dictionary(Dictionary::new()));
+    // UIKit's scene lifecycle, which iOS 27 requires of an app built with its SDK: each window
+    // scene's delegate is Waft's host's, which the host registers before UIKit starts.
+    put("UIApplicationSceneManifest", scene_manifest());
+    // A ProMotion screen's full rate for the host's display link, which an iPhone caps at 60 Hz
+    // otherwise.
+    put("CADisableMinimumFrameDurationOnPhone", Value::Boolean(true));
+    put(
+        "UISupportedInterfaceOrientations",
+        Value::Array(
+            [
+                "UIInterfaceOrientationPortrait",
+                "UIInterfaceOrientationLandscapeLeft",
+                "UIInterfaceOrientationLandscapeRight",
+                "UIInterfaceOrientationPortraitUpsideDown",
+            ]
+            .iter()
+            .map(|s| text(s))
+            .collect(),
+        ),
+    );
+    if !matches!(signing, Signing::Simulator) {
+        put(
+            "UIRequiredDeviceCapabilities",
+            Value::Array(vec![text("arm64")]),
+        );
+    }
+    if !project.file_associations.is_empty() {
+        for (key, value) in
+            file_associations::apple_info_plist(&project.file_associations, &project.identifier)
+        {
+            put(&key, value);
+        }
+        // A document from Files opens where it is, which the host reaches through its URL's
+        // security-scoped access, rather than as a copy in the app's Inbox.
+        put("LSSupportsOpeningDocumentsInPlace", Value::Boolean(true));
+    }
+    if !icon_names.is_empty() {
+        let mut primary = Dictionary::new();
+        primary.insert(
+            "CFBundleIconFiles".to_owned(),
+            Value::Array(icon_names.iter().map(|n| text(n)).collect()),
+        );
+        let mut icons = Dictionary::new();
+        icons.insert("CFBundlePrimaryIcon".to_owned(), Value::Dictionary(primary));
+        put("CFBundleIcons", Value::Dictionary(icons.clone()));
+        put("CFBundleIcons~ipad", Value::Dictionary(icons));
+    }
+    Value::Dictionary(info)
+}
+
+/// One kind of scene, the app's window, whose delegate is `WaftSceneDelegate`, the iOS host's; one
+/// scene at a time.
+fn scene_manifest() -> Value {
+    let text = |s: &str| Value::String(s.to_owned());
+    let mut window = Dictionary::new();
+    window.insert(
+        "UISceneConfigurationName".to_owned(),
+        text("Default Configuration"),
+    );
+    window.insert(
+        "UISceneDelegateClassName".to_owned(),
+        text("WaftSceneDelegate"),
+    );
+    let mut configurations = Dictionary::new();
+    configurations.insert(
+        "UIWindowSceneSessionRoleApplication".to_owned(),
+        Value::Array(vec![Value::Dictionary(window)]),
+    );
+    let mut manifest = Dictionary::new();
+    manifest.insert(
+        "UIApplicationSupportsMultipleScenes".to_owned(),
+        Value::Boolean(false),
+    );
+    manifest.insert(
+        "UISceneConfigurations".to_owned(),
+        Value::Dictionary(configurations),
+    );
+    Value::Dictionary(manifest)
+}
+
+/// Legacy icon files, which need no asset catalog. Returns the base names for `CFBundleIconFiles`.
+fn write_icons(project: &Project, app: &Path) -> Result<Vec<String>> {
+    let Some(icon) = &project.icon else {
+        return Ok(Vec::new());
+    };
+    let source = icons::load(icon)?;
+    for (file, size) in [
+        ("AppIcon60x60@2x.png", 120),
+        ("AppIcon60x60@3x.png", 180),
+        ("AppIcon76x76@2x~ipad.png", 152),
+        ("AppIcon83.5x83.5@2x~ipad.png", 167),
+    ] {
+        icons::write_resized(&source, size, &app.join(file))?;
+    }
+    Ok(vec![
+        "AppIcon60x60".to_owned(),
+        "AppIcon76x76".to_owned(),
+        "AppIcon83.5x83.5".to_owned(),
+    ])
+}
+
+fn run_simulator(app: &App, simulator: &Simulator) -> Result<()> {
+    let udid = simulator.udid.as_str();
+    if simulator.state != "Booted" {
+        println!("booting {} ({})", simulator.name, simulator.runtime);
+        let boot = Command::new("xcrun")
+            .args(["simctl", "boot", udid])
+            .output()?;
+        let stderr = String::from_utf8_lossy(&boot.stderr);
+        if !boot.status.success() && !stderr.contains("Booted") {
+            bail!("simctl boot failed: {}", stderr.trim());
+        }
+    }
+    tools::run(
+        Command::new("open").args(["-a", "Simulator"]),
+        "open Simulator",
+    )?;
+    tools::run(
+        Command::new("xcrun").args(["simctl", "bootstatus", udid, "-b"]),
+        "simctl bootstatus",
+    )?;
+    tools::run(
+        Command::new("xcrun")
+            .args(["simctl", "install", udid])
+            .arg(&app.path),
+        "simctl install",
+    )?;
+    let _ = Command::new("xcrun")
+        .args(["simctl", "terminate", udid, &app.bundle_id])
+        .output();
+    println!("launching {} on {}", app.bundle_id, simulator.name);
+    tools::run(
+        Command::new("xcrun").args(["simctl", "launch", "--console-pty", udid, &app.bundle_id]),
+        "simctl launch",
+    )
+}
+
+fn run_device(app: &App, device: &IosDevice) -> Result<()> {
+    let device = device.id.as_str();
+    tools::run(
+        Command::new("xcrun")
+            .args(["devicectl", "device", "install", "app", "--device", device])
+            .arg(&app.path),
+        "devicectl install",
+    )?;
+    println!("launching {} on {device}", app.bundle_id);
+    tools::run(
+        Command::new("xcrun").args([
+            "devicectl",
+            "device",
+            "process",
+            "launch",
+            "--console",
+            "--device",
+            device,
+            &app.bundle_id,
+        ]),
+        "devicectl launch",
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn info_plist_names_the_executable_and_platform() {
+        let project = test_project();
+        let plist = info_plist(&project, Signing::Simulator, "15.0", &[]);
+        let dict = plist.as_dictionary().unwrap();
+        assert_eq!(
+            dict.get("CFBundleExecutable").unwrap().as_string(),
+            Some("myapp")
+        );
+        assert_eq!(
+            dict.get("DTPlatformName").unwrap().as_string(),
+            Some("iphonesimulator")
+        );
+        assert!(dict.get("UILaunchScreen").is_some());
+        assert!(dict.get("CFBundleIcons").is_none());
+        assert!(dict.get("UIRequiredDeviceCapabilities").is_none());
+        assert!(dict.get("NSCameraUsageDescription").is_none());
+    }
+
+    #[test]
+    fn info_plist_adopts_the_scene_lifecycle_with_the_hosts_delegate() {
+        let project = test_project();
+        let plist = info_plist(&project, Signing::Simulator, "15.0", &[]);
+        let dict = plist.as_dictionary().unwrap();
+        let manifest = dict
+            .get("UIApplicationSceneManifest")
+            .and_then(Value::as_dictionary)
+            .expect("a scene manifest");
+        assert_eq!(
+            manifest
+                .get("UIApplicationSupportsMultipleScenes")
+                .and_then(Value::as_boolean),
+            Some(false)
+        );
+        let window = manifest
+            .get("UISceneConfigurations")
+            .and_then(Value::as_dictionary)
+            .and_then(|configurations| configurations.get("UIWindowSceneSessionRoleApplication"))
+            .and_then(Value::as_array)
+            .and_then(|configurations| configurations.first())
+            .and_then(Value::as_dictionary)
+            .expect("the window scene's configuration");
+        assert_eq!(
+            window
+                .get("UISceneDelegateClassName")
+                .and_then(Value::as_string),
+            Some("WaftSceneDelegate")
+        );
+        assert_eq!(
+            dict.get("CADisableMinimumFrameDurationOnPhone")
+                .and_then(Value::as_boolean),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn info_plist_declares_the_documents_the_app_opens_in_place() {
+        let mut project = test_project();
+        project.file_associations = serde_json::from_value(serde_json::json!([
+            { "extensions": ["wapk"], "name": "WaOS program", "owner": true },
+        ]))
+        .unwrap();
+        let plist = info_plist(&project, Signing::Development(None), "15.0", &[]);
+        let dict = plist.as_dictionary().unwrap();
+        let exported = dict
+            .get("UTExportedTypeDeclarations")
+            .and_then(Value::as_array)
+            .expect("the type the app owns, declared");
+        assert_eq!(
+            exported[0]
+                .as_dictionary()
+                .and_then(|declaration| declaration.get("UTTypeIdentifier"))
+                .and_then(Value::as_string),
+            Some("com.example.myapp.wapk")
+        );
+        assert!(dict.get("CFBundleDocumentTypes").is_some());
+        assert_eq!(
+            dict.get("LSSupportsOpeningDocumentsInPlace")
+                .and_then(Value::as_boolean),
+            Some(true)
+        );
+        let without = info_plist(&test_project(), Signing::Simulator, "15.0", &[]);
+        assert!(
+            without
+                .as_dictionary()
+                .unwrap()
+                .get("LSSupportsOpeningDocumentsInPlace")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn info_plist_says_why_the_app_uses_the_camera() {
+        let mut project = test_project();
+        project.usage_descriptions.camera = Some("Scans the code on a ticket.".into());
+        let plist = info_plist(&project, Signing::Development(None), "15.0", &[]);
+        let dict = plist.as_dictionary().unwrap();
+        assert_eq!(
+            dict.get("NSCameraUsageDescription").unwrap().as_string(),
+            Some("Scans the code on a ticket.")
+        );
+    }
+
+    fn test_project() -> Project {
+        Project {
+            root: PathBuf::from("/tmp/x"),
+            workspace_root: PathBuf::from("/tmp/x"),
+            target_dir: PathBuf::from("/tmp/x/target"),
+            package: "myapp".into(),
+            bin: "myapp".into(),
+            library: Some("myapp".into()),
+            version: "0.1.0".into(),
+            description: None,
+            homepage: None,
+            authors: Vec::new(),
+            name: "My App".into(),
+            identifier: "com.example.myapp".into(),
+            icon: None,
+            resources: Vec::new(),
+            file_associations: Vec::new(),
+            usage_descriptions: Default::default(),
+            macos: Default::default(),
+            ios: Default::default(),
+            android: Default::default(),
+            windows: Default::default(),
+        }
+    }
+}
