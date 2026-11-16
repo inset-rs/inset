@@ -21,7 +21,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - widgets/navigation_toolbar.rs → navigation_toolbar.dart
 - widgets/standard_component_type.rs → standard_component_type.dart
 - widgets/title.rs → title.dart
-- widgets/scroll_simulation.rs → scroll_simulation.dart
 - widgets/scroll_metrics.rs → scroll_metrics.dart
 - widgets/primary_scroll_controller.rs → primary_scroll_controller.dart
 - widgets/scroll_controller.rs → scroll_controller.dart
@@ -376,6 +375,12 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - Change: the deprecated `tolerance` getter is not ported.
   Reason: platform — it reads the implicit view's device pixel ratio, and there is no implicit view.
   Affect: call `tolerance_for(metrics)`, as Flutter asks.
+
+## widgets/scroll_simulation.rs → scroll_simulation.dart
+
+- Change: a fling from past an edge back into the content decelerates like any fling.
+  Reason: platform — UIKit does so, measured on an iPhone (`experiments/2026-11-16-scroll-reversal`, Part 7).
+  Affect: a swipe that turns back at a list's end carries on, instead of springing back to the end.
 
 ## widgets/scroll_notification.rs → scroll_notification.dart
 
