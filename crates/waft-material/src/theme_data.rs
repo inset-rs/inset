@@ -28,6 +28,7 @@ use crate::bottom_sheet_theme::BottomSheetThemeData;
 use crate::button_theme::ButtonThemeData;
 use crate::card_theme::CardThemeData;
 use crate::checkbox_theme::CheckboxThemeData;
+use crate::chip_theme::ChipThemeData;
 use crate::color_scheme::ColorScheme;
 use crate::colors::{Colors, MaterialColor};
 use crate::constants::{K_DEFAULT_ICON_DARK_COLOR, K_DEFAULT_ICON_LIGHT_COLOR};
@@ -63,6 +64,7 @@ use crate::popup_menu_theme::PopupMenuThemeData;
 use crate::progress_indicator_theme::ProgressIndicatorThemeData;
 use crate::radio_theme::RadioThemeData;
 use crate::scrollbar_theme::ScrollbarThemeData;
+use crate::segmented_button_theme::SegmentedButtonThemeData;
 use crate::slider_theme::SliderThemeData;
 use crate::snack_bar_theme::SnackBarThemeData;
 use crate::switch_theme::SwitchThemeData;
@@ -70,6 +72,7 @@ use crate::tab_bar_theme::TabBarThemeData;
 use crate::text_button_theme::TextButtonThemeData;
 use crate::text_selection_theme::TextSelectionThemeData;
 use crate::text_theme::TextTheme;
+use crate::toggle_buttons_theme::ToggleButtonsThemeData;
 use crate::tooltip_theme::TooltipThemeData;
 use crate::typography::Typography;
 
@@ -627,6 +630,10 @@ pub struct ThemeData {
     pub card_theme: CardThemeData,
     /// A theme for customizing the appearance and layout of `Checkbox` widgets.
     pub checkbox_theme: CheckboxThemeData,
+    /// A theme for customizing the appearance and layout of `Chip` widgets.
+    ///
+    /// This is the value returned from `ChipTheme::of`.
+    pub chip_theme: ChipThemeData,
     /// A theme for customizing the shape of a dialog.
     pub dialog_theme: DialogThemeData,
     /// A theme for customizing the appearance of [`Divider`](crate::Divider)s,
@@ -681,6 +688,8 @@ pub struct ThemeData {
     pub progress_indicator_theme: ProgressIndicatorThemeData,
     /// A theme for customizing the appearance and layout of `Radio` widgets.
     pub radio_theme: RadioThemeData,
+    /// A theme for customizing the appearance and layout of `SegmentedButton` widgets.
+    pub segmented_button_theme: SegmentedButtonThemeData,
     /// The colors and shapes used to render `Slider`.
     ///
     /// This is the value returned from `SliderTheme::of`.
@@ -697,6 +706,8 @@ pub struct ThemeData {
     /// A theme for customizing the appearance for text selection in `TextField` and
     /// `SelectableText` widgets.
     pub text_selection_theme: TextSelectionThemeData,
+    /// Defines the default configuration of `ToggleButtons` widgets.
+    pub toggle_buttons_theme: ToggleButtonsThemeData,
     /// A theme for customizing the appearance and layout of `Tooltip` widgets.
     pub tooltip_theme: TooltipThemeData,
 
@@ -1135,6 +1146,8 @@ impl ThemeData {
                 Some(&b.checkbox_theme),
                 t,
             ),
+            chip_theme: ChipThemeData::lerp(Some(&a.chip_theme), Some(&b.chip_theme), t)
+                .expect("both sides"),
             dialog_theme: DialogThemeData::lerp(Some(&a.dialog_theme), Some(&b.dialog_theme), t),
             divider_theme: DividerThemeData::lerp(
                 Some(&a.divider_theme),
@@ -1235,6 +1248,11 @@ impl ThemeData {
             )
             .expect("both sides"),
             radio_theme: RadioThemeData::lerp(Some(&a.radio_theme), Some(&b.radio_theme), t),
+            segmented_button_theme: SegmentedButtonThemeData::lerp(
+                Some(&a.segmented_button_theme),
+                Some(&b.segmented_button_theme),
+                t,
+            ),
             slider_theme: SliderThemeData::lerp(&a.slider_theme, &b.slider_theme, t),
             snack_bar_theme: SnackBarThemeData::lerp(
                 Some(&a.snack_bar_theme),
@@ -1252,6 +1270,12 @@ impl ThemeData {
             text_selection_theme: TextSelectionThemeData::lerp(
                 Some(&a.text_selection_theme),
                 Some(&b.text_selection_theme),
+                t,
+            )
+            .expect("both sides"),
+            toggle_buttons_theme: ToggleButtonsThemeData::lerp(
+                Some(&a.toggle_buttons_theme),
+                Some(&b.toggle_buttons_theme),
                 t,
             )
             .expect("both sides"),
@@ -1333,6 +1357,7 @@ impl PartialEq for ThemeData {
             && other.button_theme == self.button_theme
             && other.card_theme == self.card_theme
             && other.checkbox_theme == self.checkbox_theme
+            && other.chip_theme == self.chip_theme
             && other.dialog_theme == self.dialog_theme
             && other.divider_theme == self.divider_theme
             && other.drawer_theme == self.drawer_theme
@@ -1353,12 +1378,14 @@ impl PartialEq for ThemeData {
             && other.popup_menu_theme == self.popup_menu_theme
             && other.progress_indicator_theme == self.progress_indicator_theme
             && other.radio_theme == self.radio_theme
+            && other.segmented_button_theme == self.segmented_button_theme
             && other.slider_theme == self.slider_theme
             && other.snack_bar_theme == self.snack_bar_theme
             && other.switch_theme == self.switch_theme
             && other.tab_bar_theme == self.tab_bar_theme
             && other.text_button_theme == self.text_button_theme
             && other.text_selection_theme == self.text_selection_theme
+            && other.toggle_buttons_theme == self.toggle_buttons_theme
             && other.tooltip_theme == self.tooltip_theme
             // DEPRECATED (newest deprecations at the bottom)
             && other.dialog_background_color == self.dialog_background_color
@@ -1432,6 +1459,7 @@ pub struct ThemeDataBuilder {
     button_theme: Option<Box<ButtonThemeData>>,
     card_theme: Option<Box<CardThemeData>>,
     checkbox_theme: Option<Box<CheckboxThemeData>>,
+    chip_theme: Option<Box<ChipThemeData>>,
     dialog_theme: Option<Box<DialogThemeData>>,
     divider_theme: Option<Box<DividerThemeData>>,
     drawer_theme: Option<Box<DrawerThemeData>>,
@@ -1452,12 +1480,14 @@ pub struct ThemeDataBuilder {
     popup_menu_theme: Option<Box<PopupMenuThemeData>>,
     progress_indicator_theme: Option<Box<ProgressIndicatorThemeData>>,
     radio_theme: Option<Box<RadioThemeData>>,
+    segmented_button_theme: Option<Box<SegmentedButtonThemeData>>,
     slider_theme: Option<Box<SliderThemeData>>,
     snack_bar_theme: Option<Box<SnackBarThemeData>>,
     switch_theme: Option<Box<SwitchThemeData>>,
     tab_bar_theme: Option<Box<TabBarThemeData>>,
     text_button_theme: Option<Box<TextButtonThemeData>>,
     text_selection_theme: Option<Box<TextSelectionThemeData>>,
+    toggle_buttons_theme: Option<Box<ToggleButtonsThemeData>>,
     tooltip_theme: Option<Box<TooltipThemeData>>,
     // DEPRECATED (newest deprecations at the bottom)
     dialog_background_color: Option<Color>,
@@ -1794,6 +1824,12 @@ impl ThemeDataBuilder {
         self
     }
 
+    /// Dart `ThemeData(chipTheme:)`.
+    pub fn chip_theme(mut self, chip_theme: ChipThemeData) -> ThemeDataBuilder {
+        self.chip_theme = Some(Box::new(chip_theme));
+        self
+    }
+
     /// Dart `ThemeData(dialogTheme:)`.
     pub fn dialog_theme(mut self, dialog_theme: DialogThemeData) -> ThemeDataBuilder {
         self.dialog_theme = Some(Box::new(dialog_theme));
@@ -1944,6 +1980,15 @@ impl ThemeDataBuilder {
         self
     }
 
+    /// Dart `ThemeData(segmentedButtonTheme:)`.
+    pub fn segmented_button_theme(
+        mut self,
+        segmented_button_theme: SegmentedButtonThemeData,
+    ) -> ThemeDataBuilder {
+        self.segmented_button_theme = Some(Box::new(segmented_button_theme));
+        self
+    }
+
     /// Dart `ThemeData(sliderTheme:)`.
     pub fn slider_theme(mut self, slider_theme: SliderThemeData) -> ThemeDataBuilder {
         self.slider_theme = Some(Box::new(slider_theme));
@@ -1980,6 +2025,15 @@ impl ThemeDataBuilder {
         text_selection_theme: TextSelectionThemeData,
     ) -> ThemeDataBuilder {
         self.text_selection_theme = Some(Box::new(text_selection_theme));
+        self
+    }
+
+    /// Dart `ThemeData(toggleButtonsTheme:)`.
+    pub fn toggle_buttons_theme(
+        mut self,
+        toggle_buttons_theme: ToggleButtonsThemeData,
+    ) -> ThemeDataBuilder {
+        self.toggle_buttons_theme = Some(Box::new(toggle_buttons_theme));
         self
     }
 
@@ -2062,6 +2116,7 @@ impl ThemeDataBuilder {
             button_theme,
             card_theme,
             checkbox_theme,
+            chip_theme,
             dialog_theme,
             divider_theme,
             drawer_theme,
@@ -2082,12 +2137,14 @@ impl ThemeDataBuilder {
             popup_menu_theme,
             progress_indicator_theme,
             radio_theme,
+            segmented_button_theme,
             slider_theme,
             snack_bar_theme,
             switch_theme,
             tab_bar_theme,
             text_button_theme,
             text_selection_theme,
+            toggle_buttons_theme,
             tooltip_theme,
             mut dialog_background_color,
             mut indicator_color,
@@ -2473,6 +2530,7 @@ impl ThemeDataBuilder {
             button_theme,
             card_theme: unboxed_or_default(card_theme),
             checkbox_theme: unboxed_or_default(checkbox_theme),
+            chip_theme: unboxed_or_default(chip_theme),
             dialog_theme: unboxed_or_default(dialog_theme),
             divider_theme: unboxed_or_default(divider_theme),
             drawer_theme: unboxed_or_default(drawer_theme),
@@ -2493,12 +2551,14 @@ impl ThemeDataBuilder {
             popup_menu_theme: unboxed_or_default(popup_menu_theme),
             progress_indicator_theme: unboxed_or_default(progress_indicator_theme),
             radio_theme: unboxed_or_default(radio_theme),
+            segmented_button_theme: unboxed_or_default(segmented_button_theme),
             slider_theme: unboxed_or_default(slider_theme),
             snack_bar_theme: unboxed_or_default(snack_bar_theme),
             switch_theme: unboxed_or_default(switch_theme),
             tab_bar_theme: unboxed_or_default(tab_bar_theme),
             text_button_theme: unboxed_or_default(text_button_theme),
             text_selection_theme: unboxed_or_default(text_selection_theme),
+            toggle_buttons_theme: unboxed_or_default(toggle_buttons_theme),
             tooltip_theme: unboxed_or_default(tooltip_theme),
             // DEPRECATED (newest deprecations at the bottom)
             dialog_background_color,
@@ -2879,6 +2939,12 @@ impl ThemeDataCopyWith {
         self
     }
 
+    /// Dart `copyWith(chipTheme:)`.
+    pub fn chip_theme(mut self, chip_theme: ChipThemeData) -> ThemeDataCopyWith {
+        self.theme.chip_theme = chip_theme;
+        self
+    }
+
     /// Dart `copyWith(dialogTheme:)`.
     pub fn dialog_theme(mut self, dialog_theme: DialogThemeData) -> ThemeDataCopyWith {
         self.theme.dialog_theme = dialog_theme;
@@ -3035,6 +3101,15 @@ impl ThemeDataCopyWith {
         self
     }
 
+    /// Dart `copyWith(segmentedButtonTheme:)`.
+    pub fn segmented_button_theme(
+        mut self,
+        segmented_button_theme: SegmentedButtonThemeData,
+    ) -> ThemeDataCopyWith {
+        self.theme.segmented_button_theme = segmented_button_theme;
+        self
+    }
+
     /// Dart `copyWith(sliderTheme:)`.
     pub fn slider_theme(mut self, slider_theme: SliderThemeData) -> ThemeDataCopyWith {
         self.theme.slider_theme = slider_theme;
@@ -3074,6 +3149,15 @@ impl ThemeDataCopyWith {
         text_selection_theme: TextSelectionThemeData,
     ) -> ThemeDataCopyWith {
         self.theme.text_selection_theme = text_selection_theme;
+        self
+    }
+
+    /// Dart `copyWith(toggleButtonsTheme:)`.
+    pub fn toggle_buttons_theme(
+        mut self,
+        toggle_buttons_theme: ToggleButtonsThemeData,
+    ) -> ThemeDataCopyWith {
+        self.theme.toggle_buttons_theme = toggle_buttons_theme;
         self
     }
 
@@ -4906,6 +4990,12 @@ mod tests {
             button_theme: ButtonThemeData::new().with_color_scheme(ColorScheme::dark()),
             card_theme: CardThemeData::new().elevation(1.0),
             checkbox_theme: CheckboxThemeData::new(),
+            chip_theme: ChipThemeData::from_defaults(
+                None,
+                Some(Colors::BLACK),
+                Colors::WHITE,
+                TextStyle::new().color(Colors::BLACK),
+            ),
             dialog_theme: DialogThemeData::new().background_color(Colors::BLACK),
             divider_theme: DividerThemeData::new().color(Colors::BLACK),
             drawer_theme: DrawerThemeData::new().elevation(1.0),
@@ -4953,6 +5043,7 @@ mod tests {
             popup_menu_theme: PopupMenuThemeData::new().color(Colors::BLACK),
             progress_indicator_theme: ProgressIndicatorThemeData::new(),
             radio_theme: RadioThemeData::new(),
+            segmented_button_theme: SegmentedButtonThemeData::new(),
             slider_theme: SliderThemeData::from_primary_colors(
                 Colors::BLACK,
                 Colors::BLACK,
@@ -4968,6 +5059,8 @@ mod tests {
                     .build(),
             ),
             text_selection_theme: TextSelectionThemeData::new().cursor_color(Colors::BLACK),
+            toggle_buttons_theme: ToggleButtonsThemeData::new()
+                .text_style(TextStyle::new().color(Colors::BLACK)),
             tooltip_theme: TooltipThemeData::new().height(100.0),
             // DEPRECATED (newest deprecations at the bottom)
             dialog_background_color: Colors::BLACK,
@@ -5038,6 +5131,12 @@ mod tests {
             button_theme: ButtonThemeData::new().with_color_scheme(ColorScheme::light()),
             card_theme: CardThemeData::new().elevation(2.0),
             checkbox_theme: CheckboxThemeData::new(),
+            chip_theme: ChipThemeData::from_defaults(
+                None,
+                Some(Colors::WHITE),
+                Colors::BLACK,
+                TextStyle::new().color(Colors::WHITE),
+            ),
             dialog_theme: DialogThemeData::new().background_color(Colors::WHITE),
             divider_theme: DividerThemeData::new().color(Colors::WHITE),
             drawer_theme: DrawerThemeData::new().elevation(2.0),
@@ -5069,6 +5168,7 @@ mod tests {
             popup_menu_theme: PopupMenuThemeData::new().color(Colors::WHITE),
             progress_indicator_theme: ProgressIndicatorThemeData::new(),
             radio_theme: RadioThemeData::new(),
+            segmented_button_theme: SegmentedButtonThemeData::new(),
             slider_theme: SliderThemeData::from_primary_colors(
                 Colors::WHITE,
                 Colors::WHITE,
@@ -5080,6 +5180,8 @@ mod tests {
             tab_bar_theme: TabBarThemeData::new().label_color(Colors::WHITE),
             text_button_theme: TextButtonThemeData::new(),
             text_selection_theme: TextSelectionThemeData::new().cursor_color(Colors::WHITE),
+            toggle_buttons_theme: ToggleButtonsThemeData::new()
+                .text_style(TextStyle::new().color(Colors::WHITE)),
             tooltip_theme: TooltipThemeData::new().height(100.0),
             // DEPRECATED (newest deprecations at the bottom)
             dialog_background_color: Colors::WHITE,
@@ -5142,6 +5244,7 @@ mod tests {
             .button_theme(other_theme.button_theme.clone())
             .card_theme(other_theme.card_theme.clone())
             .checkbox_theme(other_theme.checkbox_theme.clone())
+            .chip_theme(other_theme.chip_theme.clone())
             .dialog_theme(other_theme.dialog_theme.clone())
             .divider_theme(other_theme.divider_theme.clone())
             .drawer_theme(other_theme.drawer_theme.clone())
@@ -5162,12 +5265,14 @@ mod tests {
             .popup_menu_theme(other_theme.popup_menu_theme.clone())
             .progress_indicator_theme(other_theme.progress_indicator_theme.clone())
             .radio_theme(other_theme.radio_theme.clone())
+            .segmented_button_theme(other_theme.segmented_button_theme.clone())
             .slider_theme(other_theme.slider_theme.clone())
             .snack_bar_theme(other_theme.snack_bar_theme.clone())
             .switch_theme(other_theme.switch_theme.clone())
             .tab_bar_theme(other_theme.tab_bar_theme.clone())
             .text_button_theme(other_theme.text_button_theme.clone())
             .text_selection_theme(other_theme.text_selection_theme.clone())
+            .toggle_buttons_theme(other_theme.toggle_buttons_theme.clone())
             .tooltip_theme(other_theme.tooltip_theme.clone())
             // DEPRECATED (newest deprecations at the bottom)
             .dialog_background_color(other_theme.dialog_background_color)
@@ -5287,6 +5392,7 @@ mod tests {
             assert_eq!(theme_data_copy.button_theme, other_theme.button_theme);
             assert_eq!(theme_data_copy.card_theme, other_theme.card_theme);
             assert_eq!(theme_data_copy.checkbox_theme, other_theme.checkbox_theme);
+            assert_eq!(theme_data_copy.chip_theme, other_theme.chip_theme);
             assert_eq!(theme_data_copy.dialog_theme, other_theme.dialog_theme);
             assert_eq!(theme_data_copy.divider_theme, other_theme.divider_theme);
             assert_eq!(theme_data_copy.drawer_theme, other_theme.drawer_theme);
@@ -5346,6 +5452,10 @@ mod tests {
                 other_theme.progress_indicator_theme
             );
             assert_eq!(theme_data_copy.radio_theme, other_theme.radio_theme);
+            assert_eq!(
+                theme_data_copy.segmented_button_theme,
+                other_theme.segmented_button_theme
+            );
             assert_eq!(theme_data_copy.slider_theme, other_theme.slider_theme);
             assert_eq!(theme_data_copy.snack_bar_theme, other_theme.snack_bar_theme);
             assert_eq!(theme_data_copy.switch_theme, other_theme.switch_theme);
@@ -5369,6 +5479,10 @@ mod tests {
             assert_eq!(
                 theme_data_copy.text_selection_theme.selection_handle_color,
                 other_theme.text_selection_theme.selection_handle_color
+            );
+            assert_eq!(
+                theme_data_copy.toggle_buttons_theme,
+                other_theme.toggle_buttons_theme
             );
             assert_eq!(theme_data_copy.tooltip_theme, other_theme.tooltip_theme);
             // DEPRECATED (newest deprecations at the bottom)

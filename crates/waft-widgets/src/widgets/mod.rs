@@ -62,6 +62,7 @@ pub mod page_storage;
 pub mod page_transitions_builder;
 pub mod page_view;
 pub mod pages;
+pub mod placeholder;
 pub mod platform_menu_bar;
 pub mod platform_tray_icon;
 pub mod pop_scope;

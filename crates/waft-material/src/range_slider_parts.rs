@@ -6,7 +6,7 @@
 //! parameter Dart declares optional with no default in the abstract signature is an
 //! `Option`, so an implementation applies its own default as Dart's override does. A shape's
 //! `paint` takes the `App`, as `slider_parts.rs` says. `RangeSlider` itself is
-//! `range_slider.dart`, not ported yet.
+//! `range_slider.rs`.
 
 use std::any::Any;
 use std::fmt::{self, Debug};

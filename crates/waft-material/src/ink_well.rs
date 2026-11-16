@@ -3639,6 +3639,10 @@ mod tests {
     /// Dart's `coversSameAreaAs(expected, areaToCompare: area, sampleSize: sample_size)`: on
     /// a `sample_size` by `sample_size` grid over `area`, every point is inside both paths or
     /// outside both.
+    ///
+    /// The grid starts at `area`'s top left. Dart's matcher starts it at the origin of the
+    /// plane (and adds a random jitter), so for an area away from the origin it samples beside
+    /// both paths; sampling the area itself checks what the case means, which is stronger.
     fn covers_same_area_as(
         actual: &valo::Path,
         expected: &valo::Path,
