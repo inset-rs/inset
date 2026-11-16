@@ -2,6 +2,10 @@
 
 Waft's Android host: `NativeActivity` with Waft's own glue, the app's loop on a thread of its own, and each activity's window as a view of the app. It takes an app's entry, `android_main`, which `#[waft::main]` writes, and Android 12 (API 31) or later. It provides `AndroidPlatform`, Waft's `Platform` on Android; `src/lib.rs` says how the host is built. `waft-embedder-default` uses it, and `cargo waft` packages it.
 
+## Lifecycle
+
+The app hears its lifecycle state as Flutter's Android embedding reports it, from `onResume`, `onPause`, `onStop`, the window's focus and `onDestroy`: resumed while an activity is resumed and has the focus, inactive while it is resumed without the focus or paused, paused once stopped, and detached once no activity is left. With several activities, one per task, the app is as far forward as its most forward activity (`src/lifecycle.rs`).
+
 ## Cameras
 
 `Platform::cameras` is the NDK's own camera API, `ACameraManager` and `ACameraDevice`, with no Java but the permission's question (`src/media/`); `Platform::video_frame_readers` the readers a camera's frames go to.
