@@ -561,6 +561,26 @@ pub trait Platform: Any {
         let _ = locale;
     }
 
+    /// The local time zone's offset from UTC at `seconds_since_epoch`, positive east of UTC: the
+    /// Dart VM's `DateTime_timeZoneOffsetInSeconds`, which `DateTime` asks for each local value
+    /// it makes. The instant is already within the years a 32-bit `time_t` holds, as the VM maps
+    /// it (`DateTime`'s equivalent year). The host asks the system on every call, keeping
+    /// nothing, so a change of zone shows in the next value made. The default is UTC's zero, for
+    /// a host with no zone to ask.
+    fn time_zone_offset(&self, seconds_since_epoch: i64) -> crate::SignedDuration {
+        let _ = seconds_since_epoch;
+        crate::SignedDuration::ZERO
+    }
+
+    /// The local time zone's name at `seconds_since_epoch`, as the system gives it (an
+    /// abbreviation such as "CET" on a C library and in a browser, the full name on Windows):
+    /// the Dart VM's `DateTime_timeZoneName`, asked as [`time_zone_offset`](Self::time_zone_offset)
+    /// is. The default is "UTC".
+    fn time_zone_name(&self, seconds_since_epoch: i64) -> String {
+        let _ = seconds_since_epoch;
+        "UTC".to_string()
+    }
+
     /// Whether briefly displaying the characters as you type in obscured text fields is enabled
     /// in system settings (Flutter `PlatformDispatcher.brieflyShowPassword`).
     ///

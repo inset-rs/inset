@@ -4,7 +4,8 @@
 //! over them on the app's GPU device (`gpu_interop`); Core Animation's compositor of composition
 //! layers (`composition`) and its clock beside the host's (`media_time`); AVFoundation's players
 //! and cameras (`media`), and Media Accessibility's caption settings (`caption_appearance`); the
-//! notification center (`notifications`); and for their pasteboards, the UTIs the framework's MIME
+//! notification center (`notifications`); the local time zone, from the C library
+//! (`local_time`); and for their pasteboards, the UTIs the framework's MIME
 //! types are named by (`pasteboard_types`), the app's futures run on its main thread on behalf of
 //! the system (`app_futures`), and the file a promised file's bytes are written into
 //! (`promised_files`); and work off the main thread, on Grand Central Dispatch (`work_queue`).
@@ -21,6 +22,7 @@ pub mod composition;
 pub mod gpu_interop;
 pub mod hardware_buffers;
 pub mod image_codecs;
+pub mod local_time;
 pub mod media;
 mod media_futures;
 pub mod media_time;

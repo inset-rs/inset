@@ -7,10 +7,10 @@ use std::time::Duration;
 
 use waft_embedder::{
     Brightness, Clipboard, Dispatcher, FileDialogs, ImageCodecFuture, Matrix4,
-    NotificationActivation, Notifications, Offset, Opener, Platform, Rect, Screen, Screens, Size,
-    SnapshotDelegate, SystemMouseCursorKind, TargetPlatform, TextEditingValue,
-    TextInputConfiguration, TextInputHost, View, ViewFocusDirection, ViewFocusState, ViewHost,
-    ViewId, ViewMetrics, ViewRef,
+    NotificationActivation, Notifications, Offset, Opener, Platform, Rect, Screen, Screens,
+    SignedDuration, Size, SnapshotDelegate, SystemMouseCursorKind, TargetPlatform,
+    TextEditingValue, TextInputConfiguration, TextInputHost, View, ViewFocusDirection,
+    ViewFocusState, ViewHost, ViewId, ViewMetrics, ViewRef,
 };
 use web_sys::HtmlCanvasElement;
 use web_time::Instant;
@@ -185,6 +185,15 @@ impl Platform for WebPlatform {
     /// `setDefaultFontFamilies(['Roboto'])`.
     fn default_font_families(&self) -> Vec<String> {
         vec![String::from(ROBOTO)]
+    }
+
+    /// The browser's zone, asked on every call (`local_time.rs`).
+    fn time_zone_offset(&self, seconds_since_epoch: i64) -> SignedDuration {
+        crate::local_time::time_zone_offset(seconds_since_epoch)
+    }
+
+    fn time_zone_name(&self, seconds_since_epoch: i64) -> String {
+        crate::local_time::time_zone_name(seconds_since_epoch)
     }
 
     fn now(&self) -> Instant {

@@ -18,6 +18,7 @@ mod console;
 mod display_links;
 mod file_dialogs;
 mod hidden_window;
+mod local_time;
 mod menus;
 mod notifications;
 mod opener;

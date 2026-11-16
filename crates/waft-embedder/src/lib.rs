@@ -40,6 +40,7 @@ mod pointer_report;
 mod restoration;
 mod scene;
 mod semantics;
+mod signed_duration;
 mod snapshot_delegate;
 mod system_context_menu;
 #[cfg(feature = "test-support")]
@@ -135,6 +136,7 @@ pub use semantics::{
     SemanticsRole, SemanticsValidationResult, SpellOutStringAttribute, StringAttribute,
     StringAttributeRef,
 };
+pub use signed_duration::SignedDuration;
 pub use snapshot_delegate::SnapshotDelegate;
 pub use system_context_menu::SystemContextMenuItem;
 pub use text::*;

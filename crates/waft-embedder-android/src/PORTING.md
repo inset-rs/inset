@@ -3,6 +3,10 @@
 Host implementation. Flutter analogue: the engine's Android embedder under
 `shell/platform/android`, whose activity and view are written in Java.
 
+## Identical
+
+- local_time.rs → the Dart VM's `OS::GetTimeZoneOffsetInSeconds` and `OS::GetTimeZoneName` on Linux (`os_linux.cc`), which `DateTime`'s natives call
+
 ## native_activity.rs / app_thread.rs / host.rs → the Android embedder's `FlutterActivity` and `FlutterActivityAndFragmentDelegate`
 
 - Change: the app runs on a thread of its own, started with the process's first activity and kept for the process, which every activity's callbacks hand their events to from Android's main thread, each activity a view of the one app; where Flutter's activity owns an engine of its own, destroyed with it unless the engine is cached.

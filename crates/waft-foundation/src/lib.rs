@@ -31,4 +31,4 @@ pub use handle_map::DebugObject;
 pub use key::*;
 pub use observer_list::*;
 pub use timers::Timer;
-pub use waft_embedder::TargetPlatform;
+pub use waft_embedder::{SignedDuration, TargetPlatform};

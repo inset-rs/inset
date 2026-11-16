@@ -9,6 +9,7 @@
 mod composition;
 mod dmabuf;
 mod file_dialogs;
+mod local_time;
 mod notifications;
 mod opener;
 mod portal;

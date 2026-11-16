@@ -27,6 +27,11 @@ pub struct SelectorBarItem {
     /// `Text`; an empty text shows none.
     pub text: String,
 
+    /// What the item shows in place of its text, in the item's foreground as the text is: a text
+    /// with an `InfoBadge`, for one. Flutter `Tab.child`; an item made with
+    /// [`with_child`](Self::with_child) has it and an empty text.
+    pub child: Option<WidgetRef>,
+
     /// `Icon`, drawn at `SelectorBarItemIconScale` in the item's foreground.
     pub icon: Option<WidgetRef>,
 
@@ -40,8 +45,18 @@ impl SelectorBarItem {
         Self {
             id: id.into(),
             text: text.into(),
+            child: None,
             icon: None,
             is_enabled: true,
+        }
+    }
+
+    /// Creates an item showing `child` in place of a text, as Flutter's `Tab(child:)`, which
+    /// takes a text or a child, not both.
+    pub fn with_child<K>(id: impl Into<String>, child: impl IntoWidget<K>) -> Self {
+        Self {
+            child: Some(child.into_widget()),
+            ..Self::new(id, String::new())
         }
     }
 
@@ -506,8 +521,10 @@ fn item_template(
         .into_widget()
 }
 
-/// The template's `StackPanel` of `PART_IconVisual` and `PART_TextVisual` at the item's
-/// `Padding`, each shown only when the item has one, and none when it has neither.
+/// The template's `StackPanel` of `PART_IconVisual` and `PART_TextVisual`, or the child in the
+/// text's place, at the item's `Padding`, each shown only when the item has one, and none when
+/// it has neither. The state's foreground reaches them through the inherited text style and
+/// icon theme, as Flutter's `TabBar` gives a tab its label colour, so that a child takes it too.
 fn item_content(
     r: &ThemeResources,
     item: &SelectorBarItem,
@@ -525,9 +542,14 @@ fn item_content(
             .into_widget(),
         );
     }
-    if !item.text.is_empty() {
+    let label = match &item.child {
+        Some(child) => Some(child.clone()),
+        None if !item.text.is_empty() => Some(Text::new(item.text.clone()).into_widget()),
+        None => None,
+    };
+    if let Some(label) = label {
         let m = r.selector_bar_item_text_visual_margin;
-        parts.push(Margin::new(m, Text::new(item.text.clone())).into_widget());
+        parts.push(Margin::new(m, label).into_widget());
     }
     if parts.is_empty() {
         return None;
@@ -546,7 +568,11 @@ fn item_content(
         FontWeight::NORMAL,
         foreground,
     );
-    Some(DefaultTextStyle::new(style, content).into_widget())
+    Some(IconTheme::merge(
+        None,
+        IconThemeData::new().color(foreground),
+        DefaultTextStyle::merge(content).style(style),
+    ))
 }
 
 /// `PART_SelectionVisual`, in `SelectorBarItemPill`: a 4 by 3 pill centred at the bottom, which
