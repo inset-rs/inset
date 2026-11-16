@@ -13,7 +13,8 @@
 //! activity's. A view is made with the first activity Android makes for it, and the activity is
 //! attached to it until Android destroys the activity. An activity destroyed finishing removes its
 //! view; one destroyed to be made again leaves it, and the one Android makes in its place, which
-//! the glue gives the same view (`saved_view.rs`), is attached to it, so the app runs on.
+//! the glue gives the same view (`saved_view.rs`), is attached to it, so the app runs on. The
+//! app's lifecycle state follows its activities' (`lifecycle.rs`).
 //!
 //! At a refresh the input waiting is read before the frame is decided and drawn, as Android's
 //! `Choreographer.doFrame` runs its input callbacks before its animation and traversal ones. The
@@ -35,8 +36,8 @@ use ndk::event::{InputEvent, KeyAction, KeyEvent, Keycode, MotionEvent};
 use ndk::looper::ThreadLooper;
 use ndk::native_window::NativeWindow;
 use waft_embedder::{
-    EmbedderClient, Frame, FrameVsync, PlatformRef, View, ViewFocusDirection, ViewFocusEvent,
-    ViewFocusState, ViewId,
+    AppLifecycleState, EmbedderClient, Frame, FrameVsync, PlatformRef, View, ViewFocusDirection,
+    ViewFocusEvent, ViewFocusState, ViewId,
 };
 
 use crate::activity::Activity;
@@ -46,6 +47,7 @@ use crate::application::Application;
 use crate::composition::SurfaceControlCompositor;
 use crate::gpu::Gpu;
 use crate::input_queues::InputQueues;
+use crate::lifecycle::{ActivitiesLifecycle, ActivityState};
 use crate::log::warn_to_log;
 use crate::open_requests::OpenRequests;
 use crate::platform::AndroidPlatform;
@@ -112,6 +114,8 @@ impl AndroidEmbedder {
             vsync: None,
             refreshed: Rc::new(Cell::new(None)),
             idle_ticks: 0,
+            lifecycle: ActivitiesLifecycle::default(),
+            reported_state: AppLifecycleState::Detached,
         };
         for told in told {
             host.on_told(told);
@@ -170,6 +174,10 @@ struct Host<C> {
     idle_ticks: u8,
     /// Opens what the intents that reach the app ask to open (`open_requests.rs`).
     open_requests: OpenRequests,
+    /// What each activity was told of its lifecycle and focus.
+    lifecycle: ActivitiesLifecycle,
+    /// The state the client was last told the app is in.
+    reported_state: AppLifecycleState,
 }
 
 impl<C: EmbedderClient> Host<C> {
@@ -245,6 +253,7 @@ impl<C: EmbedderClient> Host<C> {
                 self.configuration_changed(view, configuration)
             }
             ActivityEvent::FocusChanged(focused) => self.on_focus(view, focused),
+            ActivityEvent::StateChanged(state) => self.activity_state_changed(view, state),
             ActivityEvent::InputQueueCreated(queue) => {
                 self.input_queues
                     .attach(view, queue, self.looper.as_foreign());
@@ -309,17 +318,19 @@ impl<C: EmbedderClient> Host<C> {
     /// Android destroyed the activity of the view numbered `id`: the view goes with it where the
     /// activity is `finishing`, and otherwise stays, without a window, for the activity Android
     /// makes in its place, as Flutter's engine stays for a configuration change
-    /// (`detachFromActivityForConfigChanges`).
+    /// (`detachFromActivityForConfigChanges`). The app's state follows, detached where no activity
+    /// is left, as Flutter's activity reports at `onDetach`.
     fn activity_destroyed(&mut self, id: ViewId, finishing: bool) {
-        let Some(view) = self.views.get(id) else {
-            return;
-        };
-        if let Some(activity) = view.activity() {
-            view.detach(&activity);
+        if let Some(view) = self.views.get(id) {
+            if let Some(activity) = view.activity() {
+                view.detach(&activity);
+            }
+            if finishing {
+                self.remove_view(id);
+            }
         }
-        if finishing {
-            self.remove_view(id);
-        }
+        self.lifecycle.remove(id);
+        self.report_lifecycle();
     }
 
     /// The view numbered `id` is the app's no more, and the client hears so.
@@ -345,6 +356,7 @@ impl<C: EmbedderClient> Host<C> {
         if self.client.is_none() {
             let start = self.start.take().expect("start runs once");
             self.client = Some(start(Rc::clone(&self.platform) as PlatformRef));
+            self.report_lifecycle();
         } else {
             // Back from the background: the framework's last picture belongs to the new
             // window, and its metrics may have changed while the app was away.
@@ -487,14 +499,16 @@ impl<C: EmbedderClient> Host<C> {
         }
     }
 
-    /// The window of the view numbered `id` gained or lost the focus; one that gains it has the
-    /// user's settings read again, which the user may have changed in the system's settings, the
-    /// clipboard looked at, which only the focused app may read, and the app's tasks, which the
-    /// user may have swiped away meanwhile.
+    /// The window of the view numbered `id` gained or lost the focus, which the app's state
+    /// follows; one that gains it has the user's settings read again, which the user may have
+    /// changed in the system's settings, the clipboard looked at, which only the focused app may
+    /// read, and the app's tasks, which the user may have swiped away meanwhile.
     fn on_focus(&mut self, id: ViewId, focused: bool) {
         if let Some(view) = self.views.get(id) {
             view.set_focused(focused);
         }
+        self.lifecycle.set_focused(id, focused);
+        self.report_lifecycle();
         if let Some(client) = &mut self.client {
             client.view_focus_changed(ViewFocusEvent {
                 view_id: id,
@@ -511,6 +525,25 @@ impl<C: EmbedderClient> Host<C> {
             self.look_at_clipboard();
             self.look_at_tasks();
             crate::media::app_in_front();
+        }
+    }
+
+    /// The activity of the view numbered `id` resumed, paused or stopped.
+    fn activity_state_changed(&mut self, id: ViewId, state: ActivityState) {
+        self.lifecycle.set_state(id, state);
+        self.report_lifecycle();
+    }
+
+    /// The client hears the app's state when its activities' states make another; one started
+    /// later hears the state they make then.
+    fn report_lifecycle(&mut self) {
+        let Some(client) = &mut self.client else {
+            return;
+        };
+        let state = self.lifecycle.app_state();
+        if state != self.reported_state {
+            self.reported_state = state;
+            client.app_lifecycle_state_changed(state);
         }
     }
 

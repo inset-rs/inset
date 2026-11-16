@@ -97,6 +97,10 @@ pub struct RendererBinding {
     debug_mouse_tracker_update_scheduled: bool,
     first_frame_deferred_count: u32,
     first_frame_sent: bool,
+    /// The view whose render view a test lays out at a surface size of its own, and that size:
+    /// flutter_test's `TestWidgetsFlutterBinding._surfaceSize`.
+    #[cfg(any(test, feature = "test-support"))]
+    surface_size: Option<(ViewId, waft_embedder::Size)>,
 }
 
 impl RendererBinding {
@@ -240,7 +244,39 @@ impl RendererBinding {
         app: &App,
         render_view: RenderHandle<RenderView>,
     ) -> ViewConfiguration {
-        ViewConfiguration::from_view(&*render_view.flutter_view(app))
+        let view = render_view.flutter_view(app);
+        #[cfg(any(test, feature = "test-support"))]
+        if let Some((surface_view, size)) = app.get(self).surface_size
+            && surface_view == view.id()
+        {
+            // flutter_test's `TestWidgetsFlutterBinding.createViewConfigurationFor`.
+            let constraints = crate::BoxConstraints::tight(size);
+            let device_pixel_ratio = view.metrics().device_pixel_ratio;
+            return ViewConfiguration::new(
+                constraints * device_pixel_ratio,
+                constraints,
+                device_pixel_ratio,
+            );
+        }
+        ViewConfiguration::from_view(&*view)
+    }
+
+    /// flutter_test's `TestWidgetsFlutterBinding.setSurfaceSize`: lays the render view of `view`
+    /// out at `size` logical pixels, or at the view's own size again for `None`, leaving the
+    /// view's metrics, and so its `MediaQuery`, as they are.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn set_surface_size(
+        self: Handle<Self>,
+        app: &mut App,
+        view: ViewId,
+        size: Option<waft_embedder::Size>,
+    ) {
+        let surface_size = size.map(|size| (view, size));
+        if app.get(self).surface_size == surface_size {
+            return;
+        }
+        app.get_mut(self).surface_size = surface_size;
+        self.handle_metrics_changed(app);
     }
 
     /// Marks all views to require compositing, which will force them to re-render

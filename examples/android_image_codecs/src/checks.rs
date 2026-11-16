@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 
 use waft_embedder::Size;
 use waft_embedder::image_codecs::{
-    AlphaType, DateTime, ImageCodecs, ImageErrorKind, ImageMetadata, ImageRotation, ImageSource,
-    PixelBuffer, PixelFormat,
+    AlphaType, AnimationPlays, DateTime, ImageCodecs, ImageErrorKind, ImageMetadata, ImagePictures,
+    ImageRotation, ImageSource, PixelBuffer, PixelFormat,
 };
 
 /// The folder Android gives the app's files, where the photo is written to open it as a file.
@@ -356,10 +356,10 @@ fn says_it_is_the_upright_photo(report: &mut Report, photo: &dyn ImageSource) {
         photo.size() == Size::new(32.0, 48.0),
         format!("size upright {:?}", photo.size()),
     );
-    let frames = photo.frames();
+    let pictures = photo.pictures();
     report.expect(
-        frames.len() == 1 && frames[0].duration.is_none(),
-        format!("one still frame: {frames:?}"),
+        pictures == ImagePictures::Still,
+        format!("one still picture: {pictures:?}"),
     );
 }
 
@@ -414,8 +414,8 @@ async fn png_with_alpha(codecs: &dyn ImageCodecs) -> Report {
     report
 }
 
-/// The animation's two frames, with their durations and colours, the second decoded before the
-/// first and after it.
+/// The animation's two frames, with their durations and colours, played forever, the second
+/// decoded before the first and after it.
 async fn animation(
     codecs: &dyn ImageCodecs,
     title: &'static str,
@@ -429,11 +429,18 @@ async fn animation(
         Err(error) => return failed(report, &error.to_string()),
     };
     report.note(format!("{} {:?}", image.mime_type(), image.size()));
-    let found: Vec<_> = image.frames().iter().map(|frame| frame.duration).collect();
+    let ImagePictures::Animation(animation) = image.pictures() else {
+        return failed(report, &format!("not an animation: {:?}", image.pictures()));
+    };
+    let found: Vec<_> = animation.frames.iter().map(|frame| frame.duration).collect();
     let expected = durations.map(|milliseconds| Some(Duration::from_millis(milliseconds)));
     report.expect(
         found == expected,
         format!("frames and durations: {found:?}"),
+    );
+    report.expect(
+        animation.plays == AnimationPlays::Forever,
+        format!("plays {:?}", animation.plays),
     );
     for frame in [1, 0, 1] {
         match image.decode_pixels(frame, None).await {

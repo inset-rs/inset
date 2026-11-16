@@ -108,6 +108,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: platform — they serve the implicit view, and there is no implicit view.
   Affect: a test that renders without widgets passes its view.
 
+- Change: `RendererBinding::set_surface_size(view, size)`, behind the `test-support` feature, is flutter_test's `TestWidgetsFlutterBinding.setSurfaceSize` with its `createViewConfigurationFor` override, and takes the view where Dart's applies to the implicit view.
+  Reason: language — Dart's test binding overrides `createViewConfigurationFor` as a subclass, and Rust has no subclass of the binding; there is no implicit view.
+  Affect: a case lays a view's render tree out at a surface size of its own through `WidgetTester::set_surface_size`; an app built without the feature has no such state.
+
 ## mouse_tracker.rs → mouse_tracker.dart
 
 - Change: `MouseTracker` finds the annotations in a hit test by asking two kinds of target: a render object answers through its `RenderObject::mouse_tracker_annotation` override, which the tracker reads again on each pointer event, and a `TextSpan` is one.

@@ -1118,8 +1118,8 @@ mod tests {
     use waft_painting::{BorderRadius, BorderRadiusGeometry, BorderSide, RoundedRectangleBorder};
     use waft_rendering::AnyRenderBox;
     use waft_widgets::{
-        AnyElement, Builder, Center, Container, ListView, ModalBarrier, MouseRegion,
-        PreferredSizeWidgetRef, Text,
+        AnyElement, Builder, Center, Container, ListView, ModalBarrier, MouseRegion, Orientation,
+        OrientationBuilder, PreferredSizeWidgetRef, Text,
     };
 
     use waft_widgets::testing::{TestPointer, WidgetTester, find, test_widgets};
@@ -1997,6 +1997,76 @@ mod tests {
             close_end_drawer(tester, &key);
             tester.pump_and_settle();
             assert_eq!(found(tester, "endDrawer"), 0);
+        });
+    }
+
+    /// drawer_test's 'Disposing drawer/endDrawer does not crash if … is open and framework is
+    /// locked': a portrait scaffold with the drawer `drawer_of` gives it, opened by `open`, which
+    /// turning the view to landscape replaces, disposing the open drawer's controller while the
+    /// framework is locked.
+    fn dispose_open_drawer_on_rotation(
+        tester: &mut WidgetTester,
+        drawer_of: fn(Scaffold) -> Scaffold,
+        label: &'static str,
+        open: fn(&WidgetTester, &GlobalKey),
+    ) {
+        // Regression test for https://github.com/flutter/flutter/issues/34978
+        tester.view().set_physical_size(Size::new(1800.0, 2400.0));
+        let key = GlobalKey::new();
+        let portrait_key = key.clone();
+        pump_app(tester, m3, move |_app| {
+            let portrait_key = portrait_key.clone();
+            OrientationBuilder::new(move |_app, _context, orientation| match orientation {
+                Orientation::Portrait => {
+                    drawer_of(Scaffold::new().key(portrait_key.clone().into()))
+                        .body(Container::new())
+                        .into_widget()
+                }
+                Orientation::Landscape => Scaffold::new()
+                    .app_bar(PreferredSizeWidgetRef::new(AppBar::new()))
+                    .body(Container::new())
+                    .into_widget(),
+            })
+            .into_widget()
+        });
+        assert_eq!(found(tester, label), 0);
+
+        open(tester, &key);
+        tester.pump_and_settle();
+        assert_eq!(found(tester, label), 1);
+
+        // Change the orientation and cause the drawer controller to be disposed
+        // while the framework is locked.
+        tester.view().set_physical_size(Size::new(2400.0, 1800.0));
+        tester.pump_and_settle();
+        assert!(
+            find::by_type::<crate::action_buttons::BackButton>()
+                .evaluate(tester)
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn disposing_drawer_does_not_crash_if_drawer_is_open_and_framework_is_locked() {
+        test_widgets(|tester| {
+            dispose_open_drawer_on_rotation(
+                tester,
+                |scaffold| scaffold.drawer(Text::new("drawer")),
+                "drawer",
+                open_drawer,
+            );
+        });
+    }
+
+    #[test]
+    fn disposing_end_drawer_does_not_crash_if_end_drawer_is_open_and_framework_is_locked() {
+        test_widgets(|tester| {
+            dispose_open_drawer_on_rotation(
+                tester,
+                |scaffold| scaffold.end_drawer(Text::new("endDrawer")),
+                "endDrawer",
+                open_end_drawer,
+            );
         });
     }
 

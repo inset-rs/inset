@@ -65,6 +65,12 @@ No Flutter crate in this shape. Closest analogue: `flutter_test`'s `TestPlatform
   Reason: platform — what a view asks of the system goes to that view's host, and every view has one.
   Affect: a test reads what a view asked of the system from the view, and a text field under test talks to a text input that answers nothing and edits nothing itself.
 
-## Deferred
+## view.rs → flutter_test `TestFlutterView`
 
-- `TestFlutterView`'s per-view overrides beyond size and pixel ratio (padding, insets, gesture settings). Trigger: the first test that sets one of them.
+- Change: `TestView`'s setters (`set_physical_size`, `set_physical_constraints`, `set_device_pixel_ratio`, `set_padding`, `set_view_padding`, `set_view_insets`, `set_system_gesture_insets`, `set_gesture_settings`) and their `reset_*` tell a `MetricsListener` that whoever runs the app installs, where `TestFlutterView`'s call the dispatcher's `onMetricsChanged`; `reset_*` returns to what the view was made with, not to a real view's values.
+  Reason: platform — waft-test names no framework, and a view's changes reach the app through its host's client; the test view has no real view behind it.
+  Affect: a view no listener hears changes its metrics silently; a case that makes its own app over a `TestView` reports the change to the framework itself.
+
+- Change: `displayFeatures` and `display` (`TestDisplay`) have no setters, and neither does `displayCornerRadii`, which `TestFlutterView` has none of either.
+  Reason: platform — `ViewMetrics` carries no display features, screen size or corner radii.
+  Affect: a case that needs them sets them on the `MediaQuery`, as Dart's corner-radius cases do.

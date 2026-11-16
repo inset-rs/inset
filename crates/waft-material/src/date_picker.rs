@@ -4378,9 +4378,7 @@ pub(crate) mod tests {
     use crate::tooltip::tests::{m2, m3};
     use std::cell::RefCell;
     use std::rc::Rc;
-    use waft_embedder::{
-        Offset, Size, TargetPlatform, TextAffinity, TextEditingValue, TextSelection,
-    };
+    use waft_embedder::{Offset, Size, TextAffinity, TextEditingValue, TextSelection};
     use waft_foundation::{DateTime, Listener};
     use waft_painting::{BorderRadiusGeometry, BorderSide, RoundedRectangleBorder, ShapeBorderRef};
     use waft_services::{LogicalKeyboardKey, PhysicalKeyboardKey, TextInputClient};
@@ -4400,32 +4398,10 @@ pub(crate) mod tests {
 
     pub(super) type PickerResult = Rc<RefCell<Option<CompleterFuture<RouteResult>>>>;
 
-    /// A tester whose view is `size` physical pixels at a device pixel ratio of 1: Dart's
-    /// `tester.view.physicalSize = size; tester.view.devicePixelRatio = 1.0`.
-    pub(super) fn tester_of_size(size: Size) -> WidgetTester {
-        WidgetTester::with_view(
-            waft_test::TestPlatform::new().on(TargetPlatform::Android),
-            waft_test::TestView::with_pixel_ratio(size.width(), size.height(), 1.0),
-        )
-    }
-
-    /// What the host does when the view's size changes: Dart's `tester.view.physicalSize = size`
-    /// followed by the binding's metrics change. The tester's views here are at a device pixel
-    /// ratio of 1 (see [`tester_of_size`]).
-    pub(super) fn resize_view(tester: &mut WidgetTester, size: Size) {
-        tester.view().resize(size.width(), size.height());
-        tester.update(|app| {
-            waft_rendering::RendererBinding::instance(app).handle_metrics_changed(app);
-        });
-    }
-
-    /// Runs a case whose Dart source sets the view size first: `test_widgets` for its stack,
-    /// with the sized tester inside.
-    pub(super) fn test_widgets_sized(size: Size, body: impl FnOnce(&mut WidgetTester) + Send) {
-        test_widgets(move |_| {
-            let mut tester = tester_of_size(size);
-            body(&mut tester);
-        });
+    /// Dart's `tester.view.physicalSize = size; tester.view.devicePixelRatio = 1.0`.
+    pub(super) fn size_view(tester: &WidgetTester, size: Size) {
+        tester.view().set_physical_size(size);
+        tester.view().set_device_pixel_ratio(1.0);
     }
 
     /// Dart's `wideWindowSize` and `narrowWindowSize`, set as the physical size at a device pixel
@@ -4630,12 +4606,12 @@ pub(crate) mod tests {
 
     #[test]
     fn material3_default_dialog_size() {
-        test_widgets(|_| {
+        test_widgets(|tester| {
             let mut options = DatePickerOptions::new();
             options.use_material3 = true;
 
             // Test landscape layout.
-            let tester = &mut tester_of_size(WIDE_WINDOW_SIZE);
+            size_view(tester, WIDE_WINDOW_SIZE);
             prepare_date_picker(tester, &options);
             assert_eq!(
                 dialog_container_size(tester),
@@ -4643,7 +4619,7 @@ pub(crate) mod tests {
             );
 
             // Test portrait layout.
-            let tester = &mut tester_of_size(NARROW_WINDOW_SIZE);
+            size_view(tester, NARROW_WINDOW_SIZE);
             prepare_date_picker(tester, &options);
             assert_eq!(
                 dialog_container_size(tester),
@@ -4957,11 +4933,11 @@ pub(crate) mod tests {
     // The Material 2 'Default dialog size'.
     #[test]
     fn material2_default_dialog_size() {
-        test_widgets(|_| {
+        test_widgets(|tester| {
             let options = DatePickerOptions::new();
 
             // Test landscape layout.
-            let tester = &mut tester_of_size(WIDE_WINDOW_SIZE);
+            size_view(tester, WIDE_WINDOW_SIZE);
             prepare_date_picker(tester, &options);
             assert_eq!(
                 dialog_container_size(tester),
@@ -4969,7 +4945,7 @@ pub(crate) mod tests {
             );
 
             // Test portrait layout.
-            let tester = &mut tester_of_size(NARROW_WINDOW_SIZE);
+            size_view(tester, NARROW_WINDOW_SIZE);
             prepare_date_picker(tester, &options);
             assert_eq!(
                 dialog_container_size(tester),
@@ -5128,7 +5104,7 @@ pub(crate) mod tests {
         use super::*;
         use super::{
             DatePickerOptions, enter_text, has_no_text, has_text, picked_date, prepare_date_picker,
-            resize_view, tap_icon, tester_of_size, text_field_count,
+            size_view, tap_icon, text_field_count,
         };
         use crate::colors::Colors;
         use crate::date::GregorianCalendarDelegate;
@@ -5842,8 +5818,8 @@ pub(crate) mod tests {
                     (206.0, 178.0, 324.0)
                 );
 
-                // Portrait layout (Dart's 900x1200 physical pixels at the default pixel ratio of 3).
-                let tester = &mut tester_of_size(Size::new(300.0, 400.0));
+                // Portrait layout.
+                tester.view().set_physical_size(Size::new(900.0, 1200.0));
                 assert_eq!(
                     show_and_read(tester, TextDirection::Ltr),
                     (258.0, 230.0, 196.0)
@@ -6451,14 +6427,6 @@ pub(crate) mod tests {
                 .initial_date(DateTime::utc(2016, 1, 15))
         }
 
-        /// Dart's `tester.view.physicalSize = size` at the default pixel ratio of 3.
-        fn tester_of_physical_size(physical_size: Size) -> WidgetTester {
-            WidgetTester::with_physical_size(
-                waft_test::TestPlatform::new().on(TargetPlatform::Android),
-                physical_size,
-            )
-        }
-
         fn top_right(tester: &WidgetTester, element: AnyElement) -> Offset {
             let rect = tester.get_rect(element);
             Offset::new(rect.right, rect.top)
@@ -6466,8 +6434,8 @@ pub(crate) mod tests {
 
         #[test]
         fn default_calendar_mode_layout_landscape() {
-            test_widgets(|_| {
-                let tester = &mut tester_of_physical_size(Size::new(1920.0, 1080.0));
+            test_widgets(|tester| {
+                tester.view().set_physical_size(Size::new(1920.0, 1080.0));
                 pump_dialog_m3(tester, layout_dialog());
 
                 let help_text = tester.element(find::text("Select date"));
@@ -6584,8 +6552,8 @@ pub(crate) mod tests {
 
         #[test]
         fn default_calendar_mode_layout_portrait() {
-            test_widgets(|_| {
-                let tester = &mut tester_of_physical_size(Size::new(1070.0, 1770.0));
+            test_widgets(|tester| {
+                tester.view().set_physical_size(Size::new(1070.0, 1770.0));
                 pump_dialog_m3(tester, layout_dialog());
 
                 let help_text = tester.element(find::text("Select date"));
@@ -7128,7 +7096,8 @@ pub(crate) mod tests {
 
         #[test]
         fn landscape_input_only_date_picker_headers_use_headline_small_in_portrait() {
-            test_widgets_sized(Size::new(1070.0, 1770.0), |tester| {
+            test_widgets(|tester| {
+                size_view(tester, Size::new(1070.0, 1770.0));
                 let mut options = DatePickerOptions::new();
                 options.initial_entry_mode = DatePickerEntryMode::Input;
                 options.use_material3 = true;
@@ -7141,7 +7110,8 @@ pub(crate) mod tests {
 
         #[test]
         fn landscape_input_only_date_picker_headers_use_headline_small_in_landscape() {
-            test_widgets_sized(Size::new(1770.0, 1070.0), |tester| {
+            test_widgets(|tester| {
+                size_view(tester, Size::new(1770.0, 1070.0));
                 let mut options = DatePickerOptions::new();
                 options.initial_entry_mode = DatePickerEntryMode::Input;
                 options.use_material3 = true;
@@ -7155,9 +7125,9 @@ pub(crate) mod tests {
         /// A regression test for https://github.com/flutter/flutter/issues/131989.
         #[test]
         fn dialog_contents_do_not_overflow_when_resized_during_orientation_change() {
-            test_widgets(|_| {
+            test_widgets(|tester| {
                 // Initial window size is wide for landscape mode.
-                let tester = &mut tester_of_size(WIDE_WINDOW_SIZE);
+                size_view(tester, WIDE_WINDOW_SIZE);
                 let mut options = DatePickerOptions::new();
                 options.use_material3 = true;
                 prepare_date_picker(tester, &options);
@@ -7167,7 +7137,7 @@ pub(crate) mod tests {
                 );
 
                 // Change window size to narrow for portrait mode.
-                resize_view(tester, NARROW_WINDOW_SIZE);
+                tester.view().set_physical_size(NARROW_WINDOW_SIZE);
                 tester.pump();
                 tester.pump_and_settle();
                 assert_eq!(
@@ -7177,17 +7147,45 @@ pub(crate) mod tests {
             });
         }
 
+        /// A regression test for https://github.com/flutter/flutter/issues/140311.
+        #[test]
+        fn text_field_stays_visible_when_orientation_is_portrait_and_height_is_reduced() {
+            test_widgets(|tester| {
+                size_view(tester, Size::new(720.0, 1280.0));
+                let mut options = DatePickerOptions::new();
+                options.initial_entry_mode = DatePickerEntryMode::Input;
+                options.use_material3 = true;
+
+                // Text field and header are visible by default.
+                prepare_date_picker(tester, &options);
+                expect(tester, &find::by_type::<TextField>(), finds_one_widget());
+                expect(tester, &find::text("Select date"), finds_one_widget());
+
+                // Simulate the portait mode on a device with a small display when the virtual
+                // keyboard is visible.
+                tester.view().set_view_insets(waft_embedder::ViewPadding {
+                    bottom: 1000.0,
+                    ..waft_embedder::ViewPadding::ZERO
+                });
+                tester.pump_and_settle();
+
+                // Text field is visible and header is hidden.
+                expect(tester, &find::by_type::<TextField>(), finds_one_widget());
+                expect(tester, &find::text("Select date"), finds_nothing());
+            });
+        }
+
         #[test]
         fn screen_configurations_show_and_close_the_picker_without_failing() {
-            test_widgets(|_| {
-                // Common screen size roughly based on a Pixel 1, and a small one based on a LG K130.
-                for size in [
-                    Size::new(1070.0, 1770.0),
-                    Size::new(1770.0, 1070.0),
-                    Size::new(320.0, 521.0),
-                    Size::new(521.0, 320.0),
-                ] {
-                    let tester = &mut tester_of_size(size);
+            // Common screen size roughly based on a Pixel 1, and a small one based on a LG K130.
+            for size in [
+                Size::new(1070.0, 1770.0),
+                Size::new(1770.0, 1070.0),
+                Size::new(320.0, 521.0),
+                Size::new(521.0, 320.0),
+            ] {
+                test_widgets(|tester| {
+                    size_view(tester, size);
                     let result = prepare_date_picker(tester, &DatePickerOptions::new());
                     tester.tap(find::text("OK"));
                     tester.pump_and_settle();
@@ -7196,10 +7194,9 @@ pub(crate) mod tests {
                         Some(DateTime::utc(2016, 1, 15)),
                         "{size:?}"
                     );
-                }
-            });
+                });
+            }
         }
-
         #[test]
         fn date_picker_dialog_with_updated_inset_padding() {
             test_widgets(|tester| {
@@ -7353,8 +7350,8 @@ pub(crate) mod tests {
 
         use super::*;
         use super::{
-            PickerResult, enter_text_in_field, picked_range, range, resize_view, tap_icon,
-            tester_of_size, text_field_count,
+            PickerResult, enter_text_in_field, picked_range, range, size_view, tap_icon,
+            text_field_count,
         };
         use crate::colors::Colors;
         use crate::date::{DateTimeRange, GregorianCalendarDelegate};
@@ -7516,10 +7513,6 @@ pub(crate) mod tests {
             result
         }
 
-        fn default_size() -> Size {
-            Size::new(800.0, 600.0)
-        }
-
         fn first_text(tester: &WidgetTester, text: &str) -> AnyElement {
             *find::text(text)
                 .evaluate(tester)
@@ -7534,12 +7527,11 @@ pub(crate) mod tests {
         }
 
         fn pick_range(
+            tester: &mut WidgetTester,
             prepare: &Prepare,
-            size: Size,
             steps: impl FnOnce(&mut WidgetTester),
             action: &str,
         ) -> Option<DateTimeRange> {
-            let tester = &mut tester_of_size(size);
             let result = prepare_picker(tester, prepare);
             steps(tester);
             tester.tap(find::text(action));
@@ -7585,8 +7577,8 @@ pub(crate) mod tests {
 
         #[test]
         fn initial_date_is_the_default() {
-            test_widgets(|_| {
-                let result = pick_range(&Prepare::new(), default_size(), |_tester| {}, "SAVE");
+            test_widgets(|tester| {
+                let result = pick_range(tester, &Prepare::new(), |_tester| {}, "SAVE");
                 assert_eq!(result, Some(range((2016, 1, 15), (2016, 1, 25))));
             });
         }
@@ -7644,10 +7636,10 @@ pub(crate) mod tests {
 
         #[test]
         fn can_select_a_range() {
-            test_widgets(|_| {
+            test_widgets(|tester| {
                 let result = pick_range(
+                    tester,
                     &Prepare::new(),
-                    default_size(),
                     |tester| {
                         tap_first(tester, "12");
                         tap_first(tester, "14");
@@ -7660,10 +7652,10 @@ pub(crate) mod tests {
 
         #[test]
         fn tapping_earlier_date_resets_selected_range() {
-            test_widgets(|_| {
+            test_widgets(|tester| {
                 let result = pick_range(
+                    tester,
                     &Prepare::new(),
-                    default_size(),
                     |tester| {
                         tap_first(tester, "12");
                         tap_first(tester, "11");
@@ -7677,10 +7669,10 @@ pub(crate) mod tests {
 
         #[test]
         fn can_select_single_day_range() {
-            test_widgets(|_| {
+            test_widgets(|tester| {
                 let result = pick_range(
+                    tester,
                     &Prepare::new(),
-                    default_size(),
                     |tester| {
                         tap_first(tester, "12");
                         tap_first(tester, "12");
@@ -7693,14 +7685,14 @@ pub(crate) mod tests {
 
         #[test]
         fn cannot_select_a_day_outside_bounds() {
-            test_widgets(|_| {
+            test_widgets(|tester| {
                 let mut prepare = Prepare::new();
                 prepare.initial_date_range = Some(range((2017, 1, 13), (2017, 1, 15)));
                 prepare.first_date = DateTime::utc(2017, 1, 12);
                 prepare.last_date = DateTime::utc(2017, 1, 16);
                 let result = pick_range(
+                    tester,
                     &prepare,
-                    default_size(),
                     |tester| {
                         // Earlier than firstDate. Should be ignored.
                         tester.tap(find::text("10"));
@@ -7716,12 +7708,12 @@ pub(crate) mod tests {
 
         #[test]
         fn can_select_a_range_even_if_the_range_includes_non_selectable_days() {
-            test_widgets(|_| {
+            test_widgets(|tester| {
                 let mut prepare = Prepare::new();
                 prepare.selectable_day_predicate = Some(Rc::new(|day, _, _| day.day() != 13));
                 let result = pick_range(
+                    tester,
                     &prepare,
-                    default_size(),
                     |tester| {
                         tap_first(tester, "12");
                         tap_first(tester, "14");
@@ -7735,15 +7727,15 @@ pub(crate) mod tests {
 
         #[test]
         fn cannot_select_a_day_inside_bounds_but_not_selectable() {
-            test_widgets(|_| {
+            test_widgets(|tester| {
                 let mut prepare = Prepare::new();
                 prepare.initial_date_range = Some(range((2017, 1, 13), (2017, 1, 14)));
                 prepare.first_date = DateTime::utc(2017, 1, 12);
                 prepare.last_date = DateTime::utc(2017, 1, 16);
                 prepare.selectable_day_predicate = Some(Rc::new(|day, _, _| day.day() != 15));
                 let result = pick_range(
+                    tester,
                     &prepare,
-                    default_size(),
                     |tester| {
                         // Non-selectable date. Should be ignored.
                         tester.tap(find::text("15"));
@@ -7757,7 +7749,7 @@ pub(crate) mod tests {
 
         #[test]
         fn selectable_date_becoming_non_selectable_when_selected_start_day() {
-            test_widgets(|_| {
+            test_widgets(|tester| {
                 let mut prepare = Prepare::new();
                 prepare.selectable_day_predicate =
                     Some(Rc::new(|day, selected_start, selected_end| {
@@ -7769,8 +7761,8 @@ pub(crate) mod tests {
                         true
                     }));
                 let result = pick_range(
+                    tester,
                     &prepare,
-                    default_size(),
                     |tester| {
                         for day in ["12", "11", "14"] {
                             tap_first(tester, day);
@@ -7875,10 +7867,10 @@ pub(crate) mod tests {
 
         #[test]
         fn switching_to_input_mode_keeps_selected_date() {
-            test_widgets(|_| {
+            test_widgets(|tester| {
                 let result = pick_range(
+                    tester,
                     &Prepare::new(),
-                    default_size(),
                     |tester| {
                         tap_first(tester, "12");
                         tap_first(tester, "14");
@@ -8342,8 +8334,8 @@ pub(crate) mod tests {
 
         #[test]
         fn input_mode_initial_date_range_is_the_default() {
-            test_widgets(|_| {
-                let result = pick_range(&Prepare::input_mode(), default_size(), |_tester| {}, "OK");
+            test_widgets(|tester| {
+                let result = pick_range(tester, &Prepare::input_mode(), |_tester| {}, "OK");
                 assert_eq!(result, Some(range((2017, 1, 15), (2017, 1, 17))));
             });
         }
@@ -8360,12 +8352,12 @@ pub(crate) mod tests {
 
         #[test]
         fn input_mode_toggle_to_calendar_mode_keeps_selected_date() {
-            test_widgets(|_| {
+            test_widgets(|tester| {
                 let mut prepare = Prepare::input_mode();
                 prepare.initial_date_range = None;
                 let result = pick_range(
+                    tester,
                     &prepare,
-                    default_size(),
                     |tester| {
                         enter_in(tester, 0, "12/25/2016");
                         enter_in(tester, 1, "12/27/2016");
@@ -8379,12 +8371,12 @@ pub(crate) mod tests {
 
         #[test]
         fn input_mode_entered_text_returns_range() {
-            test_widgets(|_| {
+            test_widgets(|tester| {
                 let mut prepare = Prepare::input_mode();
                 prepare.initial_date_range = None;
                 let result = pick_range(
+                    tester,
                     &prepare,
-                    default_size(),
                     |tester| {
                         enter_in(tester, 0, "12/25/2016");
                         enter_in(tester, 1, "12/27/2016");
@@ -8856,13 +8848,13 @@ pub(crate) mod tests {
         /// A regression test for https://github.com/flutter/flutter/issues/131989.
         #[test]
         fn dialog_contents_do_not_overflow_when_resized_from_landscape_to_portrait() {
-            test_widgets(|_| {
+            test_widgets(|tester| {
                 // Initial window size is wide for landscape mode.
-                let tester = &mut tester_of_size(WIDE_WINDOW_SIZE);
+                size_view(tester, WIDE_WINDOW_SIZE);
                 prepare_picker(tester, &Prepare::new());
 
                 // Change window size to narrow for portrait mode.
-                resize_view(tester, NARROW_WINDOW_SIZE);
+                tester.view().set_physical_size(NARROW_WINDOW_SIZE);
                 tester.pump();
             });
         }
@@ -8924,8 +8916,36 @@ pub(crate) mod tests {
             });
         }
 
-        fn input_only_headline_font_size(size: Size) -> Option<f64> {
-            let tester = &mut tester_of_size(size);
+        /// A regression test for https://github.com/flutter/flutter/issues/140311.
+        #[test]
+        fn range_text_fields_stay_visible_when_orientation_is_portrait_and_height_is_reduced() {
+            test_widgets(|tester| {
+                size_view(tester, Size::new(720.0, 1280.0));
+                let mut prepare = Prepare::new();
+                prepare.initial_entry_mode = DatePickerEntryMode::Input;
+                prepare.use_material3 = true;
+
+                // Text fields and header are visible by default.
+                prepare_picker(tester, &prepare);
+                expect(tester, &find::by_type::<TextField>(), finds_n_widgets(2));
+                expect(tester, &find::text("Select range"), finds_one_widget());
+
+                // Simulate the portait mode on a device with a small display when the virtual
+                // keyboard is visible.
+                tester.view().set_view_insets(waft_embedder::ViewPadding {
+                    bottom: 1000.0,
+                    ..waft_embedder::ViewPadding::ZERO
+                });
+                tester.pump_and_settle();
+
+                // Text fields are visible and header is hidden.
+                expect(tester, &find::by_type::<TextField>(), finds_n_widgets(2));
+                expect(tester, &find::text("Select range"), finds_nothing());
+            });
+        }
+
+        fn input_only_headline_font_size(tester: &mut WidgetTester, size: Size) -> Option<f64> {
+            size_view(tester, size);
             let mut prepare = Prepare::new();
             prepare.initial_entry_mode = DatePickerEntryMode::Input;
             prepare.use_material3 = true;
@@ -8938,9 +8958,9 @@ pub(crate) mod tests {
 
         #[test]
         fn landscape_input_only_date_picker_headers_use_headline_small_in_portrait() {
-            test_widgets(|_| {
+            test_widgets(|tester| {
                 assert_eq!(
-                    input_only_headline_font_size(Size::new(1070.0, 1770.0)),
+                    input_only_headline_font_size(tester, Size::new(1070.0, 1770.0)),
                     Some(32.0)
                 );
             });
@@ -8948,9 +8968,9 @@ pub(crate) mod tests {
 
         #[test]
         fn landscape_input_only_date_picker_headers_use_headline_small_in_landscape() {
-            test_widgets(|_| {
+            test_widgets(|tester| {
                 assert_eq!(
-                    input_only_headline_font_size(Size::new(1770.0, 1070.0)),
+                    input_only_headline_font_size(tester, Size::new(1770.0, 1070.0)),
                     Some(24.0)
                 );
             });

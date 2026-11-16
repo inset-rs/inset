@@ -1135,7 +1135,8 @@ mod tests {
     };
 
     use waft_widgets::testing::{
-        TargetPlatformVariant, WidgetTester, find, test_widgets, test_widgets_variant,
+        TargetPlatformVariant, WidgetTester, expect, find, finds_one_widget, test_widgets,
+        test_widgets_variant,
     };
 
     use super::*;
@@ -1869,6 +1870,54 @@ mod tests {
                     platform == TargetPlatform::Android,
                     "{platform:?}"
                 );
+            });
+        }
+    }
+
+    // 'PredictiveBackPageTransitionsBuilder uses display corner radii when available', for each
+    // builder.
+    #[test]
+    fn the_predictive_back_builders_use_the_display_corner_radii_when_available() {
+        let display_corner_radii = BorderRadius::all(Radius::circular(33.3));
+        let clip_of_the_display_corners = move || {
+            find::by_widget_predicate("a ClipRRect of the display corners", move |_, widget| {
+                waft_widgets::downcast_widget::<ClipRRect>(widget)
+                    .is_some_and(|clip| clip.border_radius == display_corner_radii.into())
+            })
+        };
+        for variant in [Variant::SharedElement, Variant::Fullscreen] {
+            test_widgets(|tester| {
+                pump_app(tester, theme_for_every_platform(variant.builder()), |app| {
+                    app.builder(move |app, context, child| {
+                        MediaQuery::new(
+                            MediaQuery::of(app, context)
+                                .apply_display_corner_radii(Some(display_corner_radii)),
+                            child.cloned().expect("the navigator"),
+                        )
+                        .into_widget()
+                    })
+                    .routes(push_routes())
+                });
+
+                assert_eq!(variant.predictive_back_transitions(tester), 0);
+                assert_eq!(variant.fallback_transitions(tester), 1);
+                assert_eq!(count_of::<ClipRRect>(tester), 0);
+
+                tester.tap(find::text("push"));
+                tester.pump_and_settle();
+
+                assert_eq!(variant.predictive_back_transitions(tester), 0);
+                assert_eq!(variant.fallback_transitions(tester), 1);
+                assert_eq!(count_of::<ClipRRect>(tester), 0);
+
+                // Start a system pop gesture, which will switch to using the predictive back
+                // page transition.
+                start_back_gesture(tester, Offset::new(5.0, 300.0), 0.0);
+                tester.pump();
+
+                assert_eq!(variant.predictive_back_transitions(tester), 1);
+                assert_eq!(variant.fallback_transitions(tester), 0);
+                expect(tester, &clip_of_the_display_corners(), finds_one_widget());
             });
         }
     }

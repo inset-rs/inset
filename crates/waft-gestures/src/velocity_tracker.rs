@@ -1,10 +1,14 @@
 //! Flutter counterpart: `gestures/velocity_tracker.dart` (`VelocityTracker`
 //! and the iOS / macOS fling subclasses). [`Velocity`](crate::velocity::Velocity)
 //! / [`VelocityEstimate`](crate::velocity::VelocityEstimate) live in `velocity.rs`.
+//!
+//! Every tracker's `now` is the App's clock ([`App::clock`](waft_foundation::App::clock)),
+//! Dart's `GestureBinding.samplingClock`: the time a sample is added and the time an estimate
+//! is asked for, between which a pointer that moved no more is taken to have stopped. Each call
+//! passes the clock rather than the `App`, since a recognizer adds a sample to the tracker it
+//! holds in the `App`.
 
 use std::time::Duration;
-
-use web_time::Instant;
 
 use waft_embedder::{Offset, PointerDeviceKind};
 
@@ -23,6 +27,25 @@ struct PointAtTime {
     time: Duration,
 }
 
+/// Dart's `_sinceLastSample`: a stopwatch on the sampling clock, reset at each sample.
+#[derive(Clone, Copy, Debug, Default)]
+struct SinceLastSample {
+    sampled_at: Option<Duration>,
+}
+
+impl SinceLastSample {
+    fn reset(&mut self, now: Duration) {
+        self.sampled_at = Some(now);
+    }
+
+    /// Whether the last sample is more than `ASSUME_POINTER_MOVE_STOPPED_MILLISECONDS` old.
+    fn pointer_stopped(&self, now: Duration) -> bool {
+        self.sampled_at.is_some_and(|at| {
+            now.saturating_sub(at).as_millis() > ASSUME_POINTER_MOVE_STOPPED_MILLISECONDS
+        })
+    }
+}
+
 /// Dart's `VelocityTracker` used as a type: what a
 /// [`GestureVelocityTrackerBuilder`](crate::GestureVelocityTrackerBuilder)
 /// returns, and what a `Map<int, VelocityTracker>` holds.
@@ -35,16 +58,17 @@ pub trait AnyVelocityTracker {
     /// The kind of pointer this tracker is for.
     fn kind(&self) -> PointerDeviceKind;
 
-    /// Adds a position as the given time to the tracker.
-    fn add_position(&mut self, time: Duration, position: Offset);
+    /// Adds a position as the given time to the tracker, at `now` on the App's clock.
+    fn add_position(&mut self, now: Duration, time: Duration, position: Offset);
 
     /// Returns an estimate of the velocity of the object being tracked by the
-    /// tracker given the current information available to the tracker.
-    fn get_velocity_estimate(&self) -> Option<VelocityEstimate>;
+    /// tracker given the current information available to the tracker, at `now` on the App's
+    /// clock.
+    fn get_velocity_estimate(&self, now: Duration) -> Option<VelocityEstimate>;
 
     /// Computes the velocity of the pointer at the time of the last provided
-    /// data point.
-    fn get_velocity(&self) -> Velocity;
+    /// data point, at `now` on the App's clock.
+    fn get_velocity(&self, now: Duration) -> Velocity;
 }
 
 impl AnyVelocityTracker for VelocityTracker {
@@ -52,16 +76,16 @@ impl AnyVelocityTracker for VelocityTracker {
         self.kind
     }
 
-    fn add_position(&mut self, time: Duration, position: Offset) {
-        VelocityTracker::add_position(self, time, position);
+    fn add_position(&mut self, now: Duration, time: Duration, position: Offset) {
+        VelocityTracker::add_position(self, now, time, position);
     }
 
-    fn get_velocity_estimate(&self) -> Option<VelocityEstimate> {
-        VelocityTracker::get_velocity_estimate(self)
+    fn get_velocity_estimate(&self, now: Duration) -> Option<VelocityEstimate> {
+        VelocityTracker::get_velocity_estimate(self, now)
     }
 
-    fn get_velocity(&self) -> Velocity {
-        VelocityTracker::get_velocity(self)
+    fn get_velocity(&self, now: Duration) -> Velocity {
+        VelocityTracker::get_velocity(self, now)
     }
 }
 
@@ -70,16 +94,16 @@ impl AnyVelocityTracker for IOSScrollViewFlingVelocityTracker {
         self.kind
     }
 
-    fn add_position(&mut self, time: Duration, position: Offset) {
-        IOSScrollViewFlingVelocityTracker::add_position(self, time, position);
+    fn add_position(&mut self, now: Duration, time: Duration, position: Offset) {
+        IOSScrollViewFlingVelocityTracker::add_position(self, now, time, position);
     }
 
-    fn get_velocity_estimate(&self) -> Option<VelocityEstimate> {
-        IOSScrollViewFlingVelocityTracker::get_velocity_estimate(self)
+    fn get_velocity_estimate(&self, now: Duration) -> Option<VelocityEstimate> {
+        IOSScrollViewFlingVelocityTracker::get_velocity_estimate(self, now)
     }
 
-    fn get_velocity(&self) -> Velocity {
-        IOSScrollViewFlingVelocityTracker::get_velocity(self)
+    fn get_velocity(&self, now: Duration) -> Velocity {
+        IOSScrollViewFlingVelocityTracker::get_velocity(self, now)
     }
 }
 
@@ -88,16 +112,16 @@ impl AnyVelocityTracker for MacOSScrollViewFlingVelocityTracker {
         MacOSScrollViewFlingVelocityTracker::kind(self)
     }
 
-    fn add_position(&mut self, time: Duration, position: Offset) {
-        MacOSScrollViewFlingVelocityTracker::add_position(self, time, position);
+    fn add_position(&mut self, now: Duration, time: Duration, position: Offset) {
+        MacOSScrollViewFlingVelocityTracker::add_position(self, now, time, position);
     }
 
-    fn get_velocity_estimate(&self) -> Option<VelocityEstimate> {
-        MacOSScrollViewFlingVelocityTracker::get_velocity_estimate(self)
+    fn get_velocity_estimate(&self, now: Duration) -> Option<VelocityEstimate> {
+        MacOSScrollViewFlingVelocityTracker::get_velocity_estimate(self, now)
     }
 
-    fn get_velocity(&self) -> Velocity {
-        MacOSScrollViewFlingVelocityTracker::get_velocity(self)
+    fn get_velocity(&self, now: Duration) -> Velocity {
+        MacOSScrollViewFlingVelocityTracker::get_velocity(self, now)
     }
 }
 
@@ -116,7 +140,7 @@ impl AnyVelocityTracker for MacOSScrollViewFlingVelocityTracker {
 pub struct VelocityTracker {
     /// The kind of pointer this tracker is for.
     pub kind: PointerDeviceKind,
-    last_sample: Option<Instant>,
+    since_last_sample: SinceLastSample,
     samples: [Option<PointAtTime>; HISTORY_SIZE],
     index: usize,
 }
@@ -126,24 +150,15 @@ impl VelocityTracker {
     pub fn with_kind(kind: PointerDeviceKind) -> VelocityTracker {
         VelocityTracker {
             kind,
-            last_sample: None,
+            since_last_sample: SinceLastSample::default(),
             samples: [None; HISTORY_SIZE],
             index: 0,
         }
     }
 
-    fn note_sample(&mut self) {
-        self.last_sample = Some(Instant::now());
-    }
-
-    fn recently_stopped(&self) -> bool {
-        self.last_sample
-            .is_some_and(|at| at.elapsed().as_millis() > ASSUME_POINTER_MOVE_STOPPED_MILLISECONDS)
-    }
-
-    /// Adds a position as the given time to the tracker.
-    pub fn add_position(&mut self, time: Duration, position: Offset) {
-        self.note_sample();
+    /// Adds a position as the given time to the tracker, at `now` on the App's clock.
+    pub fn add_position(&mut self, now: Duration, time: Duration, position: Offset) {
+        self.since_last_sample.reset(now);
         self.index += 1;
         if self.index == HISTORY_SIZE {
             self.index = 0;
@@ -160,8 +175,8 @@ impl VelocityTracker {
     /// Information is added using [`add_position`](Self::add_position).
     ///
     /// Returns [`None`] if there is no data on which to base an estimate.
-    pub fn get_velocity_estimate(&self) -> Option<VelocityEstimate> {
-        if self.recently_stopped() {
+    pub fn get_velocity_estimate(&self, now: Duration) -> Option<VelocityEstimate> {
+        if self.since_last_sample.pointer_stopped(now) {
             return Some(VelocityEstimate::new(
                 Offset::ZERO,
                 1.0,
@@ -236,8 +251,8 @@ impl VelocityTracker {
     ///
     /// Returns [`Velocity::ZERO`] if there is no data from which to compute an
     /// estimate or if the estimated velocity is zero.
-    pub fn get_velocity(&self) -> Velocity {
-        velocity_from_estimate(self.get_velocity_estimate())
+    pub fn get_velocity(&self, now: Duration) -> Velocity {
+        velocity_from_estimate(self.get_velocity_estimate(now))
     }
 }
 
@@ -246,7 +261,7 @@ impl VelocityTracker {
 pub struct IOSScrollViewFlingVelocityTracker {
     /// The kind of pointer this tracker is for.
     pub kind: PointerDeviceKind,
-    last_sample: Option<Instant>,
+    since_last_sample: SinceLastSample,
     index: usize,
     touch_samples: [Option<PointAtTime>; IOS_SAMPLE_SIZE],
 }
@@ -256,20 +271,15 @@ impl IOSScrollViewFlingVelocityTracker {
     pub fn new(kind: PointerDeviceKind) -> IOSScrollViewFlingVelocityTracker {
         IOSScrollViewFlingVelocityTracker {
             kind,
-            last_sample: None,
+            since_last_sample: SinceLastSample::default(),
             index: 0,
             touch_samples: [None; IOS_SAMPLE_SIZE],
         }
     }
 
-    fn recently_stopped(&self) -> bool {
-        self.last_sample
-            .is_some_and(|at| at.elapsed().as_millis() > ASSUME_POINTER_MOVE_STOPPED_MILLISECONDS)
-    }
-
-    /// Adds a position as the given time to the tracker.
-    pub fn add_position(&mut self, time: Duration, position: Offset) {
-        self.last_sample = Some(Instant::now());
+    /// Adds a position as the given time to the tracker, at `now` on the App's clock.
+    pub fn add_position(&mut self, now: Duration, time: Duration, position: Offset) {
+        self.since_last_sample.reset(now);
         if cfg!(debug_assertions) {
             let previous_point = self.touch_samples[self.index];
             debug_assert!(
@@ -310,9 +320,10 @@ impl IOSScrollViewFlingVelocityTracker {
         }
     }
 
-    /// Returns an estimate of the velocity of the object being tracked.
-    pub fn get_velocity_estimate(&self) -> Option<VelocityEstimate> {
-        if self.recently_stopped() {
+    /// Returns an estimate of the velocity of the object being tracked, at `now` on the App's
+    /// clock.
+    pub fn get_velocity_estimate(&self, now: Duration) -> Option<VelocityEstimate> {
+        if self.since_last_sample.pointer_stopped(now) {
             return Some(VelocityEstimate::new(
                 Offset::ZERO,
                 1.0,
@@ -357,9 +368,10 @@ impl IOSScrollViewFlingVelocityTracker {
         }
     }
 
-    /// Computes the velocity of the pointer at the time of the last sample.
-    pub fn get_velocity(&self) -> Velocity {
-        velocity_from_estimate(self.get_velocity_estimate())
+    /// Computes the velocity of the pointer at the time of the last sample, at `now` on the
+    /// App's clock.
+    pub fn get_velocity(&self, now: Duration) -> Velocity {
+        velocity_from_estimate(self.get_velocity_estimate(now))
     }
 }
 
@@ -382,14 +394,15 @@ impl MacOSScrollViewFlingVelocityTracker {
         self.inner.kind
     }
 
-    /// Adds a position as the given time to the tracker.
-    pub fn add_position(&mut self, time: Duration, position: Offset) {
-        self.inner.add_position(time, position);
+    /// Adds a position as the given time to the tracker, at `now` on the App's clock.
+    pub fn add_position(&mut self, now: Duration, time: Duration, position: Offset) {
+        self.inner.add_position(now, time, position);
     }
 
-    /// Returns an estimate of the velocity of the object being tracked.
-    pub fn get_velocity_estimate(&self) -> Option<VelocityEstimate> {
-        if self.inner.recently_stopped() {
+    /// Returns an estimate of the velocity of the object being tracked, at `now` on the App's
+    /// clock.
+    pub fn get_velocity_estimate(&self, now: Duration) -> Option<VelocityEstimate> {
+        if self.inner.since_last_sample.pointer_stopped(now) {
             return Some(VelocityEstimate::new(
                 Offset::ZERO,
                 1.0,
@@ -435,9 +448,10 @@ impl MacOSScrollViewFlingVelocityTracker {
         }
     }
 
-    /// Computes the velocity of the pointer at the time of the last sample.
-    pub fn get_velocity(&self) -> Velocity {
-        velocity_from_estimate(self.get_velocity_estimate())
+    /// Computes the velocity of the pointer at the time of the last sample, at `now` on the
+    /// App's clock.
+    pub fn get_velocity(&self, now: Duration) -> Velocity {
+        velocity_from_estimate(self.get_velocity_estimate(now))
     }
 }
 
@@ -460,3 +474,8 @@ fn duration_abs_diff_ms(a: Duration, b: Duration) -> f64 {
         (b - a).as_micros() as f64 / 1000.0
     }
 }
+
+#[cfg(test)]
+mod data;
+#[cfg(test)]
+mod tests;

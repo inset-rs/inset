@@ -1528,7 +1528,7 @@ impl SnackBarThemeDataGetters for SnackbarDefaultsM2 {
 mod tests {
     use std::cell::{Cell, RefCell};
 
-    use waft_embedder::{Offset, Rect, TargetPlatform};
+    use waft_embedder::{Offset, Rect, Size};
     use waft_widgets::{Builder, Directionality, GestureDetector, GlobalKey, SizedBox};
 
     use waft_widgets::testing::{
@@ -3871,6 +3871,7 @@ mod tests {
     /// column, the first showing `snack_bar`; returns whether a tap at the top left of the
     /// second button's label pressed it, with the snack bar still showing.
     fn taps_behind_the_snack_bar(
+        tester: &mut WidgetTester,
         theme: impl FnOnce(&App) -> ThemeData,
         snack_bar: impl Fn() -> SnackBar + 'static,
     ) -> bool {
@@ -3878,11 +3879,8 @@ mod tests {
         const SNACKBAR_CONTENT: &str = "Snackbar";
         const BUTTON_TEXT2: &str = "Try press me";
         let completed = Rc::new(Cell::new(false));
-        let mut tester = WidgetTester::with_view(
-            waft_test::TestPlatform::new().on(TargetPlatform::Android),
-            waft_test::TestView::with_pixel_ratio(200.0, 200.0, 1.0),
-        );
-        let tester = &mut tester;
+        tester.view().set_physical_size(Size::square(200.0));
+        tester.view().set_device_pixel_ratio(1.0);
         let snack_bar = Rc::new(snack_bar);
         let home = Scaffold::new().body(Builder::new({
             let completed = Rc::clone(&completed);
@@ -3922,8 +3920,8 @@ mod tests {
     // Dart: 'Tap on button behind snack bar defined by width'.
     #[test]
     fn a_button_beside_a_snack_bar_of_custom_width_can_be_tapped() {
-        test_widgets(|_| {
-            assert!(taps_behind_the_snack_bar(m3, || {
+        test_widgets(|tester| {
+            assert!(taps_behind_the_snack_bar(tester, m3, || {
                 SnackBar::new(Text::new("Snackbar"))
                     .behavior(SnackBarBehavior::Floating)
                     .width(100.0)
@@ -3934,8 +3932,8 @@ mod tests {
     // Dart: 'Tap on button behind snack bar defined by margin'.
     #[test]
     fn a_button_in_a_snack_bar_s_margin_can_be_tapped() {
-        test_widgets(|_| {
-            assert!(taps_behind_the_snack_bar(m3, || {
+        test_widgets(|tester| {
+            assert!(taps_behind_the_snack_bar(tester, m3, || {
                 SnackBar::new(Text::new("Snackbar"))
                     .behavior(SnackBarBehavior::Floating)
                     .margin(EdgeInsets::only(100.0, 0.0, 0.0, 0.0))
@@ -3946,8 +3944,8 @@ mod tests {
     // Dart: "Can't tap on button behind snack bar defined by margin and HitTestBehavior.opaque".
     #[test]
     fn a_button_in_the_margin_of_an_opaque_snack_bar_cannot_be_tapped() {
-        test_widgets(|_| {
-            assert!(!taps_behind_the_snack_bar(m3, || {
+        test_widgets(|tester| {
+            assert!(!taps_behind_the_snack_bar(tester, m3, || {
                 SnackBar::new(Text::new("Snackbar"))
                     .hit_test_behavior(HitTestBehavior::Opaque)
                     .behavior(SnackBarBehavior::Floating)
@@ -3960,8 +3958,9 @@ mod tests {
     // SnackBarThemeData'.
     #[test]
     fn a_button_in_the_theme_s_inset_padding_can_be_tapped() {
-        test_widgets(|_| {
+        test_widgets(|tester| {
             assert!(taps_behind_the_snack_bar(
+                tester,
                 |app| {
                     ThemeData::builder()
                         .snack_bar_theme(
@@ -4181,13 +4180,10 @@ mod tests {
 
     /// The overflowing-action cases, on a 500x800 view: the snack bar's content row and the
     /// rect of its 20 high content box.
-    fn overflowing_action(padding: Option<EdgeInsets>) -> (WidgetTester, Rect) {
+    fn overflowing_action(tester: &mut WidgetTester, padding: Option<EdgeInsets>) -> Rect {
         let content_key = GlobalKey::new();
-        let mut owned = WidgetTester::with_view(
-            waft_test::TestPlatform::new().on(TargetPlatform::Android),
-            waft_test::TestView::with_pixel_ratio(500.0, 800.0, 1.0),
-        );
-        let tester = &mut owned;
+        tester.view().set_physical_size(Size::new(500.0, 800.0));
+        tester.view().set_device_pixel_ratio(1.0);
         let home = Scaffold::new().body(Builder::new({
             let content_key = content_key.clone();
             move |_app, context| {
@@ -4211,8 +4207,7 @@ mod tests {
         pump_app(tester, m3, home.into_widget());
         tester.tap(find::text("Show"));
         tester.pump_and_settle();
-        let content = rect_of_key(tester, &content_key);
-        (owned, content)
+        rect_of_key(tester, &content_key)
     }
 
     /// Dart's `tester.widget<Row>(find.descendant(of: find.byType(SnackBar), matching:
@@ -4230,10 +4225,9 @@ mod tests {
     // Dart: 'SnackBar does not allocate 40% empty space on right when action overflows'.
     #[test]
     fn an_overflowing_action_leaves_only_the_end_padding_beside_the_content() {
-        test_widgets(|_| {
+        test_widgets(|tester| {
             const SCREEN_WIDTH: f64 = 500.0;
-            let (mut owned, content) = overflowing_action(None);
-            let tester = &mut owned;
+            let content = overflowing_action(tester, None);
             // For screenWidth = 500, horizontalPadding = 24 on start and end, the content width is 452px (500 - 24 - 24).
             assert_eq!(content.width(), 452.0);
             assert_eq!(content.top_right().dx(), SCREEN_WIDTH - 24.0);
@@ -4250,11 +4244,10 @@ mod tests {
     // Dart: 'SnackBar respects custom padding when action overflows'.
     #[test]
     fn an_overflowing_action_keeps_a_custom_padding_without_a_spacer() {
-        test_widgets(|_| {
+        test_widgets(|tester| {
             const SCREEN_WIDTH: f64 = 500.0;
             let custom_padding = EdgeInsets::only(36.0, 0.0, 48.0, 0.0);
-            let (mut owned, content) = overflowing_action(Some(custom_padding));
-            let tester = &mut owned;
+            let content = overflowing_action(tester, Some(custom_padding));
             // When a custom padding is provided, it is applied on both sides by the outer
             // Padding, so no extra spacer is inserted in the content row.
             let children = content_row_children(tester);

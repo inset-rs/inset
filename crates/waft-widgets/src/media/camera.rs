@@ -540,10 +540,8 @@ mod tests {
     fn a_camera_preview_places_the_sessions_preview_layer_at_its_formats_size() {
         let cameras = cameras();
         let compositor = MockCompositor::new();
-        let tester = &mut WidgetTester::with_physical_size(
-            platform_with(&cameras, &compositor),
-            Size::new(1200.0, 2400.0),
-        );
+        let tester = &mut WidgetTester::with_platform(platform_with(&cameras, &compositor));
+        tester.view().set_physical_size(Size::new(1200.0, 2400.0));
         let camera = opened(&tester.cell);
         let layer = tester.update(|app| {
             app.platform()

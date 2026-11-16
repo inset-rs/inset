@@ -4128,13 +4128,8 @@ pub(crate) mod tests {
 
             find_menu_item_button(tester, TestMenu::MainMenu0.label());
 
-            // didChangeMetrics: Dart's `tester.view.physicalSize = const Size(700.0, 700.0)`.
-            tester.view().resize(700.0, 700.0);
-            {
-                let mut app = tester.cell.borrow_mut();
-                waft_rendering::RendererBinding::instance(&mut app)
-                    .handle_metrics_changed(&mut app);
-            }
+            // didChangeMetrics.
+            tester.view().set_physical_size(Size::new(700.0, 700.0));
             pump(tester);
 
             // Go without throw.
@@ -7577,12 +7572,8 @@ pub(crate) mod tests {
     // 'DropdownMenu does not crash at zero area'
     #[test]
     fn a_menu_at_zero_area_does_not_panic() {
-        test_widgets(|_| {
-            let mut tester = WidgetTester::with_physical_size(
-                waft_test::TestPlatform::new().on(TargetPlatform::Android),
-                Size::ZERO,
-            );
-            let tester = &mut tester;
+        test_widgets(|tester| {
+            tester.view().set_physical_size(Size::ZERO);
             let controller = {
                 let mut app = tester.cell.borrow_mut();
                 TextEditingController::new(&mut app)

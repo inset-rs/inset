@@ -7133,12 +7133,8 @@ mod tests {
         // overlay, because there doesn't seem to be a way to open the menu at zero
         // area. Though, this should be sufficient since the overlay has been verified
         // by similar tests for MenuAnchor and PopupMenuItem.
-        test_widgets(|_| {
-            let mut tester = WidgetTester::with_physical_size(
-                waft_test::TestPlatform::new().on(waft_embedder::TargetPlatform::Android),
-                Size::ZERO,
-            );
-            let tester = &mut tester;
+        test_widgets(|tester| {
+            tester.view().set_physical_size(Size::ZERO);
             pump_app(tester, m3, |_app| {
                 Center::new()
                     .child(

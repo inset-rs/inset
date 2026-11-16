@@ -6,8 +6,6 @@
 //! run on, and then on macOS, where `MaterialPageRoute` slides as Cupertino's does and the
 //! scroll views wear desktop scrollbars.
 
-use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
-
 use material_gallery_lib::pages::drawers::{DRAWER_HEADER, END_DRAWER_HEADER};
 use material_gallery_lib::pages::messages::{BANNER_TEXT, PERSISTENT_SHEET_TEXT};
 use material_gallery_lib::{Entry, Gallery, entry_route, sub_route};
@@ -18,10 +16,9 @@ use waft_material::{
     TextButton, Theme,
 };
 use waft_rendering::{RenderAnimatedOpacity, RenderAnimatedOpacityMixin, RenderOpacity};
-use waft_test::TestPlatform;
 use waft_widgets::testing::{
-    Finder, WidgetTester, expect, find, finds_nothing, finds_one_widget, finds_widgets,
-    test_widgets,
+    Finder, TargetPlatformVariant, WidgetTester, expect, find, finds_nothing, finds_one_widget,
+    finds_widgets, test_widgets_variant,
 };
 use waft_widgets::{GlobalKey, NavigatorState, RouteRef, Text, Wrap};
 
@@ -34,33 +31,24 @@ const PLATFORMS: [TargetPlatform; 2] = [TargetPlatform::Android, TargetPlatform:
 /// Runs `case` against a fresh gallery on each of [`PLATFORMS`], naming the platform it
 /// failed on.
 fn on_each_platform(case: fn(&mut Fixture)) {
-    for platform in PLATFORMS {
-        test_widgets(|_| {
-            let run = catch_unwind(AssertUnwindSafe(|| case(&mut Fixture::new(platform))));
-            if let Err(panic) = run {
-                eprintln!("the case failed on {platform:?}");
-                resume_unwind(panic);
-            }
-        });
-    }
+    test_widgets_variant(TargetPlatformVariant::new(PLATFORMS), |tester| {
+        case(&mut Fixture::new(tester));
+    });
 }
 
 /// The mounted gallery, plus the key its navigator is reached through.
-struct Fixture {
-    tester: WidgetTester,
+struct Fixture<'t> {
+    tester: &'t mut WidgetTester,
     navigator: GlobalKey,
 }
 
-impl Fixture {
-    fn new(platform: TargetPlatform) -> Fixture {
+impl<'t> Fixture<'t> {
+    fn new(tester: &'t mut WidgetTester) -> Fixture<'t> {
         // The window at flutter_test's device pixel ratio.
-        let mut tester = WidgetTester::with_physical_size(
-            TestPlatform::new().on(platform),
-            Size::new(
-                VIEW[0] * WidgetTester::DEVICE_PIXEL_RATIO,
-                VIEW[1] * WidgetTester::DEVICE_PIXEL_RATIO,
-            ),
-        );
+        let ratio = tester.device_pixel_ratio();
+        tester
+            .view()
+            .set_physical_size(Size::new(VIEW[0] * ratio, VIEW[1] * ratio));
         let navigator = GlobalKey::new();
         tester.pump_widget(Gallery::new().navigator_key(navigator.clone()));
 
@@ -129,7 +117,7 @@ impl Fixture {
 
     /// The data of the `Text`s `finder` finds.
     fn texts_in(&mut self, finder: Finder) -> Vec<String> {
-        let found = finder.evaluate(&self.tester);
+        let found = finder.evaluate(self.tester);
         found
             .into_iter()
             .filter_map(|text| self.tester.widget(text, |text: &Text| text.data.clone()))
@@ -139,14 +127,14 @@ impl Fixture {
     /// Checks that a `Text` reading exactly `text` is onstage.
     #[track_caller]
     fn expect_shown(&mut self, text: &str) {
-        expect(&self.tester, &find::text(text), finds_one_widget());
+        expect(self.tester, &find::text(text), finds_one_widget());
     }
 
     /// Checks that no `Text` reading `text` is mounted at all, onstage or not.
     #[track_caller]
     fn expect_gone(&mut self, text: &str) {
         expect(
-            &self.tester,
+            self.tester,
             &find::text(text).skip_offstage(false),
             finds_nothing(),
         );
@@ -209,7 +197,7 @@ impl Fixture {
     #[track_caller]
     fn assert_app_bar_reads(&mut self, title: &str) {
         expect(
-            &self.tester,
+            self.tester,
             &find::descendant(find::by_type::<AppBar>(), find::text(title)),
             finds_widgets(),
         );
@@ -227,7 +215,7 @@ fn the_index_lists_every_entry() {
         fixture.assert_app_bar_reads("Material Gallery");
         for entry in Entry::ALL {
             expect(
-                &fixture.tester,
+                fixture.tester,
                 &find::widget_with_text::<ListTile>(entry.title()),
                 finds_one_widget(),
             );
@@ -286,7 +274,7 @@ fn the_index_drawer_opens_an_entry() {
     on_each_platform(|fixture| {
         fixture.tap(find::by_type::<DrawerButton>());
         expect(
-            &fixture.tester,
+            fixture.tester,
             &find::by_type::<DrawerHeader>(),
             finds_one_widget(),
         );
@@ -300,7 +288,7 @@ fn the_index_drawer_opens_an_entry() {
         fixture.go_back();
         assert!(!fixture.can_pop(), "the Lists page came back off");
         expect(
-            &fixture.tester,
+            fixture.tester,
             &find::by_type::<DrawerHeader>().skip_offstage(false),
             finds_nothing(),
         );
@@ -481,7 +469,7 @@ fn tapping_a_tile_selects_it() {
         fixture.expect_shown("Selected: Starred");
         let tiles = find::by_type::<ListTile>()
             .skip_offstage(false)
-            .evaluate(&fixture.tester);
+            .evaluate(fixture.tester);
         let selected = tiles
             .into_iter()
             .filter(|tile| {
@@ -529,7 +517,7 @@ fn press_common_button<W: 'static>(
         find::widget_with_text::<W>(label),
     ));
     let pressed = format!("Last pressed: {expected}");
-    if !find::text(&pressed).evaluate(&fixture.tester).is_empty() {
+    if !find::text(&pressed).evaluate(fixture.tester).is_empty() {
         return None;
     }
     let shown = fixture

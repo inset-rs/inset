@@ -16,6 +16,10 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — each case has its own `App`, which holds its debug flags, clock and singletons, where flutter_test's isolate-global ones are reset and checked between tests.
   Affect: a case that leaves a flag set or a singleton changed cannot affect the next, and is not reported for it.
 
+- Change: a view metric a case sets (`tester.view().set_physical_size(..)` and the rest) reaches the framework at once, through a listener the tester installs on its `TestView`, as the shell's `view_metrics_changed` does: `RendererBinding::handle_metrics_changed`, then the checkpoint.
+  Reason: platform — `TestFlutterView`'s setters call the dispatcher's `onMetricsChanged`; here the tester stands in for the shell, which hands a view's changes to the framework.
+  Affect: a case sets a metric while it does not hold the app, and needs no `addTearDown(tester.view.reset)`, since each case has its own view.
+
 - Change: a tester whose pump panicked (a case that catches the panic of a build, a layout or a paint) skips the end-of-test disposal and timer check when dropped.
   Reason: language — a panic unwinds out of the frame and leaves the tree half built, where Dart's framework reports the error through `FlutterError.reportError`, finishes the frame, and the case reads it with `takeException`.
   Affect: such a case is not checked for a timer left pending; the cases that expect a build to fail pump nothing after it.
@@ -46,4 +50,3 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - finder.rs: `find.bySemanticsLabel` and the semantics finders. Trigger: the semantics tree.
 - finder.rs: `find.image`, `find.widgetWithImage`, `find.bySubtype`, `find.byElementType`, `find.backButton`, `find.closeButton` and `Finder.hitTestable`. Trigger: a case that needs one.
 - finders.rs: the older eager helpers (`elements`, `ancestors`, `is_onstage`, `find_onstage_by_key`, `descendants_of_type`, `ancestor_of_type`, `center_of`, `global_rect`, `render_box_of`) and the cases that hold an `AnyElement` to hand them, which Dart writes as a finder (`find.descendant(of:)`, `find.ancestor(of:)`, `tester.renderObject(finder)`, `tester.getRect(finder)`). No `find::by_element` stands in: flutter_test has none, and a tester method already takes an element. Trigger: the next edit of each case's file.
-- tester.rs: `resize_view`, Dart's `tester.view.physicalSize` set while a case runs. Trigger: harness branch D (the test view's metrics).

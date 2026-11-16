@@ -17,6 +17,12 @@ Host implementation. Flutter analogue: the engine's Android embedder under
   Reason: platform — the input queues and the choreographer are both on the app's looper, which fixes no order between them within a poll, where Android's `Choreographer.doFrame` runs its input callbacks before its frame.
   Affect: a touch that arrived before a refresh moves that refresh's frame, not the next one.
 
+## lifecycle.rs → the Android embedder's `LifecycleChannel` and `FlutterActivityAndFragmentDelegate`
+
+- Change: the app's lifecycle state is its most forward activity's, with the focus while any of its activities' windows has it, and detached once no activity is left.
+  Reason: design — one app with an activity per task, where Flutter's engine reports its one activity.
+  Affect: with one activity the states are Flutter's; with several, the app stays resumed while any of its tasks is in front and pauses only once all are stopped.
+
 ## view_requests.rs / task_window.rs → no Flutter counterpart (Flutter's Android embedding has one activity to an engine)
 
 - Change: `Platform::request_view` starts Waft's document activity, `rs.waft.WaftDocumentActivity`, from the application in a task of its own (`FLAG_ACTIVITY_NEW_TASK | NEW_DOCUMENT | MULTIPLE_TASK`), the intent's data the view's initial data and its extras the request's number and a value made fresh in each process, and the activity arrives as the view carrying both; a task Android brings back after the process died arrives as a view the platform gave, with the initial data and no request.

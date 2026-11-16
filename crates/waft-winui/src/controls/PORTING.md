@@ -506,6 +506,40 @@ Ported against: aa3207e6
   Reason: framework — WinUI selects which elements receive input through its popup layer, while Flutter groups widgets and consumes gestures outside that group.
   Affect: Outside taps dismiss the menu without activating ordinary tap callbacks behind it, but raw pointer listeners behind the menu can still observe those pointer events.
 
+## command_bar/mod.rs → `CommandBar` and `AppBar`
+
+- Change: `CommandBar` is drawn in the root overlay, above a light-dismiss layer covering the window, from the moment it starts opening until it has closed, while its place in the layout keeps its closed size.
+  Reason: framework — WinUI lifts the open bar above the page through a layout transition element, which Waft does not have; the overlay is where a widget paints above the content after it, and the bar's subtree moves there under a global key.
+  Affect: An open bar covers the content below it and is not clipped by its parent, as in WinUI, but it also comes above a flyout or tooltip that was showing before it opened.
+
+- Change: `CommandBar` raises `Opening` and `Closing`, and moves the focus into the opening bar or back out of the closing one, at the end of the frame in which its owner's `is_open` changed.
+  Reason: framework — the bar learns of the change while it builds, when it can neither run the application's code nor move the focus, where WinUI does both from the `IsOpen` property change.
+  Affect: An `Opening` handler runs one frame after the change, with the open bar already laid out.
+
+- Change: `CommandBar` raises `DynamicOverflowItemsChanging` at the end of the frame whose layout moved the commands, not before they move.
+  Reason: framework — WinUI raises it from inside measure, and a Waft render object cannot run the application's code during layout.
+  Affect: A handler runs after the frame showing the commands already moved, and a change it makes to the commands shows a frame later.
+
+- Change: `CommandBar` keeps every primary command built in the bar and hides those it moved into the overflow, where it builds them again as overflow items.
+  Reason: framework — WinUI moves one element from the primary `ItemsControl` to the overflow's during measure, while a Waft element cannot change parents during layout.
+  Affect: A command's pointer-over and pressed state does not follow it into the overflow, and a focused command that moves loses the focus (see Deferred).
+
+- Change: `CommandBar` takes a rebuild whose commands differ in kind, label or `DynamicOverflowOrder` from the last as a reset of both command collections, every primary command back in the bar before it measures again.
+  Reason: language — the commands are values without identity, so the bar cannot see an insertion or a removal as WinUI's observable collections report one.
+  Affect: Changing a command's icon or callback keeps the overflow as it is; adding, removing or relabelling one starts over and may raise `DynamicOverflowItemsChanging` again.
+
+- Change: `CommandBar` opens upward when the menu would pass the overlay's bottom below the expanded bar, measuring the menu alone, where WinUI also counts the padding row it adds to its windowed popup, as tall as the bar.
+  Reason: os — WinUI's overflow menu is a separate window, padded so its animations have room, while the overlay needs no padding.
+  Affect: Near the window's bottom the bar keeps opening downward a little longer, by the difference between its open and closed heights: 16 pixels with labels at the bottom.
+
+- Change: `CommandBar` lets a Shift+Tab that arrives on the open bar's last element from outside the bar stop there, where WinUI's `ProcessCandidateTabStopOverride` sends it on into the overflow menu.
+  Reason: framework — the bar sees only the keys of a focus inside it, and Waft's focus traversal has no hook for a container to replace the target of a move into it.
+  Affect: Shift+Tab into a sticky open bar reaches the bar's last element before the menu; Tab and Shift+Tab within the bar pass to and from the menu as in WinUI.
+
+- Change: `AppBarButton` and `AppBarToggleButton` in the overflow menu show their accelerator text whenever an item of the menu has some, as on a machine with a keyboard.
+  Reason: os — WinUI asks Windows whether a keyboard is attached (`GetIsKeyboardPresent`).
+  Affect: The menu keeps its accelerator column on a tablet without a keyboard.
+
 ## flyout/placement.rs → `MenuFlyout` point placement
 
 - Change: `MenuFlyout` starts pen-triggered menus at the requested point, aligning the left edge in left-to-right layouts and the right edge in right-to-left layouts.
@@ -835,3 +869,9 @@ TableView keeps WinUI's own structure, its rows on the kit's lazy list as `Items
 - `TableViewColumn`'s `HeaderTemplate` and `HeaderTemplateSelector` remain deferred; a header is its text. Trigger: An application needs a header other than text.
 - `TableView`'s `IsEnabled`, with its rows' `Disabled` and `SelectedDisabled` states, remains deferred. Trigger: An application disables a table.
 - `TableView`'s right-to-left layout, its columns from the right and its header's trailing edge on the left, remains deferred. Trigger: A consumer needs right-to-left layout.
+- `CommandBar`'s focus following a command between the bar and the overflow menu (`StoreFocusedCommandBarElement` and `RestoreCommandBarElementFocus`) remains deferred. Trigger: An application that narrows or changes a bar while one of its commands has the focus.
+- An `AppBarButton` with a `Flyout` in the overflow menu opens it beside the item on a click, as `OpenSubMenu` does, but the cascading menu's opening on hover, its delayed closing and its closing of the whole bar with a menu item (`CascadingMenuHelper`, `ISubMenuOwner`, `IMenu`) remain deferred. Trigger: An application with sub-menus in a bar's overflow.
+- `CommandBar`'s and `AppBar`'s template settings (`CommandBarTemplateSettings`, `AppBarTemplateSettings`, `AppBarButtonTemplateSettings`), the overflow presenter's style (`CommandBarOverflowPresenterStyle`, which the bar takes from the theme resources), `AppBarElementContainer` and `Page.TopAppBar` and `BottomAppBar` remain deferred. Trigger: An application that restyles the bar or hosts other controls among its commands.
+- `CommandBar`'s and its buttons' accessibility, the automation peers and the size and position in set of the `MoreButton` and the commands, remains deferred. Trigger: The kit gains accessibility support.
+- `CommandBar`'s access keys and key tips, its element sounds, its closing on system back and its gamepad navigation remain deferred. Trigger: A host exposes those facilities, or the kit provides shared access-key mode.
+- `CommandBar`'s `IsEnabled`, with its `Disabled` state's ellipsis foreground, and a command's `Visibility` remain deferred. Trigger: An application disables a bar or hides one of its commands.

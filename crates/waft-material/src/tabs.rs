@@ -12851,9 +12851,9 @@ pub(crate) mod tests {
         use std::cell::{Cell, RefCell};
         use waft_painting::Decoration;
 
-        use waft_embedder::{RRect, Radius, TargetPlatform};
+        use waft_embedder::{RRect, Radius};
         use waft_painting::EdgeInsets;
-        use waft_test::TestPlatform;
+
         use waft_widgets::{
             AnyElement, Focus, Icon, MediaQueryData, PreferredSizeWidgetRef, UnfocusDisposition,
         };
@@ -14443,20 +14443,11 @@ pub(crate) mod tests {
             });
         }
 
-        /// A tester whose view has no area: Dart's `tester.view.physicalSize = Size.zero`.
-        fn zero_area_tester() -> WidgetTester {
-            WidgetTester::with_physical_size(
-                TestPlatform::new().on(TargetPlatform::Android),
-                Size::ZERO,
-            )
-        }
-
         // 'TabPageSelector does not crash at zero area'.
         #[test]
         fn a_tab_page_selector_animates_at_zero_area() {
-            test_widgets(|_| {
-                let mut tester = zero_area_tester();
-                let tester = &mut tester;
+            test_widgets(|tester| {
+                tester.view().set_physical_size(Size::ZERO);
                 let controller = controller(tester, 2);
                 let theme = theme(tester, None, None);
                 tester.pump_widget(material_app(
@@ -14475,9 +14466,8 @@ pub(crate) mod tests {
         // 'TabBarView does not crash at zero area'.
         #[test]
         fn a_tab_bar_view_animates_at_zero_area() {
-            test_widgets(|_| {
-                let mut tester = zero_area_tester();
-                let tester = &mut tester;
+            test_widgets(|tester| {
+                tester.view().set_physical_size(Size::ZERO);
                 let controller = controller(tester, 2);
                 let theme = theme(tester, None, None);
                 tester.pump_widget(material_app(
@@ -14562,9 +14552,8 @@ pub(crate) mod tests {
         // 'TabBar does not crash at zero area'.
         #[test]
         fn a_tab_bar_animates_at_zero_area() {
-            test_widgets(|_| {
-                let mut tester = zero_area_tester();
-                let tester = &mut tester;
+            test_widgets(|tester| {
+                tester.view().set_physical_size(Size::ZERO);
                 let controller = controller(tester, 2);
                 let theme = theme(tester, None, None);
                 tester.pump_widget(material_app(
