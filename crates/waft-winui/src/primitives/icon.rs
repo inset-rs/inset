@@ -137,6 +137,8 @@ pub enum FluentSymbol {
     List,
     /// Rows and columns of a table.
     Table,
+    /// A box of tools: a bar of commands.
+    Toolbox,
 }
 
 impl FluentSymbol {
@@ -192,6 +194,7 @@ impl FluentSymbol {
             Self::Document => 62329,
             Self::List => 62702,
             Self::Table => 63326,
+            Self::Toolbox => 63534,
         })
         .unwrap()
     }

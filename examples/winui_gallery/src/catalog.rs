@@ -7,6 +7,8 @@ use waft_winui::FluentSymbol;
 pub enum Feature {
     /// Application menu headers and keyboard navigation.
     MenuBar,
+    /// A toolbar of commands with an overflow menu.
+    CommandBar,
     BreadcrumbBar,
     /// Independent primary and flyout actions.
     SplitButton,
@@ -86,13 +88,14 @@ pub enum Feature {
 
 impl Feature {
     /// Display order in the navigation pane.
-    pub const ALL: [Self; 39] = [
+    pub const ALL: [Self; 40] = [
         Self::Button,
         Self::DropDownButton,
         Self::SplitButton,
         Self::ToggleSplitButton,
         Self::MenuFlyout,
         Self::MenuBar,
+        Self::CommandBar,
         Self::BreadcrumbBar,
         Self::Flyout,
         Self::ContentDialog,
@@ -135,6 +138,7 @@ impl Feature {
             Self::ToggleSplitButton => "ToggleSplitButton",
             Self::MenuFlyout => "MenuFlyout",
             Self::MenuBar => "MenuBar",
+            Self::CommandBar => "CommandBar",
             Self::BreadcrumbBar => "BreadcrumbBar",
             Self::Flyout => "Flyout",
             Self::ContentDialog => "ContentDialog",
@@ -180,6 +184,7 @@ impl Feature {
             Self::ToggleSplitButton => FluentSymbol::Checkmark,
             Self::MenuFlyout => FluentSymbol::More,
             Self::MenuBar => FluentSymbol::MenuList,
+            Self::CommandBar => FluentSymbol::Toolbox,
             Self::BreadcrumbBar => FluentSymbol::ChevronLeft,
             Self::Flyout => FluentSymbol::ChevronRight,
             Self::ContentDialog => FluentSymbol::Warning,
@@ -229,6 +234,9 @@ impl Feature {
             }
             Self::MenuBar => {
                 "Organize application commands into menus with pointer and keyboard navigation."
+            }
+            Self::CommandBar => {
+                "Show an app's commands in a bar, the rest in an overflow menu that takes what no longer fits."
             }
             Self::Flyout => "Show reusable content beside its opening control.",
             Self::ContentDialog => "Ask a modal question with up to three command buttons.",

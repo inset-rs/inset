@@ -1,4 +1,4 @@
-//! CommandBar: commands moving into the overflow as the bar narrows and back as it widens, `DynamicOverflowOrder`, the label positions, toggle buttons, opening and closing with their events, light dismiss, and the keyboard.
+//! CommandBar: commands moving into the overflow as the bar narrows and back as it widens, `DynamicOverflowOrder`, the label positions, toggle buttons, opening and closing with their events, light dismiss, right to left, the keyboard, and the gallery page.
 
 use crate::common::Fixture;
 use std::{
@@ -525,4 +525,20 @@ fn arrow_keys_move_along_the_bar_and_into_the_overflow() {
     key(&mut f, Physical::ESCAPE, Key::ESCAPE);
     assert!(!shared.open.get());
     assert!(focused(&f).is_none());
+}
+
+#[test]
+fn the_gallery_page_opens_its_bar() {
+    use crate::common::GalleryFixtureExt;
+    let mut f = Fixture::for_feature([1080, 900], winui_gallery::Feature::CommandBar);
+    f.capture("gallery_command_bar_light");
+    f.tap("Open");
+    f.find("Delete");
+    f.capture("gallery_command_bar_open_light");
+    // The first press outside the open bar only closes it.
+    f.tap("Dark theme");
+    f.tap("Dark theme");
+    f.tap("Open");
+    f.find("Delete");
+    f.capture("gallery_command_bar_open_dark");
 }
