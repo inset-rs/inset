@@ -39,6 +39,7 @@ pub mod combo_box;
 
 pub mod color_picker;
 
+pub mod auto_suggest_box;
 pub mod command_bar;
 pub mod menu_bar;
 

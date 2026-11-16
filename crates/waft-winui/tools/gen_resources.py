@@ -75,6 +75,8 @@ DEFAULT_CONTROLS = (
     'SortIndicator',
     'ResizeGripper',
     'TableView',
+    'ListViewItem',
+    'AutoSuggestBox',
 )
 
 NS = {

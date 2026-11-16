@@ -3055,7 +3055,7 @@ impl ComboBoxState {
             }))
             .child(
                 CustomPaint::new()
-                    .painter(PopupShadow::for_combo_box_popup(
+                    .painter(PopupShadow::for_anchored_popup(
                         resources.theme,
                         corner_radius,
                     ))

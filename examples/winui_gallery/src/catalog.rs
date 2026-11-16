@@ -42,6 +42,8 @@ pub enum Feature {
     NumberBox,
     /// Choosing one item from a drop-down list, or typing it.
     ComboBox,
+    /// A text box that lists suggestions as the user types.
+    AutoSuggestBox,
     /// Switch content, headers and dragging.
     ToggleSwitch,
     /// Pixel, auto and star layout.
@@ -88,7 +90,7 @@ pub enum Feature {
 
 impl Feature {
     /// Display order in the navigation pane.
-    pub const ALL: [Self; 40] = [
+    pub const ALL: [Self; 41] = [
         Self::Button,
         Self::DropDownButton,
         Self::SplitButton,
@@ -103,6 +105,7 @@ impl Feature {
         Self::PasswordBox,
         Self::NumberBox,
         Self::ComboBox,
+        Self::AutoSuggestBox,
         Self::ToggleSwitch,
         Self::Grid,
         Self::CheckBox,
@@ -148,6 +151,7 @@ impl Feature {
             Self::PasswordBox => "PasswordBox",
             Self::NumberBox => "NumberBox",
             Self::ComboBox => "ComboBox",
+            Self::AutoSuggestBox => "AutoSuggestBox",
             Self::ToggleSwitch => "ToggleSwitch",
             Self::Grid => "Grid",
             Self::CheckBox => "CheckBox",
@@ -194,6 +198,7 @@ impl Feature {
             Self::PasswordBox => FluentSymbol::LockClosed,
             Self::NumberBox => FluentSymbol::ChevronUpDown,
             Self::ComboBox => FluentSymbol::CheckmarkCircle,
+            Self::AutoSuggestBox => FluentSymbol::Search,
             Self::ToggleSwitch => FluentSymbol::ToggleLeft,
             Self::Grid => FluentSymbol::Grid,
             Self::CheckBox => FluentSymbol::CheckboxChecked,
@@ -251,6 +256,9 @@ impl Feature {
             }
             Self::ComboBox => {
                 "Choose one item from a drop-down list with the pointer or the keyboard, or type it."
+            }
+            Self::AutoSuggestBox => {
+                "Type to get suggestions, move through them with the arrow keys, and submit a query."
             }
             Self::ToggleSwitch => "Switch settings on and off, or drag the thumb.",
             Self::Grid => "Arrange content with fixed, content-sized and proportional tracks.",

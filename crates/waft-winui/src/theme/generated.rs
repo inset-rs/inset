@@ -1498,14 +1498,6 @@ pub struct ThemeResources {
     pub tab_view_selected_item_border_brush: [(f64, Color); 2],
     /// `SystemControlBackgroundBaseMediumBrush`.
     pub system_control_background_base_medium_brush: Color,
-    /// `ListViewItemDragThemeOpacity`.
-    pub list_view_item_drag_theme_opacity: f64,
-    /// `ListViewItemReorderThemeOpacity`.
-    pub list_view_item_reorder_theme_opacity: f64,
-    /// `ListViewItemReorderTargetThemeOpacity`.
-    pub list_view_item_reorder_target_theme_opacity: f64,
-    /// `ListViewItemReorderHintThemeOffset`.
-    pub list_view_item_reorder_hint_theme_offset: f64,
     /// `TabViewHeaderPadding`.
     pub tab_view_header_padding: [f64; 4],
     /// `TabViewItemHeaderPadding`.
@@ -1880,8 +1872,6 @@ pub struct ThemeResources {
     pub system_control_highlight_list_low_brush: Color,
     /// `SystemControlHighlightListMediumBrush`.
     pub system_control_highlight_list_medium_brush: Color,
-    /// `ListViewItemDisabledThemeOpacity`.
-    pub list_view_item_disabled_theme_opacity: f64,
     /// `NavigationViewAutoSuggestBoxMargin`.
     pub navigation_view_auto_suggest_box_margin: [f64; 4],
     /// `TopNavigationViewAutoSuggestBoxMargin`.
@@ -3923,6 +3913,184 @@ pub struct ThemeResources {
     pub table_view_header_cell_padding_compact: [f64; 4],
     /// `TableViewHeaderCellPaddingComfortable`.
     pub table_view_header_cell_padding_comfortable: [f64; 4],
+    // `ListViewItem_themeresources.xaml`
+    /// `ListViewItemBorderBackground`.
+    pub list_view_item_border_background: Color,
+    /// `ListViewItemBackground`.
+    pub list_view_item_background: Color,
+    /// `ListViewItemBackgroundPointerOver`.
+    pub list_view_item_background_pointer_over: Color,
+    /// `ListViewItemBackgroundPressed`.
+    pub list_view_item_background_pressed: Color,
+    /// `ListViewItemBackgroundSelected`.
+    pub list_view_item_background_selected: Color,
+    /// `ListViewItemBackgroundSelectedPointerOver`.
+    pub list_view_item_background_selected_pointer_over: Color,
+    /// `ListViewItemBackgroundSelectedPressed`.
+    pub list_view_item_background_selected_pressed: Color,
+    /// `ListViewItemForegroundPointerOver`.
+    pub list_view_item_foreground_pointer_over: Color,
+    /// `ListViewItemForegroundPressed`.
+    pub list_view_item_foreground_pressed: Color,
+    /// `ListViewItemForegroundSelected`.
+    pub list_view_item_foreground_selected: Color,
+    /// `ListViewItemForegroundSelectedPointerOver`.
+    pub list_view_item_foreground_selected_pointer_over: Color,
+    /// `ListViewItemForegroundSelectedPressed`.
+    pub list_view_item_foreground_selected_pressed: Color,
+    /// `ListViewItemFocusBorderBrush`.
+    pub list_view_item_focus_border_brush: Color,
+    /// `ListViewItemFocusSecondaryBorderBrush`.
+    pub list_view_item_focus_secondary_border_brush: Color,
+    /// `ListViewItemCheckBrush`.
+    pub list_view_item_check_brush: Color,
+    /// `ListViewItemCheckBoxBrush`.
+    pub list_view_item_check_box_brush: Color,
+    /// `ListViewItemDragBackground`.
+    pub list_view_item_drag_background: Color,
+    /// `ListViewItemDragForeground`.
+    pub list_view_item_drag_foreground: Color,
+    /// `ListViewItemPlaceholderBackground`.
+    pub list_view_item_placeholder_background: Color,
+    /// `ListViewItemMultiArrangeOverlayTextBorder`.
+    pub list_view_item_multi_arrange_overlay_text_border: Color,
+    /// `ListViewItemMultiArrangeOverlayTextBackground`.
+    pub list_view_item_multi_arrange_overlay_text_background: Color,
+    /// `ListViewItemCheckHintThemeBrush`.
+    pub list_view_item_check_hint_theme_brush: Color,
+    /// `ListViewItemCheckSelectingThemeBrush`.
+    pub list_view_item_check_selecting_theme_brush: Color,
+    /// `ListViewItemCheckThemeBrush`.
+    pub list_view_item_check_theme_brush: Color,
+    /// `ListViewItemDragBackgroundThemeBrush`.
+    pub list_view_item_drag_background_theme_brush: Color,
+    /// `ListViewItemDragForegroundThemeBrush`.
+    pub list_view_item_drag_foreground_theme_brush: Color,
+    /// `ListViewItemFocusBorderThemeBrush`.
+    pub list_view_item_focus_border_theme_brush: Color,
+    /// `ListViewItemOverlayBackgroundThemeBrush`.
+    pub list_view_item_overlay_background_theme_brush: Color,
+    /// `ListViewItemOverlaySecondaryForegroundThemeBrush`.
+    pub list_view_item_overlay_secondary_foreground_theme_brush: Color,
+    /// `ListViewItemOverlayForegroundThemeBrush`.
+    pub list_view_item_overlay_foreground_theme_brush: Color,
+    /// `ListViewItemPlaceholderBackgroundThemeBrush`.
+    pub list_view_item_placeholder_background_theme_brush: Color,
+    /// `ListViewItemPointerOverBackgroundThemeBrush`.
+    pub list_view_item_pointer_over_background_theme_brush: Color,
+    /// `ListViewItemSelectedBackgroundThemeBrush`.
+    pub list_view_item_selected_background_theme_brush: Color,
+    /// `ListViewItemSelectedForegroundThemeBrush`.
+    pub list_view_item_selected_foreground_theme_brush: Color,
+    /// `ListViewItemSelectedPointerOverBackgroundThemeBrush`.
+    pub list_view_item_selected_pointer_over_background_theme_brush: Color,
+    /// `ListViewItemSelectedPointerOverBorderThemeBrush`.
+    pub list_view_item_selected_pointer_over_border_theme_brush: Color,
+    /// `ListViewItemCheckPressedBrush`.
+    pub list_view_item_check_pressed_brush: Color,
+    /// `ListViewItemCheckDisabledBrush`.
+    pub list_view_item_check_disabled_brush: Color,
+    /// `ListViewItemCheckBoxPointerOverBrush`.
+    pub list_view_item_check_box_pointer_over_brush: Color,
+    /// `ListViewItemCheckBoxPressedBrush`.
+    pub list_view_item_check_box_pressed_brush: Color,
+    /// `ListViewItemCheckBoxDisabledBrush`.
+    pub list_view_item_check_box_disabled_brush: Color,
+    /// `ListViewItemCheckBoxSelectedBrush`.
+    pub list_view_item_check_box_selected_brush: Color,
+    /// `ListViewItemCheckBoxSelectedPointerOverBrush`.
+    pub list_view_item_check_box_selected_pointer_over_brush: Color,
+    /// `ListViewItemCheckBoxSelectedPressedBrush`.
+    pub list_view_item_check_box_selected_pressed_brush: Color,
+    /// `ListViewItemCheckBoxSelectedDisabledBrush`.
+    pub list_view_item_check_box_selected_disabled_brush: Color,
+    /// `ListViewItemCheckBoxBorderBrush`.
+    pub list_view_item_check_box_border_brush: Color,
+    /// `ListViewItemCheckBoxPointerOverBorderBrush`.
+    pub list_view_item_check_box_pointer_over_border_brush: Color,
+    /// `ListViewItemCheckBoxPressedBorderBrush`.
+    pub list_view_item_check_box_pressed_border_brush: Color,
+    /// `ListViewItemCheckBoxDisabledBorderBrush`.
+    pub list_view_item_check_box_disabled_border_brush: Color,
+    /// `ListViewItemBackgroundSelectedDisabled`.
+    pub list_view_item_background_selected_disabled: Color,
+    /// `ListViewItemSelectionIndicatorBrush`.
+    pub list_view_item_selection_indicator_brush: Color,
+    /// `ListViewItemSelectionIndicatorPointerOverBrush`.
+    pub list_view_item_selection_indicator_pointer_over_brush: Color,
+    /// `ListViewItemSelectionIndicatorPressedBrush`.
+    pub list_view_item_selection_indicator_pressed_brush: Color,
+    /// `ListViewItemSelectionIndicatorDisabledBrush`.
+    pub list_view_item_selection_indicator_disabled_brush: Color,
+    /// `ListPickerFlyoutPresenterSelectedItemBackgroundThemeBrush`.
+    pub list_picker_flyout_presenter_selected_item_background_theme_brush: Color,
+    /// `FlyoutBackgroundThemeBrush`.
+    pub flyout_background_theme_brush: Color,
+    /// `CheckBoxBorderThemeThickness`.
+    pub check_box_border_theme_thickness: f64,
+    /// `TextStyleExtraLargeFontSize`.
+    pub text_style_extra_large_font_size: f64,
+    /// `GridViewItemMultiselectBorderThickness`.
+    pub grid_view_item_multiselect_border_thickness: [f64; 4],
+    /// `ListPickerFlyoutPresenterMultiselectCheckBoxMargin`.
+    pub list_picker_flyout_presenter_multiselect_check_box_margin: [f64; 4],
+    /// `ListPickerFlyoutPresenterItemMargin`.
+    pub list_picker_flyout_presenter_item_margin: [f64; 4],
+    /// `ListViewItemContentOffsetX`.
+    pub list_view_item_content_offset_x: f64,
+    /// `ListViewItemDisabledThemeOpacity`.
+    pub list_view_item_disabled_theme_opacity: f64,
+    /// `ListViewItemDragThemeOpacity`.
+    pub list_view_item_drag_theme_opacity: f64,
+    /// `ListViewItemReorderThemeOpacity`.
+    pub list_view_item_reorder_theme_opacity: f64,
+    /// `ListViewItemReorderTargetThemeOpacity`.
+    pub list_view_item_reorder_target_theme_opacity: f64,
+    /// `ListViewItemReorderTargetThemeScale`.
+    pub list_view_item_reorder_target_theme_scale: f64,
+    /// `ListViewItemReorderHintThemeOffset`.
+    pub list_view_item_reorder_hint_theme_offset: f64,
+    /// `ListViewItemSelectedBorderThemeThickness`.
+    pub list_view_item_selected_border_theme_thickness: f64,
+    /// `ListViewItemMinHeight`.
+    pub list_view_item_min_height: f64,
+    /// `ListViewItemCompactSelectedBorderThemeThickness`.
+    pub list_view_item_compact_selected_border_theme_thickness: [f64; 4],
+    /// `ListViewItemCornerRadius`.
+    pub list_view_item_corner_radius: [f64; 4],
+    /// `ListViewItemCheckBoxCornerRadius`.
+    pub list_view_item_check_box_corner_radius: [f64; 4],
+    /// `ListViewItemSelectionIndicatorCornerRadius`.
+    pub list_view_item_selection_indicator_corner_radius: [f64; 4],
+    // `AutoSuggestBox_themeresources.xaml`
+    /// `AutoSuggestBoxSuggestionsListBackground`.
+    pub auto_suggest_box_suggestions_list_background: AcrylicBrushResources,
+    /// `AutoSuggestBoxSuggestionsListBorderBrush`.
+    pub auto_suggest_box_suggestions_list_border_brush: Color,
+    /// `AutoSuggestBoxLightDismissOverlayBackground`.
+    pub auto_suggest_box_light_dismiss_overlay_background: Color,
+    /// `AutoSuggestListMaxHeight`.
+    pub auto_suggest_list_max_height: f64,
+    /// `AutoSuggestListBorderThemeThickness`.
+    pub auto_suggest_list_border_theme_thickness: [f64; 4],
+    /// `AutoSuggestListMargin`.
+    pub auto_suggest_list_margin: [f64; 4],
+    /// `AutoSuggestListPadding`.
+    pub auto_suggest_list_padding: [f64; 4],
+    /// `AutoSuggestBoxTopHeaderMargin`.
+    pub auto_suggest_box_top_header_margin: [f64; 4],
+    /// `AutoSuggestBoxInnerButtonMargin`.
+    pub auto_suggest_box_inner_button_margin: [f64; 4],
+    /// `AutoSuggestBoxDeleteButtonMargin`.
+    pub auto_suggest_box_delete_button_margin: [f64; 4],
+    /// `AutoSuggestBoxQueryButtonPadding`.
+    pub auto_suggest_box_query_button_padding: [f64; 4],
+    /// `AutoSuggestBoxLeftButtonMargin`.
+    pub auto_suggest_box_left_button_margin: f64,
+    /// `AutoSuggestBoxRightButtonMargin`.
+    pub auto_suggest_box_right_button_margin: f64,
+    /// `AutoSuggestBoxIconFontSize`.
+    pub auto_suggest_box_icon_font_size: f64,
 }
 
 impl ThemeResources {
@@ -6521,10 +6689,6 @@ impl ThemeResources {
                 Theme::Light => Color::from_argb(153, 0, 0, 0),
                 Theme::Dark => Color::from_argb(153, 255, 255, 255),
             },
-            list_view_item_drag_theme_opacity: 0.8,
-            list_view_item_reorder_theme_opacity: 0.8,
-            list_view_item_reorder_target_theme_opacity: 0.5,
-            list_view_item_reorder_hint_theme_offset: 10.0,
             tab_view_header_padding: [0.0, 8.0, 0.0, 0.0],
             tab_view_item_header_padding: [8.0, 3.0, 4.0, 3.0],
             tab_view_selected_item_header_padding: [9.0, 3.0, 5.0, 4.0],
@@ -7020,7 +7184,6 @@ impl ThemeResources {
                 Theme::Light => Color::from_argb(51, 0, 0, 0),
                 Theme::Dark => Color::from_argb(51, 255, 255, 255),
             },
-            list_view_item_disabled_theme_opacity: 0.55,
             navigation_view_auto_suggest_box_margin: [16.0, 0.0, 16.0, 0.0],
             top_navigation_view_auto_suggest_box_margin: [4.0, 0.0, 4.0, 0.0],
             pane_toggle_button_height: 36.0,
@@ -10200,6 +10363,263 @@ impl ThemeResources {
             table_view_cell_padding_comfortable: [8.0, 8.0, 8.0, 8.0],
             table_view_header_cell_padding_compact: [8.0, 2.0, 8.0, 2.0],
             table_view_header_cell_padding_comfortable: [8.0, 8.0, 8.0, 8.0],
+            list_view_item_border_background: match theme {
+                Theme::Light => Color::from_argb(6, 0, 0, 0),
+                Theme::Dark => Color::from_argb(10, 255, 255, 255),
+            },
+            list_view_item_background: Color::from_argb(0, 255, 255, 255),
+            list_view_item_background_pointer_over: match theme {
+                Theme::Light => Color::from_argb(9, 0, 0, 0),
+                Theme::Dark => Color::from_argb(15, 255, 255, 255),
+            },
+            list_view_item_background_pressed: match theme {
+                Theme::Light => Color::from_argb(6, 0, 0, 0),
+                Theme::Dark => Color::from_argb(10, 255, 255, 255),
+            },
+            list_view_item_background_selected: match theme {
+                Theme::Light => Color::from_argb(9, 0, 0, 0),
+                Theme::Dark => Color::from_argb(15, 255, 255, 255),
+            },
+            list_view_item_background_selected_pointer_over: match theme {
+                Theme::Light => Color::from_argb(6, 0, 0, 0),
+                Theme::Dark => Color::from_argb(10, 255, 255, 255),
+            },
+            list_view_item_background_selected_pressed: match theme {
+                Theme::Light => Color::from_argb(9, 0, 0, 0),
+                Theme::Dark => Color::from_argb(15, 255, 255, 255),
+            },
+            list_view_item_foreground_pointer_over: match theme {
+                Theme::Light => Color::from_argb(228, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            list_view_item_foreground_pressed: match theme {
+                Theme::Light => Color::from_argb(228, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            list_view_item_foreground_selected: match theme {
+                Theme::Light => Color::from_argb(228, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            list_view_item_foreground_selected_pointer_over: match theme {
+                Theme::Light => Color::from_argb(228, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            list_view_item_foreground_selected_pressed: match theme {
+                Theme::Light => Color::from_argb(228, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            list_view_item_focus_border_brush: match theme {
+                Theme::Light => Color::from_argb(228, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            list_view_item_focus_secondary_border_brush: match theme {
+                Theme::Light => Color::from_argb(228, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            list_view_item_check_brush: match theme {
+                Theme::Light => Color::from_argb(255, 255, 255, 255),
+                Theme::Dark => Color::from_argb(255, 0, 0, 0),
+            },
+            list_view_item_check_box_brush: match theme {
+                Theme::Light => Color::from_argb(6, 0, 0, 0),
+                Theme::Dark => Color::from_argb(25, 0, 0, 0),
+            },
+            list_view_item_drag_background: Color::from_argb(0, 255, 255, 255),
+            list_view_item_drag_foreground: match theme {
+                Theme::Light => Color::from_argb(255, 255, 255, 255),
+                Theme::Dark => Color::from_argb(255, 0, 0, 0),
+            },
+            list_view_item_placeholder_background: match theme {
+                Theme::Light => Color::from_argb(81, 0, 0, 0),
+                Theme::Dark => Color::from_argb(63, 255, 255, 255),
+            },
+            list_view_item_multi_arrange_overlay_text_border: match theme {
+                Theme::Light => Color::from_argb(255, 255, 255, 255),
+                Theme::Dark => Color::from_argb(255, 0, 0, 0),
+            },
+            list_view_item_multi_arrange_overlay_text_background: match theme {
+                Theme::Light => accent.dark1,
+                Theme::Dark => accent.light2,
+            },
+            list_view_item_check_hint_theme_brush: match theme {
+                Theme::Light => Color::from_argb(255, 70, 23, 180),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            list_view_item_check_selecting_theme_brush: match theme {
+                Theme::Light => Color::from_argb(255, 70, 23, 180),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            list_view_item_check_theme_brush: Color::from_argb(255, 255, 255, 255),
+            list_view_item_drag_background_theme_brush: Color::from_argb(153, 70, 23, 180),
+            list_view_item_drag_foreground_theme_brush: Color::from_argb(255, 255, 255, 255),
+            list_view_item_focus_border_theme_brush: match theme {
+                Theme::Light => Color::from_argb(255, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            list_view_item_overlay_background_theme_brush: Color::from_argb(166, 0, 0, 0),
+            list_view_item_overlay_secondary_foreground_theme_brush: Color::from_argb(
+                153, 255, 255, 255,
+            ),
+            list_view_item_overlay_foreground_theme_brush: Color::from_argb(255, 255, 255, 255),
+            list_view_item_placeholder_background_theme_brush: Color::from_argb(255, 61, 61, 61),
+            list_view_item_pointer_over_background_theme_brush: match theme {
+                Theme::Light => Color::from_argb(77, 0, 0, 0),
+                Theme::Dark => Color::from_argb(77, 255, 255, 255),
+            },
+            list_view_item_selected_background_theme_brush: Color::from_argb(255, 70, 23, 180),
+            list_view_item_selected_foreground_theme_brush: match theme {
+                Theme::Light => Color::from_argb(255, 0, 0, 0),
+                Theme::Dark => Color::from_argb(255, 255, 255, 255),
+            },
+            list_view_item_selected_pointer_over_background_theme_brush: Color::from_argb(
+                255, 95, 55, 190,
+            ),
+            list_view_item_selected_pointer_over_border_theme_brush: Color::from_argb(
+                255, 95, 55, 190,
+            ),
+            list_view_item_check_pressed_brush: match theme {
+                Theme::Light => Color::from_argb(179, 255, 255, 255),
+                Theme::Dark => Color::from_argb(128, 0, 0, 0),
+            },
+            list_view_item_check_disabled_brush: match theme {
+                Theme::Light => Color::from_argb(255, 255, 255, 255),
+                Theme::Dark => Color::from_argb(135, 255, 255, 255),
+            },
+            list_view_item_check_box_pointer_over_brush: match theme {
+                Theme::Light => Color::from_argb(6, 0, 0, 0),
+                Theme::Dark => Color::from_argb(25, 0, 0, 0),
+            },
+            list_view_item_check_box_pressed_brush: match theme {
+                Theme::Light => Color::from_argb(6, 0, 0, 0),
+                Theme::Dark => Color::from_argb(25, 0, 0, 0),
+            },
+            list_view_item_check_box_disabled_brush: match theme {
+                Theme::Light => Color::from_argb(6, 0, 0, 0),
+                Theme::Dark => Color::from_argb(25, 0, 0, 0),
+            },
+            list_view_item_check_box_selected_brush: match theme {
+                Theme::Light => accent.dark1,
+                Theme::Dark => accent.light2,
+            },
+            list_view_item_check_box_selected_pointer_over_brush: match theme {
+                Theme::Light => {
+                    let color = accent.dark1;
+                    color.with_values(Some(color.a * 0.9), None, None, None, None)
+                }
+                Theme::Dark => {
+                    let color = accent.light2;
+                    color.with_values(Some(color.a * 0.9), None, None, None, None)
+                }
+            },
+            list_view_item_check_box_selected_pressed_brush: match theme {
+                Theme::Light => {
+                    let color = accent.dark1;
+                    color.with_values(Some(color.a * 0.8), None, None, None, None)
+                }
+                Theme::Dark => {
+                    let color = accent.light2;
+                    color.with_values(Some(color.a * 0.8), None, None, None, None)
+                }
+            },
+            list_view_item_check_box_selected_disabled_brush: match theme {
+                Theme::Light => Color::from_argb(55, 0, 0, 0),
+                Theme::Dark => Color::from_argb(40, 255, 255, 255),
+            },
+            list_view_item_check_box_border_brush: match theme {
+                Theme::Light => Color::from_argb(114, 0, 0, 0),
+                Theme::Dark => Color::from_argb(139, 255, 255, 255),
+            },
+            list_view_item_check_box_pointer_over_border_brush: match theme {
+                Theme::Light => Color::from_argb(114, 0, 0, 0),
+                Theme::Dark => Color::from_argb(139, 255, 255, 255),
+            },
+            list_view_item_check_box_pressed_border_brush: match theme {
+                Theme::Light => Color::from_argb(114, 0, 0, 0),
+                Theme::Dark => Color::from_argb(139, 255, 255, 255),
+            },
+            list_view_item_check_box_disabled_border_brush: match theme {
+                Theme::Light => Color::from_argb(55, 0, 0, 0),
+                Theme::Dark => Color::from_argb(40, 255, 255, 255),
+            },
+            list_view_item_background_selected_disabled: match theme {
+                Theme::Light => Color::from_argb(9, 0, 0, 0),
+                Theme::Dark => Color::from_argb(15, 255, 255, 255),
+            },
+            list_view_item_selection_indicator_brush: match theme {
+                Theme::Light => accent.dark1,
+                Theme::Dark => accent.light2,
+            },
+            list_view_item_selection_indicator_pointer_over_brush: match theme {
+                Theme::Light => accent.dark1,
+                Theme::Dark => accent.light2,
+            },
+            list_view_item_selection_indicator_pressed_brush: match theme {
+                Theme::Light => accent.dark1,
+                Theme::Dark => accent.light2,
+            },
+            list_view_item_selection_indicator_disabled_brush: match theme {
+                Theme::Light => Color::from_argb(55, 0, 0, 0),
+                Theme::Dark => Color::from_argb(40, 255, 255, 255),
+            },
+            list_picker_flyout_presenter_selected_item_background_theme_brush: match theme {
+                Theme::Light => Color::from_argb(0, 255, 255, 255),
+                Theme::Dark => Color::from_argb(0, 0, 0, 0),
+            },
+            flyout_background_theme_brush: match theme {
+                Theme::Light => Color::from_argb(255, 255, 255, 255),
+                Theme::Dark => Color::from_argb(255, 0, 0, 0),
+            },
+            check_box_border_theme_thickness: 2.0,
+            text_style_extra_large_font_size: 25.5,
+            grid_view_item_multiselect_border_thickness: [2.5, 2.5, 2.5, 2.5],
+            list_picker_flyout_presenter_multiselect_check_box_margin: [0.0, 9.5, 0.0, 0.0],
+            list_picker_flyout_presenter_item_margin: [0.0, 0.0, 0.0, 19.0],
+            list_view_item_content_offset_x: -40.5,
+            list_view_item_disabled_theme_opacity: 0.3,
+            list_view_item_drag_theme_opacity: 0.8,
+            list_view_item_reorder_theme_opacity: 0.8,
+            list_view_item_reorder_target_theme_opacity: 0.5,
+            list_view_item_reorder_target_theme_scale: 0.95,
+            list_view_item_reorder_hint_theme_offset: 10.0,
+            list_view_item_selected_border_theme_thickness: 4.0,
+            list_view_item_min_height: 40.0,
+            list_view_item_compact_selected_border_theme_thickness: [4.0, 4.0, 4.0, 4.0],
+            list_view_item_corner_radius: [4.0, 4.0, 4.0, 4.0],
+            list_view_item_check_box_corner_radius: [3.0, 3.0, 3.0, 3.0],
+            list_view_item_selection_indicator_corner_radius: [1.5, 1.5, 1.5, 1.5],
+            auto_suggest_box_suggestions_list_background: match theme {
+                Theme::Light => AcrylicBrushResources {
+                    tint_color: Color::from_argb(255, 252, 252, 252),
+                    tint_opacity: 0.0,
+                    tint_luminosity_opacity: Some(0.85),
+                    fallback_color: Color::from_argb(255, 249, 249, 249),
+                },
+                Theme::Dark => AcrylicBrushResources {
+                    tint_color: Color::from_argb(255, 44, 44, 44),
+                    tint_opacity: 0.15,
+                    tint_luminosity_opacity: Some(0.96),
+                    fallback_color: Color::from_argb(255, 44, 44, 44),
+                },
+            },
+            auto_suggest_box_suggestions_list_border_brush: match theme {
+                Theme::Light => Color::from_argb(15, 0, 0, 0),
+                Theme::Dark => Color::from_argb(51, 0, 0, 0),
+            },
+            auto_suggest_box_light_dismiss_overlay_background: match theme {
+                Theme::Light => Color::from_argb(153, 255, 255, 255),
+                Theme::Dark => Color::from_argb(153, 0, 0, 0),
+            },
+            auto_suggest_list_max_height: 374.0,
+            auto_suggest_list_border_theme_thickness: [1.0, 1.0, 1.0, 1.0],
+            auto_suggest_list_margin: [0.0, 2.0, 0.0, 2.0],
+            auto_suggest_list_padding: [-1.0, 0.0, -1.0, 0.0],
+            auto_suggest_box_top_header_margin: [0.0, 0.0, 0.0, 8.0],
+            auto_suggest_box_inner_button_margin: [1.0, 3.0, 1.0, 3.0],
+            auto_suggest_box_delete_button_margin: [0.0, 4.0, 0.0, 4.0],
+            auto_suggest_box_query_button_padding: [3.0, 2.0, 3.0, 2.0],
+            auto_suggest_box_left_button_margin: 3.0,
+            auto_suggest_box_right_button_margin: 4.0,
+            auto_suggest_box_icon_font_size: 12.0,
         }
     }
 }

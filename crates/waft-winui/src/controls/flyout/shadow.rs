@@ -48,9 +48,11 @@ impl PopupShadow {
         }
     }
 
-    /// ComboBox's popup: `OnOpen` gives `PopupBorder` ElevationHelper's base Z of 32; an
-    /// editable box's popup squares the corners next to the box.
-    pub(crate) fn for_combo_box_popup(theme: Theme, corner_radius: [f64; 4]) -> PopupShadow {
+    /// A popup opening from its control at ElevationHelper's base Z of 32: ComboBox's, whose
+    /// `OnOpen` raises `PopupBorder`, and AutoSuggestBox's, whose `OnPopupOpened` raises
+    /// `SuggestionsContainer`. An editable ComboBox's and AutoSuggestBox's square the corners
+    /// next to the box.
+    pub(crate) fn for_anchored_popup(theme: Theme, corner_radius: [f64; 4]) -> PopupShadow {
         PopupShadow {
             theme,
             translation_z: 32.0,
