@@ -4212,8 +4212,8 @@ impl TabPageSelectorState {
         let parent = self
             .tab_controller(app)
             .animation(app)
-            .and_then(|animation| animation.upgrade(app))
-            .expect("a selector's controller is valid");
+            .expect("a selector's controller is valid")
+            .keep(app);
         let animation = CurvedAnimation::new(app, parent, Curves::fast_out_slow_in(), None);
         app.get_mut(self).animation = Some(animation);
     }

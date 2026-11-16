@@ -1444,8 +1444,8 @@ impl<T: Clone + PartialEq + 'static> Debug for PopupMenuState<T> {
 impl<T: Clone + PartialEq + 'static> PopupMenuState<T> {
     fn route_animation(app: &App, route: Handle<PopupMenuRoute<T>>) -> AnimationRef<f64> {
         ModalRoute::animation(route, app)
-            .and_then(|animation| animation.upgrade(app))
             .expect("an installed route has an animation")
+            .keep(app)
     }
 
     fn set_opacities(self: Handle<Self>, app: &mut App) {

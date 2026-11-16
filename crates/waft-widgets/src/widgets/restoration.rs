@@ -1231,7 +1231,7 @@ pub trait RestorationMixin: State + Sized + 'static {
                 .debug_properties_waiting_for_reregistration
                 .as_mut()
         {
-            waiting.retain(|other| other.handle() != property);
+            waiting.retain(|other| other != property);
         }
     }
 
@@ -1517,7 +1517,7 @@ pub trait RestorationMixin: State + Sized + 'static {
                 .debug_properties_waiting_for_reregistration
                 .as_mut()
         {
-            waiting.retain(|other| other.handle() != property);
+            waiting.retain(|other| other != property);
         }
         property.remove_listener(app, &listener);
         property.unregister(app);

@@ -4552,14 +4552,14 @@ pub trait TextSelectionGestureDetectorBuilderBase: TextSelectionGestureDetectorB
     /// provided by this builder.
     fn build_gesture_detector(
         self: Handle<Self>,
-        _app: &mut App,
+        app: &mut App,
         key: Option<KeyRef>,
         behavior: Option<HitTestBehavior>,
         child: WidgetRef,
     ) -> TextSelectionGestureDetector {
         // The detector's callbacks keep the builder, as Dart's tear-offs do.
-        let this = self.keep(_app);
-        let force_press = self.builder_data(_app).delegate.force_press_enabled(_app);
+        let this = self.keep(app);
+        let force_press = self.builder_data(app).delegate.force_press_enabled(app);
         let mut detector = TextSelectionGestureDetector::new(child)
             .on_tap_track_start(Listener::new({
                 let this = this.clone();
@@ -4703,7 +4703,7 @@ pub trait TextSelectionGestureDetectorBuilderBase: TextSelectionGestureDetectorB
                 }
             }))
             .on_user_tap_always_called(
-                TextSelectionGestureDetectorBuilder::on_user_tap_always_called(self, _app),
+                TextSelectionGestureDetectorBuilder::on_user_tap_always_called(self, app),
             );
         if force_press {
             detector = detector

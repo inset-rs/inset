@@ -1209,8 +1209,8 @@ impl ModalBottomSheetState {
     /// Dart's `widget.route.animation!`.
     fn route_animation(self: Handle<Self>, app: &App) -> AnimationRef<f64> {
         ModalRoute::animation(self.widget(app).route, app)
-            .and_then(|animation| animation.upgrade(app))
             .expect("an installed route")
+            .keep(app)
     }
 
     fn get_route_label(app: &App, localizations: &dyn MaterialLocalizations) -> String {
@@ -2109,8 +2109,8 @@ impl ModalRoute for ModalBottomSheetRoute {
             let transparent = barrier_color.with_values(Some(0.0), None, None, None, None);
             debug_assert!(barrier_color != transparent);
             let animation = TransitionRoute::animation(self, app)
-                .and_then(|animation| animation.upgrade(app))
-                .expect("an installed route");
+                .expect("an installed route")
+                .keep(app);
             // changedInternalState is called if barrierColor updates
             let color_tween = ColorTween::new(app, Some(transparent), Some(barrier_color));
             // changedInternalState is called if barrierCurve updates

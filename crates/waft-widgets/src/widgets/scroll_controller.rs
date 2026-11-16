@@ -350,7 +350,7 @@ impl ScrollController {
                 .data(app)
                 .positions
                 .iter()
-                .any(|attached| attached.handle() == position)
+                .any(|attached| attached == position)
         );
         if let Some(on_detach) = controller.on_detach(app) {
             on_detach(app, position);
@@ -359,7 +359,7 @@ impl ScrollController {
         controller
             .data_mut(app)
             .positions
-            .retain(|attached| attached.handle() != position);
+            .retain(|attached| attached != position);
     }
 
     /// See [`ScrollControllerLeaf::dispose`].

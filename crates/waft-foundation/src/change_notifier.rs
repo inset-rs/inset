@@ -839,16 +839,17 @@ mod tests {
         Listener::new(move |_app| log.borrow_mut().push(name.to_string()))
     }
 
-    fn add(app: &mut App, host: Handle<TestNotifier>, listener: Listener) {
-        host.add_listener(app, listener);
+    /// The helpers take a `&Ref`, or a bare handle from inside a listener of the host.
+    fn add(app: &mut App, host: impl ToHandle<TestNotifier>, listener: Listener) {
+        host.to_handle().add_listener(app, listener);
     }
 
-    fn remove(app: &mut App, host: Handle<TestNotifier>, listener: &Listener) {
-        host.remove_listener(app, listener);
+    fn remove(app: &mut App, host: impl ToHandle<TestNotifier>, listener: &Listener) {
+        host.to_handle().remove_listener(app, listener);
     }
 
-    fn notify(app: &mut App, host: Handle<TestNotifier>) {
-        host.notify_listeners(app);
+    fn notify(app: &mut App, host: impl ToHandle<TestNotifier>) {
+        host.to_handle().notify_listeners(app);
     }
 
     fn silence_panic_hook() -> Box<dyn Fn(&std::panic::PanicHookInfo<'_>) + Send + Sync + 'static> {
@@ -866,51 +867,51 @@ mod tests {
         let host = app.create(TestNotifier::default());
 
         let listener = recording(&log, "listener");
-        add(&mut app, host.handle(), listener.clone());
-        add(&mut app, host.handle(), listener.clone());
-        notify(&mut app, host.handle());
+        add(&mut app, &host, listener.clone());
+        add(&mut app, &host, listener.clone());
+        notify(&mut app, &host);
         assert_eq!(fired(&log), ["listener", "listener"]);
         log.borrow_mut().clear();
 
-        remove(&mut app, host.handle(), &listener);
-        notify(&mut app, host.handle());
+        remove(&mut app, &host, &listener);
+        notify(&mut app, &host);
         assert_eq!(fired(&log), ["listener"]);
         log.borrow_mut().clear();
 
-        remove(&mut app, host.handle(), &listener);
-        notify(&mut app, host.handle());
+        remove(&mut app, &host, &listener);
+        notify(&mut app, &host);
         assert_eq!(fired(&log), Vec::<String>::new());
         log.borrow_mut().clear();
 
-        remove(&mut app, host.handle(), &listener);
-        notify(&mut app, host.handle());
+        remove(&mut app, &host, &listener);
+        notify(&mut app, &host);
         assert_eq!(fired(&log), Vec::<String>::new());
         log.borrow_mut().clear();
 
-        add(&mut app, host.handle(), listener.clone());
-        notify(&mut app, host.handle());
+        add(&mut app, &host, listener.clone());
+        notify(&mut app, &host);
         assert_eq!(fired(&log), ["listener"]);
         log.borrow_mut().clear();
 
         let listener1 = recording(&log, "listener1");
-        add(&mut app, host.handle(), listener1.clone());
-        notify(&mut app, host.handle());
+        add(&mut app, &host, listener1.clone());
+        notify(&mut app, &host);
         assert_eq!(fired(&log), ["listener", "listener1"]);
         log.borrow_mut().clear();
 
         let listener2 = recording(&log, "listener2");
-        add(&mut app, host.handle(), listener2.clone());
-        notify(&mut app, host.handle());
+        add(&mut app, &host, listener2.clone());
+        notify(&mut app, &host);
         assert_eq!(fired(&log), ["listener", "listener1", "listener2"]);
         log.borrow_mut().clear();
 
-        remove(&mut app, host.handle(), &listener1);
-        notify(&mut app, host.handle());
+        remove(&mut app, &host, &listener1);
+        notify(&mut app, &host);
         assert_eq!(fired(&log), ["listener", "listener2"]);
         log.borrow_mut().clear();
 
-        add(&mut app, host.handle(), listener1.clone());
-        notify(&mut app, host.handle());
+        add(&mut app, &host, listener1.clone());
+        notify(&mut app, &host);
         assert_eq!(fired(&log), ["listener", "listener2", "listener1"]);
     }
 
@@ -938,19 +939,19 @@ mod tests {
             })
         };
 
-        add(&mut app, host.handle(), listener1);
-        add(&mut app, host.handle(), listener2);
-        add(&mut app, host.handle(), listener3);
+        add(&mut app, &host, listener1);
+        add(&mut app, &host, listener2);
+        add(&mut app, &host, listener3);
 
-        notify(&mut app, host.handle());
+        notify(&mut app, &host);
         assert_eq!(fired(&log), ["listener1", "listener2"]);
 
         log.borrow_mut().clear();
-        notify(&mut app, host.handle());
+        notify(&mut app, &host);
         assert_eq!(fired(&log), ["listener2", "listener4"]);
 
         log.borrow_mut().clear();
-        notify(&mut app, host.handle());
+        notify(&mut app, &host);
         assert_eq!(fired(&log), ["listener2", "listener4", "listener4"]);
     }
 
@@ -978,8 +979,8 @@ mod tests {
             })
         };
 
-        add(&mut app, host.handle(), listener1);
-        notify(&mut app, host.handle());
+        add(&mut app, &host, listener1);
+        notify(&mut app, &host);
         assert_eq!(fired(&log), ["listener1"]);
     }
 
@@ -1005,11 +1006,11 @@ mod tests {
         };
         *self_removing_slot.borrow_mut() = Some(self_removing.clone());
 
-        add(&mut app, host.handle(), listener1.clone());
-        add(&mut app, host.handle(), self_removing);
-        add(&mut app, host.handle(), listener1);
+        add(&mut app, &host, listener1.clone());
+        add(&mut app, &host, self_removing);
+        add(&mut app, &host, listener1);
 
-        notify(&mut app, host.handle());
+        notify(&mut app, &host);
         assert_eq!(
             fired(&log),
             ["listener1", "selfRemovingListener", "listener1"]
@@ -1038,10 +1039,10 @@ mod tests {
         *self_removing_slot.borrow_mut() = Some(self_removing.clone());
         let listener1 = recording(&log, "listener1");
 
-        add(&mut app, host.handle(), self_removing);
-        add(&mut app, host.handle(), listener1);
+        add(&mut app, &host, self_removing);
+        add(&mut app, &host, listener1);
 
-        notify(&mut app, host.handle());
+        notify(&mut app, &host);
         assert_eq!(fired(&log), ["selfRemovingListener", "listener1"]);
     }
 
@@ -1137,7 +1138,7 @@ mod tests {
             let names = ["0", "1", "2", "3", "4", "5", "6", "7"];
             let listeners: Vec<Listener> = names.iter().map(|name| recording(&log, name)).collect();
             for listener in &listeners {
-                add(&mut app, host.handle(), listener.clone());
+                add(&mut app, &host, listener.clone());
             }
 
             let mut survivors: Vec<String> = names.iter().map(|n| n.to_string()).collect();
@@ -1145,12 +1146,12 @@ mod tests {
 
             for step in 0..8 {
                 let index = (first + step) % 8;
-                remove(&mut app, host.handle(), &listeners[index]);
+                remove(&mut app, &host, &listeners[index]);
                 survivors.retain(|s| s != names[index]);
                 saw_realloc |= app.get(&host).change_notifier.listeners.len() < 8;
 
                 log.borrow_mut().clear();
-                notify(&mut app, host.handle());
+                notify(&mut app, &host);
                 assert_eq!(fired(&log), survivors, "after removing {index}");
                 assert_eq!(app.get(&host).change_notifier.count, survivors.len());
             }
@@ -1168,8 +1169,8 @@ mod tests {
         let host = app.create(TestNotifier::default());
 
         let listener = recording(&log, "a");
-        add(&mut app, host.handle(), listener.clone());
-        ChangeNotifierData::dispose(&mut app, host.handle());
+        add(&mut app, &host, listener.clone());
+        ChangeNotifierData::dispose(&mut app, &host);
 
         assert!(!app.get(&host).change_notifier.has_listeners());
         app.get_mut(&host)
@@ -1194,8 +1195,8 @@ mod tests {
         let cell = AppCell::new();
         let mut app = cell.borrow_mut();
         let host = app.create(TestNotifier::default());
-        ChangeNotifierData::dispose(&mut app, host.handle());
-        notify(&mut app, host.handle());
+        ChangeNotifierData::dispose(&mut app, &host);
+        notify(&mut app, &host);
     }
 
     #[test]
@@ -1395,9 +1396,9 @@ mod tests {
             listener
         };
 
-        add(&mut app, host.handle(), auto_remove);
+        add(&mut app, &host, auto_remove);
         for listener in &listeners {
-            add(&mut app, host.handle(), listener.clone());
+            add(&mut app, &host, listener.clone());
         }
 
         let remaining = [
@@ -1412,18 +1413,18 @@ mod tests {
             "listener11",
         ];
 
-        notify(&mut app, host.handle());
+        notify(&mut app, &host);
         assert_eq!(fired(&log), remaining);
 
         log.borrow_mut().clear();
-        notify(&mut app, host.handle());
+        notify(&mut app, &host);
         assert_eq!(fired(&log), remaining);
 
         for i in [0, 2, 5, 6, 7, 8, 9, 10, 11] {
-            remove(&mut app, host.handle(), &listeners[i]);
+            remove(&mut app, &host, &listeners[i]);
         }
         log.borrow_mut().clear();
-        notify(&mut app, host.handle());
+        notify(&mut app, &host);
         assert_eq!(fired(&log), Vec::<String>::new());
     }
 
@@ -1443,18 +1444,18 @@ mod tests {
                 finished_flag.set(true);
             })
         };
-        add(&mut app, host.handle(), listener);
+        add(&mut app, &host, listener);
 
         let hook = silence_panic_hook();
         let panicked = catch_unwind(AssertUnwindSafe(|| {
-            notify(&mut app, host.handle());
+            notify(&mut app, &host);
         }))
         .is_err();
         std::panic::set_hook(hook);
 
         assert!(panicked);
         assert!(!finished.get());
-        ChangeNotifierData::dispose(&mut app, host.handle());
+        ChangeNotifierData::dispose(&mut app, &host);
     }
 
     #[test]
@@ -1492,14 +1493,14 @@ mod tests {
             })
         };
 
-        add(&mut app, host.handle(), l0);
-        add(&mut app, host.handle(), l1);
-        add(&mut app, host.handle(), l2);
-        add(&mut app, host.handle(), l3.clone());
+        add(&mut app, &host, l0);
+        add(&mut app, &host, l1);
+        add(&mut app, &host, l2);
+        add(&mut app, &host, l3.clone());
 
         let hook = silence_panic_hook();
         let panicked = catch_unwind(AssertUnwindSafe(|| {
-            notify(&mut app, host.handle());
+            notify(&mut app, &host);
         }))
         .is_err();
         std::panic::set_hook(hook);
@@ -1523,7 +1524,7 @@ mod tests {
         );
 
         log.borrow_mut().clear();
-        notify(&mut app, host.handle());
+        notify(&mut app, &host);
         assert_eq!(fired(&log), ["l1"]);
         assert_eq!(app.get(&host).change_notifier.count, 1);
         assert_eq!(
@@ -1532,7 +1533,7 @@ mod tests {
         );
 
         log.borrow_mut().clear();
-        notify(&mut app, host.handle());
+        notify(&mut app, &host);
         assert_eq!(fired(&log), ["l1"]);
     }
 
@@ -1563,12 +1564,12 @@ mod tests {
             })
         };
 
-        add(&mut app, host.handle(), outer);
-        add(&mut app, host.handle(), doomed);
+        add(&mut app, &host, outer);
+        add(&mut app, &host, doomed);
 
         let hook = silence_panic_hook();
         let panicked = catch_unwind(AssertUnwindSafe(|| {
-            notify(&mut app, host.handle());
+            notify(&mut app, &host);
         }))
         .is_err();
         std::panic::set_hook(hook);
@@ -1590,9 +1591,9 @@ mod tests {
         );
 
         let survivor = app.get(&host).change_notifier.listeners[0].clone().unwrap();
-        remove(&mut app, host.handle(), &survivor);
+        remove(&mut app, &host, &survivor);
         log.borrow_mut().clear();
-        notify(&mut app, host.handle());
+        notify(&mut app, &host);
         assert_eq!(
             app.get(&host).change_notifier.reentrantly_removed_listeners,
             0
@@ -1616,12 +1617,12 @@ mod tests {
                 panic!("bad listener");
             })
         };
-        add(&mut app, host.handle(), saboteur);
-        add(&mut app, host.handle(), doomed);
+        add(&mut app, &host, saboteur);
+        add(&mut app, &host, doomed);
 
         let hook = silence_panic_hook();
         let _ = catch_unwind(AssertUnwindSafe(|| {
-            notify(&mut app, host.handle());
+            notify(&mut app, &host);
         }));
         std::panic::set_hook(hook);
 
@@ -1630,7 +1631,7 @@ mod tests {
             1
         );
 
-        ChangeNotifierData::dispose(&mut app, host.handle());
+        ChangeNotifierData::dispose(&mut app, &host);
         assert_eq!(
             app.get(&host).change_notifier.reentrantly_removed_listeners,
             0
@@ -1655,20 +1656,20 @@ mod tests {
                 panic!("bad listener");
             })
         };
-        add(&mut app, host.handle(), saboteur);
-        add(&mut app, host.handle(), doomed);
+        add(&mut app, &host, saboteur);
+        add(&mut app, &host, doomed);
 
         let hook = silence_panic_hook();
         let _ = catch_unwind(AssertUnwindSafe(|| {
-            notify(&mut app, host.handle());
+            notify(&mut app, &host);
         }));
         std::panic::set_hook(hook);
 
-        ChangeNotifierData::dispose(&mut app, host.handle());
-        add(&mut app, host.handle(), recording(&log, "after"));
+        ChangeNotifierData::dispose(&mut app, &host);
+        add(&mut app, &host, recording(&log, "after"));
 
         log.borrow_mut().clear();
-        notify(&mut app, host.handle());
+        notify(&mut app, &host);
         assert_eq!(fired(&log), ["after"]);
         assert_eq!(app.get(&host).change_notifier.count, 1);
     }

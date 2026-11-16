@@ -239,6 +239,14 @@ impl<H: Copy + Into<HandleId>> PartialEq<H> for Retained<H> {
     }
 }
 
+/// A borrowed reference equals a bare handle to the same object, as in
+/// `kept.iter().any(|kept| kept == handle)`.
+impl<T> PartialEq<Handle<T>> for &Ref<T> {
+    fn eq(&self, other: &Handle<T>) -> bool {
+        self.handle == *other
+    }
+}
+
 /// A bare handle equals a reference to the same object.
 impl<T> PartialEq<Ref<T>> for Handle<T> {
     fn eq(&self, other: &Ref<T>) -> bool {

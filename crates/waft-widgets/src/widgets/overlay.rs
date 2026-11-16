@@ -241,9 +241,7 @@ impl OverlayEntry {
             return;
         }
 
-        app.get_mut(overlay)
-            .entries
-            .retain(|entry| entry.handle() != self);
+        app.get_mut(overlay).entries.retain(|entry| entry != self);
         if SchedulerBinding::scheduler_phase(app) == SchedulerPhase::PersistentCallbacks {
             SchedulerBinding::add_post_frame_callback(
                 app,
@@ -410,7 +408,7 @@ impl OverlayEntryWidgetState {
         let children = app.get_mut(self).sorted_theater_siblings.as_mut();
         debug_assert!(children.is_some());
         let Some(children) = children else { return };
-        let position = children.iter().position(|other| other.handle() == child);
+        let position = children.iter().position(|other| other == child);
         debug_assert!(position.is_some(), "the child was in the collection");
         if let Some(position) = position {
             children.remove(position);
@@ -705,13 +703,13 @@ impl OverlayState {
         if let Some(below) = below {
             return entries
                 .iter()
-                .position(|entry| entry.handle() == below)
+                .position(|entry| entry == below)
                 .expect("`below` is in this Overlay");
         }
         if let Some(above) = above {
             return entries
                 .iter()
-                .position(|entry| entry.handle() == above)
+                .position(|entry| entry == above)
                 .expect("`above` is in this Overlay")
                 + 1;
         }
@@ -725,10 +723,7 @@ impl OverlayState {
         );
         let current_overlay = app.get(entry).overlay;
         assert!(
-            !app.get(self)
-                .entries
-                .iter()
-                .any(|kept| kept.handle() == entry),
+            !app.get(self).entries.iter().any(|kept| kept == entry),
             "The specified entry is already present in the target Overlay. Consider calling \
              remove on the OverlayEntry before inserting it to a different Overlay."
         );
@@ -807,13 +802,8 @@ impl OverlayState {
         );
         let present = |entry: Handle<OverlayEntry>| {
             app.get(entry).overlay == Some(self)
-                && app
-                    .get(self)
-                    .entries
-                    .iter()
-                    .any(|kept| kept.handle() == entry)
-                && new_entries
-                    .is_none_or(|entries| entries.iter().any(|kept| kept.handle() == entry))
+                && app.get(self).entries.iter().any(|kept| kept == entry)
+                && new_entries.is_none_or(|entries| entries.iter().any(|kept| kept == entry))
         };
         assert!(
             above.is_none_or(present),
@@ -887,12 +877,12 @@ impl OverlayState {
             if let Some(below) = below {
                 entries
                     .iter()
-                    .position(|entry| entry.handle() == below)
+                    .position(|entry| entry == below)
                     .expect("`below` is in `new_entries`")
             } else if let Some(above) = above {
                 entries
                     .iter()
-                    .position(|entry| entry.handle() == above)
+                    .position(|entry| entry == above)
                     .expect("`above` is in `new_entries`")
                     + 1
             } else {
@@ -923,12 +913,7 @@ impl OverlayState {
     /// always returns false in release mode.
     pub fn debug_is_visible(self: Handle<Self>, app: &App, entry: Handle<OverlayEntry>) -> bool {
         let mut result = false;
-        debug_assert!(
-            app.get(self)
-                .entries
-                .iter()
-                .any(|kept| kept.handle() == entry)
-        );
+        debug_assert!(app.get(self).entries.iter().any(|kept| kept == entry));
         if cfg!(debug_assertions) {
             let entries = app.get(self).entries.clone();
             for index in (1..entries.len()).rev() {
@@ -1645,8 +1630,7 @@ impl TheaterChildren {
                         self.candidate = (|| {
                             let model = app.get(candidate).child_model;
                             let list = app.get(model).sorted_theater_siblings.as_ref()?;
-                            let index =
-                                list.iter().position(|value| value.handle() == candidate)?;
+                            let index = list.iter().position(|value| value == candidate)?;
                             let next = if self.reversed {
                                 index.checked_sub(1).and_then(|i| list.get(i))
                             } else {

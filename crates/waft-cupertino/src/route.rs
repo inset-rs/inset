@@ -377,17 +377,19 @@ fn start_pop_gesture(route: AnyPageRoute, app: &mut App) -> Ref<CupertinoBackGes
     let navigator = route.navigator(app).expect("an installed route");
     let controller = transition_route
         .controller(app)
-        .and_then(|controller| controller.upgrade(app))
-        .expect("an installed route has a controller");
+        .expect("an installed route has a controller")
+        .keep(app);
     // Dart's closures keep the route for as long as the gesture lasts.
     let kept_route = transition_route.keep(app);
-    let kept_for_is_active = kept_route.clone();
     CupertinoBackGestureController::new(
         app,
         navigator,
         controller,
-        Rc::new(move |app| kept_route.as_route().is_current(app)),
-        Rc::new(move |app| kept_for_is_active.as_route().is_active(app)),
+        Rc::new({
+            let kept_route = kept_route.clone();
+            move |app| kept_route.as_route().is_current(app)
+        }),
+        Rc::new(move |app| kept_route.as_route().is_active(app)),
     )
 }
 

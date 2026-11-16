@@ -1065,13 +1065,13 @@ impl<T: 'static> DragTargetHandler for Ref<DragTargetState<T>> {
             !app.get(self)
                 .candidate_avatars
                 .iter()
-                .any(|kept| kept.handle() == avatar)
+                .any(|kept| kept == avatar)
         );
         debug_assert!(
             !app.get(self)
                 .rejected_avatars
                 .iter()
-                .any(|kept| kept.handle() == avatar)
+                .any(|kept| kept == avatar)
         );
         let data = app
             .get(avatar)
@@ -1113,10 +1113,10 @@ impl<T: 'static> DragTargetHandler for Ref<DragTargetState<T>> {
         self.set_state(app, |state| {
             state
                 .candidate_avatars
-                .retain(|candidate| candidate.handle() != avatar);
+                .retain(|candidate| candidate != avatar);
             state
                 .rejected_avatars
-                .retain(|candidate| candidate.handle() != avatar);
+                .retain(|candidate| candidate != avatar);
         });
         if let Some(callback) = self.widget(app).on_leave.clone() {
             let data = app
@@ -1133,7 +1133,7 @@ impl<T: 'static> DragTargetHandler for Ref<DragTargetState<T>> {
             app.get(self)
                 .candidate_avatars
                 .iter()
-                .any(|kept| kept.handle() == avatar)
+                .any(|kept| kept == avatar)
         );
         if !self.mounted(app) {
             return;
@@ -1141,7 +1141,7 @@ impl<T: 'static> DragTargetHandler for Ref<DragTargetState<T>> {
         self.set_state(app, |state| {
             state
                 .candidate_avatars
-                .retain(|candidate| candidate.handle() != avatar)
+                .retain(|candidate| candidate != avatar)
         });
         if let Some(data) = app.get(avatar).data.clone() {
             let data = data.downcast::<T>().unwrap();

@@ -117,7 +117,10 @@ pub trait InteractiveInkFeatureObject: Sized + 'static {
 /// What a field Dart types as `InteractiveInkFeature` holds: an ink response's splashes.
 pub type InteractiveInkFeatureRef = Retained<AnyInteractiveInkFeature>;
 
-waft_foundation::erased_handle!(AnyInteractiveInkFeature: InteractiveInkFeatureLeaf => InteractiveInkFeatureObject::as_interactive_ink_feature);
+waft_foundation::erased_handle!(
+    AnyInteractiveInkFeature: InteractiveInkFeatureLeaf
+        => InteractiveInkFeatureObject::as_interactive_ink_feature
+);
 
 impl<F: InteractiveInkFeatureLeaf> InteractiveInkFeatureObject for F {
     fn as_interactive_ink_feature(self: Handle<Self>) -> AnyInteractiveInkFeature {

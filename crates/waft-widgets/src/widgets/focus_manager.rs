@@ -1169,10 +1169,7 @@ impl AnyFocusNode {
     /// Removes the given [`AnyFocusNode`] and its children as a child of this node.
     fn remove_child(self, app: &mut App, node: AnyFocusNode, remove_scope_focus: bool) {
         debug_assert!(
-            self.data(app)
-                .children
-                .iter()
-                .any(|kept| kept.handle() == node),
+            self.data(app).children.iter().any(|kept| kept == node),
             "Tried to remove a node that wasn't a child."
         );
         debug_assert!(node.data(app).parent == Some(self));
@@ -1190,9 +1187,7 @@ impl AnyFocusNode {
         node.data_mut(app).parent = None;
         node.clear_enclosing_scope_cache(app);
         node.clear_ancestors_caches(app);
-        self.data_mut(app)
-            .children
-            .retain(|child| child.handle() != node);
+        self.data_mut(app).children.retain(|child| child != node);
         for ancestor in self.ancestors(app) {
             ancestor.data_mut(app).descendants = None;
         }
@@ -1232,10 +1227,7 @@ impl AnyFocusNode {
         );
         if child.data(app).parent == Some(self) {
             debug_assert!(
-                self.data(app)
-                    .children
-                    .iter()
-                    .any(|kept| kept.handle() == child),
+                self.data(app).children.iter().any(|kept| kept == child),
                 "Found a node that says it's a child, but doesn't appear in the child list."
             );
             // The child is already a child of this parent.
@@ -1466,7 +1458,7 @@ fn remove_focused_child(app: &mut App, scope: Handle<FocusScopeNode>, node: AnyF
     app.get_mut(scope)
         .scope
         .focused_children
-        .retain(|child| child.handle() != node);
+        .retain(|child| child != node);
 }
 
 /// An object that can be used by a stateful widget to obtain the keyboard focus and to handle
@@ -2222,7 +2214,7 @@ impl FocusManager {
         if manager.suspended_node.handle() == Some(node) {
             manager.suspended_node = None;
         }
-        manager.dirty_nodes.retain(|dirty| dirty.handle() != node);
+        manager.dirty_nodes.retain(|dirty| dirty != node);
     }
 
     fn mark_properties_changed(self: Handle<Self>, app: &mut App, node: AnyFocusNode) {
@@ -2341,7 +2333,7 @@ fn add_dirty_node(app: &mut App, manager: Handle<FocusManager>, node: AnyFocusNo
         .get(manager)
         .dirty_nodes
         .iter()
-        .all(|dirty| dirty.handle() != node)
+        .all(|dirty| dirty != node)
     {
         let node = node.keep(app);
         app.get_mut(manager).dirty_nodes.push(node);

@@ -1535,7 +1535,7 @@ impl ScrollPositionWithSingleContextLeaf for DraggableScrollableSheetScrollPosit
                 let controllers = &mut app.get_mut(self).ballistic_controllers;
                 if let Some(index) = controllers
                     .iter()
-                    .position(|controller| controller.handle() == ballistic_controller)
+                    .position(|controller| controller == ballistic_controller)
                 {
                     let removed = controllers.remove(index);
                     removed.dispose(app);

@@ -248,8 +248,8 @@ impl<T: Clone + PartialEq + Debug + 'static> DropdownMenuItemButtonState<T> {
         let unit = 0.5 / (route.items.len() as f64 + 1.5);
         let selected_index = route.selected_index;
         let animation = ModalRoute::animation(widget.route, app)
-            .and_then(|animation| animation.upgrade(app))
-            .expect("an installed route has an animation");
+            .expect("an installed route has an animation")
+            .keep(app);
         let opacity_animation = if item_index == selected_index {
             CurvedAnimation::new(app, animation, Rc::new(Threshold::new(0.0)), None)
         } else {
@@ -480,8 +480,8 @@ impl<T: Clone + PartialEq + Debug + 'static> State for DropdownMenuState<T> {
         // CurvedAnimation._curveDirection.
         let route = self.widget(app).route;
         let animation: AnimationRef<f64> = ModalRoute::animation(route, app)
-            .and_then(|animation| animation.upgrade(app))
-            .expect("an installed route has an animation");
+            .expect("an installed route has an animation")
+            .keep(app);
         let fade_opacity = CurvedAnimation::new(
             app,
             animation.clone(),

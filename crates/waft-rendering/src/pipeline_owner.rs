@@ -446,12 +446,7 @@ impl PipelineOwner {
     /// [`adopt_child`](Self::adopt_child).
     pub fn drop_child(self: Handle<Self>, app: &mut App, child: Handle<PipelineOwner>) {
         debug_assert_eq!(app.get(child).debug_parent, Some(self));
-        debug_assert!(
-            app.get(self)
-                .children
-                .iter()
-                .any(|kept| kept.handle() == child)
-        );
+        debug_assert!(app.get(self).children.iter().any(|kept| kept == child));
         debug_assert!(
             !app.get(self).debug_doing_child_layout,
             "Cannot modify child list after layout."
@@ -459,7 +454,7 @@ impl PipelineOwner {
         let children = &mut app.get_mut(self).children;
         let index = children
             .iter()
-            .position(|candidate| candidate.handle() == child)
+            .position(|candidate| candidate == child)
             .expect("child was in the list");
         children.remove(index);
         if cfg!(debug_assertions) {

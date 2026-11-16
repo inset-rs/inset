@@ -1369,8 +1369,8 @@ pub trait LocalHistoryRoute: TransitionRoute {
         debug_assert!(app.get(entry).owner == Some(self.as_route()));
         let data = self.local_history_route_data_mut(app);
         let history = data.local_history.as_mut().expect("a local history");
-        debug_assert!(history.iter().any(|held| held.handle() == entry));
-        let position = history.iter().position(|held| held.handle() == entry);
+        debug_assert!(history.iter().any(|held| held == entry));
+        let position = history.iter().position(|held| held == entry);
         let mut internal_state_changed = false;
         if let Some(position) = position {
             history.remove(position);
@@ -1719,18 +1719,12 @@ impl State for ModalScopeState {
         app.get_mut(self).no_gesture_in_progress =
             Some(app.create(waft_foundation::ValueNotifier::new(false)));
         let route = self.route(app);
-        let as_listenable = |animation: AnimationRef<f64>| {
-            Rc::new(animation) as Rc<dyn waft_foundation::Listenable>
+        let as_listenable = |animation: AnyAnimation<f64>| {
+            Rc::new(animation.keep(app)) as Rc<dyn waft_foundation::Listenable>
         };
         let animations: Vec<Option<Rc<dyn waft_foundation::Listenable>>> = vec![
-            route
-                .animation(app)
-                .and_then(|animation| animation.upgrade(app))
-                .map(as_listenable),
-            route
-                .secondary_animation(app)
-                .and_then(|animation| animation.upgrade(app))
-                .map(as_listenable),
+            route.animation(app).map(as_listenable),
+            route.secondary_animation(app).map(as_listenable),
         ];
         app.get_mut(self).listenable = Some(Rc::new(MergingListenable::new(animations)));
     }
@@ -2643,8 +2637,8 @@ pub trait ModalRouteBase: ModalRoute {
                 let transparent = barrier_color.with_values(Some(0.0), None, None, None, None);
                 debug_assert!(barrier_color != transparent);
                 let animation = TransitionRoute::animation(self, app)
-                    .and_then(|animation| animation.upgrade(app))
-                    .expect("an installed route keeps its animation");
+                    .expect("an installed route keeps its animation")
+                    .keep(app);
                 let curve = ModalRoute::barrier_curve(self, app);
                 let color_tween = ColorTween::new(app, Some(transparent), Some(barrier_color));
                 let curve_tween = CurveTween::new(app, curve);
@@ -2815,8 +2809,8 @@ impl AnyModalRoute {
     pub fn animations(self, app: &App) -> (AnimationRef<f64>, AnimationRef<f64>) {
         let kept = |animation: Option<AnyAnimation<f64>>| {
             animation
-                .and_then(|animation| animation.upgrade(app))
                 .expect("an installed route keeps its animations")
+                .keep(app)
         };
         (
             kept(self.animation(app)),
@@ -3363,7 +3357,7 @@ impl RouteObserver {
                 .get(self)
                 .listeners
                 .iter()
-                .any(|(held, _)| held.handle() == route);
+                .any(|(held, _)| held == route);
         }
         contained
     }
@@ -3381,10 +3375,7 @@ impl RouteObserver {
     ) {
         let kept = route.keep(app);
         let listeners = &mut app.get_mut(self).listeners;
-        let subscribers = match listeners
-            .iter_mut()
-            .find(|(held, _)| held.handle() == route)
-        {
+        let subscribers = match listeners.iter_mut().find(|(held, _)| held == route) {
             Some((_, subscribers)) => subscribers,
             None => {
                 listeners.push((kept, Vec::new()));
@@ -3421,7 +3412,7 @@ impl RouteObserver {
         app.get(self)
             .listeners
             .iter()
-            .find(|(held, _)| held.handle() == route)
+            .find(|(held, _)| held == route)
             .map(|(_, subscribers)| subscribers.clone())
     }
 
@@ -4129,8 +4120,8 @@ impl RawDialogRoute {
         };
         Builder::new(move |app, context| {
             let animation = TransitionRoute::animation(this, app)
-                .and_then(|animation| animation.upgrade(app))
-                .expect("an installed route keeps its animation");
+                .expect("an installed route keeps its animation")
+                .keep(app);
             let mut details =
                 RouteBarrierDetails::new(animation, ModalRoute::barrier_dismissible(this, app));
             if let Some(color) = ModalRoute::barrier_color(this, app) {

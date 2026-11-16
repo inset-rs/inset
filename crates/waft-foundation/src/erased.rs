@@ -8,8 +8,9 @@
 /// such as `FooLeaf::as_foo`):
 ///
 /// - `From<AnyFoo> for HandleId`, and equality and hashing by the object's id, as Dart's `==`
-///   on an object reference;
-/// - equality with a [`Retained`](crate::Retained) of the same object;
+///   on an object reference. By the id, not the vtable's address: Rust does not promise one
+///   address per vtable instantiation, and two codegen units can each hold their own copy;
+/// - equality with a [`Retained`](crate::Retained) of the same object, owned or borrowed;
 /// - `From<Handle<T>>` for every leaf `T`, so a typed [`Ref`](crate::Ref) erases with
 ///   [`Retained::erase`](crate::Retained::erase): Dart's upcast;
 /// - `upgrade` and `keep`, as [`Handle::upgrade`](crate::Handle::upgrade) and
@@ -47,6 +48,12 @@ macro_rules! erased_handle {
         impl ::core::cmp::PartialEq<$crate::Retained<$erased>> for $erased {
             fn eq(&self, other: &$crate::Retained<$erased>) -> bool {
                 self.id == other.handle().id
+            }
+        }
+
+        impl ::core::cmp::PartialEq<$erased> for &$crate::Retained<$erased> {
+            fn eq(&self, other: &$erased) -> bool {
+                self.handle().id == other.id
             }
         }
 
@@ -100,6 +107,14 @@ macro_rules! erased_handle {
         {
             fn eq(&self, other: &$crate::Retained<$erased<$param>>) -> bool {
                 self.id == other.handle().id
+            }
+        }
+
+        impl<$param: 'static> ::core::cmp::PartialEq<$erased<$param>>
+            for &$crate::Retained<$erased<$param>>
+        {
+            fn eq(&self, other: &$erased<$param>) -> bool {
+                self.handle().id == other.id
             }
         }
 

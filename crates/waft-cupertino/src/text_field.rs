@@ -1384,7 +1384,7 @@ impl State for CupertinoTextFieldState {
             RestorableProperty::dispose(controller, app);
             app.get_mut(self).controller = None;
         }
-        if self.widget(app).focus_node.handle() != old_widget.focus_node.handle() {
+        if self.widget(app).focus_node != old_widget.focus_node {
             let old_focus = old_widget
                 .focus_node
                 .clone()

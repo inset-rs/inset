@@ -1377,17 +1377,19 @@ fn start_pop_gesture<R: ModalRoute>(
 ) -> Ref<CupertinoDragGestureController> {
     let navigator = Route::navigator(this, app).expect("an installed route");
     let controller = TransitionRoute::controller(this, app)
-        .and_then(|controller| controller.upgrade(app))
-        .expect("an installed route has a controller");
+        .expect("an installed route has a controller")
+        .keep(app);
     // Dart's closures keep the route for as long as the gesture lasts.
     let kept_route = this.keep(app);
-    let kept_for_is_active = kept_route.clone();
     CupertinoDragGestureController::new(
         app,
         top_gap,
         navigator,
-        Rc::new(move |app| Route::as_route(kept_route.handle()).is_current(app)),
-        Rc::new(move |app| Route::as_route(kept_for_is_active.handle()).is_active(app)),
+        Rc::new({
+            let kept_route = kept_route.clone();
+            move |app| kept_route.as_route().is_current(app)
+        }),
+        Rc::new(move |app| kept_route.as_route().is_active(app)),
         controller,
     )
 }

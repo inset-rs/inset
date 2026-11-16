@@ -121,6 +121,11 @@ impl MenuFlyout {
         &app.get(self).flyout
     }
 
+    /// The flyout this menu presents in, for a call that takes the `App` mutably.
+    fn flyout(self: Handle<Self>, app: &App) -> Handle<Flyout> {
+        self.as_flyout(app).handle()
+    }
+
     /// Replaces the item configuration while preserving keyed item state.
     pub fn items(self: Handle<Self>, app: &mut App, items: Vec<MenuFlyoutItem>) {
         assert!(
@@ -128,12 +133,12 @@ impl MenuFlyout {
             "cannot update a disposed MenuFlyout"
         );
         app.get_mut(self).items = items;
-        self.as_flyout(app).handle().rebuild_content(app);
+        self.flyout(app).rebuild_content(app);
     }
 
     /// Shows from a context beneath FlyoutTarget.
     pub fn show_at(self: Handle<Self>, app: &mut App, target: BuildContext) {
-        self.as_flyout(app).handle().show_at(app, target);
+        self.flyout(app).show_at(app, target);
     }
 
     /// Shows with per-opening placement and input policy.
@@ -143,19 +148,17 @@ impl MenuFlyout {
         target: BuildContext,
         options: FlyoutShowOptions,
     ) {
-        self.as_flyout(app)
-            .handle()
-            .show_at_with_options(app, target, options);
+        self.flyout(app).show_at_with_options(app, target, options);
     }
 
     /// Hides this menu and its open descendants.
     pub fn hide(self: Handle<Self>, app: &mut App) {
-        self.as_flyout(app).handle().hide(app);
+        self.flyout(app).hide(app);
     }
 
     /// Whether this menu is currently shown.
     pub fn is_open(self: Handle<Self>, app: &App) -> bool {
-        self.as_flyout(app).handle().is_open(app)
+        self.flyout(app).is_open(app)
     }
 
     /// Releases the retained presenter and its child menus.
@@ -164,7 +167,7 @@ impl MenuFlyout {
             return;
         }
         app.get_mut(self).disposed = true;
-        self.as_flyout(app).handle().dispose(app);
+        self.flyout(app).dispose(app);
     }
 
     /// Captures the source padding mode and resets the collection's scroll position.
@@ -175,8 +178,7 @@ impl MenuFlyout {
             InputDevice::current(app)
         };
         app.get_mut(self).input = input;
-        self.as_flyout(app)
-            .handle()
+        self.flyout(app)
             .menu_point_placement(app, input == InputDevice::Touch);
         if let Some(presenter) = app.get(self).presenter {
             presenter.prepare_open(app);
