@@ -5,7 +5,8 @@
 //! entry and the types the app owns are the CLI's own (`freedesktop`), which the package carries
 //! among its files in place of cargo-packager's entry. On Windows the executable carries the app's
 //! icon as a resource (`windows_resources`), linked in as it is built, since cargo-packager puts it
-//! only on the installer; `run` builds the same executable, so it carries the icon too.
+//! only on the installer; `run` builds the same executable, so it carries the icon too. The
+//! installers and the executables in them are signed as the metadata says (`windows_signing`).
 
 use std::fs;
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -22,6 +23,7 @@ use crate::freedesktop;
 use crate::icons;
 use crate::project::{Profile, Project};
 use crate::windows_resources;
+use crate::windows_signing::WindowsSigning;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Format {
@@ -144,6 +146,10 @@ fn package(
     config.description = project.description.clone();
     config.homepage = project.homepage.clone();
     config.authors = (!project.authors.is_empty()).then(|| project.authors.clone());
+    if matches!(format, PackageFormat::Wix | PackageFormat::Nsis) {
+        config.windows = WindowsSigning::of(&project.windows)?
+            .packager_config(project.windows.timestamp_url.as_deref());
+    }
     if let Some(entry_name) = linux_entry_name(project, format) {
         add_freedesktop_files(&mut config, project, &entry_name, out)?;
     }

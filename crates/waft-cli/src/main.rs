@@ -26,6 +26,7 @@ mod usage_descriptions;
 mod wasm;
 mod web;
 mod windows_resources;
+mod windows_signing;
 
 use std::ffi::OsString;
 use std::path::PathBuf;

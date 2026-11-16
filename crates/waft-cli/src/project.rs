@@ -48,6 +48,7 @@ pub struct Metadata {
     pub macos: MacosMetadata,
     pub ios: IosMetadata,
     pub android: AndroidMetadata,
+    pub windows: WindowsMetadata,
 }
 
 /// A kind of file the app opens: one `[[package.metadata.waft.file_associations]]` table.
@@ -135,6 +136,20 @@ pub struct Helper {
 pub struct Library {
     pub package: String,
     pub lib: String,
+}
+
+/// How the Windows installers and the executables in them are signed: by a certificate in the
+/// machine's store, or by a command of the developer's; unsigned with neither.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct WindowsMetadata {
+    /// The SHA-1 thumbprint of the certificate `signtool` signs with.
+    pub certificate_thumbprint: Option<String>,
+    /// The command each file is signed with, `%1` standing for its path, for a signer other than
+    /// `signtool`: `osslsigncode` off Windows, or a cloud signing service's tool.
+    pub sign_command: Option<String>,
+    /// The RFC 3161 server each signature is timestamped by, so it outlives the certificate.
+    pub timestamp_url: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -267,6 +282,7 @@ pub struct Project {
     pub macos: MacosMetadata,
     pub ios: IosMetadata,
     pub android: AndroidMetadata,
+    pub windows: WindowsMetadata,
 }
 
 impl Project {
@@ -352,6 +368,7 @@ impl Project {
             usage_descriptions: waft.usage_descriptions,
             macos,
             ios: waft.ios,
+            windows: waft.windows,
             android,
             root,
         })

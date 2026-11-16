@@ -96,6 +96,11 @@ alias = "upload"
 store_password = { env = "WAFT_ANDROID_STORE_PASSWORD" }  # or { file = "path" }; never the password itself
 key_password = { file = "../secrets/upload-key-password" }  # where the key's own password differs
 
+[package.metadata.waft.windows]    # how the MSI and NSIS installers, and the executables in them, are signed; see Signing
+certificate_thumbprint = "A1B2…"   # a certificate in the machine's store, for signtool; or:
+# sign_command = "osslsigncode sign -pkcs11module … -in %1 -out %1"   # a command per file, %1 its path
+timestamp_url = "http://timestamp.digicert.com"
+
 [[package.metadata.waft.file_associations]]  # a kind of file this app defines
 extensions = ["mydoc"]
 name = "My document"
@@ -160,7 +165,7 @@ Signing happens when credentials are present, never by flag.
   - an App Store Connect key: `APPLE_API_KEY` (its id), `APPLE_API_ISSUER` and `APPLE_API_KEY_PATH`.
 
   `run` is never notarized.
-- Windows: `certificate_thumbprint` or a custom sign command, through cargo-packager.
+- Windows: `build msi` and `build nsis` sign the installer and the executables in it, through cargo-packager, with `signtool` and the certificate whose thumbprint `windows.certificate_thumbprint` gives, or with `windows.sign_command`, a command run for each file with `%1` standing for its path, never both; SHA-256, timestamped by `windows.timestamp_url` where it is given. With neither the packages are unsigned, which SmartScreen warns of. The folder `build windows` makes is not signed.
 - Android: a debug build, and a release build of an app that names no release key, is signed with the debug key in `~/.android/debug.keystore`, made with `keytool` when the machine has none; the release build with a warning, since a store refuses it, as a new Flutter app's release build is. A release build, `run --release` and `build apk` alike, of an app with `[package.metadata.waft.android.release]` is signed with that key: the keystore and alias it names, and its passwords from where it says, an environment variable or a file, which apksigner reads itself (`env:` and `file:`), so they never pass through the CLI or sit in `Cargo.toml`.
 
 ## Size
