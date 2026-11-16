@@ -9,6 +9,7 @@
 use std::rc::Rc;
 use std::time::Duration;
 
+use material_gallery_lib::pages::cards::EXPANDED_TILE_CHILD;
 use material_gallery_lib::pages::drawers::{DRAWER_HEADER, END_DRAWER_HEADER};
 use material_gallery_lib::pages::messages::{BANNER_TEXT, PERSISTENT_SHEET_TEXT};
 use material_gallery_lib::{Entry, Gallery, entry_route, sub_route};
@@ -411,10 +412,37 @@ impl Fixture {
 
     /// Opens `entry` from its tile on the index and checks the page's app bar wears its title.
     fn open_from_index(&mut self, entry: Entry) {
+        self.scroll_index_to(entry.title());
         self.tap_text(entry.title());
         assert!(self.can_pop(), "the tile pushed {entry:?} over the index");
         self.assert_app_bar_reads(entry.title());
         self.assert_top_route_settled();
+    }
+
+    /// Scrolls the index until the tile reading `title` is built and inside the view, below the
+    /// app bar and above the bottom edge: the index is a list longer than the window, so a later
+    /// tile sits below the fold, and one the index was scrolled past sits above it.
+    fn scroll_index_to(&mut self, title: &str) {
+        const TOP: f64 = 80.0;
+        const BOTTOM_MARGIN: f64 = 20.0;
+        // A tile not built yet is searched for down the list first, then back up it.
+        for attempt in 0..40 {
+            let up = if self.texts().iter().any(|shown| shown == title) {
+                let y = self.center_of_text(title).dy();
+                if (TOP..=VIEW[1] - BOTTOM_MARGIN).contains(&y) {
+                    return;
+                }
+                y < TOP
+            } else {
+                attempt >= 20
+            };
+            let by = if up { 240.0 } else { -240.0 };
+            self.drag(
+                Offset::new(VIEW[0] / 2.0, VIEW[1] / 2.0),
+                Offset::new(0.0, by),
+            );
+        }
+        panic!("the index never showed {title:?}; saw {:?}", self.texts());
     }
 
     /// Leaves the top page by its back button, as a user would: the app bar's leading widget.
@@ -962,5 +990,86 @@ fn the_snack_bar_with_an_action_shows_from_its_button() {
 fn the_modal_bottom_sheet_opens_from_its_button() {
     on_each_platform(|fixture| {
         assert_messages_button_shows(fixture, "Modal sheet", "A modal bottom sheet");
+    });
+}
+
+/// A filter chip toggles on a tap, and the page's caption says which are on.
+#[test]
+fn a_filter_chip_toggles_on_a_tap() {
+    on_each_platform(|fixture| {
+        fixture.open_from_index(Entry::Chips);
+        assert!(!fixture.shows("filters on: Coffee"));
+
+        fixture.tap_text("Coffee");
+        assert!(
+            fixture.shows("filters on: Coffee"),
+            "the filter chip reported its selection; saw {:?}",
+            fixture.texts()
+        );
+
+        fixture.tap_text("Coffee");
+        assert!(
+            !fixture.shows("filters on: Coffee"),
+            "a second tap cleared it"
+        );
+    });
+}
+
+/// An alert dialog opens from its button and answers the page with the button it was closed by.
+#[test]
+fn an_alert_dialog_answers_with_its_button() {
+    on_each_platform(|fixture| {
+        fixture.open_from_index(Entry::Dialogs);
+        fixture.tap_text("Alert dialog");
+        assert!(fixture.shows("Discard draft?"), "saw {:?}", fixture.texts());
+
+        fixture.tap_text("Discard");
+        assert!(
+            fixture.shows("Answer: Discard"),
+            "the dialog popped with its answer; saw {:?}",
+            fixture.texts()
+        );
+        assert!(!fixture.shows("Discard draft?"), "the dialog closed");
+    });
+}
+
+/// A collapsed expansion tile opens on a tap and shows its children.
+#[test]
+fn an_expansion_tile_opens_on_a_tap() {
+    on_each_platform(|fixture| {
+        fixture.open_from_index(Entry::Cards);
+        let shown = |fixture: &mut Fixture| {
+            fixture
+                .texts()
+                .iter()
+                .filter(|text| text.as_str() == EXPANDED_TILE_CHILD)
+                .count()
+        };
+        let before = shown(fixture);
+        fixture.tap_text("Collapsed tile");
+        assert_eq!(shown(fixture), before + 1);
+    });
+}
+
+/// The time picker opens in its dial, and OK answers the page with the time it showed.
+#[test]
+fn the_time_picker_opens_and_answers_with_ok() {
+    on_each_platform(|fixture| {
+        fixture.open_from_index(Entry::Pickers);
+        let before = fixture
+            .texts()
+            .into_iter()
+            .find(|text| text.starts_with("Time: "));
+
+        fixture.tap_text("Dial");
+        assert!(fixture.shows("Select time"), "saw {:?}", fixture.texts());
+
+        fixture.tap_text("OK");
+        assert!(!fixture.shows("Select time"), "the dialog closed");
+        let after = fixture
+            .texts()
+            .into_iter()
+            .find(|text| text.starts_with("Time: "));
+        assert_ne!(before, after, "the page's caption took the picked time");
     });
 }
