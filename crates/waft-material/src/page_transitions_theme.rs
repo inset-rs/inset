@@ -1898,21 +1898,20 @@ mod tests {
         StatefulBuilder, Text, WidgetBuilder,
     };
 
+    use waft_widgets::testing::{
+        TargetPlatformVariant, TestPointer, TestVSync, WidgetTester, test_widgets,
+        test_widgets_variant,
+    };
+
     use super::*;
     use crate::app::MaterialApp;
     use crate::material::Material;
     use crate::page::MaterialPageRoute;
-    use crate::test_support::{WidgetTester, material_page_app, with_main_thread_stack};
+    use crate::test_support::{PaintInspection, material_page_app};
     use crate::text_button::TextButton;
     use crate::theme_data::ThemeData;
     use waft_animation::AnyAnimation;
     use waft_test::{assert_no_new_objects, object_snapshot};
-
-    fn tester_on(platform: TargetPlatform) -> WidgetTester {
-        let tester = WidgetTester::on(platform);
-        tester.install_fonts();
-        tester
-    }
 
     /// `tester.pumpWidget(MaterialApp(theme: theme(app), ..))` with the pages `configure` gives.
     fn pump_app(
@@ -2061,40 +2060,37 @@ mod tests {
     #[test]
     fn the_default_theme_builds_a_cupertino_page_transition_on_ios_and_macos() {
         for platform in [TargetPlatform::IOS, TargetPlatform::MacOS] {
-            with_main_thread_stack(|| {
-                let mut tester = tester_on(platform);
-                pump_app(&mut tester, ThemeData::new, |app| app.routes(push_routes()));
-                assert_eq!(count_of::<CupertinoPageTransition>(&tester), 1);
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                pump_app(tester, ThemeData::new, |app| app.routes(push_routes()));
+                assert_eq!(count_of::<CupertinoPageTransition>(tester), 1);
 
-                tap_text(&mut tester, "push");
+                tap_text(tester, "push");
                 tester.pump_and_settle();
-                assert_eq!(count_onstage_text(&tester, "page b"), 1);
-                assert_eq!(count_of::<CupertinoPageTransition>(&tester), 1);
+                assert_eq!(count_onstage_text(tester, "page b"), 1);
+                assert_eq!(count_of::<CupertinoPageTransition>(tester), 1);
             });
         }
     }
 
     #[test]
     fn the_default_theme_builds_a_fade_forwards_page_transition_on_android() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            pump_app(&mut tester, ThemeData::new, |app| app.routes(push_routes()));
-            assert_eq!(count_of::<FadeForwardsPageTransition>(&tester), 1);
+        test_widgets(|tester| {
+            pump_app(tester, ThemeData::new, |app| app.routes(push_routes()));
+            assert_eq!(count_of::<FadeForwardsPageTransition>(tester), 1);
 
-            tap_text(&mut tester, "push");
+            tap_text(tester, "push");
             tester.pump_and_settle();
-            assert_eq!(count_onstage_text(&tester, "page b"), 1);
-            assert_eq!(count_of::<FadeForwardsPageTransition>(&tester), 1);
+            assert_eq!(count_onstage_text(tester, "page b"), 1);
+            assert_eq!(count_of::<FadeForwardsPageTransition>(tester), 1);
         });
     }
 
     /// The fade-forwards cases on the background: the last `ColoredBox` 400ms into the push.
     fn fade_forwards_background(builder: FadeForwardsPageTransitionsBuilder) -> Color {
         let mut color = Colors::TRANSPARENT;
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             pump_app(
-                &mut tester,
+                tester,
                 move |app| {
                     let color_scheme = ThemeData::new(app)
                         .color_scheme
@@ -2111,15 +2107,15 @@ mod tests {
                 },
                 |app| app.routes(push_routes()),
             );
-            assert_eq!(count_of::<FadeForwardsPageTransition>(&tester), 1);
+            assert_eq!(count_of::<FadeForwardsPageTransition>(tester), 1);
 
-            tap_text(&mut tester, "push");
-            tester.pump(Duration::from_millis(400));
-            color = last_colored_box_color(&tester);
+            tap_text(tester, "push");
+            tester.pump_by(Duration::from_millis(400));
+            color = last_colored_box_color(tester);
 
             tester.pump_and_settle();
-            assert_eq!(count_onstage_text(&tester, "page b"), 1);
-            assert_eq!(count_of::<FadeForwardsPageTransition>(&tester), 1);
+            assert_eq!(count_onstage_text(tester, "page b"), 1);
+            assert_eq!(count_of::<FadeForwardsPageTransition>(tester), 1);
         });
         color
     }
@@ -2137,19 +2133,6 @@ mod tests {
                 .background_color(Colors::LIGHT_GREEN.primary()),
         );
         assert_eq!(color, Colors::LIGHT_GREEN.primary());
-    }
-
-    /// flutter_test's `TestVSync`: vends ordinary tickers, in no view.
-    struct TestVSync;
-
-    impl waft_scheduler::TickerProvider for TestVSync {
-        fn create_ticker(
-            &self,
-            app: &mut App,
-            on_tick: waft_scheduler::TickerCallback,
-        ) -> Ref<waft_scheduler::Ticker> {
-            waft_scheduler::Ticker::new(app, on_tick, None)
-        }
     }
 
     /// The fade-forwards delegated transition over `animation` and `secondary_animation` of a
@@ -2211,10 +2194,9 @@ mod tests {
 
     #[test]
     fn the_fade_forwards_delegated_transition_fades_out_during_a_forward_secondary_animation() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let controller = delegated_fade_forwards(
-                &mut tester,
+                tester,
                 ValueTween::new(1.0, 0.0),
                 ValueTween::new(0.0, 1.0),
             );
@@ -2222,21 +2204,20 @@ mod tests {
             // Since secondary animation is forward, transition will be reverse between duration
             // 0 to 0.25.
             controller.set_value(&mut tester.cell.borrow_mut(), 0.0);
-            tester.pump(Duration::ZERO);
-            assert_eq!(opacity(&tester), 1.0);
+            tester.pump();
+            assert_eq!(opacity(tester), 1.0);
 
             controller.set_value(&mut tester.cell.borrow_mut(), 0.25);
-            tester.pump(Duration::ZERO);
-            assert_eq!(opacity(&tester), 0.0);
+            tester.pump();
+            assert_eq!(opacity(tester), 0.0);
         });
     }
 
     #[test]
     fn the_fade_forwards_delegated_transition_fades_in_during_a_reverse_secondary_animation() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let controller = delegated_fade_forwards(
-                &mut tester,
+                tester,
                 ValueTween::new(0.0, 1.0),
                 ValueTween::new(1.0, 0.0),
             );
@@ -2244,19 +2225,18 @@ mod tests {
             // Since secondary animation is reverse, transition will be forward between duration
             // 0.75 to 1.0.
             controller.set_value(&mut tester.cell.borrow_mut(), 0.75);
-            tester.pump(Duration::ZERO);
-            assert_eq!(opacity(&tester), 0.0);
+            tester.pump();
+            assert_eq!(opacity(tester), 0.0);
 
             controller.set_value(&mut tester.cell.borrow_mut(), 1.0);
-            tester.pump(Duration::ZERO);
-            assert_eq!(opacity(&tester), 1.0);
+            tester.pump();
+            assert_eq!(opacity(tester), 1.0);
         });
     }
 
     #[test]
     fn fade_forwards_paints_no_background_under_a_route_that_is_not_opaque() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let light_green = Colors::LIGHT_GREEN.primary();
             let push_b = Rc::new(|app: &mut App, context: BuildContext| {
                 let route = MaterialPageRoute::new(app, text_page("page b"));
@@ -2275,7 +2255,7 @@ mod tests {
                 Navigator::of(app, context, false).push(app, route.erase());
             });
             pump_app(
-                &mut tester,
+                tester,
                 theme_with(
                     TargetPlatform::Android,
                     FadeForwardsPageTransitionsBuilder::new().background_color(light_green),
@@ -2292,14 +2272,14 @@ mod tests {
                     })
             };
 
-            tap_text(&mut tester, "push a");
+            tap_text(tester, "push a");
             tester.pump_and_settle();
 
-            tap_text(&mut tester, "push b");
-            tester.pump(Duration::from_millis(400));
+            tap_text(tester, "push b");
+            tester.pump_by(Duration::from_millis(400));
 
             // Check that ColoredBox is not used for non-opaque route.
-            assert!(no_light_green_box(&tester));
+            assert!(no_light_green_box(tester));
 
             tester.pump_and_settle();
 
@@ -2309,7 +2289,7 @@ mod tests {
             tester.pump_and_settle_by(Duration::from_millis(400));
 
             // Check that ColoredBox is not used for non-opaque route
-            assert!(no_light_green_box(&tester));
+            assert!(no_light_green_box(tester));
         });
     }
 
@@ -2317,8 +2297,7 @@ mod tests {
     /// `_updateAnimations` replaces; here they are freed with their last reference.
     #[test]
     fn a_zoom_transition_given_a_new_animation_leaves_no_new_arena_objects() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let [first, second] = [0.25, 0.5].map(|value| {
                 tester
                     .cell
@@ -2370,15 +2349,15 @@ mod tests {
         builder: impl PageTransitionsBuilder,
         at: Duration,
     ) {
-        let mut tester = tester_on(platform);
+        let mut tester = WidgetTester::on(platform);
         pump_app(&mut tester, theme_with(platform, builder), |app| {
             app.routes(push_routes())
         });
         let assert_a_frame_leaves_nothing = |tester: &mut WidgetTester| {
-            tester.pump(Duration::ZERO);
-            tester.pump(at);
+            tester.pump();
+            tester.pump_by(at);
             let snapshot = object_snapshot(&tester.cell.borrow());
-            tester.pump(Duration::from_millis(16));
+            tester.pump_by(Duration::from_millis(16));
             tester.cell.checkpoint();
             assert_no_new_objects(&tester.cell.borrow(), &snapshot);
         };
@@ -2393,7 +2372,7 @@ mod tests {
     /// Not a Dart case: see [`assert_mid_transition_frames_leave_nothing`].
     #[test]
     fn a_frame_of_a_zoom_push_or_pop_leaves_no_new_arena_objects() {
-        with_main_thread_stack(|| {
+        test_widgets(|_tester| {
             assert_mid_transition_frames_leave_nothing(
                 TargetPlatform::Android,
                 ZoomPageTransitionsBuilder::new(),
@@ -2405,7 +2384,7 @@ mod tests {
     /// Not a Dart case: see [`assert_mid_transition_frames_leave_nothing`].
     #[test]
     fn a_frame_of_a_fade_forwards_push_or_pop_leaves_no_new_arena_objects() {
-        with_main_thread_stack(|| {
+        test_widgets(|_tester| {
             assert_mid_transition_frames_leave_nothing(
                 TargetPlatform::Android,
                 FadeForwardsPageTransitionsBuilder::new(),
@@ -2416,61 +2395,58 @@ mod tests {
 
     #[test]
     fn the_fade_forwards_transition_lasts_450_ms() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             pump_app(
-                &mut tester,
+                tester,
                 theme_with(
                     TargetPlatform::Android,
                     FadeForwardsPageTransitionsBuilder::new(),
                 ),
                 |app| app.routes(push_routes()),
             );
-            assert_eq!(count_of::<FadeForwardsPageTransition>(&tester), 1);
+            assert_eq!(count_of::<FadeForwardsPageTransition>(tester), 1);
 
-            tap_text(&mut tester, "push");
-            tester.pump(Duration::from_millis(799));
-            assert_eq!(count_onstage_text(&tester, "page b"), 0);
+            tap_text(tester, "push");
+            tester.pump_by(Duration::from_millis(799));
+            assert_eq!(count_onstage_text(tester, "page b"), 0);
             // Color is not transparent during animation.
-            assert_ne!(last_colored_box_color(&tester), Colors::TRANSPARENT);
+            assert_ne!(last_colored_box_color(tester), Colors::TRANSPARENT);
 
-            tester.pump(Duration::from_millis(801));
-            assert_eq!(count_onstage_text(&tester, "page b"), 1);
+            tester.pump_by(Duration::from_millis(801));
+            assert_eq!(count_onstage_text(tester, "page b"), 1);
             // Color is transparent after the animation.
-            assert_eq!(last_colored_box_color(&tester), Colors::TRANSPARENT);
+            assert_eq!(last_colored_box_color(tester), Colors::TRANSPARENT);
         });
     }
 
     #[test]
     fn the_cupertino_page_transitions_builder_lasts_500_ms() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::IOS);
+        test_widgets_variant(TargetPlatformVariant::only(TargetPlatform::IOS), |tester| {
             pump_app(
-                &mut tester,
+                tester,
                 theme_with(TargetPlatform::IOS, CupertinoPageTransitionsBuilder::new()),
                 |app| app.routes(push_routes()),
             );
-            assert_eq!(count_of::<CupertinoPageTransition>(&tester), 1);
+            assert_eq!(count_of::<CupertinoPageTransition>(tester), 1);
 
-            tap_text(&mut tester, "push");
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(499));
+            tap_text(tester, "push");
+            tester.pump();
+            tester.pump_by(Duration::from_millis(499));
             let running = |tester: &WidgetTester| {
                 waft_scheduler::SchedulerBinding::transient_callback_count(
                     &mut tester.cell.borrow_mut(),
                 ) > 0
             };
-            assert!(running(&tester));
+            assert!(running(tester));
 
-            tester.pump(Duration::from_millis(10));
-            assert!(!running(&tester));
+            tester.pump_by(Duration::from_millis(10));
+            assert!(!running(tester));
         });
     }
 
     #[test]
     fn the_route_durations_follow_a_change_of_the_page_transitions_builder() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let routes = || {
                 vec![
                     (
@@ -2501,28 +2477,28 @@ mod tests {
                 ]
             };
             pump_app(
-                &mut tester,
+                tester,
                 theme_with(
                     TargetPlatform::Android,
                     FadeForwardsPageTransitionsBuilder::new(),
                 ),
                 move |app| app.routes(routes()),
             );
-            assert_eq!(count_of::<FadeForwardsPageTransition>(&tester), 1);
+            assert_eq!(count_of::<FadeForwardsPageTransition>(tester), 1);
 
-            tap_text(&mut tester, "push");
-            tester.pump(Duration::from_millis(799));
-            assert_eq!(count_onstage_text(&tester, "page b"), 0);
+            tap_text(tester, "push");
+            tester.pump_by(Duration::from_millis(799));
+            assert_eq!(count_onstage_text(tester, "page b"), 0);
             // The color is not transparent during animation.
-            assert_ne!(last_colored_box_color(&tester), Colors::TRANSPARENT);
+            assert_ne!(last_colored_box_color(tester), Colors::TRANSPARENT);
 
-            tester.pump(Duration::from_millis(801));
-            assert_eq!(count_onstage_text(&tester, "page b"), 1);
+            tester.pump_by(Duration::from_millis(801));
+            assert_eq!(count_onstage_text(tester, "page b"), 1);
             // The color is transparent after the animation.
-            assert_eq!(last_colored_box_color(&tester), Colors::TRANSPARENT);
+            assert_eq!(last_colored_box_color(tester), Colors::TRANSPARENT);
 
             pump_app(
-                &mut tester,
+                tester,
                 theme_with(
                     TargetPlatform::Android,
                     waft_widgets::FadeUpwardsPageTransitionsBuilder::new(),
@@ -2542,74 +2518,72 @@ mod tests {
                     .count(),
                 1
             );
-            tap_text(&mut tester, "pop");
-            tester.pump(Duration::from_millis(299));
-            assert_eq!(count_onstage_text(&tester, "page b"), 1);
+            tap_text(tester, "pop");
+            tester.pump_by(Duration::from_millis(299));
+            assert_eq!(count_onstage_text(tester, "page b"), 1);
             // ColoredBox doesn't exist in FadeUpwardsPageTransition.
-            assert_eq!(count_of::<ColoredBox>(&tester), 0);
+            assert_eq!(count_of::<ColoredBox>(tester), 0);
 
-            tester.pump(Duration::from_millis(301));
-            assert_eq!(count_onstage_text(&tester, "page b"), 0);
+            tester.pump_by(Duration::from_millis(301));
+            assert_eq!(count_onstage_text(tester, "page b"), 0);
             // The first page.
-            assert_eq!(count_onstage_text(&tester, "push"), 1);
-            assert_eq!(count_of::<ColoredBox>(&tester), 0);
+            assert_eq!(count_onstage_text(tester, "push"), 1);
+            assert_eq!(count_of::<ColoredBox>(tester), 0);
         });
     }
 
     #[test]
     fn a_page_transitions_theme_override_builds_a_cupertino_page_transition_on_android() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             pump_app(
-                &mut tester,
+                tester,
                 theme_with(
                     TargetPlatform::Android,
                     CupertinoPageTransitionsBuilder::new(),
                 ),
                 |app| app.routes(push_routes()),
             );
-            assert_eq!(count_of::<CupertinoPageTransition>(&tester), 1);
+            assert_eq!(count_of::<CupertinoPageTransition>(tester), 1);
 
-            tap_text(&mut tester, "push");
+            tap_text(tester, "push");
             tester.pump_and_settle();
-            assert_eq!(count_onstage_text(&tester, "page b"), 1);
-            assert_eq!(count_of::<CupertinoPageTransition>(&tester), 1);
+            assert_eq!(count_onstage_text(tester, "page b"), 1);
+            assert_eq!(count_of::<CupertinoPageTransition>(tester), 1);
         });
     }
 
     #[test]
     fn a_cupertino_page_transition_on_android_does_not_block_gestures_after_a_back_swipe() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             pump_app(
-                &mut tester,
+                tester,
                 theme_with(
                     TargetPlatform::Android,
                     CupertinoPageTransitionsBuilder::new(),
                 ),
                 |app| app.routes(push_routes()),
             );
-            assert_eq!(count_of::<CupertinoPageTransition>(&tester), 1);
+            assert_eq!(count_of::<CupertinoPageTransition>(tester), 1);
 
-            tap_text(&mut tester, "push");
+            tap_text(tester, "push");
             tester.pump_and_settle();
-            assert_eq!(count_onstage_text(&tester, "page b"), 1);
-            assert_eq!(count_of::<CupertinoPageTransition>(&tester), 1);
+            assert_eq!(count_onstage_text(tester, "page b"), 1);
+            assert_eq!(count_of::<CupertinoPageTransition>(tester), 1);
 
             tester.pump_and_settle_by(Duration::from_secs(60));
 
-            let mut gesture = WidgetTester::touch(1);
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, Offset::new(5.0, 100.0));
             tester.move_to(&mut gesture, Offset::new(405.0, 100.0), true);
             tester.up(&gesture);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             tester.pump_and_settle_by(Duration::from_secs(60));
 
-            assert_eq!(count_onstage_text(&tester, "push"), 1);
-            tap_text(&mut tester, "push");
+            assert_eq!(count_onstage_text(tester, "push"), 1);
+            tap_text(tester, "push");
             tester.pump_and_settle();
-            assert_eq!(count_onstage_text(&tester, "page b"), 1);
+            assert_eq!(count_onstage_text(tester, "page b"), 1);
         });
     }
 
@@ -2664,78 +2638,75 @@ mod tests {
 
     #[test]
     fn zoom_page_transitions_snapshot_both_routes_by_default() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            zoom_snapshotting_app(&mut tester, true, true);
+        test_widgets(|tester| {
+            zoom_snapshotting_app(tester, true, true);
 
             // Transitioning from page 1 to page 2.
-            let navigator = navigator(&tester);
+            let navigator = navigator(tester);
             navigator.push_named(&mut tester.cell.borrow_mut(), "/2", None);
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(50));
+            tester.pump();
+            tester.pump_by(Duration::from_millis(50));
 
             // Exiting route should be snapshotted.
-            assert!(is_transitioning_with_snapshotting(&tester, "Page 1"));
+            assert!(is_transitioning_with_snapshotting(tester, "Page 1"));
 
             // Entering route should be snapshotted.
-            assert!(is_transitioning_with_snapshotting(&tester, "Page 2"));
+            assert!(is_transitioning_with_snapshotting(tester, "Page 2"));
 
             tester.pump_and_settle();
 
             // Transitioning back from page 2 to page 1.
             navigator.pop(&mut tester.cell.borrow_mut(), None);
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(50));
+            tester.pump();
+            tester.pump_by(Duration::from_millis(50));
 
             // Exiting route should be snapshotted.
-            assert!(is_transitioning_with_snapshotting(&tester, "Page 2"));
+            assert!(is_transitioning_with_snapshotting(tester, "Page 2"));
 
             // Entering route should be snapshotted.
-            assert!(is_transitioning_with_snapshotting(&tester, "Page 1"));
+            assert!(is_transitioning_with_snapshotting(tester, "Page 1"));
         });
     }
 
     #[test]
     fn zoom_page_transitions_allow_snapshotting_false_snapshots_neither_route() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            zoom_snapshotting_app(&mut tester, false, true);
+        test_widgets(|tester| {
+            zoom_snapshotting_app(tester, false, true);
 
-            let navigator = navigator(&tester);
+            let navigator = navigator(tester);
             navigator.push_named(&mut tester.cell.borrow_mut(), "/2", None);
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(50));
+            tester.pump();
+            tester.pump_by(Duration::from_millis(50));
 
-            assert!(!is_transitioning_with_snapshotting(&tester, "Page 1"));
-            assert!(!is_transitioning_with_snapshotting(&tester, "Page 2"));
+            assert!(!is_transitioning_with_snapshotting(tester, "Page 1"));
+            assert!(!is_transitioning_with_snapshotting(tester, "Page 2"));
 
             tester.pump_and_settle();
 
             navigator.pop(&mut tester.cell.borrow_mut(), None);
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(50));
+            tester.pump();
+            tester.pump_by(Duration::from_millis(50));
 
-            assert!(!is_transitioning_with_snapshotting(&tester, "Page 2"));
-            assert!(!is_transitioning_with_snapshotting(&tester, "Page 1"));
+            assert!(!is_transitioning_with_snapshotting(tester, "Page 2"));
+            assert!(!is_transitioning_with_snapshotting(tester, "Page 1"));
         });
     }
 
     #[test]
     fn a_route_allow_snapshotting_false_overrides_the_zoom_builders_true() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            zoom_snapshotting_app(&mut tester, true, false);
+        test_widgets(|tester| {
+            zoom_snapshotting_app(tester, true, false);
 
-            let navigator = navigator(&tester);
+            let navigator = navigator(tester);
             navigator.push_named(&mut tester.cell.borrow_mut(), "/2", None);
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(50));
+            tester.pump();
+            tester.pump_by(Duration::from_millis(50));
 
             // First route should be snapshotted.
-            assert!(is_transitioning_with_snapshotting(&tester, "Page 1"));
+            assert!(is_transitioning_with_snapshotting(tester, "Page 1"));
 
             // Second route should not be snapshotted.
-            assert!(!is_transitioning_with_snapshotting(&tester, "Page 2"));
+            assert!(!is_transitioning_with_snapshotting(tester, "Page 2"));
 
             tester.pump_and_settle();
         });
@@ -2743,8 +2714,7 @@ mod tests {
 
     #[test]
     fn the_zoom_page_transition_builds_the_page_once() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let built_count = Rc::new(std::cell::Cell::new(0));
             let routes = {
                 let built_count = Rc::clone(&built_count);
@@ -2776,17 +2746,17 @@ mod tests {
                 ]
             };
             pump_app(
-                &mut tester,
+                tester,
                 theme_with(TargetPlatform::Android, ZoomPageTransitionsBuilder::new()),
                 move |app| app.routes(routes),
             );
 
             // No matter push or pop was called, the child widget should built only once.
-            tap_text(&mut tester, "push");
+            tap_text(tester, "push");
             tester.pump_and_settle();
             assert_eq!(built_count.get(), 1);
 
-            tap_text(&mut tester, "pop");
+            tap_text(tester, "pop");
             tester.pump_and_settle();
             assert_eq!(built_count.get(), 1);
         });
@@ -2826,10 +2796,9 @@ mod tests {
     // page_test 'test page transition (_ZoomPageTransition) without rasterization'.
     #[test]
     fn the_zoom_page_transition_scales_and_fades_the_pages_mid_animation() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             pump_app(
-                &mut tester,
+                tester,
                 theme_with(TargetPlatform::Android, ZoomPageTransitionsBuilder::new()),
                 |app| {
                     app.on_generate_route(|app, settings| {
@@ -2850,45 +2819,45 @@ mod tests {
                 },
             );
 
-            let navigator = navigator(&tester);
+            let navigator = navigator(tester);
             navigator.push_named(&mut tester.cell.borrow_mut(), "/next", None);
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(50));
+            tester.pump();
+            tester.pump_by(Duration::from_millis(50));
 
-            let page_1 = layers_above(&tester, "Page 1");
-            let page_2 = layers_above(&tester, "Page 2");
+            let page_1 = layers_above(tester, "Page 1");
+            let page_2 = layers_above(tester, "Page 2");
             // Page 1 is enlarging, starts from 1.0.
-            assert!(first_scale(&tester, &page_1) > 1.0);
+            assert!(first_scale(tester, &page_1) > 1.0);
             // Page 2 is enlarging from the value less than 1.0.
-            assert!(first_scale(&tester, &page_2) < 1.0);
+            assert!(first_scale(tester, &page_2) < 1.0);
             // Page 2 is becoming none transparent.
-            assert!(first_alpha(&tester, &page_2) < 255);
+            assert!(first_alpha(tester, &page_2) < 255);
 
-            tester.pump(Duration::from_millis(250));
-            tester.pump(Duration::from_millis(1));
+            tester.pump_by(Duration::from_millis(250));
+            tester.pump_by(Duration::from_millis(1));
 
             // Page 2 covers page 1.
-            assert_eq!(count_onstage_text(&tester, "Page 1"), 0);
-            assert_eq!(count_onstage_text(&tester, "Page 2"), 1);
+            assert_eq!(count_onstage_text(tester, "Page 1"), 0);
+            assert_eq!(count_onstage_text(tester, "Page 2"), 1);
 
             navigator.pop(&mut tester.cell.borrow_mut(), None);
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(100));
+            tester.pump();
+            tester.pump_by(Duration::from_millis(100));
 
-            let page_1 = layers_above(&tester, "Page 1");
-            let page_2 = layers_above(&tester, "Page 2");
+            let page_1 = layers_above(tester, "Page 1");
+            let page_2 = layers_above(tester, "Page 2");
             // Page 1 is narrowing down, but still larger than 1.0.
-            assert!(first_scale(&tester, &page_1) > 1.0);
+            assert!(first_scale(tester, &page_1) > 1.0);
             // Page 2 is smaller than 1.0.
-            assert!(first_scale(&tester, &page_2) < 1.0);
+            assert!(first_scale(tester, &page_2) < 1.0);
             // Page 2 is becoming transparent.
-            assert!(first_alpha(&tester, &page_2) < 255);
+            assert!(first_alpha(tester, &page_2) < 255);
 
-            tester.pump(Duration::from_millis(200));
-            tester.pump(Duration::from_millis(1));
+            tester.pump_by(Duration::from_millis(200));
+            tester.pump_by(Duration::from_millis(1));
 
-            assert_eq!(count_onstage_text(&tester, "Page 1"), 1);
-            assert_eq!(count_onstage_text(&tester, "Page 2"), 0);
+            assert_eq!(count_onstage_text(tester, "Page 1"), 1);
+            assert_eq!(count_onstage_text(tester, "Page 2"), 0);
         });
     }
 
@@ -2901,11 +2870,10 @@ mod tests {
         surface: Color,
         at: Duration,
     ) -> Vec<u32> {
-        let mut drawn = Vec::new();
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(platform);
+        let drawn = std::sync::Mutex::new(Vec::new());
+        test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
             pump_app(
-                &mut tester,
+                tester,
                 move |app| {
                     let color_scheme = ThemeData::new(app).color_scheme.with_surface(surface);
                     ThemeData::builder()
@@ -2925,9 +2893,9 @@ mod tests {
                 |app| app.routes(push_routes()),
             );
 
-            tap_text(&mut tester, "push");
-            tester.pump(Duration::ZERO);
-            tester.pump(at);
+            tap_text(tester, "push");
+            tester.pump();
+            tester.pump_by(at);
 
             let enter = *tester
                 .find_by_type::<ZoomEnterTransition>()
@@ -2940,7 +2908,7 @@ mod tests {
                 })
                 .expect("the entering page's zoom transition");
             let render = tester.render_box_of(enter).as_object();
-            drawn = tester
+            *drawn.lock().expect("the colors") = tester
                 .painted(render)
                 .into_iter()
                 .filter_map(|drawn| match drawn {
@@ -2950,9 +2918,9 @@ mod tests {
                 .collect();
 
             tester.pump_and_settle();
-            assert_eq!(count_onstage_text(&tester, "page b"), 1);
+            assert_eq!(count_onstage_text(tester, "page b"), 1);
         });
-        drawn
+        drawn.into_inner().expect("the colors")
     }
 
     // 'ZoomPageTransitionsBuilder uses theme color during transition effects', on the page
@@ -2993,10 +2961,9 @@ mod tests {
 
     #[test]
     fn the_incoming_route_takes_input_during_a_fade_forwards_back_navigation() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             pump_app(
-                &mut tester,
+                tester,
                 move |app| {
                     let color_scheme = ThemeData::new(app)
                         .color_scheme
@@ -3031,39 +2998,39 @@ mod tests {
                 },
             );
 
-            assert_eq!(count_onstage_text(&tester, "push"), 1);
-            assert_eq!(count_onstage_text(&tester, "go back"), 0);
+            assert_eq!(count_onstage_text(tester, "push"), 1);
+            assert_eq!(count_onstage_text(tester, "go back"), 0);
 
             // Go to the second route.
-            tap_text(&mut tester, "push");
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(801));
+            tap_text(tester, "push");
+            tester.pump();
+            tester.pump_by(Duration::from_millis(801));
 
-            assert_eq!(count_onstage_text(&tester, "push"), 0);
-            assert_eq!(count_onstage_text(&tester, "go back"), 1);
+            assert_eq!(count_onstage_text(tester, "push"), 0);
+            assert_eq!(count_onstage_text(tester, "go back"), 1);
 
             // Tap to go back to the first route.
-            tap_text(&mut tester, "go back");
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(400));
+            tap_text(tester, "go back");
+            tester.pump();
+            tester.pump_by(Duration::from_millis(400));
 
-            assert_eq!(count_onstage_text(&tester, "push"), 1);
-            assert_eq!(count_onstage_text(&tester, "go back"), 1);
+            assert_eq!(count_onstage_text(tester, "push"), 1);
+            assert_eq!(count_onstage_text(tester, "go back"), 1);
 
             // In the middle of the transition, tap to go back to the second route.
-            tap_text(&mut tester, "push");
+            tap_text(tester, "push");
 
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(401));
+            tester.pump();
+            tester.pump_by(Duration::from_millis(401));
 
-            assert_eq!(count_onstage_text(&tester, "push"), 1);
-            assert_eq!(count_onstage_text(&tester, "go back"), 1);
+            assert_eq!(count_onstage_text(tester, "push"), 1);
+            assert_eq!(count_onstage_text(tester, "go back"), 1);
 
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(400));
+            tester.pump();
+            tester.pump_by(Duration::from_millis(400));
 
-            assert_eq!(count_onstage_text(&tester, "push"), 0);
-            assert_eq!(count_onstage_text(&tester, "go back"), 1);
+            assert_eq!(count_onstage_text(tester, "push"), 0);
+            assert_eq!(count_onstage_text(tester, "go back"), 1);
         });
     }
 
@@ -3124,47 +3091,45 @@ mod tests {
 
     #[test]
     fn fade_forwards_snapshots_the_entering_and_exiting_routes_only_while_animating() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            fade_forwards_snapshotting_app(&mut tester, true, true);
-            assert!(!is_snapshotting(&tester, "Page 1"));
+        test_widgets(|tester| {
+            fade_forwards_snapshotting_app(tester, true, true);
+            assert!(!is_snapshotting(tester, "Page 1"));
 
             // Push. Part way into the transition, both pages are partially transparent.
-            let navigator = navigator(&tester);
+            let navigator = navigator(tester);
             navigator.push_named(&mut tester.cell.borrow_mut(), "/2", None);
-            tester.pump(Duration::ZERO);
-            tester.pump(A_TENTH_OF_THE_TRANSITION);
-            assert!(is_snapshotting(&tester, "Page 1"));
-            assert!(is_snapshotting(&tester, "Page 2"));
+            tester.pump();
+            tester.pump_by(A_TENTH_OF_THE_TRANSITION);
+            assert!(is_snapshotting(tester, "Page 1"));
+            assert!(is_snapshotting(tester, "Page 2"));
 
             tester.pump_and_settle();
-            assert!(!is_snapshotting(&tester, "Page 2"));
+            assert!(!is_snapshotting(tester, "Page 2"));
 
             // Pop.
             navigator.pop(&mut tester.cell.borrow_mut(), None);
-            tester.pump(Duration::ZERO);
-            tester.pump(A_TENTH_OF_THE_TRANSITION);
-            assert!(is_snapshotting(&tester, "Page 1"));
-            assert!(is_snapshotting(&tester, "Page 2"));
+            tester.pump();
+            tester.pump_by(A_TENTH_OF_THE_TRANSITION);
+            assert!(is_snapshotting(tester, "Page 1"));
+            assert!(is_snapshotting(tester, "Page 2"));
 
             tester.pump_and_settle();
-            assert_eq!(count_onstage_text(&tester, "Page 2"), 0);
-            assert!(!is_snapshotting(&tester, "Page 1"));
+            assert_eq!(count_onstage_text(tester, "Page 2"), 0);
+            assert!(!is_snapshotting(tester, "Page 1"));
         });
     }
 
     #[test]
     fn a_route_allow_snapshotting_false_disables_fade_forwards_snapshotting_for_that_route_only() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            fade_forwards_snapshotting_app(&mut tester, true, false);
+        test_widgets(|tester| {
+            fade_forwards_snapshotting_app(tester, true, false);
 
-            let navigator = navigator(&tester);
+            let navigator = navigator(tester);
             navigator.push_named(&mut tester.cell.borrow_mut(), "/2", None);
-            tester.pump(Duration::ZERO);
-            tester.pump(A_TENTH_OF_THE_TRANSITION);
-            assert!(is_snapshotting(&tester, "Page 1"));
-            assert!(!is_snapshotting(&tester, "Page 2"));
+            tester.pump();
+            tester.pump_by(A_TENTH_OF_THE_TRANSITION);
+            assert!(is_snapshotting(tester, "Page 1"));
+            assert!(!is_snapshotting(tester, "Page 2"));
 
             tester.pump_and_settle();
         });
@@ -3172,26 +3137,25 @@ mod tests {
 
     #[test]
     fn fade_forwards_allow_snapshotting_false_disables_snapshotting_for_all_routes() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            fade_forwards_snapshotting_app(&mut tester, false, true);
+        test_widgets(|tester| {
+            fade_forwards_snapshotting_app(tester, false, true);
 
             // Push.
-            let navigator = navigator(&tester);
+            let navigator = navigator(tester);
             navigator.push_named(&mut tester.cell.borrow_mut(), "/2", None);
-            tester.pump(Duration::ZERO);
-            tester.pump(A_TENTH_OF_THE_TRANSITION);
-            assert!(!is_snapshotting(&tester, "Page 1"));
-            assert!(!is_snapshotting(&tester, "Page 2"));
+            tester.pump();
+            tester.pump_by(A_TENTH_OF_THE_TRANSITION);
+            assert!(!is_snapshotting(tester, "Page 1"));
+            assert!(!is_snapshotting(tester, "Page 2"));
 
             tester.pump_and_settle();
 
             // Pop.
             navigator.pop(&mut tester.cell.borrow_mut(), None);
-            tester.pump(Duration::ZERO);
-            tester.pump(A_TENTH_OF_THE_TRANSITION);
-            assert!(!is_snapshotting(&tester, "Page 1"));
-            assert!(!is_snapshotting(&tester, "Page 2"));
+            tester.pump();
+            tester.pump_by(A_TENTH_OF_THE_TRANSITION);
+            assert!(!is_snapshotting(tester, "Page 1"));
+            assert!(!is_snapshotting(tester, "Page 2"));
 
             tester.pump_and_settle();
         });
@@ -3223,65 +3187,72 @@ mod tests {
 
     #[test]
     fn the_zoom_painters_compare_their_animation_values_to_repaint() {
-        let cell = crate::test_support::test_cell();
-        let mut app = cell.borrow_mut();
-        let controller = AnimationController::new(
-            &mut app,
-            None,
-            Some(Duration::from_millis(100)),
-            None,
-            0.0,
-            1.0,
-            AnimationBehavior::Normal,
-            TestVSync,
-        );
-        let animation = controller.erase::<AnyAnimation<f64>>();
-        let complete = k_always_complete_animation(&mut app);
-        let first = ZoomExitTransitionPainter::new(
-            &mut app,
-            false,
-            animation.clone(),
-            complete.clone(),
-            animation.clone(),
-        );
-        let second = ZoomExitTransitionPainter::new(
-            &mut app,
-            false,
-            animation.clone(),
-            complete.clone(),
-            animation.clone(),
-        );
-        assert!(!second.should_repaint(&app, first.erase::<AnySnapshotPainter>().handle()));
-        let reversed =
-            ZoomExitTransitionPainter::new(&mut app, true, animation.clone(), complete, animation);
-        assert!(reversed.should_repaint(&app, first.erase::<AnySnapshotPainter>().handle()));
-    }
-
-    #[test]
-    fn a_zoom_enter_transition_that_flips_its_direction_repaints_with_a_new_painter() {
-        let mut tester = tester_on(TargetPlatform::Android);
-        let animation = {
+        test_widgets(|tester| {
             let mut app = tester.cell.borrow_mut();
-            AnimationController::new(
+            let controller = AnimationController::new(
                 &mut app,
                 None,
                 Some(Duration::from_millis(100)),
                 None,
-                0.5,
+                0.0,
                 1.0,
                 AnimationBehavior::Normal,
                 TestVSync,
-            )
-            .into_erased::<AnyAnimation<f64>>()
-        };
-        let transition = |reverse| ZoomEnterTransition {
-            animation: animation.clone(),
-            child: Some(SizedBox::new().width(10.0).height(10.0).into_widget()),
-            allow_snapshotting: true,
-            reverse,
-            background_color: Color::from_argb(0xFF, 0, 0, 0),
-        };
-        tester.pump_widget(transition(false).into_widget());
-        tester.pump_widget(transition(true).into_widget());
+            );
+            let animation = controller.erase::<AnyAnimation<f64>>();
+            let complete = k_always_complete_animation(&mut app);
+            let first = ZoomExitTransitionPainter::new(
+                &mut app,
+                false,
+                animation.clone(),
+                complete.clone(),
+                animation.clone(),
+            );
+            let second = ZoomExitTransitionPainter::new(
+                &mut app,
+                false,
+                animation.clone(),
+                complete.clone(),
+                animation.clone(),
+            );
+            assert!(!second.should_repaint(&app, first.erase::<AnySnapshotPainter>().handle()));
+            let reversed = ZoomExitTransitionPainter::new(
+                &mut app,
+                true,
+                animation.clone(),
+                complete,
+                animation,
+            );
+            assert!(reversed.should_repaint(&app, first.erase::<AnySnapshotPainter>().handle()));
+        });
+    }
+
+    #[test]
+    fn a_zoom_enter_transition_that_flips_its_direction_repaints_with_a_new_painter() {
+        test_widgets(|tester| {
+            let animation = {
+                let mut app = tester.cell.borrow_mut();
+                AnimationController::new(
+                    &mut app,
+                    None,
+                    Some(Duration::from_millis(100)),
+                    None,
+                    0.5,
+                    1.0,
+                    AnimationBehavior::Normal,
+                    TestVSync,
+                )
+                .into_erased::<AnyAnimation<f64>>()
+            };
+            let transition = |reverse| ZoomEnterTransition {
+                animation: animation.clone(),
+                child: Some(SizedBox::new().width(10.0).height(10.0).into_widget()),
+                allow_snapshotting: true,
+                reverse,
+                background_color: Color::from_argb(0xFF, 0, 0, 0),
+            };
+            tester.pump_widget(transition(false).into_widget());
+            tester.pump_widget(transition(true).into_widget());
+        });
     }
 }

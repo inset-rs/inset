@@ -71,17 +71,10 @@ impl LeafRenderObjectWidget for VideoFrameView {}
 
 #[cfg(test)]
 mod tests {
-    use std::rc::Rc;
-    use std::time::Duration;
-
-    use waft_embedder::{Layer, Rect, TargetPlatform, VideoFrame};
-    use waft_foundation::AppCell;
-    use waft_test::{TestPlatform, TestView};
+    use waft_embedder::{Layer, Rect, VideoFrame};
 
     use super::*;
-    use crate::binding::run_app;
-    use crate::framework::IntoWidget;
-    use crate::test_harness::pump_every_view;
+    use crate::testing::test_widgets;
 
     /// A reader with no frame yet.
     struct NoFrames;
@@ -96,40 +89,32 @@ mod tests {
     /// to take the frame from as it draws.
     #[test]
     fn a_video_frame_view_puts_its_reader_in_the_scene_at_its_box() {
-        let view = Rc::new(TestView::new(800.0, 600.0));
-        let platform = TestPlatform::new()
-            .on(TargetPlatform::MacOS)
-            .with_view(Rc::clone(&view) as waft_embedder::ViewRef);
-        let cell = AppCell::with_platform(Rc::new(platform));
-        let reader: Arc<dyn VideoFrameReader> = Arc::new(NoFrames);
-        run_app(
-            &mut cell.borrow_mut(),
-            crate::Center::new()
-                .child(
+        test_widgets(|tester| {
+            let reader: Arc<dyn VideoFrameReader> = Arc::new(NoFrames);
+            tester.pump_widget(
+                crate::Center::new().child(
                     crate::SizedBox::new()
                         .width(320.0)
                         .height(180.0)
                         .child(VideoFrameView::new(Arc::clone(&reader))),
-                )
-                .into_widget(),
-        );
-        cell.elapse(Duration::ZERO);
-        pump_every_view(&mut cell.borrow_mut(), Duration::ZERO);
+                ),
+            );
 
-        let scene = view.last_scene().expect("a frame was presented");
-        let shown = std::cell::RefCell::new(Vec::new());
-        waft_embedder::slices(&scene, |asked_for| {
-            shown.borrow_mut().push(Arc::clone(asked_for));
-            None
+            let scene = tester.view().last_scene().expect("a frame was presented");
+            let shown = std::cell::RefCell::new(Vec::new());
+            waft_embedder::slices(&scene, |asked_for| {
+                shown.borrow_mut().push(Arc::clone(asked_for));
+                None
+            });
+            let shown = shown.into_inner();
+            assert_eq!(shown.len(), 1);
+            assert!(Arc::ptr_eq(&shown[0], &reader));
+            let video = find_video_frames(&scene.root.children).expect("the reader's layer");
+            assert_eq!(
+                video.rect.size(),
+                Rect::from_ltwh(0.0, 0.0, 320.0, 180.0).size()
+            );
         });
-        let shown = shown.into_inner();
-        assert_eq!(shown.len(), 1);
-        assert!(Arc::ptr_eq(&shown[0], &reader));
-        let video = find_video_frames(&scene.root.children).expect("the reader's layer");
-        assert_eq!(
-            video.rect.size(),
-            Rect::from_ltwh(0.0, 0.0, 320.0, 180.0).size()
-        );
     }
 
     fn find_video_frames(layers: &[Layer]) -> Option<waft_embedder::VideoLayer> {

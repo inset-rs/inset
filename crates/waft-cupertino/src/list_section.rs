@@ -573,7 +573,6 @@ impl StatelessWidget for CupertinoListSection {
 mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
-    use waft_foundation::AppCell;
 
     use waft_embedder::{Offset, TextDirection};
     use waft_rendering::{
@@ -582,8 +581,13 @@ mod tests {
     };
     use waft_widgets::{Builder, Directionality, GlobalKey};
 
+    use waft_widgets::testing::{WidgetTester, test_widgets};
+
     use super::*;
-    use crate::test_support::{build, test_cell};
+    use crate::test_support::{assert_near, assert_offset_near};
+
+    /// A divider's thickness: one device pixel at the tester's 3.0.
+    const HAIRLINE: f64 = 1.0 / 3.0;
 
     fn key_of(key: &GlobalKey) -> KeyRef {
         key.clone().into()
@@ -625,11 +629,8 @@ mod tests {
             .expect("the section has been laid out")
     }
 
-    fn mount<K>(cell: &AppCell, section: impl IntoWidget<K>) {
-        build(
-            cell,
-            Directionality::new(TextDirection::Ltr, section).into_widget(),
-        );
+    fn mount<K>(tester: &mut WidgetTester, section: impl IntoWidget<K>) {
+        tester.pump_widget(Directionality::new(TextDirection::Ltr, section));
     }
 
     /// Records the text style in force where the section places a slot.
@@ -644,150 +645,147 @@ mod tests {
 
     #[test]
     fn a_base_section_stacks_its_top_margin_header_dividers_and_footer() {
-        let cell = test_cell();
-        let (section_key, header, first, second, footer) = (
-            GlobalKey::new(),
-            GlobalKey::new(),
-            GlobalKey::new(),
-            GlobalKey::new(),
-            GlobalKey::new(),
-        );
-        mount(
-            &cell,
-            CupertinoListSection::new()
-                .key(key_of(&section_key))
-                .header(slot(&header, 50.0, 10.0))
-                .footer(slot(&footer, 50.0, 10.0))
-                .children([
-                    slot(&first, 50.0, 40.0).into_widget(),
-                    slot(&second, 50.0, 40.0).into_widget(),
-                ]),
-        );
-        let mut app = cell.borrow_mut();
+        test_widgets(|tester| {
+            let (section_key, header, first, second, footer) = (
+                GlobalKey::new(),
+                GlobalKey::new(),
+                GlobalKey::new(),
+                GlobalKey::new(),
+                GlobalKey::new(),
+            );
+            mount(
+                tester,
+                CupertinoListSection::new()
+                    .key(key_of(&section_key))
+                    .header(slot(&header, 50.0, 10.0))
+                    .footer(slot(&footer, 50.0, 10.0))
+                    .children([
+                        slot(&first, 50.0, 40.0).into_widget(),
+                        slot(&second, 50.0, 40.0).into_widget(),
+                    ]),
+            );
+            let mut app = tester.cell.borrow_mut();
 
-        assert_eq!(
-            offset_of(&mut app, &header),
-            Offset::new(20.0, 22.0),
-            "the top margin, then the header's start margin"
-        );
-        assert_eq!(
-            offset_of(&mut app, &first),
-            Offset::new(175.0, 38.5),
-            "the header margin's 6 below it, then the long divider at a 2x device pixel"
-        );
-        assert_eq!(
-            offset_of(&mut app, &second).dy(),
-            79.0,
-            "the first row and the short divider between them"
-        );
-        assert_eq!(
-            offset_of(&mut app, &footer),
-            Offset::new(20.0, 127.5),
-            "the closing long divider and the rows' bottom margin"
-        );
+            assert_eq!(
+                offset_of(&mut app, &header),
+                Offset::new(20.0, 22.0),
+                "the top margin, then the header's start margin"
+            );
+            // The header margin's 6 below it, then the long divider, a device pixel at 3.0.
+            assert_offset_near(
+                offset_of(&mut app, &first),
+                Offset::new(375.0, 38.0 + HAIRLINE),
+            );
+            // The first row and the short divider between them.
+            assert_near(offset_of(&mut app, &second).dy(), 78.0 + 2.0 * HAIRLINE);
+            // The closing long divider and the rows' bottom margin.
+            assert_offset_near(offset_of(&mut app, &footer), Offset::new(20.0, 127.0));
 
-        let section = root(&mut app, &section_key);
-        assert!(
-            find::<RenderClipRSuperellipse>(&app, section).is_none(),
-            "the base section does not clip"
-        );
+            let section = root(&mut app, &section_key);
+            assert!(
+                find::<RenderClipRSuperellipse>(&app, section).is_none(),
+                "the base section does not clip"
+            );
+        });
     }
 
     #[test]
     fn an_inset_grouped_section_clips_its_rows_and_drops_the_long_dividers() {
-        let cell = test_cell();
-        let (section_key, first, second) = (GlobalKey::new(), GlobalKey::new(), GlobalKey::new());
-        mount(
-            &cell,
-            CupertinoListSection::inset_grouped()
-                .key(key_of(&section_key))
-                .children([
-                    slot(&first, 50.0, 40.0).into_widget(),
-                    slot(&second, 50.0, 40.0).into_widget(),
-                ]),
-        );
-        let mut app = cell.borrow_mut();
+        test_widgets(|tester| {
+            let (section_key, first, second) =
+                (GlobalKey::new(), GlobalKey::new(), GlobalKey::new());
+            mount(
+                tester,
+                CupertinoListSection::inset_grouped()
+                    .key(key_of(&section_key))
+                    .children([
+                        slot(&first, 50.0, 40.0).into_widget(),
+                        slot(&second, 50.0, 40.0).into_widget(),
+                    ]),
+            );
+            let mut app = tester.cell.borrow_mut();
 
-        assert_eq!(
-            offset_of(&mut app, &first).dy(),
-            20.0,
-            "no top margin and no long divider, only the rows' own margin"
-        );
-        assert_eq!(
-            offset_of(&mut app, &second).dy(),
-            60.5,
-            "one short divider between the rows"
-        );
+            assert_eq!(
+                offset_of(&mut app, &first).dy(),
+                20.0,
+                "no top margin and no long divider, only the rows' own margin"
+            );
+            // One short divider between the rows.
+            assert_near(offset_of(&mut app, &second).dy(), 60.0 + HAIRLINE);
 
-        let section = root(&mut app, &section_key);
-        let clip = find::<RenderClipRSuperellipse>(&app, section).expect("the rows are clipped");
-        assert_eq!(clip.clip_behavior(&app), Clip::HardEdge);
-        assert_eq!(clip.size(&app).width(), 360.0, "inset by the rows' margin");
+            let section = root(&mut app, &section_key);
+            let clip =
+                find::<RenderClipRSuperellipse>(&app, section).expect("the rows are clipped");
+            assert_eq!(clip.clip_behavior(&app), Clip::HardEdge);
+            assert_eq!(clip.size(&app).width(), 760.0, "inset by the rows' margin");
+        });
     }
 
     #[test]
     fn a_base_section_styles_its_header_and_footer_in_the_header_footer_color() {
-        let cell = test_cell();
-        let seen = Rc::new(RefCell::new(Vec::new()));
-        let resolved = Rc::new(RefCell::new(None));
-        mount(
-            &cell,
-            CupertinoListSection::new()
-                .header(probe(&seen))
-                .footer(probe(&seen))
-                .children([Builder::new({
-                    let resolved = Rc::clone(&resolved);
-                    move |app, context| {
-                        *resolved.borrow_mut() = Some(CupertinoDynamicColor::resolve(
-                            &K_HEADER_FOOTER_COLOR,
-                            app,
-                            context,
-                        ));
-                        SizedBox::shrink().into_widget()
-                    }
-                })
-                .into_widget()]),
-        );
+        test_widgets(|tester| {
+            let seen = Rc::new(RefCell::new(Vec::new()));
+            let resolved = Rc::new(RefCell::new(None));
+            mount(
+                tester,
+                CupertinoListSection::new()
+                    .header(probe(&seen))
+                    .footer(probe(&seen))
+                    .children([Builder::new({
+                        let resolved = Rc::clone(&resolved);
+                        move |app, context| {
+                            *resolved.borrow_mut() = Some(CupertinoDynamicColor::resolve(
+                                &K_HEADER_FOOTER_COLOR,
+                                app,
+                                context,
+                            ));
+                            SizedBox::shrink().into_widget()
+                        }
+                    })
+                    .into_widget()]),
+            );
 
-        let seen = seen.borrow();
-        assert_eq!(seen.len(), 2, "header and footer");
-        for style in seen.iter() {
-            assert_eq!(style.font_size, Some(13.0));
-            assert_eq!(style.color, resolved.borrow().clone());
-        }
+            let seen = seen.borrow();
+            assert_eq!(seen.len(), 2, "header and footer");
+            for style in seen.iter() {
+                assert_eq!(style.font_size, Some(13.0));
+                assert_eq!(style.color, resolved.borrow().clone());
+            }
+        });
     }
 
     #[test]
     fn an_inset_grouped_header_is_bold_and_re_picks_the_rows_margin() {
-        let cell = test_cell();
-        let seen = Rc::new(RefCell::new(Vec::new()));
-        let with_header = CupertinoListSection::inset_grouped().header(probe(&seen));
-        assert_eq!(
-            with_header.margin,
-            K_DEFAULT_INSET_GROUPED_ROWS_MARGIN_WITH_HEADER
-        );
-        assert_eq!(
-            CupertinoListSection::inset_grouped().margin,
-            K_DEFAULT_INSET_GROUPED_ROWS_MARGIN,
-            "a section without a header keeps the plain margin"
-        );
+        test_widgets(|tester| {
+            let seen = Rc::new(RefCell::new(Vec::new()));
+            let with_header = CupertinoListSection::inset_grouped().header(probe(&seen));
+            assert_eq!(
+                with_header.margin,
+                K_DEFAULT_INSET_GROUPED_ROWS_MARGIN_WITH_HEADER
+            );
+            assert_eq!(
+                CupertinoListSection::inset_grouped().margin,
+                K_DEFAULT_INSET_GROUPED_ROWS_MARGIN,
+                "a section without a header keeps the plain margin"
+            );
 
-        mount(
-            &cell,
-            with_header
-                .footer(probe(&seen))
-                .children([SizedBox::new().width(50.0).height(40.0).into_widget()]),
-        );
+            mount(
+                tester,
+                with_header
+                    .footer(probe(&seen))
+                    .children([SizedBox::new().width(50.0).height(40.0).into_widget()]),
+            );
 
-        let seen = seen.borrow();
-        let (header, footer) = (&seen[0], &seen[1]);
-        assert_eq!(header.font_size, Some(20.0));
-        assert_eq!(header.font_weight, Some(FontWeight::BOLD));
-        assert_eq!(
-            footer.font_size,
-            Some(17.0),
-            "the footer keeps the theme's text style"
-        );
+            let seen = seen.borrow();
+            let (header, footer) = (&seen[0], &seen[1]);
+            assert_eq!(header.font_size, Some(20.0));
+            assert_eq!(header.font_weight, Some(FontWeight::BOLD));
+            assert_eq!(
+                footer.font_size,
+                Some(17.0),
+                "the footer keeps the theme's text style"
+            );
+        });
     }
 
     #[test]

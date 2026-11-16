@@ -2441,21 +2441,18 @@ impl StatelessWidget for BottomSheetGestureDetector {
 mod tests {
     use std::cell::{Cell, RefCell};
     use waft_painting::ShapeBorder;
+    use waft_widgets::Text;
 
-    use waft_embedder::{Rect, TargetPlatform};
+    use waft_embedder::Rect;
     use waft_widgets::{AnyElement, Notification, RouteSettings};
+
+    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
 
     use super::*;
     use crate::scaffold::ScaffoldState;
-    use crate::test_support::{AhemText, WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::material_app;
     use crate::theme_data::ThemeData;
     use waft_test::{assert_no_new_objects, object_snapshot};
-
-    fn tester() -> WidgetTester {
-        let tester = WidgetTester::on(TargetPlatform::Android);
-        tester.install_fonts();
-        tester
-    }
 
     fn m3(tester: &WidgetTester) -> ThemeData {
         ThemeData::new(&tester.cell.borrow())
@@ -2467,9 +2464,9 @@ mod tests {
             .build(&tester.cell.borrow())
     }
 
-    /// Dart's `const Text('BottomSheet')` as the tests lay it out in Ahem.
+    /// Dart's `const Text('BottomSheet')` as the tests lay it out.
     fn text(text: &'static str) -> WidgetRef {
-        AhemText::new(text).into_widget()
+        Text::new(text).into_widget()
     }
 
     fn sheet_builder(content: &'static str) -> WidgetBuilder {
@@ -2653,7 +2650,7 @@ mod tests {
     }
 
     fn found(tester: &WidgetTester, content: &str) -> usize {
-        tester.find_ahem_text(content).len()
+        tester.find_text(content).len()
     }
 
     fn only(found: Vec<AnyElement>) -> AnyElement {
@@ -2662,7 +2659,7 @@ mod tests {
     }
 
     fn rect_of_text(tester: &WidgetTester, content: &str) -> Rect {
-        tester.global_rect(tester.render_box_of(only(tester.find_ahem_text(content))))
+        tester.global_rect(tester.render_box_of(only(tester.find_text(content))))
     }
 
     fn center_of_text(tester: &WidgetTester, content: &str) -> Offset {
@@ -2685,9 +2682,9 @@ mod tests {
     /// `checkNonLinearAnimation`.
     fn check_non_linear_animation(tester: &mut WidgetTester) {
         let first_position = center_of_text(tester, "BottomSheet");
-        tester.pump(Duration::from_millis(30));
+        tester.pump_by(Duration::from_millis(30));
         let second_position = center_of_text(tester, "BottomSheet");
-        tester.pump(Duration::from_millis(30));
+        tester.pump_by(Duration::from_millis(30));
         let third_position = center_of_text(tester, "BottomSheet");
 
         let dy_delta1 = second_position.dy() - first_position.dy();
@@ -2699,20 +2696,19 @@ mod tests {
 
     /// Dart's 'Swiping down a BottomSheet should dismiss it by default', 'when enableDrag is
     /// false' and 'when enableDrag is true'.
-    fn swipe_persistent(enable_drag: Option<bool>, dismissed: bool) {
-        let mut tester = tester();
+    fn swipe_persistent(tester: &mut WidgetTester, enable_drag: Option<bool>, dismissed: bool) {
         let scaffold_key = GlobalKey::new();
-        tester.pump_widget(app_with_scaffold(m3(&tester), &scaffold_key));
-        tester.pump(Duration::ZERO);
-        assert_eq!(found(&tester, "BottomSheet"), 0);
+        tester.pump_widget(app_with_scaffold(m3(tester), &scaffold_key));
+        tester.pump();
+        assert_eq!(found(tester, "BottomSheet"), 0);
 
-        let scaffold = scaffold_state(&tester, &scaffold_key);
+        let scaffold = scaffold_state(tester, &scaffold_key);
         let controller = Persistent {
             enable_drag,
             ..Persistent::default()
         }
         .show(
-            &tester,
+            tester,
             scaffold,
             Rc::new(|_app, _context| {
                 SizedBox::new()
@@ -2721,54 +2717,53 @@ mod tests {
                     .into_widget()
             }),
         );
-        let then_called = flag_when_complete(&tester, controller.closed());
+        let then_called = flag_when_complete(tester, controller.closed());
 
         tester.pump_and_settle();
         assert!(!then_called.get());
-        assert_eq!(found(&tester, "BottomSheet"), 1);
+        assert_eq!(found(tester, "BottomSheet"), 1);
 
         // Swipe the bottom sheet to dismiss it.
-        drag_text(&mut tester, "BottomSheet", Offset::new(0.0, 150.0));
+        drag_text(tester, "BottomSheet", Offset::new(0.0, 150.0));
         tester.pump_and_settle(); // Bottom sheet dismiss animation.
         assert_eq!(then_called.get(), dismissed);
-        assert_eq!(found(&tester, "BottomSheet"), if dismissed { 0 } else { 1 });
+        assert_eq!(found(tester, "BottomSheet"), if dismissed { 0 } else { 1 });
     }
 
     #[test]
     fn swiping_down_a_bottom_sheet_dismisses_it_by_default() {
-        with_main_thread_stack(|| swipe_persistent(None, true));
+        test_widgets(|tester| swipe_persistent(tester, None, true));
     }
 
     #[test]
     fn swiping_down_a_bottom_sheet_does_not_dismiss_it_when_enable_drag_is_false() {
-        with_main_thread_stack(|| swipe_persistent(Some(false), false));
+        test_widgets(|tester| swipe_persistent(tester, Some(false), false));
     }
 
     #[test]
     fn swiping_down_a_bottom_sheet_dismisses_it_when_enable_drag_is_true() {
-        with_main_thread_stack(|| swipe_persistent(Some(true), true));
+        test_widgets(|tester| swipe_persistent(tester, Some(true), true));
     }
 
     /// Dart's 'Tapping on a BottomSheet should not trigger a rebuild when enableDrag is true'.
     #[test]
     fn tapping_a_draggable_bottom_sheet_does_not_rebuild_it() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let scaffold_key = GlobalKey::new();
-            tester.pump_widget(app_with_scaffold(m3(&tester), &scaffold_key));
-            tester.pump(Duration::ZERO);
+            tester.pump_widget(app_with_scaffold(m3(tester), &scaffold_key));
+            tester.pump();
             let build_count = Rc::new(Cell::new(0));
             assert_eq!(build_count.get(), 0);
-            assert_eq!(found(&tester, "BottomSheet"), 0);
+            assert_eq!(found(tester, "BottomSheet"), 0);
 
-            let scaffold = scaffold_state(&tester, &scaffold_key);
+            let scaffold = scaffold_state(tester, &scaffold_key);
             let count = Rc::clone(&build_count);
             Persistent {
                 enable_drag: Some(true),
                 ..Persistent::default()
             }
             .show(
-                &tester,
+                tester,
                 scaffold,
                 Rc::new(move |_app, _context| {
                     count.set(count.get() + 1);
@@ -2781,24 +2776,23 @@ mod tests {
 
             tester.pump_and_settle();
             assert_eq!(build_count.get(), 1);
-            assert_eq!(found(&tester, "BottomSheet"), 1);
+            assert_eq!(found(tester, "BottomSheet"), 1);
 
             // Tap on bottom sheet should not trigger a rebuild.
-            let center = center_of_text(&tester, "BottomSheet");
+            let center = center_of_text(tester, "BottomSheet");
             tester.tap(center, 1);
             tester.pump_and_settle();
             assert_eq!(build_count.get(), 1);
-            assert_eq!(found(&tester, "BottomSheet"), 1);
+            assert_eq!(found(tester, "BottomSheet"), 1);
         });
     }
 
     /// Dart's first 'Modal BottomSheet builder should only be called once'.
     #[test]
     fn a_modal_bottom_sheet_builder_is_called_once() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let saved = Saved::default();
-            tester.pump_widget(app_saving_context(&tester, &saved));
+            tester.pump_widget(app_saving_context(tester, &saved));
 
             let num_builder_calls = Rc::new(Cell::new(0));
             let calls = Rc::clone(&num_builder_calls);
@@ -2807,7 +2801,7 @@ mod tests {
                 ..Modal::default()
             }
             .show(
-                &tester,
+                tester,
                 saved.get(),
                 Rc::new(move |_app, _context| {
                     calls.set(calls.get() + 1);
@@ -2819,7 +2813,7 @@ mod tests {
             assert_eq!(num_builder_calls.get(), 1);
 
             // Swipe the bottom sheet to dismiss it.
-            drag_text(&mut tester, "BottomSheet", Offset::new(0.0, 150.0));
+            drag_text(tester, "BottomSheet", Offset::new(0.0, 150.0));
             tester.pump_and_settle(); // Bottom sheet dismiss animation.
             assert_eq!(num_builder_calls.get(), 1);
         });
@@ -2828,47 +2822,45 @@ mod tests {
     /// Dart's 'Tapping on a modal BottomSheet should not dismiss it'.
     #[test]
     fn tapping_on_a_modal_bottom_sheet_does_not_dismiss_it() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let saved = Saved::default();
-            tester.pump_widget(app_saving_context(&tester, &saved));
-            tester.pump(Duration::ZERO);
-            assert_eq!(found(&tester, "BottomSheet"), 0);
+            tester.pump_widget(app_saving_context(tester, &saved));
+            tester.pump();
+            assert_eq!(found(tester, "BottomSheet"), 0);
 
-            let future = Modal::default().show(&tester, saved.get(), sheet_builder("BottomSheet"));
-            let then_called = flag_when_complete(&tester, future);
+            let future = Modal::default().show(tester, saved.get(), sheet_builder("BottomSheet"));
+            let then_called = flag_when_complete(tester, future);
 
             tester.pump_and_settle();
-            assert_eq!(found(&tester, "BottomSheet"), 1);
+            assert_eq!(found(tester, "BottomSheet"), 1);
             assert!(!then_called.get());
 
             // Tap on the bottom sheet itself, it should not be dismissed
-            let center = center_of_text(&tester, "BottomSheet");
+            let center = center_of_text(tester, "BottomSheet");
             tester.tap(center, 1);
             tester.pump_and_settle();
-            assert_eq!(found(&tester, "BottomSheet"), 1);
+            assert_eq!(found(tester, "BottomSheet"), 1);
             assert!(!then_called.get());
         });
     }
 
     /// Dart's 'Tapping outside a modal BottomSheet should dismiss it by default', 'when
     /// isDismissible=true' and 'should not dismiss it when isDismissible=false'.
-    fn tap_outside_modal(is_dismissible: bool) {
-        let mut tester = tester();
+    fn tap_outside_modal(tester: &mut WidgetTester, is_dismissible: bool) {
         let saved = Saved::default();
-        tester.pump_widget(app_saving_context(&tester, &saved));
-        tester.pump(Duration::ZERO);
-        assert_eq!(found(&tester, "BottomSheet"), 0);
+        tester.pump_widget(app_saving_context(tester, &saved));
+        tester.pump();
+        assert_eq!(found(tester, "BottomSheet"), 0);
 
         let future = Modal {
             is_dismissible,
             ..Modal::default()
         }
-        .show(&tester, saved.get(), sheet_builder("BottomSheet"));
-        let then_called = flag_when_complete(&tester, future);
+        .show(tester, saved.get(), sheet_builder("BottomSheet"));
+        let then_called = flag_when_complete(tester, future);
 
         tester.pump_and_settle();
-        assert_eq!(found(&tester, "BottomSheet"), 1);
+        assert_eq!(found(tester, "BottomSheet"), 1);
         assert!(!then_called.get());
 
         // Tap above the bottom sheet to dismiss it.
@@ -2876,106 +2868,103 @@ mod tests {
         tester.pump_and_settle(); // Bottom sheet dismiss animation.
         assert_eq!(then_called.get(), is_dismissible);
         assert_eq!(
-            found(&tester, "BottomSheet"),
+            found(tester, "BottomSheet"),
             if is_dismissible { 0 } else { 1 }
         );
     }
 
     #[test]
     fn tapping_outside_a_modal_bottom_sheet_dismisses_it_by_default() {
-        with_main_thread_stack(|| tap_outside_modal(Modal::default().is_dismissible));
+        test_widgets(|tester| tap_outside_modal(tester, Modal::default().is_dismissible));
     }
 
     #[test]
     fn tapping_outside_a_modal_bottom_sheet_dismisses_it_when_is_dismissible_is_true() {
-        with_main_thread_stack(|| tap_outside_modal(true));
+        test_widgets(|tester| tap_outside_modal(tester, true));
     }
 
     #[test]
     fn tapping_outside_a_modal_bottom_sheet_does_not_dismiss_it_when_is_dismissible_is_false() {
-        with_main_thread_stack(|| tap_outside_modal(false));
+        test_widgets(|tester| tap_outside_modal(tester, false));
     }
 
     /// Dart's 'Verify that the BottomSheet animates non-linearly'.
     #[test]
     fn the_bottom_sheet_animates_non_linearly() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let saved = Saved::default();
-            tester.pump_widget(app_saving_context(&tester, &saved));
-            tester.pump(Duration::ZERO);
-            assert_eq!(found(&tester, "BottomSheet"), 0);
+            tester.pump_widget(app_saving_context(tester, &saved));
+            tester.pump();
+            assert_eq!(found(tester, "BottomSheet"), 0);
 
-            Modal::default().show(&tester, saved.get(), sheet_builder("BottomSheet"));
-            tester.pump(Duration::ZERO);
+            Modal::default().show(tester, saved.get(), sheet_builder("BottomSheet"));
+            tester.pump();
 
-            check_non_linear_animation(&mut tester);
+            check_non_linear_animation(tester);
             tester.pump_and_settle();
 
             // Tap above the bottom sheet to dismiss it.
             tester.tap(Offset::new(20.0, 20.0), 1);
-            tester.pump(Duration::ZERO);
-            check_non_linear_animation(&mut tester);
+            tester.pump();
+            check_non_linear_animation(tester);
             tester.pump_and_settle(); // Bottom sheet dismiss animation.
-            assert_eq!(found(&tester, "BottomSheet"), 0);
+            assert_eq!(found(tester, "BottomSheet"), 0);
         });
     }
 
     /// Dart's 'Swiping down a modal BottomSheet should dismiss it by default', 'should not
     /// dismiss it when enableDrag is false' and 'should dismiss it when enableDrag is true'.
-    fn swipe_modal(enable_drag: bool, dismissed: bool) {
-        let mut tester = tester();
+    fn swipe_modal(tester: &mut WidgetTester, enable_drag: bool, dismissed: bool) {
         let saved = Saved::default();
-        tester.pump_widget(app_saving_context(&tester, &saved));
-        tester.pump(Duration::ZERO);
-        assert_eq!(found(&tester, "BottomSheet"), 0);
+        tester.pump_widget(app_saving_context(tester, &saved));
+        tester.pump();
+        assert_eq!(found(tester, "BottomSheet"), 0);
 
         let future = Modal {
             is_dismissible: false,
             enable_drag,
             ..Modal::default()
         }
-        .show(&tester, saved.get(), sheet_builder("BottomSheet"));
-        let then_called = flag_when_complete(&tester, future);
+        .show(tester, saved.get(), sheet_builder("BottomSheet"));
+        let then_called = flag_when_complete(tester, future);
 
         tester.pump_and_settle();
-        assert_eq!(found(&tester, "BottomSheet"), 1);
+        assert_eq!(found(tester, "BottomSheet"), 1);
         assert!(!then_called.get());
 
         // Swipe the bottom sheet to dismiss it.
-        drag_text(&mut tester, "BottomSheet", Offset::new(0.0, 150.0));
+        drag_text(tester, "BottomSheet", Offset::new(0.0, 150.0));
         tester.pump_and_settle(); // Bottom sheet dismiss animation.
         assert_eq!(then_called.get(), dismissed);
-        assert_eq!(found(&tester, "BottomSheet"), if dismissed { 0 } else { 1 });
+        assert_eq!(found(tester, "BottomSheet"), if dismissed { 0 } else { 1 });
     }
 
     #[test]
     fn swiping_down_a_modal_bottom_sheet_dismisses_it_by_default() {
-        with_main_thread_stack(|| swipe_modal(Modal::default().enable_drag, true));
+        test_widgets(|tester| swipe_modal(tester, Modal::default().enable_drag, true));
     }
 
     #[test]
     fn swiping_down_a_modal_bottom_sheet_does_not_dismiss_it_when_enable_drag_is_false() {
-        with_main_thread_stack(|| swipe_modal(false, false));
+        test_widgets(|tester| swipe_modal(tester, false, false));
     }
 
     #[test]
     fn swiping_down_a_modal_bottom_sheet_dismisses_it_when_enable_drag_is_true() {
-        with_main_thread_stack(|| swipe_modal(true, true));
+        test_widgets(|tester| swipe_modal(tester, true, true));
     }
 
     /// Dart's 'Verify that a downwards fling dismisses a persistent BottomSheet'.
     #[test]
     fn a_downwards_fling_dismisses_a_persistent_bottom_sheet() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let scaffold_key = GlobalKey::new();
-            tester.pump_widget(app_with_scaffold(m3(&tester), &scaffold_key));
-            assert_eq!(found(&tester, "BottomSheet"), 0);
+            tester.pump_widget(app_with_scaffold(m3(tester), &scaffold_key));
+            assert_eq!(found(tester, "BottomSheet"), 0);
 
-            let scaffold = scaffold_state(&tester, &scaffold_key);
+            let scaffold = scaffold_state(tester, &scaffold_key);
             let controller = Persistent::default().show(
-                &tester,
+                tester,
                 scaffold,
                 Rc::new(|_app, _context| {
                     Container::new()
@@ -2984,55 +2973,54 @@ mod tests {
                         .into_widget()
                 }),
             );
-            let then_called = flag_when_complete(&tester, controller.closed());
+            let then_called = flag_when_complete(tester, controller.closed());
 
             assert!(!then_called.get());
-            assert_eq!(found(&tester, "BottomSheet"), 0);
+            assert_eq!(found(tester, "BottomSheet"), 0);
 
-            tester.pump(Duration::ZERO); // bottom sheet show animation starts
-
-            assert!(!then_called.get());
-            assert_eq!(found(&tester, "BottomSheet"), 1);
-
-            tester.pump(Duration::from_secs(1)); // animation done
+            tester.pump(); // bottom sheet show animation starts
 
             assert!(!then_called.get());
-            assert_eq!(found(&tester, "BottomSheet"), 1);
+            assert_eq!(found(tester, "BottomSheet"), 1);
+
+            tester.pump_by(Duration::from_secs(1)); // animation done
+
+            assert!(!then_called.get());
+            assert_eq!(found(tester, "BottomSheet"), 1);
 
             // The fling below must be such that the velocity estimation examines an
             // offset greater than the kTouchSlop. Too slow or too short a distance, and
             // it won't trigger. Also, it must not be so much that it drags the bottom
             // sheet off the screen, or we won't see it after we pump!
-            fling_text(&mut tester, "BottomSheet", Offset::new(0.0, 50.0), 2000.0);
-            tester.pump(Duration::ZERO); // drain the microtask queue (Future completion callback)
+            fling_text(tester, "BottomSheet", Offset::new(0.0, 50.0), 2000.0);
+            tester.pump(); // drain the microtask queue (Future completion callback)
 
             assert!(then_called.get());
-            assert_eq!(found(&tester, "BottomSheet"), 1);
+            assert_eq!(found(tester, "BottomSheet"), 1);
 
-            tester.pump(Duration::ZERO); // bottom sheet dismiss animation starts
-
-            assert!(then_called.get());
-            assert_eq!(found(&tester, "BottomSheet"), 1);
-
-            tester.pump(Duration::from_secs(1)); // animation done
+            tester.pump(); // bottom sheet dismiss animation starts
 
             assert!(then_called.get());
-            assert_eq!(found(&tester, "BottomSheet"), 0);
+            assert_eq!(found(tester, "BottomSheet"), 1);
+
+            tester.pump_by(Duration::from_secs(1)); // animation done
+
+            assert!(then_called.get());
+            assert_eq!(found(tester, "BottomSheet"), 0);
         });
     }
 
     /// Dart's 'Verify that dragging past the bottom dismisses a persistent BottomSheet'.
     #[test]
     fn dragging_past_the_bottom_dismisses_a_persistent_bottom_sheet() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // This is a regression test for https://github.com/flutter/flutter/issues/5528
-            let mut tester = tester();
             let scaffold_key = GlobalKey::new();
-            tester.pump_widget(app_with_scaffold(m3(&tester), &scaffold_key));
+            tester.pump_widget(app_with_scaffold(m3(tester), &scaffold_key));
 
-            let scaffold = scaffold_state(&tester, &scaffold_key);
+            let scaffold = scaffold_state(tester, &scaffold_key);
             Persistent::default().show(
-                &tester,
+                tester,
                 scaffold,
                 Rc::new(|_app, _context| {
                     Container::new()
@@ -3042,16 +3030,16 @@ mod tests {
                 }),
             );
 
-            tester.pump(Duration::ZERO); // bottom sheet show animation starts
-            tester.pump(Duration::from_secs(1)); // animation done
-            assert_eq!(found(&tester, "BottomSheet"), 1);
+            tester.pump(); // bottom sheet show animation starts
+            tester.pump_by(Duration::from_secs(1)); // animation done
+            assert_eq!(found(tester, "BottomSheet"), 1);
 
-            fling_text(&mut tester, "BottomSheet", Offset::new(0.0, 400.0), 1000.0);
-            tester.pump(Duration::ZERO); // drain the microtask queue (Future completion callback)
-            tester.pump(Duration::ZERO); // bottom sheet dismiss animation starts
-            tester.pump(Duration::from_secs(1)); // animation done
+            fling_text(tester, "BottomSheet", Offset::new(0.0, 400.0), 1000.0);
+            tester.pump(); // drain the microtask queue (Future completion callback)
+            tester.pump(); // bottom sheet dismiss animation starts
+            tester.pump_by(Duration::from_secs(1)); // animation done
 
-            assert_eq!(found(&tester, "BottomSheet"), 0);
+            assert_eq!(found(tester, "BottomSheet"), 0);
         });
     }
 
@@ -3066,35 +3054,33 @@ mod tests {
     /// Dart's 'Standard BottomSheet closes when its extent is nearly its minimum'.
     #[test]
     fn a_standard_bottom_sheet_closes_when_its_extent_is_nearly_its_minimum() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let scaffold_key = GlobalKey::new();
-            tester.pump_widget(app_with_scaffold(m3(&tester), &scaffold_key));
+            tester.pump_widget(app_with_scaffold(m3(tester), &scaffold_key));
 
             let notification_context = Saved::default();
             let saving = notification_context.clone();
-            let scaffold = scaffold_state(&tester, &scaffold_key);
+            let scaffold = scaffold_state(tester, &scaffold_key);
             Persistent::default().show(
-                &tester,
+                tester,
                 scaffold,
                 Rc::new(move |_app, _context| saving.builder(|| text("BottomSheet"))),
             );
             tester.pump_and_settle();
 
-            dispatch_nearly_minimum_extent(&tester, notification_context.get());
+            dispatch_nearly_minimum_extent(tester, notification_context.get());
             tester.pump_and_settle();
 
-            assert_eq!(found(&tester, "BottomSheet"), 0);
+            assert_eq!(found(tester, "BottomSheet"), 0);
         });
     }
 
     /// Dart's 'Modal BottomSheet closes when its extent is nearly its minimum'.
     #[test]
     fn a_modal_bottom_sheet_closes_when_its_extent_is_nearly_its_minimum() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let scaffold_key = GlobalKey::new();
-            tester.pump_widget(app_with_scaffold(m3(&tester), &scaffold_key));
+            tester.pump_widget(app_with_scaffold(m3(tester), &scaffold_key));
 
             let notification_context = Saved::default();
             let saving = notification_context.clone();
@@ -3102,31 +3088,21 @@ mod tests {
                 .current_context(&tester.cell.borrow_mut())
                 .expect("the scaffold is mounted");
             Modal::default().show(
-                &tester,
+                tester,
                 context,
                 Rc::new(move |_app, _context| saving.builder(|| text("BottomSheet"))),
             );
             tester.pump_and_settle();
 
-            dispatch_nearly_minimum_extent(&tester, notification_context.get());
+            dispatch_nearly_minimum_extent(tester, notification_context.get());
             tester.pump_and_settle();
 
-            assert_eq!(found(&tester, "BottomSheet"), 0);
+            assert_eq!(found(tester, "BottomSheet"), 0);
         });
     }
 
     /// flutter_test's `TestVSync`: vends ordinary tickers, in no view.
-    struct TestVSync;
-
-    impl waft_scheduler::TickerProvider for TestVSync {
-        fn create_ticker(
-            &self,
-            app: &mut App,
-            on_tick: waft_scheduler::TickerCallback,
-        ) -> Ref<waft_scheduler::Ticker> {
-            waft_scheduler::Ticker::new(app, on_tick, None)
-        }
-    }
+    use waft_widgets::testing::TestVSync;
 
     /// `AnimationController(vsync: const TestVSync(), duration: 2s, reverseDuration: 2s)`.
     fn two_second_controller(tester: &WidgetTester) -> Ref<AnimationController> {
@@ -3164,24 +3140,23 @@ mod tests {
     /// Dart's 'Disposing app while bottom sheet is disappearing does not crash'.
     #[test]
     fn disposing_the_app_while_a_bottom_sheet_is_disappearing_does_not_crash() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let saved = Saved::default();
-            tester.pump_widget(app_saving_context(&tester, &saved));
+            tester.pump_widget(app_saving_context(tester, &saved));
 
-            tester.pump(Duration::ZERO);
-            assert_eq!(found(&tester, "BottomSheet"), 0);
+            tester.pump();
+            assert_eq!(found(tester, "BottomSheet"), 0);
 
             // Bring up bottom sheet.
-            let future = Modal::default().show(&tester, saved.get(), sheet_builder("BottomSheet"));
-            let then_called = flag_when_complete(&tester, future);
+            let future = Modal::default().show(tester, saved.get(), sheet_builder("BottomSheet"));
+            let then_called = flag_when_complete(tester, future);
             tester.pump_and_settle();
-            assert_eq!(found(&tester, "BottomSheet"), 1);
+            assert_eq!(found(tester, "BottomSheet"), 1);
             assert!(!then_called.get());
 
             // Start closing animation of Bottom sheet.
-            pop(&tester, saved.get());
-            tester.pump(Duration::ZERO);
+            pop(tester, saved.get());
+            tester.pump();
 
             // Dispose app by replacing it with a container. This shouldn't crash.
             tester.pump_widget(Container::new().into_widget());
@@ -3191,12 +3166,11 @@ mod tests {
     /// Dart's 'Verify that accessibleNavigation has no impact on the BottomSheet animation'.
     #[test]
     fn accessible_navigation_has_no_impact_on_the_bottom_sheet_animation() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regression test for https://github.com/flutter/flutter/issues/121098
-            let mut tester = tester();
             let saved = Saved::default();
             let home = saved.builder(|| Center::new().child(text("Test")).into_widget());
-            let app = material_app(m3(&tester), home);
+            let app = material_app(m3(tester), home);
             // Dart's `MaterialApp(builder:)` wraps the navigator; a `MediaQuery` around the
             // home is what that builder's descendants see.
             let _ = app;
@@ -3214,15 +3188,15 @@ mod tests {
                 }
             })
             .into_widget();
-            tester.pump_widget(material_app(m3(&tester), home));
+            tester.pump_widget(material_app(m3(tester), home));
 
-            tester.pump(Duration::ZERO);
-            assert_eq!(found(&tester, "BottomSheet"), 0);
+            tester.pump();
+            assert_eq!(found(tester, "BottomSheet"), 0);
 
-            Modal::default().show(&tester, saved.get(), sheet_builder("BottomSheet"));
-            tester.pump(Duration::ZERO);
+            Modal::default().show(tester, saved.get(), sheet_builder("BottomSheet"));
+            tester.pump();
 
-            check_non_linear_animation(&mut tester);
+            check_non_linear_animation(tester);
             tester.pump_and_settle();
         });
     }
@@ -3267,27 +3241,26 @@ mod tests {
     /// Dart's 'modal BottomSheet has no top MediaQuery'.
     #[test]
     fn a_modal_bottom_sheet_has_no_top_media_query_padding() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let outer = Saved::default();
             let inner = Saved::default();
             tester.pump_widget(padded_navigator(&outer));
 
             let saving = inner.clone();
             Modal::default().show(
-                &tester,
+                tester,
                 outer.get(),
                 Rc::new(move |_app, context| {
                     saving.0.set(Some(context));
                     Container::new().into_widget()
                 }),
             );
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_secs(1));
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1));
 
-            assert_eq!(padding_of(&tester, outer.get()), EdgeInsets::all(50.0));
+            assert_eq!(padding_of(tester, outer.get()), EdgeInsets::all(50.0));
             assert_eq!(
-                padding_of(&tester, inner.get()),
+                padding_of(tester, inner.get()),
                 EdgeInsets::only(50.0, 0.0, 50.0, 50.0)
             );
         });
@@ -3296,8 +3269,7 @@ mod tests {
     /// Dart's 'modal BottomSheet can insert a SafeArea'.
     #[test]
     fn a_modal_bottom_sheet_can_insert_a_safe_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let outer = Saved::default();
             let inner = Saved::default();
             tester.pump_widget(padded_navigator(&outer));
@@ -3311,12 +3283,12 @@ mod tests {
             };
 
             // Without a SafeArea (useSafeArea is false by default)
-            Modal::default().show(&tester, outer.get(), inner_builder(&inner));
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_secs(1));
+            Modal::default().show(tester, outer.get(), inner_builder(&inner));
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1));
 
             // Top padding is consumed and there is no SafeArea
-            assert_eq!(padding_of(&tester, inner.get()).top, 0.0);
+            assert_eq!(padding_of(tester, inner.get()).top, 0.0);
             assert!(tester.find_by_type::<SafeArea>().is_empty());
 
             // With a SafeArea
@@ -3324,9 +3296,9 @@ mod tests {
                 use_safe_area: true,
                 ..Modal::default()
             }
-            .show(&tester, outer.get(), inner_builder(&inner));
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_secs(1));
+            .show(tester, outer.get(), inner_builder(&inner));
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1));
 
             // A SafeArea is inserted, with left / top / right true but bottom false.
             let safe_area = only(tester.find_by_type::<SafeArea>());
@@ -3340,7 +3312,7 @@ mod tests {
             // Because that SafeArea is inserted, no left / top / right padding remains
             // for `builder` to consume. Bottom padding does remain.
             assert_eq!(
-                padding_of(&tester, inner.get()),
+                padding_of(tester, inner.get()),
                 EdgeInsets::from_ltrb(0.0, 0.0, 0.0, 50.0)
             );
         });
@@ -3349,8 +3321,7 @@ mod tests {
     /// Dart's 'Verify that visual properties are passed through'.
     #[test]
     fn visual_properties_are_passed_through_to_the_modal_bottom_sheet() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let scaffold_key = GlobalKey::new();
             let color = Colors::PINK.primary();
             let elevation = 9.0;
@@ -3362,7 +3333,7 @@ mod tests {
             let clip_behavior = Clip::AntiAlias;
             let barrier_color = Colors::RED.primary();
 
-            tester.pump_widget(app_with_scaffold(m3(&tester), &scaffold_key));
+            tester.pump_widget(app_with_scaffold(m3(tester), &scaffold_key));
 
             Modal {
                 background_color: Some(color),
@@ -3373,13 +3344,13 @@ mod tests {
                 ..Modal::default()
             }
             .show(
-                &tester,
-                scaffold_context(&tester, &scaffold_key),
+                tester,
+                scaffold_context(tester, &scaffold_key),
                 sheet_builder("BottomSheet"),
             );
 
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_secs(1));
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1));
 
             let bottom_sheet = only(tester.find_by_type::<BottomSheet>());
             tester.widget(bottom_sheet, |bottom_sheet: &BottomSheet| {
@@ -3415,8 +3386,7 @@ mod tests {
     /// Dart's 'Material3 - BottomSheet uses fallback values'.
     #[test]
     fn material3_bottom_sheet_uses_fallback_values() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let surface_color = Colors::PINK.primary();
             let surface_tint_color = Colors::BLUE.primary();
             let default_shape: ShapeBorderRef =
@@ -3445,7 +3415,7 @@ mod tests {
                     .into_widget(),
             ));
 
-            let material = sheet_material(&tester);
+            let material = sheet_material(tester);
             tester.widget(material, |material: &Material| {
                 assert_eq!(material.color, Some(surface_color));
                 // Surface tint is no longer used by default.
@@ -3463,10 +3433,9 @@ mod tests {
     /// Dart's 'Material3 - BottomSheet has transparent shadow'.
     #[test]
     fn material3_bottom_sheet_has_a_transparent_shadow() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(material_app(
-                m3(&tester),
+                m3(tester),
                 Scaffold::new()
                     .body(BottomSheet::new(
                         Rc::new(|_app| {}),
@@ -3475,7 +3444,7 @@ mod tests {
                     .into_widget(),
             ));
 
-            let material = sheet_material(&tester);
+            let material = sheet_material(tester);
             tester.widget(material, |material: &Material| {
                 assert_eq!(material.shadow_color, Some(Colors::TRANSPARENT));
             });
@@ -3490,8 +3459,7 @@ mod tests {
 
     /// Dart's 'Drag handle interactive area size at minimum possible size' and 'at given
     /// dragHandleSize'.
-    fn drag_handle_size(drag_handle_size: Size, expected: Size) {
-        let mut tester = tester();
+    fn drag_handle_size(tester: &mut WidgetTester, drag_handle_size: Size, expected: Size) {
         let scaffold_key = GlobalKey::new();
         let theme = ThemeData::builder()
             .bottom_sheet_theme(BottomSheetThemeData::new().drag_handle_size(drag_handle_size))
@@ -3508,21 +3476,22 @@ mod tests {
             ..Modal::default()
         }
         .show(
-            &tester,
-            scaffold_context(&tester, &scaffold_key),
+            tester,
+            scaffold_context(tester, &scaffold_key),
             sheet_builder("BottomSheet"),
         );
 
-        tester.pump(Duration::ZERO); // Bottom sheet show animation starts.
-        tester.pump(Duration::from_secs(1)); // Animation done.
+        tester.pump(); // Bottom sheet show animation starts.
+        tester.pump_by(Duration::from_secs(1)); // Animation done.
 
-        assert_eq!(drag_handle_rect(&tester).size(), expected);
+        assert_eq!(drag_handle_rect(tester).size(), expected);
     }
 
     #[test]
     fn the_drag_handle_interactive_area_is_at_least_the_minimum_interactive_size() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             drag_handle_size(
+                tester,
                 Size::new(20.0, 20.0),
                 Size::new(K_MIN_INTERACTIVE_DIMENSION, K_MIN_INTERACTIVE_DIMENSION),
             )
@@ -3531,7 +3500,9 @@ mod tests {
 
     #[test]
     fn the_drag_handle_interactive_area_is_the_given_drag_handle_size() {
-        with_main_thread_stack(|| drag_handle_size(Size::new(100.0, 50.0), Size::new(100.0, 50.0)));
+        test_widgets(|tester| {
+            drag_handle_size(tester, Size::new(100.0, 50.0), Size::new(100.0, 50.0))
+        });
     }
 
     /// The colour of the decorated `Container` under the only `_DragHandle`.
@@ -3569,8 +3540,8 @@ mod tests {
         default_color: Color,
         hovering_color: Color,
     ) {
-        tester.pump(Duration::ZERO); // bottom sheet show animation starts
-        tester.pump(Duration::from_secs(1)); // animation done
+        tester.pump(); // bottom sheet show animation starts
+        tester.pump_by(Duration::from_secs(1)); // animation done
 
         let drag_handle = drag_handle_rect(tester);
         assert_eq!(drag_handle.size(), Size::new(48.0, 48.0));
@@ -3578,14 +3549,14 @@ mod tests {
         let edge = drag_handle.top_left() - Offset::new(1.0, 1.0);
 
         // Shows default drag handle color
-        let mut gesture = WidgetTester::mouse(1, 0);
+        let mut gesture = TestPointer::mouse(1, 0);
         tester.add_pointer(&mut gesture, edge);
-        tester.pump(Duration::ZERO);
+        tester.pump();
         assert_eq!(drag_handle_color(tester), Some(default_color));
 
         // Shows hovering drag handle color
         tester.move_to(&mut gesture, center, false);
-        tester.pump(Duration::ZERO);
+        tester.pump();
         assert_eq!(drag_handle_color(tester), Some(hovering_color));
         tester.send(&gesture, waft_embedder::PointerChange::Remove);
     }
@@ -3593,10 +3564,9 @@ mod tests {
     /// Dart's 'Drag handle color can take WidgetStateProperty'.
     #[test]
     fn the_theme_drag_handle_color_can_take_a_widget_state_property() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let default_color = Colors::BLUE.primary();
             let hovering_color = Colors::GREEN.primary();
-            let mut tester = tester();
             let build_scaffold = |tester: &WidgetTester, scaffold_key: &GlobalKey| {
                 let theme = ThemeData::builder()
                     .bottom_sheet_theme(
@@ -3615,7 +3585,7 @@ mod tests {
             };
 
             let scaffold_key = GlobalKey::new();
-            let app = build_scaffold(&tester, &scaffold_key);
+            let app = build_scaffold(tester, &scaffold_key);
             tester.pump_widget(app);
 
             Modal {
@@ -3623,16 +3593,16 @@ mod tests {
                 ..Modal::default()
             }
             .show(
-                &tester,
-                scaffold_context(&tester, &scaffold_key),
+                tester,
+                scaffold_context(tester, &scaffold_key),
                 sheet_builder("BottomSheet"),
             );
 
-            check_drag_handle_and_colors(&mut tester, default_color, hovering_color);
+            check_drag_handle_and_colors(tester, default_color, hovering_color);
 
             tester.pump_widget(Container::new().into_widget()); // Reset
             let scaffold_key = GlobalKey::new();
-            let app = build_scaffold(&tester, &scaffold_key);
+            let app = build_scaffold(tester, &scaffold_key);
             tester.pump_widget(app);
 
             Persistent {
@@ -3640,8 +3610,8 @@ mod tests {
                 ..Persistent::default()
             }
             .show(
-                &tester,
-                scaffold_state(&tester, &scaffold_key),
+                tester,
+                scaffold_state(tester, &scaffold_key),
                 Rc::new(|_app, _context| {
                     Builder::new(|_app, _context| {
                         SizedBox::new()
@@ -3653,7 +3623,7 @@ mod tests {
                 }),
             );
 
-            check_drag_handle_and_colors(&mut tester, default_color, hovering_color);
+            check_drag_handle_and_colors(tester, default_color, hovering_color);
         });
     }
 
@@ -3662,33 +3632,32 @@ mod tests {
     /// it.
     #[test]
     fn rebuilding_a_modal_bottom_sheet_barrier_leaves_no_new_arena_objects() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let scaffold_key = GlobalKey::new();
-            tester.pump_widget(app_with_scaffold(m3(&tester), &scaffold_key));
+            tester.pump_widget(app_with_scaffold(m3(tester), &scaffold_key));
             let sheet_route: Rc<Cell<Option<waft_widgets::AnyModalRoute>>> = Rc::default();
             let route = Rc::clone(&sheet_route);
             Modal::default().show(
-                &tester,
-                scaffold_context(&tester, &scaffold_key),
+                tester,
+                scaffold_context(tester, &scaffold_key),
                 Rc::new(move |app, context| {
                     route.set(waft_widgets::AnyModalRoute::of(app, context));
                     text("BottomSheet")
                 }),
             );
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_secs(1));
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1));
             let sheet_route = sheet_route.get().expect("the sheet built");
             let rebuild_barrier = |tester: &mut WidgetTester| {
                 sheet_route
                     .as_route()
                     .changed_internal_state(&mut tester.cell.borrow_mut());
-                tester.pump(Duration::from_millis(16));
+                tester.pump_by(Duration::from_millis(16));
             };
-            rebuild_barrier(&mut tester);
+            rebuild_barrier(tester);
 
             let snapshot = object_snapshot(&tester.cell.borrow());
-            rebuild_barrier(&mut tester);
+            rebuild_barrier(tester);
             tester.cell.checkpoint();
             assert_no_new_objects(&tester.cell.borrow(), &snapshot);
         });
@@ -3697,14 +3666,13 @@ mod tests {
     /// Dart's 'Verify that route settings can be set in the showModalBottomSheet'.
     #[test]
     fn route_settings_can_be_set_in_show_modal_bottom_sheet() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let scaffold_key = GlobalKey::new();
             let route_settings = RouteSettings::new()
                 .name("route_name".to_string())
                 .arguments(Rc::new("route_argument".to_string()));
 
-            tester.pump_widget(app_with_scaffold(m3(&tester), &scaffold_key));
+            tester.pump_widget(app_with_scaffold(m3(tester), &scaffold_key));
 
             let retrieved_route_settings: Rc<RefCell<Option<RouteSettingsRef>>> =
                 Rc::new(RefCell::new(None));
@@ -3714,8 +3682,8 @@ mod tests {
                 ..Modal::default()
             }
             .show(
-                &tester,
-                scaffold_context(&tester, &scaffold_key),
+                tester,
+                scaffold_context(tester, &scaffold_key),
                 Rc::new(move |app, context| {
                     *retrieved.borrow_mut() =
                         waft_widgets::AnyModalRoute::settings_of(app, context);
@@ -3723,8 +3691,8 @@ mod tests {
                 }),
             );
 
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_secs(1));
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1));
 
             match retrieved_route_settings.borrow().as_ref() {
                 Some(RouteSettingsRef::Settings(settings)) => {
@@ -3746,18 +3714,17 @@ mod tests {
     /// Dart's 'Verify showModalBottomSheet use AnimationController if provided.' and 'the
     /// framework do not dispose the transitionAnimationController provided by user.'. Dart
     /// taps a `GestureDetector` that calls `showModalBottomSheet`; the case calls it.
-    fn modal_with_controller(dispose_after: bool) {
-        let mut tester = tester();
+    fn modal_with_controller(tester: &mut WidgetTester, dispose_after: bool) {
         let saved = Saved::default();
-        let controller = two_second_controller(&tester);
+        let controller = two_second_controller(tester);
         tester.pump_widget(material_app(
-            m3(&tester),
+            m3(tester),
             Scaffold::new()
                 .body(saved.builder(|| SizedBox::new().height(100.0).width(100.0).into_widget()))
                 .into_widget(),
         ));
 
-        assert_eq!(found(&tester, "BottomSheet"), 0);
+        assert_eq!(found(tester, "BottomSheet"), 0);
 
         // Opening animation will start after tapping
         Modal {
@@ -3765,25 +3732,25 @@ mod tests {
             transition_animation_controller: Some(controller.clone()),
             ..Modal::default()
         }
-        .show(&tester, saved.get(), sheet_builder("BottomSheet"));
-        tester.pump(Duration::ZERO);
+        .show(tester, saved.get(), sheet_builder("BottomSheet"));
+        tester.pump();
 
-        assert_eq!(found(&tester, "BottomSheet"), 1);
-        tester.pump(Duration::from_millis(2000));
-        assert_eq!(found(&tester, "BottomSheet"), 1);
+        assert_eq!(found(tester, "BottomSheet"), 1);
+        tester.pump_by(Duration::from_millis(2000));
+        assert_eq!(found(tester, "BottomSheet"), 1);
 
         // Tapping above the bottom sheet to dismiss it.
         tester.tap(Offset::new(20.0, 20.0), 1); // Closing animation will start after tapping
-        tester.pump(Duration::ZERO);
+        tester.pump();
 
-        assert_eq!(found(&tester, "BottomSheet"), 1);
-        tester.pump(Duration::from_millis(2000));
+        assert_eq!(found(tester, "BottomSheet"), 1);
+        tester.pump_by(Duration::from_millis(2000));
         // The bottom sheet should still be present at the very end of the animation.
-        assert_eq!(found(&tester, "BottomSheet"), 1);
+        assert_eq!(found(tester, "BottomSheet"), 1);
 
-        tester.pump(Duration::from_millis(1));
+        tester.pump_by(Duration::from_millis(1));
         // The bottom sheet should not be showing any longer.
-        assert_eq!(found(&tester, "BottomSheet"), 0);
+        assert_eq!(found(tester, "BottomSheet"), 0);
 
         if dispose_after {
             // Double disposal panics.
@@ -3793,12 +3760,12 @@ mod tests {
 
     #[test]
     fn show_modal_bottom_sheet_uses_the_animation_controller_it_is_given() {
-        with_main_thread_stack(|| modal_with_controller(false));
+        test_widgets(|tester| modal_with_controller(tester, false));
     }
 
     #[test]
     fn the_framework_does_not_dispose_the_transition_animation_controller_a_caller_gives() {
-        with_main_thread_stack(|| modal_with_controller(true));
+        test_widgets(|tester| modal_with_controller(tester, true));
     }
 
     /// Dart's `_StatusTestAnimationController.isListening`: whether any value or status
@@ -3814,23 +3781,22 @@ mod tests {
     /// disposing.'.
     #[test]
     fn a_dismissed_persistent_sheet_leaves_no_listener_on_a_callers_controller() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let scaffold_key = GlobalKey::new();
-            let controller = two_second_controller(&tester);
+            let controller = two_second_controller(tester);
 
-            tester.pump_widget(app_with_scaffold(m3(&tester), &scaffold_key));
+            tester.pump_widget(app_with_scaffold(m3(tester), &scaffold_key));
 
-            tester.pump(Duration::ZERO);
-            assert!(!is_listening(&tester, controller.handle()));
+            tester.pump();
+            assert!(!is_listening(tester, controller.handle()));
 
             Persistent {
                 transition_animation_controller: Some(controller.clone()),
                 ..Persistent::default()
             }
             .show(
-                &tester,
-                scaffold_state(&tester, &scaffold_key),
+                tester,
+                scaffold_state(tester, &scaffold_key),
                 Rc::new(|_app, _context| {
                     SizedBox::new()
                         .height(200.0)
@@ -3840,14 +3806,14 @@ mod tests {
             );
 
             tester.pump_and_settle();
-            assert!(is_listening(&tester, controller.handle()));
-            assert_eq!(found(&tester, "BottomSheet"), 1);
+            assert!(is_listening(tester, controller.handle()));
+            assert_eq!(found(tester, "BottomSheet"), 1);
 
             // Swipe the bottom sheet to dismiss it.
-            drag_text(&mut tester, "BottomSheet", Offset::new(0.0, 150.0));
+            drag_text(tester, "BottomSheet", Offset::new(0.0, 150.0));
             tester.pump_and_settle(); // Bottom sheet dismiss animation.
-            assert!(!is_listening(&tester, controller.handle()));
-            assert_eq!(found(&tester, "BottomSheet"), 0);
+            assert!(!is_listening(tester, controller.handle()));
+            assert_eq!(found(tester, "BottomSheet"), 0);
 
             controller.dispose(&mut tester.cell.borrow_mut());
         });
@@ -3859,13 +3825,12 @@ mod tests {
     /// sheet's context.
     #[test]
     fn a_persistent_bottom_sheet_uses_the_animation_controller_it_is_given() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let saved = Saved::default();
             let sheet = Saved::default();
-            let controller = two_second_controller(&tester);
+            let controller = two_second_controller(tester);
             tester.pump_widget(material_app(
-                m3(&tester),
+                m3(tester),
                 Scaffold::new()
                     .body(
                         saved.builder(|| SizedBox::new().height(100.0).width(100.0).into_widget()),
@@ -3873,7 +3838,7 @@ mod tests {
                     .into_widget(),
             ));
 
-            assert_eq!(found(&tester, "BottomSheet"), 0);
+            assert_eq!(found(tester, "BottomSheet"), 0);
 
             let saving = sheet.clone();
             show_bottom_sheet(
@@ -3891,24 +3856,24 @@ mod tests {
                 Some(controller.clone()),
                 None,
             );
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            assert_eq!(found(&tester, "BottomSheet"), 1);
-            tester.pump(Duration::from_millis(2000));
-            assert_eq!(found(&tester, "BottomSheet"), 1);
+            assert_eq!(found(tester, "BottomSheet"), 1);
+            tester.pump_by(Duration::from_millis(2000));
+            assert_eq!(found(tester, "BottomSheet"), 1);
 
             // Dismiss it as the sheet's button would.
-            pop(&tester, sheet.get()); // Closing animation will start after tapping
-            tester.pump(Duration::ZERO);
+            pop(tester, sheet.get()); // Closing animation will start after tapping
+            tester.pump();
 
-            assert_eq!(found(&tester, "BottomSheet"), 1);
-            tester.pump(Duration::from_millis(2000));
+            assert_eq!(found(tester, "BottomSheet"), 1);
+            tester.pump_by(Duration::from_millis(2000));
             // The bottom sheet should still be present at the very end of the animation.
-            assert_eq!(found(&tester, "BottomSheet"), 1);
+            assert_eq!(found(tester, "BottomSheet"), 1);
 
-            tester.pump(Duration::from_millis(1));
+            tester.pump_by(Duration::from_millis(1));
             // The bottom sheet should not be showing any longer.
-            assert_eq!(found(&tester, "BottomSheet"), 0);
+            assert_eq!(found(tester, "BottomSheet"), 0);
 
             tester.pump_widget(SizedBox::shrink().into_widget());
             // Double dispose panics.
@@ -3919,10 +3884,9 @@ mod tests {
     /// Dart's 'Each of the internal animation controllers should be disposed by the framework.'.
     #[test]
     fn each_internal_animation_controller_is_disposed_by_the_framework() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let scaffold_key = GlobalKey::new();
-            tester.pump_widget(app_with_scaffold(m3(&tester), &scaffold_key));
+            tester.pump_widget(app_with_scaffold(m3(tester), &scaffold_key));
 
             let sheet = || -> WidgetBuilder {
                 Rc::new(|_app, _context| {
@@ -3930,17 +3894,17 @@ mod tests {
                         .into_widget()
                 })
             };
-            let scaffold = scaffold_state(&tester, &scaffold_key);
-            Persistent::default().show(&tester, scaffold, sheet());
+            let scaffold = scaffold_state(tester, &scaffold_key);
+            Persistent::default().show(tester, scaffold, sheet());
 
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(tester.find_by_type::<BottomSheet>().len(), 1);
 
             // The first sheet's animation is still running.
 
             // Trigger the second sheet will remove the first sheet from tree.
-            Persistent::default().show(&tester, scaffold, sheet());
-            tester.pump(Duration::ZERO);
+            Persistent::default().show(tester, scaffold, sheet());
+            tester.pump();
             assert_eq!(tester.find_by_type::<BottomSheet>().len(), 1);
 
             // Remove the Scaffold from the tree. A ticker still running when its provider is
@@ -3952,17 +3916,16 @@ mod tests {
     /// Dart's 'The old route entry should be removed when a new sheet popup'.
     #[test]
     fn the_old_route_entry_is_removed_when_a_new_sheet_pops_up() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regression test for https://github.com/flutter/flutter/issues/99627
-            let mut tester = tester();
             let scaffold_key = GlobalKey::new();
-            tester.pump_widget(app_with_scaffold(m3(&tester), &scaffold_key));
+            tester.pump_widget(app_with_scaffold(m3(tester), &scaffold_key));
 
-            let context = scaffold_context(&tester, &scaffold_key);
+            let context = scaffold_context(tester, &scaffold_key);
             let route = waft_widgets::AnyModalRoute::of(&mut tester.cell.borrow_mut(), context)
                 .expect("the scaffold is in a route");
             let can_pop = |tester: &WidgetTester| route.can_pop(&mut tester.cell.borrow_mut());
-            assert!(!can_pop(&tester));
+            assert!(!can_pop(tester));
 
             let sheet = || -> WidgetBuilder {
                 Rc::new(|_app, _context| {
@@ -3970,22 +3933,22 @@ mod tests {
                         .into_widget()
                 })
             };
-            let scaffold = scaffold_state(&tester, &scaffold_key);
-            Persistent::default().show(&tester, scaffold, sheet());
+            let scaffold = scaffold_state(tester, &scaffold_key);
+            Persistent::default().show(tester, scaffold, sheet());
 
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(tester.find_by_type::<BottomSheet>().len(), 1);
-            assert!(can_pop(&tester));
+            assert!(can_pop(tester));
 
             // Trigger the second sheet will remove the first sheet from tree.
-            let sheet_controller = Persistent::default().show(&tester, scaffold, sheet());
-            tester.pump(Duration::ZERO);
+            let sheet_controller = Persistent::default().show(tester, scaffold, sheet());
+            tester.pump();
             assert_eq!(tester.find_by_type::<BottomSheet>().len(), 1);
-            assert!(can_pop(&tester));
+            assert!(can_pop(tester));
 
             sheet_controller.close(&mut tester.cell.borrow_mut());
 
-            assert!(!can_pop(&tester));
+            assert!(!can_pop(tester));
         });
     }
 
@@ -3994,38 +3957,36 @@ mod tests {
     /// calls them.
     #[test]
     fn closing_a_persistent_bottom_sheet_that_is_not_the_current_one_does_not_crash() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regression test for https://github.com/flutter/flutter/issues/93717
-            let mut tester = tester();
             let scaffold_key = GlobalKey::new();
-            tester.pump_widget(app_with_scaffold(m3(&tester), &scaffold_key));
-            let scaffold = scaffold_state(&tester, &scaffold_key);
+            tester.pump_widget(app_with_scaffold(m3(tester), &scaffold_key));
+            let scaffold = scaffold_state(tester, &scaffold_key);
 
             let sheet_controller1 =
-                Persistent::default().show(&tester, scaffold, sheet_builder("BottomSheet 1"));
+                Persistent::default().show(tester, scaffold, sheet_builder("BottomSheet 1"));
             tester.pump_and_settle();
-            assert_eq!(found(&tester, "BottomSheet 1"), 1);
+            assert_eq!(found(tester, "BottomSheet 1"), 1);
 
-            Persistent::default().show(&tester, scaffold, sheet_builder("BottomSheet 2"));
+            Persistent::default().show(tester, scaffold, sheet_builder("BottomSheet 2"));
             tester.pump_and_settle();
-            assert_eq!(found(&tester, "BottomSheet 2"), 1);
+            assert_eq!(found(tester, "BottomSheet 2"), 1);
 
             // This will throw an assertion if regressed
             sheet_controller1.close(&mut tester.cell.borrow_mut());
             tester.pump_and_settle();
-            assert_eq!(found(&tester, "BottomSheet 2"), 1);
+            assert_eq!(found(tester, "BottomSheet 2"), 1);
         });
     }
 
     /// Dart's 'ModalBottomSheetRoute shows BottomSheet correctly'.
     #[test]
     fn a_pushed_modal_bottom_sheet_route_shows_a_bottom_sheet() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let saved = Saved::default();
-            tester.pump_widget(app_saving_context(&tester, &saved));
+            tester.pump_widget(app_saving_context(tester, &saved));
 
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert!(tester.find_by_type::<BottomSheet>().is_empty());
 
             // Bring up bottom sheet.
@@ -4128,18 +4089,17 @@ mod tests {
     /// Dart's 'showModalBottomSheet does not use root Navigator by default'.
     #[test]
     fn show_modal_bottom_sheet_uses_the_nearest_navigator_by_default() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            tester.pump_widget(nested_navigator_app(&tester, None));
+        test_widgets(|tester| {
+            tester.pump_widget(nested_navigator_app(tester, None));
 
-            let button = center_of_text(&tester, "Show bottom sheet");
+            let button = center_of_text(tester, "Show bottom sheet");
             tester.tap(button, 1);
             tester.pump_and_settle();
 
             // Bottom sheet is displayed in correct position within the inner navigator
             // and above the BottomNavigationBar.
             assert_eq!(
-                bottom_sheet_bottom(&tester),
+                bottom_sheet_bottom(tester),
                 600.0 - BOTTOM_NAVIGATION_BAR_HEIGHT
             );
         });
@@ -4148,17 +4108,16 @@ mod tests {
     /// Dart's 'showModalBottomSheet uses root Navigator when specified'.
     #[test]
     fn show_modal_bottom_sheet_uses_the_root_navigator_when_asked() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            tester.pump_widget(nested_navigator_app(&tester, Some(true)));
+        test_widgets(|tester| {
+            tester.pump_widget(nested_navigator_app(tester, Some(true)));
 
-            let button = center_of_text(&tester, "Show bottom sheet");
+            let button = center_of_text(tester, "Show bottom sheet");
             tester.tap(button, 1);
             tester.pump_and_settle();
 
             // Bottom sheet is displayed in correct position above all content including
             // the BottomNavigationBar.
-            assert_eq!(bottom_sheet_bottom(&tester), 600.0);
+            assert_eq!(bottom_sheet_bottom(tester), 600.0);
         });
     }
 
@@ -4166,13 +4125,12 @@ mod tests {
     /// the bottom sheet'.
     #[test]
     fn a_modal_bottom_sheet_route_that_does_not_request_focus_leaves_it_where_it_is() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let saved = Saved::default();
             let focus_node = waft_widgets::FocusNode::new(&mut tester.cell.borrow_mut())
                 .into_erased::<waft_widgets::AnyFocusNode>();
             tester.pump_widget(material_app(
-                m3(&tester),
+                m3(tester),
                 Material::new()
                     .child(saved.builder({
                         let focus_node = focus_node.clone();
@@ -4180,40 +4138,40 @@ mod tests {
                     }))
                     .into_widget(),
             ));
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // Initially, there is no bottom sheet and the text field has no focus.
             assert!(tester.find_by_type::<BottomSheet>().is_empty());
-            assert!(!has_focus(&tester, focus_node.handle()));
+            assert!(!has_focus(tester, focus_node.handle()));
 
             // Request focus on the text field.
             focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
-            tester.pump(Duration::ZERO);
-            assert!(has_focus(&tester, focus_node.handle()));
+            tester.pump();
+            assert!(has_focus(tester, focus_node.handle()));
 
             // Bring up bottom sheet.
-            push_container_sheet(&tester, saved.get(), None);
-            tester.pump(Duration::ZERO);
+            push_container_sheet(tester, saved.get(), None);
+            tester.pump();
 
             // The bottom sheet is showing and the text field has lost focus.
             assert_eq!(tester.find_by_type::<BottomSheet>().len(), 1);
-            assert!(!has_focus(&tester, focus_node.handle()));
+            assert!(!has_focus(tester, focus_node.handle()));
 
             // Dismiss the bottom sheet.
-            pop(&tester, saved.get());
-            tester.pump(Duration::ZERO);
+            pop(tester, saved.get());
+            tester.pump();
 
             // The bottom sheet is dismissed and the focus is shifted back to the text field.
             assert!(tester.find_by_type::<BottomSheet>().is_empty());
-            assert!(has_focus(&tester, focus_node.handle()));
+            assert!(has_focus(tester, focus_node.handle()));
 
             // Bring up bottom sheet again with requestFocus to false.
-            push_container_sheet(&tester, saved.get(), Some(false));
-            tester.pump(Duration::ZERO);
+            push_container_sheet(tester, saved.get(), Some(false));
+            tester.pump();
 
             // The bottom sheet is showing and the text field still has focus.
             assert_eq!(tester.find_by_type::<BottomSheet>().len(), 1);
-            assert!(has_focus(&tester, focus_node.handle()));
+            assert!(has_focus(tester, focus_node.handle()));
         });
     }
 
@@ -4221,13 +4179,12 @@ mod tests {
     /// from the navigator's own context; a context under it reaches the same navigator.
     #[test]
     fn show_modal_bottom_sheet_requests_focus_only_when_asked() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let saved = Saved::default();
             let focus_node = waft_widgets::FocusNode::new(&mut tester.cell.borrow_mut())
                 .into_erased::<waft_widgets::AnyFocusNode>();
             tester.pump_widget(material_app(
-                m3(&tester),
+                m3(tester),
                 Scaffold::new()
                     .body(saved.builder({
                         let focus_node = focus_node.clone();
@@ -4236,11 +4193,11 @@ mod tests {
                     .into_widget(),
             ));
             focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
-            tester.pump(Duration::ZERO);
-            assert!(has_focus(&tester, focus_node.handle()));
+            tester.pump();
+            assert!(has_focus(tester, focus_node.handle()));
 
             let sheet_scope_has_focus = |tester: &WidgetTester| {
-                let sheet_text = only(tester.find_ahem_text("BottomSheet"));
+                let sheet_text = only(tester.find_text("BottomSheet"));
                 let mut app = tester.cell.borrow_mut();
                 waft_widgets::FocusScope::of(&mut app, sheet_text, true)
                     .as_node()
@@ -4252,26 +4209,26 @@ mod tests {
                     request_focus: Some(true),
                     ..Modal::default()
                 }
-                .show(&tester, saved.get(), sheet_builder("BottomSheet")),
+                .show(tester, saved.get(), sheet_builder("BottomSheet")),
             );
             tester.pump_and_settle();
-            assert!(sheet_scope_has_focus(&tester));
-            assert!(!has_focus(&tester, focus_node.handle()));
+            assert!(sheet_scope_has_focus(tester));
+            assert!(!has_focus(tester, focus_node.handle()));
 
-            pop(&tester, saved.get());
+            pop(tester, saved.get());
             tester.pump_and_settle();
-            assert!(has_focus(&tester, focus_node.handle()));
+            assert!(has_focus(tester, focus_node.handle()));
 
             drop(
                 Modal {
                     request_focus: Some(false),
                     ..Modal::default()
                 }
-                .show(&tester, saved.get(), sheet_builder("BottomSheet")),
+                .show(tester, saved.get(), sheet_builder("BottomSheet")),
             );
             tester.pump_and_settle();
-            assert!(!sheet_scope_has_focus(&tester));
-            assert!(has_focus(&tester, focus_node.handle()));
+            assert!(!sheet_scope_has_focus(tester));
+            assert!(has_focus(tester, focus_node.handle()));
         });
     }
 
@@ -4298,11 +4255,10 @@ mod tests {
     /// the box stands in with its fallback sizing.
     #[test]
     fn material3_default_constraints_are_a_max_width_of_640() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             tester.pump_widget(material_app(
-                m3(&tester),
+                m3(tester),
                 MediaQuery::new(
                     waft_widgets::MediaQueryData::new().size(Size::new(1000.0, 1000.0)),
                     Scaffold::new()
@@ -4314,25 +4270,24 @@ mod tests {
                 )
                 .into_widget(),
             ));
-            assert_eq!(rect_of_key(&tester, &key).width(), 640.0);
+            assert_eq!(rect_of_key(tester, &key).width(), 640.0);
         });
     }
 
     /// Dart's 'Material2 - No constraints by default for bottomSheet property'.
     #[test]
     fn material2_has_no_constraints_by_default_for_the_bottom_sheet_property() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(material_app(
-                m2(&tester),
+                m2(tester),
                 Scaffold::new()
                     .body(Center::new().child(text("body")))
                     .bottom_sheet(text("BottomSheet"))
                     .into_widget(),
             ));
-            assert_eq!(found(&tester, "BottomSheet"), 1);
+            assert_eq!(found(tester, "BottomSheet"), 1);
             assert_eq!(
-                rect_of_text(&tester, "BottomSheet"),
+                rect_of_text(tester, "BottomSheet"),
                 Rect::from_ltrb(0.0, 586.0, 154.0, 600.0)
             );
         });
@@ -4342,17 +4297,16 @@ mod tests {
     /// `showBottomSheet`; the case calls it.
     #[test]
     fn there_are_no_constraints_by_default_for_show_bottom_sheet() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let saved = Saved::default();
-            tester.pump_widget(app_with_scaffold_body(m2(&tester), &saved));
-            assert_eq!(found(&tester, "BottomSheet"), 0);
+            tester.pump_widget(app_with_scaffold_body(m2(tester), &saved));
+            assert_eq!(found(tester, "BottomSheet"), 0);
             let scaffold = Scaffold::of(&mut tester.cell.borrow_mut(), saved.get());
-            Persistent::default().show(&tester, scaffold, sheet_builder("BottomSheet"));
+            Persistent::default().show(tester, scaffold, sheet_builder("BottomSheet"));
             tester.pump_and_settle();
-            assert_eq!(found(&tester, "BottomSheet"), 1);
+            assert_eq!(found(tester, "BottomSheet"), 1);
             assert_eq!(
-                rect_of_text(&tester, "BottomSheet"),
+                rect_of_text(tester, "BottomSheet"),
                 Rect::from_ltrb(0.0, 586.0, 154.0, 600.0)
             );
         });
@@ -4361,16 +4315,15 @@ mod tests {
     /// Dart's 'No constraints by default for showModalBottomSheet'.
     #[test]
     fn there_are_no_constraints_by_default_for_show_modal_bottom_sheet() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let saved = Saved::default();
-            tester.pump_widget(app_with_scaffold_body(m2(&tester), &saved));
-            assert_eq!(found(&tester, "BottomSheet"), 0);
-            Modal::default().show(&tester, saved.get(), sheet_builder("BottomSheet"));
+            tester.pump_widget(app_with_scaffold_body(m2(tester), &saved));
+            assert_eq!(found(tester, "BottomSheet"), 0);
+            Modal::default().show(tester, saved.get(), sheet_builder("BottomSheet"));
             tester.pump_and_settle();
-            assert_eq!(found(&tester, "BottomSheet"), 1);
+            assert_eq!(found(tester, "BottomSheet"), 1);
             assert_eq!(
-                rect_of_text(&tester, "BottomSheet"),
+                rect_of_text(tester, "BottomSheet"),
                 Rect::from_ltrb(0.0, 586.0, 800.0, 600.0)
             );
         });
@@ -4386,98 +4339,104 @@ mod tests {
 
     /// Dart's 'Theme constraints used for showBottomSheet' and 'constraints param overrides
     /// theme for showBottomSheet'.
-    fn persistent_constraints(constraints: Option<BoxConstraints>, sheet_max_width: f64) {
-        let mut tester = tester();
+    fn persistent_constraints(
+        tester: &mut WidgetTester,
+        constraints: Option<BoxConstraints>,
+        sheet_max_width: f64,
+    ) {
         let saved = Saved::default();
         tester.pump_widget(app_with_scaffold_body(
-            max_width_theme(&tester, 80.0),
+            max_width_theme(tester, 80.0),
             &saved,
         ));
-        assert_eq!(found(&tester, "BottomSheet"), 0);
+        assert_eq!(found(tester, "BottomSheet"), 0);
         let scaffold = Scaffold::of(&mut tester.cell.borrow_mut(), saved.get());
         Persistent {
             constraints,
             ..Persistent::default()
         }
-        .show(&tester, scaffold, sheet_builder("BottomSheet"));
+        .show(tester, scaffold, sheet_builder("BottomSheet"));
         tester.pump_and_settle();
-        assert_eq!(found(&tester, "BottomSheet"), 1);
+        assert_eq!(found(tester, "BottomSheet"), 1);
 
         // Should be centered and only 80dp wide.
-        let bottom_sheet_rect = rect_of_text(&tester, "BottomSheet");
+        let bottom_sheet_rect = rect_of_text(tester, "BottomSheet");
         assert_eq!(bottom_sheet_rect.left, 800.0 / 2.0 - sheet_max_width / 2.0);
         assert_eq!(bottom_sheet_rect.width(), sheet_max_width);
     }
 
     #[test]
     fn theme_constraints_are_used_for_show_bottom_sheet() {
-        with_main_thread_stack(|| persistent_constraints(None, 80.0));
+        test_widgets(|tester| persistent_constraints(tester, None, 80.0));
     }
 
     #[test]
     fn the_constraints_argument_overrides_the_theme_for_show_bottom_sheet() {
-        with_main_thread_stack(|| {
-            persistent_constraints(Some(BoxConstraints::new().max_width(100.0)), 100.0)
+        test_widgets(|tester| {
+            persistent_constraints(tester, Some(BoxConstraints::new().max_width(100.0)), 100.0)
         });
     }
 
     /// Dart's 'Theme constraints used for showModalBottomSheet' and 'constraints param
     /// overrides theme for showModalBottomSheet'.
-    fn modal_constraints(constraints: Option<BoxConstraints>, sheet_max_width: f64) {
-        let mut tester = tester();
+    fn modal_constraints(
+        tester: &mut WidgetTester,
+        constraints: Option<BoxConstraints>,
+        sheet_max_width: f64,
+    ) {
         let saved = Saved::default();
         tester.pump_widget(app_with_scaffold_body(
-            max_width_theme(&tester, 80.0),
+            max_width_theme(tester, 80.0),
             &saved,
         ));
-        assert_eq!(found(&tester, "BottomSheet"), 0);
+        assert_eq!(found(tester, "BottomSheet"), 0);
         Modal {
             constraints,
             ..Modal::default()
         }
-        .show(&tester, saved.get(), sheet_builder("BottomSheet"));
+        .show(tester, saved.get(), sheet_builder("BottomSheet"));
         tester.pump_and_settle();
-        assert_eq!(found(&tester, "BottomSheet"), 1);
+        assert_eq!(found(tester, "BottomSheet"), 1);
 
         // Should be centered and only 80dp wide.
-        let bottom_sheet_rect = rect_of_text(&tester, "BottomSheet");
+        let bottom_sheet_rect = rect_of_text(tester, "BottomSheet");
         assert_eq!(bottom_sheet_rect.left, 800.0 / 2.0 - sheet_max_width / 2.0);
         assert_eq!(bottom_sheet_rect.width(), sheet_max_width);
     }
 
     #[test]
     fn theme_constraints_are_used_for_show_modal_bottom_sheet() {
-        with_main_thread_stack(|| modal_constraints(None, 80.0));
+        test_widgets(|tester| modal_constraints(tester, None, 80.0));
     }
 
     #[test]
     fn the_constraints_argument_overrides_the_theme_for_show_modal_bottom_sheet() {
-        with_main_thread_stack(|| {
-            modal_constraints(Some(BoxConstraints::new().max_width(100.0)), 100.0)
+        test_widgets(|tester| {
+            modal_constraints(tester, Some(BoxConstraints::new().max_width(100.0)), 100.0)
         });
     }
 
     /// Dart's 'scrollControlDisabledMaxHeightRatio' group.
     fn scroll_control_disabled_max_height_ratio(
+        tester: &mut WidgetTester,
         is_scroll_controlled: bool,
         scroll_control_disabled_max_height_ratio: f64,
     ) {
-        let mut tester = tester();
         let saved = Saved::default();
-        tester.pump_widget(app_with_scaffold_body(m3(&tester), &saved));
+        tester.pump_widget(app_with_scaffold_body(m3(tester), &saved));
         Modal {
             is_scroll_controlled,
             scroll_control_disabled_max_height_ratio,
             ..Modal::default()
         }
         .show(
-            &tester,
+            tester,
             saved.get(),
             Rc::new(|_app, _context| SizedBox::expand().child(text("BottomSheet")).into_widget()),
         );
         tester.pump_and_settle();
         assert_eq!(
-            rect_of_text(&tester, "BottomSheet"),
+            rect_of_text(tester, "BottomSheet"),
             Rect::from_ltrb(
                 80.0,
                 600.0
@@ -4494,33 +4453,32 @@ mod tests {
 
     #[test]
     fn the_scroll_control_disabled_max_height_ratio_works_at_9_16() {
-        with_main_thread_stack(|| scroll_control_disabled_max_height_ratio(false, 9.0 / 16.0));
+        test_widgets(|tester| scroll_control_disabled_max_height_ratio(tester, false, 9.0 / 16.0));
     }
 
     #[test]
     fn the_scroll_control_disabled_max_height_ratio_works_at_8_16() {
-        with_main_thread_stack(|| scroll_control_disabled_max_height_ratio(false, 8.0 / 16.0));
+        test_widgets(|tester| scroll_control_disabled_max_height_ratio(tester, false, 8.0 / 16.0));
     }
 
     #[test]
     fn the_scroll_control_disabled_max_height_ratio_works_when_scroll_controlled() {
-        with_main_thread_stack(|| scroll_control_disabled_max_height_ratio(true, 8.0 / 16.0));
+        test_widgets(|tester| scroll_control_disabled_max_height_ratio(tester, true, 8.0 / 16.0));
     }
 
     /// Dart's 'Verify that modalBarrierDismissLabel is used if provided' and 'from context is
     /// used if barrierLabel is not provided'.
-    fn barrier_label(barrier_label: Option<&str>) {
-        let mut tester = tester();
+    fn barrier_label(tester: &mut WidgetTester, barrier_label: Option<&str>) {
         let scaffold_key = GlobalKey::new();
-        tester.pump_widget(app_with_scaffold(m3(&tester), &scaffold_key));
-        let context = scaffold_context(&tester, &scaffold_key);
+        tester.pump_widget(app_with_scaffold(m3(tester), &scaffold_key));
+        let context = scaffold_context(tester, &scaffold_key);
         Modal {
             barrier_label: barrier_label.map(str::to_string),
             ..Modal::default()
         }
-        .show(&tester, context, sheet_builder("BottomSheet"));
-        tester.pump(Duration::ZERO);
-        tester.pump(Duration::from_secs(1));
+        .show(tester, context, sheet_builder("BottomSheet"));
+        tester.pump();
+        tester.pump_by(Duration::from_secs(1));
 
         let expected = barrier_label.map(str::to_string).unwrap_or_else(|| {
             <dyn MaterialLocalizations>::of(&mut tester.cell.borrow_mut(), context).scrim_label()
@@ -4539,12 +4497,12 @@ mod tests {
 
     #[test]
     fn the_given_barrier_label_is_used() {
-        with_main_thread_stack(|| barrier_label(Some("custom label")));
+        test_widgets(|tester| barrier_label(tester, Some("custom label")));
     }
 
     #[test]
     fn the_scrim_label_is_used_when_no_barrier_label_is_given() {
-        with_main_thread_stack(|| barrier_label(None));
+        test_widgets(|tester| barrier_label(tester, None));
     }
 
     /// The sheet of Dart's animation cases: `SizedBox.expand(child: ColoredBox(key: sheetKey,
@@ -4580,14 +4538,13 @@ mod tests {
     /// Dart's 'Bottom sheet animation can be customized'.
     #[test]
     fn the_bottom_sheet_animation_can_be_customized() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let saved = Saved::default();
             let sheet = Saved::default();
             let sheet_key = GlobalKey::new();
 
             // Test custom animation style.
-            tester.pump_widget(app_with_scaffold_body(m3(&tester), &saved));
+            tester.pump_widget(app_with_scaffold_body(m3(tester), &saved));
             let scaffold = Scaffold::of(&mut tester.cell.borrow_mut(), saved.get());
             Persistent {
                 sheet_animation_style: Some(AnimationStyle::new(
@@ -4598,111 +4555,116 @@ mod tests {
                 )),
                 ..Persistent::default()
             }
-            .show(&tester, scaffold, expanded_sheet(&sheet_key, &sheet));
-            tester.pump(Duration::ZERO);
+            .show(tester, scaffold, expanded_sheet(&sheet_key, &sheet));
+            tester.pump();
             // Advance the animation by 1/2 of the custom forward duration.
-            tester.pump(Duration::from_millis(400));
+            tester.pump_by(Duration::from_millis(400));
 
             // The bottom sheet is partially visible.
-            close_to(top_of(&tester, &sheet_key), 134.6, 0.1);
+            close_to(top_of(tester, &sheet_key), 134.6, 0.1);
 
             // Advance the animation by 1/2 of the custom forward duration.
-            tester.pump(Duration::from_millis(400));
+            tester.pump_by(Duration::from_millis(400));
 
             // The bottom sheet is fully visible.
-            assert_eq!(top_of(&tester, &sheet_key), 0.0);
+            assert_eq!(top_of(tester, &sheet_key), 0.0);
 
             // Dismiss the bottom sheet.
-            pop(&tester, sheet.get());
-            tester.pump(Duration::ZERO);
+            pop(tester, sheet.get());
+            tester.pump();
             // Advance the animation by 1/2 of the custom reverse duration.
-            tester.pump(Duration::from_millis(200));
+            tester.pump_by(Duration::from_millis(200));
 
             // The bottom sheet is partially visible.
-            close_to(top_of(&tester, &sheet_key), 134.6, 0.1);
+            close_to(top_of(tester, &sheet_key), 134.6, 0.1);
 
             // Advance the animation by 1/2 of the custom reverse duration.
-            tester.pump(Duration::from_millis(200));
+            tester.pump_by(Duration::from_millis(200));
 
             // The bottom sheet is dismissed.
-            assert_eq!(top_of(&tester, &sheet_key), 600.0);
+            assert_eq!(top_of(tester, &sheet_key), 600.0);
 
             // Test no animation style.
-            tester.pump_widget(app_with_scaffold_body(m3(&tester), &saved));
+            tester.pump_widget(app_with_scaffold_body(m3(tester), &saved));
             tester.pump_and_settle();
             let scaffold = Scaffold::of(&mut tester.cell.borrow_mut(), saved.get());
             Persistent {
                 sheet_animation_style: Some(AnimationStyle::NO_ANIMATION),
                 ..Persistent::default()
             }
-            .show(&tester, scaffold, expanded_sheet(&sheet_key, &sheet));
-            tester.pump(Duration::ZERO);
+            .show(tester, scaffold, expanded_sheet(&sheet_key, &sheet));
+            tester.pump();
 
             // The bottom sheet is fully visible.
-            assert_eq!(top_of(&tester, &sheet_key), 0.0);
+            assert_eq!(top_of(tester, &sheet_key), 0.0);
 
             // Dismiss the bottom sheet.
-            pop(&tester, sheet.get());
-            tester.pump(Duration::ZERO);
+            pop(tester, sheet.get());
+            tester.pump();
 
             // The bottom sheet is dismissed.
-            assert!(!mounted(&tester, &sheet_key));
+            assert!(!mounted(tester, &sheet_key));
         });
     }
 
     /// Dart's 'Modal bottom sheet default animation' and 'Modal bottom sheet animation can be
     /// customized': `forward`/`reverse` are half of each duration.
-    fn modal_animation(style: Option<AnimationStyle>, half_forward: u64, half_reverse: u64) {
-        let mut tester = tester();
+    fn modal_animation(
+        tester: &mut WidgetTester,
+        style: Option<AnimationStyle>,
+        half_forward: u64,
+        half_reverse: u64,
+    ) {
         let saved = Saved::default();
         let sheet = Saved::default();
         let sheet_key = GlobalKey::new();
-        tester.pump_widget(app_with_scaffold_body(m3(&tester), &saved));
+        tester.pump_widget(app_with_scaffold_body(m3(tester), &saved));
 
         // Tap the 'X' to show the bottom sheet.
         Modal {
             sheet_animation_style: style,
             ..Modal::default()
         }
-        .show(&tester, saved.get(), expanded_sheet(&sheet_key, &sheet));
-        tester.pump(Duration::ZERO);
+        .show(tester, saved.get(), expanded_sheet(&sheet_key, &sheet));
+        tester.pump();
         // Advance the animation by 1/2 of the forward duration.
-        tester.pump(Duration::from_millis(half_forward));
+        tester.pump_by(Duration::from_millis(half_forward));
 
         // The modal bottom sheet is partially visible.
-        close_to(top_of(&tester, &sheet_key), 316.7, 0.1);
+        close_to(top_of(tester, &sheet_key), 316.7, 0.1);
 
         // Advance the animation by 1/2 of the forward duration.
-        tester.pump(Duration::from_millis(half_forward));
+        tester.pump_by(Duration::from_millis(half_forward));
 
         // The modal bottom sheet is fully visible.
-        assert_eq!(top_of(&tester, &sheet_key), 262.5);
+        assert_eq!(top_of(tester, &sheet_key), 262.5);
 
         // Dismiss the bottom sheet.
-        pop(&tester, sheet.get());
-        tester.pump(Duration::ZERO);
+        pop(tester, sheet.get());
+        tester.pump();
         // Advance the animation by 1/2 of the reverse duration.
-        tester.pump(Duration::from_millis(half_reverse));
+        tester.pump_by(Duration::from_millis(half_reverse));
 
         // The modal bottom sheet is partially visible.
-        close_to(top_of(&tester, &sheet_key), 316.7, 0.1);
+        close_to(top_of(tester, &sheet_key), 316.7, 0.1);
 
         // Advance the animation by 1/2 of the reverse duration.
-        tester.pump(Duration::from_millis(half_reverse));
+        tester.pump_by(Duration::from_millis(half_reverse));
 
         // The modal bottom sheet is dismissed.
-        assert_eq!(top_of(&tester, &sheet_key), 600.0);
+        assert_eq!(top_of(tester, &sheet_key), 600.0);
     }
 
     #[test]
     fn the_modal_bottom_sheet_default_animation() {
-        with_main_thread_stack(|| modal_animation(None, 125, 100));
+        test_widgets(|tester| modal_animation(tester, None, 125, 100));
     }
 
     #[test]
     fn the_modal_bottom_sheet_animation_can_be_customized() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             modal_animation(
+                tester,
                 Some(AnimationStyle::new(
                     None,
                     Some(Duration::from_millis(800)),
@@ -4714,38 +4676,36 @@ mod tests {
             );
 
             // Test no animation style.
-            let mut tester = tester();
             let saved = Saved::default();
             let sheet = Saved::default();
             let sheet_key = GlobalKey::new();
-            tester.pump_widget(app_with_scaffold_body(m3(&tester), &saved));
+            tester.pump_widget(app_with_scaffold_body(m3(tester), &saved));
             tester.pump_and_settle();
             Modal {
                 sheet_animation_style: Some(AnimationStyle::NO_ANIMATION),
                 ..Modal::default()
             }
-            .show(&tester, saved.get(), expanded_sheet(&sheet_key, &sheet));
-            tester.pump(Duration::ZERO);
+            .show(tester, saved.get(), expanded_sheet(&sheet_key, &sheet));
+            tester.pump();
 
             // The bottom sheet is fully visible.
-            assert_eq!(top_of(&tester, &sheet_key), 262.5);
+            assert_eq!(top_of(tester, &sheet_key), 262.5);
 
             // Dismiss the bottom sheet.
-            pop(&tester, sheet.get());
-            tester.pump(Duration::ZERO);
+            pop(tester, sheet.get());
+            tester.pump();
 
             // The bottom sheet is dismissed.
-            assert!(!mounted(&tester, &sheet_key));
+            assert!(!mounted(tester, &sheet_key));
         });
     }
 
     /// Dart's 'BottomSheet does not crash at zero area'.
     #[test]
     fn a_bottom_sheet_does_not_crash_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(material_app(
-                m3(&tester),
+                m3(tester),
                 Scaffold::new()
                     .body(
                         Center::new().child(SizedBox::shrink().child(BottomSheet::new(
@@ -4766,12 +4726,11 @@ mod tests {
     /// Dart's 'ModalBottomSheet uses AnimationStyle curve' and 'reverseCurve'.
     #[test]
     fn a_modal_bottom_sheet_uses_the_animation_style_curve() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let saved = Saved::default();
             let sheet = Saved::default();
             let sheet_key = GlobalKey::new();
-            tester.pump_widget(app_with_scaffold_body(m3(&tester), &saved));
+            tester.pump_widget(app_with_scaffold_body(m3(tester), &saved));
             Modal {
                 sheet_animation_style: Some(AnimationStyle::new(
                     Some(Curves::linear()),
@@ -4781,20 +4740,20 @@ mod tests {
                 )),
                 ..Modal::default()
             }
-            .show(&tester, saved.get(), expanded_sheet(&sheet_key, &sheet));
-            tester.pump(Duration::ZERO);
+            .show(tester, saved.get(), expanded_sheet(&sheet_key, &sheet));
+            tester.pump();
 
             // Advance the animation by 50ms.
-            tester.pump(Duration::from_millis(50));
-            let open_extent1 = top_of(&tester, &sheet_key);
+            tester.pump_by(Duration::from_millis(50));
+            let open_extent1 = top_of(tester, &sheet_key);
 
             // Advance the animation by an additional 50ms.
-            tester.pump(Duration::from_millis(50));
-            let open_extent2 = top_of(&tester, &sheet_key);
+            tester.pump_by(Duration::from_millis(50));
+            let open_extent2 = top_of(tester, &sheet_key);
 
             // Advance the animation by an additional 50ms.
-            tester.pump(Duration::from_millis(50));
-            let open_extent3 = top_of(&tester, &sheet_key);
+            tester.pump_by(Duration::from_millis(50));
+            let open_extent3 = top_of(tester, &sheet_key);
 
             // For the linear curve, the distance covered in each time interval should
             // be the same.
@@ -4806,19 +4765,18 @@ mod tests {
             tester.pump_and_settle();
 
             // Dismiss the bottom sheet.
-            pop(&tester, sheet.get());
+            pop(tester, sheet.get());
             tester.pump_and_settle();
         });
     }
 
     #[test]
     fn a_modal_bottom_sheet_uses_the_animation_style_reverse_curve() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let saved = Saved::default();
             let sheet = Saved::default();
             let sheet_key = GlobalKey::new();
-            tester.pump_widget(app_with_scaffold_body(m3(&tester), &saved));
+            tester.pump_widget(app_with_scaffold_body(m3(tester), &saved));
             Modal {
                 sheet_animation_style: Some(AnimationStyle::new(
                     None,
@@ -4828,24 +4786,24 @@ mod tests {
                 )),
                 ..Modal::default()
             }
-            .show(&tester, saved.get(), expanded_sheet(&sheet_key, &sheet));
+            .show(tester, saved.get(), expanded_sheet(&sheet_key, &sheet));
             tester.pump_and_settle();
 
             // Start the dismissal.
-            pop(&tester, sheet.get());
-            tester.pump(Duration::ZERO);
+            pop(tester, sheet.get());
+            tester.pump();
 
             // Advance the animation by 50ms during the close transition.
-            tester.pump(Duration::from_millis(50));
-            let close_extent1 = top_of(&tester, &sheet_key);
+            tester.pump_by(Duration::from_millis(50));
+            let close_extent1 = top_of(tester, &sheet_key);
 
             // Advance the animation by an additional 50ms.
-            tester.pump(Duration::from_millis(50));
-            let close_extent2 = top_of(&tester, &sheet_key);
+            tester.pump_by(Duration::from_millis(50));
+            let close_extent2 = top_of(tester, &sheet_key);
 
             // Advance the animation by an additional 50ms.
-            tester.pump(Duration::from_millis(50));
-            let close_extent3 = top_of(&tester, &sheet_key);
+            tester.pump_by(Duration::from_millis(50));
+            let close_extent3 = top_of(tester, &sheet_key);
 
             // For the linear curve, the distance covered in each time interval should
             // be the same.
@@ -4862,12 +4820,11 @@ mod tests {
     /// Dart's 'ModalBottomSheet with AnimationStyle.noAnimation opens and closes immediately'.
     #[test]
     fn a_modal_bottom_sheet_without_animation_opens_and_closes_immediately() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let saved = Saved::default();
             let sheet = Saved::default();
             let sheet_key = GlobalKey::new();
-            tester.pump_widget(app_with_scaffold_body(m3(&tester), &saved));
+            tester.pump_widget(app_with_scaffold_body(m3(tester), &saved));
             let saving = sheet.clone();
             let key = sheet_key.clone();
             Modal {
@@ -4875,7 +4832,7 @@ mod tests {
                 ..Modal::default()
             }
             .show(
-                &tester,
+                tester,
                 saved.get(),
                 Rc::new(move |_app, context| {
                     saving.0.set(Some(context));
@@ -4885,33 +4842,32 @@ mod tests {
                         .into_widget()
                 }),
             );
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            assert!(mounted(&tester, &sheet_key));
+            assert!(mounted(tester, &sheet_key));
 
-            pop(&tester, sheet.get());
-            tester.pump(Duration::ZERO);
+            pop(tester, sheet.get());
+            tester.pump();
 
-            assert!(!mounted(&tester, &sheet_key));
+            assert!(!mounted(tester, &sheet_key));
         });
     }
 
     /// Dart's 'ModalBottomSheet does not jump when drag gesture ends'.
     #[test]
     fn a_modal_bottom_sheet_does_not_jump_when_the_drag_gesture_ends() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regression test for https://github.com/flutter/flutter/issues/183299.
-            let mut tester = tester();
             let saved = Saved::default();
             let sheet_key = GlobalKey::new();
-            tester.pump_widget(app_with_scaffold_body(m3(&tester), &saved));
+            tester.pump_widget(app_with_scaffold_body(m3(tester), &saved));
             let key = sheet_key.clone();
             Modal {
                 show_drag_handle: Some(true),
                 ..Modal::default()
             }
             .show(
-                &tester,
+                tester,
                 saved.get(),
                 Rc::new(move |_app, _context| {
                     SizedBox::expand()
@@ -4922,31 +4878,29 @@ mod tests {
             );
             tester.pump_and_settle();
 
-            let mut gesture = WidgetTester::touch(1);
-            let center = drag_handle_rect(&tester).center();
+            let mut gesture = TestPointer::touch(1);
+            let center = drag_handle_rect(tester).center();
             tester.down(&mut gesture, center);
 
-            let by = |tester: &mut WidgetTester,
-                      gesture: &mut crate::test_support::TestPointer,
-                      dy: f64| {
+            let by = |tester: &mut WidgetTester, gesture: &mut TestPointer, dy: f64| {
                 let at = gesture.position + Offset::new(0.0, dy);
                 tester.move_to(gesture, at, true);
             };
-            by(&mut tester, &mut gesture, 50.0);
-            tester.pump(Duration::ZERO);
+            by(tester, &mut gesture, 50.0);
+            tester.pump();
 
-            by(&mut tester, &mut gesture, 50.0);
-            tester.pump(Duration::ZERO);
+            by(tester, &mut gesture, 50.0);
+            tester.pump();
 
-            by(&mut tester, &mut gesture, 100.0);
-            tester.pump(Duration::ZERO);
+            by(tester, &mut gesture, 100.0);
+            tester.pump();
 
-            let y_before_up = top_of(&tester, &sheet_key);
+            let y_before_up = top_of(tester, &sheet_key);
 
             tester.up(&gesture);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            let y_after_up = top_of(&tester, &sheet_key);
+            let y_after_up = top_of(tester, &sheet_key);
 
             // The bottom sheet should not jump when the drag gesture ends.
             // Its position immediately after releasing the gesture should remain
@@ -5015,9 +4969,8 @@ mod tests {
     /// Dart's 'Scaffold.bottomSheet update test'.
     #[test]
     fn the_scaffold_bottom_sheet_can_come_back_while_it_is_disappearing() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regression test for https://github.com/flutter/flutter/issues/83668
-            let mut tester = tester();
             let build_frame = |tester: &WidgetTester, bottom_sheet: Option<WidgetRef>| {
                 let mut scaffold = Scaffold::new().body(placeholder(800.0));
                 if let Some(bottom_sheet) = bottom_sheet {
@@ -5026,27 +4979,26 @@ mod tests {
                 material_app(m3(tester), scaffold.into_widget())
             };
 
-            tester.pump_widget(build_frame(&tester, Some(text("I love Flutter!"))));
-            tester.pump_widget(build_frame(&tester, None));
+            tester.pump_widget(build_frame(tester, Some(text("I love Flutter!"))));
+            tester.pump_widget(build_frame(tester, None));
 
             // The disappearing animation has not yet been completed.
-            tester.pump_widget(build_frame(&tester, Some(text("I love Flutter!"))));
+            tester.pump_widget(build_frame(tester, Some(text("I love Flutter!"))));
         });
     }
 
     /// Dart's 'Verify that a BottomSheet can be rebuilt with ScaffoldFeatureController.setState()'.
     #[test]
     fn a_bottom_sheet_can_be_rebuilt_with_its_controller_set_state() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let scaffold_key = GlobalKey::new();
             let build_count = Rc::new(Cell::new(0));
-            tester.pump_widget(app_with_scaffold(m3(&tester), &scaffold_key));
+            tester.pump_widget(app_with_scaffold(m3(tester), &scaffold_key));
 
-            let scaffold = scaffold_state(&tester, &scaffold_key);
+            let scaffold = scaffold_state(tester, &scaffold_key);
             let count = Rc::clone(&build_count);
             let bottom_sheet = Persistent::default().show(
-                &tester,
+                tester,
                 scaffold,
                 Rc::new(move |_app, _context| {
                     let count = Rc::clone(&count);
@@ -5058,10 +5010,10 @@ mod tests {
                 }),
             );
 
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(build_count.get(), 1);
             bottom_sheet.set_state(&mut tester.cell.borrow_mut(), &mut |_app| {});
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(build_count.get(), 2);
         });
     }
@@ -5069,10 +5021,9 @@ mod tests {
     /// Dart's 'Verify that a persistent BottomSheet cannot be dismissed'.
     #[test]
     fn a_persistent_bottom_sheet_cannot_be_dismissed() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(material_app(
-                m3(&tester),
+                m3(tester),
                 Scaffold::new()
                     .body(Center::new().child(text("body")))
                     .bottom_sheet(draggable_texts(None))
@@ -5081,26 +5032,25 @@ mod tests {
 
             tester.pump_and_settle();
 
-            assert_eq!(found(&tester, "Two"), 1);
+            assert_eq!(found(tester, "Two"), 1);
 
-            drag_text(&mut tester, "Two", Offset::new(0.0, 400.0));
+            drag_text(tester, "Two", Offset::new(0.0, 400.0));
             tester.pump_and_settle();
 
-            assert_eq!(found(&tester, "Two"), 1);
+            assert_eq!(found(tester, "Two"), 1);
         });
     }
 
     /// Dart's 'Verify that a scrollable BottomSheet can be dismissed'.
     #[test]
     fn a_scrollable_bottom_sheet_can_be_dismissed() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let scaffold_key = GlobalKey::new();
-            tester.pump_widget(app_with_scaffold(m3(&tester), &scaffold_key));
+            tester.pump_widget(app_with_scaffold(m3(tester), &scaffold_key));
 
-            let scaffold = scaffold_state(&tester, &scaffold_key);
+            let scaffold = scaffold_state(tester, &scaffold_key);
             Persistent::default().show(
-                &tester,
+                tester,
                 scaffold,
                 Rc::new(|_app, _context| {
                     texts_list(&["One", "Two", "Three"])
@@ -5112,62 +5062,64 @@ mod tests {
 
             tester.pump_and_settle();
 
-            assert_eq!(found(&tester, "Two"), 1);
+            assert_eq!(found(tester, "Two"), 1);
 
-            drag_text(&mut tester, "Two", Offset::new(0.0, 400.0));
+            drag_text(tester, "Two", Offset::new(0.0, 400.0));
             tester.pump_and_settle();
 
-            assert_eq!(found(&tester, "Two"), 0);
+            assert_eq!(found(tester, "Two"), 0);
         });
     }
 
     /// Dart's 'Verify DraggableScrollableSheet.shouldCloseOnMinExtent == false prevents
     /// dismissal' and 'Verify that a scrollControlled BottomSheet can be dismissed'.
-    fn draggable_persistent(should_close_on_min_extent: Option<bool>, dismissed: bool) {
-        let mut tester = tester();
+    fn draggable_persistent(
+        tester: &mut WidgetTester,
+        should_close_on_min_extent: Option<bool>,
+        dismissed: bool,
+    ) {
         let scaffold_key = GlobalKey::new();
-        tester.pump_widget(app_with_scaffold(m3(&tester), &scaffold_key));
+        tester.pump_widget(app_with_scaffold(m3(tester), &scaffold_key));
 
-        let scaffold = scaffold_state(&tester, &scaffold_key);
+        let scaffold = scaffold_state(tester, &scaffold_key);
         Persistent::default().show(
-            &tester,
+            tester,
             scaffold,
             Rc::new(move |_app, _context| draggable_texts(should_close_on_min_extent)),
         );
 
         tester.pump_and_settle();
 
-        assert_eq!(found(&tester, "Two"), 1);
+        assert_eq!(found(tester, "Two"), 1);
 
-        drag_text(&mut tester, "Two", Offset::new(0.0, 400.0));
+        drag_text(tester, "Two", Offset::new(0.0, 400.0));
         tester.pump_and_settle();
 
-        assert_eq!(found(&tester, "Two"), if dismissed { 0 } else { 1 });
+        assert_eq!(found(tester, "Two"), if dismissed { 0 } else { 1 });
     }
 
     #[test]
     fn should_close_on_min_extent_false_prevents_dismissing_a_draggable_sheet() {
-        with_main_thread_stack(|| draggable_persistent(Some(false), false));
+        test_widgets(|tester| draggable_persistent(tester, Some(false), false));
     }
 
     #[test]
     fn a_scroll_controlled_bottom_sheet_can_be_dismissed() {
-        with_main_thread_stack(|| draggable_persistent(None, true));
+        test_widgets(|tester| draggable_persistent(tester, None, true));
     }
 
     /// Dart's 'Verify that a BottomSheet animates non-linearly' (persistent).
     #[test]
     fn a_persistent_bottom_sheet_animates_non_linearly() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let scaffold_key = GlobalKey::new();
-            tester.pump_widget(app_with_scaffold(m3(&tester), &scaffold_key));
+            tester.pump_widget(app_with_scaffold(m3(tester), &scaffold_key));
 
             let check = |tester: &mut WidgetTester| {
                 let first_position = center_of_text(tester, "One");
-                tester.pump(Duration::from_millis(30));
+                tester.pump_by(Duration::from_millis(30));
                 let second_position = center_of_text(tester, "One");
-                tester.pump(Duration::from_millis(30));
+                tester.pump_by(Duration::from_millis(30));
                 let third_position = center_of_text(tester, "One");
 
                 let dy_delta1 = second_position.dy() - first_position.dy();
@@ -5177,9 +5129,9 @@ mod tests {
                 assert!((dy_delta1 - dy_delta2).abs() > 0.1);
             };
 
-            let scaffold = scaffold_state(&tester, &scaffold_key);
+            let scaffold = scaffold_state(tester, &scaffold_key);
             Persistent::default().show(
-                &tester,
+                tester,
                 scaffold,
                 Rc::new(|_app, _context| {
                     texts_list(&["One", "Two", "Three"])
@@ -5188,18 +5140,18 @@ mod tests {
                         .into_widget()
                 }),
             );
-            tester.pump(Duration::ZERO);
-            check(&mut tester);
+            tester.pump();
+            check(tester);
 
             tester.pump_and_settle();
 
-            assert_eq!(found(&tester, "Two"), 1);
+            assert_eq!(found(tester, "Two"), 1);
 
-            drag_text(&mut tester, "Two", Offset::new(0.0, 200.0));
-            check(&mut tester);
+            drag_text(tester, "Two", Offset::new(0.0, 200.0));
+            check(tester);
             tester.pump_and_settle();
 
-            assert_eq!(found(&tester, "Two"), 0);
+            assert_eq!(found(tester, "Two"), 0);
         });
     }
 
@@ -5209,7 +5161,7 @@ mod tests {
     fn draggable_items() -> waft_widgets::DraggableScrollableSheet {
         waft_widgets::DraggableScrollableSheet::new(Rc::new(|_app, _context, controller| {
             waft_widgets::ListView::builder(|_app, _context, index| {
-                Some(AhemText::new(&format!("Item {index}")).into_widget())
+                Some(Text::new(format!("Item {index}")).into_widget())
             })
             .item_count(50)
             .build()
@@ -5261,9 +5213,8 @@ mod tests {
     /// Dart's 'Persistent draggableScrollableSheet localHistoryEntries test'.
     #[test]
     fn a_persistent_draggable_sheet_adds_and_removes_its_local_history_entry() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regression test for https://github.com/flutter/flutter/issues/110123
-            let mut tester = tester();
             let draggable_scrollable_sheet = || {
                 draggable_items()
                     .snap(true)
@@ -5272,40 +5223,39 @@ mod tests {
                     .into_widget()
             };
 
-            let frame = app_bar_scaffold(&tester, Some(draggable_scrollable_sheet()));
+            let frame = app_bar_scaffold(tester, Some(draggable_scrollable_sheet()));
             tester.pump_widget(frame);
             tester.pump_and_settle();
 
-            assert_eq!(back_buttons(&tester), 0);
+            assert_eq!(back_buttons(tester), 0);
 
-            drag_text(&mut tester, "Item 2", Offset::new(0.0, -200.0));
+            drag_text(tester, "Item 2", Offset::new(0.0, -200.0));
             tester.pump_and_settle();
             // We've started to drag up, we should have a back button now for a11y
-            assert_eq!(back_buttons(&tester), 1);
+            assert_eq!(back_buttons(tester), 1);
 
-            fling_text(&mut tester, "Item 2", Offset::new(0.0, 200.0), 2000.0);
+            fling_text(tester, "Item 2", Offset::new(0.0, 200.0), 2000.0);
             tester.pump_and_settle();
             // BackButton should be hidden
-            assert_eq!(back_buttons(&tester), 0);
+            assert_eq!(back_buttons(tester), 0);
 
             // Show the back button again
-            drag_text(&mut tester, "Item 2", Offset::new(0.0, -200.0));
+            drag_text(tester, "Item 2", Offset::new(0.0, -200.0));
             tester.pump_and_settle();
-            assert_eq!(back_buttons(&tester), 1);
+            assert_eq!(back_buttons(tester), 1);
 
             // Remove the draggableScrollableSheet should hide the back button
-            let frame = app_bar_scaffold(&tester, None);
+            let frame = app_bar_scaffold(tester, None);
             tester.pump_widget(frame);
-            assert_eq!(back_buttons(&tester), 0);
+            assert_eq!(back_buttons(tester), 0);
         });
     }
 
     /// Dart's 'Verify that a persistent BottomSheet can fling up and hide the fab'.
     #[test]
     fn a_persistent_bottom_sheet_can_fling_up_and_hide_the_fab() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let frame = app_bar_scaffold(&tester, Some(draggable_items().into_widget()));
+        test_widgets(|tester| {
+            let frame = app_bar_scaffold(tester, Some(draggable_items().into_widget()));
             tester.pump_widget(frame);
             tester.pump_and_settle();
             let fabs = |tester: &WidgetTester| {
@@ -5317,82 +5267,80 @@ mod tests {
                 hit_testable_count::<crate::floating_action_button::FloatingActionButton>(tester)
             };
 
-            assert_eq!(found(&tester, "Item 2"), 1);
-            assert_eq!(found(&tester, "Item 22"), 0);
-            assert_eq!(fabs(&tester), 1);
-            assert_eq!(hit_testable_fabs(&tester), 1);
-            assert_eq!(back_buttons(&tester), 0);
+            assert_eq!(found(tester, "Item 2"), 1);
+            assert_eq!(found(tester, "Item 22"), 0);
+            assert_eq!(fabs(tester), 1);
+            assert_eq!(hit_testable_fabs(tester), 1);
+            assert_eq!(back_buttons(tester), 0);
 
-            drag_text(&mut tester, "Item 2", Offset::new(0.0, -20.0));
+            drag_text(tester, "Item 2", Offset::new(0.0, -20.0));
             tester.pump_and_settle();
 
-            assert_eq!(found(&tester, "Item 2"), 1);
-            assert_eq!(found(&tester, "Item 22"), 0);
-            assert_eq!(fabs(&tester), 1);
-            assert_eq!(hit_testable_fabs(&tester), 1);
+            assert_eq!(found(tester, "Item 2"), 1);
+            assert_eq!(found(tester, "Item 22"), 0);
+            assert_eq!(fabs(tester), 1);
+            assert_eq!(hit_testable_fabs(tester), 1);
 
-            fling_text(&mut tester, "Item 2", Offset::new(0.0, -600.0), 2000.0);
+            fling_text(tester, "Item 2", Offset::new(0.0, -600.0), 2000.0);
             tester.pump_and_settle();
 
-            assert_eq!(found(&tester, "Item 2"), 0);
-            assert_eq!(found(&tester, "Item 22"), 1);
-            assert_eq!(fabs(&tester), 1);
-            assert_eq!(hit_testable_fabs(&tester), 0);
+            assert_eq!(found(tester, "Item 2"), 0);
+            assert_eq!(found(tester, "Item 22"), 1);
+            assert_eq!(fabs(tester), 1);
+            assert_eq!(hit_testable_fabs(tester), 0);
         });
     }
 
     /// Dart's 'Verify that a back button resets a persistent BottomSheet'.
     #[test]
     fn a_back_button_resets_a_persistent_bottom_sheet() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let frame = app_bar_scaffold(&tester, Some(draggable_items().into_widget()));
+        test_widgets(|tester| {
+            let frame = app_bar_scaffold(tester, Some(draggable_items().into_widget()));
             tester.pump_widget(frame);
             tester.pump_and_settle();
 
-            assert_eq!(found(&tester, "Item 2"), 1);
-            assert_eq!(found(&tester, "Item 22"), 0);
-            assert_eq!(back_buttons(&tester), 0);
+            assert_eq!(found(tester, "Item 2"), 1);
+            assert_eq!(found(tester, "Item 22"), 0);
+            assert_eq!(back_buttons(tester), 0);
 
-            drag_text(&mut tester, "Item 2", Offset::new(0.0, -20.0));
+            drag_text(tester, "Item 2", Offset::new(0.0, -20.0));
             tester.pump_and_settle();
 
-            assert_eq!(found(&tester, "Item 2"), 1);
-            assert_eq!(found(&tester, "Item 22"), 0);
+            assert_eq!(found(tester, "Item 2"), 1);
+            assert_eq!(found(tester, "Item 22"), 0);
             // We've started to drag up, we should have a back button now for a11y
-            assert_eq!(back_buttons(&tester), 1);
+            assert_eq!(back_buttons(tester), 1);
 
-            tap_back_button(&mut tester, 2);
+            tap_back_button(tester, 2);
             tester.pump_and_settle();
 
-            assert_eq!(back_buttons(&tester), 0);
-            assert_eq!(found(&tester, "Item 2"), 1);
-            assert_eq!(found(&tester, "Item 22"), 0);
+            assert_eq!(back_buttons(tester), 0);
+            assert_eq!(found(tester, "Item 2"), 1);
+            assert_eq!(found(tester, "Item 22"), 0);
 
-            fling_text(&mut tester, "Item 2", Offset::new(0.0, -600.0), 2000.0);
+            fling_text(tester, "Item 2", Offset::new(0.0, -600.0), 2000.0);
             tester.pump_and_settle();
 
-            assert_eq!(found(&tester, "Item 2"), 0);
-            assert_eq!(found(&tester, "Item 22"), 1);
-            assert_eq!(back_buttons(&tester), 1);
+            assert_eq!(found(tester, "Item 2"), 0);
+            assert_eq!(found(tester, "Item 22"), 1);
+            assert_eq!(back_buttons(tester), 1);
 
-            tap_back_button(&mut tester, 3);
+            tap_back_button(tester, 3);
             tester.pump_and_settle();
 
-            assert_eq!(back_buttons(&tester), 0);
-            assert_eq!(found(&tester, "Item 2"), 1);
-            assert_eq!(found(&tester, "Item 22"), 0);
+            assert_eq!(back_buttons(tester), 0);
+            assert_eq!(found(tester, "Item 2"), 1);
+            assert_eq!(found(tester, "Item 22"), 0);
         });
     }
 
     /// Dart's 'Verify that a scrollable BottomSheet hides the fab when scrolled up'.
     #[test]
     fn a_scrollable_bottom_sheet_hides_the_fab_when_scrolled_up() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let scaffold_key = GlobalKey::new();
             tester.pump_widget(material_app(
-                m3(&tester),
+                m3(tester),
                 Scaffold::new()
                     .key(scaffold_key.clone().into())
                     .body(Center::new().child(text("body")))
@@ -5406,9 +5354,9 @@ mod tests {
                 only(tester.find_by_type::<crate::floating_action_button::FloatingActionButton>())
             };
 
-            let scaffold = scaffold_state(&tester, &scaffold_key);
+            let scaffold = scaffold_state(tester, &scaffold_key);
             Persistent::default().show(
-                &tester,
+                tester,
                 scaffold,
                 Rc::new(|_app, _context| {
                     waft_widgets::DraggableScrollableSheet::new(Rc::new(
@@ -5429,31 +5377,30 @@ mod tests {
 
             tester.pump_and_settle();
 
-            assert_eq!(found(&tester, "Two"), 1);
-            assert!(hit_testable(&tester, fab(&tester)));
+            assert_eq!(found(tester, "Two"), 1);
+            assert!(hit_testable(tester, fab(tester)));
 
-            drag_text(&mut tester, "Two", Offset::new(0.0, -600.0));
+            drag_text(tester, "Two", Offset::new(0.0, -600.0));
             tester.pump_and_settle();
 
-            assert_eq!(found(&tester, "Two"), 1);
+            assert_eq!(found(tester, "Two"), 1);
             assert_eq!(
                 tester
                     .find_by_type::<crate::floating_action_button::FloatingActionButton>()
                     .len(),
                 1
             );
-            assert!(!hit_testable(&tester, fab(&tester)));
+            assert!(!hit_testable(tester, fab(tester)));
         });
     }
 
     /// Dart's 'showBottomSheet()'.
     #[test]
     fn show_bottom_sheet_builds_the_sheet_once() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             tester.pump_widget(material_app(
-                m3(&tester),
+                m3(tester),
                 Scaffold::new()
                     .body(
                         waft_widgets::KeyedSubtree::new(placeholder(800.0)).key(key.clone().into()),
@@ -5487,7 +5434,7 @@ mod tests {
                 None,
                 None,
             );
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(build_count.get(), 1);
         });
     }
@@ -5495,13 +5442,12 @@ mod tests {
     /// Dart's 'Scaffold removes top MediaQuery padding'.
     #[test]
     fn the_scaffold_removes_top_media_query_padding_from_a_bottom_sheet() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let scaffold_context = Saved::default();
             let bottom_sheet_context = Saved::default();
             let saving = scaffold_context.clone();
             tester.pump_widget(material_app(
-                m3(&tester),
+                m3(tester),
                 Builder::new(move |app, context| {
                     let data = MediaQuery::of(app, context)
                         .copy_with()
@@ -5518,7 +5464,7 @@ mod tests {
                 .into_widget(),
             ));
 
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             let saving = bottom_sheet_context.clone();
             show_bottom_sheet(
@@ -5539,10 +5485,10 @@ mod tests {
                 None,
             );
 
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             assert_eq!(
-                padding_of(&tester, bottom_sheet_context.get()),
+                padding_of(tester, bottom_sheet_context.get()),
                 EdgeInsets::only(50.0, 0.0, 50.0, 50.0)
             );
         });
@@ -5552,8 +5498,7 @@ mod tests {
     /// `showModalBottomSheet`; the case calls it from the button's context.
     #[test]
     fn a_scaffold_bottom_sheet_shows_and_its_modal_sheet_dismisses() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let bottom_sheet_key = GlobalKey::new();
             let button_context = Saved::default();
             let sheet = Container::new()
@@ -5563,41 +5508,41 @@ mod tests {
                 .child(button_context.builder(|| text("showModalBottomSheet")))
                 .into_widget();
             tester.pump_widget(material_app(
-                m2(&tester),
+                m2(tester),
                 Scaffold::new()
                     .body(placeholder(800.0))
                     .bottom_sheet(sheet)
                     .into_widget(),
             ));
 
-            assert_eq!(found(&tester, "showModalBottomSheet"), 1);
-            let rect = rect_of_key(&tester, &bottom_sheet_key);
+            assert_eq!(found(tester, "showModalBottomSheet"), 1);
+            let rect = rect_of_key(tester, &bottom_sheet_key);
             assert_eq!(rect.size(), Size::new(800.0, 200.0));
             assert_eq!(rect.top_left(), Offset::new(0.0, 400.0));
 
             // Show the modal bottomSheet
             Modal::default().show(
-                &tester,
+                tester,
                 button_context.get(),
                 sheet_builder("modal bottom sheet"),
             );
             tester.pump_and_settle();
-            assert_eq!(found(&tester, "modal bottom sheet"), 1);
+            assert_eq!(found(tester, "modal bottom sheet"), 1);
 
             // Dismiss the modal bottomSheet by tapping above the sheet
             tester.tap(Offset::new(20.0, 20.0), 1);
             tester.pump_and_settle();
-            assert_eq!(found(&tester, "modal bottom sheet"), 0);
-            assert_eq!(found(&tester, "showModalBottomSheet"), 1);
+            assert_eq!(found(tester, "modal bottom sheet"), 0);
+            assert_eq!(found(tester, "showModalBottomSheet"), 1);
 
             // Remove the persistent bottomSheet
             tester.pump_widget(material_app(
-                m2(&tester),
+                m2(tester),
                 Scaffold::new().body(placeholder(800.0)).into_widget(),
             ));
             tester.pump_and_settle();
-            assert_eq!(found(&tester, "showModalBottomSheet"), 0);
-            assert!(!mounted(&tester, &bottom_sheet_key));
+            assert_eq!(found(tester, "showModalBottomSheet"), 0);
+            assert!(!mounted(tester, &bottom_sheet_key));
         });
     }
 
@@ -5605,9 +5550,8 @@ mod tests {
     /// widget has the same key and type.'.
     #[test]
     fn a_scaffold_bottom_sheet_of_the_same_type_keeps_its_render_object() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regression test for https://github.com/flutter/flutter/issues/71435
-            let mut tester = tester();
             let build_frame = |tester: &WidgetTester, content: &'static str| {
                 material_app(
                     m3(tester),
@@ -5618,14 +5562,14 @@ mod tests {
                 )
             };
 
-            tester.pump_widget(build_frame(&tester, "I love Flutter!"));
+            tester.pump_widget(build_frame(tester, "I love Flutter!"));
             let render_before_update =
-                tester.render_box_of(only(tester.find_ahem_text("I love Flutter!")));
+                tester.render_box_of(only(tester.find_text("I love Flutter!")));
 
-            tester.pump_widget(build_frame(&tester, "Flutter is the best!"));
+            tester.pump_widget(build_frame(tester, "Flutter is the best!"));
             tester.pump_and_settle();
             let render_after_update =
-                tester.render_box_of(only(tester.find_ahem_text("Flutter is the best!")));
+                tester.render_box_of(only(tester.find_text("Flutter is the best!")));
 
             assert_eq!(render_before_update, render_after_update);
         });
@@ -5634,8 +5578,7 @@ mod tests {
     /// Dart's 'Verify that visual properties are passed through' (persistent).
     #[test]
     fn visual_properties_are_passed_through_to_a_persistent_bottom_sheet() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let scaffold_key = GlobalKey::new();
             let color = Colors::PINK.primary();
             let elevation = 9.0;
@@ -5646,9 +5589,9 @@ mod tests {
                 ));
             let clip_behavior = Clip::AntiAlias;
 
-            tester.pump_widget(app_with_scaffold(m3(&tester), &scaffold_key));
+            tester.pump_widget(app_with_scaffold(m3(tester), &scaffold_key));
 
-            let scaffold = scaffold_state(&tester, &scaffold_key);
+            let scaffold = scaffold_state(tester, &scaffold_key);
             scaffold.show_bottom_sheet(
                 &mut tester.cell.borrow_mut(),
                 Rc::new(|_app, _context| {
@@ -5683,14 +5626,13 @@ mod tests {
     /// Dart's 'PersistentBottomSheetController.close dismisses the bottom sheet'.
     #[test]
     fn closing_the_persistent_bottom_sheet_controller_dismisses_the_sheet() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let scaffold_key = GlobalKey::new();
-            tester.pump_widget(app_with_scaffold(m3(&tester), &scaffold_key));
+            tester.pump_widget(app_with_scaffold(m3(tester), &scaffold_key));
 
-            let scaffold = scaffold_state(&tester, &scaffold_key);
+            let scaffold = scaffold_state(tester, &scaffold_key);
             let bottom_sheet = Persistent::default().show(
-                &tester,
+                tester,
                 scaffold,
                 Rc::new(|_app, _context| {
                     Builder::new(|_app, _context| Container::new().height(200.0).into_widget())
@@ -5698,11 +5640,11 @@ mod tests {
                 }),
             );
 
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(tester.find_by_type::<BottomSheet>().len(), 1);
 
             bottom_sheet.close(&mut tester.cell.borrow_mut());
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert!(tester.find_by_type::<BottomSheet>().is_empty());
         });
     }
@@ -5832,60 +5774,56 @@ mod tests {
 
     #[test]
     fn the_sheet_material_extends_behind_the_keyboard_and_the_content_stays_above() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let content = GlobalKey::new();
-            tester.pump_widget(KeyboardInsetApp::new(0.0).build(&tester, &content));
-            assert_eq!(rect_of_key(&tester, &content).top, 500.0);
-            assert_eq!(rect_of_key(&tester, &content).bottom, 600.0);
-            assert_eq!(inset_sheet_material(&tester).top, 500.0);
-            assert_eq!(inset_sheet_material(&tester).bottom, 600.0);
+            tester.pump_widget(KeyboardInsetApp::new(0.0).build(tester, &content));
+            assert_eq!(rect_of_key(tester, &content).top, 500.0);
+            assert_eq!(rect_of_key(tester, &content).bottom, 600.0);
+            assert_eq!(inset_sheet_material(tester).top, 500.0);
+            assert_eq!(inset_sheet_material(tester).bottom, 600.0);
 
-            tester.pump_widget(KeyboardInsetApp::new(200.0).build(&tester, &content));
+            tester.pump_widget(KeyboardInsetApp::new(200.0).build(tester, &content));
             // Content avoids the keyboard exactly as before.
-            assert_eq!(rect_of_key(&tester, &content).top, 300.0);
-            assert_eq!(rect_of_key(&tester, &content).bottom, 400.0);
+            assert_eq!(rect_of_key(tester, &content).top, 300.0);
+            assert_eq!(rect_of_key(tester, &content).bottom, 400.0);
             // The sheet's own Material now continues to the bottom of the screen.
-            assert_eq!(inset_sheet_material(&tester).top, 300.0);
-            assert_eq!(inset_sheet_material(&tester).bottom, 600.0);
+            assert_eq!(inset_sheet_material(tester).top, 300.0);
+            assert_eq!(inset_sheet_material(tester).bottom, 600.0);
         });
     }
 
     #[test]
     fn resize_to_avoid_bottom_inset_false_leaves_the_sheet_unchanged() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let content = GlobalKey::new();
             let mut app = KeyboardInsetApp::new(200.0);
             app.resize_to_avoid_bottom_inset = false;
-            tester.pump_widget(app.build(&tester, &content));
-            assert_eq!(rect_of_key(&tester, &content).top, 500.0);
-            assert_eq!(rect_of_key(&tester, &content).bottom, 600.0);
-            assert_eq!(inset_sheet_material(&tester).top, 500.0);
-            assert_eq!(inset_sheet_material(&tester).bottom, 600.0);
+            tester.pump_widget(app.build(tester, &content));
+            assert_eq!(rect_of_key(tester, &content).top, 500.0);
+            assert_eq!(rect_of_key(tester, &content).bottom, 600.0);
+            assert_eq!(inset_sheet_material(tester).top, 500.0);
+            assert_eq!(inset_sheet_material(tester).bottom, 600.0);
         });
     }
 
     #[test]
     fn the_sheet_material_stops_above_a_bottom_navigation_bar() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let content = GlobalKey::new();
             let mut app = KeyboardInsetApp::new(200.0);
             app.bottom_navigation_bar = Some(SizedBox::new().height(50.0).into_widget());
-            tester.pump_widget(app.build(&tester, &content));
-            assert_eq!(rect_of_key(&tester, &content).top, 300.0);
-            assert_eq!(rect_of_key(&tester, &content).bottom, 400.0);
+            tester.pump_widget(app.build(tester, &content));
+            assert_eq!(rect_of_key(tester, &content).top, 300.0);
+            assert_eq!(rect_of_key(tester, &content).bottom, 400.0);
             // Extends down to the top of the bottom navigation bar, not past it.
-            assert_eq!(inset_sheet_material(&tester).top, 300.0);
-            assert_eq!(inset_sheet_material(&tester).bottom, 550.0);
+            assert_eq!(inset_sheet_material(tester).top, 300.0);
+            assert_eq!(inset_sheet_material(tester).bottom, 550.0);
         });
     }
 
     #[test]
     fn a_docked_floating_action_button_straddles_the_top_edge_of_the_sheet_content() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let content = GlobalKey::new();
             let fab_center_y = |tester: &WidgetTester| {
                 let fab =
@@ -5900,20 +5838,19 @@ mod tests {
                 app
             };
 
-            tester.pump_widget(app(0.0).build(&tester, &content));
-            assert_eq!(fab_center_y(&tester), 500.0);
+            tester.pump_widget(app(0.0).build(tester, &content));
+            assert_eq!(fab_center_y(tester), 500.0);
 
-            tester.pump_widget(app(200.0).build(&tester, &content));
+            tester.pump_widget(app(200.0).build(tester, &content));
             tester.pump_and_settle();
             // Top of the content (300), not the top of the extended Material.
-            assert_eq!(fab_center_y(&tester), 300.0);
+            assert_eq!(fab_center_y(tester), 300.0);
         });
     }
 
     #[test]
     fn the_keyboard_appearing_keeps_the_sheet_contents_state_and_focus() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let content = GlobalKey::new();
             let focus_node = waft_widgets::FocusNode::new(&mut tester.cell.borrow_mut());
             let sheet = || {
@@ -5930,16 +5867,16 @@ mod tests {
             let has_focus =
                 |tester: &WidgetTester| focus_node.has_focus(&mut tester.cell.borrow_mut());
 
-            tester.pump_widget(app(0.0).build(&tester, &content));
+            tester.pump_widget(app(0.0).build(tester, &content));
             focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
-            tester.pump(Duration::ZERO);
-            assert!(has_focus(&tester));
+            tester.pump();
+            assert!(has_focus(tester));
             // The `EditableText`'s element, which holds its state.
             let before = only(tester.find_by_type::<waft_widgets::EditableText>());
 
-            tester.pump_widget(app(200.0).build(&tester, &content));
-            tester.pump(Duration::ZERO);
-            assert!(has_focus(&tester));
+            tester.pump_widget(app(200.0).build(tester, &content));
+            tester.pump();
+            assert!(has_focus(tester));
             assert_eq!(
                 only(tester.find_by_type::<waft_widgets::EditableText>()),
                 before
@@ -5949,61 +5886,57 @@ mod tests {
 
     #[test]
     fn a_shown_bottom_sheet_can_still_be_flung_closed_with_the_keyboard_up() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let scaffold_key = GlobalKey::new();
-            tester.pump_widget(keyboard_app_with_scaffold(&tester, 200.0, &scaffold_key));
-            let scaffold = scaffold_state(&tester, &scaffold_key);
-            Persistent::default().show(&tester, scaffold, sheet_of_height(100.0));
+            tester.pump_widget(keyboard_app_with_scaffold(tester, 200.0, &scaffold_key));
+            let scaffold = scaffold_state(tester, &scaffold_key);
+            Persistent::default().show(tester, scaffold, sheet_of_height(100.0));
             tester.pump_and_settle();
-            assert_eq!(rect_of_text(&tester, "sheet").bottom, 400.0);
-            assert_eq!(inset_sheet_material(&tester).bottom, 600.0);
+            assert_eq!(rect_of_text(tester, "sheet").bottom, 400.0);
+            assert_eq!(inset_sheet_material(tester).bottom, 600.0);
 
-            fling_text(&mut tester, "sheet", Offset::new(0.0, 300.0), 2000.0);
+            fling_text(tester, "sheet", Offset::new(0.0, 300.0), 2000.0);
             tester.pump_and_settle();
-            assert_eq!(found(&tester, "sheet"), 0);
+            assert_eq!(found(tester, "sheet"), 0);
         });
     }
 
     #[test]
     fn a_shown_bottom_sheet_follows_the_drag_with_the_keyboard_up() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const KEYBOARD_HEIGHT: f64 = 200.0;
             const CONTENT_HEIGHT: f64 = 100.0;
             const MATERIAL_HEIGHT: f64 = CONTENT_HEIGHT + KEYBOARD_HEIGHT;
             // The content is at the top of the Material, which ends at the bottom of
             // the 600px tall test screen.
             const CONTENT_TOP: f64 = 600.0 - MATERIAL_HEIGHT;
-            let mut tester = tester();
             let scaffold_key = GlobalKey::new();
             tester.pump_widget(keyboard_app_with_scaffold(
-                &tester,
+                tester,
                 KEYBOARD_HEIGHT,
                 &scaffold_key,
             ));
-            let scaffold = scaffold_state(&tester, &scaffold_key);
-            Persistent::default().show(&tester, scaffold, sheet_of_height(CONTENT_HEIGHT));
+            let scaffold = scaffold_state(tester, &scaffold_key);
+            Persistent::default().show(tester, scaffold, sheet_of_height(CONTENT_HEIGHT));
             tester.pump_and_settle();
-            assert_eq!(rect_of_text(&tester, "sheet").top, CONTENT_TOP);
-            assert_eq!(inset_sheet_material(&tester).height(), MATERIAL_HEIGHT);
+            assert_eq!(rect_of_text(tester, "sheet").top, CONTENT_TOP);
+            assert_eq!(inset_sheet_material(tester).height(), MATERIAL_HEIGHT);
 
             // The whole sheet moves with the finger.
             const DRAG_DISTANCE: f64 = 100.0;
-            let mut gesture = WidgetTester::touch(1);
-            let center = center_of_text(&tester, "sheet");
+            let mut gesture = TestPointer::touch(1);
+            let center = center_of_text(tester, "sheet");
             tester.down(&mut gesture, center);
-            let move_by = |tester: &mut WidgetTester,
-                           gesture: &mut crate::test_support::TestPointer,
-                           dy: f64| {
+            let move_by = |tester: &mut WidgetTester, gesture: &mut TestPointer, dy: f64| {
                 let at = gesture.position + Offset::new(0.0, dy);
                 tester.move_to(gesture, at, true);
             };
-            move_by(&mut tester, &mut gesture, 20.0); // Past the touch slop.
-            tester.pump(Duration::ZERO);
-            move_by(&mut tester, &mut gesture, DRAG_DISTANCE);
-            tester.pump(Duration::ZERO);
+            move_by(tester, &mut gesture, 20.0); // Past the touch slop.
+            tester.pump();
+            move_by(tester, &mut gesture, DRAG_DISTANCE);
+            tester.pump();
             assert_eq!(
-                rect_of_text(&tester, "sheet").top,
+                rect_of_text(tester, "sheet").top,
                 CONTENT_TOP + DRAG_DISTANCE
             );
 
@@ -6011,45 +5944,39 @@ mod tests {
             // including the part behind the keyboard: springs back open.
             tester.up(&gesture);
             tester.pump_and_settle();
-            assert_eq!(rect_of_text(&tester, "sheet").top, CONTENT_TOP);
+            assert_eq!(rect_of_text(tester, "sheet").top, CONTENT_TOP);
 
             // More than half of the whole sheet: closes.
-            drag_text(
-                &mut tester,
-                "sheet",
-                Offset::new(0.0, MATERIAL_HEIGHT * 0.75),
-            );
+            drag_text(tester, "sheet", Offset::new(0.0, MATERIAL_HEIGHT * 0.75));
             tester.pump_and_settle();
-            assert_eq!(found(&tester, "sheet"), 0);
+            assert_eq!(found(tester, "sheet"), 0);
         });
     }
 
     #[test]
     fn the_max_height_constraint_bounds_the_content_not_the_material_behind_the_keyboard() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let scaffold_key = GlobalKey::new();
-            tester.pump_widget(keyboard_app_with_scaffold(&tester, 200.0, &scaffold_key));
-            let scaffold = scaffold_state(&tester, &scaffold_key);
+            tester.pump_widget(keyboard_app_with_scaffold(tester, 200.0, &scaffold_key));
+            let scaffold = scaffold_state(tester, &scaffold_key);
             Persistent {
                 constraints: Some(BoxConstraints::new().max_height(250.0)),
                 ..Persistent::default()
             }
-            .show(&tester, scaffold, sheet_of_height(400.0));
+            .show(tester, scaffold, sheet_of_height(400.0));
             tester.pump_and_settle();
             // The content gets the full 250 it is allowed, above the keyboard.
-            assert_eq!(rect_of_text(&tester, "sheet").top, 150.0);
-            assert_eq!(rect_of_text(&tester, "sheet").bottom, 400.0);
+            assert_eq!(rect_of_text(tester, "sheet").top, 150.0);
+            assert_eq!(rect_of_text(tester, "sheet").bottom, 400.0);
             // The Material is 250 + 200.
-            assert_eq!(inset_sheet_material(&tester).top, 150.0);
-            assert_eq!(inset_sheet_material(&tester).bottom, 600.0);
+            assert_eq!(inset_sheet_material(tester).top, 150.0);
+            assert_eq!(inset_sheet_material(tester).bottom, 600.0);
         });
     }
 
     #[test]
     fn taps_in_the_material_behind_the_keyboard_do_not_reach_the_content() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let content = GlobalKey::new();
             let tap_count = Rc::new(Cell::new(0));
             let mut app = KeyboardInsetApp::new(200.0);
@@ -6067,9 +5994,9 @@ mod tests {
                     )
                     .into_widget()
             });
-            tester.pump_widget(app.build(&tester, &content));
-            assert_eq!(rect_of_text(&tester, "sheet").bottom, 400.0);
-            assert_eq!(inset_sheet_material(&tester).bottom, 600.0);
+            tester.pump_widget(app.build(tester, &content));
+            assert_eq!(rect_of_text(tester, "sheet").bottom, 400.0);
+            assert_eq!(inset_sheet_material(tester).bottom, 600.0);
 
             // Inside the content.
             tester.tap(Offset::new(400.0, 350.0), 1);
@@ -6085,8 +6012,7 @@ mod tests {
 
     #[test]
     fn a_scaffold_shorter_than_the_keyboard_inset_keeps_the_sheet_inside_its_bounds() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let content = GlobalKey::new();
             // A 250px tall Scaffold centered on the 600px screen, so it spans y 175..425.
             let nested = |tester: &WidgetTester, keyboard_height: f64| {
@@ -6118,26 +6044,25 @@ mod tests {
             };
 
             for keyboard_height in [0.0, 200.0, 400.0, 0.0] {
-                tester.pump_widget(nested(&tester, keyboard_height));
+                tester.pump_widget(nested(tester, keyboard_height));
                 tester.pump_and_settle();
                 // The content gets whatever is left above the keyboard, at most the
                 // theme's 150, exactly as before.
                 assert_eq!(
-                    rect_of_key(&tester, &content).height(),
+                    rect_of_key(tester, &content).height(),
                     (250.0 - keyboard_height).clamp(0.0, 150.0)
                 );
                 // The Material always ends at the Scaffold's bottom edge and never
                 // leaves the Scaffold, without any clipping.
-                assert_eq!(inset_sheet_material(&tester).bottom, 425.0);
-                assert!(inset_sheet_material(&tester).top >= 175.0);
+                assert_eq!(inset_sheet_material(tester).bottom, 425.0);
+                assert!(inset_sheet_material(tester).top >= 175.0);
             }
         });
     }
 
     #[test]
     fn a_bottom_sheet_given_as_the_scaffolds_bottom_sheet_is_not_extended_twice() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let content = GlobalKey::new();
             let mut app = KeyboardInsetApp::new(200.0);
             app.bottom_sheet = Some({
@@ -6155,14 +6080,14 @@ mod tests {
                 .enable_drag(false)
                 .into_widget()
             });
-            tester.pump_widget(app.build(&tester, &content));
+            tester.pump_widget(app.build(tester, &content));
             assert_eq!(tester.find_by_type::<BottomSheet>().len(), 2);
 
             // Only the Scaffold's own sheet extends behind the keyboard. The user's
             // sheet, and its Material, end with the content.
-            assert_eq!(rect_of_key(&tester, &content).bottom, 400.0);
-            assert_eq!(material_of_sheet(&tester, 0).bottom, 600.0);
-            assert_eq!(material_of_sheet(&tester, 1).bottom, 400.0);
+            assert_eq!(rect_of_key(tester, &content).bottom, 400.0);
+            assert_eq!(material_of_sheet(tester, 0).bottom, 600.0);
+            assert_eq!(material_of_sheet(tester, 1).bottom, 400.0);
         });
     }
 
@@ -6202,9 +6127,8 @@ mod tests {
     /// Dart's 'Material3 - Passing no BottomSheetThemeData returns defaults'.
     #[test]
     fn material3_passing_no_bottom_sheet_theme_returns_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = m3(&tester);
+        test_widgets(|tester| {
+            let theme = m3(tester);
             let surface_container_low = theme.color_scheme.surface_container_low();
             tester.pump_widget(bottom_sheet_in_scaffold(theme, plain_sheet()));
 
@@ -6216,7 +6140,7 @@ mod tests {
                         waft_embedder::Radius::ZERO,
                     ),
                 ));
-            tester.widget(sheet_material(&tester), |material: &Material| {
+            tester.widget(sheet_material(tester), |material: &Material| {
                 assert_eq!(material.color, Some(surface_container_low));
                 assert_eq!(material.elevation, 1.0);
                 assert!(shape_eq(material.shape.as_deref(), Some(&*default_shape)));
@@ -6228,11 +6152,10 @@ mod tests {
     /// Dart's 'Material2 - Passing no BottomSheetThemeData returns defaults'.
     #[test]
     fn material2_passing_no_bottom_sheet_theme_returns_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            tester.pump_widget(bottom_sheet_in_scaffold(m2(&tester), plain_sheet()));
+        test_widgets(|tester| {
+            tester.pump_widget(bottom_sheet_in_scaffold(m2(tester), plain_sheet()));
 
-            tester.widget(sheet_material(&tester), |material: &Material| {
+            tester.widget(sheet_material(tester), |material: &Material| {
                 assert_eq!(material.color, None);
                 assert_eq!(material.elevation, 0.0);
                 assert!(material.shape.is_none());
@@ -6244,15 +6167,14 @@ mod tests {
     /// Dart's 'BottomSheet uses values from BottomSheetThemeData'.
     #[test]
     fn a_bottom_sheet_uses_values_from_the_bottom_sheet_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let bottom_sheet_theme = orange_bottom_sheet_theme();
             let theme = ThemeData::builder()
                 .bottom_sheet_theme(bottom_sheet_theme.clone())
                 .build(&tester.cell.borrow());
             tester.pump_widget(bottom_sheet_in_scaffold(theme, plain_sheet()));
 
-            tester.widget(sheet_material(&tester), |material: &Material| {
+            tester.widget(sheet_material(tester), |material: &Material| {
                 assert_eq!(material.color, bottom_sheet_theme.background_color);
                 assert_eq!(Some(material.elevation), bottom_sheet_theme.elevation);
                 assert!(shape_eq(
@@ -6270,8 +6192,7 @@ mod tests {
     /// Dart's 'BottomSheet widget properties take priority over theme'.
     #[test]
     fn bottom_sheet_widget_properties_take_priority_over_the_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let background_color = Colors::PURPLE.primary();
             let shadow_color = Colors::BLUE.primary();
             let elevation = 7.0;
@@ -6295,7 +6216,7 @@ mod tests {
                     .clip_behavior(Clip::HardEdge),
             ));
 
-            tester.widget(sheet_material(&tester), |material: &Material| {
+            tester.widget(sheet_material(tester), |material: &Material| {
                 assert_eq!(material.color, Some(background_color));
                 assert_eq!(material.shadow_color, Some(shadow_color));
                 assert_eq!(material.elevation, elevation);
@@ -6355,8 +6276,7 @@ mod tests {
     /// Dart's 'Modal bottom sheet-specific parameters are used for modal bottom sheets'.
     #[test]
     fn modal_specific_theme_parameters_are_used_for_modal_bottom_sheets() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let saved = Saved::default();
             let modal_elevation = 5.0;
             let persistent_elevation = 7.0;
@@ -6371,15 +6291,15 @@ mod tests {
                 .modal_barrier_color(modal_barrier_color);
 
             tester.pump_widget(bottom_sheet_with_elevations(
-                &tester,
+                tester,
                 bottom_sheet_theme,
                 true,
                 &saved,
             ));
-            show_modal_from(&tester, &saved);
+            show_modal_from(tester, &saved);
             tester.pump_and_settle();
 
-            tester.widget(sheet_material(&tester), |material: &Material| {
+            tester.widget(sheet_material(tester), |material: &Material| {
                 assert_eq!(material.elevation, modal_elevation);
                 assert_eq!(material.color, Some(modal_background_color));
             });
@@ -6398,8 +6318,7 @@ mod tests {
     /// sheet-specific parameters for persistent bottom sheets'.
     #[test]
     fn general_theme_parameters_win_over_modal_ones_for_persistent_bottom_sheets() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let saved = Saved::default();
             let modal_elevation = 5.0;
             let persistent_elevation = 7.0;
@@ -6412,15 +6331,15 @@ mod tests {
                 .modal_background_color(modal_background_color);
 
             tester.pump_widget(bottom_sheet_with_elevations(
-                &tester,
+                tester,
                 bottom_sheet_theme,
                 true,
                 &saved,
             ));
-            show_persistent_from(&tester, &saved);
+            show_persistent_from(tester, &saved);
             tester.pump_and_settle();
 
-            tester.widget(sheet_material(&tester), |material: &Material| {
+            tester.widget(sheet_material(tester), |material: &Material| {
                 assert_eq!(material.elevation, persistent_elevation);
                 assert_eq!(material.color, Some(persistent_background_color));
             });
@@ -6431,26 +6350,25 @@ mod tests {
     /// bottom sheets".
     #[test]
     fn material3_modal_theme_parameters_do_not_apply_to_persistent_bottom_sheets() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let saved = Saved::default();
             let bottom_sheet_theme = BottomSheetThemeData::new()
                 .modal_elevation(5.0)
                 .modal_background_color(Colors::YELLOW.primary());
 
             tester.pump_widget(bottom_sheet_with_elevations(
-                &tester,
+                tester,
                 bottom_sheet_theme,
                 true,
                 &saved,
             ));
-            show_persistent_from(&tester, &saved);
+            show_persistent_from(tester, &saved);
             tester.pump_and_settle();
 
             let surface_container_low = Theme::of(&mut tester.cell.borrow_mut(), saved.get())
                 .color_scheme
                 .surface_container_low();
-            tester.widget(sheet_material(&tester), |material: &Material| {
+            tester.widget(sheet_material(tester), |material: &Material| {
                 assert_eq!(material.elevation, 1.0);
                 assert_eq!(material.color, Some(surface_container_low));
             });
@@ -6461,23 +6379,22 @@ mod tests {
     /// bottom sheets".
     #[test]
     fn material2_modal_theme_parameters_do_not_apply_to_persistent_bottom_sheets() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let saved = Saved::default();
             let bottom_sheet_theme = BottomSheetThemeData::new()
                 .modal_elevation(5.0)
                 .modal_background_color(Colors::YELLOW.primary());
 
             tester.pump_widget(bottom_sheet_with_elevations(
-                &tester,
+                tester,
                 bottom_sheet_theme,
                 false,
                 &saved,
             ));
-            show_persistent_from(&tester, &saved);
+            show_persistent_from(tester, &saved);
             tester.pump_and_settle();
 
-            tester.widget(sheet_material(&tester), |material: &Material| {
+            tester.widget(sheet_material(tester), |material: &Material| {
                 assert_eq!(material.elevation, 0.0);
                 assert_eq!(material.color, None);
             });
@@ -6489,11 +6406,10 @@ mod tests {
     #[test]
     #[should_panic(expected = "'BottomSheet.animationController' cannot be null")]
     fn dragging_a_draggable_bottom_sheet_without_an_animation_controller_fails() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regression test for https://github.com/flutter/flutter/issues/89168
-            let mut tester = tester();
             tester.pump_widget(material_app(
-                m3(&tester),
+                m3(tester),
                 BottomSheet::new(
                     Rc::new(|_app| {}),
                     Rc::new(|_app, _context| {
@@ -6507,7 +6423,7 @@ mod tests {
                 .into_widget(),
             ));
 
-            drag_text(&mut tester, "BottomSheet", Offset::new(0.0, 150.0));
+            drag_text(tester, "BottomSheet", Offset::new(0.0, 150.0));
         });
     }
 
@@ -6516,12 +6432,11 @@ mod tests {
     /// freed once nothing holds it.
     #[test]
     fn a_modal_bottom_sheet_frees_its_animations_as_it_disposes_them() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let saved = Saved::default();
-            tester.pump_widget(app_saving_context(&tester, &saved));
-            tester.pump(Duration::ZERO);
-            drop(Modal::default().show(&tester, saved.get(), sheet_builder("BottomSheet")));
+            tester.pump_widget(app_saving_context(tester, &saved));
+            tester.pump();
+            drop(Modal::default().show(tester, saved.get(), sheet_builder("BottomSheet")));
             tester.pump_and_settle();
             let state = |tester: &WidgetTester| {
                 let sheet = tester.find_by_type::<ModalBottomSheet>()[0];
@@ -6542,7 +6457,7 @@ mod tests {
                     .handle()
             };
             let (curved, proxy) = {
-                let state = state(&tester);
+                let state = state(tester);
                 let app = tester.cell.borrow();
                 (
                     state.curved_sheet_animation(&app),
@@ -6550,19 +6465,19 @@ mod tests {
                 )
             };
 
-            drag_text(&mut tester, "BottomSheet", Offset::new(0.0, 20.0));
+            drag_text(tester, "BottomSheet", Offset::new(0.0, 20.0));
             tester.pump_and_settle();
-            let first_drag_end = drag_end_curve(&tester);
-            drag_text(&mut tester, "BottomSheet", Offset::new(0.0, 20.0));
+            let first_drag_end = drag_end_curve(tester);
+            drag_text(tester, "BottomSheet", Offset::new(0.0, 20.0));
             tester.pump_and_settle();
-            let second_drag_end = drag_end_curve(&tester);
+            let second_drag_end = drag_end_curve(tester);
             tester.cell.checkpoint();
             assert!(!tester.cell.borrow().contains(first_drag_end));
             assert!(tester.cell.borrow().contains(second_drag_end));
 
-            drag_text(&mut tester, "BottomSheet", Offset::new(0.0, 150.0));
+            drag_text(tester, "BottomSheet", Offset::new(0.0, 150.0));
             tester.pump_and_settle();
-            assert_eq!(found(&tester, "BottomSheet"), 0);
+            assert_eq!(found(tester, "BottomSheet"), 0);
             tester.cell.checkpoint();
             let app = tester.cell.borrow();
             assert!(!app.contains(second_drag_end));

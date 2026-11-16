@@ -1192,10 +1192,14 @@ mod tests {
         FocusNodeLeaf, IntoWidget, SizedBox,
     };
 
+    use waft_widgets::testing::{
+        TargetPlatformVariant, TestPointer, WidgetTester, test_widgets, test_widgets_variant,
+    };
+
     use super::*;
     use crate::colors::Colors;
     use crate::material::Material;
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::material_app;
     use crate::text_button::TextButton;
     use crate::text_selection::material_text_selection_controls;
     use crate::theme_data::ThemeData;
@@ -1205,12 +1209,6 @@ mod tests {
     const K_MORE_THAN_FOUR_LINES: &str = "First line of text is\nSecond line goes until\nThird line of stuff\nFourth line won't display and ends at";
     const ATWATER: &str = "Atwater Peel Sherbrooke Bonaventure";
 
-    fn tester_on(platform: TargetPlatform) -> WidgetTester {
-        let tester = WidgetTester::on(platform);
-        tester.install_platform_fonts();
-        tester
-    }
-
     /// A tester on `platform` whose host clipboard the case reads back.
     fn tester_with_clipboard(platform: TargetPlatform) -> (WidgetTester, MockClipboard) {
         let clipboard = MockClipboard::new();
@@ -1219,7 +1217,6 @@ mod tests {
                 .on(platform)
                 .with_clipboard(Rc::new(clipboard.clone())),
         );
-        tester.install_platform_fonts();
         (tester, clipboard)
     }
 
@@ -1463,20 +1460,19 @@ mod tests {
 
     #[test]
     fn uses_default_selection_style_for_selection_and_cursor_colors_if_provided() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let selection_color = Colors::ORANGE.primary();
             let cursor_color = Colors::RED.primary();
             let root = material_home(
-                &mut tester,
+                tester,
                 DefaultSelectionStyle::new(SelectableText::new("text"))
                     .selection_color(selection_color)
                     .cursor_color(cursor_color),
             );
             tester.pump_widget(root);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             let (selection, cursor) = tester
-                .widget::<EditableText, _>(editable_elements(&tester)[0], |widget| {
+                .widget::<EditableText, _>(editable_elements(tester)[0], |widget| {
                     (widget.selection_color, widget.cursor_color)
                 });
             assert_eq!(selection, Some(selection_color));
@@ -1486,45 +1482,43 @@ mod tests {
 
     #[test]
     fn selectable_text_can_have_custom_selection_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let selection_color = Colors::ORANGE.primary();
             let default_selection_color = Colors::RED.primary();
             let root = material_home(
-                &mut tester,
+                tester,
                 DefaultSelectionStyle::new(
                     SelectableText::new("text").selection_color(selection_color),
                 )
                 .selection_color(default_selection_color),
             );
             tester.pump_widget(root);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             let selection = tester
-                .widget::<EditableText, _>(editable_elements(&tester)[0], |w| w.selection_color);
+                .widget::<EditableText, _>(editable_elements(tester)[0], |w| w.selection_color);
             assert_eq!(selection, Some(selection_color));
         });
     }
 
     #[test]
     fn can_switch_between_text_height_behavior() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let text_height_behavior = TextHeightBehavior {
                 apply_height_to_first_ascent: false,
                 apply_height_to_last_descent: false,
                 ..TextHeightBehavior::default()
             };
-            let root = overlay(&mut tester, SelectableText::new("selectable text"));
+            let root = overlay(tester, SelectableText::new("selectable text"));
             tester.pump_widget(root);
-            let editable = render_editable_at(&tester, 0);
+            let editable = render_editable_at(tester, 0);
             assert_eq!(editable.text_height_behavior(&tester.cell.borrow()), None);
 
             let root = overlay(
-                &mut tester,
+                tester,
                 SelectableText::new("selectable text").text_height_behavior(text_height_behavior),
             );
             tester.pump_widget(root);
-            let editable = render_editable_at(&tester, 0);
+            let editable = render_editable_at(tester, 0);
             assert_eq!(
                 editable.text_height_behavior(&tester.cell.borrow()),
                 Some(text_height_behavior)
@@ -1534,169 +1528,159 @@ mod tests {
 
     #[test]
     fn cursor_blinks_when_show_cursor_is_true() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let root = overlay(
-                &mut tester,
-                SelectableText::new("some text").show_cursor(true),
-            );
+        test_widgets(|tester| {
+            let root = overlay(tester, SelectableText::new("some text").show_cursor(true));
             tester.pump_widget(root);
-            let at = center_of_selectable_text(&tester);
+            let at = center_of_selectable_text(tester);
             tester.tap(at, 1);
 
-            let editable_text = editable_state(&tester);
+            let editable_text = editable_state(tester);
             let visible = |tester: &WidgetTester| {
                 editable_text.cursor_currently_visible(&tester.cell.borrow())
             };
             let interval = EditableTextState::cursor_blink_interval();
 
             // Check that the cursor visibility toggles after each blink interval.
-            let initial_show_cursor = visible(&tester);
-            tester.pump(interval);
-            assert_eq!(visible(&tester), !initial_show_cursor);
-            tester.pump(interval);
-            assert_eq!(visible(&tester), initial_show_cursor);
-            tester.pump(interval / 10);
-            assert_eq!(visible(&tester), initial_show_cursor);
-            tester.pump(interval);
-            assert_eq!(visible(&tester), !initial_show_cursor);
-            tester.pump(interval);
-            assert_eq!(visible(&tester), initial_show_cursor);
+            let initial_show_cursor = visible(tester);
+            tester.pump_by(interval);
+            assert_eq!(visible(tester), !initial_show_cursor);
+            tester.pump_by(interval);
+            assert_eq!(visible(tester), initial_show_cursor);
+            tester.pump_by(interval / 10);
+            assert_eq!(visible(tester), initial_show_cursor);
+            tester.pump_by(interval);
+            assert_eq!(visible(tester), !initial_show_cursor);
+            tester.pump_by(interval);
+            assert_eq!(visible(tester), initial_show_cursor);
         });
     }
 
     #[test]
     fn caret_position_is_updated_on_tap() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let root = overlay(&mut tester, SelectableText::new("abc def ghi"));
+        test_widgets(|tester| {
+            let root = overlay(tester, SelectableText::new("abc def ghi"));
             tester.pump_widget(root);
-            assert_eq!(selection(&tester).base_offset, -1);
-            assert_eq!(selection(&tester).extent_offset, -1);
+            assert_eq!(selection(tester).base_offset, -1);
+            assert_eq!(selection(tester).extent_offset, -1);
 
             // Tap to reposition the caret.
             let tap_index = 4;
-            let e_pos = text_offset_to_position(&tester, tap_index);
+            let e_pos = text_offset_to_position(tester, tap_index);
             tester.tap(e_pos, 1);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            assert_eq!(selection(&tester).base_offset, tap_index);
-            assert_eq!(selection(&tester).extent_offset, tap_index);
+            assert_eq!(selection(tester).base_offset, tap_index);
+            assert_eq!(selection(tester).extent_offset, tap_index);
         });
     }
 
     #[test]
     fn enable_interactive_selection_false_tap() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let root = overlay(
-                &mut tester,
+                tester,
                 SelectableText::new("abc def ghi").enable_interactive_selection(false),
             );
             tester.pump_widget(root);
-            assert_eq!(selection(&tester).base_offset, -1);
-            assert_eq!(selection(&tester).extent_offset, -1);
+            assert_eq!(selection(tester).base_offset, -1);
+            assert_eq!(selection(tester).extent_offset, -1);
 
             // Tap would ordinarily reposition the caret.
-            let e_pos = text_offset_to_position(&tester, 4);
+            let e_pos = text_offset_to_position(tester, 4);
             tester.tap(e_pos, 1);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            assert_eq!(selection(&tester).base_offset, -1);
-            assert_eq!(selection(&tester).extent_offset, -1);
+            assert_eq!(selection(tester).base_offset, -1);
+            assert_eq!(selection(tester).extent_offset, -1);
         });
     }
 
     #[test]
     fn enable_interactive_selection_false_long_press() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let root = overlay(
-                &mut tester,
+                tester,
                 SelectableText::new("abc def ghi").enable_interactive_selection(false),
             );
             tester.pump_widget(root);
-            assert_eq!(selection(&tester).base_offset, -1);
-            assert_eq!(selection(&tester).extent_offset, -1);
+            assert_eq!(selection(tester).base_offset, -1);
+            assert_eq!(selection(tester).extent_offset, -1);
 
             // Long press the 'e' to select 'def'.
-            let e_pos = text_offset_to_position(&tester, 5);
-            let mut gesture = WidgetTester::touch(7);
+            let e_pos = text_offset_to_position(tester, 5);
+            let mut gesture = TestPointer::touch(7);
             tester.down(&mut gesture, e_pos);
-            tester.pump(Duration::from_secs(2));
+            tester.pump_by(Duration::from_secs(2));
             tester.up(&gesture);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            assert!(selection(&tester).is_collapsed());
-            assert_eq!(selection(&tester).base_offset, -1);
-            assert_eq!(selection(&tester).extent_offset, -1);
+            assert!(selection(tester).is_collapsed());
+            assert_eq!(selection(tester).base_offset, -1);
+            assert_eq!(selection(tester).extent_offset, -1);
         });
     }
 
     #[test]
     fn can_long_press_to_select() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let root = overlay(&mut tester, SelectableText::new("abc def ghi"));
+        test_widgets(|tester| {
+            let root = overlay(tester, SelectableText::new("abc def ghi"));
             tester.pump_widget(root);
-            assert!(selection(&tester).is_collapsed());
+            assert!(selection(tester).is_collapsed());
 
             // Long press the 'e' to select 'def'.
-            let e_pos = text_offset_to_position(&tester, 5);
+            let e_pos = text_offset_to_position(tester, 5);
             tester.long_press(e_pos, 1);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // 'def' is selected.
-            assert_eq!(selection(&tester).base_offset, 4);
-            assert_eq!(selection(&tester).extent_offset, 7);
+            assert_eq!(selection(tester).base_offset, 4);
+            assert_eq!(selection(tester).extent_offset, 7);
 
             // Tapping elsewhere immediately collapses and moves the cursor.
-            let at = text_offset_to_position(&tester, 9);
+            let at = text_offset_to_position(tester, 9);
             tester.tap(at, 2);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            assert!(selection(&tester).is_collapsed());
-            assert_eq!(selection(&tester).base_offset, 9);
+            assert!(selection(tester).is_collapsed());
+            assert_eq!(selection(tester).base_offset, 9);
         });
     }
 
     #[test]
     fn mouse_long_press_is_just_like_a_tap() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let root = overlay(&mut tester, SelectableText::new("abc def ghi"));
+        test_widgets(|tester| {
+            let root = overlay(tester, SelectableText::new("abc def ghi"));
             tester.pump_widget(root);
 
             // Long press the 'e' using a mouse device.
             let e_index = 5;
-            let e_pos = text_offset_to_position(&tester, e_index);
-            let mut gesture = WidgetTester::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+            let e_pos = text_offset_to_position(tester, e_index);
+            let mut gesture = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
             tester.down(&mut gesture, e_pos);
-            tester.pump(Duration::from_secs(2));
+            tester.pump_by(Duration::from_secs(2));
             tester.up(&gesture);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // The cursor is placed just like a regular tap.
-            assert_eq!(selection(&tester).base_offset, e_index);
-            assert_eq!(selection(&tester).extent_offset, e_index);
+            assert_eq!(selection(tester).base_offset, e_index);
+            assert_eq!(selection(tester).extent_offset, e_index);
         });
     }
 
     #[test]
     fn selectable_text_has_adaptive_size() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let root = overlay(&mut tester, SelectableText::new("s"));
+        test_widgets(|tester| {
+            let root = overlay(tester, SelectableText::new("s"));
             tester.pump_widget(root);
             assert_eq!(
-                selectable_text_size(&tester),
+                selectable_text_size(tester),
                 waft_embedder::Size::new(17.0, 14.0)
             );
 
-            let root = overlay(&mut tester, SelectableText::new("very very long"));
+            let root = overlay(tester, SelectableText::new("very very long"));
             tester.pump_widget(root);
             assert_eq!(
-                selectable_text_size(&tester),
+                selectable_text_size(tester),
                 waft_embedder::Size::new(199.0, 14.0)
             );
         });
@@ -1705,43 +1689,41 @@ mod tests {
     #[test]
     #[allow(deprecated)]
     fn can_scale_with_text_scale_factor() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let root = overlay(&mut tester, SelectableText::new("selectable text"));
+        test_widgets(|tester| {
+            let root = overlay(tester, SelectableText::new("selectable text"));
             tester.pump_widget(root);
-            assert_eq!(selectable_text_size(&tester).height(), 14.0);
+            assert_eq!(selectable_text_size(tester).height(), 14.0);
 
             let root = overlay(
-                &mut tester,
+                tester,
                 SelectableText::new("selectable text").text_scale_factor(1.9),
             );
             tester.pump_widget(root);
-            assert_eq!(selectable_text_size(&tester).height(), 27.0);
+            assert_eq!(selectable_text_size(tester).height(), 27.0);
         });
     }
 
     #[test]
     fn can_switch_between_text_width_basis() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             const TEXT: &str = "I can face roll keyboardkeyboardaszzaaaaszzaaaaszzaaaaszzaaaa";
             let root = overlay(
-                &mut tester,
+                tester,
                 SelectableText::new(TEXT).text_width_basis(TextWidthBasis::Parent),
             );
             tester.pump_widget(root);
             assert_eq!(
-                selectable_text_size(&tester),
+                selectable_text_size(tester),
                 waft_embedder::Size::new(800.0, 28.0)
             );
 
             let root = overlay(
-                &mut tester,
+                tester,
                 SelectableText::new(TEXT).text_width_basis(TextWidthBasis::LongestLine),
             );
             tester.pump_widget(root);
             assert_eq!(
-                selectable_text_size(&tester),
+                selectable_text_size(tester),
                 waft_embedder::Size::new(633.0, 28.0)
             );
         });
@@ -1749,24 +1731,23 @@ mod tests {
 
     #[test]
     fn selectable_text_basic() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let root = overlay(&mut tester, SelectableText::new("selectable"));
+        test_widgets(|tester| {
+            let root = overlay(tester, SelectableText::new("selectable"));
             tester.pump_widget(root);
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(200));
-            assert!(selection(&tester).is_collapsed());
+            tester.pump();
+            tester.pump_by(Duration::from_millis(200));
+            assert!(selection(tester).is_collapsed());
 
-            let at = center_of_selectable_text(&tester);
+            let at = center_of_selectable_text(tester);
             tester.tap(at, 1);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // Collapse selection should not paint.
-            assert!(!handles_are_visible(&tester));
+            assert!(!handles_are_visible(tester));
             // Long press on the 't' character of text 'selectable' to show context menu.
-            let d_pos = text_offset_to_position(&tester, 5);
+            let d_pos = text_offset_to_position(tester, 5);
             tester.long_press(d_pos, 2);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // Context menu should not have paste and cut.
             assert_eq!(tester.find_onstage_text("Copy").len(), 1);
@@ -1778,19 +1759,18 @@ mod tests {
     #[test]
     #[allow(deprecated)]
     fn selectable_text_can_disable_toolbar_options() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let root = overlay(
-                &mut tester,
+                tester,
                 SelectableText::new("a selectable text").toolbar_options(ToolbarOptions {
                     select_all: true,
                     ..ToolbarOptions::default()
                 }),
             );
             tester.pump_widget(root);
-            let d_pos = text_offset_to_position(&tester, 5);
+            let d_pos = text_offset_to_position(tester, 5);
             tester.long_press(d_pos, 1);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             // Context menu should not have copy.
             assert!(tester.find_onstage_text("Copy").is_empty());
             assert_eq!(tester.find_onstage_text("Select all").len(), 1);
@@ -1799,33 +1779,32 @@ mod tests {
 
     #[test]
     fn can_select_text_by_dragging_with_a_mouse() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let root = material_home(
-                &mut tester,
+                tester,
                 SelectableText::new("abc def ghi").drag_start_behavior(DragStartBehavior::Down),
             );
             tester.pump_widget(root);
 
-            let e_pos = text_offset_to_position(&tester, 5);
-            let g_pos = text_offset_to_position(&tester, 8);
+            let e_pos = text_offset_to_position(tester, 5);
+            let g_pos = text_offset_to_position(tester, 8);
 
-            let mut gesture = WidgetTester::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+            let mut gesture = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
             tester.down(&mut gesture, e_pos);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             tester.move_to(&mut gesture, g_pos, true);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             tester.up(&gesture);
             tester.pump_and_settle();
 
-            assert_eq!(selection(&tester).base_offset, 5);
-            assert_eq!(selection(&tester).extent_offset, 8);
+            assert_eq!(selection(tester).base_offset, 5);
+            assert_eq!(selection(tester).extent_offset, 8);
         });
     }
 
     #[test]
     fn can_use_selection_toolbar() {
-        with_main_thread_stack(|| {
+        test_widgets(|_tester| {
             let (mut tester, clipboard) = tester_with_clipboard(TargetPlatform::Android);
             clipboard.set_clipboard_data(Some("Clipboard data".to_owned()));
             let test_value = "abc def ghi";
@@ -1835,9 +1814,9 @@ mod tests {
             // Tap the selection handle to bring up the "paste / select all" menu.
             let at = text_offset_to_position(&tester, test_value.find('e').unwrap() as i32);
             tester.tap(at, 1);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             // Skip past the frame where the opacity is zero.
-            tester.pump(Duration::from_millis(200));
+            tester.pump_by(Duration::from_millis(200));
             let render_editable = render_editable_at(&tester, 0);
             let controller = controller(&tester);
             let handle_point = {
@@ -1852,9 +1831,9 @@ mod tests {
             // with the text itself does not show the menu, so add a small vertical
             // offset to tap below the text.
             tester.tap(handle_point + Offset::new(1.0, 13.0), 2);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             // Skip past the frame where the opacity is zero.
-            tester.pump(Duration::from_millis(200));
+            tester.pump_by(Duration::from_millis(200));
 
             // Select all should select all the text.
             let select_all = tester.find_onstage_text("Select all")[0];
@@ -1862,7 +1841,7 @@ mod tests {
                 .global_rect(tester.render_box_of(select_all))
                 .center();
             tester.tap(at, 3);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(selection(&tester).base_offset, 0);
             assert_eq!(selection(&tester).extent_offset, test_value.len() as i32);
 
@@ -1870,8 +1849,8 @@ mod tests {
             let copy = tester.find_onstage_text("Copy")[0];
             let at = tester.global_rect(tester.render_box_of(copy)).center();
             tester.tap(at, 4);
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(200));
+            tester.pump();
+            tester.pump_by(Duration::from_millis(200));
             assert!(selection(&tester).is_collapsed());
         });
     }
@@ -1899,69 +1878,68 @@ mod tests {
 
     #[test]
     fn selectable_height_with_max_line() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let root = selectable_text_builder(&mut tester, "", Some(1), None);
+        test_widgets(|tester| {
+            let root = selectable_text_builder(tester, "", Some(1), None);
             tester.pump_widget(root);
-            let empty_input_size = selectable_text_size(&tester);
+            let empty_input_size = selectable_text_size(tester);
 
-            let root = selectable_text_builder(&mut tester, "No wrapping here.", Some(1), None);
+            let root = selectable_text_builder(tester, "No wrapping here.", Some(1), None);
             tester.pump_widget(root);
             assert_eq!(
-                selectable_text_size(&tester).height(),
+                selectable_text_size(tester).height(),
                 empty_input_size.height()
             );
 
             // Even when entering multiline text, SelectableText doesn't grow. It's a single
             // line input.
-            let root = selectable_text_builder(&mut tester, K_THREE_LINES, Some(1), None);
+            let root = selectable_text_builder(tester, K_THREE_LINES, Some(1), None);
             tester.pump_widget(root);
             assert_eq!(
-                selectable_text_size(&tester).height(),
+                selectable_text_size(tester).height(),
                 empty_input_size.height()
             );
 
             // maxLines: 3 makes the SelectableText 3 lines tall.
-            let root = selectable_text_builder(&mut tester, "", Some(3), None);
+            let root = selectable_text_builder(tester, "", Some(3), None);
             tester.pump_widget(root);
-            assert!(selectable_text_size(&tester).height() > empty_input_size.height());
-            let three_line_input_size = selectable_text_size(&tester);
+            assert!(selectable_text_size(tester).height() > empty_input_size.height());
+            let three_line_input_size = selectable_text_size(tester);
 
             // Filling with 3 lines of text stays the same size.
-            let root = selectable_text_builder(&mut tester, K_THREE_LINES, Some(3), None);
+            let root = selectable_text_builder(tester, K_THREE_LINES, Some(3), None);
             tester.pump_widget(root);
             assert_eq!(
-                selectable_text_size(&tester).height(),
+                selectable_text_size(tester).height(),
                 three_line_input_size.height()
             );
 
             // An extra line won't increase the size because we max at 3.
-            let root = selectable_text_builder(&mut tester, K_MORE_THAN_FOUR_LINES, Some(3), None);
+            let root = selectable_text_builder(tester, K_MORE_THAN_FOUR_LINES, Some(3), None);
             tester.pump_widget(root);
             assert_eq!(
-                selectable_text_size(&tester).height(),
+                selectable_text_size(tester).height(),
                 three_line_input_size.height()
             );
 
             // But now it will... but it will max at four.
-            let root = selectable_text_builder(&mut tester, K_MORE_THAN_FOUR_LINES, Some(4), None);
+            let root = selectable_text_builder(tester, K_MORE_THAN_FOUR_LINES, Some(4), None);
             tester.pump_widget(root);
-            assert!(selectable_text_size(&tester).height() > three_line_input_size.height());
-            let four_line_input_size = selectable_text_size(&tester);
+            assert!(selectable_text_size(tester).height() > three_line_input_size.height());
+            let four_line_input_size = selectable_text_size(tester);
 
             // Now it won't max out until the end.
-            let root = selectable_text_builder(&mut tester, "", None, None);
+            let root = selectable_text_builder(tester, "", None, None);
             tester.pump_widget(root);
-            assert_eq!(selectable_text_size(&tester), empty_input_size);
-            let root = selectable_text_builder(&mut tester, K_THREE_LINES, None, None);
+            assert_eq!(selectable_text_size(tester), empty_input_size);
+            let root = selectable_text_builder(tester, K_THREE_LINES, None, None);
             tester.pump_widget(root);
             assert_eq!(
-                selectable_text_size(&tester).height(),
+                selectable_text_size(tester).height(),
                 three_line_input_size.height()
             );
-            let root = selectable_text_builder(&mut tester, K_MORE_THAN_FOUR_LINES, None, None);
+            let root = selectable_text_builder(tester, K_MORE_THAN_FOUR_LINES, None, None);
             tester.pump_widget(root);
-            assert!(selectable_text_size(&tester).height() > four_line_input_size.height());
+            assert!(selectable_text_size(tester).height() > four_line_input_size.height());
         });
     }
 
@@ -1976,18 +1954,17 @@ mod tests {
 
     #[test]
     fn selectable_height_with_min_line() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let root = selectable_text_builder(&mut tester, "", Some(1), None);
+        test_widgets(|tester| {
+            let root = selectable_text_builder(tester, "", Some(1), None);
             tester.pump_widget(root);
-            let empty_input_size = selectable_text_size(&tester);
+            let empty_input_size = selectable_text_size(tester);
 
             // Even if the text is a one liner, minimum height of SelectableText will
             // determined by minLines.
-            let root = selectable_text_builder(&mut tester, "No wrapping here.", Some(3), Some(2));
+            let root = selectable_text_builder(tester, "No wrapping here.", Some(3), Some(2));
             tester.pump_widget(root);
             assert_eq!(
-                selectable_text_size(&tester).height(),
+                selectable_text_size(tester).height(),
                 empty_input_size.height() * 2.0
             );
         });
@@ -1995,10 +1972,9 @@ mod tests {
 
     #[test]
     fn tapping_outside_selectable_text_clears_the_selection() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let root = material_home(
-                &mut tester,
+                tester,
                 Center::new().child(Column::new().children(vec![
                     SelectableText::new("first selectable text").into_widget(),
                     SelectableText::new("second selectable text").into_widget(),
@@ -2014,31 +1990,31 @@ mod tests {
             tester.pump_and_settle();
 
             // First tap on the first SelectableText sets the cursor.
-            let at = text_offset_to_position(&tester, 5);
+            let at = text_offset_to_position(tester, 5);
             tester.tap(at, 1);
             tester.pump_and_settle();
 
-            let controller_a = controller_at(&tester, 0);
-            let controller_b = controller_at(&tester, 1);
+            let controller_a = controller_at(tester, 0);
+            let controller_b = controller_at(tester, 1);
             let read = |tester: &WidgetTester, controller: AnyTextEditingController| {
                 controller.selection(&tester.cell.borrow())
             };
             let empty = TextSelection::collapsed(-1, TextAffinity::Downstream);
 
             assert_eq!(
-                read(&tester, controller_a.handle()),
+                read(tester, controller_a.handle()),
                 TextSelection::collapsed(5, TextAffinity::Downstream)
             );
-            assert_eq!(read(&tester, controller_b.handle()), empty);
+            assert_eq!(read(tester, controller_b.handle()), empty);
 
             // Tapping on the second SelectableText sets the cursor on it, and clears the
             // selection from the first SelectableText.
-            let selectable_text_start = top_left_of_selectable_text(&tester, 1);
+            let selectable_text_start = top_left_of_selectable_text(tester, 1);
             tester.tap(selectable_text_start, 2);
             tester.pump_and_settle();
-            assert_eq!(read(&tester, controller_a.handle()), empty);
+            assert_eq!(read(tester, controller_a.handle()), empty);
             assert_eq!(
-                read(&tester, controller_b.handle()),
+                read(tester, controller_b.handle()),
                 TextSelection::collapsed(0, TextAffinity::Downstream)
             );
 
@@ -2049,9 +2025,9 @@ mod tests {
                 AppLifecycleState::Inactive,
             );
             tester.pump_and_settle();
-            assert_eq!(read(&tester, controller_a.handle()), empty);
+            assert_eq!(read(tester, controller_a.handle()), empty);
             assert_eq!(
-                read(&tester, controller_b.handle()),
+                read(tester, controller_b.handle()),
                 TextSelection::collapsed(0, TextAffinity::Downstream)
             );
         });
@@ -2059,15 +2035,14 @@ mod tests {
 
     #[test]
     fn selectable_text_is_skipped_during_focus_traversal() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let (first_field_focus, last_field_focus) = {
                 let mut app = tester.cell.borrow_mut();
                 (FocusNode::new(&mut app), FocusNode::new(&mut app))
             };
             // Dart's two `TextField`s, which this case only needs to take focus by traversal.
             let root = material_home(
-                &mut tester,
+                tester,
                 Center::new().child(Column::new().children(vec![
                     Focus::new(SizedBox::new().width(10.0).height(10.0))
                         .focus_node(first_field_focus.erase())
@@ -2080,7 +2055,7 @@ mod tests {
                 ])),
             );
             tester.pump_widget(root);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             assert!(first_field_focus.has_focus(&mut tester.cell.borrow_mut()));
             assert!(!last_field_focus.has_focus(&mut tester.cell.borrow_mut()));
@@ -2088,7 +2063,7 @@ mod tests {
             first_field_focus
                 .as_node()
                 .next_focus(&mut tester.cell.borrow_mut());
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // Expecting focus to skip straight to the second field.
             assert!(!first_field_focus.has_focus(&mut tester.cell.borrow_mut()));
@@ -2112,75 +2087,71 @@ mod tests {
 
     #[test]
     fn keyboard_shift_test_1() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            setup_keyboard_widget(&mut tester, "a big house");
+        test_widgets(|tester| {
+            setup_keyboard_widget(tester, "a big house");
 
-            key_down(&mut tester, LogicalKeyboardKey::SHIFT_LEFT);
-            key_down(&mut tester, LogicalKeyboardKey::ARROW_LEFT);
-            assert_eq!(selection_delta(&tester), -1);
+            key_down(tester, LogicalKeyboardKey::SHIFT_LEFT);
+            key_down(tester, LogicalKeyboardKey::ARROW_LEFT);
+            assert_eq!(selection_delta(tester), -1);
         });
     }
 
     #[test]
     fn keyboard_shift_test_2() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            setup_keyboard_widget(&mut tester, "abcdefghi");
+        test_widgets(|tester| {
+            setup_keyboard_widget(tester, "abcdefghi");
 
-            controller(&tester).set_selection(
+            controller(tester).set_selection(
                 &mut tester.cell.borrow_mut(),
                 TextSelection::collapsed(3, TextAffinity::Downstream),
             );
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            key_down(&mut tester, LogicalKeyboardKey::SHIFT_LEFT);
-            key_down(&mut tester, LogicalKeyboardKey::ARROW_RIGHT);
+            key_down(tester, LogicalKeyboardKey::SHIFT_LEFT);
+            key_down(tester, LogicalKeyboardKey::ARROW_RIGHT);
             tester.pump_and_settle();
-            assert_eq!(selection_delta(&tester), 1);
+            assert_eq!(selection_delta(tester), 1);
         });
     }
 
     #[test]
     fn keyboard_control_shift_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            setup_keyboard_widget(&mut tester, "their big house");
+        test_widgets(|tester| {
+            setup_keyboard_widget(tester, "their big house");
 
-            key_down(&mut tester, LogicalKeyboardKey::CONTROL_LEFT);
-            key_down(&mut tester, LogicalKeyboardKey::SHIFT_LEFT);
-            key_down(&mut tester, LogicalKeyboardKey::ARROW_LEFT);
+            key_down(tester, LogicalKeyboardKey::CONTROL_LEFT);
+            key_down(tester, LogicalKeyboardKey::SHIFT_LEFT);
+            key_down(tester, LogicalKeyboardKey::ARROW_LEFT);
             tester.pump_and_settle();
 
-            assert_eq!(selection_delta(&tester), -5);
+            assert_eq!(selection_delta(tester), -5);
         });
     }
 
     #[test]
     fn keyboard_down_and_up_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            setup_keyboard_widget(&mut tester, "a big house");
+        test_widgets(|tester| {
+            setup_keyboard_widget(tester, "a big house");
 
-            key_down(&mut tester, LogicalKeyboardKey::SHIFT_LEFT);
-            key_down(&mut tester, LogicalKeyboardKey::ARROW_UP);
+            key_down(tester, LogicalKeyboardKey::SHIFT_LEFT);
+            key_down(tester, LogicalKeyboardKey::ARROW_UP);
             tester.pump_and_settle();
 
-            assert_eq!(selection_delta(&tester), -11);
+            assert_eq!(selection_delta(tester), -11);
 
-            key_up(&mut tester, LogicalKeyboardKey::ARROW_UP);
-            key_up(&mut tester, LogicalKeyboardKey::SHIFT_LEFT);
-            key_down(&mut tester, LogicalKeyboardKey::SHIFT_LEFT);
-            key_down(&mut tester, LogicalKeyboardKey::ARROW_DOWN);
+            key_up(tester, LogicalKeyboardKey::ARROW_UP);
+            key_up(tester, LogicalKeyboardKey::SHIFT_LEFT);
+            key_down(tester, LogicalKeyboardKey::SHIFT_LEFT);
+            key_down(tester, LogicalKeyboardKey::ARROW_DOWN);
             tester.pump_and_settle();
 
-            assert_eq!(selection_delta(&tester), 0);
+            assert_eq!(selection_delta(tester), 0);
         });
     }
 
     #[test]
     fn copy_test() {
-        with_main_thread_stack(|| {
+        test_widgets(|_tester| {
             let (mut tester, clipboard) = tester_with_clipboard(TargetPlatform::Android);
             let test_value = "a big house\njumped over a mouse";
             let root = material_home(
@@ -2196,7 +2167,7 @@ mod tests {
                 &mut tester.cell.borrow_mut(),
                 TextSelection::collapsed(0, TextAffinity::Downstream),
             );
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // Select the first 5 characters.
             key_down(&mut tester, LogicalKeyboardKey::SHIFT_LEFT);
@@ -2219,38 +2190,33 @@ mod tests {
 
     #[test]
     fn select_all_test() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let test_value = "a big house\njumped over a mouse";
-            let root = material_home(
-                &mut tester,
-                SelectableText::new(test_value).max_lines(Some(3)),
-            );
+            let root = material_home(tester, SelectableText::new(test_value).max_lines(Some(3)));
             tester.pump_widget(root);
-            let at = center_of_selectable_text(&tester);
+            let at = center_of_selectable_text(tester);
             tester.tap(at, 1);
             tester.pump_and_settle();
 
             // Select All.
-            key_down(&mut tester, LogicalKeyboardKey::CONTROL_LEFT);
-            key_press(&mut tester, LogicalKeyboardKey::KEY_A);
-            key_up(&mut tester, LogicalKeyboardKey::CONTROL_LEFT);
+            key_down(tester, LogicalKeyboardKey::CONTROL_LEFT);
+            key_press(tester, LogicalKeyboardKey::KEY_A);
+            key_up(tester, LogicalKeyboardKey::CONTROL_LEFT);
             tester.pump_and_settle();
 
-            assert_eq!(selection(&tester).base_offset, 0);
-            assert_eq!(selection(&tester).extent_offset, 31);
+            assert_eq!(selection(tester).base_offset, 0);
+            assert_eq!(selection(tester).extent_offset, 31);
         });
     }
 
     #[test]
     fn keyboard_selection_should_call_on_selection_changed() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let new_selection: Rc<RefCell<Option<TextSelection>>> = Rc::new(RefCell::new(None));
             let test_value = "a big house\njumped over a mouse";
             let recorded = Rc::clone(&new_selection);
             let root = material_home(
-                &mut tester,
+                tester,
                 SelectableText::new(test_value)
                     .max_lines(Some(3))
                     .on_selection_changed(move |_app, selection, _cause| {
@@ -2259,23 +2225,23 @@ mod tests {
                     }),
             );
             tester.pump_widget(root);
-            let at = center_of_selectable_text(&tester);
+            let at = center_of_selectable_text(tester);
             tester.tap(at, 1);
             tester.pump_and_settle();
             let tapped = new_selection.borrow_mut().take().expect("a tap selects");
             assert_eq!(tapped.base_offset, 31);
             assert_eq!(tapped.extent_offset, 31);
 
-            controller(&tester).set_selection(
+            controller(tester).set_selection(
                 &mut tester.cell.borrow_mut(),
                 TextSelection::collapsed(0, TextAffinity::Downstream),
             );
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // Select the first 5 characters.
-            key_down(&mut tester, LogicalKeyboardKey::SHIFT_LEFT);
+            key_down(tester, LogicalKeyboardKey::SHIFT_LEFT);
             for i in 0..5 {
-                key_press(&mut tester, LogicalKeyboardKey::ARROW_RIGHT);
+                key_press(tester, LogicalKeyboardKey::ARROW_RIGHT);
                 tester.pump_and_settle();
                 let selection = new_selection.borrow_mut().take().expect("a key selects");
                 assert_eq!(selection.base_offset, 0);
@@ -2286,12 +2252,11 @@ mod tests {
 
     #[test]
     fn on_tap_is_called_upon_tap() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let tap_count = Rc::new(Cell::new(0));
             let counted = Rc::clone(&tap_count);
             let root = overlay(
-                &mut tester,
+                tester,
                 SelectableText::new("something")
                     .on_tap(Listener::new(move |_app| counted.set(counted.get() + 1))),
             );
@@ -2299,10 +2264,10 @@ mod tests {
 
             assert_eq!(tap_count.get(), 0);
             for pointer in 1..=3 {
-                let at = center_of_selectable_text(&tester);
+                let at = center_of_selectable_text(tester);
                 tester.tap(at, pointer);
                 // Wait a bit so they're all single taps and not double taps.
-                tester.pump(Duration::from_millis(300));
+                tester.pump_by(Duration::from_millis(300));
             }
             assert_eq!(tap_count.get(), 3);
         });
@@ -2310,8 +2275,7 @@ mod tests {
 
     #[test]
     fn selectable_text_style_is_merged_with_default_text_style() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let default_style = TextStyle::new().color(Colors::BLUE.shade500());
             let build_frame = |tester: &mut WidgetTester, style: TextStyle| {
                 material_home(
@@ -2327,9 +2291,9 @@ mod tests {
             };
 
             // Empty TextStyle is overridden by theme.
-            let root = build_frame(&mut tester, TextStyle::new());
+            let root = build_frame(tester, TextStyle::new());
             tester.pump_widget(root);
-            let style = editable_style(&tester);
+            let style = editable_style(tester);
             assert_eq!(style.color, default_style.color);
             assert_eq!(style.background, default_style.background);
             assert_eq!(style.shadows, default_style.shadows);
@@ -2338,20 +2302,20 @@ mod tests {
 
             // Properties set on TextStyle override theme.
             let set_color = Colors::RED.primary();
-            let root = build_frame(&mut tester, TextStyle::new().color(set_color));
+            let root = build_frame(tester, TextStyle::new().color(set_color));
             tester.pump_widget(root);
-            assert_eq!(editable_style(&tester).color, Some(set_color.into()));
+            assert_eq!(editable_style(tester).color, Some(set_color.into()));
 
             // inherit: false causes nothing to be merged in from theme.
             let root = build_frame(
-                &mut tester,
+                tester,
                 TextStyle::new()
                     .font_size(24.0)
                     .text_baseline(waft_embedder::TextBaseline::Alphabetic)
                     .inherit(false),
             );
             tester.pump_widget(root);
-            assert!(editable_style(&tester).color.is_none());
+            assert!(editable_style(tester).color.is_none());
         });
     }
 
@@ -2370,18 +2334,17 @@ mod tests {
 
     #[test]
     fn tap_moves_cursor_to_the_edge_of_the_word_it_tapped() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::IOS);
-            let root = atwater(&mut tester, None);
+        test_widgets_variant(TargetPlatformVariant::only(TargetPlatform::IOS), |tester| {
+            let root = atwater(tester, None);
             tester.pump_widget(root);
 
-            let at = selectable_text_start_plus(&tester, 50.0);
+            let at = selectable_text_start_plus(tester, 50.0);
             tester.tap(at, 1);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // We moved the cursor.
             assert_eq!(
-                selection(&tester),
+                selection(tester),
                 TextSelection::collapsed(7, TextAffinity::Upstream)
             );
 
@@ -2396,18 +2359,17 @@ mod tests {
             .into_iter()
             .filter(|platform| *platform != TargetPlatform::IOS)
         {
-            with_main_thread_stack(|| {
-                let mut tester = tester_on(platform);
-                let root = atwater(&mut tester, None);
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                let root = atwater(tester, None);
                 tester.pump_widget(root);
 
-                let at = selectable_text_start_plus(&tester, 50.0);
+                let at = selectable_text_start_plus(tester, 50.0);
                 tester.tap(at, 1);
-                tester.pump(Duration::ZERO);
+                tester.pump();
 
                 // We moved the cursor.
                 assert_eq!(
-                    selection(&tester),
+                    selection(tester),
                     TextSelection::collapsed(4, TextAffinity::Upstream),
                     "{platform:?}"
                 );
@@ -2423,20 +2385,19 @@ mod tests {
 
     #[test]
     fn two_slow_taps_do_not_trigger_a_word_selection_on_ios() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::IOS);
-            let root = atwater(&mut tester, None);
+        test_widgets_variant(TargetPlatformVariant::only(TargetPlatform::IOS), |tester| {
+            let root = atwater(tester, None);
             tester.pump_widget(root);
 
-            let at = selectable_text_start_plus(&tester, 50.0);
+            let at = selectable_text_start_plus(tester, 50.0);
             tester.tap(at, 1);
-            tester.pump(Duration::from_millis(500));
+            tester.pump_by(Duration::from_millis(500));
             tester.tap(at, 2);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // Plain collapsed selection.
             assert_eq!(
-                selection(&tester),
+                selection(tester),
                 TextSelection::collapsed(7, TextAffinity::Upstream)
             );
 
@@ -2451,20 +2412,19 @@ mod tests {
             .into_iter()
             .filter(|platform| *platform != TargetPlatform::IOS)
         {
-            with_main_thread_stack(|| {
-                let mut tester = tester_on(platform);
-                let root = atwater(&mut tester, None);
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                let root = atwater(tester, None);
                 tester.pump_widget(root);
 
-                let at = selectable_text_start_plus(&tester, 50.0);
+                let at = selectable_text_start_plus(tester, 50.0);
                 tester.tap(at, 1);
-                tester.pump(Duration::from_millis(500));
+                tester.pump_by(Duration::from_millis(500));
                 tester.tap(at, 2);
-                tester.pump(Duration::ZERO);
+                tester.pump();
 
                 // Plain collapsed selection.
                 assert_eq!(
-                    selection(&tester),
+                    selection(tester),
                     TextSelection::collapsed(4, TextAffinity::Upstream),
                     "{platform:?}"
                 );
@@ -2478,26 +2438,25 @@ mod tests {
     #[test]
     fn double_tap_selects_word_and_first_tap_of_double_tap_moves_cursor() {
         for platform in [TargetPlatform::IOS, TargetPlatform::MacOS] {
-            with_main_thread_stack(|| {
-                let mut tester = tester_on(platform);
-                let root = atwater(&mut tester, None);
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                let root = atwater(tester, None);
                 tester.pump_widget(root);
 
                 // This tap just puts the cursor somewhere different than where the double
                 // tap will occur to test that the double tap moves the existing cursor first.
-                let at = selectable_text_start_plus(&tester, 50.0);
+                let at = selectable_text_start_plus(tester, 50.0);
                 tester.tap(at, 1);
-                tester.pump(Duration::from_millis(500));
+                tester.pump_by(Duration::from_millis(500));
 
-                let at = selectable_text_start_plus(&tester, 150.0);
+                let at = selectable_text_start_plus(tester, 150.0);
                 tester.tap(at, 2);
-                tester.pump(Duration::from_millis(50));
+                tester.pump_by(Duration::from_millis(50));
 
                 // First tap moved the cursor.
                 // On iOS, this moves the cursor to the closest word edge.
                 // On macOS, this moves the cursor to the tapped position.
                 assert_eq!(
-                    selection(&tester),
+                    selection(tester),
                     TextSelection::collapsed(
                         if platform == TargetPlatform::IOS {
                             12
@@ -2509,16 +2468,12 @@ mod tests {
                     "{platform:?}"
                 );
                 tester.tap(at, 3);
-                tester.pump(Duration::ZERO);
+                tester.pump();
 
                 // Second tap selects the word around the cursor.
-                assert_eq!(
-                    selection(&tester),
-                    TextSelection::new(8, 12),
-                    "{platform:?}"
-                );
+                assert_eq!(selection(tester), TextSelection::new(8, 12), "{platform:?}");
 
-                expect_cupertino_selection_toolbar(&tester, platform);
+                expect_cupertino_selection_toolbar(tester, platform);
             });
         }
     }
@@ -2526,122 +2481,117 @@ mod tests {
     #[test]
     fn double_tap_selects_word_and_first_tap_of_double_tap_moves_cursor_and_shows_toolbar_android()
     {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let root = atwater(&mut tester, None);
+        test_widgets(|tester| {
+            let root = atwater(tester, None);
             tester.pump_widget(root);
 
-            let at = selectable_text_start_plus(&tester, 50.0);
+            let at = selectable_text_start_plus(tester, 50.0);
             tester.tap(at, 1);
-            tester.pump(Duration::from_millis(500));
+            tester.pump_by(Duration::from_millis(500));
 
-            let at = selectable_text_start_plus(&tester, 150.0);
+            let at = selectable_text_start_plus(tester, 150.0);
             tester.tap(at, 2);
-            tester.pump(Duration::from_millis(50));
+            tester.pump_by(Duration::from_millis(50));
 
             // First tap moved the cursor.
             assert_eq!(
-                selection(&tester),
+                selection(tester),
                 TextSelection::collapsed(11, TextAffinity::Upstream)
             );
             tester.tap(at, 3);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // Second tap selects the word around the cursor.
-            assert_eq!(selection(&tester), TextSelection::new(8, 12));
+            assert_eq!(selection(tester), TextSelection::new(8, 12));
 
-            expect_material_selection_toolbar(&tester, TargetPlatform::Android);
+            expect_material_selection_toolbar(tester, TargetPlatform::Android);
         });
     }
 
     #[test]
     fn double_tap_on_top_of_cursor_also_selects_word_android() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let root = atwater(&mut tester, None);
+        test_widgets(|tester| {
+            let root = atwater(tester, None);
             tester.pump_widget(root);
 
             // Tap to put the cursor after the "w".
             let index = 3;
-            let at = text_offset_to_position(&tester, index);
+            let at = text_offset_to_position(tester, index);
             tester.tap(at, 1);
-            tester.pump(Duration::from_millis(500));
+            tester.pump_by(Duration::from_millis(500));
 
             assert_eq!(
-                selection(&tester),
+                selection(tester),
                 TextSelection::collapsed(index, TextAffinity::Downstream)
             );
 
             // Double tap on the same location.
             tester.tap(at, 2);
-            tester.pump(Duration::from_millis(50));
+            tester.pump_by(Duration::from_millis(50));
 
             // First tap doesn't change the selection.
             assert_eq!(
-                selection(&tester),
+                selection(tester),
                 TextSelection::collapsed(index, TextAffinity::Downstream)
             );
 
             // Second tap selects the word around the cursor.
             tester.tap(at, 3);
-            tester.pump(Duration::ZERO);
-            assert_eq!(selection(&tester), TextSelection::new(0, 7));
+            tester.pump();
+            assert_eq!(selection(tester), TextSelection::new(0, 7));
 
-            expect_material_selection_toolbar(&tester, TargetPlatform::Android);
+            expect_material_selection_toolbar(tester, TargetPlatform::Android);
         });
     }
 
     #[test]
     fn long_press_selects_word_and_shows_toolbar_ios() {
         for platform in [TargetPlatform::IOS, TargetPlatform::MacOS] {
-            with_main_thread_stack(|| {
-                let mut tester = tester_on(platform);
-                let root = atwater(&mut tester, None);
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                let root = atwater(tester, None);
                 tester.pump_widget(root);
 
-                let at = selectable_text_start_plus(&tester, 50.0);
+                let at = selectable_text_start_plus(tester, 50.0);
                 tester.long_press(at, 1);
-                tester.pump(Duration::ZERO);
+                tester.pump();
 
                 // The long pressed word is selected.
-                assert_eq!(selection(&tester), TextSelection::new(0, 7), "{platform:?}");
+                assert_eq!(selection(tester), TextSelection::new(0, 7), "{platform:?}");
 
-                expect_cupertino_selection_toolbar(&tester, platform);
+                expect_cupertino_selection_toolbar(tester, platform);
             });
         }
     }
 
     #[test]
     fn long_press_selects_word_and_shows_toolbar_android() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let root = atwater(&mut tester, None);
+        test_widgets(|tester| {
+            let root = atwater(tester, None);
             tester.pump_widget(root);
 
-            let at = selectable_text_start_plus(&tester, 50.0);
+            let at = selectable_text_start_plus(tester, 50.0);
             tester.long_press(at, 1);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            assert_eq!(selection(&tester), TextSelection::new(0, 7));
+            assert_eq!(selection(tester), TextSelection::new(0, 7));
 
-            expect_material_selection_toolbar(&tester, TargetPlatform::Android);
+            expect_material_selection_toolbar(tester, TargetPlatform::Android);
         });
     }
 
     #[test]
     fn long_press_selects_word_and_shows_custom_toolbar_cupertino() {
         for platform in ALL_PLATFORMS {
-            with_main_thread_stack(|| {
-                let mut tester = tester_on(platform);
-                let root = atwater(&mut tester, Some(cupertino_text_selection_controls()));
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                let root = atwater(tester, Some(cupertino_text_selection_controls()));
                 tester.pump_widget(root);
 
-                let at = selectable_text_start_plus(&tester, 50.0);
+                let at = selectable_text_start_plus(tester, 50.0);
                 tester.long_press(at, 1);
-                tester.pump(Duration::ZERO);
+                tester.pump();
 
                 // The long pressed word is selected.
-                assert_eq!(selection(&tester), TextSelection::new(0, 7), "{platform:?}");
+                assert_eq!(selection(tester), TextSelection::new(0, 7), "{platform:?}");
 
                 // Toolbar shows one button (copy).
                 assert_eq!(
@@ -2657,16 +2607,15 @@ mod tests {
     #[test]
     fn long_press_selects_word_and_shows_custom_toolbar_material() {
         for platform in ALL_PLATFORMS {
-            with_main_thread_stack(|| {
-                let mut tester = tester_on(platform);
-                let root = atwater(&mut tester, Some(material_text_selection_controls()));
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                let root = atwater(tester, Some(material_text_selection_controls()));
                 tester.pump_widget(root);
 
-                let at = selectable_text_start_plus(&tester, 50.0);
+                let at = selectable_text_start_plus(tester, 50.0);
                 tester.long_press(at, 1);
-                tester.pump(Duration::ZERO);
+                tester.pump();
 
-                assert_eq!(selection(&tester), TextSelection::new(0, 7), "{platform:?}");
+                assert_eq!(selection(tester), TextSelection::new(0, 7), "{platform:?}");
 
                 // Collapsed toolbar shows 2 buttons: copy, select all
                 assert_eq!(
@@ -2686,13 +2635,12 @@ mod tests {
 
     #[test]
     fn text_selection_controls_is_passed_to_editable_text() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let controls = material_text_selection_controls();
-            let root = atwater(&mut tester, Some(Rc::clone(&controls)));
+            let root = atwater(tester, Some(Rc::clone(&controls)));
             tester.pump_widget(root);
 
-            let passed = tester.widget::<EditableText, _>(editable_elements(&tester)[0], |w| {
+            let passed = tester.widget::<EditableText, _>(editable_elements(tester)[0], |w| {
                 w.selection_controls.clone()
             });
             assert!(passed.is_some_and(|passed| Rc::ptr_eq(&passed, &controls)));
@@ -2705,110 +2653,104 @@ mod tests {
 
     #[test]
     fn long_press_shows_handles_and_toolbar() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let root = abc_def_ghi(&mut tester);
+        test_widgets(|tester| {
+            let root = abc_def_ghi(tester);
             tester.pump_widget(root);
 
             // Long press at 'e' in 'def'.
-            let e_pos = text_offset_to_position(&tester, 5);
+            let e_pos = text_offset_to_position(tester, 5);
             tester.long_press(e_pos, 1);
             tester.pump_and_settle();
 
-            assert!(handles_are_visible(&tester));
-            assert!(toolbar_is_visible(&tester));
+            assert!(handles_are_visible(tester));
+            assert!(toolbar_is_visible(tester));
         });
     }
 
     #[test]
     fn double_tap_shows_handles_and_toolbar() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let root = abc_def_ghi(&mut tester);
+        test_widgets(|tester| {
+            let root = abc_def_ghi(tester);
             tester.pump_widget(root);
 
             // Double tap at 'e' in 'def'.
-            let e_pos = text_offset_to_position(&tester, 5);
+            let e_pos = text_offset_to_position(tester, 5);
             tester.tap(e_pos, 1);
-            tester.pump(Duration::from_millis(50));
+            tester.pump_by(Duration::from_millis(50));
             tester.tap(e_pos, 2);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            assert!(handles_are_visible(&tester));
-            assert!(toolbar_is_visible(&tester));
+            assert!(handles_are_visible(tester));
+            assert!(toolbar_is_visible(tester));
         });
     }
 
     #[test]
     fn mouse_tap_does_not_show_handles_nor_toolbar() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let root = abc_def_ghi(&mut tester);
+        test_widgets(|tester| {
+            let root = abc_def_ghi(tester);
             tester.pump_widget(root);
 
-            let e_pos = text_offset_to_position(&tester, 5);
-            let mut gesture = WidgetTester::mouse(7, waft_gestures::K_PRIMARY_BUTTON);
+            let e_pos = text_offset_to_position(tester, 5);
+            let mut gesture = TestPointer::mouse(7, waft_gestures::K_PRIMARY_BUTTON);
             tester.down(&mut gesture, e_pos);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             tester.up(&gesture);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            assert!(!toolbar_is_visible(&tester));
-            assert!(!handles_are_visible(&tester));
+            assert!(!toolbar_is_visible(tester));
+            assert!(!handles_are_visible(tester));
         });
     }
 
     #[test]
     fn mouse_long_press_does_not_show_handles_nor_toolbar() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let root = abc_def_ghi(&mut tester);
+        test_widgets(|tester| {
+            let root = abc_def_ghi(tester);
             tester.pump_widget(root);
 
-            let e_pos = text_offset_to_position(&tester, 5);
-            let mut gesture = WidgetTester::mouse(7, waft_gestures::K_PRIMARY_BUTTON);
+            let e_pos = text_offset_to_position(tester, 5);
+            let mut gesture = TestPointer::mouse(7, waft_gestures::K_PRIMARY_BUTTON);
             tester.down(&mut gesture, e_pos);
-            tester.pump(Duration::from_secs(2));
+            tester.pump_by(Duration::from_secs(2));
             tester.up(&gesture);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            assert!(!toolbar_is_visible(&tester));
-            assert!(!handles_are_visible(&tester));
+            assert!(!toolbar_is_visible(tester));
+            assert!(!handles_are_visible(tester));
         });
     }
 
     #[test]
     fn mouse_double_tap_does_not_show_handles_nor_toolbar() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let root = abc_def_ghi(&mut tester);
+        test_widgets(|tester| {
+            let root = abc_def_ghi(tester);
             tester.pump_widget(root);
 
             // Double tap to trigger the selectable text.
-            let at = center_of_selectable_text(&tester);
-            let mut gesture = WidgetTester::mouse(7, waft_gestures::K_PRIMARY_BUTTON);
+            let at = center_of_selectable_text(tester);
+            let mut gesture = TestPointer::mouse(7, waft_gestures::K_PRIMARY_BUTTON);
             tester.down(&mut gesture, at);
-            tester.pump(Duration::from_millis(50));
+            tester.pump_by(Duration::from_millis(50));
             tester.up(&gesture);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             tester.send(&gesture, waft_embedder::PointerChange::Down);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             tester.up(&gesture);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            assert!(!toolbar_is_visible(&tester));
-            assert!(!handles_are_visible(&tester));
+            assert!(!toolbar_is_visible(tester));
+            assert!(!handles_are_visible(tester));
         });
     }
 
     #[test]
     fn on_selection_changed_is_called_when_selection_changes() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let count = Rc::new(Cell::new(0));
             let counted = Rc::clone(&count);
             let root = material_home(
-                &mut tester,
+                tester,
                 SelectableText::new("abc def ghi").on_selection_changed(
                     move |_app, _selection, _cause| counted.set(counted.get() + 1),
                 ),
@@ -2816,14 +2758,14 @@ mod tests {
             tester.pump_widget(root);
 
             // Long press to select 'abc'.
-            let a_location = text_offset_to_position(&tester, 1);
+            let a_location = text_offset_to_position(tester, 1);
             tester.long_press(a_location, 1);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(count.get(), 1);
             // Long press to select 'def'.
-            let at = text_offset_to_position(&tester, 5);
+            let at = text_offset_to_position(tester, 5);
             tester.long_press(at, 2);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(count.get(), 2);
             // Tap on 'Select all' option to select the whole text.
             let select_all = tester.find_onstage_text("Select all")[0];
@@ -2837,8 +2779,7 @@ mod tests {
 
     #[test]
     fn selectable_text_rich_span_style_is_merged_with_default_text_style() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let text_style = TextStyle::new()
                 .color(Color::new(0xff00ff00))
                 .font_size(12.0);
@@ -2853,15 +2794,14 @@ mod tests {
             tester.pump_widget(root);
 
             let font_size = tester
-                .widget::<EditableText, _>(editable_elements(&tester)[0], |w| w.style.font_size);
+                .widget::<EditableText, _>(editable_elements(tester)[0], |w| w.style.font_size);
             assert_eq!(font_size, text_style.font_size);
         });
     }
 
     #[test]
     fn a_second_tap_at_the_same_place_does_not_call_on_selection_changed() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let selection_seen: Rc<RefCell<Option<TextSelection>>> = Rc::new(RefCell::new(None));
             let count = Rc::new(Cell::new(0));
             let (recorded, counted) = (Rc::clone(&selection_seen), Rc::clone(&count));
@@ -2884,9 +2824,9 @@ mod tests {
 
             // Tap to put the cursor before the "F".
             let index = 7;
-            let at = text_offset_to_position(&tester, index);
+            let at = text_offset_to_position(tester, index);
             tester.tap(at, 1);
-            tester.pump(Duration::from_millis(500));
+            tester.pump_by(Duration::from_millis(500));
             assert_eq!(
                 *selection_seen.borrow(),
                 Some(TextSelection::collapsed(index, TextAffinity::Downstream))
@@ -2896,7 +2836,7 @@ mod tests {
 
             // Tap on the same location again.
             tester.tap(at, 2);
-            tester.pump(Duration::from_millis(50));
+            tester.pump_by(Duration::from_millis(50));
             assert_eq!(
                 *selection_seen.borrow(),
                 Some(TextSelection::collapsed(index, TextAffinity::Downstream))
@@ -2908,33 +2848,31 @@ mod tests {
 
     #[test]
     fn changing_the_data_gives_the_editable_text_a_new_controller() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let root = abc_def_ghi(&mut tester);
+        test_widgets(|tester| {
+            let root = abc_def_ghi(tester);
             tester.pump_widget(root);
-            let first = controller(&tester);
+            let first = controller(tester);
             assert_eq!(first.text_value(&tester.cell.borrow()), "abc def ghi");
 
-            let root = material_home(&mut tester, SelectableText::new("jkl"));
+            let root = material_home(tester, SelectableText::new("jkl"));
             tester.pump_widget(root);
-            let second = controller(&tester);
+            let second = controller(tester);
             assert!(first != second);
             assert_eq!(second.text_value(&tester.cell.borrow()), "jkl");
 
-            let root = material_home(&mut tester, SelectableText::new("jkl"));
+            let root = material_home(tester, SelectableText::new("jkl"));
             tester.pump_widget(root);
-            assert!(controller(&tester) == second);
+            assert!(controller(tester) == second);
         });
     }
 
     #[test]
     fn the_editable_text_is_read_only_and_does_not_force_a_line() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let root = abc_def_ghi(&mut tester);
+        test_widgets(|tester| {
+            let root = abc_def_ghi(tester);
             tester.pump_widget(root);
             let (read_only, force_line, max_lines) = tester
-                .widget::<EditableText, _>(editable_elements(&tester)[0], |w| {
+                .widget::<EditableText, _>(editable_elements(tester)[0], |w| {
                     (w.read_only, w.force_line, w.max_lines)
                 });
             assert!(read_only);

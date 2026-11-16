@@ -1063,31 +1063,25 @@ impl ToggleablePainter for CheckboxPainter {
 mod tests {
     use std::rc::Rc;
     use std::sync::Arc;
-    use std::time::Duration;
 
+    use waft_embedder::RRect;
     use waft_embedder::valo::{GradientStop, Matrix, Op, Path, Shader, SpreadMode};
-    use waft_embedder::{
-        KeyData, KeyEventDeviceType, KeyEventType, PointerChange, PointerData, PointerDataPacket,
-        PointerDeviceKind, RRect,
-    };
-    use waft_foundation::AppCell;
-    use waft_gestures::GestureBinding;
-    use waft_painting::{PaintingBinding, draw_drrect};
+    use waft_painting::draw_drrect;
     use waft_rendering::{
-        AnyRenderObject, RenderBox, RenderCustomPaint, RenderHandle, RenderObject, RendererBinding,
+        AnyRenderObject, RenderBox, RenderCustomPaint, RenderHandle, RenderObject,
     };
-    use waft_services::{KeyEventManager, LogicalKeyboardKey, PhysicalKeyboardKey};
-    use waft_test::TestPlatform;
+    use waft_services::{LogicalKeyboardKey, PhysicalKeyboardKey};
+    use waft_widgets::testing::{
+        TargetPlatformVariant, TestPointer, WidgetTester, test_widgets, test_widgets_variant,
+    };
     use waft_widgets::{
-        Center, FocusHighlightStrategy, FocusManager, FocusNode, GlobalKey, IntoWidget, SizedBox,
+        AnyFocusNode, Center, FocusHighlightStrategy, FocusNode, GlobalKey, IntoWidget, SizedBox,
         WidgetStateMouseCursor,
     };
 
     use super::*;
     use crate::app::CupertinoApp;
-    use crate::test_support::{build, pump, test_view};
     use crate::theme::CupertinoThemeData;
-    use waft_widgets::AnyFocusNode;
 
     /// The `StatefulBuilder` every Dart test wraps its checkbox in: it owns the value.
     struct Host {
@@ -1153,7 +1147,6 @@ mod tests {
     }
 
     struct Setup {
-        platform: TargetPlatform,
         initial: Option<bool>,
         theme: Option<CupertinoThemeData>,
         focusable: bool,
@@ -1164,7 +1157,6 @@ mod tests {
     impl Setup {
         fn new() -> Setup {
             Setup {
-                platform: TargetPlatform::IOS,
                 initial: Some(false),
                 theme: None,
                 focusable: false,
@@ -1176,11 +1168,6 @@ mod tests {
         /// Mounts the host as a `CupertinoApp`'s home, under the app's shortcuts.
         fn in_app(mut self) -> Setup {
             self.in_app = true;
-            self
-        }
-
-        fn on(mut self, platform: TargetPlatform) -> Setup {
-            self.platform = platform;
             self
         }
 
@@ -1212,12 +1199,10 @@ mod tests {
             self
         }
 
-        fn mount(self) -> Fixture {
-            let platform = TestPlatform::new().on(self.platform).with_view(test_view());
-            let cell = AppCell::with_platform(Rc::new(platform));
+        fn mount(self, tester: &mut WidgetTester) -> Fixture<'_> {
             let focus_node = self
                 .focusable
-                .then(|| FocusNode::new(&mut cell.borrow_mut()).into_erased());
+                .then(|| FocusNode::new(&mut tester.cell.borrow_mut()).into_erased());
             let host_key = GlobalKey::new();
             let host = Host {
                 key: Some(host_key.clone().into()),
@@ -1227,46 +1212,34 @@ mod tests {
                 configure: self.configure,
             };
             let root = if self.in_app {
-                install_fonts(&mut cell.borrow_mut());
                 CupertinoApp::new().home(host).into_widget()
             } else {
                 host.into_widget()
             };
-            build(&cell, root);
+            tester.pump_widget(root);
             let host = host_key
-                .current_state::<HostState>(&cell.borrow_mut())
+                .current_state::<HostState>(&tester.cell.borrow_mut())
                 .expect("the host mounted");
             Fixture {
-                cell,
+                tester,
                 host,
                 focus_node,
-                clock: Duration::ZERO,
             }
         }
     }
 
-    fn install_fonts(app: &mut App) {
-        let binding = PaintingBinding::instance(app);
-        if !binding.has_fonts(app) {
-            binding.install_fonts(app, |fonts| {
-                fonts.add_source(valo_system_fonts::SystemFonts::load());
-            });
-        }
-    }
-
-    struct Fixture {
-        cell: Rc<AppCell>,
+    struct Fixture<'t> {
+        tester: &'t mut WidgetTester,
         host: Handle<HostState>,
         focus_node: Option<FocusNodeRef>,
-        clock: Duration,
     }
 
-    /// The test view is 400x300 logical pixels.
-    const VIEW_CENTER: Offset = Offset::new(200.0, 150.0);
+    /// The centre of the tester's 800x600 view, where the checkbox is centred.
+    const VIEW_CENTER: Offset = Offset::new(400.0, 300.0);
 
-    impl Fixture {
+    impl Fixture<'_> {
         fn value(&self) -> Option<bool> {
-            self.cell.borrow().get(self.host).value
+            self.tester.cell.borrow().get(self.host).value
         }
 
         fn node(&self) -> AnyFocusNode {
@@ -1277,97 +1250,38 @@ mod tests {
 
         /// Rebuilds the host with `change` applied, as a Dart test's second `pumpWidget`.
         fn set(&mut self, change: impl FnOnce(&mut HostState)) {
-            self.host.set_state(&mut self.cell.borrow_mut(), change);
-            self.pump();
-        }
-
-        fn pump(&mut self) {
-            self.clock += Duration::from_millis(16);
-            pump(&mut self.cell.borrow_mut(), self.clock);
-        }
-
-        /// Dart's `pumpAndSettle`: frames until no animation is left.
-        fn settle(&mut self) {
-            for _ in 0..60 {
-                self.pump();
-            }
-        }
-
-        fn highlight_traditionally(&self) {
-            let mut app = self.cell.borrow_mut();
-            let manager = FocusManager::instance(&mut app);
-            manager.set_highlight_strategy(&mut app, FocusHighlightStrategy::AlwaysTraditional);
-        }
-
-        /// The test view is 2x: logical coordinates double into the packet.
-        fn send(&mut self, change: PointerChange, kind: PointerDeviceKind, at: Offset) {
-            self.clock += Duration::from_millis(10);
-            let mut app = self.cell.borrow_mut();
-            GestureBinding::instance(&mut app).handle_pointer_data_packet(
-                &mut app,
-                PointerDataPacket::new(vec![PointerData {
-                    change,
-                    kind,
-                    time_stamp: self.clock,
-                    device: 1,
-                    pointer_identifier: 1,
-                    buttons: if matches!(change, PointerChange::Down | PointerChange::Move) {
-                        1
-                    } else {
-                        0
-                    },
-                    physical_x: at.dx() * 2.0,
-                    physical_y: at.dy() * 2.0,
-                    ..PointerData::default()
-                }]),
-            );
-            app.drain_microtasks();
-        }
-
-        /// Dart's `tester.sendKeyEvent`: one key down and up, the way the shell delivers it.
-        fn send_key_event(&mut self, physical: PhysicalKeyboardKey, logical: LogicalKeyboardKey) {
-            let mut app = self.cell.borrow_mut();
-            for event_type in [KeyEventType::Down, KeyEventType::Up] {
-                KeyEventManager::instance(&mut app).handle_key_data(
-                    &mut app,
-                    KeyData {
-                        time_stamp: self.clock,
-                        event_type,
-                        device_type: KeyEventDeviceType::Keyboard,
-                        physical: physical.usb_hid_usage,
-                        logical: logical.key_id,
-                        character: None,
-                        synthesized: false,
-                    },
-                );
-            }
-            app.drain_microtasks();
+            self.host
+                .set_state(&mut self.tester.cell.borrow_mut(), change);
+            self.tester.pump();
         }
 
         /// Dart's `tester.tap` at the checkbox's centre.
         fn tap(&mut self) {
-            self.send(PointerChange::Down, PointerDeviceKind::Touch, VIEW_CENTER);
-            self.send(PointerChange::Up, PointerDeviceKind::Touch, VIEW_CENTER);
-            self.pump();
+            self.tester.tap(VIEW_CENTER, 1);
         }
 
-        /// A mouse that arrives over the checkbox's centre.
+        /// Dart's `gesture.addPointer(location: center)`, `pump` and `gesture.moveTo(center)`:
+        /// a mouse that arrives over the checkbox's centre.
         fn hover(&mut self) {
-            self.send(PointerChange::Add, PointerDeviceKind::Mouse, VIEW_CENTER);
-            self.send(PointerChange::Hover, PointerDeviceKind::Mouse, VIEW_CENTER);
-            self.pump();
+            let mut mouse = TestPointer::mouse(1, 0);
+            self.tester.add_pointer(&mut mouse, VIEW_CENTER);
+            self.tester.pump();
+            self.tester.move_to(&mut mouse, VIEW_CENTER, false);
         }
 
-        fn cursor(&self) -> Option<MouseCursorRef> {
-            let mut app = self.cell.borrow_mut();
-            RendererBinding::instance(&mut app)
-                .mouse_tracker(&app)
-                .debug_device_active_cursor(&app, 1)
+        fn cursor(&self) -> MouseCursorRef {
+            self.tester.active_cursor(1)
         }
 
         fn root(&self) -> AnyRenderObject {
-            let key = self.cell.borrow().get(self.host).checkbox_key.clone();
-            let app = self.cell.borrow();
+            let key = self
+                .tester
+                .cell
+                .borrow()
+                .get(self.host)
+                .checkbox_key
+                .clone();
+            let app = self.tester.cell.borrow();
             key.current_context(&app)
                 .expect("the checkbox mounted")
                 .find_render_object(&app)
@@ -1377,7 +1291,7 @@ mod tests {
         /// The ops the checkbox's painter records, in paint order.
         fn ops(&self) -> Vec<Op> {
             let root = self.root();
-            let mut app = self.cell.borrow_mut();
+            let mut app = self.tester.cell.borrow_mut();
             let custom = find::<RenderCustomPaint>(&app, root).expect("the checkbox's paint");
             let painter = custom.painter(&app).expect("the checkbox's painter");
             let size = custom.size(&app);
@@ -1502,40 +1416,54 @@ mod tests {
 
     #[test]
     fn a_tristate_checkbox_cycles_false_true_null() {
-        let mut fixture = Setup::new()
-            .initial(None)
-            .configure(|checkbox| checkbox.tristate(true))
-            .mount();
-        assert_eq!(fixture.value(), None);
-        for expected in [Some(false), Some(true), None] {
-            fixture.tap();
-            fixture.settle();
-            assert_eq!(fixture.value(), expected);
-        }
+        test_widgets(|tester| {
+            let mut fixture = Setup::new()
+                .initial(None)
+                .configure(|checkbox| checkbox.tristate(true))
+                .mount(tester);
+            assert_eq!(fixture.value(), None);
+            for expected in [Some(false), Some(true), None] {
+                fixture.tap();
+                fixture.tester.pump_and_settle();
+                assert_eq!(fixture.value(), expected);
+            }
+        });
     }
 
     #[test]
     fn the_checkbox_can_be_toggled_by_keyboard_shortcuts() {
-        let mut fixture = Setup::new()
-            .in_app()
-            .initial(Some(true))
-            .configure(|checkbox| checkbox.autofocus(true))
-            .mount();
-        fixture.highlight_traditionally();
-        fixture.settle();
-        fixture.send_key_event(PhysicalKeyboardKey::ENTER, LogicalKeyboardKey::ENTER);
-        fixture.settle();
-        // On web, switches don't respond to the enter key.
-        assert_eq!(fixture.value(), Some(K_IS_WEB));
-        fixture.send_key_event(PhysicalKeyboardKey::ENTER, LogicalKeyboardKey::ENTER);
-        fixture.settle();
-        assert_eq!(fixture.value(), Some(true));
-        fixture.send_key_event(PhysicalKeyboardKey::SPACE, LogicalKeyboardKey::SPACE);
-        fixture.settle();
-        assert_eq!(fixture.value(), Some(false));
-        fixture.send_key_event(PhysicalKeyboardKey::SPACE, LogicalKeyboardKey::SPACE);
-        fixture.settle();
-        assert_eq!(fixture.value(), Some(true));
+        test_widgets(|tester| {
+            let fixture = Setup::new()
+                .in_app()
+                .initial(Some(true))
+                .configure(|checkbox| checkbox.autofocus(true))
+                .mount(tester);
+            fixture
+                .tester
+                .set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
+            fixture.tester.pump_and_settle();
+            fixture
+                .tester
+                .send_key_event(PhysicalKeyboardKey::ENTER, LogicalKeyboardKey::ENTER);
+            fixture.tester.pump_and_settle();
+            // On web, switches don't respond to the enter key.
+            assert_eq!(fixture.value(), Some(K_IS_WEB));
+            fixture
+                .tester
+                .send_key_event(PhysicalKeyboardKey::ENTER, LogicalKeyboardKey::ENTER);
+            fixture.tester.pump_and_settle();
+            assert_eq!(fixture.value(), Some(true));
+            fixture
+                .tester
+                .send_key_event(PhysicalKeyboardKey::SPACE, LogicalKeyboardKey::SPACE);
+            fixture.tester.pump_and_settle();
+            assert_eq!(fixture.value(), Some(false));
+            fixture
+                .tester
+                .send_key_event(PhysicalKeyboardKey::SPACE, LogicalKeyboardKey::SPACE);
+            fixture.tester.pump_and_settle();
+            assert_eq!(fixture.value(), Some(true));
+        });
     }
 
     fn shape_and_side(checkbox: CupertinoCheckbox) -> CupertinoCheckbox {
@@ -1553,12 +1481,9 @@ mod tests {
 
     #[test]
     fn the_shape_and_side_paint_the_border_ring_on_mobile() {
-        for platform in [
-            TargetPlatform::IOS,
-            TargetPlatform::Android,
-            TargetPlatform::Fuchsia,
-        ] {
-            let fixture = Setup::new().on(platform).configure(shape_and_side).mount();
+        test_widgets_variant(TargetPlatformVariant::mobile(), |tester| {
+            let platform = tester.target_platform();
+            let fixture = Setup::new().configure(shape_and_side).mount(tester);
             assert_eq!(
                 fixture.drawn()[1],
                 ring(
@@ -1568,17 +1493,14 @@ mod tests {
                 ),
                 "{platform:?}: the 14x14 box centred in the 44x44 tap target"
             );
-        }
+        });
     }
 
     #[test]
     fn the_shape_and_side_paint_the_border_ring_on_desktop() {
-        for platform in [
-            TargetPlatform::MacOS,
-            TargetPlatform::Linux,
-            TargetPlatform::Windows,
-        ] {
-            let fixture = Setup::new().on(platform).configure(shape_and_side).mount();
+        test_widgets_variant(TargetPlatformVariant::desktop(), |tester| {
+            let platform = tester.target_platform();
+            let fixture = Setup::new().configure(shape_and_side).mount(tester);
             assert_eq!(
                 fixture.drawn()[1],
                 ring(
@@ -1588,81 +1510,88 @@ mod tests {
                 ),
                 "{platform:?}: the tap target is the box"
             );
-        }
+        });
     }
 
     #[test]
     fn the_tap_target_size_centres_the_box() {
-        let fixture = Setup::new()
-            .configure(|checkbox| checkbox.tap_target_size(Size::square(20.0)))
-            .mount();
-        assert_eq!(
-            fixture.drawn()[1],
-            ring(
-                0xffd1d1d6,
-                RRect::from_ltrbr(3.0, 3.0, 17.0, 17.0, Radius::circular(4.0)),
-                RRect::from_ltrbr(4.0, 4.0, 16.0, 16.0, Radius::circular(3.0)),
-            )
-        );
+        test_widgets(|tester| {
+            let fixture = Setup::new()
+                .configure(|checkbox| checkbox.tap_target_size(Size::square(20.0)))
+                .mount(tester);
+            assert_eq!(
+                fixture.drawn()[1],
+                ring(
+                    0xffd1d1d6,
+                    RRect::from_ltrbr(3.0, 3.0, 17.0, 17.0, Radius::circular(4.0)),
+                    RRect::from_ltrbr(4.0, 4.0, 16.0, 16.0, Radius::circular(3.0)),
+                )
+            );
+        });
     }
 
     #[test]
     fn a_mouse_over_the_checkbox_shows_the_configured_cursor() {
-        let mut fixture = Setup::new().mount();
-        fixture.hover();
-        let expected: MouseCursorRef = if K_IS_WEB {
-            SystemMouseCursors::CLICK.into()
-        } else {
-            SystemMouseCursors::BASIC.into()
-        };
-        assert_eq!(fixture.cursor(), Some(expected));
+        test_widgets(|tester| {
+            let mut fixture = Setup::new().mount(tester);
+            fixture.hover();
+            let expected: MouseCursorRef = if K_IS_WEB {
+                SystemMouseCursors::CLICK.into()
+            } else {
+                SystemMouseCursors::BASIC.into()
+            };
+            assert!(fixture.cursor() == expected);
 
-        fixture.set(|host| host.enabled = false);
-        assert_eq!(fixture.cursor(), Some(SystemMouseCursors::BASIC.into()));
+            fixture.set(|host| host.enabled = false);
+            assert_eq!(fixture.cursor(), SystemMouseCursors::BASIC.into());
 
-        let mut fixture = Setup::new()
-            .initial(Some(true))
-            .configure(|checkbox| checkbox.mouse_cursor(SystemMouseCursors::GRAB.into()))
-            .mount();
-        fixture.hover();
-        assert_eq!(fixture.cursor(), Some(SystemMouseCursors::GRAB.into()));
+            let fixture = Setup::new()
+                .initial(Some(true))
+                .configure(|checkbox| checkbox.mouse_cursor(SystemMouseCursors::GRAB.into()))
+                .mount(tester);
+            assert_eq!(fixture.cursor(), SystemMouseCursors::GRAB.into());
+        });
     }
 
     #[test]
     fn the_mouse_cursor_resolves_in_selected_focused_and_disabled_states() {
-        let cursor: MouseCursorRef = WidgetStateMouseCursor::resolve_with(
-            |states| {
-                if states.contains(&WidgetState::Disabled) {
-                    SystemMouseCursors::FORBIDDEN.into()
-                } else if states.contains(&WidgetState::Focused) {
-                    SystemMouseCursors::GRAB.into()
-                } else if states.contains(&WidgetState::Selected) {
-                    SystemMouseCursors::CLICK.into()
-                } else {
-                    SystemMouseCursors::BASIC.into()
-                }
-            },
-            Some("_CheckboxMouseCursor()"),
-        )
-        .into();
-        let mut fixture = Setup::new()
-            .focus_node()
-            .configure(move |checkbox| checkbox.mouse_cursor(Rc::clone(&cursor)))
-            .mount();
-        fixture.highlight_traditionally();
-        fixture.hover();
-        assert_eq!(fixture.cursor(), Some(SystemMouseCursors::BASIC.into()));
+        test_widgets(|tester| {
+            let cursor: MouseCursorRef = WidgetStateMouseCursor::resolve_with(
+                |states| {
+                    if states.contains(&WidgetState::Disabled) {
+                        SystemMouseCursors::FORBIDDEN.into()
+                    } else if states.contains(&WidgetState::Focused) {
+                        SystemMouseCursors::GRAB.into()
+                    } else if states.contains(&WidgetState::Selected) {
+                        SystemMouseCursors::CLICK.into()
+                    } else {
+                        SystemMouseCursors::BASIC.into()
+                    }
+                },
+                Some("_CheckboxMouseCursor()"),
+            )
+            .into();
+            let mut fixture = Setup::new()
+                .focus_node()
+                .configure(move |checkbox| checkbox.mouse_cursor(Rc::clone(&cursor)))
+                .mount(tester);
+            fixture
+                .tester
+                .set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
+            fixture.hover();
+            assert_eq!(fixture.cursor(), SystemMouseCursors::BASIC.into());
 
-        fixture.set(|host| host.value = Some(true));
-        assert_eq!(fixture.cursor(), Some(SystemMouseCursors::CLICK.into()));
+            fixture.set(|host| host.value = Some(true));
+            assert_eq!(fixture.cursor(), SystemMouseCursors::CLICK.into());
 
-        let node = fixture.node();
-        node.request_focus(&mut fixture.cell.borrow_mut(), None);
-        fixture.pump();
-        assert_eq!(fixture.cursor(), Some(SystemMouseCursors::GRAB.into()));
+            let node = fixture.node();
+            node.request_focus(&mut fixture.tester.cell.borrow_mut(), None);
+            fixture.tester.pump();
+            assert_eq!(fixture.cursor(), SystemMouseCursors::GRAB.into());
 
-        fixture.set(|host| host.enabled = false);
-        assert_eq!(fixture.cursor(), Some(SystemMouseCursors::FORBIDDEN.into()));
+            fixture.set(|host| host.enabled = false);
+            assert_eq!(fixture.cursor(), SystemMouseCursors::FORBIDDEN.into());
+        });
     }
 
     fn fill_by_enablement() -> WidgetStatePropertyRef<Option<Color>> {
@@ -1677,142 +1606,179 @@ mod tests {
 
     #[test]
     fn the_fill_colour_resolves_in_enabled_and_disabled_states() {
-        let mut fixture = Setup::new()
-            .initial(Some(true))
-            .configure(|checkbox| checkbox.fill_color(fill_by_enablement()))
-            .mount();
-        fixture.settle();
-        assert_eq!(fixture.drawn()[0].color(), 0xFF000001);
-        fixture.set(|host| host.enabled = false);
-        fixture.settle();
-        assert_eq!(fixture.drawn()[0].color(), 0xFF000002);
+        test_widgets(|tester| {
+            let mut fixture = Setup::new()
+                .initial(Some(true))
+                .configure(|checkbox| checkbox.fill_color(fill_by_enablement()))
+                .mount(tester);
+            fixture.tester.pump_and_settle();
+            assert_eq!(fixture.drawn()[0].color(), 0xFF000001);
+            fixture.set(|host| host.enabled = false);
+            fixture.tester.pump_and_settle();
+            assert_eq!(fixture.drawn()[0].color(), 0xFF000002);
+        });
     }
 
     #[test]
     fn the_fill_colour_takes_precedence_over_the_active_colour() {
-        let mut fixture = Setup::new()
-            .initial(Some(true))
-            .configure(|checkbox| {
-                checkbox
-                    .fill_color(fill_by_enablement())
-                    .active_color(Color::new(0xFF000003))
-            })
-            .mount();
-        fixture.settle();
-        assert_eq!(fixture.drawn()[0].color(), 0xFF000001);
-        fixture.set(|host| host.enabled = false);
-        fixture.settle();
-        assert_eq!(fixture.drawn()[0].color(), 0xFF000002);
+        test_widgets(|tester| {
+            let mut fixture = Setup::new()
+                .initial(Some(true))
+                .configure(|checkbox| {
+                    checkbox
+                        .fill_color(fill_by_enablement())
+                        .active_color(Color::new(0xFF000003))
+                })
+                .mount(tester);
+            fixture.tester.pump_and_settle();
+            assert_eq!(fixture.drawn()[0].color(), 0xFF000001);
+            fixture.set(|host| host.enabled = false);
+            fixture.tester.pump_and_settle();
+            assert_eq!(fixture.drawn()[0].color(), 0xFF000002);
+        });
     }
 
     #[test]
     fn the_fill_colour_resolves_in_hovered_and_focused_states() {
-        let fill = <dyn WidgetStateProperty<Option<Color>>>::resolve_with(|states| {
-            Some(Color::new(if states.contains(&WidgetState::Hovered) {
-                0xFF000001
-            } else if states.contains(&WidgetState::Focused) {
-                0xFF000002
-            } else {
-                0x00000000
-            }))
-        });
-        let mut fixture = Setup::new()
-            .initial(Some(true))
-            .focus_node()
-            .configure(move |checkbox| checkbox.fill_color(Rc::clone(&fill)))
-            .mount();
-        fixture.highlight_traditionally();
-        let node = fixture.node();
-        node.request_focus(&mut fixture.cell.borrow_mut(), None);
-        fixture.settle();
-        assert!(node.has_primary_focus(&fixture.cell.borrow()));
-        assert_eq!(fixture.drawn()[0].color(), 0xFF000002);
+        test_widgets(|tester| {
+            let fill = <dyn WidgetStateProperty<Option<Color>>>::resolve_with(|states| {
+                Some(Color::new(if states.contains(&WidgetState::Hovered) {
+                    0xFF000001
+                } else if states.contains(&WidgetState::Focused) {
+                    0xFF000002
+                } else {
+                    0x00000000
+                }))
+            });
+            let mut fixture = Setup::new()
+                .initial(Some(true))
+                .focus_node()
+                .configure(move |checkbox| checkbox.fill_color(Rc::clone(&fill)))
+                .mount(tester);
+            fixture
+                .tester
+                .set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
+            let node = fixture.node();
+            node.request_focus(&mut fixture.tester.cell.borrow_mut(), None);
+            fixture.tester.pump_and_settle();
+            assert!(node.has_primary_focus(&fixture.tester.cell.borrow()));
+            assert_eq!(fixture.drawn()[0].color(), 0xFF000002);
 
-        fixture.hover();
-        fixture.settle();
-        assert_eq!(fixture.drawn()[0].color(), 0xFF000001);
+            fixture.hover();
+            fixture.tester.pump_and_settle();
+            assert_eq!(fixture.drawn()[0].color(), 0xFF000001);
+        });
     }
 
     #[test]
     fn a_focused_checkbox_strokes_its_focus_colour() {
-        let default_focus_color =
-            argb(CupertinoCheckboxState::default_focus_color(Color::new(ACTIVE_BLUE)).into());
-        for (focus_color, expected) in [(None, default_focus_color), (Some(0xffaabbcc), 0xffaabbcc)]
-        {
-            let mut fixture = Setup::new()
-                .initial(Some(true))
-                .focus_node()
-                .configure(move |checkbox| {
-                    let checkbox = checkbox.autofocus(true);
-                    match focus_color {
-                        Some(color) => checkbox.focus_color(Color::new(color)),
-                        None => checkbox,
-                    }
-                })
-                .mount();
-            fixture.highlight_traditionally();
-            fixture.pump();
-            assert!(fixture.node().has_primary_focus(&fixture.cell.borrow()));
-            let drawn = fixture.drawn();
-            assert_eq!(drawn[0].color(), ACTIVE_BLUE);
-            assert_eq!(drawn[1], Drawn::Stroke(WHITE, 2.0), "the check");
-            assert_eq!(drawn[2], Drawn::Stroke(expected, 3.5), "{focus_color:?}");
-        }
+        test_widgets(|tester| {
+            let default_focus_color =
+                argb(CupertinoCheckboxState::default_focus_color(Color::new(ACTIVE_BLUE)).into());
+            for (focus_color, expected) in
+                [(None, default_focus_color), (Some(0xffaabbcc), 0xffaabbcc)]
+            {
+                let fixture = Setup::new()
+                    .initial(Some(true))
+                    .focus_node()
+                    .configure(move |checkbox| {
+                        let checkbox = checkbox.autofocus(true);
+                        match focus_color {
+                            Some(color) => checkbox.focus_color(Color::new(color)),
+                            None => checkbox,
+                        }
+                    })
+                    .mount(tester);
+                fixture
+                    .tester
+                    .set_highlight_strategy(FocusHighlightStrategy::AlwaysTraditional);
+                fixture.tester.pump();
+                assert!(
+                    fixture
+                        .node()
+                        .has_primary_focus(&fixture.tester.cell.borrow())
+                );
+                let drawn = fixture.drawn();
+                assert_eq!(drawn[0].color(), ACTIVE_BLUE);
+                assert_eq!(drawn[1], Drawn::Stroke(WHITE, 2.0), "the check");
+                assert_eq!(drawn[2], Drawn::Stroke(expected, 3.5), "{focus_color:?}");
+            }
+        });
     }
 
-    /// Presses the checkbox's centre and leaves the finger down.
-    fn press(fixture: &mut Fixture) {
-        fixture.send(PointerChange::Down, PointerDeviceKind::Touch, VIEW_CENTER);
-        fixture.pump();
+    /// Dart's `tester.startGesture(center)` and `pump`: presses the checkbox's centre with
+    /// pointer `id` and leaves the finger down.
+    fn press(fixture: &mut Fixture<'_>, id: i64) -> TestPointer {
+        let mut gesture = TestPointer::touch(id);
+        fixture.tester.down(&mut gesture, VIEW_CENTER);
+        fixture.tester.pump();
+        gesture
+    }
+
+    /// Dart's `gesture1.up()`, `gesture2.up()` and `pump`, which finish the gestures.
+    fn release(tester: &mut WidgetTester, gestures: &[TestPointer]) {
+        for gesture in gestures {
+            tester.up(gesture);
+        }
+        tester.pump();
     }
 
     #[test]
     fn a_pressed_checkbox_takes_an_overlay_without_a_light_theme() {
-        const PRESSED: u32 = 0x26ffffff;
-        let mut fixture = Setup::new().mount();
-        press(&mut fixture);
-        let drawn = fixture.drawn();
-        assert_eq!(drawn[0].color(), WHITE, "the inactive fill");
-        assert!(matches!(drawn[1], Drawn::Ring(..)), "{:?}", drawn[1]);
-        assert_eq!(drawn[2].color(), PRESSED);
+        test_widgets(|tester| {
+            const PRESSED: u32 = 0x26ffffff;
+            let mut fixture = Setup::new().mount(tester);
+            let gesture1 = press(&mut fixture, 1);
+            let drawn = fixture.drawn();
+            assert_eq!(drawn[0].color(), WHITE, "the inactive fill");
+            assert!(matches!(drawn[1], Drawn::Ring(..)), "{:?}", drawn[1]);
+            assert_eq!(drawn[2].color(), PRESSED);
 
-        let mut fixture = Setup::new().initial(Some(true)).mount();
-        press(&mut fixture);
-        let drawn = fixture.drawn();
-        assert_eq!(drawn[0].color(), ACTIVE_BLUE);
-        assert_eq!(drawn[1], Drawn::Stroke(WHITE, 2.0), "the check");
-        assert_eq!(drawn[2].color(), PRESSED);
+            let mut fixture = Setup::new().initial(Some(true)).mount(tester);
+            let gesture2 = press(&mut fixture, 2);
+            let drawn = fixture.drawn();
+            assert_eq!(drawn[0].color(), ACTIVE_BLUE);
+            assert_eq!(drawn[1], Drawn::Stroke(WHITE, 2.0), "the check");
+            assert_eq!(drawn[2].color(), PRESSED);
+            release(tester, &[gesture1, gesture2]);
+        });
     }
 
     #[test]
     fn a_light_theme_darkens_a_pressed_checkbox() {
-        let mut fixture = Setup::new()
-            .theme(CupertinoThemeData::new().with_brightness(Brightness::Light))
-            .mount();
-        press(&mut fixture);
-        assert_eq!(fixture.drawn()[2].color(), 0x26000000);
+        test_widgets(|tester| {
+            let mut fixture = Setup::new()
+                .theme(CupertinoThemeData::new().with_brightness(Brightness::Light))
+                .mount(tester);
+            let gesture = press(&mut fixture, 1);
+            assert_eq!(fixture.drawn()[2].color(), 0x26000000);
+            release(tester, &[gesture]);
+        });
     }
 
     #[test]
     fn a_dark_pressed_checkbox_is_lightened() {
-        const PRESSED: u32 = 0x26ffffff;
-        let mut fixture = Setup::new().dark().mount();
-        press(&mut fixture);
-        let drawn = fixture.drawn();
-        assert_eq!(
-            drawn[0],
-            Drawn::Gradient(0xff000000),
-            "the unchecked dark fill is a gradient"
-        );
-        assert!(matches!(drawn[1], Drawn::Ring(..)), "{:?}", drawn[1]);
-        assert_eq!(drawn[2].color(), PRESSED);
+        test_widgets(|tester| {
+            const PRESSED: u32 = 0x26ffffff;
+            let mut fixture = Setup::new().dark().mount(tester);
+            let gesture1 = press(&mut fixture, 1);
+            let drawn = fixture.drawn();
+            assert_eq!(
+                drawn[0],
+                Drawn::Gradient(0xff000000),
+                "the unchecked dark fill is a gradient"
+            );
+            assert!(matches!(drawn[1], Drawn::Ring(..)), "{:?}", drawn[1]);
+            assert_eq!(drawn[2].color(), PRESSED);
 
-        let mut fixture = Setup::new().dark().initial(Some(true)).mount();
-        press(&mut fixture);
-        let drawn = fixture.drawn();
-        assert_eq!(drawn[0].color(), 0xff3264d7);
-        assert_eq!(drawn[1], Drawn::Stroke(0xffdee8f8, 2.0), "the check");
-        assert_eq!(drawn[2].color(), PRESSED);
+            let mut fixture = Setup::new().dark().initial(Some(true)).mount(tester);
+            let gesture2 = press(&mut fixture, 2);
+            let drawn = fixture.drawn();
+            assert_eq!(drawn[0].color(), 0xff3264d7);
+            assert_eq!(drawn[1], Drawn::Stroke(0xffdee8f8, 2.0), "the check");
+            assert_eq!(drawn[2].color(), PRESSED);
+            release(tester, &[gesture1, gesture2]);
+        });
     }
 
     /// The shader of Dart's `LinearGradient(begin: Alignment.topCenter, end:
@@ -1839,96 +1805,104 @@ mod tests {
 
     #[test]
     fn a_dark_checkbox_fills_with_its_gradient_opacities() {
-        // White at 0.14 and 0.29.
-        let fixture = Setup::new().dark().mount();
-        assert_eq!(fixture.shaders(), [dark_fill(0x24ffffff, 0x4affffff)]);
+        test_widgets(|tester| {
+            // White at 0.14 and 0.29.
+            let fixture = Setup::new().dark().mount(tester);
+            assert_eq!(fixture.shaders(), [dark_fill(0x24ffffff, 0x4affffff)]);
 
-        // The checked, enabled box is filled flat.
-        let fixture = Setup::new().dark().initial(Some(true)).mount();
-        assert_eq!(fixture.shaders(), []);
+            // The checked, enabled box is filled flat.
+            let fixture = Setup::new().dark().initial(Some(true)).mount(tester);
+            assert_eq!(fixture.shaders(), []);
+        });
     }
 
     #[test]
     fn a_disabled_dark_checkbox_fills_with_its_disabled_gradient_opacities() {
-        // White at 0.08 and 0.14, checked or not.
-        for initial in [Some(true), Some(false)] {
-            let mut fixture = Setup::new().dark().initial(initial).mount();
-            fixture.set(|host| host.enabled = false);
-            assert_eq!(
-                fixture.shaders(),
-                [dark_fill(0x14ffffff, 0x24ffffff)],
-                "{initial:?}"
-            );
-        }
+        test_widgets(|tester| {
+            // White at 0.08 and 0.14, checked or not.
+            for initial in [Some(true), Some(false)] {
+                let mut fixture = Setup::new().dark().initial(initial).mount(tester);
+                fixture.set(|host| host.enabled = false);
+                assert_eq!(
+                    fixture.shaders(),
+                    [dark_fill(0x14ffffff, 0x24ffffff)],
+                    "{initial:?}"
+                );
+            }
+        });
     }
 
     #[test]
     fn a_disabled_checkbox_paints_its_disabled_defaults() {
-        let mut fixture = Setup::new().initial(Some(true)).mount();
-        fixture.set(|host| host.enabled = false);
-        let drawn = fixture.drawn();
-        assert_eq!(drawn[0].color(), 0x80ffffff, "white at half opacity");
-        assert_eq!(
-            drawn[2],
-            Drawn::Stroke(0x40000000, 2.0),
-            "the disabled check"
-        );
+        test_widgets(|tester| {
+            let mut fixture = Setup::new().initial(Some(true)).mount(tester);
+            fixture.set(|host| host.enabled = false);
+            let drawn = fixture.drawn();
+            assert_eq!(drawn[0].color(), 0x80ffffff, "white at half opacity");
+            assert_eq!(
+                drawn[2],
+                Drawn::Stroke(0x40000000, 2.0),
+                "the disabled check"
+            );
 
-        fixture.set(|host| host.value = Some(false));
-        assert_eq!(colors(&fixture.drawn()), [0x80ffffff, 0x0d000000]);
+            fixture.set(|host| host.value = Some(false));
+            assert_eq!(colors(&fixture.drawn()), [0x80ffffff, 0x0d000000]);
+        });
     }
 
     #[test]
     fn a_mixed_checkbox_draws_a_dash() {
-        let fixture = Setup::new()
-            .initial(None)
-            .configure(|checkbox| checkbox.tristate(true))
-            .mount();
-        let drawn = fixture.drawn();
-        assert_eq!(drawn[0].color(), ACTIVE_BLUE);
-        assert_eq!(drawn[1], Drawn::Stroke(WHITE, 2.0), "the dash");
+        test_widgets(|tester| {
+            let fixture = Setup::new()
+                .initial(None)
+                .configure(|checkbox| checkbox.tristate(true))
+                .mount(tester);
+            let drawn = fixture.drawn();
+            assert_eq!(drawn[0].color(), ACTIVE_BLUE);
+            assert_eq!(drawn[1], Drawn::Stroke(WHITE, 2.0), "the dash");
+        });
     }
 
     #[test]
     fn a_checkbox_squeezed_to_nothing_lays_out_at_zero() {
-        let cell = crate::test_support::test_cell();
-        let key = GlobalKey::new();
-        build(
-            &cell,
-            Center::new()
-                .child(
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            tester.pump_widget(
+                Center::new().child(
                     SizedBox::shrink().child(
                         CupertinoCheckbox::new(Some(true), Some(Rc::new(|_app: &mut App, _| {})))
                             .key(key.clone().into()),
                     ),
-                )
-                .into_widget(),
-        );
-        let app = cell.borrow();
-        let render = key
-            .current_context(&app)
-            .and_then(|context| context.find_render_object(&app))
-            .and_then(|object| object.as_box())
-            .expect("the checkbox laid out");
-        assert_eq!(render.size(&app), Size::ZERO);
+                ),
+            );
+            assert_eq!(tester.size_of(&key), Size::ZERO);
+        });
     }
 
     #[test]
     fn unmounting_the_checkbox_disposes_its_painter() {
-        let fixture = Setup::new().mount();
-        let key = fixture.cell.borrow().get(fixture.host).checkbox_key.clone();
-        let state = key
-            .current_state::<CupertinoCheckboxState>(&fixture.cell.borrow_mut())
-            .expect("the checkbox mounted");
-        let painter = fixture
-            .cell
-            .borrow()
-            .get(state)
-            .painter
-            .handle()
-            .expect("created");
-        build(&fixture.cell, SizedBox::shrink().into_widget());
-        fixture.cell.checkpoint();
-        assert!(!fixture.cell.borrow().contains(painter));
+        test_widgets(|tester| {
+            let fixture = Setup::new().mount(tester);
+            let key = fixture
+                .tester
+                .cell
+                .borrow()
+                .get(fixture.host)
+                .checkbox_key
+                .clone();
+            let state = key
+                .current_state::<CupertinoCheckboxState>(&fixture.tester.cell.borrow_mut())
+                .expect("the checkbox mounted");
+            let painter = fixture
+                .tester
+                .cell
+                .borrow()
+                .get(state)
+                .painter
+                .handle()
+                .expect("created");
+            fixture.tester.pump_widget(SizedBox::shrink());
+            assert!(!fixture.tester.cell.borrow().contains(painter));
+        });
     }
 }

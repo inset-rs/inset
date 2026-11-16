@@ -2893,8 +2893,9 @@ impl PageTransitionsBuilder for CupertinoPageTransitionsBuilder {
 mod tests {
     use std::cell::Cell;
 
-    use waft_embedder::{Locale, PointerChange, PointerData, PointerDataPacket, PointerDeviceKind};
-    use waft_gestures::GestureBinding;
+    use waft_embedder::{Locale, PointerChange};
+    use waft_test::{assert_no_new_objects, object_snapshot};
+    use waft_widgets::testing::{TestPointer, TestVSync, WidgetTester, test_widgets};
     use waft_widgets::{
         AnyModalRoute, DefaultWidgetsLocalizations, GlobalKey, Localizations, Navigator,
         NavigatorState, PageRef, SizedBox,
@@ -2902,55 +2903,78 @@ mod tests {
 
     use super::*;
     use crate::localizations::DefaultCupertinoLocalizations;
-    use crate::test_support::{build, pump, test_cell};
-    use waft_test::{assert_no_new_objects, object_snapshot};
 
-    /// The test view is 800x600 physical at 2x.
-    const VIEW_WIDTH: f64 = 400.0;
+    /// The tester's view width, in logical pixels.
+    const VIEW_WIDTH: f64 = 800.0;
 
-    /// Sends one pointer packet; the test view is 2x, so logical coordinates double.
-    fn send(app: &mut App, change: PointerChange, x: f64, y: f64, at: Duration) {
-        send_from(app, change, x, y, x, at);
-    }
-
-    /// Sends one pointer packet carrying the movement from `previous_x`.
-    fn send_from(
-        app: &mut App,
-        change: PointerChange,
-        x: f64,
-        y: f64,
-        previous_x: f64,
-        at: Duration,
-    ) {
-        GestureBinding::instance(app).handle_pointer_data_packet(
-            app,
-            PointerDataPacket::new(vec![PointerData {
-                change,
-                kind: PointerDeviceKind::Touch,
-                time_stamp: at,
-                pointer_identifier: 1,
-                physical_x: x * 2.0,
-                physical_y: y * 2.0,
-                physical_delta_x: (x - previous_x) * 2.0,
-                ..PointerData::default()
-            }]),
-        );
-        app.drain_microtasks();
-    }
-
-    fn tap_at(app: &mut App, x: f64, y: f64) {
-        send(app, PointerChange::Down, x, y, Duration::ZERO);
-        send(app, PointerChange::Up, x, y, Duration::from_millis(16));
-    }
-
-    /// Runs frames until every route transition has settled.
-    fn settle(app: &mut App, from: Duration) -> Duration {
-        let mut at = from;
-        for _ in 0..60 {
-            at += Duration::from_millis(20);
-            pump(app, at);
+    /// A back-gesture drag from the left edge at `(5, 150)`: `steps` moves of `step` each,
+    /// stamped `interval` apart, with a frame `interval` long after each; the finger stays
+    /// down.
+    fn drag_from_the_edge(
+        tester: &mut WidgetTester,
+        step: f64,
+        steps: u32,
+        interval: Duration,
+    ) -> TestPointer {
+        let mut finger = TestPointer::touch(1);
+        tester.down(&mut finger, Offset::new(5.0, 150.0));
+        for n in 1..=steps {
+            finger.position = finger.position + Offset::new(step, 0.0);
+            tester.send_at(
+                &finger,
+                PointerChange::Move,
+                Offset::new(step, 0.0),
+                interval * n,
+            );
+            tester.pump_by(interval);
         }
-        at
+        finger
+    }
+
+    /// A navigator whose every route is a plain `CupertinoPageRoute`, settled.
+    fn mount_plain_navigator(tester: &mut WidgetTester, navigator_key: &GlobalKey) {
+        tester.pump_widget(navigator(navigator_key, |navigator| {
+            navigator.on_generate_route(|app, _settings| {
+                Some(CupertinoPageRoute::new(app, plain_page()).into_erased())
+            })
+        }));
+        tester.pump_and_settle();
+    }
+
+    /// A navigator whose initial page hands its build context to the cell this returns,
+    /// settled.
+    fn mount_context_navigator(tester: &mut WidgetTester) -> Rc<Cell<Option<BuildContext>>> {
+        let navigator_key = GlobalKey::new();
+        let page_context: Rc<Cell<Option<BuildContext>>> = Rc::default();
+        tester.pump_widget({
+            let page_context = Rc::clone(&page_context);
+            navigator(&navigator_key, move |navigator| {
+                navigator.on_generate_route(move |app, _settings| {
+                    Some(
+                        CupertinoPageRoute::new(app, context_page(Rc::clone(&page_context)))
+                            .into_erased(),
+                    )
+                })
+            })
+        });
+        tester.pump_and_settle();
+        page_context
+    }
+
+    /// Pushes a `CupertinoPageRoute` of a page keyed `page_key` and settles the push.
+    fn push_keyed_page(
+        tester: &mut WidgetTester,
+        navigator_key: &GlobalKey,
+        page_key: &GlobalKey,
+    ) -> Ref<CupertinoPageRoute> {
+        let state = navigator_state(navigator_key, &mut tester.cell.borrow_mut());
+        let pushed = tester.update(|app| {
+            let pushed = CupertinoPageRoute::new(app, keyed_page(page_key));
+            state.push(app, pushed.clone().into_erased());
+            pushed
+        });
+        tester.pump_and_settle();
+        pushed
     }
 
     /// A page filling the view, keyed so a test can find its render box.
@@ -2990,112 +3014,92 @@ mod tests {
     }
 
     /// The x coordinate the keyed page paints at, in the view's coordinate system.
-    fn page_left(key: &GlobalKey, app: &mut App) -> f64 {
-        let context = key.current_context(app).expect("the page is mounted");
-        context
-            .find_render_object(app)
-            .expect("the page has a render object")
-            .as_box()
-            .expect("the page is a box")
-            .local_to_global(app, Offset::ZERO, None)
-            .dx()
+    fn page_left(key: &GlobalKey, tester: &WidgetTester) -> f64 {
+        top_left(key, tester).dx()
     }
 
     /// The y coordinate the keyed page paints at, in the view's coordinate system.
-    fn page_top(key: &GlobalKey, app: &mut App) -> f64 {
-        let context = key.current_context(app).expect("the page is mounted");
-        context
-            .find_render_object(app)
-            .expect("the page has a render object")
+    fn page_top(key: &GlobalKey, tester: &WidgetTester) -> f64 {
+        top_left(key, tester).dy()
+    }
+
+    fn top_left(key: &GlobalKey, tester: &WidgetTester) -> Offset {
+        let render = tester
+            .render_object(key)
             .as_box()
-            .expect("the page is a box")
-            .local_to_global(app, Offset::ZERO, None)
-            .dy()
+            .expect("the page is a box");
+        render.local_to_global(&tester.cell.borrow(), Offset::ZERO, None)
     }
 
     /// Checks that a frame part way into `push`, over a settled page, leaves no new arena
     /// objects: Dart's collector frees what each frame's build replaces.
     fn assert_a_mid_push_frame_leaves_nothing(
-        push: impl FnOnce(&mut App, BuildContext, Handle<NavigatorState>),
+        push: impl FnOnce(&mut App, BuildContext, Handle<NavigatorState>) + Send,
     ) {
-        let cell = test_cell();
-        let navigator_key = GlobalKey::new();
-        let page_context: Rc<Cell<Option<BuildContext>>> = Rc::default();
-        build(&cell, {
-            let page_context = Rc::clone(&page_context);
-            navigator(&navigator_key, move |navigator| {
-                navigator.on_generate_route(move |app, _settings| {
-                    Some(
-                        CupertinoPageRoute::new(app, context_page(Rc::clone(&page_context)))
-                            .into_erased(),
-                    )
+        test_widgets(|tester| {
+            let navigator_key = GlobalKey::new();
+            let page_context: Rc<Cell<Option<BuildContext>>> = Rc::default();
+            tester.pump_widget({
+                let page_context = Rc::clone(&page_context);
+                navigator(&navigator_key, move |navigator| {
+                    navigator.on_generate_route(move |app, _settings| {
+                        Some(
+                            CupertinoPageRoute::new(app, context_page(Rc::clone(&page_context)))
+                                .into_erased(),
+                        )
+                    })
                 })
-            })
-        });
-        let mut at = settle(&mut cell.borrow_mut(), Duration::ZERO);
-        {
-            let mut app = cell.borrow_mut();
-            let state = navigator_state(&navigator_key, &mut app);
-            push(&mut app, page_context.get().expect("the page built"), state);
+            });
+            tester.pump_and_settle();
+            tester.update(|app| {
+                let state = navigator_state(&navigator_key, app);
+                push(app, page_context.get().expect("the page built"), state);
+            });
             for _ in 0..3 {
-                at += Duration::from_millis(20);
-                pump(&mut app, at);
+                tester.pump_by(Duration::from_millis(20));
             }
-        }
-        cell.checkpoint();
-        let snapshot = object_snapshot(&cell.borrow());
-        pump(&mut cell.borrow_mut(), at + Duration::from_millis(20));
-        cell.checkpoint();
-        assert_no_new_objects(&cell.borrow(), &snapshot);
+            let snapshot = object_snapshot(&tester.cell.borrow());
+            tester.pump_by(Duration::from_millis(20));
+            assert_no_new_objects(&tester.cell.borrow(), &snapshot);
+        });
     }
 
     /// Not a Dart case: a controller disposed before its status changes takes the back
     /// gesture's listener with it, as the closure Dart makes goes with its controller.
     #[test]
     fn the_back_gestures_status_listener_goes_with_a_controller_disposed_first() {
-        use waft_animation::AnimationBehavior;
-        use waft_scheduler::{Ticker, TickerCallback, TickerProvider};
-
-        struct Vsync;
-        impl TickerProvider for Vsync {
-            fn create_ticker(&self, app: &mut App, on_tick: TickerCallback) -> Ref<Ticker> {
-                Ticker::new(app, on_tick, None)
-            }
-        }
-
-        let cell = test_cell();
-        let navigator_key = GlobalKey::new();
-        build(
-            &cell,
-            navigator(&navigator_key, |navigator| {
+        test_widgets(|tester| {
+            use waft_animation::AnimationBehavior;
+            let navigator_key = GlobalKey::new();
+            tester.pump_widget(navigator(&navigator_key, |navigator| {
                 navigator.on_generate_route(|app, _settings| {
                     Some(CupertinoPageRoute::new(app, plain_page()).into_erased())
                 })
-            }),
-        );
-        let mut app = cell.borrow_mut();
-        let state = navigator_state(&navigator_key, &mut app);
-        let controller = AnimationController::new(
-            &mut app,
-            None,
-            Some(Duration::from_millis(100)),
-            None,
-            0.0,
-            1.0,
-            AnimationBehavior::Normal,
-            Vsync,
-        );
-        let listener =
-            stop_user_gesture_when_the_animation_ends(&mut app, state, controller.handle());
-        assert!(
-            listener.upgrade().is_some(),
-            "the controller's list holds it"
-        );
-        controller.dispose(&mut app);
-        drop(controller);
-        drop(app);
-        cell.checkpoint();
-        assert!(listener.upgrade().is_none(), "nothing else holds it");
+            }));
+            let mut app = tester.cell.borrow_mut();
+            let state = navigator_state(&navigator_key, &mut app);
+            let controller = AnimationController::new(
+                &mut app,
+                None,
+                Some(Duration::from_millis(100)),
+                None,
+                0.0,
+                1.0,
+                AnimationBehavior::Normal,
+                TestVSync,
+            );
+            let listener =
+                stop_user_gesture_when_the_animation_ends(&mut app, state, controller.handle());
+            assert!(
+                listener.upgrade().is_some(),
+                "the controller's list holds it"
+            );
+            controller.dispose(&mut app);
+            drop(controller);
+            drop(app);
+            tester.cell.checkpoint();
+            assert!(listener.upgrade().is_none(), "nothing else holds it");
+        });
     }
 
     /// Not a Dart case: see [`assert_a_mid_push_frame_leaves_nothing`].
@@ -3136,378 +3140,298 @@ mod tests {
 
     #[test]
     fn a_pushed_cupertino_page_route_slides_in_from_the_right() {
-        let cell = test_cell();
-        let app = cell.borrow();
-        let navigator_key = GlobalKey::new();
-        drop(app);
-        build(
-            &cell,
-            navigator(&navigator_key, |navigator| {
-                navigator.on_generate_route(|app, _settings| {
-                    Some(CupertinoPageRoute::new(app, plain_page()).into_erased())
-                })
-            }),
-        );
-        let mut app = cell.borrow_mut();
-        let state = navigator_state(&navigator_key, &mut app);
-        let at = settle(&mut app, Duration::ZERO);
+        test_widgets(|tester| {
+            let navigator_key = GlobalKey::new();
+            mount_plain_navigator(tester, &navigator_key);
+            let state = navigator_state(&navigator_key, &mut tester.cell.borrow_mut());
 
-        let page_key = GlobalKey::new();
-        let pushed = CupertinoPageRoute::new(&mut app, keyed_page(&page_key));
-        state.push(&mut app, pushed.clone().into_erased());
-        let mut at = at;
-        for _ in 0..4 {
-            at += Duration::from_millis(20);
-            pump(&mut app, at);
-        }
-        let mid = page_left(&page_key, &mut app);
-        assert!(
-            mid > 0.0 && mid < VIEW_WIDTH,
-            "the page is part way in from the right, at {mid}"
-        );
+            let page_key = GlobalKey::new();
+            let pushed = tester.update(|app| {
+                let pushed = CupertinoPageRoute::new(app, keyed_page(&page_key));
+                state.push(app, pushed.clone().into_erased());
+                pushed
+            });
+            for _ in 0..4 {
+                tester.pump_by(Duration::from_millis(20));
+            }
+            let mid = page_left(&page_key, tester);
+            assert!(
+                mid > 0.0 && mid < VIEW_WIDTH,
+                "the page is part way in from the right, at {mid}"
+            );
 
-        let at = settle(&mut app, at);
-        assert_eq!(
-            page_left(&page_key, &mut app),
-            0.0,
-            "the slide ends with the page fully on screen"
-        );
-        let animation =
-            TransitionRoute::animation(pushed.handle(), &app).expect("an installed route");
-        assert_eq!(animation.value(&app), 1.0);
+            tester.pump_and_settle();
+            assert_eq!(
+                page_left(&page_key, tester),
+                0.0,
+                "the slide ends with the page fully on screen"
+            );
+            {
+                let app = tester.cell.borrow();
+                let animation =
+                    TransitionRoute::animation(pushed.handle(), &app).expect("an installed route");
+                assert_eq!(animation.value(&app), 1.0);
+            }
 
-        state.pop(&mut app, None);
-        settle(&mut app, at);
-        assert!(!Route::is_active(pushed.handle(), &app), "the route popped");
+            tester.update(|app| state.pop(app, None));
+            tester.pump_and_settle();
+            assert!(
+                !Route::is_active(pushed.handle(), &tester.cell.borrow()),
+                "the route popped"
+            );
+        });
     }
 
     #[test]
     fn cupertino_pages_build_page_based_routes_that_carry_the_previous_title() {
-        let cell = test_cell();
-        let app = cell.borrow();
-        let navigator_key = GlobalKey::new();
-        let top_context: Rc<Cell<Option<BuildContext>>> = Rc::default();
-        let pages: Vec<PageRef> = vec![
-            Rc::new(CupertinoPage::new(SizedBox::expand()).title("Home".to_string())),
-            Rc::new(
-                CupertinoPage::new(
-                    Builder::new({
-                        let top_context = Rc::clone(&top_context);
-                        move |_app, context| {
-                            top_context.set(Some(context));
-                            SizedBox::expand().into_widget()
-                        }
-                    })
-                    .into_widget(),
-                )
-                .title("Details".to_string()),
-            ),
-        ];
-        drop(app);
-        build(
-            &cell,
-            navigator(&navigator_key, move |navigator| {
+        test_widgets(|tester| {
+            let navigator_key = GlobalKey::new();
+            let top_context: Rc<Cell<Option<BuildContext>>> = Rc::default();
+            let pages: Vec<PageRef> = vec![
+                Rc::new(CupertinoPage::new(SizedBox::expand()).title("Home".to_string())),
+                Rc::new(
+                    CupertinoPage::new(
+                        Builder::new({
+                            let top_context = Rc::clone(&top_context);
+                            move |_app, context| {
+                                top_context.set(Some(context));
+                                SizedBox::expand().into_widget()
+                            }
+                        })
+                        .into_widget(),
+                    )
+                    .title("Details".to_string()),
+                ),
+            ];
+            tester.pump_widget(navigator(&navigator_key, move |navigator| {
                 navigator.pages(pages).on_did_remove_page(|_app, _page| {})
-            }),
-        );
-        let mut app = cell.borrow_mut();
-        settle(&mut app, Duration::ZERO);
+            }));
+            tester.pump_and_settle();
+            let mut app = tester.cell.borrow_mut();
 
-        let context = top_context.get().expect("the top page built");
-        let route = AnyModalRoute::of(&mut app, context)
-            .expect("a modal route")
-            .as_route()
-            .downcast::<PageBasedCupertinoPageRoute>(&app)
-            .expect("a page-based Cupertino page route");
-        assert_eq!(
-            CupertinoRouteTransitionMixin::title(route, &app),
-            Some("Details".to_string())
-        );
-        let previous_title = CupertinoRouteTransitionMixin::previous_title(route, &app);
-        assert_eq!(
-            app.get(previous_title).value().clone(),
-            Some("Home".to_string()),
-            "the previous route's title is readable once installed"
-        );
-        assert!(!ModalRoute::fullscreen_dialog(route, &app));
-        assert!(ModalRoute::maintain_state(route, &app));
+            let context = top_context.get().expect("the top page built");
+            let route = AnyModalRoute::of(&mut app, context)
+                .expect("a modal route")
+                .as_route()
+                .downcast::<PageBasedCupertinoPageRoute>(&app)
+                .expect("a page-based Cupertino page route");
+            assert_eq!(
+                CupertinoRouteTransitionMixin::title(route, &app),
+                Some("Details".to_string())
+            );
+            let previous_title = CupertinoRouteTransitionMixin::previous_title(route, &app);
+            assert_eq!(
+                app.get(previous_title).value().clone(),
+                Some("Home".to_string()),
+                "the previous route's title is readable once installed"
+            );
+            assert!(!ModalRoute::fullscreen_dialog(route, &app));
+            assert!(ModalRoute::maintain_state(route, &app));
+        });
     }
 
     #[test]
     fn a_flung_back_gesture_drag_moves_the_page_and_pops_the_route() {
-        let cell = test_cell();
-        let app = cell.borrow();
-        let navigator_key = GlobalKey::new();
-        drop(app);
-        build(
-            &cell,
-            navigator(&navigator_key, |navigator| {
-                navigator.on_generate_route(|app, _settings| {
-                    Some(CupertinoPageRoute::new(app, plain_page()).into_erased())
-                })
-            }),
-        );
-        let mut app = cell.borrow_mut();
-        let state = navigator_state(&navigator_key, &mut app);
-        let at = settle(&mut app, Duration::ZERO);
+        test_widgets(|tester| {
+            let navigator_key = GlobalKey::new();
+            mount_plain_navigator(tester, &navigator_key);
+            let page_key = GlobalKey::new();
+            let pushed = push_keyed_page(tester, &navigator_key, &page_key);
+            assert_eq!(page_left(&page_key, tester), 0.0);
 
-        let page_key = GlobalKey::new();
-        let pushed = CupertinoPageRoute::new(&mut app, keyed_page(&page_key));
-        state.push(&mut app, pushed.clone().into_erased());
-        let at = settle(&mut app, at);
-        assert_eq!(page_left(&page_key, &mut app), 0.0);
+            let finger = drag_from_the_edge(tester, 25.0, 4, Duration::from_millis(12));
+            let dragged = page_left(&page_key, tester);
+            assert!(dragged > 0.0, "the drag moved the page right, to {dragged}");
 
-        send(&mut app, PointerChange::Down, 5.0, 150.0, Duration::ZERO);
-        for step in 1_u64..=4 {
-            send_from(
-                &mut app,
-                PointerChange::Move,
-                5.0 + 25.0 * step as f64,
-                150.0,
-                5.0 + 25.0 * (step - 1) as f64,
-                Duration::from_millis(step * 12),
+            tester.send_at(
+                &finger,
+                PointerChange::Up,
+                Offset::ZERO,
+                Duration::from_millis(48),
             );
-            pump(&mut app, at + Duration::from_millis(step * 12));
-        }
-        let dragged = page_left(&page_key, &mut app);
-        assert!(dragged > 0.0, "the drag moved the page right, to {dragged}");
-
-        send(
-            &mut app,
-            PointerChange::Up,
-            105.0,
-            150.0,
-            Duration::from_millis(48),
-        );
-        settle(&mut app, at + Duration::from_millis(48));
-        assert!(
-            !Route::is_active(pushed.handle(), &app),
-            "the fling popped the route"
-        );
+            tester.pump_and_settle();
+            assert!(
+                !Route::is_active(pushed.handle(), &tester.cell.borrow()),
+                "the fling popped the route"
+            );
+        });
     }
 
     #[test]
     fn a_dropped_short_back_gesture_drag_snaps_the_page_back() {
-        let cell = test_cell();
-        let app = cell.borrow();
-        let navigator_key = GlobalKey::new();
-        drop(app);
-        build(
-            &cell,
-            navigator(&navigator_key, |navigator| {
-                navigator.on_generate_route(|app, _settings| {
-                    Some(CupertinoPageRoute::new(app, plain_page()).into_erased())
-                })
-            }),
-        );
-        let mut app = cell.borrow_mut();
-        let state = navigator_state(&navigator_key, &mut app);
-        let at = settle(&mut app, Duration::ZERO);
+        test_widgets(|tester| {
+            let navigator_key = GlobalKey::new();
+            mount_plain_navigator(tester, &navigator_key);
+            let page_key = GlobalKey::new();
+            let pushed = push_keyed_page(tester, &navigator_key, &page_key);
 
-        let page_key = GlobalKey::new();
-        let pushed = CupertinoPageRoute::new(&mut app, keyed_page(&page_key));
-        state.push(&mut app, pushed.clone().into_erased());
-        let at = settle(&mut app, at);
-
-        send(&mut app, PointerChange::Down, 5.0, 150.0, Duration::ZERO);
-        for step in 1_u64..=4 {
-            send_from(
-                &mut app,
-                PointerChange::Move,
-                5.0 + 5.0 * step as f64,
-                150.0,
-                5.0 + 5.0 * (step - 1) as f64,
-                Duration::from_millis(step * 60),
+            let finger = drag_from_the_edge(tester, 5.0, 4, Duration::from_millis(60));
+            let dragged = page_left(&page_key, tester);
+            assert!(dragged > 0.0, "the drag moved the page right, to {dragged}");
+            tester.send_at(
+                &finger,
+                PointerChange::Up,
+                Offset::ZERO,
+                Duration::from_millis(240),
             );
-            pump(&mut app, at + Duration::from_millis(step * 60));
-        }
-        let dragged = page_left(&page_key, &mut app);
-        assert!(dragged > 0.0, "the drag moved the page right, to {dragged}");
-        send(
-            &mut app,
-            PointerChange::Up,
-            25.0,
-            150.0,
-            Duration::from_millis(240),
-        );
-        settle(&mut app, at + Duration::from_millis(240));
+            tester.pump_and_settle();
 
-        assert!(
-            Route::is_active(pushed.handle(), &app),
-            "the short drag did not pop"
-        );
-        assert_eq!(
-            page_left(&page_key, &mut app),
-            0.0,
-            "the page snapped back on screen"
-        );
+            assert!(
+                Route::is_active(pushed.handle(), &tester.cell.borrow()),
+                "the short drag did not pop"
+            );
+            assert_eq!(
+                page_left(&page_key, tester),
+                0.0,
+                "the page snapped back on screen"
+            );
+        });
     }
 
     #[test]
     fn a_modal_popup_slides_up_from_the_bottom_and_dismisses_on_a_barrier_tap() {
-        let cell = test_cell();
-        let app = cell.borrow();
-        let navigator_key = GlobalKey::new();
-        let page_context: Rc<Cell<Option<BuildContext>>> = Rc::default();
-        drop(app);
-        build(&cell, {
-            let page_context = Rc::clone(&page_context);
-            navigator(&navigator_key, move |navigator| {
-                navigator.on_generate_route(move |app, _settings| {
-                    Some(
-                        CupertinoPageRoute::new(app, context_page(Rc::clone(&page_context)))
-                            .into_erased(),
-                    )
-                })
-            })
+        test_widgets(|tester| {
+            let page_context = mount_context_navigator(tester);
+
+            let popup_key = GlobalKey::new();
+            let key: KeyRef = popup_key.clone().into();
+            let context = page_context.get().expect("the page built");
+            let popped = tester.update(|app| {
+                show_cupertino_modal_popup(
+                    app,
+                    context,
+                    Rc::new(move |_app, _context| {
+                        SizedBox::new()
+                            .key(key.clone())
+                            .width(200.0)
+                            .height(100.0)
+                            .into_widget()
+                    }),
+                    None,
+                    K_CUPERTINO_MODAL_BARRIER_COLOR,
+                    true,
+                    true,
+                    false,
+                    None,
+                    None,
+                )
+            });
+            for _ in 0..3 {
+                tester.pump_by(Duration::from_millis(20));
+            }
+            let mid = page_top(&popup_key, tester);
+            assert!(mid > 500.0, "the popup starts below the view, at {mid}");
+
+            tester.pump_and_settle();
+            assert_eq!(
+                page_top(&popup_key, tester),
+                500.0,
+                "the popup ends flush with the bottom of the 600pt view"
+            );
+
+            tester.tap(Offset::new(200.0, 20.0), 1);
+            tester.pump_and_settle();
+            assert!(
+                matches!(popped.peek(), Some(None)),
+                "the barrier tap dismissed the popup with no result"
+            );
         });
-        let mut app = cell.borrow_mut();
-        let at = settle(&mut app, Duration::ZERO);
-
-        let popup_key = GlobalKey::new();
-        let key: KeyRef = popup_key.clone().into();
-        let context = page_context.get().expect("the page built");
-        let popped = show_cupertino_modal_popup(
-            &mut app,
-            context,
-            Rc::new(move |_app, _context| {
-                SizedBox::new()
-                    .key(key.clone())
-                    .width(200.0)
-                    .height(100.0)
-                    .into_widget()
-            }),
-            None,
-            K_CUPERTINO_MODAL_BARRIER_COLOR,
-            true,
-            true,
-            false,
-            None,
-            None,
-        );
-        let mut at = at;
-        for _ in 0..3 {
-            at += Duration::from_millis(20);
-            pump(&mut app, at);
-        }
-        let mid = page_top(&popup_key, &mut app);
-        assert!(mid > 200.0, "the popup starts below the view, at {mid}");
-
-        let at = settle(&mut app, at);
-        assert_eq!(
-            page_top(&popup_key, &mut app),
-            200.0,
-            "the popup ends flush with the bottom of the 300pt view"
-        );
-
-        tap_at(&mut app, 200.0, 20.0);
-        settle(&mut app, at);
-        assert!(
-            matches!(popped.peek(), Some(None)),
-            "the barrier tap dismissed the popup with no result"
-        );
     }
 
     #[test]
     fn a_cupertino_dialog_fades_in() {
-        let cell = test_cell();
-        let app = cell.borrow();
-        let navigator_key = GlobalKey::new();
-        let page_context: Rc<Cell<Option<BuildContext>>> = Rc::default();
-        drop(app);
-        build(&cell, {
-            let page_context = Rc::clone(&page_context);
-            navigator(&navigator_key, move |navigator| {
-                navigator.on_generate_route(move |app, _settings| {
-                    Some(
-                        CupertinoPageRoute::new(app, context_page(Rc::clone(&page_context)))
-                            .into_erased(),
-                    )
-                })
-            })
+        test_widgets(|tester| {
+            let page_context = mount_context_navigator(tester);
+
+            let dialog_context: Rc<Cell<Option<BuildContext>>> = Rc::default();
+            let context = page_context.get().expect("the page built");
+            let popped = tester.update(|app| {
+                show_cupertino_dialog(
+                    app,
+                    context,
+                    context_page(Rc::clone(&dialog_context)),
+                    None,
+                    None,
+                    true,
+                    false,
+                    None,
+                    None,
+                )
+            });
+            for _ in 0..2 {
+                tester.pump_by(Duration::from_millis(20));
+            }
+            let dialog_context = dialog_context.get().expect("the dialog built");
+            let opacity = dialog_context
+                .find_ancestor_widget_of_exact_type::<FadeTransition>(&tester.cell.borrow())
+                .expect("the dialog is wrapped in a FadeTransition")
+                .opacity
+                .clone();
+            let value = opacity.value(&tester.cell.borrow());
+            assert!(
+                value > 0.0 && value < 1.0,
+                "the dialog is fading in at {value}"
+            );
+
+            tester.pump_and_settle();
+            assert_eq!(
+                opacity.value(&tester.cell.borrow()),
+                1.0,
+                "the fade completes"
+            );
+            assert!(!popped.is_completed(), "the dialog is still up");
         });
-        let mut app = cell.borrow_mut();
-        let at = settle(&mut app, Duration::ZERO);
-
-        let dialog_context: Rc<Cell<Option<BuildContext>>> = Rc::default();
-        let context = page_context.get().expect("the page built");
-        let popped = show_cupertino_dialog(
-            &mut app,
-            context,
-            context_page(Rc::clone(&dialog_context)),
-            None,
-            None,
-            true,
-            false,
-            None,
-            None,
-        );
-        let mut at = at;
-        for _ in 0..2 {
-            at += Duration::from_millis(20);
-            pump(&mut app, at);
-        }
-        let dialog_context = dialog_context.get().expect("the dialog built");
-        let opacity = dialog_context
-            .find_ancestor_widget_of_exact_type::<FadeTransition>(&app)
-            .expect("the dialog is wrapped in a FadeTransition")
-            .opacity
-            .clone();
-        let value = opacity.value(&app);
-        assert!(
-            value > 0.0 && value < 1.0,
-            "the dialog is fading in at {value}"
-        );
-
-        settle(&mut app, at);
-        assert_eq!(opacity.value(&app), 1.0, "the fade completes");
-        assert!(!popped.is_completed(), "the dialog is still up");
     }
 
     #[test]
     fn the_pop_gesture_is_disabled_for_the_first_route_and_for_a_fullscreen_dialog() {
-        let cell = test_cell();
-        let app = cell.borrow();
-        let navigator_key = GlobalKey::new();
-        let first = Rc::new(Cell::new(None));
-        drop(app);
-        build(&cell, {
-            let first = Rc::clone(&first);
-            navigator(&navigator_key, move |navigator| {
-                navigator.on_generate_route(move |app, _settings| {
-                    let route = CupertinoPageRoute::new(app, plain_page());
-                    first.set(Some(route.handle()));
-                    Some(route.into_erased())
+        test_widgets(|tester| {
+            let navigator_key = GlobalKey::new();
+            let first = Rc::new(Cell::new(None));
+            tester.pump_widget({
+                let first = Rc::clone(&first);
+                navigator(&navigator_key, move |navigator| {
+                    navigator.on_generate_route(move |app, _settings| {
+                        let route = CupertinoPageRoute::new(app, plain_page());
+                        first.set(Some(route.handle()));
+                        Some(route.into_erased())
+                    })
                 })
-            })
+            });
+            tester.pump_and_settle();
+            let state = navigator_state(&navigator_key, &mut tester.cell.borrow_mut());
+            let first = first.get().expect("the initial route was generated");
+            assert!(
+                !tester.update(|app| PredictiveBackRoute::pop_gesture_enabled(first, app)),
+                "the first route has nothing to go back to"
+            );
+
+            let dialog = tester.update(|app| {
+                let dialog =
+                    CupertinoPageRoute::new(app, plain_page()).fullscreen_dialog(app, true);
+                state.push(app, dialog.clone().into_erased());
+                dialog
+            });
+            tester.pump_and_settle();
+            assert!(
+                !tester
+                    .update(|app| PredictiveBackRoute::pop_gesture_enabled(dialog.handle(), app)),
+                "a fullscreen dialog is not dismissible by back swipe"
+            );
+
+            tester.update(|app| state.pop(app, None));
+            tester.pump_and_settle();
+            let second = tester.update(|app| {
+                let second = CupertinoPageRoute::new(app, plain_page());
+                state.push(app, second.clone().into_erased());
+                second
+            });
+            tester.pump_and_settle();
+            assert!(
+                tester.update(|app| PredictiveBackRoute::pop_gesture_enabled(second.handle(), app)),
+                "a plain second page route can be swiped back"
+            );
         });
-        let mut app = cell.borrow_mut();
-        let state = navigator_state(&navigator_key, &mut app);
-        let at = settle(&mut app, Duration::ZERO);
-        let first = first.get().expect("the initial route was generated");
-        assert!(
-            !PredictiveBackRoute::pop_gesture_enabled(first, &mut app),
-            "the first route has nothing to go back to"
-        );
-
-        let dialog =
-            CupertinoPageRoute::new(&mut app, plain_page()).fullscreen_dialog(&mut app, true);
-        state.push(&mut app, dialog.clone().into_erased());
-        let at = settle(&mut app, at);
-        assert!(
-            !PredictiveBackRoute::pop_gesture_enabled(dialog.handle(), &mut app),
-            "a fullscreen dialog is not dismissible by back swipe"
-        );
-
-        state.pop(&mut app, None);
-        let at = settle(&mut app, at);
-        let second = CupertinoPageRoute::new(&mut app, plain_page());
-        state.push(&mut app, second.clone().into_erased());
-        settle(&mut app, at);
-        assert!(
-            PredictiveBackRoute::pop_gesture_enabled(second.handle(), &mut app),
-            "a plain second page route can be swiped back"
-        );
     }
 
     // ---- CupertinoPageTransitionsBuilder ----
@@ -3544,53 +3468,57 @@ mod tests {
     /// `CupertinoPageRoute`'s own transitions.
     #[test]
     fn the_builder_builds_a_cupertino_page_transition() {
-        let cell = test_cell();
-        let key = GlobalKey::new();
-        let first = GlobalKey::new();
-        let second = GlobalKey::new();
-        build(
-            &cell,
-            navigator(&key, {
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            let first = GlobalKey::new();
+            let second = GlobalKey::new();
+            tester.pump_widget(navigator(&key, {
                 let first = first.clone();
                 move |navigator| {
                     navigator.on_generate_route(move |app, _settings| {
                         Some(builder_route(app, keyed_page(&first), false).into_erased())
                     })
                 }
-            }),
-        );
-        let mut app = cell.borrow_mut();
-        let first_context = first.current_context(&app).expect("the page is mounted");
-        assert!(
-            first_context
-                .find_ancestor_widget_of_exact_type::<CupertinoPageTransition>(&app)
-                .is_some()
-        );
+            }));
+            let mut app = tester.cell.borrow_mut();
+            let first_context = first.current_context(&app).expect("the page is mounted");
+            assert!(
+                first_context
+                    .find_ancestor_widget_of_exact_type::<CupertinoPageTransition>(&app)
+                    .is_some()
+            );
 
-        let pushed = builder_route(&mut app, keyed_page(&second), false).into_erased();
-        navigator_state(&key, &mut app).push(&mut app, pushed);
-        let at = settle(&mut app, Duration::ZERO);
-        let second_context = second.current_context(&app).expect("the page is mounted");
-        assert!(
-            second_context
-                .find_ancestor_widget_of_exact_type::<CupertinoPageTransition>(&app)
-                .is_some()
-        );
-        assert_eq!(page_left(&second, &mut app), 0.0, "the page slid in");
+            let pushed = builder_route(&mut app, keyed_page(&second), false).into_erased();
+            navigator_state(&key, &mut app).push(&mut app, pushed);
+            drop(app);
+            tester.pump_and_settle();
+            let app = tester.cell.borrow();
+            let second_context = second.current_context(&app).expect("the page is mounted");
+            assert!(
+                second_context
+                    .find_ancestor_widget_of_exact_type::<CupertinoPageTransition>(&app)
+                    .is_some()
+            );
+            drop(app);
+            assert_eq!(page_left(&second, tester), 0.0, "the page slid in");
 
-        let dialog_key = GlobalKey::new();
-        let dialog = builder_route(&mut app, keyed_page(&dialog_key), true).into_erased();
-        navigator_state(&key, &mut app).push(&mut app, dialog);
-        settle(&mut app, at);
-        let dialog_context = dialog_key
-            .current_context(&app)
-            .expect("the dialog is mounted");
-        assert!(
-            dialog_context
-                .find_ancestor_widget_of_exact_type::<CupertinoFullscreenDialogTransition>(&app)
-                .is_some(),
-            "a fullscreen dialog gets the dialog transition"
-        );
+            let mut app = tester.cell.borrow_mut();
+            let dialog_key = GlobalKey::new();
+            let dialog = builder_route(&mut app, keyed_page(&dialog_key), true).into_erased();
+            navigator_state(&key, &mut app).push(&mut app, dialog);
+            drop(app);
+            tester.pump_and_settle();
+            let app = tester.cell.borrow();
+            let dialog_context = dialog_key
+                .current_context(&app)
+                .expect("the dialog is mounted");
+            assert!(
+                dialog_context
+                    .find_ancestor_widget_of_exact_type::<CupertinoFullscreenDialogTransition>(&app)
+                    .is_some(),
+                "a fullscreen dialog gets the dialog transition"
+            );
+        });
     }
 
     /// route_test.dart's "has correct transitionDuration of 500ms".
@@ -3630,121 +3558,136 @@ mod tests {
     /// the navigator and disposes the back-gesture detector in the middle of its drag.
     #[test]
     fn updating_the_pages_during_a_drag_gesture_does_not_get_stuck() {
-        let cell = test_cell();
-        let update_pages = cell.borrow_mut().new_entity(|_cx| false);
-        let navigator_key = Rc::new(std::cell::RefCell::new(GlobalKey::new()));
-        let new_page_key = GlobalKey::new();
-        let root = {
-            let update_pages = update_pages.clone();
-            let navigator_key = Rc::clone(&navigator_key);
-            let new_page_key = new_page_key.clone();
-            Builder::new(move |app, _context| {
-                let pages: Vec<PageRef> = if *update_pages.read(app) {
-                    vec![
-                        Rc::new(CupertinoPage::new(SizedBox::expand()).name("/home".to_string())),
-                        Rc::new(
-                            CupertinoPage::new(SizedBox::expand().key(new_page_key.clone().into()))
+        test_widgets(|tester| {
+            let update_pages = tester.cell.borrow_mut().new_entity(|_cx| false);
+            let navigator_key = Rc::new(std::cell::RefCell::new(GlobalKey::new()));
+            let new_page_key = GlobalKey::new();
+            let root = {
+                let update_pages = update_pages.clone();
+                let navigator_key = Rc::clone(&navigator_key);
+                let new_page_key = new_page_key.clone();
+                Builder::new(move |app, _context| {
+                    let pages: Vec<PageRef> = if *update_pages.read(app) {
+                        vec![
+                            Rc::new(
+                                CupertinoPage::new(SizedBox::expand()).name("/home".to_string()),
+                            ),
+                            Rc::new(
+                                CupertinoPage::new(
+                                    SizedBox::expand().key(new_page_key.clone().into()),
+                                )
                                 .name("/home/new".to_string()),
-                        ),
-                    ]
-                } else {
-                    vec![
-                        Rc::new(CupertinoPage::new(SizedBox::expand()).name("/home".to_string())),
-                        Rc::new(
-                            CupertinoPage::new(SizedBox::expand()).name("/home/old".to_string()),
-                        ),
-                    ]
-                };
-                let key = GlobalKey::new();
-                *navigator_key.borrow_mut() = key.clone();
-                navigator(&key, move |navigator| {
-                    navigator
-                        .pages(pages)
-                        .on_pop_page(|_app, _route, _result| false)
+                            ),
+                        ]
+                    } else {
+                        vec![
+                            Rc::new(
+                                CupertinoPage::new(SizedBox::expand()).name("/home".to_string()),
+                            ),
+                            Rc::new(
+                                CupertinoPage::new(SizedBox::expand())
+                                    .name("/home/old".to_string()),
+                            ),
+                        ]
+                    };
+                    let key = GlobalKey::new();
+                    *navigator_key.borrow_mut() = key.clone();
+                    navigator(&key, move |navigator| {
+                        navigator
+                            .pages(pages)
+                            .on_pop_page(|_app, _route, _result| false)
+                    })
                 })
-            })
-            .into_widget()
-        };
-        build(&cell, root);
-        let mut app = cell.borrow_mut();
-        let at = settle(&mut app, Duration::ZERO);
+                .into_widget()
+            };
+            tester.pump_widget(root);
+            tester.pump_and_settle();
 
-        // Start swiping.
-        send(&mut app, PointerChange::Down, 5.0, 100.0, at);
-        send_from(&mut app, PointerChange::Move, 105.0, 100.0, 5.0, at);
-        pump(&mut app, at);
+            // Start swiping.
+            let mut swipe_gesture = TestPointer::touch(1);
+            tester.down(&mut swipe_gesture, Offset::new(5.0, 100.0));
+            tester.move_to(&mut swipe_gesture, Offset::new(105.0, 100.0), true);
+            tester.pump();
+            let mut app = tester.cell.borrow_mut();
 
-        let navigator = navigator_state(&navigator_key.borrow(), &mut app);
-        assert!(navigator.user_gesture_in_progress(&app));
+            let navigator = navigator_state(&navigator_key.borrow(), &mut app);
+            assert!(navigator.user_gesture_in_progress(&app));
 
-        update_pages.update(&mut app, |update_pages, cx| {
-            *update_pages = true;
-            cx.notify();
+            update_pages.update(&mut app, |update_pages, cx| {
+                *update_pages = true;
+                cx.notify();
+            });
+            // Wait for pages to update.
+            drop(app);
+            tester.pump_by(Duration::from_secs(3));
+            let mut app = tester.cell.borrow_mut();
+
+            // Verify pages are updated.
+            assert!(new_page_key.current_context(&app).is_some());
+            // Verify `userGestureInProgress` is set to false.
+            let navigator = navigator_state(&navigator_key.borrow(), &mut app);
+            assert!(!navigator.user_gesture_in_progress(&app));
         });
-        // Wait for pages to update.
-        pump(&mut app, at + Duration::from_secs(3));
-
-        // Verify pages are updated.
-        assert!(new_page_key.current_context(&app).is_some());
-        // Verify `userGestureInProgress` is set to false.
-        let navigator = navigator_state(&navigator_key.borrow(), &mut app);
-        assert!(!navigator.user_gesture_in_progress(&app));
     }
 
     /// Not a Dart case: the pages change during a back gesture's drag and the navigator stays,
     /// so the detector disposed with the dragged route stops the navigator's user gesture.
     #[test]
     fn a_navigator_that_outlives_a_detector_disposed_mid_drag_stops_its_user_gesture() {
-        let cell = test_cell();
-        let update_pages = cell.borrow_mut().new_entity(|_cx| false);
-        let navigator_key = GlobalKey::new();
-        let new_page_key = GlobalKey::new();
-        let root = {
-            let update_pages = update_pages.clone();
-            let navigator_key = navigator_key.clone();
-            let new_page_key = new_page_key.clone();
-            Builder::new(move |app, _context| {
-                let home: PageRef = Rc::new(
-                    CupertinoPage::new(SizedBox::expand())
-                        .key(waft_foundation::ValueKey::new("/home").into()),
-                );
-                let top: PageRef = if *update_pages.read(app) {
-                    Rc::new(
-                        CupertinoPage::new(SizedBox::expand().key(new_page_key.clone().into()))
-                            .key(waft_foundation::ValueKey::new("/home/new").into()),
-                    )
-                } else {
-                    Rc::new(
+        test_widgets(|tester| {
+            let update_pages = tester.cell.borrow_mut().new_entity(|_cx| false);
+            let navigator_key = GlobalKey::new();
+            let new_page_key = GlobalKey::new();
+            let root = {
+                let update_pages = update_pages.clone();
+                let navigator_key = navigator_key.clone();
+                let new_page_key = new_page_key.clone();
+                Builder::new(move |app, _context| {
+                    let home: PageRef = Rc::new(
                         CupertinoPage::new(SizedBox::expand())
-                            .key(waft_foundation::ValueKey::new("/home/old").into()),
-                    )
-                };
-                navigator(&navigator_key, move |navigator| {
-                    navigator
-                        .pages(vec![home, top])
-                        .on_did_remove_page(|_app, _page| {})
+                            .key(waft_foundation::ValueKey::new("/home").into()),
+                    );
+                    let top: PageRef = if *update_pages.read(app) {
+                        Rc::new(
+                            CupertinoPage::new(SizedBox::expand().key(new_page_key.clone().into()))
+                                .key(waft_foundation::ValueKey::new("/home/new").into()),
+                        )
+                    } else {
+                        Rc::new(
+                            CupertinoPage::new(SizedBox::expand())
+                                .key(waft_foundation::ValueKey::new("/home/old").into()),
+                        )
+                    };
+                    navigator(&navigator_key, move |navigator| {
+                        navigator
+                            .pages(vec![home, top])
+                            .on_did_remove_page(|_app, _page| {})
+                    })
                 })
-            })
-            .into_widget()
-        };
-        build(&cell, root);
-        let mut app = cell.borrow_mut();
-        let at = settle(&mut app, Duration::ZERO);
+                .into_widget()
+            };
+            tester.pump_widget(root);
+            tester.pump_and_settle();
 
-        send(&mut app, PointerChange::Down, 5.0, 100.0, at);
-        send_from(&mut app, PointerChange::Move, 105.0, 100.0, 5.0, at);
-        pump(&mut app, at);
-        let navigator = navigator_state(&navigator_key, &mut app);
-        assert!(navigator.user_gesture_in_progress(&app));
+            let mut finger = TestPointer::touch(1);
+            tester.down(&mut finger, Offset::new(5.0, 100.0));
+            tester.move_to(&mut finger, Offset::new(105.0, 100.0), true);
+            tester.pump();
+            let mut app = tester.cell.borrow_mut();
+            let navigator = navigator_state(&navigator_key, &mut app);
+            assert!(navigator.user_gesture_in_progress(&app));
 
-        update_pages.update(&mut app, |update_pages, cx| {
-            *update_pages = true;
-            cx.notify();
+            update_pages.update(&mut app, |update_pages, cx| {
+                *update_pages = true;
+                cx.notify();
+            });
+            drop(app);
+            tester.pump_and_settle();
+            let mut app = tester.cell.borrow_mut();
+
+            assert!(new_page_key.current_context(&app).is_some());
+            assert_eq!(navigator_state(&navigator_key, &mut app), navigator);
+            assert!(!navigator.user_gesture_in_progress(&app));
         });
-        settle(&mut app, at);
-
-        assert!(new_page_key.current_context(&app).is_some());
-        assert_eq!(navigator_state(&navigator_key, &mut app), navigator);
-        assert!(!navigator.user_gesture_in_progress(&app));
     }
 }

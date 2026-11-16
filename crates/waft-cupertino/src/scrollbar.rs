@@ -400,97 +400,87 @@ mod tests {
         Directionality, GlobalKey, ListView, MediaQueryData, ScrollController, SizedBox,
     };
 
+    use waft_widgets::testing::test_widgets;
+
     use super::*;
-    use crate::test_support::{build, pump, test_cell};
 
     const ITEM_EXTENT: f64 = 50.0;
 
     #[test]
     fn a_cupertino_scrollbar_thickens_while_its_thumb_is_pressed() {
-        let cell = test_cell();
-        let mut app = cell.borrow_mut();
-        let key = GlobalKey::new();
-        let controller = ScrollController::default(&mut app);
-        let list = ListView::new()
-            .controller(controller.clone().into_erased())
-            .children((0..40).map(|_| SizedBox::new().height(ITEM_EXTENT).into_widget()));
-        let scrollbar = CupertinoScrollbar::new(list)
-            .key(key.clone().into())
-            .controller(controller.clone().into_erased());
-        let tree: WidgetRef = MediaQuery::new(
-            MediaQueryData::new().size(Size::new(400.0, 300.0)),
-            scrollbar,
-        )
-        .into_widget();
-        drop(app);
-        build(
-            &cell,
-            Directionality::new(TextDirection::Ltr, tree).into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        // The metrics notification is dispatched from a microtask after layout, so the
-        // painter only knows the axis from the second frame on.
-        pump(&mut app, Duration::from_millis(16));
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            let controller = ScrollController::default(&mut tester.cell.borrow_mut());
+            let list = ListView::new()
+                .controller(controller.clone().into_erased())
+                .children((0..40).map(|_| SizedBox::new().height(ITEM_EXTENT).into_widget()));
+            let scrollbar = CupertinoScrollbar::new(list)
+                .key(key.clone().into())
+                .controller(controller.clone().into_erased());
+            let tree: WidgetRef = MediaQuery::new(
+                MediaQueryData::new().size(Size::new(400.0, 300.0)),
+                scrollbar,
+            )
+            .into_widget();
+            tester.pump_widget(Directionality::new(TextDirection::Ltr, tree).into_widget());
+            // The metrics notification is dispatched from a microtask after layout, so the
+            // painter only knows the axis from the second frame on.
+            tester.pump_by(Duration::from_millis(16));
 
-        let state = key
-            .current_state::<CupertinoScrollbarState>(&app)
-            .expect("the scrollbar is mounted");
-        let painter = RawScrollbarState::scrollbar_painter(state, &app);
-        assert_eq!(
-            painter.thickness(&app),
-            CupertinoScrollbar::DEFAULT_THICKNESS,
-            "the resting thickness"
-        );
+            let mut app = tester.cell.borrow_mut();
+            let state = key
+                .current_state::<CupertinoScrollbarState>(&app)
+                .expect("the scrollbar is mounted");
+            let painter = RawScrollbarState::scrollbar_painter(state, &app);
+            assert_eq!(
+                painter.thickness(&app),
+                CupertinoScrollbar::DEFAULT_THICKNESS,
+                "the resting thickness"
+            );
 
-        state.handle_thumb_press(&mut app);
-        for step in 1..10 {
-            pump(&mut app, Duration::from_millis(16 + step * 20));
-        }
-        assert_eq!(
-            painter.thickness(&app),
-            CupertinoScrollbar::DEFAULT_THICKNESS_WHILE_DRAGGING,
-            "a pressed thumb thickens"
-        );
-        assert_eq!(
-            painter.radius(&app),
-            Some(CupertinoScrollbar::DEFAULT_RADIUS_WHILE_DRAGGING),
-            "and takes the dragging radius"
-        );
+            state.handle_thumb_press(&mut app);
+            drop(app);
+            for _ in 1..10 {
+                tester.pump_by(Duration::from_millis(20));
+            }
+            let app = tester.cell.borrow();
+            assert_eq!(
+                painter.thickness(&app),
+                CupertinoScrollbar::DEFAULT_THICKNESS_WHILE_DRAGGING,
+                "a pressed thumb thickens"
+            );
+            assert_eq!(
+                painter.radius(&app),
+                Some(CupertinoScrollbar::DEFAULT_RADIUS_WHILE_DRAGGING),
+                "and takes the dragging radius"
+            );
+        });
     }
 
     /// Dart's collector frees the thickness controller `_CupertinoScrollbarState` makes once
     /// the state is gone; here the state frees it in its `dispose`.
     #[test]
     fn a_disposed_cupertino_scrollbar_frees_its_thickness_controller() {
-        let cell = test_cell();
-        let key = GlobalKey::new();
-        let controller = ScrollController::default(&mut cell.borrow_mut());
-        let list = ListView::new()
-            .controller(controller.clone().into_erased())
-            .children((0..40).map(|_| SizedBox::new().height(ITEM_EXTENT).into_widget()));
-        let scrollbar = CupertinoScrollbar::new(list)
-            .key(key.clone().into())
-            .controller(controller.clone().into_erased());
-        build(
-            &cell,
-            Directionality::new(TextDirection::Ltr, scrollbar).into_widget(),
-        );
-        let thickness = {
-            let app = cell.borrow();
-            let state = key
-                .current_state::<CupertinoScrollbarState>(&app)
-                .expect("the scrollbar is mounted");
-            state.thickness_animation_controller(&app)
-        };
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            let controller = ScrollController::default(&mut tester.cell.borrow_mut());
+            let list = ListView::new()
+                .controller(controller.clone().into_erased())
+                .children((0..40).map(|_| SizedBox::new().height(ITEM_EXTENT).into_widget()));
+            let scrollbar = CupertinoScrollbar::new(list)
+                .key(key.clone().into())
+                .controller(controller.clone().into_erased());
+            tester.pump_widget(Directionality::new(TextDirection::Ltr, scrollbar).into_widget());
+            let thickness = {
+                let app = tester.cell.borrow();
+                let state = key
+                    .current_state::<CupertinoScrollbarState>(&app)
+                    .expect("the scrollbar is mounted");
+                state.thickness_animation_controller(&app)
+            };
 
-        {
-            let mut app = cell.borrow_mut();
-            let view = app.platform().views()[0].clone();
-            let root = waft_widgets::View::new(view, SizedBox::new()).into_widget();
-            waft_widgets::WidgetsBinding::instance(&mut app).attach_root_widget(&mut app, root);
-            pump(&mut app, Duration::from_millis(16));
-        }
-        cell.checkpoint();
-        assert!(!cell.borrow().contains(thickness));
+            tester.pump_widget(SizedBox::new());
+            assert!(!tester.cell.borrow().contains(thickness));
+        });
     }
 }

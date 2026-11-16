@@ -670,9 +670,11 @@ mod tests {
     use waft_embedder::{Brightness, FontStyle};
     use waft_widgets::IntoWidget;
 
+    use waft_widgets::testing::test_widgets;
+
     use super::*;
     use crate::colors::Colors;
-    use crate::test_support::{probe, test_cell, with_main_thread_stack};
+    use crate::test_support::probe;
     use crate::theme::Theme;
     use crate::theme_data::ThemeData;
     use crate::typography::Typography;
@@ -788,11 +790,10 @@ mod tests {
 
     #[test]
     fn merges_properly_in_the_presence_of_null_fields() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let partial_theme =
                 TextTheme::new().title_large(TextStyle::new().color(Color::new(0xcafefeed)));
-            let full_theme = ThemeData::fallback(&cell.borrow(), None)
+            let full_theme = ThemeData::fallback(&tester.cell.borrow(), None)
                 .text_theme
                 .merge(Some(&partial_theme));
             assert_eq!(
@@ -1110,10 +1111,9 @@ mod tests {
 
     #[test]
     fn text_theme_of_and_primary_of_are_the_ambient_theme_text_themes() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let (theme, text_theme, primary_text_theme) = probe(
-                &cell,
+                tester,
                 |app, child| {
                     let data = ThemeData::builder()
                         .text_theme(

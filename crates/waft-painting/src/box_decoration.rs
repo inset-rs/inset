@@ -3,7 +3,7 @@
 use std::any::Any;
 use std::fmt::{Debug, Formatter, Result as FmtResult};
 
-use waft_embedder::{BlendMode, Canvas, ClipOp, Paint};
+use waft_embedder::{BlendMode, Canvas, Paint};
 use waft_embedder::{Offset, Path, PathBuilder, Rect, Size};
 use waft_foundation::{App, VoidCallback};
 
@@ -14,7 +14,6 @@ use crate::box_border::{Border, BorderDirectional, BoxBorder, BoxBorderRef, BoxS
 use crate::box_shadow::BoxShadow;
 use crate::circle_border::{oval_path, rrect_path};
 use crate::colors::AnyColor;
-use crate::debug::debug_disable_shadows;
 use crate::decoration::{BoxPainter, Decoration, DecorationRef};
 use crate::draw::draw_rrect;
 use crate::edge_insets::{EdgeInsets, EdgeInsetsGeometry};
@@ -477,13 +476,6 @@ impl BoxDecorationPainter {
             let bounds = rect
                 .shift(box_shadow.offset)
                 .inflate(box_shadow.spread_radius);
-            if cfg!(debug_assertions)
-                && debug_disable_shadows()
-                && box_shadow.blur_style == waft_embedder::BlurStyle::Outer
-            {
-                canvas.save();
-                canvas.clip_rect(bounds, ClipOp::Intersect, true);
-            }
             Self::paint_box(
                 canvas,
                 bounds,
@@ -492,12 +484,6 @@ impl BoxDecorationPainter {
                 self.decoration.border_radius,
                 text_direction,
             );
-            if cfg!(debug_assertions)
-                && debug_disable_shadows()
-                && box_shadow.blur_style == waft_embedder::BlurStyle::Outer
-            {
-                canvas.restore();
-            }
         }
     }
 

@@ -864,11 +864,9 @@ impl RenderBox for RenderIntrinsicHorizontalStadium {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    //! Ported from `test/badge_test.dart`. flutter_test lays text out in Ahem, which the test
-    //! platform does not have, so a case that measures a label gives `Badge` an
-    //! [`AhemText`](crate::test_support::AhemText) in place of `Text`, behind a probe that
-    //! reads the `DefaultTextStyle` the badge gives it, where Dart reads the paragraph's style.
-    //! `Badge.count`'s label is a real `Text`, so its case measures the text it got.
+    //! Ported from `test/badge_test.dart`. flutter_test lays text out in FlutterTest, whose glyphs
+    //! are squares of the font size; a case that reads a label's style reads the style of the
+    //! `RenderParagraph`, as Dart does.
 
     use std::cell::RefCell;
     use std::rc::Rc;
@@ -877,42 +875,27 @@ pub(crate) mod tests {
     use waft_painting::Alignment;
     use waft_widgets::{Align, Builder, Center, Container, Icon};
 
+    use waft_widgets::testing::{WidgetTester, test_widgets};
+
     use super::*;
+    use crate::bottom_navigation_bar::tests::paragraph_style;
     use crate::colors::Colors;
     use crate::icons::Icons;
-    use crate::test_support::{AhemText, Drawn, WidgetTester, with_main_thread_stack};
+    use crate::test_support::{Drawn, PaintInspection};
     use crate::theme::Theme;
     use crate::theme_data::ThemeData;
-    use crate::tooltip::tests::{m3, pump_app, tester};
+    use crate::tooltip::tests::{m3, pump_app};
 
     /// What a case reads from the build of its widgets.
     #[derive(Clone, Default)]
     pub(crate) struct Seen {
-        pub(crate) label_style: Rc<RefCell<Option<TextStyle>>>,
         theme: Rc<RefCell<Option<Rc<ThemeData>>>>,
     }
 
     impl Seen {
-        pub(crate) fn label_style(&self) -> TextStyle {
-            self.label_style
-                .borrow()
-                .clone()
-                .expect("the label was built")
-        }
-
         fn theme(&self) -> Rc<ThemeData> {
             self.theme.borrow().clone().expect("the probe was built")
         }
-    }
-
-    /// The label of Dart's `Text(text)` in Ahem, which records the style it is built under.
-    pub(crate) fn ahem_label(text: &'static str, seen: &Seen) -> WidgetRef {
-        let label_style = Rc::clone(&seen.label_style);
-        Builder::new(move |app, context| {
-            *label_style.borrow_mut() = Some(DefaultTextStyle::of(app, context).style);
-            AhemText::new(text).into_widget()
-        })
-        .into_widget()
     }
 
     /// Dart's `Builder(builder: (context) { theme = Theme.of(context); return badge; })`.
@@ -951,8 +934,8 @@ pub(crate) mod tests {
         tester.paints_rrect(tester.render_box_of(badge).as_object(), rrect, color)
     }
 
-    pub(crate) fn rect_of_ahem(tester: &WidgetTester, text: &str) -> Rect {
-        let label = tester.find_ahem_text(text);
+    pub(crate) fn rect_of_text(tester: &WidgetTester, text: &str) -> Rect {
+        let label = tester.find_text(text);
         assert_eq!(label.len(), 1, "one label showing {text}");
         tester.global_rect(tester.render_box_of(label[0]))
     }
@@ -963,19 +946,18 @@ pub(crate) mod tests {
 
     #[test]
     fn large_badge_defaults() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let seen = Seen::default();
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+            pump_app(tester, m3, |_app| {
                 top_left_aligned(badge_reading_theme(
                     &seen,
-                    Badge::new().label(ahem_label("0", &seen)).child(add_icon()),
+                    Badge::new().label(Text::new("0")).child(add_icon()),
                 ))
             });
             let theme = seen.theme();
 
             assert_eq!(
-                seen.label_style(),
+                paragraph_style(tester, "0"),
                 theme
                     .text_theme
                     .label_small
@@ -993,16 +975,16 @@ pub(crate) mod tests {
             // icon.width = 24
 
             // default Icon size
-            assert_eq!(badge_rect(&tester).size(), Size::new(24.0, 24.0));
-            assert_eq!(badge_rect(&tester).top_left(), Offset::ZERO);
+            assert_eq!(badge_rect(tester).size(), Size::new(24.0, 24.0));
+            assert_eq!(badge_rect(tester).top_left(), Offset::ZERO);
 
             assert_eq!(
-                rect_of_ahem(&tester, "0").top_left(),
+                rect_of_text(tester, "0").top_left(),
                 Offset::new(16.0, -4.0)
             );
 
             assert!(badge_paints_rrect(
-                &tester,
+                tester,
                 stadium(12.0, -4.0, 31.5, 12.0, 8.0),
                 Some(theme.color_scheme.error),
             ));
@@ -1011,15 +993,14 @@ pub(crate) mod tests {
 
     #[test]
     fn large_badge_defaults_with_rtl() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let seen = Seen::default();
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+            pump_app(tester, m3, |_app| {
                 Directionality::new(
                     TextDirection::Rtl,
                     top_left_aligned(badge_reading_theme(
                         &seen,
-                        Badge::new().label(ahem_label("0", &seen)).child(add_icon()),
+                        Badge::new().label(Text::new("0")).child(add_icon()),
                     )),
                 )
                 .into_widget()
@@ -1027,7 +1008,7 @@ pub(crate) mod tests {
             let theme = seen.theme();
 
             assert_eq!(
-                seen.label_style(),
+                paragraph_style(tester, "0"),
                 theme
                     .text_theme
                     .label_small
@@ -1037,16 +1018,13 @@ pub(crate) mod tests {
                     .color(theme.color_scheme.on_error)
             );
 
-            assert_eq!(badge_rect(&tester).size(), Size::new(24.0, 24.0));
-            assert_eq!(badge_rect(&tester).top_left(), Offset::ZERO);
+            assert_eq!(badge_rect(tester).size(), Size::new(24.0, 24.0));
+            assert_eq!(badge_rect(tester).top_left(), Offset::ZERO);
 
-            assert_eq!(
-                rect_of_ahem(&tester, "0").top_left(),
-                Offset::new(0.0, -4.0)
-            );
+            assert_eq!(rect_of_text(tester, "0").top_left(), Offset::new(0.0, -4.0));
 
             assert!(badge_paints_rrect(
-                &tester,
+                tester,
                 stadium(-4.0, -4.0, 15.5, 12.0, 8.0),
                 Some(theme.color_scheme.error),
             ));
@@ -1056,16 +1034,15 @@ pub(crate) mod tests {
     // Essentially the same as 'Large Badge defaults'.
     #[test]
     fn badge_count() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let seen = Seen::default();
-            let mut tester = tester();
             let build_frame = |count: i64, seen: &Seen| {
                 top_left_aligned(badge_reading_theme(
                     seen,
                     Badge::count(count).child(add_icon()),
                 ))
             };
-            pump_app(&mut tester, m3, |_app| build_frame(0, &seen));
+            pump_app(tester, m3, |_app| build_frame(0, &seen));
             let theme = seen.theme();
 
             // default badge alignment = AlignmentDirectional(12, -4)
@@ -1074,10 +1051,10 @@ pub(crate) mod tests {
             // icon.width = 24
 
             // default Icon size
-            assert_eq!(badge_rect(&tester).size(), Size::new(24.0, 24.0));
-            assert_eq!(badge_rect(&tester).top_left(), Offset::ZERO);
+            assert_eq!(badge_rect(tester).size(), Size::new(24.0, 24.0));
+            assert_eq!(badge_rect(tester).top_left(), Offset::ZERO);
 
-            // The font's '0' is narrower than the badge is tall, where flutter_test's Ahem
+            // The font's '0' is narrower than the badge is tall, where FlutterTest
             // gives it 11.5: the stadium is as wide as it is tall, and centers the text.
             let label = tester.find_text("0");
             assert_eq!(label.len(), 1);
@@ -1095,21 +1072,20 @@ pub(crate) mod tests {
             // R = L + '0'.width + padding.width
             // B = T + largeSize, R = largeSize/2
             assert!(badge_paints_rrect(
-                &tester,
+                tester,
                 stadium(12.0, -4.0, 12.0 + badge_width, 12.0, 8.0),
                 Some(theme.color_scheme.error),
             ));
 
-            pump_app(&mut tester, m3, |_app| build_frame(1000, &seen));
+            pump_app(tester, m3, |_app| build_frame(1000, &seen));
             assert_eq!(tester.find_text("999+").len(), 1);
         });
     }
 
     #[test]
     fn small_badge_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 top_left_aligned(Badge::new().child(add_icon()))
             });
             let colors = ThemeData::new(&tester.cell.borrow()).color_scheme;
@@ -1120,15 +1096,15 @@ pub(crate) mod tests {
             // icon.width = 24
 
             // default Icon size
-            assert_eq!(badge_rect(&tester).size(), Size::new(24.0, 24.0));
-            assert_eq!(badge_rect(&tester).top_left(), Offset::ZERO);
+            assert_eq!(badge_rect(tester).size(), Size::new(24.0, 24.0));
+            assert_eq!(badge_rect(tester).top_left(), Offset::ZERO);
 
             // L = icon.size.width - smallSize
             // T = 0
             // R = icon.size.width
             // B = smallSize
             assert!(badge_paints_rrect(
-                &tester,
+                tester,
                 stadium(18.0, 0.0, 24.0, 6.0, 3.0),
                 Some(colors.error),
             ));
@@ -1137,9 +1113,8 @@ pub(crate) mod tests {
 
     #[test]
     fn small_badge_rtl_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 Directionality::new(
                     TextDirection::Rtl,
                     top_left_aligned(Badge::new().child(add_icon())),
@@ -1153,15 +1128,15 @@ pub(crate) mod tests {
             // icon.width = 24
 
             // default Icon size
-            assert_eq!(badge_rect(&tester).size(), Size::new(24.0, 24.0));
-            assert_eq!(badge_rect(&tester).top_left(), Offset::ZERO);
+            assert_eq!(badge_rect(tester).size(), Size::new(24.0, 24.0));
+            assert_eq!(badge_rect(tester).top_left(), Offset::ZERO);
 
             // L = 0
             // T = 0
             // R = smallSize
             // B = smallSize
             assert!(badge_paints_rrect(
-                &tester,
+                tester,
                 stadium(0.0, 0.0, 6.0, 6.0, 3.0),
                 Some(colors.error),
             ));
@@ -1170,23 +1145,21 @@ pub(crate) mod tests {
 
     #[test]
     fn large_badge_text_style_and_colors() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let green = Color::new(0xff00ff00);
             let black = Color::new(0xff000000);
-            let seen = Seen::default();
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+            pump_app(tester, m3, |_app| {
                 top_left_aligned(
                     Badge::new()
                         .text_color(green)
                         .background_color(black)
                         .text_style(TextStyle::new().font_size(10.0))
-                        .label(ahem_label("0", &seen))
+                        .label(Text::new("0"))
                         .child(add_icon()),
                 )
             });
 
-            let text_style = seen.label_style();
+            let text_style = paragraph_style(tester, "0");
             assert_eq!(text_style.font_size, Some(10.0));
             assert_eq!(
                 text_style.color.as_ref().map(|color| color.color()),
@@ -1204,24 +1177,22 @@ pub(crate) mod tests {
 
     #[test]
     fn is_label_visible() {
-        with_main_thread_stack(|| {
-            let seen = Seen::default();
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 top_left_aligned(
                     Badge::new()
-                        .label(ahem_label("0", &seen))
+                        .label(Text::new("0"))
                         .is_label_visible(false)
                         .child(add_icon()),
                 )
             });
 
-            assert!(tester.find_ahem_text("0").is_empty());
+            assert!(tester.find_text("0").is_empty());
             assert_eq!(tester.find_by_type::<Icon>().len(), 1);
 
             // default Icon size
-            assert_eq!(badge_rect(&tester).size(), Size::new(24.0, 24.0));
-            assert_eq!(badge_rect(&tester).top_left(), Offset::ZERO);
+            assert_eq!(badge_rect(tester).size(), Size::new(24.0, 24.0));
+            assert_eq!(badge_rect(tester).top_left(), Offset::ZERO);
             let badge = tester.find_by_type::<Badge>()[0];
             let drawn = tester.painted(tester.render_box_of(badge).as_object());
             assert!(!drawn.iter().any(|drawn| matches!(drawn, Drawn::Path(..))));
@@ -1246,8 +1217,7 @@ pub(crate) mod tests {
 
     #[test]
     fn large_badge_alignment() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let build_frame = |alignment: Alignment, offset: Offset| {
                 top_left_aligned(
                     Badge::new()
@@ -1271,10 +1241,10 @@ pub(crate) mod tests {
 
             for offset in [Offset::ZERO, Offset::new(5.0, 10.0)] {
                 for (alignment, left, top) in aligned_corners(16.0) {
-                    pump_app(&mut tester, m3, |_app| build_frame(alignment, offset));
+                    pump_app(tester, m3, |_app| build_frame(alignment, offset));
                     assert!(
                         badge_paints_rrect(
-                            &tester,
+                            tester,
                             stadium(left, top, left + 16.0, top + 16.0, 8.0).shift(offset),
                             None,
                         ),
@@ -1287,8 +1257,7 @@ pub(crate) mod tests {
 
     #[test]
     fn small_badge_alignment() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let build_frame = |alignment: Alignment, offset: Offset| {
                 top_left_aligned(
                     Badge::new()
@@ -1307,10 +1276,10 @@ pub(crate) mod tests {
 
             for offset in [Offset::ZERO, Offset::new(5.0, 10.0)] {
                 for (alignment, left, top) in aligned_corners(6.0) {
-                    pump_app(&mut tester, m3, |_app| build_frame(alignment, offset));
+                    pump_app(tester, m3, |_app| build_frame(alignment, offset));
                     assert!(
                         badge_paints_rrect(
-                            &tester,
+                            tester,
                             stadium(left, top, left + 6.0, top + 6.0, 3.0),
                             None,
                         ),
@@ -1323,9 +1292,8 @@ pub(crate) mod tests {
 
     #[test]
     fn badge_larger_than_large_size() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 top_left_aligned(
                     Badge::new()
                         // LargeSize = 16, make content of badge bigger than the default.
@@ -1348,7 +1316,7 @@ pub(crate) mod tests {
 
             // Badge should scale with content
             assert!(badge_paints_rrect(
-                &tester,
+                tester,
                 stadium(0.0, -7.0, 30.0 + 8.0, 23.0, 15.0),
                 None,
             ));
@@ -1357,9 +1325,8 @@ pub(crate) mod tests {
 
     #[test]
     fn badge_renders_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 Center::new()
                     .child(SizedBox::shrink().child(Badge::new().label(Text::new("X"))))
                     .into_widget()
@@ -1373,16 +1340,13 @@ pub(crate) mod tests {
 
     #[test]
     fn badge_count_max_count_limits_displayed_value() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let mut shows = |count: i64, max_count: Option<i64>, text: &str| {
                 let badge = match max_count {
                     Some(max_count) => Badge::count(count).max_count(max_count),
                     None => Badge::count(count),
                 };
-                pump_app(&mut tester, m3, |_app| {
-                    top_left_aligned(badge.child(add_icon()))
-                });
+                pump_app(tester, m3, |_app| top_left_aligned(badge.child(add_icon())));
                 assert_eq!(tester.find_text(text).len(), 1, "{text}");
             };
 
@@ -1410,9 +1374,8 @@ pub(crate) mod tests {
 
     #[test]
     fn badge_count_displays_0_when_count_is_zero() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, |_app| {
+        test_widgets(|tester| {
+            pump_app(tester, m3, |_app| {
                 top_left_aligned(Badge::count(0).max_count(5).child(add_icon()))
             });
             assert_eq!(tester.find_text("0").len(), 1);

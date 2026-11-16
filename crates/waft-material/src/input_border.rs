@@ -1292,15 +1292,16 @@ pub(crate) fn input_border_of(shape: &dyn ShapeBorder) -> Option<InputBorderRef>
 #[cfg(test)]
 mod tests {
     use waft_embedder::valo::{Op, Point};
-    use waft_foundation::TargetPlatform;
     use waft_painting::{RoundedRectangleBorder, RoundedSuperellipseBorder, StadiumBorder};
     use waft_widgets::{Center, IntoWidget};
+
+    use waft_widgets::testing::test_widgets;
 
     use super::*;
     use crate::colors::Colors;
     use crate::input_decorator::{FloatingLabelBehavior, InputDecoration};
     use crate::scaffold::Scaffold;
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::material_app;
     use crate::text_field::TextField;
     use crate::theme_data::ThemeData;
 
@@ -1408,9 +1409,7 @@ mod tests {
         border: fn() -> ShapedInputBorder,
         floating_label_behavior: FloatingLabelBehavior,
     ) {
-        with_main_thread_stack(move || {
-            let mut tester = WidgetTester::on(TargetPlatform::Android);
-            tester.install_platform_fonts();
+        test_widgets(|tester| {
             let theme = ThemeData::new(&tester.cell.borrow());
             let app = material_app(
                 theme,

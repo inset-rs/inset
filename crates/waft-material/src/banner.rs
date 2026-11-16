@@ -787,35 +787,23 @@ mod tests {
         SizedBox, Text,
     };
 
+    use waft_widgets::testing::{WidgetTester, test_widgets};
+
     use super::*;
+    use crate::bottom_navigation_bar::tests::paragraph_style;
     use crate::color_scheme::ColorScheme;
     use crate::colors::Colors;
     use crate::icons::Icons;
     use crate::scaffold::{Scaffold, ScaffoldMessenger};
     use crate::snack_bar::SnackBar;
-    use crate::test_support::{AhemText, WidgetTester, with_main_thread_stack};
     use crate::text_button::TextButton;
     use crate::theme_data::ThemeData;
-    use crate::tooltip::tests::{m2, m3, pump_app, tester};
+    use crate::tooltip::tests::{m2, m3, pump_app};
     use crate::typography::Typography;
 
-    /// A banner's content: Dart's `Text(text)` laid out in Ahem, with the `DefaultTextStyle`
-    /// it lays out in recorded, which is the style Dart reads from its `RenderParagraph`.
-    fn content(text: &str) -> (WidgetRef, Rc<RefCell<Option<TextStyle>>>) {
-        let style = Rc::new(RefCell::new(None));
-        let text = text.to_owned();
-        let seen = Rc::clone(&style);
-        let widget = Builder::new(move |app, context| {
-            *seen.borrow_mut() = Some(DefaultTextStyle::of(app, context).style);
-            AhemText::new(&text).into_widget()
-        })
-        .into_widget();
-        (widget, style)
-    }
-
-    /// Dart's `TextButton(child: Text(label), onPressed: () {})`, its label in Ahem.
+    /// Dart's `TextButton(child: Text(label), onPressed: () {})`, its label.
     fn action(label: &str) -> WidgetRef {
-        TextButton::new(Some(Listener::new(|_app| {})), Some(AhemText::new(label))).into_widget()
+        TextButton::new(Some(Listener::new(|_app| {})), Some(Text::new(label))).into_widget()
     }
 
     /// Dart's `TextButton(child: Text('DISMISS'), onPressed: () =>
@@ -826,7 +814,7 @@ mod tests {
                 ScaffoldMessenger::of(app, context)
                     .hide_current_material_banner(app, MaterialBannerClosedReason::Hide);
             })),
-            Some(AhemText::new("DISMISS")),
+            Some(Text::new("DISMISS")),
         )
     }
 
@@ -871,7 +859,7 @@ mod tests {
     /// Dart's `tester.tap(find.text(text))`.
     fn tap_text(tester: &mut WidgetTester, text: &str) {
         let element = *tester
-            .find_ahem_text(text)
+            .find_text(text)
             .first()
             .expect("a Text showing the text");
         let center = rect(tester, element).center();
@@ -911,7 +899,7 @@ mod tests {
 
     /// Dart's `_getMaterialFromText`: the nearest `Material` around the content.
     fn material_around(tester: &WidgetTester, text: &str) -> AnyElement {
-        let content = *tester.find_ahem_text(text).first().expect("the content");
+        let content = *tester.find_text(text).first().expect("the content");
         tester.ancestor_of_type::<Material>(content)
     }
 
@@ -936,7 +924,7 @@ mod tests {
     }
 
     fn content_rect(tester: &WidgetTester, text: &str) -> Rect {
-        let content = *tester.find_ahem_text(text).first().expect("the content");
+        let content = *tester.find_text(text).first().expect("the content");
         rect(tester, content)
     }
 
@@ -948,15 +936,12 @@ mod tests {
         rect(tester, bar)
     }
 
-    fn with_tester(body: impl FnOnce(&mut WidgetTester) + Send) {
-        with_main_thread_stack(|| body(&mut tester()));
-    }
-
     #[test]
     fn a_banner_respects_its_properties() {
-        // Dart: 'MaterialBanner properties are respected'.
-        with_tester(|tester| {
-            let (content_widget, style) = content("Content");
+        test_widgets(|tester| {
+            // Dart: 'MaterialBanner properties are respected'.
+
+            let content_widget = Text::new("Content").into_widget();
             let content_text_style = TextStyle::new().color(Colors::PINK.primary());
             let banner_text_style = content_text_style.clone();
             pump_app(tester, m3, move |_app| {
@@ -978,17 +963,18 @@ mod tests {
                     Some(Colors::BLUE.primary())
                 )
             );
-            assert_eq!(*style.borrow(), Some(content_text_style));
+            assert_eq!(paragraph_style(tester, "Content"), content_text_style);
             assert_eq!(divider_color(tester), Some(Colors::YELLOW.primary()));
         });
     }
 
     #[test]
     fn a_banner_shown_by_the_messenger_respects_its_properties() {
-        // Dart: 'MaterialBanner properties are respected when presented by ScaffoldMessenger'.
-        with_tester(|tester| {
+        test_widgets(|tester| {
+            // Dart: 'MaterialBanner properties are respected when presented by ScaffoldMessenger'.
+
             let tap_target = GlobalKey::new();
-            let (content_widget, style) = content("Content");
+            let content_widget = Text::new("Content").into_widget();
             let content_text_style = TextStyle::new().color(Colors::PINK.primary());
             let banner_text_style = content_text_style.clone();
             pump_app(tester, m3, |_app| {
@@ -1016,18 +1002,19 @@ mod tests {
                     Some(Colors::BLUE.primary())
                 )
             );
-            assert_eq!(*style.borrow(), Some(content_text_style));
+            assert_eq!(paragraph_style(tester, "Content"), content_text_style);
             assert_eq!(divider_color(tester), Some(Colors::YELLOW.primary()));
         });
     }
 
     #[test]
     fn more_than_one_action_is_laid_out_below_the_content() {
-        // Dart: 'Actions laid out below content if more than one action'.
-        with_tester(|tester| {
+        test_widgets(|tester| {
+            // Dart: 'Actions laid out below content if more than one action'.
+
             pump_app(tester, m3, |_app| {
                 MaterialBanner::new(
-                    AhemText::new("Content"),
+                    Text::new("Content"),
                     vec![action("Action 1"), action("Action 2")],
                 )
                 .into_widget()
@@ -1042,9 +1029,10 @@ mod tests {
 
     #[test]
     fn more_than_one_action_of_a_shown_banner_is_laid_out_below_the_content() {
-        // Dart: 'Actions laid out below content if more than one action when presented by
-        // ScaffoldMessenger'.
-        with_tester(|tester| {
+        test_widgets(|tester| {
+            // Dart: 'Actions laid out below content if more than one action when presented by
+            // ScaffoldMessenger'.
+
             let tap_target = GlobalKey::new();
             pump_app(tester, m3, |_app| {
                 messenger_home(&tap_target, true, |_app, context| {
@@ -1055,10 +1043,10 @@ mod tests {
                                 MaterialBannerClosedReason::Hide,
                             );
                         })),
-                        Some(AhemText::new("OK")),
+                        Some(Text::new("OK")),
                     );
                     MaterialBanner::new(
-                        AhemText::new("Content"),
+                        Text::new("Content"),
                         vec![ok.into_widget(), dismiss(context).into_widget()],
                     )
                 })
@@ -1075,10 +1063,11 @@ mod tests {
 
     #[test]
     fn a_single_action_is_laid_out_beside_the_content() {
-        // Dart: 'Actions laid out beside content if only one action'.
-        with_tester(|tester| {
+        test_widgets(|tester| {
+            // Dart: 'Actions laid out beside content if only one action'.
+
             pump_app(tester, m3, |_app| {
-                MaterialBanner::new(AhemText::new("Content"), vec![action("Action")]).into_widget()
+                MaterialBanner::new(Text::new("Content"), vec![action("Action")]).into_widget()
             });
 
             let content_bottom_left = content_rect(tester, "Content").bottom_left();
@@ -1090,16 +1079,14 @@ mod tests {
 
     #[test]
     fn a_single_action_of_a_shown_banner_is_laid_out_beside_the_content() {
-        // Dart: 'Actions laid out beside content if only one action when presented by
-        // ScaffoldMessenger'.
-        with_tester(|tester| {
+        test_widgets(|tester| {
+            // Dart: 'Actions laid out beside content if only one action when presented by
+            // ScaffoldMessenger'.
+
             let tap_target = GlobalKey::new();
             pump_app(tester, m3, |_app| {
                 messenger_home(&tap_target, true, |_app, context| {
-                    MaterialBanner::new(
-                        AhemText::new("Content"),
-                        vec![dismiss(context).into_widget()],
-                    )
+                    MaterialBanner::new(Text::new("Content"), vec![dismiss(context).into_widget()])
                 })
             });
             tap_key(tester, &tap_target);
@@ -1114,8 +1101,9 @@ mod tests {
 
     #[test]
     fn the_content_scales_with_the_text_up_to_the_maximum_scale_factor() {
-        // Dart: 'material banner content can scale and has maxScaleFactor'.
-        with_tester(|tester| {
+        test_widgets(|tester| {
+            // Dart: 'material banner content can scale and has maxScaleFactor'.
+
             fn size_almost_equal(a: Size, b: Size) -> bool {
                 (a.width() - b.width()).abs() <= 0.05 && (a.height() - b.height()).abs() <= 0.05
             }
@@ -1124,7 +1112,7 @@ mod tests {
                     MediaQuery::new(
                         MediaQueryData::new().text_scaler(text_scaler),
                         MaterialBanner::new(
-                            SizedBox::new().child(Center::new().child(AhemText::new("A"))),
+                            SizedBox::new().child(Center::new().child(Text::new("A"))),
                             vec![action("B")],
                         )
                         .force_actions_below(true),
@@ -1134,7 +1122,7 @@ mod tests {
             };
 
             build_app(tester, TextScaler::NO_SCALING);
-            assert_eq!(tester.find_ahem_text("A").len(), 1);
+            assert_eq!(tester.find_text("A").len(), 1);
             assert_eq!(content_rect(tester, "A").size(), Size::new(14.25, 20.0));
 
             build_app(tester, TextScaler::linear(1.1));
@@ -1173,7 +1161,7 @@ mod tests {
             |_app| {
                 messenger_home(tap_target, true, move |_app, context| {
                     let mut banner = MaterialBanner::new(
-                        AhemText::new("MaterialBanner"),
+                        Text::new("MaterialBanner"),
                         vec![dismiss(context).into_widget()],
                     );
                     banner.elevation = elevation;
@@ -1189,8 +1177,9 @@ mod tests {
 
     #[test]
     fn the_elevation_defaults_to_zero() {
-        // Dart: 'MaterialBanner elevation' / 'Elevation defaults to 0'.
-        with_tester(|tester| {
+        test_widgets(|tester| {
+            // Dart: 'MaterialBanner elevation' / 'Elevation defaults to 0'.
+
             let tap_target = GlobalKey::new();
 
             pump_elevation_banner(tester, &tap_target, None, None);
@@ -1218,8 +1207,9 @@ mod tests {
 
     #[test]
     fn the_elevation_of_the_banner_theme_is_used_by_default() {
-        // Dart: 'MaterialBanner elevation' / 'Uses elevation of MaterialBannerTheme by default'.
-        with_tester(|tester| {
+        test_widgets(|tester| {
+            // Dart: 'MaterialBanner elevation' / 'Uses elevation of MaterialBannerTheme by default'.
+
             let tap_target = GlobalKey::new();
 
             pump_elevation_banner(tester, &tap_target, None, Some(6.0));
@@ -1240,8 +1230,9 @@ mod tests {
 
     #[test]
     fn a_banner_of_elevation_zero_pushes_the_scaffold_body_down() {
-        // Dart: 'MaterialBanner elevation' / 'Scaffold body is pushed down if elevation is 0'.
-        with_tester(|tester| {
+        test_widgets(|tester| {
+            // Dart: 'MaterialBanner elevation' / 'Scaffold body is pushed down if elevation is 0'.
+
             let tap_target = GlobalKey::new();
 
             pump_elevation_banner(tester, &tap_target, Some(0.0), None);
@@ -1258,8 +1249,9 @@ mod tests {
 
     #[test]
     fn a_shown_banner_stays_until_dismissed() {
-        // Dart: 'MaterialBanner control test'.
-        with_tester(|tester| {
+        test_widgets(|tester| {
+            // Dart: 'MaterialBanner control test'.
+
             const HELLO_MATERIAL_BANNER: &str = "Hello MaterialBanner";
             let tap_target = GlobalKey::new();
             let dismiss_target = GlobalKey::new();
@@ -1267,7 +1259,7 @@ mod tests {
                 let dismiss_target = dismiss_target.clone();
                 messenger_home(&tap_target, true, move |_app, context| {
                     MaterialBanner::new(
-                        AhemText::new(HELLO_MATERIAL_BANNER),
+                        Text::new(HELLO_MATERIAL_BANNER),
                         vec![
                             dismiss(context)
                                 .key(dismiss_target.clone().into())
@@ -1276,23 +1268,23 @@ mod tests {
                     )
                 })
             });
-            let shown = |tester: &WidgetTester| tester.find_ahem_text(HELLO_MATERIAL_BANNER).len();
+            let shown = |tester: &WidgetTester| tester.find_text(HELLO_MATERIAL_BANNER).len();
             assert_eq!(shown(tester), 0);
             tap_key(tester, &tap_target);
             assert_eq!(shown(tester), 0);
-            tester.pump(Duration::ZERO); // schedule animation
+            tester.pump(); // schedule animation
             assert_eq!(shown(tester), 1);
-            tester.pump(Duration::ZERO); // begin animation
+            tester.pump(); // begin animation
             assert_eq!(shown(tester), 1);
             // 0.75s // animation last frame; two second timer starts here
-            tester.pump(Duration::from_millis(750));
+            tester.pump_by(Duration::from_millis(750));
             assert_eq!(shown(tester), 1);
-            tester.pump(Duration::from_millis(750)); // 1.50s
+            tester.pump_by(Duration::from_millis(750)); // 1.50s
             assert_eq!(shown(tester), 1);
-            tester.pump(Duration::from_millis(750)); // 2.25s
+            tester.pump_by(Duration::from_millis(750)); // 2.25s
             assert_eq!(shown(tester), 1);
             tap_key(tester, &dismiss_target);
-            tester.pump(Duration::ZERO); // begin animation
+            tester.pump(); // begin animation
             assert_eq!(shown(tester), 1); // frame 0 of dismiss animation
             // 3.75s // last frame of animation, material banner removed from build
             tester.pump_and_settle();
@@ -1302,8 +1294,9 @@ mod tests {
 
     #[test]
     fn a_second_banner_waits_for_the_first_to_close() {
-        // Dart: 'MaterialBanner twice test'.
-        with_tester(|tester| {
+        test_widgets(|tester| {
+            // Dart: 'MaterialBanner twice test'.
+
             let material_banner_count = Rc::new(Cell::new(0));
             let tap_target = GlobalKey::new();
             let dismiss_target = GlobalKey::new();
@@ -1313,7 +1306,7 @@ mod tests {
                 messenger_home(&tap_target, true, move |_app, context| {
                     material_banner_count.set(material_banner_count.get() + 1);
                     MaterialBanner::new(
-                        AhemText::new(&format!("banner{}", material_banner_count.get())),
+                        Text::new(format!("banner{}", material_banner_count.get())),
                         vec![
                             dismiss(context)
                                 .key(dismiss_target.clone().into())
@@ -1324,53 +1317,54 @@ mod tests {
             });
             let shown = |tester: &WidgetTester| {
                 (
-                    tester.find_ahem_text("banner1").len(),
-                    tester.find_ahem_text("banner2").len(),
+                    tester.find_text("banner1").len(),
+                    tester.find_text("banner2").len(),
                 )
             };
             assert_eq!(shown(tester), (0, 0));
             tap_key(tester, &tap_target); // queue banner1
             tap_key(tester, &tap_target); // queue banner2
             assert_eq!(shown(tester), (0, 0));
-            tester.pump(Duration::ZERO); // schedule animation for banner1
+            tester.pump(); // schedule animation for banner1
             assert_eq!(shown(tester), (1, 0));
-            tester.pump(Duration::ZERO); // begin animation
+            tester.pump(); // begin animation
             assert_eq!(shown(tester), (1, 0));
-            tester.pump(Duration::from_millis(750)); // 0.75s // animation last frame
+            tester.pump_by(Duration::from_millis(750)); // 0.75s // animation last frame
             assert_eq!(shown(tester), (1, 0));
-            tester.pump(Duration::from_millis(750)); // 1.50s
+            tester.pump_by(Duration::from_millis(750)); // 1.50s
             assert_eq!(shown(tester), (1, 0));
-            tester.pump(Duration::from_millis(750)); // 2.25s
+            tester.pump_by(Duration::from_millis(750)); // 2.25s
             assert_eq!(shown(tester), (1, 0));
             tap_key(tester, &dismiss_target);
-            tester.pump(Duration::ZERO); // begin animation
+            tester.pump(); // begin animation
             assert_eq!(shown(tester), (1, 0));
             // 3.75s // last frame of animation, material banner removed from build, new
             // material banner put in its place
-            tester.pump(Duration::from_millis(750));
+            tester.pump_by(Duration::from_millis(750));
             assert_eq!(shown(tester), (0, 1));
-            tester.pump(Duration::ZERO); // begin animation
+            tester.pump(); // begin animation
             assert_eq!(shown(tester), (0, 1));
-            tester.pump(Duration::from_millis(750)); // 4.50s // animation last frame
+            tester.pump_by(Duration::from_millis(750)); // 4.50s // animation last frame
             assert_eq!(shown(tester), (0, 1));
-            tester.pump(Duration::from_millis(750)); // 5.25s
+            tester.pump_by(Duration::from_millis(750)); // 5.25s
             assert_eq!(shown(tester), (0, 1));
-            tester.pump(Duration::from_millis(750)); // 6.00s
+            tester.pump_by(Duration::from_millis(750)); // 6.00s
             assert_eq!(shown(tester), (0, 1));
             tap_key(tester, &dismiss_target); // reverse animation is scheduled
-            tester.pump(Duration::ZERO); // begin animation
+            tester.pump(); // begin animation
             assert_eq!(shown(tester), (0, 1));
             // 7.50s // last frame of animation, material banner removed from build
-            tester.pump(Duration::from_millis(750));
+            tester.pump_by(Duration::from_millis(750));
             assert_eq!(shown(tester), (0, 0));
         });
     }
 
     #[test]
     fn showing_a_snack_bar_does_not_duplicate_the_banner() {
-        // Dart: 'ScaffoldMessenger does not duplicate a MaterialBanner when presenting a
-        // SnackBar.'
-        with_tester(|tester| {
+        test_widgets(|tester| {
+            // Dart: 'ScaffoldMessenger does not duplicate a MaterialBanner when presenting a
+            // SnackBar.'
+
             let material_banner_tap_target = GlobalKey::new();
             let snack_bar_tap_target = GlobalKey::new();
             pump_app(tester, m3, |_app| {
@@ -1398,7 +1392,7 @@ mod tests {
                                         ScaffoldMessenger::of(app, context).show_material_banner(
                                             app,
                                             MaterialBanner::new(
-                                                AhemText::new("MaterialBanner"),
+                                                Text::new("MaterialBanner"),
                                                 vec![dismiss(context).into_widget()],
                                             ),
                                         );
@@ -1416,16 +1410,17 @@ mod tests {
             tester.pump_and_settle();
 
             assert_eq!(tester.find_text("SnackBar").len(), 1);
-            assert_eq!(tester.find_ahem_text("MaterialBanner").len(), 1);
+            assert_eq!(tester.find_text("MaterialBanner").len(), 1);
         });
     }
 
     #[test]
     fn a_single_action_beside_the_content_is_aligned_to_the_trailing_edge() {
-        // Dart: 'Single action laid out beside content but aligned to the trailing edge'.
-        with_tester(|tester| {
+        test_widgets(|tester| {
+            // Dart: 'Single action laid out beside content but aligned to the trailing edge'.
+
             pump_app(tester, m3, |_app| {
-                MaterialBanner::new(AhemText::new("Content"), vec![action("Action")]).into_widget()
+                MaterialBanner::new(Text::new("Content"), vec![action("Action")]).into_widget()
             });
 
             let actions_top_right = overflow_bar_rect(tester).top_right();
@@ -1439,16 +1434,14 @@ mod tests {
 
     #[test]
     fn a_single_action_beside_the_content_of_a_shown_banner_is_aligned_to_the_trailing_edge() {
-        // Dart: 'Single action laid out beside content but aligned to the trailing edge when
-        // presented by ScaffoldMessenger'.
-        with_tester(|tester| {
+        test_widgets(|tester| {
+            // Dart: 'Single action laid out beside content but aligned to the trailing edge when
+            // presented by ScaffoldMessenger'.
+
             let tap_target = GlobalKey::new();
             pump_app(tester, m3, |_app| {
                 messenger_home(&tap_target, true, |_app, context| {
-                    MaterialBanner::new(
-                        AhemText::new("Content"),
-                        vec![dismiss(context).into_widget()],
-                    )
+                    MaterialBanner::new(Text::new("Content"), vec![dismiss(context).into_widget()])
                 })
             });
             tap_key(tester, &tap_target);
@@ -1465,12 +1458,13 @@ mod tests {
 
     #[test]
     fn a_single_action_beside_the_content_is_aligned_to_the_trailing_edge_in_rtl() {
-        // Dart: 'Single action laid out beside content but aligned to the trailing edge - RTL'.
-        with_tester(|tester| {
+        test_widgets(|tester| {
+            // Dart: 'Single action laid out beside content but aligned to the trailing edge - RTL'.
+
             pump_app(tester, m3, |_app| {
                 Directionality::new(
                     TextDirection::Rtl,
-                    MaterialBanner::new(AhemText::new("Content"), vec![action("Action")]),
+                    MaterialBanner::new(Text::new("Content"), vec![action("Action")]),
                 )
                 .into_widget()
             });
@@ -1485,16 +1479,17 @@ mod tests {
     #[test]
     fn a_single_action_beside_the_content_of_a_shown_banner_is_aligned_to_the_trailing_edge_in_rtl()
     {
-        // Dart: 'Single action laid out beside content but aligned to the trailing edge when
-        // presented by ScaffoldMessenger - RTL'.
-        with_tester(|tester| {
+        test_widgets(|tester| {
+            // Dart: 'Single action laid out beside content but aligned to the trailing edge when
+            // presented by ScaffoldMessenger - RTL'.
+
             let tap_target = GlobalKey::new();
             pump_app(tester, m3, |_app| {
                 Directionality::new(
                     TextDirection::Rtl,
                     messenger_home(&tap_target, true, |_app, context| {
                         MaterialBanner::new(
-                            AhemText::new("Content"),
+                            Text::new("Content"),
                             vec![dismiss(context).into_widget()],
                         )
                     }),
@@ -1513,10 +1508,11 @@ mod tests {
 
     #[test]
     fn forcing_actions_below_lays_one_action_out_below_the_content() {
-        // Dart: 'Actions laid out below content if forced override'.
-        with_tester(|tester| {
+        test_widgets(|tester| {
+            // Dart: 'Actions laid out below content if forced override'.
+
             pump_app(tester, m3, |_app| {
-                MaterialBanner::new(AhemText::new("Content"), vec![action("Action")])
+                MaterialBanner::new(Text::new("Content"), vec![action("Action")])
                     .force_actions_below(true)
                     .into_widget()
             });
@@ -1530,17 +1526,15 @@ mod tests {
 
     #[test]
     fn forcing_actions_below_lays_one_action_of_a_shown_banner_out_below_the_content() {
-        // Dart: 'Actions laid out below content if forced override when presented by
-        // ScaffoldMessenger'.
-        with_tester(|tester| {
+        test_widgets(|tester| {
+            // Dart: 'Actions laid out below content if forced override when presented by
+            // ScaffoldMessenger'.
+
             let tap_target = GlobalKey::new();
             pump_app(tester, m3, |_app| {
                 messenger_home(&tap_target, true, |_app, context| {
-                    MaterialBanner::new(
-                        AhemText::new("Content"),
-                        vec![dismiss(context).into_widget()],
-                    )
-                    .force_actions_below(true)
+                    MaterialBanner::new(Text::new("Content"), vec![dismiss(context).into_widget()])
+                        .force_actions_below(true)
                 })
             });
             tap_key(tester, &tap_target);
@@ -1598,8 +1592,9 @@ mod tests {
 
     #[test]
     fn the_action_widgets_are_laid_out_as_the_button_bar_laid_them_out() {
-        // Dart: 'Action widgets layout'.
-        with_tester(|tester| {
+        test_widgets(|tester| {
+            // Dart: 'Action widgets layout'.
+
             let build_frame = |tester: &mut WidgetTester,
                                actions: &[GlobalKey],
                                text_direction: TextDirection| {
@@ -1699,8 +1694,9 @@ mod tests {
 
     #[test]
     fn the_action_widgets_of_a_shown_banner_are_laid_out_as_the_button_bar_laid_them_out() {
-        // Dart: 'Action widgets layout when presented by ScaffoldMessenger'.
-        with_tester(|tester| {
+        test_widgets(|tester| {
+            // Dart: 'Action widgets layout when presented by ScaffoldMessenger'.
+
             let tap_target = GlobalKey::new();
             let dismiss_target = GlobalKey::new();
             let one = keys(1);
@@ -1821,8 +1817,9 @@ mod tests {
 
     #[test]
     fn overflowing_action_widgets_are_laid_out_as_the_button_bar_laid_them_out() {
-        // Dart: 'Action widgets layout with overflow'.
-        with_tester(|tester| {
+        test_widgets(|tester| {
+            // Dart: 'Action widgets layout with overflow'.
+
             let actions = keys(4);
             // The action coordinates that follow were obtained by running
             // the test code, before ButtonBar was replaced by OverflowBar.
@@ -1837,8 +1834,9 @@ mod tests {
 
     #[test]
     fn overflowing_action_widgets_of_a_shown_banner_are_laid_out_as_the_button_bar_laid_them_out() {
-        // Dart: 'Action widgets layout with overflow when presented by ScaffoldMessenger'.
-        with_tester(|tester| {
+        test_widgets(|tester| {
+            // Dart: 'Action widgets layout with overflow when presented by ScaffoldMessenger'.
+
             let tap_target = GlobalKey::new();
             let dismiss_target = GlobalKey::new();
             let actions = keys(4);
@@ -1876,8 +1874,9 @@ mod tests {
 
     #[test]
     fn the_overflow_alignment_aligns_the_overflowing_actions() {
-        // Dart: '[overflowAlignment] test'.
-        with_tester(|tester| {
+        test_widgets(|tester| {
+            // Dart: '[overflowAlignment] test'.
+
             let actions = keys(4);
 
             pump_overflowing_actions(
@@ -1908,8 +1907,9 @@ mod tests {
 
     #[test]
     fn the_overflow_alignment_aligns_the_overflowing_actions_of_a_shown_banner() {
-        // Dart: '[overflowAlignment] test when presented by ScaffoldMessenger'.
-        with_tester(|tester| {
+        test_widgets(|tester| {
+            // Dart: '[overflowAlignment] test when presented by ScaffoldMessenger'.
+
             let tap_target = GlobalKey::new();
             let dismiss_target = GlobalKey::new();
             let actions = keys(4);
@@ -1938,8 +1938,9 @@ mod tests {
 
     #[test]
     fn the_messenger_asserts_when_it_has_no_scaffold_to_show_a_banner_in() {
-        // Dart: 'ScaffoldMessenger will alert for MaterialBanners that cannot be presented'.
-        with_tester(|tester| {
+        test_widgets(|tester| {
+            // Dart: 'ScaffoldMessenger will alert for MaterialBanners that cannot be presented'.
+
             let context = Rc::new(Cell::new(None));
             let seen = Rc::clone(&context);
             pump_app(tester, m3, move |_app| {
@@ -1978,11 +1979,12 @@ mod tests {
 
     #[test]
     fn a_custom_margin_is_respected() {
-        // Dart: 'Custom Margin respected'.
-        with_tester(|tester| {
+        test_widgets(|tester| {
+            // Dart: 'Custom Margin respected'.
+
             let margin = EdgeInsets::all(30.0);
             pump_app(tester, m3, move |_app| {
-                MaterialBanner::new(AhemText::new("I am a banner"), vec![action("Action")])
+                MaterialBanner::new(Text::new("I am a banner"), vec![action("Action")])
                     .margin(margin)
                     .into_widget()
             });
@@ -1996,8 +1998,9 @@ mod tests {
 
     #[test]
     fn the_minimum_action_bar_height_is_respected() {
-        // Dart: 'minActionBarHeight is respected'.
-        with_tester(|tester| {
+        test_widgets(|tester| {
+            // Dart: 'minActionBarHeight is respected'.
+
             const MIN_ACTION_BAR_HEIGHT: f64 = 20.0;
             pump_app(tester, m3, |_app| {
                 crate::scaffold::Scaffold::new()
@@ -2023,8 +2026,9 @@ mod tests {
 
     #[test]
     fn the_minimum_action_bar_height_of_a_shown_banner_is_respected() {
-        // Dart: 'minimumActionBarHeight is respected when presented by ScaffoldMessenger'.
-        with_tester(|tester| {
+        test_widgets(|tester| {
+            // Dart: 'minimumActionBarHeight is respected when presented by ScaffoldMessenger'.
+
             const MIN_ACTION_BAR_HEIGHT: f64 = 20.0;
             let tap_target = GlobalKey::new();
             pump_app(tester, m3, |_app| {
@@ -2045,12 +2049,13 @@ mod tests {
 
     #[test]
     fn a_banner_renders_at_zero_size() {
-        // Dart: 'MaterialBanner renders at zero size'.
-        with_tester(|tester| {
+        test_widgets(|tester| {
+            // Dart: 'MaterialBanner renders at zero size'.
+
             pump_app(tester, m3, |_app| {
                 Center::new()
                     .child(SizedBox::shrink().child(MaterialBanner::new(
-                        AhemText::new("X"),
+                        Text::new("X"),
                         vec![SizedBox::shrink().into_widget()],
                     )))
                     .into_widget()
@@ -2109,9 +2114,10 @@ mod tests {
 
     #[test]
     fn material3_without_a_banner_theme_uses_the_defaults() {
-        // Dart: 'Material3 - Passing no MaterialBannerThemeData returns defaults'.
-        with_tester(|tester| {
-            let (content_widget, style) = content("Content");
+        test_widgets(|tester| {
+            // Dart: 'Material3 - Passing no MaterialBannerThemeData returns defaults'.
+
+            let content_widget = Text::new("Content").into_widget();
             let localized_theme = Rc::new(RefCell::new(None));
             let seen = Rc::clone(&localized_theme);
             pump_app(tester, m3, move |_app| {
@@ -2134,7 +2140,10 @@ mod tests {
             assert_eq!(shadow_color, None);
             assert_eq!(elevation, 0.0);
 
-            assert_eq!(*style.borrow(), localized_theme.text_theme.body_medium);
+            assert_eq!(
+                Some(paragraph_style(tester, "Content")),
+                localized_theme.text_theme.body_medium
+            );
 
             assert_default_paddings(tester);
 
@@ -2147,11 +2156,12 @@ mod tests {
 
     #[test]
     fn material3_without_a_banner_theme_uses_the_defaults_for_a_shown_banner() {
-        // Dart: 'Material3 - Passing no MaterialBannerThemeData returns defaults when presented
-        // by ScaffoldMessenger'.
-        with_tester(|tester| {
+        test_widgets(|tester| {
+            // Dart: 'Material3 - Passing no MaterialBannerThemeData returns defaults when presented
+            // by ScaffoldMessenger'.
+
             let tap_target = GlobalKey::new();
-            let (content_widget, style) = content("Content");
+            let content_widget = Text::new("Content").into_widget();
             let localized_theme = Rc::new(RefCell::new(None));
             let seen = Rc::clone(&localized_theme);
             pump_app(tester, m3, |_app| {
@@ -2177,7 +2187,10 @@ mod tests {
             assert_eq!(shadow_color, None);
             assert_eq!(elevation, 0.0);
 
-            assert_eq!(*style.borrow(), localized_theme.text_theme.body_medium);
+            assert_eq!(
+                Some(paragraph_style(tester, "Content")),
+                localized_theme.text_theme.body_medium
+            );
 
             assert_default_paddings(tester);
 
@@ -2194,10 +2207,11 @@ mod tests {
 
     #[test]
     fn a_banner_uses_the_values_of_the_banner_theme() {
-        // Dart: 'MaterialBanner uses values from MaterialBannerThemeData'.
-        with_tester(|tester| {
+        test_widgets(|tester| {
+            // Dart: 'MaterialBanner uses values from MaterialBannerThemeData'.
+
             let banner_theme = theme_banner();
-            let (content_widget, style) = content("Content");
+            let content_widget = Text::new("Content").into_widget();
             pump_app(tester, banner_theme_app, move |_app| {
                 Scaffold::new()
                     .body(
@@ -2216,7 +2230,10 @@ mod tests {
                     banner_theme.shadow_color
                 )
             );
-            assert_eq!(*style.borrow(), banner_theme.content_text_style);
+            assert_eq!(
+                Some(paragraph_style(tester, "Content")),
+                banner_theme.content_text_style
+            );
 
             assert_content_and_leading(tester, (24.0, 41.0), (19.0, 11.0));
 
@@ -2226,12 +2243,13 @@ mod tests {
 
     #[test]
     fn a_shown_banner_uses_the_values_of_the_banner_theme() {
-        // Dart: 'MaterialBanner uses values from MaterialBannerThemeData when presented by
-        // ScaffoldMessenger'.
-        with_tester(|tester| {
+        test_widgets(|tester| {
+            // Dart: 'MaterialBanner uses values from MaterialBannerThemeData when presented by
+            // ScaffoldMessenger'.
+
             let banner_theme = theme_banner();
             let tap_target = GlobalKey::new();
-            let (content_widget, style) = content("Content");
+            let content_widget = Text::new("Content").into_widget();
             pump_app(tester, banner_theme_app, |_app| {
                 messenger_home(&tap_target, true, move |_app, _context| {
                     MaterialBanner::new(content_widget.clone(), vec![action("Action")])
@@ -2250,7 +2268,10 @@ mod tests {
                     banner_theme.shadow_color
                 )
             );
-            assert_eq!(*style.borrow(), banner_theme.content_text_style);
+            assert_eq!(
+                Some(paragraph_style(tester, "Content")),
+                banner_theme.content_text_style
+            );
 
             assert_content_and_leading(tester, (24.0, 41.0), (19.0, 11.0));
 
@@ -2260,11 +2281,12 @@ mod tests {
 
     #[test]
     fn the_banner_properties_take_priority_over_the_theme() {
-        // Dart: 'MaterialBanner widget properties take priority over theme'.
-        with_tester(|tester| {
+        test_widgets(|tester| {
+            // Dart: 'MaterialBanner widget properties take priority over theme'.
+
             let text_style = TextStyle::new().color(Colors::GREEN.primary());
             let banner_text_style = text_style.clone();
-            let (content_widget, style) = content("Content");
+            let content_widget = Text::new("Content").into_widget();
             pump_app(tester, banner_theme_app, move |_app| {
                 Scaffold::new()
                     .body(
@@ -2290,7 +2312,7 @@ mod tests {
                     Some(Colors::ORANGE.primary())
                 )
             );
-            assert_eq!(*style.borrow(), Some(text_style));
+            assert_eq!(Some(paragraph_style(tester, "Content")), Some(text_style));
 
             assert_content_and_leading(tester, (29.0, 58.0), (24.0, 22.0));
 
@@ -2300,14 +2322,15 @@ mod tests {
 
     #[test]
     fn the_properties_of_a_shown_banner_take_priority_over_the_theme() {
-        // Dart: 'MaterialBanner widget properties take priority over theme when presented by
-        // ScaffoldMessenger'.
-        with_tester(|tester| {
+        test_widgets(|tester| {
+            // Dart: 'MaterialBanner widget properties take priority over theme when presented by
+            // ScaffoldMessenger'.
+
             const ELEVATION: f64 = 6.0;
             let text_style = TextStyle::new().color(Colors::GREEN.primary());
             let banner_text_style = text_style.clone();
             let tap_target = GlobalKey::new();
-            let (content_widget, style) = content("Content");
+            let content_widget = Text::new("Content").into_widget();
             pump_app(tester, banner_theme_app, |_app| {
                 messenger_home(&tap_target, true, move |_app, _context| {
                     MaterialBanner::new(content_widget.clone(), vec![action("Action")])
@@ -2326,7 +2349,7 @@ mod tests {
                 material_values(tester, material_around(tester, "Content"));
             assert_eq!(color, Some(Colors::PURPLE.primary()));
             assert_eq!(elevation, ELEVATION);
-            assert_eq!(*style.borrow(), Some(text_style));
+            assert_eq!(Some(paragraph_style(tester, "Content")), Some(text_style));
 
             assert_content_and_leading(tester, (29.0, 58.0), (24.0, 22.0));
 
@@ -2342,8 +2365,9 @@ mod tests {
 
     #[test]
     fn a_banner_uses_the_color_scheme_when_necessary() {
-        // Dart: 'MaterialBanner uses color scheme when necessary'.
-        with_tester(|tester| {
+        test_widgets(|tester| {
+            // Dart: 'MaterialBanner uses color scheme when necessary'.
+
             pump_app(
                 tester,
                 |app| {
@@ -2354,7 +2378,7 @@ mod tests {
                 |_app| {
                     Scaffold::new()
                         .body(MaterialBanner::new(
-                            AhemText::new("Content"),
+                            Text::new("Content"),
                             vec![action("Action")],
                         ))
                         .into_widget()
@@ -2368,9 +2392,10 @@ mod tests {
 
     #[test]
     fn a_shown_banner_uses_the_color_scheme_when_necessary() {
-        // Dart: 'MaterialBanner uses color scheme when necessary when presented by
-        // ScaffoldMessenger'.
-        with_tester(|tester| {
+        test_widgets(|tester| {
+            // Dart: 'MaterialBanner uses color scheme when necessary when presented by
+            // ScaffoldMessenger'.
+
             let tap_target = GlobalKey::new();
             pump_app(
                 tester,
@@ -2381,7 +2406,7 @@ mod tests {
                 },
                 |_app| {
                     messenger_home(&tap_target, true, |_app, _context| {
-                        MaterialBanner::new(AhemText::new("Content"), vec![action("Action")])
+                        MaterialBanner::new(Text::new("Content"), vec![action("Action")])
                     })
                 },
             );
@@ -2408,14 +2433,17 @@ mod tests {
     }
 
     /// The Material 2 defaults Dart's 'Material 2' cases check.
-    fn assert_material2_defaults(tester: &WidgetTester, style: &RefCell<Option<TextStyle>>) {
+    fn assert_material2_defaults(tester: &WidgetTester) {
         assert_eq!(
             material_values(tester, material_around(tester, "Content")),
             (0.0, Some(Color::new(0xffffffff)), None, None)
         );
 
         // Default value for ThemeData.typography is Typography.material2014()
-        assert_eq!(*style.borrow(), material2014_body_medium());
+        assert_eq!(
+            Some(paragraph_style(tester, "Content")),
+            material2014_body_medium()
+        );
 
         assert_default_paddings(tester);
 
@@ -2424,10 +2452,11 @@ mod tests {
 
     #[test]
     fn material2_without_a_banner_theme_uses_the_defaults() {
-        // Dart: 'Material 2' / 'Material2 - Passing no MaterialBannerThemeData returns
-        // defaults'.
-        with_tester(|tester| {
-            let (content_widget, style) = content("Content");
+        test_widgets(|tester| {
+            // Dart: 'Material 2' / 'Material2 - Passing no MaterialBannerThemeData returns
+            // defaults'.
+
+            let content_widget = Text::new("Content").into_widget();
             pump_app(tester, m2, move |_app| {
                 Scaffold::new()
                     .body(
@@ -2437,17 +2466,18 @@ mod tests {
                     .into_widget()
             });
 
-            assert_material2_defaults(tester, &style);
+            assert_material2_defaults(tester);
         });
     }
 
     #[test]
     fn material2_without_a_banner_theme_uses_the_defaults_for_a_shown_banner() {
-        // Dart: 'Material 2' / 'Material2 - Passing no MaterialBannerThemeData returns defaults
-        // when presented by ScaffoldMessenger'.
-        with_tester(|tester| {
+        test_widgets(|tester| {
+            // Dart: 'Material 2' / 'Material2 - Passing no MaterialBannerThemeData returns defaults
+            // when presented by ScaffoldMessenger'.
+
             let tap_target = GlobalKey::new();
-            let (content_widget, style) = content("Content");
+            let content_widget = Text::new("Content").into_widget();
             pump_app(tester, m2, |_app| {
                 messenger_home(&tap_target, true, move |_app, _context| {
                     MaterialBanner::new(content_widget.clone(), vec![action("Action")])
@@ -2457,7 +2487,7 @@ mod tests {
             tap_key(tester, &tap_target);
             tester.pump_and_settle();
 
-            assert_material2_defaults(tester, &style);
+            assert_material2_defaults(tester);
         });
     }
 }

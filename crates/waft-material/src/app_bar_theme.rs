@@ -951,10 +951,12 @@ mod tests {
     use waft_painting::ShapeBorder;
     use waft_painting::{BorderRadiusGeometry, BorderSide, FontStyle, RoundedRectangleBorder};
 
+    use waft_widgets::testing::test_widgets;
+
     use super::*;
     use crate::colors::Colors;
     use crate::drawer_theme::tests::theme_seen_through_capture;
-    use crate::test_support::{probe, test_cell, with_main_thread_stack};
+    use crate::test_support::probe;
     use crate::theme_data::ThemeData;
 
     fn rounded(radius: f64) -> RoundedRectangleBorder {
@@ -1216,13 +1218,12 @@ mod tests {
 
     #[test]
     fn of_returns_the_theme_data_app_bar_theme_without_an_ancestor() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let expected = app_bar_theme_data();
             let theme_data_app_bar = expected.clone();
 
             let seen = probe(
-                &cell,
+                tester,
                 move |app, child| {
                     let data = ThemeData::builder()
                         .app_bar_theme(theme_data_app_bar.clone())
@@ -1238,12 +1239,11 @@ mod tests {
 
     #[test]
     fn of_returns_the_closest_app_bar_theme_over_theme_data() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let expected = app_bar_theme_data();
 
             let seen = probe(
-                &cell,
+                tester,
                 move |app, child| {
                     let data = ThemeData::builder()
                         .app_bar_theme(AppBarThemeData::new().elevation(3.0))
@@ -1259,11 +1259,9 @@ mod tests {
 
     #[test]
     fn a_captured_app_bar_theme_is_kept_under_another_app_bar_theme() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
-
+        test_widgets(|tester| {
             let seen = theme_seen_through_capture(
-                &cell,
+                tester,
                 |probe| {
                     AppBarTheme::new()
                         .with_elevation(1.0)
@@ -1301,9 +1299,8 @@ mod tests {
 
     #[test]
     fn theme_data_holds_the_app_bar_theme() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
-            let app = cell.borrow();
+        test_widgets(|tester| {
+            let app = tester.cell.borrow();
             let theme = ThemeData::new(&app);
             assert_eq!(theme.app_bar_theme, AppBarThemeData::new());
 
@@ -1332,9 +1329,8 @@ mod tests {
 
     #[test]
     fn theme_data_takes_the_data_of_an_app_bar_theme() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
-            let app = cell.borrow();
+        test_widgets(|tester| {
+            let app = tester.cell.borrow();
 
             let built = ThemeData::builder()
                 .app_bar_theme(app_bar_theme_of_properties())

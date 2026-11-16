@@ -6014,83 +6014,17 @@ impl Notification for NavigationNotification {
 #[cfg(test)]
 mod tests {
     use std::cell::{Cell, RefCell};
-    use std::time::Duration;
-    use waft_foundation::AppCell;
 
-    use waft_embedder::{Restoration, TargetPlatform, TextDirection};
-    use waft_services::{RestorationMap, RestorationUpdate};
-    use waft_test::{TestPlatform, TestView};
-
-    use super::*;
-    use crate::binding::run_app;
-    use crate::test_harness::pump_every_view;
+    use waft_embedder::TextDirection;
     use waft_foundation::ValueKey;
 
+    use super::*;
     use crate::framework::IntoWidget;
+    use crate::testing::{TestPointer, WidgetTester, test_widgets};
     use crate::widgets::basic::{Align, Directionality, SizedBox};
     use crate::widgets::pages::PageRouteBuilder;
     use crate::widgets::restoration::RootRestorationScope;
     use crate::widgets::routes::RoutePageBuilder;
-
-    const VIEW_WIDTH: f64 = 300.0;
-    const VIEW_HEIGHT: f64 = 200.0;
-
-    /// A host that answers `Restoration::get` with what it was handed and records every
-    /// `Restoration::put`.
-    struct RecordingRestoration {
-        stored: RefCell<Option<RestorationUpdate>>,
-        puts: RefCell<Vec<RestorationMap>>,
-    }
-
-    impl Restoration for RecordingRestoration {
-        fn get(&self) -> Option<RestorationUpdate> {
-            self.stored.borrow().clone()
-        }
-
-        fn put(&self, data: RestorationMap) {
-            self.puts.borrow_mut().push(data);
-        }
-    }
-
-    /// An [`App`] with a single view, whose host restores `restoration_data`.
-    fn app_with_view(
-        restoration_data: Option<RestorationMap>,
-    ) -> (Rc<AppCell>, Rc<RecordingRestoration>) {
-        let restoration = Rc::new(RecordingRestoration {
-            stored: RefCell::new(Some(RestorationUpdate {
-                enabled: true,
-                data: restoration_data,
-            })),
-            puts: RefCell::new(Vec::new()),
-        });
-        let platform = TestPlatform::new()
-            .on(TargetPlatform::MacOS)
-            .with_view(Rc::new(TestView::new(VIEW_WIDTH, VIEW_HEIGHT)))
-            .with_restoration(restoration.clone());
-        (AppCell::with_platform(Rc::new(platform)), restoration)
-    }
-
-    fn mount(cell: &AppCell, child: WidgetRef) {
-        run_app(&mut cell.borrow_mut(), child);
-        cell.elapse(Duration::ZERO);
-        pump_every_view(&mut cell.borrow_mut(), Duration::ZERO);
-    }
-
-    /// Rebuilds the root with a new widget, the way `run_app` first attached it.
-    fn attach(binding: Handle<crate::binding::WidgetsBinding>, app: &mut App, child: WidgetRef) {
-        let root = crate::MultiViewApp::new(move |_app, _view| Some(child.clone()));
-        binding.attach_root_widget(app, root.into_widget());
-    }
-
-    /// Runs frames until every route transition has settled.
-    fn settle(app: &mut App, from: Duration) -> Duration {
-        let mut at = from;
-        for _ in 0..40 {
-            at += Duration::from_millis(20);
-            pump_every_view(app, at);
-        }
-        at
-    }
 
     fn corner_page() -> RoutePageBuilder {
         Rc::new(|_app, _context, _animation, _secondary| {
@@ -6152,7 +6086,9 @@ mod tests {
     }
 
     /// The names of the pages the navigator's history currently holds, bottom-most first.
-    fn history_names(state: Handle<NavigatorState>, app: &App) -> Vec<String> {
+    fn history_names(state: Handle<NavigatorState>, tester: &WidgetTester) -> Vec<String> {
+        let app = tester.cell.borrow();
+        let app = &*app;
         state
             .history_entries(app)
             .into_iter()
@@ -6178,8 +6114,8 @@ mod tests {
         .into_widget()
     }
 
-    fn state(key: &GlobalKey, app: &mut App) -> Handle<NavigatorState> {
-        key.current_state::<NavigatorState>(app)
+    fn state(key: &GlobalKey, tester: &WidgetTester) -> Handle<NavigatorState> {
+        key.current_state::<NavigatorState>(&tester.cell.borrow())
             .expect("a mounted navigator")
     }
 
@@ -6187,269 +6123,216 @@ mod tests {
 
     #[test]
     fn the_pages_api_inserts_removes_and_reorders_routes_through_the_transition_delegate() {
-        let (cell, _restoration) = app_with_view(None);
-        let mut app = cell.borrow_mut();
-        let key = GlobalKey::new();
-        let binding = crate::binding::WidgetsBinding::instance(&mut app);
-        drop(app);
-        mount(
-            &cell,
-            pages_navigator(&key, vec![TestPage::page("a"), TestPage::page("b")]),
-        );
-        let mut app = cell.borrow_mut();
-        let navigator_state = state(&key, &mut app);
-        let at = settle(&mut app, Duration::ZERO);
-        assert_eq!(history_names(navigator_state, &app), vec!["a", "b"]);
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            tester.pump_widget(pages_navigator(
+                &key,
+                vec![TestPage::page("a"), TestPage::page("b")],
+            ));
+            let navigator_state = state(&key, tester);
+            tester.pump_and_settle();
+            assert_eq!(history_names(navigator_state, tester), vec!["a", "b"]);
 
-        // Insert in the middle.
-        attach(
-            binding,
-            &mut app,
-            pages_navigator(
+            // Insert in the middle.
+            tester.pump_widget(pages_navigator(
                 &key,
                 vec![
                     TestPage::page("a"),
                     TestPage::page("c"),
                     TestPage::page("b"),
                 ],
-            ),
-        );
-        let at = settle(&mut app, at);
-        assert_eq!(history_names(navigator_state, &app), vec!["a", "c", "b"]);
+            ));
+            tester.pump_and_settle();
+            assert_eq!(history_names(navigator_state, tester), vec!["a", "c", "b"]);
 
-        // Reorder.
-        attach(
-            binding,
-            &mut app,
-            pages_navigator(
+            // Reorder.
+            tester.pump_widget(pages_navigator(
                 &key,
                 vec![
                     TestPage::page("a"),
                     TestPage::page("b"),
                     TestPage::page("c"),
                 ],
-            ),
-        );
-        let at = settle(&mut app, at);
-        assert_eq!(history_names(navigator_state, &app), vec!["a", "b", "c"]);
+            ));
+            tester.pump_and_settle();
+            assert_eq!(history_names(navigator_state, tester), vec!["a", "b", "c"]);
 
-        // Remove.
-        attach(
-            binding,
-            &mut app,
-            pages_navigator(&key, vec![TestPage::page("a")]),
-        );
-        settle(&mut app, at);
-        assert_eq!(history_names(navigator_state, &app), vec!["a"]);
+            // Remove.
+            tester.pump_widget(pages_navigator(&key, vec![TestPage::page("a")]));
+            tester.pump_and_settle();
+            assert_eq!(history_names(navigator_state, tester), vec!["a"]);
+        });
+    }
+
+    #[derive(Default)]
+    struct Recorder {
+        navigator_observer: NavigatorObserverData,
+        log: RefCell<Vec<String>>,
+    }
+
+    fn route_name(app: &App, route: Option<AnyRoute>) -> String {
+        match route {
+            None => "none".to_string(),
+            Some(route) => route.settings(app).name().unwrap_or("?").to_string(),
+        }
+    }
+
+    impl NavigatorObserver for Recorder {
+        crate::navigator_observer_accessors!();
+
+        fn did_push(
+            self: Handle<Self>,
+            app: &mut App,
+            route: AnyRoute,
+            previous_route: Option<AnyRoute>,
+        ) {
+            let entry = format!(
+                "push {} over {}",
+                route_name(app, Some(route)),
+                route_name(app, previous_route)
+            );
+            app.get(self).log.borrow_mut().push(entry);
+        }
+
+        fn did_pop(
+            self: Handle<Self>,
+            app: &mut App,
+            route: AnyRoute,
+            previous_route: Option<AnyRoute>,
+        ) {
+            let entry = format!(
+                "pop {} to {}",
+                route_name(app, Some(route)),
+                route_name(app, previous_route)
+            );
+            app.get(self).log.borrow_mut().push(entry);
+        }
+
+        fn did_remove(
+            self: Handle<Self>,
+            app: &mut App,
+            route: AnyRoute,
+            previous_route: Option<AnyRoute>,
+        ) {
+            let entry = format!(
+                "remove {} above {}",
+                route_name(app, Some(route)),
+                route_name(app, previous_route)
+            );
+            app.get(self).log.borrow_mut().push(entry);
+        }
+
+        fn did_replace(
+            self: Handle<Self>,
+            app: &mut App,
+            new_route: Option<AnyRoute>,
+            old_route: Option<AnyRoute>,
+        ) {
+            let entry = format!(
+                "replace {} with {}",
+                route_name(app, old_route),
+                route_name(app, new_route)
+            );
+            app.get(self).log.borrow_mut().push(entry);
+        }
+    }
+
+    /// A route named as `settings` asks, showing the corner page.
+    fn named_route(app: &mut App, settings: &RouteSettings) -> Option<RouteRef> {
+        let name = settings.name.clone().unwrap_or_default();
+        Some(
+            PageRouteBuilder::new(app, corner_page())
+                .settings(app, RouteSettings::new().name(name).into())
+                .into_erased(),
+        )
     }
 
     #[test]
     fn a_navigator_observer_sees_every_push_pop_replace_and_remove() {
-        #[derive(Default)]
-        struct Recorder {
-            navigator_observer: NavigatorObserverData,
-            log: RefCell<Vec<String>>,
-        }
-
-        fn name(app: &App, route: Option<AnyRoute>) -> String {
-            match route {
-                None => "none".to_string(),
-                Some(route) => route.settings(app).name().unwrap_or("?").to_string(),
-            }
-        }
-
-        impl NavigatorObserver for Recorder {
-            crate::navigator_observer_accessors!();
-
-            fn did_push(
-                self: Handle<Self>,
-                app: &mut App,
-                route: AnyRoute,
-                previous_route: Option<AnyRoute>,
-            ) {
-                let entry = format!(
-                    "push {} over {}",
-                    name(app, Some(route)),
-                    name(app, previous_route)
-                );
-                app.get(self).log.borrow_mut().push(entry);
-            }
-
-            fn did_pop(
-                self: Handle<Self>,
-                app: &mut App,
-                route: AnyRoute,
-                previous_route: Option<AnyRoute>,
-            ) {
-                let entry = format!(
-                    "pop {} to {}",
-                    name(app, Some(route)),
-                    name(app, previous_route)
-                );
-                app.get(self).log.borrow_mut().push(entry);
-            }
-
-            fn did_remove(
-                self: Handle<Self>,
-                app: &mut App,
-                route: AnyRoute,
-                previous_route: Option<AnyRoute>,
-            ) {
-                let entry = format!(
-                    "remove {} above {}",
-                    name(app, Some(route)),
-                    name(app, previous_route)
-                );
-                app.get(self).log.borrow_mut().push(entry);
-            }
-
-            fn did_replace(
-                self: Handle<Self>,
-                app: &mut App,
-                new_route: Option<AnyRoute>,
-                old_route: Option<AnyRoute>,
-            ) {
-                let entry = format!(
-                    "replace {} with {}",
-                    name(app, old_route),
-                    name(app, new_route)
-                );
-                app.get(self).log.borrow_mut().push(entry);
-            }
-        }
-
-        let (cell, _restoration) = app_with_view(None);
-        let mut app = cell.borrow_mut();
-        let key = GlobalKey::new();
-        let observer = app.create(Recorder::default());
-        drop(app);
-        mount(
-            &cell,
-            Directionality::new(
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            let observer = tester.update(|app| app.create(Recorder::default()));
+            tester.pump_widget(Directionality::new(
                 TextDirection::Ltr,
                 Navigator::new()
                     .key(key.clone().into())
                     .observers(vec![observer.erase()])
-                    .on_generate_route(|app, settings| {
-                        let name = settings.name.clone().unwrap_or_default();
-                        Some(
-                            PageRouteBuilder::new(app, corner_page())
-                                .settings(app, RouteSettings::new().name(name).into())
-                                .into_erased(),
-                        )
-                    }),
-            )
-            .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        let navigator_state = state(&key, &mut app);
-        let at = settle(&mut app, Duration::ZERO);
-        assert_eq!(
-            app.get(&observer).log.borrow().as_slice(),
-            ["push / over none"]
-        );
+                    .on_generate_route(named_route),
+            ));
+            let navigator_state = state(&key, tester);
+            tester.pump_and_settle();
+            assert_eq!(
+                tester.cell.borrow().get(&observer).log.borrow().as_slice(),
+                ["push / over none"]
+            );
 
-        navigator_state.push_named(&mut app, "second", None);
-        let at = settle(&mut app, at);
-        navigator_state.push_replacement_named(&mut app, "third", None, None);
-        let at = settle(&mut app, at);
-        navigator_state.pop(&mut app, None);
-        settle(&mut app, at);
+            tester.update(|app| navigator_state.push_named(app, "second", None));
+            tester.pump_and_settle();
+            tester.update(|app| navigator_state.push_replacement_named(app, "third", None, None));
+            tester.pump_and_settle();
+            tester.update(|app| navigator_state.pop(app, None));
+            tester.pump_and_settle();
 
-        assert_eq!(
-            app.get(&observer).log.borrow().as_slice(),
-            [
-                "push / over none",
-                "push second over /",
-                "replace second with third",
-                "pop third to /",
-            ]
-        );
+            assert_eq!(
+                tester.cell.borrow().get(&observer).log.borrow().as_slice(),
+                [
+                    "push / over none",
+                    "push second over /",
+                    "replace second with third",
+                    "pop third to /",
+                ]
+            );
+        });
+    }
+
+    /// A restorable navigator keyed `key` over a restorable page "a", under a root restoration
+    /// scope.
+    fn restorable_navigator(key: &GlobalKey) -> WidgetRef {
+        Directionality::new(
+            TextDirection::Ltr,
+            RootRestorationScope::new(
+                Some("root".to_string()),
+                Navigator::new()
+                    .key(key.clone().into())
+                    .restoration_scope_id("nav")
+                    .pages(vec![TestPage::restorable_page("a")])
+                    .on_did_remove_page(|_app, _page| {})
+                    .on_generate_route(named_route),
+            ),
+        )
+        .into_widget()
     }
 
     #[test]
     fn the_history_is_restored_from_the_restoration_data_of_a_previous_run() {
         // Run once, pushing a restorable named route on top of a restorable page.
-        let (cell, restoration) = app_with_view(None);
+        let mut tester = WidgetTester::restoring(None);
         let key = GlobalKey::new();
-        mount(
-            &cell,
-            Directionality::new(
-                TextDirection::Ltr,
-                RootRestorationScope::new(
-                    Some("root".to_string()),
-                    Navigator::new()
-                        .key(key.clone().into())
-                        .restoration_scope_id("nav")
-                        .pages(vec![TestPage::restorable_page("a")])
-                        .on_did_remove_page(|_app, _page| {})
-                        .on_generate_route(|app, settings| {
-                            let name = settings.name.clone().unwrap_or_default();
-                            Some(
-                                PageRouteBuilder::new(app, corner_page())
-                                    .settings(app, RouteSettings::new().name(name).into())
-                                    .into_erased(),
-                            )
-                        }),
-                ),
-            )
-            .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        let navigator_state = state(&key, &mut app);
-        let at = settle(&mut app, Duration::ZERO);
-        navigator_state.restorable_push_named(&mut app, "second", None);
-        settle(&mut app, at);
-        assert_eq!(history_names(navigator_state, &app), vec!["a", "second"]);
-        app.drain_microtasks();
-
-        let saved = restoration
-            .puts
-            .borrow()
-            .last()
-            .cloned()
+        tester.pump_widget(restorable_navigator(&key));
+        let navigator_state = state(&key, &tester);
+        tester.pump_and_settle();
+        tester.update(|app| navigator_state.restorable_push_named(app, "second", None));
+        tester.pump_and_settle();
+        assert_eq!(history_names(navigator_state, &tester), vec!["a", "second"]);
+        let saved = tester
+            .restoration_data()
             .expect("the manager wrote the restoration data");
 
         // Run again from the saved data: the pageless route comes back.
-        let (cell, _restoration) = app_with_view(Some(saved));
+        let mut tester = WidgetTester::restoring(Some(saved));
         let key = GlobalKey::new();
-        mount(
-            &cell,
-            Directionality::new(
-                TextDirection::Ltr,
-                RootRestorationScope::new(
-                    Some("root".to_string()),
-                    Navigator::new()
-                        .key(key.clone().into())
-                        .restoration_scope_id("nav")
-                        .pages(vec![TestPage::restorable_page("a")])
-                        .on_did_remove_page(|_app, _page| {})
-                        .on_generate_route(|app, settings| {
-                            let name = settings.name.clone().unwrap_or_default();
-                            Some(
-                                PageRouteBuilder::new(app, corner_page())
-                                    .settings(app, RouteSettings::new().name(name).into())
-                                    .into_erased(),
-                            )
-                        }),
-                ),
-            )
-            .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        let restored = state(&key, &mut app);
-        settle(&mut app, Duration::ZERO);
-        assert_eq!(history_names(restored, &app), vec!["a", "second"]);
+        tester.pump_widget(restorable_navigator(&key));
+        let restored = state(&key, &tester);
+        tester.pump_and_settle();
+        assert_eq!(history_names(restored, &tester), vec!["a", "second"]);
     }
 
     #[test]
     fn a_route_reports_its_position_in_the_history() {
-        let (cell, _restoration) = app_with_view(None);
-        let key = GlobalKey::new();
-        let pushed: Rc<Cell<Option<AnyRoute>>> = Rc::new(Cell::new(None));
-        mount(
-            &cell,
-            Directionality::new(
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            let pushed: Rc<Cell<Option<AnyRoute>>> = Rc::new(Cell::new(None));
+            tester.pump_widget(Directionality::new(
                 TextDirection::Ltr,
                 Navigator::new().key(key.clone().into()).on_generate_route({
                     let pushed = Rc::clone(&pushed);
@@ -6460,26 +6343,29 @@ mod tests {
                         Some(route)
                     }
                 }),
-            )
-            .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        let navigator_state = state(&key, &mut app);
-        let at = settle(&mut app, Duration::ZERO);
-        let first = pushed.get().expect("the initial route");
-        assert!(first.is_first(&app));
-        assert!(first.is_current(&app));
-        assert!(first.is_active(&app));
-        assert!(!first.has_active_route_below(&app));
+            ));
+            let navigator_state = state(&key, tester);
+            tester.pump_and_settle();
+            let first = pushed.get().expect("the initial route");
+            {
+                let app = tester.cell.borrow();
+                assert!(first.is_first(&app));
+                assert!(first.is_current(&app));
+                assert!(first.is_active(&app));
+                assert!(!first.has_active_route_below(&app));
+            }
 
-        let second: RouteRef = PageRouteBuilder::new(&mut app, corner_page()).into_erased();
-        navigator_state.push(&mut app, second.clone());
-        settle(&mut app, at);
-        assert!(first.is_first(&app));
-        assert!(!first.is_current(&app));
-        assert!(second.is_current(&app));
-        assert!(!second.is_first(&app));
-        assert!(second.has_active_route_below(&app));
+            let second: RouteRef =
+                tester.update(|app| PageRouteBuilder::new(app, corner_page()).into_erased());
+            tester.update(|app| navigator_state.push(app, second.clone()));
+            tester.pump_and_settle();
+            let app = tester.cell.borrow();
+            assert!(first.is_first(&app));
+            assert!(!first.is_current(&app));
+            assert!(second.is_current(&app));
+            assert!(!second.is_first(&app));
+            assert!(second.has_active_route_below(&app));
+        });
     }
 
     /// A navigator whose every route is a plain [`PageRouteBuilder`] showing the corner page.
@@ -6499,120 +6385,123 @@ mod tests {
     /// pop's result, and a `.then` on it runs at the microtask drain — never inline.
     #[test]
     fn push_returns_a_future_that_completes_with_the_pop_result() {
-        let (cell, _restoration) = app_with_view(None);
-        let key = GlobalKey::new();
-        mount(&cell, pageless_navigator(&key));
-        let mut app = cell.borrow_mut();
-        let navigator_state = state(&key, &mut app);
-        let at = settle(&mut app, Duration::ZERO);
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            tester.pump_widget(pageless_navigator(&key));
+            let navigator_state = state(&key, tester);
+            tester.pump_and_settle();
 
-        let second: RouteRef = PageRouteBuilder::new(&mut app, corner_page()).into_erased();
-        let popped = navigator_state.push(&mut app, second);
-        let at = settle(&mut app, at);
-        assert!(!popped.is_completed(), "the route is still up");
+            let popped = tester.update(|app| {
+                let second: RouteRef = PageRouteBuilder::new(app, corner_page()).into_erased();
+                navigator_state.push(app, second)
+            });
+            tester.pump_and_settle();
+            assert!(!popped.is_completed(), "the route is still up");
 
-        let seen: Rc<Cell<Option<i32>>> = Rc::default();
-        popped.clone().then(&mut app, {
-            let seen = Rc::clone(&seen);
-            move |_app, result| {
-                seen.set(result.and_then(|value| value.downcast_ref::<i32>().copied()));
-            }
+            let seen: Rc<Cell<Option<i32>>> = Rc::default();
+            tester.update(|app| {
+                popped.clone().then(app, {
+                    let seen = Rc::clone(&seen);
+                    move |_app, result| {
+                        seen.set(result.and_then(|value| value.downcast_ref::<i32>().copied()));
+                    }
+                });
+                navigator_state.pop(app, Some(Rc::new(42)));
+                assert!(
+                    popped.is_completed(),
+                    "did_complete resolves the future within the pop"
+                );
+                assert_eq!(seen.get(), None, "a listener never runs inline");
+                app.drain_microtasks();
+            });
+            assert_eq!(seen.get(), Some(42));
+            tester.pump_and_settle();
         });
-        navigator_state.pop(&mut app, Some(Rc::new(42)));
-        assert!(
-            popped.is_completed(),
-            "did_complete resolves the future within the pop"
-        );
-        assert_eq!(seen.get(), None, "a listener never runs inline");
-        app.drain_microtasks();
-        assert_eq!(seen.get(), Some(42));
-        settle(&mut app, at);
     }
 
     /// Dart's "remove a route whose value is awaited": `removeRoute(route, 'B')` completes the
     /// future the push returned, and the continuation awaiting it resumes at the checkpoint.
     #[test]
     fn remove_route_completes_the_awaited_value() {
-        let (cell, _restoration) = app_with_view(None);
-        let key = GlobalKey::new();
-        mount(&cell, pageless_navigator(&key));
-        let mut app = cell.borrow_mut();
-        let navigator_state = state(&key, &mut app);
-        let at = settle(&mut app, Duration::ZERO);
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            tester.pump_widget(pageless_navigator(&key));
+            let navigator_state = state(&key, tester);
+            tester.pump_and_settle();
 
-        let route_a: RouteRef = PageRouteBuilder::new(&mut app, corner_page()).into_erased();
-        let page_value = navigator_state.push(&mut app, route_a.clone());
-        let at = settle(&mut app, at);
-        let awaited: Rc<Cell<Option<&'static str>>> = Rc::default();
-        app.spawn({
-            let awaited = Rc::clone(&awaited);
-            async move |_cx| {
-                let value = page_value.await;
-                awaited.set(value.and_then(|value| value.downcast_ref::<&str>().copied()));
-            }
+            let route_a: RouteRef =
+                tester.update(|app| PageRouteBuilder::new(app, corner_page()).into_erased());
+            let page_value = tester.update(|app| navigator_state.push(app, route_a.clone()));
+            tester.pump_and_settle();
+            let awaited: Rc<Cell<Option<&'static str>>> = Rc::default();
+            tester.update(|app| {
+                app.spawn({
+                    let awaited = Rc::clone(&awaited);
+                    async move |_cx| {
+                        let value = page_value.await;
+                        awaited.set(value.and_then(|value| value.downcast_ref::<&str>().copied()));
+                    }
+                })
+            });
+            tester.cell.checkpoint();
+            assert_eq!(
+                awaited.get(),
+                None,
+                "the continuation is parked on the future"
+            );
+
+            tester.update(|app| {
+                navigator_state.remove_route(app, route_a.handle(), Some(Rc::new("B")));
+            });
+            assert_eq!(
+                awaited.get(),
+                None,
+                "the continuation resumes only at the checkpoint"
+            );
+            tester.cell.checkpoint();
+            assert_eq!(awaited.get(), Some("B"));
+            tester.pump_and_settle();
         });
-        drop(app);
-        cell.checkpoint();
-        assert_eq!(
-            awaited.get(),
-            None,
-            "the continuation is parked on the future"
-        );
-
-        let mut app = cell.borrow_mut();
-        navigator_state.remove_route(&mut app, route_a.handle(), Some(Rc::new("B")));
-        settle(&mut app, at);
-        assert_eq!(
-            awaited.get(),
-            None,
-            "the continuation resumes only at the checkpoint"
-        );
-        drop(app);
-        cell.checkpoint();
-        assert_eq!(awaited.get(), Some("B"));
     }
 
     /// Not a Dart case: the pointer listener keeps the disposed state readable, as Dart's
     /// tear-off keeps it alive, until the pointer ends.
     #[test]
     fn a_pointer_that_ends_after_its_navigator_is_disposed_ends_on_the_disposed_state() {
-        let (cell, _restoration) = app_with_view(None);
-        let key = GlobalKey::new();
-        mount(&cell, pageless_navigator(&key));
-        let mut app = cell.borrow_mut();
-        let navigator_state = state(&key, &mut app);
-        let at = settle(&mut app, Duration::ZERO);
-        let position = waft_embedder::Offset::new(5.0, 5.0);
-        GestureBinding::instance(&mut app).handle_pointer_event(
-            &mut app,
-            waft_gestures::PointerEvent::Down(waft_gestures::PointerDownEvent {
-                pointer: 1,
-                position,
-                kind: waft_embedder::PointerDeviceKind::Touch,
-                ..waft_gestures::PointerDownEvent::default()
-            }),
-        );
-        app.drain_microtasks();
-        assert!(app.get(navigator_state).active_pointers.contains(&1));
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            tester.pump_widget(pageless_navigator(&key));
+            let navigator_state = state(&key, tester);
+            tester.pump_and_settle();
+            let mut pointer = TestPointer::touch(1);
+            tester.down(&mut pointer, waft_embedder::Offset::new(5.0, 5.0));
+            assert!(
+                tester
+                    .cell
+                    .borrow()
+                    .get(navigator_state)
+                    .active_pointers
+                    .contains(&1)
+            );
 
-        let binding = crate::binding::WidgetsBinding::instance(&mut app);
-        attach(binding, &mut app, SizedBox::new().into_widget());
-        settle(&mut app, at);
-        assert!(
-            app.is_disposed(navigator_state),
-            "the navigator was disposed"
-        );
+            tester.pump_widget(SizedBox::new());
+            tester.pump_and_settle();
+            assert!(
+                tester.cell.borrow().is_disposed(navigator_state),
+                "the navigator was disposed"
+            );
 
-        GestureBinding::instance(&mut app).handle_pointer_event(
-            &mut app,
-            waft_gestures::PointerEvent::Up(waft_gestures::PointerUpEvent {
-                pointer: 1,
-                position,
-                kind: waft_embedder::PointerDeviceKind::Touch,
-                ..waft_gestures::PointerUpEvent::default()
-            }),
-        );
-        assert!(!app.get(navigator_state).active_pointers.contains(&1));
-        app.drain_microtasks();
+            // Kept, as Dart's local keeps the state once the pointer's listener lets it go.
+            let navigator_state = navigator_state.keep(&tester.cell.borrow());
+            tester.up(&pointer);
+            assert!(
+                !tester
+                    .cell
+                    .borrow()
+                    .get(&navigator_state)
+                    .active_pointers
+                    .contains(&1)
+            );
+        });
     }
 }

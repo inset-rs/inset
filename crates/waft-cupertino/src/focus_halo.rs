@@ -199,8 +199,9 @@ mod tests {
         Directionality, FocusNode, FocusNodeRef, GlobalKey, SizedBox, UnfocusDisposition,
     };
 
+    use waft_widgets::testing::{WidgetTester, test_widgets};
+
     use super::*;
-    use crate::test_support::{build, pump, test_cell};
 
     fn find<T: RenderObject>(app: &App, node: AnyRenderObject) -> Option<RenderHandle<T>> {
         if let Some(found) = node.downcast::<T>(app) {
@@ -215,15 +216,12 @@ mod tests {
         found
     }
 
-    fn halo_side(app: &mut App, key: &GlobalKey) -> BorderSide {
-        let root = key
-            .current_context(app)
-            .expect("the halo mounted")
-            .find_render_object(app)
-            .expect("the halo has been laid out");
-        let decorated = find::<RenderDecoratedBox>(app, root).expect("the foreground decoration");
+    fn halo_side(tester: &WidgetTester, key: &GlobalKey) -> BorderSide {
+        let root = tester.render_object(key);
+        let app = tester.cell.borrow();
+        let decorated = find::<RenderDecoratedBox>(&app, root).expect("the foreground decoration");
         decorated
-            .decoration(app)
+            .decoration(&app)
             .as_any()
             .downcast_ref::<ShapeDecoration>()
             .expect("a ShapeDecoration")
@@ -236,37 +234,31 @@ mod tests {
 
     #[test]
     fn a_halo_outlines_its_shape_while_a_focus_node_inside_it_has_focus() {
-        let cell = test_cell();
-        let mut app = cell.borrow_mut();
-        let key = GlobalKey::new();
-        let node: FocusNodeRef = FocusNode::new(&mut app).into_erased();
-        drop(app);
-        build(
-            &cell,
-            Directionality::new(
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            let node: FocusNodeRef = tester.update(|app| FocusNode::new(app).into_erased());
+            tester.pump_widget(Directionality::new(
                 TextDirection::Ltr,
                 CupertinoFocusHalo::with_rounded_superellipse(
                     BorderRadius::circular(10.0).into(),
                     Focus::new(SizedBox::square(Some(40.0))).focus_node(node.clone()),
                 )
                 .key(key.clone().into()),
-            )
-            .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        assert_eq!(halo_side(&mut app, &key), BorderSide::NONE);
+            ));
+            assert_eq!(halo_side(tester, &key), BorderSide::NONE);
 
-        node.request_focus(&mut app, None);
-        pump(&mut app, std::time::Duration::ZERO);
-        let side = halo_side(&mut app, &key);
-        assert_eq!(side.width, 3.5);
-        assert_eq!(
-            side.color,
-            CupertinoFocusHaloState::effective_focus_outline_color()
-        );
+            tester.update(|app| node.request_focus(app, None));
+            tester.pump_and_settle();
+            let side = halo_side(tester, &key);
+            assert_eq!(side.width, 3.5);
+            assert_eq!(
+                side.color,
+                CupertinoFocusHaloState::effective_focus_outline_color()
+            );
 
-        node.unfocus(&mut app, UnfocusDisposition::Scope);
-        pump(&mut app, std::time::Duration::ZERO);
-        assert_eq!(halo_side(&mut app, &key), BorderSide::NONE);
+            tester.update(|app| node.unfocus(app, UnfocusDisposition::Scope));
+            tester.pump_and_settle();
+            assert_eq!(halo_side(tester, &key), BorderSide::NONE);
+        });
     }
 }

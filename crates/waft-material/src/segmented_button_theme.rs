@@ -253,6 +253,8 @@ mod tests {
         Center, Icon, IconData, WidgetState, WidgetStateProperty, WidgetStatePropertyRef,
     };
 
+    use waft_widgets::testing::{WidgetTester, test_widgets};
+
     use super::*;
     use crate::colors::Colors;
     use crate::icons::Icons;
@@ -262,9 +264,8 @@ mod tests {
         argb, ink_rect_colors, label, mouse_at, numbered, text_center,
     };
     use crate::segmented_button::{ButtonSegment, SegmentedButton};
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::material_app;
     use crate::theme_data::ThemeData;
-    use crate::tooltip::tests::tester;
 
     #[test]
     fn segmented_button_theme_data_copy_with_and_equality_basics() {
@@ -398,12 +399,11 @@ mod tests {
     // 'With no other configuration, defaults are used'
     #[test]
     fn with_no_other_configuration_the_defaults_are_used() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = ThemeData::new(&tester.cell.borrow());
             let colors = theme.color_scheme.clone();
             pump_three(
-                &mut tester,
+                tester,
                 theme,
                 |home| home,
                 SegmentedButton::new(three_segments(), vec![2])
@@ -412,7 +412,7 @@ mod tests {
 
             // Test first segment, should be enabled
             check_segment(
-                &tester,
+                tester,
                 "1",
                 Expected {
                     animation_duration: false,
@@ -423,7 +423,7 @@ mod tests {
             );
             // Test second segment, should be enabled and selected
             check_segment(
-                &tester,
+                tester,
                 "2",
                 Expected {
                     animation_duration: false,
@@ -434,7 +434,7 @@ mod tests {
             );
             // Test last segment, should be disabled
             check_segment(
-                &tester,
+                tester,
                 "3",
                 Expected {
                     animation_duration: false,
@@ -469,13 +469,12 @@ mod tests {
     // 'ThemeData.segmentedButtonTheme overrides defaults'
     #[test]
     fn theme_data_segmented_button_theme_overrides_the_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = ThemeData::builder()
                 .segmented_button_theme(global_theme_data())
                 .build(&tester.cell.borrow());
             pump_three(
-                &mut tester,
+                tester,
                 theme,
                 |home| home,
                 SegmentedButton::new(three_segments(), vec![2])
@@ -483,7 +482,7 @@ mod tests {
             );
 
             check_segment(
-                &tester,
+                tester,
                 "1",
                 Expected {
                     animation_duration: false,
@@ -493,7 +492,7 @@ mod tests {
                 },
             );
             check_segment(
-                &tester,
+                tester,
                 "2",
                 Expected {
                     animation_duration: false,
@@ -503,7 +502,7 @@ mod tests {
                 },
             );
             check_segment(
-                &tester,
+                tester,
                 "3",
                 Expected {
                     animation_duration: false,
@@ -518,13 +517,12 @@ mod tests {
     // 'SegmentedButtonTheme overrides ThemeData and defaults'
     #[test]
     fn segmented_button_theme_overrides_theme_data_and_the_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = ThemeData::builder()
                 .segmented_button_theme(global_theme_data())
                 .build(&tester.cell.borrow());
             pump_three(
-                &mut tester,
+                tester,
                 theme,
                 |home| SegmentedButtonTheme::new(segmented_theme_data(), home).into_widget(),
                 SegmentedButton::new(three_segments(), vec![2])
@@ -532,7 +530,7 @@ mod tests {
             );
 
             check_segment(
-                &tester,
+                tester,
                 "1",
                 Expected {
                     animation_duration: true,
@@ -542,7 +540,7 @@ mod tests {
                 },
             );
             check_segment(
-                &tester,
+                tester,
                 "2",
                 Expected {
                     animation_duration: true,
@@ -552,7 +550,7 @@ mod tests {
                 },
             );
             check_segment(
-                &tester,
+                tester,
                 "3",
                 Expected {
                     animation_duration: true,
@@ -567,13 +565,12 @@ mod tests {
     // 'Widget parameters overrides SegmentedTheme, ThemeData and defaults'
     #[test]
     fn widget_parameters_override_the_segmented_theme_theme_data_and_the_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = ThemeData::builder()
                 .segmented_button_theme(global_theme_data())
                 .build(&tester.cell.borrow());
             pump_three(
-                &mut tester,
+                tester,
                 theme,
                 |home| SegmentedButtonTheme::new(segmented_theme_data(), home).into_widget(),
                 SegmentedButton::new(three_segments(), vec![2])
@@ -587,7 +584,7 @@ mod tests {
             );
 
             check_segment(
-                &tester,
+                tester,
                 "1",
                 Expected {
                     animation_duration: true,
@@ -597,7 +594,7 @@ mod tests {
                 },
             );
             check_segment(
-                &tester,
+                tester,
                 "2",
                 Expected {
                     animation_duration: true,
@@ -607,7 +604,7 @@ mod tests {
                 },
             );
             check_segment(
-                &tester,
+                tester,
                 "3",
                 Expected {
                     animation_duration: true,
@@ -623,8 +620,7 @@ mod tests {
     // color'
     #[test]
     fn the_theme_style_from_overlay_color_overrides_the_default_overlay_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let overlay_color = Color::new(0xffff0000);
             let theme = ThemeData::builder()
                 .segmented_button_theme(
@@ -640,7 +636,7 @@ mod tests {
                 ButtonSegment::new(1).label(label("Option 2")),
             ];
             pump_three(
-                &mut tester,
+                tester,
                 theme,
                 |home| home,
                 SegmentedButton::new(segments, vec![1]).on_selection_changed(|_app, _selected| {}),
@@ -649,22 +645,22 @@ mod tests {
             let press = argb(overlay_color.with_opacity(0.1));
 
             // Hovered selected segment,
-            let center = text_center(&tester, "Option 1");
-            let mut gesture = mouse_at(&mut tester, center);
+            let center = text_center(tester, "Option 1");
+            let mut gesture = mouse_at(tester, center);
             tester.pump_and_settle();
-            assert!(ink_rect_colors(&tester).contains(&hover));
+            assert!(ink_rect_colors(tester).contains(&hover));
 
             // Hovered unselected segment,
-            let center = text_center(&tester, "Option 2");
+            let center = text_center(tester, "Option 2");
             tester.move_to(&mut gesture, center, false);
             tester.pump_and_settle();
-            assert!(ink_rect_colors(&tester).contains(&hover));
+            assert!(ink_rect_colors(tester).contains(&hover));
 
             // Highlighted unselected segment (pressed).
-            let center = text_center(&tester, "Option 1");
+            let center = text_center(tester, "Option 1");
             tester.down(&mut gesture, center);
             tester.pump_and_settle();
-            let colors = ink_rect_colors(&tester);
+            let colors = ink_rect_colors(tester);
             assert!(colors.contains(&hover) && colors.contains(&press));
             // Remove pressed and hovered states,
             tester.up(&gesture);
@@ -673,10 +669,10 @@ mod tests {
             tester.pump_and_settle();
 
             // Highlighted selected segment (pressed)
-            let center = text_center(&tester, "Option 2");
+            let center = text_center(tester, "Option 2");
             tester.down(&mut gesture, center);
             tester.pump_and_settle();
-            let colors = ink_rect_colors(&tester);
+            let colors = ink_rect_colors(tester);
             assert!(colors.contains(&hover) && colors.contains(&press));
             // Remove pressed and hovered states,
             tester.up(&gesture);
@@ -687,12 +683,12 @@ mod tests {
             // Focused unselected segment.
             tester.send_key_event(PhysicalKeyboardKey::TAB, LogicalKeyboardKey::TAB);
             tester.pump_and_settle();
-            assert!(ink_rect_colors(&tester).contains(&press));
+            assert!(ink_rect_colors(tester).contains(&press));
 
             // Focused selected segment.
             tester.send_key_event(PhysicalKeyboardKey::TAB, LogicalKeyboardKey::TAB);
             tester.pump_and_settle();
-            assert!(ink_rect_colors(&tester).contains(&press));
+            assert!(ink_rect_colors(tester).contains(&press));
         });
     }
 }

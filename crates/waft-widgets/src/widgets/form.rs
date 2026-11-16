@@ -1641,182 +1641,60 @@ pub enum AutovalidateMode {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::{Cell, RefCell, RefMut};
-    use std::time::Duration;
+    use std::cell::{Cell, RefCell};
     use waft_foundation::OptionRetained;
     use waft_foundation::Ref;
 
-    use waft_embedder::{Restoration, Size, TargetPlatform, TextDirection};
-    use waft_foundation::{AppCell, UniqueKey, ValueKey};
-    use waft_services::{RestorationMap, RestorationUpdate};
-    use waft_test::{TestPlatform, TestView};
+    use waft_embedder::{Size, TextDirection};
+    use waft_foundation::{UniqueKey, ValueKey};
+    use waft_services::RestorationMap;
 
     use super::*;
-    use crate::binding::WidgetsBinding;
-    use crate::framework::StatelessWidget;
-    use crate::framework::{AnyElement, GlobalKey, downcast_widget};
-    use crate::test_harness::{platform_view, pump_every_view};
+    use crate::framework::{GlobalKey, downcast_widget};
+    use crate::testing::{WidgetTester, test_widgets};
     use crate::widgets::basic::{Center, Column, Directionality, SizedBox, StatefulBuilder};
     use crate::widgets::focus_manager::{AnyFocusNode, FocusNodeRef};
     use crate::widgets::restoration::RootRestorationScope;
     use crate::widgets::scroll_view::ListView;
+    use crate::widgets::text::Text;
 
-    // ---- flutter_test's `WidgetTester`, as far as these tests use it ----
-
-    /// A host that answers `Restoration::get` with what it was handed and records every
-    /// `Restoration::put`.
-    struct RecordingRestoration {
-        stored: RefCell<Option<RestorationUpdate>>,
-        puts: RefCell<Vec<RestorationMap>>,
+    /// Dart's `tester.pumpWidget(widget)` under the left-to-right `Directionality` the
+    /// `MaterialApp` of Dart's cases gives it.
+    fn pump_ltr(tester: &mut WidgetTester, widget: WidgetRef) {
+        tester.pump_widget(Directionality::new(TextDirection::Ltr, widget));
     }
 
-    impl Restoration for RecordingRestoration {
-        fn get(&self) -> Option<RestorationUpdate> {
-            self.stored.borrow().clone()
-        }
-
-        fn put(&self, data: RestorationMap) {
-            self.puts.borrow_mut().push(data);
-        }
+    /// How many onstage `Text`s show `text`: Dart's `find.text(text)`.
+    fn count_text(tester: &WidgetTester, text: &str) -> usize {
+        tester.find_onstage_text(text).len()
     }
 
-    struct WidgetTester {
-        cell: Rc<AppCell>,
-        restoration: Rc<RecordingRestoration>,
-        now: Duration,
+    fn form_state(tester: &WidgetTester, key: &GlobalKey) -> Handle<FormState> {
+        key.current_state::<FormState>(&tester.cell.borrow())
+            .expect("the form is mounted")
     }
 
-    impl WidgetTester {
-        fn new() -> WidgetTester {
-            WidgetTester::restoring(None)
-        }
-
-        /// An app whose host restores `data`, as `restoreFrom` hands it.
-        fn restoring(data: Option<RestorationMap>) -> WidgetTester {
-            let restoration = Rc::new(RecordingRestoration {
-                stored: RefCell::new(Some(RestorationUpdate {
-                    enabled: true,
-                    data,
-                })),
-                puts: RefCell::new(Vec::new()),
-            });
-            let platform = TestPlatform::new()
-                .on(TargetPlatform::Android)
-                .with_view(Rc::new(TestView::new(800.0, 600.0)))
-                .with_restoration(restoration.clone());
-            WidgetTester {
-                cell: AppCell::with_platform(Rc::new(platform)),
-                restoration,
-                now: Duration::ZERO,
-            }
-        }
-
-        fn app(&self) -> RefMut<'_, App> {
-            self.cell.borrow_mut()
-        }
-
-        /// `tester.pumpWidget`: attaches `widget` as the root, then one frame.
-        fn pump_widget(&mut self, widget: WidgetRef) {
-            let widget = Directionality::new(TextDirection::Ltr, widget).into_widget();
-            {
-                let mut app = self.app();
-                let view = platform_view(&app);
-                let binding = WidgetsBinding::instance(&mut app);
-                binding.attach_root_widget(
-                    &mut app,
-                    crate::view::View::new(view, widget).into_widget(),
-                );
-            }
-            self.pump();
-        }
-
-        /// `tester.pump`: one frame of every view, asked for or not.
-        fn pump(&mut self) {
-            self.cell.elapse(Duration::ZERO);
-            {
-                let mut app = self.app();
-                pump_every_view(&mut app, self.now);
-                app.drain_microtasks();
-            }
-            self.cell.checkpoint();
-        }
-
-        /// The restoration data the host was last handed: `getRestorationData`.
-        fn restoration_data(&self) -> Option<RestorationMap> {
-            self.restoration.puts.borrow().last().cloned()
-        }
-
-        /// Every mounted element, in tree order.
-        fn elements(&self) -> Vec<AnyElement> {
-            let mut app = self.cell.borrow_mut();
-            let root = WidgetsBinding::instance(&mut app)
-                .root_element(&app)
-                .expect("a mounted tree");
-            let mut found = Vec::new();
-            let mut stack = vec![root];
-            while let Some(element) = stack.pop() {
-                found.push(element);
-                let mut children = Vec::new();
-                element.visit_children(&app, &mut |child| children.push(child));
-                stack.extend(children.into_iter().rev());
-            }
-            found
-        }
-
-        /// How many mounted [`Shown`]s show `text`: `find.text(text)`.
-        fn count_text(&self, text: &str) -> usize {
-            let elements = self.elements();
-            let app = self.cell.borrow();
-            elements
-                .into_iter()
-                .filter(|element| {
-                    downcast_widget::<Shown>(&**element.widget(&app))
-                        .is_some_and(|widget| widget.0 == text)
-                })
-                .count()
-        }
-
-        fn form(&self, key: &GlobalKey) -> Handle<FormState> {
-            key.current_state::<FormState>(&self.app())
-                .expect("the form is mounted")
-        }
-
-        fn field<T: Clone + 'static>(&self, key: &GlobalKey) -> Handle<FormFieldState<T>> {
-            key.current_state::<FormFieldState<T>>(&self.app())
-                .expect("the field is mounted")
-        }
-
-        /// `tester.enterText` on a field: the value its text field would hand `didChange`.
-        fn enter_text(&self, key: &GlobalKey, text: &str) {
-            let field = self.field::<String>(key);
-            field.did_change(&mut self.app(), Some(text.to_string()));
-        }
+    fn field_state<T: Clone + 'static>(
+        tester: &WidgetTester,
+        key: &GlobalKey,
+    ) -> Handle<FormFieldState<T>> {
+        key.current_state::<FormFieldState<T>>(&tester.cell.borrow())
+            .expect("the field is mounted")
     }
 
-    /// A string on screen, where flutter_test's `find.text` looks: a `Text` without the fonts
-    /// a `Text` needs to lay out.
-    #[derive(Debug)]
-    struct Shown(String);
-
-    impl Shown {
-        fn new(text: impl Into<String>) -> Shown {
-            Shown(text.into())
-        }
-    }
-
-    impl StatelessWidget for Shown {
-        fn build(&self, _app: &mut App, _context: BuildContext) -> WidgetRef {
-            SizedBox::shrink().into_widget()
-        }
+    /// `tester.enterText` on a field: the value its text field would hand `didChange`.
+    fn enter_text(tester: &WidgetTester, key: &GlobalKey, text: &str) {
+        let field = field_state::<String>(tester, key);
+        field.did_change(&mut tester.cell.borrow_mut(), Some(text.to_string()));
     }
 
     // ---- a minimal `TextFormField`: a `FormField<String>` showing its value and error ----
 
     fn show_field(app: &mut App, field: AnyFormFieldState<String>) -> WidgetRef {
         let mut children =
-            vec![Shown::new(field.value(app).cloned().unwrap_or_default()).into_widget()];
+            vec![Text::new(field.value(app).cloned().unwrap_or_default()).into_widget()];
         if let Some(error_text) = field.error_text(app) {
-            children.push(Shown::new(error_text).into_widget());
+            children.push(Text::new(error_text).into_widget());
         }
         Column::new().children(children).into_widget()
     }
@@ -1844,94 +1722,99 @@ mod tests {
 
     #[test]
     fn on_saved_is_called_with_the_value_the_field_holds() {
-        let mut tester = WidgetTester::new();
-        let form_key = GlobalKey::new();
-        let field_key = GlobalKey::new();
-        let field_value = Rc::new(RefCell::new(None));
-        let saved = Rc::clone(&field_value);
-        tester.pump_widget(
-            Form::new(text_field(&field_key).on_saved(move |_app, value| {
-                *saved.borrow_mut() = value;
-            }))
-            .key(form_key.clone().into())
-            .into_widget(),
-        );
+        test_widgets(|tester| {
+            let form_key = GlobalKey::new();
+            let field_key = GlobalKey::new();
+            let field_value = Rc::new(RefCell::new(None));
+            let saved = Rc::clone(&field_value);
+            pump_ltr(
+                tester,
+                Form::new(text_field(&field_key).on_saved(move |_app, value| {
+                    *saved.borrow_mut() = value;
+                }))
+                .key(form_key.clone().into())
+                .into_widget(),
+            );
 
-        assert_eq!(*field_value.borrow(), None);
+            assert_eq!(*field_value.borrow(), None);
 
-        for test_value in ["Test", ""] {
-            tester.enter_text(&field_key, test_value);
-            let form = tester.form(&form_key);
-            form.save(&mut tester.app());
-            // Pumping is unnecessary because callback happens regardless of frames.
-            assert_eq!(field_value.borrow().as_deref(), Some(test_value));
-        }
+            for test_value in ["Test", ""] {
+                enter_text(tester, &field_key, test_value);
+                let form = form_state(tester, &form_key);
+                form.save(&mut tester.cell.borrow_mut());
+                // Pumping is unnecessary because callback happens regardless of frames.
+                assert_eq!(field_value.borrow().as_deref(), Some(test_value));
+            }
+        });
     }
 
     #[test]
     fn on_reset_is_called_when_the_form_resets() {
-        let mut tester = WidgetTester::new();
-        let form_key = GlobalKey::new();
-        let reset_called = Rc::new(Cell::new(false));
-        let called = Rc::clone(&reset_called);
-        tester.pump_widget(
-            Form::new(
-                FormField::<String>::new(|_app, _field| SizedBox::shrink().into_widget())
-                    .on_reset(move |_app| called.set(true)),
-            )
-            .key(form_key.clone().into())
-            .into_widget(),
-        );
+        test_widgets(|tester| {
+            let form_key = GlobalKey::new();
+            let reset_called = Rc::new(Cell::new(false));
+            let called = Rc::clone(&reset_called);
+            pump_ltr(
+                tester,
+                Form::new(
+                    FormField::<String>::new(|_app, _field| SizedBox::shrink().into_widget())
+                        .on_reset(move |_app| called.set(true)),
+                )
+                .key(form_key.clone().into())
+                .into_widget(),
+            );
 
-        assert!(!reset_called.get());
+            assert!(!reset_called.get());
 
-        let form = tester.form(&form_key);
-        form.reset(&mut tester.app());
-        tester.pump();
+            let form = form_state(tester, &form_key);
+            form.reset(&mut tester.cell.borrow_mut());
+            tester.pump();
 
-        assert!(reset_called.get());
+            assert!(reset_called.get());
+        });
     }
 
     #[test]
     fn the_validator_sets_the_error_text_only_when_validate_is_called() {
-        let mut tester = WidgetTester::new();
-        let form_key = GlobalKey::new();
-        let field_key = GlobalKey::new();
-        let error_text = |value: Option<&String>| {
-            Some(format!("{}/error", value.map(String::as_str).unwrap_or("")))
-        };
-        let builder = |autovalidate_mode| {
-            Form::new(text_field(&field_key).validator(move |_app, value| error_text(value)))
-                .key(form_key.clone().into())
-                .autovalidate_mode(autovalidate_mode)
-                .into_widget()
-        };
+        test_widgets(|tester| {
+            let form_key = GlobalKey::new();
+            let field_key = GlobalKey::new();
+            let error_text = |value: Option<&String>| {
+                Some(format!("{}/error", value.map(String::as_str).unwrap_or("")))
+            };
+            let builder = |autovalidate_mode| {
+                Form::new(text_field(&field_key).validator(move |_app, value| error_text(value)))
+                    .key(form_key.clone().into())
+                    .autovalidate_mode(autovalidate_mode)
+                    .into_widget()
+            };
 
-        // Start off not autovalidating.
-        tester.pump_widget(builder(AutovalidateMode::Disabled));
+            // Start off not autovalidating.
+            pump_ltr(tester, builder(AutovalidateMode::Disabled));
 
-        for test_value in ["Test", ""] {
-            let expected = error_text(Some(&test_value.to_string())).unwrap();
-            let form = tester.form(&form_key);
-            form.reset(&mut tester.app());
-            tester.pump_widget(builder(AutovalidateMode::Disabled));
-            tester.enter_text(&field_key, test_value);
-            tester.pump();
+            for test_value in ["Test", ""] {
+                let expected = error_text(Some(&test_value.to_string())).unwrap();
+                let form = form_state(tester, &form_key);
+                form.reset(&mut tester.cell.borrow_mut());
+                pump_ltr(tester, builder(AutovalidateMode::Disabled));
+                enter_text(tester, &field_key, test_value);
+                tester.pump();
 
-            // We have to manually validate if we're not autovalidating.
-            assert_eq!(tester.count_text(&expected), 0);
-            form.validate(&mut tester.app());
-            tester.pump();
-            assert_eq!(tester.count_text(&expected), 1);
+                // We have to manually validate if we're not autovalidating.
+                assert_eq!(count_text(tester, &expected), 0);
+                form.validate(&mut tester.cell.borrow_mut());
+                tester.pump();
+                assert_eq!(count_text(tester, &expected), 1);
 
-            // Try again with autovalidation. Should validate immediately.
-            form.reset(&mut tester.app());
-            tester.pump_widget(builder(AutovalidateMode::Always));
-            tester.enter_text(&field_key, test_value);
-            tester.pump();
+                // Try again with autovalidation. Should validate immediately.
+                form.reset(&mut tester.cell.borrow_mut());
+                pump_ltr(tester, builder(AutovalidateMode::Always));
+                enter_text(tester, &field_key, test_value);
+                tester.pump();
 
-            assert_eq!(tester.count_text(&expected), 1);
-        }
+                assert_eq!(count_text(tester, &expected), 1);
+            }
+        });
     }
 
     fn valid_string_validator(value: Option<&String>) -> Option<String> {
@@ -1940,188 +1823,196 @@ mod tests {
 
     #[test]
     fn is_valid_is_true_for_fields_that_are_valid() {
-        let mut tester = WidgetTester::new();
-        let field_key1 = GlobalKey::new();
-        let field_key2 = GlobalKey::new();
-        let field = |key: &GlobalKey| {
-            text_field(key)
-                .initial_value("Valid string".to_string())
-                .validator(|_app, value| valid_string_validator(value))
-                .autovalidate_mode(AutovalidateMode::Always)
-                .into_widget()
-        };
-        tester.pump_widget(
-            Form::new(ListView::new().children([field(&field_key1), field(&field_key2)]))
-                .into_widget(),
-        );
+        test_widgets(|tester| {
+            let field_key1 = GlobalKey::new();
+            let field_key2 = GlobalKey::new();
+            let field = |key: &GlobalKey| {
+                text_field(key)
+                    .initial_value("Valid string".to_string())
+                    .validator(|_app, value| valid_string_validator(value))
+                    .autovalidate_mode(AutovalidateMode::Always)
+                    .into_widget()
+            };
+            pump_ltr(
+                tester,
+                Form::new(ListView::new().children([field(&field_key1), field(&field_key2)]))
+                    .into_widget(),
+            );
 
-        let (field1, field2) = (
-            tester.field::<String>(&field_key1),
-            tester.field::<String>(&field_key2),
-        );
-        assert!(field1.is_valid(&mut tester.app()));
-        assert!(field2.is_valid(&mut tester.app()));
+            let (field1, field2) = (
+                field_state::<String>(tester, &field_key1),
+                field_state::<String>(tester, &field_key2),
+            );
+            assert!(field1.is_valid(&mut tester.cell.borrow_mut()));
+            assert!(field2.is_valid(&mut tester.cell.borrow_mut()));
+        });
     }
 
     #[test]
     fn is_valid_is_false_for_an_invalid_field_and_does_not_change_its_error_display() {
-        let mut tester = WidgetTester::new();
-        let field_key1 = GlobalKey::new();
-        let field_key2 = GlobalKey::new();
-        let field = |key: &GlobalKey, initial_value: &str| {
-            text_field(key)
-                .initial_value(initial_value.to_string())
-                .validator(|_app, value| valid_string_validator(value))
-                .autovalidate_mode(AutovalidateMode::Disabled)
-                .into_widget()
-        };
-        tester.pump_widget(
-            Form::new(
-                ListView::new()
-                    .children([field(&field_key1, "Valid string"), field(&field_key2, "")]),
-            )
-            .into_widget(),
-        );
+        test_widgets(|tester| {
+            let field_key1 = GlobalKey::new();
+            let field_key2 = GlobalKey::new();
+            let field = |key: &GlobalKey, initial_value: &str| {
+                text_field(key)
+                    .initial_value(initial_value.to_string())
+                    .validator(|_app, value| valid_string_validator(value))
+                    .autovalidate_mode(AutovalidateMode::Disabled)
+                    .into_widget()
+            };
+            pump_ltr(
+                tester,
+                Form::new(
+                    ListView::new()
+                        .children([field(&field_key1, "Valid string"), field(&field_key2, "")]),
+                )
+                .into_widget(),
+            );
 
-        let (field1, field2) = (
-            tester.field::<String>(&field_key1),
-            tester.field::<String>(&field_key2),
-        );
-        assert!(field1.is_valid(&mut tester.app()));
-        assert!(!field2.is_valid(&mut tester.app()));
-        assert!(!field2.has_error(&tester.app()));
+            let (field1, field2) = (
+                field_state::<String>(tester, &field_key1),
+                field_state::<String>(tester, &field_key2),
+            );
+            assert!(field1.is_valid(&mut tester.cell.borrow_mut()));
+            assert!(!field2.is_valid(&mut tester.cell.borrow_mut()));
+            assert!(!field2.has_error(&tester.cell.borrow_mut()));
+        });
     }
 
     #[test]
     fn validate_granularly_returns_a_set_of_all_and_only_the_invalid_fields() {
-        let mut tester = WidgetTester::new();
-        let form_key = GlobalKey::new();
-        let valid_fields_key = UniqueKey::new();
-        let invalid_fields_key = UniqueKey::new();
-        let field = |key: UniqueKey, initial_value: &str| {
-            FormField::new(show_field)
-                .key(key.into())
-                .initial_value(initial_value.to_string())
-                .validator(|_app, value| valid_string_validator(value))
-                .autovalidate_mode(AutovalidateMode::Disabled)
-                .into_widget()
-        };
-        tester.pump_widget(
-            Form::new(ListView::new().children([
-                field(valid_fields_key, "Valid string"),
-                field(invalid_fields_key, "Invalid string"),
-                field(invalid_fields_key, "Invalid string"),
-            ]))
-            .key(form_key.clone().into())
-            .into_widget(),
-        );
+        test_widgets(|tester| {
+            let form_key = GlobalKey::new();
+            let valid_fields_key = UniqueKey::new();
+            let invalid_fields_key = UniqueKey::new();
+            let field = |key: UniqueKey, initial_value: &str| {
+                FormField::new(show_field)
+                    .key(key.into())
+                    .initial_value(initial_value.to_string())
+                    .validator(|_app, value| valid_string_validator(value))
+                    .autovalidate_mode(AutovalidateMode::Disabled)
+                    .into_widget()
+            };
+            pump_ltr(
+                tester,
+                Form::new(ListView::new().children([
+                    field(valid_fields_key, "Valid string"),
+                    field(invalid_fields_key, "Invalid string"),
+                    field(invalid_fields_key, "Invalid string"),
+                ]))
+                .key(form_key.clone().into())
+                .into_widget(),
+            );
 
-        let form = tester.form(&form_key);
-        let validation_result = form.validate_granularly(&mut tester.app());
+            let form = form_state(tester, &form_key);
+            let validation_result = form.validate_granularly(&mut tester.cell.borrow_mut());
 
-        let app = tester.app();
-        let with_key = |key: UniqueKey| {
-            let key = KeyRef::from(key);
-            validation_result
-                .iter()
-                .filter(|field| field.context(&app).widget(&app).key() == Some(&key))
-                .count()
-        };
-        assert_eq!(validation_result.len(), 2);
-        assert_eq!(with_key(invalid_fields_key), 2);
-        assert_eq!(with_key(valid_fields_key), 0);
+            let app = tester.cell.borrow_mut();
+            let with_key = |key: UniqueKey| {
+                let key = KeyRef::from(key);
+                validation_result
+                    .iter()
+                    .filter(|field| field.context(&app).widget(&app).key() == Some(&key))
+                    .count()
+            };
+            assert_eq!(validation_result.len(), 2);
+            assert_eq!(with_key(invalid_fields_key), 2);
+            assert_eq!(with_key(valid_fields_key), 0);
+        });
     }
 
     #[test]
     fn multiple_fields_communicate() {
-        let mut tester = WidgetTester::new();
-        let form_key = GlobalKey::new();
-        let field_key = GlobalKey::new();
-        let second_key = GlobalKey::new();
-        let read_key = field_key.clone();
-        // Input 2's validator depends on a input 1's value.
-        let builder = || {
-            let read_key = read_key.clone();
-            Form::new(
-                ListView::new().children([
-                    text_field(&field_key).into_widget(),
-                    text_field(&second_key)
-                        .validator(move |app, _input| {
-                            let field = read_key
-                                .current_state::<FormFieldState<String>>(app)
-                                .expect("the first field is mounted");
-                            Some(format!(
-                                "{}/error",
-                                field.value(app).cloned().unwrap_or_default()
-                            ))
-                        })
-                        .into_widget(),
-                ]),
-            )
-            .key(form_key.clone().into())
-            .autovalidate_mode(AutovalidateMode::Always)
-            .into_widget()
-        };
-        tester.pump_widget(builder());
+        test_widgets(|tester| {
+            let form_key = GlobalKey::new();
+            let field_key = GlobalKey::new();
+            let second_key = GlobalKey::new();
+            let read_key = field_key.clone();
+            // Input 2's validator depends on a input 1's value.
+            let builder = || {
+                let read_key = read_key.clone();
+                Form::new(
+                    ListView::new().children([
+                        text_field(&field_key).into_widget(),
+                        text_field(&second_key)
+                            .validator(move |app, _input| {
+                                let field = read_key
+                                    .current_state::<FormFieldState<String>>(app)
+                                    .expect("the first field is mounted");
+                                Some(format!(
+                                    "{}/error",
+                                    field.value(app).cloned().unwrap_or_default()
+                                ))
+                            })
+                            .into_widget(),
+                    ]),
+                )
+                .key(form_key.clone().into())
+                .autovalidate_mode(AutovalidateMode::Always)
+                .into_widget()
+            };
+            pump_ltr(tester, builder());
 
-        for test_value in ["Test", ""] {
-            tester.enter_text(&field_key, test_value);
-            tester.pump();
+            for test_value in ["Test", ""] {
+                enter_text(tester, &field_key, test_value);
+                tester.pump();
 
-            // Check for a new Text widget with our error text.
-            assert_eq!(tester.count_text(&format!("{test_value}/error")), 1);
-        }
+                // Check for a new Text widget with our error text.
+                assert_eq!(count_text(tester, &format!("{test_value}/error")), 1);
+            }
+        });
     }
 
     #[test]
     fn removing_a_field_from_the_tree_does_not_crash_the_form() {
-        let mut tester = WidgetTester::new();
-        let form_key = GlobalKey::new();
-        let field_key = GlobalKey::new();
-        let field_value = Rc::new(RefCell::new(None::<String>));
-        let builder = |remove: bool| {
-            let saved = Rc::clone(&field_value);
-            let child = if remove {
-                SizedBox::new().into_widget()
-            } else {
-                text_field(&field_key)
-                    .on_saved(move |_app, value| *saved.borrow_mut() = value)
-                    .validator(|_app, value| {
-                        value
-                            .is_some_and(|value| !value.is_empty())
-                            .then(|| "yes".to_string())
-                    })
-                    .into_widget()
+        test_widgets(|tester| {
+            let form_key = GlobalKey::new();
+            let field_key = GlobalKey::new();
+            let field_value = Rc::new(RefCell::new(None::<String>));
+            let builder = |remove: bool| {
+                let saved = Rc::clone(&field_value);
+                let child = if remove {
+                    SizedBox::new().into_widget()
+                } else {
+                    text_field(&field_key)
+                        .on_saved(move |_app, value| *saved.borrow_mut() = value)
+                        .validator(|_app, value| {
+                            value
+                                .is_some_and(|value| !value.is_empty())
+                                .then(|| "yes".to_string())
+                        })
+                        .into_widget()
+                };
+                Form::new(child).key(form_key.clone().into()).into_widget()
             };
-            Form::new(child).key(form_key.clone().into()).into_widget()
-        };
 
-        tester.pump_widget(builder(false));
-        let form = tester.form(&form_key);
+            pump_ltr(tester, builder(false));
+            let form = form_state(tester, &form_key);
 
-        assert_eq!(*field_value.borrow(), None);
-        assert!(form.validate(&mut tester.app()));
+            assert_eq!(*field_value.borrow(), None);
+            assert!(form.validate(&mut tester.cell.borrow_mut()));
 
-        tester.enter_text(&field_key, "Test");
-        tester.pump_widget(builder(false));
+            enter_text(tester, &field_key, "Test");
+            pump_ltr(tester, builder(false));
 
-        // Form wasn't saved yet.
-        assert_eq!(*field_value.borrow(), None);
-        assert!(!form.validate(&mut tester.app()));
+            // Form wasn't saved yet.
+            assert_eq!(*field_value.borrow(), None);
+            assert!(!form.validate(&mut tester.cell.borrow_mut()));
 
-        form.save(&mut tester.app());
+            form.save(&mut tester.cell.borrow_mut());
 
-        // Now fieldValue is saved.
-        assert_eq!(field_value.borrow().as_deref(), Some("Test"));
-        assert!(!form.validate(&mut tester.app()));
+            // Now fieldValue is saved.
+            assert_eq!(field_value.borrow().as_deref(), Some("Test"));
+            assert!(!form.validate(&mut tester.cell.borrow_mut()));
 
-        // Now remove the field with an error.
-        tester.pump_widget(builder(true));
+            // Now remove the field with an error.
+            pump_ltr(tester, builder(true));
 
-        // Reset the form. Should not crash.
-        form.reset(&mut tester.app());
-        form.save(&mut tester.app());
-        assert!(form.validate(&mut tester.app()));
+            // Reset the form. Should not crash.
+            form.reset(&mut tester.cell.borrow_mut());
+            form.save(&mut tester.cell.borrow_mut());
+            assert!(form.validate(&mut tester.cell.borrow_mut()));
+        });
     }
 
     /// A lone field, no form above it, that records its state as its builder is handed it.
@@ -2134,7 +2025,7 @@ mod tests {
             recorded.set(Some(field));
             let mut children = vec![SizedBox::new().into_widget()];
             if show_error && let Some(error_text) = field.error_text(app) {
-                children.push(Shown::new(error_text).into_widget());
+                children.push(Text::new(error_text).into_widget());
             }
             Column::new().children(children).into_widget()
         })
@@ -2148,77 +2039,85 @@ mod tests {
 
     #[test]
     fn a_field_does_not_autovalidate_before_its_value_changes_on_user_interaction() {
-        let mut tester = WidgetTester::new();
-        let recorded = Rc::new(Cell::new(None));
-        tester.pump_widget(
-            recording_field(&recorded, true)
-                .initial_value("foo".to_string())
-                .autovalidate_mode(AutovalidateMode::OnUserInteraction)
-                .validator(|_app, value| error_text(value))
-                .into_widget(),
-        );
-        let field = recorded.get().expect("built");
-        // The form field has no error.
-        assert!(!field.has_error(&tester.app()));
-        // No error widget is visible.
-        assert_eq!(tester.count_text("foo/error"), 0);
+        test_widgets(|tester| {
+            let recorded = Rc::new(Cell::new(None));
+            pump_ltr(
+                tester,
+                recording_field(&recorded, true)
+                    .initial_value("foo".to_string())
+                    .autovalidate_mode(AutovalidateMode::OnUserInteraction)
+                    .validator(|_app, value| error_text(value))
+                    .into_widget(),
+            );
+            let field = recorded.get().expect("built");
+            // The form field has no error.
+            assert!(!field.has_error(&tester.cell.borrow_mut()));
+            // No error widget is visible.
+            assert_eq!(count_text(tester, "foo/error"), 0);
+        });
     }
 
     #[test]
     fn a_field_does_not_autovalidate_before_its_value_changes_on_user_interaction_if_error() {
-        let mut tester = WidgetTester::new();
-        let recorded = Rc::new(Cell::new(None));
-        tester.pump_widget(
-            recording_field(&recorded, true)
-                .initial_value("foo".to_string())
-                .autovalidate_mode(AutovalidateMode::OnUserInteractionIfError)
-                .validator(|_app, value| required(value))
-                .into_widget(),
-        );
-        let field = recorded.get().expect("built");
-        // The form field has no error.
-        assert!(!field.has_error(&tester.app()));
-        // No "Required" error is visible.
-        assert_eq!(tester.count_text("Required"), 0);
+        test_widgets(|tester| {
+            let recorded = Rc::new(Cell::new(None));
+            pump_ltr(
+                tester,
+                recording_field(&recorded, true)
+                    .initial_value("foo".to_string())
+                    .autovalidate_mode(AutovalidateMode::OnUserInteractionIfError)
+                    .validator(|_app, value| required(value))
+                    .into_widget(),
+            );
+            let field = recorded.get().expect("built");
+            // The form field has no error.
+            assert!(!field.has_error(&tester.cell.borrow_mut()));
+            // No "Required" error is visible.
+            assert_eq!(count_text(tester, "Required"), 0);
+        });
     }
 
     #[test]
     fn a_field_with_an_empty_value_does_not_autovalidate_before_it_changes_on_user_interaction_if_error()
      {
-        let mut tester = WidgetTester::new();
-        let recorded = Rc::new(Cell::new(None));
-        tester.pump_widget(
-            recording_field(&recorded, true)
-                .autovalidate_mode(AutovalidateMode::OnUserInteractionIfError)
-                .validator(|_app, value| required(value))
-                .into_widget(),
-        );
-        let field = recorded.get().expect("built");
+        test_widgets(|tester| {
+            let recorded = Rc::new(Cell::new(None));
+            pump_ltr(
+                tester,
+                recording_field(&recorded, true)
+                    .autovalidate_mode(AutovalidateMode::OnUserInteractionIfError)
+                    .validator(|_app, value| required(value))
+                    .into_widget(),
+            );
+            let field = recorded.get().expect("built");
 
-        assert!(!field.has_error(&tester.app()));
-        assert_eq!(tester.count_text("Required"), 0);
-        assert_eq!(field.error_text(&tester.app()), None);
+            assert!(!field.has_error(&tester.cell.borrow_mut()));
+            assert_eq!(count_text(tester, "Required"), 0);
+            assert_eq!(field.error_text(&tester.cell.borrow_mut()), None);
 
-        field.validate(&mut tester.app());
-        tester.pump();
+            field.validate(&mut tester.cell.borrow_mut());
+            tester.pump();
 
-        assert!(field.has_error(&tester.app()));
-        assert_eq!(tester.count_text("Required"), 1);
+            assert!(field.has_error(&tester.cell.borrow_mut()));
+            assert_eq!(count_text(tester, "Required"), 1);
+        });
     }
 
     #[test]
     fn a_field_autovalidates_before_its_value_changes_when_its_mode_is_always() {
-        let mut tester = WidgetTester::new();
-        let recorded = Rc::new(Cell::new(None));
-        tester.pump_widget(
-            recording_field(&recorded, false)
-                .initial_value("foo".to_string())
-                .autovalidate_mode(AutovalidateMode::Always)
-                .validator(|_app, value| error_text(value))
-                .into_widget(),
-        );
-        let field = recorded.get().expect("built");
-        assert!(field.has_error(&tester.app()));
+        test_widgets(|tester| {
+            let recorded = Rc::new(Cell::new(None));
+            pump_ltr(
+                tester,
+                recording_field(&recorded, false)
+                    .initial_value("foo".to_string())
+                    .autovalidate_mode(AutovalidateMode::Always)
+                    .validator(|_app, value| error_text(value))
+                    .into_widget(),
+            );
+            let field = recorded.get().expect("built");
+            assert!(field.has_error(&tester.cell.borrow_mut()));
+        });
     }
 
     fn error_slash(value: Option<&String>) -> Option<String> {
@@ -2230,552 +2129,579 @@ mod tests {
 
     #[test]
     fn a_form_autovalidates_its_fields_only_after_one_changes_on_user_interaction() {
-        let mut tester = WidgetTester::new();
-        let keys = [GlobalKey::new(), GlobalKey::new(), GlobalKey::new()];
-        let builder = || {
-            Form::new(Column::new().children(keys.iter().map(|key| {
-                text_field(key)
-                    .initial_value("foo".to_string())
-                    .validator(|_app, value| error_slash(value))
-                    .into_widget()
-            })))
-            .autovalidate_mode(AutovalidateMode::OnUserInteraction)
-            .into_widget()
-        };
+        test_widgets(|tester| {
+            let keys = [GlobalKey::new(), GlobalKey::new(), GlobalKey::new()];
+            let builder = || {
+                Form::new(Column::new().children(keys.iter().map(|key| {
+                    text_field(key)
+                        .initial_value("foo".to_string())
+                        .validator(|_app, value| error_slash(value))
+                        .into_widget()
+                })))
+                .autovalidate_mode(AutovalidateMode::OnUserInteraction)
+                .into_widget()
+            };
 
-        // Makes sure the Form widget won't auto-validate the form fields
-        // after rebuilds if there is not user interaction.
-        tester.pump_widget(builder());
-        tester.pump_widget(builder());
+            // Makes sure the Form widget won't auto-validate the form fields
+            // after rebuilds if there is not user interaction.
+            pump_ltr(tester, builder());
+            pump_ltr(tester, builder());
 
-        // We expect no validation error text being shown.
-        assert_eq!(tester.count_text("error/foo"), 0);
+            // We expect no validation error text being shown.
+            assert_eq!(count_text(tester, "error/foo"), 0);
 
-        // Set a empty string into the first form field to
-        // trigger the fields validators.
-        tester.enter_text(&keys[0], "");
-        tester.pump();
+            // Set a empty string into the first form field to
+            // trigger the fields validators.
+            enter_text(tester, &keys[0], "");
+            tester.pump();
 
-        // Now we expect the errors to be shown for the first Text Field and
-        // for the next two form fields that have their contents unchanged.
-        assert_eq!(tester.count_text("error/"), 1);
-        assert_eq!(tester.count_text("error/foo"), 2);
+            // Now we expect the errors to be shown for the first Text Field and
+            // for the next two form fields that have their contents unchanged.
+            assert_eq!(count_text(tester, "error/"), 1);
+            assert_eq!(count_text(tester, "error/foo"), 2);
+        });
     }
 
     #[test]
     fn a_form_autovalidates_its_fields_before_any_changes_when_its_mode_is_always() {
-        let mut tester = WidgetTester::new();
-        let field_key = GlobalKey::new();
-        let builder = || {
-            Form::new(
-                text_field(&field_key)
-                    // A `TextFormField` without an initial value holds an empty string.
-                    .initial_value(String::new())
-                    .validator(|_app, value| error_slash(value)),
-            )
-            .autovalidate_mode(AutovalidateMode::Always)
-            .into_widget()
-        };
+        test_widgets(|tester| {
+            let field_key = GlobalKey::new();
+            let builder = || {
+                Form::new(
+                    text_field(&field_key)
+                        // A `TextFormField` without an initial value holds an empty string.
+                        .initial_value(String::new())
+                        .validator(|_app, value| error_slash(value)),
+                )
+                .autovalidate_mode(AutovalidateMode::Always)
+                .into_widget()
+            };
 
-        // The issue only happens on the second build so we
-        // need to rebuild the tree twice.
-        tester.pump_widget(builder());
-        tester.pump_widget(builder());
+            // The issue only happens on the second build so we
+            // need to rebuild the tree twice.
+            pump_ltr(tester, builder());
+            pump_ltr(tester, builder());
 
-        // We expect validation error text being shown.
-        assert_eq!(tester.count_text("error/"), 1);
+            // We expect validation error text being shown.
+            assert_eq!(count_text(tester, "error/"), 1);
+        });
     }
 
     #[test]
     fn form_reset_clears_errors_and_autovalidates_again_only_on_the_next_user_interaction() {
-        let mut tester = WidgetTester::new();
-        let form_key = GlobalKey::new();
-        let field_key = GlobalKey::new();
-        tester.pump_widget(
-            Form::new(
-                text_field(&field_key)
-                    .initial_value("foo".to_string())
-                    .validator(|_app, value| error_text(value)),
-            )
-            .key(form_key.clone().into())
-            .autovalidate_mode(AutovalidateMode::OnUserInteraction)
-            .into_widget(),
-        );
+        test_widgets(|tester| {
+            let form_key = GlobalKey::new();
+            let field_key = GlobalKey::new();
+            pump_ltr(
+                tester,
+                Form::new(
+                    text_field(&field_key)
+                        .initial_value("foo".to_string())
+                        .validator(|_app, value| error_text(value)),
+                )
+                .key(form_key.clone().into())
+                .autovalidate_mode(AutovalidateMode::OnUserInteraction)
+                .into_widget(),
+            );
 
-        // No error text is visible yet.
-        assert_eq!(tester.count_text("foo/error"), 0);
+            // No error text is visible yet.
+            assert_eq!(count_text(tester, "foo/error"), 0);
 
-        tester.enter_text(&field_key, "bar");
-        tester.pump();
-        tester.pump();
-        assert_eq!(tester.count_text("bar/error"), 1);
+            enter_text(tester, &field_key, "bar");
+            tester.pump();
+            tester.pump();
+            assert_eq!(count_text(tester, "bar/error"), 1);
 
-        // Resetting the form state should remove the error text.
-        let form = tester.form(&form_key);
-        form.reset(&mut tester.app());
-        tester.pump();
-        assert_eq!(tester.count_text("bar/error"), 0);
+            // Resetting the form state should remove the error text.
+            let form = form_state(tester, &form_key);
+            form.reset(&mut tester.cell.borrow_mut());
+            tester.pump();
+            assert_eq!(count_text(tester, "bar/error"), 0);
+        });
     }
 
     #[test]
     fn a_form_on_user_interaction_if_error_revalidates_only_once_an_error_exists() {
-        let mut tester = WidgetTester::new();
-        let form_key = GlobalKey::new();
-        let field_key = GlobalKey::new();
-        tester.pump_widget(
-            Form::new(
-                text_field(&field_key)
-                    .initial_value("foo".to_string())
-                    .validator(|_app, value| required(value)),
-            )
-            .key(form_key.clone().into())
-            .autovalidate_mode(AutovalidateMode::OnUserInteractionIfError)
-            .into_widget(),
-        );
-        let form = tester.form(&form_key);
+        test_widgets(|tester| {
+            let form_key = GlobalKey::new();
+            let field_key = GlobalKey::new();
+            pump_ltr(
+                tester,
+                Form::new(
+                    text_field(&field_key)
+                        .initial_value("foo".to_string())
+                        .validator(|_app, value| required(value)),
+                )
+                .key(form_key.clone().into())
+                .autovalidate_mode(AutovalidateMode::OnUserInteractionIfError)
+                .into_widget(),
+            );
+            let form = form_state(tester, &form_key);
 
-        // No error text is visible yet. (Initial valid state).
-        assert_eq!(tester.count_text("Required"), 0);
+            // No error text is visible yet. (Initial valid state).
+            assert_eq!(count_text(tester, "Required"), 0);
 
-        // User types valid input 'bar' → autovalidate is disabled → still no error.
-        tester.enter_text(&field_key, "bar");
-        tester.pump();
-        assert_eq!(tester.count_text("Required"), 0);
+            // User types valid input 'bar' → autovalidate is disabled → still no error.
+            enter_text(tester, &field_key, "bar");
+            tester.pump();
+            assert_eq!(count_text(tester, "Required"), 0);
 
-        // Clear the input (invalid).
-        tester.enter_text(&field_key, "");
-        tester.pump();
+            // Clear the input (invalid).
+            enter_text(tester, &field_key, "");
+            tester.pump();
 
-        // Manually submit form to show the initial error (AutovalidateMode is now active).
-        form.validate(&mut tester.app());
-        assert_eq!(tester.count_text("Required"), 0);
-        tester.pump();
+            // Manually submit form to show the initial error (AutovalidateMode is now active).
+            form.validate(&mut tester.cell.borrow_mut());
+            assert_eq!(count_text(tester, "Required"), 0);
+            tester.pump();
 
-        // Verify error is shown.
-        assert_eq!(tester.count_text("Required"), 1);
+            // Verify error is shown.
+            assert_eq!(count_text(tester, "Required"), 1);
 
-        // Now user interacts again with valid text ('baz') → validation auto-runs and clears
-        // the error.
-        tester.enter_text(&field_key, "baz");
-        tester.pump();
-        assert_eq!(tester.count_text("Required"), 0);
+            // Now user interacts again with valid text ('baz') → validation auto-runs and clears
+            // the error.
+            enter_text(tester, &field_key, "baz");
+            tester.pump();
+            assert_eq!(count_text(tester, "Required"), 0);
 
-        // Check the behavior of a manual validate when the text is already valid.
-        // This should *confirm* the error is cleared, not re-introduce it.
-        form.validate(&mut tester.app());
-        tester.pump();
-        assert_eq!(tester.count_text("Required"), 0);
+            // Check the behavior of a manual validate when the text is already valid.
+            // This should *confirm* the error is cleared, not re-introduce it.
+            form.validate(&mut tester.cell.borrow_mut());
+            tester.pump();
+            assert_eq!(count_text(tester, "Required"), 0);
 
-        // Resetting should clear form (already cleared, but a safety check).
-        tester.enter_text(&field_key, "");
-        form.reset(&mut tester.app());
-        tester.pump();
-        assert_eq!(tester.count_text("Required"), 0);
+            // Resetting should clear form (already cleared, but a safety check).
+            enter_text(tester, &field_key, "");
+            form.reset(&mut tester.cell.borrow_mut());
+            tester.pump();
+            assert_eq!(count_text(tester, "Required"), 0);
+        });
     }
 
     #[test]
     fn has_interacted_by_user_is_false_while_the_input_has_not_changed() {
-        let mut tester = WidgetTester::new();
-        let field_key = GlobalKey::new();
-        tester.pump_widget(text_field(&field_key).into_widget());
+        test_widgets(|tester| {
+            let field_key = GlobalKey::new();
+            pump_ltr(tester, text_field(&field_key).into_widget());
 
-        let field = tester.field::<String>(&field_key);
-        assert!(!field.has_interacted_by_user(&tester.app()));
+            let field = field_state::<String>(tester, &field_key);
+            assert!(!field.has_interacted_by_user(&tester.cell.borrow_mut()));
+        });
     }
 
     #[test]
     fn has_interacted_by_user_is_true_after_the_input_changed() {
-        let mut tester = WidgetTester::new();
-        let field_key = GlobalKey::new();
-        tester.pump_widget(text_field(&field_key).into_widget());
-        let field = tester.field::<String>(&field_key);
+        test_widgets(|tester| {
+            let field_key = GlobalKey::new();
+            pump_ltr(tester, text_field(&field_key).into_widget());
+            let field = field_state::<String>(tester, &field_key);
 
-        // initially, the field has not been interacted with
-        assert!(!field.has_interacted_by_user(&tester.app()));
+            // initially, the field has not been interacted with
+            assert!(!field.has_interacted_by_user(&tester.cell.borrow_mut()));
 
-        // after entering text, the field has been interacted with
-        tester.enter_text(&field_key, "foo");
-        assert!(field.has_interacted_by_user(&tester.app()));
+            // after entering text, the field has been interacted with
+            enter_text(tester, &field_key, "foo");
+            assert!(field.has_interacted_by_user(&tester.cell.borrow_mut()));
+        });
     }
 
     #[test]
     fn has_interacted_by_user_is_false_after_the_field_is_reset() {
-        let mut tester = WidgetTester::new();
-        let field_key = GlobalKey::new();
-        tester.pump_widget(text_field(&field_key).into_widget());
-        let field = tester.field::<String>(&field_key);
+        test_widgets(|tester| {
+            let field_key = GlobalKey::new();
+            pump_ltr(tester, text_field(&field_key).into_widget());
+            let field = field_state::<String>(tester, &field_key);
 
-        // initially, the field has not been interacted with
-        assert!(!field.has_interacted_by_user(&tester.app()));
+            // initially, the field has not been interacted with
+            assert!(!field.has_interacted_by_user(&tester.cell.borrow_mut()));
 
-        // after entering text, the field has been interacted with
-        tester.enter_text(&field_key, "foo");
-        assert!(field.has_interacted_by_user(&tester.app()));
+            // after entering text, the field has been interacted with
+            enter_text(tester, &field_key, "foo");
+            assert!(field.has_interacted_by_user(&tester.cell.borrow_mut()));
 
-        // after resetting the field, it has not been interacted with again
-        field.reset(&mut tester.app());
-        assert!(!field.has_interacted_by_user(&tester.app()));
+            // after resetting the field, it has not been interacted with again
+            field.reset(&mut tester.cell.borrow_mut());
+            assert!(!field.has_interacted_by_user(&tester.cell.borrow_mut()));
+        });
     }
 
     #[test]
     fn force_error_text_forces_an_error_state_from_the_first_build() {
-        let mut tester = WidgetTester::new();
-        let field_key = GlobalKey::new();
-        tester.pump_widget(
-            Form::new(text_field(&field_key).force_error_text("Forcing error."))
-                .autovalidate_mode(AutovalidateMode::Disabled)
-                .into_widget(),
-        );
-        assert_eq!(tester.count_text("Forcing error."), 1);
+        test_widgets(|tester| {
+            let field_key = GlobalKey::new();
+            pump_ltr(
+                tester,
+                Form::new(text_field(&field_key).force_error_text("Forcing error."))
+                    .autovalidate_mode(AutovalidateMode::Disabled)
+                    .into_widget(),
+            );
+            assert_eq!(count_text(tester, "Forcing error."), 1);
+        });
     }
 
     #[test]
     fn validate_is_false_with_a_force_error_text_even_when_the_validator_finds_no_error() {
-        let mut tester = WidgetTester::new();
-        let form_key = GlobalKey::new();
-        let field_key = GlobalKey::new();
-        tester.pump_widget(
-            Form::new(
-                text_field(&field_key)
-                    .force_error_text("Forcing error")
-                    .validator(|_app, _value| None),
-            )
-            .key(form_key.clone().into())
-            .into_widget(),
-        );
+        test_widgets(|tester| {
+            let form_key = GlobalKey::new();
+            let field_key = GlobalKey::new();
+            pump_ltr(
+                tester,
+                Form::new(
+                    text_field(&field_key)
+                        .force_error_text("Forcing error")
+                        .validator(|_app, _value| None),
+                )
+                .key(form_key.clone().into())
+                .into_widget(),
+            );
 
-        assert_eq!(tester.count_text("Forcing error"), 1);
-        let form = tester.form(&form_key);
-        let is_valid = form.validate(&mut tester.app());
-        assert!(!is_valid);
+            assert_eq!(count_text(tester, "Forcing error"), 1);
+            let form = form_state(tester, &form_key);
+            let is_valid = form.validate(&mut tester.cell.borrow_mut());
+            assert!(!is_valid);
 
-        tester.pump();
-        assert_eq!(tester.count_text("Forcing error"), 1);
+            tester.pump();
+            assert_eq!(count_text(tester, "Forcing error"), 1);
+        });
     }
 
     #[test]
     fn force_error_text_forces_an_error_state_only_once_it_is_set() {
-        let mut tester = WidgetTester::new();
-        let form_key = GlobalKey::new();
-        let field_key = GlobalKey::new();
-        let builder = |force_error_text: Option<&str>| {
-            let mut field = text_field(&field_key);
-            if let Some(force_error_text) = force_error_text {
-                field = field.force_error_text(force_error_text);
-            }
-            Form::new(field)
-                .key(form_key.clone().into())
-                .autovalidate_mode(AutovalidateMode::Disabled)
-                .into_widget()
-        };
+        test_widgets(|tester| {
+            let form_key = GlobalKey::new();
+            let field_key = GlobalKey::new();
+            let builder = |force_error_text: Option<&str>| {
+                let mut field = text_field(&field_key);
+                if let Some(force_error_text) = force_error_text {
+                    field = field.force_error_text(force_error_text);
+                }
+                Form::new(field)
+                    .key(form_key.clone().into())
+                    .autovalidate_mode(AutovalidateMode::Disabled)
+                    .into_widget()
+            };
 
-        tester.pump_widget(builder(None));
-        let form = tester.form(&form_key);
-        let is_valid = form.validate(&mut tester.app());
-        assert!(is_valid);
-        assert_eq!(tester.count_text("Forcing Error Text"), 0);
-        tester.pump_widget(builder(Some("Forcing Error Text")));
-        assert_eq!(tester.count_text("Forcing Error Text"), 1);
+            pump_ltr(tester, builder(None));
+            let form = form_state(tester, &form_key);
+            let is_valid = form.validate(&mut tester.cell.borrow_mut());
+            assert!(is_valid);
+            assert_eq!(count_text(tester, "Forcing Error Text"), 0);
+            pump_ltr(tester, builder(Some("Forcing Error Text")));
+            assert_eq!(count_text(tester, "Forcing Error Text"), 1);
+        });
     }
 
     #[test]
     fn the_validator_is_not_called_while_a_force_error_text_is_given() {
-        let mut tester = WidgetTester::new();
-        let form_key = GlobalKey::new();
-        let field_key = GlobalKey::new();
-        let force_error_text = "Forcing error.";
-        let validator_error_text =
-            "this error should not appear as we override it with forceErrorText";
-        let did_call_validator = Rc::new(Cell::new(false));
-        let builder = |autovalidate_mode| {
-            let called = Rc::clone(&did_call_validator);
-            Form::new(
-                text_field(&field_key)
-                    .force_error_text(force_error_text)
-                    .validator(move |_app, _value| {
-                        called.set(true);
-                        Some(validator_error_text.to_string())
-                    }),
-            )
-            .key(form_key.clone().into())
-            .autovalidate_mode(autovalidate_mode)
-            .into_widget()
-        };
+        test_widgets(|tester| {
+            let form_key = GlobalKey::new();
+            let field_key = GlobalKey::new();
+            let force_error_text = "Forcing error.";
+            let validator_error_text =
+                "this error should not appear as we override it with forceErrorText";
+            let did_call_validator = Rc::new(Cell::new(false));
+            let builder = |autovalidate_mode| {
+                let called = Rc::clone(&did_call_validator);
+                Form::new(
+                    text_field(&field_key)
+                        .force_error_text(force_error_text)
+                        .validator(move |_app, _value| {
+                            called.set(true);
+                            Some(validator_error_text.to_string())
+                        }),
+                )
+                .key(form_key.clone().into())
+                .autovalidate_mode(autovalidate_mode)
+                .into_widget()
+            };
 
-        // Start off not autovalidating.
-        tester.pump_widget(builder(AutovalidateMode::Disabled));
-        assert_eq!(tester.count_text(force_error_text), 1);
-        assert_eq!(tester.count_text(validator_error_text), 0);
+            // Start off not autovalidating.
+            pump_ltr(tester, builder(AutovalidateMode::Disabled));
+            assert_eq!(count_text(tester, force_error_text), 1);
+            assert_eq!(count_text(tester, validator_error_text), 0);
 
-        let form = tester.form(&form_key);
-        form.reset(&mut tester.app());
-        tester.pump();
-        assert_eq!(tester.count_text(force_error_text), 0);
-        assert_eq!(tester.count_text(validator_error_text), 0);
+            let form = form_state(tester, &form_key);
+            form.reset(&mut tester.cell.borrow_mut());
+            tester.pump();
+            assert_eq!(count_text(tester, force_error_text), 0);
+            assert_eq!(count_text(tester, validator_error_text), 0);
 
-        // We have to manually validate if we're not autovalidating.
-        form.validate(&mut tester.app());
-        tester.pump();
+            // We have to manually validate if we're not autovalidating.
+            form.validate(&mut tester.cell.borrow_mut());
+            tester.pump();
 
-        assert!(!did_call_validator.get());
-        assert_eq!(tester.count_text(force_error_text), 1);
-        assert_eq!(tester.count_text(validator_error_text), 0);
+            assert!(!did_call_validator.get());
+            assert_eq!(count_text(tester, force_error_text), 1);
+            assert_eq!(count_text(tester, validator_error_text), 0);
 
-        // Try again with autovalidation. Should validate immediately.
-        tester.pump_widget(builder(AutovalidateMode::Always));
+            // Try again with autovalidation. Should validate immediately.
+            pump_ltr(tester, builder(AutovalidateMode::Always));
 
-        assert!(!did_call_validator.get());
-        assert_eq!(tester.count_text(force_error_text), 1);
-        assert_eq!(tester.count_text(validator_error_text), 0);
+            assert!(!did_call_validator.get());
+            assert_eq!(count_text(tester, force_error_text), 1);
+            assert_eq!(count_text(tester, validator_error_text), 0);
+        });
     }
 
     #[test]
     fn removing_the_validator_takes_its_error_text_away() {
-        let mut tester = WidgetTester::new();
-        let form_key = GlobalKey::new();
-        let field_key = GlobalKey::new();
-        let use_validator = Rc::new(Cell::new(false));
-        let set_state = Rc::new(RefCell::new(None));
-        let builder = {
-            let (form_key, field_key) = (form_key.clone(), field_key.clone());
-            let (use_validator, set_state) = (Rc::clone(&use_validator), Rc::clone(&set_state));
-            StatefulBuilder::new(move |_app, _context, setter| {
-                *set_state.borrow_mut() = Some(setter);
-                let mut field = text_field(&field_key);
-                if use_validator.get() {
-                    field = field.validator(|_app, value| {
-                        value
-                            .is_none_or(|value| value.is_empty())
-                            .then(|| "test_error".to_string())
-                    });
-                }
-                Form::new(field).key(form_key.clone().into()).into_widget()
-            })
-        };
-        tester.pump_widget(builder.into_widget());
-        let form = tester.form(&form_key);
-        let set_use_validator = |tester: &mut WidgetTester, value: bool| {
-            let setter = set_state.borrow().clone().expect("built");
-            let use_validator = Rc::clone(&use_validator);
-            setter(&mut tester.app(), &mut move |_app| use_validator.set(value));
+        test_widgets(|tester| {
+            let form_key = GlobalKey::new();
+            let field_key = GlobalKey::new();
+            let use_validator = Rc::new(Cell::new(false));
+            let set_state = Rc::new(RefCell::new(None));
+            let builder = {
+                let (form_key, field_key) = (form_key.clone(), field_key.clone());
+                let (use_validator, set_state) = (Rc::clone(&use_validator), Rc::clone(&set_state));
+                StatefulBuilder::new(move |_app, _context, setter| {
+                    *set_state.borrow_mut() = Some(setter);
+                    let mut field = text_field(&field_key);
+                    if use_validator.get() {
+                        field = field.validator(|_app, value| {
+                            value
+                                .is_none_or(|value| value.is_empty())
+                                .then(|| "test_error".to_string())
+                        });
+                    }
+                    Form::new(field).key(form_key.clone().into()).into_widget()
+                })
+            };
+            pump_ltr(tester, builder.into_widget());
+            let form = form_state(tester, &form_key);
+            let set_use_validator = |tester: &mut WidgetTester, value: bool| {
+                let setter = set_state.borrow().clone().expect("built");
+                let use_validator = Rc::clone(&use_validator);
+                setter(&mut tester.cell.borrow_mut(), &mut move |_app| {
+                    use_validator.set(value)
+                });
+                tester.pump();
+            };
+
+            // Start with no validator.
+            enter_text(tester, &field_key, "");
             tester.pump();
-        };
+            form.validate(&mut tester.cell.borrow_mut());
+            tester.pump();
+            assert_eq!(count_text(tester, "test_error"), 0);
 
-        // Start with no validator.
-        tester.enter_text(&field_key, "");
-        tester.pump();
-        form.validate(&mut tester.app());
-        tester.pump();
-        assert_eq!(tester.count_text("test_error"), 0);
+            // Now use the validator.
+            set_use_validator(tester, true);
+            form.validate(&mut tester.cell.borrow_mut());
+            tester.pump();
+            assert_eq!(count_text(tester, "test_error"), 1);
 
-        // Now use the validator.
-        set_use_validator(&mut tester, true);
-        form.validate(&mut tester.app());
-        tester.pump();
-        assert_eq!(tester.count_text("test_error"), 1);
-
-        // Remove the validator again and expect the error to disappear.
-        set_use_validator(&mut tester, false);
-        form.validate(&mut tester.app());
-        tester.pump();
-        assert_eq!(tester.count_text("test_error"), 0);
+            // Remove the validator again and expect the error to disappear.
+            set_use_validator(tester, false);
+            form.validate(&mut tester.cell.borrow_mut());
+            tester.pump();
+            assert_eq!(count_text(tester, "test_error"), 0);
+        });
     }
 
     /// `tester.tap` on a text field: its subtree takes the primary focus.
     fn focus(tester: &mut WidgetTester, node: AnyFocusNode) {
-        node.request_focus(&mut tester.app(), None);
+        node.request_focus(&mut tester.cell.borrow_mut(), None);
         tester.pump();
         tester.pump();
     }
 
     #[test]
     fn a_form_on_unfocus_validates_a_field_as_it_loses_the_focus() {
-        let mut tester = WidgetTester::new();
-        let (key1, key2) = (GlobalKey::new(), GlobalKey::new());
-        let (node1, node2): (FocusNodeRef, FocusNodeRef) = {
-            let mut app = tester.app();
-            (
-                FocusNode::new(&mut app).into_erased(),
-                FocusNode::new(&mut app).into_erased(),
-            )
-        };
-        let field = |key: &GlobalKey, node| {
-            focusable_text_field(key, node)
-                .initial_value("bar".to_string())
-                .validator(|_app, value| error_text(value))
-                .into_widget()
-        };
-        tester.pump_widget(
-            Form::new(
-                Column::new().children([field(&key1, node1.clone()), field(&key2, node2.clone())]),
-            )
-            .autovalidate_mode(AutovalidateMode::OnUnfocus)
-            .into_widget(),
-        );
+        test_widgets(|tester| {
+            let (key1, key2) = (GlobalKey::new(), GlobalKey::new());
+            let (node1, node2): (FocusNodeRef, FocusNodeRef) = {
+                let mut app = tester.cell.borrow_mut();
+                (
+                    FocusNode::new(&mut app).into_erased(),
+                    FocusNode::new(&mut app).into_erased(),
+                )
+            };
+            let field = |key: &GlobalKey, node| {
+                focusable_text_field(key, node)
+                    .initial_value("bar".to_string())
+                    .validator(|_app, value| error_text(value))
+                    .into_widget()
+            };
+            pump_ltr(
+                tester,
+                Form::new(
+                    Column::new()
+                        .children([field(&key1, node1.clone()), field(&key2, node2.clone())]),
+                )
+                .autovalidate_mode(AutovalidateMode::OnUnfocus)
+                .into_widget(),
+            );
 
-        // No error text is visible yet.
-        assert_eq!(tester.count_text("foo/error"), 0);
+            // No error text is visible yet.
+            assert_eq!(count_text(tester, "foo/error"), 0);
 
-        // Enter text in the first TextFormField.
-        focus(&mut tester, node1.handle());
-        tester.enter_text(&key1, "foo");
-        tester.pump();
+            // Enter text in the first TextFormField.
+            focus(tester, node1.handle());
+            enter_text(tester, &key1, "foo");
+            tester.pump();
 
-        // No error text is visible yet.
-        assert_eq!(tester.count_text("foo/error"), 0);
+            // No error text is visible yet.
+            assert_eq!(count_text(tester, "foo/error"), 0);
 
-        // Tap on the second TextFormField to trigger validation.
-        // This should trigger validation for the first TextFormField as well.
-        focus(&mut tester, node2.handle());
+            // Tap on the second TextFormField to trigger validation.
+            // This should trigger validation for the first TextFormField as well.
+            focus(tester, node2.handle());
 
-        // Verify that the error text is displayed for the first TextFormField.
-        assert_eq!(tester.count_text("foo/error"), 1);
-        assert_eq!(tester.count_text("bar/error"), 0);
+            // Verify that the error text is displayed for the first TextFormField.
+            assert_eq!(count_text(tester, "foo/error"), 1);
+            assert_eq!(count_text(tester, "bar/error"), 0);
 
-        // Tap on the first TextFormField to trigger validation.
-        focus(&mut tester, node1.handle());
+            // Tap on the first TextFormField to trigger validation.
+            focus(tester, node1.handle());
 
-        // Verify that the both error texts are displayed.
-        assert_eq!(tester.count_text("foo/error"), 1);
-        assert_eq!(tester.count_text("bar/error"), 1);
+            // Verify that the both error texts are displayed.
+            assert_eq!(count_text(tester, "foo/error"), 1);
+            assert_eq!(count_text(tester, "bar/error"), 1);
+        });
     }
 
     #[test]
     fn a_field_mode_of_its_own_wins_over_the_form_on_unfocus() {
-        let mut tester = WidgetTester::new();
-        let (key1, key2) = (GlobalKey::new(), GlobalKey::new());
-        let (node1, node2): (FocusNodeRef, FocusNodeRef) = {
-            let mut app = tester.app();
-            (
-                FocusNode::new(&mut app).into_erased(),
-                FocusNode::new(&mut app).into_erased(),
-            )
-        };
-        tester.pump_widget(
-            Form::new(
-                Column::new().children([
-                    focusable_text_field(&key1, node1.clone())
-                        .autovalidate_mode(AutovalidateMode::Always)
-                        .initial_value("foo".to_string())
-                        .validator(|_app, value| error_text(value))
-                        .into_widget(),
-                    focusable_text_field(&key2, node2.clone())
-                        .autovalidate_mode(AutovalidateMode::Disabled)
-                        .initial_value("bar".to_string())
-                        .validator(|_app, value| error_text(value))
-                        .into_widget(),
-                ]),
-            )
-            .autovalidate_mode(AutovalidateMode::OnUnfocus)
-            .into_widget(),
-        );
+        test_widgets(|tester| {
+            let (key1, key2) = (GlobalKey::new(), GlobalKey::new());
+            let (node1, node2): (FocusNodeRef, FocusNodeRef) = {
+                let mut app = tester.cell.borrow_mut();
+                (
+                    FocusNode::new(&mut app).into_erased(),
+                    FocusNode::new(&mut app).into_erased(),
+                )
+            };
+            pump_ltr(
+                tester,
+                Form::new(
+                    Column::new().children([
+                        focusable_text_field(&key1, node1.clone())
+                            .autovalidate_mode(AutovalidateMode::Always)
+                            .initial_value("foo".to_string())
+                            .validator(|_app, value| error_text(value))
+                            .into_widget(),
+                        focusable_text_field(&key2, node2.clone())
+                            .autovalidate_mode(AutovalidateMode::Disabled)
+                            .initial_value("bar".to_string())
+                            .validator(|_app, value| error_text(value))
+                            .into_widget(),
+                    ]),
+                )
+                .autovalidate_mode(AutovalidateMode::OnUnfocus)
+                .into_widget(),
+            );
 
-        // Verify that the error text is displayed for the first TextFormField.
-        assert_eq!(tester.count_text("foo/error"), 1);
+            // Verify that the error text is displayed for the first TextFormField.
+            assert_eq!(count_text(tester, "foo/error"), 1);
 
-        // Enter text in the TextFormField.
-        focus(&mut tester, node1.handle());
-        tester.enter_text(&key1, "foo");
-        tester.pump();
+            // Enter text in the TextFormField.
+            focus(tester, node1.handle());
+            enter_text(tester, &key1, "foo");
+            tester.pump();
 
-        // Click in the second TextFormField to trigger validation.
-        focus(&mut tester, node2.handle());
+            // Click in the second TextFormField to trigger validation.
+            focus(tester, node2.handle());
 
-        // No error text is visible yet for the second TextFormField.
-        assert_eq!(tester.count_text("bar/error"), 0);
+            // No error text is visible yet for the second TextFormField.
+            assert_eq!(count_text(tester, "bar/error"), 0);
 
-        // Now click in the first TextFormField to trigger validation for the second
-        // TextFormField.
-        focus(&mut tester, node1.handle());
+            // Now click in the first TextFormField to trigger validation for the second
+            // TextFormField.
+            focus(tester, node1.handle());
 
-        // Verify that the error text is displayed for the second TextFormField.
-        assert_eq!(tester.count_text("bar/error"), 1);
+            // Verify that the error text is displayed for the second TextFormField.
+            assert_eq!(count_text(tester, "bar/error"), 1);
+        });
     }
 
     #[test]
     fn a_form_on_unfocus_validates_every_field_when_validated_by_hand() {
-        let mut tester = WidgetTester::new();
-        let form_key = GlobalKey::new();
-        let (key1, key2) = (GlobalKey::new(), GlobalKey::new());
-        let (node1, node2): (FocusNodeRef, FocusNodeRef) = {
-            let mut app = tester.app();
-            (
-                FocusNode::new(&mut app).into_erased(),
-                FocusNode::new(&mut app).into_erased(),
-            )
-        };
-        tester.pump_widget(
-            Form::new(
-                Column::new().children([
-                    focusable_text_field(&key1, node1.clone())
-                        .initial_value("foo".to_string())
-                        .validator(|_app, value| error_text(value))
-                        .into_widget(),
-                    focusable_text_field(&key2, node2.clone())
-                        .initial_value("bar".to_string())
-                        .validator(|_app, value| error_text(value))
-                        .into_widget(),
-                ]),
-            )
-            .key(form_key.clone().into())
-            .autovalidate_mode(AutovalidateMode::OnUnfocus)
-            .into_widget(),
-        );
+        test_widgets(|tester| {
+            let form_key = GlobalKey::new();
+            let (key1, key2) = (GlobalKey::new(), GlobalKey::new());
+            let (node1, node2): (FocusNodeRef, FocusNodeRef) = {
+                let mut app = tester.cell.borrow_mut();
+                (
+                    FocusNode::new(&mut app).into_erased(),
+                    FocusNode::new(&mut app).into_erased(),
+                )
+            };
+            pump_ltr(
+                tester,
+                Form::new(
+                    Column::new().children([
+                        focusable_text_field(&key1, node1.clone())
+                            .initial_value("foo".to_string())
+                            .validator(|_app, value| error_text(value))
+                            .into_widget(),
+                        focusable_text_field(&key2, node2.clone())
+                            .initial_value("bar".to_string())
+                            .validator(|_app, value| error_text(value))
+                            .into_widget(),
+                    ]),
+                )
+                .key(form_key.clone().into())
+                .autovalidate_mode(AutovalidateMode::OnUnfocus)
+                .into_widget(),
+            );
 
-        // Focus on the first field.
-        focus(&mut tester, node1.handle());
+            // Focus on the first field.
+            focus(tester, node1.handle());
 
-        // Check no error messages are displayed initially.
-        assert_eq!(tester.count_text("foo/error"), 0);
-        assert_eq!(tester.count_text("bar/error"), 0);
+            // Check no error messages are displayed initially.
+            assert_eq!(count_text(tester, "foo/error"), 0);
+            assert_eq!(count_text(tester, "bar/error"), 0);
 
-        // Validate all fields manually using FormState.
-        let form = tester.form(&form_key);
-        assert!(!form.validate(&mut tester.app()));
-        tester.pump();
+            // Validate all fields manually using FormState.
+            let form = form_state(tester, &form_key);
+            assert!(!form.validate(&mut tester.cell.borrow_mut()));
+            tester.pump();
 
-        // Check error messages are displayed.
-        assert_eq!(tester.count_text("foo/error"), 1);
-        assert_eq!(tester.count_text("bar/error"), 1);
+            // Check error messages are displayed.
+            assert_eq!(count_text(tester, "foo/error"), 1);
+            assert_eq!(count_text(tester, "bar/error"), 1);
+        });
     }
 
     #[test]
     fn a_form_always_validates_its_fields_at_the_second_frame() {
-        let mut tester = WidgetTester::new();
-        let (key1, key2) = (GlobalKey::new(), GlobalKey::new());
-        tester.pump_widget(
-            Form::new(
-                Column::new().children([
-                    text_field(&key1)
-                        .initial_value("foo".to_string())
-                        .validator(|_app, value| error_text(value))
-                        .into_widget(),
-                    text_field(&key2)
-                        .initial_value("bar".to_string())
-                        .validator(|_app, value| error_text(value))
-                        .into_widget(),
-                ]),
-            )
-            .autovalidate_mode(AutovalidateMode::Always)
-            .into_widget(),
-        );
+        test_widgets(|tester| {
+            let (key1, key2) = (GlobalKey::new(), GlobalKey::new());
+            pump_ltr(
+                tester,
+                Form::new(
+                    Column::new().children([
+                        text_field(&key1)
+                            .initial_value("foo".to_string())
+                            .validator(|_app, value| error_text(value))
+                            .into_widget(),
+                        text_field(&key2)
+                            .initial_value("bar".to_string())
+                            .validator(|_app, value| error_text(value))
+                            .into_widget(),
+                    ]),
+                )
+                .autovalidate_mode(AutovalidateMode::Always)
+                .into_widget(),
+            );
 
-        // The validation happens in a post frame callback, so the error
-        // doesn't show up until the second frame.
-        assert_eq!(tester.count_text("foo/error"), 0);
-        assert_eq!(tester.count_text("bar/error"), 0);
+            // The validation happens in a post frame callback, so the error
+            // doesn't show up until the second frame.
+            assert_eq!(count_text(tester, "foo/error"), 0);
+            assert_eq!(count_text(tester, "bar/error"), 0);
 
-        tester.pump();
+            tester.pump();
 
-        // The error shows up on the second frame.
-        assert_eq!(tester.count_text("foo/error"), 1);
-        assert_eq!(tester.count_text("bar/error"), 1);
+            // The error shows up on the second frame.
+            assert_eq!(count_text(tester, "foo/error"), 1);
+            assert_eq!(count_text(tester, "bar/error"), 1);
+        });
     }
 
     /// `tester.getSize(find.byType(W))`: the size of the first box at or below the one `W`.
     fn size_of_widget<W: 'static>(tester: &WidgetTester) -> Size {
         let elements = tester.elements();
-        let app = tester.app();
+        let app = tester.cell.borrow();
         let mut found = elements
             .into_iter()
             .filter(|element| downcast_widget::<W>(&**element.widget(&app)).is_some());
@@ -2790,284 +2716,300 @@ mod tests {
 
     /// `Text('X')`: a box that would be bigger than zero, which zero constraints squeeze.
     fn sized_text() -> WidgetRef {
-        SizedBox::new()
-            .width(14.0)
-            .height(14.0)
-            .child(Shown::new("X"))
-            .into_widget()
+        Text::new("X").into_widget()
     }
 
     #[test]
     fn a_form_does_not_crash_at_zero_area() {
-        let mut tester = WidgetTester::new();
-        tester.pump_widget(
-            Center::new()
-                .child(SizedBox::shrink().child(Form::new(sized_text())))
-                .into_widget(),
-        );
-        assert_eq!(size_of_widget::<Form>(&tester), Size::ZERO);
+        test_widgets(|tester| {
+            pump_ltr(
+                tester,
+                Center::new()
+                    .child(SizedBox::shrink().child(Form::new(sized_text())))
+                    .into_widget(),
+            );
+            assert_eq!(size_of_widget::<Form>(tester), Size::ZERO);
+        });
     }
 
     #[test]
     fn a_form_field_does_not_crash_at_zero_area() {
-        let mut tester = WidgetTester::new();
-        tester.pump_widget(
-            Center::new()
-                .child(
-                    SizedBox::shrink().child(FormField::<String>::new(|_app, _field| sized_text())),
-                )
-                .into_widget(),
-        );
-        assert_eq!(size_of_widget::<FormField<String>>(&tester), Size::ZERO);
+        test_widgets(|tester| {
+            pump_ltr(
+                tester,
+                Center::new()
+                    .child(
+                        SizedBox::shrink()
+                            .child(FormField::<String>::new(|_app, _field| sized_text())),
+                    )
+                    .into_widget(),
+            );
+            assert_eq!(size_of_widget::<FormField<String>>(tester), Size::ZERO);
+        });
     }
 
     #[test]
     fn clear_error_clears_the_error_and_keeps_the_value() {
-        let mut tester = WidgetTester::new();
-        let field_key = GlobalKey::new();
-        tester.pump_widget(
-            Form::new(
-                text_field(&field_key)
-                    .initial_value("foo".to_string())
-                    .validator(|_app, value| error_text(value)),
-            )
-            .into_widget(),
-        );
-        let field = tester.field::<String>(&field_key);
+        test_widgets(|tester| {
+            let field_key = GlobalKey::new();
+            pump_ltr(
+                tester,
+                Form::new(
+                    text_field(&field_key)
+                        .initial_value("foo".to_string())
+                        .validator(|_app, value| error_text(value)),
+                )
+                .into_widget(),
+            );
+            let field = field_state::<String>(tester, &field_key);
 
-        field.validate(&mut tester.app());
-        tester.pump();
-        assert_eq!(tester.count_text("foo/error"), 1);
+            field.validate(&mut tester.cell.borrow_mut());
+            tester.pump();
+            assert_eq!(count_text(tester, "foo/error"), 1);
 
-        field.clear_error(&mut tester.app());
-        tester.pump();
+            field.clear_error(&mut tester.cell.borrow_mut());
+            tester.pump();
 
-        assert_eq!(tester.count_text("foo/error"), 0);
+            assert_eq!(count_text(tester, "foo/error"), 0);
 
-        // Value is preserved.
-        assert_eq!(tester.count_text("foo"), 1);
+            // Value is preserved.
+            assert_eq!(count_text(tester, "foo"), 1);
+        });
     }
 
     #[test]
     fn clear_error_on_the_form_clears_every_field_error() {
-        let mut tester = WidgetTester::new();
-        let form_key = GlobalKey::new();
-        let (key1, key2) = (GlobalKey::new(), GlobalKey::new());
-        tester.pump_widget(
-            Form::new(
-                Column::new().children([
-                    text_field(&key1)
-                        .initial_value("foo".to_string())
-                        .validator(|_app, value| error_text(value))
-                        .into_widget(),
-                    text_field(&key2)
-                        .initial_value("bar".to_string())
-                        .validator(|_app, value| error_text(value))
-                        .into_widget(),
-                ]),
-            )
-            .key(form_key.clone().into())
-            .into_widget(),
-        );
-        let form = tester.form(&form_key);
+        test_widgets(|tester| {
+            let form_key = GlobalKey::new();
+            let (key1, key2) = (GlobalKey::new(), GlobalKey::new());
+            pump_ltr(
+                tester,
+                Form::new(
+                    Column::new().children([
+                        text_field(&key1)
+                            .initial_value("foo".to_string())
+                            .validator(|_app, value| error_text(value))
+                            .into_widget(),
+                        text_field(&key2)
+                            .initial_value("bar".to_string())
+                            .validator(|_app, value| error_text(value))
+                            .into_widget(),
+                    ]),
+                )
+                .key(form_key.clone().into())
+                .into_widget(),
+            );
+            let form = form_state(tester, &form_key);
 
-        form.validate(&mut tester.app());
-        tester.pump();
+            form.validate(&mut tester.cell.borrow_mut());
+            tester.pump();
 
-        assert_eq!(tester.count_text("foo/error"), 1);
-        assert_eq!(tester.count_text("bar/error"), 1);
+            assert_eq!(count_text(tester, "foo/error"), 1);
+            assert_eq!(count_text(tester, "bar/error"), 1);
 
-        form.clear_error(&mut tester.app());
-        tester.pump();
+            form.clear_error(&mut tester.cell.borrow_mut());
+            tester.pump();
 
-        assert_eq!(tester.count_text("foo/error"), 0);
-        assert_eq!(tester.count_text("bar/error"), 0);
-        assert_eq!(tester.count_text("foo"), 1);
-        assert_eq!(tester.count_text("bar"), 1);
+            assert_eq!(count_text(tester, "foo/error"), 0);
+            assert_eq!(count_text(tester, "bar/error"), 0);
+            assert_eq!(count_text(tester, "foo"), 1);
+            assert_eq!(count_text(tester, "bar"), 1);
+        });
     }
 
     #[test]
     fn fields_exposes_every_registered_field_state_with_its_value() {
-        let mut tester = WidgetTester::new();
-        let form_key = GlobalKey::new();
-        let (key1, key2) = (GlobalKey::new(), GlobalKey::new());
-        tester.pump_widget(
-            Form::new(
-                Column::new().children([
-                    text_field(&key1)
-                        .initial_value("A".to_string())
-                        .into_widget(),
-                    text_field(&key2)
-                        .initial_value("B".to_string())
-                        .into_widget(),
-                ]),
-            )
-            .key(form_key.clone().into())
-            .into_widget(),
-        );
+        test_widgets(|tester| {
+            let form_key = GlobalKey::new();
+            let (key1, key2) = (GlobalKey::new(), GlobalKey::new());
+            pump_ltr(
+                tester,
+                Form::new(
+                    Column::new().children([
+                        text_field(&key1)
+                            .initial_value("A".to_string())
+                            .into_widget(),
+                        text_field(&key2)
+                            .initial_value("B".to_string())
+                            .into_widget(),
+                    ]),
+                )
+                .key(form_key.clone().into())
+                .into_widget(),
+            );
 
-        let form = tester.form(&form_key);
-        let app = tester.app();
-        let fields = form.fields(&app);
-        assert_eq!(fields.len(), 2);
-        let values: Vec<&String> = fields
-            .iter()
-            .map(|field| {
-                field
-                    .value(&app)
-                    .and_then(|value| value.downcast_ref::<String>())
-                    .unwrap()
-            })
-            .collect();
-        assert!(values.contains(&&"A".to_string()));
-        assert!(values.contains(&&"B".to_string()));
+            let form = form_state(tester, &form_key);
+            let app = tester.cell.borrow_mut();
+            let fields = form.fields(&app);
+            assert_eq!(fields.len(), 2);
+            let values: Vec<&String> = fields
+                .iter()
+                .map(|field| {
+                    field
+                        .value(&app)
+                        .and_then(|value| value.downcast_ref::<String>())
+                        .unwrap()
+                })
+                .collect();
+            assert!(values.contains(&&"A".to_string()));
+            assert!(values.contains(&&"B".to_string()));
+        });
     }
 
     #[test]
     fn fields_reports_every_field_invalid_after_validation_errors() {
-        let mut tester = WidgetTester::new();
-        let form_key = GlobalKey::new();
-        let (key1, key2) = (GlobalKey::new(), GlobalKey::new());
-        tester.pump_widget(
-            Form::new(
-                Column::new().children([
-                    text_field(&key1)
-                        .initial_value("foo".to_string())
-                        .validator(|_app, value| error_text(value))
-                        .into_widget(),
-                    text_field(&key2)
-                        .initial_value("bar".to_string())
-                        .validator(|_app, value| error_text(value))
-                        .into_widget(),
-                ]),
-            )
-            .key(form_key.clone().into())
-            .into_widget(),
-        );
-        let form = tester.form(&form_key);
+        test_widgets(|tester| {
+            let form_key = GlobalKey::new();
+            let (key1, key2) = (GlobalKey::new(), GlobalKey::new());
+            pump_ltr(
+                tester,
+                Form::new(
+                    Column::new().children([
+                        text_field(&key1)
+                            .initial_value("foo".to_string())
+                            .validator(|_app, value| error_text(value))
+                            .into_widget(),
+                        text_field(&key2)
+                            .initial_value("bar".to_string())
+                            .validator(|_app, value| error_text(value))
+                            .into_widget(),
+                    ]),
+                )
+                .key(form_key.clone().into())
+                .into_widget(),
+            );
+            let form = form_state(tester, &form_key);
 
-        form.validate(&mut tester.app());
-        tester.pump();
+            form.validate(&mut tester.cell.borrow_mut());
+            tester.pump();
 
-        assert_eq!(tester.count_text("foo/error"), 1);
-        assert_eq!(tester.count_text("bar/error"), 1);
+            assert_eq!(count_text(tester, "foo/error"), 1);
+            assert_eq!(count_text(tester, "bar/error"), 1);
 
-        let mut app = tester.app();
-        let fields = form.fields(&app);
+            let mut app = tester.cell.borrow_mut();
+            let fields = form.fields(&app);
 
-        // Expect all fields to be invalid.
-        assert!(fields.into_iter().all(|field| !field.is_valid(&mut app)));
+            // Expect all fields to be invalid.
+            assert!(fields.into_iter().all(|field| !field.is_valid(&mut app)));
+        });
     }
 
     #[test]
     fn is_valid_evaluates_validity_without_updating_the_error_display() {
-        let mut tester = WidgetTester::new();
-        let form_key = GlobalKey::new();
-        let field_key = GlobalKey::new();
-        tester.pump_widget(
-            Form::new(
-                text_field(&field_key)
-                    .initial_value("foo".to_string())
-                    .validator(|_app, value| error_text(value)),
-            )
-            .key(form_key.clone().into())
-            .into_widget(),
-        );
+        test_widgets(|tester| {
+            let form_key = GlobalKey::new();
+            let field_key = GlobalKey::new();
+            pump_ltr(
+                tester,
+                Form::new(
+                    text_field(&field_key)
+                        .initial_value("foo".to_string())
+                        .validator(|_app, value| error_text(value)),
+                )
+                .key(form_key.clone().into())
+                .into_widget(),
+            );
 
-        let form = tester.form(&form_key);
-        let fields = form.fields(&tester.app());
-        assert_eq!(fields.len(), 1);
-        let field = fields[0];
+            let form = form_state(tester, &form_key);
+            let fields = form.fields(&tester.cell.borrow_mut());
+            assert_eq!(fields.len(), 1);
+            let field = fields[0];
 
-        assert!(!field.is_valid(&mut tester.app()));
+            assert!(!field.is_valid(&mut tester.cell.borrow_mut()));
 
-        // No error UI should be shown.
-        assert_eq!(tester.count_text("foo/error"), 0);
-        assert!(!field.has_error(&tester.app()));
+            // No error UI should be shown.
+            assert_eq!(count_text(tester, "foo/error"), 0);
+            assert!(!field.has_error(&tester.cell.borrow_mut()));
+        });
     }
 
     #[test]
     fn fields_collects_and_updates_the_values_of_fields_of_every_type() {
-        let mut tester = WidgetTester::new();
-        let form_key = GlobalKey::new();
-        let keyed = |name: &str| KeyRef::from(ValueKey::new(name.to_string()));
-        tester.pump_widget(
-            Form::new(
-                Column::new().children([
-                    FormField::new(show_field)
-                        .key(keyed("name"))
-                        .initial_value("Name".to_string())
-                        .into_widget(),
-                    FormField::new(show_field)
-                        .key(keyed("email"))
-                        .initial_value("Email".to_string())
-                        .into_widget(),
-                    FormField::<i64>::new(|_app, _field| SizedBox::shrink().into_widget())
-                        .key(keyed("age"))
-                        .initial_value(18)
-                        .into_widget(),
-                ]),
-            )
-            .key(form_key.clone().into())
-            .into_widget(),
-        );
-        let form = tester.form(&form_key);
+        test_widgets(|tester| {
+            let form_key = GlobalKey::new();
+            let keyed = |name: &str| KeyRef::from(ValueKey::new(name.to_string()));
+            pump_ltr(
+                tester,
+                Form::new(
+                    Column::new().children([
+                        FormField::new(show_field)
+                            .key(keyed("name"))
+                            .initial_value("Name".to_string())
+                            .into_widget(),
+                        FormField::new(show_field)
+                            .key(keyed("email"))
+                            .initial_value("Email".to_string())
+                            .into_widget(),
+                        FormField::<i64>::new(|_app, _field| SizedBox::shrink().into_widget())
+                            .key(keyed("age"))
+                            .initial_value(18)
+                            .into_widget(),
+                    ]),
+                )
+                .key(form_key.clone().into())
+                .into_widget(),
+            );
+            let form = form_state(tester, &form_key);
 
-        let collect_data = |tester: &WidgetTester| {
-            let app = tester.app();
-            let mut data = Vec::new();
-            for field in form.fields(&app) {
-                let key = field.context(&app).widget(&app).key().cloned();
-                let value = field.value(&app).expect("every field holds a value");
-                let value = value
-                    .downcast_ref::<String>()
-                    .cloned()
-                    .or_else(|| value.downcast_ref::<i64>().map(i64::to_string))
-                    .expect("a String or an i64");
-                data.push((key.expect("every field is keyed"), value));
-            }
-            data
-        };
+            let collect_data = |tester: &WidgetTester| {
+                let app = tester.cell.borrow_mut();
+                let mut data = Vec::new();
+                for field in form.fields(&app) {
+                    let key = field.context(&app).widget(&app).key().cloned();
+                    let value = field.value(&app).expect("every field holds a value");
+                    let value = value
+                        .downcast_ref::<String>()
+                        .cloned()
+                        .or_else(|| value.downcast_ref::<i64>().map(i64::to_string))
+                        .expect("a String or an i64");
+                    data.push((key.expect("every field is keyed"), value));
+                }
+                data
+            };
 
-        assert_eq!(
-            collect_data(&tester),
-            [
-                (keyed("name"), "Name".to_string()),
-                (keyed("email"), "Email".to_string()),
-                (keyed("age"), "18".to_string()),
-            ]
-        );
+            assert_eq!(
+                collect_data(tester),
+                [
+                    (keyed("name"), "Name".to_string()),
+                    (keyed("email"), "Email".to_string()),
+                    (keyed("age"), "18".to_string()),
+                ]
+            );
 
-        let field = |tester: &WidgetTester, name: &str| {
-            let app = tester.app();
-            form.fields(&app)
-                .into_iter()
-                .find(|field| field.context(&app).widget(&app).key() == Some(&keyed(name)))
-                .expect("a field keyed so")
-        };
-        let name = field(&tester, "name")
-            .typed::<String>()
-            .expect("a String field");
-        let email = field(&tester, "email")
-            .typed::<String>()
-            .expect("a String field");
-        let age = field(&tester, "age").typed::<i64>().expect("an i64 field");
-        assert!(field(&tester, "age").typed::<String>().is_none());
+            let field = |tester: &WidgetTester, name: &str| {
+                let app = tester.cell.borrow_mut();
+                form.fields(&app)
+                    .into_iter()
+                    .find(|field| field.context(&app).widget(&app).key() == Some(&keyed(name)))
+                    .expect("a field keyed so")
+            };
+            let name = field(tester, "name")
+                .typed::<String>()
+                .expect("a String field");
+            let email = field(tester, "email")
+                .typed::<String>()
+                .expect("a String field");
+            let age = field(tester, "age").typed::<i64>().expect("an i64 field");
+            assert!(field(tester, "age").typed::<String>().is_none());
 
-        name.did_change(&mut tester.app(), Some("New Name".to_string()));
-        email.did_change(&mut tester.app(), Some("new@email.com".to_string()));
-        age.did_change(&mut tester.app(), Some(30));
+            name.did_change(&mut tester.cell.borrow_mut(), Some("New Name".to_string()));
+            email.did_change(
+                &mut tester.cell.borrow_mut(),
+                Some("new@email.com".to_string()),
+            );
+            age.did_change(&mut tester.cell.borrow_mut(), Some(30));
 
-        tester.pump();
+            tester.pump();
 
-        assert_eq!(
-            collect_data(&tester),
-            [
-                (keyed("name"), "New Name".to_string()),
-                (keyed("email"), "new@email.com".to_string()),
-                (keyed("age"), "30".to_string()),
-            ]
-        );
+            assert_eq!(
+                collect_data(tester),
+                [
+                    (keyed("name"), "New Name".to_string()),
+                    (keyed("email"), "new@email.com".to_string()),
+                    (keyed("age"), "30".to_string()),
+                ]
+            );
+        });
     }
 
     // ---- restoration, through a field that restores its value as `TextFormField` does ----
@@ -3204,69 +3146,74 @@ mod tests {
         };
         let restart_and_restore = |data: Option<RestorationMap>| {
             let mut tester = WidgetTester::restoring(data);
-            tester.pump_widget(builder());
+            pump_ltr(&mut tester, builder());
             tester
         };
 
-        let mut tester = WidgetTester::new();
-        tester.pump_widget(builder());
+        let mut tester = WidgetTester::restoring(None);
+        pump_ltr(&mut tester, builder());
 
         // No error text is visible yet.
-        assert_eq!(tester.count_text("foo/error"), 0);
+        assert_eq!(count_text(&tester, "foo/error"), 0);
 
         let field = key_state::<RestorableTextFieldState>(&tester, &field_key);
-        field.did_change(&mut tester.app(), Some("bar".to_string()));
+        field.did_change(&mut tester.cell.borrow_mut(), Some("bar".to_string()));
         tester.pump();
         tester.pump();
-        assert_eq!(tester.count_text("bar/error"), 1);
+        assert_eq!(count_text(&tester, "bar/error"), 1);
 
         let data = tester.restoration_data();
         let mut tester = restart_and_restore(data.clone());
         // Error text should be present after restart and restore.
-        assert_eq!(tester.count_text("bar/error"), 1);
+        assert_eq!(count_text(&tester, "bar/error"), 1);
 
         // Resetting the form state should remove the error text.
         let field = key_state::<RestorableTextFieldState>(&tester, &field_key);
-        field.reset(&mut tester.app());
+        field.reset(&mut tester.cell.borrow_mut());
         tester.pump();
         tester.pump();
-        assert_eq!(tester.count_text("bar/error"), 0);
+        assert_eq!(count_text(&tester, "bar/error"), 0);
         let tester = restart_and_restore(tester.restoration_data());
         // Error text should still be removed after restart and restore.
-        assert_eq!(tester.count_text("bar/error"), 0);
+        assert_eq!(count_text(&tester, "bar/error"), 0);
 
         let tester = restart_and_restore(data);
-        assert_eq!(tester.count_text("bar/error"), 1);
+        assert_eq!(count_text(&tester, "bar/error"), 1);
     }
 
     fn key_state<S: State>(tester: &WidgetTester, key: &GlobalKey) -> Handle<S> {
-        key.current_state::<S>(&tester.app())
+        key.current_state::<S>(&tester.cell.borrow())
             .expect("the field is mounted")
     }
 
     #[test]
     fn a_form_with_can_pop_wraps_its_fields_in_a_pop_scope() {
-        let mut tester = WidgetTester::new();
-        tester.pump_widget(Form::new(SizedBox::shrink()).can_pop(false).into_widget());
-        let pop_scopes: Vec<bool> = {
-            let elements = tester.elements();
-            let app = tester.app();
-            elements
-                .into_iter()
-                .filter_map(|element| {
-                    downcast_widget::<PopScope>(&**element.widget(&app)).map(|scope| scope.can_pop)
-                })
-                .collect()
-        };
-        assert_eq!(pop_scopes, [false]);
+        test_widgets(|tester| {
+            pump_ltr(
+                tester,
+                Form::new(SizedBox::shrink()).can_pop(false).into_widget(),
+            );
+            let pop_scopes: Vec<bool> = {
+                let elements = tester.elements();
+                let app = tester.cell.borrow_mut();
+                elements
+                    .into_iter()
+                    .filter_map(|element| {
+                        downcast_widget::<PopScope>(&**element.widget(&app))
+                            .map(|scope| scope.can_pop)
+                    })
+                    .collect()
+            };
+            assert_eq!(pop_scopes, [false]);
 
-        tester.pump_widget(Form::new(SizedBox::shrink()).into_widget());
-        let elements = tester.elements();
-        let app = tester.app();
-        assert!(
-            elements
-                .into_iter()
-                .all(|element| downcast_widget::<PopScope>(&**element.widget(&app)).is_none())
-        );
+            pump_ltr(tester, Form::new(SizedBox::shrink()).into_widget());
+            let elements = tester.elements();
+            let app = tester.cell.borrow_mut();
+            assert!(
+                elements
+                    .into_iter()
+                    .all(|element| downcast_widget::<PopScope>(&**element.widget(&app)).is_none())
+            );
+        });
     }
 }

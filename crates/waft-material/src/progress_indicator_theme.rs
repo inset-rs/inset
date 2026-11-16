@@ -484,15 +484,16 @@ mod tests {
     use waft_painting::{BorderRadius, BorderSide, EdgeInsets};
     use waft_widgets::{Center, SizedBox};
 
+    use waft_widgets::testing::{WidgetTester, test_widgets};
+
     use super::*;
     use crate::colors::Colors;
     use crate::material::Material;
     use crate::progress_indicator::tests::{
         active_arc_of, arc, centered_width, circle, circular_sizes, controller_at, padded,
-        painted_by, paints, pump_with, rect, rrect, scaffold_app, tester, theme_with, themed,
+        painted_by, paints, pump_with, rect, rrect, scaffold_app, theme_with, themed,
     };
     use crate::progress_indicator::{CircularProgressIndicator, LinearProgressIndicator};
-    use crate::test_support::with_main_thread_stack;
     use crate::theme_data::ThemeData;
 
     #[test]
@@ -516,13 +517,12 @@ mod tests {
 
     #[test]
     fn can_theme_linear_progress_indicator_using_progress_indicator_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let color = Color::new(0xFF00FF00);
             let linear_track_color = Color::new(0xFFFF0000);
             let linear_min_height = 25.0;
             let border_radius = 8.0;
-            pump_with(&mut tester, |app| {
+            pump_with(tester, |app| {
                 let theme = theme_with(
                     app,
                     ProgressIndicatorThemeData::new()
@@ -538,7 +538,7 @@ mod tests {
             });
             let radius = Radius::circular(border_radius);
             assert!(paints(
-                &painted_by::<LinearProgressIndicator>(&tester),
+                &painted_by::<LinearProgressIndicator>(tester),
                 &[
                     // Track.
                     rrect(RRect::from_ltrbr(
@@ -565,8 +565,7 @@ mod tests {
 
     #[test]
     fn can_theme_linear_progress_indicator_when_year2023_to_false() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let color = Color::new(0xFF00FF00);
             let linear_track_color = Color::new(0xFFFF0000);
             let linear_min_height = 25.0;
@@ -574,7 +573,7 @@ mod tests {
             let stop_indicator_color = Color::new(0xFF0000FF);
             let stop_indicator_radius = 10.0;
             let track_gap = 16.0;
-            pump_with(&mut tester, |app| {
+            pump_with(tester, |app| {
                 let theme = theme_with(
                     app,
                     ProgressIndicatorThemeData::new()
@@ -596,7 +595,7 @@ mod tests {
             });
             let radius = Radius::circular(border_radius);
             assert!(paints(
-                &painted_by::<LinearProgressIndicator>(&tester),
+                &painted_by::<LinearProgressIndicator>(tester),
                 &[
                     // Track.
                     rrect(RRect::from_ltrbr(
@@ -628,8 +627,7 @@ mod tests {
 
     #[test]
     fn local_progress_indicator_theme_takes_precedence_over_inherited_progress_indicator_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let color = Color::new(0xFFFF00FF);
             let linear_track_color = Color::new(0xFF00FFFF);
             let linear_min_height = 20.0;
@@ -637,7 +635,7 @@ mod tests {
             let stop_indicator_color = Color::new(0xFFFFFF00);
             let stop_indicator_radius = 8.0;
             let track_gap = 12.0;
-            pump_with(&mut tester, |app| {
+            pump_with(tester, |app| {
                 let theme = theme_with(
                     app,
                     ProgressIndicatorThemeData::new()
@@ -668,7 +666,7 @@ mod tests {
             });
             let radius = Radius::circular(border_radius);
             assert!(paints(
-                &painted_by::<LinearProgressIndicator>(&tester),
+                &painted_by::<LinearProgressIndicator>(tester),
                 &[
                     // Track.
                     rrect(RRect::from_ltrbr(
@@ -695,8 +693,7 @@ mod tests {
 
     #[test]
     fn can_theme_circular_progress_indicator_using_progress_indicator_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let color = Color::new(0xFFFF0000);
             let circular_track_color = Color::new(0xFF0000FF);
             let stroke_width = 8.0;
@@ -704,7 +701,7 @@ mod tests {
             let stroke_cap = StrokeCap::Butt;
             let constraints = BoxConstraints::tight_for(Some(80.0), Some(80.0));
             let padding: EdgeInsetsGeometry = EdgeInsets::all(14.0).into();
-            pump_with(&mut tester, |app| {
+            pump_with(tester, |app| {
                 let theme = theme_with(
                     app,
                     ProgressIndicatorThemeData::new()
@@ -722,7 +719,7 @@ mod tests {
                 )
             });
 
-            let (indicator, _) = circular_sizes(&tester);
+            let (indicator, _) = circular_sizes(tester);
             assert_eq!(
                 indicator,
                 Size::new(
@@ -731,7 +728,7 @@ mod tests {
                 )
             );
             assert!(paints(
-                &painted_by::<CircularProgressIndicator>(&tester),
+                &painted_by::<CircularProgressIndicator>(tester),
                 &[
                     // Track.
                     arc()
@@ -750,8 +747,7 @@ mod tests {
 
     #[test]
     fn can_theme_circular_progress_indicator_when_year2023_to_false() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let color = Color::new(0xFFFF0000);
             let circular_track_color = Color::new(0xFF0000FF);
             let stroke_width = 8.0;
@@ -760,7 +756,7 @@ mod tests {
             let constraints = BoxConstraints::tight_for(Some(80.0), Some(80.0));
             let track_gap = 12.0;
             let padding: EdgeInsetsGeometry = EdgeInsets::all(18.0).into();
-            pump_with(&mut tester, |app| {
+            pump_with(tester, |app| {
                 let theme = theme_with(
                     app,
                     ProgressIndicatorThemeData::new()
@@ -780,11 +776,11 @@ mod tests {
                 )
             });
 
-            let (indicator, indicator_box) = circular_sizes(&tester);
+            let (indicator, indicator_box) = circular_sizes(tester);
             assert_eq!(indicator_box, constraints.biggest());
             assert_eq!(indicator, padded(indicator_box, padding));
             assert!(paints(
-                &painted_by::<CircularProgressIndicator>(&tester),
+                &painted_by::<CircularProgressIndicator>(tester),
                 &[
                     // Track.
                     arc()
@@ -804,9 +800,8 @@ mod tests {
     #[test]
     fn circular_progress_indicator_year2023_set_to_false_and_provided_circular_track_color_does_not_throw_exception()
      {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_with(&mut tester, |app| {
+        test_widgets(|tester| {
+            pump_with(tester, |app| {
                 themed(
                     theme_with(
                         app,
@@ -827,10 +822,9 @@ mod tests {
     #[test]
     fn opt_into_2024_circular_progress_indicator_appearance_with_progress_indicator_theme_data_year2023()
      {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let padding: EdgeInsetsGeometry = EdgeInsets::all(4.0).into();
-            pump_with(&mut tester, |app| {
+            pump_with(tester, |app| {
                 scaffold_app(
                     Some(year2023_false_theme(app)),
                     Center::new().child(CircularProgressIndicator::new().value(0.5)),
@@ -838,11 +832,11 @@ mod tests {
             });
             let colors = year2023_false_theme(&tester.cell.borrow()).color_scheme;
 
-            let (indicator, indicator_box) = circular_sizes(&tester);
+            let (indicator, indicator_box) = circular_sizes(tester);
             assert_eq!(indicator, padded(indicator_box, padding));
             let arc_rect = Rect::from_ltrb(2.0, 2.0, 38.0, 38.0);
             assert!(paints(
-                &painted_by::<CircularProgressIndicator>(&tester),
+                &painted_by::<CircularProgressIndicator>(tester),
                 &[
                     // Track.
                     arc()
@@ -863,9 +857,8 @@ mod tests {
 
     #[test]
     fn circular_progress_indicator_year2023_overrides_progress_indicator_theme_data_year2023() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_with(&mut tester, |app| {
+        test_widgets(|tester| {
+            pump_with(tester, |app| {
                 scaffold_app(
                     Some(year2023_false_theme(app)),
                     Center::new().child(CircularProgressIndicator::new().year2023(true).value(0.5)),
@@ -873,10 +866,10 @@ mod tests {
             });
             let colors = year2023_false_theme(&tester.cell.borrow()).color_scheme;
 
-            let (indicator, indicator_box) = circular_sizes(&tester);
+            let (indicator, indicator_box) = circular_sizes(tester);
             assert_eq!(indicator, indicator_box);
             assert!(paints(
-                &painted_by::<CircularProgressIndicator>(&tester),
+                &painted_by::<CircularProgressIndicator>(tester),
                 &[
                     // Active indicator.
                     arc()
@@ -891,10 +884,9 @@ mod tests {
     #[test]
     fn opt_into_2024_linear_progress_indicator_appearance_with_progress_indicator_theme_data_year2023()
      {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let default_track_gap = 4.0;
-            pump_with(&mut tester, |app| {
+            pump_with(tester, |app| {
                 scaffold_app(
                     Some(year2023_false_theme(app)),
                     SizedBox::new()
@@ -905,7 +897,7 @@ mod tests {
             let colors = year2023_false_theme(&tester.cell.borrow()).color_scheme;
             let radius = Radius::circular(2.0);
             assert!(paints(
-                &painted_by::<LinearProgressIndicator>(&tester),
+                &painted_by::<LinearProgressIndicator>(tester),
                 &[
                     // Track.
                     rrect(RRect::from_ltrbr(
@@ -927,9 +919,8 @@ mod tests {
 
     #[test]
     fn linear_progress_indicator_year2023_overrides_progress_indicator_theme_data_year2023() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_with(&mut tester, |app| {
+        test_widgets(|tester| {
+            pump_with(tester, |app| {
                 scaffold_app(
                     Some(year2023_false_theme(app)),
                     SizedBox::new()
@@ -939,7 +930,7 @@ mod tests {
             });
             let colors = year2023_false_theme(&tester.cell.borrow()).color_scheme;
             assert!(paints(
-                &painted_by::<LinearProgressIndicator>(&tester),
+                &painted_by::<LinearProgressIndicator>(tester),
                 &[
                     // Track.
                     rect(Rect::from_ltrb(0.0, 0.0, 200.0, 4.0)).color(colors.secondary_container()),
@@ -986,10 +977,8 @@ mod tests {
 
     #[test]
     fn linear_progress_indicator_reflects_the_value_of_the_theme_controller() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let pump = |tester: &mut crate::test_support::WidgetTester,
-                        controllers: Controllers| {
+        test_widgets(|tester| {
+            let pump = |tester: &mut WidgetTester, controllers: Controllers| {
                 pump_with(tester, |app| {
                     let indicator = match controllers.widget.clone() {
                         Some(controller) => LinearProgressIndicator::new().controller(controller),
@@ -1003,49 +992,46 @@ mod tests {
                     )
                 });
             };
-            let expect_progress_at =
-                |tester: &crate::test_support::WidgetTester, left: f64, right: f64| {
-                    let mut expected = Vec::new();
-                    if right < 200.0 {
-                        // Right track
-                        expected.push(rect(Rect::from_ltrb(right, 0.0, 200.0, 4.0)));
-                    }
-                    expected.push(rect(Rect::from_ltrb(left, 0.0, right, 4.0)));
-                    if left > 0.0 {
-                        // Left track
-                        expected.push(rect(Rect::from_ltrb(0.0, 0.0, left, 4.0)));
-                    }
-                    assert!(
-                        paints(&painted_by::<LinearProgressIndicator>(tester), &expected),
-                        "progress from {left} to {right}"
-                    );
-                };
+            let expect_progress_at = |tester: &WidgetTester, left: f64, right: f64| {
+                let mut expected = Vec::new();
+                if right < 200.0 {
+                    // Right track
+                    expected.push(rect(Rect::from_ltrb(right, 0.0, 200.0, 4.0)));
+                }
+                expected.push(rect(Rect::from_ltrb(left, 0.0, right, 4.0)));
+                if left > 0.0 {
+                    // Left track
+                    expected.push(rect(Rect::from_ltrb(0.0, 0.0, left, 4.0)));
+                }
+                assert!(
+                    paints(&painted_by::<LinearProgressIndicator>(tester), &expected),
+                    "progress from {left} to {right}"
+                );
+            };
 
             let mut controllers = Controllers::default();
-            pump(&mut tester, controllers.clone());
-            tester.pump(Duration::from_millis(500));
-            expect_progress_at(&tester, 16.028758883476257, 141.07513427734375);
+            pump(tester, controllers.clone());
+            tester.pump_by(Duration::from_millis(500));
+            expect_progress_at(tester, 16.028758883476257, 141.07513427734375);
 
-            controllers.global_theme = Some(controller_at(&tester, 0.1));
-            pump(&mut tester, controllers.clone());
-            expect_progress_at(&tester, 0.0, 37.14974820613861);
+            controllers.global_theme = Some(controller_at(tester, 0.1));
+            pump(tester, controllers.clone());
+            expect_progress_at(tester, 0.0, 37.14974820613861);
 
-            controllers.indicator_theme = Some(controller_at(&tester, 0.5));
-            pump(&mut tester, controllers.clone());
-            expect_progress_at(&tester, 127.79541015625, 200.0);
+            controllers.indicator_theme = Some(controller_at(tester, 0.5));
+            pump(tester, controllers.clone());
+            expect_progress_at(tester, 127.79541015625, 200.0);
 
-            controllers.widget = Some(controller_at(&tester, 0.8));
-            pump(&mut tester, controllers.clone());
-            expect_progress_at(&tester, 98.24226796627045, 181.18448555469513);
+            controllers.widget = Some(controller_at(tester, 0.8));
+            pump(tester, controllers.clone());
+            expect_progress_at(tester, 98.24226796627045, 181.18448555469513);
         });
     }
 
     #[test]
     fn circular_progress_indicator_reflects_the_value_of_the_theme_controller() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let pump = |tester: &mut crate::test_support::WidgetTester,
-                        controllers: Controllers| {
+        test_widgets(|tester| {
+            let pump = |tester: &mut WidgetTester, controllers: Controllers| {
                 pump_with(tester, |app| {
                     let indicator = match controllers.widget.clone() {
                         Some(controller) => CircularProgressIndicator::new().controller(controller),
@@ -1061,30 +1047,29 @@ mod tests {
                     )
                 });
             };
-            let expect_progress_at =
-                |tester: &crate::test_support::WidgetTester, start: f64, sweep: f64| {
-                    assert_eq!(
-                        active_arc_of::<CircularProgressIndicator>(tester),
-                        (start, sweep)
-                    );
-                };
+            let expect_progress_at = |tester: &WidgetTester, start: f64, sweep: f64| {
+                assert_eq!(
+                    active_arc_of::<CircularProgressIndicator>(tester),
+                    (start, sweep)
+                );
+            };
 
             let mut controllers = Controllers::default();
-            pump(&mut tester, controllers.clone());
-            tester.pump(Duration::from_millis(500));
-            expect_progress_at(&tester, 0.43225767465697107, 4.52182126629162);
+            pump(tester, controllers.clone());
+            tester.pump_by(Duration::from_millis(500));
+            expect_progress_at(tester, 0.43225767465697107, 4.52182126629162);
 
-            controllers.global_theme = Some(controller_at(&tester, 0.1));
-            pump(&mut tester, controllers.clone());
-            expect_progress_at(&tester, 0.628318530718057, 2.8904563625380906);
+            controllers.global_theme = Some(controller_at(tester, 0.1));
+            pump(tester, controllers.clone());
+            expect_progress_at(tester, 0.628318530718057, 2.8904563625380906);
 
-            controllers.indicator_theme = Some(controller_at(&tester, 0.5));
-            pump(&mut tester, controllers.clone());
-            expect_progress_at(&tester, std::f64::consts::FRAC_PI_2, 0.001);
+            controllers.indicator_theme = Some(controller_at(tester, 0.5));
+            pump(tester, controllers.clone());
+            expect_progress_at(tester, std::f64::consts::FRAC_PI_2, 0.001);
 
-            controllers.widget = Some(controller_at(&tester, 0.8));
-            pump(&mut tester, controllers.clone());
-            expect_progress_at(&tester, 2.520489337828999, 4.076855234710353);
+            controllers.widget = Some(controller_at(tester, 0.8));
+            pump(tester, controllers.clone());
+            expect_progress_at(tester, 2.520489337828999, 4.076855234710353);
         });
     }
 }

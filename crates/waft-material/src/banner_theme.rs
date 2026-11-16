@@ -270,10 +270,12 @@ impl InheritedWidget for MaterialBannerTheme {
 mod tests {
     use waft_widgets::SizedBox;
 
+    use waft_widgets::testing::test_widgets;
+
     use super::*;
     use crate::colors::Colors;
+    use crate::drawer_theme::tests::probe;
     use crate::drawer_theme::tests::theme_seen_through_capture;
-    use crate::test_support::{probe, test_cell, with_main_thread_stack};
     use crate::theme_data::ThemeData;
 
     #[test]
@@ -365,15 +367,14 @@ mod tests {
 
     #[test]
     fn of_returns_the_theme_data_banner_theme_without_an_ancestor() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let expected = MaterialBannerThemeData::new()
                 .elevation(3.0)
                 .divider_color(Colors::RED.primary());
             let theme_data_banner = expected.clone();
 
             let seen = probe(
-                &cell,
+                tester,
                 move |app, child| {
                     let data = ThemeData::builder()
                         .banner_theme(theme_data_banner.clone())
@@ -389,13 +390,12 @@ mod tests {
 
     #[test]
     fn of_returns_the_closest_banner_theme_over_theme_data() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let widget_banner = MaterialBannerThemeData::new().elevation(7.0);
             let expected = widget_banner.clone();
 
             let seen = probe(
-                &cell,
+                tester,
                 move |app, child| {
                     let data = ThemeData::builder()
                         .banner_theme(MaterialBannerThemeData::new().elevation(3.0))
@@ -415,13 +415,12 @@ mod tests {
 
     #[test]
     fn of_falls_back_to_theme_data_when_the_banner_theme_has_no_data() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let expected = MaterialBannerThemeData::new().elevation(3.0);
             let theme_data_banner = expected.clone();
 
             let seen = probe(
-                &cell,
+                tester,
                 move |app, child| {
                     let data = ThemeData::builder()
                         .banner_theme(theme_data_banner.clone())
@@ -437,13 +436,12 @@ mod tests {
 
     #[test]
     fn a_captured_banner_theme_is_kept_under_another_banner_theme() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let captured = MaterialBannerThemeData::new().elevation(1.0);
             let shadowing = MaterialBannerThemeData::new().elevation(2.0);
 
             let seen = theme_seen_through_capture(
-                &cell,
+                tester,
                 |probe| {
                     MaterialBannerTheme::new(probe)
                         .data(captured.clone())
@@ -483,9 +481,8 @@ mod tests {
 
     #[test]
     fn theme_data_holds_the_banner_theme() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
-            let app = cell.borrow();
+        test_widgets(|tester| {
+            let app = tester.cell.borrow();
             let theme = ThemeData::new(&app);
             assert_eq!(theme.banner_theme, MaterialBannerThemeData::new());
 

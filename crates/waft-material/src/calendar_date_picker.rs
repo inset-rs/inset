@@ -2698,9 +2698,11 @@ pub(crate) mod tests {
     use waft_services::PhysicalKeyboardKey;
     use waft_widgets::{AnyElement, Directionality, IntoWidget};
 
+    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+
     use super::*;
-    use crate::chip::tests::{center_of, tester};
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::chip::tests::center_of;
+    use crate::test_support::{PaintInspection, material_app};
     use crate::theme_data::ThemeData;
 
     /// The options of Dart's test helper `calendarDatePicker(..)`.
@@ -2895,17 +2897,16 @@ pub(crate) mod tests {
 
     #[test]
     fn can_select_a_day() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let reported = Reported::default();
             pump(
-                &mut tester,
+                tester,
                 PickerOptions {
                     initial_date: Some(DateTime::utc(2016, 1, 15)),
                     ..reported.options()
                 },
             );
-            tap_text(&mut tester, "12");
+            tap_text(tester, "12");
             assert_eq!(
                 reported.selected_date.get(),
                 Some(DateTime::utc(2016, 1, 12))
@@ -2915,11 +2916,10 @@ pub(crate) mod tests {
 
     #[test]
     fn can_select_a_day_with_nothing_first_selected() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let reported = Reported::default();
-            pump(&mut tester, reported.options());
-            tap_text(&mut tester, "12");
+            pump(tester, reported.options());
+            tap_text(tester, "12");
             assert_eq!(
                 reported.selected_date.get(),
                 Some(DateTime::utc(2016, 1, 12))
@@ -2928,38 +2928,37 @@ pub(crate) mod tests {
     }
 
     fn run_can_select_a_month(initial_date: Option<DateTime>) {
-        with_main_thread_stack(move || {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let reported = Reported::default();
             pump(
-                &mut tester,
+                tester,
                 PickerOptions {
                     initial_date,
                     ..reported.options()
                 },
             );
-            assert!(has_text(&tester, "January 2016"));
+            assert!(has_text(tester, "January 2016"));
 
             // Go back two months
-            tap_month_button(&mut tester, "Previous month");
+            tap_month_button(tester, "Previous month");
             tester.pump_and_settle();
-            assert!(has_text(&tester, "December 2015"));
+            assert!(has_text(tester, "December 2015"));
             assert_eq!(
                 reported.displayed_month.get(),
                 Some(DateTime::utc(2015, 12, 1))
             );
-            tap_month_button(&mut tester, "Previous month");
+            tap_month_button(tester, "Previous month");
             tester.pump_and_settle();
-            assert!(has_text(&tester, "November 2015"));
+            assert!(has_text(tester, "November 2015"));
             assert_eq!(
                 reported.displayed_month.get(),
                 Some(DateTime::utc(2015, 11, 1))
             );
 
             // Go forward a month
-            tap_month_button(&mut tester, "Next month");
+            tap_month_button(tester, "Next month");
             tester.pump_and_settle();
-            assert!(has_text(&tester, "December 2015"));
+            assert!(has_text(tester, "December 2015"));
             assert_eq!(
                 reported.displayed_month.get(),
                 Some(DateTime::utc(2015, 12, 1))
@@ -2978,22 +2977,21 @@ pub(crate) mod tests {
     }
 
     fn run_can_select_a_year(initial_date: Option<DateTime>) {
-        with_main_thread_stack(move || {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let reported = Reported::default();
             pump(
-                &mut tester,
+                tester,
                 PickerOptions {
                     initial_date,
                     ..reported.options()
                 },
             );
 
-            tap_text(&mut tester, "January 2016"); // Switch to year mode.
+            tap_text(tester, "January 2016"); // Switch to year mode.
             tester.pump_and_settle();
-            tap_text(&mut tester, "2018");
+            tap_text(tester, "2018");
             tester.pump_and_settle();
-            assert!(has_text(&tester, "January 2018"));
+            assert!(has_text(tester, "January 2018"));
             assert_eq!(
                 reported.displayed_month.get(),
                 Some(DateTime::utc(2018, 1, 1))
@@ -3013,28 +3011,27 @@ pub(crate) mod tests {
 
     #[test]
     fn selecting_date_does_not_change_displayed_month() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let reported = Reported::default();
             pump(
-                &mut tester,
+                tester,
                 PickerOptions {
                     initial_date: Some(DateTime::utc(2020, 3, 15)),
                     ..reported.options()
                 },
             );
 
-            tap_month_button(&mut tester, "Next month");
+            tap_month_button(tester, "Next month");
             tester.pump_and_settle();
-            assert!(has_text(&tester, "April 2020"));
+            assert!(has_text(tester, "April 2020"));
             assert_eq!(
                 reported.displayed_month.get(),
                 Some(DateTime::utc(2020, 4, 1))
             );
 
-            tap_text(&mut tester, "25");
+            tap_text(tester, "25");
             tester.pump_and_settle();
-            assert!(has_text(&tester, "April 2020"));
+            assert!(has_text(tester, "April 2020"));
             assert_eq!(
                 reported.displayed_month.get(),
                 Some(DateTime::utc(2020, 4, 1))
@@ -3044,30 +3041,29 @@ pub(crate) mod tests {
                 Some(DateTime::utc(2020, 4, 25))
             );
             // There isn't a 31 in April so there shouldn't be one if it is showing April.
-            assert!(!has_text(&tester, "31"));
+            assert!(!has_text(tester, "31"));
         });
     }
 
     #[test]
     fn changing_year_does_change_selected_date() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let reported = Reported::default();
             pump(
-                &mut tester,
+                tester,
                 PickerOptions {
                     initial_date: Some(DateTime::utc(2016, 1, 15)),
                     ..reported.options()
                 },
             );
-            tap_text(&mut tester, "4");
+            tap_text(tester, "4");
             assert_eq!(
                 reported.selected_date.get(),
                 Some(DateTime::utc(2016, 1, 4))
             );
-            tap_text(&mut tester, "January 2016");
+            tap_text(tester, "January 2016");
             tester.pump_and_settle();
-            tap_text(&mut tester, "2018");
+            tap_text(tester, "2018");
             tester.pump_and_settle();
             assert_eq!(
                 reported.selected_date.get(),
@@ -3078,27 +3074,26 @@ pub(crate) mod tests {
 
     #[test]
     fn changing_year_for_february_29th() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let reported = Reported::default();
             pump(
-                &mut tester,
+                tester,
                 PickerOptions {
                     initial_date: Some(DateTime::utc(2020, 2, 29)),
                     ..reported.options()
                 },
             );
-            tap_text(&mut tester, "February 2020");
+            tap_text(tester, "February 2020");
             tester.pump_and_settle();
-            tap_text(&mut tester, "2018");
+            tap_text(tester, "2018");
             tester.pump_and_settle();
             assert_eq!(
                 reported.selected_date.get(),
                 Some(DateTime::utc(2018, 2, 28))
             );
-            tap_text(&mut tester, "February 2018");
+            tap_text(tester, "February 2018");
             tester.pump_and_settle();
-            tap_text(&mut tester, "2020");
+            tap_text(tester, "2020");
             tester.pump_and_settle();
             // Changing back to 2020 the 29th is not selected anymore.
             assert_eq!(
@@ -3110,25 +3105,24 @@ pub(crate) mod tests {
 
     #[test]
     fn changing_year_does_not_change_the_month() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let reported = Reported::default();
             pump(
-                &mut tester,
+                tester,
                 PickerOptions {
                     initial_date: Some(DateTime::utc(2016, 1, 15)),
                     ..reported.options()
                 },
             );
-            tap_month_button(&mut tester, "Next month");
+            tap_month_button(tester, "Next month");
             tester.pump_and_settle();
-            tap_month_button(&mut tester, "Next month");
+            tap_month_button(tester, "Next month");
             tester.pump_and_settle();
-            tap_text(&mut tester, "March 2016");
+            tap_text(tester, "March 2016");
             tester.pump_and_settle();
-            tap_text(&mut tester, "2018");
+            tap_text(tester, "2018");
             tester.pump_and_settle();
-            assert!(has_text(&tester, "March 2018"));
+            assert!(has_text(tester, "March 2018"));
             assert_eq!(
                 reported.displayed_month.get(),
                 Some(DateTime::utc(2018, 3, 1))
@@ -3138,21 +3132,20 @@ pub(crate) mod tests {
 
     #[test]
     fn can_select_a_year_and_then_a_day() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let reported = Reported::default();
             pump(
-                &mut tester,
+                tester,
                 PickerOptions {
                     initial_date: Some(DateTime::utc(2016, 1, 15)),
                     ..reported.options()
                 },
             );
-            tap_text(&mut tester, "January 2016"); // Switch to year mode.
+            tap_text(tester, "January 2016"); // Switch to year mode.
             tester.pump_and_settle();
-            tap_text(&mut tester, "2017");
+            tap_text(tester, "2017");
             tester.pump_and_settle();
-            tap_text(&mut tester, "19");
+            tap_text(tester, "19");
             assert_eq!(
                 reported.selected_date.get(),
                 Some(DateTime::utc(2017, 1, 19))
@@ -3162,12 +3155,11 @@ pub(crate) mod tests {
 
     #[test]
     fn cannot_select_a_day_outside_bounds() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let valid_date = DateTime::utc(2017, 1, 15);
             let reported = Reported::default();
             pump(
-                &mut tester,
+                tester,
                 PickerOptions {
                     initial_date: Some(valid_date),
                     first_date: valid_date,
@@ -3177,26 +3169,25 @@ pub(crate) mod tests {
             );
 
             // Earlier than firstDate. Should be ignored.
-            tap_text(&mut tester, "10");
+            tap_text(tester, "10");
             assert_eq!(reported.selected_date.get(), None);
 
             // Later than lastDate. Should be ignored.
-            tap_text(&mut tester, "20");
+            tap_text(tester, "20");
             assert_eq!(reported.selected_date.get(), None);
 
             // This one is just right.
-            tap_text(&mut tester, "15");
+            tap_text(tester, "15");
             assert_eq!(reported.selected_date.get(), Some(valid_date));
         });
     }
 
     #[test]
     fn cannot_navigate_to_a_month_outside_bounds() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let reported = Reported::default();
             pump(
-                &mut tester,
+                tester,
                 PickerOptions {
                     first_date: DateTime::utc(2016, 12, 15),
                     initial_date: Some(DateTime::utc(2017, 1, 15)),
@@ -3205,35 +3196,34 @@ pub(crate) mod tests {
                 },
             );
 
-            tap_month_button(&mut tester, "Next month");
+            tap_month_button(tester, "Next month");
             tester.pump_and_settle();
             assert_eq!(
                 reported.displayed_month.get(),
                 Some(DateTime::utc(2017, 2, 1))
             );
             // Shouldn't be possible to keep going forward into March.
-            assert!(!month_button_enabled(&tester, "Next month"));
+            assert!(!month_button_enabled(tester, "Next month"));
 
-            tap_month_button(&mut tester, "Previous month");
+            tap_month_button(tester, "Previous month");
             tester.pump_and_settle();
-            tap_month_button(&mut tester, "Previous month");
+            tap_month_button(tester, "Previous month");
             tester.pump_and_settle();
             assert_eq!(
                 reported.displayed_month.get(),
                 Some(DateTime::utc(2016, 12, 1))
             );
             // Shouldn't be possible to keep going backward into November.
-            assert!(!month_button_enabled(&tester, "Previous month"));
+            assert!(!month_button_enabled(tester, "Previous month"));
         });
     }
 
     #[test]
     fn cannot_select_disabled_year() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let reported = Reported::default();
             pump(
-                &mut tester,
+                tester,
                 PickerOptions {
                     first_date: DateTime::utc(2018, 6, 9),
                     initial_date: Some(DateTime::utc(2018, 7, 4)),
@@ -3241,14 +3231,14 @@ pub(crate) mod tests {
                     ..reported.options()
                 },
             );
-            tap_text(&mut tester, "July 2018"); // Switch to year mode.
+            tap_text(tester, "July 2018"); // Switch to year mode.
             tester.pump_and_settle();
-            tap_text(&mut tester, "2016"); // Disabled, doesn't change the year.
+            tap_text(tester, "2016"); // Disabled, doesn't change the year.
             tester.pump_and_settle();
-            tap_text(&mut tester, "2020"); // Disabled, doesn't change the year.
+            tap_text(tester, "2020"); // Disabled, doesn't change the year.
             tester.pump_and_settle();
 
-            tap_text(&mut tester, "2018");
+            tap_text(tester, "2018");
             tester.pump_and_settle();
             // Nothing should have changed.
             assert_eq!(reported.displayed_month.get(), None);
@@ -3257,11 +3247,10 @@ pub(crate) mod tests {
 
     #[test]
     fn selecting_first_date_year_respects_first_date() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let reported = Reported::default();
             pump(
-                &mut tester,
+                tester,
                 PickerOptions {
                     first_date: DateTime::utc(2016, 6, 9),
                     initial_date: Some(DateTime::utc(2018, 5, 4)),
@@ -3269,12 +3258,12 @@ pub(crate) mod tests {
                     ..reported.options()
                 },
             );
-            tap_text(&mut tester, "May 2018");
+            tap_text(tester, "May 2018");
             tester.pump_and_settle();
-            tap_text(&mut tester, "2016");
+            tap_text(tester, "2016");
             tester.pump_and_settle();
             // Month should be clamped to June as the range starts at June 2016.
-            assert!(has_text(&tester, "June 2016"));
+            assert!(has_text(tester, "June 2016"));
             assert_eq!(
                 reported.displayed_month.get(),
                 Some(DateTime::utc(2016, 6, 1))
@@ -3288,11 +3277,10 @@ pub(crate) mod tests {
 
     #[test]
     fn selecting_last_date_year_respects_last_date() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let reported = Reported::default();
             pump(
-                &mut tester,
+                tester,
                 PickerOptions {
                     first_date: DateTime::utc(2016, 6, 9),
                     initial_date: Some(DateTime::utc(2018, 5, 4)),
@@ -3301,14 +3289,14 @@ pub(crate) mod tests {
                 },
             );
             // Selected date is now 2018-05-04 (initialDate).
-            tap_text(&mut tester, "May 2018");
+            tap_text(tester, "May 2018");
             // Selected date is still 2018-05-04.
             tester.pump_and_settle();
-            tap_text(&mut tester, "2019");
+            tap_text(tester, "2019");
             // Selected date would become 2019-05-04 but gets clamped to the month of
             // lastDate, so 2019-01-04.
             tester.pump_and_settle();
-            assert!(has_text(&tester, "January 2019"));
+            assert!(has_text(tester, "January 2019"));
             assert_eq!(
                 reported.displayed_month.get(),
                 Some(DateTime::utc(2019, 1, 1))
@@ -3322,11 +3310,10 @@ pub(crate) mod tests {
 
     #[test]
     fn selecting_last_date_year_respects_last_date_when_the_day_is_beyond_it() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let reported = Reported::default();
             pump(
-                &mut tester,
+                tester,
                 PickerOptions {
                     first_date: DateTime::utc(2016, 6, 9),
                     initial_date: Some(DateTime::utc(2018, 5, 15)),
@@ -3335,15 +3322,15 @@ pub(crate) mod tests {
                 },
             );
             // Selected date is now 2018-05-15 (initialDate).
-            tap_text(&mut tester, "May 2018");
+            tap_text(tester, "May 2018");
             // Selected date is still 2018-05-15.
             tester.pump_and_settle();
-            tap_text(&mut tester, "2019");
+            tap_text(tester, "2019");
             // Selected date would become 2019-05-15 but gets clamped to the month of
             // lastDate, so 2019-01-15. Day is now beyond the lastDate so that also gets
             // clamped, to 2019-01-04.
             tester.pump_and_settle();
-            assert!(has_text(&tester, "January 2019"));
+            assert!(has_text(tester, "January 2019"));
             assert_eq!(
                 reported.displayed_month.get(),
                 Some(DateTime::utc(2019, 1, 1))
@@ -3357,11 +3344,10 @@ pub(crate) mod tests {
 
     #[test]
     fn only_predicate_days_are_selectable() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let reported = Reported::default();
             pump(
-                &mut tester,
+                tester,
                 PickerOptions {
                     first_date: DateTime::utc(2017, 1, 10),
                     initial_date: Some(DateTime::utc(2017, 1, 16)),
@@ -3370,14 +3356,14 @@ pub(crate) mod tests {
                     ..reported.options()
                 },
             );
-            tap_text(&mut tester, "13"); // Odd, doesn't work.
+            tap_text(tester, "13"); // Odd, doesn't work.
             assert_eq!(reported.selected_date.get(), None);
-            tap_text(&mut tester, "10"); // Even, works.
+            tap_text(tester, "10"); // Even, works.
             assert_eq!(
                 reported.selected_date.get(),
                 Some(DateTime::utc(2017, 1, 10))
             );
-            tap_text(&mut tester, "17"); // Odd, doesn't work.
+            tap_text(tester, "17"); // Odd, doesn't work.
             assert_eq!(
                 reported.selected_date.get(),
                 Some(DateTime::utc(2017, 1, 10))
@@ -3387,10 +3373,9 @@ pub(crate) mod tests {
 
     #[test]
     fn can_select_initial_calendar_picker_mode() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump(
-                &mut tester,
+                tester,
                 PickerOptions {
                     initial_date: Some(DateTime::utc(2014, 1, 15)),
                     initial_calendar_mode: DatePickerMode::Year,
@@ -3399,9 +3384,9 @@ pub(crate) mod tests {
             );
             // 2018 wouldn't be available if the year picker wasn't showing.
             // The initial current year is 2014.
-            tap_text(&mut tester, "2018");
+            tap_text(tester, "2018");
             tester.pump_and_settle();
-            assert!(has_text(&tester, "January 2018"));
+            assert!(has_text(tester, "January 2018"));
         });
     }
 
@@ -3418,11 +3403,10 @@ pub(crate) mod tests {
 
     #[test]
     fn day_builder_customizes_days_and_preserves_tap_handling() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let selected_dates = Rc::new(RefCell::new(Vec::new()));
             pump(
-                &mut tester,
+                tester,
                 PickerOptions {
                     initial_date: Some(DateTime::utc(2016, 1, 15)),
                     on_date_changed: {
@@ -3445,7 +3429,7 @@ pub(crate) mod tests {
 
             // Notify a date change only when the custom day is tapped.
             assert!(selected_dates.borrow().is_empty());
-            tap_text(&mut tester, "Custom day 1");
+            tap_text(tester, "Custom day 1");
             tester.pump_and_settle();
             assert_eq!(*selected_dates.borrow(), vec![DateTime::utc(2016, 1, 1)]);
         });
@@ -3453,11 +3437,10 @@ pub(crate) mod tests {
 
     #[test]
     fn day_builder_receives_day_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let states_for_day = Rc::new(RefCell::new(HashMap::new()));
             pump(
-                &mut tester,
+                tester,
                 PickerOptions {
                     initial_date: Some(DateTime::utc(2016, 1, 15)),
                     selectable_day_predicate: Some(Rc::new(|date: DateTime| date.day() != 10)),
@@ -3476,15 +3459,15 @@ pub(crate) mod tests {
             assert!(states(10).contains(&WidgetState::Disabled));
             assert!(states(15).contains(&WidgetState::Selected));
 
-            let mut mouse = WidgetTester::mouse(1, 0);
+            let mut mouse = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut mouse, waft_embedder::Offset::new(0.0, 0.0));
-            let twelve = text(&tester, "12");
-            let at = center_of(&tester, twelve);
+            let twelve = text(tester, "12");
+            let at = center_of(tester, twelve);
             tester.move_to(&mut mouse, at, false);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert!(states(12).contains(&WidgetState::Hovered));
 
-            tap_text(&mut tester, "12");
+            tap_text(tester, "12");
             tester.pump_and_settle();
             assert!(states(12).contains(&WidgetState::Selected));
             assert!(!states(15).contains(&WidgetState::Selected));
@@ -3493,10 +3476,9 @@ pub(crate) mod tests {
 
     #[test]
     fn weekday_builder_customizes_headers_and_uses_date_time_weekday_values() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump(
-                &mut tester,
+                tester,
                 PickerOptions {
                     weekday_builder: Some(Rc::new(|_app, _context, details| {
                         if details.weekday == DateTime::SUNDAY {
@@ -3514,11 +3496,10 @@ pub(crate) mod tests {
 
     #[test]
     fn weekday_builder_receives_weekdays_in_locale_order_for_en_us() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let weekdays = Rc::new(RefCell::new(Vec::new()));
             pump(
-                &mut tester,
+                tester,
                 PickerOptions {
                     weekday_builder: Some({
                         let weekdays = Rc::clone(&weekdays);
@@ -3547,34 +3528,32 @@ pub(crate) mod tests {
 
     #[test]
     fn selecting_date_does_not_switch_picker_to_year_selection() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump(
-                &mut tester,
+                tester,
                 PickerOptions {
                     initial_date: Some(DateTime::utc(2020, 5, 10)),
                     initial_calendar_mode: DatePickerMode::Year,
                     ..PickerOptions::default()
                 },
             );
-            tap_text(&mut tester, "2017");
+            tap_text(tester, "2017");
             tester.pump_and_settle();
-            assert!(has_text(&tester, "May 2017"));
-            tap_text(&mut tester, "10");
+            assert!(has_text(tester, "May 2017"));
+            tap_text(tester, "10");
             tester.pump_and_settle();
-            assert!(has_text(&tester, "May 2017"));
-            assert!(!has_text(&tester, "2017"));
+            assert!(has_text(tester, "May 2017"));
+            assert!(!has_text(tester, "2017"));
         });
     }
 
     #[test]
     fn selecting_disabled_date_does_not_change_current_selection() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let day = |day: i32| DateTime::utc(2020, 5, day);
             let selection = Rc::new(Cell::new(day(2)));
             pump(
-                &mut tester,
+                tester,
                 PickerOptions {
                     initial_date: Some(selection.get()),
                     first_date: day(2),
@@ -3587,13 +3566,13 @@ pub(crate) mod tests {
                 },
             );
 
-            tap_text(&mut tester, "3");
+            tap_text(tester, "3");
             tester.pump_and_settle();
             assert_eq!(selection.get(), day(3));
-            tap_text(&mut tester, "4");
+            tap_text(tester, "4");
             tester.pump_and_settle();
             assert_eq!(selection.get(), day(3));
-            tap_text(&mut tester, "5");
+            tap_text(tester, "5");
             tester.pump_and_settle();
             assert_eq!(selection.get(), day(3));
         });
@@ -3601,12 +3580,11 @@ pub(crate) mod tests {
 
     #[test]
     fn updates_to_initial_calendar_mode_parameter_is_not_reflected_in_the_state() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let picker_key = GlobalKey::new();
 
             pump(
-                &mut tester,
+                tester,
                 PickerOptions {
                     key: Some(picker_key.clone()),
                     initial_date: Some(DateTime::utc(2016, 1, 15)),
@@ -3618,11 +3596,11 @@ pub(crate) mod tests {
 
             // Should be in year mode.
             assert_eq!(tester.find_text("January 2016").len(), 1); // Day/year selector
-            assert!(!has_text(&tester, "15")); // day 15 in grid
+            assert!(!has_text(tester, "15")); // day 15 in grid
             assert_eq!(tester.find_text("2016").len(), 1); // 2016 in year grid
 
             pump(
-                &mut tester,
+                tester,
                 PickerOptions {
                     key: Some(picker_key),
                     initial_date: Some(DateTime::utc(2016, 1, 15)),
@@ -3633,7 +3611,7 @@ pub(crate) mod tests {
 
             // Should be in year mode still; updating an _initial_ parameter has no effect.
             assert_eq!(tester.find_text("January 2016").len(), 1); // Day/year selector
-            assert!(!has_text(&tester, "15")); // day 15 in grid
+            assert!(!has_text(tester, "15")); // day 15 in grid
             assert_eq!(tester.find_text("2016").len(), 1); // 2016 in year grid
         });
     }
@@ -3679,20 +3657,19 @@ pub(crate) mod tests {
 
     #[test]
     fn keyboard_can_toggle_to_year_mode() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump(
-                &mut tester,
+                tester,
                 PickerOptions {
                     initial_date: Some(DateTime::utc(2016, 1, 15)),
                     ..PickerOptions::default()
                 },
             );
-            assert!(!has_text(&tester, "2016"));
+            assert!(!has_text(tester, "2016"));
             assert_eq!(tester.find_text("January 2016").len(), 1);
             // Navigate to the year selector and activate it.
-            tab(&mut tester);
-            space(&mut tester);
+            tab(tester);
+            space(tester);
             tester.pump_and_settle();
             // The years should be visible.
             assert_eq!(tester.find_text("2016").len(), 1);
@@ -3702,10 +3679,9 @@ pub(crate) mod tests {
 
     #[test]
     fn keyboard_can_navigate_next_and_previous_months() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump(
-                &mut tester,
+                tester,
                 PickerOptions {
                     initial_date: Some(DateTime::utc(2016, 1, 15)),
                     ..PickerOptions::default()
@@ -3713,19 +3689,19 @@ pub(crate) mod tests {
             );
             assert_eq!(tester.find_text("January 2016").len(), 1);
             // Navigate to the previous month button and activate it twice.
-            tab(&mut tester);
-            tab(&mut tester);
-            space(&mut tester);
+            tab(tester);
+            tab(tester);
+            space(tester);
             tester.pump_and_settle();
-            space(&mut tester);
+            space(tester);
             tester.pump_and_settle();
             // Should be showing Nov 2015
             assert_eq!(tester.find_text("November 2015").len(), 1);
 
             // Navigate to the next month button and activate it four times.
-            tab(&mut tester);
+            tab(tester);
             for _ in 0..4 {
-                space(&mut tester);
+                space(tester);
                 tester.pump_and_settle();
             }
             // Should be on Mar 2016.
@@ -3741,17 +3717,16 @@ pub(crate) mod tests {
 
     #[test]
     fn keyboard_can_navigate_date_grid_with_arrow_keys() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let reported = Reported::default();
             pump(
-                &mut tester,
+                tester,
                 PickerOptions {
                     initial_date: Some(DateTime::utc(2016, 1, 15)),
                     ..reported.options()
                 },
             );
-            navigate_to_the_grid(&mut tester);
+            navigate_to_the_grid(tester);
 
             // Navigate from Jan 15 to Jan 18 with arrow keys.
             for direction in [
@@ -3763,12 +3738,12 @@ pub(crate) mod tests {
                 TraversalDirection::Left,
                 TraversalDirection::Left,
             ] {
-                arrow(&mut tester, direction);
+                arrow(tester, direction);
             }
             tester.pump_and_settle();
 
             // Activate it.
-            space(&mut tester);
+            space(tester);
             tester.pump_and_settle();
 
             // Should have selected Jan 18.
@@ -3781,23 +3756,22 @@ pub(crate) mod tests {
 
     #[test]
     fn keyboard_navigating_with_arrow_keys_scrolls_months() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let reported = Reported::default();
             pump(
-                &mut tester,
+                tester,
                 PickerOptions {
                     initial_date: Some(DateTime::utc(2016, 1, 15)),
                     ..reported.options()
                 },
             );
-            navigate_to_the_grid(&mut tester);
+            navigate_to_the_grid(tester);
             tester.pump_and_settle();
 
             // Navigate from Jan 15 to Dec 31 with arrow keys
-            arrow(&mut tester, TraversalDirection::Up);
-            arrow(&mut tester, TraversalDirection::Up);
-            arrow(&mut tester, TraversalDirection::Left);
+            arrow(tester, TraversalDirection::Up);
+            arrow(tester, TraversalDirection::Up);
+            arrow(tester, TraversalDirection::Left);
             tester.pump_and_settle();
 
             // Should have scrolled to Dec 2015.
@@ -3805,7 +3779,7 @@ pub(crate) mod tests {
 
             // Navigate from Dec 31 to Nov 26 with arrow keys.
             for _ in 0..5 {
-                arrow(&mut tester, TraversalDirection::Up);
+                arrow(tester, TraversalDirection::Up);
             }
             tester.pump_and_settle();
 
@@ -3813,7 +3787,7 @@ pub(crate) mod tests {
             assert_eq!(tester.find_text("November 2015").len(), 1);
 
             // Activate it
-            space(&mut tester);
+            space(tester);
             tester.pump_and_settle();
 
             assert_eq!(
@@ -3825,30 +3799,29 @@ pub(crate) mod tests {
 
     #[test]
     fn keyboard_rtl_text_direction_reverses_the_horizontal_arrow_key_navigation() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let reported = Reported::default();
             pump(
-                &mut tester,
+                tester,
                 PickerOptions {
                     initial_date: Some(DateTime::utc(2016, 1, 15)),
                     text_direction: TextDirection::Rtl,
                     ..reported.options()
                 },
             );
-            navigate_to_the_grid(&mut tester);
+            navigate_to_the_grid(tester);
             tester.pump_and_settle();
 
             // Navigate from Jan 15 to 19 with arrow keys.
             for _ in 0..4 {
-                arrow(&mut tester, TraversalDirection::Right);
+                arrow(tester, TraversalDirection::Right);
             }
-            arrow(&mut tester, TraversalDirection::Down);
-            arrow(&mut tester, TraversalDirection::Left);
+            arrow(tester, TraversalDirection::Down);
+            arrow(tester, TraversalDirection::Left);
             tester.pump_and_settle();
 
             // Activate it.
-            space(&mut tester);
+            space(tester);
             tester.pump_and_settle();
 
             // Should have selected Jan 19.
@@ -3861,8 +3834,7 @@ pub(crate) mod tests {
 
     #[test]
     fn calendar_date_picker_renders_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             for mode in [DatePickerMode::Day, DatePickerMode::Year] {
                 let picker = CalendarDatePicker::new(
                     Some(DateTime::utc(2025, 1, 1)),
@@ -3871,7 +3843,7 @@ pub(crate) mod tests {
                     Rc::new(|_app, _date| {}),
                 )
                 .initial_calendar_mode(mode);
-                let theme = theme_for(&tester, None);
+                let theme = theme_for(tester, None);
                 tester.pump_widget(material_app(
                     theme,
                     crate::scaffold::Scaffold::new()
@@ -3884,9 +3856,8 @@ pub(crate) mod tests {
 
     #[test]
     fn year_picker_current_year_is_visible() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let root = year_picker(&tester, None, None, None, None);
+        test_widgets(|tester| {
+            let root = year_picker(tester, None, None, None, None);
             tester.pump_widget(root);
             assert_eq!(tester.find_text("2016").len(), 1);
         });
@@ -3894,11 +3865,10 @@ pub(crate) mod tests {
 
     #[test]
     fn year_picker_can_select_a_year() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let selected_date = Rc::new(Cell::new(None));
             let root = year_picker(
-                &tester,
+                tester,
                 None,
                 None,
                 None,
@@ -3909,7 +3879,7 @@ pub(crate) mod tests {
             );
             tester.pump_widget(root);
             tester.pump_and_settle();
-            tap_text(&mut tester, "2018");
+            tap_text(tester, "2018");
             tester.pump_and_settle();
             assert_eq!(selected_date.get(), Some(DateTime::utc(2018, 1, 1)));
         });
@@ -3917,11 +3887,10 @@ pub(crate) mod tests {
 
     #[test]
     fn year_picker_cannot_select_disabled_year() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let selected_year = Rc::new(Cell::new(None));
             let root = year_picker(
-                &tester,
+                tester,
                 Some(DateTime::utc(2018, 7, 4)),
                 Some(DateTime::utc(2018, 6, 9)),
                 Some(DateTime::utc(2018, 12, 15)),
@@ -3931,13 +3900,13 @@ pub(crate) mod tests {
                 }),
             );
             tester.pump_widget(root);
-            tap_text(&mut tester, "2016"); // Disabled, doesn't change the year.
+            tap_text(tester, "2016"); // Disabled, doesn't change the year.
             tester.pump_and_settle();
             assert_eq!(selected_year.get(), None);
-            tap_text(&mut tester, "2020"); // Disabled, doesn't change the year.
+            tap_text(tester, "2020"); // Disabled, doesn't change the year.
             tester.pump_and_settle();
             assert_eq!(selected_year.get(), None);
-            tap_text(&mut tester, "2018");
+            tap_text(tester, "2018");
             tester.pump_and_settle();
             assert_eq!(selected_year.get(), Some(DateTime::utc(2018, 7, 1)));
         });
@@ -3945,79 +3914,76 @@ pub(crate) mod tests {
 
     #[test]
     fn year_picker_selecting_year_with_no_selected_month_uses_earliest_month() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let selected_year = Rc::new(Cell::new(None));
             let on_changed: ValueChanged<DateTime> = {
                 let selected_year = Rc::clone(&selected_year);
                 Rc::new(move |_app, date| selected_year.set(Some(date)))
             };
             let root = year_picker(
-                &tester,
+                tester,
                 None,
                 Some(DateTime::utc(2018, 6, 9)),
                 Some(DateTime::utc(2019, 12, 15)),
                 Some(Rc::clone(&on_changed)),
             );
             tester.pump_widget(root);
-            tap_text(&mut tester, "2018");
+            tap_text(tester, "2018");
             assert_eq!(selected_year.get(), Some(DateTime::utc(2018, 6, 1)));
             let root = year_picker(
-                &tester,
+                tester,
                 Some(DateTime::utc(2018, 6, 1)),
                 Some(DateTime::utc(2018, 6, 9)),
                 Some(DateTime::utc(2019, 12, 15)),
                 Some(on_changed),
             );
             tester.pump_widget(root);
-            tap_text(&mut tester, "2019");
+            tap_text(tester, "2019");
             assert_eq!(selected_year.get(), Some(DateTime::utc(2019, 6, 1)));
         });
     }
 
     #[test]
     fn year_picker_selecting_year_with_no_selected_month_uses_january() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let selected_year = Rc::new(Cell::new(None));
             let on_changed: ValueChanged<DateTime> = {
                 let selected_year = Rc::clone(&selected_year);
                 Rc::new(move |_app, date| selected_year.set(Some(date)))
             };
             let root = year_picker(
-                &tester,
+                tester,
                 None,
                 Some(DateTime::utc(2018, 6, 9)),
                 Some(DateTime::utc(2019, 12, 15)),
                 Some(Rc::clone(&on_changed)),
             );
             tester.pump_widget(root);
-            tap_text(&mut tester, "2019");
+            tap_text(tester, "2019");
             assert_eq!(selected_year.get(), Some(DateTime::utc(2019, 1, 1))); // january implied
             let root = year_picker(
-                &tester,
+                tester,
                 Some(DateTime::utc(2018, 1, 1)),
                 Some(DateTime::utc(2018, 6, 9)),
                 Some(DateTime::utc(2019, 12, 15)),
                 Some(on_changed),
             );
             tester.pump_widget(root);
-            tap_text(&mut tester, "2018");
+            tap_text(tester, "2018");
             assert_eq!(selected_year.get(), Some(DateTime::utc(2018, 6, 1)));
         });
     }
 
     #[test]
     fn year_picker_renders_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let picker = YearPicker::new(
                 DateTime::utc(2024, 1, 1),
                 DateTime::utc(2026, 1, 1),
                 Some(DateTime::utc(2025, 1, 1)),
                 Rc::new(|_app, _date| {}),
             );
-            let theme = theme_for(&tester, None);
+            let theme = theme_for(tester, None);
             tester.pump_widget(material_app(
                 theme,
                 crate::scaffold::Scaffold::new()
@@ -4162,11 +4128,10 @@ pub(crate) mod tests {
 
     #[test]
     fn calendar_delegate_defaults_to_gregorian_calendar_system() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_with_delegate(&mut tester, None);
+        test_widgets(|tester| {
+            pump_with_delegate(tester, None);
             let (calendar_picker, year_picker) =
-                delegates_of_the_picker_and_the_year_picker(&mut tester);
+                delegates_of_the_picker_and_the_year_picker(tester);
             assert_eq!(
                 delegate_type_name(&calendar_picker),
                 "GregorianCalendarDelegate"
@@ -4180,11 +4145,10 @@ pub(crate) mod tests {
 
     #[test]
     fn calendar_delegate_using_custom_calendar_delegate_implementation() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_with_delegate(&mut tester, Some(Rc::new(TestCalendarDelegate)));
+        test_widgets(|tester| {
+            pump_with_delegate(tester, Some(Rc::new(TestCalendarDelegate)));
             let (calendar_picker, year_picker) =
-                delegates_of_the_picker_and_the_year_picker(&mut tester);
+                delegates_of_the_picker_and_the_year_picker(tester);
             assert_eq!(delegate_type_name(&calendar_picker), "TestCalendarDelegate");
             assert_eq!(delegate_type_name(&year_picker), "TestCalendarDelegate");
         });
@@ -4252,53 +4216,53 @@ pub(crate) mod tests {
 
     #[test]
     fn day_builder_preserves_hovered_when_rebuilt() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let states_for_day = Rc::new(RefCell::new(HashMap::new()));
-            pump(&mut tester, states_picker(&states_for_day, false));
-            let mut mouse = WidgetTester::mouse(1, 0);
+            pump(tester, states_picker(&states_for_day, false));
+            let mut mouse = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut mouse, waft_embedder::Offset::new(0.0, 0.0));
-            let day = text(&tester, "12");
-            let at = center_of(&tester, day);
+            let day = text(tester, "12");
+            let at = center_of(tester, day);
             tester.move_to(&mut mouse, at, false);
-            check_states_survive_rebuild(&mut tester, &states_for_day, WidgetState::Hovered);
+            check_states_survive_rebuild(tester, &states_for_day, WidgetState::Hovered);
         });
     }
 
     #[test]
     fn day_builder_preserves_focused_when_rebuilt() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let states_for_day = Rc::new(RefCell::new(HashMap::new()));
-            pump(&mut tester, states_picker(&states_for_day, false));
+            pump(tester, states_picker(&states_for_day, false));
             // Focus the selected day (the 15th), then walk three days back to the 12th.
-            navigate_to_the_grid(&mut tester);
+            navigate_to_the_grid(tester);
             tester.pump_and_settle();
             for _ in 0..3 {
-                arrow(&mut tester, TraversalDirection::Left);
+                arrow(tester, TraversalDirection::Left);
                 tester.pump_and_settle();
             }
-            check_states_survive_rebuild(&mut tester, &states_for_day, WidgetState::Focused);
+            check_states_survive_rebuild(tester, &states_for_day, WidgetState::Focused);
         });
     }
 
     #[test]
     fn day_builder_preserves_pressed_when_rebuilt() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let states_for_day = Rc::new(RefCell::new(HashMap::new()));
-            pump(&mut tester, states_picker(&states_for_day, false));
-            let mut touch = WidgetTester::touch(1);
-            let day = text(&tester, "12");
-            let at = center_of(&tester, day);
+            pump(tester, states_picker(&states_for_day, false));
+            let mut touch = TestPointer::touch(1);
+            let day = text(tester, "12");
+            let at = center_of(tester, day);
             tester.down(&mut touch, at);
-            check_states_survive_rebuild(&mut tester, &states_for_day, WidgetState::Pressed);
+            check_states_survive_rebuild(tester, &states_for_day, WidgetState::Pressed);
             tester.cancel(&touch);
         });
     }
 
-    fn today_picker_theme(border: Option<BorderSide>, foreground: Color) -> ThemeData {
-        let tester = tester();
+    fn today_picker_theme(
+        tester: &mut WidgetTester,
+        border: Option<BorderSide>,
+        foreground: Color,
+    ) -> ThemeData {
         let app = tester.cell.borrow();
         let mut picker_theme =
             DatePickerThemeData::new().today_foreground_color(<dyn WidgetStateProperty<
@@ -4326,10 +4290,9 @@ pub(crate) mod tests {
 
     #[test]
     fn material2_current_date_is_highlighted() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump(
-                &mut tester,
+                tester,
                 PickerOptions {
                     use_material3: Some(false),
                     initial_date: Some(DateTime::utc(2016, 1, 15)),
@@ -4337,23 +4300,22 @@ pub(crate) mod tests {
                     ..PickerOptions::default()
                 },
             );
-            assert_today_circle(&tester, Color::new(0xff2196f3)); // default primary color
+            assert_today_circle(tester, Color::new(0xff2196f3)); // default primary color
         });
     }
 
     #[test]
     fn material3_current_date_is_highlighted() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump(
-                &mut tester,
+                tester,
                 PickerOptions {
                     initial_date: Some(DateTime::utc(2016, 1, 15)),
                     current_date: DateTime::utc(2016, 1, 2),
                     ..PickerOptions::default()
                 },
             );
-            assert_today_circle(&tester, Color::new(0xff6750a4)); // default primary color
+            assert_today_circle(tester, Color::new(0xff6750a4)); // default primary color
         });
     }
 
@@ -4370,100 +4332,91 @@ pub(crate) mod tests {
 
     #[test]
     fn material2_current_date_is_highlighted_even_if_it_is_disabled() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump(&mut tester, disabled_current_date_options(Some(false)));
-            assert_today_circle(&tester, Color::new(0x61000000)); // default disabled color
+        test_widgets(|tester| {
+            pump(tester, disabled_current_date_options(Some(false)));
+            assert_today_circle(tester, Color::new(0x61000000)); // default disabled color
         });
     }
 
     #[test]
     fn material3_current_date_is_highlighted_even_if_it_is_disabled() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump(&mut tester, disabled_current_date_options(None));
-            assert_today_circle(&tester, Color::new(0x616750a4)); // default disabled color
+        test_widgets(|tester| {
+            pump(tester, disabled_current_date_options(None));
+            assert_today_circle(tester, Color::new(0x616750a4)); // default disabled color
         });
     }
 
     #[test]
     fn non_null_today_border_color_should_be_respected_over_foreground_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let custom_border_color = Colors::RED.primary();
-            pump(
-                &mut tester,
-                PickerOptions {
-                    initial_date: Some(DateTime::utc(2016, 1, 15)),
-                    current_date: DateTime::utc(2016, 1, 2),
-                    theme: Some(today_picker_theme(
-                        Some(BorderSide {
-                            color: custom_border_color,
-                            ..BorderSide::default()
-                        }),
-                        Colors::BLUE.primary(),
-                    )),
-                    ..PickerOptions::default()
-                },
-            );
+            let options = PickerOptions {
+                initial_date: Some(DateTime::utc(2016, 1, 15)),
+                current_date: DateTime::utc(2016, 1, 2),
+                theme: Some(today_picker_theme(
+                    tester,
+                    Some(BorderSide {
+                        color: custom_border_color,
+                        ..BorderSide::default()
+                    }),
+                    Colors::BLUE.primary(),
+                )),
+                ..PickerOptions::default()
+            };
+            pump(tester, options);
             // The current day is painted with the custom border color.
-            assert_today_circle(&tester, custom_border_color);
+            assert_today_circle(tester, custom_border_color);
         });
     }
 
     #[test]
     fn non_null_today_border_color_is_used_even_when_disabled() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let custom_border_color = Colors::RED.primary();
-            pump(
-                &mut tester,
-                PickerOptions {
-                    theme: Some(today_picker_theme(
-                        Some(BorderSide {
-                            color: custom_border_color,
-                            ..BorderSide::default()
-                        }),
-                        Colors::BLUE.primary(),
-                    )),
-                    ..disabled_current_date_options(None)
-                },
-            );
+            let options = PickerOptions {
+                theme: Some(today_picker_theme(
+                    tester,
+                    Some(BorderSide {
+                        color: custom_border_color,
+                        ..BorderSide::default()
+                    }),
+                    Colors::BLUE.primary(),
+                )),
+                ..disabled_current_date_options(None)
+            };
+            pump(tester, options);
             // The current day is painted with the custom border color, not with the foreground
             // color's opacity applied, even if it is a disabled day.
-            assert_today_circle(&tester, custom_border_color);
+            assert_today_circle(tester, custom_border_color);
         });
     }
 
     #[test]
     fn transparent_today_border_should_fall_back_to_foreground_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let custom_foreground_color = Colors::GREEN.primary();
-            pump(
-                &mut tester,
-                PickerOptions {
-                    initial_date: Some(DateTime::utc(2016, 1, 15)),
-                    current_date: DateTime::utc(2016, 1, 2),
-                    theme: Some(today_picker_theme(
-                        Some(BorderSide {
-                            color: Color::new(0x00000000),
-                            ..BorderSide::default()
-                        }),
-                        custom_foreground_color,
-                    )),
-                    ..PickerOptions::default()
-                },
-            );
+            let options = PickerOptions {
+                initial_date: Some(DateTime::utc(2016, 1, 15)),
+                current_date: DateTime::utc(2016, 1, 2),
+                theme: Some(today_picker_theme(
+                    tester,
+                    Some(BorderSide {
+                        color: Color::new(0x00000000),
+                        ..BorderSide::default()
+                    }),
+                    custom_foreground_color,
+                )),
+                ..PickerOptions::default()
+            };
+            pump(tester, options);
             // The current day uses the foreground color since the todayBorder color is
             // transparent.
-            assert_today_circle(&tester, custom_foreground_color);
+            assert_today_circle(tester, custom_foreground_color);
         });
     }
 
     fn run_initial_date_updates_are_not_reflected(use_material3: bool) {
-        with_main_thread_stack(move || {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let picker_key = GlobalKey::new();
             let initial_date = DateTime::utc(2020, 1, 21);
             let updated_date = DateTime::utc(1976, 2, 23);
@@ -4483,13 +4436,13 @@ pub(crate) mod tests {
                 ..PickerOptions::default()
             };
 
-            pump(&mut tester, options(initial_date));
+            pump(tester, options(initial_date));
             tester.pump_and_settle();
 
             // Month should show as January 2020.
             assert_eq!(tester.find_text("January 2020").len(), 1);
             // Selected date should be painted with a colored circle.
-            let ops = tester.nearest_material_ops(text(&tester, "21"));
+            let ops = tester.nearest_material_ops(text(tester, "21"));
             assert!(paints_calls(
                 &ops,
                 &[PaintCall::circle(Some(selected_color))]
@@ -4497,15 +4450,15 @@ pub(crate) mod tests {
 
             // Change to the updated initialDate.
             // This should have no effect, the initialDate is only the _initial_ date.
-            pump(&mut tester, options(updated_date));
+            pump(tester, options(updated_date));
             // Wait for the page scroll animation to finish.
             tester.pump_and_settle_by(Duration::from_millis(200));
 
             // Month should show as January 2020 still.
             assert_eq!(tester.find_text("January 2020").len(), 1);
-            assert!(!has_text(&tester, "February 1976"));
+            assert!(!has_text(tester, "February 1976"));
             // Selected date should be painted with a colored circle.
-            let ops = tester.nearest_material_ops(text(&tester, "21"));
+            let ops = tester.nearest_material_ops(text(tester, "21"));
             assert!(paints_calls(
                 &ops,
                 &[PaintCall::circle(Some(selected_color))]
@@ -4525,10 +4478,9 @@ pub(crate) mod tests {
 
     #[test]
     fn dragging_more_than_half_the_width_should_not_cause_a_jump() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump(
-                &mut tester,
+                tester,
                 PickerOptions {
                     initial_date: Some(DateTime::utc(2016, 1, 15)),
                     ..PickerOptions::default()
@@ -4536,8 +4488,8 @@ pub(crate) mod tests {
             );
             tester.pump_and_settle();
             let page_view = tester.find_by_type::<waft_widgets::PageView>()[0];
-            let mut gesture = WidgetTester::touch(1);
-            let start = center_of(&tester, page_view);
+            let mut gesture = TestPointer::touch(1);
+            let start = center_of(tester, page_view);
             tester.down(&mut gesture, start);
             // This initial drag is required for the PageView to recognize the gesture, as it
             // uses DragStartBehavior.start. It does not count towards the drag distance.
@@ -4545,14 +4497,14 @@ pub(crate) mod tests {
                 let at = gesture.position + waft_embedder::Offset::new(dx, 0.0);
                 tester.move_to(&mut gesture, at, true);
             };
-            move_by(&mut tester, 100.0);
+            move_by(tester, 100.0);
             // Dragging for a bit less than half the width should reveal the previous month.
-            move_by(&mut tester, 800.0 / 2.0 - 1.0);
+            move_by(tester, 800.0 / 2.0 - 1.0);
             tester.pump_and_settle();
             assert_eq!(tester.find_text("January 2016").len(), 1);
             assert_eq!(tester.find_text("1").len(), 2);
             // Dragging a bit over the half should still show both.
-            move_by(&mut tester, 2.0);
+            move_by(tester, 2.0);
             tester.pump_and_settle();
             assert_eq!(tester.find_text("December 2015").len(), 1);
             assert_eq!(tester.find_text("1").len(), 2);
@@ -4576,28 +4528,26 @@ pub(crate) mod tests {
         let platform = waft_test::TestPlatform::new()
             .on(TargetPlatform::Android)
             .with_haptics(Rc::clone(&feedback) as Rc<dyn waft_embedder::Haptics>);
-        let tester =
-            WidgetTester::with_physical_size(platform, waft_embedder::Size::new(1600.0, 1200.0));
-        tester.install_platform_fonts();
-        (tester, feedback)
+        (WidgetTester::with_platform(platform), feedback)
     }
 
     const HAPTIC_FEEDBACK_INTERVAL: Duration = Duration::from_millis(10);
 
     #[test]
     fn haptic_feedback_selecting_date_vibrates() {
-        with_main_thread_stack(|| {
-            let (mut tester, feedback) = feedback_tester();
+        test_widgets(|_| {
+            let (mut feedback_tester, feedback) = feedback_tester();
+            let tester = &mut feedback_tester;
             pump(
-                &mut tester,
+                tester,
                 PickerOptions {
                     initial_date: Some(DateTime::utc(2016, 1, 15)),
                     ..PickerOptions::default()
                 },
             );
             for (day, count) in [("10", 1), ("12", 2), ("14", 3)] {
-                tap_text(&mut tester, day);
-                tester.pump(HAPTIC_FEEDBACK_INTERVAL);
+                tap_text(tester, day);
+                tester.pump_by(HAPTIC_FEEDBACK_INTERVAL);
                 assert_eq!(feedback.haptics.borrow().len(), count, "after {day}");
             }
         });
@@ -4605,10 +4555,11 @@ pub(crate) mod tests {
 
     #[test]
     fn haptic_feedback_tapping_unselectable_date_does_not_vibrate() {
-        with_main_thread_stack(|| {
-            let (mut tester, feedback) = feedback_tester();
+        test_widgets(|_| {
+            let (mut feedback_tester, feedback) = feedback_tester();
+            let tester = &mut feedback_tester;
             pump(
-                &mut tester,
+                tester,
                 PickerOptions {
                     initial_date: Some(DateTime::utc(2016, 1, 10)),
                     selectable_day_predicate: Some(Rc::new(|date: DateTime| date.day() % 2 == 0)),
@@ -4616,8 +4567,8 @@ pub(crate) mod tests {
                 },
             );
             for day in ["11", "13", "15"] {
-                tap_text(&mut tester, day);
-                tester.pump(HAPTIC_FEEDBACK_INTERVAL);
+                tap_text(tester, day);
+                tester.pump_by(HAPTIC_FEEDBACK_INTERVAL);
                 assert_eq!(feedback.haptics.borrow().len(), 0, "after {day}");
             }
         });
@@ -4625,31 +4576,31 @@ pub(crate) mod tests {
 
     #[test]
     fn haptic_feedback_changing_modes_and_year_vibrates() {
-        with_main_thread_stack(|| {
-            let (mut tester, feedback) = feedback_tester();
+        test_widgets(|_| {
+            let (mut feedback_tester, feedback) = feedback_tester();
+            let tester = &mut feedback_tester;
             pump(
-                &mut tester,
+                tester,
                 PickerOptions {
                     initial_date: Some(DateTime::utc(2016, 1, 15)),
                     ..PickerOptions::default()
                 },
             );
-            tap_text(&mut tester, "January 2016");
-            tester.pump(HAPTIC_FEEDBACK_INTERVAL);
+            tap_text(tester, "January 2016");
+            tester.pump_by(HAPTIC_FEEDBACK_INTERVAL);
             assert_eq!(feedback.haptics.borrow().len(), 1);
-            tap_text(&mut tester, "2018");
-            tester.pump(HAPTIC_FEEDBACK_INTERVAL);
+            tap_text(tester, "2018");
+            tester.pump_by(HAPTIC_FEEDBACK_INTERVAL);
             assert_eq!(feedback.haptics.borrow().len(), 2);
         });
     }
 
     #[test]
     fn default_day_selection_overlay() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = theme_for(&tester, None);
+        test_widgets(|tester| {
+            let theme = theme_for(tester, None);
             pump(
-                &mut tester,
+                tester,
                 PickerOptions {
                     first_date: DateTime::utc(2016, 12, 15),
                     initial_date: Some(DateTime::utc(2017, 1, 15)),
@@ -4691,17 +4642,17 @@ pub(crate) mod tests {
                     .count()
             };
 
-            let ops = tester.painted_ops_deep(outer_ink_features(&tester).as_object());
+            let ops = tester.painted_ops_deep(outer_ink_features(tester).as_object());
             assert!(!paints_calls(&ops, std::slice::from_ref(&overlay)));
             assert_eq!(clips(&ops), 0);
 
-            let mut mouse = WidgetTester::mouse(1, 0);
+            let mut mouse = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut mouse, waft_embedder::Offset::ZERO);
-            let day = text(&tester, "25");
-            let at = center_of(&tester, day);
+            let day = text(tester, "25");
+            let at = center_of(tester, day);
             tester.move_to(&mut mouse, at, false);
             tester.pump_and_settle();
-            let ops = tester.painted_ops_deep(outer_ink_features(&tester).as_object());
+            let ops = tester.painted_ops_deep(outer_ink_features(tester).as_object());
             assert!(paints_calls(
                 &ops,
                 &[PaintCall::circle(None), overlay.clone()]
@@ -4712,10 +4663,9 @@ pub(crate) mod tests {
 
     #[test]
     fn ink_feature_paints_on_inner_material() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump(
-                &mut tester,
+                tester,
                 PickerOptions {
                     first_date: DateTime::utc(2025, 6, 1),
                     initial_date: Some(DateTime::utc(2025, 7, 20)),
@@ -4738,17 +4688,16 @@ pub(crate) mod tests {
             let inner = tester.find_by_type::<waft_widgets::PageView>()[0];
 
             // Only the inner Material should have ink features.
-            assert!(ink_features_of(&tester, outer).is_none());
-            assert_eq!(ink_features_of(&tester, inner).map(|f| f.len()), Some(31));
+            assert!(ink_features_of(tester, outer).is_none());
+            assert_eq!(ink_features_of(tester, inner).map(|f| f.len()), Some(31));
         });
     }
 
     #[test]
     fn year_picker_ink_features_are_painted_on_inner_material() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let root = year_picker(
-                &tester,
+                tester,
                 Some(DateTime::utc(2025, 1, 1)),
                 Some(DateTime::utc(2020, 1, 1)),
                 Some(DateTime::utc(2030, 1, 1)),
@@ -4767,9 +4716,8 @@ pub(crate) mod tests {
                 .expect("a Material above the element")
             };
             // Material outside the GridView, and the one directly wrapping it.
-            let outer = ink_features_of(&tester, tester.find_by_type::<YearPicker>()[0]);
-            let inner =
-                ink_features_of(&tester, tester.find_by_type::<waft_widgets::GridView>()[0]);
+            let outer = ink_features_of(tester, tester.find_by_type::<YearPicker>()[0]);
+            let inner = ink_features_of(tester, tester.find_by_type::<waft_widgets::GridView>()[0]);
             assert_ne!(outer.as_object(), inner.as_object());
             {
                 let app = tester.cell.borrow();
@@ -4778,12 +4726,12 @@ pub(crate) mod tests {
             }
 
             // Hover over the 2022 year item to trigger the ink highlight.
-            let mut mouse = WidgetTester::mouse(1, 0);
-            let year = text(&tester, "2022");
-            let at = center_of(&tester, year);
+            let mut mouse = TestPointer::mouse(1, 0);
+            let year = text(tester, "2022");
+            let at = center_of(tester, year);
             tester.add_pointer(&mut mouse, at);
             tester.move_to(&mut mouse, at, false);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // Only the inner Material should have ink features.
             let app = tester.cell.borrow();
@@ -4840,10 +4788,10 @@ pub(crate) mod tests {
 
     #[test]
     fn year_picker_non_null_today_border_color_should_be_respected_over_today_foreground_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let custom_border_color = Colors::RED.primary();
             let theme = today_picker_theme(
+                tester,
                 Some(BorderSide {
                     color: custom_border_color,
                     ..BorderSide::default()
@@ -4851,7 +4799,7 @@ pub(crate) mod tests {
                 Colors::BLUE.primary(),
             );
             let root = year_picker_with_today_border(
-                &tester,
+                tester,
                 DateTime::utc(2001, 1, 1),
                 DateTime::utc(2031, 12, 31),
                 DateTime::utc(2016, 1, 15),
@@ -4860,16 +4808,16 @@ pub(crate) mod tests {
             );
             tester.pump_widget(root);
             // The current year is painted with the custom border color.
-            assert_eq!(year_side_color(&tester, "2016"), custom_border_color);
+            assert_eq!(year_side_color(tester, "2016"), custom_border_color);
         });
     }
 
     #[test]
     fn year_picker_non_null_today_border_color_is_used_even_when_disabled() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let custom_border_color = Colors::RED.primary();
             let theme = today_picker_theme(
+                tester,
                 Some(BorderSide {
                     color: custom_border_color,
                     ..BorderSide::default()
@@ -4877,7 +4825,7 @@ pub(crate) mod tests {
                 Colors::BLUE.primary(),
             );
             let root = year_picker_with_today_border(
-                &tester,
+                tester,
                 DateTime::utc(2018, 6, 9),
                 DateTime::utc(2030, 12, 15),
                 DateTime::utc(2020, 1, 1),
@@ -4887,16 +4835,16 @@ pub(crate) mod tests {
             tester.pump_widget(root);
             // The current year is painted with the custom border color, not with the foreground
             // color's opacity applied, even if it is disabled.
-            assert_eq!(year_side_color(&tester, "2016"), custom_border_color);
+            assert_eq!(year_side_color(tester, "2016"), custom_border_color);
         });
     }
 
     #[test]
     fn year_picker_transparent_today_border_should_fall_back_to_foreground_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let custom_foreground_color = Colors::GREEN.primary();
             let theme = today_picker_theme(
+                tester,
                 Some(BorderSide {
                     color: Color::new(0x00000000),
                     ..BorderSide::default()
@@ -4904,7 +4852,7 @@ pub(crate) mod tests {
                 custom_foreground_color,
             );
             let root = year_picker_with_today_border(
-                &tester,
+                tester,
                 DateTime::utc(2001, 1, 1),
                 DateTime::utc(2031, 12, 31),
                 DateTime::utc(2016, 1, 15),
@@ -4914,7 +4862,7 @@ pub(crate) mod tests {
             tester.pump_widget(root);
             // The current year uses the foreground color since the todayBorder color is
             // transparent.
-            assert_eq!(year_side_color(&tester, "2016"), custom_foreground_color);
+            assert_eq!(year_side_color(tester, "2016"), custom_foreground_color);
         });
     }
 }

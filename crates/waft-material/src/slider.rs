@@ -3417,14 +3417,16 @@ pub(crate) mod tests {
     use waft_embedder::valo::Op;
     use waft_widgets::{Center, StatefulBuilder};
 
+    use waft_widgets::testing::{
+        TargetPlatformVariant, TestPointer, WidgetTester, test_widgets, test_widgets_variant,
+    };
+
     use super::*;
     use crate::material::Material;
     use crate::slider_parts::SliderTickMarkShape;
     use crate::slider_value_indicator_shape::SliderComponentShape;
-    pub(crate) use crate::test_support::colors_match;
-    use crate::test_support::{
-        PaintCall, WidgetTester, material_app, paints_calls, with_main_thread_stack,
-    };
+    use crate::test_support::{PaintCall, material_app, paints_calls};
+    pub(crate) use crate::test_support::{PaintInspection, colors_match};
     use crate::theme_data::ThemeData;
 
     /// Dart's `LoggingThumbShape`: a thumb shape that also logs its repaint center.
@@ -3586,13 +3588,6 @@ pub(crate) mod tests {
         slider.into_widget()
     }
 
-    /// A tester on `platform` whose fonts lay out text, as the debug banner and the labels need.
-    pub(crate) fn tester_on(platform: TargetPlatform) -> WidgetTester {
-        let tester = WidgetTester::on(platform);
-        tester.install_fonts();
-        tester
-    }
-
     /// Dart's `ThemeData()`.
     pub(crate) fn default_theme(tester: &WidgetTester) -> ThemeData {
         ThemeData::builder().build(&tester.cell.borrow())
@@ -3611,14 +3606,13 @@ pub(crate) mod tests {
     // 'The initial value should respect the discrete value'.
     #[test]
     fn the_initial_value_should_respect_the_discrete_value() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let heard = Heard::starting_at(0.20);
             let log = Rc::new(RefCell::new(Vec::new()));
             let thumb_log = Rc::clone(&log);
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             tester.pump_widget(stateful_slider_app(
-                &tester,
+                tester,
                 theme,
                 TextDirection::Ltr,
                 &heard,
@@ -3643,12 +3637,11 @@ pub(crate) mod tests {
     // 'Slider can move when tapped (LTR)'.
     #[test]
     fn a_slider_moves_when_tapped_ltr() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let heard = Heard::starting_at(0.0);
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             tester.pump_widget(stateful_slider_app(
-                &tester,
+                tester,
                 theme,
                 TextDirection::Ltr,
                 &heard,
@@ -3657,35 +3650,34 @@ pub(crate) mod tests {
             ));
 
             assert_eq!(heard.value.get(), 0.0);
-            tester.tap(slider_rect(&tester).center(), 1);
+            tester.tap(slider_rect(tester).center(), 1);
             assert_eq!(heard.value.get(), 0.5);
             assert_eq!(heard.start_value.get(), Some(0.0));
             assert_eq!(heard.end_value.get(), Some(0.5));
             heard.start_value.set(None);
             heard.end_value.set(None);
-            tester.pump(Duration::ZERO); // No animation should start.
-            assert_eq!(transient_callback_count(&tester), 0);
+            tester.pump(); // No animation should start.
+            assert_eq!(transient_callback_count(tester), 0);
 
-            let rect = slider_rect(&tester);
+            let rect = slider_rect(tester);
             let target = rect.top_left() + (rect.bottom_right() - rect.top_left()) / 4.0;
             tester.tap(target, 2);
             assert!((heard.value.get() - 0.25).abs() <= 0.05);
             assert_eq!(heard.start_value.get(), Some(0.5));
             assert!((heard.end_value.get().unwrap() - 0.25).abs() <= 0.05);
-            tester.pump(Duration::ZERO); // No animation should start.
-            assert_eq!(transient_callback_count(&tester), 0);
+            tester.pump(); // No animation should start.
+            assert_eq!(transient_callback_count(tester), 0);
         });
     }
 
     // 'Slider can move when tapped (RTL)'.
     #[test]
     fn a_slider_moves_when_tapped_rtl() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let heard = Heard::starting_at(0.0);
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             tester.pump_widget(stateful_slider_app(
-                &tester,
+                tester,
                 theme,
                 TextDirection::Rtl,
                 &heard,
@@ -3694,29 +3686,28 @@ pub(crate) mod tests {
             ));
 
             assert_eq!(heard.value.get(), 0.0);
-            tester.tap(slider_rect(&tester).center(), 1);
+            tester.tap(slider_rect(tester).center(), 1);
             assert_eq!(heard.value.get(), 0.5);
-            tester.pump(Duration::ZERO); // No animation should start.
-            assert_eq!(transient_callback_count(&tester), 0);
+            tester.pump(); // No animation should start.
+            assert_eq!(transient_callback_count(tester), 0);
 
-            let rect = slider_rect(&tester);
+            let rect = slider_rect(tester);
             let target = rect.top_left() + (rect.bottom_right() - rect.top_left()) / 4.0;
             tester.tap(target, 2);
             assert!((heard.value.get() - 0.75).abs() <= 0.05);
-            tester.pump(Duration::ZERO); // No animation should start.
-            assert_eq!(transient_callback_count(&tester), 0);
+            tester.pump(); // No animation should start.
+            assert_eq!(transient_callback_count(tester), 0);
         });
     }
 
     // "Slider doesn't send duplicate change events if tapped on the same value".
     #[test]
     fn a_slider_sends_no_duplicate_change_events_when_tapped_on_the_same_value() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let heard = Heard::starting_at(0.0);
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             tester.pump_widget(stateful_slider_app(
-                &tester,
+                tester,
                 theme,
                 TextDirection::Ltr,
                 &heard,
@@ -3725,14 +3716,14 @@ pub(crate) mod tests {
             ));
 
             assert_eq!(heard.value.get(), 0.0);
-            tester.tap(slider_rect(&tester).center(), 1);
+            tester.tap(slider_rect(tester).center(), 1);
             assert_eq!(heard.value.get(), 0.5);
             assert_eq!(heard.start_value.get(), Some(0.0));
             assert_eq!(heard.end_value.get(), Some(0.5));
-            tester.pump(Duration::ZERO);
-            tester.tap(slider_rect(&tester).center(), 2);
+            tester.pump();
+            tester.tap(slider_rect(tester).center(), 2);
             assert_eq!(heard.value.get(), 0.5);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(heard.updates.get(), 1);
             assert_eq!(heard.start_updates.get(), 2);
             assert_eq!(heard.end_updates.get(), 2);
@@ -3742,12 +3733,11 @@ pub(crate) mod tests {
     // 'Value indicator shows for a bit after being tapped'.
     #[test]
     fn the_value_indicator_shows_for_a_bit_after_a_tap() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let heard = Heard::starting_at(0.0);
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             tester.pump_widget(stateful_slider_app(
-                &tester,
+                tester,
                 theme,
                 TextDirection::Ltr,
                 &heard,
@@ -3756,23 +3746,23 @@ pub(crate) mod tests {
             ));
 
             assert_eq!(heard.value.get(), 0.0);
-            tester.tap(slider_rect(&tester).center(), 1);
+            tester.tap(slider_rect(tester).center(), 1);
             assert_eq!(heard.value.get(), 0.5);
-            tester.pump(Duration::from_millis(100));
+            tester.pump_by(Duration::from_millis(100));
             // Starts with the position animation and value indicator
-            assert_eq!(transient_callback_count(&tester), 2);
-            tester.pump(Duration::from_millis(100));
+            assert_eq!(transient_callback_count(tester), 2);
+            tester.pump_by(Duration::from_millis(100));
             // Value indicator is longer than position.
-            assert_eq!(transient_callback_count(&tester), 1);
-            tester.pump(Duration::from_millis(100));
-            assert_eq!(transient_callback_count(&tester), 0);
-            tester.pump(Duration::from_millis(100));
-            assert_eq!(transient_callback_count(&tester), 0);
-            tester.pump(Duration::from_millis(100));
+            assert_eq!(transient_callback_count(tester), 1);
+            tester.pump_by(Duration::from_millis(100));
+            assert_eq!(transient_callback_count(tester), 0);
+            tester.pump_by(Duration::from_millis(100));
+            assert_eq!(transient_callback_count(tester), 0);
+            tester.pump_by(Duration::from_millis(100));
             // Shown for long enough, value indicator is animated closed.
-            assert_eq!(transient_callback_count(&tester), 1);
-            tester.pump(Duration::from_millis(101));
-            assert_eq!(transient_callback_count(&tester), 0);
+            assert_eq!(transient_callback_count(tester), 1);
+            tester.pump_by(Duration::from_millis(101));
+            assert_eq!(transient_callback_count(tester), 0);
         });
     }
 
@@ -3814,9 +3804,8 @@ pub(crate) mod tests {
     // 'Tick marks are skipped when they are too dense'.
     #[test]
     fn tick_marks_are_skipped_when_too_dense() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             let build_slider = |divisions: i32| {
                 material_app(
                     theme.clone(),
@@ -3839,7 +3828,7 @@ pub(crate) mod tests {
             tester.pump_widget(build_slider(4));
 
             // 5 tick marks and a thumb.
-            assert_eq!(circles(&tester, slider_render(&tester)).len(), 6);
+            assert_eq!(circles(tester, slider_render(tester)).len(), 6);
 
             // 200 divisions will produce a tick interval off less than 6,
             // which would be too dense to draw.
@@ -3847,7 +3836,7 @@ pub(crate) mod tests {
 
             // No tick marks are drawn because they are too dense, but the thumb is
             // still drawn.
-            assert_eq!(circles(&tester, slider_render(&tester)).len(), 1);
+            assert_eq!(circles(tester, slider_render(tester)).len(), 1);
         });
     }
 
@@ -3861,9 +3850,8 @@ pub(crate) mod tests {
     // 'Slider sizing'.
     #[test]
     fn slider_sizing() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             let app = |theme: ThemeData, body: WidgetRef| {
                 material_app(
                     theme,
@@ -3875,7 +3863,7 @@ pub(crate) mod tests {
                 )
             };
             tester.pump_widget(app(theme.clone(), Slider::new(0.5, None).into_widget()));
-            assert_eq!(slider_size(&tester), Size::new(800.0, 600.0));
+            assert_eq!(slider_size(tester), Size::new(800.0, 600.0));
 
             tester.pump_widget(app(
                 theme.clone(),
@@ -3883,7 +3871,7 @@ pub(crate) mod tests {
                     .child(Slider::new(0.5, None))
                     .into_widget(),
             ));
-            assert_eq!(slider_size(&tester), Size::new(144.0 + 2.0 * 24.0, 600.0));
+            assert_eq!(slider_size(tester), Size::new(144.0 + 2.0 * 24.0, 600.0));
 
             tester.pump_widget(app(
                 theme,
@@ -3893,7 +3881,7 @@ pub(crate) mod tests {
                     .child(Slider::new(0.5, None))
                     .into_widget(),
             ));
-            assert_eq!(slider_size(&tester), Size::new(144.0 + 2.0 * 24.0, 48.0));
+            assert_eq!(slider_size(tester), Size::new(144.0 + 2.0 * 24.0, 48.0));
         });
     }
 
@@ -3921,12 +3909,11 @@ pub(crate) mod tests {
     // 'Slider take on discrete values'.
     #[test]
     fn a_slider_takes_on_discrete_values() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let heard = Heard::starting_at(0.0);
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             tester.pump_widget(stateful_slider_app(
-                &tester,
+                tester,
                 theme,
                 TextDirection::Ltr,
                 &heard,
@@ -3940,31 +3927,30 @@ pub(crate) mod tests {
             ));
 
             assert_eq!(heard.value.get(), 0.0);
-            tester.tap(slider_rect(&tester).center(), 1);
+            tester.tap(slider_rect(tester).center(), 1);
             assert_eq!(heard.value.get(), 50.0);
-            tester.drag_from(slider_rect(&tester).center(), Offset::new(5.0, 0.0), 2);
+            tester.drag_from(slider_rect(tester).center(), Offset::new(5.0, 0.0), 2);
             assert_eq!(heard.value.get(), 50.0);
-            tester.drag_from(slider_rect(&tester).center(), Offset::new(40.0, 0.0), 3);
+            tester.drag_from(slider_rect(tester).center(), Offset::new(40.0, 0.0), 3);
             assert_eq!(heard.value.get(), 80.0);
 
-            tester.pump(Duration::ZERO); // Starts animation.
-            assert!(transient_callback_count(&tester) > 0);
-            tester.pump(Duration::from_millis(200));
-            tester.pump(Duration::from_millis(200));
-            tester.pump(Duration::from_millis(200));
-            tester.pump(Duration::from_millis(200));
+            tester.pump(); // Starts animation.
+            assert!(transient_callback_count(tester) > 0);
+            tester.pump_by(Duration::from_millis(200));
+            tester.pump_by(Duration::from_millis(200));
+            tester.pump_by(Duration::from_millis(200));
+            tester.pump_by(Duration::from_millis(200));
             // Animation complete.
-            assert_eq!(transient_callback_count(&tester), 0);
+            assert_eq!(transient_callback_count(tester), 0);
         });
     }
 
     // 'Discrete slider has no floating-point rounding errors'.
     #[test]
     fn a_discrete_slider_has_no_floating_point_rounding_errors() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let values = Rc::new(RefCell::new(Vec::new()));
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             tester.pump_widget(material_body(
                 theme,
                 TextDirection::Ltr,
@@ -3977,10 +3963,10 @@ pub(crate) mod tests {
                 ),
             ));
 
-            let rect = slider_rect(&tester);
+            let rect = slider_rect(tester);
             let active_track_width = rect.width() - 48.0;
             let start = rect.top_left() + Offset::new(24.0, rect.height() / 2.0);
-            let mut gesture = WidgetTester::touch(1);
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, start);
             tester.move_to(
                 &mut gesture,
@@ -4001,17 +3987,16 @@ pub(crate) mod tests {
     // 'Slider can be given zero values'.
     #[test]
     fn a_slider_can_be_given_zero_values() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let log = Rc::new(RefCell::new(Vec::new()));
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             tester.pump_widget(material_body(
                 theme.clone(),
                 TextDirection::Ltr,
                 Slider::new(0.0, Some(logging(&log))),
             ));
 
-            tester.tap(slider_rect(&tester).center(), 1);
+            tester.tap(slider_rect(tester).center(), 1);
             assert_eq!(*log.borrow(), vec![0.5]);
             log.borrow_mut().clear();
 
@@ -4021,7 +4006,7 @@ pub(crate) mod tests {
                 Slider::new(0.0, Some(logging(&log))).max(0.0),
             ));
 
-            tester.tap(slider_rect(&tester).center(), 2);
+            tester.tap(slider_rect(tester).center(), 2);
             assert!(log.borrow().is_empty());
         });
     }
@@ -4029,11 +4014,10 @@ pub(crate) mod tests {
     // 'Slider can tap in vertical scroller'.
     #[test]
     fn a_slider_can_be_tapped_in_a_vertical_scroller() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let value = Rc::new(Cell::new(0.0));
             let on_changed_value = Rc::clone(&value);
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             tester.pump_widget(material_body(
                 theme,
                 TextDirection::Ltr,
@@ -4049,18 +4033,17 @@ pub(crate) mod tests {
                 ]),
             ));
 
-            tester.tap(slider_rect(&tester).center(), 1);
+            tester.tap(slider_rect(tester).center(), 1);
             assert_eq!(value.get(), 0.5);
         });
     }
 
     /// Dart's 'Slider drags immediately' for `text_direction`: the value after a press at the
     /// centre and a move one pixel right.
-    fn drags_immediately(text_direction: TextDirection) -> f64 {
-        let mut tester = tester_on(TargetPlatform::Android);
+    fn drags_immediately(tester: &mut WidgetTester, text_direction: TextDirection) -> f64 {
         let value = Rc::new(Cell::new(0.0));
         let on_changed_value = Rc::clone(&value);
-        let theme = default_theme(&tester);
+        let theme = default_theme(tester);
         tester.pump_widget(material_body(
             theme,
             text_direction,
@@ -4072,8 +4055,8 @@ pub(crate) mod tests {
             )),
         ));
 
-        let center = slider_rect(&tester).center();
-        let mut gesture = WidgetTester::touch(1);
+        let center = slider_rect(tester).center();
+        let mut gesture = TestPointer::touch(1);
         tester.down(&mut gesture, center);
 
         assert_eq!(value.get(), 0.5);
@@ -4087,29 +4070,28 @@ pub(crate) mod tests {
     // 'Slider drags immediately (LTR)'.
     #[test]
     fn a_slider_drags_immediately_ltr() {
-        with_main_thread_stack(|| {
-            assert!(drags_immediately(TextDirection::Ltr) > 0.5);
+        test_widgets(|tester| {
+            assert!(drags_immediately(tester, TextDirection::Ltr) > 0.5);
         });
     }
 
     // 'Slider drags immediately (RTL)'.
     #[test]
     fn a_slider_drags_immediately_rtl() {
-        with_main_thread_stack(|| {
-            assert!(drags_immediately(TextDirection::Rtl) < 0.5);
+        test_widgets(|tester| {
+            assert!(drags_immediately(tester, TextDirection::Rtl) < 0.5);
         });
     }
 
     // 'Slider onChangeStart and onChangeEnd fire once'.
     #[test]
     fn on_change_start_and_on_change_end_fire_once() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regression test for https://github.com/flutter/flutter/issues/28115
-            let mut tester = tester_on(TargetPlatform::Android);
             let heard = Heard::starting_at(0.0);
             let start_heard = Rc::clone(&heard);
             let end_heard = Rc::clone(&heard);
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             tester.pump_widget(material_body(
                 theme,
                 TextDirection::Ltr,
@@ -4130,7 +4112,7 @@ pub(crate) mod tests {
                 ),
             ));
 
-            tester.drag_from(slider_rect(&tester).center(), Offset::new(20.0, 0.0), 1);
+            tester.drag_from(slider_rect(tester).center(), Offset::new(20.0, 0.0), 1);
 
             assert_eq!(heard.start_updates.get(), 1);
             assert_eq!(heard.end_updates.get(), 1);
@@ -4190,11 +4172,10 @@ pub(crate) mod tests {
     // 'Material3 - Slider is focusable and has correct focus color'.
     #[test]
     fn material3_a_slider_is_focusable_and_has_the_focus_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let focus_node = new_focus_node(&tester);
+        test_widgets(|tester| {
+            let focus_node = new_focus_node(tester);
             tester.set_highlight_strategy(waft_widgets::FocusHighlightStrategy::AlwaysTraditional);
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             let value = Rc::new(Cell::new(0.5));
             let build_app = |enabled: bool| {
                 focusable_slider_app(theme.clone(), &value, enabled, {
@@ -4208,21 +4189,13 @@ pub(crate) mod tests {
             tester.pump_and_settle();
             assert!(focus_node.has_primary_focus(&tester.cell.borrow()));
             let focused_color = primary_with_opacity(&theme, 0.1);
-            assert!(paints_circle(
-                &tester,
-                slider_render(&tester),
-                focused_color
-            ));
+            assert!(paints_circle(tester, slider_render(tester), focused_color));
 
             // Check that the overlay does not show when unfocused and disabled.
             tester.pump_widget(build_app(false));
             tester.pump_and_settle();
             assert!(!focus_node.has_primary_focus(&tester.cell.borrow()));
-            assert!(!paints_circle(
-                &tester,
-                slider_render(&tester),
-                focused_color
-            ));
+            assert!(!paints_circle(tester, slider_render(tester), focused_color));
             focus_node.dispose(&mut tester.cell.borrow_mut());
         });
     }
@@ -4230,11 +4203,10 @@ pub(crate) mod tests {
     // 'Slider has correct focus color from overlayColor property'.
     #[test]
     fn a_slider_takes_its_focus_color_from_overlay_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let focus_node = new_focus_node(&tester);
+        test_widgets(|tester| {
+            let focus_node = new_focus_node(tester);
             tester.set_highlight_strategy(waft_widgets::FocusHighlightStrategy::AlwaysTraditional);
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             let value = Rc::new(Cell::new(0.5));
             let purple = Colors::PURPLE.get(&500).expect("a swatch shade");
             let build_app = |enabled: bool| {
@@ -4261,13 +4233,13 @@ pub(crate) mod tests {
             // Check that the overlay shows when focused.
             tester.pump_and_settle();
             assert!(focus_node.has_primary_focus(&tester.cell.borrow()));
-            assert!(paints_circle(&tester, slider_render(&tester), purple));
+            assert!(paints_circle(tester, slider_render(tester), purple));
 
             // Check that the overlay does not show when focused and disabled.
             tester.pump_widget(build_app(false));
             tester.pump_and_settle();
             assert!(!focus_node.has_primary_focus(&tester.cell.borrow()));
-            assert!(!paints_circle(&tester, slider_render(&tester), purple));
+            assert!(!paints_circle(tester, slider_render(tester), purple));
             focus_node.dispose(&mut tester.cell.borrow_mut());
         });
     }
@@ -4275,10 +4247,9 @@ pub(crate) mod tests {
     // 'Slider can be hovered and has correct hover color'.
     #[test]
     fn a_slider_can_be_hovered_and_has_the_hover_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             tester.set_highlight_strategy(waft_widgets::FocusHighlightStrategy::AlwaysTraditional);
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             let value = Rc::new(Cell::new(0.5));
             let orange = Colors::ORANGE.get(&500).expect("a swatch shade");
             let build_app = |enabled: bool| {
@@ -4288,57 +4259,48 @@ pub(crate) mod tests {
 
             // Slider does not have overlay when enabled and not hovered.
             tester.pump_and_settle();
-            assert!(!paints_circle(&tester, slider_render(&tester), orange));
+            assert!(!paints_circle(tester, slider_render(tester), orange));
 
             // Start hovering.
-            let mut gesture = WidgetTester::mouse(1, 0);
+            let mut gesture = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut gesture, Offset::ZERO);
-            tester.move_to(&mut gesture, slider_rect(&tester).center(), false);
+            tester.move_to(&mut gesture, slider_rect(tester).center(), false);
 
             // Slider has overlay when enabled and hovered.
             tester.pump_widget(build_app(true));
             tester.pump_and_settle();
             let hovered_color = primary_with_opacity(&theme, 0.08);
-            assert!(paints_circle(
-                &tester,
-                slider_render(&tester),
-                hovered_color
-            ));
+            assert!(paints_circle(tester, slider_render(tester), hovered_color));
 
             // Slider still shows correct hovered color after pressing/dragging
-            let mut pressed = WidgetTester::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+            let mut pressed = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
             pressed.position = gesture.position;
-            tester.down(&mut pressed, slider_rect(&tester).center());
-            tester.pump(Duration::ZERO);
+            tester.down(&mut pressed, slider_rect(tester).center());
+            tester.pump();
             tester.up(&pressed);
             tester.pump_and_settle();
             gesture.position = pressed.position;
             tester.move_to(&mut gesture, Offset::new(0.0, 100.0), false);
             tester.pump_and_settle();
-            tester.move_to(&mut gesture, slider_rect(&tester).center(), false);
+            tester.move_to(&mut gesture, slider_rect(tester).center(), false);
             tester.pump_and_settle();
-            assert!(paints_circle(
-                &tester,
-                slider_render(&tester),
-                hovered_color
-            ));
+            assert!(paints_circle(tester, slider_render(tester), hovered_color));
 
             // Slider does not have an overlay when disabled and hovered.
             tester.pump_widget(build_app(false));
             tester.pump_and_settle();
-            assert!(!paints_circle(&tester, slider_render(&tester), orange));
+            assert!(!paints_circle(tester, slider_render(tester), orange));
         });
     }
 
     // 'Material3 - Slider is draggable and has correct dragged color'.
     #[test]
     fn material3_a_slider_is_draggable_and_has_the_dragged_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             tester.set_highlight_strategy(waft_widgets::FocusHighlightStrategy::AlwaysTraditional);
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             let value = Rc::new(Cell::new(0.5));
-            let focus_node = new_focus_node(&tester);
+            let focus_node = new_focus_node(tester);
             let build_app = |enabled: bool| {
                 focusable_slider_app(theme.clone(), &value, enabled, {
                     let focus_node = focus_node.clone();
@@ -4350,54 +4312,38 @@ pub(crate) mod tests {
             // Slider does not have overlay when enabled and not dragged.
             tester.pump_and_settle();
             let dragged_color = primary_with_opacity(&theme, 0.1);
-            assert!(!paints_circle(
-                &tester,
-                slider_render(&tester),
-                dragged_color
-            ));
+            assert!(!paints_circle(tester, slider_render(tester), dragged_color));
 
             // Start dragging.
-            let mut drag = WidgetTester::touch(1);
-            tester.down(&mut drag, slider_rect(&tester).center());
-            tester.pump(waft_gestures::K_PRESS_TIMEOUT);
+            let mut drag = TestPointer::touch(1);
+            tester.down(&mut drag, slider_rect(tester).center());
+            tester.pump_by(waft_gestures::K_PRESS_TIMEOUT);
 
             // Less than configured touch slop, more than default touch slop
             let at = drag.position + Offset::new(19.0, 0.0);
             tester.move_to(&mut drag, at, true);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             // Valo records no draw that covers no pixel, and the overlay has just started
             // to grow from a zero radius, a circle Dart's `paints` matcher sees as a call; one
             // frame later it has a radius.
-            tester.pump(Duration::from_millis(16));
+            tester.pump_by(Duration::from_millis(16));
 
             // Slider has overlay when enabled and dragged.
-            assert!(paints_circle(
-                &tester,
-                slider_render(&tester),
-                dragged_color
-            ));
+            assert!(paints_circle(tester, slider_render(tester), dragged_color));
 
             tester.up(&drag);
             tester.pump_and_settle();
 
             // Slider without focus doesn't have overlay when enabled and dragged.
             assert!(!focus_node.has_focus(&mut tester.cell.borrow_mut()));
-            assert!(!paints_circle(
-                &tester,
-                slider_render(&tester),
-                dragged_color
-            ));
+            assert!(!paints_circle(tester, slider_render(tester), dragged_color));
 
             // Slider has overlay when enabled, dragged and focused.
             focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
             tester.pump_and_settle();
 
             assert!(focus_node.has_focus(&mut tester.cell.borrow_mut()));
-            assert!(paints_circle(
-                &tester,
-                slider_render(&tester),
-                dragged_color
-            ));
+            assert!(paints_circle(tester, slider_render(tester), dragged_color));
             focus_node.dispose(&mut tester.cell.borrow_mut());
         });
     }
@@ -4405,11 +4351,10 @@ pub(crate) mod tests {
     // 'OverlayColor property is correctly applied when activeColor is also provided'.
     #[test]
     fn overlay_color_applies_when_active_color_is_also_given() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let focus_node = new_focus_node(&tester);
+        test_widgets(|tester| {
+            let focus_node = new_focus_node(tester);
             tester.set_highlight_strategy(waft_widgets::FocusHighlightStrategy::AlwaysTraditional);
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             let value = Rc::new(Cell::new(0.5));
             const ACTIVE_COLOR: Color = Color::new(0xffff0000);
             const OVERLAY_COLOR: Color = Color::new(0xff0000ff);
@@ -4430,28 +4375,20 @@ pub(crate) mod tests {
             tester.pump_and_settle();
 
             // Check that thumb color is using active color.
-            assert!(paints_circle(&tester, slider_render(&tester), ACTIVE_COLOR));
+            assert!(paints_circle(tester, slider_render(tester), ACTIVE_COLOR));
 
             focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
             tester.pump_and_settle();
 
             // Check that the overlay shows when focused.
             assert!(focus_node.has_primary_focus(&tester.cell.borrow()));
-            assert!(paints_circle(
-                &tester,
-                slider_render(&tester),
-                OVERLAY_COLOR
-            ));
+            assert!(paints_circle(tester, slider_render(tester), OVERLAY_COLOR));
 
             // Check that the overlay does not show when focused and disabled.
             tester.pump_widget(build_app(false));
             tester.pump_and_settle();
             assert!(!focus_node.has_primary_focus(&tester.cell.borrow()));
-            assert!(!paints_circle(
-                &tester,
-                slider_render(&tester),
-                OVERLAY_COLOR
-            ));
+            assert!(!paints_circle(tester, slider_render(tester), OVERLAY_COLOR));
             focus_node.dispose(&mut tester.cell.borrow_mut());
         });
     }
@@ -4535,25 +4472,28 @@ pub(crate) mod tests {
 
     /// The keyboard case for `platform`, whose arrows step by `step`: right, left, up and down
     /// in turn, right and left swapped by `text_direction`.
-    fn keyboard_shortcuts_step(platform: TargetPlatform, text_direction: TextDirection, step: f64) {
-        let mut tester = tester_on(platform);
-        let values = keyboard_slider(&mut tester, text_direction);
+    fn keyboard_shortcuts_step(
+        tester: &mut WidgetTester,
+        text_direction: TextDirection,
+        step: f64,
+    ) {
+        let values = keyboard_slider(tester, text_direction);
         let (up, down) = (0.5 + step, 0.5 - step);
         let right = match text_direction {
             TextDirection::Ltr => up,
             TextDirection::Rtl => down,
         };
 
-        send_arrow(&mut tester, LogicalKeyboardKey::ARROW_RIGHT);
+        send_arrow(tester, LogicalKeyboardKey::ARROW_RIGHT);
         assert_keyboard_values(&values, 0.5, right, right);
 
-        send_arrow(&mut tester, LogicalKeyboardKey::ARROW_LEFT);
+        send_arrow(tester, LogicalKeyboardKey::ARROW_LEFT);
         assert_keyboard_values(&values, right, 0.5, 0.5);
 
-        send_arrow(&mut tester, LogicalKeyboardKey::ARROW_UP);
+        send_arrow(tester, LogicalKeyboardKey::ARROW_UP);
         assert_keyboard_values(&values, 0.5, up, up);
 
-        send_arrow(&mut tester, LogicalKeyboardKey::ARROW_DOWN);
+        send_arrow(tester, LogicalKeyboardKey::ARROW_DOWN);
         assert_keyboard_values(&values, up, 0.5, 0.5);
     }
 
@@ -4561,14 +4501,16 @@ pub(crate) mod tests {
     // Fuchsia, Linux, Windows).
     #[test]
     fn the_keyboard_steps_a_slider_by_five_percent_ltr() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             for platform in [
                 TargetPlatform::Android,
                 TargetPlatform::Fuchsia,
                 TargetPlatform::Linux,
                 TargetPlatform::Windows,
             ] {
-                keyboard_shortcuts_step(platform, TextDirection::Ltr, 0.05);
+                test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                    keyboard_shortcuts_step(tester, TextDirection::Ltr, 0.05);
+                });
             }
         });
     }
@@ -4576,9 +4518,11 @@ pub(crate) mod tests {
     // 'Slider can be incremented and decremented by keyboard shortcuts - LTR' (iOS, macOS).
     #[test]
     fn the_keyboard_steps_a_slider_by_ten_percent_ltr_on_apple_platforms() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             for platform in [TargetPlatform::IOS, TargetPlatform::MacOS] {
-                keyboard_shortcuts_step(platform, TextDirection::Ltr, 0.1);
+                test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                    keyboard_shortcuts_step(tester, TextDirection::Ltr, 0.1);
+                });
             }
         });
     }
@@ -4587,14 +4531,16 @@ pub(crate) mod tests {
     // Fuchsia, Linux, Windows).
     #[test]
     fn the_keyboard_steps_a_slider_by_five_percent_rtl() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             for platform in [
                 TargetPlatform::Android,
                 TargetPlatform::Fuchsia,
                 TargetPlatform::Linux,
                 TargetPlatform::Windows,
             ] {
-                keyboard_shortcuts_step(platform, TextDirection::Rtl, 0.05);
+                test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                    keyboard_shortcuts_step(tester, TextDirection::Rtl, 0.05);
+                });
             }
         });
     }
@@ -4602,9 +4548,11 @@ pub(crate) mod tests {
     // 'Slider can be incremented and decremented by keyboard shortcuts - RTL' (iOS, macOS).
     #[test]
     fn the_keyboard_steps_a_slider_by_ten_percent_rtl_on_apple_platforms() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             for platform in [TargetPlatform::IOS, TargetPlatform::MacOS] {
-                keyboard_shortcuts_step(platform, TextDirection::Rtl, 0.1);
+                test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                    keyboard_shortcuts_step(tester, TextDirection::Rtl, 0.1);
+                });
             }
         });
     }
@@ -4710,7 +4658,7 @@ pub(crate) mod tests {
         assert_eq!(indicator_visible(tester, theme), visible_when_released);
 
         let center = slider_rect(tester).center();
-        let mut gesture = WidgetTester::touch(1);
+        let mut gesture = TestPointer::touch(1);
         tester.down(&mut gesture, center);
         tester.pump_and_settle();
         assert_eq!(indicator_visible(tester, theme), visible_when_dragged);
@@ -4747,33 +4695,34 @@ pub(crate) mod tests {
     /// disabled, continuous enabled and continuous disabled, with what they expect while
     /// dragged and once released.
     fn expect_value_indicators(
+        tester: &mut WidgetTester,
         show_value_indicator: Option<ShowValueIndicator>,
         discrete: (bool, bool),
         continuous: (bool, bool),
     ) {
-        let mut tester = tester_on(TargetPlatform::Android);
-        let theme = value_indicator_theme(&tester, show_value_indicator);
-        expect_value_indicator(&mut tester, discrete.0, discrete.1, &theme, Some(3), true);
-        expect_value_indicator(&mut tester, false, false, &theme, Some(3), false);
-        expect_value_indicator(&mut tester, continuous.0, continuous.1, &theme, None, true);
-        expect_value_indicator(&mut tester, false, false, &theme, None, false);
+        let theme = value_indicator_theme(tester, show_value_indicator);
+        expect_value_indicator(tester, discrete.0, discrete.1, &theme, Some(3), true);
+        expect_value_indicator(tester, false, false, &theme, Some(3), false);
+        expect_value_indicator(tester, continuous.0, continuous.1, &theme, None, true);
+        expect_value_indicator(tester, false, false, &theme, None, false);
     }
 
     // 'Value indicator appears and disappears when it should:' 'showValueIndicator set to
     // onlyForDiscrete'.
     #[test]
     fn the_value_indicator_shows_only_for_discrete() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // The default value is onlyForDiscrete. No modification is needed.
-            expect_value_indicators(None, (true, false), (false, false));
+            expect_value_indicators(tester, None, (true, false), (false, false));
         });
     }
 
     // 'showValueIndicator set to onlyForContinuous'.
     #[test]
     fn the_value_indicator_shows_only_for_continuous() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             expect_value_indicators(
+                tester,
                 Some(ShowValueIndicator::OnlyForContinuous),
                 (false, false),
                 (true, false),
@@ -4784,8 +4733,9 @@ pub(crate) mod tests {
     // 'showValueIndicator set to onDrag'.
     #[test]
     fn the_value_indicator_shows_on_drag() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             expect_value_indicators(
+                tester,
                 Some(ShowValueIndicator::OnDrag),
                 (true, false),
                 (true, false),
@@ -4796,8 +4746,9 @@ pub(crate) mod tests {
     // 'showValueIndicator set to never'.
     #[test]
     fn the_value_indicator_never_shows() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             expect_value_indicators(
+                tester,
                 Some(ShowValueIndicator::Never),
                 (false, false),
                 (false, false),
@@ -4808,8 +4759,9 @@ pub(crate) mod tests {
     // 'showValueIndicator set to alwaysVisible'.
     #[test]
     fn the_value_indicator_is_always_visible() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             expect_value_indicators(
+                tester,
                 Some(ShowValueIndicator::AlwaysVisible),
                 (true, true),
                 (true, true),
@@ -4820,7 +4772,7 @@ pub(crate) mod tests {
     // 'Slider.adaptive'.
     #[test]
     fn slider_adaptive() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let value = Rc::new(Cell::new(0.5));
             let build_frame = |tester: &WidgetTester, platform: TargetPlatform| {
                 let theme = ThemeData::builder()
@@ -4846,9 +4798,8 @@ pub(crate) mod tests {
             };
 
             for platform in [TargetPlatform::IOS, TargetPlatform::MacOS] {
-                let mut tester = tester_on(TargetPlatform::Android);
                 value.set(0.5);
-                tester.pump_widget(build_frame(&tester, platform));
+                tester.pump_widget(build_frame(tester, platform));
                 assert_eq!(tester.find_by_type::<Slider>().len(), 1);
                 let cupertino = tester.find_by_type::<CupertinoSlider>();
                 assert_eq!(cupertino.len(), 1);
@@ -4857,7 +4808,7 @@ pub(crate) mod tests {
                 let center = tester
                     .global_rect(tester.render_box_of(cupertino[0]))
                     .center();
-                let mut gesture = WidgetTester::touch(1);
+                let mut gesture = TestPointer::touch(1);
                 tester.down(&mut gesture, center);
                 // Drag to the right end of the track.
                 tester.move_to(&mut gesture, center + Offset::new(600.0, 0.0), true);
@@ -4871,16 +4822,15 @@ pub(crate) mod tests {
                 TargetPlatform::Linux,
                 TargetPlatform::Windows,
             ] {
-                let mut tester = tester_on(TargetPlatform::Android);
                 value.set(0.5);
-                tester.pump_widget(build_frame(&tester, platform));
+                tester.pump_widget(build_frame(tester, platform));
                 tester.pump_and_settle(); // Finish the theme change animation.
                 assert_eq!(tester.find_by_type::<Slider>().len(), 1);
                 assert!(tester.find_by_type::<CupertinoSlider>().is_empty());
 
                 assert_eq!(value.get(), 0.5, "on {platform:?}");
-                let center = slider_rect(&tester).center();
-                let mut gesture = WidgetTester::touch(1);
+                let center = slider_rect(tester).center();
+                let mut gesture = TestPointer::touch(1);
                 tester.down(&mut gesture, center);
                 // Drag to the right end of the track.
                 tester.move_to(&mut gesture, center + Offset::new(600.0, 0.0), true);
@@ -4893,12 +4843,11 @@ pub(crate) mod tests {
     // 'Slider respects height from theme'.
     #[test]
     fn a_slider_respects_the_height_of_its_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let heard = Heard::starting_at(0.0);
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             tester.pump_widget(stateful_slider_app(
-                &tester,
+                tester,
                 theme,
                 TextDirection::Ltr,
                 &heard,
@@ -4913,7 +4862,7 @@ pub(crate) mod tests {
                 |slider| slider.divisions(4),
             ));
 
-            assert_eq!(slider_size(&tester).height(), 200.0);
+            assert_eq!(slider_size(tester).height(), 200.0);
         });
     }
 
@@ -4932,10 +4881,9 @@ pub(crate) mod tests {
     // 'Slider changes mouse cursor when hovered'.
     #[test]
     fn a_slider_changes_the_mouse_cursor_when_hovered() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             use waft_services::SystemMouseCursors;
-            let mut tester = tester_on(TargetPlatform::Android);
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             let frame = |slider: Slider| {
                 material_body(
                     theme.clone(),
@@ -4952,34 +4900,31 @@ pub(crate) mod tests {
                 Slider::new(0.5, noop()).mouse_cursor(SystemMouseCursors::TEXT.into()),
             ));
 
-            let mut gesture = WidgetTester::mouse(1, 0);
-            tester.add_pointer(&mut gesture, slider_rect(&tester).center());
+            let mut gesture = TestPointer::mouse(1, 0);
+            tester.add_pointer(&mut gesture, slider_rect(tester).center());
 
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            assert!(is_cursor(&active_cursor(&tester), SystemMouseCursors::TEXT));
+            assert!(is_cursor(&active_cursor(tester), SystemMouseCursors::TEXT));
 
             // Test Slider.adaptive() constructor
             tester.pump_widget(frame(
                 Slider::adaptive(0.5, noop()).mouse_cursor(SystemMouseCursors::TEXT.into()),
             ));
 
-            assert!(is_cursor(&active_cursor(&tester), SystemMouseCursors::TEXT));
+            assert!(is_cursor(&active_cursor(tester), SystemMouseCursors::TEXT));
 
             // Test default cursor
             tester.pump_widget(frame(Slider::new(0.5, noop())));
 
-            assert!(is_cursor(
-                &active_cursor(&tester),
-                SystemMouseCursors::CLICK
-            ));
+            assert!(is_cursor(&active_cursor(tester), SystemMouseCursors::CLICK));
         });
     }
 
     // 'Slider WidgetStateMouseCursor resolves correctly'.
     #[test]
     fn a_slider_resolves_a_widget_state_mouse_cursor() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             use waft_services::{PhysicalKeyboardKey, SystemMouseCursors};
             let system_default_cursor = SystemMouseCursors::BASIC;
             let regular_cursor = SystemMouseCursors::CLICK;
@@ -4988,8 +4933,7 @@ pub(crate) mod tests {
             let hovered_cursor = SystemMouseCursors::GRAB;
             let dragged_cursor = SystemMouseCursors::MOVE;
 
-            let mut tester = tester_on(TargetPlatform::Android);
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             let build_frame = |enabled: bool| {
                 // Dart's `_StateDependentMouseCursor`.
                 let cursor = WidgetStateMouseCursor::resolve_with(
@@ -5023,55 +4967,55 @@ pub(crate) mod tests {
                 )
             };
 
-            let mut gesture = WidgetTester::mouse(1, 0);
+            let mut gesture = TestPointer::mouse(1, 0);
 
             // Dart's tester starts with an empty view; this one has none until it pumps.
             tester.pump_widget(SizedBox::new().into_widget());
 
             // System default.
             tester.add_pointer(&mut gesture, Offset::ZERO);
-            tester.pump(Duration::ZERO);
-            assert!(is_cursor(&active_cursor(&tester), system_default_cursor));
+            tester.pump();
+            assert!(is_cursor(&active_cursor(tester), system_default_cursor));
 
             // Disabled.
             tester.pump_widget(build_frame(false));
-            tester.move_to(&mut gesture, slider_rect(&tester).center(), false);
-            tester.pump(Duration::ZERO);
-            assert!(is_cursor(&active_cursor(&tester), disabled_cursor));
+            tester.move_to(&mut gesture, slider_rect(tester).center(), false);
+            tester.pump();
+            assert!(is_cursor(&active_cursor(tester), disabled_cursor));
 
             // Regular.
             tester.pump_widget(build_frame(true));
-            assert!(is_cursor(&active_cursor(&tester), regular_cursor));
+            assert!(is_cursor(&active_cursor(tester), regular_cursor));
 
             // Hovered.
-            tester.pump(Duration::ZERO);
-            assert!(is_cursor(&active_cursor(&tester), hovered_cursor));
+            tester.pump();
+            assert!(is_cursor(&active_cursor(tester), hovered_cursor));
 
             // Dragged.
-            let mut pressed = WidgetTester::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+            let mut pressed = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
             pressed.position = gesture.position;
-            tester.down(&mut pressed, slider_rect(&tester).center());
+            tester.down(&mut pressed, slider_rect(tester).center());
             let at = pressed.position + Offset::new(20.0, 0.0);
             tester.move_to(&mut pressed, at, true);
-            tester.pump(Duration::ZERO);
-            assert!(is_cursor(&active_cursor(&tester), dragged_cursor));
+            tester.pump();
+            assert!(is_cursor(&active_cursor(tester), dragged_cursor));
 
             // Hovered.
             tester.up(&pressed);
             gesture.position = pressed.position;
-            tester.pump(Duration::ZERO);
-            assert!(is_cursor(&active_cursor(&tester), hovered_cursor));
+            tester.pump();
+            assert!(is_cursor(&active_cursor(tester), hovered_cursor));
 
             // Focused.
             tester.send_key_event(PhysicalKeyboardKey::TAB, LogicalKeyboardKey::TAB);
-            tester.pump(Duration::ZERO);
-            assert!(is_cursor(&active_cursor(&tester), focused_cursor));
+            tester.pump();
+            assert!(is_cursor(&active_cursor(tester), focused_cursor));
 
             // System default.
             tester.move_to(&mut gesture, Offset::ZERO, false);
             tester.send_key_event(PhysicalKeyboardKey::TAB, LogicalKeyboardKey::TAB);
-            tester.pump(Duration::ZERO);
-            assert!(is_cursor(&active_cursor(&tester), system_default_cursor));
+            tester.pump();
+            assert!(is_cursor(&active_cursor(tester), system_default_cursor));
         });
     }
 
@@ -5090,11 +5034,10 @@ pub(crate) mod tests {
     // 'Slider paints thumbColor'.
     #[test]
     fn a_slider_paints_its_thumb_color() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const COLOR: Color = Color::new(0xffffc107);
-            let mut tester = tester_on(TargetPlatform::Android);
             let slider_adaptive = platform_slider_app(
-                &tester,
+                tester,
                 TargetPlatform::IOS,
                 Slider::new(0.0, noop()).thumb_color(COLOR),
             );
@@ -5102,18 +5045,17 @@ pub(crate) mod tests {
             tester.pump_widget(slider_adaptive);
             tester.pump_and_settle();
 
-            assert!(paints_circle(&tester, slider_render(&tester), COLOR));
+            assert!(paints_circle(tester, slider_render(tester), COLOR));
         });
     }
 
     // 'Slider.adaptive paints thumbColor on Android'.
     #[test]
     fn slider_adaptive_paints_its_thumb_color_on_android() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const COLOR: Color = Color::new(0xffffc107);
-            let mut tester = tester_on(TargetPlatform::Android);
             let slider_adaptive = platform_slider_app(
-                &tester,
+                tester,
                 TargetPlatform::Android,
                 Slider::adaptive(0.0, noop()).thumb_color(COLOR),
             );
@@ -5121,7 +5063,7 @@ pub(crate) mod tests {
             tester.pump_widget(slider_adaptive);
             tester.pump_and_settle();
 
-            assert!(paints_circle(&tester, slider_render(&tester), COLOR));
+            assert!(paints_circle(tester, slider_render(tester), COLOR));
         });
     }
 
@@ -5150,16 +5092,15 @@ pub(crate) mod tests {
     // 'If thumbColor is null, it defaults to CupertinoColors.white'.
     #[test]
     fn an_adaptive_thumb_color_defaults_to_cupertino_white() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let slider_adaptive =
-                platform_slider_app(&tester, TargetPlatform::IOS, Slider::adaptive(0.0, noop()));
+                platform_slider_app(tester, TargetPlatform::IOS, Slider::adaptive(0.0, noop()));
 
             tester.pump_widget(slider_adaptive);
             tester.pump_and_settle();
 
             assert_eq!(
-                sixth_cupertino_rrect_color(&tester),
+                sixth_cupertino_rrect_color(tester),
                 Some(CupertinoColors::WHITE.color().into())
             );
         });
@@ -5168,11 +5109,10 @@ pub(crate) mod tests {
     // 'Slider.adaptive passes thumbColor to CupertinoSlider'.
     #[test]
     fn slider_adaptive_passes_its_thumb_color_to_the_cupertino_slider() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const COLOR: Color = Color::new(0xffffc107);
-            let mut tester = tester_on(TargetPlatform::Android);
             let slider_adaptive = platform_slider_app(
-                &tester,
+                tester,
                 TargetPlatform::IOS,
                 Slider::adaptive(0.0, noop()).thumb_color(COLOR),
             );
@@ -5180,20 +5120,19 @@ pub(crate) mod tests {
             tester.pump_widget(slider_adaptive);
             tester.pump_and_settle();
 
-            assert_eq!(sixth_cupertino_rrect_color(&tester), Some(COLOR.into()));
+            assert_eq!(sixth_cupertino_rrect_color(tester), Some(COLOR.into()));
         });
     }
 
     // 'Drag gesture uses provided gesture settings'.
     #[test]
     fn the_drag_gesture_uses_the_gesture_settings_given() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regression test for https://github.com/flutter/flutter/issues/103566
-            let mut tester = tester_on(TargetPlatform::Android);
             let value = Rc::new(Cell::new(0.5));
             let drag_started = Rc::new(Cell::new(false));
             let slider_end = Rc::new(Cell::new(false));
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             let build = |touch_slop: f64, with_end: bool| {
                 let (value, drag_started, slider_end) = (
                     Rc::clone(&value),
@@ -5240,14 +5179,14 @@ pub(crate) mod tests {
             };
             tester.pump_widget(build(20.0, false));
 
-            let mut drag = WidgetTester::touch(1);
-            tester.down(&mut drag, slider_rect(&tester).center());
-            tester.pump(waft_gestures::K_PRESS_TIMEOUT);
+            let mut drag = TestPointer::touch(1);
+            tester.down(&mut drag, slider_rect(tester).center());
+            tester.pump_by(waft_gestures::K_PRESS_TIMEOUT);
 
             // Less than configured touch slop, more than default touch slop
             let at = drag.position + Offset::new(19.0, 0.0);
             tester.move_to(&mut drag, at, true);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             assert_eq!(value.get(), 0.5);
             assert!(drag_started.get());
@@ -5257,9 +5196,9 @@ pub(crate) mod tests {
             tester.up(&drag);
             tester.pump_and_settle();
 
-            let mut drag = WidgetTester::touch(2);
-            tester.down(&mut drag, slider_rect(&tester).center());
-            tester.pump(waft_gestures::K_PRESS_TIMEOUT);
+            let mut drag = TestPointer::touch(2);
+            tester.down(&mut drag, slider_rect(tester).center());
+            tester.pump_by(waft_gestures::K_PRESS_TIMEOUT);
 
             tester.pump_widget(build(10.0, true));
 
@@ -5327,8 +5266,7 @@ pub(crate) mod tests {
     // 'Slider.allowedInteraction' 'SliderInteraction.tapOnly'.
     #[test]
     fn slider_interaction_tap_only() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let value = Rc::new(Cell::new(1.0));
             // (slider's left padding (overlayRadius), windowHeight / 2)
             let start_of_the_slider_track = Offset::new(24.0, 300.0);
@@ -5336,7 +5274,7 @@ pub(crate) mod tests {
             let logs = Rc::new(RefCell::new(Vec::new()));
 
             // allow tap only
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             tester.pump_widget(interaction_app(
                 theme,
                 &value,
@@ -5347,22 +5285,22 @@ pub(crate) mod tests {
             assert!(logs.borrow().is_empty());
 
             // test tap
-            let mut gesture = WidgetTester::touch(1);
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, center_of_the_slide_track);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             // changes from 1.0 -> 0.5
             assert_eq!(value.get(), 0.5);
             assert_eq!(*logs.borrow(), ["onChangeStart", "onChanged"]);
 
             // test slide
             tester.move_to(&mut gesture, start_of_the_slider_track, true);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             // has no effect, remains 0.5
             assert_eq!(value.get(), 0.5);
             assert_eq!(*logs.borrow(), ["onChangeStart", "onChanged"]);
 
             tester.up(&gesture);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(
                 *logs.borrow(),
                 ["onChangeStart", "onChanged", "onChangeEnd"]
@@ -5373,8 +5311,7 @@ pub(crate) mod tests {
     // 'SliderInteraction.tapAndSlide (default)'.
     #[test]
     fn slider_interaction_tap_and_slide_is_the_default() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let value = Rc::new(Cell::new(1.0));
             // (slider's left padding (overlayRadius), windowHeight / 2)
             let start_of_the_slider_track = Offset::new(24.0, 300.0);
@@ -5382,26 +5319,26 @@ pub(crate) mod tests {
             let end_of_the_slider_track = Offset::new(800.0 - 24.0, 300.0);
             let logs = Rc::new(RefCell::new(Vec::new()));
 
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             tester.pump_widget(interaction_app(theme, &value, &logs, None));
 
             assert!(logs.borrow().is_empty());
 
             // Test tap.
-            let mut gesture = WidgetTester::touch(1);
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, center_of_the_slide_track);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             // changes from 1.0 -> 0.5
             assert_eq!(value.get(), 0.5);
             assert_eq!(*logs.borrow(), ["onChangeStart", "onChanged"]);
 
             // test slide
             tester.move_to(&mut gesture, start_of_the_slider_track, true);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             // changes from 0.5 -> 0.0
             assert_eq!(value.get(), 0.0);
             tester.move_to(&mut gesture, end_of_the_slider_track, true);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             // changes from 0.0 -> 1.0
             assert_eq!(value.get(), 1.0);
             assert_eq!(
@@ -5410,7 +5347,7 @@ pub(crate) mod tests {
             );
 
             tester.up(&gesture);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             assert_eq!(
                 *logs.borrow(),
@@ -5447,10 +5384,9 @@ pub(crate) mod tests {
     // 'SliderInteraction.slideOnly'.
     #[test]
     fn slider_interaction_slide_only() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const OVERLAY_RADIUS: f64 = 23.0;
             let overlay_color = Colors::RED.primary();
-            let mut tester = tester_on(TargetPlatform::Android);
             let value = Rc::new(Cell::new(1.0));
             // (slider's left padding (overlayRadius), windowHeight / 2)
             let start_of_the_slider_track = Offset::new(OVERLAY_RADIUS, 300.0);
@@ -5481,23 +5417,23 @@ pub(crate) mod tests {
             assert!(logs.borrow().is_empty());
 
             // Test tap.
-            let mut gesture = WidgetTester::touch(1);
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, center_of_the_slider_track);
             // Start animation.
-            tester.pump(Duration::ZERO);
+            tester.pump();
             // Go to mid-animation frame.
-            tester.pump(K_RADIAL_REACTION_DURATION.mul_f64(0.5));
+            tester.pump_by(K_RADIAL_REACTION_DURATION.mul_f64(0.5));
             assert!(paints_circle_at(
-                &tester,
-                slider_render(&tester),
+                tester,
+                slider_render(tester),
                 overlay_color,
                 x_pos_thumb(value.get()),
                 None
             ));
             // We have a non-linear asymmetric curve, so just verify the radius is not full.
             assert!(!paints_circle_at(
-                &tester,
-                slider_render(&tester),
+                tester,
+                slider_render(tester),
                 overlay_color,
                 x_pos_thumb(value.get()),
                 Some(OVERLAY_RADIUS)
@@ -5507,8 +5443,8 @@ pub(crate) mod tests {
             tester.pump_and_settle();
             // Overlay drawn.
             assert!(paints_circle_at(
-                &tester,
-                slider_render(&tester),
+                tester,
+                slider_render(tester),
                 overlay_color,
                 x_pos_thumb(value.get()),
                 Some(OVERLAY_RADIUS)
@@ -5519,26 +5455,26 @@ pub(crate) mod tests {
 
             // Test slide.
             tester.move_to(&mut gesture, start_of_the_slider_track, true);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             // Changes from 1.0 -> 0.5.
             assert_eq!(value.get(), 0.5);
             // Overlay still there.
             assert!(paints_circle_at(
-                &tester,
-                slider_render(&tester),
+                tester,
+                slider_render(tester),
                 overlay_color,
                 x_pos_thumb(value.get()),
                 Some(OVERLAY_RADIUS)
             ));
             tester.move_to(&mut gesture, end_of_the_slider_track, true);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             // Changes from 0.0 -> 1.0.
             assert_eq!(value.get(), 1.0);
             assert_eq!(*logs.borrow(), ["onChangeStart", "onChanged", "onChanged"]);
             // Overlay still there.
             assert!(paints_circle_at(
-                &tester,
-                slider_render(&tester),
+                tester,
+                slider_render(tester),
                 overlay_color,
                 x_pos_thumb(value.get()),
                 Some(OVERLAY_RADIUS)
@@ -5547,20 +5483,20 @@ pub(crate) mod tests {
             tester.up(&gesture);
 
             // Start release animation.
-            tester.pump(Duration::ZERO);
+            tester.pump();
             // Go to mid-animation frame.
-            tester.pump(K_RADIAL_REACTION_DURATION.mul_f64(0.5));
+            tester.pump_by(K_RADIAL_REACTION_DURATION.mul_f64(0.5));
             assert!(paints_circle_at(
-                &tester,
-                slider_render(&tester),
+                tester,
+                slider_render(tester),
                 overlay_color,
                 x_pos_thumb(value.get()),
                 None
             ));
             // Verify the radius is not full.
             assert!(!paints_circle_at(
-                &tester,
-                slider_render(&tester),
+                tester,
+                slider_render(tester),
                 overlay_color,
                 x_pos_thumb(value.get()),
                 Some(OVERLAY_RADIUS)
@@ -5569,7 +5505,7 @@ pub(crate) mod tests {
             tester.pump_and_settle();
             // No overlay drawn.
             let color: waft_embedder::valo::Color = overlay_color.into();
-            assert!(!tester.painted_ops(slider_render(&tester)).iter().any(|op| matches!(op,
+            assert!(!tester.painted_ops(slider_render(tester)).iter().any(|op| matches!(op,
                 Op::DrawPath { path, paint, .. } if paint.color == color
                     && circle_of(path).is_some_and(|circle| (circle.width() / 2.0 - OVERLAY_RADIUS).abs() < 1e-3))));
 
@@ -5583,8 +5519,7 @@ pub(crate) mod tests {
     // 'SliderInteraction.slideThumb'.
     #[test]
     fn slider_interaction_slide_thumb() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let value = Rc::new(Cell::new(1.0));
             // (slider's left padding (overlayRadius), windowHeight / 2)
             let start_of_the_slider_track = Offset::new(24.0, 300.0);
@@ -5592,7 +5527,7 @@ pub(crate) mod tests {
             let end_of_the_slider_track = Offset::new(800.0 - 24.0, 300.0);
             let logs = Rc::new(RefCell::new(Vec::new()));
 
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             tester.pump_widget(interaction_app(
                 theme,
                 &value,
@@ -5603,16 +5538,16 @@ pub(crate) mod tests {
             assert!(logs.borrow().is_empty());
 
             // test tap
-            let mut gesture = WidgetTester::touch(1);
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, center_of_the_slider_track);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             // has no effect, remains 1.0
             assert_eq!(value.get(), 1.0);
             assert!(logs.borrow().is_empty());
 
             // test slide
             tester.move_to(&mut gesture, start_of_the_slider_track, true);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             // has no effect, remains 1.0
             assert_eq!(value.get(), 1.0);
             assert!(logs.borrow().is_empty());
@@ -5620,13 +5555,13 @@ pub(crate) mod tests {
             // test slide thumb
             tester.up(&gesture);
             tester.down(&mut gesture, end_of_the_slider_track); // where the thumb is
-            tester.pump(Duration::ZERO);
+            tester.pump();
             // has no effect, remains 1.0
             assert_eq!(value.get(), 1.0);
             assert_eq!(*logs.borrow(), ["onChangeStart"]);
 
             tester.move_to(&mut gesture, center_of_the_slider_track, true);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             // changes from 1.0 -> 0.5
             assert_eq!(value.get(), 0.5);
             assert_eq!(*logs.borrow(), ["onChangeStart", "onChanged"]);
@@ -5638,7 +5573,7 @@ pub(crate) mod tests {
                 &mut gesture,
                 center_of_the_slider_track + Offset::new(-10.0, 0.0),
             );
-            tester.pump(Duration::ZERO);
+            tester.pump();
             // changes from 1.0 -> 0.5
             assert_eq!(value.get(), 0.5);
             assert_eq!(
@@ -5651,7 +5586,7 @@ pub(crate) mod tests {
                 end_of_the_slider_track + Offset::new(-10.0, 0.0),
                 true,
             );
-            tester.pump(Duration::ZERO);
+            tester.pump();
             // changes from 0.5 -> 1.0
             assert_eq!(value.get(), 1.0);
             assert_eq!(
@@ -5666,7 +5601,7 @@ pub(crate) mod tests {
             );
 
             tester.up(&gesture);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             assert_eq!(
                 *logs.borrow(),
@@ -5755,8 +5690,7 @@ pub(crate) mod tests {
     // 'Can update renderObject when secondaryTrackValue is updated'.
     #[test]
     fn the_render_object_updates_with_the_secondary_track_value() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let log = Rc::new(RefCell::new(Vec::new()));
             let logging_track_shape = Rc::new(LoggingRoundedRectSliderTrackShape {
                 secondary_offset_log: Rc::clone(&log),
@@ -5800,9 +5734,8 @@ pub(crate) mod tests {
     // 'Discrete Slider does not apply thumb padding in a non-rounded track shape'.
     #[test]
     fn a_discrete_slider_applies_no_thumb_padding_on_a_non_rounded_track() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regression test for https://github.com/flutter/flutter/issues/161805
-            let mut tester = tester_on(TargetPlatform::Android);
             // The default track left and right padding.
             let slider_padding = 24.0;
             let theme = ThemeData::builder()
@@ -5845,28 +5778,27 @@ pub(crate) mod tests {
                         _ => false,
                     })
             };
-            assert!(paints_thumb_at(&tester, slider_padding));
+            assert!(paints_thumb_at(tester, slider_padding));
 
             tester.pump_widget(build_slider(100.0));
             tester.pump_and_settle();
 
-            assert!(paints_thumb_at(&tester, 800.0 - slider_padding));
+            assert!(paints_thumb_at(tester, 800.0 - slider_padding));
         });
     }
 
     // 'Slider does not crash at zero area'.
     #[test]
     fn a_slider_does_not_crash_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             tester.pump_widget(material_app(
                 theme,
                 crate::scaffold::Scaffold::new()
                     .body(Center::new().child(SizedBox::shrink().child(Slider::new(1.0, noop()))))
                     .into_widget(),
             ));
-            assert_eq!(slider_size(&tester), Size::ZERO);
+            assert_eq!(slider_size(tester), Size::ZERO);
         });
     }
 
@@ -5912,13 +5844,12 @@ pub(crate) mod tests {
     // 'Slider label respects horizontal buffer and avoids screen overflow'.
     #[test]
     fn the_label_keeps_the_horizontal_buffer_and_avoids_screen_overflow() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let log_painters = Rc::new(RefCell::new(Vec::new()));
             let shape = Rc::new(LoggingValueIndicatorShape {
                 log_painter_widths: Rc::clone(&log_painters),
             });
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             #[expect(deprecated, reason = "Dart's case uses the deprecated `always`")]
             let show_value_indicator = ShowValueIndicator::Always;
             tester.pump_widget(material_app(
@@ -5935,8 +5866,8 @@ pub(crate) mod tests {
                     .into_widget(),
             ));
 
-            let mut gesture = WidgetTester::touch(1);
-            tester.down(&mut gesture, slider_rect(&tester).center());
+            let mut gesture = TestPointer::touch(1);
+            tester.down(&mut gesture, slider_rect(tester).center());
             tester.pump_and_settle();
 
             let screen_width = WidgetTester::SIZE.width();
@@ -6040,12 +5971,15 @@ pub(crate) mod tests {
     }
 
     /// Dart's 'Discrete Slider snaps at the visual midpoint between ticks ($name)'.
-    fn snaps_at_the_visual_midpoint(text_direction: TextDirection, year2023: Option<bool>) {
-        let mut tester = tester_on(TargetPlatform::Android);
+    fn snaps_at_the_visual_midpoint(
+        tester: &mut WidgetTester,
+        text_direction: TextDirection,
+        year2023: Option<bool>,
+    ) {
         const DIVISIONS: i32 = 10;
         let value = Rc::new(Cell::new(0.0));
         let tick_centers =
-            pump_discrete_slider(&mut tester, &value, DIVISIONS, text_direction, year2023);
+            pump_discrete_slider(tester, &value, DIVISIONS, text_direction, year2023);
         // Ticks are painted left to right in pixel space regardless of text
         // direction, so in RTL the tick at pixel index i has the value divisions - i.
         let value_of_tick = |pixel_index: i32| match text_direction {
@@ -6062,7 +5996,7 @@ pub(crate) mod tests {
             let dy = tick_centers[index].dy();
 
             tester.tap(Offset::new(midpoint_dx - MIDPOINT_OFFSET, dy), 1);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(
                 value.get(),
                 value_of_tick(i),
@@ -6071,7 +6005,7 @@ pub(crate) mod tests {
             );
 
             tester.tap(Offset::new(midpoint_dx + MIDPOINT_OFFSET, dy), 1);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(
                 value.get(),
                 value_of_tick(i + 1),
@@ -6084,42 +6018,45 @@ pub(crate) mod tests {
     // 'Discrete Slider snaps at the visual midpoint between ticks (M3)'.
     #[test]
     fn a_discrete_slider_snaps_at_the_visual_midpoint_m3() {
-        with_main_thread_stack(|| snaps_at_the_visual_midpoint(TextDirection::Ltr, None));
+        test_widgets(|tester| snaps_at_the_visual_midpoint(tester, TextDirection::Ltr, None));
     }
 
     // 'Discrete Slider snaps at the visual midpoint between ticks (M3 RTL)'.
     #[test]
     fn a_discrete_slider_snaps_at_the_visual_midpoint_m3_rtl() {
-        with_main_thread_stack(|| snaps_at_the_visual_midpoint(TextDirection::Rtl, None));
+        test_widgets(|tester| snaps_at_the_visual_midpoint(tester, TextDirection::Rtl, None));
     }
 
     // 'Discrete Slider snaps at the visual midpoint between ticks (M3 with year2023 false
     // (gapped track))'.
     #[test]
     fn a_discrete_slider_snaps_at_the_visual_midpoint_on_the_gapped_track() {
-        with_main_thread_stack(|| snaps_at_the_visual_midpoint(TextDirection::Ltr, Some(false)));
+        test_widgets(|tester| {
+            snaps_at_the_visual_midpoint(tester, TextDirection::Ltr, Some(false))
+        });
     }
 
     // 'Discrete Slider snaps at the visual midpoint between ticks (M3 with year2023 false
     // (gapped track) RTL)'.
     #[test]
     fn a_discrete_slider_snaps_at_the_visual_midpoint_on_the_gapped_track_rtl() {
-        with_main_thread_stack(|| snaps_at_the_visual_midpoint(TextDirection::Rtl, Some(false)));
+        test_widgets(|tester| {
+            snaps_at_the_visual_midpoint(tester, TextDirection::Rtl, Some(false))
+        });
     }
 
     // 'Discrete Slider snaps to a tick when tapping its center'.
     #[test]
     fn a_discrete_slider_snaps_to_a_tick_tapped_at_its_center() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             const DIVISIONS: i32 = 10;
             let value = Rc::new(Cell::new(0.0));
             let tick_centers =
-                pump_discrete_slider(&mut tester, &value, DIVISIONS, TextDirection::Ltr, None);
+                pump_discrete_slider(tester, &value, DIVISIONS, TextDirection::Ltr, None);
 
             for i in (0..=DIVISIONS).rev() {
                 tester.tap(tick_centers[i as usize], 1);
-                tester.pump(Duration::ZERO);
+                tester.pump();
                 assert_eq!(value.get(), f64::from(i), "Tapping the center of tick {i}");
             }
         });
@@ -6128,34 +6065,28 @@ pub(crate) mod tests {
     // 'Discrete Slider drag after a tap uses the same track coordinates as the tap'.
     #[test]
     fn a_discrete_drag_after_a_tap_uses_the_tap_track_coordinates() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // With many divisions, even a small mismatch between the width used to map
             // a position to a value and the width used to scale drag deltas adds up to
             // more than half a division over a full-track drag. The gapped track has the
             // largest padding, which makes the mismatch most visible.
-            let mut tester = tester_on(TargetPlatform::Android);
             const DIVISIONS: i32 = 100;
             let value = Rc::new(Cell::new(0.0));
-            let tick_centers = pump_discrete_slider(
-                &mut tester,
-                &value,
-                DIVISIONS,
-                TextDirection::Ltr,
-                Some(false),
-            );
+            let tick_centers =
+                pump_discrete_slider(tester, &value, DIVISIONS, TextDirection::Ltr, Some(false));
 
-            let mut gesture = WidgetTester::touch(1);
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, tick_centers[0]);
             // Move past the touch slop first so the drag starts mid-gesture and the
             // rest of the movement is scaled by the drag delta normalizer.
             let at = gesture.position + Offset::new(waft_gestures::K_TOUCH_SLOP * 2.0, 0.0);
             tester.move_to(&mut gesture, at, true);
             tester.move_to(&mut gesture, *tick_centers.last().unwrap(), true);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(value.get(), f64::from(DIVISIONS));
 
             tester.move_to(&mut gesture, tick_centers[0], true);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(value.get(), 0.0);
             tester.up(&gesture);
         });
@@ -6174,11 +6105,8 @@ pub(crate) mod tests {
     #[test]
     #[expect(deprecated, reason = "Dart's case calls the deprecated `withOpacity`")]
     fn the_default_slider_when_year2023_is_false() {
-        with_main_thread_stack(|| {
-            let shadows = waft_painting::debug_disable_shadows();
-            waft_painting::set_debug_disable_shadows(false);
-            let mut tester = tester_on(TargetPlatform::Android);
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             let color_scheme = theme.color_scheme.clone();
             let active_track_color = color_scheme.primary;
             let inactive_track_color = color_scheme.secondary_container();
@@ -6194,7 +6122,7 @@ pub(crate) mod tests {
             let disabled_thumb_color = color_scheme.on_surface.with_opacity(0.38);
             let value_indicator_color = color_scheme.inverse_surface();
             let value = 0.45;
-            let app_theme = default_theme(&tester);
+            let app_theme = default_theme(tester);
             let build_app =
                 |divisions: Option<i32>, enabled: bool, text_direction: TextDirection| {
                     let mut slider = Slider::new(value, enabled.then(noop).flatten())
@@ -6231,8 +6159,8 @@ pub(crate) mod tests {
                     )
                 };
             assert!(paints(
-                &tester,
-                slider_render(&tester),
+                tester,
+                slider_render(tester),
                 &[
                     // Active track.
                     PaintCall::rrect_at(
@@ -6258,8 +6186,8 @@ pub(crate) mod tests {
             let app = build_app(None, true, TextDirection::Rtl);
             tester.pump_widget(app);
             assert!(paints(
-                &tester,
-                slider_render(&tester),
+                tester,
+                slider_render(tester),
                 &[
                     // Inactive track.
                     PaintCall::rrect_at(
@@ -6283,14 +6211,14 @@ pub(crate) mod tests {
             tester.pump_widget(app);
 
             // Test default colors for enabled slider.
-            let render = slider_render(&tester);
+            let render = slider_render(tester);
             assert!(paints(
-                &tester,
+                tester,
                 render,
                 &[PaintCall::circle(None), PaintCall::rrect(Some(thumb_color))]
             ));
             assert!(!paints(
-                &tester,
+                tester,
                 render,
                 &[
                     PaintCall::circle(None),
@@ -6298,17 +6226,17 @@ pub(crate) mod tests {
                 ]
             ));
             assert!(!paints(
-                &tester,
+                tester,
                 render,
                 &[PaintCall::rrect(Some(disabled_active_track_color))]
             ));
             assert!(!paints(
-                &tester,
+                tester,
                 render,
                 &[PaintCall::rrect(Some(disabled_inactive_track_color))]
             ));
             assert!(!paints(
-                &tester,
+                tester,
                 render,
                 &[PaintCall::rrect(Some(
                     disabled_secondary_active_track_color
@@ -6318,9 +6246,9 @@ pub(crate) mod tests {
             // Test defaults colors for discrete slider.
             let app = build_app(Some(3), true, TextDirection::Ltr);
             tester.pump_widget(app);
-            let render = slider_render(&tester);
+            let render = slider_render(tester);
             assert!(paints(
-                &tester,
+                tester,
                 render,
                 &[
                     PaintCall::rrect(Some(active_track_color)),
@@ -6333,22 +6261,22 @@ pub(crate) mod tests {
                 ],
             ));
             assert!(!paints(
-                &tester,
+                tester,
                 render,
                 &[PaintCall::circle(Some(disabled_thumb_color))]
             ));
             assert!(!paints(
-                &tester,
+                tester,
                 render,
                 &[PaintCall::rrect(Some(disabled_active_track_color))]
             ));
             assert!(!paints(
-                &tester,
+                tester,
                 render,
                 &[PaintCall::rrect(Some(disabled_inactive_track_color))]
             ));
             assert!(!paints(
-                &tester,
+                tester,
                 render,
                 &[PaintCall::rrect(Some(
                     disabled_secondary_active_track_color
@@ -6359,9 +6287,9 @@ pub(crate) mod tests {
             let app = build_app(None, false, TextDirection::Ltr);
             tester.pump_widget(app);
             tester.pump_and_settle();
-            let render = slider_render(&tester);
+            let render = slider_render(tester);
             assert!(paints(
-                &tester,
+                tester,
                 render,
                 &[
                     PaintCall::rrect(Some(disabled_active_track_color)),
@@ -6370,7 +6298,7 @@ pub(crate) mod tests {
                 ],
             ));
             assert!(paints(
-                &tester,
+                tester,
                 render,
                 &[
                     PaintCall::circle(None),
@@ -6378,22 +6306,22 @@ pub(crate) mod tests {
                 ]
             ));
             assert!(!paints(
-                &tester,
+                tester,
                 render,
                 &[PaintCall::circle(None), PaintCall::rrect(Some(thumb_color))]
             ));
             assert!(!paints(
-                &tester,
+                tester,
                 render,
                 &[PaintCall::rrect(Some(active_track_color))]
             ));
             assert!(!paints(
-                &tester,
+                tester,
                 render,
                 &[PaintCall::rrect(Some(inactive_track_color))]
             ));
             assert!(!paints(
-                &tester,
+                tester,
                 render,
                 &[PaintCall::rrect(Some(secondary_active_track_color))]
             ));
@@ -6401,9 +6329,9 @@ pub(crate) mod tests {
             // Test defaults colors for disabled discrete slider.
             let app = build_app(Some(3), false, TextDirection::Ltr);
             tester.pump_widget(app);
-            let render = slider_render(&tester);
+            let render = slider_render(tester);
             assert!(paints(
-                &tester,
+                tester,
                 render,
                 &[
                     PaintCall::rrect(Some(disabled_active_track_color)),
@@ -6417,22 +6345,22 @@ pub(crate) mod tests {
                 ],
             ));
             assert!(!paints(
-                &tester,
+                tester,
                 render,
                 &[PaintCall::circle(None), PaintCall::rrect(Some(thumb_color))]
             ));
             assert!(!paints(
-                &tester,
+                tester,
                 render,
                 &[PaintCall::rrect(Some(active_track_color))]
             ));
             assert!(!paints(
-                &tester,
+                tester,
                 render,
                 &[PaintCall::rrect(Some(inactive_track_color))]
             ));
             assert!(!paints(
-                &tester,
+                tester,
                 render,
                 &[PaintCall::rrect(Some(secondary_active_track_color))]
             ));
@@ -6441,8 +6369,8 @@ pub(crate) mod tests {
             tester.pump_widget(app);
             tester.pump_and_settle();
 
-            let center = slider_rect(&tester).center();
-            let mut gesture = WidgetTester::touch(1);
+            let center = slider_rect(tester).center();
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, center);
             // Wait for value indicator animation to finish.
             tester.pump_and_settle();
@@ -6460,15 +6388,13 @@ pub(crate) mod tests {
                 &[PaintCall::rrect(Some(value_indicator_color))]
             ));
             tester.up(&gesture);
-            waft_painting::set_debug_disable_shadows(shadows);
         });
     }
 
     // 'Slider value indicator text when year2023 is false'.
     #[test]
     fn the_value_indicator_text_when_year2023_is_false() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let value = 50.0_f64;
             let log = Rc::new(RefCell::new(Vec::new()));
             let shape = Rc::new(LoggingValueIndicatorLabel {
@@ -6491,8 +6417,8 @@ pub(crate) mod tests {
             ));
 
             // Normal text
-            let center = slider_rect(&tester).center();
-            let mut gesture = WidgetTester::touch(1);
+            let center = slider_rect(tester).center();
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, center);
             tester.pump_and_settle();
 
@@ -6551,12 +6477,11 @@ pub(crate) mod tests {
     // "Slider doesn't start any animations after dispose".
     #[test]
     fn a_slider_starts_no_animation_after_dispose() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let heard = Heard::starting_at(0.0);
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             tester.pump_widget(stateful_slider_app(
-                &tester,
+                tester,
                 theme,
                 TextDirection::Ltr,
                 &heard,
@@ -6564,8 +6489,8 @@ pub(crate) mod tests {
                 |slider| slider.divisions(4),
             ));
 
-            let mut gesture = WidgetTester::touch(1);
-            tester.down(&mut gesture, slider_rect(&tester).center());
+            let mut gesture = TestPointer::touch(1);
+            tester.down(&mut gesture, slider_rect(tester).center());
             tester.pump_and_settle();
             assert_eq!(heard.value.get(), 0.5);
             let at = gesture.position + Offset::new(-500.0, 0.0);
@@ -6581,62 +6506,51 @@ pub(crate) mod tests {
     // 'Overlay appear only when hovered on the thumb on desktop' (macOS, Linux, Windows).
     #[test]
     fn the_overlay_appears_only_when_the_thumb_is_hovered_on_desktop() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             for platform in [
                 TargetPlatform::MacOS,
                 TargetPlatform::Linux,
                 TargetPlatform::Windows,
             ] {
-                let mut tester = tester_on(platform);
-                let value = Rc::new(Cell::new(0.5));
-                const OVERLAY_COLOR: Color = Color::new(0xffff0000);
-                let theme = default_theme(&tester);
-                let build_app = || {
-                    focusable_slider_app(theme.clone(), &value, true, |slider| {
-                        slider.overlay_color(Rc::new(WidgetStatePropertyAll::new(Some(
-                            OVERLAY_COLOR,
-                        ))))
-                    })
-                };
-                tester.pump_widget(build_app());
+                test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                    let value = Rc::new(Cell::new(0.5));
+                    const OVERLAY_COLOR: Color = Color::new(0xffff0000);
+                    let theme = default_theme(tester);
+                    let build_app = || {
+                        focusable_slider_app(theme.clone(), &value, true, |slider| {
+                            slider.overlay_color(Rc::new(WidgetStatePropertyAll::new(Some(
+                                OVERLAY_COLOR,
+                            ))))
+                        })
+                    };
+                    tester.pump_widget(build_app());
 
-                // Slider does not have overlay when enabled and not hovered.
-                tester.pump_and_settle();
-                assert!(!paints_circle(
-                    &tester,
-                    slider_render(&tester),
-                    OVERLAY_COLOR
-                ));
+                    // Slider does not have overlay when enabled and not hovered.
+                    tester.pump_and_settle();
+                    assert!(!paints_circle(tester, slider_render(tester), OVERLAY_COLOR));
 
-                // Hover on the slider but outside the thumb.
-                let mut gesture = WidgetTester::mouse(1, 0);
-                tester.add_pointer(&mut gesture, Offset::ZERO);
-                tester.move_to(&mut gesture, slider_rect(&tester).top_left(), false);
+                    // Hover on the slider but outside the thumb.
+                    let mut gesture = TestPointer::mouse(1, 0);
+                    tester.add_pointer(&mut gesture, Offset::ZERO);
+                    tester.move_to(&mut gesture, slider_rect(tester).top_left(), false);
 
-                tester.pump_widget(build_app());
-                tester.pump_and_settle();
-                assert!(!paints_circle(
-                    &tester,
-                    slider_render(&tester),
-                    OVERLAY_COLOR
-                ));
+                    tester.pump_widget(build_app());
+                    tester.pump_and_settle();
+                    assert!(!paints_circle(tester, slider_render(tester), OVERLAY_COLOR));
 
-                // Hover on the thumb.
-                tester.move_to(&mut gesture, slider_rect(&tester).center(), false);
-                tester.pump_and_settle();
-                assert!(
-                    paints_circle(&tester, slider_render(&tester), OVERLAY_COLOR),
-                    "on {platform:?}"
-                );
+                    // Hover on the thumb.
+                    tester.move_to(&mut gesture, slider_rect(tester).center(), false);
+                    tester.pump_and_settle();
+                    assert!(
+                        paints_circle(tester, slider_render(tester), OVERLAY_COLOR),
+                        "on {platform:?}"
+                    );
 
-                // Hover on the slider but outside the thumb.
-                tester.move_to(&mut gesture, slider_rect(&tester).bottom_right(), false);
-                tester.pump_and_settle();
-                assert!(!paints_circle(
-                    &tester,
-                    slider_render(&tester),
-                    OVERLAY_COLOR
-                ));
+                    // Hover on the slider but outside the thumb.
+                    tester.move_to(&mut gesture, slider_rect(tester).bottom_right(), false);
+                    tester.pump_and_settle();
+                    assert!(!paints_circle(tester, slider_render(tester), OVERLAY_COLOR));
+                });
             }
         });
     }
@@ -6644,9 +6558,8 @@ pub(crate) mod tests {
     // 'showValueIndicator takes priority over theme'.
     #[test]
     fn show_value_indicator_takes_priority_over_the_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             let red = Colors::RED.primary();
             let build_app =
                 |theme_show_value_indicator: Option<ShowValueIndicator>,
@@ -6684,33 +6597,32 @@ pub(crate) mod tests {
             };
 
             tester.pump_widget(build_app(Some(ShowValueIndicator::Never), None));
-            check_value_indicator(&tester, false);
+            check_value_indicator(tester, false);
 
             tester.pump_widget(build_app(
                 Some(ShowValueIndicator::Never),
                 Some(ShowValueIndicator::AlwaysVisible),
             ));
-            check_value_indicator(&tester, true);
+            check_value_indicator(tester, true);
 
             tester.pump_widget(build_app(
                 Some(ShowValueIndicator::AlwaysVisible),
                 Some(ShowValueIndicator::Never),
             ));
-            check_value_indicator(&tester, false);
+            check_value_indicator(tester, false);
         });
     }
 
     // 'Event on Slider should perform no-op if already unmounted'.
     #[test]
     fn an_event_on_an_unmounted_slider_does_nothing() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Test covering crashing found in Google internal issue b/192329942.
-            let mut tester = tester_on(TargetPlatform::Android);
             let value = Rc::new(Cell::new(0.0));
             let should_show_slider = Rc::new(Cell::new(true));
             let show_setter: Rc<RefCell<Option<waft_widgets::StateSetter>>> =
                 Rc::new(RefCell::new(None));
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             let (builder_value, builder_show, builder_setter) = (
                 Rc::clone(&value),
                 Rc::clone(&should_show_slider),
@@ -6746,8 +6658,8 @@ pub(crate) mod tests {
             ));
 
             // Move Slider.
-            let mut gesture = WidgetTester::touch(1);
-            tester.down(&mut gesture, slider_rect(&tester).center());
+            let mut gesture = TestPointer::touch(1);
+            tester.down(&mut gesture, slider_rect(tester).center());
             let at = gesture.position + Offset::new(1.0, 0.0);
             tester.move_to(&mut gesture, at, true);
             tester.pump_and_settle();
@@ -6772,11 +6684,10 @@ pub(crate) mod tests {
     // 'Slider.padding can override the default Slider padding'.
     #[test]
     fn slider_padding_overrides_the_default_padding() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             use waft_embedder::{RRect, Radius};
             use waft_painting::{EdgeInsets, EdgeInsetsDirectional};
-            let mut tester = tester_on(TargetPlatform::Android);
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             let build_slider = |padding: EdgeInsetsGeometry| {
                 material_app(
                     theme.clone(),
@@ -6824,10 +6735,10 @@ pub(crate) mod tests {
             tester.pump_and_settle();
 
             // The height equals to the default thumb height.
-            assert_eq!(slider_render_box_size(&tester), Size::new(800.0, 20.0));
+            assert_eq!(slider_render_box_size(tester), Size::new(800.0, 20.0));
             assert!(paints(
-                &tester,
-                slider_render(&tester),
+                tester,
+                slider_render(tester),
                 &tracks((398.0, 8.0, 800.0, 12.0), (0.0, 7.0, 402.0, 13.0))
             ));
 
@@ -6840,12 +6751,12 @@ pub(crate) mod tests {
             tester.pump_and_settle();
 
             assert_eq!(
-                slider_render_box_size(&tester),
+                slider_render_box_size(tester),
                 Size::new(800.0 - START_PADDING - END_PADDING, 20.0)
             );
             assert!(paints(
-                &tester,
-                slider_render(&tester),
+                tester,
+                slider_render(tester),
                 &tracks((338.0, 8.0, 680.0, 12.0), (0.0, 7.0, 342.0, 13.0))
             ));
 
@@ -6859,13 +6770,13 @@ pub(crate) mod tests {
             tester.pump_and_settle();
 
             assert_eq!(
-                slider_size(&tester),
+                slider_size(tester),
                 Size::new(800.0, TOP_PADDING + TRACK_HEIGHT + BOTTOM_PADDING)
             );
-            assert_eq!(slider_render_box_size(&tester), Size::new(800.0, 20.0));
+            assert_eq!(slider_render_box_size(tester), Size::new(800.0, 20.0));
             assert!(paints(
-                &tester,
-                slider_render(&tester),
+                tester,
+                slider_render(tester),
                 &tracks((398.0, 8.0, 800.0, 12.0), (0.0, 7.0, 402.0, 13.0))
             ));
         });
@@ -6874,14 +6785,13 @@ pub(crate) mod tests {
     /// Dart's 'Discrete Slider repaints and animates when dragged' and 'Discrete Slider
     /// repaints when dragged', whose bodies are the same: the thumb's repaint centres while a
     /// discrete slider is pressed, then dragged to its start and animated there.
-    fn discrete_slider_repaints_when_dragged() {
-        let mut tester = tester_on(TargetPlatform::Android);
+    fn discrete_slider_repaints_when_dragged(tester: &mut WidgetTester) {
         let heard = Heard::starting_at(0.0);
         let log = Rc::new(RefCell::new(Vec::new()));
         let thumb_log = Rc::clone(&log);
-        let theme = default_theme(&tester);
+        let theme = default_theme(tester);
         tester.pump_widget(stateful_slider_app(
-            &tester,
+            tester,
             theme,
             TextDirection::Ltr,
             &heard,
@@ -6901,29 +6811,29 @@ pub(crate) mod tests {
             Offset::new(26.0, 300.0),
             Offset::new(400.0, 300.0),
         ];
-        let mut gesture = WidgetTester::touch(1);
-        tester.down(&mut gesture, slider_rect(&tester).center());
-        tester.pump(Duration::ZERO);
-        tester.pump(Duration::from_millis(100));
+        let mut gesture = TestPointer::touch(1);
+        tester.down(&mut gesture, slider_rect(tester).center());
+        tester.pump();
+        tester.pump_by(Duration::from_millis(100));
         assert_eq!(heard.value.get(), 0.5);
         assert_eq!(log.borrow().len(), 3);
         assert_eq!(*log.borrow(), expected_log);
         let at = gesture.position + Offset::new(-500.0, 0.0);
         tester.move_to(&mut gesture, at, true);
-        tester.pump(Duration::ZERO);
-        tester.pump(Duration::from_millis(10));
+        tester.pump();
+        tester.pump_by(Duration::from_millis(10));
         assert_eq!(heard.value.get(), 0.0);
         assert_eq!(log.borrow().len(), 5);
         assert!((log.borrow().last().expect("logged").dx() - 386.6).abs() <= 0.1);
         // With no more gesture or value changes, the thumb position should still
         // be redrawn in the animated position.
-        tester.pump(Duration::ZERO);
-        tester.pump(Duration::from_millis(10));
+        tester.pump();
+        tester.pump_by(Duration::from_millis(10));
         assert_eq!(heard.value.get(), 0.0);
         assert_eq!(log.borrow().len(), 7);
         assert!((log.borrow().last().expect("logged").dx() - 344.8).abs() <= 0.1);
         // Final position.
-        tester.pump(Duration::from_millis(80));
+        tester.pump_by(Duration::from_millis(80));
         assert_eq!(heard.value.get(), 0.0);
         assert_eq!(log.borrow().len(), 8);
         assert!((log.borrow().last().expect("logged").dx() - 26.0).abs() <= 0.1);
@@ -6933,22 +6843,21 @@ pub(crate) mod tests {
     // 'Discrete Slider repaints and animates when dragged'.
     #[test]
     fn a_discrete_slider_repaints_and_animates_when_dragged() {
-        with_main_thread_stack(discrete_slider_repaints_when_dragged);
+        test_widgets(discrete_slider_repaints_when_dragged);
     }
 
     // 'Discrete Slider repaints when dragged'.
     #[test]
     fn a_discrete_slider_repaints_when_dragged() {
-        with_main_thread_stack(discrete_slider_repaints_when_dragged);
+        test_widgets(discrete_slider_repaints_when_dragged);
     }
 
     // 'Slider has correct hovered color from overlayColor property'.
     #[test]
     fn a_slider_takes_its_hovered_color_from_overlay_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             tester.set_highlight_strategy(waft_widgets::FocusHighlightStrategy::AlwaysTraditional);
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             let value = Rc::new(Cell::new(0.5));
             let cyan = Colors::CYAN.get(&500).expect("a swatch shade");
             let build_app = |enabled: bool| {
@@ -6968,34 +6877,33 @@ pub(crate) mod tests {
 
             // Slider does not have overlay when enabled and not hovered.
             tester.pump_and_settle();
-            assert!(!paints_circle(&tester, slider_render(&tester), cyan));
+            assert!(!paints_circle(tester, slider_render(tester), cyan));
 
             // Start hovering.
-            let mut gesture = WidgetTester::mouse(1, 0);
+            let mut gesture = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut gesture, Offset::ZERO);
-            tester.move_to(&mut gesture, slider_rect(&tester).center(), false);
+            tester.move_to(&mut gesture, slider_rect(tester).center(), false);
 
             // Slider has overlay when enabled and hovered.
             tester.pump_widget(build_app(true));
             tester.pump_and_settle();
-            assert!(paints_circle(&tester, slider_render(&tester), cyan));
+            assert!(paints_circle(tester, slider_render(tester), cyan));
 
             // Slider does not have an overlay when disabled and hovered.
             tester.pump_widget(build_app(false));
             tester.pump_and_settle();
-            assert!(!paints_circle(&tester, slider_render(&tester), cyan));
+            assert!(!paints_circle(tester, slider_render(tester), cyan));
         });
     }
 
     // 'Slider has correct dragged color from overlayColor property'.
     #[test]
     fn a_slider_takes_its_dragged_color_from_overlay_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             tester.set_highlight_strategy(waft_widgets::FocusHighlightStrategy::AlwaysTraditional);
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             let value = Rc::new(Cell::new(0.5));
-            let focus_node = new_focus_node(&tester);
+            let focus_node = new_focus_node(tester);
             let lime = Colors::LIME.get(&500).expect("a swatch shade");
             let build_app = |enabled: bool| {
                 focusable_slider_app(theme.clone(), &value, enabled, {
@@ -7019,29 +6927,29 @@ pub(crate) mod tests {
 
             // Slider does not have overlay when enabled and not dragged.
             tester.pump_and_settle();
-            assert!(!paints_circle(&tester, slider_render(&tester), lime));
+            assert!(!paints_circle(tester, slider_render(tester), lime));
 
             // Start dragging.
-            let mut drag = WidgetTester::touch(1);
-            tester.down(&mut drag, slider_rect(&tester).center());
-            tester.pump(waft_gestures::K_PRESS_TIMEOUT);
+            let mut drag = TestPointer::touch(1);
+            tester.down(&mut drag, slider_rect(tester).center());
+            tester.pump_by(waft_gestures::K_PRESS_TIMEOUT);
 
             // Less than configured touch slop, more than default touch slop
             let at = drag.position + Offset::new(19.0, 0.0);
             tester.move_to(&mut drag, at, true);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             // As in the dragged-colour case above: one frame later the overlay has a radius.
-            tester.pump(Duration::from_millis(16));
+            tester.pump_by(Duration::from_millis(16));
 
             // Slider has overlay when enabled and dragged.
-            assert!(paints_circle(&tester, slider_render(&tester), lime));
+            assert!(paints_circle(tester, slider_render(tester), lime));
 
             tester.up(&drag);
             tester.pump_and_settle();
 
             // Slider without focus doesn't have overlay when enabled and dragged.
             assert!(!focus_node.has_focus(&mut tester.cell.borrow_mut()));
-            assert!(!paints_circle(&tester, slider_render(&tester), lime));
+            assert!(!paints_circle(tester, slider_render(tester), lime));
             focus_node.dispose(&mut tester.cell.borrow_mut());
         });
     }
@@ -7049,7 +6957,7 @@ pub(crate) mod tests {
     // 'In directional nav, Slider can be navigated out of by using up and down arrows'.
     #[test]
     fn in_directional_navigation_up_and_down_arrows_leave_a_slider() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             use waft_widgets::{
                 Column, DirectionalFocusIntent, MediaQueryData, Shortcuts, StateSetter,
                 TraversalDirection,
@@ -7069,11 +6977,10 @@ pub(crate) mod tests {
             })
             .collect();
 
-            let mut tester = tester_on(TargetPlatform::Android);
             tester.set_highlight_strategy(waft_widgets::FocusHighlightStrategy::AlwaysTraditional);
             let top_slider_value = Rc::new(Cell::new(0.5));
             let bottom_slider_value = Rc::new(Cell::new(0.5));
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             let (top, bottom) = (
                 Rc::clone(&top_slider_value),
                 Rc::clone(&bottom_slider_value),
@@ -7113,47 +7020,47 @@ pub(crate) mod tests {
             let values = || (top_slider_value.get(), bottom_slider_value.get());
 
             // The top slider is auto-focused and can be adjusted with left and right arrow keys.
-            send_arrow(&mut tester, LogicalKeyboardKey::ARROW_RIGHT);
+            send_arrow(tester, LogicalKeyboardKey::ARROW_RIGHT);
             // focused top Slider increased after first arrowRight; unfocused bottom Slider
             // unaffected by first arrowRight
             assert_eq!(values(), (0.55, 0.5));
 
-            send_arrow(&mut tester, LogicalKeyboardKey::ARROW_LEFT);
+            send_arrow(tester, LogicalKeyboardKey::ARROW_LEFT);
             // focused top Slider decreased after first arrowLeft; unfocused bottom Slider
             // unaffected by first arrowLeft
             assert_eq!(values(), (0.5, 0.5));
 
             // Pressing the down-arrow key moves focus down to the bottom slider
-            send_arrow(&mut tester, LogicalKeyboardKey::ARROW_DOWN);
+            send_arrow(tester, LogicalKeyboardKey::ARROW_DOWN);
             // arrowDown unfocuses top Slider, does not alter its value; arrowDown focuses
             // bottom Slider, does not alter its value
             assert_eq!(values(), (0.5, 0.5));
 
             // The bottom slider is now focused and can be adjusted with left and right arrow keys.
-            send_arrow(&mut tester, LogicalKeyboardKey::ARROW_RIGHT);
+            send_arrow(tester, LogicalKeyboardKey::ARROW_RIGHT);
             // unfocused top Slider unaffected by second arrowRight; focused bottom Slider
             // increased by second arrowRight
             assert_eq!(values(), (0.5, 0.55));
 
-            send_arrow(&mut tester, LogicalKeyboardKey::ARROW_LEFT);
+            send_arrow(tester, LogicalKeyboardKey::ARROW_LEFT);
             // unfocused top Slider unaffected by second arrowLeft; focused bottom Slider
             // decreased by second arrowLeft
             assert_eq!(values(), (0.5, 0.5));
 
             // Pressing the up-arrow key moves focus back up to the top slider
-            send_arrow(&mut tester, LogicalKeyboardKey::ARROW_UP);
+            send_arrow(tester, LogicalKeyboardKey::ARROW_UP);
             // arrowUp focuses top Slider, does not alter its value; arrowUp unfocuses bottom
             // Slider, does not alter its value
             assert_eq!(values(), (0.5, 0.5));
 
             // The top slider is now focused again and can be adjusted with left and right arrow
             // keys.
-            send_arrow(&mut tester, LogicalKeyboardKey::ARROW_RIGHT);
+            send_arrow(tester, LogicalKeyboardKey::ARROW_RIGHT);
             // focused top Slider increased after third arrowRight; unfocused bottom Slider
             // unaffected by third arrowRight
             assert_eq!(values(), (0.55, 0.5));
 
-            send_arrow(&mut tester, LogicalKeyboardKey::ARROW_LEFT);
+            send_arrow(tester, LogicalKeyboardKey::ARROW_LEFT);
             // focused top Slider decreased after third arrowLeft; unfocused bottom Slider
             // unaffected by third arrowLeft
             assert_eq!(values(), (0.5, 0.5));
@@ -7223,19 +7130,18 @@ pub(crate) mod tests {
     /// reference to each.
     #[test]
     fn an_unmounted_slider_leaves_none_of_its_objects_alive() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let heard = Heard::starting_at(0.0);
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             tester.pump_widget(stateful_slider_app(
-                &tester,
+                tester,
                 theme,
                 TextDirection::Ltr,
                 &heard,
                 plain,
                 |slider| slider.divisions(4).label("0"),
             ));
-            let handles = slider_owned_handles(&tester);
+            let handles = slider_owned_handles(tester);
             {
                 let app = tester.cell.borrow();
                 assert!(handles.iter().all(|&handle| app.contains(handle)));
@@ -7255,8 +7161,7 @@ pub(crate) mod tests {
     /// readable until it fires, as Dart's closure keeps it alive.
     #[test]
     fn the_value_indicator_timer_outlives_a_render_slider_replaced_by_a_platform_change() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let value = Rc::new(Cell::new(0.0));
             let build_frame = |tester: &WidgetTester, platform: TargetPlatform| {
                 let theme = ThemeData::builder()
@@ -7287,18 +7192,18 @@ pub(crate) mod tests {
                     .into_widget(),
                 )
             };
-            tester.pump_widget(build_frame(&tester, TargetPlatform::Android));
+            tester.pump_widget(build_frame(tester, TargetPlatform::Android));
             tester.pump_and_settle();
 
-            tester.tap(slider_rect(&tester).center(), 1);
+            tester.tap(slider_rect(tester).center(), 1);
             assert_eq!(value.get(), 0.5);
             let render = tester.first::<RenderSlider>();
             let state = render.get(&tester.cell.borrow()).state;
-            tester.pump(Duration::from_millis(100));
+            tester.pump_by(Duration::from_millis(100));
 
-            tester.pump_widget(build_frame(&tester, TargetPlatform::IOS));
+            tester.pump_widget(build_frame(tester, TargetPlatform::IOS));
             // The theme's 200 ms change, ending before the timer's 500 ms.
-            tester.pump(Duration::from_millis(300));
+            tester.pump_by(Duration::from_millis(300));
             assert_eq!(tester.find_by_type::<CupertinoSlider>().len(), 1);
             {
                 let app = tester.cell.borrow();
@@ -7307,7 +7212,7 @@ pub(crate) mod tests {
             }
 
             // Past the 500 ms the timer waits.
-            tester.pump(Duration::from_millis(500));
+            tester.pump_by(Duration::from_millis(500));
             assert!(tester.cell.borrow().get(state).interaction_timer.is_none());
             tester.pump_and_settle();
             assert!(!tester.cell.borrow().contains(render.handle()));
@@ -7318,14 +7223,13 @@ pub(crate) mod tests {
     // indicator animation completing.'
     #[test]
     fn a_slider_disposed_mid_indicator_removes_its_value_indicator_from_the_overlay() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             use waft_widgets::{Builder, Column, Navigator, Text, WidgetBuilder};
 
             use crate::elevated_button::ElevatedButton;
             use crate::page::MaterialPageRoute;
             use crate::scaffold::Scaffold;
 
-            let mut tester = tester_on(TargetPlatform::Android);
             const FILL_COLOR: Color = Color::new(0xf55f5f5f);
             let value = Rc::new(Cell::new(0.0));
             let theme = ThemeData::builder()
@@ -7397,15 +7301,15 @@ pub(crate) mod tests {
                         )
                     })
             };
-            let top_right = slider_rect(&tester).top_right() + Offset::new(-24.0, 0.0);
-            let mut gesture = WidgetTester::touch(1);
+            let top_right = slider_rect(tester).top_right() + Offset::new(-24.0, 0.0);
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, top_right);
             // Wait for value indicator animation to finish.
             tester.pump_and_settle();
 
             assert_eq!(tester.find_by_type::<Slider>().len(), 1);
             // Represents the Slider.
-            assert!(indicator_paints(&tester));
+            assert!(indicator_paints(tester));
 
             let next = tester.find_onstage_text("Next")[0];
             let next = tester.global_rect(tester.render_box_of(next)).center();
@@ -7413,7 +7317,7 @@ pub(crate) mod tests {
             tester.pump_and_settle();
 
             assert!(tester.find_by_type::<Slider>().is_empty());
-            assert!(!indicator_paints(&tester));
+            assert!(!indicator_paints(tester));
             assert_eq!(tester.find_onstage_text("Inner page").len(), 1);
 
             // Don't stop holding the value indicator.

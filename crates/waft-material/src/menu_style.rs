@@ -408,7 +408,6 @@ impl Debug for MenuStyle {
 #[cfg(test)]
 mod tests {
     use std::rc::Rc;
-    use std::time::Duration;
 
     use waft_embedder::Rect;
     use waft_rendering::BoxConstraints;
@@ -417,15 +416,17 @@ mod tests {
         WidgetStatePropertyAll,
     };
 
+    use waft_widgets::testing::{WidgetTester, test_widgets};
+
     use super::*;
     use crate::material::Material;
     use crate::menu_anchor::{MenuBar, MenuItemButton, MenuPanel, SubmenuButton};
     use crate::menu_bar_theme::{MenuBarTheme, MenuBarThemeData};
     use crate::menu_theme::tests::{only, rect, tap_text};
     use crate::menu_theme::{MenuTheme, MenuThemeData};
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::material_app;
     use crate::theme_data::ThemeData;
-    use crate::tooltip::tests::{m2, m3, tester};
+    use crate::tooltip::tests::{m2, m3};
 
     fn all<T: Clone + Debug + PartialEq + 'static>(value: T) -> WidgetStatePropertyRef<Option<T>> {
         Rc::new(WidgetStatePropertyAll::new(Some(value)))
@@ -519,7 +520,7 @@ mod tests {
     /// Opens the first menu: Dart's "Have to open a menu initially to start things going."
     fn open_first_menu(tester: &mut WidgetTester) {
         tap_text(tester, "Menu 0");
-        tester.pump(Duration::ZERO);
+        tester.pump();
     }
 
     // menu_style_test.dart 'MenuStyle lerp special cases'.
@@ -533,34 +534,33 @@ mod tests {
     // menu_style_test.dart 'fixedSize affects geometry'.
     #[test]
     fn a_fixed_size_sizes_the_menu_bar_and_its_menus() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_themed_bar(
-                &mut tester,
+                tester,
                 m3,
                 MenuStyle::new().fixed_size(all(waft_embedder::Size::new(600.0, 60.0))),
                 MenuStyle::new().fixed_size(all(waft_embedder::Size::new(100.0, 100.0))),
             );
-            open_first_menu(&mut tester);
+            open_first_menu(tester);
 
             // MenuBarTheme affects MenuBar.
-            let panels = menu_panels(&tester);
+            let panels = menu_panels(tester);
             assert_eq!(
-                rect(&tester, panels[0]),
+                rect(tester, panels[0]),
                 Rect::from_ltrb(100.0, 0.0, 700.0, 60.0)
             );
             assert_eq!(
-                rect(&tester, panels[0]).size(),
+                rect(tester, panels[0]).size(),
                 waft_embedder::Size::new(600.0, 60.0)
             );
 
             // MenuTheme affects menus.
             assert_eq!(
-                rect(&tester, panels[1]),
+                rect(tester, panels[1]),
                 Rect::from_ltrb(104.0, 54.0, 204.0, 154.0)
             );
             assert_eq!(
-                rect(&tester, panels[1]).size(),
+                rect(tester, panels[1]).size(),
                 waft_embedder::Size::new(100.0, 100.0)
             );
         });
@@ -569,34 +569,33 @@ mod tests {
     // menu_style_test.dart 'maximumSize affects geometry'.
     #[test]
     fn a_maximum_size_limits_the_menu_bar_and_its_menus() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_themed_bar(
-                &mut tester,
+                tester,
                 m3,
                 MenuStyle::new().maximum_size(all(waft_embedder::Size::new(250.0, 40.0))),
                 MenuStyle::new().maximum_size(all(waft_embedder::Size::new(100.0, 100.0))),
             );
-            open_first_menu(&mut tester);
+            open_first_menu(tester);
 
             // MenuBarTheme affects MenuBar.
-            let panels = menu_panels(&tester);
+            let panels = menu_panels(tester);
             assert_eq!(
-                rect(&tester, panels[0]),
+                rect(tester, panels[0]),
                 Rect::from_ltrb(275.0, 0.0, 525.0, 40.0)
             );
             assert_eq!(
-                rect(&tester, panels[0]).size(),
+                rect(tester, panels[0]).size(),
                 waft_embedder::Size::new(250.0, 40.0)
             );
 
             // MenuTheme affects menus.
             assert_eq!(
-                rect(&tester, panels[1]),
+                rect(tester, panels[1]),
                 Rect::from_ltrb(279.0, 44.0, 379.0, 144.0)
             );
             assert_eq!(
-                rect(&tester, panels[1]).size(),
+                rect(tester, panels[1]).size(),
                 waft_embedder::Size::new(100.0, 100.0)
             );
         });
@@ -605,34 +604,33 @@ mod tests {
     // menu_style_test.dart 'minimumSize affects geometry'.
     #[test]
     fn a_minimum_size_grows_the_menu_bar_and_its_menus() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_themed_bar(
-                &mut tester,
+                tester,
                 m3,
                 MenuStyle::new().minimum_size(all(waft_embedder::Size::new(400.0, 60.0))),
                 MenuStyle::new().minimum_size(all(waft_embedder::Size::new(300.0, 300.0))),
             );
-            open_first_menu(&mut tester);
+            open_first_menu(tester);
 
             // MenuBarTheme affects MenuBar.
-            let panels = menu_panels(&tester);
+            let panels = menu_panels(tester);
             assert_eq!(
-                rect(&tester, panels[0]),
+                rect(tester, panels[0]),
                 Rect::from_ltrb(200.0, 0.0, 600.0, 60.0)
             );
             assert_eq!(
-                rect(&tester, panels[0]).size(),
+                rect(tester, panels[0]).size(),
                 waft_embedder::Size::new(400.0, 60.0)
             );
 
             // MenuTheme affects menus.
             assert_eq!(
-                rect(&tester, panels[1]),
+                rect(tester, panels[1]),
                 Rect::from_ltrb(204.0, 54.0, 504.0, 354.0)
             );
             assert_eq!(
-                rect(&tester, panels[1]).size(),
+                rect(tester, panels[1]).size(),
                 waft_embedder::Size::new(300.0, 300.0)
             );
         });
@@ -641,26 +639,25 @@ mod tests {
     // menu_style_test.dart 'visual density'.
     #[test]
     fn a_menu_styles_visual_density_spaces_the_bar_and_its_menus() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_themed_bar(
-                &mut tester,
+                tester,
                 m2,
                 MenuStyle::new().visual_density(VisualDensity::new(1.5, -1.5)),
                 MenuStyle::new().visual_density(VisualDensity::new(0.5, -0.5)),
             );
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             let bar = only(tester.find_by_type::<MenuBar>());
-            assert_eq!(rect(&tester, bar), Rect::from_ltrb(228.0, 0.0, 572.0, 48.0));
+            assert_eq!(rect(tester, bar), Rect::from_ltrb(228.0, 0.0, 572.0, 48.0));
 
             // Open and make sure things are the right size.
-            tap_text(&mut tester, "Menu 1");
-            tester.pump(Duration::ZERO);
+            tap_text(tester, "Menu 1");
+            tester.pump();
 
-            assert_eq!(rect(&tester, bar), Rect::from_ltrb(228.0, 0.0, 572.0, 48.0));
+            assert_eq!(rect(tester, bar), Rect::from_ltrb(228.0, 0.0, 572.0, 48.0));
             assert_eq!(
-                rect(&tester, only(tester.find_text("Sub Menu 10"))),
+                rect(tester, only(tester.find_text("Sub Menu 10"))),
                 Rect::from_ltrb(372.0, 70.0, 565.0, 84.0)
             );
             let label = only(tester.find_text("Sub Menu 10"));
@@ -673,7 +670,7 @@ mod tests {
                 })
                 .collect();
             assert_eq!(
-                rect(&tester, materials[1]),
+                rect(tester, materials[1]),
                 Rect::from_ltrb(352.0, 48.0, 585.0, 190.0)
             );
         });

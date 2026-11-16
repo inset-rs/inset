@@ -420,20 +420,24 @@ mod tests {
     };
 
     use super::*;
-    use crate::binding::run_app;
-    use crate::test_harness::pump_every_view;
+    use crate::testing::WidgetTester;
 
     fn app_with(
         players: &MockPlayers,
         compositor: &MockCompositor,
         view: &Rc<TestView>,
     ) -> Rc<AppCell> {
-        let platform = TestPlatform::new()
+        let platform = platform_with(players, compositor)
             .on(TargetPlatform::MacOS)
-            .with_view(Rc::clone(view) as waft_embedder::ViewRef)
-            .with_players(Rc::new(players.clone()))
-            .with_compositor(Arc::new(compositor.clone()));
+            .with_view(Rc::clone(view) as waft_embedder::ViewRef);
         AppCell::with_platform(Rc::new(platform))
+    }
+
+    /// A platform with `players`, compositing through `compositor`.
+    fn platform_with(players: &MockPlayers, compositor: &MockCompositor) -> TestPlatform {
+        TestPlatform::new()
+            .with_players(Rc::new(players.clone()))
+            .with_compositor(Arc::new(compositor.clone()))
     }
 
     fn ready(size: Size) -> PlayerState {
@@ -606,37 +610,29 @@ mod tests {
     #[test]
     fn a_player_view_draws_its_players_cues_over_the_video() {
         let players = MockPlayers::new();
-        let view = Rc::new(TestView::new(800.0, 600.0));
-        let platform = TestPlatform::new()
-            .on(TargetPlatform::MacOS)
-            .with_view(Rc::clone(&view) as waft_embedder::ViewRef)
-            .with_players(Rc::new(players.clone()))
-            .with_compositor(Arc::new(MockCompositor::new()))
-            .with_font_source(|| Box::new(waft_embedder::SystemFontSource::platform()));
-        let cell = AppCell::with_platform(Rc::new(platform));
-        {
-            let mut app = cell.borrow_mut();
-            waft_painting::PaintingBinding::instance(&mut app).install_platform_fonts(&mut app);
-        }
-        let player = Player::new(&mut cell.borrow_mut(), "https://example.com/a.mp4").unwrap();
+        let tester =
+            &mut WidgetTester::with_platform(platform_with(&players, &MockCompositor::new()));
+        let player = tester
+            .update(|app| Player::new(app, "https://example.com/a.mp4"))
+            .unwrap();
         let host = &players.opened()[0];
-        mount(&cell, PlayerView::new(player).into_widget());
+        tester.pump_widget(PlayerView::new(player));
         host.set_state(ready(Size::new(320.0, 180.0)));
-        cell.checkpoint();
-        pump_every_view(&mut cell.borrow_mut(), Duration::from_millis(16));
-        assert!(glyph_runs(&view).is_empty(), "no cues, no text");
+        tester.cell.checkpoint();
+        tester.pump();
+        assert!(glyph_runs(tester).is_empty(), "no cues, no text");
 
         host.set_cues(vec![Cue::new(CueContent::Text(vec![CueTextRun::new(
             "Hello",
         )]))]);
-        cell.checkpoint();
-        pump_every_view(&mut cell.borrow_mut(), Duration::from_millis(32));
-        assert!(!glyph_runs(&view).is_empty(), "the cue's text is drawn");
+        tester.cell.checkpoint();
+        tester.pump();
+        assert!(!glyph_runs(tester).is_empty(), "the cue's text is drawn");
 
         host.set_cues(Vec::new());
-        cell.checkpoint();
-        pump_every_view(&mut cell.borrow_mut(), Duration::from_millis(48));
-        assert!(glyph_runs(&view).is_empty(), "a cue gone is drawn no more");
+        tester.cell.checkpoint();
+        tester.pump();
+        assert!(glyph_runs(tester).is_empty(), "a cue gone is drawn no more");
     }
 
     #[test]
@@ -650,17 +646,11 @@ mod tests {
     fn a_player_view_shows_its_player_on_a_layer_it_places_at_the_videos_size() {
         let players = MockPlayers::new();
         let compositor = MockCompositor::new();
-        let view = Rc::new(TestView::new(800.0, 600.0));
-        let cell = app_with(&players, &compositor, &view);
-        let player = Player::new(&mut cell.borrow_mut(), "https://example.com/a.mp4").unwrap();
-        run_app(
-            &mut cell.borrow_mut(),
-            crate::Center::new()
-                .child(PlayerView::new(player))
-                .into_widget(),
-        );
-        cell.elapse(Duration::ZERO);
-        pump_every_view(&mut cell.borrow_mut(), Duration::ZERO);
+        let tester = &mut WidgetTester::with_platform(platform_with(&players, &compositor));
+        let player = tester
+            .update(|app| Player::new(app, "https://example.com/a.mp4"))
+            .unwrap();
+        tester.pump_widget(crate::Center::new().child(PlayerView::new(player)));
 
         let made = compositor.made();
         assert_eq!(made.len(), 1, "one layer, of the view's own");
@@ -670,47 +660,49 @@ mod tests {
             .expect("put on the view's layer");
         assert!(Arc::ptr_eq(&video_layer, &made[0].layer));
         assert_eq!(
-            placements(&view).len(),
+            placements(tester).len(),
             0,
             "nothing placed until the size is known"
         );
 
         players.opened()[0].set_state(ready(Size::new(320.0, 180.0)));
-        cell.checkpoint();
-        pump_every_view(&mut cell.borrow_mut(), Duration::from_millis(16));
-        let placements = placements(&view);
+        tester.cell.checkpoint();
+        tester.pump();
+        let placements = placements(tester);
         assert_eq!(placements.len(), 1);
         let (placed, placement) = &placements[0];
         assert!(Arc::ptr_eq(placed, &made[0].layer));
         assert_eq!(
             placement.bounds(),
-            waft_embedder::Rect::from_ltwh(240.0, 210.0, 320.0, 180.0)
+            waft_embedder::Rect::from_ltwh(720.0, 630.0, 960.0, 540.0),
+            "the logical 320x180 at the centre of the view, in physical pixels"
         );
     }
 
     #[test]
     fn a_player_view_puts_its_player_nowhere_as_it_goes_unless_another_took_it_since() {
         let players = MockPlayers::new();
-        let view = Rc::new(TestView::new(800.0, 600.0));
-        let cell = app_with(&players, &MockCompositor::new(), &view);
-        let player = Player::new(&mut cell.borrow_mut(), "https://example.com/a.mp4").unwrap();
+        let tester =
+            &mut WidgetTester::with_platform(platform_with(&players, &MockCompositor::new()));
+        let player = tester
+            .update(|app| Player::new(app, "https://example.com/a.mp4"))
+            .unwrap();
         let host = &players.opened()[0];
-        mount(&cell, PlayerView::new(player.clone()).into_widget());
+        tester.pump_widget(PlayerView::new(player.clone()));
         assert!(host.video_layer().is_some());
-        mount(&cell, crate::SizedBox::new().into_widget());
+        tester.pump_widget(crate::SizedBox::new());
         assert!(
             host.video_layer().is_none(),
             "unmounted, it puts the video nowhere"
         );
         assert_eq!(host.calls().last(), Some(&PlayerCall::SetVideoOutput(None)));
 
-        mount(&cell, PlayerView::new(player.clone()).into_widget());
+        tester.pump_widget(PlayerView::new(player.clone()));
         let elsewhere = waft_embedder::test_support::idle_layer();
-        player.set_video_output(
-            &mut cell.borrow_mut(),
-            Some(VideoOutput::Layer(Arc::clone(&elsewhere))),
-        );
-        mount(&cell, crate::SizedBox::new().into_widget());
+        tester.update(|app| {
+            player.set_video_output(app, Some(VideoOutput::Layer(Arc::clone(&elsewhere))))
+        });
+        tester.pump_widget(crate::SizedBox::new());
         assert!(
             host.video_layer()
                 .is_some_and(|layer| Arc::ptr_eq(&layer, &elsewhere)),
@@ -722,39 +714,33 @@ mod tests {
     fn a_reader_the_app_made_takes_the_video_from_a_view_which_leaves_it_alone() {
         let players = MockPlayers::new();
         let readers = MockVideoFrameReaders::new();
-        let view = Rc::new(TestView::new(800.0, 600.0));
-        let platform = TestPlatform::new()
-            .on(TargetPlatform::MacOS)
-            .with_view(Rc::clone(&view) as waft_embedder::ViewRef)
-            .with_players(Rc::new(players.clone()))
-            .with_compositor(Arc::new(MockCompositor::new()))
-            .with_video_frame_readers(Rc::new(readers.clone()));
-        let cell = AppCell::with_platform(Rc::new(platform));
-        let player = Player::new(&mut cell.borrow_mut(), "https://example.com/a.mp4").unwrap();
-        let host = &players.opened()[0];
-        mount(&cell, PlayerView::new(player.clone()).into_widget());
-
-        let reader = cell
-            .borrow()
-            .platform()
-            .video_frame_readers()
-            .expect("the platform's readers")
-            .make_reader();
-        assert!(Arc::ptr_eq(&reader, &readers.made()[0]));
-        player.set_video_output(
-            &mut cell.borrow_mut(),
-            Some(VideoOutput::Frames(Arc::clone(&reader))),
+        let tester = &mut WidgetTester::with_platform(
+            platform_with(&players, &MockCompositor::new())
+                .with_video_frame_readers(Rc::new(readers.clone())),
         );
+        let player = tester
+            .update(|app| Player::new(app, "https://example.com/a.mp4"))
+            .unwrap();
+        let host = &players.opened()[0];
+        tester.pump_widget(PlayerView::new(player.clone()));
+
+        let reader = tester.update(|app| {
+            app.platform()
+                .video_frame_readers()
+                .expect("the platform's readers")
+                .make_reader()
+        });
+        assert!(Arc::ptr_eq(&reader, &readers.made()[0]));
+        tester.update(|app| {
+            player.set_video_output(app, Some(VideoOutput::Frames(Arc::clone(&reader))))
+        });
         assert_eq!(
             host.calls().last(),
             Some(&PlayerCall::SetVideoOutput(Some(VideoOutputKind::Frames)))
         );
         assert!(host.video_layer().is_none(), "one destination at a time");
 
-        mount(
-            &cell,
-            crate::VideoFrameView::new(Arc::clone(&reader)).into_widget(),
-        );
+        tester.pump_widget(crate::VideoFrameView::new(Arc::clone(&reader)));
         assert!(
             host.frame_reader()
                 .is_some_and(|read_by| Arc::ptr_eq(&read_by, &reader)),
@@ -762,30 +748,23 @@ mod tests {
         );
     }
 
-    /// Runs `widget` as the app's content, and its first frame.
-    fn mount(cell: &AppCell, widget: crate::WidgetRef) {
-        run_app(&mut cell.borrow_mut(), widget);
-        cell.elapse(Duration::ZERO);
-        pump_every_view(&mut cell.borrow_mut(), Duration::ZERO);
-    }
-
-    /// The glyph runs `view`'s last scene draws.
-    fn glyph_runs(view: &TestView) -> Vec<waft_embedder::valo::Op> {
-        let scene = view.last_scene().expect("a frame was presented");
+    /// The glyph runs the tester's view last drew.
+    fn glyph_runs(tester: &WidgetTester) -> Vec<waft_embedder::valo::Op> {
+        let scene = tester.view().last_scene().expect("a frame was presented");
         waft_embedder::flattened_ops(&waft_embedder::slices(&scene, |_| None).picture_with_room())
             .into_iter()
             .filter(|op| matches!(op, waft_embedder::valo::Op::GlyphRun { .. }))
             .collect()
     }
 
-    /// The composition layers `view`'s last scene places, with their placements.
+    /// The composition layers the tester's view last placed, with their placements.
     fn placements(
-        view: &TestView,
+        tester: &WidgetTester,
     ) -> Vec<(
         Arc<dyn waft_embedder::CompositionLayer>,
         waft_embedder::Placement,
     )> {
-        let scene = view.last_scene().expect("a frame was presented");
+        let scene = tester.view().last_scene().expect("a frame was presented");
         waft_embedder::slices(&scene, |_| None)
             .composition_layers()
             .map(|(layer, placement)| (Arc::clone(layer), placement.clone()))

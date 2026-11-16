@@ -546,7 +546,7 @@ pub fn material_text_selection_controls() -> Rc<dyn TextSelectionControls> {
 
 #[cfg(test)]
 mod tests {
-    use waft_embedder::{TargetPlatform, TextAffinity, TextSelection};
+    use waft_embedder::{TextAffinity, TextSelection};
     use waft_painting::{EdgeInsets, TextStyle};
     use waft_services::TextSelectionDelegate;
     use waft_widgets::{
@@ -554,9 +554,11 @@ mod tests {
         Padding, TextEditingController, TextEditingControllerLeaf,
     };
 
+    use waft_widgets::testing::{WidgetTester, test_widgets};
+
     use super::*;
     use crate::colors::Colors;
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::material_app;
     use crate::text_selection_theme::TextSelectionThemeData;
     use crate::theme_data::ThemeData;
 
@@ -602,62 +604,51 @@ mod tests {
         material_text_selection_controls().can_select_all(&app, state.as_text_selection_delegate())
     }
 
-    fn tester() -> WidgetTester {
-        let tester = WidgetTester::on(TargetPlatform::Android);
-        tester.install_platform_fonts();
-        tester
-    }
-
     #[test]
     fn can_select_all_should_return_false_when_there_is_no_text() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
-            let root = create_editable_text(&tester, &key, None, None);
+            let root = create_editable_text(tester, &key, None, None);
             tester.pump_widget(root);
-            assert!(!can_select_all(&tester, &key));
+            assert!(!can_select_all(tester, &key));
         });
     }
 
     #[test]
     fn can_select_all_should_return_true_when_there_is_text_and_collapsed_selection() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
-            let root = create_editable_text(&tester, &key, Some("123"), None);
+            let root = create_editable_text(tester, &key, Some("123"), None);
             tester.pump_widget(root);
-            assert!(can_select_all(&tester, &key));
+            assert!(can_select_all(tester, &key));
         });
     }
 
     #[test]
     fn can_select_all_should_return_true_when_there_is_text_and_partial_uncollapsed_selection() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let root =
-                create_editable_text(&tester, &key, Some("123"), Some(TextSelection::new(1, 2)));
+                create_editable_text(tester, &key, Some("123"), Some(TextSelection::new(1, 2)));
             tester.pump_widget(root);
-            assert!(can_select_all(&tester, &key));
+            assert!(can_select_all(tester, &key));
         });
     }
 
     #[test]
     fn can_select_all_should_return_false_when_there_is_text_and_full_selection() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let root =
-                create_editable_text(&tester, &key, Some("123"), Some(TextSelection::new(0, 3)));
+                create_editable_text(tester, &key, Some("123"), Some(TextSelection::new(0, 3)));
             tester.pump_widget(root);
-            assert!(!can_select_all(&tester, &key));
+            assert!(!can_select_all(tester, &key));
         });
     }
 
     #[test]
     fn material_handles_works_with_3_positional_parameters() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = ThemeData::builder()
                 .text_selection_theme(
                     TextSelectionThemeData::new().selection_handle_color(Color::new(0x550000AA)),
@@ -697,8 +688,10 @@ mod tests {
 
     /// The matrix of the `Transform` that `build_handle` wraps the handle of `handle_type` in,
     /// if any.
-    fn handle_rotation(handle_type: TextSelectionHandleType) -> Option<waft_embedder::Matrix4> {
-        let mut tester = WidgetTester::on(TargetPlatform::Android);
+    fn handle_rotation(
+        tester: &mut WidgetTester,
+        handle_type: TextSelectionHandleType,
+    ) -> Option<waft_embedder::Matrix4> {
         let theme = ThemeData::new(&tester.cell.borrow());
         let built = Rc::new(std::cell::RefCell::new(None));
         let root = {
@@ -726,14 +719,17 @@ mod tests {
 
     #[test]
     fn material_handles_point_up_left_and_turn_by_type() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_eq!(
-                handle_rotation(TextSelectionHandleType::Left),
+                handle_rotation(tester, TextSelectionHandleType::Left),
                 Some(Transform::rotate(PI / 2.0).transform)
             );
-            assert_eq!(handle_rotation(TextSelectionHandleType::Right), None);
             assert_eq!(
-                handle_rotation(TextSelectionHandleType::Collapsed),
+                handle_rotation(tester, TextSelectionHandleType::Right),
+                None
+            );
+            assert_eq!(
+                handle_rotation(tester, TextSelectionHandleType::Collapsed),
                 Some(Transform::rotate(PI / 4.0).transform)
             );
         });

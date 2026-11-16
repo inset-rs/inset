@@ -1178,366 +1178,133 @@ impl State for DismissibleState {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::{Cell, RefCell, RefMut};
+    use std::cell::{Cell, RefCell};
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
-    use waft_embedder::{Color, PointerDeviceKind, TargetPlatform};
-    use waft_foundation::{AppCell, Completer, ValueKey};
-    use waft_gestures::{PointerDownEvent, PointerEvent, PointerMoveEvent, PointerUpEvent};
+    use waft_embedder::{Color, PointerChange};
+    use waft_foundation::{Completer, ValueKey};
     use waft_painting::{AxisDirection, EdgeInsetsGeometry};
     use waft_rendering::{AnyRenderObject, RenderBox, RenderClipRect, RenderCustomClip};
-    use waft_scheduler::SchedulerBinding;
-    use waft_test::{TestPlatform, TestView};
 
     use super::*;
-    use crate::binding::WidgetsBinding;
-    use crate::framework::{AnyElement, StatelessWidget, downcast_widget};
-    use crate::test_harness::{platform_view, pump_every_view};
+    use crate::framework::StatelessWidget;
+    use crate::testing::{TestPointer, WidgetTester, test_widgets};
     use crate::widgets::basic::{AspectRatio, Center, Column, Listener, StatefulBuilder};
     use crate::widgets::container::Container;
     use crate::widgets::scroll_controller::{ScrollController, ScrollControllerLeaf};
     use crate::widgets::scroll_physics::{NeverScrollableScrollPhysics, ScrollPhysicsRef};
     use crate::widgets::scroll_view::ListView;
+    use crate::widgets::text::Text;
 
-    // ---- flutter_test's `WidgetTester`, as far as these tests use it ----
+    // ---- what these tests ask of flutter_test's `WidgetTester` and finders ----
 
-    const DRAG_SLOP_DEFAULT: f64 = 20.0;
-
-    struct WidgetTester {
-        cell: Rc<AppCell>,
-        now: Duration,
-        last_pointer: i64,
+    fn count(tester: &WidgetTester, text: &str) -> usize {
+        tester.find_text(text).len()
     }
 
-    struct TestGesture {
-        pointer: i64,
-        location: Offset,
+    /// `tester.renderObject(find.text(text))`.
+    fn text_render_object(tester: &WidgetTester, text: &str) -> AnyRenderObject {
+        let element = *tester.find_text(text).first().expect("the text is mounted");
+        element
+            .find_render_object(&tester.cell.borrow())
+            .expect("a text has a box")
     }
 
-    impl WidgetTester {
-        fn new() -> WidgetTester {
-            let view = TestView::with_pixel_ratio(2400.0, 1800.0, 3.0);
-            let platform = TestPlatform::new()
-                .on(TargetPlatform::Android)
-                .with_view(Rc::new(view));
-            WidgetTester {
-                cell: AppCell::with_platform(Rc::new(platform)),
-                now: Duration::ZERO,
-                last_pointer: 0,
-            }
-        }
+    /// The global top left and size of the box showing `text`.
+    fn rect_of(tester: &WidgetTester, text: &str) -> (Offset, Size) {
+        let element = *tester.find_text(text).first().expect("the text is mounted");
+        let rect = tester.global_rect(tester.render_box_of(element));
+        (rect.top_left(), rect.size())
+    }
 
-        fn app(&self) -> RefMut<'_, App> {
-            self.cell.borrow_mut()
-        }
+    fn get_top_left(tester: &WidgetTester, text: &str) -> Offset {
+        rect_of(tester, text).0
+    }
 
-        /// `tester.pumpWidget`: attaches `widget` as the root, then one frame.
-        fn pump_widget(&mut self, widget: WidgetRef) {
-            {
-                let mut app = self.app();
-                let view = platform_view(&app);
-                let binding = WidgetsBinding::instance(&mut app);
-                binding.attach_root_widget(
-                    &mut app,
-                    crate::view::View::new(view, widget).into_widget(),
-                );
-            }
-            self.pump(Duration::ZERO);
-        }
+    fn get_top_right(tester: &WidgetTester, text: &str) -> Offset {
+        let (origin, size) = rect_of(tester, text);
+        origin + Offset::new(size.width(), 0.0)
+    }
 
-        /// `tester.pump(duration)`: the clock moves on by `duration`, then one frame.
-        fn pump(&mut self, duration: Duration) {
-            self.cell.elapse(duration);
-            self.now += duration;
-            {
-                let mut app = self.app();
-                pump_every_view(&mut app, self.now);
-                app.drain_microtasks();
-            }
-            // What a frame's callbacks left to their `async` continuations runs before the next
-            // event, as the microtasks after a Dart frame do.
-            self.cell.checkpoint();
-        }
+    fn get_bottom_left(tester: &WidgetTester, text: &str) -> Offset {
+        let (origin, size) = rect_of(tester, text);
+        origin + Offset::new(0.0, size.height())
+    }
 
-        /// `tester.pumpAndSettle()`: frames 100ms apart until none is scheduled.
-        fn pump_and_settle(&mut self) {
-            let end_time = self.now + Duration::from_secs(10 * 60);
-            loop {
-                assert!(self.now <= end_time, "pumpAndSettle timed out");
-                self.pump(Duration::from_millis(100));
-                if !SchedulerBinding::has_scheduled_frame(&mut self.app()) {
-                    return;
-                }
-            }
-        }
+    fn get_center(tester: &WidgetTester, text: &str) -> Offset {
+        let (origin, size) = rect_of(tester, text);
+        origin + Offset::new(size.width() / 2.0, size.height() / 2.0)
+    }
 
-        fn send_event_to_binding(&self, event: PointerEvent) {
-            {
-                let mut app = self.app();
-                waft_gestures::GestureBinding::instance(&mut app)
-                    .handle_pointer_event(&mut app, event);
-                app.drain_microtasks();
-            }
-            self.cell.checkpoint();
-        }
+    /// `gesture.moveBy(offset)`.
+    fn move_by(tester: &mut WidgetTester, gesture: &mut TestPointer, offset: Offset) {
+        let at = gesture.position + offset;
+        tester.move_to(gesture, at, true);
+    }
 
-        fn start_gesture(&mut self, location: Offset) -> TestGesture {
-            self.last_pointer += 1;
-            let gesture = TestGesture {
-                pointer: self.last_pointer,
-                location,
-            };
-            self.send_event_to_binding(PointerEvent::Down(PointerDownEvent {
-                pointer: gesture.pointer,
-                position: location,
-                kind: PointerDeviceKind::Touch,
-                ..PointerDownEvent::default()
-            }));
-            gesture
-        }
+    /// `tester.fling(find.text(text), offset, speed)`: `flingFrom` its center.
+    fn fling(tester: &mut WidgetTester, text: &str, offset: Offset, speed: f64) {
+        let start = get_center(tester, text);
+        tester.fling_from(start, offset, speed, 1);
+    }
 
-        fn move_to(&self, gesture: &mut TestGesture, location: Offset, time_stamp: Duration) {
-            let delta = location - gesture.location;
-            gesture.location = location;
-            self.send_event_to_binding(PointerEvent::Move(PointerMoveEvent {
-                pointer: gesture.pointer,
-                position: location,
+    /// `tester.fling(find.text(text), offset, speed, initialOffset: initial_offset)`: a move to
+    /// `initial_offset` from its center, `flingFrom`'s one second wait, then its 51 moves over
+    /// `offset` at `speed` logical pixels a second, a frame after every 16ms of stamps, and an
+    /// up.
+    fn fling_with_initial_offset(
+        tester: &mut WidgetTester,
+        text: &str,
+        offset: Offset,
+        speed: f64,
+        initial_offset: Offset,
+    ) {
+        const K_MOVE_COUNT: u32 = 50;
+        let micros = |time_stamp: f64| Duration::from_micros(time_stamp as u64);
+        let start = get_center(tester, text);
+        let frame_interval = Duration::from_millis(16).as_micros() as f64;
+        let initial_offset_delay = Duration::from_secs(1);
+        let time_stamp_delta = 1000000.0 * offset.distance() / (K_MOVE_COUNT as f64 * speed);
+        let mut time_stamp: f64 = 0.0;
+        let mut last_time_stamp = time_stamp;
+        let mut touch = TestPointer::touch(1);
+        touch.position = start;
+        tester.send_at(&touch, PointerChange::Down, Offset::ZERO, micros(0.0));
+        let mut move_to = |tester: &mut WidgetTester, location: Offset, time_stamp: f64| {
+            let delta = location - touch.position;
+            touch.position = location;
+            tester.send_at(
+                &touch,
+                PointerChange::Move,
                 delta,
-                time_stamp,
-                ..PointerMoveEvent::default()
-            }));
-        }
-
-        fn move_by(&self, gesture: &mut TestGesture, offset: Offset) {
-            self.move_to(gesture, gesture.location + offset, Duration::ZERO);
-        }
-
-        fn up(&self, gesture: TestGesture) {
-            self.up_at(gesture, Duration::ZERO);
-        }
-
-        fn up_at(&self, gesture: TestGesture, time_stamp: Duration) {
-            self.send_event_to_binding(PointerEvent::Up(PointerUpEvent {
-                pointer: gesture.pointer,
-                position: gesture.location,
-                time_stamp,
-                ..PointerUpEvent::default()
-            }));
-        }
-
-        /// `tester.tapAt(location)`.
-        fn tap_at(&mut self, location: Offset) {
-            let gesture = self.start_gesture(location);
-            self.up(gesture);
-        }
-
-        /// `tester.drag(find.text(text), offset)`: `dragFrom` its center with flutter_test's
-        /// default slops, the move split where it leaves the 20 x 20 slop box.
-        fn drag(&mut self, text: &str, offset: Offset) {
-            let start = self.get_center(text);
-            let touch_slop_x = DRAG_SLOP_DEFAULT;
-            let touch_slop_y = DRAG_SLOP_DEFAULT;
-            let mut gesture = self.start_gesture(start);
-            let x_sign = sign(offset.dx());
-            let y_sign = sign(offset.dy());
-            let offset_x = offset.dx();
-            let offset_y = offset.dy();
-            let separate_x = offset.dx().abs() > touch_slop_x && touch_slop_x > 0.0;
-            let separate_y = offset.dy().abs() > touch_slop_y && touch_slop_y > 0.0;
-            if separate_y || separate_x {
-                let offset_slope = offset_y / offset_x;
-                let inverse_offset_slope = offset_x / offset_y;
-                let slop_slope = touch_slop_y / touch_slop_x;
-                let absolute_offset_slope = offset_slope.abs();
-                let signed_slop_x = touch_slop_x * x_sign;
-                let signed_slop_y = touch_slop_y * y_sign;
-                if absolute_offset_slope != slop_slope {
-                    if absolute_offset_slope < slop_slope {
-                        let diff_y = offset_slope.abs() * touch_slop_x * y_sign;
-                        self.move_by(&mut gesture, Offset::new(signed_slop_x, diff_y));
-                        if offset_y.abs() <= touch_slop_y {
-                            self.move_by(
-                                &mut gesture,
-                                Offset::new(offset_x - signed_slop_x, offset_y - diff_y),
-                            );
-                        } else {
-                            let diff_y2 = signed_slop_y - diff_y;
-                            let diff_x2 = inverse_offset_slope * diff_y2;
-                            self.move_by(&mut gesture, Offset::new(diff_x2, diff_y2));
-                            self.move_by(
-                                &mut gesture,
-                                Offset::new(
-                                    offset_x - diff_x2 - signed_slop_x,
-                                    offset_y - signed_slop_y,
-                                ),
-                            );
-                        }
-                    } else {
-                        let diff_x = inverse_offset_slope.abs() * touch_slop_y * x_sign;
-                        self.move_by(&mut gesture, Offset::new(diff_x, signed_slop_y));
-                        if offset_x.abs() <= touch_slop_x {
-                            self.move_by(
-                                &mut gesture,
-                                Offset::new(offset_x - diff_x, offset_y - signed_slop_y),
-                            );
-                        } else {
-                            let diff_x2 = signed_slop_x - diff_x;
-                            let diff_y2 = offset_slope * diff_x2;
-                            self.move_by(&mut gesture, Offset::new(diff_x2, diff_y2));
-                            self.move_by(
-                                &mut gesture,
-                                Offset::new(
-                                    offset_x - signed_slop_x,
-                                    offset_y - diff_y2 - signed_slop_y,
-                                ),
-                            );
-                        }
-                    }
-                } else {
-                    self.move_by(&mut gesture, Offset::new(signed_slop_x, signed_slop_y));
-                    self.move_by(
-                        &mut gesture,
-                        Offset::new(offset_x - signed_slop_x, offset_y - signed_slop_y),
-                    );
-                }
-            } else {
-                self.move_by(&mut gesture, offset);
+                micros(time_stamp.round()),
+            );
+        };
+        move_to(tester, start + initial_offset, time_stamp);
+        time_stamp += initial_offset_delay.as_micros() as f64;
+        tester.pump_by(initial_offset_delay);
+        for i in 0..=K_MOVE_COUNT {
+            let location = start
+                + initial_offset
+                + Offset::lerp(
+                    Some(Offset::ZERO),
+                    Some(offset),
+                    f64::from(i) / f64::from(K_MOVE_COUNT),
+                )
+                .expect("both ends are given");
+            move_to(tester, location, time_stamp);
+            time_stamp += time_stamp_delta;
+            if time_stamp - last_time_stamp > frame_interval {
+                tester.pump_by(micros((time_stamp - last_time_stamp).trunc()));
+                last_time_stamp = time_stamp;
             }
-            self.up(gesture);
         }
-
-        /// `tester.fling(find.text(text), offset, speed, initialOffset:)`: `flingFrom` its
-        /// center, 50 moves over `offset` at `speed` pixels a second, with a pump each time
-        /// more than 16ms of them have passed.
-        fn fling(&mut self, text: &str, offset: Offset, speed: f64, initial_offset: Offset) {
-            const MOVE_COUNT: u32 = 50;
-            let start = self.get_center(text);
-            let frame_interval = Duration::from_millis(16).as_micros() as f64;
-            let initial_offset_delay = Duration::from_secs(1);
-            let time_stamp_delta = 1000000.0 * offset.distance() / (MOVE_COUNT as f64 * speed);
-            let mut time_stamp: f64 = 0.0;
-            let mut last_time_stamp = time_stamp;
-            let mut gesture = self.start_gesture(start);
-            if initial_offset.distance() > 0.0 {
-                self.move_to(
-                    &mut gesture,
-                    start + initial_offset,
-                    micros(time_stamp.round()),
-                );
-                time_stamp += initial_offset_delay.as_micros() as f64;
-                self.pump(initial_offset_delay);
-            }
-            for i in 0..=MOVE_COUNT {
-                let location = start
-                    + initial_offset
-                    + Offset::lerp(
-                        Some(Offset::ZERO),
-                        Some(offset),
-                        i as f64 / MOVE_COUNT as f64,
-                    )
-                    .expect("both ends are given");
-                self.move_to(&mut gesture, location, micros(time_stamp.round()));
-                time_stamp += time_stamp_delta;
-                if time_stamp - last_time_stamp > frame_interval {
-                    self.pump(micros((time_stamp - last_time_stamp).trunc()));
-                    last_time_stamp = time_stamp;
-                }
-            }
-            self.up_at(gesture, micros(time_stamp.round()));
-        }
-
-        /// Every mounted element, in tree order.
-        fn elements(&self) -> Vec<AnyElement> {
-            let mut app = self.app();
-            let root = WidgetsBinding::instance(&mut app)
-                .root_element(&app)
-                .expect("a mounted tree");
-            let mut found = Vec::new();
-            let mut stack = vec![root];
-            while let Some(element) = stack.pop() {
-                found.push(element);
-                let mut children = Vec::new();
-                element.visit_children(&app, &mut |child| children.push(child));
-                stack.extend(children.into_iter().rev());
-            }
-            found
-        }
-
-        /// The elements of the [`Label`]s showing `text`: `find.text(text)`.
-        fn find_text(&self, text: &str) -> Vec<AnyElement> {
-            let elements = self.elements();
-            let app = self.app();
-            elements
-                .into_iter()
-                .filter(|element| {
-                    downcast_widget::<Label>(&**element.widget(&app))
-                        .is_some_and(|label| label.0 == text)
-                })
-                .collect()
-        }
-
-        fn count(&self, text: &str) -> usize {
-            self.find_text(text).len()
-        }
-
-        /// `tester.renderObject(find.text(text))`.
-        fn render_object(&self, text: &str) -> AnyRenderObject {
-            let element = *self.find_text(text).first().expect("the text is mounted");
-            element
-                .find_render_object(&self.app())
-                .expect("a label has a box")
-        }
-
-        /// The global top left and size of the box showing `text`.
-        fn rect_of(&self, text: &str) -> (Offset, Size) {
-            let object = self.render_object(text);
-            let app = self.app();
-            let render_box = object.as_box().expect("a label is a box");
-            (
-                render_box.local_to_global(&app, Offset::ZERO, None),
-                render_box.size(&app),
-            )
-        }
-
-        fn get_top_left(&self, text: &str) -> Offset {
-            self.rect_of(text).0
-        }
-
-        fn get_top_right(&self, text: &str) -> Offset {
-            let (origin, size) = self.rect_of(text);
-            origin + Offset::new(size.width(), 0.0)
-        }
-
-        fn get_bottom_left(&self, text: &str) -> Offset {
-            let (origin, size) = self.rect_of(text);
-            origin + Offset::new(0.0, size.height())
-        }
-
-        fn get_center(&self, text: &str) -> Offset {
-            let (origin, size) = self.rect_of(text);
-            origin + Offset::new(size.width() / 2.0, size.height() / 2.0)
-        }
-    }
-
-    fn micros(micros: f64) -> Duration {
-        Duration::from_micros(micros as u64)
-    }
-
-    /// Where `find.text` looks: a `Text` that fills its tight constraints as a `Text` does in
-    /// these tests, without the fonts a `Text` needs to lay out.
-    #[derive(Debug)]
-    struct Label(String);
-
-    impl Label {
-        fn new(text: impl Into<String>) -> Label {
-            Label(text.into())
-        }
-    }
-
-    impl StatelessWidget for Label {
-        fn build(&self, _app: &mut App, _context: BuildContext) -> WidgetRef {
-            SizedBox::expand().into_widget()
-        }
+        tester.send_at(
+            &touch,
+            PointerChange::Up,
+            Offset::ZERO,
+            micros(time_stamp.round()),
+        );
     }
 
     // ---- the test's own `buildTest` and its globals ----
@@ -1619,7 +1386,7 @@ mod tests {
                         SizedBox::new()
                             .width(100.0)
                             .height(100.0)
-                            .child(Label::new(item.to_string())),
+                            .child(Text::new(item.to_string())),
                     )
                     .drag_start_behavior(DragStartBehavior::Down)
                     .direction(options.dismiss_direction)
@@ -1654,7 +1421,7 @@ mod tests {
                             .confirm_dismiss(move |app, direction| confirm_dismiss(app, direction));
                     }
                     if let Some(background) = options.background {
-                        dismissible = dismissible.background(Label::new(background));
+                        dismissible = dismissible.background(Text::new(background));
                     }
                     dismissible.into_widget()
                 };
@@ -1691,30 +1458,31 @@ mod tests {
             AxisDirection::Left => (
                 // getTopRight() returns a point that's just beyond itemWidget's right
                 // edge and outside the Dismissible event listener's bounds.
-                tester.get_top_right(text) + Offset::new(-0.1, 0.0),
-                tester.get_top_left(text) + Offset::new(-0.1, 0.0),
+                get_top_right(tester, text) + Offset::new(-0.1, 0.0),
+                get_top_left(tester, text) + Offset::new(-0.1, 0.0),
             ),
             AxisDirection::Right => (
                 // we do the same thing here to keep the test symmetric
-                tester.get_top_left(text) + Offset::new(0.1, 0.0),
-                tester.get_top_right(text) + Offset::new(0.1, 0.0),
+                get_top_left(tester, text) + Offset::new(0.1, 0.0),
+                get_top_right(tester, text) + Offset::new(0.1, 0.0),
             ),
             AxisDirection::Up => (
                 // getBottomLeft() returns a point that's just below itemWidget's bottom
                 // edge and outside the Dismissible event listener's bounds.
-                tester.get_bottom_left(text) + Offset::new(0.0, -0.1),
-                tester.get_top_left(text) + Offset::new(0.0, -0.1),
+                get_bottom_left(tester, text) + Offset::new(0.0, -0.1),
+                get_top_left(tester, text) + Offset::new(0.0, -0.1),
             ),
             AxisDirection::Down => (
                 // again with doing the same here for symmetry
-                tester.get_top_left(text) + Offset::new(0.1, 0.0),
-                tester.get_bottom_left(text) + Offset::new(0.1, 0.0),
+                get_top_left(tester, text) + Offset::new(0.1, 0.0),
+                get_bottom_left(tester, text) + Offset::new(0.1, 0.0),
             ),
         };
 
-        let mut gesture = tester.start_gesture(down_location);
-        tester.move_to(&mut gesture, up_location, Duration::ZERO);
-        tester.up(gesture);
+        let mut gesture = TestPointer::touch(1);
+        tester.down(&mut gesture, down_location);
+        tester.move_to(&mut gesture, up_location, true);
+        tester.up(&gesture);
     }
 
     fn axis_delta(gesture_direction: AxisDirection, amount: f64) -> Offset {
@@ -1729,7 +1497,7 @@ mod tests {
     /// The test's `flingElement`.
     fn fling_element(tester: &mut WidgetTester, text: &str, gesture_direction: AxisDirection) {
         let delta = axis_delta(gesture_direction, 300.0);
-        tester.fling(text, delta, 1000.0, Offset::ZERO);
+        fling(tester, text, delta, 1000.0);
     }
 
     /// The test's `flingElementFromZero`: a drag one way, then a fling back to where it
@@ -1740,13 +1508,13 @@ mod tests {
         gesture_direction: AxisDirection,
     ) {
         let delta = axis_delta(gesture_direction, 300.0);
-        tester.fling(text, delta, 1000.0, delta * -1.0);
+        fling_with_initial_offset(tester, text, delta, 1000.0, delta * -1.0);
     }
 
     /// The test's `rollbackElement`.
     fn rollback_element(tester: &mut WidgetTester, text: &str, gesture_direction: AxisDirection) {
         let delta = axis_delta(gesture_direction, 30.0);
-        tester.fling(text, delta, 1000.0, Offset::ZERO);
+        fling(tester, text, delta, 1000.0);
     }
 
     type DismissMethod = fn(&mut WidgetTester, &str, AxisDirection);
@@ -1758,7 +1526,7 @@ mod tests {
         mechanism: DismissMethod,
     ) {
         let text = item.to_string();
-        assert_eq!(tester.count(&text), 1);
+        assert_eq!(count(tester, &text), 1);
 
         mechanism(tester, &text, gesture_direction);
         tester.pump_and_settle();
@@ -1771,10 +1539,11 @@ mod tests {
         amount: f64,
     ) {
         let text = item.to_string();
-        assert_eq!(tester.count(&text), 1);
+        assert_eq!(count(tester, &text), 1);
 
-        tester.drag(&text, axis_delta(gesture_direction, amount));
-        tester.pump(Duration::ZERO);
+        let start = get_center(tester, &text);
+        tester.drag_from(start, axis_delta(gesture_direction, amount), 1);
+        tester.pump();
     }
 
     fn check_fling_item_before_movement_end(
@@ -1784,12 +1553,12 @@ mod tests {
         mechanism: DismissMethod,
     ) {
         let text = item.to_string();
-        assert_eq!(tester.count(&text), 1);
+        assert_eq!(count(tester, &text), 1);
 
         mechanism(tester, &text, gesture_direction);
 
-        tester.pump(Duration::ZERO); // start the slide
-        tester.pump(Duration::from_millis(100));
+        tester.pump(); // start the slide
+        tester.pump_by(Duration::from_millis(100));
     }
 
     fn check_fling_item_after_movement(
@@ -1799,12 +1568,12 @@ mod tests {
         mechanism: DismissMethod,
     ) {
         let text = item.to_string();
-        assert_eq!(tester.count(&text), 1);
+        assert_eq!(count(tester, &text), 1);
 
         mechanism(tester, &text, gesture_direction);
 
-        tester.pump(Duration::ZERO); // start the slide
-        tester.pump(Duration::from_millis(300));
+        tester.pump(); // start the slide
+        tester.pump_by(Duration::from_millis(300));
     }
 
     /// The test's `Test1215DismissibleWidget`.
@@ -1815,7 +1584,7 @@ mod tests {
         fn build(&self, _app: &mut App, _context: BuildContext) -> WidgetRef {
             Dismissible::new(
                 ValueKey::new(self.0).into(),
-                AspectRatio::new(1.0).child(Label::new(self.0)),
+                AspectRatio::new(1.0).child(Text::new(self.0)),
             )
             .drag_start_behavior(DragStartBehavior::Down)
             .into_widget()
@@ -1847,124 +1616,148 @@ mod tests {
 
     #[test]
     fn a_horizontal_drag_dismisses_in_a_vertical_list() {
-        let results = Results::new();
-        let mut tester = WidgetTester::new();
-        tester.pump_widget(build_test(&results, BuildTest::default()));
-        assert!(results.dismissed_items().is_empty());
+        test_widgets(|tester| {
+            let results = Results::new();
+            tester.pump_widget(build_test(&results, BuildTest::default()));
+            assert!(results.dismissed_items().is_empty());
 
-        dismiss_item(&mut tester, 0, Right, dismiss_element);
-        assert_eq!(tester.count("0"), 0);
-        assert_eq!(results.dismissed_items(), [0]);
-        assert_eq!(
-            results.reported_dismiss_direction.get(),
-            DismissDirection::StartToEnd
-        );
+            dismiss_item(tester, 0, Right, dismiss_element);
+            assert_eq!(count(tester, "0"), 0);
+            assert_eq!(results.dismissed_items(), [0]);
+            assert_eq!(
+                results.reported_dismiss_direction.get(),
+                DismissDirection::StartToEnd
+            );
 
-        dismiss_item(&mut tester, 1, Left, dismiss_element);
-        assert_eq!(tester.count("1"), 0);
-        assert_eq!(results.dismissed_items(), [0, 1]);
-        assert_eq!(
-            results.reported_dismiss_direction.get(),
-            DismissDirection::EndToStart
-        );
+            dismiss_item(tester, 1, Left, dismiss_element);
+            assert_eq!(count(tester, "1"), 0);
+            assert_eq!(results.dismissed_items(), [0, 1]);
+            assert_eq!(
+                results.reported_dismiss_direction.get(),
+                DismissDirection::EndToStart
+            );
+        });
     }
 
     #[test]
     fn a_horizontal_fling_dismisses_in_a_vertical_list() {
-        let results = Results::new();
-        let mut tester = WidgetTester::new();
-        tester.pump_widget(build_test(&results, BuildTest::default()));
-        assert!(results.dismissed_items().is_empty());
+        test_widgets(|tester| {
+            let results = Results::new();
+            tester.pump_widget(build_test(&results, BuildTest::default()));
+            assert!(results.dismissed_items().is_empty());
 
-        dismiss_item(&mut tester, 0, Right, fling_element);
-        assert_eq!(tester.count("0"), 0);
-        assert_eq!(results.dismissed_items(), [0]);
-        assert_eq!(
-            results.reported_dismiss_direction.get(),
-            DismissDirection::StartToEnd
-        );
+            dismiss_item(tester, 0, Right, fling_element);
+            assert_eq!(count(tester, "0"), 0);
+            assert_eq!(results.dismissed_items(), [0]);
+            assert_eq!(
+                results.reported_dismiss_direction.get(),
+                DismissDirection::StartToEnd
+            );
 
-        dismiss_item(&mut tester, 1, Left, fling_element);
-        assert_eq!(tester.count("1"), 0);
-        assert_eq!(results.dismissed_items(), [0, 1]);
-        assert_eq!(
-            results.reported_dismiss_direction.get(),
-            DismissDirection::EndToStart
-        );
+            dismiss_item(tester, 1, Left, fling_element);
+            assert_eq!(count(tester, "1"), 0);
+            assert_eq!(results.dismissed_items(), [0, 1]);
+            assert_eq!(
+                results.reported_dismiss_direction.get(),
+                DismissDirection::EndToStart
+            );
+        });
     }
 
     #[test]
     fn a_horizontal_fling_does_not_dismiss_at_zero_offset_but_does_otherwise() {
-        let results = Results::new();
-        let mut tester = WidgetTester::new();
-        tester.pump_widget(build_test(
-            &results,
-            BuildTest {
-                start_to_end_threshold: Some(0.95),
-                ..BuildTest::default()
-            },
-        ));
-        assert!(results.dismissed_items().is_empty());
+        test_widgets(|tester| {
+            let results = Results::new();
+            tester.pump_widget(build_test(
+                &results,
+                BuildTest {
+                    start_to_end_threshold: Some(0.95),
+                    ..BuildTest::default()
+                },
+            ));
+            assert!(results.dismissed_items().is_empty());
 
-        dismiss_item(&mut tester, 0, Right, fling_element_from_zero);
-        assert_eq!(tester.count("0"), 1);
-        assert!(results.dismissed_items().is_empty());
+            dismiss_item(tester, 0, Right, fling_element_from_zero);
+            assert_eq!(count(tester, "0"), 1);
+            assert!(results.dismissed_items().is_empty());
 
-        dismiss_item(&mut tester, 0, Left, fling_element_from_zero);
-        assert_eq!(tester.count("0"), 1);
-        assert!(results.dismissed_items().is_empty());
+            dismiss_item(tester, 0, Left, fling_element_from_zero);
+            assert_eq!(count(tester, "0"), 1);
+            assert!(results.dismissed_items().is_empty());
 
-        dismiss_item(&mut tester, 0, Right, fling_element);
-        assert_eq!(tester.count("0"), 0);
-        assert_eq!(results.dismissed_items(), [0]);
-        assert_eq!(
-            results.reported_dismiss_direction.get(),
-            DismissDirection::StartToEnd
-        );
+            dismiss_item(tester, 0, Right, fling_element);
+            assert_eq!(count(tester, "0"), 0);
+            assert_eq!(results.dismissed_items(), [0]);
+            assert_eq!(
+                results.reported_dismiss_direction.get(),
+                DismissDirection::StartToEnd
+            );
 
-        dismiss_item(&mut tester, 1, Left, fling_element);
-        assert_eq!(tester.count("1"), 0);
-        assert_eq!(results.dismissed_items(), [0, 1]);
-        assert_eq!(
-            results.reported_dismiss_direction.get(),
-            DismissDirection::EndToStart
-        );
+            dismiss_item(tester, 1, Left, fling_element);
+            assert_eq!(count(tester, "1"), 0);
+            assert_eq!(results.dismissed_items(), [0, 1]);
+            assert_eq!(
+                results.reported_dismiss_direction.get(),
+                DismissDirection::EndToStart
+            );
+        });
     }
 
     #[test]
     fn a_vertical_drag_dismisses_in_a_horizontal_list() {
-        let results = Results::new();
-        let mut tester = WidgetTester::new();
-        tester.pump_widget(build_test(
-            &results,
-            BuildTest {
-                scroll_direction: Axis::Horizontal,
-                dismiss_direction: DismissDirection::Vertical,
-                ..BuildTest::default()
-            },
-        ));
-        assert!(results.dismissed_items().is_empty());
+        test_widgets(|tester| {
+            let results = Results::new();
+            tester.pump_widget(build_test(
+                &results,
+                BuildTest {
+                    scroll_direction: Axis::Horizontal,
+                    dismiss_direction: DismissDirection::Vertical,
+                    ..BuildTest::default()
+                },
+            ));
+            assert!(results.dismissed_items().is_empty());
 
-        dismiss_item(&mut tester, 0, AxisUp, dismiss_element);
-        assert_eq!(tester.count("0"), 0);
-        assert_eq!(results.dismissed_items(), [0]);
-        assert_eq!(
-            results.reported_dismiss_direction.get(),
-            DismissDirection::Up
-        );
+            dismiss_item(tester, 0, AxisUp, dismiss_element);
+            assert_eq!(count(tester, "0"), 0);
+            assert_eq!(results.dismissed_items(), [0]);
+            assert_eq!(
+                results.reported_dismiss_direction.get(),
+                DismissDirection::Up
+            );
 
-        dismiss_item(&mut tester, 1, AxisDown, dismiss_element);
-        assert_eq!(tester.count("1"), 0);
-        assert_eq!(results.dismissed_items(), [0, 1]);
-        assert_eq!(
-            results.reported_dismiss_direction.get(),
-            DismissDirection::Down
-        );
+            dismiss_item(tester, 1, AxisDown, dismiss_element);
+            assert_eq!(count(tester, "1"), 0);
+            assert_eq!(results.dismissed_items(), [0, 1]);
+            assert_eq!(
+                results.reported_dismiss_direction.get(),
+                DismissDirection::Down
+            );
+        });
     }
 
     /// The shape of the four one-direction cases: the wrong way first, which leaves the item,
     /// then the right way, which dismisses it.
     fn check_one_way(
+        options: fn() -> BuildTest,
+        mechanism: DismissMethod,
+        wrong_way: AxisDirection,
+        right_way: AxisDirection,
+        also_item_one: bool,
+    ) {
+        test_widgets(|tester| {
+            check_one_way_with(
+                tester,
+                options(),
+                mechanism,
+                wrong_way,
+                right_way,
+                also_item_one,
+            )
+        });
+    }
+
+    fn check_one_way_with(
+        tester: &mut WidgetTester,
         options: BuildTest,
         mechanism: DismissMethod,
         wrong_way: AxisDirection,
@@ -1972,29 +1765,28 @@ mod tests {
         also_item_one: bool,
     ) {
         let results = Results::new();
-        let mut tester = WidgetTester::new();
         tester.pump_widget(build_test(&results, options));
         assert!(results.dismissed_items().is_empty());
 
-        dismiss_item(&mut tester, 0, wrong_way, mechanism);
-        assert_eq!(tester.count("0"), 1);
+        dismiss_item(tester, 0, wrong_way, mechanism);
+        assert_eq!(count(tester, "0"), 1);
         assert!(results.dismissed_items().is_empty());
         if also_item_one {
-            dismiss_item(&mut tester, 1, wrong_way, mechanism);
+            dismiss_item(tester, 1, wrong_way, mechanism);
         }
 
-        dismiss_item(&mut tester, 0, right_way, mechanism);
-        assert_eq!(tester.count("0"), 0);
+        dismiss_item(tester, 0, right_way, mechanism);
+        assert_eq!(count(tester, "0"), 0);
         assert_eq!(results.dismissed_items(), [0]);
         if also_item_one {
-            dismiss_item(&mut tester, 1, right_way, mechanism);
+            dismiss_item(tester, 1, right_way, mechanism);
         }
     }
 
     #[test]
     fn a_drag_left_dismisses_with_end_to_start_in_ltr() {
         check_one_way(
-            BuildTest {
+            || BuildTest {
                 dismiss_direction: DismissDirection::EndToStart,
                 ..BuildTest::default()
             },
@@ -2008,7 +1800,7 @@ mod tests {
     #[test]
     fn a_drag_right_dismisses_with_start_to_end_in_ltr() {
         check_one_way(
-            BuildTest {
+            || BuildTest {
                 dismiss_direction: DismissDirection::StartToEnd,
                 ..BuildTest::default()
             },
@@ -2022,7 +1814,7 @@ mod tests {
     #[test]
     fn a_drag_right_dismisses_with_end_to_start_in_rtl() {
         check_one_way(
-            BuildTest {
+            || BuildTest {
                 text_direction: TextDirection::Rtl,
                 dismiss_direction: DismissDirection::EndToStart,
                 ..BuildTest::default()
@@ -2037,7 +1829,7 @@ mod tests {
     #[test]
     fn a_drag_left_dismisses_with_start_to_end_in_rtl() {
         check_one_way(
-            BuildTest {
+            || BuildTest {
                 text_direction: TextDirection::Rtl,
                 dismiss_direction: DismissDirection::StartToEnd,
                 ..BuildTest::default()
@@ -2053,7 +1845,7 @@ mod tests {
     fn a_fling_left_dismisses_with_end_to_start_in_ltr() {
         // Flutter's case drags rather than flings, as written.
         check_one_way(
-            BuildTest {
+            || BuildTest {
                 dismiss_direction: DismissDirection::EndToStart,
                 ..BuildTest::default()
             },
@@ -2067,7 +1859,7 @@ mod tests {
     #[test]
     fn a_fling_right_dismisses_with_start_to_end_in_ltr() {
         check_one_way(
-            BuildTest {
+            || BuildTest {
                 dismiss_direction: DismissDirection::StartToEnd,
                 ..BuildTest::default()
             },
@@ -2081,7 +1873,7 @@ mod tests {
     #[test]
     fn a_fling_right_dismisses_with_end_to_start_in_rtl() {
         check_one_way(
-            BuildTest {
+            || BuildTest {
                 text_direction: TextDirection::Rtl,
                 dismiss_direction: DismissDirection::EndToStart,
                 ..BuildTest::default()
@@ -2096,7 +1888,7 @@ mod tests {
     #[test]
     fn a_fling_left_dismisses_with_start_to_end_in_rtl() {
         check_one_way(
-            BuildTest {
+            || BuildTest {
                 text_direction: TextDirection::Rtl,
                 dismiss_direction: DismissDirection::StartToEnd,
                 ..BuildTest::default()
@@ -2111,7 +1903,7 @@ mod tests {
     #[test]
     fn a_drag_up_dismisses_with_up() {
         check_one_way(
-            BuildTest {
+            || BuildTest {
                 scroll_direction: Axis::Horizontal,
                 dismiss_direction: DismissDirection::Up,
                 ..BuildTest::default()
@@ -2126,7 +1918,7 @@ mod tests {
     #[test]
     fn a_drag_down_dismisses_with_down() {
         check_one_way(
-            BuildTest {
+            || BuildTest {
                 scroll_direction: Axis::Horizontal,
                 dismiss_direction: DismissDirection::Down,
                 ..BuildTest::default()
@@ -2141,7 +1933,7 @@ mod tests {
     #[test]
     fn a_fling_up_dismisses_with_up() {
         check_one_way(
-            BuildTest {
+            || BuildTest {
                 scroll_direction: Axis::Horizontal,
                 dismiss_direction: DismissDirection::Up,
                 ..BuildTest::default()
@@ -2156,7 +1948,7 @@ mod tests {
     #[test]
     fn a_fling_down_dismisses_with_down() {
         check_one_way(
-            BuildTest {
+            || BuildTest {
                 scroll_direction: Axis::Horizontal,
                 dismiss_direction: DismissDirection::Down,
                 ..BuildTest::default()
@@ -2171,7 +1963,7 @@ mod tests {
     #[test]
     fn a_drag_left_has_no_effect_with_a_high_dismiss_threshold() {
         check_one_way(
-            BuildTest {
+            || BuildTest {
                 start_to_end_threshold: Some(1.0),
                 ..BuildTest::default()
             },
@@ -2185,7 +1977,7 @@ mod tests {
     #[test]
     fn a_fling_left_has_no_effect_with_a_high_dismiss_threshold() {
         check_one_way(
-            BuildTest {
+            || BuildTest {
                 start_to_end_threshold: Some(1.0),
                 ..BuildTest::default()
             },
@@ -2198,434 +1990,456 @@ mod tests {
 
     #[test]
     fn drag_moves_across_rebuilds_do_not_assert() {
-        let results = Results::new();
-        let mut tester = WidgetTester::new();
-        tester.pump_widget(build_test(
-            &results,
-            BuildTest {
-                scroll_direction: Axis::Horizontal,
-                dismiss_direction: DismissDirection::Down,
-                ..BuildTest::default()
-            },
-        ));
-        let location = tester.get_top_left("0");
-        let offset = Offset::new(0.0, 5.0);
-        let mut gesture = tester.start_gesture(location);
-        for _ in 0..4 {
-            tester.move_by(&mut gesture, offset);
-            tester.pump_widget(build_test(&results, BuildTest::default()));
-        }
-        tester.up(gesture);
+        test_widgets(|tester| {
+            let results = Results::new();
+            tester.pump_widget(build_test(
+                &results,
+                BuildTest {
+                    scroll_direction: Axis::Horizontal,
+                    dismiss_direction: DismissDirection::Down,
+                    ..BuildTest::default()
+                },
+            ));
+            let location = get_top_left(tester, "0");
+            let offset = Offset::new(0.0, 5.0);
+            let mut gesture = TestPointer::touch(1);
+            tester.down(&mut gesture, location);
+            for _ in 0..4 {
+                move_by(tester, &mut gesture, offset);
+                tester.pump_widget(build_test(&results, BuildTest::default()));
+            }
+            tester.up(&gesture);
+        });
     }
 
     #[test]
     fn dismissing_the_bottom_then_the_top_item_does_not_throw() {
-        let mut tester = WidgetTester::new();
-        tester.pump_widget(
-            Directionality::new(
-                TextDirection::Ltr,
-                Center::new().child(SizedBox::new().width(100.0).height(1000.0).child(
-                    Column::new().children([
-                        Test1215DismissibleWidget("1").into_widget(),
-                        Test1215DismissibleWidget("2").into_widget(),
-                    ]),
-                )),
-            )
-            .into_widget(),
-        );
-        assert_eq!(tester.count("1"), 1);
-        assert_eq!(tester.count("2"), 1);
-        dismiss_element(&mut tester, "2", Right);
-        tester.pump(Duration::ZERO); // start the slide away
-        tester.pump(Duration::from_secs(1)); // finish the slide away
-        assert_eq!(tester.count("1"), 1);
-        assert_eq!(tester.count("2"), 0);
-        dismiss_element(&mut tester, "1", Right);
-        tester.pump(Duration::ZERO); // start the slide away
-        // finish the slide away (at which point the child is no longer included in the tree)
-        tester.pump(Duration::from_secs(1));
-        assert_eq!(tester.count("1"), 0);
-        assert_eq!(tester.count("2"), 0);
+        test_widgets(|tester| {
+            tester.pump_widget(
+                Directionality::new(
+                    TextDirection::Ltr,
+                    Center::new().child(SizedBox::new().width(100.0).height(1000.0).child(
+                        Column::new().children([
+                            Test1215DismissibleWidget("1").into_widget(),
+                            Test1215DismissibleWidget("2").into_widget(),
+                        ]),
+                    )),
+                )
+                .into_widget(),
+            );
+            assert_eq!(count(tester, "1"), 1);
+            assert_eq!(count(tester, "2"), 1);
+            dismiss_element(tester, "2", Right);
+            tester.pump(); // start the slide away
+            tester.pump_by(Duration::from_secs(1)); // finish the slide away
+            assert_eq!(count(tester, "1"), 1);
+            assert_eq!(count(tester, "2"), 0);
+            dismiss_element(tester, "1", Right);
+            tester.pump(); // start the slide away
+            // finish the slide away (at which point the child is no longer included in the tree)
+            tester.pump_by(Duration::from_secs(1));
+            assert_eq!(count(tester, "1"), 0);
+            assert_eq!(count(tester, "2"), 0);
+        });
     }
 
     #[test]
     fn a_dismissible_collapses_from_its_full_size() {
-        let results = Results::new();
-        let mut tester = WidgetTester::new();
-        tester.pump_widget(build_test(
-            &results,
-            BuildTest {
-                background: Some("background"),
-                ..BuildTest::default()
-            },
-        ));
-        assert!(results.dismissed_items().is_empty());
+        test_widgets(|tester| {
+            let results = Results::new();
+            tester.pump_widget(build_test(
+                &results,
+                BuildTest {
+                    background: Some("background"),
+                    ..BuildTest::default()
+                },
+            ));
+            assert!(results.dismissed_items().is_empty());
 
-        assert_eq!(tester.count("0"), 1);
-        dismiss_element(&mut tester, "0", Right);
-        tester.pump(Duration::ZERO);
+            assert_eq!(count(tester, "0"), 1);
+            dismiss_element(tester, "0", Right);
+            tester.pump();
 
-        // The other four have been culled.
-        assert_eq!(tester.count("background"), 1);
-        let (_, size) = tester.rect_of("background");
-        assert_eq!(size.height(), 100.0);
+            // The other four have been culled.
+            assert_eq!(count(tester, "background"), 1);
+            let (_, size) = rect_of(tester, "background");
+            assert_eq!(size.height(), 100.0);
+        });
     }
 
     // ---- not in dismissible_test.dart: `_DismissibleClipper` ----
 
     #[test]
     fn the_background_is_clipped_to_the_part_the_child_has_uncovered() {
-        let results = Results::new();
-        let mut tester = WidgetTester::new();
-        tester.pump_widget(build_test(
-            &results,
-            BuildTest {
-                background: Some("background"),
-                ..BuildTest::default()
-            },
-        ));
-        let start = tester.get_center("0");
-        let mut gesture = tester.start_gesture(start);
-        tester.move_by(&mut gesture, Offset::new(-30.0, 0.0));
-        tester.pump(Duration::ZERO);
+        test_widgets(|tester| {
+            let results = Results::new();
+            tester.pump_widget(build_test(
+                &results,
+                BuildTest {
+                    background: Some("background"),
+                    ..BuildTest::default()
+                },
+            ));
+            let start = get_center(tester, "0");
+            let mut gesture = TestPointer::touch(1);
+            tester.down(&mut gesture, start);
+            move_by(tester, &mut gesture, Offset::new(-30.0, 0.0));
+            tester.pump();
 
-        let background = tester.render_object("background");
-        let app = tester.app();
-        let mut clip = None;
-        let mut ancestor = background.parent(&app);
-        while let Some(object) = ancestor {
-            if let Some(clip_rect) = object.downcast::<RenderClipRect>(&app) {
-                clip = Some(clip_rect);
-                break;
+            let background = text_render_object(tester, "background");
+            let app = tester.cell.borrow();
+            let mut clip = None;
+            let mut ancestor = background.parent(&app);
+            while let Some(object) = ancestor {
+                if let Some(clip_rect) = object.downcast::<RenderClipRect>(&app) {
+                    clip = Some(clip_rect);
+                    break;
+                }
+                ancestor = object.parent(&app);
             }
-            ancestor = object.parent(&app);
-        }
-        let clip = clip.expect("the background sits in a ClipRect");
-        let width = clip.size(&app).width();
-        assert_eq!(
-            RenderCustomClip::<Rect>::clip(clip, &app),
-            Rect::from_ltrb(width - 30.0, 0.0, width, 100.0)
-        );
-        drop(app);
-        tester.up(gesture);
+            let clip = clip.expect("the background sits in a ClipRect");
+            let width = clip.size(&app).width();
+            assert_eq!(
+                RenderCustomClip::<Rect>::clip(clip, &app),
+                Rect::from_ltrb(width - 30.0, 0.0, width, 100.0)
+            );
+            drop(app);
+            tester.up(&gesture);
+        });
     }
 
     #[test]
     fn a_fling_item_stays_before_the_movement_duration_completes() {
-        let results = Results::new();
-        let mut tester = WidgetTester::new();
-        tester.pump_widget(build_test(&results, BuildTest::default()));
-        assert!(results.dismissed_items().is_empty());
+        test_widgets(|tester| {
+            let results = Results::new();
+            tester.pump_widget(build_test(&results, BuildTest::default()));
+            assert!(results.dismissed_items().is_empty());
 
-        check_fling_item_before_movement_end(&mut tester, 0, Left, fling_element);
-        assert_eq!(tester.count("0"), 1);
+            check_fling_item_before_movement_end(tester, 0, Left, fling_element);
+            assert_eq!(count(tester, "0"), 1);
 
-        check_fling_item_before_movement_end(&mut tester, 1, Right, fling_element);
-        assert_eq!(tester.count("1"), 1);
+            check_fling_item_before_movement_end(tester, 1, Right, fling_element);
+            assert_eq!(count(tester, "1"), 1);
+        });
     }
 
     #[test]
     fn a_fling_item_is_gone_after_the_movement_duration() {
-        let results = Results::new();
-        let mut tester = WidgetTester::new();
-        tester.pump_widget(build_test(&results, BuildTest::default()));
-        assert!(results.dismissed_items().is_empty());
+        test_widgets(|tester| {
+            let results = Results::new();
+            tester.pump_widget(build_test(&results, BuildTest::default()));
+            assert!(results.dismissed_items().is_empty());
 
-        check_fling_item_after_movement(&mut tester, 1, Left, fling_element);
-        // The resize starts after the `await` on the confirmation, which runs at the next
-        // checkpoint rather than among the frame's microtasks (waft-foundation's `Task`
-        // entry), so the child is gone a frame later than in Flutter.
-        tester.pump(Duration::ZERO);
-        assert_eq!(tester.count("1"), 0);
+            check_fling_item_after_movement(tester, 1, Left, fling_element);
+            // The resize starts after the `await` on the confirmation, which runs at the next
+            // checkpoint rather than among the frame's microtasks (waft-foundation's `Task`
+            // entry), so the child is gone a frame later than in Flutter.
+            tester.pump();
+            assert_eq!(count(tester, "1"), 0);
 
-        check_fling_item_after_movement(&mut tester, 0, Right, fling_element);
-        // The resize starts after the `await` on the confirmation, which runs at the next
-        // checkpoint rather than among the frame's microtasks (waft-foundation's `Task`
-        // entry), so the child is gone a frame later than in Flutter.
-        tester.pump(Duration::ZERO);
-        assert_eq!(tester.count("0"), 0);
+            check_fling_item_after_movement(tester, 0, Right, fling_element);
+            // The resize starts after the `await` on the confirmation, which runs at the next
+            // checkpoint rather than among the frame's microtasks (waft-foundation's `Task`
+            // entry), so the child is gone a frame later than in Flutter.
+            tester.pump();
+            assert_eq!(count(tester, "0"), 0);
+        });
     }
 
     #[test]
     fn a_horizontal_fling_short_of_the_threshold_rolls_back() {
-        let results = Results::new();
-        let mut tester = WidgetTester::new();
-        tester.pump_widget(build_test(
-            &results,
-            BuildTest {
-                scroll_direction: Axis::Horizontal,
-                ..BuildTest::default()
-            },
-        ));
-        assert!(results.dismissed_items().is_empty());
+        test_widgets(|tester| {
+            let results = Results::new();
+            tester.pump_widget(build_test(
+                &results,
+                BuildTest {
+                    scroll_direction: Axis::Horizontal,
+                    ..BuildTest::default()
+                },
+            ));
+            assert!(results.dismissed_items().is_empty());
 
-        check_fling_item_after_movement(&mut tester, 0, Left, rollback_element);
-        assert_eq!(tester.count("0"), 1);
-        assert!(results.dismissed_items().is_empty());
+            check_fling_item_after_movement(tester, 0, Left, rollback_element);
+            assert_eq!(count(tester, "0"), 1);
+            assert!(results.dismissed_items().is_empty());
 
-        check_fling_item_after_movement(&mut tester, 1, Right, rollback_element);
-        assert_eq!(tester.count("1"), 1);
-        assert!(results.dismissed_items().is_empty());
+            check_fling_item_after_movement(tester, 1, Right, rollback_element);
+            assert_eq!(count(tester, "1"), 1);
+            assert!(results.dismissed_items().is_empty());
+        });
     }
 
     #[test]
     fn a_vertical_fling_short_of_the_threshold_rolls_back() {
-        let results = Results::new();
-        let mut tester = WidgetTester::new();
-        tester.pump_widget(build_test(&results, BuildTest::default()));
-        assert!(results.dismissed_items().is_empty());
+        test_widgets(|tester| {
+            let results = Results::new();
+            tester.pump_widget(build_test(&results, BuildTest::default()));
+            assert!(results.dismissed_items().is_empty());
 
-        check_fling_item_after_movement(&mut tester, 0, Left, rollback_element);
-        assert_eq!(tester.count("0"), 1);
-        assert!(results.dismissed_items().is_empty());
+            check_fling_item_after_movement(tester, 0, Left, rollback_element);
+            assert_eq!(count(tester, "0"), 1);
+            assert!(results.dismissed_items().is_empty());
 
-        check_fling_item_after_movement(&mut tester, 1, Right, rollback_element);
-        assert_eq!(tester.count("1"), 1);
-        assert!(results.dismissed_items().is_empty());
+            check_fling_item_after_movement(tester, 1, Right, rollback_element);
+            assert_eq!(count(tester, "1"), 1);
+            assert!(results.dismissed_items().is_empty());
+        });
     }
 
     #[test]
     fn confirm_dismiss_answers_true_false_and_none() {
-        let results = Results::new();
-        let mut tester = WidgetTester::new();
-        let confirm_dismiss_direction = Rc::new(Cell::new(None));
-        let build_frame = |value: Option<bool>| {
-            build_test(
-                &results,
-                BuildTest {
-                    confirm_dismiss: Some(confirm_with(value, &confirm_dismiss_direction)),
-                    ..BuildTest::default()
-                },
-            )
-        };
+        test_widgets(|tester| {
+            let results = Results::new();
+            let confirm_dismiss_direction = Rc::new(Cell::new(None));
+            let build_frame = |value: Option<bool>| {
+                build_test(
+                    &results,
+                    BuildTest {
+                        confirm_dismiss: Some(confirm_with(value, &confirm_dismiss_direction)),
+                        ..BuildTest::default()
+                    },
+                )
+            };
 
-        // Dismiss is confirmed IFF confirmDismiss() returns true.
-        tester.pump_widget(build_frame(Some(true)));
-        assert!(results.dismissed_items().is_empty());
-
-        dismiss_item(&mut tester, 0, Right, fling_element);
-        assert_eq!(tester.count("0"), 0);
-        assert_eq!(results.dismissed_items(), [0]);
-        assert_eq!(
-            results.reported_dismiss_direction.get(),
-            DismissDirection::StartToEnd
-        );
-        assert_eq!(
-            confirm_dismiss_direction.get(),
-            Some(DismissDirection::StartToEnd)
-        );
-
-        dismiss_item(&mut tester, 1, Left, fling_element);
-        assert_eq!(tester.count("1"), 0);
-        assert_eq!(results.dismissed_items(), [0, 1]);
-        assert_eq!(
-            results.reported_dismiss_direction.get(),
-            DismissDirection::EndToStart
-        );
-        assert_eq!(
-            confirm_dismiss_direction.get(),
-            Some(DismissDirection::EndToStart)
-        );
-
-        for value in [Some(false), None] {
-            // Dismiss is not confirmed if confirmDismiss() returns false or null.
-            results.dismissed_items.borrow_mut().clear();
-            tester.pump_widget(build_frame(value));
-
-            dismiss_item(&mut tester, 0, Right, fling_element);
-            assert_eq!(tester.count("0"), 1);
+            // Dismiss is confirmed IFF confirmDismiss() returns true.
+            tester.pump_widget(build_frame(Some(true)));
             assert!(results.dismissed_items().is_empty());
+
+            dismiss_item(tester, 0, Right, fling_element);
+            assert_eq!(count(tester, "0"), 0);
+            assert_eq!(results.dismissed_items(), [0]);
+            assert_eq!(
+                results.reported_dismiss_direction.get(),
+                DismissDirection::StartToEnd
+            );
             assert_eq!(
                 confirm_dismiss_direction.get(),
                 Some(DismissDirection::StartToEnd)
             );
 
-            dismiss_item(&mut tester, 1, Left, fling_element);
-            assert_eq!(tester.count("1"), 1);
-            assert!(results.dismissed_items().is_empty());
+            dismiss_item(tester, 1, Left, fling_element);
+            assert_eq!(count(tester, "1"), 0);
+            assert_eq!(results.dismissed_items(), [0, 1]);
+            assert_eq!(
+                results.reported_dismiss_direction.get(),
+                DismissDirection::EndToStart
+            );
             assert_eq!(
                 confirm_dismiss_direction.get(),
                 Some(DismissDirection::EndToStart)
             );
-        }
+
+            for value in [Some(false), None] {
+                // Dismiss is not confirmed if confirmDismiss() returns false or null.
+                results.dismissed_items.borrow_mut().clear();
+                tester.pump_widget(build_frame(value));
+
+                dismiss_item(tester, 0, Right, fling_element);
+                assert_eq!(count(tester, "0"), 1);
+                assert!(results.dismissed_items().is_empty());
+                assert_eq!(
+                    confirm_dismiss_direction.get(),
+                    Some(DismissDirection::StartToEnd)
+                );
+
+                dismiss_item(tester, 1, Left, fling_element);
+                assert_eq!(count(tester, "1"), 1);
+                assert!(results.dismissed_items().is_empty());
+                assert_eq!(
+                    confirm_dismiss_direction.get(),
+                    Some(DismissDirection::EndToStart)
+                );
+            }
+        });
     }
 
     #[test]
     fn a_pending_confirm_dismiss_does_not_cause_errors() {
-        let results = Results::new();
-        let mut tester = WidgetTester::new();
-        let completer = Rc::new(RefCell::new(Completer::new()));
-        let build_frame = |completer: &Rc<RefCell<Completer<Option<bool>>>>| {
-            *completer.borrow_mut() = Completer::new();
-            build_test(
-                &results,
-                BuildTest {
-                    confirm_dismiss: Some(confirm_by(completer)),
-                    ..BuildTest::default()
-                },
-            )
-        };
+        test_widgets(|tester| {
+            let results = Results::new();
+            let completer = Rc::new(RefCell::new(Completer::new()));
+            let build_frame = |completer: &Rc<RefCell<Completer<Option<bool>>>>| {
+                *completer.borrow_mut() = Completer::new();
+                build_test(
+                    &results,
+                    BuildTest {
+                        confirm_dismiss: Some(confirm_by(completer)),
+                        ..BuildTest::default()
+                    },
+                )
+            };
 
-        // false and true for _handleDragEnd - when dragged to the end and released, then false
-        // and true for _handleDismissStatusChanged - when fling reaches the end.
-        for (mechanism, answer) in [
-            (dismiss_element as DismissMethod, false),
-            (dismiss_element, true),
-            (fling_element, false),
-            (fling_element, true),
-        ] {
-            tester.pump_widget(build_frame(&completer));
+            // false and true for _handleDragEnd - when dragged to the end and released, then false
+            // and true for _handleDismissStatusChanged - when fling reaches the end.
+            for (mechanism, answer) in [
+                (dismiss_element as DismissMethod, false),
+                (dismiss_element, true),
+                (fling_element, false),
+                (fling_element, true),
+            ] {
+                tester.pump_widget(build_frame(&completer));
 
-            dismiss_item(&mut tester, 0, Right, mechanism);
-            assert_eq!(tester.count("0"), 1);
-            assert!(results.dismissed_items().is_empty());
+                dismiss_item(tester, 0, Right, mechanism);
+                assert_eq!(count(tester, "0"), 1);
+                assert!(results.dismissed_items().is_empty());
 
-            tester.pump_widget(SizedBox::new().into_widget());
-            completer.borrow().complete(&mut tester.app(), Some(answer));
-            tester.pump(Duration::ZERO);
-        }
+                tester.pump_widget(SizedBox::new().into_widget());
+                completer
+                    .borrow()
+                    .complete(&mut tester.cell.borrow_mut(), Some(answer));
+                tester.pump();
+            }
+        });
     }
 
     #[test]
     fn a_dismissible_cannot_be_dragged_while_confirm_dismiss_is_pending() {
-        let results = Results::new();
-        let mut tester = WidgetTester::new();
-        let completer = Rc::new(RefCell::new(Completer::new()));
-        tester.pump_widget(build_test(
-            &results,
-            BuildTest {
-                confirm_dismiss: Some(confirm_by(&completer)),
-                ..BuildTest::default()
-            },
-        ));
+        test_widgets(|tester| {
+            let results = Results::new();
+            let completer = Rc::new(RefCell::new(Completer::new()));
+            tester.pump_widget(build_test(
+                &results,
+                BuildTest {
+                    confirm_dismiss: Some(confirm_by(&completer)),
+                    ..BuildTest::default()
+                },
+            ));
 
-        // Trigger confirmDismiss call.
-        dismiss_item(&mut tester, 0, Right, dismiss_element);
-        let position = tester.get_top_left("0");
+            // Trigger confirmDismiss call.
+            dismiss_item(tester, 0, Right, dismiss_element);
+            let position = get_top_left(tester, "0");
 
-        // Try to move and verify it has not moved.
-        let drag_at = Offset::new(100.0, tester.get_top_left("0").dy());
-        let mut gesture = tester.start_gesture(drag_at);
-        tester.move_to(
-            &mut gesture,
-            drag_at + Offset::new(100.0, 0.0),
-            Duration::ZERO,
-        );
-        tester.up(gesture);
-        tester.pump(Duration::ZERO);
-        assert_eq!(tester.get_top_left("0"), position);
+            // Try to move and verify it has not moved.
+            let drag_at = Offset::new(100.0, get_top_left(tester, "0").dy());
+            let mut gesture = TestPointer::touch(1);
+            tester.down(&mut gesture, drag_at);
+            tester.move_to(&mut gesture, drag_at + Offset::new(100.0, 0.0), true);
+            tester.up(&gesture);
+            tester.pump();
+            assert_eq!(get_top_left(tester, "0"), position);
+        });
     }
 
     #[test]
     fn an_item_dragged_to_the_end_comes_back_when_confirm_dismiss_answers_false() {
-        let results = Results::new();
-        let mut tester = WidgetTester::new();
-        let completer = Rc::new(RefCell::new(Completer::new()));
-        tester.pump_widget(build_test(
-            &results,
-            BuildTest {
-                confirm_dismiss: Some(confirm_by(&completer)),
-                ..BuildTest::default()
-            },
-        ));
+        test_widgets(|tester| {
+            let results = Results::new();
+            let completer = Rc::new(RefCell::new(Completer::new()));
+            tester.pump_widget(build_test(
+                &results,
+                BuildTest {
+                    confirm_dismiss: Some(confirm_by(&completer)),
+                    ..BuildTest::default()
+                },
+            ));
 
-        let position = tester.get_top_left("0");
-        dismiss_item(&mut tester, 0, Right, dismiss_element);
-        completer.borrow().complete(&mut tester.app(), Some(false));
-        tester.pump_and_settle();
-        assert_eq!(tester.get_top_left("0"), position);
+            let position = get_top_left(tester, "0");
+            dismiss_item(tester, 0, Right, dismiss_element);
+            completer
+                .borrow()
+                .complete(&mut tester.cell.borrow_mut(), Some(false));
+            tester.pump_and_settle();
+            assert_eq!(get_top_left(tester, "0"), position);
+        });
     }
 
     #[test]
     fn a_null_resize_duration_calls_on_dismissed_at_once() {
-        let mut tester = WidgetTester::new();
-        let resized = Rc::new(Cell::new(false));
-        let dismissed = Rc::new(Cell::new(false));
-        let (on_resized, on_dismissed) = (Rc::clone(&resized), Rc::clone(&dismissed));
-        tester.pump_widget(
-            Directionality::new(
-                TextDirection::Ltr,
-                Dismissible::new(
-                    waft_foundation::UniqueKey::new().into(),
-                    SizedBox::new()
-                        .width(100.0)
-                        .height(100.0)
-                        .child(Label::new("0")),
+        test_widgets(|tester| {
+            let resized = Rc::new(Cell::new(false));
+            let dismissed = Rc::new(Cell::new(false));
+            let (on_resized, on_dismissed) = (Rc::clone(&resized), Rc::clone(&dismissed));
+            tester.pump_widget(
+                Directionality::new(
+                    TextDirection::Ltr,
+                    Dismissible::new(
+                        waft_foundation::UniqueKey::new().into(),
+                        SizedBox::new()
+                            .width(100.0)
+                            .height(100.0)
+                            .child(Text::new("0")),
+                    )
+                    .drag_start_behavior(DragStartBehavior::Down)
+                    .resize_duration(None)
+                    .on_dismissed(move |_app, _direction| on_dismissed.set(true))
+                    .on_resize(move |_app| on_resized.set(true)),
                 )
-                .drag_start_behavior(DragStartBehavior::Down)
-                .resize_duration(None)
-                .on_dismissed(move |_app, _direction| on_dismissed.set(true))
-                .on_resize(move |_app| on_resized.set(true)),
-            )
-            .into_widget(),
-        );
+                .into_widget(),
+            );
 
-        dismiss_element(&mut tester, "0", Right);
-        tester.pump(Duration::ZERO);
-        assert!(dismissed.get());
-        assert!(!resized.get());
+            dismiss_element(tester, "0", Right);
+            tester.pump();
+            assert!(dismissed.get());
+            assert!(!resized.get());
+        });
     }
 
+    /// Dart's case takes the error and ends; here the panic unwound the pump, and the tester
+    /// leaves that half-built tree alone at its end (`testing/PORTING.md`).
     #[test]
     fn a_dismissed_dismissible_still_in_the_tree_panics() {
-        let results = Results::new();
-        let mut tester = WidgetTester::new();
-        let on_dismissed_results = Rc::clone(&results);
-        tester.pump_widget(
-            Directionality::new(
-                TextDirection::Ltr,
-                StatefulBuilder::new(move |_app, _context, set_state| {
-                    let results = Rc::clone(&on_dismissed_results);
-                    ListView::new()
-                        .drag_start_behavior(DragStartBehavior::Down)
-                        .item_extent(100.0)
-                        .children([Dismissible::new(
-                            ValueKey::new(1i64).into(),
-                            SizedBox::new()
-                                .width(100.0)
-                                .height(100.0)
-                                .child(Label::new(1.to_string())),
-                        )
-                        .drag_start_behavior(DragStartBehavior::Down)
-                        .on_dismissed(move |app, direction| {
-                            let results = Rc::clone(&results);
-                            set_state(app, &mut move |_app| {
-                                results.reported_dismiss_direction.set(direction);
-                                assert!(!results.dismissed_items.borrow().contains(&1));
-                                results.dismissed_items.borrow_mut().push(1);
-                            });
-                        })
-                        .cross_axis_end_offset(CROSS_AXIS_END_OFFSET)
-                        .into_widget()])
-                        .into_widget()
-                }),
-            )
-            .into_widget(),
-        );
-        assert!(results.dismissed_items().is_empty());
-        let error = catch_unwind(AssertUnwindSafe(|| {
-            dismiss_item(&mut tester, 1, Right, dismiss_element)
-        }))
-        .expect_err("the rebuild that keeps the dismissed Dismissible panics");
-        assert_eq!(results.dismissed_items(), [1]);
-        let message = match error.downcast::<&str>() {
-            Ok(message) => message.to_string(),
-            Err(error) => *error.downcast::<String>().expect("a panic message"),
-        };
-        let mut lines = message.lines();
-        assert_eq!(
-            lines.next(),
-            Some("A dismissed Dismissible widget is still part of the tree.")
-        );
-        // Dart's last diagnostic, the hint.
-        assert_eq!(
-            lines.next(),
-            Some(
-                "Make sure to implement the onDismissed handler and to immediately remove the \
-                 Dismissible widget from the application once that handler has fired."
-            )
-        );
-        assert_eq!(lines.next(), None);
+        test_widgets(|tester| {
+            let results = Results::new();
+            let on_dismissed_results = Rc::clone(&results);
+            tester.pump_widget(
+                Directionality::new(
+                    TextDirection::Ltr,
+                    StatefulBuilder::new(move |_app, _context, set_state| {
+                        let results = Rc::clone(&on_dismissed_results);
+                        ListView::new()
+                            .drag_start_behavior(DragStartBehavior::Down)
+                            .item_extent(100.0)
+                            .children([Dismissible::new(
+                                ValueKey::new(1i64).into(),
+                                SizedBox::new()
+                                    .width(100.0)
+                                    .height(100.0)
+                                    .child(Text::new(1.to_string())),
+                            )
+                            .drag_start_behavior(DragStartBehavior::Down)
+                            .on_dismissed(move |app, direction| {
+                                let results = Rc::clone(&results);
+                                set_state(app, &mut move |_app| {
+                                    results.reported_dismiss_direction.set(direction);
+                                    assert!(!results.dismissed_items.borrow().contains(&1));
+                                    results.dismissed_items.borrow_mut().push(1);
+                                });
+                            })
+                            .cross_axis_end_offset(CROSS_AXIS_END_OFFSET)
+                            .into_widget()])
+                            .into_widget()
+                    }),
+                )
+                .into_widget(),
+            );
+            assert!(results.dismissed_items().is_empty());
+            let error = catch_unwind(AssertUnwindSafe(|| {
+                dismiss_item(tester, 1, Right, dismiss_element)
+            }))
+            .expect_err("the rebuild that keeps the dismissed Dismissible panics");
+            assert_eq!(results.dismissed_items(), [1]);
+            let message = match error.downcast_ref::<&str>() {
+                Some(message) => message.to_string(),
+                None => error
+                    .downcast_ref::<String>()
+                    .expect("a panic message")
+                    .clone(),
+            };
+            let mut lines = message.lines();
+            assert_eq!(
+                lines.next(),
+                Some("A dismissed Dismissible widget is still part of the tree.")
+            );
+            // Dart's last diagnostic, the hint.
+            assert_eq!(
+                lines.next(),
+                Some(
+                    "Make sure to implement the onDismissed handler and to immediately remove the \
+                     Dismissible widget from the application once that handler has fired."
+                )
+            );
+            assert_eq!(lines.next(), None);
+        });
     }
 
     // ---- not in dismissible_test.dart: the constructor's background assert ----
@@ -2643,12 +2457,13 @@ mod tests {
 
     #[test]
     fn a_secondary_background_may_be_given_before_the_background() {
-        let mut tester = WidgetTester::new();
-        tester.pump_widget(backgrounds_test(
-            backgrounds_item()
-                .secondary_background(SizedBox::new())
-                .background(SizedBox::new()),
-        ));
+        test_widgets(|tester| {
+            tester.pump_widget(backgrounds_test(
+                backgrounds_item()
+                    .secondary_background(SizedBox::new())
+                    .background(SizedBox::new()),
+            ));
+        });
     }
 
     #[test]
@@ -2661,199 +2476,204 @@ mod tests {
 
     #[test]
     fn behavior_decides_how_the_dismissible_is_hit() {
-        let mut tester = WidgetTester::new();
-        let did_receive_pointer_down = Rc::new(Cell::new(false));
-        let build_stack = |child: WidgetRef| {
-            let received = Rc::clone(&did_receive_pointer_down);
-            Directionality::new(
-                TextDirection::Ltr,
-                Stack::new().children([
-                    Listener::new()
-                        .on_pointer_down(Rc::new(move |_app, _event| received.set(true)))
-                        .child(
-                            Container::new()
-                                .width(100.0)
-                                .height(100.0)
-                                .color(Color::from_argb(0xFF, 0x00, 0xFF, 0x00)),
-                        )
-                        .into_widget(),
-                    child,
-                ]),
-            )
-            .into_widget()
-        };
-        let dismissible = || {
-            Dismissible::new(
-                ValueKey::new(1i64).into(),
-                SizedBox::new().width(100.0).height(100.0),
-            )
-        };
+        test_widgets(|tester| {
+            let did_receive_pointer_down = Rc::new(Cell::new(false));
+            let build_stack = |child: WidgetRef| {
+                let received = Rc::clone(&did_receive_pointer_down);
+                Directionality::new(
+                    TextDirection::Ltr,
+                    Stack::new().children([
+                        Listener::new()
+                            .on_pointer_down(Rc::new(move |_app, _event| received.set(true)))
+                            .child(
+                                Container::new()
+                                    .width(100.0)
+                                    .height(100.0)
+                                    .color(Color::from_argb(0xFF, 0x00, 0xFF, 0x00)),
+                            )
+                            .into_widget(),
+                        child,
+                    ]),
+                )
+                .into_widget()
+            };
+            let dismissible = || {
+                Dismissible::new(
+                    ValueKey::new(1i64).into(),
+                    SizedBox::new().width(100.0).height(100.0),
+                )
+            };
 
-        tester.pump_widget(build_stack(dismissible().into_widget()));
-        tester.tap_at(Offset::new(10.0, 10.0));
-        assert!(!did_receive_pointer_down.get());
+            tester.pump_widget(build_stack(dismissible().into_widget()));
+            tester.tap(Offset::new(10.0, 10.0), 1);
+            assert!(!did_receive_pointer_down.get());
 
-        for (behavior, received) in [
-            (HitTestBehavior::DeferToChild, true),
-            (HitTestBehavior::Opaque, false),
-            (HitTestBehavior::Translucent, true),
-        ] {
-            did_receive_pointer_down.set(false);
-            tester.pump_widget(build_stack(dismissible().behavior(behavior).into_widget()));
-            tester.tap_at(Offset::new(10.0, 10.0));
-            assert_eq!(did_receive_pointer_down.get(), received, "{behavior:?}");
-        }
+            for (behavior, received) in [
+                (HitTestBehavior::DeferToChild, true),
+                (HitTestBehavior::Opaque, false),
+                (HitTestBehavior::Translucent, true),
+            ] {
+                did_receive_pointer_down.set(false);
+                tester.pump_widget(build_stack(dismissible().behavior(behavior).into_widget()));
+                tester.tap(Offset::new(10.0, 10.0), 1);
+                assert_eq!(did_receive_pointer_down.get(), received, "{behavior:?}");
+            }
+        });
     }
 
     #[test]
     fn dismiss_direction_none_does_not_dismiss() {
-        let results = Results::new();
-        let mut tester = WidgetTester::new();
-        tester.pump_widget(build_test(
-            &results,
-            BuildTest {
-                dismiss_direction: DismissDirection::None,
-                scroll_physics: Some(Rc::new(NeverScrollableScrollPhysics::new())),
-                ..BuildTest::default()
-            },
-        ));
-        assert!(results.dismissed_items().is_empty());
+        test_widgets(|tester| {
+            let results = Results::new();
+            tester.pump_widget(build_test(
+                &results,
+                BuildTest {
+                    dismiss_direction: DismissDirection::None,
+                    scroll_physics: Some(Rc::new(NeverScrollableScrollPhysics::new())),
+                    ..BuildTest::default()
+                },
+            ));
+            assert!(results.dismissed_items().is_empty());
 
-        for direction in [Left, Right, AxisUp, AxisDown] {
-            dismiss_item(&mut tester, 0, direction, dismiss_element);
-        }
-        assert_eq!(tester.count("0"), 1);
+            for direction in [Left, Right, AxisUp, AxisDown] {
+                dismiss_item(tester, 0, direction, dismiss_element);
+            }
+            assert_eq!(count(tester, "0"), 1);
+        });
     }
 
     #[test]
     fn dismiss_direction_none_does_not_prevent_scrolling() {
-        let results = Results::new();
-        let mut tester = WidgetTester::new();
-        let controller = ScrollController::default(&mut tester.app());
-        tester.pump_widget(build_test(
-            &results,
-            BuildTest {
-                controller: Some(controller.clone()),
-                dismiss_direction: DismissDirection::None,
-                ..BuildTest::default()
-            },
-        ));
-        assert!(results.dismissed_items().is_empty());
-        assert_eq!(controller.offset(&tester.app()), 0.0);
+        test_widgets(|tester| {
+            let results = Results::new();
+            let controller = tester.update(ScrollController::default);
+            tester.pump_widget(build_test(
+                &results,
+                BuildTest {
+                    controller: Some(controller.clone()),
+                    dismiss_direction: DismissDirection::None,
+                    ..BuildTest::default()
+                },
+            ));
+            assert!(results.dismissed_items().is_empty());
+            assert_eq!(controller.offset(&tester.cell.borrow()), 0.0);
 
-        dismiss_item(&mut tester, 0, Left, dismiss_element);
-        assert_eq!(controller.offset(&tester.app()), 0.0);
-        dismiss_item(&mut tester, 0, Right, dismiss_element);
-        assert_eq!(controller.offset(&tester.app()), 0.0);
-        dismiss_item(&mut tester, 0, AxisDown, dismiss_element);
-        assert_eq!(controller.offset(&tester.app()), 0.0);
-        dismiss_item(&mut tester, 0, AxisUp, dismiss_element);
-        // Within f32: pointer positions reach the list through valo's f32 matrices
-        // (waft-gestures' `push_transform` entry).
-        assert!((controller.offset(&tester.app()) - 100.0).abs() < 1e-4);
+            dismiss_item(tester, 0, Left, dismiss_element);
+            assert_eq!(controller.offset(&tester.cell.borrow()), 0.0);
+            dismiss_item(tester, 0, Right, dismiss_element);
+            assert_eq!(controller.offset(&tester.cell.borrow()), 0.0);
+            dismiss_item(tester, 0, AxisDown, dismiss_element);
+            assert_eq!(controller.offset(&tester.cell.borrow()), 0.0);
+            dismiss_item(tester, 0, AxisUp, dismiss_element);
+            // Within f32: pointer positions reach the list through valo's f32 matrices
+            // (waft-gestures' `push_transform` entry).
+            assert!((controller.offset(&tester.cell.borrow()) - 100.0).abs() < 1e-4);
+        });
     }
 
     #[test]
     fn on_update_reports_the_progress_and_the_threshold() {
-        let results = Results::new();
-        let mut tester = WidgetTester::new();
-        tester.pump_widget(build_test(
-            &results,
-            BuildTest {
-                scroll_direction: Axis::Horizontal,
-                ..BuildTest::default()
-            },
-        ));
-        assert!(results.dismissed_items().is_empty());
+        test_widgets(|tester| {
+            let results = Results::new();
+            tester.pump_widget(build_test(
+                &results,
+                BuildTest {
+                    scroll_direction: Axis::Horizontal,
+                    ..BuildTest::default()
+                },
+            ));
+            assert!(results.dismissed_items().is_empty());
 
-        // Unsuccessful dismiss, fractional progress reported
-        drag_item(&mut tester, 0, Right, 20.0);
-        assert_eq!(results.reported_dismiss_update_progress.get(), 0.2);
+            // Unsuccessful dismiss, fractional progress reported
+            drag_item(tester, 0, Right, 20.0);
+            assert_eq!(results.reported_dismiss_update_progress.get(), 0.2);
 
-        // Successful dismiss therefore threshold has been reached
-        dismiss_item(&mut tester, 0, Left, fling_element);
-        assert_eq!(tester.count("0"), 0);
-        assert_eq!(results.dismissed_items(), [0]);
-        assert_eq!(
-            results.reported_dismiss_update_reached_direction.get(),
-            Some(DismissDirection::EndToStart)
-        );
-        assert!(results.reported_dismiss_update_reached.get());
-        assert!(results.reported_dismiss_update_previous_reached.get());
-        assert_eq!(results.reported_dismiss_update_progress.get(), 1.0);
+            // Successful dismiss therefore threshold has been reached
+            dismiss_item(tester, 0, Left, fling_element);
+            assert_eq!(count(tester, "0"), 0);
+            assert_eq!(results.dismissed_items(), [0]);
+            assert_eq!(
+                results.reported_dismiss_update_reached_direction.get(),
+                Some(DismissDirection::EndToStart)
+            );
+            assert!(results.reported_dismiss_update_reached.get());
+            assert!(results.reported_dismiss_update_previous_reached.get());
+            assert_eq!(results.reported_dismiss_update_progress.get(), 1.0);
 
-        // Unsuccessful dismiss, threshold has not been reached
-        check_fling_item_after_movement(&mut tester, 1, Right, rollback_element);
-        assert_eq!(tester.count("1"), 1);
-        assert_eq!(results.dismissed_items(), [0]);
-        assert_eq!(
-            results.reported_dismiss_update_reached_direction.get(),
-            Some(DismissDirection::StartToEnd)
-        );
-        assert!(!results.reported_dismiss_update_reached.get());
-        assert!(!results.reported_dismiss_update_previous_reached.get());
-        assert_eq!(results.reported_dismiss_update_progress.get(), 0.0);
+            // Unsuccessful dismiss, threshold has not been reached
+            check_fling_item_after_movement(tester, 1, Right, rollback_element);
+            assert_eq!(count(tester, "1"), 1);
+            assert_eq!(results.dismissed_items(), [0]);
+            assert_eq!(
+                results.reported_dismiss_update_reached_direction.get(),
+                Some(DismissDirection::StartToEnd)
+            );
+            assert!(!results.reported_dismiss_update_reached.get());
+            assert!(!results.reported_dismiss_update_previous_reached.get());
+            assert_eq!(results.reported_dismiss_update_progress.get(), 0.0);
 
-        // Another successful dismiss from another direction
-        dismiss_item(&mut tester, 1, Right, fling_element);
-        assert_eq!(tester.count("1"), 0);
-        assert_eq!(results.dismissed_items(), [0, 1]);
-        assert_eq!(
-            results.reported_dismiss_update_reached_direction.get(),
-            Some(DismissDirection::StartToEnd)
-        );
-        assert!(results.reported_dismiss_update_reached.get());
-        assert!(results.reported_dismiss_update_previous_reached.get());
-        assert_eq!(results.reported_dismiss_update_progress.get(), 1.0);
+            // Another successful dismiss from another direction
+            dismiss_item(tester, 1, Right, fling_element);
+            assert_eq!(count(tester, "1"), 0);
+            assert_eq!(results.dismissed_items(), [0, 1]);
+            assert_eq!(
+                results.reported_dismiss_update_reached_direction.get(),
+                Some(DismissDirection::StartToEnd)
+            );
+            assert!(results.reported_dismiss_update_reached.get());
+            assert!(results.reported_dismiss_update_previous_reached.get());
+            assert_eq!(results.reported_dismiss_update_progress.get(), 1.0);
 
-        tester.pump_widget(build_test(
-            &results,
-            BuildTest {
-                scroll_direction: Axis::Horizontal,
-                confirm_dismiss: Some(Rc::new(|_app, _direction| Task::ready(Some(false)))),
-                ..BuildTest::default()
-            },
-        ));
+            tester.pump_widget(build_test(
+                &results,
+                BuildTest {
+                    scroll_direction: Axis::Horizontal,
+                    confirm_dismiss: Some(Rc::new(|_app, _direction| Task::ready(Some(false)))),
+                    ..BuildTest::default()
+                },
+            ));
 
-        // Threshold has been reached but dismiss was not confirmed
-        dismiss_item(&mut tester, 2, Right, fling_element);
-        assert_eq!(tester.count("2"), 1);
-        assert_eq!(results.dismissed_items(), [0, 1]);
-        assert_eq!(
-            results.reported_dismiss_update_reached_direction.get(),
-            Some(DismissDirection::StartToEnd)
-        );
-        assert!(!results.reported_dismiss_update_reached.get());
-        assert!(!results.reported_dismiss_update_previous_reached.get());
-        assert_eq!(results.reported_dismiss_update_progress.get(), 0.0);
+            // Threshold has been reached but dismiss was not confirmed
+            dismiss_item(tester, 2, Right, fling_element);
+            assert_eq!(count(tester, "2"), 1);
+            assert_eq!(results.dismissed_items(), [0, 1]);
+            assert_eq!(
+                results.reported_dismiss_update_reached_direction.get(),
+                Some(DismissDirection::StartToEnd)
+            );
+            assert!(!results.reported_dismiss_update_reached.get());
+            assert!(!results.reported_dismiss_update_previous_reached.get());
+            assert_eq!(results.reported_dismiss_update_progress.get(), 0.0);
+        });
     }
 
     #[test]
     fn changing_the_direction_keeps_the_child_state() {
-        let mut tester = WidgetTester::new();
-        let build_frame = |direction: DismissDirection| {
-            Directionality::new(
-                TextDirection::Ltr,
-                Dismissible::new(
-                    ValueKey::new("Dismissible").into(),
-                    SizedBox::new()
-                        .width(100.0)
-                        .height(100.0)
-                        .child(Label::new("I Love Flutter!")),
+        test_widgets(|tester| {
+            let build_frame = |direction: DismissDirection| {
+                Directionality::new(
+                    TextDirection::Ltr,
+                    Dismissible::new(
+                        ValueKey::new("Dismissible").into(),
+                        SizedBox::new()
+                            .width(100.0)
+                            .height(100.0)
+                            .child(Text::new("I Love Flutter!")),
+                    )
+                    .drag_start_behavior(DragStartBehavior::Down)
+                    .direction(direction)
+                    .resize_duration(None),
                 )
-                .drag_start_behavior(DragStartBehavior::Down)
-                .direction(direction)
-                .resize_duration(None),
-            )
-            .into_widget()
-        };
+                .into_widget()
+            };
 
-        tester.pump_widget(build_frame(DismissDirection::Horizontal));
-        let text_render_object_begin = tester.render_object("I Love Flutter!");
+            tester.pump_widget(build_frame(DismissDirection::Horizontal));
+            let text_render_object_begin = text_render_object(tester, "I Love Flutter!");
 
-        tester.pump_widget(build_frame(DismissDirection::None));
-        let text_render_object_end = tester.render_object("I Love Flutter!");
+            tester.pump_widget(build_frame(DismissDirection::None));
+            let text_render_object_end = text_render_object(tester, "I Love Flutter!");
 
-        assert_eq!(text_render_object_begin, text_render_object_end);
+            assert_eq!(text_render_object_begin, text_render_object_end);
+        });
     }
 }

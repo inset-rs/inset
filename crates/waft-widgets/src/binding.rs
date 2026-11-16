@@ -1584,31 +1584,20 @@ mod tests {
     use std::rc::Rc;
     use std::time::Duration;
 
-    use waft_embedder::{Size, TargetPlatform};
+    use waft_embedder::Size;
     use waft_foundation::{App, AppCell, Completer, Handle};
     use waft_rendering::{
         AnyRenderObject, BoxConstraints, RenderBox, RenderConstrainedBox, RenderConstrainedBoxBase,
         RenderHandle, RendererBinding,
     };
     use waft_scheduler::SchedulerBinding;
-    use waft_test::{IMPLICIT_VIEW_ID, TestPlatform, TestView};
+    use waft_test::{IMPLICIT_VIEW_ID, TestPlatform};
 
     use super::*;
     use crate::framework::{
         BuildContext, LeafRenderObjectWidget, RenderObjectWidget, State, StateData, StatefulWidget,
     };
-    use crate::test_harness::pump_every_view;
-
-    /// An [`App`] over one 800x600 view at 2x, with the view and the platform to read back.
-    fn app_with_view() -> (Rc<AppCell>, Rc<TestView>, Rc<TestPlatform>) {
-        let view = Rc::new(TestView::with_pixel_ratio(800.0, 600.0, 2.0));
-        let platform = Rc::new(
-            TestPlatform::new()
-                .on(TargetPlatform::MacOS)
-                .with_view(view.clone()),
-        );
-        (AppCell::with_platform(platform.clone()), view, platform)
-    }
+    use crate::testing::{WidgetTester, test_widgets};
 
     #[derive(Debug)]
     struct Sized {
@@ -1680,9 +1669,21 @@ mod tests {
         child.size(app)
     }
 
+    /// An app with flutter_test's view and no tree yet, for the cases on `run_app` itself, which
+    /// a [`WidgetTester`]'s pre-test tree would already have attached.
+    fn app_with_view() -> (Rc<AppCell>, Rc<waft_test::TestView>) {
+        let view = Rc::new(waft_test::TestView::with_pixel_ratio(
+            WidgetTester::SIZE.width() * WidgetTester::DEVICE_PIXEL_RATIO,
+            WidgetTester::SIZE.height() * WidgetTester::DEVICE_PIXEL_RATIO,
+            WidgetTester::DEVICE_PIXEL_RATIO,
+        ));
+        let platform = Rc::new(TestPlatform::new().with_view(view.clone()));
+        (AppCell::with_platform(platform), view)
+    }
+
     #[test]
     fn run_app_attaches_on_the_next_timer_turn_and_draws_a_warm_up_frame() {
-        let (cell, view, _platform) = app_with_view();
+        let (cell, view) = app_with_view();
         let mut app = cell.borrow_mut();
         run_app(
             &mut app,
@@ -1709,43 +1710,47 @@ mod tests {
             1,
             "the warm-up frame drew without a host frame"
         );
-        assert_eq!(root_child_size(&mut app), Size::new(400.0, 300.0));
+        assert_eq!(root_child_size(&mut app), Size::new(800.0, 600.0));
     }
 
     #[test]
     fn set_state_schedules_a_frame_that_rebuilds_before_layout() {
-        let (cell, view, platform) = app_with_view();
-        let mut app = cell.borrow_mut();
-        let size = Rc::new(Cell::new(Size::new(30.0, 20.0)));
-        let state = Rc::new(Cell::new(None));
-        run_app(
-            &mut app,
-            Resizable {
-                size: Rc::clone(&size),
-                state: Rc::clone(&state),
-            }
-            .into_widget(),
-        );
-        drop(app);
-        cell.elapse(Duration::ZERO);
-        let mut app = cell.borrow_mut();
-        assert_eq!(view.presented(), 1, "the warm-up frame");
-        platform.take_frame_requests();
+        test_widgets(|tester| {
+            let mut app = tester.cell.borrow_mut();
+            let size = Rc::new(Cell::new(Size::new(30.0, 20.0)));
+            let state = Rc::new(Cell::new(None));
+            run_app(
+                &mut app,
+                Resizable {
+                    size: Rc::clone(&size),
+                    state: Rc::clone(&state),
+                }
+                .into_widget(),
+            );
+            drop(app);
+            tester.cell.elapse(Duration::ZERO);
+            let mut app = tester.cell.borrow_mut();
+            // The pre-test tree drew the tester's first frame; `run_app`'s warm-up frame is the next.
+            assert_eq!(tester.view().presented(), 2, "the warm-up frame");
+            tester.platform().take_frame_requests();
 
-        size.set(Size::new(50.0, 60.0));
-        let state = state.get().expect("the state registered itself");
-        state.set_state(&mut app, |_| {});
-        assert_eq!(platform.frame_requests(), [IMPLICIT_VIEW_ID]);
+            size.set(Size::new(50.0, 60.0));
+            let state = state.get().expect("the state registered itself");
+            state.set_state(&mut app, |_| {});
+            assert_eq!(tester.platform().frame_requests(), [IMPLICIT_VIEW_ID]);
 
-        pump_every_view(&mut app, Duration::from_millis(16));
-        assert_eq!(view.presented(), 2);
-        assert_eq!(root_child_size(&mut app), Size::new(400.0, 300.0));
-        let root = WidgetsBinding::instance(&mut app)
-            .root_element(&app)
-            .expect("attached");
-        let mut leaves = Vec::new();
-        collect_leaves(&app, root, &mut leaves);
-        assert_eq!(leaves.len(), 1);
+            drop(app);
+            tester.pump_by(Duration::from_millis(16));
+            let mut app = tester.cell.borrow_mut();
+            assert_eq!(tester.view().presented(), 3);
+            assert_eq!(root_child_size(&mut app), Size::new(800.0, 600.0));
+            let root = WidgetsBinding::instance(&mut app)
+                .root_element(&app)
+                .expect("attached");
+            let mut leaves = Vec::new();
+            collect_leaves(&app, root, &mut leaves);
+            assert_eq!(leaves.len(), 1);
+        });
     }
 
     fn collect_leaves(app: &App, element: AnyElement, leaves: &mut Vec<AnyElement>) {
@@ -1761,38 +1766,43 @@ mod tests {
 
     #[test]
     fn running_a_second_app_updates_the_root_in_place() {
-        let (cell, _view, _platform) = app_with_view();
-        let mut app = cell.borrow_mut();
-        run_app(
-            &mut app,
-            Sized {
-                size: Size::new(30.0, 20.0),
-            }
-            .into_widget(),
-        );
-        drop(app);
-        cell.elapse(Duration::ZERO);
-        let mut app = cell.borrow_mut();
-        pump_every_view(&mut app, Duration::ZERO);
-        let binding = WidgetsBinding::instance(&mut app);
-        let first_root = binding.root_element(&app);
+        test_widgets(|tester| {
+            let mut app = tester.cell.borrow_mut();
+            run_app(
+                &mut app,
+                Sized {
+                    size: Size::new(30.0, 20.0),
+                }
+                .into_widget(),
+            );
+            drop(app);
+            tester.cell.elapse(Duration::ZERO);
+            let app = tester.cell.borrow();
+            drop(app);
+            tester.pump();
+            let mut app = tester.cell.borrow_mut();
+            let binding = WidgetsBinding::instance(&mut app);
+            let first_root = binding.root_element(&app);
 
-        run_app(
-            &mut app,
-            Sized {
-                size: Size::new(10.0, 10.0),
-            }
-            .into_widget(),
-        );
-        drop(app);
-        cell.elapse(Duration::ZERO);
-        let mut app = cell.borrow_mut();
-        assert_eq!(binding.root_element(&app), first_root);
-        pump_every_view(&mut app, Duration::from_millis(16));
-        assert_eq!(
-            RendererBinding::instance(&mut app).render_views(&app).len(),
-            1
-        );
+            run_app(
+                &mut app,
+                Sized {
+                    size: Size::new(10.0, 10.0),
+                }
+                .into_widget(),
+            );
+            drop(app);
+            tester.cell.elapse(Duration::ZERO);
+            let app = tester.cell.borrow();
+            assert_eq!(binding.root_element(&app), first_root);
+            drop(app);
+            tester.pump_by(Duration::from_millis(16));
+            let mut app = tester.cell.borrow_mut();
+            assert_eq!(
+                RendererBinding::instance(&mut app).render_views(&app).len(),
+                1
+            );
+        });
     }
 
     /// An observer that logs each exit request it is asked, and answers once `answer`
@@ -1983,35 +1993,39 @@ mod tests {
 
     #[test]
     fn a_metrics_change_reaches_the_observers_and_the_media_query() {
-        let (cell, view, _platform) = app_with_view();
-        let mut app = cell.borrow_mut();
-        let sizes = Rc::new(std::cell::RefCell::new(Vec::new()));
-        let probe = crate::widgets::basic::Builder::new({
-            let sizes = Rc::clone(&sizes);
-            move |app, context| {
-                sizes
-                    .borrow_mut()
-                    .push(crate::MediaQuery::size_of(app, context));
-                Sized {
-                    size: Size::new(1.0, 1.0),
+        test_widgets(|tester| {
+            let mut app = tester.cell.borrow_mut();
+            let sizes = Rc::new(std::cell::RefCell::new(Vec::new()));
+            let probe = crate::widgets::basic::Builder::new({
+                let sizes = Rc::clone(&sizes);
+                move |app, context| {
+                    sizes
+                        .borrow_mut()
+                        .push(crate::MediaQuery::size_of(app, context));
+                    Sized {
+                        size: Size::new(1.0, 1.0),
+                    }
+                    .into_widget()
                 }
-                .into_widget()
-            }
-        });
-        run_app(&mut app, probe.into_widget());
-        drop(app);
-        cell.elapse(Duration::ZERO);
-        let mut app = cell.borrow_mut();
-        pump_every_view(&mut app, Duration::ZERO);
-        assert_eq!(*sizes.borrow(), vec![Size::new(400.0, 300.0)]);
+            });
+            run_app(&mut app, probe.into_widget());
+            drop(app);
+            tester.cell.elapse(Duration::ZERO);
+            let app = tester.cell.borrow();
+            drop(app);
+            tester.pump();
+            let mut app = tester.cell.borrow_mut();
+            assert_eq!(*sizes.borrow(), vec![Size::new(800.0, 600.0)]);
 
-        view.resize(1000.0, 400.0);
-        RendererBinding::instance(&mut app).handle_metrics_changed(&mut app);
-        pump_every_view(&mut app, Duration::from_millis(16));
-        assert_eq!(
-            *sizes.borrow(),
-            vec![Size::new(400.0, 300.0), Size::new(500.0, 200.0)]
-        );
+            tester.view().resize(1500.0, 600.0);
+            RendererBinding::instance(&mut app).handle_metrics_changed(&mut app);
+            drop(app);
+            tester.pump_by(Duration::from_millis(16));
+            assert_eq!(
+                *sizes.borrow(),
+                vec![Size::new(800.0, 600.0), Size::new(500.0, 200.0)]
+            );
+        });
     }
 
     #[test]
@@ -2021,12 +2035,9 @@ mod tests {
             ..waft_embedder::CaptionStyle::default()
         };
         let settings = waft_test::MockCaptionSettings::new(text_scaled(1.5));
-        let view = Rc::new(TestView::new(400.0, 300.0));
-        let platform = TestPlatform::new()
-            .on(TargetPlatform::MacOS)
-            .with_view(view)
-            .with_caption_settings(Rc::new(settings.clone()));
-        let cell = AppCell::with_platform(Rc::new(platform));
+        let tester = &mut WidgetTester::with_platform(
+            TestPlatform::new().with_caption_settings(Rc::new(settings.clone())),
+        );
         let styles = Rc::new(std::cell::RefCell::new(Vec::new()));
         let probe = crate::widgets::basic::Builder::new({
             let styles = Rc::clone(&styles);
@@ -2040,14 +2051,12 @@ mod tests {
                 .into_widget()
             }
         });
-        run_app(&mut cell.borrow_mut(), probe.into_widget());
-        cell.elapse(Duration::ZERO);
-        pump_every_view(&mut cell.borrow_mut(), Duration::ZERO);
+        tester.pump_widget(probe);
         assert_eq!(*styles.borrow(), vec![Some(text_scaled(1.5))]);
 
         settings.set_style(text_scaled(2.0));
-        cell.checkpoint();
-        pump_every_view(&mut cell.borrow_mut(), Duration::from_millis(16));
+        tester.cell.checkpoint();
+        tester.pump();
         assert_eq!(
             *styles.borrow(),
             vec![Some(text_scaled(1.5)), Some(text_scaled(2.0))]
@@ -2056,24 +2065,23 @@ mod tests {
 
     #[test]
     fn the_media_query_has_no_caption_style_where_the_platform_keeps_no_caption_settings() {
-        let (cell, _view, _platform) = app_with_view();
-        let styles = Rc::new(std::cell::RefCell::new(Vec::new()));
-        let probe = crate::widgets::basic::Builder::new({
-            let styles = Rc::clone(&styles);
-            move |app, context| {
-                styles
-                    .borrow_mut()
-                    .push(crate::MediaQuery::caption_style_of(app, context));
-                Sized {
-                    size: Size::new(1.0, 1.0),
+        test_widgets(|tester| {
+            let styles = Rc::new(std::cell::RefCell::new(Vec::new()));
+            let probe = crate::widgets::basic::Builder::new({
+                let styles = Rc::clone(&styles);
+                move |app, context| {
+                    styles
+                        .borrow_mut()
+                        .push(crate::MediaQuery::caption_style_of(app, context));
+                    Sized {
+                        size: Size::new(1.0, 1.0),
+                    }
+                    .into_widget()
                 }
-                .into_widget()
-            }
+            });
+            tester.pump_widget(probe);
+            assert_eq!(*styles.borrow(), vec![None]);
         });
-        run_app(&mut cell.borrow_mut(), probe.into_widget());
-        cell.elapse(Duration::ZERO);
-        pump_every_view(&mut cell.borrow_mut(), Duration::ZERO);
-        assert_eq!(*styles.borrow(), vec![None]);
     }
 
     /// Logs each back-gesture callback it hears, and handles a gesture's start while `handles`.

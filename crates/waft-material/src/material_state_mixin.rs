@@ -178,14 +178,15 @@ mod tests {
     use std::cell::RefCell;
     use std::fmt::{self, Debug};
 
-    use waft_embedder::{Color, TargetPlatform};
+    use waft_embedder::Color;
     use waft_widgets::{
         BuildContext, ColoredBox, Container, GlobalKey, IntoWidget, StateData, StatefulWidget,
         WidgetRef, downcast_widget,
     };
 
+    use waft_widgets::testing::{WidgetTester, test_widgets};
+
     use super::*;
-    use crate::test_support::{WidgetTester, with_main_thread_stack};
 
     const TRUE_COLOR: Color = Color::new(0xFFF44336);
     const FALSE_COLOR: Color = Color::new(0xFF4CAF50);
@@ -316,8 +317,7 @@ mod tests {
     }
 
     fn verify(evaluator: fn(&App, Handle<MyWidgetState>) -> bool, material_state: WidgetState) {
-        with_main_thread_stack(move || {
-            let mut tester = WidgetTester::on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let controller = Controller::default();
             let key = GlobalKey::new();
             tester.pump_widget(
@@ -336,12 +336,12 @@ mod tests {
             };
 
             // Set the value to True
-            emit(&mut tester, true);
-            assert_eq!(colored_box_color(&tester, &key), TRUE_COLOR.to_argb32());
+            emit(tester, true);
+            assert_eq!(colored_box_color(tester, &key), TRUE_COLOR.to_argb32());
 
             // Set the value to False
-            emit(&mut tester, false);
-            assert_eq!(colored_box_color(&tester, &key), FALSE_COLOR.to_argb32());
+            emit(tester, false);
+            assert_eq!(colored_box_color(tester, &key), FALSE_COLOR.to_argb32());
         });
     }
 

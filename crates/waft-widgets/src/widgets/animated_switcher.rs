@@ -719,73 +719,39 @@ mod tests {
     use waft_foundation::{AppCell, UniqueKey};
 
     use waft_embedder::{Size, TextDirection};
-    use waft_test::TestPlatform;
 
     use super::*;
-    use crate::binding::WidgetsBinding;
-    use crate::framework::AnyElement;
-    use crate::test_harness::{binding_cell, binding_mount, binding_pump, platform_view};
-    use crate::view::View;
+    use crate::framework::{AnyElement, downcast_widget};
+    use crate::testing::{WidgetTester, test_widgets};
     use crate::widgets::basic::{Center, Column, Directionality, SizedBox};
     use crate::widgets::transitions::{Animated, ScaleTransition, SizeTransition};
 
     const DURATION: Duration = Duration::from_millis(100);
 
-    fn at(milliseconds: u64) -> Duration {
+    fn ms(milliseconds: u64) -> Duration {
         Duration::from_millis(milliseconds)
     }
 
-    /// Dart's `tester.pumpWidget(widget)` after the first one: the frame at `time` that builds
-    /// it.
-    fn pump_widget(app: &mut App, widget: WidgetRef, time: Duration) {
-        let view = platform_view(app);
-        let root = View::new(view, widget).into_widget();
-        WidgetsBinding::instance(app).attach_root_widget(app, root);
-        binding_pump(app, time);
-    }
-
-    fn elements(app: &mut App) -> Vec<AnyElement> {
-        fn visit(app: &App, element: AnyElement, found: &mut Vec<AnyElement>) {
-            found.push(element);
-            for child in element.children(app) {
-                visit(app, child, found);
-            }
-        }
-        let mut found = Vec::new();
-        let root = WidgetsBinding::instance(app)
-            .root_element(app)
-            .expect("a mounted tree");
-        visit(app, root, &mut found);
-        found
-    }
-
-    /// `find.byType(T)`: the tree's widgets that are a `T`, in tree order.
-    fn find_by_type<T: 'static>(app: &mut App) -> Vec<WidgetRef> {
-        elements(app)
-            .into_iter()
-            .map(|element| element.widget(app).clone())
-            .filter(|widget| widget.as_any().is::<T>())
-            .collect()
-    }
-
     /// `find.byKey(key)`.
-    fn count_by_key(app: &mut App, key: &KeyRef) -> usize {
-        elements(app)
+    fn count_by_key(tester: &WidgetTester, key: &KeyRef) -> usize {
+        let elements = tester.elements();
+        let app = tester.cell.borrow();
+        elements
             .into_iter()
-            .filter(|element| element.widget(app).key() == Some(key))
+            .filter(|element| element.widget(&app).key() == Some(key))
             .count()
     }
 
-    fn opacities(app: &mut App) -> Vec<f64> {
-        find_by_type::<FadeTransition>(app)
-            .iter()
-            .map(|widget| {
-                widget
-                    .as_any()
-                    .downcast_ref::<FadeTransition>()
+    fn opacities(tester: &WidgetTester) -> Vec<f64> {
+        let found = tester.find_by_type::<FadeTransition>();
+        let app = tester.cell.borrow();
+        found
+            .into_iter()
+            .map(|element: AnyElement| {
+                downcast_widget::<FadeTransition>(&**element.widget(&app))
                     .expect("a FadeTransition")
                     .opacity
-                    .value(app)
+                    .value(&app)
             })
             .collect()
     }
@@ -815,189 +781,156 @@ mod tests {
 
     #[test]
     fn fades_in_a_new_child() {
-        let cell = binding_cell();
-        let (one, two, three) = (unique_key(), unique_key(), unique_key());
-        binding_mount(&cell, switcher(Some(keyed_box(&one))).into_widget());
-        let mut app = cell.borrow_mut();
-        assert_eq!(opacities(&mut app), [1.0]);
+        test_widgets(|tester| {
+            let (one, two, three) = (unique_key(), unique_key(), unique_key());
+            tester.pump_widget(switcher(Some(keyed_box(&one))));
+            assert_eq!(opacities(tester), [1.0]);
 
-        pump_widget(
-            &mut app,
-            switcher(Some(keyed_box(&two))).into_widget(),
-            at(0),
-        );
-        binding_pump(&mut app, at(50));
-        assert_eq!(opacities(&mut app).len(), 2);
-        assert_eq!(opacities(&mut app)[0], 0.5);
+            tester.pump_widget(switcher(Some(keyed_box(&two))));
+            tester.pump_by(ms(50));
+            assert_eq!(opacities(tester).len(), 2);
+            assert_eq!(opacities(tester)[0], 0.5);
 
-        pump_widget(
-            &mut app,
-            switcher(Some(keyed_box(&three))).into_widget(),
-            at(50),
-        );
-        binding_pump(&mut app, at(60));
-        let opacities_now = opacities(&mut app);
-        assert_close(opacities_now[0], 0.4);
-        assert_close(opacities_now[1], 0.4);
-        assert_close(opacities_now[2], 0.1);
-        binding_pump(&mut app, at(200));
-        binding_pump(&mut app, at(300));
+            tester.pump_widget(switcher(Some(keyed_box(&three))));
+            tester.pump_by(ms(10));
+            let opacities_now = opacities(tester);
+            assert_close(opacities_now[0], 0.4);
+            assert_close(opacities_now[1], 0.4);
+            assert_close(opacities_now[2], 0.1);
+            tester.pump_and_settle();
+        });
     }
 
     #[test]
     fn can_handle_back_to_back_changes() {
-        let cell = binding_cell();
-        let (one, two, three) = (unique_key(), unique_key(), unique_key());
-        binding_mount(&cell, switcher(Some(keyed_box(&one))).into_widget());
-        let mut app = cell.borrow_mut();
-        let counts = |app: &mut App| {
-            [
-                count_by_key(app, &one),
-                count_by_key(app, &two),
-                count_by_key(app, &three),
-            ]
-        };
-        assert_eq!(counts(&mut app), [1, 0, 0]);
+        test_widgets(|tester| {
+            let (one, two, three) = (unique_key(), unique_key(), unique_key());
+            tester.pump_widget(switcher(Some(keyed_box(&one))));
+            let counts = |tester: &WidgetTester| {
+                [
+                    count_by_key(tester, &one),
+                    count_by_key(tester, &two),
+                    count_by_key(tester, &three),
+                ]
+            };
+            assert_eq!(counts(tester), [1, 0, 0]);
 
-        pump_widget(
-            &mut app,
-            switcher(Some(keyed_box(&two))).into_widget(),
-            at(0),
-        );
-        assert_eq!(counts(&mut app), [1, 1, 0]);
+            tester.pump_widget(switcher(Some(keyed_box(&two))));
+            assert_eq!(counts(tester), [1, 1, 0]);
 
-        pump_widget(
-            &mut app,
-            switcher(Some(keyed_box(&three))).into_widget(),
-            at(0),
-        );
-        assert_eq!(counts(&mut app), [1, 0, 1]);
+            tester.pump_widget(switcher(Some(keyed_box(&three))));
+            assert_eq!(counts(tester), [1, 0, 1]);
+        });
     }
 
     #[test]
     fn does_not_transition_in_a_new_child_of_the_same_type() {
-        let cell = binding_cell();
-        let plain = |width: f64| SizedBox::new().width(width).into_widget();
-        binding_mount(&cell, switcher(Some(plain(1.0))).into_widget());
-        let mut app = cell.borrow_mut();
-        assert_eq!(opacities(&mut app), [1.0]);
+        test_widgets(|tester| {
+            let plain = |width: f64| SizedBox::new().width(width).into_widget();
+            tester.pump_widget(switcher(Some(plain(1.0))));
+            assert_eq!(opacities(tester), [1.0]);
 
-        pump_widget(&mut app, switcher(Some(plain(2.0))).into_widget(), at(0));
-        binding_pump(&mut app, at(50));
-        assert_eq!(opacities(&mut app), [1.0]);
-        binding_pump(&mut app, at(200));
+            tester.pump_widget(switcher(Some(plain(2.0))));
+            tester.pump_by(ms(50));
+            assert_eq!(opacities(tester), [1.0]);
+            tester.pump_and_settle();
+        });
     }
 
     #[test]
     fn handles_null_children() {
-        let cell = binding_cell();
-        let plain = || SizedBox::new().into_widget();
-        binding_mount(&cell, switcher(None).into_widget());
-        let mut app = cell.borrow_mut();
-        assert!(find_by_type::<FadeTransition>(&mut app).is_empty());
+        test_widgets(|tester| {
+            let plain = || SizedBox::new().into_widget();
+            tester.pump_widget(switcher(None));
+            assert!(tester.find_by_type::<FadeTransition>().is_empty());
 
-        pump_widget(&mut app, switcher(Some(plain())).into_widget(), at(0));
-        binding_pump(&mut app, at(50));
-        assert_eq!(opacities(&mut app)[0], 0.5);
-        binding_pump(&mut app, at(200));
-        binding_pump(&mut app, at(300));
+            tester.pump_widget(switcher(Some(plain())));
+            tester.pump_by(ms(50));
+            assert_eq!(opacities(tester)[0], 0.5);
+            tester.pump_and_settle();
 
-        pump_widget(&mut app, switcher(Some(plain())).into_widget(), at(300));
-        assert_eq!(opacities(&mut app), [1.0]);
+            tester.pump_widget(switcher(Some(plain())));
+            assert_eq!(opacities(tester), [1.0]);
 
-        pump_widget(&mut app, switcher(None).into_widget(), at(300));
-        binding_pump(&mut app, at(350));
-        assert_eq!(opacities(&mut app)[0], 0.5);
+            tester.pump_widget(switcher(None));
+            tester.pump_by(ms(50));
+            assert_eq!(opacities(tester)[0], 0.5);
 
-        pump_widget(&mut app, switcher(None).into_widget(), at(350));
-        binding_pump(&mut app, at(400));
-        assert_eq!(opacities(&mut app)[0], 0.0);
+            tester.pump_widget(switcher(None));
+            tester.pump_by(ms(50));
+            assert_eq!(opacities(tester)[0], 0.0);
 
-        binding_pump(&mut app, at(500));
+            tester.pump_and_settle();
+        });
     }
 
     #[test]
     fn does_not_start_any_animations_after_dispose() {
-        let cell = binding_cell();
-        binding_mount(
-            &cell,
-            switcher(Some(SizedBox::new().into_widget())).into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        binding_pump(&mut app, at(50));
+        test_widgets(|tester| {
+            tester.pump_widget(switcher(Some(SizedBox::new().into_widget())));
+            tester.pump_by(ms(50));
 
-        // Change the widget tree in the middle of the animation.
-        pump_widget(&mut app, SizedBox::new().width(1.0).into_widget(), at(50));
-        let requests = app
-            .platform()
-            .downcast_ref::<TestPlatform>()
-            .expect("an app on a TestPlatform")
-            .take_frame_requests();
-        assert!(
-            requests.is_empty(),
-            "pumpAndSettle would settle after one frame"
-        );
+            // Change the widget tree in the middle of the animation.
+            tester.pump_widget(SizedBox::new().width(1.0));
+            assert_eq!(tester.pump_and_settle(), 1);
+        });
     }
 
     /// The curved animation each child entry drives is freed once the entry leaves, on the
     /// outgoing child's dismissal and with the state, as Dart's collector frees it.
     #[test]
     fn frees_each_entrys_curved_animation_once_its_entry_leaves() {
-        let cell = binding_cell();
-        let (one, two) = (unique_key(), unique_key());
-        binding_mount(&cell, switcher(Some(keyed_box(&one))).into_widget());
-        let current_animation = |app: &mut App| {
-            let state = elements(app)
-                .into_iter()
-                .find_map(|element| element.state_handle::<AnimatedSwitcherState>(app))
-                .expect("a mounted AnimatedSwitcher");
-            app.get(state)
-                .current_entry
-                .as_ref()
-                .expect("a child entry")
-                .animation
-                .handle()
-        };
-        let first = current_animation(&mut cell.borrow_mut());
+        test_widgets(|tester| {
+            let (one, two) = (unique_key(), unique_key());
+            tester.pump_widget(switcher(Some(keyed_box(&one))));
+            let current_animation = |tester: &WidgetTester| {
+                let elements = tester.elements();
+                let app = tester.cell.borrow();
+                let state = elements
+                    .into_iter()
+                    .find_map(|element| element.state_handle::<AnimatedSwitcherState>(&app))
+                    .expect("a mounted AnimatedSwitcher");
+                app.get(state)
+                    .current_entry
+                    .as_ref()
+                    .expect("a child entry")
+                    .animation
+                    .handle()
+            };
+            let first = current_animation(tester);
 
-        let second = {
-            let mut app = cell.borrow_mut();
-            pump_widget(
-                &mut app,
-                switcher(Some(keyed_box(&two))).into_widget(),
-                at(0),
+            tester.pump_widget(switcher(Some(keyed_box(&two))));
+            tester.pump_by(ms(200));
+            let second = current_animation(tester);
+            tester.cell.checkpoint();
+            assert!(
+                !tester.cell.borrow().contains(first),
+                "the outgoing entry's"
             );
-            binding_pump(&mut app, at(200));
-            current_animation(&mut app)
-        };
-        cell.checkpoint();
-        assert!(!cell.borrow().contains(first), "the outgoing entry's");
-        assert!(cell.borrow().contains(second));
+            assert!(tester.cell.borrow().contains(second));
 
-        pump_widget(
-            &mut cell.borrow_mut(),
-            SizedBox::new().into_widget(),
-            at(300),
-        );
-        cell.checkpoint();
-        assert!(
-            !cell.borrow().contains(second),
-            "the current entry's, at dispose"
-        );
+            tester.pump_widget(SizedBox::new());
+            tester.cell.checkpoint();
+            assert!(
+                !tester.cell.borrow().contains(second),
+                "the current entry's, at dispose"
+            );
+        });
     }
 
     #[test]
     fn uses_custom_layout() {
-        let cell = binding_cell();
-        let widget = switcher(Some(SizedBox::new().into_widget()))
-            .layout_builder(|_app, current_child, previous_children| {
-                Column::new()
-                    .children(previous_children.iter().chain(current_child).cloned())
-                    .into_widget()
-            })
-            .into_widget();
-        binding_mount(&cell, widget);
-        assert_eq!(find_by_type::<Column>(&mut cell.borrow_mut()).len(), 1);
+        test_widgets(|tester| {
+            let widget = switcher(Some(SizedBox::new().into_widget())).layout_builder(
+                |_app, current_child, previous_children| {
+                    Column::new()
+                        .children(previous_children.iter().chain(current_child).cloned())
+                        .into_widget()
+                },
+            );
+            tester.pump_widget(widget);
+            assert_eq!(tester.find_by_type::<Column>().len(), 1);
+        });
     }
 
     /// A layout builder that records the children it was given, `current_child` first.
@@ -1025,39 +958,39 @@ mod tests {
 
     #[test]
     fn uses_custom_transitions() {
-        let cell = binding_cell();
-        let found_children = Rc::new(RefCell::new(Vec::new()));
-        let transition_builder =
-            AnimatedSwitcherTransitionBuilder::new(|_app, child, animation| {
-                SizeTransition::new(animation)
-                    .child(child.clone())
-                    .into_widget()
-            });
-        let tree = |child: Option<WidgetRef>| {
-            let mut switcher = switcher(child)
-                .layout_builder(recording_layout(&found_children))
-                .transition_builder(transition_builder.clone());
-            switcher.key = None;
-            Directionality::new(TextDirection::Rtl, switcher).into_widget()
-        };
-        binding_mount(&cell, tree(Some(SizedBox::new().into_widget())));
-        let mut app = cell.borrow_mut();
-        assert_eq!(find_by_type::<Column>(&mut app).len(), 1);
-        for child in found_children.borrow().iter() {
-            as_keyed_subtree(child);
-        }
+        test_widgets(|tester| {
+            let found_children = Rc::new(RefCell::new(Vec::new()));
+            let transition_builder =
+                AnimatedSwitcherTransitionBuilder::new(|_app, child, animation| {
+                    SizeTransition::new(animation)
+                        .child(child.clone())
+                        .into_widget()
+                });
+            let tree = |child: Option<WidgetRef>| {
+                let mut switcher = switcher(child)
+                    .layout_builder(recording_layout(&found_children))
+                    .transition_builder(transition_builder.clone());
+                switcher.key = None;
+                Directionality::new(TextDirection::Rtl, switcher).into_widget()
+            };
+            tester.pump_widget(tree(Some(SizedBox::new().into_widget())));
+            assert_eq!(tester.find_by_type::<Column>().len(), 1);
+            for child in found_children.borrow().iter() {
+                as_keyed_subtree(child);
+            }
 
-        pump_widget(&mut app, tree(None), at(0));
-        binding_pump(&mut app, at(50));
-        assert!(!found_children.borrow().is_empty());
-        for child in found_children.borrow().iter() {
-            assert!(
-                as_keyed_subtree(child)
-                    .child
-                    .as_any()
-                    .is::<Animated<SizeTransition>>()
-            );
-        }
+            tester.pump_widget(tree(None));
+            tester.pump_by(ms(50));
+            assert!(!found_children.borrow().is_empty());
+            for child in found_children.borrow().iter() {
+                assert!(
+                    as_keyed_subtree(child)
+                        .child
+                        .as_any()
+                        .is::<Animated<SizeTransition>>()
+                );
+            }
+        });
     }
 
     /// Dart's `StatefulTest` with its static `generation`.
@@ -1101,185 +1034,171 @@ mod tests {
 
     #[test]
     fn does_not_reset_state_of_the_children_in_transitions() {
-        let cell = binding_cell();
-        let generation = Rc::new(Cell::new(0));
-        let stateful = |key: &KeyRef| {
-            switcher(Some(
-                StatefulTest {
-                    key: key.clone(),
-                    generation: Rc::clone(&generation),
-                }
-                .into_widget(),
-            ))
-            .into_widget()
-        };
-        let (one, two, three) = (unique_key(), unique_key(), unique_key());
-        binding_mount(&cell, stateful(&one));
-        let mut app = cell.borrow_mut();
-        assert_eq!(opacities(&mut app), [1.0]);
-        assert_eq!(generation.get(), 1);
+        test_widgets(|tester| {
+            let generation = Rc::new(Cell::new(0));
+            let stateful = |key: &KeyRef| {
+                switcher(Some(
+                    StatefulTest {
+                        key: key.clone(),
+                        generation: Rc::clone(&generation),
+                    }
+                    .into_widget(),
+                ))
+            };
+            let (one, two, three) = (unique_key(), unique_key(), unique_key());
+            tester.pump_widget(stateful(&one));
+            assert_eq!(opacities(tester), [1.0]);
+            assert_eq!(generation.get(), 1);
 
-        pump_widget(&mut app, stateful(&two), at(0));
-        binding_pump(&mut app, at(50));
-        assert_eq!(opacities(&mut app).len(), 2);
-        assert_eq!(opacities(&mut app)[0], 0.5);
-        assert_eq!(generation.get(), 2);
+            tester.pump_widget(stateful(&two));
+            tester.pump_by(ms(50));
+            assert_eq!(opacities(tester).len(), 2);
+            assert_eq!(opacities(tester)[0], 0.5);
+            assert_eq!(generation.get(), 2);
 
-        pump_widget(&mut app, stateful(&three), at(50));
-        binding_pump(&mut app, at(60));
-        assert_eq!(generation.get(), 3);
-        let opacities_now = opacities(&mut app);
-        assert_close(opacities_now[0], 0.4);
-        assert_close(opacities_now[1], 0.4);
-        assert_close(opacities_now[2], 0.1);
-        binding_pump(&mut app, at(200));
-        binding_pump(&mut app, at(300));
-        assert_eq!(generation.get(), 3);
+            tester.pump_widget(stateful(&three));
+            tester.pump_by(ms(10));
+            assert_eq!(generation.get(), 3);
+            let opacities_now = opacities(tester);
+            assert_close(opacities_now[0], 0.4);
+            assert_close(opacities_now[1], 0.4);
+            assert_close(opacities_now[2], 0.1);
+            tester.pump_and_settle();
+            assert_eq!(generation.get(), 3);
+        });
     }
 
     #[test]
     fn updates_widgets_without_animating_if_they_are_isomorphic() {
-        let cell = binding_cell();
-        let sized = |width: f64| {
-            Directionality::new(
-                TextDirection::Rtl,
-                switcher(Some(SizedBox::new().width(width).into_widget())),
-            )
-            .into_widget()
-        };
-        binding_mount(&cell, sized(1.0));
-        let mut app = cell.borrow_mut();
-        binding_pump(&mut app, at(10));
-        assert_eq!(opacities(&mut app)[0], 1.0);
-        let widths = |app: &mut App| {
-            find_by_type::<SizedBox>(app)
-                .iter()
-                .map(|widget| {
-                    widget
-                        .as_any()
-                        .downcast_ref::<SizedBox>()
-                        .expect("a SizedBox")
-                        .width
-                })
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(widths(&mut app), [Some(1.0)]);
+        test_widgets(|tester| {
+            let sized = |width: f64| {
+                Directionality::new(
+                    TextDirection::Rtl,
+                    switcher(Some(SizedBox::new().width(width).into_widget())),
+                )
+            };
+            tester.pump_widget(sized(1.0));
+            tester.pump_by(ms(10));
+            assert_eq!(opacities(tester)[0], 1.0);
+            let widths = |tester: &WidgetTester| {
+                tester
+                    .find_by_type::<SizedBox>()
+                    .into_iter()
+                    .map(|element| tester.widget(element, |sized_box: &SizedBox| sized_box.width))
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(widths(tester), [Some(1.0)]);
 
-        pump_widget(&mut app, sized(2.0), at(10));
-        binding_pump(&mut app, at(30));
-        assert_eq!(opacities(&mut app)[0], 1.0);
-        assert_eq!(widths(&mut app), [Some(2.0)]);
+            tester.pump_widget(sized(2.0));
+            tester.pump_by(ms(20));
+            assert_eq!(opacities(tester)[0], 1.0);
+            assert_eq!(widths(tester), [Some(2.0)]);
+        });
     }
 
     #[test]
     fn updates_previous_child_transitions_if_the_transition_builder_changes() {
-        let cell = binding_cell();
-        let found_children = Rc::new(RefCell::new(Vec::new()));
-        let tree = |key: &KeyRef, transition_builder: Option<AnimatedSwitcherTransitionBuilder>| {
-            let mut switcher =
-                switcher(Some(keyed_box(key))).layout_builder(recording_layout(&found_children));
-            if let Some(transition_builder) = transition_builder {
-                switcher = switcher.transition_builder(transition_builder);
+        test_widgets(|tester| {
+            let found_children = Rc::new(RefCell::new(Vec::new()));
+            let tree =
+                |key: &KeyRef, transition_builder: Option<AnimatedSwitcherTransitionBuilder>| {
+                    let mut switcher = switcher(Some(keyed_box(key)))
+                        .layout_builder(recording_layout(&found_children));
+                    if let Some(transition_builder) = transition_builder {
+                        switcher = switcher.transition_builder(transition_builder);
+                    }
+                    switcher
+                };
+            let (one, two, three, four) = (unique_key(), unique_key(), unique_key(), unique_key());
+            // Insert three unique children so that we have some previous children.
+            tester.pump_widget(tree(&one, None));
+            tester.pump_by(ms(10));
+            tester.pump_widget(tree(&two, None));
+            tester.pump_by(ms(10));
+            tester.pump_widget(tree(&three, None));
+            tester.pump_by(ms(10));
+
+            assert_eq!(found_children.borrow().len(), 3);
+            for child in found_children.borrow().iter() {
+                assert!(
+                    as_keyed_subtree(child)
+                        .child
+                        .as_any()
+                        .is::<FadeTransition>()
+                );
             }
-            switcher.into_widget()
-        };
-        let (one, two, three, four) = (unique_key(), unique_key(), unique_key(), unique_key());
-        // Insert three unique children so that we have some previous children.
-        binding_mount(&cell, tree(&one, None));
-        let mut app = cell.borrow_mut();
-        binding_pump(&mut app, at(10));
-        pump_widget(&mut app, tree(&two, None), at(10));
-        binding_pump(&mut app, at(20));
-        pump_widget(&mut app, tree(&three, None), at(20));
-        binding_pump(&mut app, at(30));
 
-        assert_eq!(found_children.borrow().len(), 3);
-        for child in found_children.borrow().iter() {
-            assert!(
-                as_keyed_subtree(child)
-                    .child
-                    .as_any()
-                    .is::<FadeTransition>()
-            );
-        }
+            // Now set a new transition builder and make sure all the previous
+            // transitions are replaced.
+            let scale = AnimatedSwitcherTransitionBuilder::new(|_app, child, animation| {
+                ScaleTransition::new(animation)
+                    .child(child.clone())
+                    .into_widget()
+            });
+            tester.pump_widget(tree(&four, Some(scale)));
+            tester.pump_by(ms(10));
 
-        // Now set a new transition builder and make sure all the previous
-        // transitions are replaced.
-        let scale = AnimatedSwitcherTransitionBuilder::new(|_app, child, animation| {
-            ScaleTransition::new(animation)
-                .child(child.clone())
-                .into_widget()
+            assert_eq!(found_children.borrow().len(), 3);
+            for child in found_children.borrow().iter() {
+                assert!(
+                    as_keyed_subtree(child)
+                        .child
+                        .as_any()
+                        .is::<Animated<ScaleTransition>>()
+                );
+            }
         });
-        pump_widget(&mut app, tree(&four, Some(scale)), at(30));
-        binding_pump(&mut app, at(40));
-
-        assert_eq!(found_children.borrow().len(), 3);
-        for child in found_children.borrow().iter() {
-            assert!(
-                as_keyed_subtree(child)
-                    .child
-                    .as_any()
-                    .is::<Animated<ScaleTransition>>()
-            );
-        }
     }
 
     #[test]
     fn does_not_duplicate_animations_if_the_same_child_is_entered_twice() {
-        let cell = binding_cell();
-        let (one, two): (KeyRef, KeyRef) = (
-            waft_foundation::ValueKey::new("1".to_string()).into(),
-            waft_foundation::ValueKey::new("2".to_string()).into(),
-        );
-        let tree = |key: &KeyRef| {
-            Directionality::new(
-                TextDirection::Ltr,
-                AnimatedSwitcher::new(Duration::from_millis(1000)).child(keyed_box(key)),
-            )
-            .into_widget()
-        };
-        binding_mount(&cell, tree(&one));
-        let mut app = cell.borrow_mut();
-        pump_widget(&mut app, tree(&two), at(0));
-        pump_widget(&mut app, tree(&one), at(0));
-        binding_pump(&mut app, at(1000));
-        assert_eq!(count_by_key(&mut app, &one), 1);
+        test_widgets(|tester| {
+            let (one, two): (KeyRef, KeyRef) = (
+                waft_foundation::ValueKey::new("1".to_string()).into(),
+                waft_foundation::ValueKey::new("2".to_string()).into(),
+            );
+            let tree = |key: &KeyRef| {
+                Directionality::new(
+                    TextDirection::Ltr,
+                    AnimatedSwitcher::new(Duration::from_millis(1000)).child(keyed_box(key)),
+                )
+            };
+            tester.pump_widget(tree(&one));
+            tester.pump_widget(tree(&two));
+            tester.pump_widget(tree(&one));
+            tester.pump_by(ms(1000));
+            assert_eq!(count_by_key(tester, &one), 1);
+        });
     }
 
     #[test]
     fn does_not_crash_at_zero_area() {
-        let cell = binding_cell();
-        let tree = |child: Option<WidgetRef>| {
-            let mut switcher = AnimatedSwitcher::new(Duration::from_micros(500));
-            if let Some(child) = child {
-                switcher = switcher.child(child);
-            }
-            Directionality::new(
-                TextDirection::Ltr,
-                Center::new().child(SizedBox::shrink().child(switcher)),
-            )
-            .into_widget()
-        };
-        let switcher_size = |app: &mut App| {
-            elements(app)
-                .into_iter()
-                .find(|element| element.widget(app).as_any().is::<AnimatedSwitcher>())
-                .and_then(|element| element.find_render_object(app))
-                .and_then(|render_object| render_object.as_box())
-                .expect("a mounted switcher")
-                .size(app)
-        };
-        binding_mount(&cell, tree(None));
-        let mut app = cell.borrow_mut();
-        assert_eq!(switcher_size(&mut app), Size::ZERO);
+        test_widgets(|tester| {
+            let tree = |child: Option<WidgetRef>| {
+                let mut switcher = AnimatedSwitcher::new(Duration::from_micros(500));
+                if let Some(child) = child {
+                    switcher = switcher.child(child);
+                }
+                Directionality::new(
+                    TextDirection::Ltr,
+                    Center::new().child(SizedBox::shrink().child(switcher)),
+                )
+            };
+            let switcher_size = |tester: &WidgetTester| {
+                let element = tester.find_by_type::<AnimatedSwitcher>()[0];
+                tester.global_rect(tester.render_box_of(element)).size()
+            };
+            tester.pump_widget(tree(None));
+            assert_eq!(switcher_size(tester), Size::ZERO);
 
-        let key =
-            |name: &str| -> KeyRef { waft_foundation::ValueKey::new(name.to_string()).into() };
-        pump_widget(&mut app, tree(Some(keyed_box(&key("x")))), at(0));
-        assert_eq!(switcher_size(&mut app), Size::ZERO);
+            let key =
+                |name: &str| -> KeyRef { waft_foundation::ValueKey::new(name.to_string()).into() };
+            tester.pump_widget(tree(Some(keyed_box(&key("x")))));
+            assert_eq!(switcher_size(tester), Size::ZERO);
 
-        pump_widget(&mut app, tree(Some(keyed_box(&key("y")))), at(0));
-        assert_eq!(switcher_size(&mut app), Size::ZERO);
+            tester.pump_widget(tree(Some(keyed_box(&key("y")))));
+            assert_eq!(switcher_size(tester), Size::ZERO);
+        });
     }
 
     #[test]

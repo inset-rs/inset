@@ -188,8 +188,10 @@ mod tests {
 
     use waft_widgets::IntoWidget;
 
+    use waft_widgets::testing::{WidgetTester, test_widgets};
+
     use super::*;
-    use crate::test_support::{probe, test_cell, with_main_thread_stack};
+    use crate::drawer_theme::tests::probe;
     use crate::theme_data::ThemeData;
 
     const BASE_COLOR: Color = Color::new(0xff888888);
@@ -268,13 +270,13 @@ mod tests {
     }
 
     fn overlay_results_under(
+        tester: &mut WidgetTester,
         theme_of: impl Fn(&App) -> ThemeData + 'static,
         color_of: impl Fn(&ThemeData) -> Color + 'static,
         elevation: f64,
     ) -> (Color, Color, Rc<ThemeData>) {
-        let cell = test_cell();
         probe(
-            &cell,
+            tester,
             move |app, child| Theme::new(theme_of(app), child).into_widget(),
             move |app, context| {
                 let theme = Theme::of(app, context);
@@ -290,8 +292,9 @@ mod tests {
 
     #[test]
     fn apply_overlay_overlays_the_surface_color_in_a_dark_theme() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let (applied, overlay, theme) = overlay_results_under(
+                tester,
                 dark_theme_with_overlay,
                 |theme| theme.color_scheme.surface,
                 4.0,
@@ -309,13 +312,18 @@ mod tests {
 
     #[test]
     fn apply_overlay_leaves_other_colors_and_light_themes_and_zero_elevation_alone() {
-        with_main_thread_stack(|| {
-            let (other_color, _, theme) =
-                overlay_results_under(dark_theme_with_overlay, |_| Color::new(0xff123456), 4.0);
+        test_widgets(|tester| {
+            let (other_color, _, theme) = overlay_results_under(
+                tester,
+                dark_theme_with_overlay,
+                |_| Color::new(0xff123456),
+                4.0,
+            );
             assert_eq!(other_color, Color::new(0xff123456));
             assert_eq!(theme.brightness(), Brightness::Dark);
 
             let (light, _, light_theme) = overlay_results_under(
+                tester,
                 |app| ThemeData::light(app, Some(false)),
                 |theme| theme.color_scheme.surface,
                 4.0,
@@ -323,6 +331,7 @@ mod tests {
             assert_eq!(light, light_theme.color_scheme.surface);
 
             let (flat, _, dark_theme) = overlay_results_under(
+                tester,
                 dark_theme_with_overlay,
                 |theme| theme.color_scheme.surface,
                 0.0,

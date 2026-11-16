@@ -262,6 +262,8 @@ mod tests {
 
     use waft_widgets::WidgetStatePropertyAll;
 
+    use waft_widgets::testing::{WidgetTester, test_widgets};
+
     use super::*;
     use crate::colors::Colors;
     use crate::input_decorator::InputDecorationTheme;
@@ -320,10 +322,9 @@ mod tests {
     use crate::menu_anchor::{MenuAnchor, MenuItemButton, MenuPanel};
     use crate::scaffold::Scaffold;
     use crate::shadows::k_elevation_to_shadow;
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::material_app;
     use crate::text_field::TextField;
     use crate::theme_data::ThemeData;
-    use crate::tooltip::tests::tester;
 
     fn entries() -> Vec<DropdownMenuEntry<i32>> {
         vec![
@@ -537,7 +538,7 @@ mod tests {
 
         let button = arrow_drop_down_button(tester);
         tap(tester, button);
-        tester.pump(std::time::Duration::ZERO);
+        tester.pump_by(std::time::Duration::ZERO);
         assert_eq!(tester.find_by_type::<MenuAnchor>().len(), 1);
 
         menu_material(tester, |material| {
@@ -569,8 +570,7 @@ mod tests {
     // dropdown_menu_theme_test.dart 'With no other configuration, defaults are used'.
     #[test]
     fn with_no_other_configuration_the_defaults_are_used() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = ThemeData::new(&tester.cell.borrow());
             tester.pump_widget(material_app(
                 theme.clone(),
@@ -595,12 +595,12 @@ mod tests {
                 }));
             });
 
-            let button = arrow_drop_down_button(&tester);
-            tap(&mut tester, button);
-            tester.pump(std::time::Duration::ZERO);
+            let button = arrow_drop_down_button(tester);
+            tap(tester, button);
+            tester.pump_by(std::time::Duration::ZERO);
             assert_eq!(tester.find_by_type::<MenuAnchor>().len(), 1);
 
-            menu_material(&tester, |material| {
+            menu_material(tester, |material| {
                 assert_eq!(material.color, Some(theme.color_scheme.surface_container()));
                 assert_eq!(material.shadow_color, Some(theme.color_scheme.shadow()));
                 assert_eq!(material.surface_tint_color, Some(Colors::TRANSPARENT));
@@ -608,7 +608,7 @@ mod tests {
                 assert!(shape_is(material, &rounded(4.0)));
             });
 
-            button_material(&tester, "Item 0", |material| {
+            button_material(tester, "Item 0", |material| {
                 assert_eq!(material.color, Some(Colors::TRANSPARENT));
                 assert_eq!(material.elevation, 0.0);
                 assert!(shape_is(material, &RoundedRectangleBorder::default()));
@@ -621,8 +621,7 @@ mod tests {
     // dropdown_menu_theme_test.dart 'ThemeData.dropdownMenuTheme overrides defaults'.
     #[test]
     fn the_theme_data_dropdown_menu_theme_overrides_the_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let expected = global();
             let theme = ThemeData::builder()
                 .dropdown_menu_theme(expected.theme_data())
@@ -631,15 +630,14 @@ mod tests {
                 theme.clone(),
                 centered(DropdownMenu::new(entries())),
             ));
-            assert_the_menu_shows(&mut tester, &theme, &expected);
+            assert_the_menu_shows(tester, &theme, &expected);
         });
     }
 
     // dropdown_menu_theme_test.dart 'DropdownMenuTheme overrides ThemeData and defaults'.
     #[test]
     fn a_dropdown_menu_theme_overrides_the_theme_data_and_the_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let expected = local();
             let theme = ThemeData::builder()
                 .dropdown_menu_theme(global().theme_data())
@@ -652,7 +650,7 @@ mod tests {
                 )
                 .into_widget(),
             ));
-            assert_the_menu_shows(&mut tester, &theme, &expected);
+            assert_the_menu_shows(tester, &theme, &expected);
         });
     }
 
@@ -660,8 +658,7 @@ mod tests {
     // and defaults'.
     #[test]
     fn the_widget_parameters_override_the_themes_and_the_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let expected = parameters();
             let theme = ThemeData::builder()
                 .dropdown_menu_theme(global().theme_data())
@@ -680,7 +677,7 @@ mod tests {
                 )
                 .into_widget(),
             ));
-            assert_the_menu_shows(&mut tester, &theme, &expected);
+            assert_the_menu_shows(tester, &theme, &expected);
         });
     }
 
@@ -688,8 +685,7 @@ mod tests {
     // applied when the menu is disabled'.
     #[test]
     fn the_theme_disabled_color_colours_a_disabled_menu() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = ThemeData::builder()
                 .dropdown_menu_theme(
                     DropdownMenuThemeData::new().disabled_color(Colors::GREY.primary()),

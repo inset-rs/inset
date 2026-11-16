@@ -3610,13 +3610,15 @@ mod tests {
 
     use waft_widgets::{Center, StatefulBuilder};
 
+    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+
     use super::*;
     use crate::material::Material;
     use crate::range_slider_parts::{RangeSliderTickMarkShape, RangeSliderValueIndicatorShape};
-    use crate::slider::tests::{default_theme, tester_on};
+    use crate::slider::tests::default_theme;
     use crate::test_support::{
-        CanvasCall, PaintCall, WidgetTester, colors_match, count_calls, material_app, paints_calls,
-        with_main_thread_stack,
+        CanvasCall, PaintCall, PaintInspection, colors_match, count_calls, material_app,
+        paints_calls,
     };
     use crate::theme_data::ThemeData;
 
@@ -3730,22 +3732,21 @@ mod tests {
     // 'Range Slider can move when tapped (continuous LTR)'.
     #[test]
     fn a_range_slider_moves_when_tapped_continuous_ltr() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let heard = Heard::starting_at(0.3, 0.8);
-            pump(&mut tester, TextDirection::Ltr, &heard, |slider| slider);
+            pump(tester, TextDirection::Ltr, &heard, |slider| slider);
 
             // The closest thumb is selected when tapping between the thumbs outside the touch
             // boundaries
             assert_eq!(heard.values.get(), RangeValues::new(0.3, 0.8));
             //  taps at 0.5
-            tester.tap(slider_rect(&tester).center(), 1);
-            tester.pump(Duration::ZERO);
+            tester.tap(slider_rect(tester).center(), 1);
+            tester.pump();
             assert_eq!(heard.values.get(), RangeValues::new(0.5, 0.8));
 
             // Get the bounds of the track by finding the slider edges and translating
             // inwards by the overlay radius.
-            let (top_left, bottom_right) = track_bounds(&tester);
+            let (top_left, bottom_right) = track_bounds(tester);
 
             // The start thumb is selected when tapping the left inactive track.
             let left_target = top_left + (bottom_right - top_left) * 0.1;
@@ -3754,7 +3755,7 @@ mod tests {
             assert_eq!(heard.values.get().end, 0.8);
 
             // The end thumb is selected when tapping the right inactive track.
-            tester.pump(Duration::ZERO);
+            tester.pump();
             let right_target = top_left + (bottom_right - top_left) * 0.9;
             tester.tap(right_target, 3);
             assert!(near(heard.values.get().start, 0.1, 0.01));
@@ -3765,20 +3766,19 @@ mod tests {
     // 'Range Slider can move when tapped (continuous RTL)'.
     #[test]
     fn a_range_slider_moves_when_tapped_continuous_rtl() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let heard = Heard::starting_at(0.3, 1.0);
-            pump(&mut tester, TextDirection::Rtl, &heard, |slider| slider);
+            pump(tester, TextDirection::Rtl, &heard, |slider| slider);
 
             // The closest thumb is selected when tapping between the thumbs outside the touch
             // boundaries
             assert_eq!(heard.values.get(), RangeValues::new(0.3, 1.0));
             // taps at 0.5
-            tester.tap(slider_rect(&tester).center(), 1);
-            tester.pump(Duration::ZERO);
+            tester.tap(slider_rect(tester).center(), 1);
+            tester.pump();
             assert_eq!(heard.values.get(), RangeValues::new(0.5, 1.0));
 
-            let (top_left, bottom_right) = track_bounds(&tester);
+            let (top_left, bottom_right) = track_bounds(tester);
 
             // The end thumb is selected when tapping the left inactive track.
             let left_target = top_left + (bottom_right - top_left) * 0.1;
@@ -3787,7 +3787,7 @@ mod tests {
             assert!(near(heard.values.get().end, 0.9, 0.01));
 
             // The start thumb is selected when tapping the right inactive track.
-            tester.pump(Duration::ZERO);
+            tester.pump();
             let right_target = top_left + (bottom_right - top_left) * 0.9;
             tester.tap(right_target, 3);
             assert!(near(heard.values.get().start, 0.1, 0.01));
@@ -3798,10 +3798,9 @@ mod tests {
     // 'Range Slider can move when tapped (discrete LTR)'.
     #[test]
     fn a_range_slider_moves_when_tapped_discrete_ltr() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let heard = Heard::starting_at(30.0, 80.0);
-            pump(&mut tester, TextDirection::Ltr, &heard, |slider| {
+            pump(tester, TextDirection::Ltr, &heard, |slider| {
                 slider.max(100.0).divisions(10)
             });
 
@@ -3809,11 +3808,11 @@ mod tests {
             // boundaries
             assert_eq!(heard.values.get(), RangeValues::new(30.0, 80.0));
             // taps at 0.5
-            tester.tap(slider_rect(&tester).center(), 1);
+            tester.tap(slider_rect(tester).center(), 1);
             tester.pump_and_settle();
             assert_eq!(heard.values.get(), RangeValues::new(50.0, 80.0));
 
-            let (top_left, bottom_right) = track_bounds(&tester);
+            let (top_left, bottom_right) = track_bounds(tester);
 
             // The start thumb is selected when tapping the left inactive track.
             let left_target = top_left + (bottom_right - top_left) * 0.1;
@@ -3823,7 +3822,7 @@ mod tests {
             assert_eq!(heard.values.get().end.round(), 80.0);
 
             // The end thumb is selected when tapping the right inactive track.
-            tester.pump(Duration::ZERO);
+            tester.pump();
             let right_target = top_left + (bottom_right - top_left) * 0.9;
             tester.tap(right_target, 3);
             tester.pump_and_settle();
@@ -3835,10 +3834,9 @@ mod tests {
     // 'Range Slider can move when tapped (discrete RTL)'.
     #[test]
     fn a_range_slider_moves_when_tapped_discrete_rtl() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let heard = Heard::starting_at(30.0, 80.0);
-            pump(&mut tester, TextDirection::Rtl, &heard, |slider| {
+            pump(tester, TextDirection::Rtl, &heard, |slider| {
                 slider.max(100.0).divisions(10)
             });
 
@@ -3846,11 +3844,11 @@ mod tests {
             // boundaries
             assert_eq!(heard.values.get(), RangeValues::new(30.0, 80.0));
             // taps at 0.5
-            tester.tap(slider_rect(&tester).center(), 1);
+            tester.tap(slider_rect(tester).center(), 1);
             tester.pump_and_settle();
             assert_eq!(heard.values.get(), RangeValues::new(50.0, 80.0));
 
-            let (top_left, bottom_right) = track_bounds(&tester);
+            let (top_left, bottom_right) = track_bounds(tester);
 
             // The start thumb is selected when tapping the left inactive track.
             let left_target = top_left + (bottom_right - top_left) * 0.1;
@@ -3860,7 +3858,7 @@ mod tests {
             assert_eq!(heard.values.get().end.round(), 90.0);
 
             // The end thumb is selected when tapping the right inactive track.
-            tester.pump(Duration::ZERO);
+            tester.pump();
             let right_target = top_left + (bottom_right - top_left) * 0.9;
             tester.tap(right_target, 3);
             tester.pump_and_settle();
@@ -3872,15 +3870,15 @@ mod tests {
     /// The four 'thumbs can be dragged to the min and max' cases: `max` is 1.0 or 100 with
     /// divisions; under RTL the thumbs swap.
     fn thumbs_are_dragged_to_the_min_and_max(
+        tester: &mut WidgetTester,
         text_direction: TextDirection,
         start: f64,
         end: f64,
         max: f64,
         divisions: Option<i32>,
     ) {
-        let mut tester = tester_on(TargetPlatform::Android);
         let heard = Heard::starting_at(start, end);
-        pump(&mut tester, text_direction, &heard, move |slider| {
+        pump(tester, text_direction, &heard, move |slider| {
             let slider = slider.max(max);
             match divisions {
                 Some(divisions) => slider.divisions(divisions),
@@ -3890,7 +3888,7 @@ mod tests {
 
         // Get the bounds of the track by finding the slider edges and translating
         // inwards by the overlay radius.
-        let (top_left, bottom_right) = track_bounds(&tester);
+        let (top_left, bottom_right) = track_bounds(tester);
         let span = bottom_right - top_left;
         let (first_target, first_expected, second_target, second_expected) = match text_direction {
             TextDirection::Ltr => (0.3, (false, 0.0), 0.7, (true, max)),
@@ -3917,41 +3915,57 @@ mod tests {
     // 'Range Slider thumbs can be dragged to the min and max (continuous LTR)'.
     #[test]
     fn range_slider_thumbs_can_be_dragged_to_the_min_and_max_continuous_ltr() {
-        with_main_thread_stack(|| {
-            thumbs_are_dragged_to_the_min_and_max(TextDirection::Ltr, 0.3, 0.7, 1.0, None);
+        test_widgets(|tester| {
+            thumbs_are_dragged_to_the_min_and_max(tester, TextDirection::Ltr, 0.3, 0.7, 1.0, None);
         });
     }
 
     // 'Range Slider thumbs can be dragged to the min and max (continuous RTL)'.
     #[test]
     fn range_slider_thumbs_can_be_dragged_to_the_min_and_max_continuous_rtl() {
-        with_main_thread_stack(|| {
-            thumbs_are_dragged_to_the_min_and_max(TextDirection::Rtl, 0.3, 0.7, 1.0, None);
+        test_widgets(|tester| {
+            thumbs_are_dragged_to_the_min_and_max(tester, TextDirection::Rtl, 0.3, 0.7, 1.0, None);
         });
     }
 
     // 'Range Slider thumbs can be dragged to the min and max (discrete LTR)'.
     #[test]
     fn range_slider_thumbs_can_be_dragged_to_the_min_and_max_discrete_ltr() {
-        with_main_thread_stack(|| {
-            thumbs_are_dragged_to_the_min_and_max(TextDirection::Ltr, 30.0, 70.0, 100.0, Some(10));
+        test_widgets(|tester| {
+            thumbs_are_dragged_to_the_min_and_max(
+                tester,
+                TextDirection::Ltr,
+                30.0,
+                70.0,
+                100.0,
+                Some(10),
+            );
         });
     }
 
     // 'Range Slider thumbs can be dragged to the min and max (discrete RTL)'.
     #[test]
     fn range_slider_thumbs_can_be_dragged_to_the_min_and_max_discrete_rtl() {
-        with_main_thread_stack(|| {
-            thumbs_are_dragged_to_the_min_and_max(TextDirection::Rtl, 30.0, 70.0, 100.0, Some(10));
+        test_widgets(|tester| {
+            thumbs_are_dragged_to_the_min_and_max(
+                tester,
+                TextDirection::Rtl,
+                30.0,
+                70.0,
+                100.0,
+                Some(10),
+            );
         });
     }
 
     // 'minThumbSeparation has same width as surrounding box, values still bounded (ltr / rtl)'.
-    fn min_thumb_separation_keeps_values_bounded(text_direction: TextDirection) {
+    fn min_thumb_separation_keeps_values_bounded(
+        tester: &mut WidgetTester,
+        text_direction: TextDirection,
+    ) {
         const BOUNDING_BOX_SIZE: f64 = 200.0;
-        let mut tester = tester_on(TargetPlatform::Android);
         let heard = Heard::starting_at(0.0, 1.0);
-        let theme = default_theme(&tester);
+        let theme = default_theme(tester);
         tester.pump_widget(range_slider_app(
             theme,
             text_direction,
@@ -3968,7 +3982,7 @@ mod tests {
             |slider| slider,
         ));
 
-        tester.drag_from(slider_rect(&tester).center(), Offset::ZERO, 1);
+        tester.drag_from(slider_rect(tester).center(), Offset::ZERO, 1);
         tester.pump_and_settle();
 
         let values = heard.values.get();
@@ -3978,25 +3992,29 @@ mod tests {
 
     #[test]
     fn min_thumb_separation_as_wide_as_the_box_keeps_values_bounded_ltr() {
-        with_main_thread_stack(|| min_thumb_separation_keeps_values_bounded(TextDirection::Ltr));
+        test_widgets(|tester| {
+            min_thumb_separation_keeps_values_bounded(tester, TextDirection::Ltr)
+        });
     }
 
     #[test]
     fn min_thumb_separation_as_wide_as_the_box_keeps_values_bounded_rtl() {
-        with_main_thread_stack(|| min_thumb_separation_keeps_values_bounded(TextDirection::Rtl));
+        test_widgets(|tester| {
+            min_thumb_separation_keeps_values_bounded(tester, TextDirection::Rtl)
+        });
     }
 
     /// The eight 'thumbs can be dragged together and the start / end thumb can be dragged
     /// apart' cases.
     fn thumbs_are_dragged_together_and_apart(
+        tester: &mut WidgetTester,
         text_direction: TextDirection,
         discrete: bool,
         drag_start_apart: bool,
     ) {
-        let mut tester = tester_on(TargetPlatform::Android);
         let (scale, epsilon) = if discrete { (100.0, 0.01) } else { (1.0, 0.05) };
         let heard = Heard::starting_at(0.3 * scale, 0.7 * scale);
-        pump(&mut tester, text_direction, &heard, move |slider| {
+        pump(tester, text_direction, &heard, move |slider| {
             if discrete {
                 slider.max(100.0).divisions(10)
             } else {
@@ -4004,7 +4022,7 @@ mod tests {
             }
         });
 
-        let (top_left, bottom_right) = track_bounds(&tester);
+        let (top_left, bottom_right) = track_bounds(tester);
         let span = bottom_right - top_left;
         let middle = top_left + bottom_right / 2.0;
         let (first_is_start, second_is_start) = match text_direction {
@@ -4052,8 +4070,8 @@ mod tests {
             $(
                 #[test]
                 fn $name() {
-                    with_main_thread_stack(|| {
-                        thumbs_are_dragged_together_and_apart(
+                    test_widgets(|tester| {
+                        thumbs_are_dragged_together_and_apart(tester,
                             $direction,
                             $discrete,
                             $start_apart,
@@ -4088,11 +4106,10 @@ mod tests {
     // 'Discrete range slider has no floating-point rounding errors'.
     #[test]
     fn a_discrete_range_slider_has_no_floating_point_rounding_errors() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let values_list = Rc::new(RefCell::new(Vec::new()));
             let heard_list = Rc::clone(&values_list);
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             tester.pump_widget(material_app(
                 theme,
                 Directionality::new(
@@ -4117,9 +4134,9 @@ mod tests {
                 .into_widget(),
             ));
 
-            let (top_left, bottom_right) = track_bounds(&tester);
+            let (top_left, bottom_right) = track_bounds(tester);
             let active_track_width = bottom_right.dx() - top_left.dx();
-            let mut gesture = WidgetTester::touch(1);
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, top_left);
             tester.move_to(
                 &mut gesture,
@@ -4141,14 +4158,13 @@ mod tests {
     // tap'.
     #[test]
     fn range_slider_calls_on_change_start_and_end_for_an_interaction_initiated_by_tap() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let heard = Heard::starting_at(30.0, 70.0);
-            pump(&mut tester, TextDirection::Ltr, &heard, |slider| {
+            pump(tester, TextDirection::Ltr, &heard, |slider| {
                 slider.max(100.0)
             });
 
-            let (top_left, bottom_right) = track_bounds(&tester);
+            let (top_left, bottom_right) = track_bounds(tester);
             // Drag the start thumb towards the center.
             let left_target = top_left + (bottom_right - top_left) * 0.3;
             assert!(heard.start_values.get().is_none());
@@ -4169,14 +4185,13 @@ mod tests {
     // drag'.
     #[test]
     fn range_slider_calls_on_change_start_and_end_for_an_interaction_initiated_by_drag() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let heard = Heard::starting_at(30.0, 70.0);
-            pump(&mut tester, TextDirection::Ltr, &heard, |slider| {
+            pump(tester, TextDirection::Ltr, &heard, |slider| {
                 slider.max(100.0)
             });
 
-            let (top_left, bottom_right) = track_bounds(&tester);
+            let (top_left, bottom_right) = track_bounds(tester);
             let span = bottom_right - top_left;
             // Drag the thumbs together.
             let left_target = top_left + span * 0.3;
@@ -4300,16 +4315,15 @@ mod tests {
     // slider'.
     #[test]
     fn a_range_slider_uses_the_theme_colors_for_the_right_shapes_when_enabled() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let theme = themed_theme(&tester);
+        test_widgets(|tester| {
+            let theme = themed_theme(tester);
             let slider_theme = theme.slider_theme.clone();
             tester.pump_widget(themed_app(&theme, ThemedArgs::default()));
 
             // Check default theme for enabled widget.
-            let render = range_render(&tester);
+            let render = range_render(tester);
             assert!(paints(
-                &tester,
+                tester,
                 render,
                 &[
                     rrect(slider_theme.inactive_track_color),
@@ -4318,7 +4332,7 @@ mod tests {
                 ]
             ));
             assert!(paints(
-                &tester,
+                tester,
                 render,
                 &[
                     circle(slider_theme.thumb_color),
@@ -4326,27 +4340,27 @@ mod tests {
                 ]
             ));
             assert!(!paints(
-                &tester,
+                tester,
                 render,
                 &[circle(slider_theme.disabled_thumb_color)]
             ));
             assert!(!paints_rect(
-                &tester,
+                tester,
                 render,
                 slider_theme.disabled_active_track_color
             ));
             assert!(!paints_rect(
-                &tester,
+                tester,
                 render,
                 slider_theme.disabled_inactive_track_color
             ));
             assert!(!paints(
-                &tester,
+                tester,
                 render,
                 &[circle(slider_theme.active_tick_mark_color)]
             ));
             assert!(!paints(
-                &tester,
+                tester,
                 render,
                 &[circle(slider_theme.inactive_tick_mark_color)]
             ));
@@ -4357,10 +4371,9 @@ mod tests {
     // color'.
     #[test]
     fn a_range_slider_uses_its_active_color_for_the_active_shapes() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             const ACTIVE_COLOR: Color = Color::new(0xcafefeed);
-            let theme = themed_theme(&tester);
+            let theme = themed_theme(tester);
             let slider_theme = theme.slider_theme.clone();
             tester.pump_widget(themed_app(
                 &theme,
@@ -4370,9 +4383,9 @@ mod tests {
                 },
             ));
 
-            let render = range_render(&tester);
+            let render = range_render(tester);
             assert!(paints(
-                &tester,
+                tester,
                 render,
                 &[
                     rrect(slider_theme.inactive_track_color),
@@ -4381,27 +4394,23 @@ mod tests {
                 ]
             ));
             assert!(paints(
-                &tester,
+                tester,
                 render,
                 &[circle(Some(ACTIVE_COLOR)), circle(Some(ACTIVE_COLOR))]
             ));
+            assert!(!paints(tester, render, &[circle(slider_theme.thumb_color)]));
             assert!(!paints(
-                &tester,
-                render,
-                &[circle(slider_theme.thumb_color)]
-            ));
-            assert!(!paints(
-                &tester,
+                tester,
                 render,
                 &[circle(slider_theme.disabled_thumb_color)]
             ));
             assert!(!paints_rect(
-                &tester,
+                tester,
                 render,
                 slider_theme.disabled_active_track_color
             ));
             assert!(!paints_rect(
-                &tester,
+                tester,
                 render,
                 slider_theme.disabled_inactive_track_color
             ));
@@ -4412,10 +4421,9 @@ mod tests {
     // color'.
     #[test]
     fn a_range_slider_uses_its_inactive_color_for_the_inactive_shapes() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             const INACTIVE_COLOR: Color = Color::new(0xdeadbeef);
-            let theme = themed_theme(&tester);
+            let theme = themed_theme(tester);
             let slider_theme = theme.slider_theme.clone();
             tester.pump_widget(themed_app(
                 &theme,
@@ -4425,9 +4433,9 @@ mod tests {
                 },
             ));
 
-            let render = range_render(&tester);
+            let render = range_render(tester);
             assert!(paints(
-                &tester,
+                tester,
                 render,
                 &[
                     rrect(Some(INACTIVE_COLOR)),
@@ -4436,7 +4444,7 @@ mod tests {
                 ]
             ));
             assert!(paints(
-                &tester,
+                tester,
                 render,
                 &[
                     circle(slider_theme.thumb_color),
@@ -4444,17 +4452,17 @@ mod tests {
                 ]
             ));
             assert!(!paints(
-                &tester,
+                tester,
                 render,
                 &[circle(slider_theme.disabled_thumb_color)]
             ));
             assert!(!paints_rect(
-                &tester,
+                tester,
                 render,
                 slider_theme.disabled_active_track_color
             ));
             assert!(!paints_rect(
-                &tester,
+                tester,
                 render,
                 slider_theme.disabled_inactive_track_color
             ));
@@ -4465,11 +4473,10 @@ mod tests {
     // colors'.
     #[test]
     fn a_range_slider_uses_its_active_and_inactive_colors() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             const ACTIVE_COLOR: Color = Color::new(0xcafefeed);
             const INACTIVE_COLOR: Color = Color::new(0xdeadbeef);
-            let theme = themed_theme(&tester);
+            let theme = themed_theme(tester);
             let slider_theme = theme.slider_theme.clone();
             tester.pump_widget(themed_app(
                 &theme,
@@ -4480,9 +4487,9 @@ mod tests {
                 },
             ));
 
-            let render = range_render(&tester);
+            let render = range_render(tester);
             assert!(paints(
-                &tester,
+                tester,
                 render,
                 &[
                     rrect(Some(INACTIVE_COLOR)),
@@ -4491,27 +4498,23 @@ mod tests {
                 ]
             ));
             assert!(paints(
-                &tester,
+                tester,
                 render,
                 &[circle(Some(ACTIVE_COLOR)), circle(Some(ACTIVE_COLOR))]
             ));
+            assert!(!paints(tester, render, &[circle(slider_theme.thumb_color)]));
             assert!(!paints(
-                &tester,
-                render,
-                &[circle(slider_theme.thumb_color)]
-            ));
-            assert!(!paints(
-                &tester,
+                tester,
                 render,
                 &[circle(slider_theme.disabled_thumb_color)]
             ));
             assert!(!paints_rect(
-                &tester,
+                tester,
                 render,
                 slider_theme.disabled_active_track_color
             ));
             assert!(!paints_rect(
-                &tester,
+                tester,
                 render,
                 slider_theme.disabled_inactive_track_color
             ));
@@ -4521,9 +4524,8 @@ mod tests {
     // 'Range Slider uses the right theme colors for the right shapes for a discrete slider'.
     #[test]
     fn a_discrete_range_slider_uses_the_theme_colors_for_the_right_shapes() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let theme = themed_theme(&tester);
+        test_widgets(|tester| {
+            let theme = themed_theme(tester);
             let slider_theme = theme.slider_theme.clone();
             tester.pump_widget(themed_app(
                 &theme,
@@ -4533,9 +4535,9 @@ mod tests {
                 },
             ));
 
-            let render = range_render(&tester);
+            let render = range_render(tester);
             assert!(paints(
-                &tester,
+                tester,
                 render,
                 &[
                     rrect(slider_theme.inactive_track_color),
@@ -4544,7 +4546,7 @@ mod tests {
                 ]
             ));
             assert!(paints(
-                &tester,
+                tester,
                 render,
                 &[
                     circle(slider_theme.inactive_tick_mark_color),
@@ -4556,17 +4558,17 @@ mod tests {
                 ]
             ));
             assert!(!paints(
-                &tester,
+                tester,
                 render,
                 &[circle(slider_theme.disabled_thumb_color)]
             ));
             assert!(!paints_rect(
-                &tester,
+                tester,
                 render,
                 slider_theme.disabled_active_track_color
             ));
             assert!(!paints_rect(
-                &tester,
+                tester,
                 render,
                 slider_theme.disabled_inactive_track_color
             ));
@@ -4577,11 +4579,10 @@ mod tests {
     // active and inactive colors'.
     #[test]
     fn a_discrete_range_slider_uses_its_active_and_inactive_colors() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             const ACTIVE_COLOR: Color = Color::new(0xcafefeed);
             const INACTIVE_COLOR: Color = Color::new(0xdeadbeef);
-            let theme = themed_theme(&tester);
+            let theme = themed_theme(tester);
             let slider_theme = theme.slider_theme.clone();
             tester.pump_widget(themed_app(
                 &theme,
@@ -4593,9 +4594,9 @@ mod tests {
                 },
             ));
 
-            let render = range_render(&tester);
+            let render = range_render(tester);
             assert!(paints(
-                &tester,
+                tester,
                 render,
                 &[
                     rrect(Some(INACTIVE_COLOR)),
@@ -4604,7 +4605,7 @@ mod tests {
                 ]
             ));
             assert!(paints(
-                &tester,
+                tester,
                 render,
                 &[
                     circle(Some(ACTIVE_COLOR)),
@@ -4615,33 +4616,29 @@ mod tests {
                     circle(Some(ACTIVE_COLOR)),
                 ]
             ));
+            assert!(!paints(tester, render, &[circle(slider_theme.thumb_color)]));
             assert!(!paints(
-                &tester,
-                render,
-                &[circle(slider_theme.thumb_color)]
-            ));
-            assert!(!paints(
-                &tester,
+                tester,
                 render,
                 &[circle(slider_theme.disabled_thumb_color)]
             ));
             assert!(!paints_rect(
-                &tester,
+                tester,
                 render,
                 slider_theme.disabled_active_track_color
             ));
             assert!(!paints_rect(
-                &tester,
+                tester,
                 render,
                 slider_theme.disabled_inactive_track_color
             ));
             assert!(!paints(
-                &tester,
+                tester,
                 render,
                 &[circle(slider_theme.active_tick_mark_color)]
             ));
             assert!(!paints(
-                &tester,
+                tester,
                 render,
                 &[circle(slider_theme.inactive_tick_mark_color)]
             ));
@@ -4652,9 +4649,8 @@ mod tests {
     // slider'.
     #[test]
     fn a_disabled_range_slider_uses_the_disabled_theme_colors() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let theme = themed_theme(&tester);
+        test_widgets(|tester| {
+            let theme = themed_theme(tester);
             let slider_theme = theme.slider_theme.clone();
             tester.pump_widget(themed_app(
                 &theme,
@@ -4664,9 +4660,9 @@ mod tests {
                 },
             ));
 
-            let render = range_render(&tester);
+            let render = range_render(tester);
             assert!(paints(
-                &tester,
+                tester,
                 render,
                 &[
                     rrect(slider_theme.disabled_inactive_track_color),
@@ -4674,18 +4670,14 @@ mod tests {
                     rrect(slider_theme.disabled_active_track_color),
                 ]
             ));
-            assert!(!paints(
-                &tester,
-                render,
-                &[circle(slider_theme.thumb_color)]
-            ));
+            assert!(!paints(tester, render, &[circle(slider_theme.thumb_color)]));
             assert!(!paints_rect(
-                &tester,
+                tester,
                 render,
                 slider_theme.active_track_color
             ));
             assert!(!paints_rect(
-                &tester,
+                tester,
                 render,
                 slider_theme.inactive_track_color
             ));
@@ -4696,9 +4688,8 @@ mod tests {
     // active and inactive colors'.
     #[test]
     fn a_disabled_range_slider_ignores_its_active_and_inactive_colors() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let theme = themed_theme(&tester);
+        test_widgets(|tester| {
+            let theme = themed_theme(tester);
             let slider_theme = theme.slider_theme.clone();
             tester.pump_widget(themed_app(
                 &theme,
@@ -4710,9 +4701,9 @@ mod tests {
                 },
             ));
 
-            let render = range_render(&tester);
+            let render = range_render(tester);
             assert!(paints(
-                &tester,
+                tester,
                 render,
                 &[
                     rrect(slider_theme.disabled_inactive_track_color),
@@ -4720,18 +4711,14 @@ mod tests {
                     rrect(slider_theme.disabled_active_track_color),
                 ]
             ));
-            assert!(!paints(
-                &tester,
-                render,
-                &[circle(slider_theme.thumb_color)]
-            ));
+            assert!(!paints(tester, render, &[circle(slider_theme.thumb_color)]));
             assert!(!paints_rect(
-                &tester,
+                tester,
                 render,
                 slider_theme.active_track_color
             ));
             assert!(!paints_rect(
-                &tester,
+                tester,
                 render,
                 slider_theme.inactive_track_color
             ));
@@ -4762,11 +4749,10 @@ mod tests {
     // 'RangeSlider changes mouse cursor when hovered'.
     #[test]
     fn a_range_slider_changes_the_mouse_cursor_when_hovered() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             use waft_services::SystemMouseCursors;
-            let mut tester = tester_on(TargetPlatform::Android);
             let values = RangeValues::new(50.0, 70.0);
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             let frame = |slider: RangeSlider| {
                 material_body(
                     theme.clone(),
@@ -4778,9 +4764,9 @@ mod tests {
             // Test default cursor.
             tester.pump_widget(frame(RangeSlider::new(values, noop()).max(100.0)));
 
-            let mut gesture = WidgetTester::mouse(1, 0);
-            tester.add_pointer(&mut gesture, slider_rect(&tester).center());
-            assert!(active_cursor_is(&tester, SystemMouseCursors::CLICK));
+            let mut gesture = TestPointer::mouse(1, 0);
+            tester.add_pointer(&mut gesture, slider_rect(tester).center());
+            assert!(active_cursor_is(tester, SystemMouseCursors::CLICK));
 
             // Test custom cursor.
             tester.pump_widget(frame(
@@ -4790,19 +4776,18 @@ mod tests {
                         SystemMouseCursors::TEXT.into(),
                     )))),
             ));
-            tester.pump(Duration::ZERO);
-            assert!(active_cursor_is(&tester, SystemMouseCursors::TEXT));
+            tester.pump();
+            assert!(active_cursor_is(tester, SystemMouseCursors::TEXT));
         });
     }
 
     // 'RangeSlider WidgetStateMouseCursor resolves correctly'.
     #[test]
     fn a_range_slider_resolves_a_widget_state_mouse_cursor() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             use waft_services::{PhysicalKeyboardKey, SystemMouseCursors};
-            let mut tester = tester_on(TargetPlatform::Android);
             let heard = Heard::starting_at(20.0, 75.0);
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             let build_frame = |enabled: bool| {
                 let heard = Rc::clone(&heard);
                 material_app(
@@ -4848,44 +4833,44 @@ mod tests {
                 )
             };
 
-            let mut gesture = WidgetTester::mouse(1, 0);
+            let mut gesture = TestPointer::mouse(1, 0);
             // Dart's tester starts with an empty view; this one has none until it pumps.
             tester.pump_widget(waft_widgets::SizedBox::new().into_widget());
 
             // System default.
             tester.add_pointer(&mut gesture, Offset::ZERO);
             tester.pump_widget(build_frame(false));
-            assert!(active_cursor_is(&tester, SystemMouseCursors::BASIC));
+            assert!(active_cursor_is(tester, SystemMouseCursors::BASIC));
 
             // Disabled.
-            tester.move_to(&mut gesture, slider_rect(&tester).center(), false);
-            tester.pump(Duration::ZERO);
-            assert!(active_cursor_is(&tester, SystemMouseCursors::FORBIDDEN));
+            tester.move_to(&mut gesture, slider_rect(tester).center(), false);
+            tester.pump();
+            assert!(active_cursor_is(tester, SystemMouseCursors::FORBIDDEN));
 
             // Hovered.
             tester.pump_widget(build_frame(true));
-            assert!(active_cursor_is(&tester, SystemMouseCursors::GRAB));
+            assert!(active_cursor_is(tester, SystemMouseCursors::GRAB));
 
             // Dragged.
-            let mut pressed = WidgetTester::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+            let mut pressed = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
             pressed.position = gesture.position;
-            tester.down(&mut pressed, slider_rect(&tester).center());
+            tester.down(&mut pressed, slider_rect(tester).center());
             let at = pressed.position + Offset::new(20.0, 0.0);
             tester.move_to(&mut pressed, at, true);
-            tester.pump(Duration::ZERO);
-            assert!(active_cursor_is(&tester, SystemMouseCursors::MOVE));
+            tester.pump();
+            assert!(active_cursor_is(tester, SystemMouseCursors::MOVE));
 
             // Hovered.
             tester.up(&pressed);
             gesture.position = pressed.position;
-            tester.pump(Duration::ZERO);
-            assert!(active_cursor_is(&tester, SystemMouseCursors::GRAB));
+            tester.pump();
+            assert!(active_cursor_is(tester, SystemMouseCursors::GRAB));
 
             // System default.
             tester.move_to(&mut gesture, Offset::ZERO, false);
             tester.send_key_event(PhysicalKeyboardKey::TAB, LogicalKeyboardKey::TAB);
-            tester.pump(Duration::ZERO);
-            assert!(active_cursor_is(&tester, SystemMouseCursors::BASIC));
+            tester.pump();
+            assert!(active_cursor_is(tester, SystemMouseCursors::BASIC));
         });
     }
 
@@ -4925,23 +4910,22 @@ mod tests {
     // 'RangeSlider can be focused using keyboard focus'.
     #[test]
     fn a_range_slider_can_be_focused_using_keyboard_focus() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let heard = Heard::starting_at(20.0, 80.0);
-            pump(&mut tester, TextDirection::Ltr, &heard, |slider| {
+            pump(tester, TextDirection::Ltr, &heard, |slider| {
                 slider.max(100.0)
             });
 
             // Focus on the start thumb
             assert_eq!(tester.find_by_type::<RangeSlider>().len(), 1);
-            let (start_focus_node, end_focus_node) = thumb_focus_nodes(&tester);
+            let (start_focus_node, end_focus_node) = thumb_focus_nodes(tester);
             start_focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
             tester.pump_and_settle();
-            assert_eq!(primary_focus(&tester), Some(start_focus_node));
+            assert_eq!(primary_focus(tester), Some(start_focus_node));
 
             // Tab to focus on the end thumb
-            send_key(&mut tester, LogicalKeyboardKey::TAB);
-            assert_eq!(primary_focus(&tester), Some(end_focus_node));
+            send_key(tester, LogicalKeyboardKey::TAB);
+            assert_eq!(primary_focus(tester), Some(end_focus_node));
         });
     }
 
@@ -5030,53 +5014,51 @@ mod tests {
     // 'arrow keys do not change the value when not in editing mode'.
     #[test]
     fn directional_arrow_keys_move_the_focus_outside_editing_mode() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let fixture = pump_directional_range_slider(&mut tester, NavigationMode::Directional);
+        test_widgets(|tester| {
+            let fixture = pump_directional_range_slider(tester, NavigationMode::Directional);
             let (left, right) = (
                 FocusNodeLeaf::as_node(fixture.left_neighbor.handle()),
                 FocusNodeLeaf::as_node(fixture.right_neighbor.handle()),
             );
-            let start_focus_node = focus_start_thumb(&mut tester);
+            let start_focus_node = focus_start_thumb(tester);
 
-            send_key(&mut tester, LogicalKeyboardKey::ARROW_RIGHT);
+            send_key(tester, LogicalKeyboardKey::ARROW_RIGHT);
             // arrowRight should move focus, not change the value, outside editing mode
             assert_eq!(fixture.heard.values.get(), RangeValues::new(40.0, 80.0));
             // arrowRight should move the focus to the right neighbor
-            assert_eq!(primary_focus(&tester), Some(right));
+            assert_eq!(primary_focus(tester), Some(right));
 
-            send_key(&mut tester, LogicalKeyboardKey::ARROW_LEFT);
+            send_key(tester, LogicalKeyboardKey::ARROW_LEFT);
             // arrowLeft should move focus, not change the value, outside editing mode
             assert_eq!(fixture.heard.values.get(), RangeValues::new(40.0, 80.0));
             // arrowLeft should move the focus back to the start thumb
-            assert_eq!(primary_focus(&tester), Some(start_focus_node));
+            assert_eq!(primary_focus(tester), Some(start_focus_node));
 
-            send_key(&mut tester, LogicalKeyboardKey::ARROW_LEFT);
+            send_key(tester, LogicalKeyboardKey::ARROW_LEFT);
             assert_eq!(fixture.heard.values.get(), RangeValues::new(40.0, 80.0));
             // a second arrowLeft should move the focus to the left neighbor
-            assert_eq!(primary_focus(&tester), Some(left));
+            assert_eq!(primary_focus(tester), Some(left));
         });
     }
 
     // 'pressing enter enters editing mode and arrow keys adjust the value'.
     #[test]
     fn pressing_enter_enters_editing_mode_and_arrow_keys_adjust_the_value() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let fixture = pump_directional_range_slider(&mut tester, NavigationMode::Directional);
-            focus_start_thumb(&mut tester);
+        test_widgets(|tester| {
+            let fixture = pump_directional_range_slider(tester, NavigationMode::Directional);
+            focus_start_thumb(tester);
 
             // Enter editing mode.
-            send_key(&mut tester, LogicalKeyboardKey::ENTER);
+            send_key(tester, LogicalKeyboardKey::ENTER);
 
             // In LTR, the right arrow increases the focused (start) thumb...
-            send_key(&mut tester, LogicalKeyboardKey::ARROW_RIGHT);
+            send_key(tester, LogicalKeyboardKey::ARROW_RIGHT);
             let increased_start = fixture.heard.values.get().start;
             assert!(increased_start > 40.0);
             assert_eq!(fixture.heard.values.get().end, 80.0);
 
             // ...and the left arrow decreases it.
-            send_key(&mut tester, LogicalKeyboardKey::ARROW_LEFT);
+            send_key(tester, LogicalKeyboardKey::ARROW_LEFT);
             assert!(fixture.heard.values.get().start < increased_start);
             assert_eq!(fixture.heard.values.get().end, 80.0);
         });
@@ -5085,17 +5067,16 @@ mod tests {
     // 'pressing enter again exits editing mode'.
     #[test]
     fn pressing_enter_again_exits_editing_mode() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let fixture = pump_directional_range_slider(&mut tester, NavigationMode::Directional);
-            focus_start_thumb(&mut tester);
+        test_widgets(|tester| {
+            let fixture = pump_directional_range_slider(tester, NavigationMode::Directional);
+            focus_start_thumb(tester);
 
             // Enter then exit editing mode.
-            send_key(&mut tester, LogicalKeyboardKey::ENTER);
-            send_key(&mut tester, LogicalKeyboardKey::ENTER);
+            send_key(tester, LogicalKeyboardKey::ENTER);
+            send_key(tester, LogicalKeyboardKey::ENTER);
 
             // Arrow keys no longer adjust the value.
-            send_key(&mut tester, LogicalKeyboardKey::ARROW_RIGHT);
+            send_key(tester, LogicalKeyboardKey::ARROW_RIGHT);
             assert_eq!(fixture.heard.values.get(), RangeValues::new(40.0, 80.0));
         });
     }
@@ -5103,13 +5084,12 @@ mod tests {
     // 'losing focus exits editing mode'.
     #[test]
     fn losing_focus_exits_editing_mode() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let fixture = pump_directional_range_slider(&mut tester, NavigationMode::Directional);
-            let start_focus_node = focus_start_thumb(&mut tester);
+        test_widgets(|tester| {
+            let fixture = pump_directional_range_slider(tester, NavigationMode::Directional);
+            let start_focus_node = focus_start_thumb(tester);
 
             // Enter editing mode.
-            send_key(&mut tester, LogicalKeyboardKey::ENTER);
+            send_key(tester, LogicalKeyboardKey::ENTER);
 
             // Losing focus should reset the editing mode.
             start_focus_node.unfocus(
@@ -5122,7 +5102,7 @@ mod tests {
             // editing mode was reset when focus was lost.
             start_focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
             tester.pump_and_settle();
-            send_key(&mut tester, LogicalKeyboardKey::ARROW_RIGHT);
+            send_key(tester, LogicalKeyboardKey::ARROW_RIGHT);
             assert_eq!(fixture.heard.values.get(), RangeValues::new(40.0, 80.0));
         });
     }
@@ -5130,17 +5110,16 @@ mod tests {
     // 'arrow keys change the value directly in traditional navigation mode'.
     #[test]
     fn arrow_keys_change_the_value_directly_in_traditional_navigation_mode() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let fixture = pump_directional_range_slider(&mut tester, NavigationMode::Traditional);
-            focus_start_thumb(&mut tester);
+        test_widgets(|tester| {
+            let fixture = pump_directional_range_slider(tester, NavigationMode::Traditional);
+            focus_start_thumb(tester);
 
             // No need to enter an editing mode in traditional navigation.
-            send_key(&mut tester, LogicalKeyboardKey::ARROW_RIGHT);
+            send_key(tester, LogicalKeyboardKey::ARROW_RIGHT);
             assert!(fixture.heard.values.get().start > 40.0);
             assert_eq!(fixture.heard.values.get().end, 80.0);
 
-            send_key(&mut tester, LogicalKeyboardKey::ARROW_LEFT);
+            send_key(tester, LogicalKeyboardKey::ARROW_LEFT);
             assert!(near(fixture.heard.values.get().start, 40.0, 1e-9));
             assert_eq!(fixture.heard.values.get().end, 80.0);
         });
@@ -5186,11 +5165,10 @@ mod tests {
     #[test]
     #[expect(deprecated, reason = "Dart's case calls the deprecated `withOpacity`")]
     fn a_range_slider_can_be_hovered_and_has_the_hover_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             tester.set_highlight_strategy(waft_widgets::FocusHighlightStrategy::AlwaysTraditional);
             let values = Rc::new(Cell::new(RangeValues::new(50.0, 70.0)));
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             let hover_color = theme.color_scheme.primary.with_opacity(0.12);
             let build_app = |enabled: bool| {
                 enabled_range_slider_app(theme.clone(), &values, enabled, |slider| {
@@ -5201,22 +5179,22 @@ mod tests {
             tester.pump_widget(build_app(true));
             // RangeSlider does not have overlay when enabled and not hovered.
             tester.pump_and_settle();
-            assert!(!paints_circle_of_color(&tester, hover_color));
+            assert!(!paints_circle_of_color(tester, hover_color));
 
             // Start hovering.
-            let mut gesture = WidgetTester::mouse(1, 0);
+            let mut gesture = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut gesture, Offset::ZERO);
-            tester.move_to(&mut gesture, slider_rect(&tester).center(), false);
+            tester.move_to(&mut gesture, slider_rect(tester).center(), false);
 
             // RangeSlider has overlay when enabled and hovered.
             tester.pump_widget(build_app(true));
             tester.pump_and_settle();
-            assert!(paints_circle_of_color(&tester, hover_color));
+            assert!(paints_circle_of_color(tester, hover_color));
 
             // RangeSlider does not have an overlay when disabled and hovered.
             tester.pump_widget(build_app(false));
             tester.pump_and_settle();
-            assert!(!paints_circle_of_color(&tester, hover_color));
+            assert!(!paints_circle_of_color(tester, hover_color));
         });
     }
 
@@ -5224,11 +5202,10 @@ mod tests {
     #[test]
     #[expect(deprecated, reason = "Dart's case calls the deprecated `withOpacity`")]
     fn a_range_slider_is_draggable_and_has_the_dragged_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             tester.set_highlight_strategy(waft_widgets::FocusHighlightStrategy::AlwaysTraditional);
             let values = Rc::new(Cell::new(RangeValues::new(50.0, 70.0)));
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             let dragged_color = theme.color_scheme.primary.with_opacity(0.12);
             tester.pump_widget(enabled_range_slider_app(theme, &values, true, |slider| {
                 slider.max(100.0)
@@ -5236,32 +5213,31 @@ mod tests {
 
             // RangeSlider does not have overlay when enabled and not dragged.
             tester.pump_and_settle();
-            assert!(!paints_circle_of_color(&tester, dragged_color));
+            assert!(!paints_circle_of_color(tester, dragged_color));
 
             // Start dragging.
-            let mut drag = WidgetTester::touch(1);
-            tester.down(&mut drag, slider_rect(&tester).center());
-            tester.pump(waft_gestures::K_PRESS_TIMEOUT);
+            let mut drag = TestPointer::touch(1);
+            tester.down(&mut drag, slider_rect(tester).center());
+            tester.pump_by(waft_gestures::K_PRESS_TIMEOUT);
             // Less than configured touch slop, more than default touch slop
             let at = drag.position + Offset::new(19.0, 0.0);
             tester.move_to(&mut drag, at, true);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // RangeSlider has overlay when enabled and dragged.
-            assert!(paints_circle_of_color(&tester, dragged_color));
+            assert!(paints_circle_of_color(tester, dragged_color));
         });
     }
 
     // 'RangeSlider overlayColor supports hovered and dragged states'.
     #[test]
     fn a_range_slider_overlay_color_supports_hovered_and_dragged_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             tester.set_highlight_strategy(waft_widgets::FocusHighlightStrategy::AlwaysTraditional);
             let values = Rc::new(Cell::new(RangeValues::new(50.0, 70.0)));
             const HOVER_COLOR: Color = Color::new(0xffff0000);
             const DRAGGED_COLOR: Color = Color::new(0xff0000ff);
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             let build_app = |enabled: bool| {
                 enabled_range_slider_app(theme.clone(), &values, enabled, move |slider| {
                     let slider =
@@ -5289,62 +5265,61 @@ mod tests {
             tester.pump_widget(build_app(true));
             // RangeSlider does not have overlay when enabled and not hovered.
             tester.pump_and_settle();
-            assert!(!paints_circle_of_color(&tester, HOVER_COLOR));
+            assert!(!paints_circle_of_color(tester, HOVER_COLOR));
 
             // Hover on the range slider but outside the thumb.
-            let mut gesture = WidgetTester::mouse(1, 0);
+            let mut gesture = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut gesture, Offset::ZERO);
-            tester.move_to(&mut gesture, slider_rect(&tester).top_left(), false);
+            tester.move_to(&mut gesture, slider_rect(tester).top_left(), false);
             tester.pump_widget(build_app(true));
             tester.pump_and_settle();
-            assert!(!paints_circle_of_color(&tester, HOVER_COLOR));
+            assert!(!paints_circle_of_color(tester, HOVER_COLOR));
 
             // Hover on the thumb.
-            tester.move_to(&mut gesture, slider_rect(&tester).center(), false);
+            tester.move_to(&mut gesture, slider_rect(tester).center(), false);
             tester.pump_and_settle();
-            assert!(paints_circle_of_color(&tester, HOVER_COLOR));
+            assert!(paints_circle_of_color(tester, HOVER_COLOR));
 
             // Hover on the slider but outside the thumb.
-            tester.move_to(&mut gesture, slider_rect(&tester).bottom_right(), false);
+            tester.move_to(&mut gesture, slider_rect(tester).bottom_right(), false);
             tester.pump_and_settle();
-            assert!(!paints_circle_of_color(&tester, HOVER_COLOR));
+            assert!(!paints_circle_of_color(tester, HOVER_COLOR));
 
             // Reset range slider values.
             values.set(RangeValues::new(50.0, 70.0));
             // RangeSlider does not have overlay when enabled and not dragged.
             tester.pump_widget(build_app(true));
             tester.pump_and_settle();
-            assert!(!paints_circle_of_color(&tester, DRAGGED_COLOR));
+            assert!(!paints_circle_of_color(tester, DRAGGED_COLOR));
 
             // Start dragging.
-            let mut drag = WidgetTester::touch(2);
-            tester.down(&mut drag, slider_rect(&tester).center());
-            tester.pump(waft_gestures::K_PRESS_TIMEOUT);
+            let mut drag = TestPointer::touch(2);
+            tester.down(&mut drag, slider_rect(tester).center());
+            tester.pump_by(waft_gestures::K_PRESS_TIMEOUT);
             // Less than configured touch slop, more than default touch slop.
             let at = drag.position + Offset::new(19.0, 0.0);
             tester.move_to(&mut drag, at, true);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // RangeSlider has overlay when enabled and dragged.
-            assert!(paints_circle_of_color(&tester, DRAGGED_COLOR));
+            assert!(paints_circle_of_color(tester, DRAGGED_COLOR));
 
             // Stop dragging.
             tester.up(&drag);
             tester.pump_and_settle();
-            assert!(!paints_circle_of_color(&tester, DRAGGED_COLOR));
+            assert!(!paints_circle_of_color(tester, DRAGGED_COLOR));
         });
     }
 
     // 'RangeSlider onChangeStart and onChangeEnd fire once'.
     #[test]
     fn range_slider_on_change_start_and_end_fire_once() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regression test for https://github.com/flutter/flutter/issues/128433
-            let mut tester = tester_on(TargetPlatform::Android);
             let heard = Heard::starting_at(40.0, 80.0);
             let (start_fired, end_fired) = (Rc::new(Cell::new(0)), Rc::new(Cell::new(0)));
             let (start, end) = (Rc::clone(&start_fired), Rc::clone(&end_fired));
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             let _ = heard;
             tester.pump_widget(material_body(
                 theme,
@@ -5358,7 +5333,7 @@ mod tests {
                     ),
             ));
 
-            tester.drag_from(slider_rect(&tester).top_left(), Offset::new(100.0, 0.0), 1);
+            tester.drag_from(slider_rect(tester).top_left(), Offset::new(100.0, 0.0), 1);
             assert_eq!(start_fired.get(), 1);
             assert_eq!(end_fired.get(), 1);
         });
@@ -5367,10 +5342,9 @@ mod tests {
     // 'RangeSlider in a ListView does not throw an exception'.
     #[test]
     fn a_range_slider_in_a_list_view_does_not_throw() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regression test for https://github.com/flutter/flutter/issues/126648
-            let mut tester = tester_on(TargetPlatform::Android);
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             tester.pump_widget(material_app(
                 theme,
                 Directionality::new(
@@ -5394,8 +5368,7 @@ mod tests {
     // 'Range Slider top thumb gets stroked when overlapping'.
     #[test]
     fn the_top_range_slider_thumb_is_stroked_when_overlapping() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let heard = Heard::starting_at(0.3, 0.7);
             let theme = ThemeData::builder()
                 .platform(TargetPlatform::Android)
@@ -5407,7 +5380,7 @@ mod tests {
                 )
                 .build(&tester.cell.borrow());
             let slider_theme = theme.slider_theme.clone();
-            let app_theme = default_theme(&tester);
+            let app_theme = default_theme(tester);
             tester.pump_widget(range_slider_app(
                 app_theme,
                 TextDirection::Ltr,
@@ -5418,7 +5391,7 @@ mod tests {
                 |slider| slider,
             ));
 
-            let (top_left, bottom_right) = track_bounds(&tester);
+            let (top_left, bottom_right) = track_bounds(tester);
             let span = bottom_right - top_left;
             let middle = top_left + bottom_right / 2.0;
             // Drag the thumbs towards the center.
@@ -5433,8 +5406,8 @@ mod tests {
 
             // The drag gesture has finished, so no overlayColor should show up.
             assert!(paints(
-                &tester,
-                range_render(&tester),
+                tester,
+                range_render(tester),
                 &[
                     circle(slider_theme.thumb_color),
                     circle(slider_theme.overlapping_shape_stroke_color),
@@ -5447,8 +5420,7 @@ mod tests {
     // 'Range Slider thumb gets stroked when overlapping'.
     #[test]
     fn a_range_slider_thumb_is_stroked_when_overlapping() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let heard = Heard::starting_at(0.3, 0.7);
             let theme = ThemeData::builder()
                 .platform(TargetPlatform::Android)
@@ -5459,7 +5431,7 @@ mod tests {
                         .show_value_indicator(ShowValueIndicator::OnlyForContinuous),
                 )
                 .build(&tester.cell.borrow());
-            let app_theme = default_theme(&tester);
+            let app_theme = default_theme(tester);
             tester.pump_widget(range_slider_app(
                 app_theme,
                 TextDirection::Ltr,
@@ -5479,7 +5451,7 @@ mod tests {
                 },
             ));
 
-            let (top_left, bottom_right) = track_bounds(&tester);
+            let (top_left, bottom_right) = track_bounds(tester);
             let span = bottom_right - top_left;
             let middle = top_left + bottom_right / 2.0;
             // Drag the thumbs towards the center.
@@ -5492,7 +5464,7 @@ mod tests {
             assert!(near(heard.values.get().start, 0.5, 0.03));
             assert!(near(heard.values.get().end, 0.5, 0.03));
 
-            let mut gesture = WidgetTester::touch(3);
+            let mut gesture = TestPointer::touch(3);
             tester.down(&mut gesture, middle);
             tester.pump_and_settle();
 
@@ -5500,14 +5472,14 @@ mod tests {
             // circle, and the last one is the second thumb.
             let stroke = theme.slider_theme.overlapping_shape_stroke_color;
             assert!(paints(
-                &tester,
-                range_render(&tester),
+                tester,
+                range_render(tester),
                 &[circle(None), circle(stroke), circle(None)]
             ));
             tester.up(&gesture);
             assert!(paints(
-                &tester,
-                range_render(&tester),
+                tester,
+                range_render(tester),
                 &[circle(None), circle(stroke), circle(None)]
             ));
         });
@@ -5581,7 +5553,7 @@ mod tests {
                 )))
                 .into_widget(),
         ));
-        let mut gesture = WidgetTester::touch(1);
+        let mut gesture = TestPointer::touch(1);
         if dragged {
             tester.down(&mut gesture, slider_rect(tester).center());
         }
@@ -5599,8 +5571,7 @@ mod tests {
     // 'Value indicator appears when it should'.
     #[test]
     fn the_range_value_indicator_appears_when_it_should() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let base_theme = ThemeData::builder()
                 .platform(TargetPlatform::Android)
                 .primary_swatch(crate::colors::Colors::BLUE)
@@ -5626,7 +5597,7 @@ mod tests {
 
             // Default (showValueIndicator set to onlyForDiscrete).
             expect(
-                &mut tester,
+                tester,
                 &theme,
                 &[
                     (true, Some(10), true, true),
@@ -5645,7 +5616,7 @@ mod tests {
                 .copy_with()
                 .show_value_indicator(ShowValueIndicator::OnlyForContinuous);
             expect(
-                &mut tester,
+                tester,
                 &theme,
                 &[
                     (false, Some(10), true, true),
@@ -5664,7 +5635,7 @@ mod tests {
                 .copy_with()
                 .show_value_indicator(ShowValueIndicator::OnDrag);
             expect(
-                &mut tester,
+                tester,
                 &theme,
                 &[
                     (true, Some(10), true, true),
@@ -5683,7 +5654,7 @@ mod tests {
                 .copy_with()
                 .show_value_indicator(ShowValueIndicator::Never);
             expect(
-                &mut tester,
+                tester,
                 &theme,
                 &[
                     (false, Some(10), true, true),
@@ -5702,7 +5673,7 @@ mod tests {
                 .copy_with()
                 .show_value_indicator(ShowValueIndicator::AlwaysVisible);
             expect(
-                &mut tester,
+                tester,
                 &theme,
                 &[
                     (true, Some(3), true, true),
@@ -5727,9 +5698,8 @@ mod tests {
     // 'RangeSlider does not crash at zero area'.
     #[test]
     fn a_range_slider_does_not_crash_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let theme = default_theme(&tester);
+        test_widgets(|tester| {
+            let theme = default_theme(tester);
             tester.pump_widget(material_app(
                 theme,
                 crate::scaffold::Scaffold::new()
@@ -5742,7 +5712,7 @@ mod tests {
                     .into_widget(),
             ));
 
-            assert_eq!(range_slider_size(&tester), Size::ZERO);
+            assert_eq!(range_slider_size(tester), Size::ZERO);
         });
     }
 
@@ -5750,10 +5720,9 @@ mod tests {
     // RoundedRectRange'.
     #[test]
     fn a_range_slider_can_be_painted_in_a_narrower_constraint_with_a_rounded_track() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             use waft_embedder::{RRect, Radius};
-            let mut tester = tester_on(TargetPlatform::Android);
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             tester.pump_widget(material_body(
                 theme,
                 SizedBox::new()
@@ -5762,10 +5731,10 @@ mod tests {
                     .child(RangeSlider::new(RangeValues::new(0.25, 0.5), None)),
             ));
 
-            let render = range_render(&tester);
+            let render = range_render(tester);
             let circular = Radius::circular(2.0);
             assert!(paints(
-                &tester,
+                tester,
                 render,
                 &[
                     // left inactive track RRect
@@ -5819,9 +5788,8 @@ mod tests {
     // 'Range Slider can be painted in a narrower constraint when track shape is Rectangular'.
     #[test]
     fn a_range_slider_can_be_painted_in_a_narrower_constraint_with_a_rectangular_track() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             use crate::range_slider_parts::RectangularRangeSliderTrackShape;
-            let mut tester = tester_on(TargetPlatform::Android);
             let theme = ThemeData::builder()
                 .slider_theme(
                     SliderThemeData::new()
@@ -5836,7 +5804,7 @@ mod tests {
                     .child(RangeSlider::new(RangeValues::new(0.25, 0.5), None)),
             ));
 
-            let render = range_render(&tester);
+            let render = range_render(tester);
             // There should no gap between the inactive track and active track.
             let rects: Vec<Rect> = tester
                 .painted_ops(render)
@@ -5864,7 +5832,7 @@ mod tests {
             );
             // thumbs
             assert!(paints(
-                &tester,
+                tester,
                 render,
                 &[
                     PaintCall::Circle {
@@ -5887,10 +5855,9 @@ mod tests {
     // 'Update the divisions and values at the same time for RangeSlider'.
     #[test]
     fn updating_the_divisions_and_values_at_the_same_time_places_the_thumbs() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regress test for https://github.com/flutter/flutter/issues/65943
-            let mut tester = tester_on(TargetPlatform::Android);
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             let build_frame = |max_value: f64| {
                 material_app(
                     theme.clone(),
@@ -5907,7 +5874,7 @@ mod tests {
             };
 
             tester.pump_widget(build_frame(10.0));
-            let render = range_render(&tester);
+            let render = range_render(tester);
 
             // Update the divisions from 10 to 15, the thumbs should be paint at the correct
             // position.
@@ -6001,9 +5968,8 @@ mod tests {
     // 'Value indicator appears on tap'.
     #[test]
     fn the_range_value_indicator_appears_on_tap() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let theme = themed_theme(&tester);
+        test_widgets(|tester| {
+            let theme = themed_theme(tester);
             let slider_theme = theme.slider_theme.clone();
             let discrete_values = RangeValues::new(20.0, 40.0);
             tester.pump_widget(material_app(
@@ -6021,11 +5987,11 @@ mod tests {
                     .into_widget(),
             ));
 
-            tester.tap(slider_rect(&tester).center(), 1);
+            tester.tap(slider_rect(tester).center(), 1);
             tester.pump_and_settle();
 
             assert!(overlay_paints_shadows_and_indicator(
-                &tester,
+                tester,
                 slider_theme
                     .value_indicator_color
                     .expect("the theme has a value indicator color")
@@ -6036,8 +6002,7 @@ mod tests {
     // 'RangeSlider value indicator text when year2023 is false'.
     #[test]
     fn the_range_value_indicator_text_when_year2023_is_false() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let values = RangeValues::new(25.0, 75.0);
             let log_label = Rc::new(RefCell::new(Vec::new()));
             let shape = Rc::new(LoggingRangeSliderValueIndicatorShape {
@@ -6063,8 +6028,8 @@ mod tests {
                     .into_widget(),
             ));
 
-            let mut gesture = WidgetTester::touch(1);
-            tester.down(&mut gesture, slider_rect(&tester).top_left());
+            let mut gesture = TestPointer::touch(1);
+            tester.down(&mut gesture, slider_rect(tester).top_left());
             tester.pump_and_settle();
 
             let (text, style) = log_label
@@ -6088,8 +6053,7 @@ mod tests {
     #[test]
     #[expect(deprecated, reason = "Dart's case passes the deprecated `always`")]
     fn range_slider_labels_respect_the_horizontal_buffer() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let log_painter_width = Rc::new(RefCell::new(Vec::new()));
             let shape = Rc::new(LoggingRangeSliderValueIndicatorShape {
                 log_label: Rc::default(),
@@ -6099,7 +6063,7 @@ mod tests {
                 "A very long start label string that exceeds standard screen widths";
             const LONG_LABEL_END: &str =
                 "A very long end label string that exceeds standard screen widths";
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             tester.pump_widget(material_app(
                 theme,
                 crate::scaffold::Scaffold::new()
@@ -6115,8 +6079,8 @@ mod tests {
             ));
 
             // Press the range slider to trigger the value indicators
-            let mut gesture = WidgetTester::touch(1);
-            tester.down(&mut gesture, slider_rect(&tester).center());
+            let mut gesture = TestPointer::touch(1);
+            tester.down(&mut gesture, slider_rect(tester).center());
             tester.pump_and_settle();
 
             let screen_width = 800.0;
@@ -6169,13 +6133,12 @@ mod tests {
     #[test]
     #[expect(clippy::needless_range_loop, reason = "Dart's loops index `ticks`")]
     fn a_discrete_range_slider_snaps_at_the_visual_midpoint_between_ticks() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regression test for https://github.com/flutter/flutter/issues/184391.
             const DIVISIONS: usize = 10;
-            let mut tester = tester_on(TargetPlatform::Android);
             let values = Rc::new(Cell::new(RangeValues::new(0.0, 10.0)));
             let tick_centers = Rc::new(RefCell::new(Vec::new()));
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             let (shared_values, shared_ticks) = (Rc::clone(&values), Rc::clone(&tick_centers));
             tester.pump_widget(material_app(
                 theme,
@@ -6229,14 +6192,14 @@ mod tests {
                     Offset::new(midpoint_dx(i) - MIDPOINT_OFFSET, ticks[i].dy()),
                     1,
                 );
-                tester.pump(Duration::ZERO);
+                tester.pump();
                 // Just left of the midpoint of ticks i and i + 1
                 assert_eq!(values.get().start, i as f64);
                 tester.tap(
                     Offset::new(midpoint_dx(i) + MIDPOINT_OFFSET, ticks[i].dy()),
                     2,
                 );
-                tester.pump(Duration::ZERO);
+                tester.pump();
                 // Just right of the midpoint of ticks i and i + 1
                 assert_eq!(values.get().start, (i + 1) as f64);
             }
@@ -6248,13 +6211,13 @@ mod tests {
                     Offset::new(midpoint_dx(i) - MIDPOINT_OFFSET, ticks[i].dy()),
                     3,
                 );
-                tester.pump(Duration::ZERO);
+                tester.pump();
                 assert_eq!(values.get().end, i as f64);
                 tester.tap(
                     Offset::new(midpoint_dx(i) + MIDPOINT_OFFSET, ticks[i].dy()),
                     4,
                 );
-                tester.pump(Duration::ZERO);
+                tester.pump();
                 assert_eq!(values.get().end, (i + 1) as f64);
             }
         });
@@ -6274,30 +6237,29 @@ mod tests {
     // 'RangeSlider keeps drag overlay when touch moves outside thumb'.
     #[test]
     fn a_range_slider_keeps_the_drag_overlay_when_touch_moves_outside_the_thumb() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const OVERLAY_COLOR: Color = Color::new(0xff800080);
-            let mut tester = tester_on(TargetPlatform::Android);
             tester.set_highlight_strategy(waft_widgets::FocusHighlightStrategy::AlwaysTouch);
             let values = Rc::new(Cell::new(RangeValues::new(0.3, 0.7)));
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             tester.pump_widget(overlay_color_app(
                 theme,
                 &values,
                 Rc::new(WidgetStatePropertyAll::new(Some(OVERLAY_COLOR))),
             ));
 
-            let rect = slider_rect(&tester);
+            let rect = slider_rect(tester);
             let start_thumb_pos = rect.top_left() + (rect.bottom_right() - rect.top_left()) * 0.3;
-            let mut gesture = WidgetTester::touch(1);
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, start_thumb_pos);
             let at = gesture.position + Offset::new(40.0, -80.0);
             tester.move_to(&mut gesture, at, true);
             tester.pump_and_settle();
-            assert!(paints_circle_of_color(&tester, OVERLAY_COLOR));
+            assert!(paints_circle_of_color(tester, OVERLAY_COLOR));
 
             tester.up(&gesture);
             tester.pump_and_settle();
-            assert!(!paints_circle_of_color(&tester, OVERLAY_COLOR));
+            assert!(!paints_circle_of_color(tester, OVERLAY_COLOR));
             tester.set_highlight_strategy(waft_widgets::FocusHighlightStrategy::Automatic);
         });
     }
@@ -6305,31 +6267,30 @@ mod tests {
     // 'RangeSlider touch focus does not show persistent overlay'.
     #[test]
     fn a_range_slider_touch_focus_does_not_show_a_persistent_overlay() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const OVERLAY_COLOR: Color = Color::new(0xff800080);
-            let mut tester = tester_on(TargetPlatform::Android);
             tester.set_highlight_strategy(waft_widgets::FocusHighlightStrategy::AlwaysTouch);
             let values = Rc::new(Cell::new(RangeValues::new(0.3, 0.7)));
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             tester.pump_widget(overlay_color_app(
                 theme,
                 &values,
                 Rc::new(WidgetStatePropertyAll::new(Some(OVERLAY_COLOR))),
             ));
 
-            let rect = slider_rect(&tester);
+            let rect = slider_rect(tester);
             let start_thumb_pos = rect.top_left() + (rect.bottom_right() - rect.top_left()) * 0.3;
-            let mut gesture = WidgetTester::touch(1);
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, start_thumb_pos);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             let at = gesture.position + Offset::new(10.0, 0.0);
             tester.move_to(&mut gesture, at, true);
             tester.up(&gesture);
             tester.pump_and_settle();
 
-            let (start_focus_node, _) = thumb_focus_nodes(&tester);
+            let (start_focus_node, _) = thumb_focus_nodes(tester);
             assert!(start_focus_node.has_focus(&mut tester.cell.borrow_mut()));
-            assert!(!paints_circle_of_color(&tester, OVERLAY_COLOR));
+            assert!(!paints_circle_of_color(tester, OVERLAY_COLOR));
             tester.set_highlight_strategy(waft_widgets::FocusHighlightStrategy::Automatic);
         });
     }
@@ -6337,23 +6298,22 @@ mod tests {
     // 'RangeSlider keyboard focus shows focused overlay'.
     #[test]
     fn a_range_slider_keyboard_focus_shows_a_focused_overlay() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const OVERLAY_COLOR: Color = Color::new(0xff800080);
-            let mut tester = tester_on(TargetPlatform::Android);
             tester.set_highlight_strategy(waft_widgets::FocusHighlightStrategy::AlwaysTraditional);
             let values = Rc::new(Cell::new(RangeValues::new(0.3, 0.7)));
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             tester.pump_widget(overlay_color_app(
                 theme,
                 &values,
                 Rc::new(WidgetStatePropertyAll::new(Some(OVERLAY_COLOR))),
             ));
 
-            send_key(&mut tester, LogicalKeyboardKey::TAB);
+            send_key(tester, LogicalKeyboardKey::TAB);
 
-            let (start_focus_node, _) = thumb_focus_nodes(&tester);
+            let (start_focus_node, _) = thumb_focus_nodes(tester);
             assert!(start_focus_node.has_focus(&mut tester.cell.borrow_mut()));
-            assert!(paints_circle_of_color(&tester, OVERLAY_COLOR));
+            assert!(paints_circle_of_color(tester, OVERLAY_COLOR));
             tester.set_highlight_strategy(waft_widgets::FocusHighlightStrategy::Automatic);
         });
     }
@@ -6361,12 +6321,11 @@ mod tests {
     // 'RangeSlider overlayColor resolves focused state'.
     #[test]
     fn a_range_slider_overlay_color_resolves_the_focused_state() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const FOCUSED_COLOR: Color = Color::new(0xff800080);
-            let mut tester = tester_on(TargetPlatform::Android);
             tester.set_highlight_strategy(waft_widgets::FocusHighlightStrategy::AlwaysTraditional);
             let values = Rc::new(Cell::new(RangeValues::new(0.3, 0.7)));
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             tester.pump_widget(overlay_color_app(
                 theme,
                 &values,
@@ -6377,13 +6336,13 @@ mod tests {
                 }),
             ));
 
-            assert!(!paints_circle_of_color(&tester, FOCUSED_COLOR));
+            assert!(!paints_circle_of_color(tester, FOCUSED_COLOR));
 
-            send_key(&mut tester, LogicalKeyboardKey::TAB);
+            send_key(tester, LogicalKeyboardKey::TAB);
 
-            let (start_focus_node, _) = thumb_focus_nodes(&tester);
+            let (start_focus_node, _) = thumb_focus_nodes(tester);
             assert!(start_focus_node.has_focus(&mut tester.cell.borrow_mut()));
-            assert!(paints_circle_of_color(&tester, FOCUSED_COLOR));
+            assert!(paints_circle_of_color(tester, FOCUSED_COLOR));
             tester.set_highlight_strategy(waft_widgets::FocusHighlightStrategy::Automatic);
         });
     }
@@ -6391,130 +6350,126 @@ mod tests {
     // 'RangeSlider taps should set focus on start/end thumbs'.
     #[test]
     fn taps_set_focus_on_the_start_and_end_thumbs() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let heard = Heard::starting_at(0.3, 0.7);
-            pump(&mut tester, TextDirection::Ltr, &heard, |slider| slider);
+            pump(tester, TextDirection::Ltr, &heard, |slider| slider);
 
-            let rect = slider_rect(&tester);
+            let rect = slider_rect(tester);
             let span = rect.bottom_right() - rect.top_left();
 
             // Tap near the start thumb (0.3)
             tester.tap(rect.top_left() + span * 0.3, 1);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // Verify focus changed to start thumb
-            let (start_focus_node, end_focus_node) = thumb_focus_nodes(&tester);
+            let (start_focus_node, end_focus_node) = thumb_focus_nodes(tester);
             assert!(start_focus_node.has_focus(&mut tester.cell.borrow_mut()));
-            assert_eq!(primary_focus(&tester), Some(start_focus_node));
+            assert_eq!(primary_focus(tester), Some(start_focus_node));
 
             // Reset focus
-            primary_focus(&tester).expect("a primary focus").unfocus(
+            primary_focus(tester).expect("a primary focus").unfocus(
                 &mut tester.cell.borrow_mut(),
                 waft_widgets::UnfocusDisposition::Scope,
             );
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // Tap near the end thumb (0.7)
             tester.tap(rect.top_left() + span * 0.7, 2);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // Verify focus changed to end thumb
             assert!(end_focus_node.has_focus(&mut tester.cell.borrow_mut()));
-            assert_eq!(primary_focus(&tester), Some(end_focus_node));
+            assert_eq!(primary_focus(tester), Some(end_focus_node));
         });
     }
 
     // 'RangeSlider drag should set focus on start/end thumbs'.
     #[test]
     fn drags_set_focus_on_the_start_and_end_thumbs() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let heard = Heard::starting_at(0.3, 0.7);
-            pump(&mut tester, TextDirection::Ltr, &heard, |slider| slider);
+            pump(tester, TextDirection::Ltr, &heard, |slider| slider);
 
-            let rect = slider_rect(&tester);
+            let rect = slider_rect(tester);
             let span = rect.bottom_right() - rect.top_left();
-            let (start_focus_node, end_focus_node) = thumb_focus_nodes(&tester);
+            let (start_focus_node, end_focus_node) = thumb_focus_nodes(tester);
 
             // Drag start thumb
-            let mut gesture = WidgetTester::touch(1);
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, rect.top_left() + span * 0.3);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // Verify focus on start drag
             assert!(start_focus_node.has_focus(&mut tester.cell.borrow_mut()));
-            assert_eq!(primary_focus(&tester), Some(start_focus_node));
+            assert_eq!(primary_focus(tester), Some(start_focus_node));
             let at = gesture.position + Offset::new(10.0, 0.0);
             tester.move_to(&mut gesture, at, true);
             tester.up(&gesture);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // Reset focus
-            primary_focus(&tester).expect("a primary focus").unfocus(
+            primary_focus(tester).expect("a primary focus").unfocus(
                 &mut tester.cell.borrow_mut(),
                 waft_widgets::UnfocusDisposition::Scope,
             );
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // Drag end thumb
-            let mut end_gesture = WidgetTester::touch(2);
+            let mut end_gesture = TestPointer::touch(2);
             tester.down(&mut end_gesture, rect.top_left() + span * 0.7);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // Verify focus on end drag
             assert!(end_focus_node.has_focus(&mut tester.cell.borrow_mut()));
-            assert_eq!(primary_focus(&tester), Some(end_focus_node));
+            assert_eq!(primary_focus(tester), Some(end_focus_node));
             let at = end_gesture.position + Offset::new(-10.0, 0.0);
             tester.move_to(&mut end_gesture, at, true);
             tester.up(&end_gesture);
-            tester.pump(Duration::ZERO);
+            tester.pump();
         });
     }
 
     // 'RangeSlider tap start thumb then tab should focus end thumb'.
     #[test]
     fn tapping_the_start_thumb_then_tab_focuses_the_end_thumb() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let heard = Heard::starting_at(0.3, 0.7);
-            pump(&mut tester, TextDirection::Ltr, &heard, |slider| slider);
+            pump(tester, TextDirection::Ltr, &heard, |slider| slider);
 
-            let rect = slider_rect(&tester);
+            let rect = slider_rect(tester);
             let span = rect.bottom_right() - rect.top_left();
 
             // Tap near the start thumb (0.3)
             tester.tap(rect.top_left() + span * 0.3, 1);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // Verify start thumb has focus
-            let (start_focus_node, end_focus_node) = thumb_focus_nodes(&tester);
+            let (start_focus_node, end_focus_node) = thumb_focus_nodes(tester);
             assert!(start_focus_node.has_focus(&mut tester.cell.borrow_mut()));
-            assert_eq!(primary_focus(&tester), Some(start_focus_node));
+            assert_eq!(primary_focus(tester), Some(start_focus_node));
 
             // Press Tab
             tester.send_key_event(
                 waft_services::PhysicalKeyboardKey::TAB,
                 LogicalKeyboardKey::TAB,
             );
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // Verify end thumb has focus
             assert!(end_focus_node.has_focus(&mut tester.cell.borrow_mut()));
-            assert_eq!(primary_focus(&tester), Some(end_focus_node));
+            assert_eq!(primary_focus(tester), Some(end_focus_node));
         });
     }
 
     // 'Drag gesture uses provided gesture settings'.
     #[test]
     fn the_range_slider_drag_gesture_uses_the_gesture_settings_given() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Regression test for https://github.com/flutter/flutter/issues/105833
-            let mut tester = tester_on(TargetPlatform::Android);
             let values = Rc::new(Cell::new(RangeValues::new(0.1, 0.5)));
             let drag_started = Rc::new(Cell::new(false));
             let slider_end = Rc::new(Cell::new(false));
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             let build = |touch_slop: f64, with_end: bool| {
                 let (values, drag_started, slider_end) = (
                     Rc::clone(&values),
@@ -6564,14 +6519,14 @@ mod tests {
             };
             tester.pump_widget(build(20.0, false));
 
-            let mut drag = WidgetTester::touch(1);
-            tester.down(&mut drag, slider_rect(&tester).center());
-            tester.pump(waft_gestures::K_PRESS_TIMEOUT);
+            let mut drag = TestPointer::touch(1);
+            tester.down(&mut drag, slider_rect(tester).center());
+            tester.pump_by(waft_gestures::K_PRESS_TIMEOUT);
 
             // Less than configured touch slop, more than default touch slop
             let at = drag.position + Offset::new(19.0, 0.0);
             tester.move_to(&mut drag, at, true);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             assert_eq!(values.get(), RangeValues::new(0.1, 0.5));
             assert!(drag_started.get());
@@ -6581,9 +6536,9 @@ mod tests {
             tester.up(&drag);
             tester.pump_and_settle();
 
-            let mut drag = WidgetTester::touch(2);
-            tester.down(&mut drag, slider_rect(&tester).center());
-            tester.pump(waft_gestures::K_PRESS_TIMEOUT);
+            let mut drag = TestPointer::touch(2);
+            tester.down(&mut drag, slider_rect(tester).center());
+            tester.pump_by(waft_gestures::K_PRESS_TIMEOUT);
 
             tester.pump_widget(build(10.0, true));
 
@@ -6608,8 +6563,10 @@ mod tests {
     /// The two 'top value indicator gets stroked when overlapping' cases: the thumbs dragged
     /// together under `text_scale`, then pressed.
     #[expect(deprecated, reason = "Dart's case passes the deprecated `always`")]
-    fn the_top_value_indicator_is_stroked_when_overlapping(text_scale: Option<f64>) {
-        let mut tester = tester_on(TargetPlatform::Android);
+    fn the_top_value_indicator_is_stroked_when_overlapping(
+        tester: &mut WidgetTester,
+        text_scale: Option<f64>,
+    ) {
         let heard = Heard::starting_at(0.3, 0.7);
         let theme = ThemeData::builder()
             .platform(TargetPlatform::Android)
@@ -6622,7 +6579,7 @@ mod tests {
             )
             .build(&tester.cell.borrow());
         let slider_theme = theme.slider_theme.clone();
-        let app_theme = default_theme(&tester);
+        let app_theme = default_theme(tester);
         tester.pump_widget(range_slider_app(
             app_theme,
             TextDirection::Ltr,
@@ -6651,7 +6608,7 @@ mod tests {
             },
         ));
 
-        let (top_left, bottom_right) = track_bounds(&tester);
+        let (top_left, bottom_right) = track_bounds(tester);
         let span = bottom_right - top_left;
         let middle = top_left + bottom_right / 2.0;
         // Drag the thumbs towards the center.
@@ -6664,11 +6621,11 @@ mod tests {
         assert!(near(heard.values.get().start, 0.5, 0.03));
         assert!(near(heard.values.get().end, 0.5, 0.03));
 
-        let mut gesture = WidgetTester::touch(3);
+        let mut gesture = TestPointer::touch(3);
         tester.down(&mut gesture, middle);
         tester.pump_and_settle();
         assert!(overlay_paints_shadows_and_indicator(
-            &tester,
+            tester,
             slider_theme
                 .value_indicator_color
                 .expect("the theme has a value indicator color")
@@ -6679,22 +6636,23 @@ mod tests {
     // 'Range Slider top value indicator gets stroked when overlapping'.
     #[test]
     fn the_top_range_value_indicator_is_stroked_when_overlapping() {
-        with_main_thread_stack(|| the_top_value_indicator_is_stroked_when_overlapping(None));
+        test_widgets(|tester| the_top_value_indicator_is_stroked_when_overlapping(tester, None));
     }
 
     // 'Range Slider top value indicator gets stroked when overlapping with large text scale'.
     #[test]
     fn the_top_range_value_indicator_is_stroked_when_overlapping_with_a_large_text_scale() {
-        with_main_thread_stack(|| the_top_value_indicator_is_stroked_when_overlapping(Some(2.0)));
+        test_widgets(|tester| {
+            the_top_value_indicator_is_stroked_when_overlapping(tester, Some(2.0))
+        });
     }
 
     // 'Discrete RangeSlider does not apply thumb padding in a non-rounded track shape'.
     #[test]
     fn a_discrete_range_slider_does_not_apply_thumb_padding_in_a_non_rounded_track() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             use crate::range_slider_parts::RectangularRangeSliderTrackShape;
             // Regression test for https://github.com/flutter/flutter/issues/161805
-            let mut tester = tester_on(TargetPlatform::Android);
             // The default track left and right padding.
             const SLIDER_PADDING: f64 = 24.0;
             let theme = ThemeData::builder()
@@ -6719,9 +6677,9 @@ mod tests {
                     .into_widget(),
             ));
 
-            let render = range_render(&tester);
+            let render = range_render(tester);
             assert!(paints(
-                &tester,
+                tester,
                 render,
                 &[
                     // Start thumb.
@@ -6746,9 +6704,8 @@ mod tests {
     // 'RangeSlider supports DropRangeSliderValueIndicatorShape'.
     #[test]
     fn a_range_slider_supports_the_drop_value_indicator_shape() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             use crate::range_slider_parts::DropRangeSliderValueIndicatorShape;
-            let mut tester = tester_on(TargetPlatform::Android);
             let values = RangeValues::new(25.0, 75.0);
             const VALUE_INDICATOR_COLOR: Color = Color::new(0xffff0000);
             let theme = ThemeData::builder()
@@ -6776,8 +6733,8 @@ mod tests {
                     .into_widget(),
             ));
 
-            let mut gesture = WidgetTester::touch(1);
-            tester.down(&mut gesture, slider_rect(&tester).top_left());
+            let mut gesture = TestPointer::touch(1);
+            tester.down(&mut gesture, slider_rect(tester).top_left());
             tester.pump_and_settle();
             let value_indicator = tester
                 .all::<RenderValueIndicator>()
@@ -6786,7 +6743,7 @@ mod tests {
                 .expect("a value indicator")
                 .as_render_object(&tester.cell.borrow());
             assert!(paints(
-                &tester,
+                tester,
                 value_indicator,
                 &[PaintCall::path(Some(VALUE_INDICATOR_COLOR))]
             ));
@@ -6862,16 +6819,15 @@ mod tests {
     /// here with the last reference to each.
     #[test]
     fn an_unmounted_range_slider_leaves_none_of_its_objects_alive() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let heard = Heard::starting_at(0.0, 4.0);
-            pump(&mut tester, TextDirection::Ltr, &heard, |slider| {
+            pump(tester, TextDirection::Ltr, &heard, |slider| {
                 slider
                     .max(4.0)
                     .divisions(4)
                     .labels(RangeLabels::new("0", "4"))
             });
-            let handles = range_slider_owned_handles(&tester);
+            let handles = range_slider_owned_handles(tester);
             {
                 let app = tester.cell.borrow();
                 assert!(handles.iter().all(|&handle| app.contains(handle)));
@@ -6892,14 +6848,13 @@ mod tests {
     /// read here.
     #[test]
     fn a_range_slider_disposed_mid_indicator_removes_its_value_indicator_from_the_overlay() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             use waft_widgets::{Builder, Column, Navigator, Text, WidgetBuilder};
 
             use crate::elevated_button::ElevatedButton;
             use crate::page::MaterialPageRoute;
             use crate::scaffold::Scaffold;
 
-            let mut tester = tester_on(TargetPlatform::Android);
             let values = Rc::new(Cell::new(RangeValues::new(0.5, 0.75)));
             const FILL_COLOR: Color = Color::new(0xf55f5f5f);
             let theme = ThemeData::builder()
@@ -6962,8 +6917,8 @@ mod tests {
 
             let overlay_ops =
                 |tester: &WidgetTester| tester.painted_ops_deep(overlay_render(tester));
-            let top_right = slider_rect(&tester).top_right() + Offset::new(-24.0, 0.0);
-            let mut gesture = WidgetTester::touch(1);
+            let top_right = slider_rect(tester).top_right() + Offset::new(-24.0, 0.0);
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, top_right);
             // Wait for value indicator animation to finish.
             tester.pump_and_settle();
@@ -6979,10 +6934,10 @@ mod tests {
                 PaintCall::path(Some(FILL_COLOR)),
                 PaintCall::Paragraph,
             ];
-            assert!(paints_calls(&overlay_ops(&tester), &sequence));
+            assert!(paints_calls(&overlay_ops(tester), &sequence));
             // Represents the Raised Button and Range Slider.
             assert_eq!(
-                count_calls(&overlay_ops(&tester), CanvasCall::DrawParagraph),
+                count_calls(&overlay_ops(tester), CanvasCall::DrawParagraph),
                 3
             );
 
@@ -6992,10 +6947,10 @@ mod tests {
             tester.pump_and_settle();
 
             assert!(tester.find_by_type::<RangeSlider>().is_empty());
-            assert!(!paints_calls(&overlay_ops(&tester), &sequence[2..]));
+            assert!(!paints_calls(&overlay_ops(tester), &sequence[2..]));
             // Represents the raised button with inner page text.
             assert_eq!(
-                count_calls(&overlay_ops(&tester), CanvasCall::DrawParagraph),
+                count_calls(&overlay_ops(tester), CanvasCall::DrawParagraph),
                 1
             );
             assert_eq!(tester.find_onstage_text("Inner page").len(), 1);
@@ -7059,9 +7014,8 @@ mod tests {
 
     // 'PaddleRangeSliderValueIndicatorShape skips all painting at zero scale' and 'Default
     // range indicator shape skips all painting at zero scale'.
-    fn skips_all_painting_at_zero_scale(slider_theme: SliderThemeData) {
-        let mut tester = tester_on(TargetPlatform::Android);
-        let theme = default_theme(&tester);
+    fn skips_all_painting_at_zero_scale(tester: &mut WidgetTester, slider_theme: SliderThemeData) {
+        let theme = default_theme(tester);
         tester.pump_widget(build_range_app(
             theme,
             slider_theme,
@@ -7070,23 +7024,24 @@ mod tests {
         ));
 
         // Tap the center of the track to kick off the animation of the value indicator.
-        let mut gesture = WidgetTester::touch(1);
-        tester.down(&mut gesture, slider_rect(&tester).center());
+        let mut gesture = TestPointer::touch(1);
+        tester.down(&mut gesture, slider_rect(tester).center());
         // No value indicator path to paint at scale 0.
-        tester.pump(Duration::ZERO);
-        assert_eq!(path_count(&tester), 0);
+        tester.pump();
+        assert_eq!(path_count(tester), 0);
 
         // Painting a path for each value indicator.
-        tester.pump(Duration::from_millis(16));
-        assert_eq!(path_count(&tester), 2);
+        tester.pump_by(Duration::from_millis(16));
+        assert_eq!(path_count(tester), 2);
         tester.up(&gesture);
     }
 
     #[test]
     fn the_paddle_range_value_indicator_skips_all_painting_at_zero_scale() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             use crate::slider_value_indicator_shape::PaddleRangeSliderValueIndicatorShape;
             skips_all_painting_at_zero_scale(
+                tester,
                 SliderThemeData::new()
                     .track_height(0.0)
                     .range_value_indicator_shape(Rc::new(
@@ -7099,8 +7054,9 @@ mod tests {
     #[test]
     #[expect(deprecated, reason = "Dart's case passes the deprecated `always`")]
     fn the_default_range_value_indicator_skips_all_painting_at_zero_scale() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             skips_all_painting_at_zero_scale(
+                tester,
                 SliderThemeData::new()
                     .track_height(0.0)
                     .overlay_shape(<dyn crate::SliderComponentShape>::no_overlay())
@@ -7116,13 +7072,13 @@ mod tests {
     /// and the top indicator takes the overlapping shape's stroke colour.
     #[expect(deprecated, reason = "Dart's case passes the deprecated `always`")]
     fn value_indicator_stroke_colors(
+        tester: &mut WidgetTester,
         shape: crate::range_slider_parts::RangeSliderValueIndicatorShapeRef,
         overlapping: bool,
     ) {
         const VALUE_INDICATOR_COLOR: Color = Color::new(0xff000001);
         const STROKE_COLOR: Color = Color::new(0xff000002);
         const OVERLAPPING_COLOR: Color = Color::new(0xff000003);
-        let mut tester = tester_on(TargetPlatform::Android);
         let mut slider_theme = SliderThemeData::new()
             .show_value_indicator(ShowValueIndicator::Always)
             .range_value_indicator_shape(shape)
@@ -7148,8 +7104,8 @@ mod tests {
                 .into_widget(),
         ));
 
-        let mut gesture = WidgetTester::touch(1);
-        tester.down(&mut gesture, slider_rect(&tester).center());
+        let mut gesture = TestPointer::touch(1);
+        tester.down(&mut gesture, slider_rect(tester).center());
         // Wait for value indicator animation to finish.
         tester.pump_and_settle();
 
@@ -7161,7 +7117,7 @@ mod tests {
         // Dart's `paints` sequence off the `Overlay`: the thumbs' two shadows, then each
         // indicator's stroke and fill.
         assert!(paints_calls(
-            &tester.painted_ops_deep(overlay_render(&tester)),
+            &tester.painted_ops_deep(overlay_render(tester)),
             &[
                 any_thumb_shadow(),
                 any_thumb_shadow(),
@@ -7178,8 +7134,8 @@ mod tests {
     // SliderTheme.valueIndicatorStrokeColor'.
     #[test]
     fn the_rectangular_range_value_indicator_supports_the_stroke_color() {
-        with_main_thread_stack(|| {
-            value_indicator_stroke_colors(
+        test_widgets(|tester| {
+            value_indicator_stroke_colors(tester,
                 Rc::new(
                     crate::slider_value_indicator_shape::RectangularRangeSliderValueIndicatorShape::new(),
                 ),
@@ -7191,8 +7147,8 @@ mod tests {
     // '... on overlapping indicator'.
     #[test]
     fn the_rectangular_range_value_indicator_supports_the_stroke_color_when_overlapping() {
-        with_main_thread_stack(|| {
-            value_indicator_stroke_colors(
+        test_widgets(|tester| {
+            value_indicator_stroke_colors(tester,
                 Rc::new(
                     crate::slider_value_indicator_shape::RectangularRangeSliderValueIndicatorShape::new(),
                 ),
@@ -7204,8 +7160,9 @@ mod tests {
     // 'PaddleRangeSliderValueIndicatorShape supports SliderTheme.valueIndicatorStrokeColor'.
     #[test]
     fn the_paddle_range_value_indicator_supports_the_stroke_color() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             value_indicator_stroke_colors(
+                tester,
                 Rc::new(
                     crate::slider_value_indicator_shape::PaddleRangeSliderValueIndicatorShape::new(
                     ),
@@ -7218,8 +7175,9 @@ mod tests {
     // '... on overlapping indicator'.
     #[test]
     fn the_paddle_range_value_indicator_supports_the_stroke_color_when_overlapping() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             value_indicator_stroke_colors(
+                tester,
                 Rc::new(
                     crate::slider_value_indicator_shape::PaddleRangeSliderValueIndicatorShape::new(
                     ),
@@ -7230,16 +7188,12 @@ mod tests {
     }
 
     /// Dart's `path(color: black, style: stroke, strokeWidth: 2 * elevation)` of a thumb's
-    /// shadow: a `DrawShadow` of `elevation` while shadows show, and the stroked path
-    /// `debugDisableShadows` draws instead when it is set.
+    /// shadow, which Dart draws with `debugDisableShadows` set: here the shadow's own
+    /// `DrawShadow` of `elevation`.
     fn thumb_shadow_call(elevation: f64) -> PaintCall {
-        if waft_painting::debug_disable_shadows() {
-            PaintCall::stroked_path(crate::colors::Colors::BLACK, elevation * 2.0)
-        } else {
-            PaintCall::Shadow {
-                elevation: Some(elevation),
-                color: None,
-            }
+        PaintCall::Shadow {
+            elevation: Some(elevation),
+            color: None,
         }
     }
 
@@ -7250,13 +7204,12 @@ mod tests {
     // 'RangeSlider overlay appears correctly for specific thumb interactions'.
     #[test]
     fn the_range_slider_overlay_appears_for_specific_thumb_interactions() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             tester.set_highlight_strategy(waft_widgets::FocusHighlightStrategy::AlwaysTraditional);
             let values = Rc::new(Cell::new(RangeValues::new(50.0, 70.0)));
             const HOVER_COLOR: Color = Color::new(0xffff0000);
             const DRAG_COLOR: Color = Color::new(0xff0000ff);
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             tester.pump_widget(enabled_range_slider_app(theme, &values, true, |slider| {
                 slider
                     .max(100.0)
@@ -7277,20 +7230,20 @@ mod tests {
             tester.pump_and_settle();
 
             // Initial state - no overlay.
-            assert!(!paints_circle_of_color(&tester, DRAG_COLOR));
+            assert!(!paints_circle_of_color(tester, DRAG_COLOR));
 
             // Drag start thumb to left.
-            let top_thumb_location = slider_rect(&tester).center();
-            let mut drag_start_thumb = WidgetTester::touch(1);
+            let top_thumb_location = slider_rect(tester).center();
+            let mut drag_start_thumb = TestPointer::touch(1);
             tester.down(&mut drag_start_thumb, top_thumb_location);
-            tester.pump(waft_gestures::K_PRESS_TIMEOUT);
+            tester.pump_by(waft_gestures::K_PRESS_TIMEOUT);
             let at = drag_start_thumb.position + Offset::new(-20.0, 0.0);
             tester.move_to(&mut drag_start_thumb, at, true);
             tester.pump_and_settle();
 
             // Verify overlay is visible and shadow is visible on single thumb.
             assert!(range_paints(
-                &tester,
+                tester,
                 &[
                     PaintCall::circle(Some(DRAG_COLOR)),
                     thumb_shadow_call(1.0),
@@ -7306,7 +7259,7 @@ mod tests {
 
             // Verify overlay and shadow disappears
             assert!(!range_paints(
-                &tester,
+                tester,
                 &[
                     PaintCall::circle(Some(DRAG_COLOR)),
                     thumb_shadow_call(1.0),
@@ -7315,30 +7268,30 @@ mod tests {
             ));
 
             // Drag end thumb and return to original position.
-            let bottom_thumb_location = slider_rect(&tester).center() + Offset::new(220.0, 0.0);
-            let mut drag_end_thumb = WidgetTester::touch(2);
+            let bottom_thumb_location = slider_rect(tester).center() + Offset::new(220.0, 0.0);
+            let mut drag_end_thumb = TestPointer::touch(2);
             tester.down(&mut drag_end_thumb, bottom_thumb_location);
-            tester.pump(waft_gestures::K_PRESS_TIMEOUT);
+            tester.pump_by(waft_gestures::K_PRESS_TIMEOUT);
             let at = drag_end_thumb.position + Offset::new(20.0, 0.0);
             tester.move_to(&mut drag_end_thumb, at, true);
-            tester.pump(waft_gestures::K_PRESS_TIMEOUT);
+            tester.pump_by(waft_gestures::K_PRESS_TIMEOUT);
             let at = drag_end_thumb.position + Offset::new(-20.0, 0.0);
             tester.move_to(&mut drag_end_thumb, at, true);
             tester.up(&drag_end_thumb);
             tester.pump_and_settle();
 
             // Verify overlay disappears.
-            assert!(!paints_circle_of_color(&tester, DRAG_COLOR));
+            assert!(!paints_circle_of_color(tester, DRAG_COLOR));
 
             // Hover on start thumb.
-            let mut gesture = WidgetTester::mouse(1, 0);
+            let mut gesture = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut gesture, Offset::ZERO);
             tester.move_to(&mut gesture, top_thumb_location, false);
             tester.pump_and_settle();
 
             // Verify overlay appears only for start thumb and no shadow is visible.
             assert!(range_paints(
-                &tester,
+                tester,
                 &[
                     PaintCall::circle(Some(HOVER_COLOR)),
                     thumb_shadow_call(1.0),
@@ -7348,18 +7301,18 @@ mod tests {
             // 2 thumbs, 1 overlay for hover, and 1 overlay for focus.
             assert_eq!(
                 count_calls(
-                    &tester.painted_ops(range_render(&tester)),
+                    &tester.painted_ops(range_render(tester)),
                     CanvasCall::DrawCircle
                 ),
                 4
             );
 
             // Move away from thumb
-            tester.move_to(&mut gesture, slider_rect(&tester).top_right(), false);
+            tester.move_to(&mut gesture, slider_rect(tester).top_right(), false);
             tester.pump_and_settle();
 
             // Verify overlay disappears
-            assert!(!paints_circle_of_color(&tester, HOVER_COLOR));
+            assert!(!paints_circle_of_color(tester, HOVER_COLOR));
         });
     }
 
@@ -7370,19 +7323,12 @@ mod tests {
             .as_object()
     }
 
-    /// A thumb's shadow as Dart's `path(color: Colors.black)`, of either kind.
+    /// A thumb's shadow, Dart's `path(color: Colors.black)` under `debugDisableShadows`: here
+    /// its `DrawShadow`.
     fn any_thumb_shadow() -> PaintCall {
-        if waft_painting::debug_disable_shadows() {
-            PaintCall::Path {
-                color: Some(crate::colors::Colors::BLACK),
-                stroke_width: None,
-                stroked: None,
-            }
-        } else {
-            PaintCall::Shadow {
-                elevation: None,
-                color: None,
-            }
+        PaintCall::Shadow {
+            elevation: None,
+            color: None,
         }
     }
 
@@ -7390,9 +7336,8 @@ mod tests {
     // are showing'.
     #[test]
     fn a_range_slider_uses_the_theme_colors_when_the_value_indicators_are_showing() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let theme = themed_theme(&tester);
+        test_widgets(|tester| {
+            let theme = themed_theme(tester);
             let slider_theme = theme.slider_theme.clone();
             let recorded = Rc::new(Cell::new(RangeValues::new(0.5, 0.75)));
             tester.pump_widget(themed_app(
@@ -7404,15 +7349,15 @@ mod tests {
                 },
             ));
 
-            let top_right = slider_rect(&tester).top_right() + Offset::new(-24.0, 0.0);
-            let mut gesture = WidgetTester::touch(1);
+            let top_right = slider_rect(tester).top_right() + Offset::new(-24.0, 0.0);
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, top_right);
             // Wait for value indicator animation to finish.
             tester.pump_and_settle();
             assert_eq!(recorded.get().end, 1.0);
 
             assert!(paints_calls(
-                &tester.painted_ops_deep(overlay_render(&tester)),
+                &tester.painted_ops_deep(overlay_render(tester)),
                 &[
                     any_thumb_shadow(), // shadow
                     any_thumb_shadow(), // shadow
@@ -7430,10 +7375,9 @@ mod tests {
     #[test]
     #[expect(deprecated, reason = "Dart's case calls the deprecated `withOpacity`")]
     fn the_default_range_slider_when_year2023_is_false() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             use waft_embedder::{RRect, Radius};
-            let mut tester = tester_on(TargetPlatform::Android);
-            let theme = default_theme(&tester);
+            let theme = default_theme(tester);
             let color_scheme = theme.color_scheme.clone();
             let active_track_color = color_scheme.primary;
             let inactive_track_color = color_scheme.secondary_container();
@@ -7479,7 +7423,7 @@ mod tests {
             let track_outer_corner_radius = Radius::circular(8.0);
             let track_inner_corner_radius = Radius::circular(2.0);
             assert!(paints_now(
-                &tester,
+                tester,
                 &[
                     // Inactive track.
                     PaintCall::rrect_at(
@@ -7519,7 +7463,7 @@ mod tests {
 
             // Test default colors for enabled slider.
             assert!(paints_now(
-                &tester,
+                tester,
                 &[
                     PaintCall::circle(None),
                     PaintCall::circle(None),
@@ -7528,7 +7472,7 @@ mod tests {
                 ]
             ));
             assert!(!paints_now(
-                &tester,
+                tester,
                 &[
                     PaintCall::circle(None),
                     PaintCall::circle(None),
@@ -7536,16 +7480,13 @@ mod tests {
                     rrect(disabled_thumb_color),
                 ]
             ));
-            assert!(!paints_now(&tester, &[rrect(disabled_active_track_color)]));
-            assert!(!paints_now(
-                &tester,
-                &[rrect(disabled_inactive_track_color)]
-            ));
+            assert!(!paints_now(tester, &[rrect(disabled_active_track_color)]));
+            assert!(!paints_now(tester, &[rrect(disabled_inactive_track_color)]));
 
             // Test defaults colors for discrete slider.
             tester.pump_widget(build_app(Some(4), true));
             assert!(paints_now(
-                &tester,
+                tester,
                 &[
                     rrect(inactive_track_color),
                     rrect(inactive_track_color),
@@ -7555,18 +7496,15 @@ mod tests {
                     circle(inactive_tick_mark_color),
                 ]
             ));
-            assert!(!paints_now(&tester, &[rrect(disabled_thumb_color)]));
-            assert!(!paints_now(&tester, &[rrect(disabled_active_track_color)]));
-            assert!(!paints_now(
-                &tester,
-                &[rrect(disabled_inactive_track_color)]
-            ));
+            assert!(!paints_now(tester, &[rrect(disabled_thumb_color)]));
+            assert!(!paints_now(tester, &[rrect(disabled_active_track_color)]));
+            assert!(!paints_now(tester, &[rrect(disabled_inactive_track_color)]));
 
             // Test defaults colors for disabled slider.
             tester.pump_widget(build_app(None, false));
             tester.pump_and_settle();
             assert!(paints_now(
-                &tester,
+                tester,
                 &[
                     rrect(disabled_inactive_track_color),
                     rrect(disabled_inactive_track_color),
@@ -7576,16 +7514,16 @@ mod tests {
                 ]
             ));
             assert!(!paints_now(
-                &tester,
+                tester,
                 &[rrect(thumb_color), rrect(thumb_color)]
             ));
-            assert!(!paints_now(&tester, &[rrect(active_track_color)]));
-            assert!(!paints_now(&tester, &[rrect(inactive_track_color)]));
+            assert!(!paints_now(tester, &[rrect(active_track_color)]));
+            assert!(!paints_now(tester, &[rrect(inactive_track_color)]));
 
             // Test defaults colors for disabled discrete slider.
             tester.pump_widget(build_app(Some(4), false));
             assert!(paints_now(
-                &tester,
+                tester,
                 &[
                     rrect(disabled_inactive_track_color),
                     rrect(disabled_inactive_track_color),
@@ -7598,20 +7536,20 @@ mod tests {
                 ]
             ));
             assert!(!paints_now(
-                &tester,
+                tester,
                 &[rrect(thumb_color), rrect(thumb_color)]
             ));
-            assert!(!paints_now(&tester, &[rrect(active_track_color)]));
-            assert!(!paints_now(&tester, &[rrect(inactive_track_color)]));
+            assert!(!paints_now(tester, &[rrect(active_track_color)]));
+            assert!(!paints_now(tester, &[rrect(inactive_track_color)]));
 
             tester.pump_widget(build_app(Some(4), true));
             tester.pump_and_settle();
-            let mut gesture = WidgetTester::touch(1);
-            tester.down(&mut gesture, slider_rect(&tester).top_left());
+            let mut gesture = TestPointer::touch(1);
+            tester.down(&mut gesture, slider_rect(tester).top_left());
             // Wait for value indicator animation to finish.
             tester.pump_and_settle();
             assert!(paints_calls(
-                &tester.painted_ops_deep(overlay_render(&tester)),
+                &tester.painted_ops_deep(overlay_render(tester)),
                 &[PaintCall::Scale, rrect(value_indicator_color)]
             ));
             tester.up(&gesture);
@@ -7621,9 +7559,8 @@ mod tests {
     // slider_theme_test's 'Can customize RangeSlider track gap when year2023 is false'.
     #[test]
     fn the_range_slider_track_gap_can_be_customized_when_year2023_is_false() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             use waft_embedder::{RRect, Radius};
-            let mut tester = tester_on(TargetPlatform::Android);
             let build_range_slider = |tester: &WidgetTester, track_gap: f64| {
                 let theme = ThemeData::builder()
                     .slider_theme(SliderThemeData::new().track_gap(track_gap))
@@ -7677,16 +7614,16 @@ mod tests {
                 PaintCall::rrect_at(RRect::from_ltrbr(left, 292.0, right, 308.0, inner), None)
             };
 
-            tester.pump_widget(build_range_slider(&tester, 0.0));
+            tester.pump_widget(build_range_slider(tester, 0.0));
             let mut expected = tracks(212.0, 588.0).to_vec();
             expected.push(active(212.0, 588.0));
-            assert!(range_paints(&tester, &expected));
+            assert!(range_paints(tester, &expected));
 
-            tester.pump_widget(build_range_slider(&tester, 10.0));
+            tester.pump_widget(build_range_slider(tester, 10.0));
             tester.pump_and_settle();
             let mut expected = tracks(202.0, 598.0).to_vec();
             expected.push(active(222.0, 578.0));
-            assert!(range_paints(&tester, &expected));
+            assert!(range_paints(tester, &expected));
         });
     }
 }

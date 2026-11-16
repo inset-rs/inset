@@ -520,13 +520,13 @@ impl StatelessWidget for HitTestableAtOrigin {
 #[cfg(test)]
 mod tests {
     use waft_embedder::{Size, TextDirection};
-    use waft_foundation::AppCell;
     use waft_painting::EdgeInsets;
     use waft_rendering::{AnyRenderObject, RenderPadding};
     use waft_widgets::{Directionality, MediaQueryData};
 
+    use waft_widgets::testing::{WidgetTester, test_widgets};
+
     use super::*;
-    use crate::test_support::{build, test_cell};
 
     const BAR_HEIGHT: f64 = 44.0;
 
@@ -566,16 +566,15 @@ mod tests {
     }
 
     fn mount(
-        cell: &AppCell,
+        tester: &mut WidgetTester,
         data: MediaQueryData,
         scaffold: CupertinoPageScaffold,
     ) -> Vec<EdgeInsets> {
-        let tree: WidgetRef = MediaQuery::new(data, scaffold).into_widget();
-        build(
-            cell,
-            Directionality::new(TextDirection::Ltr, tree).into_widget(),
-        );
-        let mut app = cell.borrow_mut();
+        tester.pump_widget(Directionality::new(
+            TextDirection::Ltr,
+            MediaQuery::new(data, scaffold).into_widget(),
+        ));
+        let mut app = tester.cell.borrow_mut();
         let root = waft_widgets::WidgetsBinding::instance(&mut app)
             .root_element(&app)
             .expect("a mounted root element")
@@ -586,66 +585,65 @@ mod tests {
 
     #[test]
     fn an_opaque_navigation_bar_shifts_the_content_down_by_its_preferred_height() {
-        let cell = test_cell();
-        let scaffold = CupertinoPageScaffold::new(SizedBox::expand()).navigation_bar(
-            ObstructingPreferredSizeWidgetRef::new(TestNavigationBar { opaque: true }),
-        );
-        let paddings = mount(
-            &cell,
-            MediaQueryData::new().padding(EdgeInsets::from_ltrb(0.0, 20.0, 0.0, 0.0)),
-            scaffold,
-        );
-        assert!(
-            paddings.contains(&EdgeInsets::from_ltrb(0.0, BAR_HEIGHT + 20.0, 0.0, 0.0)),
-            "the content is inset by the bar's height plus the top padding: {paddings:?}"
-        );
+        test_widgets(|tester| {
+            let scaffold = CupertinoPageScaffold::new(SizedBox::expand()).navigation_bar(
+                ObstructingPreferredSizeWidgetRef::new(TestNavigationBar { opaque: true }),
+            );
+            let paddings = mount(
+                tester,
+                MediaQueryData::new().padding(EdgeInsets::from_ltrb(0.0, 20.0, 0.0, 0.0)),
+                scaffold,
+            );
+            assert!(
+                paddings.contains(&EdgeInsets::from_ltrb(0.0, BAR_HEIGHT + 20.0, 0.0, 0.0)),
+                "the content is inset by the bar's height plus the top padding: {paddings:?}"
+            );
+        });
     }
 
     #[test]
     fn a_translucent_navigation_bar_leaves_the_content_in_place_and_hints_the_padding() {
-        let cell = test_cell();
-        let scaffold = CupertinoPageScaffold::new(SizedBox::expand()).navigation_bar(
-            ObstructingPreferredSizeWidgetRef::new(TestNavigationBar { opaque: false }),
-        );
-        let paddings = mount(
-            &cell,
-            MediaQueryData::new().padding(EdgeInsets::from_ltrb(0.0, 20.0, 0.0, 0.0)),
-            scaffold,
-        );
-        assert!(
-            paddings.contains(&EdgeInsets::ZERO),
-            "a translucent bar does not shift the content: {paddings:?}"
-        );
+        test_widgets(|tester| {
+            let scaffold = CupertinoPageScaffold::new(SizedBox::expand()).navigation_bar(
+                ObstructingPreferredSizeWidgetRef::new(TestNavigationBar { opaque: false }),
+            );
+            let paddings = mount(
+                tester,
+                MediaQueryData::new().padding(EdgeInsets::from_ltrb(0.0, 20.0, 0.0, 0.0)),
+                scaffold,
+            );
+            assert!(
+                paddings.contains(&EdgeInsets::ZERO),
+                "a translucent bar does not shift the content: {paddings:?}"
+            );
+        });
     }
 
     #[test]
     fn resize_to_avoid_bottom_inset_pads_the_content_by_the_bottom_view_inset() {
-        let cell = test_cell();
-        let scaffold = CupertinoPageScaffold::new(SizedBox::expand());
-        let paddings = mount(
-            &cell,
-            MediaQueryData::new().view_insets(EdgeInsets::from_ltrb(0.0, 0.0, 0.0, 120.0)),
-            scaffold,
-        );
-        assert!(
-            paddings.contains(&EdgeInsets::from_ltrb(0.0, 0.0, 0.0, 120.0)),
-            "the keyboard inset becomes bottom padding: {paddings:?}"
-        );
+        test_widgets(|tester| {
+            let scaffold = CupertinoPageScaffold::new(SizedBox::expand());
+            let paddings = mount(
+                tester,
+                MediaQueryData::new().view_insets(EdgeInsets::from_ltrb(0.0, 0.0, 0.0, 120.0)),
+                scaffold,
+            );
+            assert!(
+                paddings.contains(&EdgeInsets::from_ltrb(0.0, 0.0, 0.0, 120.0)),
+                "the keyboard inset becomes bottom padding: {paddings:?}"
+            );
 
-        let without_cell = test_cell();
-
-        let without = without_cell.borrow();
-        let scaffold =
-            CupertinoPageScaffold::new(SizedBox::expand()).resize_to_avoid_bottom_inset(false);
-        drop(without);
-        let paddings = mount(
-            &without_cell,
-            MediaQueryData::new().view_insets(EdgeInsets::from_ltrb(0.0, 0.0, 0.0, 120.0)),
-            scaffold,
-        );
-        assert!(
-            paddings.is_empty(),
-            "without resizeToAvoidBottomInset the content is not padded: {paddings:?}"
-        );
+            let scaffold =
+                CupertinoPageScaffold::new(SizedBox::expand()).resize_to_avoid_bottom_inset(false);
+            let paddings = mount(
+                tester,
+                MediaQueryData::new().view_insets(EdgeInsets::from_ltrb(0.0, 0.0, 0.0, 120.0)),
+                scaffold,
+            );
+            assert!(
+                paddings.is_empty(),
+                "without resizeToAvoidBottomInset the content is not padded: {paddings:?}"
+            );
+        });
     }
 }

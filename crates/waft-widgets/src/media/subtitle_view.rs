@@ -172,19 +172,13 @@ fn reposition_vertical_cue(cue: &Cue) -> Cue {
 #[cfg(test)]
 mod tests {
     use std::rc::Rc;
-    use std::time::Duration;
 
     use waft_embedder::valo::Op;
-    use waft_embedder::{
-        CaptionSetting, Color, CueContent, CueTextRun, CueVertical, SystemFontSource,
-        TargetPlatform,
-    };
-    use waft_foundation::AppCell;
-    use waft_test::{MockCaptionSettings, TestPlatform, TestView};
+    use waft_embedder::{CaptionSetting, Color, CueContent, CueTextRun, CueVertical};
+    use waft_test::{MockCaptionSettings, TestPlatform};
 
     use super::*;
-    use crate::binding::run_app;
-    use crate::test_harness::pump_every_view;
+    use crate::testing::{WidgetTester, test_widgets};
 
     const RED: Color = Color::new(0xFFFF_0000);
     const GREEN: Color = Color::new(0xFF00_FF00);
@@ -198,9 +192,9 @@ mod tests {
         }
     }
 
-    /// The colours of the glyph runs `view`'s last scene draws.
-    fn glyph_colors(view: &TestView) -> Vec<waft_embedder::valo::Color> {
-        let scene = view.last_scene().expect("a frame was presented");
+    /// The colours of the glyph runs the tester's view last drew.
+    fn glyph_colors(tester: &WidgetTester) -> Vec<waft_embedder::valo::Color> {
+        let scene = tester.view().last_scene().expect("a frame was presented");
         waft_embedder::flattened_ops(&waft_embedder::slices(&scene, |_| None).picture_with_room())
             .into_iter()
             .filter_map(|op| match op {
@@ -210,54 +204,41 @@ mod tests {
             .collect()
     }
 
-    /// A subtitle view on `platform`, drawn once, showing a cue whose text the media colours blue.
-    fn showing_a_blue_cue(platform: TestPlatform) -> (Rc<TestView>, Rc<AppCell>) {
-        let view = Rc::new(TestView::new(640.0, 360.0));
-        let platform = platform
-            .on(TargetPlatform::MacOS)
-            .with_view(Rc::clone(&view) as waft_embedder::ViewRef)
-            .with_font_source(|| Box::new(SystemFontSource::platform()));
-        let cell = AppCell::with_platform(Rc::new(platform) as waft_embedder::PlatformRef);
-        {
-            let mut app = cell.borrow_mut();
-            waft_painting::PaintingBinding::instance(&mut app).install_platform_fonts(&mut app);
-        }
+    /// Pumps a subtitle view showing a cue whose text the media colours blue.
+    fn pump_a_blue_cue(tester: &mut WidgetTester) {
         let mut said = CueTextRun::new("Hello");
         said.color = Some(BLUE);
         let cue = Cue::new(CueContent::Text(vec![said]));
-        run_app(
-            &mut cell.borrow_mut(),
-            SubtitleView::new(vec![cue]).into_widget(),
-        );
-        cell.elapse(Duration::ZERO);
-        pump_every_view(&mut cell.borrow_mut(), Duration::ZERO);
-        (view, cell)
+        tester.pump_widget(SubtitleView::new(vec![cue]));
     }
 
     #[test]
     fn a_subtitle_view_draws_in_the_users_caption_style_and_follows_its_changes() {
         let settings = MockCaptionSettings::new(text_in(RED));
-        let (view, cell) = showing_a_blue_cue(
+        let tester = &mut WidgetTester::with_platform(
             TestPlatform::new().with_caption_settings(Rc::new(settings.clone())),
         );
-        assert!(glyph_colors(&view).contains(&RED.into()), "the user's red");
+        pump_a_blue_cue(tester);
+        assert!(glyph_colors(tester).contains(&RED.into()), "the user's red");
 
         settings.set_style(text_in(GREEN));
-        cell.checkpoint();
-        pump_every_view(&mut cell.borrow_mut(), Duration::from_millis(16));
-        let colors = glyph_colors(&view);
+        tester.cell.checkpoint();
+        tester.pump();
+        let colors = glyph_colors(tester);
         assert!(colors.contains(&GREEN.into()), "the new style: {colors:?}");
         assert!(!colors.contains(&RED.into()));
     }
 
     #[test]
     fn a_subtitle_view_draws_the_medias_own_style_where_the_platform_has_no_caption_settings() {
-        let (view, _cell) = showing_a_blue_cue(TestPlatform::new());
-        let colors = glyph_colors(&view);
-        assert!(
-            colors.contains(&BLUE.into()),
-            "the media's blue: {colors:?}"
-        );
+        test_widgets(|tester| {
+            pump_a_blue_cue(tester);
+            let colors = glyph_colors(tester);
+            assert!(
+                colors.contains(&BLUE.into()),
+                "the media's blue: {colors:?}"
+            );
+        });
     }
 
     #[test]

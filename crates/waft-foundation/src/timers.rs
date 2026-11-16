@@ -86,6 +86,10 @@ impl Timers {
         self.now
     }
 
+    pub(crate) fn has_pending(&self) -> bool {
+        !self.queue.is_empty()
+    }
+
     /// Removes and returns the next timer due at or before `target`, advancing
     /// the clock to that timer's due time. `None` when none are due.
     pub(crate) fn pop_next_due(&mut self, target: Duration) -> Option<Listener> {

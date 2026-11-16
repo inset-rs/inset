@@ -643,7 +643,7 @@ mod tests {
 
     use std::rc::Rc;
 
-    use waft_embedder::{Radius, Size, TargetPlatform};
+    use waft_embedder::{Radius, Size};
     use waft_foundation::Listener;
     use waft_painting::{
         BorderRadius, BorderRadiusGeometry, FontStyle, RoundedRectangleBorder, ShapeBorderRef,
@@ -653,6 +653,8 @@ mod tests {
         WidgetStates,
     };
 
+    use waft_widgets::testing::{WidgetTester, test_widgets};
+
     use super::*;
     use crate::chip::tests::{center_of, size_of};
     use crate::dialog::Dialog;
@@ -661,9 +663,7 @@ mod tests {
     use crate::input_border::OutlineInputBorder;
     use crate::input_decorator::InputDecorationThemeData;
     use crate::material::Material;
-    use crate::test_support::{
-        PaintCall, WidgetTester, material_app, paints_calls, with_main_thread_stack,
-    };
+    use crate::test_support::{PaintCall, PaintInspection, material_app, paints_calls};
     use crate::text_button::TextButton;
     use crate::text_field::TextField;
     use crate::text_theme::TextTheme;
@@ -834,12 +834,6 @@ mod tests {
         theme
     }
 
-    fn tester() -> WidgetTester {
-        let tester = WidgetTester::on(TargetPlatform::Android);
-        tester.install_platform_fonts();
-        tester
-    }
-
     /// Dart's `_TimePickerLauncher`: a button that shows the time picker at 7:15, tapped.
     fn launch(tester: &mut WidgetTester, theme: ThemeData, entry_mode: TimePickerEntryMode) {
         let launcher = Material::new()
@@ -983,23 +977,18 @@ mod tests {
 
     #[test]
     fn material2_passing_no_time_picker_theme_data_uses_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let default_theme = m2(&tester.cell.borrow());
-            launch(
-                &mut tester,
-                default_theme.clone(),
-                TimePickerEntryMode::Dial,
-            );
+            launch(tester, default_theme.clone(), TimePickerEntryMode::Dial);
             let scheme = &default_theme.color_scheme;
             let typography = Typography::material2014().build();
 
-            let (color, shape) = dialog_material(&tester);
+            let (color, shape) = dialog_material(tester);
             assert_eq!(color, Some(scheme.surface));
             assert_eq!(shape, Some(ShapeBorderRef::new(rounded(4.0))));
 
             assert!(painted_circles(
-                &tester,
+                tester,
                 &[opacity(scheme.on_surface, 0.08), scheme.primary]
             ));
 
@@ -1007,29 +996,29 @@ mod tests {
                 |white| base_style(&typography, white, |theme| &theme.display_medium);
             let title_medium = base_style(&typography, false, |theme| &theme.title_medium);
             assert_eq!(
-                paragraph_style(&tester, "7"),
+                paragraph_style(tester, "7"),
                 display_medium(false).copy_with().color(scheme.primary)
             );
             assert_eq!(
-                paragraph_style(&tester, "15"),
+                paragraph_style(tester, "15"),
                 display_medium(false).copy_with().color(scheme.on_surface)
             );
             assert_eq!(
-                paragraph_style(&tester, "AM"),
+                paragraph_style(tester, "AM"),
                 title_medium.copy_with().color(scheme.primary)
             );
             assert_eq!(
-                paragraph_style(&tester, "PM"),
+                paragraph_style(tester, "PM"),
                 title_medium
                     .copy_with()
                     .color(opacity(scheme.on_surface, 0.6))
             );
             assert_eq!(
-                paragraph_style(&tester, "SELECT TIME"),
+                paragraph_style(tester, "SELECT TIME"),
                 base_style(&typography, false, |theme| &theme.label_small)
             );
 
-            let (primary, selected) = dial_label_styles(&tester);
+            let (primary, selected) = dial_label_styles(tester);
             assert_eq!(
                 primary,
                 base_style(&typography, false, |theme| &theme.body_large)
@@ -1043,16 +1032,16 @@ mod tests {
                     .color(scheme.on_primary)
             );
 
-            let (color, shape) = text_material(&tester, "7");
+            let (color, shape) = text_material(tester, "7");
             assert_eq!(color, Some(opacity(scheme.primary, 0.12)));
             assert_eq!(shape, Some(ShapeBorderRef::new(rounded(4.0))));
-            let (color, shape) = text_material(&tester, "15");
+            let (color, shape) = text_material(tester, "15");
             assert_eq!(color, Some(opacity(scheme.on_surface, 0.12)));
             assert_eq!(shape, Some(ShapeBorderRef::new(rounded(4.0))));
 
-            let (am_color, am_shape) = text_material(&tester, "AM");
+            let (am_color, am_shape) = text_material(tester, "AM");
             assert_eq!(am_color, Some(opacity(scheme.primary, 0.12)));
-            let (pm_color, pm_shape) = text_material(&tester, "PM");
+            let (pm_color, pm_shape) = text_material(tester, "PM");
             assert_eq!(pm_color, Some(Colors::TRANSPARENT));
 
             let border_color = Color::alpha_blend(opacity(scheme.on_surface, 0.38), scheme.surface);
@@ -1060,13 +1049,13 @@ mod tests {
             assert_eq!(pm_shape, rounded_with_side(border_color, false, 4.0));
 
             assert_eq!(
-                entry_mode_icon_color(&tester),
+                entry_mode_icon_color(tester),
                 Some(opacity(scheme.on_surface, 0.6))
             );
 
             let default_style = TextButton::style_from().build();
-            assert_eq!(action_button_style(&tester, "CANCEL"), default_style);
-            assert_eq!(action_button_style(&tester, "OK"), default_style);
+            assert_eq!(action_button_style(tester, "CANCEL"), default_style);
+            assert_eq!(action_button_style(tester, "OK"), default_style);
         });
     }
 
@@ -1085,29 +1074,24 @@ mod tests {
 
     #[test]
     fn material3_passing_no_time_picker_theme_data_uses_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let default_theme = m3(&tester.cell.borrow());
-            launch(
-                &mut tester,
-                default_theme.clone(),
-                TimePickerEntryMode::Dial,
-            );
+            launch(tester, default_theme.clone(), TimePickerEntryMode::Dial);
             let scheme = &default_theme.color_scheme;
             let typography = Typography::material2021().build();
             let decoration = scheme.on_surface;
 
-            let (color, shape) = dialog_material(&tester);
+            let (color, shape) = dialog_material(tester);
             assert_eq!(color, Some(scheme.surface_container_high()));
             assert_eq!(shape, Some(ShapeBorderRef::new(rounded(28.0))));
 
             assert!(painted_circles(
-                &tester,
+                tester,
                 &[scheme.surface_container_highest(), scheme.primary]
             ));
 
             assert_eq!(
-                paragraph_style(&tester, "7"),
+                paragraph_style(tester, "7"),
                 m3_style(
                     &typography,
                     |theme| &theme.display_large,
@@ -1116,7 +1100,7 @@ mod tests {
                 )
             );
             assert_eq!(
-                paragraph_style(&tester, "15"),
+                paragraph_style(tester, "15"),
                 m3_style(
                     &typography,
                     |theme| &theme.display_large,
@@ -1125,7 +1109,7 @@ mod tests {
                 )
             );
             assert_eq!(
-                paragraph_style(&tester, "AM"),
+                paragraph_style(tester, "AM"),
                 m3_style(
                     &typography,
                     |theme| &theme.title_medium,
@@ -1134,7 +1118,7 @@ mod tests {
                 )
             );
             assert_eq!(
-                paragraph_style(&tester, "PM"),
+                paragraph_style(tester, "PM"),
                 m3_style(
                     &typography,
                     |theme| &theme.title_medium,
@@ -1143,7 +1127,7 @@ mod tests {
                 )
             );
             assert_eq!(
-                paragraph_style(&tester, "Select time"),
+                paragraph_style(tester, "Select time"),
                 m3_style(
                     &typography,
                     |theme| &theme.body_medium,
@@ -1152,7 +1136,7 @@ mod tests {
                 )
             );
 
-            let (primary, selected) = dial_label_styles(&tester);
+            let (primary, selected) = dial_label_styles(tester);
             assert_eq!(
                 primary,
                 m3_style(
@@ -1172,25 +1156,25 @@ mod tests {
                 )
             );
 
-            let (color, shape) = text_material(&tester, "7");
+            let (color, shape) = text_material(tester, "7");
             assert_eq!(color, Some(scheme.primary_container()));
             assert_eq!(shape, Some(ShapeBorderRef::new(rounded(8.0))));
-            let (color, shape) = text_material(&tester, "15");
+            let (color, shape) = text_material(tester, "15");
             assert_eq!(color, Some(scheme.surface_container_highest()));
             assert_eq!(shape, Some(ShapeBorderRef::new(rounded(8.0))));
 
-            let (am_color, am_shape) = text_material(&tester, "AM");
+            let (am_color, am_shape) = text_material(tester, "AM");
             assert_eq!(am_color, Some(scheme.tertiary_container()));
-            let (pm_color, pm_shape) = text_material(&tester, "PM");
+            let (pm_color, pm_shape) = text_material(tester, "PM");
             assert_eq!(pm_color, Some(Colors::TRANSPARENT));
             assert_eq!(am_shape, rounded_with_side(scheme.outline(), true, 8.0));
             assert_eq!(pm_shape, rounded_with_side(scheme.outline(), false, 8.0));
 
-            assert_eq!(entry_mode_icon_color(&tester), None);
+            assert_eq!(entry_mode_icon_color(tester), None);
 
             let default_style = TextButton::style_from().build();
-            assert_eq!(action_button_style(&tester, "Cancel"), default_style);
-            assert_eq!(action_button_style(&tester, "OK"), default_style);
+            assert_eq!(action_button_style(tester, "Cancel"), default_style);
+            assert_eq!(action_button_style(tester, "OK"), default_style);
         });
     }
 
@@ -1237,18 +1221,13 @@ mod tests {
 
     #[test]
     fn material2_passing_no_time_picker_theme_data_uses_defaults_input_mode() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let default_theme = m2(&tester.cell.borrow());
-            launch(
-                &mut tester,
-                default_theme.clone(),
-                TimePickerEntryMode::Input,
-            );
+            launch(tester, default_theme.clone(), TimePickerEntryMode::Input);
             let scheme = &default_theme.color_scheme;
             let typography = Typography::material2014().build();
 
-            let decoration = text_field(&tester, "7")
+            let decoration = text_field(tester, "7")
                 .decoration
                 .expect("a decorated field");
             assert_eq!(decoration.filled, Some(true));
@@ -1280,21 +1259,16 @@ mod tests {
             );
 
             let default_style = TextButton::style_from().build();
-            assert_eq!(action_button_style(&tester, "CANCEL"), default_style);
-            assert_eq!(action_button_style(&tester, "OK"), default_style);
+            assert_eq!(action_button_style(tester, "CANCEL"), default_style);
+            assert_eq!(action_button_style(tester, "OK"), default_style);
         });
     }
 
     #[test]
     fn material3_passing_no_time_picker_theme_data_uses_defaults_input_mode() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let default_theme = m3(&tester.cell.borrow());
-            launch(
-                &mut tester,
-                default_theme.clone(),
-                TimePickerEntryMode::Input,
-            );
+            launch(tester, default_theme.clone(), TimePickerEntryMode::Input);
             let scheme = &default_theme.color_scheme;
             let typography = Typography::material2021().build();
 
@@ -1304,13 +1278,13 @@ mod tests {
                 scheme.on_surface,
                 scheme.on_surface,
             );
-            let field = text_field(&tester, "7");
+            let field = text_field(tester, "7");
             assert_eq!(
                 field.style.as_ref().map(|style| style.value().clone()),
                 Some(expected.clone())
             );
             assert_eq!(
-                text_field(&tester, "15")
+                text_field(tester, "15")
                     .style
                     .as_ref()
                     .map(|style| style.value().clone()),
@@ -1333,8 +1307,8 @@ mod tests {
             );
 
             let default_style = TextButton::style_from().build();
-            assert_eq!(action_button_style(&tester, "Cancel"), default_style);
-            assert_eq!(action_button_style(&tester, "OK"), default_style);
+            assert_eq!(action_button_style(tester, "Cancel"), default_style);
+            assert_eq!(action_button_style(tester, "OK"), default_style);
         });
     }
 
@@ -1405,15 +1379,14 @@ mod tests {
 
     #[test]
     fn material2_time_picker_uses_values_from_time_picker_theme_data() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = time_picker_theme(false);
             let theme_data = themed(m2(&tester.cell.borrow()), &theme);
-            launch(&mut tester, theme_data, TimePickerEntryMode::Dial);
+            launch(tester, theme_data, TimePickerEntryMode::Dial);
             let typography = Typography::material2014().build();
 
             assert_theme_values(
-                &tester,
+                tester,
                 &theme,
                 resolved_color(&theme.entry_mode_icon_color),
                 "CANCEL",
@@ -1428,7 +1401,7 @@ mod tests {
                     .color(color)
             };
             assert_eq!(
-                paragraph_style(&tester, "7"),
+                paragraph_style(tester, "7"),
                 with_theme(
                     |theme| &theme.body_medium,
                     &theme.hour_minute_text_style,
@@ -1436,7 +1409,7 @@ mod tests {
                 )
             );
             assert_eq!(
-                paragraph_style(&tester, "15"),
+                paragraph_style(tester, "15"),
                 with_theme(
                     |theme| &theme.body_medium,
                     &theme.hour_minute_text_style,
@@ -1444,7 +1417,7 @@ mod tests {
                 )
             );
             assert_eq!(
-                paragraph_style(&tester, "AM"),
+                paragraph_style(tester, "AM"),
                 with_theme(
                     |theme| &theme.title_medium,
                     &theme.day_period_text_style,
@@ -1452,7 +1425,7 @@ mod tests {
                 )
             );
             assert_eq!(
-                paragraph_style(&tester, "PM"),
+                paragraph_style(tester, "PM"),
                 with_theme(
                     |theme| &theme.title_medium,
                     &theme.day_period_text_style,
@@ -1460,12 +1433,12 @@ mod tests {
                 )
             );
             assert_eq!(
-                paragraph_style(&tester, "SELECT TIME"),
+                paragraph_style(tester, "SELECT TIME"),
                 base_style(&typography, false, |theme| &theme.body_medium)
                     .merge(Some(&style_value(&theme.help_text_style)))
             );
 
-            let (primary, selected) = dial_label_styles(&tester);
+            let (primary, selected) = dial_label_styles(tester);
             assert_eq!(
                 primary,
                 base_style(&typography, false, |theme| &theme.body_large)
@@ -1483,16 +1456,15 @@ mod tests {
 
     #[test]
     fn material3_time_picker_uses_values_from_time_picker_theme_data() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = time_picker_theme(false);
             let theme_data = themed(m3(&tester.cell.borrow()), &theme);
-            launch(&mut tester, theme_data.clone(), TimePickerEntryMode::Dial);
+            launch(tester, theme_data.clone(), TimePickerEntryMode::Dial);
             let typography = Typography::material2021().build();
             let decoration_color = Color::new(0xff1d1b20);
             let on_surface = theme_data.color_scheme.on_surface;
 
-            assert_theme_values(&tester, &theme, None, "Cancel");
+            assert_theme_values(tester, &theme, None, "Cancel");
 
             let hour_minute = |color: Color| {
                 base_style(&typography, false, |theme| &theme.body_medium)
@@ -1501,21 +1473,18 @@ mod tests {
                     .color(color)
                     .decoration_color(decoration_color)
             };
-            assert_eq!(paragraph_style(&tester, "7"), hour_minute(selected_color()));
+            assert_eq!(paragraph_style(tester, "7"), hour_minute(selected_color()));
             assert_eq!(
-                paragraph_style(&tester, "15"),
+                paragraph_style(tester, "15"),
+                hour_minute(unselected_color())
+            );
+            assert_eq!(paragraph_style(tester, "AM"), hour_minute(selected_color()));
+            assert_eq!(
+                paragraph_style(tester, "PM"),
                 hour_minute(unselected_color())
             );
             assert_eq!(
-                paragraph_style(&tester, "AM"),
-                hour_minute(selected_color())
-            );
-            assert_eq!(
-                paragraph_style(&tester, "PM"),
-                hour_minute(unselected_color())
-            );
-            assert_eq!(
-                paragraph_style(&tester, "Select time"),
+                paragraph_style(tester, "Select time"),
                 base_style(&typography, false, |theme| &theme.body_medium)
                     .merge(Some(&style_value(&theme.help_text_style)))
                     .copy_with()
@@ -1523,7 +1492,7 @@ mod tests {
                     .decoration_color(on_surface)
             );
 
-            let (primary, selected) = dial_label_styles(&tester);
+            let (primary, selected) = dial_label_styles(tester);
             assert_eq!(
                 primary,
                 base_style(&typography, false, |theme| &theme.body_large)
@@ -1544,13 +1513,12 @@ mod tests {
     #[test]
     fn time_picker_uses_values_from_time_picker_theme_data_when_input_decoration_theme_is_provided_input_mode()
      {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = time_picker_theme(true);
             let theme_data = themed(m3(&tester.cell.borrow()), &theme);
-            launch(&mut tester, theme_data, TimePickerEntryMode::Input);
+            launch(tester, theme_data, TimePickerEntryMode::Input);
 
-            let decoration = text_field(&tester, "7")
+            let decoration = text_field(tester, "7")
                 .decoration
                 .expect("a decorated field");
             let input = theme
@@ -1569,13 +1537,12 @@ mod tests {
     #[test]
     fn time_picker_uses_values_from_time_picker_theme_data_when_input_decoration_theme_is_not_provided_input_mode()
      {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = time_picker_theme(false);
             let theme_data = themed(m3(&tester.cell.borrow()), &theme);
-            launch(&mut tester, theme_data, TimePickerEntryMode::Input);
+            launch(tester, theme_data, TimePickerEntryMode::Input);
 
-            let decoration = text_field(&tester, "7")
+            let decoration = text_field(tester, "7")
                 .decoration
                 .expect("a decorated field");
             let fill = decoration.fill_color.expect("a fill color");
@@ -1589,21 +1556,19 @@ mod tests {
 
     #[test]
     fn time_picker_day_period_color_does_the_right_thing_with_non_widget_state_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = time_picker_theme(false).day_period_color(Colors::RED.primary());
             let theme_data = themed(m3(&tester.cell.borrow()), &theme);
-            launch(&mut tester, theme_data, TimePickerEntryMode::Input);
+            launch(tester, theme_data, TimePickerEntryMode::Input);
 
-            assert_eq!(text_material(&tester, "AM").0, Some(Colors::RED.primary()));
-            assert_eq!(text_material(&tester, "PM").0, Some(Colors::TRANSPARENT));
+            assert_eq!(text_material(tester, "AM").0, Some(Colors::RED.primary()));
+            assert_eq!(text_material(tester, "PM").0, Some(Colors::TRANSPARENT));
         });
     }
 
     #[test]
     fn time_picker_day_period_color_does_the_right_thing_with_widget_state_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let test_color = WidgetStateColor::resolve_with(|states| {
                 if states.contains(&WidgetState::Selected) {
                     Colors::GREEN.primary()
@@ -1613,28 +1578,24 @@ mod tests {
             });
             let theme = time_picker_theme(false).day_period_color(test_color);
             let theme_data = themed(m3(&tester.cell.borrow()), &theme);
-            launch(&mut tester, theme_data, TimePickerEntryMode::Input);
+            launch(tester, theme_data, TimePickerEntryMode::Input);
 
-            assert_eq!(
-                text_material(&tester, "AM").0,
-                Some(Colors::GREEN.primary())
-            );
-            assert_eq!(text_material(&tester, "PM").0, Some(Colors::BLUE.primary()));
+            assert_eq!(text_material(tester, "AM").0, Some(Colors::GREEN.primary()));
+            assert_eq!(text_material(tester, "PM").0, Some(Colors::BLUE.primary()));
         });
     }
 
     #[test]
     fn time_selector_separator_color_uses_the_time_selector_separator_color_value() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = time_picker_theme(false).time_selector_separator_color(Rc::new(
                 WidgetStatePropertyAll::new(Some(Color::new(0xff00ff00))),
             ));
             let theme_data = themed(m3(&tester.cell.borrow()), &theme);
-            launch(&mut tester, theme_data, TimePickerEntryMode::Input);
+            launch(tester, theme_data, TimePickerEntryMode::Input);
 
             assert_eq!(
-                color_of(&paragraph_style(&tester, ":")),
+                color_of(&paragraph_style(tester, ":")),
                 Some(Color::new(0xff00ff00))
             );
         });
@@ -1642,8 +1603,7 @@ mod tests {
 
     #[test]
     fn time_selector_separator_text_style_uses_the_time_selector_separator_text_style_value() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = time_picker_theme(false).time_selector_separator_text_style(Rc::new(
                 WidgetStatePropertyAll::new(Some(
                     TextStyle::new()
@@ -1652,9 +1612,9 @@ mod tests {
                 )),
             ));
             let theme_data = themed(m3(&tester.cell.borrow()), &theme);
-            launch(&mut tester, theme_data, TimePickerEntryMode::Input);
+            launch(tester, theme_data, TimePickerEntryMode::Input);
 
-            let style = paragraph_style(&tester, ":");
+            let style = paragraph_style(tester, ":");
             assert_eq!(style.font_size, Some(35.0));
             assert_eq!(style.font_style, Some(FontStyle::Italic));
         });
@@ -1672,7 +1632,7 @@ mod tests {
             .state_handle::<waft_widgets::EditableTextState>(&tester.cell.borrow())
             .expect("an EditableText state");
         state.request_keyboard(&mut tester.cell.borrow_mut());
-        tester.pump(Duration::ZERO);
+        tester.pump();
         waft_services::TextInputClient::update_editing_value(
             state,
             &mut tester.cell.borrow_mut(),
@@ -1688,33 +1648,31 @@ mod tests {
 
     #[test]
     fn time_picker_hour_minute_does_not_resize_on_error() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = time_picker_theme(true);
             let theme_data = themed(m3(&tester.cell.borrow()), &theme);
-            launch(&mut tester, theme_data, TimePickerEntryMode::Input);
+            launch(tester, theme_data, TimePickerEntryMode::Input);
 
-            assert_eq!(border_painter_size(&tester), Size::new(96.0, 72.0));
+            assert_eq!(border_painter_size(tester), Size::new(96.0, 72.0));
 
-            enter_invalid_hour_and_tap_ok(&mut tester);
+            enter_invalid_hour_and_tap_ok(tester);
 
-            assert_eq!(border_painter_size(&tester), Size::new(96.0, 72.0));
+            assert_eq!(border_painter_size(tester), Size::new(96.0, 72.0));
         });
     }
 
     #[test]
     fn material2_time_picker_hour_minute_does_not_resize_on_error() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = time_picker_theme(true);
             let theme_data = themed(m2(&tester.cell.borrow()), &theme);
-            launch(&mut tester, theme_data, TimePickerEntryMode::Input);
+            launch(tester, theme_data, TimePickerEntryMode::Input);
 
-            assert_eq!(border_painter_size(&tester), Size::new(96.0, 70.0));
+            assert_eq!(border_painter_size(tester), Size::new(96.0, 70.0));
 
-            enter_invalid_hour_and_tap_ok(&mut tester);
+            enter_invalid_hour_and_tap_ok(tester);
 
-            assert_eq!(border_painter_size(&tester), Size::new(96.0, 70.0));
+            assert_eq!(border_painter_size(tester), Size::new(96.0, 70.0));
         });
     }
 }

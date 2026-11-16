@@ -1907,14 +1907,15 @@ mod tests {
     use std::cell::RefCell;
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
-    use waft_embedder::TargetPlatform;
     use waft_foundation::Listener;
     use waft_widgets::{Builder, Container, IntoWidget, SizedBox};
+
+    use waft_widgets::testing::{WidgetTester, test_widgets};
 
     use super::*;
     use crate::filled_button::FilledButton;
     use crate::material::Material;
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::material_app;
 
     #[test]
     fn color_scheme_lerp_special_cases() {
@@ -2789,9 +2790,11 @@ mod tests {
 
     /// Dart's `_testFilledButtonColor`: the colour of the `Material` a `FilledButton` builds
     /// under `ThemeData(colorScheme: scheme)`.
-    fn test_filled_button_color(scheme: ColorScheme, expectation: Color) {
-        let mut tester = WidgetTester::on(TargetPlatform::Android);
-        tester.install_fonts();
+    fn test_filled_button_color(
+        tester: &mut WidgetTester,
+        scheme: ColorScheme,
+        expectation: Color,
+    ) {
         tester.pump_widget(Container::new().into_widget()); // reset
         let theme = ThemeData::builder()
             .color_scheme(scheme)
@@ -2818,7 +2821,7 @@ mod tests {
 
     #[test]
     fn color_scheme_from_seed_with_different_variants_spot_checks() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             // Default (Variant.tonalSpot).
             for (seed, expectation) in [
                 (0xFF000000, 0xFF8C4A60),
@@ -2827,6 +2830,7 @@ mod tests {
                 (0xFFFFFFFF, 0xFF006874),
             ] {
                 test_filled_button_color(
+                    tester,
                     ColorScheme::from_seed(Color::new(seed)).build(),
                     Color::new(expectation),
                 );
@@ -2840,6 +2844,7 @@ mod tests {
                 (0xFFFFFFFF, 0xFF5D5F5F),
             ] {
                 test_filled_button_color(
+                    tester,
                     ColorScheme::from_seed(Color::new(seed))
                         .dynamic_scheme_variant(DynamicSchemeVariant::Fidelity)
                         .build(),
@@ -2851,9 +2856,7 @@ mod tests {
 
     #[test]
     fn color_scheme_of_context_is_equivalent_to_theme_of_context_color_scheme() {
-        with_main_thread_stack(|| {
-            let mut tester = WidgetTester::on(TargetPlatform::Android);
-            tester.install_fonts();
+        test_widgets(|tester| {
             let color_scheme = ColorScheme::from_seed(Colors::RED.primary()).build();
             let seen: Rc<RefCell<Option<(ColorScheme, ColorScheme)>>> = Rc::default();
             let theme = ThemeData::from(color_scheme.clone()).build(&tester.cell.borrow());

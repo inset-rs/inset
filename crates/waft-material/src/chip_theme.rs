@@ -711,18 +711,18 @@ mod tests {
     use std::cell::Cell;
     use std::time::Duration;
     use waft_embedder::Offset;
-    use waft_embedder::TargetPlatform;
     use waft_foundation::Listener;
     use waft_painting::{BeveledRectangleBorder, BorderSide, StadiumBorder};
     use waft_widgets::{
         Focus, FocusNode, WidgetState, WidgetStateColor, WidgetStateOutlinedBorder,
     };
 
-    use super::*;
-    use crate::test_support::{WidgetTester, is_same_color_as};
+    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
 
-    fn fallback_body_large(color: Color) -> TextStyle {
-        let tester = WidgetTester::on(TargetPlatform::Android);
+    use super::*;
+    use crate::test_support::{PaintInspection, is_same_color_as};
+
+    fn fallback_body_large(tester: &mut WidgetTester, color: Color) -> TextStyle {
         let theme_data = ThemeData::fallback(&tester.cell.borrow(), None);
         theme_data
             .text_theme
@@ -905,129 +905,135 @@ mod tests {
 
     #[test]
     fn chip_theme_data_generates_correct_opacities_for_defaults() {
-        let custom_color1 = Color::new(0xcafefeed);
-        let custom_color2 = Color::new(0xdeadbeef);
-        let custom_style = fallback_body_large(custom_color2);
+        test_widgets(|tester| {
+            let custom_color1 = Color::new(0xcafefeed);
+            let custom_color2 = Color::new(0xdeadbeef);
+            let custom_style = fallback_body_large(tester, custom_color2);
 
-        let light_theme = ChipThemeData::from_defaults(
-            Some(Brightness::Light),
-            None,
-            custom_color1,
-            custom_style.clone(),
-        );
-        assert_eq!(
-            light_theme.background_color,
-            Some(Colors::BLACK.with_alpha(0x1f))
-        );
-        assert_eq!(
-            light_theme.delete_icon_color,
-            Some(Colors::BLACK.with_alpha(0xde).into())
-        );
-        assert_eq!(
-            light_theme.disabled_color,
-            Some(Colors::BLACK.with_alpha(0x0c))
-        );
-        assert_eq!(
-            light_theme.selected_color,
-            Some(Colors::BLACK.with_alpha(0x3d))
-        );
-        assert_eq!(
-            light_theme.secondary_selected_color,
-            Some(custom_color1.with_alpha(0x3d))
-        );
-        assert_eq!(light_theme.label_padding, None);
-        assert_eq!(light_theme.padding, Some(EdgeInsets::all(4.0).into()));
-        assert!(light_theme.side.is_none());
-        assert!(light_theme.shape.is_none());
-        assert_eq!(
-            label_color(&light_theme),
-            Some(Colors::BLACK.with_alpha(0xde))
-        );
-        assert_eq!(
-            secondary_label_color(&light_theme),
-            Some(custom_color1.with_alpha(0xde))
-        );
-        assert_eq!(light_theme.brightness, Some(Brightness::Light));
+            let light_theme = ChipThemeData::from_defaults(
+                Some(Brightness::Light),
+                None,
+                custom_color1,
+                custom_style.clone(),
+            );
+            assert_eq!(
+                light_theme.background_color,
+                Some(Colors::BLACK.with_alpha(0x1f))
+            );
+            assert_eq!(
+                light_theme.delete_icon_color,
+                Some(Colors::BLACK.with_alpha(0xde).into())
+            );
+            assert_eq!(
+                light_theme.disabled_color,
+                Some(Colors::BLACK.with_alpha(0x0c))
+            );
+            assert_eq!(
+                light_theme.selected_color,
+                Some(Colors::BLACK.with_alpha(0x3d))
+            );
+            assert_eq!(
+                light_theme.secondary_selected_color,
+                Some(custom_color1.with_alpha(0x3d))
+            );
+            assert_eq!(light_theme.label_padding, None);
+            assert_eq!(light_theme.padding, Some(EdgeInsets::all(4.0).into()));
+            assert!(light_theme.side.is_none());
+            assert!(light_theme.shape.is_none());
+            assert_eq!(
+                label_color(&light_theme),
+                Some(Colors::BLACK.with_alpha(0xde))
+            );
+            assert_eq!(
+                secondary_label_color(&light_theme),
+                Some(custom_color1.with_alpha(0xde))
+            );
+            assert_eq!(light_theme.brightness, Some(Brightness::Light));
 
-        let dark_theme = ChipThemeData::from_defaults(
-            Some(Brightness::Dark),
-            None,
-            custom_color1,
-            custom_style.clone(),
-        );
-        assert_eq!(
-            dark_theme.background_color,
-            Some(Colors::WHITE.with_alpha(0x1f))
-        );
-        assert_eq!(
-            dark_theme.delete_icon_color,
-            Some(Colors::WHITE.with_alpha(0xde).into())
-        );
-        assert_eq!(
-            dark_theme.disabled_color,
-            Some(Colors::WHITE.with_alpha(0x0c))
-        );
-        assert_eq!(
-            dark_theme.selected_color,
-            Some(Colors::WHITE.with_alpha(0x3d))
-        );
-        assert_eq!(
-            dark_theme.secondary_selected_color,
-            Some(custom_color1.with_alpha(0x3d))
-        );
-        assert_eq!(dark_theme.label_padding, None);
-        assert_eq!(dark_theme.padding, Some(EdgeInsets::all(4.0).into()));
-        assert!(dark_theme.side.is_none());
-        assert!(dark_theme.shape.is_none());
-        assert_eq!(
-            label_color(&dark_theme),
-            Some(Colors::WHITE.with_alpha(0xde))
-        );
-        assert_eq!(
-            secondary_label_color(&dark_theme),
-            Some(custom_color1.with_alpha(0xde))
-        );
-        assert_eq!(dark_theme.brightness, Some(Brightness::Dark));
+            let dark_theme = ChipThemeData::from_defaults(
+                Some(Brightness::Dark),
+                None,
+                custom_color1,
+                custom_style.clone(),
+            );
+            assert_eq!(
+                dark_theme.background_color,
+                Some(Colors::WHITE.with_alpha(0x1f))
+            );
+            assert_eq!(
+                dark_theme.delete_icon_color,
+                Some(Colors::WHITE.with_alpha(0xde).into())
+            );
+            assert_eq!(
+                dark_theme.disabled_color,
+                Some(Colors::WHITE.with_alpha(0x0c))
+            );
+            assert_eq!(
+                dark_theme.selected_color,
+                Some(Colors::WHITE.with_alpha(0x3d))
+            );
+            assert_eq!(
+                dark_theme.secondary_selected_color,
+                Some(custom_color1.with_alpha(0x3d))
+            );
+            assert_eq!(dark_theme.label_padding, None);
+            assert_eq!(dark_theme.padding, Some(EdgeInsets::all(4.0).into()));
+            assert!(dark_theme.side.is_none());
+            assert!(dark_theme.shape.is_none());
+            assert_eq!(
+                label_color(&dark_theme),
+                Some(Colors::WHITE.with_alpha(0xde))
+            );
+            assert_eq!(
+                secondary_label_color(&dark_theme),
+                Some(custom_color1.with_alpha(0xde))
+            );
+            assert_eq!(dark_theme.brightness, Some(Brightness::Dark));
 
-        let custom_theme =
-            ChipThemeData::from_defaults(None, Some(custom_color1), custom_color2, custom_style);
-        assert_eq!(
-            custom_theme.delete_icon_color,
-            Some(custom_color1.with_alpha(0xde).into())
-        );
-        assert_eq!(
-            custom_theme.disabled_color,
-            Some(custom_color1.with_alpha(0x0c))
-        );
-        assert_eq!(
-            custom_theme.selected_color,
-            Some(custom_color1.with_alpha(0x3d))
-        );
-        assert_eq!(
-            custom_theme.secondary_selected_color,
-            Some(custom_color2.with_alpha(0x3d))
-        );
-        assert_eq!(custom_theme.label_padding, None);
-        assert_eq!(custom_theme.padding, Some(EdgeInsets::all(4.0).into()));
-        assert!(custom_theme.side.is_none());
-        assert!(custom_theme.shape.is_none());
-        assert_eq!(
-            label_color(&custom_theme),
-            Some(custom_color1.with_alpha(0xde))
-        );
-        assert_eq!(
-            secondary_label_color(&custom_theme),
-            Some(custom_color2.with_alpha(0xde))
-        );
-        assert_eq!(custom_theme.brightness, Some(Brightness::Light));
+            let custom_theme = ChipThemeData::from_defaults(
+                None,
+                Some(custom_color1),
+                custom_color2,
+                custom_style,
+            );
+            assert_eq!(
+                custom_theme.delete_icon_color,
+                Some(custom_color1.with_alpha(0xde).into())
+            );
+            assert_eq!(
+                custom_theme.disabled_color,
+                Some(custom_color1.with_alpha(0x0c))
+            );
+            assert_eq!(
+                custom_theme.selected_color,
+                Some(custom_color1.with_alpha(0x3d))
+            );
+            assert_eq!(
+                custom_theme.secondary_selected_color,
+                Some(custom_color2.with_alpha(0x3d))
+            );
+            assert_eq!(custom_theme.label_padding, None);
+            assert_eq!(custom_theme.padding, Some(EdgeInsets::all(4.0).into()));
+            assert!(custom_theme.side.is_none());
+            assert!(custom_theme.shape.is_none());
+            assert_eq!(
+                label_color(&custom_theme),
+                Some(custom_color1.with_alpha(0xde))
+            );
+            assert_eq!(
+                secondary_label_color(&custom_theme),
+                Some(custom_color2.with_alpha(0xde))
+            );
+            assert_eq!(custom_theme.brightness, Some(Brightness::Light));
+        });
     }
 
-    fn black_chip_theme() -> ChipThemeData {
+    fn black_chip_theme(tester: &mut WidgetTester) -> ChipThemeData {
         ChipThemeData::from_defaults(
             Some(Brightness::Dark),
             None,
             Colors::BLACK,
-            fallback_body_large(Colors::BLACK),
+            fallback_body_large(tester, Colors::BLACK),
         )
         .elevation(1.0)
         .label_padding(EdgeInsets::symmetric(0.0, 8.0))
@@ -1042,12 +1048,12 @@ mod tests {
         .icon_theme(IconThemeData::new().size(26.0))
     }
 
-    fn white_chip_theme() -> ChipThemeData {
+    fn white_chip_theme(tester: &mut WidgetTester) -> ChipThemeData {
         ChipThemeData::from_defaults(
             Some(Brightness::Light),
             None,
             Colors::WHITE,
-            fallback_body_large(Colors::WHITE),
+            fallback_body_large(tester, Colors::WHITE),
         )
         .padding(EdgeInsets::all(2.0))
         .label_padding(EdgeInsets::only(0.0, 8.0, 0.0, 8.0))
@@ -1087,184 +1093,186 @@ mod tests {
 
     #[test]
     fn chip_theme_data_lerps_correctly() {
-        let black = black_chip_theme();
-        let white = white_chip_theme();
+        test_widgets(|tester| {
+            let black = black_chip_theme(tester);
+            let white = white_chip_theme(tester);
 
-        let lerp = ChipThemeData::lerp(Some(&black), Some(&white), 0.5).expect("a theme");
-        let middle_grey = Color::new(0xff7f7f7f);
-        same(lerp.background_color, middle_grey.with_alpha(0x1f));
-        same(
-            lerp.delete_icon_color.as_ref().map(AnyColor::color),
-            middle_grey.with_alpha(0xde),
-        );
-        same(lerp.disabled_color, middle_grey.with_alpha(0x0c));
-        same(lerp.selected_color, middle_grey.with_alpha(0x3d));
-        same(lerp.secondary_selected_color, middle_grey.with_alpha(0x3d));
-        same(lerp.shadow_color, middle_grey);
-        same(lerp.surface_tint_color, middle_grey);
-        same(lerp.selected_shadow_color, middle_grey);
-        assert_eq!(lerp.show_checkmark, Some(true));
-        assert_eq!(lerp.label_padding, Some(EdgeInsets::all(4.0).into()));
-        assert_eq!(lerp.padding, Some(EdgeInsets::all(3.0).into()));
-        same(side_color(&lerp), middle_grey);
-        assert!(is_beveled(&lerp));
-        same(label_color(&lerp), middle_grey.with_alpha(0xde));
-        same(secondary_label_color(&lerp), middle_grey.with_alpha(0xde));
-        assert_eq!(lerp.brightness, Some(Brightness::Light));
-        assert_eq!(lerp.elevation, Some(3.0));
-        assert_eq!(lerp.press_elevation, Some(7.0));
-        same(lerp.checkmark_color, middle_grey);
-        assert_eq!(lerp.icon_theme, Some(IconThemeData::new().size(24.0)));
+            let lerp = ChipThemeData::lerp(Some(&black), Some(&white), 0.5).expect("a theme");
+            let middle_grey = Color::new(0xff7f7f7f);
+            same(lerp.background_color, middle_grey.with_alpha(0x1f));
+            same(
+                lerp.delete_icon_color.as_ref().map(AnyColor::color),
+                middle_grey.with_alpha(0xde),
+            );
+            same(lerp.disabled_color, middle_grey.with_alpha(0x0c));
+            same(lerp.selected_color, middle_grey.with_alpha(0x3d));
+            same(lerp.secondary_selected_color, middle_grey.with_alpha(0x3d));
+            same(lerp.shadow_color, middle_grey);
+            same(lerp.surface_tint_color, middle_grey);
+            same(lerp.selected_shadow_color, middle_grey);
+            assert_eq!(lerp.show_checkmark, Some(true));
+            assert_eq!(lerp.label_padding, Some(EdgeInsets::all(4.0).into()));
+            assert_eq!(lerp.padding, Some(EdgeInsets::all(3.0).into()));
+            same(side_color(&lerp), middle_grey);
+            assert!(is_beveled(&lerp));
+            same(label_color(&lerp), middle_grey.with_alpha(0xde));
+            same(secondary_label_color(&lerp), middle_grey.with_alpha(0xde));
+            assert_eq!(lerp.brightness, Some(Brightness::Light));
+            assert_eq!(lerp.elevation, Some(3.0));
+            assert_eq!(lerp.press_elevation, Some(7.0));
+            same(lerp.checkmark_color, middle_grey);
+            assert_eq!(lerp.icon_theme, Some(IconThemeData::new().size(24.0)));
 
-        assert_eq!(ChipThemeData::lerp(None, None, 0.25), None);
+            assert_eq!(ChipThemeData::lerp(None, None, 0.25), None);
 
-        let a_null_25 = ChipThemeData::lerp(None, Some(&white), 0.25).expect("a theme");
-        same(a_null_25.background_color, Colors::BLACK.with_alpha(0x08));
-        same(
-            a_null_25.delete_icon_color.as_ref().map(AnyColor::color),
-            Colors::BLACK.with_alpha(0x38),
-        );
-        same(a_null_25.disabled_color, Colors::BLACK.with_alpha(0x03));
-        same(a_null_25.selected_color, Colors::BLACK.with_alpha(0x0f));
-        same(
-            a_null_25.secondary_selected_color,
-            Colors::WHITE.with_alpha(0x0f),
-        );
-        same(a_null_25.shadow_color, Colors::WHITE.with_alpha(0x40));
-        same(a_null_25.surface_tint_color, Colors::WHITE.with_alpha(0x40));
-        same(
-            a_null_25.selected_shadow_color,
-            Colors::WHITE.with_alpha(0x40),
-        );
-        assert_eq!(a_null_25.show_checkmark, Some(true));
-        assert_eq!(
-            a_null_25.label_padding,
-            Some(EdgeInsets::only(0.0, 2.0, 0.0, 2.0).into())
-        );
-        assert_eq!(a_null_25.padding, Some(EdgeInsets::all(0.5).into()));
-        same(side_color(&a_null_25), Colors::WHITE.with_alpha(0x3f));
-        assert!(is_beveled(&a_null_25));
-        same(label_color(&a_null_25), Colors::BLACK.with_alpha(0x38));
-        same(
-            secondary_label_color(&a_null_25),
-            Colors::WHITE.with_alpha(0x38),
-        );
-        assert_eq!(a_null_25.brightness, Some(Brightness::Light));
-        assert_eq!(a_null_25.elevation, Some(1.25));
-        assert_eq!(a_null_25.press_elevation, Some(2.5));
-        same(a_null_25.checkmark_color, Colors::WHITE.with_alpha(0x40));
-        assert_eq!(a_null_25.icon_theme, Some(IconThemeData::new().size(5.5)));
+            let a_null_25 = ChipThemeData::lerp(None, Some(&white), 0.25).expect("a theme");
+            same(a_null_25.background_color, Colors::BLACK.with_alpha(0x08));
+            same(
+                a_null_25.delete_icon_color.as_ref().map(AnyColor::color),
+                Colors::BLACK.with_alpha(0x38),
+            );
+            same(a_null_25.disabled_color, Colors::BLACK.with_alpha(0x03));
+            same(a_null_25.selected_color, Colors::BLACK.with_alpha(0x0f));
+            same(
+                a_null_25.secondary_selected_color,
+                Colors::WHITE.with_alpha(0x0f),
+            );
+            same(a_null_25.shadow_color, Colors::WHITE.with_alpha(0x40));
+            same(a_null_25.surface_tint_color, Colors::WHITE.with_alpha(0x40));
+            same(
+                a_null_25.selected_shadow_color,
+                Colors::WHITE.with_alpha(0x40),
+            );
+            assert_eq!(a_null_25.show_checkmark, Some(true));
+            assert_eq!(
+                a_null_25.label_padding,
+                Some(EdgeInsets::only(0.0, 2.0, 0.0, 2.0).into())
+            );
+            assert_eq!(a_null_25.padding, Some(EdgeInsets::all(0.5).into()));
+            same(side_color(&a_null_25), Colors::WHITE.with_alpha(0x3f));
+            assert!(is_beveled(&a_null_25));
+            same(label_color(&a_null_25), Colors::BLACK.with_alpha(0x38));
+            same(
+                secondary_label_color(&a_null_25),
+                Colors::WHITE.with_alpha(0x38),
+            );
+            assert_eq!(a_null_25.brightness, Some(Brightness::Light));
+            assert_eq!(a_null_25.elevation, Some(1.25));
+            assert_eq!(a_null_25.press_elevation, Some(2.5));
+            same(a_null_25.checkmark_color, Colors::WHITE.with_alpha(0x40));
+            assert_eq!(a_null_25.icon_theme, Some(IconThemeData::new().size(5.5)));
 
-        let a_null_75 = ChipThemeData::lerp(None, Some(&white), 0.75).expect("a theme");
-        same(a_null_75.background_color, Colors::BLACK.with_alpha(0x17));
-        same(
-            a_null_75.delete_icon_color.as_ref().map(AnyColor::color),
-            Colors::BLACK.with_alpha(0xa7),
-        );
-        same(a_null_75.disabled_color, Colors::BLACK.with_alpha(0x09));
-        same(a_null_75.selected_color, Colors::BLACK.with_alpha(0x2e));
-        same(
-            a_null_75.secondary_selected_color,
-            Colors::WHITE.with_alpha(0x2e),
-        );
-        same(a_null_75.shadow_color, Colors::WHITE.with_alpha(0xbf));
-        same(a_null_75.surface_tint_color, Colors::WHITE.with_alpha(0xbf));
-        same(
-            a_null_75.selected_shadow_color,
-            Colors::WHITE.with_alpha(0xbf),
-        );
-        assert_eq!(a_null_75.show_checkmark, Some(true));
-        assert_eq!(
-            a_null_75.label_padding,
-            Some(EdgeInsets::only(0.0, 6.0, 0.0, 6.0).into())
-        );
-        assert_eq!(a_null_75.padding, Some(EdgeInsets::all(1.5).into()));
-        same(side_color(&a_null_75), Colors::WHITE.with_alpha(0xbf));
-        assert!(is_beveled(&a_null_75));
-        same(label_color(&a_null_75), Colors::BLACK.with_alpha(0xa7));
-        same(
-            secondary_label_color(&a_null_75),
-            Colors::WHITE.with_alpha(0xa7),
-        );
-        assert_eq!(a_null_75.brightness, Some(Brightness::Light));
-        assert_eq!(a_null_75.elevation, Some(3.75));
-        assert_eq!(a_null_75.press_elevation, Some(7.5));
-        same(a_null_75.checkmark_color, Colors::WHITE.with_alpha(0xbf));
-        assert_eq!(a_null_75.icon_theme, Some(IconThemeData::new().size(16.5)));
+            let a_null_75 = ChipThemeData::lerp(None, Some(&white), 0.75).expect("a theme");
+            same(a_null_75.background_color, Colors::BLACK.with_alpha(0x17));
+            same(
+                a_null_75.delete_icon_color.as_ref().map(AnyColor::color),
+                Colors::BLACK.with_alpha(0xa7),
+            );
+            same(a_null_75.disabled_color, Colors::BLACK.with_alpha(0x09));
+            same(a_null_75.selected_color, Colors::BLACK.with_alpha(0x2e));
+            same(
+                a_null_75.secondary_selected_color,
+                Colors::WHITE.with_alpha(0x2e),
+            );
+            same(a_null_75.shadow_color, Colors::WHITE.with_alpha(0xbf));
+            same(a_null_75.surface_tint_color, Colors::WHITE.with_alpha(0xbf));
+            same(
+                a_null_75.selected_shadow_color,
+                Colors::WHITE.with_alpha(0xbf),
+            );
+            assert_eq!(a_null_75.show_checkmark, Some(true));
+            assert_eq!(
+                a_null_75.label_padding,
+                Some(EdgeInsets::only(0.0, 6.0, 0.0, 6.0).into())
+            );
+            assert_eq!(a_null_75.padding, Some(EdgeInsets::all(1.5).into()));
+            same(side_color(&a_null_75), Colors::WHITE.with_alpha(0xbf));
+            assert!(is_beveled(&a_null_75));
+            same(label_color(&a_null_75), Colors::BLACK.with_alpha(0xa7));
+            same(
+                secondary_label_color(&a_null_75),
+                Colors::WHITE.with_alpha(0xa7),
+            );
+            assert_eq!(a_null_75.brightness, Some(Brightness::Light));
+            assert_eq!(a_null_75.elevation, Some(3.75));
+            assert_eq!(a_null_75.press_elevation, Some(7.5));
+            same(a_null_75.checkmark_color, Colors::WHITE.with_alpha(0xbf));
+            assert_eq!(a_null_75.icon_theme, Some(IconThemeData::new().size(16.5)));
 
-        let b_null_25 = ChipThemeData::lerp(Some(&black), None, 0.25).expect("a theme");
-        same(b_null_25.background_color, Colors::WHITE.with_alpha(0x17));
-        same(
-            b_null_25.delete_icon_color.as_ref().map(AnyColor::color),
-            Colors::WHITE.with_alpha(0xa7),
-        );
-        same(b_null_25.disabled_color, Colors::WHITE.with_alpha(0x09));
-        same(b_null_25.selected_color, Colors::WHITE.with_alpha(0x2e));
-        same(
-            b_null_25.secondary_selected_color,
-            Colors::BLACK.with_alpha(0x2e),
-        );
-        same(b_null_25.shadow_color, Colors::BLACK.with_alpha(0xbf));
-        same(b_null_25.surface_tint_color, Colors::BLACK.with_alpha(0xbf));
-        same(
-            b_null_25.selected_shadow_color,
-            Colors::BLACK.with_alpha(0xbf),
-        );
-        assert_eq!(b_null_25.show_checkmark, Some(false));
-        assert_eq!(
-            b_null_25.label_padding,
-            Some(EdgeInsets::symmetric(0.0, 6.0).into())
-        );
-        assert_eq!(b_null_25.padding, Some(EdgeInsets::all(3.0).into()));
-        same(side_color(&b_null_25), Colors::BLACK.with_alpha(0xbf));
-        assert!(is_stadium(&b_null_25));
-        same(label_color(&b_null_25), Colors::WHITE.with_alpha(0xa7));
-        same(
-            secondary_label_color(&b_null_25),
-            Colors::BLACK.with_alpha(0xa7),
-        );
-        assert_eq!(b_null_25.brightness, Some(Brightness::Dark));
-        assert_eq!(b_null_25.elevation, Some(0.75));
-        assert_eq!(b_null_25.press_elevation, Some(3.0));
-        same(b_null_25.checkmark_color, Colors::BLACK.with_alpha(0xbf));
-        assert_eq!(b_null_25.icon_theme, Some(IconThemeData::new().size(19.5)));
+            let b_null_25 = ChipThemeData::lerp(Some(&black), None, 0.25).expect("a theme");
+            same(b_null_25.background_color, Colors::WHITE.with_alpha(0x17));
+            same(
+                b_null_25.delete_icon_color.as_ref().map(AnyColor::color),
+                Colors::WHITE.with_alpha(0xa7),
+            );
+            same(b_null_25.disabled_color, Colors::WHITE.with_alpha(0x09));
+            same(b_null_25.selected_color, Colors::WHITE.with_alpha(0x2e));
+            same(
+                b_null_25.secondary_selected_color,
+                Colors::BLACK.with_alpha(0x2e),
+            );
+            same(b_null_25.shadow_color, Colors::BLACK.with_alpha(0xbf));
+            same(b_null_25.surface_tint_color, Colors::BLACK.with_alpha(0xbf));
+            same(
+                b_null_25.selected_shadow_color,
+                Colors::BLACK.with_alpha(0xbf),
+            );
+            assert_eq!(b_null_25.show_checkmark, Some(false));
+            assert_eq!(
+                b_null_25.label_padding,
+                Some(EdgeInsets::symmetric(0.0, 6.0).into())
+            );
+            assert_eq!(b_null_25.padding, Some(EdgeInsets::all(3.0).into()));
+            same(side_color(&b_null_25), Colors::BLACK.with_alpha(0xbf));
+            assert!(is_stadium(&b_null_25));
+            same(label_color(&b_null_25), Colors::WHITE.with_alpha(0xa7));
+            same(
+                secondary_label_color(&b_null_25),
+                Colors::BLACK.with_alpha(0xa7),
+            );
+            assert_eq!(b_null_25.brightness, Some(Brightness::Dark));
+            assert_eq!(b_null_25.elevation, Some(0.75));
+            assert_eq!(b_null_25.press_elevation, Some(3.0));
+            same(b_null_25.checkmark_color, Colors::BLACK.with_alpha(0xbf));
+            assert_eq!(b_null_25.icon_theme, Some(IconThemeData::new().size(19.5)));
 
-        let b_null_75 = ChipThemeData::lerp(Some(&black), None, 0.75).expect("a theme");
-        same(b_null_75.background_color, Colors::WHITE.with_alpha(0x08));
-        same(
-            b_null_75.delete_icon_color.as_ref().map(AnyColor::color),
-            Colors::WHITE.with_alpha(0x38),
-        );
-        same(b_null_75.disabled_color, Colors::WHITE.with_alpha(0x03));
-        same(b_null_75.selected_color, Colors::WHITE.with_alpha(0x0f));
-        same(
-            b_null_75.secondary_selected_color,
-            Colors::BLACK.with_alpha(0x0f),
-        );
-        same(b_null_75.shadow_color, Colors::BLACK.with_alpha(0x40));
-        same(b_null_75.surface_tint_color, Colors::BLACK.with_alpha(0x40));
-        same(
-            b_null_75.selected_shadow_color,
-            Colors::BLACK.with_alpha(0x40),
-        );
-        assert_eq!(b_null_75.show_checkmark, Some(true));
-        assert_eq!(
-            b_null_75.label_padding,
-            Some(EdgeInsets::symmetric(0.0, 2.0).into())
-        );
-        assert_eq!(b_null_75.padding, Some(EdgeInsets::all(1.0).into()));
-        same(side_color(&b_null_75), Colors::BLACK.with_alpha(0x3f));
-        assert!(is_stadium(&b_null_75));
-        same(label_color(&b_null_75), Colors::WHITE.with_alpha(0x38));
-        same(
-            secondary_label_color(&b_null_75),
-            Colors::BLACK.with_alpha(0x38),
-        );
-        assert_eq!(b_null_75.brightness, Some(Brightness::Light));
-        assert_eq!(b_null_75.elevation, Some(0.25));
-        assert_eq!(b_null_75.press_elevation, Some(1.0));
-        same(b_null_75.checkmark_color, Colors::BLACK.with_alpha(0x40));
-        assert_eq!(b_null_75.icon_theme, Some(IconThemeData::new().size(6.5)));
+            let b_null_75 = ChipThemeData::lerp(Some(&black), None, 0.75).expect("a theme");
+            same(b_null_75.background_color, Colors::WHITE.with_alpha(0x08));
+            same(
+                b_null_75.delete_icon_color.as_ref().map(AnyColor::color),
+                Colors::WHITE.with_alpha(0x38),
+            );
+            same(b_null_75.disabled_color, Colors::WHITE.with_alpha(0x03));
+            same(b_null_75.selected_color, Colors::WHITE.with_alpha(0x0f));
+            same(
+                b_null_75.secondary_selected_color,
+                Colors::BLACK.with_alpha(0x0f),
+            );
+            same(b_null_75.shadow_color, Colors::BLACK.with_alpha(0x40));
+            same(b_null_75.surface_tint_color, Colors::BLACK.with_alpha(0x40));
+            same(
+                b_null_75.selected_shadow_color,
+                Colors::BLACK.with_alpha(0x40),
+            );
+            assert_eq!(b_null_75.show_checkmark, Some(true));
+            assert_eq!(
+                b_null_75.label_padding,
+                Some(EdgeInsets::symmetric(0.0, 2.0).into())
+            );
+            assert_eq!(b_null_75.padding, Some(EdgeInsets::all(1.0).into()));
+            same(side_color(&b_null_75), Colors::BLACK.with_alpha(0x3f));
+            assert!(is_stadium(&b_null_75));
+            same(label_color(&b_null_75), Colors::WHITE.with_alpha(0x38));
+            same(
+                secondary_label_color(&b_null_75),
+                Colors::BLACK.with_alpha(0x38),
+            );
+            assert_eq!(b_null_75.brightness, Some(Brightness::Light));
+            assert_eq!(b_null_75.elevation, Some(0.25));
+            assert_eq!(b_null_75.press_elevation, Some(1.0));
+            same(b_null_75.checkmark_color, Colors::BLACK.with_alpha(0x40));
+            assert_eq!(b_null_75.icon_theme, Some(IconThemeData::new().size(6.5)));
+        });
     }
 
     // Dart's helpers of chip_theme_test.dart.
@@ -1288,14 +1296,7 @@ mod tests {
 
     use crate::test_support::{
         CanvasCall, PaintCall, canvas_call_of, colors_match, material_app, paints_calls,
-        with_main_thread_stack,
     };
-
-    fn tester() -> WidgetTester {
-        let tester = WidgetTester::on(TargetPlatform::Android);
-        tester.install_platform_fonts();
-        tester
-    }
 
     fn pump_app(tester: &mut WidgetTester, theme: ThemeData, home: WidgetRef) {
         tester.pump_widget(material_app(theme, home));
@@ -1414,13 +1415,12 @@ mod tests {
 
     #[test]
     fn material3_chip_uses_theme_data_chip_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = theme_with(&tester, chip_theme_for_overrides(), true);
+        test_widgets(|tester| {
+            let theme = theme_with(tester, chip_theme_for_overrides(), true);
             let outline_variant = theme.color_scheme.outline_variant();
-            pump_app(&mut tester, theme, centered_material(avatar_chip()));
+            pump_app(tester, theme, centered_material(avatar_chip()));
             assert_chip_uses_theme(
-                &tester,
+                tester,
                 Size::new(402.0, 252.0),
                 rounded_rectangle_with_side(outline_variant),
             );
@@ -1429,12 +1429,11 @@ mod tests {
 
     #[test]
     fn material2_chip_uses_theme_data_chip_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = theme_with(&tester, chip_theme_for_overrides(), false);
-            pump_app(&mut tester, theme, centered_material(avatar_chip()));
+        test_widgets(|tester| {
+            let theme = theme_with(tester, chip_theme_for_overrides(), false);
+            pump_app(tester, theme, centered_material(avatar_chip()));
             assert_chip_uses_theme(
-                &tester,
+                tester,
                 Size::new(400.0, 250.0),
                 ShapeBorderRef::new(RoundedRectangleBorder::default()),
             );
@@ -1451,17 +1450,16 @@ mod tests {
 
     #[test]
     fn material3_chip_uses_local_chip_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = theme_with(&tester, ChipThemeData::new(), true);
+        test_widgets(|tester| {
+            let theme = theme_with(tester, ChipThemeData::new(), true);
             let outline_variant = theme.color_scheme.outline_variant();
             pump_app(
-                &mut tester,
+                tester,
                 theme,
                 local_chip_theme_home(chip_theme_for_overrides()),
             );
             assert_chip_uses_theme(
-                &tester,
+                tester,
                 Size::new(402.0, 252.0),
                 rounded_rectangle_with_side(outline_variant),
             );
@@ -1470,16 +1468,15 @@ mod tests {
 
     #[test]
     fn material2_chip_uses_local_chip_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = theme_with(&tester, ChipThemeData::new(), false);
+        test_widgets(|tester| {
+            let theme = theme_with(tester, ChipThemeData::new(), false);
             pump_app(
-                &mut tester,
+                tester,
                 theme,
                 local_chip_theme_home(chip_theme_for_overrides()),
             );
             assert_chip_uses_theme(
-                &tester,
+                tester,
                 Size::new(400.0, 250.0),
                 ShapeBorderRef::new(RoundedRectangleBorder::default()),
             );
@@ -1488,8 +1485,7 @@ mod tests {
 
     #[test]
     fn chip_properties_overrides_chip_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let background_color = Color::new(0xff000000);
             let elevation = 6.0;
             let shape = RoundedRectangleBorder::new(
@@ -1500,7 +1496,7 @@ mod tests {
                 waft_painting::BorderRadius::ZERO.into(),
             );
             let icon_theme = IconThemeData::new().color(Color::new(0xff00ff00));
-            let theme = theme_with(&tester, chip_theme_for_overrides(), true);
+            let theme = theme_with(tester, chip_theme_for_overrides(), true);
             let chip = avatar_chip()
                 .background_color(background_color)
                 .elevation(elevation)
@@ -1509,17 +1505,17 @@ mod tests {
                 .label_style(TextStyle::new().font_size(20.0))
                 .shape(shape)
                 .icon_theme(icon_theme.clone());
-            pump_app(&mut tester, theme, centered_material(chip));
+            pump_app(tester, theme, centered_material(chip));
 
-            assert!(paints_rect(&material_box_ops(&tester), background_color));
+            assert!(paints_rect(&material_box_ops(tester), background_color));
             assert_eq!(
-                size_of(&tester, only::<RawChip>(&tester)),
+                size_of(tester, only::<RawChip>(tester)),
                 Size::new(242.0, 132.0)
             ); // label + padding + labelPadding
-            assert_eq!(material_elevation(&tester), elevation);
-            assert_eq!(material_shape(&tester), Some(ShapeBorderRef::new(shape)));
-            assert_eq!(label_font_size(&tester), Some(20.0));
-            assert_eq!(icon_color(&tester), Some(Color::new(0xff00ff00)));
+            assert_eq!(material_elevation(tester), elevation);
+            assert_eq!(material_shape(tester), Some(ShapeBorderRef::new(shape)));
+            assert_eq!(label_font_size(tester), Some(20.0));
+            assert_eq!(icon_color(tester), Some(Color::new(0xff00ff00)));
         });
     }
 
@@ -1554,8 +1550,7 @@ mod tests {
 
     #[test]
     fn material3_chip_uses_constructor_parameters() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let background_color = Color::new(0xff332211);
             let shape = CircleBorder::new(
                 BorderSide {
@@ -1566,12 +1561,12 @@ mod tests {
             );
             let theme = ThemeData::new(&tester.cell.borrow());
             pump_app(
-                &mut tester,
+                tester,
                 theme,
                 centered_material(constructor_parameters_chip(background_color, shape)),
             );
             assert_chip_uses_constructor_parameters(
-                &tester,
+                tester,
                 background_color,
                 Size::new(402.0, 252.0),
                 shape,
@@ -1582,20 +1577,19 @@ mod tests {
 
     #[test]
     fn material2_chip_uses_constructor_parameters() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let background_color = Color::new(0xff332211);
             let shape = CircleBorder::default();
             let theme = ThemeData::builder()
                 .use_material3(false)
                 .build(&tester.cell.borrow());
             pump_app(
-                &mut tester,
+                tester,
                 theme,
                 centered_material(constructor_parameters_chip(background_color, shape)),
             );
             assert_chip_uses_constructor_parameters(
-                &tester,
+                tester,
                 background_color,
                 Size::new(400.0, 250.0),
                 shape,
@@ -1618,8 +1612,7 @@ mod tests {
 
     #[test]
     fn chip_uses_stateful_color_from_chip_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let focus_node = FocusNode::new(&mut tester.cell.borrow_mut())
                 .into_erased::<waft_widgets::AnyFocusNode>();
 
@@ -1668,12 +1661,12 @@ mod tests {
             };
 
             // Default, not disabled.
-            let root = chip_widget(&tester, true, false);
+            let root = chip_widget(tester, true, false);
             tester.pump_widget(root);
             assert_eq!(tester.text_color("Chip"), default_color);
 
             // Selected.
-            let root = chip_widget(&tester, true, true);
+            let root = chip_widget(tester, true, true);
             tester.pump_widget(root);
             assert_eq!(tester.text_color("Chip"), selected_color);
 
@@ -1684,8 +1677,8 @@ mod tests {
             assert_eq!(tester.text_color("Chip"), focused_color);
 
             // Hovered.
-            let center = center_of(&tester, only::<ChoiceChip>(&tester));
-            let mut gesture = WidgetTester::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+            let center = center_of(tester, only::<ChoiceChip>(tester));
+            let mut gesture = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
             tester.add_pointer(&mut gesture, Offset::ZERO);
             tester.move_to(&mut gesture, center, false);
             tester.pump_and_settle();
@@ -1697,7 +1690,7 @@ mod tests {
             assert_eq!(tester.text_color("Chip"), pressed_color);
 
             // Disabled.
-            let root = chip_widget(&tester, false, false);
+            let root = chip_widget(tester, false, false);
             tester.pump_widget(root);
             tester.pump_and_settle();
             assert_eq!(tester.text_color("Chip"), disabled_color);
@@ -1730,8 +1723,7 @@ mod tests {
 
     #[test]
     fn material2_chip_uses_stateful_shape_from_chip_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let chip_theme = || {
                 ChipThemeData::from_defaults(
                     Some(Brightness::Light),
@@ -1747,21 +1739,20 @@ mod tests {
             };
 
             // Default.
-            let theme = theme_with(&tester, chip_theme(), false);
-            pump_choice_chip_with_theme(&mut tester, theme, false);
-            assert!(is_stadium_shape(&material_shape(&tester)));
+            let theme = theme_with(tester, chip_theme(), false);
+            pump_choice_chip_with_theme(tester, theme, false);
+            assert!(is_stadium_shape(&material_shape(tester)));
 
             // Selected.
-            let theme = theme_with(&tester, chip_theme(), false);
-            pump_choice_chip_with_theme(&mut tester, theme, true);
-            assert!(is_rounded_rectangle_shape(&material_shape(&tester)));
+            let theme = theme_with(tester, chip_theme(), false);
+            pump_choice_chip_with_theme(tester, theme, true);
+            assert!(is_rounded_rectangle_shape(&material_shape(tester)));
         });
     }
 
     #[test]
     fn material3_chip_uses_stateful_shape_from_chip_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let chip_theme = || {
                 ChipThemeData::new().shape(WidgetStateOutlinedBorder::resolve_with(|states| {
                     states
@@ -1771,14 +1762,14 @@ mod tests {
             };
 
             // Default.
-            let theme = theme_with(&tester, chip_theme(), true);
-            pump_choice_chip_with_theme(&mut tester, theme, false);
-            assert!(is_rounded_rectangle_shape(&material_shape(&tester)));
+            let theme = theme_with(tester, chip_theme(), true);
+            pump_choice_chip_with_theme(tester, theme, false);
+            assert!(is_rounded_rectangle_shape(&material_shape(tester)));
 
             // Selected.
-            let theme = theme_with(&tester, chip_theme(), true);
-            pump_choice_chip_with_theme(&mut tester, theme, true);
-            assert!(is_stadium_shape(&material_shape(&tester)));
+            let theme = theme_with(tester, chip_theme(), true);
+            pump_choice_chip_with_theme(tester, theme, true);
+            assert!(is_stadium_shape(&material_shape(tester)));
         });
     }
 
@@ -1788,8 +1779,7 @@ mod tests {
 
     #[test]
     fn raw_chip_uses_material_state_color_from_chip_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let disabled_selected_color = Color::new(0xffffff00);
             let disabled_color = Color::new(0xff00ff00);
             let background_color = Color::new(0xff0000ff);
@@ -1819,30 +1809,30 @@ mod tests {
             };
 
             // Enabled chip should have the provided backgroundColor.
-            build_app(&mut tester, true, false);
+            build_app(tester, true, false);
             assert!(paints_calls(
-                &material_box_ops(&tester),
+                &material_box_ops(tester),
                 &[PaintCall::rrect(Some(background_color))]
             ));
 
             // Disabled chip should have the provided disabledColor.
-            build_app(&mut tester, false, false);
+            build_app(tester, false, false);
             assert!(paints_calls(
-                &material_box_ops(&tester),
+                &material_box_ops(tester),
                 &[PaintCall::rrect(Some(disabled_color))]
             ));
 
             // Enabled & selected chip should have the provided selectedColor.
-            build_app(&mut tester, true, true);
+            build_app(tester, true, true);
             assert!(paints_calls(
-                &material_box_ops(&tester),
+                &material_box_ops(tester),
                 &[PaintCall::rrect(Some(selected_color))]
             ));
 
             // Disabled & selected chip should have the provided disabledSelectedColor.
-            build_app(&mut tester, false, true);
+            build_app(tester, false, true);
             assert!(paints_calls(
-                &material_box_ops(&tester),
+                &material_box_ops(tester),
                 &[PaintCall::rrect(Some(disabled_selected_color))]
             ));
         });
@@ -1850,8 +1840,7 @@ mod tests {
 
     #[test]
     fn raw_chip_uses_state_colors_from_chip_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let disabled_color = Color::new(0xadfefafe);
             let background_color = Color::new(0xcafefeed);
             let selected_color = Color::new(0xbeefcafe);
@@ -1872,23 +1861,23 @@ mod tests {
             };
 
             // Enabled chip should have the provided backgroundColor.
-            build_app(&mut tester, true, false);
+            build_app(tester, true, false);
             assert!(paints_calls(
-                &material_box_ops(&tester),
+                &material_box_ops(tester),
                 &[PaintCall::rrect(Some(background_color))]
             ));
 
             // Disabled chip should have the provided disabledColor.
-            build_app(&mut tester, false, false);
+            build_app(tester, false, false);
             assert!(paints_calls(
-                &material_box_ops(&tester),
+                &material_box_ops(tester),
                 &[PaintCall::rrect(Some(disabled_color))]
             ));
 
             // Enabled & selected chip should have the provided selectedColor.
-            build_app(&mut tester, true, true);
+            build_app(tester, true, true);
             assert!(paints_calls(
-                &material_box_ops(&tester),
+                &material_box_ops(tester),
                 &[PaintCall::rrect(Some(selected_color))]
             ));
         });
@@ -1896,8 +1885,7 @@ mod tests {
 
     #[test]
     fn raw_chip_respects_checkmark_properties_from_chip_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let red = Color::new(0xffff0000);
             let build_raw_chip = |tester: &mut WidgetTester, chip_theme: ChipThemeData| {
                 let theme = theme_with(tester, chip_theme, true);
@@ -1908,9 +1896,9 @@ mod tests {
             };
 
             // Test that the checkmark is painted.
-            build_raw_chip(&mut tester, ChipThemeData::new().checkmark_color(red));
+            build_raw_chip(tester, ChipThemeData::new().checkmark_color(red));
             assert!(paints_calls(
-                &material_box_ops(&tester),
+                &material_box_ops(tester),
                 &[PaintCall::Path {
                     color: Some(red),
                     stroke_width: None,
@@ -1920,14 +1908,14 @@ mod tests {
 
             // Test that the checkmark is not painted when ChipThemeData.showCheckmark is false.
             build_raw_chip(
-                &mut tester,
+                tester,
                 ChipThemeData::new()
                     .show_checkmark(false)
                     .checkmark_color(red),
             );
             tester.pump_and_settle();
             assert!(!paints_calls(
-                &material_box_ops(&tester),
+                &material_box_ops(tester),
                 &[PaintCall::Path {
                     color: Some(red),
                     stroke_width: None,
@@ -1939,8 +1927,7 @@ mod tests {
 
     #[test]
     fn material3_raw_chip_shapes_side_is_used_when_provided() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let shape_with_side = |color: Color| {
                 RoundedRectangleBorder::new(
                     BorderSide {
@@ -1967,17 +1954,17 @@ mod tests {
             };
 
             // Test [RawChip.shape] with a side.
-            build_chip(&mut tester, None);
+            build_chip(tester, None);
 
             // Chip should have the provided shape and the side from [RawChip.shape].
             assert_eq!(
-                material_shape(&tester),
+                material_shape(tester),
                 Some(ShapeBorderRef::new(shape_with_side(Color::new(0xffff00ff))))
             );
 
             // Test [RawChip.shape] with a side and [RawChip.side].
             build_chip(
-                &mut tester,
+                tester,
                 Some(BorderSide {
                     color: Color::new(0xfffff000),
                     ..BorderSide::default()
@@ -1988,7 +1975,7 @@ mod tests {
             // Chip use shape from [RawChip.shape] and the side from [RawChip.side].
             // [RawChip.shape]'s side should be ignored.
             assert_eq!(
-                material_shape(&tester),
+                material_shape(tester),
                 Some(ShapeBorderRef::new(shape_with_side(Color::new(0xfffff000))))
             );
         });
@@ -1996,33 +1983,29 @@ mod tests {
 
     #[test]
     fn material3_chip_theme_data_icon_theme_respects_default_icon_theme_size() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let build_chip = |tester: &mut WidgetTester, icon_theme: IconThemeData| {
                 let theme = theme_with(tester, ChipThemeData::new().icon_theme(icon_theme), true);
                 pump_app(tester, theme, centered_material(avatar_chip()));
             };
 
-            build_chip(
-                &mut tester,
-                IconThemeData::new().color(Color::new(0xff332211)),
-            );
+            build_chip(tester, IconThemeData::new().color(Color::new(0xff332211)));
 
             // Icon should have the default chip iconSize.
-            assert_eq!(icon_theme_data(&tester).size, Some(18.0));
-            assert_eq!(icon_color(&tester), Some(Color::new(0xff332211)));
+            assert_eq!(icon_theme_data(tester).size, Some(18.0));
+            assert_eq!(icon_color(tester), Some(Color::new(0xff332211)));
 
             // Icon should have the provided iconSize.
             build_chip(
-                &mut tester,
+                tester,
                 IconThemeData::new()
                     .color(Color::new(0xff112233))
                     .size(23.0),
             );
             tester.pump_and_settle();
 
-            assert_eq!(icon_theme_data(&tester).size, Some(23.0));
-            assert_eq!(icon_color(&tester), Some(Color::new(0xff112233)));
+            assert_eq!(icon_theme_data(tester).size, Some(23.0));
+            assert_eq!(icon_color(tester), Some(Color::new(0xff112233)));
         });
     }
 
@@ -2035,8 +2018,7 @@ mod tests {
 
     #[test]
     fn chip_theme_data_avatar_box_constraints_updates_avatar_size_constraints() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let border = 1.0;
             let icon_size = 18.0;
             let label_padding = 8.0;
@@ -2047,9 +2029,9 @@ mod tests {
             let chip_theme = ChipThemeData::new().avatar_box_constraints(
                 BoxConstraints::tight_for_finite(f64::INFINITY, f64::INFINITY),
             );
-            let theme = theme_with(&tester, chip_theme, true);
+            let theme = theme_with(tester, chip_theme, true);
             pump_app(
-                &mut tester,
+                tester,
                 theme,
                 Material::new()
                     .child(Center::new().child(
@@ -2058,13 +2040,13 @@ mod tests {
                     .into_widget(),
             );
 
-            let chip_size = size_of(&tester, only::<RawChip>(&tester));
+            let chip_size = size_of(tester, only::<RawChip>(tester));
             assert_eq!(chip_size.width(), 127.0);
             assert_eq!(chip_size.height(), 93.0);
 
             // Calculate the distance between avatar and chip edges.
-            let chip_top_left = rect_of(&tester, material_of_chip(&tester)).top_left();
-            let avatar_center = center_of(&tester, tester.find_by_icon(&Icons::favorite()));
+            let chip_top_left = rect_of(tester, material_of_chip(tester)).top_left();
+            let avatar_center = center_of(tester, tester.find_by_icon(&Icons::favorite()));
             assert_eq!(
                 chip_top_left.dx(),
                 avatar_center.dx() - (icon_size / 2.0) - padding - border
@@ -2075,7 +2057,7 @@ mod tests {
             );
 
             // Calculate the distance between avatar and label.
-            let label_top_left = rect_of(&tester, only::<Container>(&tester)).top_left();
+            let label_top_left = rect_of(tester, only::<Container>(tester)).top_left();
             assert_eq!(
                 label_top_left.dx(),
                 avatar_center.dx() + (icon_size / 2.0) + label_padding
@@ -2085,8 +2067,7 @@ mod tests {
 
     #[test]
     fn chip_theme_data_delete_icon_box_constraints_updates_delete_icon_size_constraints() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let border = 1.0;
             let icon_size = 18.0;
             let label_padding = 8.0;
@@ -2097,9 +2078,9 @@ mod tests {
             let chip_theme = ChipThemeData::new().delete_icon_box_constraints(
                 BoxConstraints::tight_for_finite(f64::INFINITY, f64::INFINITY),
             );
-            let theme = theme_with(&tester, chip_theme, true);
+            let theme = theme_with(tester, chip_theme, true);
             pump_app(
-                &mut tester,
+                tester,
                 theme,
                 Material::new()
                     .child(Center::new().child(
@@ -2108,13 +2089,13 @@ mod tests {
                     .into_widget(),
             );
 
-            let chip_size = size_of(&tester, only::<RawChip>(&tester));
+            let chip_size = size_of(tester, only::<RawChip>(tester));
             assert_eq!(chip_size.width(), 127.0);
             assert_eq!(chip_size.height(), 93.0);
 
             // Calculate the distance between delete icon and chip edges.
-            let chip_top_right = rect_of(&tester, material_of_chip(&tester)).top_right();
-            let delete_icon_center = center_of(&tester, tester.find_by_icon(&Icons::cancel()));
+            let chip_top_right = rect_of(tester, material_of_chip(tester)).top_right();
+            let delete_icon_center = center_of(tester, tester.find_by_icon(&Icons::cancel()));
             assert_eq!(
                 chip_top_right.dx(),
                 delete_icon_center.dx() + (icon_size / 2.0) + padding + border
@@ -2125,7 +2106,7 @@ mod tests {
             );
 
             // Calculate the distance between delete icon and label.
-            let label_top_right = rect_of(&tester, only::<Container>(&tester)).top_right();
+            let label_top_right = rect_of(tester, only::<Container>(tester)).top_right();
             assert_eq!(
                 label_top_right.dx(),
                 delete_icon_center.dx() - (icon_size / 2.0) - label_padding
@@ -2135,15 +2116,14 @@ mod tests {
 
     #[test]
     fn chip_theme_data_icon_theme_updates_avatar_and_delete_icons() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let icon_color = Color::new(0xffff0000);
             let icon_size = 32.0;
             let chip_theme = ChipThemeData::new()
                 .icon_theme(IconThemeData::new().color(icon_color).size(icon_size));
-            let theme = theme_with(&tester, chip_theme, true);
+            let theme = theme_with(tester, chip_theme, true);
             pump_app(
-                &mut tester,
+                tester,
                 theme,
                 Material::new()
                     .child(
@@ -2160,8 +2140,8 @@ mod tests {
             // Test rendered icon size.
             let avatar_icon = tester.find_by_icon(&Icons::favorite());
             let delete_icon = tester.find_by_icon(&Icons::delete());
-            assert_eq!(size_of(&tester, avatar_icon).width(), icon_size);
-            assert_eq!(size_of(&tester, delete_icon).width(), icon_size);
+            assert_eq!(size_of(tester, avatar_icon).width(), icon_size);
+            assert_eq!(size_of(tester, delete_icon).width(), icon_size);
 
             // Test rendered icon color.
             assert_eq!(
@@ -2183,8 +2163,7 @@ mod tests {
 
     #[test]
     fn chip_theme_data_delete_icon_color_overrides_chip_theme_data_icon_theme_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let icon_color = Color::new(0xffff00ff);
             let delete_icon_color = Color::new(0xffff00ff);
             let build_chip = |tester: &mut WidgetTester, delete_icon_color: Option<Color>| {
@@ -2215,23 +2194,22 @@ mod tests {
                     .map(|color| color.color())
             };
 
-            build_chip(&mut tester, None);
+            build_chip(tester, None);
 
             // Test rendered icon color.
-            assert_eq!(delete_glyph_color(&tester), Some(icon_color));
+            assert_eq!(delete_glyph_color(tester), Some(icon_color));
 
-            build_chip(&mut tester, Some(delete_icon_color));
+            build_chip(tester, Some(delete_icon_color));
 
             // Test rendered icon color.
-            assert_eq!(delete_glyph_color(&tester), Some(delete_icon_color));
+            assert_eq!(delete_glyph_color(tester), Some(delete_icon_color));
         });
     }
 
     // This is a regression test for https://github.com/flutter/flutter/issues/135136.
     #[test]
     fn widget_state_border_side_properly_lerp_in_chip_theme_data_side() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let primary = Rc::new(Cell::new(Color::new(0)));
             let build_chip = |tester: &mut WidgetTester, seed_color: Color| {
                 let color_scheme = ColorScheme::from_seed(seed_color).build();
@@ -2260,17 +2238,17 @@ mod tests {
                 );
             };
 
-            build_chip(&mut tester, Colors::RED.primary());
+            build_chip(tester, Colors::RED.primary());
             tester.pump_and_settle();
             assert!(paints_calls(
-                &raw_chip_ops(&tester),
+                &raw_chip_ops(tester),
                 &[PaintCall::drrect(Some(primary.get()))]
             ));
 
-            build_chip(&mut tester, Colors::BLUE.primary());
-            tester.pump(Duration::from_millis(100));
+            build_chip(tester, Colors::BLUE.primary());
+            tester.pump_by(Duration::from_millis(100));
             assert!(paints_calls(
-                &raw_chip_ops(&tester),
+                &raw_chip_ops(tester),
                 &[PaintCall::drrect(Some(primary.get()))]
             ));
         });

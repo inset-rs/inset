@@ -1353,7 +1353,7 @@ mod tests {
     use std::cell::{Cell, RefCell};
     use waft_painting::OutlinedBorderRef;
 
-    use waft_embedder::{Radius, Rect, TargetPlatform, TextDirection};
+    use waft_embedder::{Radius, Rect, TextDirection};
     use waft_painting::{AlignmentGeometry, BorderRadius, BoxDecoration, RoundedRectangleBorder};
     use waft_rendering::{
         RenderClipPath, RenderCustomClip, RenderDecoratedBox, RenderPhysicalModelBase,
@@ -1365,12 +1365,13 @@ mod tests {
         GlobalKey, MainAxisSize, SizedBox, WidgetStatePropertyAll,
     };
 
+    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+
     use super::*;
     use crate::button_style::ButtonLayerBuilder;
     use crate::color_scheme::ColorScheme;
     use crate::constants::K_THEME_CHANGE_DURATION;
     use crate::ink_ripple::InkRipple;
-    use crate::test_support::{TestPointer, WidgetTester, with_main_thread_stack};
     use crate::theme_data::{ThemeData, VisualDensity};
 
     /// A leaf of [`ButtonStyleButton`] whose default style is Dart's `ElevatedButton`'s in
@@ -1502,10 +1503,6 @@ mod tests {
         }
     }
 
-    fn tester() -> WidgetTester {
-        WidgetTester::on(TargetPlatform::Android)
-    }
-
     fn ltr<K>(child: impl IntoWidget<K>) -> WidgetRef {
         Directionality::new(TextDirection::Ltr, child).into_widget()
     }
@@ -1599,8 +1596,7 @@ mod tests {
     // distinctly recognized'.
     #[test]
     fn a_tap_and_a_long_press_reach_their_own_callbacks() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let did_press_button = Rc::new(Cell::new(0));
             let did_long_press_button = Rc::new(Cell::new(0));
             let key = GlobalKey::new();
@@ -1627,8 +1623,7 @@ mod tests {
     // ThemeData.materialTapTargetSize'.
     #[test]
     fn the_theme_tap_target_size_pads_the_button_to_48() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             // Specifying minimumSize to mimic the original minimumSize for
             // RaisedButton so that the corresponding button size matches
             // the original version of this test.
@@ -1651,14 +1646,14 @@ mod tests {
                 };
 
             let key1 = GlobalKey::new();
-            let frame = build_frame(&tester, MaterialTapTargetSize::Padded, &key1);
+            let frame = build_frame(tester, MaterialTapTargetSize::Padded, &key1);
             tester.pump_widget(frame);
-            assert_eq!(size_of(&tester, &key1), Size::new(88.0, 48.0));
+            assert_eq!(size_of(tester, &key1), Size::new(88.0, 48.0));
 
             let key2 = GlobalKey::new();
-            let frame = build_frame(&tester, MaterialTapTargetSize::ShrinkWrap, &key2);
+            let frame = build_frame(tester, MaterialTapTargetSize::ShrinkWrap, &key2);
             tester.pump_widget(frame);
-            assert_eq!(size_of(&tester, &key2), Size::new(88.0, 36.0));
+            assert_eq!(size_of(tester, &key2), Size::new(88.0, 36.0));
         });
     }
 
@@ -1666,8 +1661,7 @@ mod tests {
     // button clips, so it paints no `clipPath`.
     #[test]
     fn a_button_does_not_clip_by_default() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(ltr(TestButton::new(Some(pressed()), sized(10.0, 10.0))));
             let shape = tester.first::<RenderPhysicalShape>();
             assert_eq!(
@@ -1679,11 +1673,10 @@ mod tests {
     }
 
     // elevated_button_test.dart 'ElevatedButton responds to density changes.'; the `Text`
-    // child is the 56x14 box the Ahem font lays 'Text' out in.
+    // child is the 56x14 box FlutterTest lays 'Text' out in.
     #[test]
     fn visual_density_grows_and_shrinks_the_button_around_its_child() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let child_key = GlobalKey::new();
             let build_test =
@@ -1717,49 +1710,49 @@ mod tests {
                     tester.pump_widget(frame);
                 };
 
-            build_test(&mut tester, VisualDensity::STANDARD, false);
-            let child_rect = rect_of(&tester, &child_key);
+            build_test(tester, VisualDensity::STANDARD, false);
+            let child_rect = rect_of(tester, &child_key);
             tester.pump_and_settle();
-            assert_eq!(size_of(&tester, &key), Size::new(132.0, 100.0));
+            assert_eq!(size_of(tester, &key), Size::new(132.0, 100.0));
             assert_eq!(child_rect, Rect::from_ltrb(350.0, 250.0, 450.0, 350.0));
 
-            build_test(&mut tester, VisualDensity::new(3.0, 3.0), false);
+            build_test(tester, VisualDensity::new(3.0, 3.0), false);
             tester.pump_and_settle();
-            assert_eq!(size_of(&tester, &key), Size::new(156.0, 124.0));
+            assert_eq!(size_of(tester, &key), Size::new(156.0, 124.0));
             assert_eq!(
-                rect_of(&tester, &child_key),
+                rect_of(tester, &child_key),
                 Rect::from_ltrb(350.0, 250.0, 450.0, 350.0)
             );
 
-            build_test(&mut tester, VisualDensity::new(-3.0, -3.0), false);
+            build_test(tester, VisualDensity::new(-3.0, -3.0), false);
             tester.pump_and_settle();
-            assert_eq!(size_of(&tester, &key), Size::new(132.0, 100.0));
+            assert_eq!(size_of(tester, &key), Size::new(132.0, 100.0));
             assert_eq!(
-                rect_of(&tester, &child_key),
+                rect_of(tester, &child_key),
                 Rect::from_ltrb(350.0, 250.0, 450.0, 350.0)
             );
 
-            build_test(&mut tester, VisualDensity::STANDARD, true);
+            build_test(tester, VisualDensity::STANDARD, true);
             tester.pump_and_settle();
-            assert_eq!(size_of(&tester, &key), Size::new(88.0, 48.0));
+            assert_eq!(size_of(tester, &key), Size::new(88.0, 48.0));
             assert_eq!(
-                rect_of(&tester, &child_key),
+                rect_of(tester, &child_key),
                 Rect::from_ltrb(372.0, 293.0, 428.0, 307.0)
             );
 
-            build_test(&mut tester, VisualDensity::new(3.0, 3.0), true);
+            build_test(tester, VisualDensity::new(3.0, 3.0), true);
             tester.pump_and_settle();
-            assert_eq!(size_of(&tester, &key), Size::new(112.0, 60.0));
+            assert_eq!(size_of(tester, &key), Size::new(112.0, 60.0));
             assert_eq!(
-                rect_of(&tester, &child_key),
+                rect_of(tester, &child_key),
                 Rect::from_ltrb(372.0, 293.0, 428.0, 307.0)
             );
 
-            build_test(&mut tester, VisualDensity::new(-3.0, -3.0), true);
+            build_test(tester, VisualDensity::new(-3.0, -3.0), true);
             tester.pump_and_settle();
-            assert_eq!(size_of(&tester, &key), Size::new(88.0, 36.0));
+            assert_eq!(size_of(tester, &key), Size::new(88.0, 36.0));
             assert_eq!(
-                rect_of(&tester, &child_key),
+                rect_of(tester, &child_key),
                 Rect::from_ltrb(372.0, 293.0, 428.0, 307.0)
             );
         });
@@ -1769,8 +1762,7 @@ mod tests {
     #[test]
     fn a_disabled_button_lowers_its_elevation_before_it_changes_color() {
         // This is a regression test for https://github.com/flutter/flutter/issues/387
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let color_scheme = ColorScheme::light();
             let background_color = color_scheme.primary;
             let disabled_background_color = color_scheme.on_surface.with_opacity(0.12);
@@ -1786,30 +1778,29 @@ mod tests {
             };
 
             // Default elevation is 2, background color is primary.
-            let frame = build_frame(&tester, true);
+            let frame = build_frame(tester, true);
             tester.pump_widget(frame);
-            assert_eq!(physical_shape(&tester), (2.0, background_color));
+            assert_eq!(physical_shape(tester), (2.0, background_color));
 
             // Disabled elevation animates to 0 over 200ms, THEN the background
             // color changes to onSurface.withOpacity(0.12)
-            let frame = build_frame(&tester, false);
+            let frame = build_frame(tester, false);
             tester.pump_widget(frame);
-            tester.pump(Duration::from_millis(50));
-            let (elevation, color) = physical_shape(&tester);
+            tester.pump_by(Duration::from_millis(50));
+            let (elevation, color) = physical_shape(tester);
             assert!(elevation < 2.0);
             assert_eq!(color, background_color);
-            tester.pump(Duration::from_millis(150));
-            assert_eq!(physical_shape(&tester), (0.0, background_color));
+            tester.pump_by(Duration::from_millis(150));
+            assert_eq!(physical_shape(tester), (0.0, background_color));
             tester.pump_and_settle();
-            assert_eq!(physical_shape(&tester), (0.0, disabled_background_color));
+            assert_eq!(physical_shape(tester), (0.0, disabled_background_color));
         });
     }
 
     // elevated_button_test.dart 'Fixed size ElevatedButtons'.
     #[test]
     fn a_fixed_size_sets_each_finite_dimension() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let keys = [GlobalKey::new(), GlobalKey::new(), GlobalKey::new()];
             let fixed_sizes = [
                 Size::new(100.0, 100.0),
@@ -1824,7 +1815,7 @@ mod tests {
             });
             let theme = ThemeData::new(&tester.cell.borrow());
             let frame = themed(
-                &tester,
+                tester,
                 theme,
                 Column::new()
                     .main_axis_size(MainAxisSize::Min)
@@ -1832,22 +1823,21 @@ mod tests {
             );
             tester.pump_widget(frame);
 
-            assert_eq!(size_of(&tester, &keys[0]), Size::new(100.0, 100.0));
-            assert_eq!(size_of(&tester, &keys[1]).width(), 200.0);
-            assert_eq!(size_of(&tester, &keys[2]).height(), 200.0);
+            assert_eq!(size_of(tester, &keys[0]), Size::new(100.0, 100.0));
+            assert_eq!(size_of(tester, &keys[1]).width(), 200.0);
+            assert_eq!(size_of(tester, &keys[2]).height(), 200.0);
         });
     }
 
     // elevated_button_test.dart 'Fixed size ElevatedButton, same as minimumSize == maximumSize'.
     #[test]
     fn a_fixed_size_sizes_like_equal_minimum_and_maximum_sizes() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let fixed = GlobalKey::new();
             let bounded = GlobalKey::new();
             let theme = ThemeData::new(&tester.cell.borrow());
             let frame = themed(
-                &tester,
+                tester,
                 theme,
                 Column::new().main_axis_size(MainAxisSize::Min).children([
                     TestButton::new(Some(pressed()), sized(20.0, 10.0))
@@ -1866,16 +1856,15 @@ mod tests {
             );
             tester.pump_widget(frame);
 
-            assert_eq!(size_of(&tester, &fixed), Size::new(200.0, 200.0));
-            assert_eq!(size_of(&tester, &bounded), Size::new(200.0, 200.0));
+            assert_eq!(size_of(tester, &fixed), Size::new(200.0, 200.0));
+            assert_eq!(size_of(tester, &bounded), Size::new(200.0, 200.0));
         });
     }
 
     // elevated_button_test.dart 'ElevatedButton statesController'.
     #[test]
     fn a_states_controller_follows_hover_press_and_disable() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let count = Rc::new(Cell::new(0));
             let controller = MaterialStatesController::new(&mut tester.cell.borrow_mut(), None);
             controller.add_listener(&mut tester.cell.borrow_mut(), counter(&count));
@@ -1893,20 +1882,20 @@ mod tests {
                 )
             };
 
-            let frame = build_frame(&tester, true);
+            let frame = build_frame(tester, true);
             tester.pump_widget(frame);
 
-            assert_eq!(value(&tester, controller.handle()), states(&[]));
+            assert_eq!(value(tester, controller.handle()), states(&[]));
             assert_eq!(count.get(), 0);
 
             let center = tester.center_of(&key);
-            let mut gesture: TestPointer = WidgetTester::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+            let mut gesture: TestPointer = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
             tester.add_pointer(&mut gesture, Offset::ZERO);
             tester.move_to(&mut gesture, center, false);
             tester.pump_and_settle();
 
             assert_eq!(
-                value(&tester, controller.handle()),
+                value(tester, controller.handle()),
                 states(&[WidgetState::Hovered])
             );
             assert_eq!(count.get(), 1);
@@ -1914,14 +1903,14 @@ mod tests {
             tester.move_to(&mut gesture, Offset::ZERO, false);
             tester.pump_and_settle();
 
-            assert_eq!(value(&tester, controller.handle()), states(&[]));
+            assert_eq!(value(tester, controller.handle()), states(&[]));
             assert_eq!(count.get(), 2);
 
             tester.move_to(&mut gesture, center, false);
             tester.pump_and_settle();
 
             assert_eq!(
-                value(&tester, controller.handle()),
+                value(tester, controller.handle()),
                 states(&[WidgetState::Hovered])
             );
             assert_eq!(count.get(), 3);
@@ -1930,7 +1919,7 @@ mod tests {
             tester.pump_and_settle();
 
             assert_eq!(
-                value(&tester, controller.handle()),
+                value(tester, controller.handle()),
                 states(&[WidgetState::Hovered, WidgetState::Pressed])
             );
             assert_eq!(count.get(), 4);
@@ -1939,7 +1928,7 @@ mod tests {
             tester.pump_and_settle();
 
             assert_eq!(
-                value(&tester, controller.handle()),
+                value(tester, controller.handle()),
                 states(&[WidgetState::Hovered])
             );
             assert_eq!(count.get(), 5);
@@ -1947,31 +1936,31 @@ mod tests {
             tester.move_to(&mut gesture, Offset::ZERO, false);
             tester.pump_and_settle();
 
-            assert_eq!(value(&tester, controller.handle()), states(&[]));
+            assert_eq!(value(tester, controller.handle()), states(&[]));
             assert_eq!(count.get(), 6);
 
             tester.down(&mut gesture, center);
             tester.pump_and_settle();
             assert_eq!(
-                value(&tester, controller.handle()),
+                value(tester, controller.handle()),
                 states(&[WidgetState::Hovered, WidgetState::Pressed])
             );
             assert_eq!(count.get(), 8); // adds hovered and pressed - two changes
 
             // If the button is rebuilt disabled, then the pressed state is
             // removed.
-            let frame = build_frame(&tester, false);
+            let frame = build_frame(tester, false);
             tester.pump_widget(frame);
             tester.pump_and_settle();
             assert_eq!(
-                value(&tester, controller.handle()),
+                value(tester, controller.handle()),
                 states(&[WidgetState::Hovered, WidgetState::Disabled])
             );
             assert_eq!(count.get(), 10); // removes pressed and adds disabled - two changes
             tester.move_to(&mut gesture, Offset::ZERO, true);
             tester.pump_and_settle();
             assert_eq!(
-                value(&tester, controller.handle()),
+                value(tester, controller.handle()),
                 states(&[WidgetState::Disabled])
             );
             assert_eq!(count.get(), 11);
@@ -1981,14 +1970,13 @@ mod tests {
     // elevated_button_test.dart 'Disabled ElevatedButton statesController'.
     #[test]
     fn a_disabled_button_marks_its_states_controller_disabled() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let count = Rc::new(Cell::new(0));
             let controller = MaterialStatesController::new(&mut tester.cell.borrow_mut(), None);
             controller.add_listener(&mut tester.cell.borrow_mut(), counter(&count));
             let theme = ThemeData::new(&tester.cell.borrow());
             let frame = themed(
-                &tester,
+                tester,
                 theme,
                 Center::new().child(
                     TestButton::new(None, sized(40.0, 10.0)).states_controller(controller.clone()),
@@ -1996,7 +1984,7 @@ mod tests {
             );
             tester.pump_widget(frame);
             assert_eq!(
-                value(&tester, controller.handle()),
+                value(tester, controller.handle()),
                 states(&[WidgetState::Disabled])
             );
             assert_eq!(count.get(), 1);
@@ -2006,8 +1994,7 @@ mod tests {
     // elevated_button_test.dart 'ElevatedButton isSelected updates a provided statesController'.
     #[test]
     fn is_selected_writes_the_selected_state_of_a_provided_controller() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let controller = MaterialStatesController::new(&mut tester.cell.borrow_mut(), None);
             let build_button = |tester: &WidgetTester, is_selected: Option<bool>| {
                 let mut button = TestButton::new(Some(pressed()), sized(40.0, 10.0))
@@ -2017,21 +2004,21 @@ mod tests {
                 themed(tester, theme, Center::new().child(button))
             };
 
-            let frame = build_button(&tester, Some(true));
+            let frame = build_button(tester, Some(true));
             tester.pump_widget(frame);
-            assert!(value(&tester, controller.handle()).contains(&WidgetState::Selected));
+            assert!(value(tester, controller.handle()).contains(&WidgetState::Selected));
 
-            let frame = build_button(&tester, Some(false));
+            let frame = build_button(tester, Some(false));
             tester.pump_widget(frame);
-            assert!(!value(&tester, controller.handle()).contains(&WidgetState::Selected));
+            assert!(!value(tester, controller.handle()).contains(&WidgetState::Selected));
 
-            let frame = build_button(&tester, Some(true));
+            let frame = build_button(tester, Some(true));
             tester.pump_widget(frame);
-            assert!(value(&tester, controller.handle()).contains(&WidgetState::Selected));
+            assert!(value(tester, controller.handle()).contains(&WidgetState::Selected));
 
-            let frame = build_button(&tester, None);
+            let frame = build_button(tester, None);
             tester.pump_widget(frame);
-            assert!(!value(&tester, controller.handle()).contains(&WidgetState::Selected));
+            assert!(!value(tester, controller.handle()).contains(&WidgetState::Selected));
         });
     }
 
@@ -2076,8 +2063,7 @@ mod tests {
     // elevated_button_test.dart 'ElevatedButton backgroundBuilder and foregroundBuilder'.
     #[test]
     fn the_layer_builders_wrap_the_button_child_behind_and_in_front() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let background_color = Color::new(0xFF000011);
             let foreground_color = Color::new(0xFF000022);
             let child_key = GlobalKey::new();
@@ -2097,12 +2083,12 @@ mod tests {
             )));
 
             assert_eq!(
-                decoration_colors(&tester),
+                decoration_colors(tester),
                 vec![Some(background_color), Some(foreground_color)]
             );
             let decorations = tester.all::<RenderDecoratedBox>();
-            assert!(is_inside(&tester, decorations[0].as_object(), &child_key));
-            assert!(is_inside(&tester, decorations[1].as_object(), &child_key));
+            assert!(is_inside(tester, decorations[0].as_object(), &child_key));
+            assert!(is_inside(tester, decorations[1].as_object(), &child_key));
         });
     }
 
@@ -2110,8 +2096,7 @@ mod tests {
     // foregroundBuilder return value'.
     #[test]
     fn a_background_builder_that_drops_its_child_drops_the_whole_foreground() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let background_color = Color::new(0xFF000011);
             let foreground_color = Color::new(0xFF000022);
             let child_key = GlobalKey::new();
@@ -2130,7 +2115,7 @@ mod tests {
                     )),
             )));
 
-            assert_eq!(decoration_colors(&tester), vec![Some(background_color)]);
+            assert_eq!(decoration_colors(tester), vec![Some(background_color)]);
             assert!(
                 child_key
                     .current_context(&tester.cell.borrow_mut())
@@ -2142,8 +2127,7 @@ mod tests {
     // elevated_button_test.dart 'ElevatedButton foregroundBuilder drops button child'.
     #[test]
     fn a_foreground_builder_that_drops_its_child_drops_the_button_child() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let foreground_color = Color::new(0xFF000022);
             let child_key = GlobalKey::new();
 
@@ -2157,7 +2141,7 @@ mod tests {
                 )),
             )));
 
-            assert_eq!(decoration_colors(&tester), vec![Some(foreground_color)]);
+            assert_eq!(decoration_colors(tester), vec![Some(foreground_color)]);
             assert!(
                 child_key
                     .current_context(&tester.cell.borrow_mut())
@@ -2170,8 +2154,7 @@ mod tests {
     // applied to the correct states'.
     #[test]
     fn the_layer_builders_see_the_button_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let foreground_states = Rc::new(RefCell::new(WidgetStates::new()));
             let background_states = Rc::new(RefCell::new(WidgetStates::new()));
             let focus_node = FocusNode::new(&mut tester.cell.borrow_mut())
@@ -2186,7 +2169,7 @@ mod tests {
             };
             let theme = ThemeData::new(&tester.cell.borrow());
             let frame = themed(
-                &tester,
+                tester,
                 theme,
                 Center::new().child(
                     TestButton::new(Some(pressed()), sized(40.0, 10.0))
@@ -2221,7 +2204,7 @@ mod tests {
 
             // Hovered.
             let center = tester.center_of(&key);
-            let mut gesture = WidgetTester::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+            let mut gesture = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
             tester.add_pointer(&mut gesture, Offset::ZERO);
             tester.move_to(&mut gesture, center, false);
             tester.pump_and_settle();
@@ -2230,9 +2213,9 @@ mod tests {
 
             // Highlighted (pressed).
             tester.send(&gesture, waft_embedder::PointerChange::Down);
-            tester.pump(Duration::ZERO); // Start the splash and highlight animations.
+            tester.pump(); // Start the splash and highlight animations.
             // Wait for splash and highlight to be well under way.
-            tester.pump(Duration::from_millis(800));
+            tester.pump_by(Duration::from_millis(800));
             assert_eq!(*background_states.borrow(), focused_hovered_pressed_states);
             assert_eq!(*foreground_states.borrow(), focused_hovered_pressed_states);
         });
@@ -2259,13 +2242,12 @@ mod tests {
     // default icon color'.
     #[test]
     fn the_icon_color_falls_back_to_the_given_foreground_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let foreground_color = Color::new(0xFFFF1234);
             let seen: Seen = Rc::default();
             let theme = ThemeData::new(&tester.cell.borrow());
             let frame = themed(
-                &tester,
+                tester,
                 theme,
                 Center::new().child(
                     TestButton::new(Some(pressed()), color_probe(&seen))
@@ -2280,8 +2262,7 @@ mod tests {
     // elevated_button_test.dart 'ElevatedButton text and icon respect animation duration'.
     #[test]
     fn the_text_and_icon_colors_animate_over_the_animation_duration() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let hovered_color = Color::new(0xFFFF0000);
             let idle_color = Color::new(0xFF000000);
             let halfway = hovered_color.with_values(None, Some(0.5), None, None, None);
@@ -2313,40 +2294,40 @@ mod tests {
             };
 
             // Test default animation duration.
-            let frame = build_button(&tester, None);
+            let frame = build_button(tester, None);
             tester.pump_widget(frame);
 
             assert_eq!(*seen.borrow(), (Some(idle_color), Some(idle_color)));
 
             let button_center = tester.center_of(&key);
-            let mut gesture = WidgetTester::mouse(1, 0);
+            let mut gesture = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut gesture, Offset::ZERO);
             tester.move_to(&mut gesture, button_center, false);
 
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(100));
+            tester.pump();
+            tester.pump_by(Duration::from_millis(100));
             assert_eq!(*seen.borrow(), (Some(halfway), Some(halfway)));
 
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_millis(200));
+            tester.pump();
+            tester.pump_by(Duration::from_millis(200));
             assert_eq!(*seen.borrow(), (Some(hovered_color), Some(hovered_color)));
 
             tester.send(&gesture, waft_embedder::PointerChange::Remove);
 
             // Test custom animation duration.
-            let frame = build_button(&tester, Some(Duration::from_secs(2)));
+            let frame = build_button(tester, Some(Duration::from_secs(2)));
             tester.pump_widget(frame);
             tester.pump_and_settle();
 
             tester.add_pointer(&mut gesture, Offset::ZERO);
             tester.move_to(&mut gesture, button_center, false);
 
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_secs(1));
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1));
             assert_eq!(*seen.borrow(), (Some(halfway), Some(halfway)));
 
-            tester.pump(Duration::ZERO);
-            tester.pump(Duration::from_secs(1));
+            tester.pump();
+            tester.pump_by(Duration::from_secs(1));
             assert_eq!(*seen.borrow(), (Some(hovered_color), Some(hovered_color)));
         });
     }
@@ -2354,31 +2335,29 @@ mod tests {
     // elevated_button_test.dart 'ElevatedButton does not crash at zero area'.
     #[test]
     fn a_button_in_a_zero_area_has_zero_size() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let theme = ThemeData::new(&tester.cell.borrow());
             let frame = themed(
-                &tester,
+                tester,
                 theme,
                 Center::new().child(SizedBox::shrink().child(
                     TestButton::new(Some(pressed()), sized(10.0, 10.0)).key(key.clone().into()),
                 )),
             );
             tester.pump_widget(frame);
-            assert_eq!(size_of(&tester, &key), Size::ZERO);
+            assert_eq!(size_of(tester, &key), Size::ZERO);
         });
     }
 
     #[test]
     fn a_tap_in_the_padded_tap_target_reaches_the_button() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let taps = Rc::new(Cell::new(0));
             let key = GlobalKey::new();
             let frame = themed(
-                &tester,
-                material2(&tester),
+                tester,
+                material2(tester),
                 Center::new().child(
                     TestButton::new(Some(counter(&taps)), sized(100.0, 20.0))
                         .key(key.clone().into()),
@@ -2386,7 +2365,7 @@ mod tests {
             );
             tester.pump_widget(frame);
             // The button's material is 36 high and centred in the 48 high tap target.
-            let rect = rect_of(&tester, &key);
+            let rect = rect_of(tester, &key);
             assert_eq!(rect.height(), 48.0);
             tester.tap(Offset::new(rect.center().dx(), rect.top + 2.0), 1);
             tester.pump_and_settle();
@@ -2398,14 +2377,13 @@ mod tests {
     /// of the later button in a column does not take a tap on the earlier one.
     #[test]
     fn a_tap_on_the_first_of_two_buttons_in_a_column_reaches_it() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let first_taps = Rc::new(Cell::new(0));
             let second_taps = Rc::new(Cell::new(0));
             let first = GlobalKey::new();
             let frame = themed(
-                &tester,
-                material2(&tester),
+                tester,
+                material2(tester),
                 Center::new().child(
                     Column::new().main_axis_size(MainAxisSize::Min).children([
                         TestButton::new(Some(counter(&first_taps)), sized(100.0, 20.0))
@@ -2417,7 +2395,7 @@ mod tests {
                 ),
             );
             tester.pump_widget(frame);
-            let rect = rect_of(&tester, &first);
+            let rect = rect_of(tester, &first);
             tester.tap(rect.center(), 1);
             tester.pump_and_settle();
             assert_eq!(first_taps.get(), 1);
@@ -2427,11 +2405,10 @@ mod tests {
 
     #[test]
     fn a_button_wraps_its_input_padding_in_a_container_semantics() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let frame = themed(
-                &tester,
-                material2(&tester),
+                tester,
+                material2(tester),
                 Center::new()
                     .child(TestButton::new(Some(pressed()), sized(100.0, 20.0)).is_selected(true)),
             );

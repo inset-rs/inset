@@ -2339,6 +2339,10 @@ mod tests {
         SizedBox, Text, TextEditingController, WidgetStates,
     };
 
+    use waft_widgets::testing::{
+        TargetPlatformVariant, TestPointer, WidgetTester, test_widgets, test_widgets_variant,
+    };
+
     use super::*;
     use crate::color_scheme::ColorScheme;
     use crate::colors::Colors;
@@ -2348,7 +2352,7 @@ mod tests {
     use crate::input_decorator::InputDecorationThemeData;
     use crate::material::Material;
     use crate::scaffold::Scaffold;
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::{PaintInspection, material_app};
     use crate::text_selection::material_text_selection_controls;
     use crate::text_theme::TextTheme;
     use crate::theme_data::ThemeData;
@@ -2376,12 +2380,6 @@ mod tests {
 
     /// A tester on `platform` with flutter_test's fonts, so a `Text` measures as in Flutter's
     /// tests.
-    fn tester_on(platform: TargetPlatform) -> WidgetTester {
-        let tester = WidgetTester::on(platform);
-        tester.install_platform_fonts();
-        tester
-    }
-
     fn theme(tester: &WidgetTester) -> ThemeData {
         ThemeData::new(&tester.cell.borrow())
     }
@@ -2457,7 +2455,7 @@ mod tests {
     fn show_keyboard(tester: &mut WidgetTester, index: usize) {
         let state = editable_state_at(tester, index);
         state.request_keyboard(&mut tester.cell.borrow_mut());
-        tester.pump(Duration::ZERO);
+        tester.pump();
     }
 
     /// Dart's `tester.enterText(finder, text)` on the `index`th field: the keyboard is shown,
@@ -2479,8 +2477,8 @@ mod tests {
 
     /// Dart's `skipPastScrollingAnimation(tester)`.
     fn skip_past_scrolling_animation(tester: &mut WidgetTester) {
-        tester.pump(Duration::ZERO);
-        tester.pump(Duration::from_millis(200));
+        tester.pump();
+        tester.pump_by(Duration::from_millis(200));
     }
 
     /// Dart's `textOffsetToPosition(tester, offset)`: the global point just above the middle
@@ -2588,19 +2586,18 @@ mod tests {
 
     #[test]
     fn uses_default_selection_style_for_selection_and_cursor_colors_if_provided() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let selection_color = Colors::ORANGE.primary();
             let cursor_color = Colors::RED.primary();
             let root = material_home(
-                theme(&tester),
+                theme(tester),
                 DefaultSelectionStyle::new(TextField::new().autofocus(true))
                     .selection_color(selection_color)
                     .cursor_color(cursor_color),
             );
             tester.pump_widget(root);
-            tester.pump(Duration::ZERO);
-            let (selection, cursor) = editable(&tester, |widget| {
+            tester.pump();
+            let (selection, cursor) = editable(tester, |widget| {
                 (widget.selection_color, widget.cursor_color)
             });
             assert_eq!(selection, Some(selection_color));
@@ -2611,11 +2608,10 @@ mod tests {
     #[test]
     fn use_error_cursor_color_when_an_input_decoration_with_an_error_text_or_error_widget_is_provided()
      {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let teal = Colors::TEAL.primary();
             let root = material_home(
-                theme(&tester),
+                theme(tester),
                 TextField::new().autofocus(true).decoration(Some(
                     InputDecoration::new()
                         .error(Text::new("error"))
@@ -2623,11 +2619,11 @@ mod tests {
                 )),
             );
             tester.pump_widget(root);
-            tester.pump(Duration::ZERO);
-            assert_eq!(editable(&tester, |widget| widget.cursor_color), teal);
+            tester.pump();
+            assert_eq!(editable(tester, |widget| widget.cursor_color), teal);
 
             let root = material_home(
-                theme(&tester),
+                theme(tester),
                 TextField::new().autofocus(true).decoration(Some(
                     InputDecoration::new()
                         .error_text("error")
@@ -2635,48 +2631,46 @@ mod tests {
                 )),
             );
             tester.pump_widget(root);
-            tester.pump(Duration::ZERO);
-            assert_eq!(editable(&tester, |widget| widget.cursor_color), teal);
+            tester.pump();
+            assert_eq!(editable(tester, |widget| widget.cursor_color), teal);
         });
     }
 
     #[test]
     fn sets_cursor_opacity_animates_on_editable_text_correctly() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let root = material_home(
-                theme(&tester),
+                theme(tester),
                 TextField::new()
                     .autofocus(true)
                     .cursor_opacity_animates(true),
             );
             tester.pump_widget(root);
-            tester.pump(Duration::ZERO);
-            assert!(editable(&tester, |widget| widget.cursor_opacity_animates));
+            tester.pump();
+            assert!(editable(tester, |widget| widget.cursor_opacity_animates));
 
             let root = material_home(
-                theme(&tester),
+                theme(tester),
                 TextField::new()
                     .autofocus(true)
                     .cursor_opacity_animates(false),
             );
             tester.pump_widget(root);
-            tester.pump(Duration::ZERO);
-            assert!(!editable(&tester, |widget| widget.cursor_opacity_animates));
+            tester.pump();
+            assert!(!editable(tester, |widget| widget.cursor_opacity_animates));
         });
     }
 
     #[test]
     fn text_field_passes_on_editing_complete_to_editable_text() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let field = TextField::new().on_editing_complete(|_app| {});
             let on_editing_complete = field.on_editing_complete.clone().expect("set above");
-            let root = material_home(theme(&tester), field);
+            let root = material_home(theme(tester), field);
             tester.pump_widget(root);
 
-            assert_eq!(editable_elements(&tester).len(), 1);
-            let passed = editable(&tester, |widget| widget.on_editing_complete.clone())
+            assert_eq!(editable_elements(tester).len(), 1);
+            let passed = editable(tester, |widget| widget.on_editing_complete.clone())
                 .expect("the field passes its callback");
             assert!(Rc::ptr_eq(&passed, &on_editing_complete));
         });
@@ -2690,8 +2684,7 @@ mod tests {
     #[test]
     fn the_second_text_field_is_clicked_triggers_the_on_tap_outside_callback_of_the_previous_text_field()
      {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let outside_click_a = Rc::new(Cell::new(false));
             let outside_click_b = Rc::new(Cell::new(false));
             let outside_click_c = Rc::new(Cell::new(false));
@@ -2706,7 +2699,7 @@ mod tests {
                     .into_widget()
             };
             let root = material_app(
-                theme(&tester),
+                theme(tester),
                 waft_widgets::Align::new()
                     .alignment(waft_painting::AlignmentGeometry::TOP_LEFT)
                     .child(Column::new().children(vec![
@@ -2718,13 +2711,13 @@ mod tests {
                     .into_widget(),
             );
             tester.pump_widget(root);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             let click = |tester: &mut WidgetTester, index: usize, pointer: i64| {
                 let center = text_field_center(tester, index);
                 tester.tap(center, pointer);
                 enter_text_at(tester, index, "Hello");
-                tester.pump(Duration::ZERO);
+                tester.pump();
             };
 
             let outside = || {
@@ -2736,14 +2729,14 @@ mod tests {
             };
             assert_eq!(outside(), (false, false, false));
 
-            click(&mut tester, 0, 1);
-            show_keyboard(&mut tester, 0);
+            click(tester, 0, 1);
+            show_keyboard(tester, 0);
             assert_eq!(outside(), (false, false, false));
 
-            click(&mut tester, 1, 2);
+            click(tester, 1, 2);
             assert_eq!(outside(), (true, false, false));
 
-            click(&mut tester, 2, 3);
+            click(tester, 2, 3);
             assert_eq!(outside(), (true, true, false));
 
             let outside_text = tester.find_onstage_text("Outside")[0];
@@ -2757,9 +2750,8 @@ mod tests {
 
     #[test]
     fn cursor_has_expected_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let root = overlay(&tester, TextField::new());
+        test_widgets(|tester| {
+            let root = overlay(tester, TextField::new());
             tester.pump_widget(root);
             let element = tester.find_by_type::<TextField>()[0];
             let (width, height, radius) = tester.widget::<TextField, _>(element, |field| {
@@ -2773,10 +2765,9 @@ mod tests {
 
     #[test]
     fn cursor_has_expected_radius_value() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let root = overlay(
-                &tester,
+                tester,
                 TextField::new().cursor_radius(Radius::circular(3.0)),
             );
             tester.pump_widget(root);
@@ -2790,9 +2781,8 @@ mod tests {
 
     #[test]
     fn clip_behavior_has_expected_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let root = overlay(&tester, TextField::new());
+        test_widgets(|tester| {
+            let root = overlay(tester, TextField::new());
             tester.pump_widget(root);
             let element = tester.find_by_type::<TextField>()[0];
             let clip_behavior = tester.widget::<TextField, _>(element, |field| field.clip_behavior);
@@ -2802,30 +2792,29 @@ mod tests {
 
     #[test]
     fn caret_position_is_updated_on_tap() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller_with(&tester, "");
-            let root = overlay(&tester, TextField::new().controller(controller.erase()));
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
+            let root = overlay(tester, TextField::new().controller(controller.erase()));
             tester.pump_widget(root);
-            assert_eq!(selection(&tester, controller.handle()).base_offset, -1);
-            assert_eq!(selection(&tester, controller.handle()).extent_offset, -1);
+            assert_eq!(selection(tester, controller.handle()).base_offset, -1);
+            assert_eq!(selection(tester, controller.handle()).extent_offset, -1);
 
             let test_value = "abc def ghi";
-            enter_text(&mut tester, test_value);
-            skip_past_scrolling_animation(&mut tester);
+            enter_text(tester, test_value);
+            skip_past_scrolling_animation(tester);
 
             // Tap to reposition the caret.
             let tap_index = test_value.find('e').unwrap() as i32;
-            let e_pos = text_offset_to_position(&tester, tap_index);
+            let e_pos = text_offset_to_position(tester, tap_index);
             tester.tap(e_pos, 1);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             assert_eq!(
-                selection(&tester, controller.handle()).base_offset,
+                selection(tester, controller.handle()).base_offset,
                 tap_index
             );
             assert_eq!(
-                selection(&tester, controller.handle()).extent_offset,
+                selection(tester, controller.handle()).extent_offset,
                 tap_index
             );
         });
@@ -2833,75 +2822,73 @@ mod tests {
 
     #[test]
     fn enable_interactive_selection_false_tap() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller_with(&tester, "");
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
             let root = overlay(
-                &tester,
+                tester,
                 TextField::new()
                     .controller(controller.erase())
                     .enable_interactive_selection(false),
             );
             tester.pump_widget(root);
-            assert_eq!(selection(&tester, controller.handle()).base_offset, -1);
-            assert_eq!(selection(&tester, controller.handle()).extent_offset, -1);
+            assert_eq!(selection(tester, controller.handle()).base_offset, -1);
+            assert_eq!(selection(tester, controller.handle()).extent_offset, -1);
 
             let test_value = "abc def ghi";
-            enter_text(&mut tester, test_value);
-            skip_past_scrolling_animation(&mut tester);
+            enter_text(tester, test_value);
+            skip_past_scrolling_animation(tester);
 
             // Tap would ordinarily reposition the caret.
             let tap_index = test_value.find('e').unwrap() as i32;
-            let e_pos = text_offset_to_position(&tester, tap_index);
+            let e_pos = text_offset_to_position(tester, tap_index);
             tester.tap(e_pos, 1);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             assert_eq!(
-                selection(&tester, controller.handle()).base_offset,
+                selection(tester, controller.handle()).base_offset,
                 test_value.len() as i32
             );
-            assert!(selection(&tester, controller.handle()).is_collapsed());
+            assert!(selection(tester, controller.handle()).is_collapsed());
         });
     }
 
     #[test]
     fn can_long_press_to_select() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller_with(&tester, "");
-            let root = overlay(&tester, TextField::new().controller(controller.erase()));
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
+            let root = overlay(tester, TextField::new().controller(controller.erase()));
             tester.pump_widget(root);
 
             let test_value = "abc def ghi";
-            enter_text(&mut tester, test_value);
-            assert_eq!(text(&tester, controller.handle()), test_value);
-            skip_past_scrolling_animation(&mut tester);
+            enter_text(tester, test_value);
+            assert_eq!(text(tester, controller.handle()), test_value);
+            skip_past_scrolling_animation(tester);
 
-            assert!(selection(&tester, controller.handle()).is_collapsed());
+            assert!(selection(tester, controller.handle()).is_collapsed());
 
             // Long press the 'e' to select 'def'.
-            let e_pos = text_offset_to_position(&tester, test_value.find('e').unwrap() as i32);
+            let e_pos = text_offset_to_position(tester, test_value.find('e').unwrap() as i32);
             tester.long_press(e_pos, 7);
             tester.pump_and_settle();
 
             // 'def' is selected.
             assert_eq!(
-                selection(&tester, controller.handle()).base_offset,
+                selection(tester, controller.handle()).base_offset,
                 test_value.find('d').unwrap() as i32
             );
             assert_eq!(
-                selection(&tester, controller.handle()).extent_offset,
+                selection(tester, controller.handle()).extent_offset,
                 test_value.find('f').unwrap() as i32 + 1
             );
 
             // Tapping elsewhere immediately collapses and moves the cursor.
-            let h_pos = text_offset_to_position(&tester, test_value.find('h').unwrap() as i32);
+            let h_pos = text_offset_to_position(tester, test_value.find('h').unwrap() as i32);
             tester.tap(h_pos, 8);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            assert!(selection(&tester, controller.handle()).is_collapsed());
+            assert!(selection(tester, controller.handle()).is_collapsed());
             assert_eq!(
-                selection(&tester, controller.handle()).base_offset,
+                selection(tester, controller.handle()).base_offset,
                 test_value.find('h').unwrap() as i32
             );
         });
@@ -2909,32 +2896,31 @@ mod tests {
 
     #[test]
     fn mouse_long_press_is_just_like_a_tap() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller_with(&tester, "");
-            let root = overlay(&tester, TextField::new().controller(controller.erase()));
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
+            let root = overlay(tester, TextField::new().controller(controller.erase()));
             tester.pump_widget(root);
 
             let test_value = "abc def ghi";
-            enter_text(&mut tester, test_value);
-            assert_eq!(text(&tester, controller.handle()), test_value);
-            skip_past_scrolling_animation(&mut tester);
+            enter_text(tester, test_value);
+            assert_eq!(text(tester, controller.handle()), test_value);
+            skip_past_scrolling_animation(tester);
 
-            assert!(selection(&tester, controller.handle()).is_collapsed());
+            assert!(selection(tester, controller.handle()).is_collapsed());
 
             // Long press the 'e' using a mouse device.
             let e_index = test_value.find('e').unwrap() as i32;
-            let e_pos = text_offset_to_position(&tester, e_index);
-            let mut gesture = WidgetTester::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+            let e_pos = text_offset_to_position(tester, e_index);
+            let mut gesture = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
             tester.down(&mut gesture, e_pos);
-            tester.pump(Duration::from_secs(2));
+            tester.pump_by(Duration::from_secs(2));
             tester.up(&gesture);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // The cursor is placed just like a regular tap.
-            assert_eq!(selection(&tester, controller.handle()).base_offset, e_index);
+            assert_eq!(selection(tester, controller.handle()).base_offset, e_index);
             assert_eq!(
-                selection(&tester, controller.handle()).extent_offset,
+                selection(tester, controller.handle()).extent_offset,
                 e_index
             );
         });
@@ -2942,8 +2928,7 @@ mod tests {
 
     #[test]
     fn read_only_text_should_not_compose() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let controller = {
                 let mut app = tester.cell.borrow_mut();
                 TextEditingController::from_value(
@@ -2957,7 +2942,7 @@ mod tests {
                 )
             };
             let root = overlay(
-                &tester,
+                tester,
                 TextField::new()
                     .controller(controller.erase())
                     .read_only(true),
@@ -2979,11 +2964,10 @@ mod tests {
 
     #[test]
     fn enable_interactive_selection_false_long_press() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller_with(&tester, "");
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
             let root = overlay(
-                &tester,
+                tester,
                 TextField::new()
                     .controller(controller.erase())
                     .enable_interactive_selection(false),
@@ -2991,20 +2975,20 @@ mod tests {
             tester.pump_widget(root);
 
             let test_value = "abc def ghi";
-            enter_text(&mut tester, test_value);
-            assert_eq!(text(&tester, controller.handle()), test_value);
-            skip_past_scrolling_animation(&mut tester);
+            enter_text(tester, test_value);
+            assert_eq!(text(tester, controller.handle()), test_value);
+            skip_past_scrolling_animation(tester);
 
-            assert!(selection(&tester, controller.handle()).is_collapsed());
+            assert!(selection(tester, controller.handle()).is_collapsed());
 
             // Long press the 'e' to select 'def'.
-            let e_pos = text_offset_to_position(&tester, test_value.find('e').unwrap() as i32);
+            let e_pos = text_offset_to_position(tester, test_value.find('e').unwrap() as i32);
             tester.long_press(e_pos, 7);
             tester.pump_and_settle();
 
-            assert!(selection(&tester, controller.handle()).is_collapsed());
+            assert!(selection(tester, controller.handle()).is_collapsed());
             assert_eq!(
-                selection(&tester, controller.handle()).base_offset,
+                selection(tester, controller.handle()).base_offset,
                 test_value.len() as i32
             );
         });
@@ -3013,31 +2997,30 @@ mod tests {
     #[test]
     fn selection_updates_on_tap_down_desktop_platforms() {
         for platform in DESKTOP {
-            with_main_thread_stack(|| {
-                let mut tester = tester_on(platform);
-                let controller = controller_with(&tester, "");
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                let controller = controller_with(tester, "");
                 let root = material_home(
-                    theme(&tester),
+                    theme(tester),
                     TextField::new().controller(controller.erase()),
                 );
                 tester.pump_widget(root);
 
-                enter_text(&mut tester, "abc def ghi");
-                skip_past_scrolling_animation(&mut tester);
+                enter_text(tester, "abc def ghi");
+                skip_past_scrolling_animation(tester);
 
-                let e_pos = text_offset_to_position(&tester, 5);
-                let g_pos = text_offset_to_position(&tester, 8);
+                let e_pos = text_offset_to_position(tester, 5);
+                let g_pos = text_offset_to_position(tester, 8);
 
-                let mut gesture = WidgetTester::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+                let mut gesture = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
                 tester.down(&mut gesture, e_pos);
                 tester.pump_and_settle();
                 assert_eq!(
-                    selection(&tester, controller.handle()).base_offset,
+                    selection(tester, controller.handle()).base_offset,
                     5,
                     "{platform:?}"
                 );
                 assert_eq!(
-                    selection(&tester, controller.handle()).extent_offset,
+                    selection(tester, controller.handle()).extent_offset,
                     5,
                     "{platform:?}"
                 );
@@ -3049,12 +3032,12 @@ mod tests {
                 tester.send(&gesture, waft_embedder::PointerChange::Down);
                 tester.pump_and_settle();
                 assert_eq!(
-                    selection(&tester, controller.handle()).base_offset,
+                    selection(tester, controller.handle()).base_offset,
                     8,
                     "{platform:?}"
                 );
                 assert_eq!(
-                    selection(&tester, controller.handle()).extent_offset,
+                    selection(tester, controller.handle()).extent_offset,
                     8,
                     "{platform:?}"
                 );
@@ -3062,12 +3045,12 @@ mod tests {
                 // This should do nothing. The selection is set on tap down on desktop platforms.
                 tester.up(&gesture);
                 assert_eq!(
-                    selection(&tester, controller.handle()).base_offset,
+                    selection(tester, controller.handle()).base_offset,
                     8,
                     "{platform:?}"
                 );
                 assert_eq!(
-                    selection(&tester, controller.handle()).extent_offset,
+                    selection(tester, controller.handle()).extent_offset,
                     8,
                     "{platform:?}"
                 );
@@ -3078,23 +3061,22 @@ mod tests {
     #[test]
     fn selection_updates_on_tap_up_mobile_platforms() {
         for platform in MOBILE {
-            with_main_thread_stack(|| {
-                let mut tester = tester_on(platform);
-                let controller = controller_with(&tester, "");
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                let controller = controller_with(tester, "");
                 let is_target_platform_apple = platform == TargetPlatform::IOS;
                 let root = material_home(
-                    theme(&tester),
+                    theme(tester),
                     TextField::new().controller(controller.erase()),
                 );
                 tester.pump_widget(root);
 
-                enter_text(&mut tester, "abc def ghi");
-                skip_past_scrolling_animation(&mut tester);
+                enter_text(tester, "abc def ghi");
+                skip_past_scrolling_animation(tester);
 
-                let e_pos = text_offset_to_position(&tester, 5);
-                let g_pos = text_offset_to_position(&tester, 8);
+                let e_pos = text_offset_to_position(tester, 5);
+                let g_pos = text_offset_to_position(tester, 8);
 
-                let mut gesture = WidgetTester::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+                let mut gesture = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
                 tester.down(&mut gesture, e_pos);
                 tester.up(&gesture);
                 tester.pump_and_settle_by(waft_gestures::K_DOUBLE_TAP_TIMEOUT);
@@ -3103,12 +3085,12 @@ mod tests {
                 tester.send(&gesture, waft_embedder::PointerChange::Down);
                 tester.pump_and_settle();
                 assert_eq!(
-                    selection(&tester, controller.handle()).base_offset,
+                    selection(tester, controller.handle()).base_offset,
                     5,
                     "{platform:?}"
                 );
                 assert_eq!(
-                    selection(&tester, controller.handle()).extent_offset,
+                    selection(tester, controller.handle()).extent_offset,
                     5,
                     "{platform:?}"
                 );
@@ -3116,29 +3098,29 @@ mod tests {
                 tester.up(&gesture);
                 tester.pump_and_settle_by(waft_gestures::K_DOUBLE_TAP_TIMEOUT);
                 assert_eq!(
-                    selection(&tester, controller.handle()).base_offset,
+                    selection(tester, controller.handle()).base_offset,
                     8,
                     "{platform:?}"
                 );
                 assert_eq!(
-                    selection(&tester, controller.handle()).extent_offset,
+                    selection(tester, controller.handle()).extent_offset,
                     8,
                     "{platform:?}"
                 );
 
-                let mut touch_gesture = WidgetTester::touch(2);
+                let mut touch_gesture = TestPointer::touch(2);
                 tester.down(&mut touch_gesture, e_pos);
                 tester.up(&touch_gesture);
                 tester.pump_and_settle_by(waft_gestures::K_DOUBLE_TAP_TIMEOUT);
                 // On iOS a tap to select, selects the word edge instead of the exact tap position.
                 let expected = if is_target_platform_apple { 7 } else { 5 };
                 assert_eq!(
-                    selection(&tester, controller.handle()).base_offset,
+                    selection(tester, controller.handle()).base_offset,
                     expected,
                     "{platform:?}"
                 );
                 assert_eq!(
-                    selection(&tester, controller.handle()).extent_offset,
+                    selection(tester, controller.handle()).extent_offset,
                     expected,
                     "{platform:?}"
                 );
@@ -3146,14 +3128,14 @@ mod tests {
                 // Selection should stay the same since it is set on tap up for mobile platforms.
                 touch_gesture.position = g_pos;
                 tester.send(&touch_gesture, waft_embedder::PointerChange::Down);
-                tester.pump(Duration::ZERO);
+                tester.pump();
                 assert_eq!(
-                    selection(&tester, controller.handle()).base_offset,
+                    selection(tester, controller.handle()).base_offset,
                     expected,
                     "{platform:?}"
                 );
                 assert_eq!(
-                    selection(&tester, controller.handle()).extent_offset,
+                    selection(tester, controller.handle()).extent_offset,
                     expected,
                     "{platform:?}"
                 );
@@ -3161,12 +3143,12 @@ mod tests {
                 tester.up(&touch_gesture);
                 tester.pump_and_settle();
                 assert_eq!(
-                    selection(&tester, controller.handle()).base_offset,
+                    selection(tester, controller.handle()).base_offset,
                     8,
                     "{platform:?}"
                 );
                 assert_eq!(
-                    selection(&tester, controller.handle()).extent_offset,
+                    selection(tester, controller.handle()).extent_offset,
                     8,
                     "{platform:?}"
                 );
@@ -3176,101 +3158,97 @@ mod tests {
 
     #[test]
     fn an_obscured_text_field_is_selectable_by_default() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller_with(&tester, "");
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
             // Obscure text and don't enable or disable selection.
             let root = overlay(
-                &tester,
+                tester,
                 TextField::new()
                     .controller(controller.erase())
                     .obscure_text(true),
             );
             tester.pump_widget(root);
-            enter_text(&mut tester, "abcdefghi");
-            skip_past_scrolling_animation(&mut tester);
-            assert!(selection(&tester, controller.handle()).is_collapsed());
+            enter_text(tester, "abcdefghi");
+            skip_past_scrolling_animation(tester);
+            assert!(selection(tester, controller.handle()).is_collapsed());
 
             // Long press does select text.
-            let e_pos = text_offset_to_position(&tester, 1);
+            let e_pos = text_offset_to_position(tester, 1);
             tester.long_press(e_pos, 7);
             tester.pump_and_settle();
-            assert!(!selection(&tester, controller.handle()).is_collapsed());
+            assert!(!selection(tester, controller.handle()).is_collapsed());
         });
     }
 
     #[test]
     fn an_obscured_text_field_is_not_selectable_when_disabled() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller_with(&tester, "");
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
             // Explicitly disabled selection on obscured text.
             let root = overlay(
-                &tester,
+                tester,
                 TextField::new()
                     .controller(controller.erase())
                     .obscure_text(true)
                     .enable_interactive_selection(false),
             );
             tester.pump_widget(root);
-            enter_text(&mut tester, "abcdefghi");
-            skip_past_scrolling_animation(&mut tester);
-            assert!(selection(&tester, controller.handle()).is_collapsed());
+            enter_text(tester, "abcdefghi");
+            skip_past_scrolling_animation(tester);
+            assert!(selection(tester, controller.handle()).is_collapsed());
 
             // Long press doesn't select text.
-            let e_pos2 = text_offset_to_position(&tester, 1);
+            let e_pos2 = text_offset_to_position(tester, 1);
             tester.long_press(e_pos2, 7);
             tester.pump_and_settle();
-            assert!(selection(&tester, controller.handle()).is_collapsed());
+            assert!(selection(tester, controller.handle()).is_collapsed());
         });
     }
 
     #[test]
     fn an_obscured_text_field_is_not_selectable_when_read_only() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller_with(&tester, "");
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
             // Explicitly disabled selection on obscured text that is read-only.
             let root = overlay(
-                &tester,
+                tester,
                 TextField::new()
                     .controller(controller.erase())
                     .obscure_text(true)
                     .read_only(true),
             );
             tester.pump_widget(root);
-            enter_text(&mut tester, "abcdefghi");
-            skip_past_scrolling_animation(&mut tester);
-            assert!(selection(&tester, controller.handle()).is_collapsed());
+            enter_text(tester, "abcdefghi");
+            skip_past_scrolling_animation(tester);
+            assert!(selection(tester, controller.handle()).is_collapsed());
 
             // Long press doesn't select text.
-            let e_pos2 = text_offset_to_position(&tester, 1);
+            let e_pos2 = text_offset_to_position(tester, 1);
             tester.long_press(e_pos2, 7);
             tester.pump_and_settle();
-            assert!(selection(&tester, controller.handle()).is_collapsed());
+            assert!(selection(tester, controller.handle()).is_collapsed());
         });
     }
 
     #[test]
     fn an_obscured_text_field_is_selected_as_one_word() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller_with(&tester, "");
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
             let root = overlay(
-                &tester,
+                tester,
                 TextField::new()
                     .controller(controller.erase())
                     .obscure_text(true),
             );
             tester.pump_widget(root);
-            enter_text(&mut tester, "abcde fghi");
-            skip_past_scrolling_animation(&mut tester);
+            enter_text(tester, "abcde fghi");
+            skip_past_scrolling_animation(tester);
 
             // Long press does select text.
-            let b_pos = text_offset_to_position(&tester, 1);
+            let b_pos = text_offset_to_position(tester, 1);
             tester.long_press(b_pos, 7);
             tester.pump_and_settle();
-            let selection = selection(&tester, controller.handle());
+            let selection = selection(tester, controller.handle());
             assert!(!selection.is_collapsed());
             assert_eq!(selection.base_offset, 0);
             assert_eq!(selection.extent_offset, 10);
@@ -3279,10 +3257,9 @@ mod tests {
 
     #[test]
     fn text_field_errortext_trumps_helper_text() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let root = overlay(
-                &tester,
+                tester,
                 TextField::new().decoration(Some(
                     InputDecoration::new()
                         .error_text("error text")
@@ -3297,47 +3274,44 @@ mod tests {
 
     #[test]
     fn cannot_enter_new_lines_onto_single_line_text_field() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller_with(&tester, "");
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
             let root = boilerplate(
-                &tester,
+                tester,
                 TextField::new()
                     .controller(controller.erase())
                     .decoration(None),
             );
             tester.pump_widget(root);
-            enter_text(&mut tester, "abc\ndef");
-            assert_eq!(text(&tester, controller.handle()), "abcdef");
+            enter_text(tester, "abc\ndef");
+            assert_eq!(text(tester, controller.handle()), "abcdef");
         });
     }
 
     #[test]
     fn injected_formatters_are_chained() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller_with(&tester, "");
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
             let root = boilerplate(
-                &tester,
+                tester,
                 TextField::new()
                     .controller(controller.erase())
                     .decoration(None)
                     .input_formatters(vec![formatter(DenyLowercase("#"))]),
             );
             tester.pump_widget(root);
-            enter_text(&mut tester, "a一b二c三\nd四e五f六");
+            enter_text(tester, "a一b二c三\nd四e五f六");
             // The default single line formatter replaces \n with empty string.
-            assert_eq!(text(&tester, controller.handle()), "#一#二#三#四#五#六");
+            assert_eq!(text(tester, controller.handle()), "#一#二#三#四#五#六");
         });
     }
 
     #[test]
     fn chained_formatters_are_in_sequence() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller_with(&tester, "");
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
             let root = boilerplate(
-                &tester,
+                tester,
                 TextField::new()
                     .controller(controller.erase())
                     .decoration(None)
@@ -3348,26 +3322,25 @@ mod tests {
                     ]),
             );
             tester.pump_widget(root);
-            enter_text(&mut tester, "a1b2c3");
+            enter_text(tester, "a1b2c3");
             // The first formatter turns it into
             // 12\n112\n212\n3
             // The second formatter turns it into
             // \n1\n2\n3
             // Multiline is allowed since maxLine != 1.
-            assert_eq!(text(&tester, controller.handle()), "\n1\n2\n3");
+            assert_eq!(text(tester, controller.handle()), "\n1\n2\n3");
         });
     }
 
     #[test]
     fn do_not_add_length_limiting_formatter_to_the_user_supplied_list() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let formatters: Vec<TextInputFormatterRef> = Vec::new();
             let field = TextField::new()
                 .decoration(None)
                 .max_length(5)
                 .input_formatters(formatters.clone());
-            let root = overlay(&tester, field);
+            let root = overlay(tester, field);
             tester.pump_widget(root);
             assert!(formatters.is_empty());
             let element = tester.find_by_type::<TextField>()[0];
@@ -3380,13 +3353,12 @@ mod tests {
 
     #[test]
     fn text_field_drops_selection_color_when_losing_focus() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller1 = controller_with(&tester, "");
+        test_widgets(|tester| {
+            let controller1 = controller_with(tester, "");
             let selection_color = Colors::ORANGE.primary();
             let cursor_color = Colors::RED.primary();
             let root = overlay(
-                &tester,
+                tester,
                 DefaultSelectionStyle::new(Column::new().children(vec![
                     TextField::new()
                         .controller(controller1.erase())
@@ -3400,41 +3372,41 @@ mod tests {
 
             let expected = TextSelection::new(0, 4);
 
-            let first = text_field_center(&tester, 0);
+            let first = text_field_center(tester, 0);
             tester.tap(first, 1);
-            enter_text_at(&mut tester, 0, "abcd");
-            tester.pump(Duration::ZERO);
+            enter_text_at(tester, 0, "abcd");
+            tester.pump();
 
-            let second = text_field_center(&tester, 1);
+            let second = text_field_center(tester, 1);
             tester.tap(second, 2);
-            enter_text_at(&mut tester, 1, "dcba");
-            tester.pump(Duration::ZERO);
+            enter_text_at(tester, 1, "dcba");
+            tester.pump();
 
             // Focus and selection is active on first TextField, so the second TextFields
             // selectionColor should be dropped.
             tester.tap(first, 3);
             controller1.set_selection(&mut tester.cell.borrow_mut(), TextSelection::new(0, 4));
-            tester.pump(Duration::ZERO);
-            assert_eq!(selection(&tester, controller1.handle()), expected);
+            tester.pump();
+            assert_eq!(selection(tester, controller1.handle()), expected);
             assert_eq!(
-                editable_at(&tester, 0, |widget| widget.selection_color),
+                editable_at(tester, 0, |widget| widget.selection_color),
                 Some(selection_color)
             );
             assert_eq!(
-                editable_at(&tester, 1, |widget| widget.selection_color),
+                editable_at(tester, 1, |widget| widget.selection_color),
                 None
             );
 
             // Focus and selection is active on second TextField, so the first TextFields
             // selectionColor should be dropped.
             tester.tap(second, 4);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(
-                editable_at(&tester, 0, |widget| widget.selection_color),
+                editable_at(tester, 0, |widget| widget.selection_color),
                 None
             );
             assert_eq!(
-                editable_at(&tester, 1, |widget| widget.selection_color),
+                editable_at(tester, 1, |widget| widget.selection_color),
                 Some(selection_color)
             );
         });
@@ -3442,37 +3414,35 @@ mod tests {
 
     #[test]
     fn max_length_limits_input() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller_with(&tester, "");
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
             let root = boilerplate(
-                &tester,
+                tester,
                 TextField::new()
                     .controller(controller.erase())
                     .max_length(10),
             );
             tester.pump_widget(root);
-            enter_text(&mut tester, "0123456789101112");
-            assert_eq!(text(&tester, controller.handle()), "0123456789");
+            enter_text(tester, "0123456789101112");
+            assert_eq!(text(tester, controller.handle()), "0123456789");
         });
     }
 
     #[test]
     fn max_length_limits_input_with_surrogate_pairs() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller_with(&tester, "");
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
             let root = boilerplate(
-                &tester,
+                tester,
                 TextField::new()
                     .controller(controller.erase())
                     .max_length(10),
             );
             tester.pump_widget(root);
             let surrogate_pair = "😆";
-            enter_text(&mut tester, &format!("{surrogate_pair}0123456789101112"));
+            enter_text(tester, &format!("{surrogate_pair}0123456789101112"));
             assert_eq!(
-                text(&tester, controller.handle()),
+                text(tester, controller.handle()),
                 format!("{surrogate_pair}012345678")
             );
         });
@@ -3480,20 +3450,19 @@ mod tests {
 
     #[test]
     fn max_length_limits_input_with_grapheme_clusters() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller_with(&tester, "");
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
             let root = boilerplate(
-                &tester,
+                tester,
                 TextField::new()
                     .controller(controller.erase())
                     .max_length(10),
             );
             tester.pump_widget(root);
             let grapheme_cluster = "👨\u{200d}👩\u{200d}👦";
-            enter_text(&mut tester, &format!("{grapheme_cluster}0123456789101112"));
+            enter_text(tester, &format!("{grapheme_cluster}0123456789101112"));
             assert_eq!(
-                text(&tester, controller.handle()),
+                text(tester, controller.handle()),
                 format!("{grapheme_cluster}012345678")
             );
         });
@@ -3501,12 +3470,11 @@ mod tests {
 
     #[test]
     fn max_length_limits_input_in_the_center_of_a_maxed_out_field() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller_with(&tester, "");
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
             let test_value = "0123456789";
             let root = boilerplate(
-                &tester,
+                tester,
                 TextField::new()
                     .controller(controller.erase())
                     .max_length(10),
@@ -3514,82 +3482,78 @@ mod tests {
             tester.pump_widget(root);
 
             // Max out the character limit in the field.
-            enter_text(&mut tester, test_value);
-            assert_eq!(text(&tester, controller.handle()), test_value);
+            enter_text(tester, test_value);
+            assert_eq!(text(tester, controller.handle()), test_value);
 
             // Entering more characters at the end does nothing.
-            enter_text(&mut tester, &format!("{test_value}9999999"));
-            assert_eq!(text(&tester, controller.handle()), test_value);
+            enter_text(tester, &format!("{test_value}9999999"));
+            assert_eq!(text(tester, controller.handle()), test_value);
 
             // Entering text in the middle of the field also does nothing.
-            enter_text(&mut tester, "0123455555555556789");
-            assert_eq!(text(&tester, controller.handle()), test_value);
+            enter_text(tester, "0123455555555556789");
+            assert_eq!(text(tester, controller.handle()), test_value);
         });
     }
 
     #[test]
     fn max_length_limits_input_length_even_if_decoration_is_null() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller_with(&tester, "");
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
             let root = boilerplate(
-                &tester,
+                tester,
                 TextField::new()
                     .controller(controller.erase())
                     .decoration(None)
                     .max_length(10),
             );
             tester.pump_widget(root);
-            enter_text(&mut tester, "0123456789101112");
-            assert_eq!(text(&tester, controller.handle()), "0123456789");
+            enter_text(tester, "0123456789101112");
+            assert_eq!(text(tester, controller.handle()), "0123456789");
         });
     }
 
     #[test]
     fn max_length_still_works_with_other_formatters() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller_with(&tester, "");
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
             let root = boilerplate(
-                &tester,
+                tester,
                 TextField::new()
                     .controller(controller.erase())
                     .max_length(10)
                     .input_formatters(vec![formatter(DenyLowercase("#"))]),
             );
             tester.pump_widget(root);
-            enter_text(&mut tester, "a一b二c三\nd四e五f六");
+            enter_text(tester, "a一b二c三\nd四e五f六");
             // The default single line formatter replaces \n with empty string.
-            assert_eq!(text(&tester, controller.handle()), "#一#二#三#四#五");
+            assert_eq!(text(tester, controller.handle()), "#一#二#三#四#五");
         });
     }
 
     #[test]
     fn max_length_isnt_enforced_when_max_length_enforcement_none() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller_with(&tester, "");
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
             let root = boilerplate(
-                &tester,
+                tester,
                 TextField::new()
                     .controller(controller.erase())
                     .max_length(10)
                     .max_length_enforcement(MaxLengthEnforcement::None),
             );
             tester.pump_widget(root);
-            enter_text(&mut tester, "0123456789101112");
-            assert_eq!(text(&tester, controller.handle()), "0123456789101112");
+            enter_text(tester, "0123456789101112");
+            assert_eq!(text(tester, controller.handle()), "0123456789101112");
         });
     }
 
     #[test]
     fn max_length_shows_warning_when_max_length_enforcement_none() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller_with(&tester, "");
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
             let deep_purple_accent = Colors::DEEP_PURPLE_ACCENT.primary();
             let root = boilerplate(
-                &tester,
+                tester,
                 TextField::new()
                     .decoration(Some(
                         InputDecoration::new()
@@ -3601,30 +3565,29 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            enter_text(&mut tester, "0123456789101112");
-            tester.pump(Duration::ZERO);
+            enter_text(tester, "0123456789101112");
+            tester.pump();
 
-            assert_eq!(text(&tester, controller.handle()), "0123456789101112");
+            assert_eq!(text(tester, controller.handle()), "0123456789101112");
             assert_eq!(tester.find_onstage_text("16/10").len(), 1);
-            assert_eq!(text_color(&tester, "16/10"), Some(deep_purple_accent));
+            assert_eq!(text_color(tester, "16/10"), Some(deep_purple_accent));
 
-            enter_text(&mut tester, "0123456789");
-            tester.pump(Duration::ZERO);
+            enter_text(tester, "0123456789");
+            tester.pump();
 
-            assert_eq!(text(&tester, controller.handle()), "0123456789");
+            assert_eq!(text(tester, controller.handle()), "0123456789");
             assert_eq!(tester.find_onstage_text("10/10").len(), 1);
-            assert_ne!(text_color(&tester, "10/10"), Some(deep_purple_accent));
+            assert_ne!(text_color(tester, "10/10"), Some(deep_purple_accent));
         });
     }
 
     /// Dart's 'maxLength shows warning when maxLengthEnforcement.none with surrogate pairs.'
     /// and its grapheme-cluster twin.
-    fn check_max_length_warning_with(prefix: &str) {
-        let mut tester = tester_on(TargetPlatform::Android);
-        let controller = controller_with(&tester, "");
+    fn check_max_length_warning_with(tester: &mut WidgetTester, prefix: &str) {
+        let controller = controller_with(tester, "");
         let deep_purple_accent = Colors::DEEP_PURPLE_ACCENT.primary();
         let root = boilerplate(
-            &tester,
+            tester,
             TextField::new()
                 .decoration(Some(
                     InputDecoration::new().error_style(TextStyle::new().color(deep_purple_accent)),
@@ -3636,37 +3599,36 @@ mod tests {
         tester.pump_widget(root);
 
         let long = format!("{prefix}012345678910111");
-        enter_text(&mut tester, &long);
-        tester.pump(Duration::ZERO);
+        enter_text(tester, &long);
+        tester.pump();
 
-        assert_eq!(text(&tester, controller.handle()), long);
+        assert_eq!(text(tester, controller.handle()), long);
         assert_eq!(tester.find_onstage_text("16/10").len(), 1);
-        assert_eq!(text_color(&tester, "16/10"), Some(deep_purple_accent));
+        assert_eq!(text_color(tester, "16/10"), Some(deep_purple_accent));
 
         let full = format!("{prefix}012345678");
-        enter_text(&mut tester, &full);
-        tester.pump(Duration::ZERO);
+        enter_text(tester, &full);
+        tester.pump();
 
-        assert_eq!(text(&tester, controller.handle()), full);
+        assert_eq!(text(tester, controller.handle()), full);
         assert_eq!(tester.find_onstage_text("10/10").len(), 1);
-        assert_ne!(text_color(&tester, "10/10"), Some(deep_purple_accent));
+        assert_ne!(text_color(tester, "10/10"), Some(deep_purple_accent));
     }
 
     #[test]
     fn max_length_shows_warning_when_max_length_enforcement_none_with_surrogate_pairs() {
-        with_main_thread_stack(|| check_max_length_warning_with("😆"));
+        test_widgets(|tester| check_max_length_warning_with(tester, "😆"));
     }
 
     #[test]
     fn max_length_shows_warning_when_max_length_enforcement_none_with_grapheme_clusters() {
-        with_main_thread_stack(|| check_max_length_warning_with("👨\u{200d}👩\u{200d}👦"));
+        test_widgets(|tester| check_max_length_warning_with(tester, "👨\u{200d}👩\u{200d}👦"));
     }
 
     #[test]
     fn max_length_shows_warning_in_material_3() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller_with(&tester, "");
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
             let deep_purple_accent = Colors::DEEP_PURPLE_ACCENT.primary();
             let theme = ThemeData::from(ColorScheme::light().with_error(deep_purple_accent))
                 .build(&tester.cell.borrow());
@@ -3685,36 +3647,35 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            enter_text(&mut tester, "0123456789101112");
-            tester.pump(Duration::ZERO);
+            enter_text(tester, "0123456789101112");
+            tester.pump();
 
-            assert_eq!(text(&tester, controller.handle()), "0123456789101112");
+            assert_eq!(text(tester, controller.handle()), "0123456789101112");
             assert_eq!(tester.find_onstage_text("16/10").len(), 1);
-            assert_eq!(text_color(&tester, "16/10"), Some(deep_purple_accent));
+            assert_eq!(text_color(tester, "16/10"), Some(deep_purple_accent));
 
-            enter_text(&mut tester, "0123456789");
-            tester.pump(Duration::ZERO);
+            enter_text(tester, "0123456789");
+            tester.pump();
 
-            assert_eq!(text(&tester, controller.handle()), "0123456789");
+            assert_eq!(text(tester, controller.handle()), "0123456789");
             assert_eq!(tester.find_onstage_text("10/10").len(), 1);
-            assert_ne!(text_color(&tester, "10/10"), Some(deep_purple_accent));
+            assert_ne!(text_color(tester, "10/10"), Some(deep_purple_accent));
         });
     }
 
     #[test]
     fn setting_max_length_shows_counter() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let root = material_home(
-                theme(&tester),
+                theme(tester),
                 Center::new().child(TextField::new().max_length(10)),
             );
             tester.pump_widget(root);
 
             assert_eq!(tester.find_onstage_text("0/10").len(), 1);
 
-            enter_text(&mut tester, "01234");
-            tester.pump(Duration::ZERO);
+            enter_text(tester, "01234");
+            tester.pump();
 
             assert_eq!(tester.find_onstage_text("5/10").len(), 1);
         });
@@ -3722,18 +3683,17 @@ mod tests {
 
     #[test]
     fn max_length_counter_measures_surrogate_pairs_as_one_character() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let root = material_home(
-                theme(&tester),
+                theme(tester),
                 Center::new().child(TextField::new().max_length(10)),
             );
             tester.pump_widget(root);
 
             assert_eq!(tester.find_onstage_text("0/10").len(), 1);
 
-            enter_text(&mut tester, "😆");
-            tester.pump(Duration::ZERO);
+            enter_text(tester, "😆");
+            tester.pump();
 
             assert_eq!(tester.find_onstage_text("1/10").len(), 1);
         });
@@ -3741,18 +3701,17 @@ mod tests {
 
     #[test]
     fn max_length_counter_measures_grapheme_clusters_as_one_character() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let root = material_home(
-                theme(&tester),
+                theme(tester),
                 Center::new().child(TextField::new().max_length(10)),
             );
             tester.pump_widget(root);
 
             assert_eq!(tester.find_onstage_text("0/10").len(), 1);
 
-            enter_text(&mut tester, "👨\u{200d}👩\u{200d}👦");
-            tester.pump(Duration::ZERO);
+            enter_text(tester, "👨\u{200d}👩\u{200d}👦");
+            tester.pump();
 
             assert_eq!(tester.find_onstage_text("1/10").len(), 1);
         });
@@ -3760,18 +3719,17 @@ mod tests {
 
     #[test]
     fn setting_max_length_to_text_field_no_max_length_shows_only_entered_length() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let root = material_home(
-                theme(&tester),
+                theme(tester),
                 Center::new().child(TextField::new().max_length(TextField::NO_MAX_LENGTH)),
             );
             tester.pump_widget(root);
 
             assert_eq!(tester.find_onstage_text("0").len(), 1);
 
-            enter_text(&mut tester, "01234");
-            tester.pump(Duration::ZERO);
+            enter_text(tester, "01234");
+            tester.pump();
 
             assert_eq!(tester.find_onstage_text("5").len(), 1);
         });
@@ -3779,10 +3737,9 @@ mod tests {
 
     #[test]
     fn passing_a_build_counter_shows_returned_widget() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let root = material_home(
-                theme(&tester),
+                theme(tester),
                 Center::new().child(
                     TextField::new()
                         .build_counter(|_app, _context, current_length, max_length, _is_focused| {
@@ -3800,8 +3757,8 @@ mod tests {
 
             assert_eq!(tester.find_onstage_text("0 of 10").len(), 1);
 
-            enter_text(&mut tester, "01234");
-            tester.pump(Duration::ZERO);
+            enter_text(tester, "01234");
+            tester.pump();
 
             assert_eq!(tester.find_onstage_text("5 of 10").len(), 1);
         });
@@ -3809,8 +3766,7 @@ mod tests {
 
     #[test]
     fn disabled_text_field_hides_helper_and_counter() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let helper_text = "helper text";
             let counter_text = "counter text";
             let error_text = "error text";
@@ -3830,33 +3786,32 @@ mod tests {
             };
             let transparent = Some(Colors::TRANSPARENT);
 
-            let root = build_frame(&tester, true, false);
+            let root = build_frame(tester, true, false);
             tester.pump_widget(root);
-            assert_ne!(text_color(&tester, helper_text), transparent);
-            assert_ne!(text_color(&tester, counter_text), transparent);
-            let root = build_frame(&tester, true, true);
+            assert_ne!(text_color(tester, helper_text), transparent);
+            assert_ne!(text_color(tester, counter_text), transparent);
+            let root = build_frame(tester, true, true);
             tester.pump_widget(root);
-            assert_ne!(text_color(&tester, error_text), transparent);
+            assert_ne!(text_color(tester, error_text), transparent);
 
             // When enabled is false, the helper/error and counter are not visible.
-            let root = build_frame(&tester, false, false);
+            let root = build_frame(tester, false, false);
             tester.pump_widget(root);
-            assert_eq!(text_color(&tester, helper_text), transparent);
-            assert_eq!(text_color(&tester, counter_text), transparent);
-            let root = build_frame(&tester, false, true);
+            assert_eq!(text_color(tester, helper_text), transparent);
+            assert_eq!(text_color(tester, counter_text), transparent);
+            let root = build_frame(tester, false, true);
             tester.pump_widget(root);
-            assert_eq!(text_color(&tester, counter_text), transparent);
-            assert_eq!(text_color(&tester, error_text), transparent);
+            assert_eq!(text_color(tester, counter_text), transparent);
+            assert_eq!(text_color(tester, error_text), transparent);
         });
     }
 
     #[test]
     fn disabled_text_field_has_default_m2_disabled_text_style_for_the_input_text() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller_with(&tester, "Atwater Peel Sherbrooke Bonaventure");
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "Atwater Peel Sherbrooke Bonaventure");
             let root = material_home(
-                m2_theme(&tester),
+                m2_theme(tester),
                 Center::new().child(
                     TextField::new()
                         .controller(controller.erase())
@@ -3864,7 +3819,7 @@ mod tests {
                 ),
             );
             tester.pump_widget(root);
-            let color = editable(&tester, |widget| {
+            let color = editable(tester, |widget| {
                 widget.style.color.as_ref().map(|color| color.color())
             });
             // Colors.black38 is the default disabled color for ThemeData.light().
@@ -3874,10 +3829,9 @@ mod tests {
 
     #[test]
     fn disabled_text_field_has_default_m3_disabled_text_style_for_the_input_text() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller_with(&tester, "Atwater Peel Sherbrooke Bonaventure");
-            let theme = theme(&tester);
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "Atwater Peel Sherbrooke Bonaventure");
+            let theme = theme(tester);
             let expected = theme
                 .text_theme
                 .body_large
@@ -3893,7 +3847,7 @@ mod tests {
                 ),
             );
             tester.pump_widget(root);
-            let color = editable(&tester, |widget| {
+            let color = editable(tester, |widget| {
                 widget.style.color.as_ref().map(|color| color.color())
             });
             assert_eq!(color, expected);
@@ -3914,10 +3868,9 @@ mod tests {
 
     #[test]
     fn enabled_text_field_states_controller() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let text_editing_controller =
-                controller_with(&tester, "Atwater Peel Sherbrooke Bonaventure");
+                controller_with(tester, "Atwater Peel Sherbrooke Bonaventure");
             let count = Rc::new(Cell::new(0));
             let states_controller = {
                 let mut app = tester.cell.borrow_mut();
@@ -3939,80 +3892,80 @@ mod tests {
                     ),
                 )
             };
-            let root = build(&tester, TextField::new());
+            let root = build(tester, TextField::new());
             tester.pump_widget(root);
 
-            let mut gesture = WidgetTester::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+            let mut gesture = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
             tester.add_pointer(&mut gesture, Offset::new(1.0, 1.0));
-            let editable_element = editable_elements(&tester)[0];
+            let editable_element = editable_elements(tester)[0];
             let center = tester
                 .global_rect(tester.render_box_of(editable_element))
                 .center();
             tester.move_to(&mut gesture, center, false);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(
-                states(&tester, states_controller.handle()),
+                states(tester, states_controller.handle()),
                 state_set(&[WidgetState::Hovered])
             );
             assert_eq!(count.get(), 1);
 
             tester.move_to(&mut gesture, Offset::ZERO, false);
-            tester.pump(Duration::ZERO);
-            assert_eq!(states(&tester, states_controller.handle()), state_set(&[]));
+            tester.pump();
+            assert_eq!(states(tester, states_controller.handle()), state_set(&[]));
             assert_eq!(count.get(), 2);
 
             tester.move_to(&mut gesture, center, false);
             tester.send(&gesture, waft_embedder::PointerChange::Down);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             tester.up(&gesture);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(
-                states(&tester, states_controller.handle()),
+                states(tester, states_controller.handle()),
                 state_set(&[WidgetState::Hovered, WidgetState::Focused])
             );
             assert_eq!(count.get(), 4); // adds hovered and pressed - two changes.
 
             tester.move_to(&mut gesture, Offset::ZERO, false);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(
-                states(&tester, states_controller.handle()),
+                states(tester, states_controller.handle()),
                 state_set(&[WidgetState::Focused])
             );
             assert_eq!(count.get(), 5);
 
             tester.send(&gesture, waft_embedder::PointerChange::Down);
-            tester.pump(Duration::ZERO);
-            assert_eq!(states(&tester, states_controller.handle()), state_set(&[]));
+            tester.pump();
+            assert_eq!(states(tester, states_controller.handle()), state_set(&[]));
             assert_eq!(count.get(), 6);
             tester.up(&gesture);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             tester.move_to(&mut gesture, center, false);
             tester.send(&gesture, waft_embedder::PointerChange::Down);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             tester.up(&gesture);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(
-                states(&tester, states_controller.handle()),
+                states(tester, states_controller.handle()),
                 state_set(&[WidgetState::Hovered, WidgetState::Focused])
             );
             assert_eq!(count.get(), 8); // adds hovered and pressed - two changes.
 
             // If the text field is rebuilt disabled, then the focused state is
             // removed.
-            let root = build(&tester, TextField::new().enabled(false));
+            let root = build(tester, TextField::new().enabled(false));
             tester.pump_widget(root);
             tester.pump_and_settle();
             assert_eq!(
-                states(&tester, states_controller.handle()),
+                states(tester, states_controller.handle()),
                 state_set(&[WidgetState::Hovered, WidgetState::Disabled])
             );
             assert_eq!(count.get(), 10); // removes focused and adds disabled - two changes.
 
             tester.move_to(&mut gesture, Offset::ZERO, false);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(
-                states(&tester, states_controller.handle()),
+                states(tester, states_controller.handle()),
                 state_set(&[WidgetState::Disabled])
             );
             assert_eq!(count.get(), 11);
@@ -4020,31 +3973,30 @@ mod tests {
             // If the text field is rebuilt enabled and in an error state, then the error
             // state is added.
             let root = build(
-                &tester,
+                tester,
                 TextField::new().decoration(Some(InputDecoration::new().error_text("error"))),
             );
             tester.pump_widget(root);
             tester.pump_and_settle();
             assert_eq!(
-                states(&tester, states_controller.handle()),
+                states(tester, states_controller.handle()),
                 state_set(&[WidgetState::Error])
             );
             assert_eq!(count.get(), 13); // removes disabled and adds error - two changes.
 
             // If the text field is rebuilt without an error, then the error
             // state is removed.
-            let root = build(&tester, TextField::new());
+            let root = build(tester, TextField::new());
             tester.pump_widget(root);
             tester.pump_and_settle();
-            assert_eq!(states(&tester, states_controller.handle()), state_set(&[]));
+            assert_eq!(states(tester, states_controller.handle()), state_set(&[]));
             assert_eq!(count.get(), 14);
         });
     }
 
     #[test]
     fn disabled_text_field_states_controller() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let count = Rc::new(Cell::new(0));
             let controller = {
                 let mut app = tester.cell.borrow_mut();
@@ -4057,7 +4009,7 @@ mod tests {
                 controller
             };
             let root = material_home(
-                theme(&tester),
+                theme(tester),
                 Center::new().child(
                     TextField::new()
                         .states_controller(controller.clone())
@@ -4066,7 +4018,7 @@ mod tests {
             );
             tester.pump_widget(root);
             assert_eq!(
-                states(&tester, controller.handle()),
+                states(tester, controller.handle()),
                 state_set(&[WidgetState::Disabled])
             );
             assert_eq!(count.get(), 1);
@@ -4075,9 +4027,8 @@ mod tests {
 
     #[test]
     fn provided_style_correctly_resolves_for_material_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller_with(&tester, "Atwater Peel Sherbrooke Bonaventure");
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "Atwater Peel Sherbrooke Bonaventure");
             let red = Colors::RED.primary();
             let blue = Colors::BLUE.primary();
             let build_frame = |tester: &WidgetTester, enabled: bool| {
@@ -4104,25 +4055,24 @@ mod tests {
                 })
             };
 
-            let root = build_frame(&tester, false);
+            let root = build_frame(tester, false);
             tester.pump_widget(root);
-            assert_eq!(style_color(&tester), Some(red));
-            let root = build_frame(&tester, true);
+            assert_eq!(style_color(tester), Some(red));
+            let root = build_frame(tester, true);
             tester.pump_widget(root);
-            assert_eq!(style_color(&tester), Some(blue));
+            assert_eq!(style_color(tester), Some(blue));
         });
     }
 
     #[test]
     fn disabled_text_field_cant_be_traversed_to() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let (focus_node1, focus_node2) = {
                 let mut app = tester.cell.borrow_mut();
                 (FocusNode::new(&mut app), FocusNode::new(&mut app))
             };
             let root = material_home(
-                theme(&tester),
+                theme(tester),
                 FocusScope::new(Center::new().child(Column::new().children(vec![
                     TextField::new()
                         .focus_node(focus_node1.erase())
@@ -4139,7 +4089,7 @@ mod tests {
             );
             tester.pump_widget(root);
 
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert!(focus_node1.has_primary_focus(&tester.cell.borrow()));
             assert!(!focus_node2.has_primary_focus(&tester.cell.borrow()));
 
@@ -4148,7 +4098,7 @@ mod tests {
                     .as_node()
                     .next_focus(&mut tester.cell.borrow_mut())
             );
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             assert!(focus_node1.has_primary_focus(&tester.cell.borrow()));
             assert!(!focus_node2.has_primary_focus(&tester.cell.borrow()));
@@ -4157,29 +4107,28 @@ mod tests {
 
     #[test]
     fn text_field_loses_focus_when_disabled() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let focus_node = FocusNode::new(&mut tester.cell.borrow_mut());
 
             let root = boilerplate(
-                &tester,
+                tester,
                 TextField::new()
                     .focus_node(focus_node.erase())
                     .autofocus(true)
                     .enabled(true),
             );
             tester.pump_widget(root);
-            assert!(has_focus(&tester, focus_node.handle()));
+            assert!(has_focus(tester, focus_node.handle()));
 
             let root = boilerplate(
-                &tester,
+                tester,
                 TextField::new()
                     .focus_node(focus_node.erase())
                     .autofocus(true)
                     .enabled(false),
             );
             tester.pump_widget(root);
-            assert!(!has_focus(&tester, focus_node.handle()));
+            assert!(!has_focus(tester, focus_node.handle()));
 
             let directional = |enabled: bool| {
                 Builder::new({
@@ -4199,54 +4148,52 @@ mod tests {
                     }
                 })
             };
-            let root = boilerplate(&tester, directional(true));
+            let root = boilerplate(tester, directional(true));
             tester.pump_widget(root);
             focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            assert!(has_focus(&tester, focus_node.handle()));
+            assert!(has_focus(tester, focus_node.handle()));
 
-            let root = boilerplate(&tester, directional(false));
+            let root = boilerplate(tester, directional(false));
             tester.pump_widget(root);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            assert!(has_focus(&tester, focus_node.handle()));
+            assert!(has_focus(tester, focus_node.handle()));
         });
     }
 
     #[test]
     fn on_tap_is_called_upon_tap() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let tap_count = Rc::new(Cell::new(0));
             let counter = Rc::clone(&tap_count);
             let root = overlay(
-                &tester,
+                tester,
                 TextField::new().on_tap(Listener::new(move |_app| counter.set(counter.get() + 1))),
             );
             tester.pump_widget(root);
 
             assert_eq!(tap_count.get(), 0);
-            let center = text_field_center(&tester, 0);
+            let center = text_field_center(tester, 0);
             tester.tap(center, 1);
             // Wait a bit so they're all single taps and not double taps.
-            tester.pump(Duration::from_millis(300));
+            tester.pump_by(Duration::from_millis(300));
             tester.tap(center, 2);
-            tester.pump(Duration::from_millis(300));
+            tester.pump_by(Duration::from_millis(300));
             tester.tap(center, 3);
-            tester.pump(Duration::from_millis(300));
+            tester.pump_by(Duration::from_millis(300));
             assert_eq!(tap_count.get(), 3);
         });
     }
 
     #[test]
     fn on_tap_is_not_called_field_is_disabled() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let tap_count = Rc::new(Cell::new(0));
             let counter = Rc::clone(&tap_count);
             let root = overlay(
-                &tester,
+                tester,
                 TextField::new()
                     .enabled(false)
                     .on_tap(Listener::new(move |_app| counter.set(counter.get() + 1))),
@@ -4254,7 +4201,7 @@ mod tests {
             tester.pump_widget(root);
 
             assert_eq!(tap_count.get(), 0);
-            let center = text_field_center(&tester, 0);
+            let center = text_field_center(tester, 0);
             tester.tap(center, 1);
             tester.tap(center, 2);
             tester.tap(center, 3);
@@ -4262,8 +4209,7 @@ mod tests {
         });
     }
 
-    fn style_is_merged_with_theme(use_material3: bool) {
-        let mut tester = tester_on(TargetPlatform::Android);
+    fn style_is_merged_with_theme(tester: &mut WidgetTester, use_material3: bool) {
         let blue = Colors::BLUE.shade500();
         let text_theme = if use_material3 {
             TextTheme::new().body_large(TextStyle::new().color(blue))
@@ -4289,7 +4235,7 @@ mod tests {
 
         // Empty TextStyle is overridden by theme
         tester.pump_widget(build_frame(&theme_data, TextStyle::new()));
-        let style = editable(&tester, |widget| widget.style.clone());
+        let style = editable(tester, |widget| widget.style.clone());
         assert_eq!(style.color, theme_style.color);
         assert_eq!(style.background, theme_style.background);
         assert_eq!(style.shadows, theme_style.shadows);
@@ -4299,7 +4245,7 @@ mod tests {
         // Properties set on TextStyle override theme
         let set_color = Colors::RED.primary();
         tester.pump_widget(build_frame(&theme_data, TextStyle::new().color(set_color)));
-        let style = editable(&tester, |widget| widget.style.clone());
+        let style = editable(tester, |widget| widget.style.clone());
         assert_eq!(style.color.map(|color| color.color()), Some(set_color));
 
         // inherit: false causes nothing to be merged in from theme
@@ -4310,18 +4256,18 @@ mod tests {
                 .text_baseline(waft_embedder::TextBaseline::Alphabetic)
                 .inherit(false),
         ));
-        let style = editable(&tester, |widget| widget.style.clone());
+        let style = editable(tester, |widget| widget.style.clone());
         assert!(style.color.is_none());
     }
 
     #[test]
     fn text_field_style_is_merged_with_theme() {
-        with_main_thread_stack(|| style_is_merged_with_theme(false));
+        test_widgets(|tester| style_is_merged_with_theme(tester, false));
     }
 
     #[test]
     fn text_field_style_is_merged_with_theme_in_material_3() {
-        with_main_thread_stack(|| style_is_merged_with_theme(true));
+        test_widgets(|tester| style_is_merged_with_theme(tester, true));
     }
 
     fn style_frame(tester: &WidgetTester, style: TextStyle) -> WidgetRef {
@@ -4330,10 +4276,9 @@ mod tests {
 
     #[test]
     fn style_enforces_required_fields() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let root = style_frame(
-                &tester,
+                tester,
                 TextStyle::new()
                     .inherit(false)
                     .font_size(12.0)
@@ -4342,7 +4287,7 @@ mod tests {
             tester.pump_widget(root);
 
             // With inherit not set to false, will pickup required fields from theme
-            let root = style_frame(&tester, TextStyle::new().font_size(12.0));
+            let root = style_frame(tester, TextStyle::new().font_size(12.0));
             tester.pump_widget(root);
         });
     }
@@ -4350,24 +4295,22 @@ mod tests {
     #[test]
     #[should_panic(expected = "inherit false style must supply fontSize and textBaseline")]
     fn style_enforces_required_fields_an_inherit_false_style_without_a_baseline_throws() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let root = style_frame(&tester, TextStyle::new().inherit(false).font_size(12.0));
+        test_widgets(|tester| {
+            let root = style_frame(tester, TextStyle::new().inherit(false).font_size(12.0));
             tester.pump_widget(root);
         });
     }
 
     #[test]
     fn selection_controls_is_passed_to_editable_text() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let controls = material_text_selection_controls();
             let root = material_home(
-                theme(&tester),
+                theme(tester),
                 Scaffold::new().body(TextField::new().selection_controls(Rc::clone(&controls))),
             );
             tester.pump_widget(root);
-            let passed = editable(&tester, |widget| widget.selection_controls.clone())
+            let passed = editable(tester, |widget| widget.selection_controls.clone())
                 .expect("the field passes its controls");
             assert!(Rc::ptr_eq(&passed, &controls));
         });
@@ -4387,139 +4330,133 @@ mod tests {
 
     #[test]
     fn tap_shows_handles_but_not_toolbar() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller_with(&tester, "abc def ghi");
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "abc def ghi");
             let root = material_home(
-                theme(&tester),
+                theme(tester),
                 TextField::new().controller(controller.erase()),
             );
             tester.pump_widget(root);
 
             // Tap to trigger the text field.
-            let center = text_field_center(&tester, 0);
+            let center = text_field_center(tester, 0);
             tester.tap(center, 1);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            assert_eq!(selection_overlay_visibility(&tester), (true, false));
+            assert_eq!(selection_overlay_visibility(tester), (true, false));
         });
     }
 
     #[test]
     fn tap_in_empty_text_field_does_not_show_handles_nor_toolbar() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller_with(&tester, "");
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
             let root = material_home(
-                theme(&tester),
+                theme(tester),
                 TextField::new().controller(controller.erase()),
             );
             tester.pump_widget(root);
 
             // Tap to trigger the text field.
-            let center = text_field_center(&tester, 0);
+            let center = text_field_center(tester, 0);
             tester.tap(center, 1);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            assert_eq!(selection_overlay_visibility(&tester), (false, false));
+            assert_eq!(selection_overlay_visibility(tester), (false, false));
         });
     }
 
     #[test]
     fn mouse_tap_does_not_show_handles_nor_toolbar() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller_with(&tester, "abc def ghi");
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "abc def ghi");
             let root = material_home(
-                theme(&tester),
+                theme(tester),
                 TextField::new().controller(controller.erase()),
             );
             tester.pump_widget(root);
 
             // Long press to trigger the text field.
-            let text_field_pos = text_field_center(&tester, 0);
-            let mut gesture = WidgetTester::mouse(7, waft_gestures::K_PRIMARY_BUTTON);
+            let text_field_pos = text_field_center(tester, 0);
+            let mut gesture = TestPointer::mouse(7, waft_gestures::K_PRIMARY_BUTTON);
             tester.down(&mut gesture, text_field_pos);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             tester.up(&gesture);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            assert_eq!(selection_overlay_visibility(&tester), (false, false));
+            assert_eq!(selection_overlay_visibility(tester), (false, false));
         });
     }
 
     #[test]
     fn long_press_shows_handles_and_toolbar() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller_with(&tester, "abc def ghi");
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "abc def ghi");
             let root = material_home(
-                theme(&tester),
+                theme(tester),
                 TextField::new().controller(controller.erase()),
             );
             tester.pump_widget(root);
 
             // Long press to trigger the text field.
-            let center = text_field_center(&tester, 0);
+            let center = text_field_center(tester, 0);
             tester.long_press(center, 1);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            assert_eq!(selection_overlay_visibility(&tester), (true, true));
+            assert_eq!(selection_overlay_visibility(tester), (true, true));
         });
     }
 
     #[test]
     fn long_press_in_empty_text_field_shows_handles_and_toolbar() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller_with(&tester, "");
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "");
             let root = material_home(
-                theme(&tester),
+                theme(tester),
                 TextField::new().controller(controller.erase()),
             );
             tester.pump_widget(root);
 
             // Tap to trigger the text field.
-            let center = text_field_center(&tester, 0);
+            let center = text_field_center(tester, 0);
             tester.long_press(center, 1);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            assert_eq!(selection_overlay_visibility(&tester), (true, true));
+            assert_eq!(selection_overlay_visibility(tester), (true, true));
         });
     }
 
     /// Dart's 'Double tap shows handles and toolbar' and 'Double tap in empty text field shows
     /// toolbar but not handles': a double tap on a field holding `text`.
-    fn double_tap_visibility(text: &str) -> (bool, bool) {
-        let mut tester = tester_on(TargetPlatform::Android);
-        let controller = controller_with(&tester, text);
+    fn double_tap_visibility(tester: &mut WidgetTester, text: &str) -> (bool, bool) {
+        let controller = controller_with(tester, text);
         let root = material_home(
-            theme(&tester),
+            theme(tester),
             TextField::new().controller(controller.erase()),
         );
         tester.pump_widget(root);
 
         // Double tap to trigger the text field.
-        let center = text_field_center(&tester, 0);
+        let center = text_field_center(tester, 0);
         tester.tap(center, 1);
-        tester.pump(Duration::from_millis(50));
+        tester.pump_by(Duration::from_millis(50));
         tester.tap(center, 2);
-        tester.pump(Duration::ZERO);
+        tester.pump();
 
-        selection_overlay_visibility(&tester)
+        selection_overlay_visibility(tester)
     }
 
     #[test]
     fn double_tap_shows_handles_and_toolbar() {
-        with_main_thread_stack(|| {
-            assert_eq!(double_tap_visibility("abc def ghi"), (true, true));
+        test_widgets(|tester| {
+            assert_eq!(double_tap_visibility(tester, "abc def ghi"), (true, true));
         });
     }
 
     #[test]
     fn double_tap_in_empty_text_field_shows_toolbar_but_not_handles() {
-        with_main_thread_stack(|| {
-            assert_eq!(double_tap_visibility(""), (false, true));
+        test_widgets(|tester| {
+            assert_eq!(double_tap_visibility(tester, ""), (false, true));
         });
     }
 
@@ -4537,23 +4474,22 @@ mod tests {
 
     /// Dart's `startGesture(from, pointer: 7)`, a frame, `moveTo(to)`, a frame, `up`, a frame.
     fn drag_handle(tester: &mut WidgetTester, from: Offset, to: Offset) {
-        let mut gesture = WidgetTester::touch(7);
+        let mut gesture = TestPointer::touch(7);
         tester.down(&mut gesture, from);
-        tester.pump(Duration::ZERO);
+        tester.pump();
         tester.move_to(&mut gesture, to, true);
-        tester.pump(Duration::ZERO);
+        tester.pump();
         tester.up(&gesture);
-        tester.pump(Duration::ZERO);
+        tester.pump();
     }
 
     #[test]
     fn can_drag_handles_to_change_selection_on_android_and_fuchsia() {
         for platform in [TargetPlatform::Android, TargetPlatform::Fuchsia] {
-            with_main_thread_stack(|| {
-                let mut tester = tester_on(platform);
-                let controller = controller_with(&tester, "");
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                let controller = controller_with(tester, "");
                 let root = overlay(
-                    &tester,
+                    tester,
                     TextField::new()
                         .drag_start_behavior(DragStartBehavior::Down)
                         .controller(controller.erase()),
@@ -4561,78 +4497,78 @@ mod tests {
                 tester.pump_widget(root);
 
                 let test_value = "abc def ghi";
-                enter_text(&mut tester, test_value);
-                skip_past_scrolling_animation(&mut tester);
+                enter_text(tester, test_value);
+                skip_past_scrolling_animation(tester);
 
                 // Long press the 'e' to select 'def'.
-                let e_pos = text_offset_to_position(&tester, test_value.find('e').unwrap() as i32);
-                let mut gesture = WidgetTester::touch(7);
+                let e_pos = text_offset_to_position(tester, test_value.find('e').unwrap() as i32);
+                let mut gesture = TestPointer::touch(7);
                 tester.down(&mut gesture, e_pos);
-                tester.pump(Duration::from_secs(2));
+                tester.pump_by(Duration::from_secs(2));
                 tester.up(&gesture);
-                tester.pump(Duration::ZERO);
+                tester.pump();
                 // skip past the frame where the opacity is zero
-                tester.pump(Duration::from_millis(200));
+                tester.pump_by(Duration::from_millis(200));
 
-                let long_pressed = selection(&tester, controller.handle());
+                let long_pressed = selection(tester, controller.handle());
                 assert_eq!(long_pressed.base_offset, 4, "{platform:?}");
                 assert_eq!(long_pressed.extent_offset, 7, "{platform:?}");
 
                 // On Fuchsia the desktop-style toolbar shown by the long press covers the
                 // handles; hide it so the drags below reach them.
-                editable_state(&tester).hide_toolbar(&mut tester.cell.borrow_mut(), false);
-                tester.pump(Duration::ZERO);
+                editable_state(tester).hide_toolbar(&mut tester.cell.borrow_mut(), false);
+                tester.pump();
 
-                let endpoints = global_endpoints(&tester, long_pressed);
+                let endpoints = global_endpoints(tester, long_pressed);
                 assert_eq!(endpoints.len(), 2);
 
                 // Drag the right handle 2 letters to the right.
                 // We use a small offset because the endpoint is on the very corner
                 // of the handle.
                 let handle_pos = endpoints[1] + Offset::new(1.0, 1.0);
-                let new_handle_pos = text_offset_to_position(&tester, test_value.len() as i32);
-                drag_handle(&mut tester, handle_pos, new_handle_pos);
+                let new_handle_pos = text_offset_to_position(tester, test_value.len() as i32);
+                drag_handle(tester, handle_pos, new_handle_pos);
 
                 assert_eq!(
-                    selection(&tester, controller.handle()).base_offset,
+                    selection(tester, controller.handle()).base_offset,
                     4,
                     "{platform:?}"
                 );
                 assert_eq!(
-                    selection(&tester, controller.handle()).extent_offset,
+                    selection(tester, controller.handle()).extent_offset,
                     11,
                     "{platform:?}"
                 );
 
                 // Drag the left handle 2 letters to the left.
                 let handle_pos = endpoints[0] + Offset::new(-1.0, 1.0);
-                let new_handle_pos = text_offset_to_position(&tester, 2);
-                drag_handle(&mut tester, handle_pos, new_handle_pos);
+                let new_handle_pos = text_offset_to_position(tester, 2);
+                drag_handle(tester, handle_pos, new_handle_pos);
 
                 assert_eq!(
-                    selection(&tester, controller.handle()).base_offset,
+                    selection(tester, controller.handle()).base_offset,
                     2,
                     "{platform:?}"
                 );
                 assert_eq!(
-                    selection(&tester, controller.handle()).extent_offset,
+                    selection(tester, controller.handle()).extent_offset,
                     11,
                     "{platform:?}"
                 );
 
                 // Drag the left handle 2 letters to the left again.
-                let endpoints = global_endpoints(&tester, selection(&tester, controller.handle()));
+                let endpoints = global_endpoints(tester, selection(tester, controller.handle()));
                 let handle_pos = endpoints[0] + Offset::new(-1.0, 1.0);
-                let new_handle_pos = text_offset_to_position(&tester, 0);
-                drag_handle(&mut tester, handle_pos, new_handle_pos);
+                let new_handle_pos = text_offset_to_position(tester, 0);
+                drag_handle(tester, handle_pos, new_handle_pos);
 
                 assert_eq!(
-                    selection(&tester, controller.handle()).base_offset,
+                    selection(tester, controller.handle()).base_offset,
                     0,
                     "{platform:?}"
                 );
                 assert_eq!(
-                    selection(&tester, controller.handle()).extent_offset,
+                    selection(tester, controller.handle()).extent_offset,
                     11,
                     "{platform:?}"
                 );
@@ -4642,94 +4578,90 @@ mod tests {
 
     #[test]
     fn tapping_selection_handles_toggles_the_toolbar() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller_with(&tester, "abc def ghi");
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "abc def ghi");
             let root = material_home(
-                theme(&tester),
+                theme(tester),
                 TextField::new().controller(controller.erase()),
             );
             tester.pump_widget(root);
 
             // Tap to position the cursor and show the selection handles.
-            let e_pos = text_offset_to_position(&tester, 5); // Index of 'e'.
+            let e_pos = text_offset_to_position(tester, 5); // Index of 'e'.
             tester.tap(e_pos, 7);
             tester.pump_and_settle();
 
-            assert_eq!(selection_overlay_visibility(&tester), (true, false));
+            assert_eq!(selection_overlay_visibility(tester), (true, false));
 
-            let endpoints = global_endpoints(&tester, selection(&tester, controller.handle()));
+            let endpoints = global_endpoints(tester, selection(tester, controller.handle()));
             assert_eq!(endpoints.len(), 1);
 
             // Tap the handle to show the toolbar.
             let handle_pos = endpoints[0] + Offset::new(0.0, 1.0);
             tester.tap(handle_pos, 7);
-            tester.pump(Duration::ZERO);
-            assert!(selection_overlay_visibility(&tester).1);
+            tester.pump();
+            assert!(selection_overlay_visibility(tester).1);
 
             // Tap the handle again to hide the toolbar.
             tester.tap(handle_pos, 7);
-            tester.pump(Duration::ZERO);
-            assert!(!selection_overlay_visibility(&tester).1);
+            tester.pump();
+            assert!(!selection_overlay_visibility(tester).1);
         });
     }
 
     #[test]
     fn mouse_long_press_does_not_show_handles_nor_toolbar() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller_with(&tester, "abc def ghi");
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "abc def ghi");
             let root = material_home(
-                theme(&tester),
+                theme(tester),
                 TextField::new().controller(controller.erase()),
             );
             tester.pump_widget(root);
 
             // Long press to trigger the text field.
-            let text_field_pos = text_field_center(&tester, 0);
-            let mut gesture = WidgetTester::mouse(7, waft_gestures::K_PRIMARY_BUTTON);
+            let text_field_pos = text_field_center(tester, 0);
+            let mut gesture = TestPointer::mouse(7, waft_gestures::K_PRIMARY_BUTTON);
             tester.down(&mut gesture, text_field_pos);
-            tester.pump(Duration::from_secs(2));
+            tester.pump_by(Duration::from_secs(2));
             tester.up(&gesture);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            assert_eq!(selection_overlay_visibility(&tester), (false, false));
+            assert_eq!(selection_overlay_visibility(tester), (false, false));
         });
     }
 
     #[test]
     fn mouse_double_tap_does_not_show_handles_nor_toolbar() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let controller = controller_with(&tester, "abc def ghi");
+        test_widgets(|tester| {
+            let controller = controller_with(tester, "abc def ghi");
             let root = material_home(
-                theme(&tester),
+                theme(tester),
                 TextField::new().controller(controller.erase()),
             );
             tester.pump_widget(root);
 
             // Double tap to trigger the text field.
-            let text_field_pos = text_field_center(&tester, 0);
-            let mut gesture = WidgetTester::mouse(7, waft_gestures::K_PRIMARY_BUTTON);
+            let text_field_pos = text_field_center(tester, 0);
+            let mut gesture = TestPointer::mouse(7, waft_gestures::K_PRIMARY_BUTTON);
             tester.down(&mut gesture, text_field_pos);
-            tester.pump(Duration::from_millis(50));
+            tester.pump_by(Duration::from_millis(50));
             tester.up(&gesture);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             tester.send(&gesture, waft_embedder::PointerChange::Down);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             tester.up(&gesture);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
-            assert_eq!(selection_overlay_visibility(&tester), (false, false));
+            assert_eq!(selection_overlay_visibility(tester), (false, false));
         });
     }
 
     #[test]
     fn by_default_text_field_is_at_least_k_min_interactive_dimension_high() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let root = material_app(
-                theme(&tester),
+                theme(tester),
                 Scaffold::new()
                     .body(Center::new().child(TextField::new()))
                     .into_widget(),
@@ -4744,10 +4676,9 @@ mod tests {
     #[test]
     fn when_text_is_very_small_text_field_still_doesnt_go_below_k_min_interactive_dimension_height()
     {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let root = material_app(
-                theme(&tester),
+                theme(tester),
                 Scaffold::new()
                     .body(
                         Center::new()
@@ -4764,12 +4695,11 @@ mod tests {
 
     #[test]
     fn a_build_counter_that_returns_null_doesnt_affect_the_size_of_the_text_field() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let text_field1_key = GlobalKey::new();
             let text_field2_key = GlobalKey::new();
             let root = material_app(
-                theme(&tester),
+                theme(tester),
                 Scaffold::new()
                     .body(Column::new().children(vec![
                         TextField::new()
@@ -4804,14 +4734,13 @@ mod tests {
 
     #[test]
     fn text_field_changes_mouse_cursor_when_hovered() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let decoration = || {
                 // Add an icon so that the left edge is not the text area
                 InputDecoration::new().icon(waft_widgets::Icon::new(Some(Icons::person())))
             };
             let root = cursor_frame(
-                &tester,
+                tester,
                 TextField::new()
                     .mouse_cursor(SystemMouseCursors::GRAB.into())
                     .decoration(Some(decoration())),
@@ -4825,13 +4754,13 @@ mod tests {
             // Top left, which is not the text area
             let edge = rect.top_left() + Offset::new(1.0, 1.0);
 
-            let mut gesture = WidgetTester::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+            let mut gesture = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
             tester.add_pointer(&mut gesture, center);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(tester.active_cursor(1), SystemMouseCursors::GRAB.into());
 
             // Test default cursor
-            let root = cursor_frame(&tester, TextField::new().decoration(Some(decoration())));
+            let root = cursor_frame(tester, TextField::new().decoration(Some(decoration())));
             tester.pump_widget(root);
             assert_eq!(tester.active_cursor(1), SystemMouseCursors::TEXT.into());
             tester.move_to(&mut gesture, edge, false);
@@ -4840,7 +4769,7 @@ mod tests {
 
             // Test default cursor when disabled
             let root = cursor_frame(
-                &tester,
+                tester,
                 TextField::new()
                     .enabled(false)
                     .decoration(Some(decoration())),
@@ -4855,8 +4784,7 @@ mod tests {
 
     #[test]
     fn text_fields_can_inherit_error_style_color_from_input_decoration_theme_data() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let green = Colors::GREEN.primary();
             let decoration_theme =
                 InputDecorationThemeData::new().error_style(TextStyle::new().color(green));
@@ -4869,11 +4797,11 @@ mod tests {
                 .build(&tester.cell.borrow());
             let root = material_app(theme_data, Scaffold::new().body(field()).into_widget());
             tester.pump_widget(root);
-            assert_eq!(editable(&tester, |widget| widget.cursor_color), green);
+            assert_eq!(editable(tester, |widget| widget.cursor_color), green);
 
             // Local theme.
             let root = material_app(
-                theme(&tester),
+                theme(tester),
                 Scaffold::new()
                     .body(
                         InputDecorationTheme::new()
@@ -4883,19 +4811,18 @@ mod tests {
                     .into_widget(),
             );
             tester.pump_widget(root);
-            assert_eq!(editable(&tester, |widget| widget.cursor_color), green);
+            assert_eq!(editable(tester, |widget| widget.cursor_color), green);
         });
     }
 
     #[test]
     fn text_field_can_inherit_decoration_from_local_input_decoration_theme_data() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let decoration = InputDecoration::new().label_text("Label");
             let decoration_theme = InputDecorationThemeData::new()
                 .error_style(TextStyle::new().color(Colors::GREEN.primary()));
             let root = material_app(
-                theme(&tester),
+                theme(tester),
                 Scaffold::new()
                     .body(
                         InputDecorationTheme::new()
@@ -4920,17 +4847,16 @@ mod tests {
 
     #[test]
     fn text_field_passes_enable_inline_prediction_to_editable_text() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let root = material_app(
-                theme(&tester),
+                theme(tester),
                 Scaffold::new()
                     .body(TextField::new().enable_inline_prediction(true))
                     .into_widget(),
             );
             tester.pump_widget(root);
             assert_eq!(
-                editable(&tester, |widget| widget.enable_inline_prediction),
+                editable(tester, |widget| widget.enable_inline_prediction),
                 Some(true)
             );
         });
@@ -4938,15 +4864,14 @@ mod tests {
 
     #[test]
     fn text_field_enable_inline_prediction_defaults_to_null() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let root = material_app(
-                theme(&tester),
+                theme(tester),
                 Scaffold::new().body(TextField::new()).into_widget(),
             );
             tester.pump_widget(root);
             assert_eq!(
-                editable(&tester, |widget| widget.enable_inline_prediction),
+                editable(tester, |widget| widget.enable_inline_prediction),
                 None
             );
         });
@@ -4957,7 +4882,7 @@ mod tests {
         platform: TargetPlatform,
         enforcement: Option<MaxLengthEnforcement>,
     ) -> WidgetTester {
-        let mut tester = tester_on(platform);
+        let mut tester = WidgetTester::on(platform);
         let mut field = TextField::new().max_length(5);
         if let Some(enforcement) = enforcement {
             field = field.max_length_enforcement(enforcement);
@@ -4991,7 +4916,7 @@ mod tests {
 
     #[test]
     fn max_length_enforcement_using_none_enforcement() {
-        with_main_thread_stack(|| {
+        test_widgets(|_tester| {
             let tester = max_length_enforcement_field(
                 TargetPlatform::Android,
                 Some(MaxLengthEnforcement::None),
@@ -5013,7 +4938,7 @@ mod tests {
 
     #[test]
     fn max_length_enforcement_using_enforced() {
-        with_main_thread_stack(|| {
+        test_widgets(|_tester| {
             let tester = max_length_enforcement_field(
                 TargetPlatform::Android,
                 Some(MaxLengthEnforcement::Enforced),
@@ -5039,7 +4964,7 @@ mod tests {
 
     #[test]
     fn max_length_enforcement_using_truncate_after_composition_ends() {
-        with_main_thread_stack(|| {
+        test_widgets(|_tester| {
             let tester = max_length_enforcement_field(
                 TargetPlatform::Android,
                 Some(MaxLengthEnforcement::TruncateAfterCompositionEnds),
@@ -5066,7 +4991,7 @@ mod tests {
     #[test]
     fn max_length_enforcement_using_default_behavior_for_different_platforms() {
         for platform in ALL_PLATFORMS {
-            with_main_thread_stack(|| {
+            test_widgets(|_tester| {
                 let tester = max_length_enforcement_field(platform, None);
 
                 update_editing_value(&tester, value("侬好啊"));
@@ -5109,44 +5034,43 @@ mod tests {
 
     #[test]
     fn cannot_request_focus_when_can_request_focus_is_false() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let focus_node = FocusNode::new(&mut tester.cell.borrow_mut());
 
             // Default test. The canRequestFocus is true by default and the text field can be
             // focused
-            let root = boilerplate(&tester, TextField::new().focus_node(focus_node.erase()));
+            let root = boilerplate(tester, TextField::new().focus_node(focus_node.erase()));
             tester.pump_widget(root);
-            assert!(!has_focus(&tester, focus_node.handle()));
+            assert!(!has_focus(tester, focus_node.handle()));
             focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
-            tester.pump(Duration::ZERO);
-            assert!(has_focus(&tester, focus_node.handle()));
+            tester.pump();
+            assert!(has_focus(tester, focus_node.handle()));
 
             // Set canRequestFocus to false: the text field cannot be focused when it is
             // tapped/long pressed.
             let root = boilerplate(
-                &tester,
+                tester,
                 TextField::new()
                     .focus_node(focus_node.erase())
                     .can_request_focus(false),
             );
             tester.pump_widget(root);
 
-            assert!(!has_focus(&tester, focus_node.handle()));
+            assert!(!has_focus(tester, focus_node.handle()));
             focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
-            tester.pump(Duration::ZERO);
-            assert!(!has_focus(&tester, focus_node.handle()));
+            tester.pump();
+            assert!(!has_focus(tester, focus_node.handle()));
 
             // The text field cannot be focused if it is tapped.
-            let center = text_field_center(&tester, 0);
+            let center = text_field_center(tester, 0);
             tester.tap(center, 1);
-            tester.pump(Duration::ZERO);
-            assert!(!has_focus(&tester, focus_node.handle()));
+            tester.pump();
+            assert!(!has_focus(tester, focus_node.handle()));
 
             // The text field cannot be focused if it is long pressed.
             tester.long_press(center, 2);
-            tester.pump(Duration::ZERO);
-            assert!(!has_focus(&tester, focus_node.handle()));
+            tester.pump();
+            assert!(!has_focus(tester, focus_node.handle()));
         });
     }
 
@@ -5177,16 +5101,15 @@ mod tests {
     #[test]
     fn tap_region_integration_tapping_outside_loses_focus_on_desktop() {
         for platform in DESKTOP {
-            with_main_thread_stack(|| {
-                let mut tester = tester_on(platform);
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
                 let focus_node = FocusNode::new(&mut tester.cell.borrow_mut());
-                let root = tap_region_frame(&tester, focus_node.erase());
+                let root = tap_region_frame(tester, focus_node.erase());
                 tester.pump_widget(root);
-                tester.pump(Duration::ZERO);
+                tester.pump();
                 assert!(focus_node.has_primary_focus(&tester.cell.borrow()));
 
                 tester.tap(Offset::new(10.0, 10.0), 1);
-                tester.pump(Duration::ZERO);
+                tester.pump();
 
                 assert!(
                     !focus_node.has_primary_focus(&tester.cell.borrow()),
@@ -5199,16 +5122,15 @@ mod tests {
     #[test]
     fn tap_region_integration_tapping_outside_doesnt_lose_focus_on_mobile() {
         for platform in MOBILE {
-            with_main_thread_stack(|| {
-                let mut tester = tester_on(platform);
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
                 let focus_node = FocusNode::new(&mut tester.cell.borrow_mut());
-                let root = tap_region_frame(&tester, focus_node.erase());
+                let root = tap_region_frame(tester, focus_node.erase());
                 tester.pump_widget(root);
-                tester.pump(Duration::ZERO);
+                tester.pump();
                 assert!(focus_node.has_primary_focus(&tester.cell.borrow()));
 
                 tester.tap(Offset::new(10.0, 10.0), 1);
-                tester.pump(Duration::ZERO);
+                tester.pump();
 
                 // Focus is lost on mobile browsers, but not mobile apps.
                 assert!(
@@ -5260,7 +5182,6 @@ mod tests {
 
     fn restored(data: Option<waft_embedder::RestorationMap>) -> WidgetTester {
         let mut tester = WidgetTester::restoring(data);
-        tester.install_platform_fonts();
         let theme = theme(&tester);
         tester.pump_widget(crate::test_support::restorable_material_app(
             "root",
@@ -5272,7 +5193,7 @@ mod tests {
 
     #[test]
     fn the_local_controller_s_text_is_restored() {
-        with_main_thread_stack(|| {
+        test_widgets(|_tester| {
             let text = "Hello World";
             let alternative_text = "Something Else";
             let mut tester = restored(None);
@@ -5302,11 +5223,10 @@ mod tests {
     #[test]
     fn cursor_radius_is_2_0() {
         for platform in [TargetPlatform::IOS, TargetPlatform::MacOS] {
-            with_main_thread_stack(|| {
-                let mut tester = tester_on(platform);
-                let root = material_home(theme(&tester), TextField::new());
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                let root = material_home(theme(tester), TextField::new());
                 tester.pump_widget(root);
-                let radius = render_editable(&tester).cursor_radius(&tester.cell.borrow());
+                let radius = render_editable(tester).cursor_radius(&tester.cell.borrow());
                 assert_eq!(radius, Some(Radius::circular(2.0)), "{platform:?}");
             });
         }
@@ -5314,14 +5234,13 @@ mod tests {
 
     #[test]
     fn cursor_animates_on_ios() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::IOS);
-            let root = material_home(theme(&tester), TextField::new());
+        test_widgets_variant(TargetPlatformVariant::only(TargetPlatform::IOS), |tester| {
+            let root = material_home(theme(tester), TextField::new());
             tester.pump_widget(root);
 
-            let center = text_field_center(&tester, 0);
+            let center = text_field_center(tester, 0);
             tester.tap(center, 1);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             let opacity = |tester: &WidgetTester| {
                 render_editable(tester)
@@ -5329,14 +5248,14 @@ mod tests {
                     .expect("the cursor has a color")
                     .opacity()
             };
-            assert_eq!(opacity(&tester), 1.0);
+            assert_eq!(opacity(tester), 1.0);
 
             let mut walltime_microsecond = 0;
             let mut last_verified_opacity = 1.0;
             let mut verify_key_frame = |tester: &mut WidgetTester, opacity_at: f64, at: u64| {
                 let delta = 1;
                 assert!(at - delta > walltime_microsecond);
-                tester.pump(Duration::from_micros(at - delta - walltime_microsecond));
+                tester.pump_by(Duration::from_micros(at - delta - walltime_microsecond));
 
                 // Instead of verifying the opacity at each key frame, this function
                 // verifies the opacity immediately *before* each key frame to avoid
@@ -5352,16 +5271,16 @@ mod tests {
                 last_verified_opacity = opacity_at;
             };
 
-            verify_key_frame(&mut tester, 1.0, 500000);
-            verify_key_frame(&mut tester, 0.75, 537500);
-            verify_key_frame(&mut tester, 0.5, 575000);
-            verify_key_frame(&mut tester, 0.25, 612500);
-            verify_key_frame(&mut tester, 0.0, 650000);
-            verify_key_frame(&mut tester, 0.0, 850000);
-            verify_key_frame(&mut tester, 0.25, 887500);
-            verify_key_frame(&mut tester, 0.5, 925000);
-            verify_key_frame(&mut tester, 0.75, 962500);
-            verify_key_frame(&mut tester, 1.0, 1000000);
+            verify_key_frame(tester, 1.0, 500000);
+            verify_key_frame(tester, 0.75, 537500);
+            verify_key_frame(tester, 0.5, 575000);
+            verify_key_frame(tester, 0.25, 612500);
+            verify_key_frame(tester, 0.0, 650000);
+            verify_key_frame(tester, 0.0, 850000);
+            verify_key_frame(tester, 0.25, 887500);
+            verify_key_frame(tester, 0.5, 925000);
+            verify_key_frame(tester, 0.75, 962500);
+            verify_key_frame(tester, 1.0, 1000000);
         });
     }
 
@@ -5371,20 +5290,19 @@ mod tests {
             .into_iter()
             .filter(|platform| *platform != TargetPlatform::IOS)
         {
-            with_main_thread_stack(|| {
-                let mut tester = tester_on(platform);
-                let root = material_home(theme(&tester), TextField::new().max_lines(Some(3)));
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                let root = material_home(theme(tester), TextField::new().max_lines(Some(3)));
                 tester.pump_widget(root);
 
-                let center = text_field_center(&tester, 0);
+                let center = text_field_center(tester, 0);
                 tester.tap(center, 1);
-                tester.pump(Duration::ZERO);
+                tester.pump();
                 // Wait for the current animation to finish. If the cursor never stops its
                 // blinking animation the test will timeout.
                 tester.pump_and_settle();
 
                 for _ in 0..40 {
-                    tester.pump(Duration::from_millis(100));
+                    tester.pump_by(Duration::from_millis(100));
                     let running = waft_scheduler::SchedulerBinding::transient_callback_count(
                         &mut tester.cell.borrow_mut(),
                     ) > 0;
@@ -5404,20 +5322,19 @@ mod tests {
 
     #[test]
     fn cursor_does_not_animate_on_android() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
-            let default_cursor_color = theme(&tester).color_scheme.primary;
+        test_widgets(|tester| {
+            let default_cursor_color = theme(tester).color_scheme.primary;
             let root = material_home(
-                theme(&tester),
+                theme(tester),
                 TextField::new()
                     .max_lines(Some(3))
                     .cursor_color(default_cursor_color),
             );
             tester.pump_widget(root);
 
-            let center = text_field_center(&tester, 0);
+            let center = text_field_center(tester, 0);
             tester.tap(center, 1);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             let alpha = |tester: &WidgetTester| {
                 render_editable(tester)
@@ -5439,34 +5356,34 @@ mod tests {
                 })
             };
 
-            tester.pump(Duration::ZERO);
-            assert_eq!(alpha(&tester), 255);
-            assert!(paints_cursor(&tester));
+            tester.pump();
+            assert_eq!(alpha(tester), 255);
+            assert!(paints_cursor(tester));
 
             // Android cursor goes from exactly on to exactly off on the 500ms dot.
-            tester.pump(Duration::from_millis(499));
-            assert_eq!(alpha(&tester), 255);
-            assert!(paints_cursor(&tester));
+            tester.pump_by(Duration::from_millis(499));
+            assert_eq!(alpha(tester), 255);
+            assert!(paints_cursor(tester));
 
-            tester.pump(Duration::from_millis(1));
-            assert_eq!(alpha(&tester), 0);
+            tester.pump_by(Duration::from_millis(1));
+            assert_eq!(alpha(tester), 0);
             // Don't try to draw the cursor.
-            assert!(cursor_rects(&tester).is_empty());
+            assert!(cursor_rects(tester).is_empty());
 
-            tester.pump(Duration::from_millis(500));
-            assert_eq!(alpha(&tester), 255);
-            assert!(paints_cursor(&tester));
+            tester.pump_by(Duration::from_millis(500));
+            assert_eq!(alpha(tester), 255);
+            assert!(paints_cursor(tester));
 
-            tester.pump(Duration::from_millis(500));
-            assert_eq!(alpha(&tester), 0);
-            assert!(cursor_rects(&tester).is_empty());
+            tester.pump_by(Duration::from_millis(500));
+            assert_eq!(alpha(tester), 0);
+            assert!(cursor_rects(tester).is_empty());
         });
     }
 
     /// The cursor and selection settings `_TextFieldState.build` picks for `platform`, as the
     /// `EditableText` receives them.
     fn platform_settings(platform: TargetPlatform) -> (bool, bool, Option<Radius>, Option<Offset>) {
-        let mut tester = tester_on(platform);
+        let mut tester = WidgetTester::on(platform);
         let root = material_home(theme(&tester), TextField::new());
         tester.pump_widget(root);
         editable(&tester, |widget| {
@@ -5481,9 +5398,9 @@ mod tests {
 
     #[test]
     fn the_cursor_settings_follow_the_platform() {
-        with_main_thread_stack(|| {
-            // iOSHorizontalOffset over the test view's device pixel ratio of 2.
-            let apple_offset = Some(Offset::new(-1.0, 0.0));
+        test_widgets(|_tester| {
+            // iOSHorizontalOffset (-2.0) over the test view's device pixel ratio of 3.
+            let apple_offset = Some(Offset::new(-2.0 / 3.0, 0.0));
             assert_eq!(
                 platform_settings(TargetPlatform::IOS),
                 (true, true, Some(Radius::circular(2.0)), apple_offset)
@@ -5509,14 +5426,14 @@ mod tests {
 
     #[test]
     fn the_force_press_and_selection_color_follow_the_platform() {
-        with_main_thread_stack(|| {
+        test_widgets(|_tester| {
             for platform in ALL_PLATFORMS {
-                let mut tester = tester_on(platform);
+                let mut tester = WidgetTester::on(platform);
                 let theme = theme(&tester);
                 let primary = theme.color_scheme.primary;
                 let root = material_home(theme, TextField::new().autofocus(true));
                 tester.pump_widget(root);
-                tester.pump(Duration::ZERO);
+                tester.pump();
                 let state = tester.find_by_type::<TextField>()[0]
                     .state_handle::<TextFieldState>(&tester.cell.borrow())
                     .expect("a TextField state");

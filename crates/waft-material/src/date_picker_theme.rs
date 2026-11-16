@@ -1370,9 +1370,11 @@ mod tests {
     use waft_rendering::RenderBox as _;
     use waft_widgets::{Builder, Container};
 
+    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+
     use super::*;
     use crate::color_scheme::ColorScheme;
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::{PaintInspection, material_app};
     use crate::text_theme::TextTheme;
     use crate::theme_data::ThemeData;
     use crate::tooltip::tests::{m2, m3};
@@ -1396,9 +1398,7 @@ mod tests {
         text_theme: TextTheme,
     }
 
-    fn capture_defaults(theme: ThemeData) -> Captured {
-        let mut tester = WidgetTester::on(TargetPlatform::Android);
-        tester.install_platform_fonts();
+    fn capture_defaults(tester: &mut WidgetTester, theme: ThemeData) -> Captured {
         let captured: Rc<RefCell<Option<Captured>>> = Rc::default();
         let root = {
             let captured = Rc::clone(&captured);
@@ -1486,13 +1486,13 @@ mod tests {
 
     #[test]
     fn date_picker_theme_defaults_m3_defaults() {
-        with_main_thread_stack(|| {
-            let tester = WidgetTester::on(TargetPlatform::Android);
+        test_widgets(|tester| {
+            let theme = m3(&tester.cell.borrow());
             let Captured {
                 defaults: m3,
                 color_scheme,
                 text_theme,
-            } = capture_defaults(m3(&tester.cell.borrow()));
+            } = capture_defaults(tester, theme);
             let none = WidgetStates::new();
             let selected = states([WidgetState::Selected]);
 
@@ -1703,13 +1703,13 @@ mod tests {
 
     #[test]
     fn date_picker_theme_defaults_m2_defaults() {
-        with_main_thread_stack(|| {
-            let tester = WidgetTester::on(TargetPlatform::Android);
+        test_widgets(|tester| {
+            let theme = m2(&tester.cell.borrow());
             let Captured {
                 defaults: m2,
                 color_scheme,
                 text_theme,
-            } = capture_defaults(m2(&tester.cell.borrow()));
+            } = capture_defaults(tester, theme);
             let none = WidgetStates::new();
             let selected = states([WidgetState::Selected]);
 
@@ -1948,9 +1948,7 @@ mod tests {
 
     #[test]
     fn year_picker_maintains_default_year_shape_at_text_scale_factor_1_1_5_2() {
-        with_main_thread_stack(|| {
-            let mut tester = WidgetTester::on(TargetPlatform::Android);
-            tester.install_platform_fonts();
+        test_widgets(|tester| {
             let theme = m3(&tester.cell.borrow());
             // Dart reads the year's decoration paint, an rrect of
             // `RRect.fromLTRBR(0.5, 0.5, w - 0.5, h - 0.5, Radius.circular((h - 1) / 2))` in
@@ -1963,9 +1961,9 @@ mod tests {
                     theme.clone(),
                     year_picker_with_scale(text_scale_factor),
                 ));
-                let size = size_of(&tester, year_container(&tester, "2025"));
+                let size = size_of(tester, year_container(tester, "2025"));
                 assert_eq!((size.width(), size.height()), (width, height));
-                let decoration = year_decoration(&tester, "2025");
+                let decoration = year_decoration(tester, "2025");
                 assert_eq!(
                     decoration.color.map(|color| color.color()),
                     Some(Color::new(0xFF6750A4))
@@ -1976,9 +1974,7 @@ mod tests {
 
     #[test]
     fn year_picker_applies_shape_from_date_picker_theme_data_year_shape_correctly() {
-        with_main_thread_stack(|| {
-            let mut tester = WidgetTester::on(TargetPlatform::Android);
-            tester.install_platform_fonts();
+        test_widgets(|tester| {
             let year_shape = CircleBorder::default();
             let today_border = BorderSide {
                 width: 3.0,
@@ -2023,11 +2019,11 @@ mod tests {
                     .expect("a CircleBorder")
                     .side
             };
-            let side_2022 = circle(&tester, "2022");
+            let side_2022 = circle(tester, "2022");
             assert_eq!(side_2022.width, 0.0);
             assert_eq!(side_2022.color, year_shape.side.color);
 
-            let side_2025 = circle(&tester, "2025");
+            let side_2025 = circle(tester, "2025");
             assert_eq!(side_2025.width, today_border.width);
             assert_eq!(side_2025.color, today_foreground_color);
             let _ = SizedBox::shrink();
@@ -2147,14 +2143,33 @@ mod tests {
     const WIDE_WINDOW_SIZE: Size = Size::new(1920.0, 1080.0);
     const NARROW_WINDOW_SIZE: Size = Size::new(1070.0, 1770.0);
 
-    /// A tester whose view is `size` logical pixels: the tester's views are at 2x.
+    /// A tester whose view is `size` physical pixels at a device pixel ratio of 1: Dart's
+    /// `tester.view.physicalSize = size; tester.view.devicePixelRatio = 1.0`.
     fn tester_of_size(size: Size) -> WidgetTester {
-        let tester = WidgetTester::with_physical_size(
+        WidgetTester::with_view(
             waft_test::TestPlatform::new().on(TargetPlatform::Android),
-            Size::new(size.width() * 2.0, size.height() * 2.0),
-        );
-        tester.install_platform_fonts();
-        tester
+            waft_test::TestView::with_pixel_ratio(size.width(), size.height(), 1.0),
+        )
+    }
+
+    /// Dart's `gesture.removePointer()`: `TestGesture` dispatches a `PointerRemovedEvent` that
+    /// carries the pointer's id, so a recognizer tracking the pointer sees it (and gives up a
+    /// press that is still down); the engine's converter would leave the id at zero.
+    fn remove_pointer(tester: &mut WidgetTester, pointer: &TestPointer) {
+        tester.update(|app| {
+            waft_gestures::GestureBinding::instance(app).handle_pointer_event(
+                app,
+                waft_gestures::PointerEvent::Removed(waft_gestures::PointerRemovedEvent {
+                    kind: waft_embedder::PointerDeviceKind::Mouse,
+                    device: pointer.id,
+                    pointer: pointer.id,
+                    position: pointer.position,
+                    ..waft_gestures::PointerRemovedEvent::default()
+                }),
+            );
+            app.drain_microtasks();
+        });
+        tester.cell.checkpoint();
     }
 
     fn themed(theme: DatePickerThemeData, use_material3: bool, tester: &WidgetTester) -> ThemeData {
@@ -2275,23 +2290,21 @@ mod tests {
 
     #[test]
     fn date_picker_dialog_uses_theme_data_date_picker_theme_calendar_mode() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let theme_data = date_picker_theme();
-            let mut tester = WidgetTester::on(TargetPlatform::Android);
-            tester.install_platform_fonts();
-            let theme = themed(theme_data.clone(), true, &tester);
+            let theme = themed(theme_data.clone(), true, tester);
             tester.pump_widget(material_app(theme, centered_home(calendar_dialog())));
 
-            let material = read_material(&tester, find_dialog_material(&tester));
+            let material = read_material(tester, find_dialog_material(tester));
             assert_eq!(material.color, theme_data.background_color);
             assert_eq!(Some(material.elevation), theme_data.elevation);
             assert_eq!(material.shadow_color, theme_data.shadow_color);
             assert_eq!(material.surface_tint_color, theme_data.surface_tint_color);
             assert_eq!(material.shape, theme_data.shape);
 
-            let select_date = text_style(&tester, "Select date");
+            let select_date = text_style(tester, "Select date");
             let header_material =
-                read_material(&tester, find_header_material(&tester, "Select date"));
+                read_material(tester, find_header_material(tester, "Select date"));
             assert_eq!(
                 style_color(&select_date),
                 theme_data.header_foreground_color
@@ -2305,7 +2318,7 @@ mod tests {
             );
             assert_eq!(header_material.color, theme_data.header_background_color);
 
-            let weekday = text_style(&tester, "W");
+            let weekday = text_style(tester, "W");
             assert_eq!(
                 style_color(&weekday),
                 theme_data.weekday_style.as_ref().and_then(style_color)
@@ -2318,7 +2331,7 @@ mod tests {
                     .and_then(|style| style.font_size)
             );
 
-            let selected_date = text_style(&tester, "Wed, Jan 25");
+            let selected_date = text_style(tester, "Wed, Jan 25");
             assert_eq!(
                 style_color(&selected_date),
                 theme_data.header_foreground_color
@@ -2335,8 +2348,8 @@ mod tests {
                 .day_style
                 .as_ref()
                 .and_then(|style| style.font_size);
-            let day31 = text_style(&tester, "31");
-            let day31_decoration = find_day_decoration(&tester, "31");
+            let day31 = text_style(tester, "31");
+            let day31_decoration = find_day_decoration(tester, "31");
             assert_eq!(
                 style_color(&day31),
                 resolved(&theme_data.day_foreground_color)
@@ -2357,8 +2370,8 @@ mod tests {
             );
 
             // DatePickerDialog.currentDate.
-            let day24 = text_style(&tester, "24");
-            let day24_decoration = find_day_decoration(&tester, "24");
+            let day24 = text_style(tester, "24");
+            let day24_decoration = find_day_decoration(tester, "24");
             assert_eq!(day24.font_size, day_font_size);
             assert_eq!(
                 style_color(&day24),
@@ -2393,7 +2406,7 @@ mod tests {
             );
 
             // The toggle mode button style.
-            let january_2023 = text_style(&tester, "January 2023");
+            let january_2023 = text_style(tester, "January 2023");
             assert_eq!(
                 january_2023.font_size,
                 theme_data
@@ -2414,26 +2427,26 @@ mod tests {
             );
 
             // The day overlay color.
-            let mut mouse = WidgetTester::mouse(1, 0);
+            let mut mouse = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut mouse, waft_embedder::Offset::ZERO);
-            let at = center_of(&tester, text_of(&tester, "25"));
+            let at = center_of(tester, text_of(tester, "25"));
             tester.move_to(&mut mouse, at, false);
             tester.pump_and_settle();
             assert!(paints_calls(
-                &ink_ops(&tester),
+                &ink_ops(tester),
                 &[PaintCall::circle(resolved(&theme_data.day_overlay_color))]
             ));
 
             // Show the year selector.
-            tap_text(&mut tester, "January 2023");
+            tap_text(tester, "January 2023");
             tester.pump_and_settle();
 
             let year_font_size = theme_data
                 .year_style
                 .as_ref()
                 .and_then(|style| style.font_size);
-            let year_2022 = text_style(&tester, "2022");
-            let year_2022_decoration = year_decoration(&tester, "2022");
+            let year_2022 = text_style(tester, "2022");
+            let year_2022_decoration = year_decoration(tester, "2022");
             assert_eq!(year_2022.font_size, year_font_size);
             assert_eq!(
                 style_color(&year_2022),
@@ -2451,8 +2464,8 @@ mod tests {
             assert_eq!(year_2022_decoration.shape, ShapeBorderRef::from(year_shape));
 
             // DatePickerDialog.currentDate.
-            let year_2023 = text_style(&tester, "2023");
-            let year_2023_decoration = year_decoration(&tester, "2023");
+            let year_2023 = text_style(tester, "2023");
+            let year_2023_decoration = year_decoration(tester, "2023");
             assert_eq!(year_2023.font_size, year_font_size);
             assert_eq!(
                 style_color(&year_2023),
@@ -2477,20 +2490,20 @@ mod tests {
             );
 
             // The year overlay color.
-            let at = center_of(&tester, text_of(&tester, "2024"));
+            let at = center_of(tester, text_of(tester, "2024"));
             tester.move_to(&mut mouse, at, false);
             tester.pump_and_settle();
             assert!(paints_after_material_fills(
-                &ink_ops(&tester),
+                &ink_ops(tester),
                 &[PaintCall::rect(resolved(&theme_data.year_overlay_color))]
             ));
 
             assert_eq!(
-                action_button_style(&tester, "Cancel"),
+                action_button_style(tester, "Cancel"),
                 theme_data.cancel_button_style
             );
             assert_eq!(
-                action_button_style(&tester, "OK"),
+                action_button_style(tester, "OK"),
                 theme_data.confirm_button_style
             );
         });
@@ -2498,11 +2511,9 @@ mod tests {
 
     #[test]
     fn date_picker_dialog_uses_theme_data_date_picker_theme_input_mode() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let theme_data = date_picker_theme();
-            let mut tester = WidgetTester::on(TargetPlatform::Android);
-            tester.install_platform_fonts();
-            let theme = themed(theme_data.clone(), true, &tester);
+            let theme = themed(theme_data.clone(), true, tester);
             tester.pump_widget(material_app(
                 theme,
                 centered_home(
@@ -2510,16 +2521,16 @@ mod tests {
                 ),
             ));
 
-            let material = read_material(&tester, find_dialog_material(&tester));
+            let material = read_material(tester, find_dialog_material(tester));
             assert_eq!(material.color, theme_data.background_color);
             assert_eq!(Some(material.elevation), theme_data.elevation);
             assert_eq!(material.shadow_color, theme_data.shadow_color);
             assert_eq!(material.surface_tint_color, theme_data.surface_tint_color);
             assert_eq!(material.shape, theme_data.shape);
 
-            let select_date = text_style(&tester, "Select date");
+            let select_date = text_style(tester, "Select date");
             let header_material =
-                read_material(&tester, find_header_material(&tester, "Select date"));
+                read_material(tester, find_header_material(tester, "Select date"));
             assert_eq!(
                 style_color(&select_date),
                 theme_data.header_foreground_color
@@ -2533,7 +2544,7 @@ mod tests {
             );
             assert_eq!(header_material.color, theme_data.header_background_color);
 
-            let decoration = input_decoration(&tester);
+            let decoration = input_decoration(tester);
             assert_eq!(
                 decoration.fill_color.map(|color| color.color()),
                 theme_data
@@ -2544,11 +2555,11 @@ mod tests {
             );
 
             assert_eq!(
-                action_button_style(&tester, "Cancel"),
+                action_button_style(tester, "Cancel"),
                 theme_data.cancel_button_style
             );
             assert_eq!(
-                action_button_style(&tester, "OK"),
+                action_button_style(tester, "OK"),
                 theme_data.confirm_button_style
             );
         });
@@ -2563,14 +2574,16 @@ mod tests {
 
     /// The shared assertions of the two `DateRangePickerDialog` theme cases, which differ in
     /// the Material version and the help text's case.
-    fn check_range_dialog_theme(use_material3: bool, select_range: &str) {
+    fn check_range_dialog_theme(
+        tester: &mut WidgetTester,
+        use_material3: bool,
+        select_range: &str,
+    ) {
         let theme_data = date_picker_theme();
-        let mut tester = WidgetTester::on(TargetPlatform::Android);
-        tester.install_platform_fonts();
-        let theme = themed(theme_data.clone(), use_material3, &tester);
+        let theme = themed(theme_data.clone(), use_material3, tester);
         tester.pump_widget(material_app(theme, centered_home(range_dialog())));
 
-        let material = read_material(&tester, find_dialog_material(&tester));
+        let material = read_material(tester, find_dialog_material(tester));
         assert_eq!(material.color, theme_data.background_color);
         let scaffold = tester.find_by_type::<crate::scaffold::Scaffold>()[0];
         assert_eq!(
@@ -2595,7 +2608,7 @@ mod tests {
             theme_data.range_picker_header_background_color
         );
 
-        let select_range = text_style(&tester, select_range);
+        let select_range = text_style(tester, select_range);
         assert_eq!(
             style_color(&select_range),
             theme_data.range_picker_header_foreground_color
@@ -2608,7 +2621,7 @@ mod tests {
                 .and_then(|style| style.font_size)
         );
 
-        let selected_date = text_style(&tester, "Jan 17");
+        let selected_date = text_style(tester, "Jan 17");
         assert_eq!(
             style_color(&selected_date),
             theme_data.range_picker_header_foreground_color
@@ -2622,22 +2635,22 @@ mod tests {
         );
 
         // The day overlay color.
-        let mut mouse = WidgetTester::mouse(1, 0);
+        let mut mouse = TestPointer::mouse(1, 0);
         tester.add_pointer(&mut mouse, waft_embedder::Offset::ZERO);
-        let at = center_of(&tester, text_of(&tester, "16"));
+        let at = center_of(tester, text_of(tester, "16"));
         tester.move_to(&mut mouse, at, false);
         tester.pump_and_settle();
         assert!(paints_calls(
-            &ink_ops(&tester),
+            &ink_ops(tester),
             &[PaintCall::circle(resolved(&theme_data.day_overlay_color))]
         ));
 
         // The range selection overlay color.
-        let at = center_of(&tester, text_of(&tester, "18"));
+        let at = center_of(tester, text_of(tester, "18"));
         tester.move_to(&mut mouse, at, false);
         tester.pump_and_settle();
         assert!(paints_calls(
-            &ink_ops(&tester),
+            &ink_ops(tester),
             &[PaintCall::circle(resolved(
                 &theme_data.range_selection_overlay_color
             ))]
@@ -2646,17 +2659,17 @@ mod tests {
 
     #[test]
     fn date_range_picker_dialog_uses_theme_data_date_picker_theme() {
-        with_main_thread_stack(|| check_range_dialog_theme(true, "Select range"));
+        test_widgets(|tester| check_range_dialog_theme(tester, true, "Select range"));
     }
 
     #[test]
     fn material2_date_range_picker_dialog_uses_theme_data_date_picker_theme() {
-        with_main_thread_stack(|| check_range_dialog_theme(false, "SELECT RANGE"));
+        test_widgets(|tester| check_range_dialog_theme(tester, false, "SELECT RANGE"));
     }
 
     #[test]
     fn dividers_use_date_picker_theme_data_divider_color() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             let theme_data = date_picker_theme();
             let show_picker = |size: Size| {
                 let mut tester = tester_of_size(size);
@@ -2685,9 +2698,7 @@ mod tests {
     #[test]
     fn date_picker_uses_theme_data_input_decoration_theme_properties_which_are_null_in_date_picker_theme_data_input_decoration_theme()
      {
-        with_main_thread_stack(|| {
-            let mut tester = WidgetTester::on(TargetPlatform::Android);
-            tester.install_platform_fonts();
+        test_widgets(|tester| {
             let build_app =
                 |tester: &WidgetTester,
                  input_decoration_theme: crate::input_decorator::InputDecorationThemeData,
@@ -2709,12 +2720,12 @@ mod tests {
 
             // With DatePickerThemeData.inputDecorationTheme.
             let root = build_app(
-                &tester,
+                tester,
                 crate::input_decorator::InputDecorationThemeData::new().filled(true),
                 Some(date_picker_theme()),
             );
             tester.pump_widget(root);
-            let decoration = input_decoration(&tester);
+            let decoration = input_decoration(tester);
             let theme_data = date_picker_theme();
             let input_theme = theme_data.input_decoration_theme.expect("an input theme");
             assert_eq!(
@@ -2725,7 +2736,7 @@ mod tests {
 
             // With ThemeData.inputDecorationTheme.
             let root = build_app(
-                &tester,
+                tester,
                 crate::input_decorator::InputDecorationThemeData::new()
                     .filled(true)
                     .fill_color(Color::new(0xFF00FF00))
@@ -2735,7 +2746,7 @@ mod tests {
             tester.pump_widget(root);
             tester.pump_and_settle();
 
-            let decoration = input_decoration(&tester);
+            let decoration = input_decoration(tester);
             assert_eq!(
                 decoration.fill_color.map(|color| color.color()),
                 Some(Color::new(0xFF00FF00))
@@ -2776,17 +2787,15 @@ mod tests {
 
     #[test]
     fn date_picker_dialog_resolves_date_picker_theme_day_overlay_color_states() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let day_overlay_color = overlay_by_state(0xff00ff00, Some(0xffff00ff), 0xffffff00);
             let hovered = Color::new(0xff00ff00);
             let pressed = Color::new(0xffffff00);
             let focused = Color::new(0xffff00ff);
-            let mut tester = WidgetTester::on(TargetPlatform::Android);
-            tester.install_platform_fonts();
             let theme = themed(
                 DatePickerThemeData::new().day_overlay_color(day_overlay_color),
                 true,
-                &tester,
+                tester,
             );
             tester.pump_widget(material_app(
                 theme,
@@ -2794,13 +2803,13 @@ mod tests {
             ));
 
             // The hover overlay color.
-            let mut mouse = WidgetTester::mouse(1, 1);
+            let mut mouse = TestPointer::mouse(1, 1);
             tester.add_pointer(&mut mouse, waft_embedder::Offset::ZERO);
-            let at = center_of(&tester, text_of(&tester, "20"));
+            let at = center_of(tester, text_of(tester, "20"));
             tester.move_to(&mut mouse, at, false);
             tester.pump_and_settle();
             assert!(paints_calls(
-                &tester.nearest_material_ops(text_of(&tester, "17")),
+                &tester.nearest_material_ops(text_of(tester, "17")),
                 &[
                     PaintCall::circle(None), // Today decoration.
                     PaintCall::circle(None), // Selected day decoration.
@@ -2812,7 +2821,7 @@ mod tests {
             tester.down(&mut mouse, at);
             tester.pump_and_settle();
             assert!(paints_calls(
-                &tester.nearest_material_ops(text_of(&tester, "17")),
+                &tester.nearest_material_ops(text_of(tester, "17")),
                 &[
                     PaintCall::circle(None), // Today decoration.
                     PaintCall::circle(None), // Selected day decoration.
@@ -2821,18 +2830,18 @@ mod tests {
                 ]
             ));
 
-            tester.remove_pointer(&mouse);
+            remove_pointer(tester, &mouse);
             tester.pump_and_settle();
 
             // Focus day selection.
             for _ in 0..5 {
-                tab(&mut tester);
+                tab(tester);
                 tester.pump_and_settle();
             }
 
             // The focused overlay color.
             assert!(paints_calls(
-                &tester.nearest_material_ops(text_of(&tester, "17")),
+                &tester.nearest_material_ops(text_of(tester, "17")),
                 &[
                     PaintCall::circle(None), // Today decoration.
                     PaintCall::circle(None), // Selected day decoration.
@@ -2844,17 +2853,15 @@ mod tests {
 
     #[test]
     fn date_picker_dialog_resolves_date_picker_theme_year_overlay_color_states() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let year_overlay_color = overlay_by_state(0xff00ff00, Some(0xffff00ff), 0xffffff00);
             let hovered = Color::new(0xff00ff00);
             let pressed = Color::new(0xffffff00);
             let focused = Color::new(0xffff00ff);
-            let mut tester = WidgetTester::on(TargetPlatform::Android);
-            tester.install_platform_fonts();
             let theme = themed(
                 DatePickerThemeData::new().year_overlay_color(year_overlay_color),
                 true,
-                &tester,
+                tester,
             );
             tester.pump_widget(material_app(
                 theme,
@@ -2864,13 +2871,13 @@ mod tests {
             ));
 
             // The hover overlay color.
-            let mut mouse = WidgetTester::mouse(1, 1);
+            let mut mouse = TestPointer::mouse(1, 1);
             tester.add_pointer(&mut mouse, waft_embedder::Offset::ZERO);
-            let at = center_of(&tester, text_of(&tester, "2022"));
+            let at = center_of(tester, text_of(tester, "2022"));
             tester.move_to(&mut mouse, at, false);
             tester.pump_and_settle();
             assert!(paints_after_material_fills(
-                &ink_ops(&tester),
+                &ink_ops(tester),
                 &[PaintCall::rect(Some(hovered))]
             ));
 
@@ -2878,25 +2885,25 @@ mod tests {
             tester.down(&mut mouse, at);
             tester.pump_and_settle();
             assert!(paints_after_material_fills(
-                &ink_ops(&tester),
+                &ink_ops(tester),
                 &[
                     PaintCall::rect(Some(hovered)),
                     PaintCall::rect(Some(pressed))
                 ]
             ));
 
-            tester.remove_pointer(&mouse);
+            remove_pointer(tester, &mouse);
             tester.pump_and_settle();
 
             // Focus year selection.
             for _ in 0..3 {
-                tab(&mut tester);
+                tab(tester);
                 tester.pump_and_settle();
             }
 
             // The focused overlay color.
             assert!(paints_after_material_fills(
-                &ink_ops(&tester),
+                &ink_ops(tester),
                 &[PaintCall::rect(Some(focused))]
             ));
         });
@@ -2904,28 +2911,26 @@ mod tests {
 
     #[test]
     fn date_range_picker_dialog_resolves_date_picker_theme_range_selection_overlay_color_states() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let range_selection_overlay_color = overlay_by_state(0xff00ff00, None, 0xffffff00);
             let hovered = Color::new(0xff00ff00);
             let pressed = Color::new(0xffffff00);
-            let mut tester = WidgetTester::on(TargetPlatform::Android);
-            tester.install_platform_fonts();
             let theme = themed(
                 DatePickerThemeData::new()
                     .range_selection_overlay_color(range_selection_overlay_color),
                 true,
-                &tester,
+                tester,
             );
             tester.pump_widget(material_app(theme, centered_home(range_dialog())));
 
             // The hover overlay color.
-            let mut mouse = WidgetTester::mouse(1, 1);
+            let mut mouse = TestPointer::mouse(1, 1);
             tester.add_pointer(&mut mouse, waft_embedder::Offset::ZERO);
-            let at = center_of(&tester, text_of(&tester, "18"));
+            let at = center_of(tester, text_of(tester, "18"));
             tester.move_to(&mut mouse, at, false);
             tester.pump_and_settle();
             assert!(paints_calls(
-                &ink_ops(&tester),
+                &ink_ops(tester),
                 &[PaintCall::circle(Some(hovered))]
             ));
 
@@ -2933,7 +2938,7 @@ mod tests {
             tester.down(&mut mouse, at);
             tester.pump_and_settle();
             assert!(paints_calls(
-                &ink_ops(&tester),
+                &ink_ops(tester),
                 &[
                     PaintCall::circle(Some(hovered)),
                     PaintCall::circle(Some(pressed))
@@ -2944,22 +2949,20 @@ mod tests {
 
     #[test]
     fn toggle_button_uses_date_picker_theme_toggle_button_text_style_color_when_it_is_defined() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let toggle_button_text_color = Color::new(0xff00ff00);
             let sub_header_foreground_color = Color::new(0xffff0000);
-            let mut tester = WidgetTester::on(TargetPlatform::Android);
-            tester.install_platform_fonts();
             let theme = themed(
                 DatePickerThemeData::new()
                     .toggle_button_text_style(TextStyle::new().color(toggle_button_text_color))
                     .sub_header_foreground_color(sub_header_foreground_color),
                 true,
-                &tester,
+                tester,
             );
             tester.pump_widget(material_app(theme, calendar_dialog().into_widget()));
 
             assert_eq!(
-                style_color(&text_style(&tester, "January 2023")),
+                style_color(&text_style(tester, "January 2023")),
                 Some(toggle_button_text_color)
             );
         });
@@ -2968,21 +2971,19 @@ mod tests {
     #[test]
     fn toggle_button_uses_date_picker_theme_sub_header_foreground_color_when_date_picker_theme_toggle_button_text_style_color_is_not_defined()
      {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let sub_header_foreground_color = Color::new(0xffff0000);
-            let mut tester = WidgetTester::on(TargetPlatform::Android);
-            tester.install_platform_fonts();
             let theme = themed(
                 DatePickerThemeData::new()
                     .toggle_button_text_style(TextStyle::new())
                     .sub_header_foreground_color(sub_header_foreground_color),
                 true,
-                &tester,
+                tester,
             );
             tester.pump_widget(material_app(theme, calendar_dialog().into_widget()));
 
             assert_eq!(
-                style_color(&text_style(&tester, "January 2023")),
+                style_color(&text_style(tester, "January 2023")),
                 Some(sub_header_foreground_color)
             );
         });

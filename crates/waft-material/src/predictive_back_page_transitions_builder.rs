@@ -1134,6 +1134,10 @@ mod tests {
         StatefulBuilder, Text, WidgetBuilder,
     };
 
+    use waft_widgets::testing::{
+        TargetPlatformVariant, WidgetTester, test_widgets, test_widgets_variant,
+    };
+
     use super::*;
     use crate::app::MaterialApp;
     use crate::colors::Colors;
@@ -1142,7 +1146,7 @@ mod tests {
     use crate::page_transitions_theme::{
         FadeForwardsPageTransition, PageTransitionsTheme, ZoomEnterTransition, ZoomPageTransition,
     };
-    use crate::test_support::{Drawn, WidgetTester, material_page_app, with_main_thread_stack};
+    use crate::test_support::{Drawn, PaintInspection, material_page_app};
     use crate::text_button::TextButton;
     use crate::theme::Theme;
     use crate::theme_data::ThemeData;
@@ -1154,8 +1158,7 @@ mod tests {
     /// and animations; here they are freed with the state's references to them.
     #[test]
     fn a_disposed_shared_element_transition_frees_its_animations() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let animation = tester
                 .cell
                 .borrow_mut()
@@ -1212,8 +1215,7 @@ mod tests {
     /// last reference.
     #[test]
     fn a_shared_element_transition_given_new_dependencies_leaves_no_new_arena_objects() {
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             let animation = tester
                 .cell
                 .borrow_mut()
@@ -1252,12 +1254,6 @@ mod tests {
         TargetPlatform::MacOS,
         TargetPlatform::Windows,
     ];
-
-    fn tester_on(platform: TargetPlatform) -> WidgetTester {
-        let tester = WidgetTester::on(platform);
-        tester.install_fonts();
-        tester
-    }
 
     fn pump_app(
         tester: &mut WidgetTester,
@@ -1458,7 +1454,7 @@ mod tests {
         // Start a system pop gesture, which will switch to using the predictive back page
         // transition.
         start_back_gesture(tester, Offset::new(5.0, 300.0), 0.0);
-        tester.pump(Duration::ZERO);
+        tester.pump();
 
         assert_eq!(variant.predictive_back_transitions(tester), 1);
         assert_eq!(variant.fallback_transitions(tester), 0);
@@ -1481,24 +1477,23 @@ mod tests {
     fn the_predictive_back_builders_follow_a_predictive_back_gesture_on_android() {
         for variant in [Variant::SharedElement, Variant::Fullscreen] {
             for platform in ALL_PLATFORMS {
-                with_main_thread_stack(|| {
-                    let mut tester = tester_on(platform);
-                    if !push_and_drag(&mut tester, platform, variant, push_routes(), None, 0.35) {
+                test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                    if !push_and_drag(tester, platform, variant, push_routes(), None, 0.35) {
                         return;
                     }
 
                     // Commit the system back gesture.
-                    commit_back_gesture(&tester);
+                    commit_back_gesture(tester);
                     tester.pump_and_settle();
 
                     assert_eq!(
-                        variant.predictive_back_transitions(&tester),
+                        variant.predictive_back_transitions(tester),
                         0,
                         "{variant:?}"
                     );
-                    assert_eq!(variant.fallback_transitions(&tester), 1, "{variant:?}");
-                    assert_eq!(found(&tester, "push"), 1);
-                    assert_eq!(found(&tester, "page b"), 0);
+                    assert_eq!(variant.fallback_transitions(tester), 1, "{variant:?}");
+                    assert_eq!(found(tester, "push"), 1);
+                    assert_eq!(found(tester, "page b"), 0);
                 });
             }
         }
@@ -1508,10 +1503,9 @@ mod tests {
     fn the_predictive_back_builders_follow_a_canceled_predictive_back_gesture_on_android() {
         for variant in [Variant::SharedElement, Variant::Fullscreen] {
             for platform in ALL_PLATFORMS {
-                with_main_thread_stack(|| {
-                    let mut tester = tester_on(platform);
+                test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
                     if !push_and_drag(
-                        &mut tester,
+                        tester,
                         platform,
                         variant,
                         push_routes(),
@@ -1522,17 +1516,17 @@ mod tests {
                     }
 
                     // Cancel the system back gesture.
-                    cancel_back_gesture(&tester);
+                    cancel_back_gesture(tester);
                     tester.pump_and_settle();
 
-                    assert_eq!(found(&tester, "push"), 0);
-                    assert_eq!(found(&tester, "page b"), 1);
+                    assert_eq!(found(tester, "push"), 0);
+                    assert_eq!(found(tester, "page b"), 1);
                     assert_eq!(
-                        variant.predictive_back_transitions(&tester),
+                        variant.predictive_back_transitions(tester),
                         0,
                         "{variant:?}"
                     );
-                    assert_eq!(variant.fallback_transitions(&tester), 1, "{variant:?}");
+                    assert_eq!(variant.fallback_transitions(tester), 1, "{variant:?}");
                 });
             }
         }
@@ -1598,8 +1592,7 @@ mod tests {
      {
         for variant in [Variant::SharedElement, Variant::Fullscreen] {
             for platform in ALL_PLATFORMS {
-                with_main_thread_stack(|| {
-                    let mut tester = tester_on(platform);
+                test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
                     let including_nested_navigator = Rc::new(std::cell::Cell::new(false));
                     let set_state = Rc::new(std::cell::RefCell::new(None::<StateSetter>));
                     let routes = routes_with_nested_navigator(
@@ -1608,18 +1601,18 @@ mod tests {
                         Rc::clone(&set_state),
                     );
                     let dragged = push_and_drag(
-                        &mut tester,
+                        tester,
                         platform,
                         variant,
                         routes,
                         Some(Offset::new(100.0, 300.0)),
                         0.3,
                     );
-                    assert_eq!(found(&tester, "Nested route inside of page b"), 0);
+                    assert_eq!(found(tester, "Nested route inside of page b"), 0);
                     if !dragged {
                         return;
                     }
-                    let update_page_b_offset = top_left(&tester, "page b");
+                    let update_page_b_offset = top_left(tester, "page b");
 
                     // In the middle of the system back gesture here, add a nested Navigator
                     // that includes a new predictive back gesture observer.
@@ -1628,41 +1621,41 @@ mod tests {
                         including_nested_navigator.set(true)
                     });
                     tester.pump_and_settle();
-                    assert_eq!(found(&tester, "push"), 1);
-                    assert_eq!(found(&tester, "page b"), 1);
-                    assert_eq!(found(&tester, "Nested route inside of page b"), 1);
+                    assert_eq!(found(tester, "push"), 1);
+                    assert_eq!(found(tester, "page b"), 1);
+                    assert_eq!(found(tester, "Nested route inside of page b"), 1);
 
                     // Send another drag gesture, and ensure that the original observer still
                     // gets it.
-                    update_back_gesture(&tester, Some(Offset::new(110.0, 300.0)), 0.35);
+                    update_back_gesture(tester, Some(Offset::new(110.0, 300.0)), 0.35);
                     tester.pump_and_settle();
 
                     assert_eq!(
-                        variant.predictive_back_transitions(&tester),
+                        variant.predictive_back_transitions(tester),
                         2,
                         "{variant:?}"
                     );
                     // Despite using a predictive back transition, the new route has not
                     // received a start event, so it is still using the fallback transition.
-                    assert_eq!(variant.fallback_transitions(&tester), 1, "{variant:?}");
+                    assert_eq!(variant.fallback_transitions(tester), 1, "{variant:?}");
 
-                    let update2_page_b_offset = top_left(&tester, "page b");
+                    let update2_page_b_offset = top_left(tester, "page b");
                     assert!(update2_page_b_offset.dx() > update_page_b_offset.dx());
 
                     // Commit the system back gesture, and the original observer is able to
                     // handle the back without interference.
-                    commit_back_gesture(&tester);
+                    commit_back_gesture(tester);
                     tester.pump_and_settle();
 
                     assert_eq!(
-                        variant.predictive_back_transitions(&tester),
+                        variant.predictive_back_transitions(tester),
                         0,
                         "{variant:?}"
                     );
-                    assert_eq!(variant.fallback_transitions(&tester), 1, "{variant:?}");
-                    assert_eq!(found(&tester, "push"), 1);
-                    assert_eq!(found(&tester, "page b"), 0);
-                    assert_eq!(found(&tester, "Nested route inside of page b"), 0);
+                    assert_eq!(variant.fallback_transitions(tester), 1, "{variant:?}");
+                    assert_eq!(found(tester, "push"), 1);
+                    assert_eq!(found(tester, "page b"), 0);
+                    assert_eq!(found(tester, "Nested route inside of page b"), 0);
                 });
             }
         }
@@ -1698,37 +1691,34 @@ mod tests {
     fn two_back_gestures_back_to_back_dismiss_two_routes() {
         for variant in [Variant::SharedElement, Variant::Fullscreen] {
             for platform in ALL_PLATFORMS {
-                with_main_thread_stack(|| {
-                    let mut tester = tester_on(platform);
-                    pump_app(
-                        &mut tester,
-                        theme_for_every_platform(variant.builder()),
-                        |app| app.routes(three_routes()),
-                    );
+                test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                    pump_app(tester, theme_for_every_platform(variant.builder()), |app| {
+                        app.routes(three_routes())
+                    });
 
-                    assert_eq!(found(&tester, "push b"), 1);
-                    assert_eq!(found(&tester, "push c"), 0);
-                    assert_eq!(found(&tester, "page c"), 0);
-                    assert_eq!(variant.predictive_back_transitions(&tester), 0);
-                    assert_eq!(variant.fallback_transitions(&tester), 1);
+                    assert_eq!(found(tester, "push b"), 1);
+                    assert_eq!(found(tester, "push c"), 0);
+                    assert_eq!(found(tester, "page c"), 0);
+                    assert_eq!(variant.predictive_back_transitions(tester), 0);
+                    assert_eq!(variant.fallback_transitions(tester), 1);
 
-                    tap_text(&mut tester, "push b");
+                    tap_text(tester, "push b");
                     tester.pump_and_settle();
 
-                    assert_eq!(found(&tester, "push"), 0);
-                    assert_eq!(found(&tester, "push c"), 1);
-                    assert_eq!(found(&tester, "page c"), 0);
-                    assert_eq!(variant.predictive_back_transitions(&tester), 0);
-                    assert_eq!(variant.fallback_transitions(&tester), 1);
+                    assert_eq!(found(tester, "push"), 0);
+                    assert_eq!(found(tester, "push c"), 1);
+                    assert_eq!(found(tester, "page c"), 0);
+                    assert_eq!(variant.predictive_back_transitions(tester), 0);
+                    assert_eq!(variant.fallback_transitions(tester), 1);
 
-                    tap_text(&mut tester, "push c");
+                    tap_text(tester, "push c");
                     tester.pump_and_settle();
 
-                    assert_eq!(found(&tester, "push"), 0);
-                    assert_eq!(found(&tester, "push c"), 0);
-                    assert_eq!(found(&tester, "page c"), 1);
-                    assert_eq!(variant.predictive_back_transitions(&tester), 0);
-                    assert_eq!(variant.fallback_transitions(&tester), 1);
+                    assert_eq!(found(tester, "push"), 0);
+                    assert_eq!(found(tester, "push c"), 0);
+                    assert_eq!(found(tester, "page c"), 1);
+                    assert_eq!(variant.predictive_back_transitions(tester), 0);
+                    assert_eq!(variant.fallback_transitions(tester), 1);
 
                     // Only Android supports backGesture channel methods. Other platforms will
                     // do nothing.
@@ -1738,81 +1728,81 @@ mod tests {
 
                     // Start a system pop gesture, which will switch to using the predictive
                     // back page transition.
-                    start_back_gesture(&tester, Offset::new(5.0, 300.0), 0.0);
-                    tester.pump(Duration::ZERO);
+                    start_back_gesture(tester, Offset::new(5.0, 300.0), 0.0);
+                    tester.pump();
 
                     assert_eq!(
-                        variant.predictive_back_transitions(&tester),
+                        variant.predictive_back_transitions(tester),
                         1,
                         "{variant:?}"
                     );
-                    assert_eq!(variant.fallback_transitions(&tester), 0, "{variant:?}");
+                    assert_eq!(variant.fallback_transitions(tester), 0, "{variant:?}");
 
                     // Drag the system back gesture far enough to commit.
-                    update_back_gesture(&tester, None, 0.35);
-                    tester.pump(Duration::ZERO);
+                    update_back_gesture(tester, None, 0.35);
+                    tester.pump();
 
                     assert_eq!(
-                        variant.predictive_back_transitions(&tester),
+                        variant.predictive_back_transitions(tester),
                         2,
                         "{variant:?}"
                     );
-                    assert_eq!(variant.fallback_transitions(&tester), 0, "{variant:?}");
+                    assert_eq!(variant.fallback_transitions(tester), 0, "{variant:?}");
 
                     // Commit the system back gesture.
-                    commit_back_gesture(&tester);
-                    tester.pump(Duration::ZERO);
+                    commit_back_gesture(tester);
+                    tester.pump();
 
                     // The predictive back page transitions still exist because the outgoing
                     // animation has not yet finished.
                     assert_eq!(
-                        variant.predictive_back_transitions(&tester),
+                        variant.predictive_back_transitions(tester),
                         2,
                         "{variant:?}"
                     );
-                    assert_eq!(variant.fallback_transitions(&tester), 0, "{variant:?}");
+                    assert_eq!(variant.fallback_transitions(tester), 0, "{variant:?}");
 
-                    assert_eq!(found(&tester, "push"), 0);
-                    assert_eq!(found(&tester, "push c"), 1);
-                    assert_eq!(found(&tester, "page c"), 1);
+                    assert_eq!(found(tester, "push"), 0);
+                    assert_eq!(found(tester, "push c"), 1);
+                    assert_eq!(found(tester, "page c"), 1);
 
                     // Start another system pop gesture, before the first has finished
                     // animating out.
-                    start_back_gesture(&tester, Offset::new(5.0, 300.0), 0.0);
-                    tester.pump(Duration::ZERO);
+                    start_back_gesture(tester, Offset::new(5.0, 300.0), 0.0);
+                    tester.pump();
 
                     assert_eq!(
-                        variant.predictive_back_transitions(&tester),
+                        variant.predictive_back_transitions(tester),
                         2,
                         "{variant:?}"
                     );
-                    assert_eq!(variant.fallback_transitions(&tester), 0, "{variant:?}");
+                    assert_eq!(variant.fallback_transitions(tester), 0, "{variant:?}");
 
                     // Drag the system back gesture far enough to commit.
-                    update_back_gesture(&tester, None, 0.35);
-                    tester.pump(Duration::ZERO);
+                    update_back_gesture(tester, None, 0.35);
+                    tester.pump();
 
                     assert_eq!(
-                        variant.predictive_back_transitions(&tester),
+                        variant.predictive_back_transitions(tester),
                         3,
                         "{variant:?}"
                     );
-                    assert_eq!(variant.fallback_transitions(&tester), 0, "{variant:?}");
+                    assert_eq!(variant.fallback_transitions(tester), 0, "{variant:?}");
 
                     // Commit the system back gesture.
-                    commit_back_gesture(&tester);
+                    commit_back_gesture(tester);
                     tester.pump_and_settle();
 
                     assert_eq!(
-                        variant.predictive_back_transitions(&tester),
+                        variant.predictive_back_transitions(tester),
                         0,
                         "{variant:?}"
                     );
-                    assert_eq!(variant.fallback_transitions(&tester), 1, "{variant:?}");
+                    assert_eq!(variant.fallback_transitions(tester), 1, "{variant:?}");
 
-                    assert_eq!(found(&tester, "push b"), 1);
-                    assert_eq!(found(&tester, "push c"), 0);
-                    assert_eq!(found(&tester, "page c"), 0);
+                    assert_eq!(found(tester, "push b"), 1);
+                    assert_eq!(found(tester, "push c"), 0);
+                    assert_eq!(found(tester, "page c"), 0);
                 });
             }
         }
@@ -1823,43 +1813,42 @@ mod tests {
     #[test]
     fn a_predictive_back_gesture_pops_the_route_on_every_platform() {
         for platform in ALL_PLATFORMS {
-            with_main_thread_stack(|| {
-                let mut tester = tester_on(platform);
-                pump_app(&mut tester, ThemeData::new, |app| app.routes(push_routes()));
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                pump_app(tester, ThemeData::new, |app| app.routes(push_routes()));
 
-                assert_eq!(found(&tester, "push"), 1);
-                assert_eq!(found(&tester, "page b"), 0);
+                assert_eq!(found(tester, "push"), 1);
+                assert_eq!(found(tester, "page b"), 0);
 
-                tap_text(&mut tester, "push");
+                tap_text(tester, "push");
                 tester.pump_and_settle();
 
-                assert_eq!(found(&tester, "push"), 0);
-                assert_eq!(found(&tester, "page b"), 1);
+                assert_eq!(found(tester, "push"), 0);
+                assert_eq!(found(tester, "page b"), 1);
 
                 // Start a system pop gesture.
-                start_back_gesture(&tester, Offset::new(5.0, 300.0), 0.0);
-                tester.pump(Duration::ZERO);
+                start_back_gesture(tester, Offset::new(5.0, 300.0), 0.0);
+                tester.pump();
 
-                assert_eq!(found(&tester, "push"), 0);
-                assert_eq!(found(&tester, "page b"), 1);
+                assert_eq!(found(tester, "push"), 0);
+                assert_eq!(found(tester, "page b"), 1);
 
                 // Drag the system back gesture far enough to commit.
-                update_back_gesture(&tester, None, 0.35);
+                update_back_gesture(tester, None, 0.35);
                 tester.pump_and_settle();
 
                 match platform {
                     // Shows both pages while doing the "peek" predictive back transition.
-                    TargetPlatform::Android => assert_eq!(found(&tester, "push"), 1),
+                    TargetPlatform::Android => assert_eq!(found(tester, "push"), 1),
                     // Does no transition yet; still shows page b only.
-                    _ => assert_eq!(found(&tester, "push"), 0, "{platform:?}"),
+                    _ => assert_eq!(found(tester, "push"), 0, "{platform:?}"),
                 }
-                assert_eq!(found(&tester, "page b"), 1);
+                assert_eq!(found(tester, "page b"), 1);
 
                 // Commit the system back gesture.
-                commit_back_gesture(&tester);
+                commit_back_gesture(tester);
                 tester.pump_and_settle();
-                assert_eq!(found(&tester, "push"), 1);
-                assert_eq!(found(&tester, "page b"), 0);
+                assert_eq!(found(tester, "push"), 1);
+                assert_eq!(found(tester, "page b"), 0);
             });
         }
     }
@@ -1867,9 +1856,8 @@ mod tests {
     #[test]
     fn predictive_back_is_the_default_on_android() {
         for platform in ALL_PLATFORMS {
-            with_main_thread_stack(|| {
-                let mut tester = tester_on(platform);
-                pump_app(&mut tester, ThemeData::new, |app| app.routes(push_routes()));
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
+                pump_app(tester, ThemeData::new, |app| app.routes(push_routes()));
 
                 let push = *tester.find_text("push").first().expect("push");
                 let builder = {
@@ -1896,86 +1884,83 @@ mod tests {
     #[test]
     fn predictive_back_falls_back_to_the_fade_forwards_transition() {
         for platform in ALL_PLATFORMS {
-            with_main_thread_stack(|| {
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
                 let variant = Variant::SharedElement;
-                let mut tester = tester_on(platform);
-                pump_app(
-                    &mut tester,
-                    theme_for_every_platform(variant.builder()),
-                    |app| app.routes(push_routes()),
-                );
+                pump_app(tester, theme_for_every_platform(variant.builder()), |app| {
+                    app.routes(push_routes())
+                });
 
-                assert_eq!(found(&tester, "push"), 1);
-                assert_eq!(found(&tester, "page b"), 0);
+                assert_eq!(found(tester, "push"), 1);
+                assert_eq!(found(tester, "page b"), 0);
 
-                tap_text(&mut tester, "push");
+                tap_text(tester, "push");
                 tester.pump_and_settle();
 
-                assert_eq!(found(&tester, "push"), 0);
-                assert_eq!(found(&tester, "page b"), 1);
+                assert_eq!(found(tester, "push"), 0);
+                assert_eq!(found(tester, "page b"), 1);
 
                 // Only Android sends system back gestures.
                 let android = platform == TargetPlatform::Android;
                 if android {
-                    start_back_gesture(&tester, Offset::new(5.0, 300.0), 0.0);
-                    tester.pump(Duration::ZERO);
+                    start_back_gesture(tester, Offset::new(5.0, 300.0), 0.0);
+                    tester.pump();
                 }
 
                 assert_eq!(
-                    variant.predictive_back_transitions(&tester),
+                    variant.predictive_back_transitions(tester),
                     usize::from(android)
                 );
-                assert_eq!(variant.fallback_transitions(&tester), usize::from(!android));
+                assert_eq!(variant.fallback_transitions(tester), usize::from(!android));
 
-                assert_eq!(found(&tester, "push"), 0);
-                assert_eq!(found(&tester, "page b"), 1);
+                assert_eq!(found(tester, "push"), 0);
+                assert_eq!(found(tester, "page b"), 1);
 
                 // Drag the system back gesture far enough to commit.
                 if android {
-                    update_back_gesture(&tester, None, 0.35);
+                    update_back_gesture(tester, None, 0.35);
                     tester.pump_and_settle();
-                    assert_eq!(found(&tester, "push"), 1);
+                    assert_eq!(found(tester, "push"), 1);
                 } else {
-                    assert_eq!(found(&tester, "push"), 0);
+                    assert_eq!(found(tester, "push"), 0);
                 }
 
-                assert_eq!(found(&tester, "page b"), 1);
+                assert_eq!(found(tester, "page b"), 1);
 
                 if android {
-                    assert_eq!(variant.predictive_back_transitions(&tester), 2);
-                    assert_eq!(variant.fallback_transitions(&tester), 0);
+                    assert_eq!(variant.predictive_back_transitions(tester), 2);
+                    assert_eq!(variant.fallback_transitions(tester), 0);
                 } else {
-                    assert_eq!(variant.predictive_back_transitions(&tester), 0);
-                    assert_eq!(variant.fallback_transitions(&tester), 1);
+                    assert_eq!(variant.predictive_back_transitions(tester), 0);
+                    assert_eq!(variant.fallback_transitions(tester), 1);
                 }
 
                 if android {
                     // Commit the system back gesture on Android.
-                    commit_back_gesture(&tester);
+                    commit_back_gesture(tester);
                 } else {
                     // On other platforms, send a one-off system pop.
-                    pop_route(&tester);
+                    pop_route(tester);
                 }
-                tester.pump(Duration::ZERO);
+                tester.pump();
 
-                assert_eq!(found(&tester, "push"), 1);
-                assert_eq!(found(&tester, "page b"), 1);
+                assert_eq!(found(tester, "push"), 1);
+                assert_eq!(found(tester, "page b"), 1);
 
                 if android {
-                    assert_eq!(variant.predictive_back_transitions(&tester), 2);
-                    assert_eq!(variant.fallback_transitions(&tester), 0);
+                    assert_eq!(variant.predictive_back_transitions(tester), 2);
+                    assert_eq!(variant.fallback_transitions(tester), 0);
                 } else {
-                    assert_eq!(variant.predictive_back_transitions(&tester), 0);
-                    assert_eq!(variant.fallback_transitions(&tester), 2);
+                    assert_eq!(variant.predictive_back_transitions(tester), 0);
+                    assert_eq!(variant.fallback_transitions(tester), 2);
                 }
 
                 tester.pump_and_settle();
 
-                assert_eq!(found(&tester, "push"), 1);
-                assert_eq!(found(&tester, "page b"), 0);
+                assert_eq!(found(tester, "push"), 1);
+                assert_eq!(found(tester, "page b"), 0);
 
-                assert_eq!(variant.predictive_back_transitions(&tester), 0);
-                assert_eq!(variant.fallback_transitions(&tester), 1);
+                assert_eq!(variant.predictive_back_transitions(tester), 0);
+                assert_eq!(variant.fallback_transitions(tester), 1);
             });
         }
     }
@@ -1983,24 +1968,23 @@ mod tests {
     #[test]
     fn the_predictive_back_builder_falls_back_with_its_fallback_color() {
         for platform in ALL_PLATFORMS {
-            with_main_thread_stack(|| {
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
                 let variant = Variant::SharedElement;
-                let mut tester = tester_on(platform);
                 pump_app(
-                    &mut tester,
+                    tester,
                     theme_for_every_platform(PageTransitionsBuilderRef::new(
                         PredictiveBackPageTransitionsBuilder::new().fallback_color(Colors::BLACK),
                     )),
                     |app| app.routes(push_routes()),
                 );
 
-                assert_eq!(found(&tester, "push"), 1);
-                assert_eq!(found(&tester, "page b"), 0);
-                assert_eq!(variant.predictive_back_transitions(&tester), 0);
-                assert_eq!(variant.fallback_transitions(&tester), 1);
+                assert_eq!(found(tester, "push"), 1);
+                assert_eq!(found(tester, "page b"), 0);
+                assert_eq!(variant.predictive_back_transitions(tester), 0);
+                assert_eq!(variant.fallback_transitions(tester), 1);
 
-                tap_text(&mut tester, "push");
-                tester.pump(Duration::from_millis(400));
+                tap_text(tester, "push");
+                tester.pump_by(Duration::from_millis(400));
 
                 let colored_box = *tester
                     .find_by_type::<ColoredBox>()
@@ -2021,11 +2005,10 @@ mod tests {
     #[test]
     fn the_predictive_back_fullscreen_builder_falls_back_with_its_fallback_color() {
         for platform in ALL_PLATFORMS {
-            with_main_thread_stack(|| {
+            test_widgets_variant(TargetPlatformVariant::only(platform), |tester| {
                 let variant = Variant::Fullscreen;
-                let mut tester = tester_on(platform);
                 pump_app(
-                    &mut tester,
+                    tester,
                     theme_for_every_platform(PageTransitionsBuilderRef::new(
                         PredictiveBackFullscreenPageTransitionsBuilder::new()
                             .fallback_color(Colors::BLACK),
@@ -2033,15 +2016,15 @@ mod tests {
                     |app| app.routes(push_routes()),
                 );
 
-                assert_eq!(found(&tester, "push"), 1);
-                assert_eq!(found(&tester, "page b"), 0);
-                assert_eq!(variant.predictive_back_transitions(&tester), 0);
-                assert_eq!(variant.fallback_transitions(&tester), 1);
+                assert_eq!(found(tester, "push"), 1);
+                assert_eq!(found(tester, "page b"), 0);
+                assert_eq!(variant.predictive_back_transitions(tester), 0);
+                assert_eq!(variant.fallback_transitions(tester), 1);
 
                 // Pump till animation is half-way through.
-                tap_text(&mut tester, "push");
-                tester.pump(Duration::ZERO);
-                tester.pump(Duration::from_millis(125));
+                tap_text(tester, "push");
+                tester.pump();
+                tester.pump_by(Duration::from_millis(125));
 
                 // The entering page's zoom transition paints the scrim.
                 let enter = *tester
@@ -2078,10 +2061,9 @@ mod tests {
     /// snapshot each time: (push exiting, push entering, pop exiting, pop entering).
     fn push_and_pop_snapshotting(builder: PredictiveBackPageTransitionsBuilder) -> [bool; 4] {
         let mut result = [false; 4];
-        with_main_thread_stack(|| {
-            let mut tester = tester_on(TargetPlatform::Android);
+        test_widgets(|tester| {
             pump_app(
-                &mut tester,
+                tester,
                 move |app| {
                     ThemeData::builder()
                         .page_transitions_theme(PageTransitionsTheme::new().with_builders(
@@ -2134,18 +2116,18 @@ mod tests {
             );
 
             navigator.push_named(&mut tester.cell.borrow_mut(), "/2", None);
-            tester.pump(Duration::ZERO);
-            tester.pump(partway);
-            assert!(Variant::SharedElement.fallback_transitions(&tester) > 0);
-            result[0] = is_snapshotting(&tester, "Page 1");
-            result[1] = is_snapshotting(&tester, "Page 2");
+            tester.pump();
+            tester.pump_by(partway);
+            assert!(Variant::SharedElement.fallback_transitions(tester) > 0);
+            result[0] = is_snapshotting(tester, "Page 1");
+            result[1] = is_snapshotting(tester, "Page 2");
             tester.pump_and_settle();
 
             navigator.pop(&mut tester.cell.borrow_mut(), None);
-            tester.pump(Duration::ZERO);
-            tester.pump(partway);
-            result[2] = is_snapshotting(&tester, "Page 2");
-            result[3] = is_snapshotting(&tester, "Page 1");
+            tester.pump();
+            tester.pump_by(partway);
+            result[2] = is_snapshotting(tester, "Page 2");
+            result[3] = is_snapshotting(tester, "Page 1");
             tester.pump_and_settle();
         });
         result
@@ -2171,15 +2153,12 @@ mod tests {
 
     #[test]
     fn a_button_back_event_starts_no_predictive_back_gesture() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let variant = Variant::SharedElement;
-            let mut tester = tester_on(TargetPlatform::Android);
-            pump_app(
-                &mut tester,
-                theme_for_every_platform(variant.builder()),
-                |app| app.routes(push_routes()),
-            );
-            tap_text(&mut tester, "push");
+            pump_app(tester, theme_for_every_platform(variant.builder()), |app| {
+                app.routes(push_routes())
+            });
+            tap_text(tester, "push");
             tester.pump_and_settle();
 
             let handled = {
@@ -2187,11 +2166,11 @@ mod tests {
                 let event = PredictiveBackEvent::new(None, 0.0, SwipeEdge::Left);
                 WidgetsBinding::instance(&mut app).handle_start_back_gesture(&mut app, event)
             };
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             assert!(!handled);
-            assert_eq!(variant.predictive_back_transitions(&tester), 0);
-            assert_eq!(variant.fallback_transitions(&tester), 1);
+            assert_eq!(variant.predictive_back_transitions(tester), 0);
+            assert_eq!(variant.fallback_transitions(tester), 1);
         });
     }
 }

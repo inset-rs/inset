@@ -1636,11 +1636,11 @@ impl MaterialLocalizations for DefaultMaterialLocalizations {
 #[cfg(test)]
 pub(crate) mod tests {
     use std::cell::RefCell;
+    use waft_widgets::testing::test_widgets;
 
     use waft_widgets::{Builder, DefaultWidgetsLocalizations, IntoWidget, SizedBox, WidgetRef};
 
     use super::*;
-    use crate::test_support::{build, test_cell};
 
     /// `child` under the US English widgets and Material localizations, as `MaterialApp`
     /// provides them.
@@ -2008,18 +2008,19 @@ pub(crate) mod tests {
     // localizations.
     #[test]
     fn of_finds_the_strings_through_a_localizations_ancestor() {
-        let cell = test_cell();
-        let seen = Rc::new(RefCell::new(None));
-        let probe = Builder::new({
-            let seen = Rc::clone(&seen);
-            move |app, context| {
-                *seen.borrow_mut() =
-                    Some(<dyn MaterialLocalizations>::of(app, context).back_button_tooltip());
-                SizedBox::shrink().into_widget()
-            }
+        test_widgets(|tester| {
+            let seen = Rc::new(RefCell::new(None));
+            let probe = Builder::new({
+                let seen = Rc::clone(&seen);
+                move |app, context| {
+                    *seen.borrow_mut() =
+                        Some(<dyn MaterialLocalizations>::of(app, context).back_button_tooltip());
+                    SizedBox::shrink().into_widget()
+                }
+            });
+            tester.pump_widget(us_english(probe));
+            assert_eq!(seen.borrow().as_deref(), Some("Back"));
         });
-        build(&cell, us_english(probe));
-        assert_eq!(seen.borrow().as_deref(), Some("Back"));
     }
 
     // localizations_test.dart 'MaterialLocalizations.of throws', the context without
@@ -2027,11 +2028,12 @@ pub(crate) mod tests {
     #[test]
     #[should_panic(expected = "No MaterialLocalizations found")]
     fn of_panics_without_a_localizations_ancestor() {
-        let cell = test_cell();
-        let probe = Builder::new(|app, context| {
-            <dyn MaterialLocalizations>::of(app, context);
-            SizedBox::shrink().into_widget()
+        test_widgets(|tester| {
+            let probe = Builder::new(|app, context| {
+                <dyn MaterialLocalizations>::of(app, context);
+                SizedBox::shrink().into_widget()
+            });
+            tester.pump_widget(probe.into_widget());
         });
-        build(&cell, probe.into_widget());
     }
 }

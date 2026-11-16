@@ -294,9 +294,10 @@ mod tests {
     use waft_painting::ShapeBorder;
     use waft_painting::{BorderRadiusGeometry, BorderSide, RoundedRectangleBorder};
 
+    use waft_widgets::testing::test_widgets;
+
     use super::*;
     use crate::colors::Colors;
-    use crate::test_support::{test_cell, with_main_thread_stack};
     use crate::theme_data::ThemeData;
 
     fn rounded(radius: f64) -> RoundedRectangleBorder {
@@ -405,9 +406,8 @@ mod tests {
 
     #[test]
     fn theme_data_holds_the_bottom_sheet_theme() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
-            let app = cell.borrow();
+        test_widgets(|tester| {
+            let app = tester.cell.borrow();
             let theme = ThemeData::new(&app);
             assert_eq!(theme.bottom_sheet_theme, BottomSheetThemeData::new());
 

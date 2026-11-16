@@ -210,27 +210,13 @@ impl StatelessWidget for CupertinoSpellCheckSuggestionsToolbar {
 
 #[cfg(test)]
 mod tests {
-    use std::rc::Rc;
-
     use waft_embedder::{Offset, Size};
-    use waft_foundation::AppCell;
     use waft_widgets::{Center, GlobalKey};
+
+    use waft_widgets::testing::test_widgets;
 
     use super::*;
     use crate::app::CupertinoApp;
-    use crate::test_support::{build, test_cell};
-
-    /// An iOS app with the app-wide fonts the toolbar's labels shape with.
-    fn app_with_fonts() -> Rc<AppCell> {
-        let cell = test_cell();
-        let mut app = cell.borrow_mut();
-        let binding = waft_painting::PaintingBinding::instance(&mut app);
-        binding.install_fonts(&mut app, |fonts| {
-            fonts.add_source(valo_system_fonts::SystemFonts::load());
-        });
-        drop(app);
-        cell
-    }
 
     fn button_items(suggestions: &[&str]) -> Vec<ContextMenuButtonItem> {
         suggestions
@@ -244,18 +230,18 @@ mod tests {
     /// Dart's `more than three suggestions throws an error`, its first half: three build.
     #[test]
     fn three_suggestions_build() {
-        let cell = app_with_fonts();
-        build(
-            &cell,
-            CupertinoApp::new()
-                .home(
-                    Center::new().child(CupertinoSpellCheckSuggestionsToolbar::new(
-                        TextSelectionToolbarAnchors::new(Offset::ZERO),
-                        button_items(&["hello", "yellow", "yell"]),
-                    )),
-                )
-                .into_widget(),
-        );
+        test_widgets(|tester| {
+            tester.pump_widget(
+                CupertinoApp::new()
+                    .home(
+                        Center::new().child(CupertinoSpellCheckSuggestionsToolbar::new(
+                            TextSelectionToolbarAnchors::new(Offset::ZERO),
+                            button_items(&["hello", "yellow", "yell"]),
+                        )),
+                    )
+                    .into_widget(),
+            );
+        });
     }
 
     /// Dart's `more than three suggestions throws an error`, its second half.
@@ -270,33 +256,24 @@ mod tests {
 
     #[test]
     fn the_toolbar_does_not_panic_at_zero_area() {
-        let cell = app_with_fonts();
-        let key = GlobalKey::new();
-        build(
-            &cell,
-            CupertinoApp::new()
-                .home(
-                    Center::new().child(
-                        SizedBox::shrink().child(
-                            CupertinoSpellCheckSuggestionsToolbar::new(
-                                TextSelectionToolbarAnchors::new(Offset::new(1.0, 1.0)),
-                                Vec::new(),
-                            )
-                            .key(key.clone().into()),
+        test_widgets(|tester| {
+            let key = GlobalKey::new();
+            tester.pump_widget(
+                CupertinoApp::new()
+                    .home(
+                        Center::new().child(
+                            SizedBox::shrink().child(
+                                CupertinoSpellCheckSuggestionsToolbar::new(
+                                    TextSelectionToolbarAnchors::new(Offset::new(1.0, 1.0)),
+                                    Vec::new(),
+                                )
+                                .key(key.clone().into()),
+                            ),
                         ),
-                    ),
-                )
-                .into_widget(),
-        );
-        let app = cell.borrow();
-        let size = key
-            .current_context(&app)
-            .expect("the toolbar is mounted")
-            .find_render_object(&app)
-            .expect("the toolbar is laid out")
-            .as_box()
-            .expect("a box")
-            .size(&app);
-        assert_eq!(size, Size::ZERO);
+                    )
+                    .into_widget(),
+            );
+            assert_eq!(tester.size_of(&key), Size::ZERO);
+        });
     }
 }

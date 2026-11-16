@@ -1531,18 +1531,11 @@ mod tests {
     use waft_embedder::{Offset, Rect, TargetPlatform};
     use waft_widgets::{Builder, Directionality, GestureDetector, GlobalKey, SizedBox};
 
+    use waft_widgets::testing::{WidgetTester, test_widgets};
+
     use super::*;
     use crate::scaffold::{Scaffold, ScaffoldFeatureController};
-    use crate::test_support::{AhemText, WidgetTester, material_app, with_main_thread_stack};
-
-    /// A tester with the OS fonts, which the snack bar measures its action label with, and
-    /// the Material icons.
-    fn tester() -> WidgetTester {
-        let tester = WidgetTester::on(TargetPlatform::Android);
-        tester.install_fonts();
-        crate::icons::install_material_icon_font(&mut tester.cell.borrow_mut());
-        tester
-    }
+    use crate::test_support::material_app;
 
     /// Dart's `ThemeData()`.
     fn m3(app: &App) -> ThemeData {
@@ -1593,18 +1586,16 @@ mod tests {
         tester.tap(center, 1);
     }
 
-    /// Dart's `find.text(text)`, counted over `Text`s and [`AhemText`]s.
+    /// Dart's `find.text(text)`, counted over `Text`s.
     fn count_text(tester: &WidgetTester, text: &str) -> usize {
-        tester.find_text(text).len() + tester.find_ahem_text(text).len()
+        tester.find_text(text).len()
     }
 
-    /// Dart's `tester.getRect(find.text(text))`, over `Text`s and [`AhemText`]s.
+    /// Dart's `tester.getRect(find.text(text))`.
     fn text_rect(tester: &WidgetTester, text: &str) -> Rect {
-        let element = tester
+        let element = *tester
             .find_text(text)
-            .into_iter()
-            .chain(tester.find_ahem_text(text))
-            .next()
+            .first()
             .expect("a Text showing the text");
         tester.global_rect(tester.render_box_of(element))
     }
@@ -1638,12 +1629,12 @@ mod tests {
         }))
     }
 
-    /// Dart's `tester.tap(find.text('X')); tester.pump(); tester.pump(750ms)`: shows the snack
+    /// Dart's `tester.tap(find.text('X')); tester.pump(); tester.pump_by(750ms)`: shows the snack
     /// bar and runs its entrance to the end.
     fn tap_x_and_settle_entrance(tester: &mut WidgetTester) {
         tap_text(tester, "X");
-        tester.pump(Duration::ZERO); // start animation
-        tester.pump(ms(750));
+        tester.pump(); // start animation
+        tester.pump_by(ms(750));
     }
 
     /// Dart's `find.descendant(of: find.byType(SnackBar), matching: find.byType(Material))`,
@@ -1685,46 +1676,44 @@ mod tests {
     // Dart: 'SnackBar control test'.
     #[test]
     fn a_snack_bar_shows_on_tap_and_leaves_after_its_duration() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const HELLO_SNACK_BAR: &str = "Hello SnackBar";
             let tap_target = GlobalKey::new();
-            let mut tester = tester();
             let home = tap_target_scaffold(&tap_target, |app, context| {
                 show(
                     app,
                     context,
-                    SnackBar::new(AhemText::new(HELLO_SNACK_BAR)).duration(Duration::from_secs(2)),
+                    SnackBar::new(Text::new(HELLO_SNACK_BAR)).duration(Duration::from_secs(2)),
                 );
             });
-            pump_app(&mut tester, m3, home.into_widget());
-            assert_eq!(count_text(&tester, HELLO_SNACK_BAR), 0);
-            tap_key(&mut tester, &tap_target);
-            assert_eq!(count_text(&tester, HELLO_SNACK_BAR), 0);
-            tester.pump(Duration::ZERO); // schedule animation
-            assert_eq!(count_text(&tester, HELLO_SNACK_BAR), 1);
-            tester.pump(Duration::ZERO); // begin animation
-            assert_eq!(count_text(&tester, HELLO_SNACK_BAR), 1);
-            tester.pump(ms(750)); // 0.75s // animation last frame; two second timer starts here
-            assert_eq!(count_text(&tester, HELLO_SNACK_BAR), 1);
-            tester.pump(ms(750)); // 1.50s
-            assert_eq!(count_text(&tester, HELLO_SNACK_BAR), 1);
-            tester.pump(ms(750)); // 2.25s
-            assert_eq!(count_text(&tester, HELLO_SNACK_BAR), 1);
-            tester.pump(ms(750)); // 3.00s // timer triggers to dismiss snackbar, reverse animation is scheduled
-            tester.pump(Duration::ZERO); // begin animation
-            assert_eq!(count_text(&tester, HELLO_SNACK_BAR), 1); // frame 0 of dismiss animation
-            tester.pump(ms(750)); // 3.75s // last frame of animation, snackbar removed from build
-            assert_eq!(count_text(&tester, HELLO_SNACK_BAR), 0);
+            pump_app(tester, m3, home.into_widget());
+            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 0);
+            tap_key(tester, &tap_target);
+            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 0);
+            tester.pump(); // schedule animation
+            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 1);
+            tester.pump(); // begin animation
+            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 1);
+            tester.pump_by(ms(750)); // 0.75s // animation last frame; two second timer starts here
+            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 1);
+            tester.pump_by(ms(750)); // 1.50s
+            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 1);
+            tester.pump_by(ms(750)); // 2.25s
+            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 1);
+            tester.pump_by(ms(750)); // 3.00s // timer triggers to dismiss snackbar, reverse animation is scheduled
+            tester.pump(); // begin animation
+            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 1); // frame 0 of dismiss animation
+            tester.pump_by(ms(750)); // 3.75s // last frame of animation, snackbar removed from build
+            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 0);
         });
     }
 
     // Dart: 'SnackBar twice test'.
     #[test]
     fn a_second_snack_bar_waits_for_the_first_to_leave() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let snack_bar_count = Rc::new(Cell::new(0));
             let tap_target = GlobalKey::new();
-            let mut tester = tester();
             let home = tap_target_scaffold(&tap_target, {
                 let snack_bar_count = Rc::clone(&snack_bar_count);
                 move |app, context| {
@@ -1732,61 +1721,60 @@ mod tests {
                     show(
                         app,
                         context,
-                        SnackBar::new(AhemText::new(&format!("bar{}", snack_bar_count.get())))
+                        SnackBar::new(Text::new(format!("bar{}", snack_bar_count.get())))
                             .duration(Duration::from_secs(2)),
                     );
                 }
             });
-            pump_app(&mut tester, m3, home.into_widget());
+            pump_app(tester, m3, home.into_widget());
             let expect = |tester: &WidgetTester, bar1: usize, bar2: usize| {
                 assert_eq!(count_text(tester, "bar1"), bar1);
                 assert_eq!(count_text(tester, "bar2"), bar2);
             };
-            expect(&tester, 0, 0);
-            tap_key(&mut tester, &tap_target); // queue bar1
-            tap_key(&mut tester, &tap_target); // queue bar2
-            expect(&tester, 0, 0);
-            tester.pump(Duration::ZERO); // schedule animation for bar1
-            expect(&tester, 1, 0);
-            tester.pump(Duration::ZERO); // begin animation
-            expect(&tester, 1, 0);
-            tester.pump(ms(750)); // 0.75s // animation last frame; two second timer starts here
-            expect(&tester, 1, 0);
-            tester.pump(ms(750)); // 1.50s
-            expect(&tester, 1, 0);
-            tester.pump(ms(750)); // 2.25s
-            expect(&tester, 1, 0);
-            tester.pump(ms(750)); // 3.00s // timer triggers to dismiss snackbar, reverse animation is scheduled
-            tester.pump(Duration::ZERO); // begin animation
-            expect(&tester, 1, 0);
-            tester.pump(ms(750)); // 3.75s // last frame of animation, snackbar removed from build, new snack bar put in its place
-            expect(&tester, 0, 1);
-            tester.pump(Duration::ZERO); // begin animation
-            expect(&tester, 0, 1);
-            tester.pump(ms(750)); // 4.50s // animation last frame; two second timer starts here
-            expect(&tester, 0, 1);
-            tester.pump(ms(750)); // 5.25s
-            expect(&tester, 0, 1);
-            tester.pump(ms(750)); // 6.00s
-            expect(&tester, 0, 1);
-            tester.pump(ms(750)); // 6.75s // timer triggers to dismiss snackbar, reverse animation is scheduled
-            tester.pump(Duration::ZERO); // begin animation
-            expect(&tester, 0, 1);
-            tester.pump(ms(750)); // 7.50s // last frame of animation, snackbar removed from build, new snack bar put in its place
-            expect(&tester, 0, 0);
+            expect(tester, 0, 0);
+            tap_key(tester, &tap_target); // queue bar1
+            tap_key(tester, &tap_target); // queue bar2
+            expect(tester, 0, 0);
+            tester.pump(); // schedule animation for bar1
+            expect(tester, 1, 0);
+            tester.pump(); // begin animation
+            expect(tester, 1, 0);
+            tester.pump_by(ms(750)); // 0.75s // animation last frame; two second timer starts here
+            expect(tester, 1, 0);
+            tester.pump_by(ms(750)); // 1.50s
+            expect(tester, 1, 0);
+            tester.pump_by(ms(750)); // 2.25s
+            expect(tester, 1, 0);
+            tester.pump_by(ms(750)); // 3.00s // timer triggers to dismiss snackbar, reverse animation is scheduled
+            tester.pump(); // begin animation
+            expect(tester, 1, 0);
+            tester.pump_by(ms(750)); // 3.75s // last frame of animation, snackbar removed from build, new snack bar put in its place
+            expect(tester, 0, 1);
+            tester.pump(); // begin animation
+            expect(tester, 0, 1);
+            tester.pump_by(ms(750)); // 4.50s // animation last frame; two second timer starts here
+            expect(tester, 0, 1);
+            tester.pump_by(ms(750)); // 5.25s
+            expect(tester, 0, 1);
+            tester.pump_by(ms(750)); // 6.00s
+            expect(tester, 0, 1);
+            tester.pump_by(ms(750)); // 6.75s // timer triggers to dismiss snackbar, reverse animation is scheduled
+            tester.pump(); // begin animation
+            expect(tester, 0, 1);
+            tester.pump_by(ms(750)); // 7.50s // last frame of animation, snackbar removed from build, new snack bar put in its place
+            expect(tester, 0, 0);
         });
     }
 
     // Dart: 'SnackBar cancel test'.
     #[test]
     fn closing_a_controller_hides_its_snack_bar_before_its_timeout() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let snack_bar_count = Rc::new(Cell::new(0));
             let time = Rc::new(Cell::new(0));
             let last_controller: Rc<RefCell<Option<Rc<SnackBarController>>>> =
                 Rc::new(RefCell::new(None));
             let tap_target = GlobalKey::new();
-            let mut tester = tester();
             let home = tap_target_scaffold(&tap_target, {
                 let snack_bar_count = Rc::clone(&snack_bar_count);
                 let time = Rc::clone(&time);
@@ -1796,57 +1784,57 @@ mod tests {
                     let controller = show(
                         app,
                         context,
-                        SnackBar::new(AhemText::new(&format!("bar{}", snack_bar_count.get())))
+                        SnackBar::new(Text::new(format!("bar{}", snack_bar_count.get())))
                             .duration(Duration::from_secs(time.get())),
                     );
                     *last_controller.borrow_mut() = Some(controller);
                 }
             });
-            pump_app(&mut tester, m3, home.into_widget());
+            pump_app(tester, m3, home.into_widget());
             let expect = |tester: &WidgetTester, bar1: usize, bar2: usize| {
                 assert_eq!(count_text(tester, "bar1"), bar1);
                 assert_eq!(count_text(tester, "bar2"), bar2);
             };
-            expect(&tester, 0, 0);
+            expect(tester, 0, 0);
             time.set(1000);
-            tap_key(&mut tester, &tap_target); // queue bar1
+            tap_key(tester, &tap_target); // queue bar1
             let first_controller = last_controller.borrow().clone().expect("shown");
             time.set(2);
-            tap_key(&mut tester, &tap_target); // queue bar2
-            expect(&tester, 0, 0);
-            tester.pump(Duration::ZERO); // schedule animation for bar1
-            expect(&tester, 1, 0);
-            tester.pump(Duration::ZERO); // begin animation
-            expect(&tester, 1, 0);
-            tester.pump(ms(750)); // 0.75s // animation last frame; two second timer starts here
-            expect(&tester, 1, 0);
-            tester.pump(ms(750)); // 1.50s
-            expect(&tester, 1, 0);
-            tester.pump(ms(750)); // 2.25s
-            expect(&tester, 1, 0);
-            tester.pump(ms(10000)); // 12.25s
-            expect(&tester, 1, 0);
+            tap_key(tester, &tap_target); // queue bar2
+            expect(tester, 0, 0);
+            tester.pump(); // schedule animation for bar1
+            expect(tester, 1, 0);
+            tester.pump(); // begin animation
+            expect(tester, 1, 0);
+            tester.pump_by(ms(750)); // 0.75s // animation last frame; two second timer starts here
+            expect(tester, 1, 0);
+            tester.pump_by(ms(750)); // 1.50s
+            expect(tester, 1, 0);
+            tester.pump_by(ms(750)); // 2.25s
+            expect(tester, 1, 0);
+            tester.pump_by(ms(10000)); // 12.25s
+            expect(tester, 1, 0);
 
             (first_controller.close)(&mut tester.cell.borrow_mut()); // snackbar is manually dismissed
 
-            tester.pump(ms(750)); // 13.00s // reverse animation is scheduled
-            tester.pump(Duration::ZERO); // begin animation
-            expect(&tester, 1, 0);
-            tester.pump(ms(750)); // 13.75s // last frame of animation, snackbar removed from build, new snack bar put in its place
-            expect(&tester, 0, 1);
-            tester.pump(Duration::ZERO); // begin animation
-            expect(&tester, 0, 1);
-            tester.pump(ms(750)); // 14.50s // animation last frame; two second timer starts here
-            expect(&tester, 0, 1);
-            tester.pump(ms(750)); // 15.25s
-            expect(&tester, 0, 1);
-            tester.pump(ms(750)); // 16.00s
-            expect(&tester, 0, 1);
-            tester.pump(ms(750)); // 16.75s // timer triggers to dismiss snackbar, reverse animation is scheduled
-            tester.pump(Duration::ZERO); // begin animation
-            expect(&tester, 0, 1);
-            tester.pump(ms(750)); // 17.50s // last frame of animation, snackbar removed from build, new snack bar put in its place
-            expect(&tester, 0, 0);
+            tester.pump_by(ms(750)); // 13.00s // reverse animation is scheduled
+            tester.pump(); // begin animation
+            expect(tester, 1, 0);
+            tester.pump_by(ms(750)); // 13.75s // last frame of animation, snackbar removed from build, new snack bar put in its place
+            expect(tester, 0, 1);
+            tester.pump(); // begin animation
+            expect(tester, 0, 1);
+            tester.pump_by(ms(750)); // 14.50s // animation last frame; two second timer starts here
+            expect(tester, 0, 1);
+            tester.pump_by(ms(750)); // 15.25s
+            expect(tester, 0, 1);
+            tester.pump_by(ms(750)); // 16.00s
+            expect(tester, 0, 1);
+            tester.pump_by(ms(750)); // 16.75s // timer triggers to dismiss snackbar, reverse animation is scheduled
+            tester.pump(); // begin animation
+            expect(tester, 0, 1);
+            tester.pump_by(ms(750)); // 17.50s // last frame of animation, snackbar removed from build, new snack bar put in its place
+            expect(tester, 0, 0);
         });
     }
 
@@ -1885,12 +1873,11 @@ mod tests {
     // Dart: 'SnackBar dismiss test', with `_testSnackBarDismiss`.
     #[test]
     fn a_snack_bar_is_dismissed_by_a_drag_in_each_of_its_directions() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let tap_target = GlobalKey::new();
             let dismiss_direction = Rc::new(Cell::new(DismissDirection::Down));
             let width = Rc::new(Cell::new(0.0));
             let snack_bar_count = Rc::new(Cell::new(0));
-            let mut tester = tester();
             let home = Scaffold::new().body(Builder::new({
                 let tap_target = tap_target.clone();
                 let dismiss_direction = Rc::clone(&dismiss_direction);
@@ -1907,12 +1894,9 @@ mod tests {
                             show(
                                 app,
                                 context,
-                                SnackBar::new(AhemText::new(&format!(
-                                    "bar{}",
-                                    snack_bar_count.get()
-                                )))
-                                .duration(Duration::from_secs(2))
-                                .dismiss_direction(dismiss_direction.get()),
+                                SnackBar::new(Text::new(format!("bar{}", snack_bar_count.get())))
+                                    .duration(Duration::from_secs(2))
+                                    .dismiss_direction(dismiss_direction.get()),
                             );
                         }))
                         .behavior(HitTestBehavior::Opaque)
@@ -1920,7 +1904,7 @@ mod tests {
                         .into_widget()
                 }
             }));
-            pump_app(&mut tester, m3, home.into_widget());
+            pump_app(tester, m3, home.into_widget());
 
             for (direction, gestures) in drag_gestures_of_dismiss_directions(width.get()) {
                 dismiss_direction.set(direction);
@@ -1938,22 +1922,22 @@ mod tests {
                             "{direction:?} {drag_gesture:?}"
                         );
                     };
-                    expect(&tester, 0, 0);
-                    tap_key(&mut tester, &tap_target); // queue bar1
-                    tap_key(&mut tester, &tap_target); // queue bar2
-                    expect(&tester, 0, 0);
-                    tester.pump(Duration::ZERO); // schedule animation for bar1
-                    expect(&tester, 1, 0);
-                    tester.pump(Duration::ZERO); // begin animation
-                    expect(&tester, 1, 0);
-                    tester.pump(ms(750)); // 0.75s // animation last frame; two second timer starts here
-                    drag_text(&mut tester, "bar1", drag_gesture);
-                    tester.pump(Duration::ZERO); // bar1 dismissed, bar2 begins animating
-                    expect(&tester, 0, 1);
-                    tester.pump(ms(750)); // 0.75s // animation last frame; two second timer starts here
-                    drag_text(&mut tester, "bar2", drag_gesture);
-                    tester.pump(Duration::ZERO); // bar2 dismissed
-                    expect(&tester, 0, 0);
+                    expect(tester, 0, 0);
+                    tap_key(tester, &tap_target); // queue bar1
+                    tap_key(tester, &tap_target); // queue bar2
+                    expect(tester, 0, 0);
+                    tester.pump(); // schedule animation for bar1
+                    expect(tester, 1, 0);
+                    tester.pump(); // begin animation
+                    expect(tester, 1, 0);
+                    tester.pump_by(ms(750)); // 0.75s // animation last frame; two second timer starts here
+                    drag_text(tester, "bar1", drag_gesture);
+                    tester.pump(); // bar1 dismissed, bar2 begins animating
+                    expect(tester, 0, 1);
+                    tester.pump_by(ms(750)); // 0.75s // animation last frame; two second timer starts here
+                    drag_text(tester, "bar2", drag_gesture);
+                    tester.pump(); // bar2 dismissed
+                    expect(tester, 0, 0);
                 }
             }
         });
@@ -1961,14 +1945,18 @@ mod tests {
 
     /// The two dismiss-direction cases: a scaffold whose tap target shows `snack_bar`, under
     /// a theme whose snack bars dismiss from start to end; a drag by `drag` dismisses it.
-    fn dismisses_by_dragging(snack_bar: impl Fn() -> SnackBar + 'static, label: &str, drag: f64) {
+    fn dismisses_by_dragging(
+        tester: &mut WidgetTester,
+        snack_bar: impl Fn() -> SnackBar + 'static,
+        label: &str,
+        drag: f64,
+    ) {
         let tap_target = GlobalKey::new();
-        let mut tester = tester();
         let home = tap_target_scaffold(&tap_target, move |app, context| {
             show(app, context, snack_bar());
         });
         pump_app(
-            &mut tester,
+            tester,
             |app| {
                 ThemeData::builder()
                     .snack_bar_theme(
@@ -1978,25 +1966,26 @@ mod tests {
             },
             home.into_widget(),
         );
-        assert_eq!(count_text(&tester, label), 0);
-        tap_key(&mut tester, &tap_target);
-        assert_eq!(count_text(&tester, label), 0);
-        tester.pump(Duration::ZERO); // schedule animation for snack bar
-        assert_eq!(count_text(&tester, label), 1);
-        tester.pump(Duration::ZERO); // begin animation
-        assert_eq!(count_text(&tester, label), 1);
-        tester.pump(ms(750));
-        drag_text(&mut tester, label, Offset::new(drag * 800.0, 0.0));
-        tester.pump(Duration::ZERO); // snack bar dismissed
-        assert_eq!(count_text(&tester, label), 0);
+        assert_eq!(count_text(tester, label), 0);
+        tap_key(tester, &tap_target);
+        assert_eq!(count_text(tester, label), 0);
+        tester.pump(); // schedule animation for snack bar
+        assert_eq!(count_text(tester, label), 1);
+        tester.pump(); // begin animation
+        assert_eq!(count_text(tester, label), 1);
+        tester.pump_by(ms(750));
+        drag_text(tester, label, Offset::new(drag * 800.0, 0.0));
+        tester.pump(); // snack bar dismissed
+        assert_eq!(count_text(tester, label), 0);
     }
 
     // Dart: 'SnackBar dismissDirection can be customised from SnackBarThemeData'.
     #[test]
     fn the_theme_sets_the_dismiss_direction() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             dismisses_by_dragging(
-                || SnackBar::new(AhemText::new("swipe ltr")).duration(Duration::from_secs(2)),
+                tester,
+                || SnackBar::new(Text::new("swipe ltr")).duration(Duration::from_secs(2)),
                 "swipe ltr",
                 1.0,
             );
@@ -2006,10 +1995,11 @@ mod tests {
     // Dart: 'dismissDirection from SnackBar should be preferred over SnackBarThemeData'.
     #[test]
     fn the_snack_bar_s_dismiss_direction_wins_over_the_theme_s() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             dismisses_by_dragging(
+                tester,
                 || {
-                    SnackBar::new(AhemText::new("swipe rtl"))
+                    SnackBar::new(Text::new("swipe rtl"))
                         .duration(Duration::from_secs(2))
                         .dismiss_direction(DismissDirection::EndToStart)
                 },
@@ -2022,7 +2012,7 @@ mod tests {
     /// Dart's `SnackBar(content: Text('I am a snack bar.'), duration: 2s,
     /// action: SnackBarAction(label: 'ACTION', onPressed: () {}))`.
     fn snack_bar_with_action() -> SnackBar {
-        SnackBar::new(AhemText::new("I am a snack bar."))
+        SnackBar::new(Text::new("I am a snack bar."))
             .duration(Duration::from_secs(2))
             .action(SnackBarAction::new("ACTION", |_app| {}))
     }
@@ -2030,9 +2020,8 @@ mod tests {
     // Dart: 'SnackBar cannot be tapped twice'.
     #[test]
     fn a_snack_bar_action_fires_only_once() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let tap_count = Rc::new(Cell::new(0));
-            let mut tester = tester();
             let home = x_scaffold({
                 let tap_count = Rc::clone(&tap_count);
                 move |app, context| {
@@ -2040,7 +2029,7 @@ mod tests {
                     show(
                         app,
                         context,
-                        SnackBar::new(AhemText::new("I am a snack bar."))
+                        SnackBar::new(Text::new("I am a snack bar."))
                             .duration(Duration::from_secs(2))
                             .action(SnackBarAction::new("ACTION", move |_app| {
                                 tap_count.set(tap_count.get() + 1);
@@ -2048,41 +2037,39 @@ mod tests {
                     );
                 }
             });
-            pump_app(&mut tester, m3, home.into_widget());
-            tap_x_and_settle_entrance(&mut tester);
+            pump_app(tester, m3, home.into_widget());
+            tap_x_and_settle_entrance(tester);
 
             assert_eq!(tap_count.get(), 0);
-            tap_text(&mut tester, "ACTION");
+            tap_text(tester, "ACTION");
             assert_eq!(tap_count.get(), 1);
-            tap_text(&mut tester, "ACTION");
+            tap_text(tester, "ACTION");
             assert_eq!(tap_count.get(), 1);
-            tester.pump(Duration::ZERO);
-            tap_text(&mut tester, "ACTION");
+            tester.pump();
+            tap_text(tester, "ACTION");
             assert_eq!(tap_count.get(), 1);
         });
     }
 
     /// Shows [`snack_bar_with_action`] under `theme` and returns the tester with it entered.
-    fn with_action_under(theme: impl FnOnce(&App) -> ThemeData) -> WidgetTester {
-        let mut tester = tester();
+    fn with_action_under(tester: &mut WidgetTester, theme: impl FnOnce(&App) -> ThemeData) {
         let home = x_scaffold(|app, context| {
             show(app, context, snack_bar_with_action());
         });
-        pump_app(&mut tester, theme, home.into_widget());
-        tap_x_and_settle_entrance(&mut tester);
-        tester
+        pump_app(tester, theme, home.into_widget());
+        tap_x_and_settle_entrance(tester);
     }
 
     // Dart: 'Material2 - Light theme SnackBar has dark background'.
     #[test]
     fn a_material_2_light_theme_snack_bar_has_a_dark_background() {
-        with_main_thread_stack(|| {
-            let tester = with_action_under(|app| ThemeData::light(app, Some(false)));
+        test_widgets(|tester| {
+            with_action_under(tester, |app| ThemeData::light(app, Some(false)));
             // There is a somewhat complicated background color calculation based
             // off of the surface color. For the default light theme it
             // should be this value.
             assert!(crate::test_support::is_same_color_as(
-                snack_bar_color(&tester),
+                snack_bar_color(tester),
                 Color::new(0xFF333333)
             ));
         });
@@ -2091,30 +2078,30 @@ mod tests {
     // Dart: 'Material3 - Light theme SnackBar has dark background'.
     #[test]
     fn a_material_3_light_theme_snack_bar_has_the_inverse_surface_background() {
-        with_main_thread_stack(|| {
-            let tester = with_action_under(m3);
+        test_widgets(|tester| {
+            with_action_under(tester, m3);
             let inverse_surface = m3(&tester.cell.borrow()).color_scheme.inverse_surface();
-            assert_eq!(snack_bar_color(&tester), inverse_surface);
+            assert_eq!(snack_bar_color(tester), inverse_surface);
         });
     }
 
     // Dart: 'Dark theme SnackBar has light background'.
     #[test]
     fn a_dark_theme_snack_bar_has_a_light_background() {
-        with_main_thread_stack(|| {
-            let tester = with_action_under(|app| ThemeData::dark(app, None));
+        test_widgets(|tester| {
+            with_action_under(tester, |app| ThemeData::dark(app, None));
             let on_surface = ThemeData::dark(&tester.cell.borrow(), None)
                 .color_scheme
                 .on_surface;
-            assert_eq!(snack_bar_color(&tester), on_surface);
+            assert_eq!(snack_bar_color(tester), on_surface);
         });
     }
 
     // Dart: 'Material2 - Dark theme SnackBar has primary text buttons'.
     #[test]
     fn a_material_2_dark_theme_snack_bar_has_primary_text_buttons() {
-        with_main_thread_stack(|| {
-            let tester = with_action_under(|app| ThemeData::dark(app, Some(false)));
+        test_widgets(|tester| {
+            with_action_under(tester, |app| ThemeData::dark(app, Some(false)));
             let primary = ThemeData::dark(&tester.cell.borrow(), Some(false))
                 .color_scheme
                 .primary;
@@ -2125,8 +2112,8 @@ mod tests {
     // Dart: 'Material3 - Dark theme SnackBar has primary text buttons'.
     #[test]
     fn a_material_3_dark_theme_snack_bar_has_inverse_primary_text_buttons() {
-        with_main_thread_stack(|| {
-            let tester = with_action_under(|app| ThemeData::dark(app, None));
+        test_widgets(|tester| {
+            with_action_under(tester, |app| ThemeData::dark(app, None));
             let inverse_primary = ThemeData::dark(&tester.cell.borrow(), None)
                 .color_scheme
                 .inverse_primary();
@@ -2137,10 +2124,9 @@ mod tests {
     // Dart: 'SnackBar should inherit theme data from its ancestor'.
     #[test]
     fn a_snack_bar_inherits_its_ancestor_s_theme_but_for_the_colour_scheme() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let theme_before_snack_bar: Rc<RefCell<Option<Rc<ThemeData>>>> = Rc::default();
             let theme_after_snack_bar: Rc<RefCell<Option<Rc<ThemeData>>>> = Rc::default();
-            let mut tester = tester();
             let home = Scaffold::new().body(Builder::new({
                 let theme_before_snack_bar = Rc::clone(&theme_before_snack_bar);
                 let theme_after_snack_bar = Rc::clone(&theme_after_snack_bar);
@@ -2167,7 +2153,7 @@ mod tests {
                 }
             }));
             pump_app(
-                &mut tester,
+                tester,
                 |app| {
                     ThemeData::builder()
                         .color_scheme(
@@ -2179,7 +2165,7 @@ mod tests {
                 },
                 home.into_widget(),
             );
-            tap_x_and_settle_entrance(&mut tester);
+            tap_x_and_settle_entrance(tester);
 
             let theme_after_snack_bar = theme_after_snack_bar.borrow().clone().expect("built");
             let compared_theme = theme_before_snack_bar
@@ -2196,29 +2182,28 @@ mod tests {
     /// Shows `snack_bar` under `theme` from the 'X' scaffold and returns the tester with it
     /// entered.
     fn showing(
+        tester: &mut WidgetTester,
         theme: impl FnOnce(&App) -> ThemeData,
         snack_bar: impl Fn() -> SnackBar + 'static,
-    ) -> WidgetTester {
-        let mut tester = tester();
+    ) {
         let home = x_scaffold(move |app, context| {
             show(app, context, snack_bar());
         });
-        pump_app(&mut tester, theme, home.into_widget());
-        tap_x_and_settle_entrance(&mut tester);
-        tester
+        pump_app(tester, theme, home.into_widget());
+        tap_x_and_settle_entrance(tester);
     }
 
     // Dart: 'Snackbar margin can be customized'.
     #[test]
     fn a_floating_snack_bar_s_margin_can_be_customized() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const PADDING: f64 = 20.0;
-            let tester = showing(m3, || {
-                SnackBar::new(AhemText::new("I am a snack bar."))
+            showing(tester, m3, || {
+                SnackBar::new(Text::new("I am a snack bar."))
                     .margin(EdgeInsets::all(PADDING))
                     .behavior(SnackBarBehavior::Floating)
             });
-            let material = snack_bar_material_rect(&tester);
+            let material = snack_bar_material_rect(tester);
             assert_eq!(material.bottom_left().dx(), PADDING);
             assert_eq!(material.bottom_left().dy(), 600.0 - PADDING); // Device height is 600.
             assert_eq!(material.bottom_right().dx(), 800.0 - PADDING); // Device width is 800.
@@ -2228,10 +2213,9 @@ mod tests {
     // Dart: 'SnackbarBehavior.floating is positioned within safe area'.
     #[test]
     fn a_floating_snack_bar_is_positioned_within_the_safe_area() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const VIEW_PADDING: f64 = 50.0;
             const FLOATING_SNACK_BAR_DEFAULT_BOTTOM_MARGIN: f64 = 10.0;
-            let mut tester = tester();
             let home = waft_widgets::MediaQuery::new(
                 // Simulate non-safe area.
                 waft_widgets::MediaQueryData::new().view_padding(EdgeInsets::only(
@@ -2244,15 +2228,15 @@ mod tests {
                     show(
                         app,
                         context,
-                        SnackBar::new(AhemText::new("I am a snack bar."))
+                        SnackBar::new(Text::new("I am a snack bar."))
                             .behavior(SnackBarBehavior::Floating),
                     );
                 }),
             );
-            pump_app(&mut tester, m3, home.into_widget());
-            tap_x_and_settle_entrance(&mut tester);
+            pump_app(tester, m3, home.into_widget());
+            tap_x_and_settle_entrance(tester);
             assert_eq!(
-                snack_bar_material_rect(&tester).bottom_left().dy(),
+                snack_bar_material_rect(tester).bottom_left().dy(),
                 // Device height is 600.
                 600.0 - VIEW_PADDING - FLOATING_SNACK_BAR_DEFAULT_BOTTOM_MARGIN
             );
@@ -2262,13 +2246,13 @@ mod tests {
     // Dart: 'Snackbar padding can be customized'.
     #[test]
     fn a_snack_bar_s_padding_can_be_customized() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const PADDING: f64 = 20.0;
-            let tester = showing(m3, || {
-                SnackBar::new(AhemText::new("I am a snack bar.")).padding(EdgeInsets::all(PADDING))
+            showing(tester, m3, || {
+                SnackBar::new(Text::new("I am a snack bar.")).padding(EdgeInsets::all(PADDING))
             });
-            let text = text_rect(&tester, "I am a snack bar.");
-            let material = snack_bar_material_rect(&tester);
+            let text = text_rect(tester, "I am a snack bar.");
+            let material = snack_bar_material_rect(tester);
             assert_eq!(
                 text.bottom_left().dx() - material.bottom_left().dx(),
                 PADDING
@@ -2292,23 +2276,24 @@ mod tests {
     // Dart: 'Snackbar width can be customized'.
     #[test]
     fn a_floating_snack_bar_s_width_can_be_customized() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const WIDTH: f64 = 200.0;
-            let tester = showing(m3, || {
-                SnackBar::new(AhemText::new("I am a snack bar."))
+            showing(tester, m3, || {
+                SnackBar::new(Text::new("I am a snack bar."))
                     .width(WIDTH)
                     .behavior(SnackBarBehavior::Floating)
             });
-            assert_centred_with_width(&tester, WIDTH);
+            assert_centred_with_width(tester, WIDTH);
         });
     }
 
     // Dart: 'Snackbar width can be customized from ThemeData'.
     #[test]
     fn a_floating_snack_bar_s_width_can_come_from_the_theme() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const WIDTH: f64 = 200.0;
-            let tester = showing(
+            showing(
+                tester,
                 |app| {
                     ThemeData::builder()
                         .snack_bar_theme(
@@ -2318,19 +2303,20 @@ mod tests {
                         )
                         .build(app)
                 },
-                || SnackBar::new(AhemText::new("Feeling snackish")),
+                || SnackBar::new(Text::new("Feeling snackish")),
             );
-            assert_centred_with_width(&tester, WIDTH);
+            assert_centred_with_width(tester, WIDTH);
         });
     }
 
     // Dart: 'Snackbar width customization takes preference of widget over theme'.
     #[test]
     fn the_snack_bar_s_width_wins_over_the_theme_s() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const THEME_WIDTH: f64 = 200.0;
             const WIDGET_WIDTH: f64 = 400.0;
-            let tester = showing(
+            showing(
+                tester,
                 |app| {
                     ThemeData::builder()
                         .snack_bar_theme(
@@ -2340,9 +2326,9 @@ mod tests {
                         )
                         .build(app)
                 },
-                || SnackBar::new(AhemText::new("Feeling super snackish")).width(WIDGET_WIDTH),
+                || SnackBar::new(Text::new("Feeling super snackish")).width(WIDGET_WIDTH),
             );
-            assert_centred_with_width(&tester, WIDGET_WIDTH);
+            assert_centred_with_width(tester, WIDGET_WIDTH);
         });
     }
 
@@ -2367,9 +2353,9 @@ mod tests {
     // Dart: 'Material2 - Snackbar labels can be colored as MaterialColor'.
     #[test]
     fn a_material_2_snack_bar_action_label_takes_its_text_color() {
-        with_main_thread_stack(|| {
-            let tester = showing(m2, || {
-                SnackBar::new(AhemText::new("I am a snack bar."))
+        test_widgets(|tester| {
+            showing(tester, m2, || {
+                SnackBar::new(Text::new("I am a snack bar."))
                     .duration(Duration::from_secs(2))
                     .action(
                         SnackBarAction::new("ACTION", |_app| {})
@@ -2384,14 +2370,14 @@ mod tests {
     // Dart: 'Material3 - Snackbar labels can be colored as MaterialColor'.
     #[test]
     fn a_material_3_snack_bar_action_resolves_its_text_color_in_every_state() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let used_color = Colors::TEAL.primary();
-            let tester = showing(m3, move || {
-                SnackBar::new(AhemText::new("I am a snack bar."))
+            showing(tester, m3, move || {
+                SnackBar::new(Text::new("I am a snack bar."))
                     .duration(Duration::from_secs(2))
                     .action(SnackBarAction::new("ACTION", |_app| {}).text_color(used_color))
             });
-            let style = action_button_style(&tester);
+            let style = action_button_style(tester);
             // Same color when resolved
             assert_eq!(
                 style
@@ -2406,10 +2392,10 @@ mod tests {
     // Dart: 'Snackbar labels can be colored as WidgetStateColor (Material 3)'.
     #[test]
     fn a_widget_state_text_color_resolves_the_action_label_by_state() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const COLOR_RED: u32 = 0xFFF44336;
             const COLOR_BLUE: u32 = 0xFF2196F3;
-            let tester = showing(m3, || {
+            showing(tester, m3, || {
                 // Dart's `_TestMaterialStateColor`.
                 let used_color = WidgetStateColor::resolve_with(|states| {
                     if states.contains(&WidgetState::Pressed) {
@@ -2417,11 +2403,11 @@ mod tests {
                     }
                     Color::new(COLOR_RED)
                 });
-                SnackBar::new(AhemText::new("I am a snack bar."))
+                SnackBar::new(Text::new("I am a snack bar."))
                     .duration(Duration::from_secs(2))
                     .action(SnackBarAction::new("ACTION", |_app| {}).text_color(used_color))
             });
-            let foreground_color = action_button_style(&tester)
+            let foreground_color = action_button_style(tester)
                 .foreground_color
                 .expect("a foreground color");
             assert_eq!(
@@ -2438,8 +2424,7 @@ mod tests {
     // Dart: 'SnackBar should push FloatingActionButton above'.
     #[test]
     fn a_snack_bar_pushes_the_floating_action_button_above_it() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let home = waft_widgets::MediaQuery::new(
                 waft_widgets::MediaQueryData::new()
                     .padding(EdgeInsets::only(10.0, 20.0, 30.0, 40.0)),
@@ -2453,7 +2438,7 @@ mod tests {
                     .child(Icon::new(Some(Icons::send()))),
                 ),
             );
-            pump_app(&mut tester, m3, home.into_widget());
+            pump_app(tester, m3, home.into_widget());
             let fab_rect = |tester: &WidgetTester| {
                 let fab =
                     tester.find_by_type::<crate::floating_action_button::FloatingActionButton>()[0];
@@ -2461,11 +2446,11 @@ mod tests {
             };
 
             // Get the Rect of the FAB to compare after the SnackBar appears.
-            let original_fab_rect = fab_rect(&tester);
+            let original_fab_rect = fab_rect(tester);
 
-            tap_x_and_settle_entrance(&mut tester); // Animation last frame.
+            tap_x_and_settle_entrance(tester); // Animation last frame.
 
-            let fab_rect = fab_rect(&tester);
+            let fab_rect = fab_rect(tester);
 
             // FAB should shift upwards after SnackBar appears.
             assert!(fab_rect.center().dy() < original_fab_rect.center().dy());
@@ -2489,7 +2474,7 @@ mod tests {
     // Dart: 'SnackBarClosedReason'.
     #[test]
     fn the_closed_future_tells_how_the_snack_bar_closed() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let action_pressed = Rc::new(Cell::new(false));
             let closed_reason: Rc<Cell<Option<SnackBarClosedReason>>> = Rc::default();
             let body_context: Rc<Cell<Option<BuildContext>>> = Rc::default();
@@ -2503,8 +2488,8 @@ mod tests {
                     let closed_reason = Rc::clone(&closed_reason);
                     GestureDetector::new()
                         .on_tap(Listener::new(move |app| {
-                            let mut snack_bar = SnackBar::new(AhemText::new("snack"))
-                                .duration(Duration::from_secs(2));
+                            let mut snack_bar =
+                                SnackBar::new(Text::new("snack")).duration(Duration::from_secs(2));
                             if with_action {
                                 let action_pressed = Rc::clone(&action_pressed);
                                 snack_bar = snack_bar
@@ -2526,33 +2511,32 @@ mod tests {
                 let context = body_context.get().expect("built");
                 ScaffoldMessenger::of(&mut app, context)
             };
-            let mut tester = tester();
-            pump_app(&mut tester, m3, home(true).into_widget());
+            pump_app(tester, m3, home(true).into_widget());
 
             // Pop up the snack bar and then press its action button.
-            tap_x_and_settle_entrance(&mut tester);
+            tap_x_and_settle_entrance(tester);
             assert!(!action_pressed.get());
-            tap_text(&mut tester, "ACTION");
+            tap_text(tester, "ACTION");
             assert!(action_pressed.get());
             // Closed reason is only set when the animation is complete.
-            tester.pump(ms(250));
+            tester.pump_by(ms(250));
             assert_eq!(closed_reason.get(), None);
             // Wait for animation to complete.
             tester.pump_and_settle_by(Duration::from_secs(1));
             assert_eq!(closed_reason.get(), Some(SnackBarClosedReason::Action));
 
             // Pop up the snack bar and then swipe downwards to dismiss it.
-            tap_text(&mut tester, "X");
-            tester.pump(ms(750));
-            tester.pump(ms(750));
-            drag_text(&mut tester, "snack", Offset::new(0.0, 50.0));
+            tap_text(tester, "X");
+            tester.pump_by(ms(750));
+            tester.pump_by(ms(750));
+            drag_text(tester, "snack", Offset::new(0.0, 50.0));
             tester.pump_and_settle_by(Duration::from_secs(1));
             assert_eq!(closed_reason.get(), Some(SnackBarClosedReason::Swipe));
 
             // Pop up the snack bar and then remove it.
-            tap_text(&mut tester, "X");
-            tester.pump(ms(750));
-            let scaffold_messenger = messenger(&tester);
+            tap_text(tester, "X");
+            tester.pump_by(ms(750));
+            let scaffold_messenger = messenger(tester);
             scaffold_messenger.remove_current_snack_bar(
                 &mut tester.cell.borrow_mut(),
                 SnackBarClosedReason::Remove,
@@ -2561,9 +2545,9 @@ mod tests {
             assert_eq!(closed_reason.get(), Some(SnackBarClosedReason::Remove));
 
             // Pop up the snack bar and then hide it.
-            tap_text(&mut tester, "X");
-            tester.pump(ms(750));
-            let scaffold_messenger = messenger(&tester);
+            tap_text(tester, "X");
+            tester.pump_by(ms(750));
+            let scaffold_messenger = messenger(tester);
             scaffold_messenger
                 .hide_current_snack_bar(&mut tester.cell.borrow_mut(), SnackBarClosedReason::Hide);
             tester.pump_and_settle_by(Duration::from_secs(1));
@@ -2571,14 +2555,14 @@ mod tests {
 
             // Remove action to test SnackBarClosedReason.timeout because Snackbar with
             // action doesn't timeout.
-            pump_app(&mut tester, m3, home(false).into_widget());
+            pump_app(tester, m3, home(false).into_widget());
 
             // Pop up the snack bar and then let it time out.
-            tap_text(&mut tester, "X");
-            tester.pump(ms(750));
-            tester.pump(ms(750));
-            tester.pump(ms(1500));
-            tester.pump(Duration::ZERO); // begin animation
+            tap_text(tester, "X");
+            tester.pump_by(ms(750));
+            tester.pump_by(ms(750));
+            tester.pump_by(ms(1500));
+            tester.pump(); // begin animation
             tester.pump_and_settle_by(Duration::from_secs(1));
             assert_eq!(closed_reason.get(), Some(SnackBarClosedReason::Timeout));
         });
@@ -2587,9 +2571,8 @@ mod tests {
     // Dart: 'accessible navigation behavior with action'.
     #[test]
     fn under_accessible_navigation_a_snack_bar_with_an_action_shows_at_once_and_stays() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let scaffold_key = GlobalKey::new();
-            let mut tester = tester();
             let home = waft_widgets::MediaQuery::new(
                 waft_widgets::MediaQueryData::new().accessible_navigation(true),
                 ScaffoldMessenger::new(Builder::new({
@@ -2603,7 +2586,7 @@ mod tests {
                                         show(
                                             app,
                                             context,
-                                            SnackBar::new(AhemText::new("snack"))
+                                            SnackBar::new(Text::new("snack"))
                                                 .duration(Duration::from_secs(1))
                                                 .action(SnackBarAction::new("ACTION", |_app| {})),
                                         );
@@ -2614,62 +2597,60 @@ mod tests {
                     }
                 })),
             );
-            pump_app(&mut tester, m3, home.into_widget());
-            tap_text(&mut tester, "X");
-            tester.pump(Duration::ZERO);
+            pump_app(tester, m3, home.into_widget());
+            tap_text(tester, "X");
+            tester.pump();
             // Find action immediately
-            assert_eq!(count_text(&tester, "ACTION"), 1);
+            assert_eq!(count_text(tester, "ACTION"), 1);
             // Snackbar doesn't close
-            tester.pump(Duration::from_secs(10));
-            assert_eq!(count_text(&tester, "ACTION"), 1);
-            tap_text(&mut tester, "ACTION");
-            tester.pump(Duration::ZERO);
+            tester.pump_by(Duration::from_secs(10));
+            assert_eq!(count_text(tester, "ACTION"), 1);
+            tap_text(tester, "ACTION");
+            tester.pump();
             // Snackbar closes immediately
-            assert_eq!(count_text(&tester, "ACTION"), 0);
+            assert_eq!(count_text(tester, "ACTION"), 0);
         });
     }
 
     // Dart: 'SnackBar default display duration test'.
     #[test]
     fn a_snack_bar_shows_for_four_seconds_by_default() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const HELLO_SNACK_BAR: &str = "Hello SnackBar";
             let tap_target = GlobalKey::new();
-            let mut tester = tester();
             let home = tap_target_scaffold(&tap_target, |app, context| {
-                show(app, context, SnackBar::new(AhemText::new(HELLO_SNACK_BAR)));
+                show(app, context, SnackBar::new(Text::new(HELLO_SNACK_BAR)));
             });
-            pump_app(&mut tester, m3, home.into_widget());
-            assert_eq!(count_text(&tester, HELLO_SNACK_BAR), 0);
-            tap_key(&mut tester, &tap_target);
-            assert_eq!(count_text(&tester, HELLO_SNACK_BAR), 0);
-            tester.pump(Duration::ZERO); // schedule animation
-            assert_eq!(count_text(&tester, HELLO_SNACK_BAR), 1);
-            tester.pump(Duration::ZERO); // begin animation
-            assert_eq!(count_text(&tester, HELLO_SNACK_BAR), 1);
-            tester.pump(ms(750)); // 0.75s // animation last frame; four second timer starts here
-            assert_eq!(count_text(&tester, HELLO_SNACK_BAR), 1);
-            tester.pump(ms(750)); // 1.50s
-            assert_eq!(count_text(&tester, HELLO_SNACK_BAR), 1);
-            tester.pump(ms(750)); // 2.25s
-            assert_eq!(count_text(&tester, HELLO_SNACK_BAR), 1);
-            tester.pump(ms(750)); // 3.00s
-            assert_eq!(count_text(&tester, HELLO_SNACK_BAR), 1);
-            tester.pump(ms(750)); // 3.75s
-            assert_eq!(count_text(&tester, HELLO_SNACK_BAR), 1);
-            tester.pump(ms(1000)); // 4.75s // timer triggers to dismiss snackbar, reverse animation is scheduled
-            tester.pump(Duration::ZERO); // begin animation
-            assert_eq!(count_text(&tester, HELLO_SNACK_BAR), 1); // frame 0 of dismiss animation
-            tester.pump(ms(750)); // 5.50s // last frame of animation, snackbar removed from build
-            assert_eq!(count_text(&tester, HELLO_SNACK_BAR), 0);
+            pump_app(tester, m3, home.into_widget());
+            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 0);
+            tap_key(tester, &tap_target);
+            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 0);
+            tester.pump(); // schedule animation
+            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 1);
+            tester.pump(); // begin animation
+            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 1);
+            tester.pump_by(ms(750)); // 0.75s // animation last frame; four second timer starts here
+            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 1);
+            tester.pump_by(ms(750)); // 1.50s
+            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 1);
+            tester.pump_by(ms(750)); // 2.25s
+            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 1);
+            tester.pump_by(ms(750)); // 3.00s
+            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 1);
+            tester.pump_by(ms(750)); // 3.75s
+            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 1);
+            tester.pump_by(ms(1000)); // 4.75s // timer triggers to dismiss snackbar, reverse animation is scheduled
+            tester.pump(); // begin animation
+            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 1); // frame 0 of dismiss animation
+            tester.pump_by(ms(750)); // 5.50s // last frame of animation, snackbar removed from build
+            assert_eq!(count_text(tester, HELLO_SNACK_BAR), 0);
         });
     }
 
     // Dart: 'SnackBar handles updates to accessibleNavigation'.
     #[test]
     fn a_snack_bar_follows_changes_to_accessible_navigation() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let boilerplate = |tester: &mut WidgetTester, accessible_navigation: bool| {
                 let theme = m3(&tester.cell.borrow());
                 tester.pump_widget(
@@ -2685,7 +2666,7 @@ mod tests {
                                             show(
                                                 app,
                                                 context,
-                                                SnackBar::new(AhemText::new("test"))
+                                                SnackBar::new(Text::new("test"))
                                                     .action(SnackBarAction::new("foo", |_app| {})),
                                             );
                                         }))
@@ -2700,39 +2681,41 @@ mod tests {
                 );
             };
 
-            boilerplate(&mut tester, false);
-            assert_eq!(count_text(&tester, "test"), 0);
-            tap_text(&mut tester, "X");
-            tester.pump(Duration::ZERO); // schedule animation
-            assert_eq!(count_text(&tester, "test"), 1);
-            tester.pump(Duration::ZERO); // begin animation
-            tester.pump(ms(4750)); // 4.75s
-            assert_eq!(count_text(&tester, "test"), 1);
+            boilerplate(tester, false);
+            assert_eq!(count_text(tester, "test"), 0);
+            tap_text(tester, "X");
+            tester.pump(); // schedule animation
+            assert_eq!(count_text(tester, "test"), 1);
+            tester.pump(); // begin animation
+            tester.pump_by(ms(4750)); // 4.75s
+            assert_eq!(count_text(tester, "test"), 1);
 
             // Enabled accessible navigation
-            boilerplate(&mut tester, true);
+            boilerplate(tester, true);
 
-            tester.pump(ms(4000)); // 8.75s
-            tester.pump(Duration::ZERO);
-            assert_eq!(count_text(&tester, "test"), 1);
+            tester.pump_by(ms(4000)); // 8.75s
+            tester.pump();
+            assert_eq!(count_text(tester, "test"), 1);
 
             // disable accessible navigation
-            boilerplate(&mut tester, false);
+            boilerplate(tester, false);
             tester.pump_and_settle_by(ms(5750));
-            assert_eq!(count_text(&tester, "test"), 1);
+            assert_eq!(count_text(tester, "test"), 1);
 
-            tap_text(&mut tester, "foo");
+            tap_text(tester, "foo");
             tester.pump_and_settle();
-            assert_eq!(count_text(&tester, "test"), 0);
+            assert_eq!(count_text(tester, "test"), 0);
         });
     }
 
     /// The `onVisible` cases: a tap shows the snack bars `show_all` shows, each counting into
     /// the returned cell when it becomes visible.
-    fn count_on_visible(labels: &'static [&'static str]) -> (WidgetTester, Rc<Cell<i32>>) {
+    fn count_on_visible(
+        tester: &mut WidgetTester,
+        labels: &'static [&'static str],
+    ) -> Rc<Cell<i32>> {
         let called = Rc::new(Cell::new(0));
         let tap_target = GlobalKey::new();
-        let mut tester = tester();
         let home = tap_target_scaffold(&tap_target, {
             let called = Rc::clone(&called);
             move |app, context| {
@@ -2741,26 +2724,26 @@ mod tests {
                     show(
                         app,
                         context,
-                        SnackBar::new(AhemText::new(label))
+                        SnackBar::new(Text::new(*label))
                             .duration(Duration::from_secs(1))
                             .on_visible(move |_app| called.set(called.get() + 1)),
                     );
                 }
             }
         });
-        pump_app(&mut tester, m3, home.into_widget());
-        tap_key(&mut tester, &tap_target);
-        tester.pump(Duration::ZERO); // start animation
+        pump_app(tester, m3, home.into_widget());
+        tap_key(tester, &tap_target);
+        tester.pump(); // start animation
         tester.pump_and_settle();
-        (tester, called)
+        called
     }
 
     // Dart: 'Snackbar calls onVisible once'.
     #[test]
     fn a_snack_bar_calls_on_visible_once() {
-        with_main_thread_stack(|| {
-            let (tester, called) = count_on_visible(&["hello"]);
-            assert_eq!(count_text(&tester, "hello"), 1);
+        test_widgets(|tester| {
+            let called = count_on_visible(tester, &["hello"]);
+            assert_eq!(count_text(tester, "hello"), 1);
             assert_eq!(called.get(), 1);
         });
     }
@@ -2768,9 +2751,9 @@ mod tests {
     // Dart: 'Snackbar does not call onVisible when it is queued'.
     #[test]
     fn a_queued_snack_bar_does_not_call_on_visible() {
-        with_main_thread_stack(|| {
-            let (tester, called) = count_on_visible(&["hello", "hello 2"]);
-            assert_eq!(count_text(&tester, "hello"), 1);
+        test_widgets(|tester| {
+            let called = count_on_visible(tester, &["hello", "hello 2"]);
+            assert_eq!(count_text(tester, "hello"), 1);
             assert_eq!(called.get(), 1);
         });
     }
@@ -2814,22 +2797,21 @@ mod tests {
     // other elements', for each behavior.
     #[test]
     fn a_snack_bar_aligns_with_the_bottom_of_an_empty_scaffold() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             for behavior in [SnackBarBehavior::Fixed, SnackBarBehavior::Floating] {
-                let mut tester = tester();
                 pump_app(
-                    &mut tester,
+                    tester,
                     m3,
                     Scaffold::new()
                         .body(waft_widgets::Container::new())
                         .into_widget(),
                 );
                 show_from_messenger_and_settle(
-                    &mut tester,
-                    SnackBar::new(AhemText::new("SnackBar text")).behavior(behavior),
+                    tester,
+                    SnackBar::new(Text::new("SnackBar text")).behavior(behavior),
                 );
-                let snack_bar = rect_of_type::<SnackBar>(&tester);
-                let scaffold = rect_of_type::<Scaffold>(&tester);
+                let snack_bar = rect_of_type::<SnackBar>(tester);
+                let scaffold = rect_of_type::<Scaffold>(tester);
                 assert_eq!(
                     snack_bar.bottom_right(),
                     scaffold.bottom_right(),
@@ -2848,12 +2830,11 @@ mod tests {
     // Scaffold has no FloatingActionButton', for each behavior.
     #[test]
     fn a_snack_bar_aligns_with_the_top_of_the_bottom_navigation_bar() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             for behavior in [SnackBarBehavior::Fixed, SnackBarBehavior::Floating] {
                 let box_key = GlobalKey::new();
-                let mut tester = tester();
                 pump_app(
-                    &mut tester,
+                    tester,
                     m3,
                     Scaffold::new()
                         .body(waft_widgets::Container::new())
@@ -2866,11 +2847,11 @@ mod tests {
                         .into_widget(),
                 );
                 show_from_messenger_and_settle(
-                    &mut tester,
-                    SnackBar::new(AhemText::new("SnackBar text")).behavior(behavior),
+                    tester,
+                    SnackBar::new(Text::new("SnackBar text")).behavior(behavior),
                 );
-                let snack_bar = rect_of_type::<SnackBar>(&tester);
-                let bottom_navigation_bar = rect_of_key(&tester, &box_key);
+                let snack_bar = rect_of_type::<SnackBar>(tester);
+                let bottom_navigation_bar = rect_of_key(tester, &box_key);
                 assert_eq!(snack_bar.bottom_right(), bottom_navigation_bar.top_right());
                 assert_eq!(snack_bar.bottom_left(), bottom_navigation_bar.top_left());
             }
@@ -2880,8 +2861,7 @@ mod tests {
     // Dart: 'Padding of SnackBarBehavior.fixed is not consumed by viewInsets'.
     #[test]
     fn a_fixed_snack_bar_s_padding_is_not_consumed_by_view_insets() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let child = |tester: &WidgetTester| {
                 material_app(
                     m3(&tester.cell.borrow()),
@@ -2903,7 +2883,7 @@ mod tests {
                         .into_widget(),
                 )
             };
-            let app = child(&tester);
+            let app = child(tester);
             tester.pump_widget(
                 waft_widgets::MediaQuery::new(
                     waft_widgets::MediaQueryData::new()
@@ -2912,11 +2892,11 @@ mod tests {
                 )
                 .into_widget(),
             );
-            tap_text(&mut tester, "X");
+            tap_text(tester, "X");
             tester.pump_and_settle(); // Show snackbar
-            let initial = rect_of_type::<SnackBar>(&tester);
+            let initial = rect_of_type::<SnackBar>(tester);
             // Consume bottom padding - as if by the keyboard opening
-            let app = child(&tester);
+            let app = child(tester);
             tester.pump_widget(
                 waft_widgets::MediaQuery::new(
                     waft_widgets::MediaQueryData::new()
@@ -2926,9 +2906,9 @@ mod tests {
                 )
                 .into_widget(),
             );
-            tap_text(&mut tester, "X");
+            tap_text(tester, "X");
             tester.pump_and_settle(); // Have the SnackBar fully animate out.
-            let last = rect_of_type::<SnackBar>(&tester);
+            let last = rect_of_type::<SnackBar>(tester);
             assert_eq!(initial.bottom_left(), last.bottom_left());
             assert_eq!(initial.bottom_right(), last.bottom_right());
         });
@@ -2938,10 +2918,9 @@ mod tests {
     // Scaffold has a FloatingActionButton'.
     #[test]
     fn a_fixed_snack_bar_aligns_with_the_bottom_of_a_scaffold_with_a_floating_action_button() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_app(
-                &mut tester,
+                tester,
                 m3,
                 Scaffold::new()
                     .body(waft_widgets::Container::new())
@@ -2949,11 +2928,11 @@ mod tests {
                     .into_widget(),
             );
             show_from_messenger_and_settle(
-                &mut tester,
-                SnackBar::new(AhemText::new("Snackbar text")).behavior(SnackBarBehavior::Fixed),
+                tester,
+                SnackBar::new(Text::new("Snackbar text")).behavior(SnackBarBehavior::Fixed),
             );
-            let snack_bar = rect_of_type::<SnackBar>(&tester);
-            let scaffold = rect_of_type::<Scaffold>(&tester);
+            let snack_bar = rect_of_type::<SnackBar>(tester);
+            let scaffold = rect_of_type::<Scaffold>(tester);
             assert_eq!(snack_bar.bottom_right(), scaffold.bottom_right());
             assert_eq!(snack_bar.bottom_left(), scaffold.bottom_left());
         });
@@ -2987,14 +2966,13 @@ mod tests {
     // FloatingActionButton when Scaffold has a FloatingActionButton'.
     #[test]
     fn a_floating_snack_bar_sits_on_top_of_the_floating_action_button() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            floating_with_fab(&mut tester, None);
+        test_widgets(|tester| {
+            floating_with_fab(tester, None);
             // Since padding between the SnackBar and the FAB is created by the SnackBar,
             // the bottom offset of the SnackBar should be equal to the top offset of the FAB
             assert_eq!(
-                rect_of_type::<SnackBar>(&tester).bottom_left().dy(),
-                rect_of_type::<crate::floating_action_button::FloatingActionButton>(&tester)
+                rect_of_type::<SnackBar>(tester).bottom_left().dy(),
+                rect_of_type::<crate::floating_action_button::FloatingActionButton>(tester)
                     .top_left()
                     .dy()
             );
@@ -3006,7 +2984,7 @@ mod tests {
     // floatingActionButtonLocation is set to a top position'.
     #[test]
     fn a_floating_snack_bar_ignores_a_floating_action_button_at_a_top_location() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             use crate::floating_action_button_location::FloatingActionButtonLocation;
             let top_locations = [
                 <dyn FloatingActionButtonLocation>::start_top(),
@@ -3016,11 +2994,10 @@ mod tests {
                 <dyn FloatingActionButtonLocation>::mini_center_top(),
                 <dyn FloatingActionButtonLocation>::mini_end_top(),
             ];
-            let mut tester = tester();
             for location in top_locations {
-                floating_with_fab(&mut tester, Some(Rc::clone(&location)));
+                floating_with_fab(tester, Some(Rc::clone(&location)));
                 assert_eq!(
-                    rect_of_type::<SnackBar>(&tester).bottom_left().dy(),
+                    rect_of_type::<SnackBar>(tester).bottom_left().dy(),
                     600.0, // Device height is 600.
                     "{location:?}"
                 );
@@ -3085,7 +3062,7 @@ mod tests {
     // floatingActionButtonLocation is not set to a top position'.
     #[test]
     fn a_floating_snack_bar_sits_on_top_of_a_floating_action_button_at_any_other_location() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             use crate::floating_action_button_location::FloatingActionButtonLocation;
             let non_top_locations: Vec<
                 crate::floating_action_button_location::FloatingActionButtonLocationRef,
@@ -3106,14 +3083,13 @@ mod tests {
                 // Regression test related to https://github.com/flutter/flutter/pull/131303.
                 Rc::new(CustomFloatingActionButtonLocation),
             ];
-            let mut tester = tester();
             for location in non_top_locations {
-                floating_with_fab(&mut tester, Some(Rc::clone(&location)));
+                floating_with_fab(tester, Some(Rc::clone(&location)));
                 // Since padding between the SnackBar and the FAB is created by the SnackBar,
                 // the bottom offset of the SnackBar should be equal to the top offset of the FAB
                 assert_eq!(
-                    rect_of_type::<SnackBar>(&tester).bottom_left().dy(),
-                    rect_of_type::<crate::floating_action_button::FloatingActionButton>(&tester)
+                    rect_of_type::<SnackBar>(tester).bottom_left().dy(),
+                    rect_of_type::<crate::floating_action_button::FloatingActionButton>(tester)
                         .top_left()
                         .dy(),
                     "{location:?}"
@@ -3149,20 +3125,15 @@ mod tests {
     // when Scaffold has a BottomNavigationBar and FloatingActionButton'.
     #[test]
     fn a_fixed_snack_bar_sits_on_the_bottom_navigation_bar_beside_a_floating_action_button() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let box_key = GlobalKey::new();
-            let mut tester = tester();
-            pump_app(
-                &mut tester,
-                m3,
-                with_bottom_bar_and_fab(&box_key, 60.0, None),
-            );
+            pump_app(tester, m3, with_bottom_bar_and_fab(&box_key, 60.0, None));
             show_from_messenger_and_settle(
-                &mut tester,
-                SnackBar::new(AhemText::new("SnackBar text")).behavior(SnackBarBehavior::Fixed),
+                tester,
+                SnackBar::new(Text::new("SnackBar text")).behavior(SnackBarBehavior::Fixed),
             );
-            let snack_bar = rect_of_type::<SnackBar>(&tester);
-            let bottom_navigation_bar = rect_of_key(&tester, &box_key);
+            let snack_bar = rect_of_type::<SnackBar>(tester);
+            let bottom_navigation_bar = rect_of_key(tester, &box_key);
             assert_eq!(snack_bar.bottom_right(), bottom_navigation_bar.top_right());
             assert_eq!(snack_bar.bottom_left(), bottom_navigation_bar.top_left());
         });
@@ -3172,21 +3143,16 @@ mod tests {
     // FloatingActionButton when Scaffold has BottomNavigationBar and FloatingActionButton'.
     #[test]
     fn a_floating_snack_bar_sits_on_the_floating_action_button_above_a_bottom_navigation_bar() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let box_key = GlobalKey::new();
-            let mut tester = tester();
-            pump_app(
-                &mut tester,
-                m3,
-                with_bottom_bar_and_fab(&box_key, 60.0, None),
-            );
+            pump_app(tester, m3, with_bottom_bar_and_fab(&box_key, 60.0, None));
             show_from_messenger_and_settle(
-                &mut tester,
-                SnackBar::new(AhemText::new("SnackBar text")).behavior(SnackBarBehavior::Floating),
+                tester,
+                SnackBar::new(Text::new("SnackBar text")).behavior(SnackBarBehavior::Floating),
             );
             assert_eq!(
-                rect_of_type::<SnackBar>(&tester).bottom_right().dy(),
-                rect_of_type::<crate::floating_action_button::FloatingActionButton>(&tester)
+                rect_of_type::<SnackBar>(tester).bottom_right().dy(),
+                rect_of_type::<crate::floating_action_button::FloatingActionButton>(tester)
                     .top_right()
                     .dy()
             );
@@ -3198,12 +3164,11 @@ mod tests {
     // and BottomNavigationBar.top is higher than FloatingActionButton.top'.
     #[test]
     fn a_floating_snack_bar_sits_on_a_bottom_navigation_bar_higher_than_the_button() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             use crate::floating_action_button_location::FloatingActionButtonLocation;
             let box_key = GlobalKey::new();
-            let mut tester = tester();
             pump_app(
-                &mut tester,
+                tester,
                 m3,
                 with_bottom_bar_and_fab(
                     &box_key,
@@ -3212,14 +3177,14 @@ mod tests {
                 ),
             );
             show_from_messenger_and_settle(
-                &mut tester,
-                SnackBar::new(AhemText::new("SnackBar text")).behavior(SnackBarBehavior::Floating),
+                tester,
+                SnackBar::new(Text::new("SnackBar text")).behavior(SnackBarBehavior::Floating),
             );
-            let snack_bar_bottom_right = rect_of_type::<SnackBar>(&tester).bottom_right();
+            let snack_bar_bottom_right = rect_of_type::<SnackBar>(tester).bottom_right();
             let fab_top_right =
-                rect_of_type::<crate::floating_action_button::FloatingActionButton>(&tester)
+                rect_of_type::<crate::floating_action_button::FloatingActionButton>(tester)
                     .top_right();
-            let nav_bar_top_right = rect_of_key(&tester, &box_key).top_right();
+            let nav_bar_top_right = rect_of_key(tester, &box_key).top_right();
 
             // Test the top of the navigation bar is higher than the top of the floating action button.
             assert!(fab_top_right.dy() > nav_bar_top_right.dy());
@@ -3232,7 +3197,7 @@ mod tests {
     fn open_floating_snack_bar(tester: &mut WidgetTester) {
         show_from_messenger_and_settle(
             tester,
-            SnackBar::new(AhemText::new("SnackBar text")).behavior(SnackBarBehavior::Floating),
+            SnackBar::new(Text::new("SnackBar text")).behavior(SnackBarBehavior::Floating),
         );
     }
 
@@ -3250,23 +3215,21 @@ mod tests {
     const MEDIUM_FAB_HEIGHT: f64 = 100.0;
 
     /// Run once with a visible SnackBar to compute the empty space above SnackBar.
-    fn space_above_snack_bar() -> f64 {
-        let mut tester = tester();
-        with_fab_height(&mut tester, MEDIUM_FAB_HEIGHT);
-        open_floating_snack_bar(&mut tester);
-        rect_of_type::<SnackBar>(&tester).top_left().dy()
+    fn space_above_snack_bar(tester: &mut WidgetTester) -> f64 {
+        with_fab_height(tester, MEDIUM_FAB_HEIGHT);
+        open_floating_snack_bar(tester);
+        rect_of_type::<SnackBar>(tester).top_left().dy()
     }
 
     // Dart: 'Snackbar with SnackBarBehavior.floating will assert when offset too high by a
     // large Scaffold.floatingActionButton', the runs that do not assert.
     #[test]
     fn a_floating_snack_bar_right_at_the_top_of_the_screen_does_not_assert() {
-        with_main_thread_stack(|| {
-            let space_above_snack_bar = space_above_snack_bar();
+        test_widgets(|tester| {
+            let space_above_snack_bar = space_above_snack_bar(tester);
             // Run with the Snackbar fully visible right on the top of the screen.
-            let mut tester = tester();
-            with_fab_height(&mut tester, space_above_snack_bar + MEDIUM_FAB_HEIGHT);
-            open_floating_snack_bar(&mut tester);
+            with_fab_height(tester, space_above_snack_bar + MEDIUM_FAB_HEIGHT);
+            open_floating_snack_bar(tester);
         });
     }
 
@@ -3281,11 +3244,10 @@ mod tests {
                     to allow room for the SnackBar to be visible."
     )]
     fn a_floating_snack_bar_pushed_fully_off_screen_by_a_large_button_asserts() {
-        with_main_thread_stack(|| {
-            let space_above_snack_bar = space_above_snack_bar();
-            let mut tester = tester();
-            with_fab_height(&mut tester, space_above_snack_bar + MEDIUM_FAB_HEIGHT * 2.0);
-            open_floating_snack_bar(&mut tester);
+        test_widgets(|tester| {
+            let space_above_snack_bar = space_above_snack_bar(tester);
+            with_fab_height(tester, space_above_snack_bar + MEDIUM_FAB_HEIGHT * 2.0);
+            open_floating_snack_bar(tester);
         });
     }
 
@@ -3293,14 +3255,10 @@ mod tests {
     #[test]
     #[should_panic(expected = "Floating SnackBar presented off screen.")]
     fn a_floating_snack_bar_pushed_partly_off_screen_by_a_large_button_asserts() {
-        with_main_thread_stack(|| {
-            let space_above_snack_bar = space_above_snack_bar();
-            let mut tester = tester();
-            with_fab_height(
-                &mut tester,
-                space_above_snack_bar + MEDIUM_FAB_HEIGHT + 10.0,
-            );
-            open_floating_snack_bar(&mut tester);
+        test_widgets(|tester| {
+            let space_above_snack_bar = space_above_snack_bar(tester);
+            with_fab_height(tester, space_above_snack_bar + MEDIUM_FAB_HEIGHT + 10.0);
+            open_floating_snack_bar(tester);
         });
     }
 
@@ -3309,16 +3267,15 @@ mod tests {
     #[test]
     #[should_panic(expected = "Floating SnackBar presented off screen.")]
     fn a_material_2_floating_snack_bar_pushed_off_screen_by_large_footer_buttons_asserts() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_app(
-                &mut tester,
+                tester,
                 m2,
                 Scaffold::new()
                     .persistent_footer_buttons(vec![SizedBox::new().height(1000.0).into_widget()])
                     .into_widget(),
             );
-            open_floating_snack_bar(&mut tester);
+            open_floating_snack_bar(tester);
             tester.pump_and_settle(); // Have the SnackBar fully animate out.
         });
     }
@@ -3328,16 +3285,15 @@ mod tests {
     #[test]
     #[should_panic(expected = "Floating SnackBar presented off screen.")]
     fn a_material_2_floating_snack_bar_pushed_off_screen_by_a_large_bottom_bar_asserts() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_app(
-                &mut tester,
+                tester,
                 m2,
                 Scaffold::new()
                     .bottom_navigation_bar(SizedBox::new().height(1000.0))
                     .into_widget(),
             );
-            open_floating_snack_bar(&mut tester);
+            open_floating_snack_bar(tester);
             tester.pump_and_settle(); // Have the SnackBar fully animate out.
         });
     }
@@ -3347,16 +3303,15 @@ mod tests {
     #[test]
     #[should_panic(expected = "Floating SnackBar presented off screen.")]
     fn a_material_3_floating_snack_bar_pushed_off_screen_by_large_footer_buttons_asserts() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_app(
-                &mut tester,
+                tester,
                 m3,
                 Scaffold::new()
                     .persistent_footer_buttons(vec![SizedBox::new().height(1000.0).into_widget()])
                     .into_widget(),
             );
-            open_floating_snack_bar(&mut tester);
+            open_floating_snack_bar(tester);
             tester.pump_and_settle(); // Have the SnackBar fully animate out.
         });
     }
@@ -3366,23 +3321,21 @@ mod tests {
     #[test]
     #[should_panic(expected = "Floating SnackBar presented off screen.")]
     fn a_material_3_floating_snack_bar_pushed_off_screen_by_a_large_bottom_bar_asserts() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_app(
-                &mut tester,
+                tester,
                 m3,
                 Scaffold::new()
                     .bottom_navigation_bar(SizedBox::new().height(1000.0))
                     .into_widget(),
             );
-            open_floating_snack_bar(&mut tester);
+            open_floating_snack_bar(tester);
             tester.pump_and_settle(); // Have the SnackBar fully animate out.
         });
     }
 
     /// Asserts `actual` is `expected` up to the precision a global position keeps through
-    /// the view's single-precision transforms when a layout holds a fraction: the action's
-    /// label is measured in the OS font, where Dart's tests measure whole Ahem squares.
+    /// the view's single-precision transforms, where Dart's are double precision.
     fn assert_more_or_less_equals(actual: f64, expected: f64) {
         assert!(
             (actual - expected).abs() < 1e-3,
@@ -3391,29 +3344,28 @@ mod tests {
     }
 
     /// The end-padding cases: the distance from the snack bar's right edge to its action's.
-    fn action_end_padding(behavior: SnackBarBehavior) -> f64 {
-        let mut tester = tester();
+    fn action_end_padding(tester: &mut WidgetTester, behavior: SnackBarBehavior) -> f64 {
         let home = x_scaffold(move |app, context| {
             show(
                 app,
                 context,
-                SnackBar::new(AhemText::new("Some content"))
+                SnackBar::new(Text::new("Some content"))
                     .behavior(behavior)
                     .action(SnackBarAction::new("ACTION", |_app| {})),
             );
         });
-        pump_app(&mut tester, m3, home.into_widget());
-        tap_text(&mut tester, "X");
+        pump_app(tester, m3, home.into_widget());
+        tap_text(tester, "X");
         tester.pump_and_settle();
-        rect_of_type::<SnackBar>(&tester).top_right().dx()
-            - rect_of_type::<SnackBarAction>(&tester).top_right().dx()
+        rect_of_type::<SnackBar>(tester).top_right().dx()
+            - rect_of_type::<SnackBarAction>(tester).top_right().dx()
     }
 
     // Dart: 'SnackBar has correct end padding when it contains an action with fixed behavior'.
     #[test]
     fn a_fixed_snack_bar_s_action_sits_12_from_its_end() {
-        with_main_thread_stack(|| {
-            assert_more_or_less_equals(action_end_padding(SnackBarBehavior::Fixed), 12.0);
+        test_widgets(|tester| {
+            assert_more_or_less_equals(action_end_padding(tester, SnackBarBehavior::Fixed), 12.0);
         });
     }
 
@@ -3421,59 +3373,57 @@ mod tests {
     // behavior'.
     #[test]
     fn a_floating_snack_bar_s_action_sits_23_from_its_end() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             assert_more_or_less_equals(
-                action_end_padding(SnackBarBehavior::Floating),
+                action_end_padding(tester, SnackBarBehavior::Floating),
                 8.0 + 15.0, // button margin + horizontal scaffold outside margin
             );
         });
     }
 
     /// The right-to-left custom width cases.
-    fn centred_right_to_left(theme: fn(&App) -> ThemeData) {
+    fn centred_right_to_left(tester: &mut WidgetTester, theme: fn(&App) -> ThemeData) {
         const CUSTOM_WIDTH: f64 = 400.0;
-        let mut tester = tester();
         let home = Directionality::new(
             TextDirection::Rtl,
             x_scaffold(|app, context| {
                 show(
                     app,
                     context,
-                    SnackBar::new(AhemText::new("Feeling super snackish"))
+                    SnackBar::new(Text::new("Feeling super snackish"))
                         .behavior(SnackBarBehavior::Floating)
                         .width(CUSTOM_WIDTH),
                 );
             }),
         );
-        pump_app(&mut tester, theme, home.into_widget());
-        tap_x_and_settle_entrance(&mut tester);
-        assert_centred_with_width(&tester, CUSTOM_WIDTH);
+        pump_app(tester, theme, home.into_widget());
+        tap_x_and_settle_entrance(tester);
+        assert_centred_with_width(tester, CUSTOM_WIDTH);
     }
 
     // Dart: 'Material3 - Floating snackbar with custom width is centered when text direction
     // is rtl'.
     #[test]
     fn a_material_3_floating_snack_bar_of_custom_width_is_centred_right_to_left() {
-        with_main_thread_stack(|| centred_right_to_left(m3));
+        test_widgets(|tester| centred_right_to_left(tester, m3));
     }
 
     // Dart: 'Material2 - Floating snackbar with custom width is centered when text direction
     // is rtl'.
     #[test]
     fn a_material_2_floating_snack_bar_of_custom_width_is_centred_right_to_left() {
-        with_main_thread_stack(|| centred_right_to_left(m2));
+        test_widgets(|tester| centred_right_to_left(tester, m2));
     }
 
     // Dart: 'ScaffoldMessenger does not duplicate a SnackBar when presenting a
     // MaterialBanner.'.
     #[test]
     fn presenting_a_material_banner_does_not_duplicate_the_snack_bar() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const SNACK_BAR_TEXT: &str = "SnackBar";
             const MATERIAL_BANNER_TEXT: &str = "MaterialBanner";
             let material_banner_tap_target = GlobalKey::new();
             let snack_bar_tap_target = GlobalKey::new();
-            let mut tester = tester();
             let home = Scaffold::new().body(Builder::new({
                 let material_banner_tap_target = material_banner_tap_target.clone();
                 let snack_bar_tap_target = snack_bar_tap_target.clone();
@@ -3483,7 +3433,7 @@ mod tests {
                             GestureDetector::new()
                                 .key(snack_bar_tap_target.clone().into())
                                 .on_tap(Listener::new(move |app| {
-                                    show(app, context, SnackBar::new(AhemText::new(SNACK_BAR_TEXT)));
+                                    show(app, context, SnackBar::new(Text::new(SNACK_BAR_TEXT)));
                                 }))
                                 .behavior(HitTestBehavior::Opaque)
                                 .child(SizedBox::new().height(100.0).width(100.0))
@@ -3492,7 +3442,7 @@ mod tests {
                                 .key(material_banner_tap_target.clone().into())
                                 .on_tap(Listener::new(move |app| {
                                     let banner = crate::banner::MaterialBanner::new(
-                                        AhemText::new(MATERIAL_BANNER_TEXT),
+                                        Text::new(MATERIAL_BANNER_TEXT),
                                         vec![
                                             TextButton::new(
                                                 Some(Listener::new(move |app| {
@@ -3517,21 +3467,23 @@ mod tests {
                         .into_widget()
                 }
             }));
-            pump_app(&mut tester, m3, home.into_widget());
-            tap_key(&mut tester, &snack_bar_tap_target);
-            tap_key(&mut tester, &material_banner_tap_target);
+            pump_app(tester, m3, home.into_widget());
+            tap_key(tester, &snack_bar_tap_target);
+            tap_key(tester, &material_banner_tap_target);
             tester.pump_and_settle();
 
-            assert_eq!(count_text(&tester, SNACK_BAR_TEXT), 1);
-            assert_eq!(count_text(&tester, MATERIAL_BANNER_TEXT), 1);
+            assert_eq!(count_text(tester, SNACK_BAR_TEXT), 1);
+            assert_eq!(count_text(tester, MATERIAL_BANNER_TEXT), 1);
         });
     }
 
     /// The nested scaffold cases: a scaffold with a button whose body is another scaffold.
-    fn top_of_snack_bar_over_nested_scaffolds(theme: fn(&App) -> ThemeData) -> f64 {
-        let mut tester = tester();
+    fn top_of_snack_bar_over_nested_scaffolds(
+        tester: &mut WidgetTester,
+        theme: fn(&App) -> ThemeData,
+    ) -> f64 {
         pump_app(
-            &mut tester,
+            tester,
             theme,
             Scaffold::new()
                 .body(Scaffold::new())
@@ -3539,8 +3491,8 @@ mod tests {
                 .into_widget(),
         );
         show_from_messenger_and_settle(
-            &mut tester,
-            SnackBar::new(AhemText::new("ScaffoldMessenger"))
+            tester,
+            SnackBar::new(Text::new("ScaffoldMessenger"))
                 .duration(Duration::from_secs(2))
                 .action(SnackBarAction::new("ACTION", |_app| {}))
                 .behavior(SnackBarBehavior::Floating),
@@ -3550,15 +3502,15 @@ mod tests {
         // SnackBar here. Since the outer Scaffold contains a FAB, the SnackBar
         // should be above it. If the inner Scaffold had the SnackBar, it would be
         // overlapping the FAB.
-        rect_of_type::<SnackBar>(&tester).top_right().dy()
+        rect_of_type::<SnackBar>(tester).top_right().dy()
     }
 
     // Dart: 'Material2 - ScaffoldMessenger presents SnackBars to only the root Scaffold when
     // Scaffolds are nested.', without the golden.
     #[test]
     fn a_material_2_snack_bar_shows_only_in_the_root_of_nested_scaffolds() {
-        with_main_thread_stack(|| {
-            assert_eq!(top_of_snack_bar_over_nested_scaffolds(m2), 465.0);
+        test_widgets(|tester| {
+            assert_eq!(top_of_snack_bar_over_nested_scaffolds(tester, m2), 465.0);
         });
     }
 
@@ -3566,20 +3518,19 @@ mod tests {
     // Scaffolds are nested.', without the golden.
     #[test]
     fn a_material_3_snack_bar_shows_only_in_the_root_of_nested_scaffolds() {
-        with_main_thread_stack(|| {
-            assert_eq!(top_of_snack_bar_over_nested_scaffolds(m3), 465.0);
+        test_widgets(|tester| {
+            assert_eq!(top_of_snack_bar_over_nested_scaffolds(tester, m3), 465.0);
         });
     }
 
     // Dart: 'ScaffoldMessengerState clearSnackBars works as expected'.
     #[test]
     fn clear_snack_bars_hides_the_current_snack_bar_and_drops_the_queue() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const SNACK_BARS: [&str; 3] = ["Hello Snackbar", "Hi Snackbar", "Bye Snackbar"];
             let snack_bar_counter = Rc::new(Cell::new(0));
             let tap_target = GlobalKey::new();
             let scaffold_messenger_key = GlobalKey::new();
-            let mut tester = tester();
             let home = ScaffoldMessenger::new(tap_target_scaffold(&tap_target, {
                 let snack_bar_counter = Rc::clone(&snack_bar_counter);
                 move |app, context| {
@@ -3588,25 +3539,25 @@ mod tests {
                     show(
                         app,
                         context,
-                        SnackBar::new(AhemText::new(SNACK_BARS[index]))
+                        SnackBar::new(Text::new(SNACK_BARS[index]))
                             .duration(Duration::from_secs(2)),
                     );
                 }
             }))
             .key(scaffold_messenger_key.clone().into());
-            pump_app(&mut tester, m3, home.into_widget());
+            pump_app(tester, m3, home.into_widget());
             let expect = |tester: &WidgetTester, counts: [usize; 3]| {
                 for (text, count) in SNACK_BARS.iter().zip(counts) {
                     assert_eq!(count_text(tester, text), count, "{text}");
                 }
             };
-            expect(&tester, [0, 0, 0]);
-            tap_key(&mut tester, &tap_target);
-            tap_key(&mut tester, &tap_target);
-            tap_key(&mut tester, &tap_target);
-            expect(&tester, [0, 0, 0]);
-            tester.pump(Duration::ZERO); // schedule animation
-            assert_eq!(count_text(&tester, SNACK_BARS[0]), 1);
+            expect(tester, [0, 0, 0]);
+            tap_key(tester, &tap_target);
+            tap_key(tester, &tap_target);
+            tap_key(tester, &tap_target);
+            expect(tester, [0, 0, 0]);
+            tester.pump(); // schedule animation
+            assert_eq!(count_text(tester, SNACK_BARS[0]), 1);
             {
                 let mut app = tester.cell.borrow_mut();
                 let messenger = scaffold_messenger_key
@@ -3614,9 +3565,9 @@ mod tests {
                     .expect("mounted");
                 messenger.clear_snack_bars(&mut app);
             }
-            assert_eq!(count_text(&tester, SNACK_BARS[0]), 1);
-            tester.pump(Duration::from_secs(2));
-            expect(&tester, [0, 0, 0]);
+            assert_eq!(count_text(tester, SNACK_BARS[0]), 1);
+            tester.pump_by(Duration::from_secs(2));
+            expect(tester, [0, 0, 0]);
         });
     }
 
@@ -3632,10 +3583,9 @@ mod tests {
 
     /// The margin and width assertion cases: builds `configure`'s snack bar and runs its
     /// entrance, where the build asserts.
-    fn shows(configure: impl Fn(SnackBar) -> SnackBar + 'static) {
-        let mut tester = tester();
-        do_build_app(&mut tester, configure);
-        tap_x_and_settle_entrance(&mut tester);
+    fn shows(tester: &mut WidgetTester, configure: impl Fn(SnackBar) -> SnackBar + 'static) {
+        do_build_app(tester, configure);
+        tap_x_and_settle_entrance(tester);
     }
 
     // Dart: 'Setting SnackBarBehavior.fixed will still assert for margin'.
@@ -3645,8 +3595,8 @@ mod tests {
                     set in the SnackBar constructor."
     )]
     fn a_fixed_snack_bar_asserts_against_a_margin() {
-        with_main_thread_stack(|| {
-            shows(|snack_bar| {
+        test_widgets(|tester| {
+            shows(tester, |snack_bar| {
                 snack_bar
                     .behavior(SnackBarBehavior::Fixed)
                     .margin(EdgeInsets::all(8.0))
@@ -3661,8 +3611,8 @@ mod tests {
                     set by default."
     )]
     fn a_snack_bar_fixed_by_default_asserts_against_a_margin() {
-        with_main_thread_stack(|| {
-            shows(|snack_bar| snack_bar.margin(EdgeInsets::all(8.0)));
+        test_widgets(|tester| {
+            shows(tester, |snack_bar| snack_bar.margin(EdgeInsets::all(8.0)));
         });
     }
 
@@ -3673,8 +3623,10 @@ mod tests {
                     set in the SnackBar constructor."
     )]
     fn a_fixed_snack_bar_asserts_against_a_width() {
-        with_main_thread_stack(|| {
-            shows(|snack_bar| snack_bar.behavior(SnackBarBehavior::Fixed).width(5.0));
+        test_widgets(|tester| {
+            shows(tester, |snack_bar| {
+                snack_bar.behavior(SnackBarBehavior::Fixed).width(5.0)
+            });
         });
     }
 
@@ -3685,8 +3637,8 @@ mod tests {
                     set by default."
     )]
     fn a_snack_bar_fixed_by_default_asserts_against_a_width() {
-        with_main_thread_stack(|| {
-            shows(|snack_bar| snack_bar.width(5.0));
+        test_widgets(|tester| {
+            shows(tester, |snack_bar| snack_bar.width(5.0));
         });
     }
 
@@ -3696,8 +3648,8 @@ mod tests {
     fn a_snack_bar_asserts_for_an_action_overflow_threshold_outside_0_to_1() {
         for overflow_threshold in [-1.0, -0.0001, 1.000001, 5.0] {
             let outcome = std::panic::catch_unwind(|| {
-                with_main_thread_stack(|| {
-                    shows(move |snack_bar| {
+                test_widgets(|tester| {
+                    shows(tester, move |snack_bar| {
                         snack_bar
                             .action_overflow_threshold(overflow_threshold)
                             .behavior(SnackBarBehavior::Fixed)
@@ -3724,10 +3676,9 @@ mod tests {
     // Dart: 'SnackBar has tooltip for Close Button'.
     #[test]
     fn a_snack_bar_s_close_button_has_a_tooltip() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_app(
-                &mut tester,
+                tester,
                 m2,
                 Scaffold::new()
                     .bottom_sheet(
@@ -3739,8 +3690,8 @@ mod tests {
                     .into_widget(),
             );
             show_from_messenger_and_settle(
-                &mut tester,
-                SnackBar::new(AhemText::new("Snackbar with close button"))
+                tester,
+                SnackBar::new(Text::new("Snackbar with close button"))
                     .duration(Duration::from_secs(365 * 24 * 60 * 60))
                     .action(SnackBarAction::new("ACTION", |_app| {}))
                     .behavior(SnackBarBehavior::Floating)
@@ -3775,15 +3726,14 @@ mod tests {
                     descendant Scaffolds to present to."
     )]
     fn showing_a_snack_bar_with_no_scaffold_to_present_it_asserts() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            pump_app(&mut tester, m3, waft_widgets::Center::new().into_widget());
+        test_widgets(|tester| {
+            pump_app(tester, m3, waft_widgets::Center::new().into_widget());
             let messenger = tester.find_by_type::<ScaffoldMessenger>()[0];
             let mut app = tester.cell.borrow_mut();
             let state = messenger
                 .state_handle::<crate::scaffold::ScaffoldMessengerState>(&app)
                 .expect("a ScaffoldMessengerState");
-            state.show_snack_bar(&mut app, SnackBar::new(AhemText::new("SnackBar")), None);
+            state.show_snack_bar(&mut app, SnackBar::new(Text::new("SnackBar")), None);
         });
     }
 
@@ -3803,9 +3753,9 @@ mod tests {
     /// The action background cases: a 'Tap' scaffold showing a snack bar with `action`;
     /// returns the action's material colour before and after the action is pressed.
     fn action_background_before_and_after_press(
+        tester: &mut WidgetTester,
         action: impl Fn() -> SnackBarAction + 'static,
     ) -> (Option<Color>, Option<Color>) {
-        let mut tester = tester();
         let home = Scaffold::new().body(Builder::new({
             let action = Rc::new(action);
             move |_app, context| {
@@ -3815,7 +3765,7 @@ mod tests {
                         show(
                             app,
                             context,
-                            SnackBar::new(AhemText::new("I am a snack bar."))
+                            SnackBar::new(Text::new("I am a snack bar."))
                                 .duration(Duration::from_secs(2))
                                 .action(action()),
                         );
@@ -3824,22 +3774,22 @@ mod tests {
                     .into_widget()
             }
         }));
-        pump_app(&mut tester, m3, home.into_widget());
-        tap_text(&mut tester, "Tap");
+        pump_app(tester, m3, home.into_widget());
+        tap_text(tester, "Tap");
         tester.pump_and_settle();
-        let before = action_material_color(&tester);
-        tap_text(&mut tester, "ACTION");
-        tester.pump(Duration::ZERO);
-        let after = action_material_color(&tester);
+        let before = action_material_color(tester);
+        tap_text(tester, "ACTION");
+        tester.pump();
+        let after = action_material_color(tester);
         (before, after)
     }
 
     // Dart: 'SnackBarAction backgroundColor works as a Color'.
     #[test]
     fn a_snack_bar_action_s_background_color_turns_transparent_once_pressed() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let background_color = Colors::BLUE.primary();
-            let (before, after) = action_background_before_and_after_press(move || {
+            let (before, after) = action_background_before_and_after_press(tester, move || {
                 SnackBarAction::new("ACTION", |_app| {}).background_color(background_color)
             });
             assert_eq!(before, Some(background_color));
@@ -3850,8 +3800,8 @@ mod tests {
     // Dart: 'SnackBarAction backgroundColor works as a WidgetStateColor'.
     #[test]
     fn a_snack_bar_action_s_widget_state_background_color_resolves_by_state() {
-        with_main_thread_stack(|| {
-            let (before, after) = action_background_before_and_after_press(|| {
+        test_widgets(|tester| {
+            let (before, after) = action_background_before_and_after_press(tester, || {
                 let background_color = WidgetStateColor::resolve_with(|states| {
                     if states.contains(&WidgetState::Disabled) {
                         return Colors::BLUE.primary();
@@ -3868,10 +3818,10 @@ mod tests {
     // Dart: 'SnackBarAction disabledBackgroundColor works as expected'.
     #[test]
     fn a_snack_bar_action_shows_its_disabled_background_color_once_pressed() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let background_color = Colors::BLUE.primary();
             let disabled_background_color = Colors::RED.primary();
-            let (before, after) = action_background_before_and_after_press(move || {
+            let (before, after) = action_background_before_and_after_press(tester, move || {
                 SnackBarAction::new("ACTION", |_app| {})
                     .background_color(background_color)
                     .disabled_background_color(disabled_background_color)
@@ -3889,8 +3839,8 @@ mod tests {
                     WidgetStateColor"
     )]
     fn a_widget_state_action_background_with_a_disabled_background_asserts() {
-        with_main_thread_stack(|| {
-            action_background_before_and_after_press(|| {
+        test_widgets(|tester| {
+            action_background_before_and_after_press(tester, || {
                 let background_color = WidgetStateColor::resolve_with(|states| {
                     if states.contains(&WidgetState::Disabled) {
                         return Colors::BLUE.primary();
@@ -3907,10 +3857,9 @@ mod tests {
     // Dart: 'SnackBar material applies SnackBar.clipBehavior'.
     #[test]
     fn a_snack_bar_s_material_takes_its_clip_behavior() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_app(
-                &mut tester,
+                tester,
                 m3,
                 Scaffold::new()
                     .body(waft_widgets::Container::new())
@@ -3921,11 +3870,8 @@ mod tests {
                     material.clip_behavior
                 })
             };
-            show_from_messenger_and_settle(
-                &mut tester,
-                SnackBar::new(AhemText::new("I am a snack bar.")),
-            );
-            assert_eq!(clip_behavior(&tester), Clip::HardEdge);
+            show_from_messenger_and_settle(tester, SnackBar::new(Text::new("I am a snack bar.")));
+            assert_eq!(clip_behavior(tester), Clip::HardEdge);
             {
                 let messenger = tester.find_by_type::<ScaffoldMessenger>()[0];
                 let mut app = tester.cell.borrow_mut();
@@ -3936,10 +3882,10 @@ mod tests {
             }
             tester.pump_and_settle(); // Have the SnackBar fully animate out.
             show_from_messenger_and_settle(
-                &mut tester,
-                SnackBar::new(AhemText::new("I am a snack bar.")).clip_behavior(Clip::AntiAlias),
+                tester,
+                SnackBar::new(Text::new("I am a snack bar.")).clip_behavior(Clip::AntiAlias),
             ); // Have the SnackBar fully animate in.
-            assert_eq!(clip_behavior(&tester), Clip::AntiAlias);
+            assert_eq!(clip_behavior(tester), Clip::AntiAlias);
         });
     }
 
@@ -3954,11 +3900,11 @@ mod tests {
         const SNACKBAR_CONTENT: &str = "Snackbar";
         const BUTTON_TEXT2: &str = "Try press me";
         let completed = Rc::new(Cell::new(false));
-        let mut tester = WidgetTester::with_physical_size(
+        let mut tester = WidgetTester::with_view(
             waft_test::TestPlatform::new().on(TargetPlatform::Android),
-            waft_embedder::Size::new(400.0, 400.0),
+            waft_test::TestView::with_pixel_ratio(200.0, 200.0, 1.0),
         );
-        tester.install_platform_fonts();
+        let tester = &mut tester;
         let snack_bar = Rc::new(snack_bar);
         let home = Scaffold::new().body(Builder::new({
             let completed = Rc::clone(&completed);
@@ -3985,22 +3931,22 @@ mod tests {
                     .into_widget()
             }
         }));
-        pump_app(&mut tester, theme, home.into_widget());
-        tap_text(&mut tester, BUTTON_TEXT);
+        pump_app(tester, theme, home.into_widget());
+        tap_text(tester, BUTTON_TEXT);
         tester.pump_and_settle();
-        assert_eq!(count_text(&tester, SNACKBAR_CONTENT), 1);
-        let top_left = text_rect(&tester, BUTTON_TEXT2).top_left();
+        assert_eq!(count_text(tester, SNACKBAR_CONTENT), 1);
+        let top_left = text_rect(tester, BUTTON_TEXT2).top_left();
         tester.tap(top_left, 1);
-        assert_eq!(count_text(&tester, SNACKBAR_CONTENT), 1);
+        assert_eq!(count_text(tester, SNACKBAR_CONTENT), 1);
         completed.get()
     }
 
     // Dart: 'Tap on button behind snack bar defined by width'.
     #[test]
     fn a_button_beside_a_snack_bar_of_custom_width_can_be_tapped() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             assert!(taps_behind_the_snack_bar(m3, || {
-                SnackBar::new(AhemText::new("Snackbar"))
+                SnackBar::new(Text::new("Snackbar"))
                     .behavior(SnackBarBehavior::Floating)
                     .width(100.0)
             }));
@@ -4010,9 +3956,9 @@ mod tests {
     // Dart: 'Tap on button behind snack bar defined by margin'.
     #[test]
     fn a_button_in_a_snack_bar_s_margin_can_be_tapped() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             assert!(taps_behind_the_snack_bar(m3, || {
-                SnackBar::new(AhemText::new("Snackbar"))
+                SnackBar::new(Text::new("Snackbar"))
                     .behavior(SnackBarBehavior::Floating)
                     .margin(EdgeInsets::only(100.0, 0.0, 0.0, 0.0))
             }));
@@ -4022,9 +3968,9 @@ mod tests {
     // Dart: "Can't tap on button behind snack bar defined by margin and HitTestBehavior.opaque".
     #[test]
     fn a_button_in_the_margin_of_an_opaque_snack_bar_cannot_be_tapped() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             assert!(!taps_behind_the_snack_bar(m3, || {
-                SnackBar::new(AhemText::new("Snackbar"))
+                SnackBar::new(Text::new("Snackbar"))
                     .hit_test_behavior(HitTestBehavior::Opaque)
                     .behavior(SnackBarBehavior::Floating)
                     .margin(EdgeInsets::only(100.0, 0.0, 0.0, 0.0))
@@ -4036,7 +3982,7 @@ mod tests {
     // SnackBarThemeData'.
     #[test]
     fn a_button_in_the_theme_s_inset_padding_can_be_tapped() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             assert!(taps_behind_the_snack_bar(
                 |app| {
                     ThemeData::builder()
@@ -4046,7 +3992,7 @@ mod tests {
                         )
                         .build(app)
                 },
-                || SnackBar::new(AhemText::new("Snackbar")).behavior(SnackBarBehavior::Floating),
+                || SnackBar::new(Text::new("Snackbar")).behavior(SnackBarBehavior::Floating),
             ));
         });
     }
@@ -4055,21 +4001,20 @@ mod tests {
     #[test]
     #[allow(deprecated)]
     fn the_action_s_overlay_is_the_inverse_primary_colour() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let home = x_scaffold(|app, context| {
                 show(
                     app,
                     context,
-                    SnackBar::new(AhemText::new("I am a snack bar."))
+                    SnackBar::new(Text::new("I am a snack bar."))
                         .action(SnackBarAction::new("ACTION", |_app| {})),
                 );
             });
-            pump_app(&mut tester, m3, home.into_widget());
-            tap_text(&mut tester, "X");
+            pump_app(tester, m3, home.into_widget());
+            tap_text(tester, "X");
             tester.pump_and_settle();
             let theme = m3(&tester.cell.borrow());
-            let overlay_color = action_button_style(&tester)
+            let overlay_color = action_button_style(tester)
                 .overlay_color
                 .expect("an overlay color")
                 .resolve(&states(&[WidgetState::Hovered]));
@@ -4098,65 +4043,62 @@ mod tests {
     // Dart: 'Setting persist to true prevents timeout'.
     #[test]
     fn a_persisting_snack_bar_does_not_time_out() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const SNACKBAR_CONTENT: &str = "Snackbar";
-            let mut tester = tester();
             let home = elevated_button_scaffold(|| {
-                SnackBar::new(AhemText::new(SNACKBAR_CONTENT))
+                SnackBar::new(Text::new(SNACKBAR_CONTENT))
                     .duration(Duration::from_secs(1))
                     .persist(true)
                     .show_close_icon(true)
             });
-            pump_app(&mut tester, m3, home.into_widget());
-            tap_text(&mut tester, "Show snackbar");
-            tester.pump(ms(750));
+            pump_app(tester, m3, home.into_widget());
+            tap_text(tester, "Show snackbar");
+            tester.pump_by(ms(750));
             // The snackbar shows up before the timeout.
-            assert_eq!(count_text(&tester, SNACKBAR_CONTENT), 1);
-            tester.pump(ms(1500));
+            assert_eq!(count_text(tester, SNACKBAR_CONTENT), 1);
+            tester.pump_by(ms(1500));
             tester.pump_and_settle();
             // The snackbar is still there after the timeout.
-            assert_eq!(count_text(&tester, SNACKBAR_CONTENT), 1);
+            assert_eq!(count_text(tester, SNACKBAR_CONTENT), 1);
             let close = tester.find_by_icon(&Icons::close());
             let center = tester.global_rect(tester.render_box_of(close)).center();
             tester.tap(center, 1);
             tester.pump_and_settle();
             // The snackbar is dismissed.
-            assert_eq!(count_text(&tester, SNACKBAR_CONTENT), 0);
+            assert_eq!(count_text(tester, SNACKBAR_CONTENT), 0);
         });
     }
 
     // Dart: 'Setting persist to false so snackbar auto dismisses'.
     #[test]
     fn a_snack_bar_that_does_not_persist_times_out_despite_its_close_icon() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const SNACKBAR_CONTENT: &str = "SnackbarContent";
-            let mut tester = tester();
             let home = elevated_button_scaffold(|| {
-                SnackBar::new(AhemText::new(SNACKBAR_CONTENT))
+                SnackBar::new(Text::new(SNACKBAR_CONTENT))
                     .duration(Duration::from_secs(1))
                     .persist(false)
                     .show_close_icon(true)
             });
-            pump_app(&mut tester, m3, home.into_widget());
-            let button = rect_of_type::<crate::elevated_button::ElevatedButton>(&tester).center();
+            pump_app(tester, m3, home.into_widget());
+            let button = rect_of_type::<crate::elevated_button::ElevatedButton>(tester).center();
             tester.tap(button, 1);
-            tester.pump(Duration::ZERO);
-            tester.pump(ms(750));
+            tester.pump();
+            tester.pump_by(ms(750));
             // The snackbar shows up before the timeout.
-            assert_eq!(count_text(&tester, SNACKBAR_CONTENT), 1);
-            tester.pump(ms(1500));
+            assert_eq!(count_text(tester, SNACKBAR_CONTENT), 1);
+            tester.pump_by(ms(1500));
             tester.pump_and_settle();
             // The snackbar auto dismisses after the timeout.
-            assert_eq!(count_text(&tester, SNACKBAR_CONTENT), 0);
+            assert_eq!(count_text(tester, SNACKBAR_CONTENT), 0);
         });
     }
 
     // Dart: 'Setting persist to false overrides accessibleNavigation'.
     #[test]
     fn a_snack_bar_that_does_not_persist_times_out_under_accessible_navigation() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const SNACKBAR_CONTENT: &str = "SnackbarContent";
-            let mut tester = tester();
             let theme = m3(&tester.cell.borrow());
             tester.pump_widget(
                 waft_widgets::MediaQuery::new(
@@ -4164,7 +4106,7 @@ mod tests {
                     material_app(
                         theme,
                         elevated_button_scaffold(|| {
-                            SnackBar::new(AhemText::new(SNACKBAR_CONTENT))
+                            SnackBar::new(Text::new(SNACKBAR_CONTENT))
                                 .duration(Duration::from_secs(1))
                                 .persist(false)
                                 .action(SnackBarAction::new("Action", |_app| {}))
@@ -4174,31 +4116,30 @@ mod tests {
                 )
                 .into_widget(),
             );
-            let button = rect_of_type::<crate::elevated_button::ElevatedButton>(&tester).center();
+            let button = rect_of_type::<crate::elevated_button::ElevatedButton>(tester).center();
             tester.tap(button, 1);
             tester.pump_and_settle();
-            assert_eq!(count_text(&tester, SNACKBAR_CONTENT), 1);
-            tester.pump(Duration::from_secs(10));
+            assert_eq!(count_text(tester, SNACKBAR_CONTENT), 1);
+            tester.pump_by(Duration::from_secs(10));
             tester.pump_and_settle();
             // The snackbar auto dismisses after the timeout.
-            assert_eq!(count_text(&tester, SNACKBAR_CONTENT), 0);
+            assert_eq!(count_text(tester, SNACKBAR_CONTENT), 0);
         });
     }
 
     // Dart: 'SnackBarAction does not crash at zero area'.
     #[test]
     fn a_snack_bar_action_lays_out_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_app(
-                &mut tester,
+                tester,
                 m3,
                 waft_widgets::Center::new()
                     .child(SizedBox::shrink().child(SnackBarAction::new("X", |_app| {})))
                     .into_widget(),
             );
             assert_eq!(
-                rect_of_type::<SnackBarAction>(&tester).size(),
+                rect_of_type::<SnackBarAction>(tester).size(),
                 waft_embedder::Size::ZERO
             );
         });
@@ -4207,8 +4148,7 @@ mod tests {
     // Dart: 'SnackBar action overflow calculation respects MediaQuery textScaler'.
     #[test]
     fn the_action_overflow_measures_the_label_with_the_text_scaler() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let build_snack_bar =
                 |tester: &mut WidgetTester, text_scaler: waft_painting::TextScaler| {
                     let home = waft_widgets::MediaQuery::new(
@@ -4233,12 +4173,12 @@ mod tests {
                 };
 
             // With no scaling, the action label fits on the same row as content.
-            build_snack_bar(&mut tester, waft_painting::TextScaler::NO_SCALING);
-            tap_text(&mut tester, "Show");
+            build_snack_bar(tester, waft_painting::TextScaler::NO_SCALING);
+            tap_text(tester, "Show");
             tester.pump_and_settle();
-            let action_top_left1 = text_rect(&tester, "Action Label").top_left();
+            let action_top_left1 = text_rect(tester, "Action Label").top_left();
             // Action and content are on the same line (action is not below content).
-            assert!(action_top_left1.dy() <= text_rect(&tester, "Message").bottom_left().dy());
+            assert!(action_top_left1.dy() <= text_rect(tester, "Message").bottom_left().dy());
             {
                 let show = tester.find_text("Show")[0];
                 let mut app = tester.cell.borrow_mut();
@@ -4249,11 +4189,11 @@ mod tests {
 
             // With a large text scaler, the action button width is scaled up and overflows
             // to a separate row below the content.
-            build_snack_bar(&mut tester, waft_painting::TextScaler::linear(3.0));
-            tap_text(&mut tester, "Show");
+            build_snack_bar(tester, waft_painting::TextScaler::linear(3.0));
+            tap_text(tester, "Show");
             tester.pump_and_settle();
-            let content_bottom_left2 = text_rect(&tester, "Message").bottom_left();
-            let action_top_left2 = text_rect(&tester, "Action Label").top_left();
+            let content_bottom_left2 = text_rect(tester, "Message").bottom_left();
+            let action_top_left2 = text_rect(tester, "Action Label").top_left();
             // Action overflows and is positioned below the content text.
             assert!(action_top_left2.dy() >= content_bottom_left2.dy());
         });
@@ -4263,11 +4203,11 @@ mod tests {
     /// rect of its 20 high content box.
     fn overflowing_action(padding: Option<EdgeInsets>) -> (WidgetTester, Rect) {
         let content_key = GlobalKey::new();
-        let mut tester = WidgetTester::with_physical_size(
+        let mut owned = WidgetTester::with_view(
             waft_test::TestPlatform::new().on(TargetPlatform::Android),
-            waft_embedder::Size::new(1000.0, 1600.0),
+            waft_test::TestView::with_pixel_ratio(500.0, 800.0, 1.0),
         );
-        tester.install_fonts();
+        let tester = &mut owned;
         let home = Scaffold::new().body(Builder::new({
             let content_key = content_key.clone();
             move |_app, context| {
@@ -4288,11 +4228,11 @@ mod tests {
                     .into_widget()
             }
         }));
-        pump_app(&mut tester, m3, home.into_widget());
-        tap_text(&mut tester, "Show");
+        pump_app(tester, m3, home.into_widget());
+        tap_text(tester, "Show");
         tester.pump_and_settle();
-        let content = rect_of_key(&tester, &content_key);
-        (tester, content)
+        let content = rect_of_key(tester, &content_key);
+        (owned, content)
     }
 
     /// Dart's `tester.widget<Row>(find.descendant(of: find.byType(SnackBar), matching:
@@ -4310,14 +4250,15 @@ mod tests {
     // Dart: 'SnackBar does not allocate 40% empty space on right when action overflows'.
     #[test]
     fn an_overflowing_action_leaves_only_the_end_padding_beside_the_content() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             const SCREEN_WIDTH: f64 = 500.0;
-            let (tester, content) = overflowing_action(None);
+            let (mut owned, content) = overflowing_action(None);
+            let tester = &mut owned;
             // For screenWidth = 500, horizontalPadding = 24 on start and end, the content width is 452px (500 - 24 - 24).
             assert_eq!(content.width(), 452.0);
             assert_eq!(content.top_right().dx(), SCREEN_WIDTH - 24.0);
             // Verify the spacer SizedBox has width equal to horizontalPadding (24.0), not 40% of snackBarWidth (188.0).
-            let children = content_row_children(&tester);
+            let children = content_row_children(tester);
             assert_eq!(children.len(), 2);
             assert!(waft_widgets::downcast_widget::<Expanded>(&*children[0]).is_some());
             let spacer = waft_widgets::downcast_widget::<SizedBox>(&*children[1])
@@ -4329,13 +4270,14 @@ mod tests {
     // Dart: 'SnackBar respects custom padding when action overflows'.
     #[test]
     fn an_overflowing_action_keeps_a_custom_padding_without_a_spacer() {
-        with_main_thread_stack(|| {
+        test_widgets(|_| {
             const SCREEN_WIDTH: f64 = 500.0;
             let custom_padding = EdgeInsets::only(36.0, 0.0, 48.0, 0.0);
-            let (tester, content) = overflowing_action(Some(custom_padding));
+            let (mut owned, content) = overflowing_action(Some(custom_padding));
+            let tester = &mut owned;
             // When a custom padding is provided, it is applied on both sides by the outer
             // Padding, so no extra spacer is inserted in the content row.
-            let children = content_row_children(&tester);
+            let children = content_row_children(tester);
             assert_eq!(children.len(), 1);
             assert!(waft_widgets::downcast_widget::<Expanded>(&*children[0]).is_some());
             assert_eq!(
@@ -4402,9 +4344,8 @@ mod tests {
     // Dart: 'Material2 - Passing no SnackBarThemeData returns defaults'.
     #[test]
     fn a_material_2_snack_bar_with_no_theme_takes_the_defaults() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const TEXT: &str = "I am a snack bar.";
-            let mut tester = tester();
             let home = x_scaffold(|app, context| {
                 show(
                     app,
@@ -4414,17 +4355,17 @@ mod tests {
                         .action(SnackBarAction::new("ACTION", |_app| {})),
                 );
             });
-            pump_app(&mut tester, m2, home.into_widget());
-            tap_text(&mut tester, "X");
+            pump_app(tester, m2, home.into_widget());
+            tap_text(tester, "X");
             tester.pump_and_settle();
             assert_eq!(
-                paragraph_style(&tester, TEXT),
+                paragraph_style(tester, TEXT),
                 crate::typography::Typography::material2018()
                     .build()
                     .white
                     .title_medium
             );
-            with_snack_bar_material(&tester, |material| {
+            with_snack_bar_material(tester, |material| {
                 assert!(crate::test_support::is_same_color_as(
                     material.color.expect("a colour"),
                     Color::new(0xFF333333)
@@ -4438,9 +4379,8 @@ mod tests {
     // Dart: 'Material3 - Passing no SnackBarThemeData returns defaults'.
     #[test]
     fn a_material_3_snack_bar_with_no_theme_takes_the_defaults() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const TEXT: &str = "I am a snack bar.";
-            let mut tester = tester();
             let home = x_scaffold(|app, context| {
                 show(
                     app,
@@ -4450,8 +4390,8 @@ mod tests {
                         .action(SnackBarAction::new("ACTION", |_app| {})),
                 );
             });
-            pump_app(&mut tester, m3, home.into_widget());
-            tap_text(&mut tester, "X");
+            pump_app(tester, m3, home.into_widget());
+            tap_text(tester, "X");
             tester.pump_and_settle();
             let theme = m3(&tester.cell.borrow());
             let typography = crate::typography::Typography::material2021().build();
@@ -4466,8 +4406,8 @@ mod tests {
                         .color(theme.color_scheme.on_inverse_surface())
                         .decoration_color(theme.color_scheme.on_surface)
                 });
-            assert_eq!(paragraph_style(&tester, TEXT), expected);
-            with_snack_bar_material(&tester, |material| {
+            assert_eq!(paragraph_style(tester, TEXT), expected);
+            with_snack_bar_material(tester, |material| {
                 assert_eq!(material.color, Some(theme.color_scheme.inverse_surface()));
                 assert_eq!(material.elevation, 6.0);
                 assert!(material.shape.is_none());
@@ -4478,10 +4418,9 @@ mod tests {
     // Dart: 'SnackBar uses values from SnackBarThemeData'.
     #[test]
     fn a_snack_bar_takes_its_values_from_the_theme() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             const TEXT: &str = "I am a snack bar.";
             const ACTION: &str = "ACTION";
-            let mut tester = tester();
             let home = x_scaffold(|app, context| {
                 show(
                     app,
@@ -4492,7 +4431,7 @@ mod tests {
                 );
             });
             pump_app(
-                &mut tester,
+                tester,
                 |app| {
                     ThemeData::builder()
                         .snack_bar_theme(snack_bar_theme(Some(true)))
@@ -4500,11 +4439,11 @@ mod tests {
                 },
                 home.into_widget(),
             );
-            tap_text(&mut tester, "X");
+            tap_text(tester, "X");
             tester.pump_and_settle();
             let theme = snack_bar_theme(Some(true));
-            assert_eq!(paragraph_style(&tester, TEXT), theme.content_text_style);
-            with_snack_bar_material(&tester, |material| {
+            assert_eq!(paragraph_style(tester, TEXT), theme.content_text_style);
+            with_snack_bar_material(tester, |material| {
                 assert_eq!(material.color, theme.background_color);
                 assert_eq!(Some(material.elevation), theme.elevation);
                 assert!(
@@ -4519,13 +4458,14 @@ mod tests {
                 Some(tester.text_color(ACTION)),
                 theme.action_text_color.as_ref().map(AnyColor::color)
             );
-            assert_eq!(close_icons_in_snack_bar(&tester), 1);
+            assert_eq!(close_icons_in_snack_bar(tester), 1);
         });
     }
 
     /// The priority cases: a floating 400 wide snack bar whose own values beat the theme's,
     /// under the theme `wrap` puts around the scaffold or in `theme`.
     fn widget_values_win(
+        tester: &mut WidgetTester,
         theme: impl FnOnce(&App) -> ThemeData,
         wrap: impl FnOnce(Scaffold) -> WidgetRef,
         configure: impl Fn(SnackBar) -> SnackBar + 'static,
@@ -4541,20 +4481,19 @@ mod tests {
                 BorderRadiusGeometry::all(Radius::circular(9.0)),
             )
         };
-        let mut tester = tester();
         let home = x_scaffold(move |app, context| {
             show(
                 app,
                 context,
-                configure(SnackBar::new(AhemText::new("I am a snack bar.")))
+                configure(SnackBar::new(Text::new("I am a snack bar.")))
                     .duration(Duration::from_secs(2))
                     .action(action()),
             );
         });
-        pump_app(&mut tester, theme, wrap(home));
-        tap_text(&mut tester, "X");
+        pump_app(tester, theme, wrap(home));
+        tap_text(tester, "X");
         tester.pump_and_settle();
-        with_snack_bar_material(&tester, |material| {
+        with_snack_bar_material(tester, |material| {
             assert_eq!(material.color, Some(background_color));
             assert_eq!(material.elevation, elevation);
             assert!(
@@ -4566,9 +4505,9 @@ mod tests {
             );
         });
         assert_eq!(tester.text_color("ACTION"), text_color);
-        assert_eq!(close_icons_in_snack_bar(&tester), 0);
+        assert_eq!(close_icons_in_snack_bar(tester), 0);
         // Assert width.
-        assert_centred_with_width(&tester, SNACK_BAR_WIDTH);
+        assert_centred_with_width(tester, SNACK_BAR_WIDTH);
     }
 
     /// Dart's priority-case snack bar: purple, floating, 400 wide, 7 high, 9-rounded, no close
@@ -4589,8 +4528,9 @@ mod tests {
     // Dart: 'SnackBar widget properties take priority over theme'.
     #[test]
     fn a_snack_bar_s_own_values_win_over_the_theme_s() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             widget_values_win(
+                tester,
                 |app| {
                     ThemeData::builder()
                         .snack_bar_theme(snack_bar_theme(Some(true)))
@@ -4606,8 +4546,9 @@ mod tests {
     // Dart: 'Local SnackBarTheme properties are used'.
     #[test]
     fn a_snack_bar_takes_its_values_from_a_local_snack_bar_theme() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             widget_values_win(
+                tester,
                 m3,
                 |scaffold| {
                     SnackBarTheme::new(
@@ -4635,8 +4576,9 @@ mod tests {
     // Dart: 'SnackBar widget properties take priority over local theme'.
     #[test]
     fn a_snack_bar_s_own_values_win_over_a_local_snack_bar_theme_s() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             widget_values_win(
+                tester,
                 m3,
                 |scaffold| SnackBarTheme::new(snack_bar_theme(Some(true)), scaffold).into_widget(),
                 prioritized,
@@ -4647,28 +4589,28 @@ mod tests {
 
     /// The theme's action background cases, from the 'X' scaffold.
     fn themed_action_background_before_and_after_press(
+        tester: &mut WidgetTester,
         theme: SnackBarThemeData,
         action: impl Fn() -> SnackBarAction + 'static,
     ) -> (Option<Color>, Option<Color>) {
-        let mut tester = tester();
         let home = x_scaffold(move |app, context| {
             show(
                 app,
                 context,
-                SnackBar::new(AhemText::new("I am a snack bar.")).action(action()),
+                SnackBar::new(Text::new("I am a snack bar.")).action(action()),
             );
         });
         pump_app(
-            &mut tester,
+            tester,
             |app| ThemeData::builder().snack_bar_theme(theme).build(app),
             home.into_widget(),
         );
-        tap_text(&mut tester, "X");
+        tap_text(tester, "X");
         tester.pump_and_settle();
-        let before = action_material_color(&tester);
-        tap_text(&mut tester, "ACTION");
-        tester.pump(Duration::ZERO);
-        let after = action_material_color(&tester);
+        let before = action_material_color(tester);
+        tap_text(tester, "ACTION");
+        tester.pump();
+        let after = action_material_color(tester);
         (before, after)
     }
 
@@ -4684,8 +4626,9 @@ mod tests {
     // Dart: 'SnackBarAction uses actionBackgroundColor'.
     #[test]
     fn a_snack_bar_action_takes_the_theme_s_action_background_color() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let (before, after) = themed_action_background_before_and_after_press(
+                tester,
                 SnackBarThemeData::new().action_background_color(by_disabled(
                     Colors::BLUE.primary(),
                     Colors::PURPLE.primary(),
@@ -4700,8 +4643,9 @@ mod tests {
     // Dart: 'SnackBarAction backgroundColor overrides SnackBarThemeData actionBackgroundColor'.
     #[test]
     fn a_snack_bar_action_s_background_color_wins_over_the_theme_s() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let (before, after) = themed_action_background_before_and_after_press(
+                tester,
                 SnackBarThemeData::new().action_background_color(by_disabled(
                     Colors::BLUE.primary(),
                     Colors::PURPLE.primary(),
@@ -4726,8 +4670,9 @@ mod tests {
                     WidgetStateColor"
     )]
     fn a_theme_with_a_widget_state_action_background_and_a_disabled_one_asserts() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             themed_action_background_before_and_after_press(
+                tester,
                 SnackBarThemeData::new()
                     .action_background_color(by_disabled(
                         Colors::BLUE.primary(),
@@ -4764,14 +4709,13 @@ mod tests {
     // Dart: 'SnackBar theme behavior is correct for floating'.
     #[test]
     fn a_theme_floating_snack_bar_sits_on_top_of_the_button() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            themed_behavior(&mut tester, SnackBarBehavior::Floating);
-            tap_text(&mut tester, "X");
+        test_widgets(|tester| {
+            themed_behavior(tester, SnackBarBehavior::Floating);
+            tap_text(tester, "X");
             tester.pump_and_settle();
-            let snack_bar_bottom_center = first_box_rect::<SnackBar>(&tester).bottom_center();
+            let snack_bar_bottom_center = first_box_rect::<SnackBar>(tester).bottom_center();
             let floating_action_button_top_center =
-                first_box_rect::<crate::floating_action_button::FloatingActionButton>(&tester)
+                first_box_rect::<crate::floating_action_button::FloatingActionButton>(tester)
                     .top_center();
             // Since padding and margin is handled inside snackBarBox,
             // the bottom offset of snackbar should equal with top offset of FAB
@@ -4782,17 +4726,16 @@ mod tests {
     // Dart: 'SnackBar theme behavior is correct for fixed'.
     #[test]
     fn a_theme_fixed_snack_bar_pushes_the_button_above_it() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            themed_behavior(&mut tester, SnackBarBehavior::Fixed);
+        test_widgets(|tester| {
+            themed_behavior(tester, SnackBarBehavior::Fixed);
             let floating_action_button_origin_bottom_center =
-                first_box_rect::<crate::floating_action_button::FloatingActionButton>(&tester)
+                first_box_rect::<crate::floating_action_button::FloatingActionButton>(tester)
                     .bottom_center();
-            tap_text(&mut tester, "X");
+            tap_text(tester, "X");
             tester.pump_and_settle();
-            let snack_bar_top_center = first_box_rect::<SnackBar>(&tester).top_center();
+            let snack_bar_top_center = first_box_rect::<SnackBar>(tester).top_center();
             let floating_action_button_bottom_center =
-                first_box_rect::<crate::floating_action_button::FloatingActionButton>(&tester)
+                first_box_rect::<crate::floating_action_button::FloatingActionButton>(tester)
                     .bottom_center();
             assert!(
                 floating_action_button_origin_bottom_center.dy()
@@ -4804,14 +4747,17 @@ mod tests {
 
     /// Dart's `buildApp(themedBehavior:, margin:, width:)` of snack_bar_theme_test.dart, with
     /// the snack bar's entrance run.
-    fn themed_and_shown(behavior: SnackBarBehavior, configure: fn(SnackBar) -> SnackBar) {
-        let mut tester = tester();
+    fn themed_and_shown(
+        tester: &mut WidgetTester,
+        behavior: SnackBarBehavior,
+        configure: fn(SnackBar) -> SnackBar,
+    ) {
         let home = x_scaffold(move |app, context| {
             show(app, context, configure(snack_bar_with_action()));
         })
         .floating_action_button(fab_with_icon());
         pump_app(
-            &mut tester,
+            tester,
             move |app| {
                 ThemeData::builder()
                     .snack_bar_theme(SnackBarThemeData::new().behavior(behavior))
@@ -4819,14 +4765,14 @@ mod tests {
             },
             home.into_widget(),
         );
-        tap_x_and_settle_entrance(&mut tester);
+        tap_x_and_settle_entrance(tester);
     }
 
     // Dart: 'SnackBar theme behavior will assert properly for margin use', the floating run.
     #[test]
     fn a_theme_floating_snack_bar_takes_a_margin() {
-        with_main_thread_stack(|| {
-            themed_and_shown(SnackBarBehavior::Floating, |snack_bar| {
+        test_widgets(|tester| {
+            themed_and_shown(tester, SnackBarBehavior::Floating, |snack_bar| {
                 snack_bar.margin(EdgeInsets::all(8.0))
             });
         });
@@ -4839,8 +4785,8 @@ mod tests {
                     set by the inherited SnackBarThemeData."
     )]
     fn a_theme_fixed_snack_bar_asserts_against_a_margin() {
-        with_main_thread_stack(|| {
-            themed_and_shown(SnackBarBehavior::Fixed, |snack_bar| {
+        test_widgets(|tester| {
+            themed_and_shown(tester, SnackBarBehavior::Fixed, |snack_bar| {
                 snack_bar.margin(EdgeInsets::all(8.0))
             });
         });
@@ -4849,8 +4795,10 @@ mod tests {
     // Dart: 'SnackBar theme behavior will assert properly for width use', the floating run.
     #[test]
     fn a_theme_floating_snack_bar_takes_a_width() {
-        with_main_thread_stack(|| {
-            themed_and_shown(SnackBarBehavior::Floating, |snack_bar| snack_bar.width(5.0));
+        test_widgets(|tester| {
+            themed_and_shown(tester, SnackBarBehavior::Floating, |snack_bar| {
+                snack_bar.width(5.0)
+            });
         });
     }
 
@@ -4861,8 +4809,10 @@ mod tests {
                     set by the inherited SnackBarThemeData."
     )]
     fn a_theme_fixed_snack_bar_asserts_against_a_width() {
-        with_main_thread_stack(|| {
-            themed_and_shown(SnackBarBehavior::Fixed, |snack_bar| snack_bar.width(5.0));
+        test_widgets(|tester| {
+            themed_and_shown(tester, SnackBarBehavior::Fixed, |snack_bar| {
+                snack_bar.width(5.0)
+            });
         });
     }
 
@@ -4870,8 +4820,7 @@ mod tests {
     /// is gone; here they are freed with the state's references to them.
     #[test]
     fn a_dismissed_snack_bar_frees_its_curved_animations() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let home = x_scaffold(|app, context| {
                 show(
                     app,
@@ -4879,8 +4828,8 @@ mod tests {
                     SnackBar::new(Text::new("Snack")).duration(Duration::from_secs(1)),
                 );
             });
-            pump_app(&mut tester, m3, home.into_widget());
-            tap_x_and_settle_entrance(&mut tester);
+            pump_app(tester, m3, home.into_widget());
+            tap_x_and_settle_entrance(tester);
             let animations = {
                 let snack_bar = tester.find_by_type::<SnackBar>()[0];
                 let app = tester.cell.borrow();
@@ -4899,9 +4848,9 @@ mod tests {
                 .map(|animation| animation.expect("made in init_state").handle())
             };
 
-            tester.pump(ms(1500)); // the timer dismisses the snack bar
-            tester.pump(Duration::ZERO); // begin the reverse animation
-            tester.pump(ms(750)); // its last frame removes the snack bar
+            tester.pump_by(ms(1500)); // the timer dismisses the snack bar
+            tester.pump(); // begin the reverse animation
+            tester.pump_by(ms(750)); // its last frame removes the snack bar
             assert!(tester.find_by_type::<SnackBar>().is_empty());
             tester.cell.checkpoint();
             let app = tester.cell.borrow();

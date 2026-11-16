@@ -65,6 +65,12 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — Rust has no inheritance.
   Affect: a `BoxShadow` stored where Flutter stores it as a `Shadow` loses `spread_radius` and `blur_style`, so it paints tighter than Flutter's.
 
+## debug.dart (`debugDisableShadows`)
+
+- Change: `debugDisableShadows` is not ported: `BoxShadow::to_paint`, the decoration painters, `RenderPhysicalModel`, `RenderPhysicalShape` and the painters that call `to_paint` always paint the shadow, and there is no stroked-path stand-in for one.
+  Reason: platform — a test reads the display list, where a shadow is its own `DrawShadow` op with its elevation and colour, so the solid stand-in Flutter's tests turn on to compare shadows as paths has nothing to make comparable.
+  Affect: a test checks a shadow by its `DrawShadow`, where Flutter's checks the stroked path `debugDisableShadows` draws; flutter_test's default of shadows off has no counterpart.
+
 ## box_decoration.rs → box_decoration.dart
 
 - Change: `BoxDecoration` and `ShapeDecoration` have no `image` field.
@@ -113,7 +119,7 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - `ImageChunkEvent` reports loading progress to stream listeners. Trigger: a provider that reports progress, such as a network provider.
 - `ResizeImage`, `FileImage` and `NetworkImage`. Trigger: decoding to a chosen size; a file system; an HTTP client.
 - `ImageProvider.evict` and `obtainCacheStatus`. Trigger: a caller that drops or inspects one image in the cache.
-- `debug.dart` beyond `debugDisableShadows`. Trigger: image loading, or tests that need it.
+- `debug.dart`'s other flags (`debugPaintPictureSizesEnabled`, `debugInvertOversizedImages`, …). Trigger: image loading, or tests that need it.
 - `ColorProperty`. Trigger: diagnostics.
 - Custom `TextScaler` / `SystemTextScaler`. Trigger: `MediaQuery`.
 - `EdgeInsets.fromViewPadding` / `fromWindowPadding`. Trigger: embedder / `MediaQuery`.

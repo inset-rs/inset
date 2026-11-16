@@ -3281,27 +3281,26 @@ impl StatelessWidget for ExcludeFocusTraversal {
 #[cfg(test)]
 mod tests {
     use waft_embedder::{Rect, TextDirection};
-    use waft_foundation::AppCell;
 
     use super::*;
+    use crate::testing::{WidgetTester, test_widgets};
     use crate::widgets::basic::{Directionality, Positioned, SizedBox, Stack};
-    use crate::widgets::focus_manager::tests::{app_with_view, mount};
 
     /// A `Focus` at a fixed place in a `Stack`, labelled so the traversal order can be read.
     fn placed(label: &'static str, rect: Rect) -> WidgetRef {
         Positioned::from_rect(rect, Focus::new(SizedBox::expand()).debug_label(label)).into_widget()
     }
 
-    /// Mounts the given children in a `Stack` under a [`FocusTraversalGroup`] with `policy`.
-    fn mount_group(cell: &AppCell, policy: FocusTraversalPolicyRef, children: Vec<WidgetRef>) {
-        mount(
-            cell,
-            Directionality::new(
-                TextDirection::Ltr,
-                FocusTraversalGroup::new(Stack::new().children(children)).policy(policy),
-            )
-            .into_widget(),
-        );
+    /// Pumps the given children in a `Stack` under a [`FocusTraversalGroup`] with `policy`.
+    fn mount_group(
+        tester: &mut WidgetTester,
+        policy: FocusTraversalPolicyRef,
+        children: Vec<WidgetRef>,
+    ) {
+        tester.pump_widget(Directionality::new(
+            TextDirection::Ltr,
+            FocusTraversalGroup::new(Stack::new().children(children)).policy(policy),
+        ));
     }
 
     fn node(app: &mut App, label: &str) -> AnyFocusNode {
@@ -3350,238 +3349,246 @@ mod tests {
 
     #[test]
     fn widget_order_traverses_in_widget_creation_order() {
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
-        let policy = WidgetOrderTraversalPolicy::new(&mut app).into_erased();
-        drop(app);
-        mount_group(&cell, policy, scattered());
-        let mut app = cell.borrow_mut();
+        test_widgets(|tester| {
+            let mut app = tester.cell.borrow_mut();
+            let policy = WidgetOrderTraversalPolicy::new(&mut app).into_erased();
+            drop(app);
+            mount_group(tester, policy, scattered());
+            let mut app = tester.cell.borrow_mut();
 
-        assert_eq!(order(&mut app, "x", 3, true), ["y", "z", "x"]);
-        assert_eq!(order(&mut app, "x", 3, false), ["z", "y", "x"]);
+            assert_eq!(order(&mut app, "x", 3, true), ["y", "z", "x"]);
+            assert_eq!(order(&mut app, "x", 3, false), ["z", "y", "x"]);
+        });
     }
 
     #[test]
     fn reading_order_traverses_top_to_bottom_in_the_reading_direction() {
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
-        let policy = ReadingOrderTraversalPolicy::new(&mut app).into_erased();
-        drop(app);
-        mount_group(&cell, policy, scattered());
-        let mut app = cell.borrow_mut();
+        test_widgets(|tester| {
+            let mut app = tester.cell.borrow_mut();
+            let policy = ReadingOrderTraversalPolicy::new(&mut app).into_erased();
+            drop(app);
+            mount_group(tester, policy, scattered());
+            let mut app = tester.cell.borrow_mut();
 
-        // "y" and "x" share the topmost band, left to right; "z" is below them.
-        assert_eq!(order(&mut app, "y", 3, true), ["x", "z", "y"]);
-        assert_eq!(order(&mut app, "y", 3, false), ["z", "x", "y"]);
+            // "y" and "x" share the topmost band, left to right; "z" is below them.
+            assert_eq!(order(&mut app, "y", 3, true), ["x", "z", "y"]);
+            assert_eq!(order(&mut app, "y", 3, false), ["z", "x", "y"]);
+        });
     }
 
     #[test]
     fn reading_order_follows_the_directionality_in_force() {
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
-        let policy = ReadingOrderTraversalPolicy::new(&mut app).into_erased();
-        drop(app);
-        mount(
-            &cell,
-            Directionality::new(
-                TextDirection::Rtl,
-                FocusTraversalGroup::new(Stack::new().children(scattered())).policy(policy),
-            )
-            .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
+        test_widgets(|tester| {
+            let mut app = tester.cell.borrow_mut();
+            let policy = ReadingOrderTraversalPolicy::new(&mut app).into_erased();
+            drop(app);
+            tester.pump_widget(
+                Directionality::new(
+                    TextDirection::Rtl,
+                    FocusTraversalGroup::new(Stack::new().children(scattered())).policy(policy),
+                )
+                .into_widget(),
+            );
+            let mut app = tester.cell.borrow_mut();
 
-        // Right to left: "x" comes before "y" in the topmost band.
-        assert_eq!(order(&mut app, "x", 3, true), ["y", "z", "x"]);
+            // Right to left: "x" comes before "y" in the topmost band.
+            assert_eq!(order(&mut app, "x", 3, true), ["y", "z", "x"]);
+        });
     }
 
     #[test]
     fn ordered_traversal_follows_the_numeric_order() {
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
-        let policy = OrderedTraversalPolicy::new(&mut app).into_erased();
-        let ordered = |label: &'static str, rect: Rect, order: f64| -> WidgetRef {
-            FocusTraversalOrder::new(
-                Rc::new(NumericFocusOrder::new(order)),
-                Positioned::from_rect(rect, Focus::new(SizedBox::expand()).debug_label(label)),
-            )
-            .into_widget()
-        };
-        drop(app);
-        mount_group(
-            &cell,
-            policy,
-            vec![
-                ordered("x", Rect::from_ltwh(100.0, 0.0, 50.0, 20.0), 3.0),
-                ordered("y", Rect::from_ltwh(0.0, 0.0, 50.0, 20.0), 1.0),
-                ordered("z", Rect::from_ltwh(0.0, 100.0, 50.0, 20.0), 2.0),
-            ],
-        );
-        let mut app = cell.borrow_mut();
+        test_widgets(|tester| {
+            let mut app = tester.cell.borrow_mut();
+            let policy = OrderedTraversalPolicy::new(&mut app).into_erased();
+            let ordered = |label: &'static str, rect: Rect, order: f64| -> WidgetRef {
+                FocusTraversalOrder::new(
+                    Rc::new(NumericFocusOrder::new(order)),
+                    Positioned::from_rect(rect, Focus::new(SizedBox::expand()).debug_label(label)),
+                )
+                .into_widget()
+            };
+            drop(app);
+            mount_group(
+                tester,
+                policy,
+                vec![
+                    ordered("x", Rect::from_ltwh(100.0, 0.0, 50.0, 20.0), 3.0),
+                    ordered("y", Rect::from_ltwh(0.0, 0.0, 50.0, 20.0), 1.0),
+                    ordered("z", Rect::from_ltwh(0.0, 100.0, 50.0, 20.0), 2.0),
+                ],
+            );
+            let mut app = tester.cell.borrow_mut();
 
-        assert_eq!(order(&mut app, "y", 3, true), ["z", "x", "y"]);
+            assert_eq!(order(&mut app, "y", 3, true), ["z", "x", "y"]);
+        });
     }
 
     #[test]
     fn ordered_traversal_follows_the_lexical_order() {
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
-        let policy = OrderedTraversalPolicy::new(&mut app).into_erased();
-        let ordered = |label: &'static str, rect: Rect, order: &'static str| -> WidgetRef {
-            FocusTraversalOrder::new(
-                Rc::new(LexicalFocusOrder::new(order)),
-                Positioned::from_rect(rect, Focus::new(SizedBox::expand()).debug_label(label)),
-            )
-            .into_widget()
-        };
-        drop(app);
-        mount_group(
-            &cell,
-            policy,
-            vec![
-                ordered("x", Rect::from_ltwh(100.0, 0.0, 50.0, 20.0), "c"),
-                ordered("y", Rect::from_ltwh(0.0, 0.0, 50.0, 20.0), "a"),
-                ordered("z", Rect::from_ltwh(0.0, 100.0, 50.0, 20.0), "b"),
-            ],
-        );
-        let mut app = cell.borrow_mut();
+        test_widgets(|tester| {
+            let mut app = tester.cell.borrow_mut();
+            let policy = OrderedTraversalPolicy::new(&mut app).into_erased();
+            let ordered = |label: &'static str, rect: Rect, order: &'static str| -> WidgetRef {
+                FocusTraversalOrder::new(
+                    Rc::new(LexicalFocusOrder::new(order)),
+                    Positioned::from_rect(rect, Focus::new(SizedBox::expand()).debug_label(label)),
+                )
+                .into_widget()
+            };
+            drop(app);
+            mount_group(
+                tester,
+                policy,
+                vec![
+                    ordered("x", Rect::from_ltwh(100.0, 0.0, 50.0, 20.0), "c"),
+                    ordered("y", Rect::from_ltwh(0.0, 0.0, 50.0, 20.0), "a"),
+                    ordered("z", Rect::from_ltwh(0.0, 100.0, 50.0, 20.0), "b"),
+                ],
+            );
+            let mut app = tester.cell.borrow_mut();
 
-        assert_eq!(order(&mut app, "y", 3, true), ["z", "x", "y"]);
+            assert_eq!(order(&mut app, "y", 3, true), ["z", "x", "y"]);
+        });
     }
 
     #[test]
     fn the_traversal_edge_behavior_decides_what_happens_at_the_last_node() {
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
-        let policy = WidgetOrderTraversalPolicy::new(&mut app).into_erased();
-        drop(app);
-        mount_group(&cell, policy, scattered());
-        let mut app = cell.borrow_mut();
+        test_widgets(|tester| {
+            let mut app = tester.cell.borrow_mut();
+            let policy = WidgetOrderTraversalPolicy::new(&mut app).into_erased();
+            drop(app);
+            mount_group(tester, policy, scattered());
+            let mut app = tester.cell.borrow_mut();
 
-        // The default is a closed loop: the last node wraps around to the first.
-        assert_eq!(order(&mut app, "z", 1, true), ["x"]);
+            // The default is a closed loop: the last node wraps around to the first.
+            assert_eq!(order(&mut app, "z", 1, true), ["x"]);
 
-        let scope = node(&mut app, "z")
-            .nearest_scope(&mut app)
-            .expect("a node in the tree has a nearest scope");
-        scope.set_traversal_edge_behavior(&mut app, TraversalEdgeBehavior::Stop);
-        assert_eq!(order(&mut app, "z", 1, true), ["z"]);
-        assert_eq!(order(&mut app, "x", 1, false), ["x"]);
+            let scope = node(&mut app, "z")
+                .nearest_scope(&mut app)
+                .expect("a node in the tree has a nearest scope");
+            scope.set_traversal_edge_behavior(&mut app, TraversalEdgeBehavior::Stop);
+            assert_eq!(order(&mut app, "z", 1, true), ["z"]);
+            assert_eq!(order(&mut app, "x", 1, false), ["x"]);
 
-        scope.set_traversal_edge_behavior(&mut app, TraversalEdgeBehavior::LeaveFlutterView);
-        let last = node(&mut app, "z");
-        last.request_focus(&mut app, None);
-        app.drain_microtasks();
-        assert!(!last.next_focus(&mut app));
-        app.drain_microtasks();
-        assert_eq!(primary_focus(&mut app), Some(scope.as_node()));
+            scope.set_traversal_edge_behavior(&mut app, TraversalEdgeBehavior::LeaveFlutterView);
+            let last = node(&mut app, "z");
+            last.request_focus(&mut app, None);
+            app.drain_microtasks();
+            assert!(!last.next_focus(&mut app));
+            app.drain_microtasks();
+            assert_eq!(primary_focus(&mut app), Some(scope.as_node()));
+        });
     }
 
     #[test]
     fn directional_focus_moves_to_the_neighbour_in_that_direction() {
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
-        let policy = ReadingOrderTraversalPolicy::new(&mut app).into_erased();
-        drop(app);
-        mount_group(&cell, policy, scattered());
-        let mut app = cell.borrow_mut();
+        test_widgets(|tester| {
+            let mut app = tester.cell.borrow_mut();
+            let policy = ReadingOrderTraversalPolicy::new(&mut app).into_erased();
+            drop(app);
+            mount_group(tester, policy, scattered());
+            let mut app = tester.cell.borrow_mut();
 
-        let y = node(&mut app, "y");
-        y.request_focus(&mut app, None);
-        app.drain_microtasks();
+            let y = node(&mut app, "y");
+            y.request_focus(&mut app, None);
+            app.drain_microtasks();
 
-        assert!(y.focus_in_direction(&mut app, TraversalDirection::Right));
-        app.drain_microtasks();
-        let focus = primary_focus(&mut app).expect("a primary focus");
-        assert_eq!(label(&app, focus), "x");
+            assert!(y.focus_in_direction(&mut app, TraversalDirection::Right));
+            app.drain_microtasks();
+            let focus = primary_focus(&mut app).expect("a primary focus");
+            assert_eq!(label(&app, focus), "x");
 
-        let x = node(&mut app, "x");
-        assert!(x.focus_in_direction(&mut app, TraversalDirection::Left));
-        app.drain_microtasks();
-        let focus = primary_focus(&mut app).expect("a primary focus");
-        assert_eq!(label(&app, focus), "y");
+            let x = node(&mut app, "x");
+            assert!(x.focus_in_direction(&mut app, TraversalDirection::Left));
+            app.drain_microtasks();
+            let focus = primary_focus(&mut app).expect("a primary focus");
+            assert_eq!(label(&app, focus), "y");
 
-        let y = node(&mut app, "y");
-        assert!(y.focus_in_direction(&mut app, TraversalDirection::Down));
-        app.drain_microtasks();
-        let focus = primary_focus(&mut app).expect("a primary focus");
-        assert_eq!(label(&app, focus), "z");
+            let y = node(&mut app, "y");
+            assert!(y.focus_in_direction(&mut app, TraversalDirection::Down));
+            app.drain_microtasks();
+            let focus = primary_focus(&mut app).expect("a primary focus");
+            assert_eq!(label(&app, focus), "z");
+        });
     }
 
     #[test]
     fn a_shortcut_bound_to_next_focus_moves_the_focus() {
-        use std::any::TypeId;
-        use std::collections::HashMap;
-        use std::time::Duration;
+        test_widgets(|tester| {
+            use std::any::TypeId;
+            use std::collections::HashMap;
+            use std::time::Duration;
 
-        use waft_services::{
-            HardwareKeyboard, KeyDownEvent, KeyEvent, LogicalKeyboardKey, PhysicalKeyboardKey,
-        };
+            use waft_services::{
+                HardwareKeyboard, KeyDownEvent, KeyEvent, LogicalKeyboardKey, PhysicalKeyboardKey,
+            };
 
-        use crate::widgets::actions::{ActionRef, Actions};
-        use crate::widgets::shortcuts::{ShortcutMap, Shortcuts, SingleActivator};
+            use crate::widgets::actions::{ActionRef, Actions};
+            use crate::widgets::shortcuts::{ShortcutMap, Shortcuts, SingleActivator};
 
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
-        let policy = WidgetOrderTraversalPolicy::new(&mut app).into_erased();
-        let action: ActionRef = NextFocusAction::new(&mut app).into_erased();
-        let shortcuts: ShortcutMap = vec![(
-            Rc::new(SingleActivator::new(LogicalKeyboardKey::TAB)),
-            Rc::new(NextFocusIntent::new()),
-        )];
-        drop(app);
-        mount(
-            &cell,
-            Directionality::new(
-                TextDirection::Ltr,
-                Shortcuts::new(
-                    shortcuts,
-                    Actions::new(
-                        HashMap::from([(TypeId::of::<NextFocusIntent>(), action)]),
-                        FocusTraversalGroup::new(Stack::new().children(scattered())).policy(policy),
+            let mut app = tester.cell.borrow_mut();
+            let policy = WidgetOrderTraversalPolicy::new(&mut app).into_erased();
+            let action: ActionRef = NextFocusAction::new(&mut app).into_erased();
+            let shortcuts: ShortcutMap = vec![(
+                Rc::new(SingleActivator::new(LogicalKeyboardKey::TAB)),
+                Rc::new(NextFocusIntent::new()),
+            )];
+            drop(app);
+            tester.pump_widget(
+                Directionality::new(
+                    TextDirection::Ltr,
+                    Shortcuts::new(
+                        shortcuts,
+                        Actions::new(
+                            HashMap::from([(TypeId::of::<NextFocusIntent>(), action)]),
+                            FocusTraversalGroup::new(Stack::new().children(scattered()))
+                                .policy(policy),
+                        ),
                     ),
-                ),
-            )
-            .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
+                )
+                .into_widget(),
+            );
+            let mut app = tester.cell.borrow_mut();
 
-        node(&mut app, "x").request_focus(&mut app, None);
-        app.drain_microtasks();
+            node(&mut app, "x").request_focus(&mut app, None);
+            app.drain_microtasks();
 
-        let tab = KeyEvent::Down(KeyDownEvent::new(
-            PhysicalKeyboardKey::TAB,
-            LogicalKeyboardKey::TAB,
-            Duration::ZERO,
-        ));
-        let keyboard = HardwareKeyboard::instance(&mut app);
-        assert!(keyboard.handle_key_event(&mut app, &tab));
-        app.drain_microtasks();
-        let focus = primary_focus(&mut app).expect("a primary focus");
-        assert_eq!(label(&app, focus), "y");
+            let tab = KeyEvent::Down(KeyDownEvent::new(
+                PhysicalKeyboardKey::TAB,
+                LogicalKeyboardKey::TAB,
+                Duration::ZERO,
+            ));
+            let keyboard = HardwareKeyboard::instance(&mut app);
+            assert!(keyboard.handle_key_event(&mut app, &tab));
+            app.drain_microtasks();
+            let focus = primary_focus(&mut app).expect("a primary focus");
+            assert_eq!(label(&app, focus), "y");
+        });
     }
 
     #[test]
     fn exclude_focus_traversal_keeps_its_descendants_out_of_the_order() {
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
-        let policy = WidgetOrderTraversalPolicy::new(&mut app).into_erased();
-        drop(app);
-        mount_group(
-            &cell,
-            policy,
-            vec![
-                placed("x", Rect::from_ltwh(100.0, 0.0, 50.0, 20.0)),
-                Positioned::from_rect(
-                    Rect::from_ltwh(0.0, 0.0, 50.0, 20.0),
-                    ExcludeFocusTraversal::new(Focus::new(SizedBox::expand()).debug_label("y")),
-                )
-                .into_widget(),
-                placed("z", Rect::from_ltwh(0.0, 100.0, 50.0, 20.0)),
-            ],
-        );
-        let mut app = cell.borrow_mut();
+        test_widgets(|tester| {
+            let mut app = tester.cell.borrow_mut();
+            let policy = WidgetOrderTraversalPolicy::new(&mut app).into_erased();
+            drop(app);
+            mount_group(
+                tester,
+                policy,
+                vec![
+                    placed("x", Rect::from_ltwh(100.0, 0.0, 50.0, 20.0)),
+                    Positioned::from_rect(
+                        Rect::from_ltwh(0.0, 0.0, 50.0, 20.0),
+                        ExcludeFocusTraversal::new(Focus::new(SizedBox::expand()).debug_label("y")),
+                    )
+                    .into_widget(),
+                    placed("z", Rect::from_ltwh(0.0, 100.0, 50.0, 20.0)),
+                ],
+            );
+            let mut app = tester.cell.borrow_mut();
 
-        assert_eq!(order(&mut app, "x", 2, true), ["z", "x"]);
+            assert_eq!(order(&mut app, "x", 2, true), ["z", "x"]);
+        });
     }
 }

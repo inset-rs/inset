@@ -730,6 +730,7 @@ mod tests {
     use super::*;
     use crate::framework::{AnyElement, Element, IntoWidget};
     use crate::test_harness::Harness;
+    use crate::testing::{WidgetTester, test_widgets};
     use crate::widgets::basic::SizedBox;
 
     fn app_on(platform: TargetPlatform) -> Rc<AppCell> {
@@ -930,37 +931,6 @@ mod tests {
         }
     }
 
-    /// An Android app with one view, the binding running.
-    fn android_with_view() -> Rc<AppCell> {
-        AppCell::with_platform(Rc::new(
-            TestPlatform::new()
-                .on(TargetPlatform::Android)
-                .with_view(Rc::new(waft_test::TestView::new(800.0, 600.0))),
-        ))
-    }
-
-    /// `tester.pumpWidget(widget)` under the view.
-    fn pump_widget(cell: &AppCell, widget: crate::framework::WidgetRef) {
-        crate::test_harness::binding_mount(cell, widget);
-    }
-
-    /// How many mounted widgets are a `W`: `find.byType(W)`.
-    fn count<W: 'static>(cell: &AppCell) -> usize {
-        let mut app = cell.borrow_mut();
-        let root = crate::binding::WidgetsBinding::instance(&mut app)
-            .root_element(&app)
-            .expect("a mounted tree");
-        let mut count = 0;
-        let mut stack = vec![root];
-        while let Some(element) = stack.pop() {
-            if crate::framework::downcast_widget::<W>(&**element.widget(&app)).is_some() {
-                count += 1;
-            }
-            element.visit_children(&app, &mut |child| stack.push(child));
-        }
-        count
-    }
-
     fn list_under(behavior: ScrollBehaviorRef) -> crate::framework::WidgetRef {
         crate::widgets::basic::Directionality::new(
             waft_embedder::TextDirection::Ltr,
@@ -976,35 +946,50 @@ mod tests {
     /// `scroll_behavior_test.dart`: "ScrollBehavior default android overscroll indicator".
     #[test]
     fn the_default_behavior_glows_on_android() {
-        let cell = android_with_view();
-        pump_widget(&cell, list_under(ScrollBehaviorRef::plain()));
+        test_widgets(|tester| {
+            tester.pump_widget(list_under(ScrollBehaviorRef::plain()));
 
-        assert_eq!(
-            count::<crate::widgets::overscroll_indicator::StretchingOverscrollIndicator>(&cell),
-            0
-        );
-        assert_eq!(count::<GlowingOverscrollIndicator>(&cell), 1);
+            assert!(
+                tester
+                    .find_onstage_by_type::<
+                        crate::widgets::overscroll_indicator::StretchingOverscrollIndicator,
+                    >()
+                    .is_empty()
+            );
+            assert_eq!(
+                tester
+                    .find_onstage_by_type::<GlowingOverscrollIndicator>()
+                    .len(),
+                1
+            );
+        });
     }
 
     /// `scroll_behavior_test.dart`: "ScrollBehavior configuration is maintained over multiple
     /// copies": "overscroll".
     #[test]
     fn a_copy_without_overscroll_keeps_the_glow_off_through_a_second_copy() {
-        let cell = android_with_view();
-        let default_behavior = ScrollBehaviorRef::plain();
-        pump_widget(&cell, list_under(default_behavior.clone()));
-        // Default adds a glowing overscroll indicator
-        assert_eq!(count::<GlowingOverscrollIndicator>(&cell), 1);
+        test_widgets(|tester| {
+            let glows = |tester: &WidgetTester| {
+                tester
+                    .find_onstage_by_type::<GlowingOverscrollIndicator>()
+                    .len()
+            };
+            let default_behavior = ScrollBehaviorRef::plain();
+            tester.pump_widget(list_under(default_behavior.clone()));
+            // Default adds a glowing overscroll indicator
+            assert_eq!(glows(tester), 1);
 
-        let once_copied_behavior =
-            ScrollBehaviorRef::new(default_behavior.copy_with().overscroll(false));
-        pump_widget(&cell, list_under(once_copied_behavior.clone()));
-        // Copy does not add indicator
-        assert_eq!(count::<GlowingOverscrollIndicator>(&cell), 0);
+            let once_copied_behavior =
+                ScrollBehaviorRef::new(default_behavior.copy_with().overscroll(false));
+            tester.pump_widget(list_under(once_copied_behavior.clone()));
+            // Copy does not add indicator
+            assert_eq!(glows(tester), 0);
 
-        let twice_copied_behavior = ScrollBehaviorRef::new(once_copied_behavior.copy_with());
-        pump_widget(&cell, list_under(twice_copied_behavior));
-        // Second copy maintains overscroll setting
-        assert_eq!(count::<GlowingOverscrollIndicator>(&cell), 0);
+            let twice_copied_behavior = ScrollBehaviorRef::new(once_copied_behavior.copy_with());
+            tester.pump_widget(list_under(twice_copied_behavior));
+            // Second copy maintains overscroll setting
+            assert_eq!(glows(tester), 0);
+        });
     }
 }

@@ -1367,12 +1367,10 @@ mod tests {
 
     use super::*;
     use crate::framework::GlobalKey;
-    use crate::test_harness::pump_every_view;
+    use crate::testing::test_widgets;
     use crate::widgets::basic::{Builder, Center, Padding, SizedBox};
-    use crate::widgets::focus_manager::tests::{app_with_view, mount};
     use crate::widgets::focus_manager::{FocusManager, FocusNode, KeyEventResult};
     use crate::widgets::value_listenable_builder::ValueListenableBuilder;
-    use std::time::Duration;
     use waft_foundation::ValueNotifier;
 
     type Captured = Rc<Cell<Option<AnyFocusNode>>>;
@@ -1392,238 +1390,237 @@ mod tests {
     /// `skipTraversal` before it attaches the node again.
     #[test]
     fn a_kept_node_remounts_after_the_focus_it_hung_under_is_freed() {
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
-        let node: FocusNodeRef = FocusNode::new(&mut app).into_erased();
-        let layout = app.create(ValueNotifier::new(0));
-        drop(app);
-        let widget = ValueListenableBuilder::new(Rc::new(layout.clone()), {
-            let node = node.clone();
-            move |_app, _context, layout: &i32, _child| match layout {
-                0 => Focus::new(Focus::new(SizedBox::shrink()).focus_node(node.clone()))
-                    .debug_label("outer")
-                    .into_widget(),
-                1 => SizedBox::shrink().into_widget(),
-                _ => Focus::new(SizedBox::shrink())
-                    .focus_node(node.clone())
-                    .into_widget(),
-            }
+        test_widgets(|tester| {
+            let mut app = tester.cell.borrow_mut();
+            let node: FocusNodeRef = FocusNode::new(&mut app).into_erased();
+            let layout = app.create(ValueNotifier::new(0));
+            drop(app);
+            let widget = ValueListenableBuilder::new(Rc::new(layout.clone()), {
+                let node = node.clone();
+                move |_app, _context, layout: &i32, _child| match layout {
+                    0 => Focus::new(Focus::new(SizedBox::shrink()).focus_node(node.clone()))
+                        .debug_label("outer")
+                        .into_widget(),
+                    1 => SizedBox::shrink().into_widget(),
+                    _ => Focus::new(SizedBox::shrink())
+                        .focus_node(node.clone())
+                        .into_widget(),
+                }
+            });
+            tester.pump_widget(widget.into_widget());
+            let mut app = tester.cell.borrow_mut();
+            let outer = node
+                .parent(&app)
+                .expect("the node hangs under the outer Focus");
+            assert!(node.ancestors(&mut app).contains(&outer));
+
+            layout.set_value(&mut app, 1);
+            drop(app);
+            tester.pump();
+            let app = tester.cell.borrow();
+            assert_eq!(node.parent(&app), None);
+            drop(app);
+            tester.cell.checkpoint();
+            let mut app = tester.cell.borrow_mut();
+            assert!(!app.contains(outer));
+
+            layout.set_value(&mut app, 2);
+            drop(app);
+            tester.pump();
+            let mut app = tester.cell.borrow_mut();
+            assert!(!node.skip_traversal(&mut app));
+            assert!(!node.ancestors(&mut app).contains(&outer));
         });
-        mount(&cell, widget.into_widget());
-        let mut app = cell.borrow_mut();
-        let outer = node
-            .parent(&app)
-            .expect("the node hangs under the outer Focus");
-        assert!(node.ancestors(&mut app).contains(&outer));
-
-        layout.set_value(&mut app, 1);
-        pump_every_view(&mut app, Duration::ZERO);
-        assert_eq!(node.parent(&app), None);
-        drop(app);
-        cell.checkpoint();
-        let mut app = cell.borrow_mut();
-        assert!(!app.contains(outer));
-
-        layout.set_value(&mut app, 2);
-        pump_every_view(&mut app, Duration::ZERO);
-        assert!(!node.skip_traversal(&mut app));
-        assert!(!node.ancestors(&mut app).contains(&outer));
     }
 
     #[test]
     fn autofocus_gives_the_focus_widgets_node_the_primary_focus() {
-        let cell = app_with_view();
-        let app = cell.borrow();
-        let captured: Captured = Rc::default();
-        drop(app);
-        mount(
-            &cell,
-            Focus::new(probe(&captured)).autofocus(true).into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        let node = captured.get().expect("Focus.of found the node");
-        assert!(node.has_primary_focus(&app));
-        let manager = FocusManager::instance(&mut app);
-        assert_eq!(manager.primary_focus(&app), Some(node));
+        test_widgets(|tester| {
+            let app = tester.cell.borrow();
+            let captured: Captured = Rc::default();
+            drop(app);
+            tester.pump_widget(Focus::new(probe(&captured)).autofocus(true).into_widget());
+            let mut app = tester.cell.borrow_mut();
+            let node = captured.get().expect("Focus.of found the node");
+            assert!(node.has_primary_focus(&app));
+            let manager = FocusManager::instance(&mut app);
+            assert_eq!(manager.primary_focus(&app), Some(node));
+        });
     }
 
     #[test]
     fn focus_of_reports_has_focus_on_the_ancestor_and_primary_focus_on_the_leaf() {
-        let cell = app_with_view();
-        let app = cell.borrow();
-        let outer: Captured = Rc::default();
-        let inner: Captured = Rc::default();
-        let inner_sink = Rc::clone(&inner);
-        let outer_sink = Rc::clone(&outer);
-        drop(app);
-        mount(
-            &cell,
-            Focus::new(Builder::new(move |app, context| {
-                outer_sink.set(Focus::maybe_of(app, context, false, true));
-                Focus::new(probe(&inner_sink)).autofocus(true).into_widget()
-            }))
-            .debug_label("outer")
-            .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
+        test_widgets(|tester| {
+            let app = tester.cell.borrow();
+            let outer: Captured = Rc::default();
+            let inner: Captured = Rc::default();
+            let inner_sink = Rc::clone(&inner);
+            let outer_sink = Rc::clone(&outer);
+            drop(app);
+            tester.pump_widget(
+                Focus::new(Builder::new(move |app, context| {
+                    outer_sink.set(Focus::maybe_of(app, context, false, true));
+                    Focus::new(probe(&inner_sink)).autofocus(true).into_widget()
+                }))
+                .debug_label("outer")
+                .into_widget(),
+            );
+            let mut app = tester.cell.borrow_mut();
 
-        let outer = outer.get().expect("the outer Focus.of found nothing");
-        let inner = inner.get().expect("the inner Focus.of found nothing");
-        assert_ne!(outer, inner);
-        assert_eq!(inner.parent(&app), Some(outer));
-        assert!(inner.has_primary_focus(&app));
-        assert!(inner.has_focus(&mut app));
-        assert!(outer.has_focus(&mut app));
-        assert!(!outer.has_primary_focus(&app));
-        assert_eq!(outer.debug_label(&app).as_deref(), Some("outer"));
+            let outer = outer.get().expect("the outer Focus.of found nothing");
+            let inner = inner.get().expect("the inner Focus.of found nothing");
+            assert_ne!(outer, inner);
+            assert_eq!(inner.parent(&app), Some(outer));
+            assert!(inner.has_primary_focus(&app));
+            assert!(inner.has_focus(&mut app));
+            assert!(outer.has_focus(&mut app));
+            assert!(!outer.has_primary_focus(&app));
+            assert_eq!(outer.debug_label(&app).as_deref(), Some("outer"));
+        });
     }
 
     #[test]
     fn focus_scope_of_returns_the_enclosing_scope() {
-        // With no FocusScope of its own, the context reaches the one the `View` installs, which
-        // hangs off the root scope through the view's `FocusTraversalGroup`.
-        let cell = app_with_view();
-        let app = cell.borrow();
-        let scope_node = Rc::new(Cell::new(None));
-        let sink = Rc::clone(&scope_node);
-        drop(app);
-        mount(
-            &cell,
-            Builder::new(move |app, context| {
-                sink.set(Some(FocusScope::of(app, context, true)));
-                SizedBox::shrink().into_widget()
-            })
-            .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        let manager = FocusManager::instance(&mut app);
-        let view_scope = scope_node.get().expect("FocusScope.of ran");
-        assert_ne!(view_scope, manager.root_scope(&app).handle());
-        assert_eq!(view_scope.debug_label(&app).as_deref(), Some("View Scope"));
-        assert_eq!(
-            view_scope.enclosing_scope(&mut app),
-            Some(manager.root_scope(&app).handle())
-        );
-
-        // A FocusScope widget below the view scopes its own subtree instead.
-        let cell = app_with_view();
-        let app = cell.borrow();
-        let scope_node = Rc::new(Cell::new(None));
-        let sink = Rc::clone(&scope_node);
-        drop(app);
-        mount(
-            &cell,
-            FocusScope::new(Builder::new(move |app, context| {
-                sink.set(Some(FocusScope::of(app, context, true)));
-                SizedBox::shrink().into_widget()
-            }))
-            .debug_label("scope")
-            .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        let manager = FocusManager::instance(&mut app);
-        let scope = scope_node.get().expect("FocusScope.of ran");
-        assert_ne!(scope, manager.root_scope(&app).handle());
-        assert_eq!(scope.debug_label(&app).as_deref(), Some("scope"));
-        assert_eq!(
-            scope
-                .enclosing_scope(&mut app)
-                .and_then(|scope| scope.debug_label(&app)),
-            Some("View Scope".to_string())
-        );
+        test_widgets(|tester| {
+            // With no FocusScope of its own, the context reaches the one the `View` installs, which
+            // hangs off the root scope through the view's `FocusTraversalGroup`.
+            let app = tester.cell.borrow();
+            let scope_node = Rc::new(Cell::new(None));
+            let sink = Rc::clone(&scope_node);
+            drop(app);
+            tester.pump_widget(
+                Builder::new(move |app, context| {
+                    sink.set(Some(FocusScope::of(app, context, true)));
+                    SizedBox::shrink().into_widget()
+                })
+                .into_widget(),
+            );
+            let mut app = tester.cell.borrow_mut();
+            let manager = FocusManager::instance(&mut app);
+            let view_scope = scope_node.get().expect("FocusScope.of ran");
+            assert_ne!(view_scope, manager.root_scope(&app).handle());
+            assert_eq!(view_scope.debug_label(&app).as_deref(), Some("View Scope"));
+            assert_eq!(
+                view_scope.enclosing_scope(&mut app),
+                Some(manager.root_scope(&app).handle())
+            );
+        });
+        test_widgets(|tester| {
+            // A FocusScope widget below the view scopes its own subtree instead.
+            let app = tester.cell.borrow();
+            let scope_node = Rc::new(Cell::new(None));
+            let sink = Rc::clone(&scope_node);
+            drop(app);
+            tester.pump_widget(
+                FocusScope::new(Builder::new(move |app, context| {
+                    sink.set(Some(FocusScope::of(app, context, true)));
+                    SizedBox::shrink().into_widget()
+                }))
+                .debug_label("scope")
+                .into_widget(),
+            );
+            let mut app = tester.cell.borrow_mut();
+            let manager = FocusManager::instance(&mut app);
+            let scope = scope_node.get().expect("FocusScope.of ran");
+            assert_ne!(scope, manager.root_scope(&app).handle());
+            assert_eq!(scope.debug_label(&app).as_deref(), Some("scope"));
+            assert_eq!(
+                scope
+                    .enclosing_scope(&mut app)
+                    .and_then(|scope| scope.debug_label(&app)),
+                Some("View Scope".to_string())
+            );
+        });
     }
 
     #[test]
     fn a_focus_widgets_on_key_event_receives_events_addressed_to_its_node() {
-        use std::time::Duration;
+        test_widgets(|tester| {
+            use std::time::Duration;
 
-        use waft_services::{
-            HardwareKeyboard, KeyDownEvent, KeyEvent, LogicalKeyboardKey, PhysicalKeyboardKey,
-        };
+            use waft_services::{
+                HardwareKeyboard, KeyDownEvent, KeyEvent, LogicalKeyboardKey, PhysicalKeyboardKey,
+            };
 
-        let cell = app_with_view();
-        let app = cell.borrow();
-        let seen: Rc<RefCell<Vec<&'static str>>> = Rc::default();
-        let inner_seen = Rc::clone(&seen);
-        let outer_seen = Rc::clone(&seen);
-        drop(app);
-        mount(
-            &cell,
-            Focus::new(
-                Focus::new(SizedBox::shrink())
-                    .autofocus(true)
-                    .on_key_event(Rc::new(move |_app, _node, _event| {
-                        inner_seen.borrow_mut().push("inner");
-                        KeyEventResult::Ignored
-                    })),
-            )
-            .on_key_event(Rc::new(move |_app, _node, _event| {
-                outer_seen.borrow_mut().push("outer");
-                KeyEventResult::Handled
-            }))
-            .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
+            let app = tester.cell.borrow();
+            let seen: Rc<RefCell<Vec<&'static str>>> = Rc::default();
+            let inner_seen = Rc::clone(&seen);
+            let outer_seen = Rc::clone(&seen);
+            drop(app);
+            tester.pump_widget(
+                Focus::new(
+                    Focus::new(SizedBox::shrink())
+                        .autofocus(true)
+                        .on_key_event(Rc::new(move |_app, _node, _event| {
+                            inner_seen.borrow_mut().push("inner");
+                            KeyEventResult::Ignored
+                        })),
+                )
+                .on_key_event(Rc::new(move |_app, _node, _event| {
+                    outer_seen.borrow_mut().push("outer");
+                    KeyEventResult::Handled
+                }))
+                .into_widget(),
+            );
+            let mut app = tester.cell.borrow_mut();
 
-        let event = KeyEvent::Down(KeyDownEvent::new(
-            PhysicalKeyboardKey::KEY_A,
-            LogicalKeyboardKey::KEY_A,
-            Duration::ZERO,
-        ));
-        let handled = HardwareKeyboard::instance(&mut app).handle_key_event(&mut app, &event);
-        assert!(handled);
-        assert_eq!(*seen.borrow(), vec!["inner", "outer"]);
+            let event = KeyEvent::Down(KeyDownEvent::new(
+                PhysicalKeyboardKey::KEY_A,
+                LogicalKeyboardKey::KEY_A,
+                Duration::ZERO,
+            ));
+            let handled = HardwareKeyboard::instance(&mut app).handle_key_event(&mut app, &event);
+            assert!(handled);
+            assert_eq!(*seen.borrow(), vec!["inner", "outer"]);
+        });
     }
 
     #[test]
     fn moving_a_focus_widget_by_global_key_keeps_its_node_and_its_focus() {
-        let cell = app_with_view();
-        let app = cell.borrow();
-        let captured: Captured = Rc::default();
-        let key = GlobalKey::new();
-        drop(app);
-        mount(
-            &cell,
-            Padding::new(waft_painting::EdgeInsetsGeometry::all(4.0))
-                .child(
-                    Focus::new(probe(&captured))
-                        .key(key.clone().into())
-                        .autofocus(true),
-                )
-                .into_widget(),
-        );
-        let app = cell.borrow();
-        let node = captured.get().expect("Focus.of found the node");
-        assert!(node.has_primary_focus(&app));
+        test_widgets(|tester| {
+            let app = tester.cell.borrow();
+            let captured: Captured = Rc::default();
+            let key = GlobalKey::new();
+            drop(app);
+            tester.pump_widget(
+                Padding::new(waft_painting::EdgeInsetsGeometry::all(4.0))
+                    .child(
+                        Focus::new(probe(&captured))
+                            .key(key.clone().into())
+                            .autofocus(true),
+                    )
+                    .into_widget(),
+            );
+            let app = tester.cell.borrow();
+            let node = captured.get().expect("Focus.of found the node");
+            assert!(node.has_primary_focus(&app));
 
-        drop(app);
-        mount(
-            &cell,
-            Center::new()
-                .child(Focus::new(probe(&captured)).key(key.clone().into()))
-                .into_widget(),
-        );
-        let app = cell.borrow();
-        assert_eq!(captured.get(), Some(node));
-        assert!(node.has_primary_focus(&app));
+            drop(app);
+            tester.pump_widget(
+                Center::new()
+                    .child(Focus::new(probe(&captured)).key(key.clone().into()))
+                    .into_widget(),
+            );
+            let app = tester.cell.borrow();
+            assert_eq!(captured.get(), Some(node));
+            assert!(node.has_primary_focus(&app));
+        });
     }
 
     #[test]
     fn exclude_focus_blocks_the_descendants() {
-        let cell = app_with_view();
-        let app = cell.borrow();
-        let captured: Captured = Rc::default();
-        drop(app);
-        mount(
-            &cell,
-            ExcludeFocus::new(Focus::new(probe(&captured))).into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        let node = captured.get().expect("Focus.of found the node");
-        assert!(!node.can_request_focus(&mut app));
+        test_widgets(|tester| {
+            let app = tester.cell.borrow();
+            let captured: Captured = Rc::default();
+            drop(app);
+            tester.pump_widget(ExcludeFocus::new(Focus::new(probe(&captured))).into_widget());
+            let mut app = tester.cell.borrow_mut();
+            let node = captured.get().expect("Focus.of found the node");
+            assert!(!node.can_request_focus(&mut app));
 
-        node.request_focus(&mut app, None);
-        app.drain_microtasks();
-        assert!(!node.has_primary_focus(&app));
+            node.request_focus(&mut app, None);
+            app.drain_microtasks();
+            assert!(!node.has_primary_focus(&app));
+        });
     }
 }

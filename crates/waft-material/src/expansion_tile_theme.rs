@@ -398,15 +398,16 @@ mod tests {
     use waft_painting::{Alignment, Border, BorderSide, EdgeInsets};
     use waft_widgets::{Center, GlobalKey, Text};
 
+    use waft_widgets::testing::{WidgetTester, test_widgets};
+
     use super::*;
     use crate::colors::Colors;
     use crate::expansion_tile::ExpansionTile;
     use crate::expansion_tile::tests::{
         animation_style_case, expand_more_rect, last_padding_rect, list_tile_rect, probe, pump_app,
-        rect_of, sized, test_icon, test_text, tester, text_rect, tile_material,
+        rect_of, sized, test_icon, test_text, text_rect, tile_material,
     };
     use crate::material::Material;
-    use crate::test_support::{AhemText, with_main_thread_stack};
     use crate::theme_data::ThemeData;
 
     /// "ExpansionTileThemeData copyWith, ==, hashCode basics".
@@ -492,7 +493,7 @@ mod tests {
 
     /// The title and trailing positions both "ExpansionTileTheme" cases check after the
     /// theme's tile padding is applied.
-    fn assert_tile_padding(tester: &crate::test_support::WidgetTester, title: &str) {
+    fn assert_tile_padding(tester: &WidgetTester, title: &str) {
         let title_rect = text_rect(tester, title);
         let trailing_rect = expand_more_rect(tester);
         let list_tile_rect = list_tile_rect(tester);
@@ -525,14 +526,13 @@ mod tests {
     /// "ExpansionTileTheme - collapsed".
     #[test]
     fn expansion_tile_theme_collapsed() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let icon = probe();
             let text = probe();
             let clip_behavior = Clip::AntiAlias;
 
             pump_app(
-                &mut tester,
+                tester,
                 |app| {
                     ThemeData::builder()
                         .expansion_tile_theme(full_theme(clip_behavior))
@@ -550,7 +550,7 @@ mod tests {
             // When a custom shape is provided, ExpansionTile will use the
             // Material widget to draw the shape and background color
             // instead of a Container.
-            let (shape, color, material_clip_behavior) = tile_material(&tester);
+            let (shape, color, material_clip_behavior) = tile_material(tester);
 
             // ExpansionTile should have Clip.antiAlias as clipBehavior.
             assert_eq!(material_clip_behavior, clip_behavior);
@@ -559,7 +559,7 @@ mod tests {
             // applied.
             assert_eq!(color, Some(Colors::RED.primary()));
 
-            assert_tile_padding(&tester, "Collapsed Tile");
+            assert_tile_padding(tester, "Collapsed Tile");
 
             // Check the collapsed icon color when iconColor is applied.
             assert_eq!(icon.get(), Some(collapsed_icon_color()));
@@ -573,14 +573,13 @@ mod tests {
     /// "ExpansionTileTheme - expanded".
     #[test]
     fn expansion_tile_theme_expanded() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let icon = probe();
             let text = probe();
             let clip_behavior = Clip::None;
 
             pump_app(
-                &mut tester,
+                tester,
                 |app| {
                     ThemeData::builder()
                         .expansion_tile_theme(full_theme(clip_behavior))
@@ -591,7 +590,7 @@ mod tests {
                         ExpansionTile::new(test_text("Expanded Tile", &text))
                             .initially_expanded(true)
                             .trailing(test_icon(&icon))
-                            .children([AhemText::new("Tile 1").into_widget()]),
+                            .children([Text::new("Tile 1").into_widget()]),
                     ),
                 ),
             );
@@ -599,11 +598,11 @@ mod tests {
             // When a custom shape is provided, ExpansionTile will use the
             // Material widget to draw the shape and background color
             // instead of a Container.
-            let (shape, color, material_clip_behavior) = tile_material(&tester);
+            let (shape, color, material_clip_behavior) = tile_material(tester);
             // Check the tile's background color when backgroundColor is applied.
             assert_eq!(color, Some(Colors::ORANGE.primary()));
 
-            assert_tile_padding(&tester, "Expanded Tile");
+            assert_tile_padding(tester, "Expanded Tile");
 
             // Check the expanded icon color when iconColor is applied.
             assert_eq!(icon.get(), Some(icon_color()));
@@ -615,14 +614,14 @@ mod tests {
             assert_eq!(material_clip_behavior, clip_behavior);
 
             // Check the child position when expandedAlignment is applied.
-            let child = tester.find_ahem_text("Tile 1");
+            let child = tester.find_text("Tile 1");
             assert_eq!(child.len(), 1, "one \"Tile 1\"");
-            let child_rect = rect_of(&tester, child[0]);
+            let child_rect = rect_of(tester, child[0]);
             assert_eq!(child_rect.right, 800.0 - 20.0);
             assert_eq!(child_rect.left, 800.0 - child_rect.width() - 20.0);
 
             // Check the child padding when childrenPadding is applied.
-            let padding_rect = last_padding_rect(&tester);
+            let padding_rect = last_padding_rect(tester);
             assert_eq!(child_rect.top, padding_rect.top + 20.0);
             assert_eq!(child_rect.left, padding_rect.left + 20.0);
             assert_eq!(child_rect.right, padding_rect.right - 20.0);
@@ -633,8 +632,9 @@ mod tests {
     /// "Override ExpansionTile animation using ExpansionTileThemeData.AnimationStyle".
     #[test]
     fn override_expansion_tile_animation_using_expansion_tile_theme_data_animation_style() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             animation_style_case(
+                tester,
                 |tester, key: &GlobalKey, animation_style| {
                     let mut expansion_tile_theme = ExpansionTileThemeData::new();
                     expansion_tile_theme.expansion_animation_style = animation_style;

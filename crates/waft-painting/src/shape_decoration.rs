@@ -3,8 +3,8 @@
 use std::any::Any;
 use std::fmt::{Debug, Formatter, Result as FmtResult};
 
-use waft_embedder::{BlurStyle, Canvas, ClipOp, FillRule, Matrix4, Offset, Paint};
-use waft_embedder::{Path, PathBuilder, Rect, Size};
+use waft_embedder::{Canvas, Offset, Paint};
+use waft_embedder::{Path, Rect, Size};
 use waft_foundation::{App, VoidCallback};
 
 use crate::basic_types::TextDirection;
@@ -14,7 +14,6 @@ use crate::box_decoration::BoxDecoration;
 use crate::box_shadow::BoxShadow;
 use crate::circle_border::CircleBorder;
 use crate::colors::AnyColor;
-use crate::debug::debug_disable_shadows;
 use crate::decoration::{BoxPainter, Decoration, DecorationRef};
 use crate::edge_insets::EdgeInsetsGeometry;
 use crate::gradient::GradientRef;
@@ -441,77 +440,27 @@ impl ShapeDecorationPainter {
         self.last_text_direction = text_direction;
     }
 
-    fn debug_handle_disabled_shadow_start(canvas: &mut Canvas, box_shadow: BoxShadow, path: &Path) {
-        if debug_disable_shadows() && box_shadow.blur_style == BlurStyle::Outer {
-            canvas.save();
-            let mut clip_path = PathBuilder::new();
-            clip_path.rect(Rect::LARGEST.into());
-            clip_path.append(path.as_valo(), &Matrix4::IDENTITY);
-            canvas.clip_path(
-                &clip_path.build(),
-                FillRule::EvenOdd,
-                ClipOp::Intersect,
-                true,
-            );
-        }
-    }
-
-    fn debug_handle_disabled_shadow_end(canvas: &mut Canvas, box_shadow: BoxShadow) {
-        if debug_disable_shadows() && box_shadow.blur_style == BlurStyle::Outer {
-            canvas.restore();
-        }
-    }
-
     fn paint_shadows(&self, canvas: &mut Canvas, text_direction: Option<TextDirection>) {
         let Some(shadow_count) = self.shadow_count else {
             return;
         };
         if self.decoration.shape.prefer_paint_interior() {
             for index in 0..shadow_count {
-                if cfg!(debug_assertions) {
-                    Self::debug_handle_disabled_shadow_start(
-                        canvas,
-                        self.decoration.shadows.as_ref().unwrap()[index],
-                        &self
-                            .decoration
-                            .shape
-                            .get_outer_path(self.shadow_bounds[index], text_direction),
-                    );
-                }
                 self.decoration.shape.paint_interior(
                     canvas,
                     self.shadow_bounds[index],
                     &self.shadow_paints[index],
                     text_direction,
                 );
-                if cfg!(debug_assertions) {
-                    Self::debug_handle_disabled_shadow_end(
-                        canvas,
-                        self.decoration.shadows.as_ref().unwrap()[index],
-                    );
-                }
             }
         } else {
             for index in 0..shadow_count {
-                if cfg!(debug_assertions) {
-                    Self::debug_handle_disabled_shadow_start(
-                        canvas,
-                        self.decoration.shadows.as_ref().unwrap()[index],
-                        &self.shadow_paths[index],
-                    );
-                }
                 let shadow_path = &self.shadow_paths[index];
                 canvas.draw_path(
                     shadow_path.as_valo(),
                     shadow_path.fill_type,
                     &self.shadow_paints[index],
                 );
-                if cfg!(debug_assertions) {
-                    Self::debug_handle_disabled_shadow_end(
-                        canvas,
-                        self.decoration.shadows.as_ref().unwrap()[index],
-                    );
-                }
             }
         }
     }

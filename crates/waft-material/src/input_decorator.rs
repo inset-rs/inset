@@ -8518,22 +8518,19 @@ pub(crate) mod tests {
     pub(crate) mod common {
         // The helpers of input_decorator_test.dart.
         //
-        // Flutter's cases measure text in flutter_test's FlutterTest font, which the test platform does
-        // not have (D16). Where a case measures a text, the decorator is handed an `AhemText` stand-in
-        // in its widget slot (`label`, `hint`, `helper`, `error`, `counter`, `prefix`, `suffix`) in
-        // the text style Dart's `Text(labelText)` etc. would get, instead of the string.
+        use waft_widgets::testing::WidgetTester;
 
         use std::time::Duration;
 
-        use waft_embedder::{Color, Offset, Rect, TargetPlatform};
+        use waft_embedder::{Color, Offset, Rect};
         use waft_painting::{
             Alignment, AlignmentGeometry, BorderRadius, BorderSide, TextAlignVertical,
             TextDirection, TextStyle,
         };
         use waft_rendering::AnyRenderBox;
         use waft_widgets::{
-            Align, AnyElement, Builder, CustomPaint, DefaultTextStyle, Directionality, IntoWidget,
-            IntrinsicWidth, MatrixTransition, WidgetRef, downcast_widget,
+            Align, AnyElement, Builder, CustomPaint, Directionality, IntoWidget, IntrinsicWidth,
+            MatrixTransition, WidgetRef, downcast_widget,
         };
 
         use super::super::*;
@@ -8541,7 +8538,6 @@ pub(crate) mod tests {
         use crate::icon_button_theme::IconButtonThemeData;
         use crate::input_border::{InputBorderRef, OutlineInputBorder, UnderlineInputBorder};
         use crate::material::Material;
-        use crate::test_support::{AhemText, WidgetTester};
         use crate::theme::Theme;
         use crate::theme_data::{ThemeData, VisualDensity};
 
@@ -8557,14 +8553,6 @@ pub(crate) mod tests {
         pub(super) const TWO_LINES: &str = "line1\nline2";
         pub(super) const THREE_LINES: &str = "line1\nline2\nline3";
 
-        /// A tester on Android with flutter_test's fonts, which `MaterialApp`'s debug banner paints
-        /// with.
-        pub(super) fn tester() -> WidgetTester {
-            let tester = WidgetTester::on(TargetPlatform::Android);
-            tester.install_platform_fonts();
-            tester
-        }
-
         /// Dart's `ThemeData()`.
         pub(super) fn m3(app: &App) -> ThemeData {
             ThemeData::builder().build(app)
@@ -8575,63 +8563,19 @@ pub(crate) mod tests {
             ThemeData::builder().use_material3(false).build(app)
         }
 
-        /// `text` in FlutterTest metrics at the ambient `DefaultTextStyle` merged with `style`: Dart's
-        /// `Text(text, style: style)`.
-        pub(super) fn ahem(text: &str, style: TextStyle) -> WidgetRef {
-            DefaultTextStyle::merge(AhemText::new(text))
-                .style(style)
-                .into_widget()
-        }
-
-        /// `text` in FlutterTest metrics at the context theme's text style `select` picks: Dart's
-        /// `Text(text, style: <that style>)` where the decorator styles its own texts.
-        pub(super) fn ahem_themed(
-            text: &'static str,
-            select: fn(&ThemeData) -> TextStyle,
-        ) -> WidgetRef {
-            Builder::new(move |app, context| {
-                let style = select(&Theme::of(app, context));
-                DefaultTextStyle::new(style, AhemText::new(text)).into_widget()
-            })
-            .into_widget()
-        }
-
-        /// The M3 hint in FlutterTest metrics: Dart's `Text(hintText, style: hintStyle)`, whose
-        /// metrics are `bodyLarge`'s.
-        pub(super) fn ahem_hint(text: &'static str) -> WidgetRef {
-            ahem_themed(text, |theme| {
-                theme
-                    .text_theme
-                    .body_large
-                    .clone()
-                    .expect("the M3 text theme has bodyLarge")
-            })
-        }
-
-        /// The helper or counter in FlutterTest metrics: Dart's `Text(helperText, style:
-        /// helperStyle)`, whose metrics are `bodySmall`'s.
-        pub(super) fn ahem_supporting(text: &'static str) -> WidgetRef {
-            ahem_themed(text, |theme| {
-                theme
-                    .text_theme
-                    .body_small
-                    .clone()
-                    .expect("the text theme has bodySmall")
-            })
-        }
-
         /// Dart's input child: `Text(inputText, style: TextStyle(fontSize: 16.0, fontWeight:
         /// FontWeight.w400, letterSpacing: 0.5, height: 1.50))`, a text style compliant with M3
         /// specification (which is bodyLarge for text fields).
         pub(super) fn input_text() -> WidgetRef {
-            ahem(
-                INPUT_TEXT,
-                TextStyle::new()
-                    .font_size(16.0)
-                    .font_weight(waft_painting::FontWeight::W400)
-                    .letter_spacing(0.5)
-                    .height(1.50),
-            )
+            Text::new(INPUT_TEXT)
+                .style(
+                    TextStyle::new()
+                        .font_size(16.0)
+                        .font_weight(waft_painting::FontWeight::W400)
+                        .letter_spacing(0.5)
+                        .height(1.50),
+                )
+                .into_widget()
         }
 
         /// Dart's `buildInputDecorator`, its named arguments the setters.
@@ -8832,9 +8776,9 @@ pub(crate) mod tests {
             tester.get_rect(tester.render_box_of(element))
         }
 
-        /// Dart's `tester.getRect(find.text(text))`, over [`AhemText`]s.
+        /// Dart's `tester.getRect(find.text(text))`.
         pub(super) fn text_rect(tester: &WidgetTester, text: &str) -> Rect {
-            let found = tester.find_ahem_text(text);
+            let found = tester.find_text(text);
             assert_eq!(found.len(), 1, "one {text:?}");
             rect_of(tester, found[0])
         }
@@ -8970,13 +8914,6 @@ pub(crate) mod tests {
         /// decorator's; the page route's transitions have their own).
         pub(super) fn find_label(tester: &WidgetTester) -> AnyElement {
             for transition in tester.find_by_type::<waft_widgets::Animated<MatrixTransition>>() {
-                if let Some(ahem) = tester
-                    .descendants_of_type::<AhemText>(transition)
-                    .into_iter()
-                    .next()
-                {
-                    return ahem;
-                }
                 if let Some(text) = tester
                     .descendants_of_type::<waft_widgets::Text>(transition)
                     .into_iter()
@@ -9011,18 +8948,12 @@ pub(crate) mod tests {
                 style.style.clone()
             })
         }
-
-        /// Runs a case on a thread with a main thread's stack (a theme does not fit a test thread's).
-        pub(super) fn case(body: impl FnOnce() + Send) {
-            crate::test_support::with_main_thread_stack(body);
-        }
     }
     // The cases on the decoration and theme values.
     mod data {
-        use std::cell::Ref;
+        use waft_widgets::testing::test_widgets;
 
         use waft_embedder::{Color, Radius};
-        use waft_foundation::App;
         use waft_painting::{
             AnyColor, AnyTextStyle, BorderRadius, BorderSide, EdgeInsets, EdgeInsetsDirectional,
             EdgeInsetsGeometry, TextStyle,
@@ -9032,7 +8963,6 @@ pub(crate) mod tests {
         use super::super::*;
         use crate::colors::Colors;
         use crate::input_border::{InputBorderRef, OutlineInputBorder, UnderlineInputBorder};
-        use crate::test_support::{test_cell, with_main_thread_stack};
         use crate::theme_data::ThemeData;
 
         fn constraints(
@@ -9444,9 +9374,8 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'InputDecorationThemeData merge'.
         #[test]
         fn theme_data_merge_fills_only_the_nullable_fields() {
-            with_main_thread_stack(|| {
-                let cell = test_cell();
-                let app: Ref<'_, App> = cell.borrow();
+            test_widgets(|tester| {
+                let app = tester.cell.borrow();
                 let override_theme = InputDecorationThemeData::new()
                     .label_style(TextStyle::new().color(Color::new(0x000000f0)))
                     .floating_label_style(TextStyle::new().color(Color::new(0x000000f1)))
@@ -9562,8 +9491,8 @@ pub(crate) mod tests {
         #[should_panic(expected = "Declaring both hint and hintText is not supported.")]
         fn a_decoration_with_both_hint_and_hint_text_fails_its_check() {
             InputDecoration::new()
-                .hint(crate::test_support::ahem_text("hint"))
                 .hint_text("hint")
+                .hint(Text::new("hint"))
                 .debug_check_arguments();
         }
 
@@ -9607,15 +9536,12 @@ pub(crate) mod tests {
 
     // input_decorator_test.dart's 'Material3 - InputDecoration container' group and the input
     // border cases after it.
-    //
-    // Stand-ins: the label-gap cases ('OutlineBorder starts at the right position…', '…does not
-    // overlap with the label…', '…does not draw over label…') measure the label, so their
-    // `labelText` is an `AhemText` in the `label` slot. Every other case keeps Dart's strings: the
-    // container height, the borders and the fills do not depend on the label's or the helper's
-    // metrics.
     #[allow(deprecated)]
     mod container_and_borders {
         use std::sync::Arc;
+        use waft_widgets::testing::{
+            TargetPlatformVariant, WidgetTester, test_widgets, test_widgets_variant,
+        };
 
         use waft_embedder::valo::Op;
         use waft_embedder::{
@@ -9623,7 +9549,7 @@ pub(crate) mod tests {
         };
         use waft_painting::{
             Alignment, AlignmentGeometry, BorderRadius, BorderSide, EdgeInsetsGeometry,
-            ShapeBorder, TextDirection, TextStyle, draw_drrect, draw_rrect,
+            ShapeBorder, TextDirection, draw_drrect, draw_rrect,
         };
         use waft_widgets::{AnyElement, Container, Icon, IntoWidget, RepaintBoundary, WidgetRef};
 
@@ -9635,7 +9561,7 @@ pub(crate) mod tests {
         use crate::icons::Icons;
         use crate::input_border::{InputBorderRef, OutlineInputBorder, UnderlineInputBorder};
         use crate::scaffold::Scaffold;
-        use crate::test_support::WidgetTester;
+        use crate::test_support::PaintInspection;
         use crate::theme::Theme;
         use crate::theme_data::{ThemeData, VisualDensity};
 
@@ -9667,16 +9593,8 @@ pub(crate) mod tests {
             TargetPlatform::Windows,
         ];
 
-        fn tester_on(platform: TargetPlatform) -> WidgetTester {
-            let tester = WidgetTester::on(platform);
-            tester.install_platform_fonts();
-            tester
-        }
-
-        fn pump(decorator: BuildInputDecorator) -> WidgetTester {
-            let mut tester = tester();
+        fn pump(tester: &mut WidgetTester, decorator: BuildInputDecorator) {
             tester.pump_widget(decorator.build());
-            tester
         }
 
         /// Dart's `Theme.of(tester.element(findDecorator()))`.
@@ -9843,22 +9761,22 @@ pub(crate) mod tests {
         // - when field is enabled - container has correct height and shape'.
         #[test]
         fn a_filled_enabled_container_has_the_m3_height_and_an_underline_with_rounded_top() {
-            case(|| {
-                check_filled_shape(BuildInputDecorator::new(filled(false)));
+            test_widgets(|tester| {
+                check_filled_shape(tester, BuildInputDecorator::new(filled(false)));
             });
         }
 
-        fn check_filled_shape(decorator: BuildInputDecorator) {
-            let tester = pump(decorator);
-            assert_eq!(get_container_rect(&tester).height(), CONTAINER_HEIGHT);
+        fn check_filled_shape(tester: &mut WidgetTester, decorator: BuildInputDecorator) {
+            pump(tester, decorator);
+            assert_eq!(get_container_rect(tester).height(), CONTAINER_HEIGHT);
             assert!(
-                get_border(&tester)
+                get_border(tester)
                     .expect("a border")
                     .as_any()
                     .is::<UnderlineInputBorder>()
             );
             assert_eq!(
-                get_border_radius(&tester),
+                get_border_radius(tester),
                 Some(BorderRadius::only(
                     Radius::circular(4.0),
                     Radius::circular(4.0),
@@ -9868,36 +9786,40 @@ pub(crate) mod tests {
             );
         }
 
-        fn check_outlined_shape(decorator: BuildInputDecorator) {
-            let tester = pump(decorator);
-            assert_eq!(get_container_rect(&tester).height(), CONTAINER_HEIGHT);
+        fn check_outlined_shape(tester: &mut WidgetTester, decorator: BuildInputDecorator) {
+            pump(tester, decorator);
+            assert_eq!(get_container_rect(tester).height(), CONTAINER_HEIGHT);
             assert!(
-                get_border(&tester)
+                get_border(tester)
                     .expect("a border")
                     .as_any()
                     .is::<OutlineInputBorder>()
             );
             assert_eq!(
-                get_border_radius(&tester),
+                get_border_radius(tester),
                 Some(BorderRadius::all(Radius::circular(4.0)))
             );
         }
 
         /// Dart's `expect(findBorderPainter(), paints..rrect(style: fill, color: color))`.
-        fn check_filled_color(decorator: BuildInputDecorator, color: fn(&ThemeData) -> Color) {
-            let tester = pump(decorator);
-            let color = color(&theme_of(&tester));
+        fn check_filled_color(
+            tester: &mut WidgetTester,
+            decorator: BuildInputDecorator,
+            color: fn(&ThemeData) -> Color,
+        ) {
+            pump(tester, decorator);
+            let color = color(&theme_of(tester));
             assert!(paints(
-                &border_painter_ops(&tester),
+                &border_painter_ops(tester),
                 &[Call::RRect(Style::Fill, Some(color), None)]
             ));
         }
 
         /// Dart's `expect(findBorderPainter(), paints..path(style: PaintingStyle.stroke))`.
-        fn check_outlined_painted(decorator: BuildInputDecorator) {
-            let tester = pump(decorator);
+        fn check_outlined_painted(tester: &mut WidgetTester, decorator: BuildInputDecorator) {
+            pump(tester, decorator);
             assert!(paints(
-                &border_painter_ops(&tester),
+                &border_painter_ops(tester),
                 &[Call::Path(
                     Some(Style::Stroke(None)),
                     Vec::new(),
@@ -9907,22 +9829,23 @@ pub(crate) mod tests {
         }
 
         fn check_border(
+            tester: &mut WidgetTester,
             decorator: BuildInputDecorator,
             color: fn(&ThemeData) -> Color,
             width: f64,
         ) {
-            let tester = pump(decorator);
-            let color = color(&theme_of(&tester));
-            assert_eq!(get_border_color(&tester), color);
-            assert_eq!(get_border_weight(&tester), width);
+            pump(tester, decorator);
+            let color = color(&theme_of(tester));
+            assert_eq!(get_border_color(tester), color);
+            assert_eq!(get_border_weight(tester), width);
         }
 
         // input_decorator_test.dart 'Material3 - InputDecoration container - for filled text field
         // - when field is enabled - container has correct color'.
         #[test]
         fn a_filled_enabled_container_is_filled_with_surface_container_highest() {
-            case(|| {
-                check_filled_color(BuildInputDecorator::new(filled(false)), |theme| {
+            test_widgets(|tester| {
+                check_filled_color(tester, BuildInputDecorator::new(filled(false)), |theme| {
                     theme.color_scheme.surface_container_highest()
                 });
             });
@@ -9932,8 +9855,9 @@ pub(crate) mod tests {
         // - when field is enabled - active indicator has correct weight and color'.
         #[test]
         fn a_filled_enabled_active_indicator_is_on_surface_variant_and_1_wide() {
-            case(|| {
+            test_widgets(|tester| {
                 check_border(
+                    tester,
                     BuildInputDecorator::new(filled(false)),
                     |theme| theme.color_scheme.on_surface_variant(),
                     1.0,
@@ -9945,8 +9869,11 @@ pub(crate) mod tests {
         // - when field is disabled - container has correct height and shape'.
         #[test]
         fn a_filled_disabled_container_has_the_m3_height_and_an_underline_with_rounded_top() {
-            case(|| {
-                check_filled_shape(BuildInputDecorator::new(filled(false).enabled(false)));
+            test_widgets(|tester| {
+                check_filled_shape(
+                    tester,
+                    BuildInputDecorator::new(filled(false).enabled(false)),
+                );
             });
         }
 
@@ -9954,8 +9881,9 @@ pub(crate) mod tests {
         // - when field is disabled - container has correct color'.
         #[test]
         fn a_filled_disabled_container_is_filled_with_4_percent_on_surface() {
-            case(|| {
+            test_widgets(|tester| {
                 check_filled_color(
+                    tester,
                     BuildInputDecorator::new(filled(false).enabled(false)),
                     |theme| theme.color_scheme.on_surface.with_opacity(0.04),
                 );
@@ -9966,8 +9894,9 @@ pub(crate) mod tests {
         // - when field is disabled - active indicator has correct weight and color'.
         #[test]
         fn a_filled_disabled_active_indicator_is_38_percent_on_surface_and_1_wide() {
-            case(|| {
+            test_widgets(|tester| {
                 check_border(
+                    tester,
                     BuildInputDecorator::new(filled(false).enabled(false)),
                     |theme| theme.color_scheme.on_surface.with_opacity(0.38),
                     1.0,
@@ -9979,8 +9908,11 @@ pub(crate) mod tests {
         // - when field is hovered - container has correct height and shape'.
         #[test]
         fn a_filled_hovered_container_has_the_m3_height_and_an_underline_with_rounded_top() {
-            case(|| {
-                check_filled_shape(BuildInputDecorator::new(filled(false)).is_hovering(true));
+            test_widgets(|tester| {
+                check_filled_shape(
+                    tester,
+                    BuildInputDecorator::new(filled(false)).is_hovering(true),
+                );
             });
         }
 
@@ -9988,12 +9920,15 @@ pub(crate) mod tests {
         // - when field is hovered - container has correct color'.
         #[test]
         fn a_filled_hovered_container_blends_the_hover_color_over_surface_container_highest() {
-            case(|| {
-                let tester = pump(BuildInputDecorator::new(filled(false)).is_hovering(true));
-                let theme = theme_of(&tester);
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(filled(false)).is_hovering(true),
+                );
+                let theme = theme_of(tester);
                 assert_eq!(theme.hover_color, Colors::BLACK.with_opacity(0.04));
                 assert!(paints(
-                    &border_painter_ops(&tester),
+                    &border_painter_ops(tester),
                     &[Call::RRect(
                         Style::Fill,
                         Some(Color::alpha_blend(
@@ -10010,8 +9945,9 @@ pub(crate) mod tests {
         // - when field is hovered - active indicator has correct weight and color'.
         #[test]
         fn a_filled_hovered_active_indicator_is_on_surface_and_1_wide() {
-            case(|| {
+            test_widgets(|tester| {
                 check_border(
+                    tester,
                     BuildInputDecorator::new(filled(false)).is_hovering(true),
                     |theme| theme.color_scheme.on_surface,
                     1.0,
@@ -10023,8 +9959,11 @@ pub(crate) mod tests {
         // - when field is focused - container has correct height and shape'.
         #[test]
         fn a_filled_focused_container_has_the_m3_height_and_an_underline_with_rounded_top() {
-            case(|| {
-                check_filled_shape(BuildInputDecorator::new(filled(false)).is_focused(true));
+            test_widgets(|tester| {
+                check_filled_shape(
+                    tester,
+                    BuildInputDecorator::new(filled(false)).is_focused(true),
+                );
             });
         }
 
@@ -10032,8 +9971,9 @@ pub(crate) mod tests {
         // - when field is focused - container has correct color'.
         #[test]
         fn a_filled_focused_container_is_filled_with_surface_container_highest() {
-            case(|| {
+            test_widgets(|tester| {
                 check_filled_color(
+                    tester,
                     BuildInputDecorator::new(filled(false)).is_focused(true),
                     |theme| theme.color_scheme.surface_container_highest(),
                 );
@@ -10044,8 +9984,9 @@ pub(crate) mod tests {
         // - when field is focused - container has correct color when focused and hovered'.
         #[test]
         fn a_filled_focused_and_hovered_container_blends_the_hover_color_over_the_fill() {
-            case(|| {
+            test_widgets(|tester| {
                 check_filled_color(
+                    tester,
                     BuildInputDecorator::new(filled(false))
                         .is_focused(true)
                         .is_hovering(true),
@@ -10062,8 +10003,9 @@ pub(crate) mod tests {
         // - when field is focused - active indicator has correct weight and color'.
         #[test]
         fn a_filled_focused_active_indicator_is_primary_and_2_wide() {
-            case(|| {
+            test_widgets(|tester| {
                 check_border(
+                    tester,
                     BuildInputDecorator::new(filled(false)).is_focused(true),
                     |theme| theme.color_scheme.primary,
                     2.0,
@@ -10076,8 +10018,9 @@ pub(crate) mod tests {
         // hovered'.
         #[test]
         fn a_filled_focused_and_hovered_active_indicator_is_primary_and_2_wide() {
-            case(|| {
+            test_widgets(|tester| {
                 check_border(
+                    tester,
                     BuildInputDecorator::new(filled(false))
                         .is_focused(true)
                         .is_hovering(true),
@@ -10091,8 +10034,8 @@ pub(crate) mod tests {
         // - when field is in error - container has correct height and shape'.
         #[test]
         fn a_filled_error_container_has_the_m3_height_and_an_underline_with_rounded_top() {
-            case(|| {
-                check_filled_shape(BuildInputDecorator::new(filled(true)));
+            test_widgets(|tester| {
+                check_filled_shape(tester, BuildInputDecorator::new(filled(true)));
             });
         }
 
@@ -10100,8 +10043,8 @@ pub(crate) mod tests {
         // - when field is in error - container has correct color'.
         #[test]
         fn a_filled_error_container_is_filled_with_surface_container_highest() {
-            case(|| {
-                check_filled_color(BuildInputDecorator::new(filled(true)), |theme| {
+            test_widgets(|tester| {
+                check_filled_color(tester, BuildInputDecorator::new(filled(true)), |theme| {
                     theme.color_scheme.surface_container_highest()
                 });
             });
@@ -10111,8 +10054,9 @@ pub(crate) mod tests {
         // - when field is in error - active indicator has correct weight and color'.
         #[test]
         fn a_filled_error_active_indicator_is_error_and_1_wide() {
-            case(|| {
+            test_widgets(|tester| {
                 check_border(
+                    tester,
                     BuildInputDecorator::new(filled(true)),
                     |theme| theme.color_scheme.error,
                     1.0,
@@ -10124,8 +10068,9 @@ pub(crate) mod tests {
         // - when field is in error - active indicator has correct weight and color when focused'.
         #[test]
         fn a_filled_focused_error_active_indicator_is_error_and_2_wide() {
-            case(|| {
+            test_widgets(|tester| {
                 check_border(
+                    tester,
                     BuildInputDecorator::new(filled(true)).is_focused(true),
                     |theme| theme.color_scheme.error,
                     2.0,
@@ -10137,8 +10082,9 @@ pub(crate) mod tests {
         // - when field is in error - active indicator has correct weight and color when hovered'.
         #[test]
         fn a_filled_hovered_error_active_indicator_is_on_error_container_and_1_wide() {
-            case(|| {
+            test_widgets(|tester| {
                 check_border(
+                    tester,
                     BuildInputDecorator::new(filled(true)).is_hovering(true),
                     |theme| theme.color_scheme.on_error_container(),
                     1.0,
@@ -10151,8 +10097,9 @@ pub(crate) mod tests {
         // hovered'.
         #[test]
         fn a_filled_focused_and_hovered_error_active_indicator_is_error_and_2_wide() {
-            case(|| {
+            test_widgets(|tester| {
                 check_border(
+                    tester,
                     BuildInputDecorator::new(filled(true))
                         .is_focused(true)
                         .is_hovering(true),
@@ -10165,17 +10112,18 @@ pub(crate) mod tests {
         /// Pumps `decoration` on each of `platforms` and checks the container's height.
         fn check_height_on(
             platforms: &[TargetPlatform],
-            decorator: impl Fn() -> BuildInputDecorator,
+            decorator: impl Fn() -> BuildInputDecorator + Sync,
             height: f64,
         ) {
             for platform in platforms {
-                let mut tester = tester_on(*platform);
-                tester.pump_widget(decorator().build());
-                assert_eq!(
-                    get_container_rect(&tester).height(),
-                    height,
-                    "on {platform:?}"
-                );
+                test_widgets_variant(TargetPlatformVariant::only(*platform), |tester| {
+                    tester.pump_widget(decorator().build());
+                    assert_eq!(
+                        get_container_rect(tester).height(),
+                        height,
+                        "on {platform:?}"
+                    );
+                });
             }
         }
 
@@ -10265,13 +10213,11 @@ pub(crate) mod tests {
         // - default container height is 48dp on desktop'.
         #[test]
         fn a_filled_container_is_48_high_on_desktop() {
-            case(|| {
-                check_height_on(
-                    &DESKTOP_PLATFORMS,
-                    || BuildInputDecorator::new(filled(false)),
-                    DESKTOP_CONTAINER_HEIGHT,
-                );
-            });
+            check_height_on(
+                &DESKTOP_PLATFORMS,
+                || BuildInputDecorator::new(filled(false)),
+                DESKTOP_CONTAINER_HEIGHT,
+            );
         }
 
         // input_decorator_test.dart 'Material3 - InputDecoration container - for filled text field
@@ -10279,9 +10225,7 @@ pub(crate) mod tests {
         // VisualDensity.compact'.
         #[test]
         fn a_filled_container_is_48_high_on_every_platform_at_compact_density() {
-            case(|| {
-                check_density_levels(|| filled(false), VisualDensity::COMPACT, 48.0);
-            });
+            check_density_levels(|| filled(false), VisualDensity::COMPACT, 48.0);
         }
 
         // input_decorator_test.dart 'Material3 - InputDecoration container - for filled text field
@@ -10289,23 +10233,22 @@ pub(crate) mod tests {
         // VisualDensity.standard'.
         #[test]
         fn a_filled_container_is_56_high_on_every_platform_at_standard_density() {
-            case(|| {
-                check_density_levels(|| filled(false), VisualDensity::STANDARD, 56.0);
-            });
+            check_density_levels(|| filled(false), VisualDensity::STANDARD, 56.0);
         }
 
         // input_decorator_test.dart 'Material3 - InputDecoration container - for filled text field
         // - Visual density defined at the decoration level takes precedence'.
         #[test]
         fn a_filled_container_takes_the_decoration_density_over_the_themes() {
-            case(|| {
-                let tester = pump(
+            test_widgets(|tester| {
+                pump(
+                    tester,
                     BuildInputDecorator::new(
                         filled(false).visual_density(VisualDensity::COMFORTABLE),
                     )
                     .theme(compact_theme_with_standard_decoration_theme),
                 );
-                assert_eq!(get_container_rect(&tester).height(), 52.0);
+                assert_eq!(get_container_rect(tester).height(), 52.0);
             });
         }
 
@@ -10313,12 +10256,13 @@ pub(crate) mod tests {
         // - Visual density defined at the input decoration theme level takes precedence'.
         #[test]
         fn a_filled_container_takes_the_decoration_theme_density_over_the_themes() {
-            case(|| {
-                let tester = pump(
+            test_widgets(|tester| {
+                pump(
+                    tester,
                     BuildInputDecorator::new(filled(false))
                         .theme(compact_theme_with_comfortable_decoration_theme),
                 );
-                assert_eq!(get_container_rect(&tester).height(), 52.0);
+                assert_eq!(get_container_rect(tester).height(), 52.0);
             });
         }
 
@@ -10326,13 +10270,14 @@ pub(crate) mod tests {
         // - Ambient activeIndicatorBorder is used'.
         #[test]
         fn a_filled_container_uses_the_ambient_active_indicator_border() {
-            case(|| {
+            test_widgets(|tester| {
                 let active_indicator_border = BorderSide {
                     color: Colors::AMBER.primary(),
                     width: 2.0,
                     ..BorderSide::default()
                 };
-                let tester = pump(
+                pump(
+                    tester,
                     BuildInputDecorator::new(InputDecoration::new().label_text(LABEL_TEXT))
                         .input_decoration_theme(
                             InputDecorationThemeData::new()
@@ -10340,8 +10285,8 @@ pub(crate) mod tests {
                                 .active_indicator_border(active_indicator_border),
                         ),
                 );
-                assert_eq!(get_border_color(&tester), active_indicator_border.color);
-                assert_eq!(get_border_weight(&tester), active_indicator_border.width);
+                assert_eq!(get_border_color(tester), active_indicator_border.color);
+                assert_eq!(get_border_weight(tester), active_indicator_border.width);
             });
         }
 
@@ -10349,8 +10294,8 @@ pub(crate) mod tests {
         // field - when field is enabled - container has correct height and shape'.
         #[test]
         fn an_outlined_enabled_container_has_the_m3_height_and_a_rounded_outline() {
-            case(|| {
-                check_outlined_shape(BuildInputDecorator::new(outlined(false)));
+            test_widgets(|tester| {
+                check_outlined_shape(tester, BuildInputDecorator::new(outlined(false)));
             });
         }
 
@@ -10358,8 +10303,8 @@ pub(crate) mod tests {
         // field - when field is enabled - container is painted correctly'.
         #[test]
         fn an_outlined_enabled_container_is_stroked_and_not_filled() {
-            case(|| {
-                check_outlined_painted(BuildInputDecorator::new(outlined(false)));
+            test_widgets(|tester| {
+                check_outlined_painted(tester, BuildInputDecorator::new(outlined(false)));
             });
         }
 
@@ -10367,8 +10312,9 @@ pub(crate) mod tests {
         // field - when field is enabled - outline has correct weight and color'.
         #[test]
         fn an_outlined_enabled_outline_is_outline_and_1_wide() {
-            case(|| {
+            test_widgets(|tester| {
                 check_border(
+                    tester,
                     BuildInputDecorator::new(outlined(false)),
                     |theme| theme.color_scheme.outline(),
                     1.0,
@@ -10380,8 +10326,11 @@ pub(crate) mod tests {
         // field - when field is disabled - container has correct height and shape'.
         #[test]
         fn an_outlined_disabled_container_has_the_m3_height_and_a_rounded_outline() {
-            case(|| {
-                check_outlined_shape(BuildInputDecorator::new(outlined(false).enabled(false)));
+            test_widgets(|tester| {
+                check_outlined_shape(
+                    tester,
+                    BuildInputDecorator::new(outlined(false).enabled(false)),
+                );
             });
         }
 
@@ -10389,8 +10338,11 @@ pub(crate) mod tests {
         // field - when field is disabled - container is painted correctly'.
         #[test]
         fn an_outlined_disabled_container_is_stroked_and_not_filled() {
-            case(|| {
-                check_outlined_painted(BuildInputDecorator::new(outlined(false).enabled(false)));
+            test_widgets(|tester| {
+                check_outlined_painted(
+                    tester,
+                    BuildInputDecorator::new(outlined(false).enabled(false)),
+                );
             });
         }
 
@@ -10398,8 +10350,9 @@ pub(crate) mod tests {
         // field - when field is disabled - outline has correct weight and color'.
         #[test]
         fn an_outlined_disabled_outline_is_12_percent_on_surface_and_1_wide() {
-            case(|| {
+            test_widgets(|tester| {
                 check_border(
+                    tester,
                     BuildInputDecorator::new(outlined(false).enabled(false)),
                     |theme| theme.color_scheme.on_surface.with_opacity(0.12),
                     1.0,
@@ -10411,8 +10364,11 @@ pub(crate) mod tests {
         // field - when field is hovered - container has correct height and shape'.
         #[test]
         fn an_outlined_hovered_container_has_the_m3_height_and_a_rounded_outline() {
-            case(|| {
-                check_outlined_shape(BuildInputDecorator::new(outlined(false)).is_hovering(true));
+            test_widgets(|tester| {
+                check_outlined_shape(
+                    tester,
+                    BuildInputDecorator::new(outlined(false)).is_hovering(true),
+                );
             });
         }
 
@@ -10420,8 +10376,11 @@ pub(crate) mod tests {
         // field - when field is hovered - container is painted correctly'.
         #[test]
         fn an_outlined_hovered_container_is_stroked_and_not_filled() {
-            case(|| {
-                check_outlined_painted(BuildInputDecorator::new(outlined(false)).is_hovering(true));
+            test_widgets(|tester| {
+                check_outlined_painted(
+                    tester,
+                    BuildInputDecorator::new(outlined(false)).is_hovering(true),
+                );
             });
         }
 
@@ -10429,8 +10388,9 @@ pub(crate) mod tests {
         // field - when field is hovered - outline has correct weight and color'.
         #[test]
         fn an_outlined_hovered_outline_is_on_surface_and_1_wide() {
-            case(|| {
+            test_widgets(|tester| {
                 check_border(
+                    tester,
                     BuildInputDecorator::new(outlined(false)).is_hovering(true),
                     |theme| theme.color_scheme.on_surface,
                     1.0,
@@ -10442,8 +10402,11 @@ pub(crate) mod tests {
         // field - when field is focused - container has correct height and shape'.
         #[test]
         fn an_outlined_focused_container_has_the_m3_height_and_a_rounded_outline() {
-            case(|| {
-                check_outlined_shape(BuildInputDecorator::new(outlined(false)).is_focused(true));
+            test_widgets(|tester| {
+                check_outlined_shape(
+                    tester,
+                    BuildInputDecorator::new(outlined(false)).is_focused(true),
+                );
             });
         }
 
@@ -10451,8 +10414,11 @@ pub(crate) mod tests {
         // field - when field is focused - container is painted correctly'.
         #[test]
         fn an_outlined_focused_container_is_stroked_and_not_filled() {
-            case(|| {
-                check_outlined_painted(BuildInputDecorator::new(outlined(false)).is_focused(true));
+            test_widgets(|tester| {
+                check_outlined_painted(
+                    tester,
+                    BuildInputDecorator::new(outlined(false)).is_focused(true),
+                );
             });
         }
 
@@ -10460,8 +10426,9 @@ pub(crate) mod tests {
         // field - when field is focused - outline has correct weight and color'.
         #[test]
         fn an_outlined_focused_outline_is_primary_and_2_wide() {
-            case(|| {
+            test_widgets(|tester| {
                 check_border(
+                    tester,
                     BuildInputDecorator::new(outlined(false)).is_focused(true),
                     |theme| theme.color_scheme.primary,
                     2.0,
@@ -10474,8 +10441,9 @@ pub(crate) mod tests {
         // hovered'.
         #[test]
         fn an_outlined_focused_and_hovered_outline_is_primary_and_2_wide() {
-            case(|| {
+            test_widgets(|tester| {
                 check_border(
+                    tester,
                     BuildInputDecorator::new(outlined(false))
                         .is_focused(true)
                         .is_hovering(true),
@@ -10489,8 +10457,8 @@ pub(crate) mod tests {
         // field - when field is in error - container has correct height and shape'.
         #[test]
         fn an_outlined_error_container_has_the_m3_height_and_a_rounded_outline() {
-            case(|| {
-                check_outlined_shape(BuildInputDecorator::new(outlined(true)));
+            test_widgets(|tester| {
+                check_outlined_shape(tester, BuildInputDecorator::new(outlined(true)));
             });
         }
 
@@ -10498,8 +10466,8 @@ pub(crate) mod tests {
         // field - when field is in error - container is painted correctly'.
         #[test]
         fn an_outlined_error_container_is_stroked_and_not_filled() {
-            case(|| {
-                check_outlined_painted(BuildInputDecorator::new(outlined(true)));
+            test_widgets(|tester| {
+                check_outlined_painted(tester, BuildInputDecorator::new(outlined(true)));
             });
         }
 
@@ -10507,8 +10475,9 @@ pub(crate) mod tests {
         // field - when field is in error - outline has correct weight and color'.
         #[test]
         fn an_outlined_error_outline_is_error_and_1_wide() {
-            case(|| {
+            test_widgets(|tester| {
                 check_border(
+                    tester,
                     BuildInputDecorator::new(outlined(true)),
                     |theme| theme.color_scheme.error,
                     1.0,
@@ -10520,8 +10489,9 @@ pub(crate) mod tests {
         // field - when field is in error - outline has correct weight and color when focused'.
         #[test]
         fn an_outlined_focused_error_outline_is_error_and_2_wide() {
-            case(|| {
+            test_widgets(|tester| {
                 check_border(
+                    tester,
                     BuildInputDecorator::new(outlined(true)).is_focused(true),
                     |theme| theme.color_scheme.error,
                     2.0,
@@ -10533,8 +10503,9 @@ pub(crate) mod tests {
         // field - when field is in error - outline has correct weight and color when hovered'.
         #[test]
         fn an_outlined_hovered_error_outline_is_on_error_container_and_1_wide() {
-            case(|| {
+            test_widgets(|tester| {
                 check_border(
+                    tester,
                     BuildInputDecorator::new(outlined(true)).is_hovering(true),
                     |theme| theme.color_scheme.on_error_container(),
                     1.0,
@@ -10547,8 +10518,9 @@ pub(crate) mod tests {
         // hovered'.
         #[test]
         fn an_outlined_focused_and_hovered_error_outline_is_error_and_2_wide() {
-            case(|| {
+            test_widgets(|tester| {
                 check_border(
+                    tester,
                     BuildInputDecorator::new(outlined(true))
                         .is_focused(true)
                         .is_hovering(true),
@@ -10562,13 +10534,11 @@ pub(crate) mod tests {
         // field - default container height is 48dp on desktop'.
         #[test]
         fn an_outlined_container_is_48_high_on_desktop() {
-            case(|| {
-                check_height_on(
-                    &DESKTOP_PLATFORMS,
-                    || BuildInputDecorator::new(outlined(false)),
-                    DESKTOP_CONTAINER_HEIGHT,
-                );
-            });
+            check_height_on(
+                &DESKTOP_PLATFORMS,
+                || BuildInputDecorator::new(outlined(false)),
+                DESKTOP_CONTAINER_HEIGHT,
+            );
         }
 
         // input_decorator_test.dart 'Material3 - InputDecoration container - for outlined text
@@ -10576,9 +10546,7 @@ pub(crate) mod tests {
         // VisualDensity.compact'.
         #[test]
         fn an_outlined_container_is_48_high_on_every_platform_at_compact_density() {
-            case(|| {
-                check_density_levels(|| outlined(false), VisualDensity::COMPACT, 48.0);
-            });
+            check_density_levels(|| outlined(false), VisualDensity::COMPACT, 48.0);
         }
 
         // input_decorator_test.dart 'Material3 - InputDecoration container - for outlined text
@@ -10586,23 +10554,22 @@ pub(crate) mod tests {
         // VisualDensity.standard'.
         #[test]
         fn an_outlined_container_is_56_high_on_every_platform_at_standard_density() {
-            case(|| {
-                check_density_levels(|| outlined(false), VisualDensity::STANDARD, 56.0);
-            });
+            check_density_levels(|| outlined(false), VisualDensity::STANDARD, 56.0);
         }
 
         // input_decorator_test.dart 'Material3 - InputDecoration container - for outlined text
         // field - Visual density defined at the decoration level takes precedence'.
         #[test]
         fn an_outlined_container_takes_the_decoration_density_over_the_themes() {
-            case(|| {
-                let tester = pump(
+            test_widgets(|tester| {
+                pump(
+                    tester,
                     BuildInputDecorator::new(
                         outlined(false).visual_density(VisualDensity::COMFORTABLE),
                     )
                     .theme(compact_theme_with_standard_decoration_theme),
                 );
-                assert_eq!(get_container_rect(&tester).height(), 52.0);
+                assert_eq!(get_container_rect(tester).height(), 52.0);
             });
         }
 
@@ -10610,12 +10577,13 @@ pub(crate) mod tests {
         // field - Visual density defined at the input decoration theme level takes precedence'.
         #[test]
         fn an_outlined_container_takes_the_decoration_theme_density_over_the_themes() {
-            case(|| {
-                let tester = pump(
+            test_widgets(|tester| {
+                pump(
+                    tester,
                     BuildInputDecorator::new(outlined(false))
                         .theme(compact_theme_with_comfortable_decoration_theme),
                 );
-                assert_eq!(get_container_rect(&tester).height(), 52.0);
+                assert_eq!(get_container_rect(tester).height(), 52.0);
             });
         }
 
@@ -10623,12 +10591,13 @@ pub(crate) mod tests {
         // no input border'.
         #[test]
         fn a_decorator_with_no_input_border_has_a_zero_border_weight() {
-            case(|| {
-                let tester = pump(
+            test_widgets(|tester| {
+                pump(
+                    tester,
                     BuildInputDecorator::new(InputDecoration::new().border(InputBorderRef::none()))
                         .is_empty(true),
                 );
-                assert_eq!(get_border_weight(&tester), 0.0);
+                assert_eq!(get_border_weight(tester), 0.0);
             });
         }
 
@@ -10638,7 +10607,7 @@ pub(crate) mod tests {
         // here each change is a pumped widget.
         #[test]
         fn an_enabled_border_that_comes_and_goes_mid_animation_lerps_without_failing() {
-            case(|| {
+            test_widgets(|tester| {
                 let decorator = |wait_is_over: bool| {
                     let mut decoration = InputDecoration::new().label_text("Test");
                     if wait_is_over {
@@ -10653,13 +10622,12 @@ pub(crate) mod tests {
                         .home(InputDecorator::new(decoration))
                         .into_widget()
                 };
-                let mut tester = tester();
                 tester.pump_widget(decorator(false));
                 tester.pump_widget(decorator(true));
-                tester.pump(K_TRANSITION_DURATION);
+                tester.pump_by(K_TRANSITION_DURATION);
                 tester.pump_widget(decorator(false));
-                tester.pump(K_TRANSITION_DURATION);
-                assert!(get_border(&tester).is_some());
+                tester.pump_by(K_TRANSITION_DURATION);
+                assert!(get_border(tester).is_some());
             });
         }
 
@@ -10760,7 +10728,7 @@ pub(crate) mod tests {
         // borders scale down to fit when large values are passed in'.
         #[test]
         fn an_outline_with_radii_larger_than_the_decorator_fills_its_rrect() {
-            case(|| {
+            test_widgets(|tester| {
                 const LARGER_BORDER_RADIUS: f64 = 200.0;
                 const SMALLER_BORDER_RADIUS: f64 = 100.0;
                 const INPUT_DECORATOR_HEIGHT: f64 = 56.0;
@@ -10772,15 +10740,18 @@ pub(crate) mod tests {
                     Radius::circular(LARGER_BORDER_RADIUS),
                     Radius::circular(SMALLER_BORDER_RADIUS),
                 );
-                let tester = pump(BuildInputDecorator::new(
-                    InputDecoration::new()
-                        .filled(true)
-                        .fill_color(Color::new(0xFF00FF00))
-                        .label_text("label text")
-                        .border(OutlineInputBorder::new().border_radius(border_radius)),
-                ));
+                pump(
+                    tester,
+                    BuildInputDecorator::new(
+                        InputDecoration::new()
+                            .filled(true)
+                            .fill_color(Color::new(0xFF00FF00))
+                            .label_text("label text")
+                            .border(OutlineInputBorder::new().border_radius(border_radius)),
+                    ),
+                );
                 assert!(paints(
-                    &border_painter_ops(&tester),
+                    &border_painter_ops(tester),
                     &[
                         Call::Save,
                         Call::RRect(
@@ -10803,25 +10774,30 @@ pub(crate) mod tests {
         // OutlineInputBorder with zero padding just wraps the label'.
         #[test]
         fn a_rounded_outline_with_zero_gap_padding_fills_its_rrect() {
-            case(|| {
+            test_widgets(|tester| {
                 const BORDER_RADIUS: f64 = 30.0;
                 const LABEL: &str = "label text";
                 const INPUT_DECORATOR_HEIGHT: f64 = 56.0;
                 const INPUT_DECORATOR_WIDTH: f64 = 800.0;
-                let tester = pump(BuildInputDecorator::new(
-                    InputDecoration::new()
-                        .filled(true)
-                        .fill_color(Color::new(0xFF00FF00))
-                        .label_text(LABEL)
-                        .border(
-                            OutlineInputBorder::new()
-                                .border_radius(BorderRadius::all(Radius::circular(BORDER_RADIUS)))
-                                .gap_padding(0.0),
-                        ),
-                ));
+                pump(
+                    tester,
+                    BuildInputDecorator::new(
+                        InputDecoration::new()
+                            .filled(true)
+                            .fill_color(Color::new(0xFF00FF00))
+                            .label_text(LABEL)
+                            .border(
+                                OutlineInputBorder::new()
+                                    .border_radius(BorderRadius::all(Radius::circular(
+                                        BORDER_RADIUS,
+                                    )))
+                                    .gap_padding(0.0),
+                            ),
+                    ),
+                );
                 assert_eq!(tester.find_text(LABEL).len(), 1);
                 assert!(paints(
-                    &border_painter_ops(&tester),
+                    &border_painter_ops(tester),
                     &[
                         Call::Save,
                         Call::RRect(
@@ -10846,12 +10822,13 @@ pub(crate) mod tests {
         // with BorderRadius.zero should draw a rectangular border'.
         #[test]
         fn an_outline_with_a_zero_radius_draws_a_rectangle() {
-            case(|| {
+            test_widgets(|tester| {
                 const LABEL: &str = "Flutter";
                 const INPUT_DECORATOR_HEIGHT: f64 = 56.0;
                 const INPUT_DECORATOR_WIDTH: f64 = 800.0;
                 const BORDER_WIDTH: f64 = 4.0;
-                let tester = pump(
+                pump(
+                    tester,
                     BuildInputDecorator::new(
                         InputDecoration::new()
                             .filled(false)
@@ -10870,7 +10847,7 @@ pub(crate) mod tests {
                 );
                 assert_eq!(tester.find_text(LABEL).len(), 1);
                 assert!(paints(
-                    &border_painter_ops(&tester),
+                    &border_painter_ops(tester),
                     &[
                         Call::Save,
                         Call::Path(
@@ -10925,18 +10902,21 @@ pub(crate) mod tests {
         // OutlineInputBorder fillColor is clipped by border'.
         #[test]
         fn an_outline_fill_is_its_rounded_rect_under_the_stroked_outline() {
-            case(|| {
-                let tester = pump(BuildInputDecorator::new(
-                    InputDecoration::new()
-                        .filled(true)
-                        .fill_color(Color::new(0xFF00FF00))
-                        .border(
-                            OutlineInputBorder::new()
-                                .border_radius(BorderRadius::all(Radius::circular(12.0))),
-                        ),
-                ));
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(
+                        InputDecoration::new()
+                            .filled(true)
+                            .fill_color(Color::new(0xFF00FF00))
+                            .border(
+                                OutlineInputBorder::new()
+                                    .border_radius(BorderRadius::all(Radius::circular(12.0))),
+                            ),
+                    ),
+                );
                 assert!(paints(
-                    &decorator_ops(&tester),
+                    &decorator_ops(tester),
                     &[
                         // The border's outer path, a rounded rectangle.
                         Call::RRect(
@@ -10970,25 +10950,28 @@ pub(crate) mod tests {
         const STROKE_DECORATOR_HEIGHT: f64 = 56.0;
 
         /// Dart's `testStrokeAlign` of the 'OutlineInputBorder strokeAlign' group.
-        fn check_stroke_align(stroke_align: f64, expected_rrect: RRect) {
-            let tester = pump(BuildInputDecorator::new(
-                InputDecoration::new()
-                    .filled(true)
-                    .fill_color(Color::new(0xFF00FF00))
-                    .enabled_border(
-                        OutlineInputBorder::new()
-                            .border_radius(BorderRadius::all(Radius::circular(
-                                STROKE_BORDER_RADIUS,
-                            )))
-                            .border_side(BorderSide {
-                                width: STROKE_BORDER_WIDTH,
-                                stroke_align,
-                                ..BorderSide::default()
-                            }),
-                    ),
-            ));
+        fn check_stroke_align(tester: &mut WidgetTester, stroke_align: f64, expected_rrect: RRect) {
+            pump(
+                tester,
+                BuildInputDecorator::new(
+                    InputDecoration::new()
+                        .filled(true)
+                        .fill_color(Color::new(0xFF00FF00))
+                        .enabled_border(
+                            OutlineInputBorder::new()
+                                .border_radius(BorderRadius::all(Radius::circular(
+                                    STROKE_BORDER_RADIUS,
+                                )))
+                                .border_side(BorderSide {
+                                    width: STROKE_BORDER_WIDTH,
+                                    stroke_align,
+                                    ..BorderSide::default()
+                                }),
+                        ),
+                ),
+            );
             assert!(paints(
-                &decorator_ops(&tester),
+                &decorator_ops(tester),
                 &[
                     // Background fill of the InputDecorator.
                     Call::RRect(
@@ -11016,8 +10999,9 @@ pub(crate) mod tests {
         // strokeAlign - strokeAlignOutside should draw border outside bounds'.
         #[test]
         fn an_outline_aligned_outside_strokes_outside_the_decorator() {
-            case(|| {
+            test_widgets(|tester| {
                 check_stroke_align(
+                    tester,
                     BorderSide::STROKE_ALIGN_OUTSIDE,
                     RRect::from_ltrbr(
                         -STROKE_BORDER_WIDTH / 2.0,
@@ -11034,8 +11018,9 @@ pub(crate) mod tests {
         // strokeAlign - strokeAlignCenter should draw border between bounds'.
         #[test]
         fn an_outline_aligned_center_strokes_on_the_decorator_edge() {
-            case(|| {
+            test_widgets(|tester| {
                 check_stroke_align(
+                    tester,
                     BorderSide::STROKE_ALIGN_CENTER,
                     RRect::from_ltrbr(
                         0.0,
@@ -11052,8 +11037,9 @@ pub(crate) mod tests {
         // strokeAlign - strokeAlignInside should draw border inside bounds'.
         #[test]
         fn an_outline_aligned_inside_strokes_inside_the_decorator() {
-            case(|| {
+            test_widgets(|tester| {
                 check_stroke_align(
+                    tester,
                     BorderSide::STROKE_ALIGN_INSIDE,
                     RRect::from_ltrbr(
                         STROKE_BORDER_WIDTH / 2.0,
@@ -11070,23 +11056,26 @@ pub(crate) mod tests {
         // UnderlineInputBorder fillColor is clipped by border'.
         #[test]
         fn an_underline_with_rounded_bottom_corners_paints_its_bottom_as_a_ring() {
-            case(|| {
-                let tester = pump(BuildInputDecorator::new(
-                    InputDecoration::new()
-                        .filled(true)
-                        .fill_color(Color::new(0xFF00FF00))
-                        .border(
-                            UnderlineInputBorder::new().border_radius(BorderRadius::only(
-                                Radius::ZERO,
-                                Radius::ZERO,
-                                Radius::circular(12.0),
-                                Radius::circular(12.0),
-                            )),
-                        ),
-                ));
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(
+                        InputDecoration::new()
+                            .filled(true)
+                            .fill_color(Color::new(0xFF00FF00))
+                            .border(
+                                UnderlineInputBorder::new().border_radius(BorderRadius::only(
+                                    Radius::ZERO,
+                                    Radius::ZERO,
+                                    Radius::circular(12.0),
+                                    Radius::circular(12.0),
+                                )),
+                            ),
+                    ),
+                );
                 // Fill is the border's outer path, a rounded rectangle.
                 assert!(paints(
-                    &decorator_ops(&tester),
+                    &decorator_ops(tester),
                     &[Call::DRRect(
                         Some(Style::Fill),
                         RRect::from_ltrb_and_corners(
@@ -11226,11 +11215,6 @@ pub(crate) mod tests {
                 .into_widget()
         }
 
-        /// The label as Dart's `Text(labelText)` measures it, in the `label` slot.
-        fn ahem_label() -> WidgetRef {
-            ahem(LABEL_TEXT, TextStyle::new())
-        }
-
         /// `point` in the border container's coordinates: Dart's `borderBox.globalToLocal(point)`.
         fn border_local(tester: &WidgetTester, point: Offset) -> Offset {
             let element = find_border_painter(tester).expect("a border painter");
@@ -11244,10 +11228,10 @@ pub(crate) mod tests {
         // at the right position when border radius is taller than horizontal content padding'.
         #[test]
         fn an_outline_with_a_tall_radius_starts_its_gap_at_the_label() {
-            case(|| {
+            test_widgets(|tester| {
                 let decorator = || {
                     InputDecorator::new(
-                        InputDecoration::new().label(ahem_label()).border(
+                        InputDecoration::new().label_text(LABEL_TEXT).border(
                             OutlineInputBorder::new()
                                 .border_radius(BorderRadius::all(Radius::circular(30.0)))
                                 .gap_padding(0.0),
@@ -11256,13 +11240,12 @@ pub(crate) mod tests {
                     .is_focused(true)
                     .is_empty(true)
                 };
-                let mut tester = tester();
                 tester.pump_widget(gap_frame(TextDirection::Ltr, decorator()));
                 // Convert label bottom left offset to border path coordinate system.
                 let label_bottom_left_local_to_border =
-                    border_local(&tester, get_label_rect(&tester).bottom_left());
+                    border_local(tester, get_label_rect(tester).bottom_left());
                 assert!(paints(
-                    &border_painter_ops(&tester),
+                    &border_painter_ops(tester),
                     &[
                         Call::Save,
                         Call::Path(
@@ -11282,9 +11265,9 @@ pub(crate) mod tests {
                 tester.pump_widget(gap_frame(TextDirection::Rtl, decorator()));
                 // Convert label bottom right offset to border path coordinate system.
                 let label_bottom_right_local_to_border =
-                    border_local(&tester, get_label_rect(&tester).bottom_right());
+                    border_local(tester, get_label_rect(tester).bottom_right());
                 assert!(paints(
-                    &border_painter_ops(&tester),
+                    &border_painter_ops(tester),
                     &[
                         Call::Save,
                         Call::Path(
@@ -11307,24 +11290,23 @@ pub(crate) mod tests {
         // not overlap with the label at the default radius'.
         #[test]
         fn an_outline_at_the_default_radius_leaves_a_gap_exactly_under_the_label() {
-            case(|| {
+            test_widgets(|tester| {
                 let decorator = || {
                     InputDecorator::new(
                         InputDecoration::new()
-                            .label(ahem_label())
+                            .label_text(LABEL_TEXT)
                             .border(OutlineInputBorder::new().gap_padding(0.0)),
                     )
                     .is_focused(true)
                 };
-                let mut tester = tester();
                 for text_direction in [TextDirection::Ltr, TextDirection::Rtl] {
                     tester.pump_widget(gap_frame(text_direction, decorator()));
-                    let label_rect = get_label_rect(&tester);
-                    let center_left = border_local(&tester, label_rect.center_left());
-                    let center_right = border_local(&tester, label_rect.center_right());
+                    let label_rect = get_label_rect(tester);
+                    let center_left = border_local(tester, label_rect.center_left());
+                    let center_right = border_local(tester, label_rect.center_right());
                     assert!(
                         paints(
-                            &border_painter_ops(&tester),
+                            &border_painter_ops(tester),
                             &[
                                 Call::Save,
                                 Call::Path(
@@ -11350,26 +11332,25 @@ pub(crate) mod tests {
         // not draw over label when input decorator is focused and has an icon'.
         #[test]
         fn an_outline_with_an_icon_leaves_its_gap_under_the_label() {
-            case(|| {
+            test_widgets(|tester| {
                 let decorator = || {
                     InputDecorator::new(
                         InputDecoration::new()
                             .icon(Icon::new(Some(Icons::insert_link())))
-                            .label(ahem_label())
+                            .label_text(LABEL_TEXT)
                             .border(OutlineInputBorder::new()),
                     )
                     .is_focused(true)
                     .is_empty(true)
                 };
-                let mut tester = tester();
                 for text_direction in [TextDirection::Ltr, TextDirection::Rtl] {
                     tester.pump_widget(gap_frame(text_direction, decorator()));
-                    let label_rect = get_label_rect(&tester);
-                    let center_left = border_local(&tester, label_rect.center_left());
-                    let center_right = border_local(&tester, label_rect.center_right());
+                    let label_rect = get_label_rect(tester);
+                    let center_left = border_local(tester, label_rect.center_left());
+                    let center_right = border_local(tester, label_rect.center_right());
                     assert!(
                         paints(
-                            &border_painter_ops(&tester),
+                            &border_painter_ops(tester),
                             &[
                                 Call::Save,
                                 Call::Path(None, Vec::new(), vec![center_left, center_right]),
@@ -11384,14 +11365,9 @@ pub(crate) mod tests {
     }
 
     // input_decorator_test.dart's label and hint cases.
-    //
-    // Stand-ins (D16): in the cases that measure the label, hint or input, `labelText` and the
-    // Dart `customLabel` are `label(ahem(..))` (styled by the decorator's
-    // `AnimatedDefaultTextStyle`), `hintText` is `hint(ahem_hint(..))` (the M3 hint metrics,
-    // `bodyLarge`), and the input is `input_text()`. The cases that read styles, opacities or
-    // counts keep Dart's strings and read what the decorator builds.
     mod label_and_hint {
         #![allow(deprecated)]
+        use waft_widgets::testing::{WidgetTester, test_widgets};
 
         use std::time::Duration;
 
@@ -11408,7 +11384,6 @@ pub(crate) mod tests {
         use crate::colors::Colors;
         use crate::icons::Icons;
         use crate::input_border::OutlineInputBorder;
-        use crate::test_support::WidgetTester;
         use crate::theme::Theme;
         use crate::theme_data::{ThemeData, VisualDensity};
 
@@ -11427,27 +11402,21 @@ pub(crate) mod tests {
             style.color.as_ref().map(AnyColor::color)
         }
 
-        /// A label stand-in: Dart's `Text(labelText)` (or `customLabel`) in FlutterTest metrics.
-        fn label() -> WidgetRef {
-            ahem(LABEL_TEXT, TextStyle::new())
-        }
-
         /// Dart's `getInputRect(tester)`.
         fn get_input_rect(tester: &WidgetTester) -> Rect {
             text_rect(tester, INPUT_TEXT)
         }
 
-        /// Dart's `getHintRect(tester)`, over the hint stand-in.
+        /// Dart's `getHintRect(tester)`.
         fn get_hint_rect(tester: &WidgetTester) -> Rect {
             text_rect(tester, HINT_TEXT)
         }
 
-        /// The hint element: the stand-in if there is one, else the decorator's `Text`.
+        /// The hint's `Text`.
         fn find_hint(tester: &WidgetTester) -> AnyElement {
             tester
-                .find_ahem_text(HINT_TEXT)
+                .find_text(HINT_TEXT)
                 .into_iter()
-                .chain(tester.find_text(HINT_TEXT))
                 .next()
                 .expect("a hint")
         }
@@ -11478,10 +11447,8 @@ pub(crate) mod tests {
             })
         }
 
-        fn pump(decorator: BuildInputDecorator) -> WidgetTester {
-            let mut tester = tester();
+        fn pump(tester: &mut WidgetTester, decorator: BuildInputDecorator) {
             tester.pump_widget(decorator.build());
-            tester
         }
 
         // ----- Material3 - InputDecoration label -----
@@ -11510,24 +11477,31 @@ pub(crate) mod tests {
                 .helper_text(HELPER_TEXT)
         }
 
-        fn check_label_color(decorator: BuildInputDecorator, expected: fn(&ThemeData) -> Color) {
-            let tester = pump(decorator);
-            let theme = decorator_theme(&tester);
-            assert_eq!(color_of(&get_label_style(&tester)), Some(expected(&theme)));
+        fn check_label_color(
+            tester: &mut WidgetTester,
+            decorator: BuildInputDecorator,
+            expected: fn(&ThemeData) -> Color,
+        ) {
+            pump(tester, decorator);
+            let theme = decorator_theme(tester);
+            assert_eq!(color_of(&get_label_style(tester)), Some(expected(&theme)));
         }
 
         // input_decorator_test.dart 'Material3 - InputDecoration label - for filled text field -
         // label and input horizontal positions are M3 compliant in LTR'.
         #[test]
         fn filled_label_and_input_start_at_the_padding_and_the_input_gap_in_ltr() {
-            case(|| {
-                let tester = pump(BuildInputDecorator::new(
-                    InputDecoration::new().filled(true).label(label()),
-                ));
-                assert_eq!(get_decorator_rect(&tester).size(), Size::new(800.0, 56.0));
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(
+                        InputDecoration::new().filled(true).label_text(LABEL_TEXT),
+                    ),
+                );
+                assert_eq!(get_decorator_rect(tester).size(), Size::new(800.0, 56.0));
                 let label_and_input_start = 12.0 + 4.0; // Content left padding + default input gap.
-                assert_eq!(get_label_rect(&tester).left, label_and_input_start);
-                assert_eq!(get_input_rect(&tester).left, label_and_input_start);
+                assert_eq!(get_label_rect(tester).left, label_and_input_start);
+                assert_eq!(get_input_rect(tester).left, label_and_input_start);
             });
         }
 
@@ -11535,15 +11509,18 @@ pub(crate) mod tests {
         // label and input horizontal positions are M3 compliant in RTL'.
         #[test]
         fn filled_label_and_input_start_at_the_padding_and_the_input_gap_in_rtl() {
-            case(|| {
-                let tester = pump(
-                    BuildInputDecorator::new(InputDecoration::new().filled(true).label(label()))
-                        .text_direction(TextDirection::Rtl),
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(
+                        InputDecoration::new().filled(true).label_text(LABEL_TEXT),
+                    )
+                    .text_direction(TextDirection::Rtl),
                 );
-                assert_eq!(get_decorator_rect(&tester).size(), Size::new(800.0, 56.0));
+                assert_eq!(get_decorator_rect(tester).size(), Size::new(800.0, 56.0));
                 let label_and_input_start = 12.0 + 4.0; // Content left padding + default input gap.
-                assert_eq!(get_label_rect(&tester).right, 800.0 - label_and_input_start);
-                assert_eq!(get_input_rect(&tester).right, 800.0 - label_and_input_start);
+                assert_eq!(get_label_rect(tester).right, 800.0 - label_and_input_start);
+                assert_eq!(get_input_rect(tester).right, 800.0 - label_and_input_start);
             });
         }
 
@@ -11551,14 +11528,14 @@ pub(crate) mod tests {
         // when field is enabled - label text has correct style'.
         #[test]
         fn filled_enabled_label_text_has_body_large_in_on_surface_variant() {
-            case(|| {
-                let tester = pump(BuildInputDecorator::new(filled_label()));
-                let theme = decorator_theme(&tester);
+            test_widgets(|tester| {
+                pump(tester, BuildInputDecorator::new(filled_label()));
+                let theme = decorator_theme(tester);
                 // Current input decorator implementation forces line height to 1.0,
                 // this is not compliant with M3 spec.
                 let expected =
                     expected_label_style(&theme, theme.color_scheme.on_surface_variant());
-                assert_eq!(get_label_style(&tester), expected);
+                assert_eq!(get_label_style(tester), expected);
             });
         }
 
@@ -11566,8 +11543,9 @@ pub(crate) mod tests {
         // when field is disabled - label text has correct color'.
         #[test]
         fn filled_disabled_label_text_is_on_surface_at_38_percent() {
-            case(|| {
+            test_widgets(|tester| {
                 check_label_color(
+                    tester,
                     BuildInputDecorator::new(filled_label().enabled(false)),
                     |theme| theme.color_scheme.on_surface.with_opacity(0.38),
                 );
@@ -11578,8 +11556,9 @@ pub(crate) mod tests {
         // when field is hovered - label text has correct color'.
         #[test]
         fn filled_hovered_label_text_is_on_surface_variant() {
-            case(|| {
+            test_widgets(|tester| {
                 check_label_color(
+                    tester,
                     BuildInputDecorator::new(filled_label()).is_hovering(true),
                     |theme| theme.color_scheme.on_surface_variant(),
                 );
@@ -11590,8 +11569,9 @@ pub(crate) mod tests {
         // when field is focused - label text has correct color'.
         #[test]
         fn filled_focused_label_text_is_primary() {
-            case(|| {
+            test_widgets(|tester| {
                 check_label_color(
+                    tester,
                     BuildInputDecorator::new(filled_label()).is_focused(true),
                     |theme| theme.color_scheme.primary,
                 );
@@ -11602,8 +11582,9 @@ pub(crate) mod tests {
         // when field is focused - label text has correct color when focused and hovered'.
         #[test]
         fn filled_focused_and_hovered_label_text_is_primary() {
-            case(|| {
+            test_widgets(|tester| {
                 check_label_color(
+                    tester,
                     BuildInputDecorator::new(filled_label())
                         .is_focused(true)
                         .is_hovering(true),
@@ -11616,8 +11597,9 @@ pub(crate) mod tests {
         // when field is in error - label text has correct color'.
         #[test]
         fn filled_error_label_text_is_error() {
-            case(|| {
+            test_widgets(|tester| {
                 check_label_color(
+                    tester,
                     BuildInputDecorator::new(filled_label().error_text(ERROR_TEXT)),
                     |theme| theme.color_scheme.error,
                 );
@@ -11628,8 +11610,9 @@ pub(crate) mod tests {
         // when field is in error - label text has correct color when focused'.
         #[test]
         fn filled_focused_error_label_text_is_error() {
-            case(|| {
+            test_widgets(|tester| {
                 check_label_color(
+                    tester,
                     BuildInputDecorator::new(filled_label().error_text(ERROR_TEXT))
                         .is_focused(true),
                     |theme| theme.color_scheme.error,
@@ -11641,8 +11624,9 @@ pub(crate) mod tests {
         // when field is in error - label text has correct style when hovered'.
         #[test]
         fn filled_hovered_error_label_text_is_on_error_container() {
-            case(|| {
+            test_widgets(|tester| {
                 check_label_color(
+                    tester,
                     BuildInputDecorator::new(filled_label().error_text(ERROR_TEXT))
                         .is_hovering(true),
                     |theme| theme.color_scheme.on_error_container(),
@@ -11654,8 +11638,9 @@ pub(crate) mod tests {
         // when field is in error - label text has correct style when focused and hovered'.
         #[test]
         fn filled_focused_and_hovered_error_label_text_is_error() {
-            case(|| {
+            test_widgets(|tester| {
                 check_label_color(
+                    tester,
                     BuildInputDecorator::new(filled_label().error_text(ERROR_TEXT))
                         .is_focused(true)
                         .is_hovering(true),
@@ -11668,16 +11653,19 @@ pub(crate) mod tests {
         // label and input horizontal positions are M3 compliant in LTR'.
         #[test]
         fn outlined_label_and_input_start_at_the_padding_and_the_input_gap_in_ltr() {
-            case(|| {
-                let tester = pump(BuildInputDecorator::new(
-                    InputDecoration::new()
-                        .border(OutlineInputBorder::new())
-                        .label(label()),
-                ));
-                assert_eq!(get_decorator_rect(&tester).size(), Size::new(800.0, 56.0));
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(
+                        InputDecoration::new()
+                            .border(OutlineInputBorder::new())
+                            .label_text(LABEL_TEXT),
+                    ),
+                );
+                assert_eq!(get_decorator_rect(tester).size(), Size::new(800.0, 56.0));
                 let label_and_input_start = 12.0 + 4.0; // Content left padding + default input gap.
-                assert_eq!(get_label_rect(&tester).left, label_and_input_start);
-                assert_eq!(get_input_rect(&tester).left, label_and_input_start);
+                assert_eq!(get_label_rect(tester).left, label_and_input_start);
+                assert_eq!(get_input_rect(tester).left, label_and_input_start);
             });
         }
 
@@ -11685,19 +11673,20 @@ pub(crate) mod tests {
         // label and input horizontal positions are M3 compliant in RTL'.
         #[test]
         fn outlined_label_and_input_start_at_the_padding_and_the_input_gap_in_rtl() {
-            case(|| {
-                let tester = pump(
+            test_widgets(|tester| {
+                pump(
+                    tester,
                     BuildInputDecorator::new(
                         InputDecoration::new()
                             .border(OutlineInputBorder::new())
-                            .label(label()),
+                            .label_text(LABEL_TEXT),
                     )
                     .text_direction(TextDirection::Rtl),
                 );
-                assert_eq!(get_decorator_rect(&tester).size(), Size::new(800.0, 56.0));
+                assert_eq!(get_decorator_rect(tester).size(), Size::new(800.0, 56.0));
                 let label_and_input_start = 12.0 + 4.0; // Content left padding + default input gap.
-                assert_eq!(get_label_rect(&tester).right, 800.0 - label_and_input_start);
-                assert_eq!(get_input_rect(&tester).right, 800.0 - label_and_input_start);
+                assert_eq!(get_label_rect(tester).right, 800.0 - label_and_input_start);
+                assert_eq!(get_input_rect(tester).right, 800.0 - label_and_input_start);
             });
         }
 
@@ -11705,17 +11694,20 @@ pub(crate) mod tests {
         // label and input horizontal positions can be adjusted in LTR'.
         #[test]
         fn outlined_label_and_input_start_at_a_custom_gap_padding_in_ltr() {
-            case(|| {
+            test_widgets(|tester| {
                 let custom_gap = 6.0;
-                let tester = pump(BuildInputDecorator::new(
-                    InputDecoration::new()
-                        .border(OutlineInputBorder::new().gap_padding(custom_gap))
-                        .label(label()),
-                ));
-                assert_eq!(get_decorator_rect(&tester).size(), Size::new(800.0, 56.0));
+                pump(
+                    tester,
+                    BuildInputDecorator::new(
+                        InputDecoration::new()
+                            .border(OutlineInputBorder::new().gap_padding(custom_gap))
+                            .label_text(LABEL_TEXT),
+                    ),
+                );
+                assert_eq!(get_decorator_rect(tester).size(), Size::new(800.0, 56.0));
                 let label_and_input_start = 12.0 + custom_gap; // Content left padding + input gap.
-                assert_eq!(get_label_rect(&tester).left, label_and_input_start);
-                assert_eq!(get_input_rect(&tester).left, label_and_input_start);
+                assert_eq!(get_label_rect(tester).left, label_and_input_start);
+                assert_eq!(get_input_rect(tester).left, label_and_input_start);
             });
         }
 
@@ -11723,20 +11715,21 @@ pub(crate) mod tests {
         // label and input horizontal positions can be adjusted in RTL'.
         #[test]
         fn outlined_label_and_input_start_at_a_custom_gap_padding_in_rtl() {
-            case(|| {
+            test_widgets(|tester| {
                 let custom_gap = 6.0;
-                let tester = pump(
+                pump(
+                    tester,
                     BuildInputDecorator::new(
                         InputDecoration::new()
                             .border(OutlineInputBorder::new().gap_padding(custom_gap))
-                            .label(label()),
+                            .label_text(LABEL_TEXT),
                     )
                     .text_direction(TextDirection::Rtl),
                 );
-                assert_eq!(get_decorator_rect(&tester).size(), Size::new(800.0, 56.0));
+                assert_eq!(get_decorator_rect(tester).size(), Size::new(800.0, 56.0));
                 let label_and_input_start = 12.0 + custom_gap; // Content left padding + input gap.
-                assert_eq!(get_label_rect(&tester).right, 800.0 - label_and_input_start);
-                assert_eq!(get_input_rect(&tester).right, 800.0 - label_and_input_start);
+                assert_eq!(get_label_rect(tester).right, 800.0 - label_and_input_start);
+                assert_eq!(get_input_rect(tester).right, 800.0 - label_and_input_start);
             });
         }
 
@@ -11744,14 +11737,14 @@ pub(crate) mod tests {
         // when field is enabled - label text has correct style'.
         #[test]
         fn outlined_enabled_label_text_has_body_large_in_on_surface_variant() {
-            case(|| {
-                let tester = pump(BuildInputDecorator::new(outlined_label()));
-                let theme = decorator_theme(&tester);
+            test_widgets(|tester| {
+                pump(tester, BuildInputDecorator::new(outlined_label()));
+                let theme = decorator_theme(tester);
                 // Current input decorator implementation forces line height to 1.0,
                 // this is not compliant with M3 spec.
                 let expected =
                     expected_label_style(&theme, theme.color_scheme.on_surface_variant());
-                assert_eq!(get_label_style(&tester), expected);
+                assert_eq!(get_label_style(tester), expected);
             });
         }
 
@@ -11759,8 +11752,9 @@ pub(crate) mod tests {
         // when field is disabled - label text has correct color'.
         #[test]
         fn outlined_disabled_label_text_is_on_surface_at_38_percent() {
-            case(|| {
+            test_widgets(|tester| {
                 check_label_color(
+                    tester,
                     BuildInputDecorator::new(outlined_label().enabled(false)),
                     |theme| theme.color_scheme.on_surface.with_opacity(0.38),
                 );
@@ -11771,8 +11765,9 @@ pub(crate) mod tests {
         // when field is hovered - label text has correct color'.
         #[test]
         fn outlined_hovered_label_text_is_on_surface_variant() {
-            case(|| {
+            test_widgets(|tester| {
                 check_label_color(
+                    tester,
                     BuildInputDecorator::new(outlined_label()).is_hovering(true),
                     |theme| theme.color_scheme.on_surface_variant(),
                 );
@@ -11783,8 +11778,9 @@ pub(crate) mod tests {
         // when field is focused - label text has correct color'.
         #[test]
         fn outlined_focused_label_text_is_primary() {
-            case(|| {
+            test_widgets(|tester| {
                 check_label_color(
+                    tester,
                     BuildInputDecorator::new(outlined_label()).is_focused(true),
                     |theme| theme.color_scheme.primary,
                 );
@@ -11795,8 +11791,9 @@ pub(crate) mod tests {
         // when field is focused - label text has correct color when focused and hovered'.
         #[test]
         fn outlined_focused_and_hovered_label_text_is_primary() {
-            case(|| {
+            test_widgets(|tester| {
                 check_label_color(
+                    tester,
                     BuildInputDecorator::new(outlined_label())
                         .is_focused(true)
                         .is_hovering(true),
@@ -11816,10 +11813,12 @@ pub(crate) mod tests {
         // when field is in error - label text has correct color'.
         #[test]
         fn outlined_error_label_text_is_error() {
-            case(|| {
-                check_label_color(BuildInputDecorator::new(outlined_error_label()), |theme| {
-                    theme.color_scheme.error
-                });
+            test_widgets(|tester| {
+                check_label_color(
+                    tester,
+                    BuildInputDecorator::new(outlined_error_label()),
+                    |theme| theme.color_scheme.error,
+                );
             });
         }
 
@@ -11827,8 +11826,9 @@ pub(crate) mod tests {
         // when field is in error - label text has correct color when focused'.
         #[test]
         fn outlined_focused_error_label_text_is_error() {
-            case(|| {
+            test_widgets(|tester| {
                 check_label_color(
+                    tester,
                     BuildInputDecorator::new(outlined_error_label()).is_focused(true),
                     |theme| theme.color_scheme.error,
                 );
@@ -11839,8 +11839,9 @@ pub(crate) mod tests {
         // when field is in error - label text has correct color when hovered'.
         #[test]
         fn outlined_hovered_error_label_text_is_on_error_container() {
-            case(|| {
+            test_widgets(|tester| {
                 check_label_color(
+                    tester,
                     BuildInputDecorator::new(outlined_error_label()).is_hovering(true),
                     |theme| theme.color_scheme.on_error_container(),
                 );
@@ -11851,8 +11852,9 @@ pub(crate) mod tests {
         // when field is in error - label text has correct color when focused and hovered'.
         #[test]
         fn outlined_focused_and_hovered_error_label_text_is_error() {
-            case(|| {
+            test_widgets(|tester| {
                 check_label_color(
+                    tester,
                     BuildInputDecorator::new(outlined_error_label())
                         .is_focused(true)
                         .is_hovering(true),
@@ -11865,13 +11867,14 @@ pub(crate) mod tests {
         // non-filled and non-outlined text field have no horizontal padding in LTR'.
         #[test]
         fn underlined_label_and_input_have_no_horizontal_padding_in_ltr() {
-            case(|| {
-                let tester = pump(BuildInputDecorator::new(
-                    InputDecoration::new().label(label()),
-                ));
-                assert_eq!(get_decorator_rect(&tester).size(), Size::new(800.0, 56.0));
-                assert_eq!(get_label_rect(&tester).left, 0.0);
-                assert_eq!(get_input_rect(&tester).left, 0.0);
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(InputDecoration::new().label_text(LABEL_TEXT)),
+                );
+                assert_eq!(get_decorator_rect(tester).size(), Size::new(800.0, 56.0));
+                assert_eq!(get_label_rect(tester).left, 0.0);
+                assert_eq!(get_input_rect(tester).left, 0.0);
             });
         }
 
@@ -11879,14 +11882,15 @@ pub(crate) mod tests {
         // non-filled and non-outlined text field have no horizontal padding in RTL'.
         #[test]
         fn underlined_label_and_input_have_no_horizontal_padding_in_rtl() {
-            case(|| {
-                let tester = pump(
-                    BuildInputDecorator::new(InputDecoration::new().label(label()))
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(InputDecoration::new().label_text(LABEL_TEXT))
                         .text_direction(TextDirection::Rtl),
                 );
-                assert_eq!(get_decorator_rect(&tester).size(), Size::new(800.0, 56.0));
-                assert_eq!(get_label_rect(&tester).right, 800.0);
-                assert_eq!(get_input_rect(&tester).right, 800.0);
+                assert_eq!(get_decorator_rect(tester).size(), Size::new(800.0, 56.0));
+                assert_eq!(get_label_rect(tester).right, 800.0);
+                assert_eq!(get_input_rect(tester).right, 800.0);
             });
         }
 
@@ -11904,9 +11908,10 @@ pub(crate) mod tests {
         // overrides default style'.
         #[test]
         fn floating_label_style_overrides_the_default_style() {
-            case(|| {
+            test_widgets(|tester| {
                 let floating_label_style = style(Colors::INDIGO.primary());
-                let tester = pump(
+                pump(
+                    tester,
                     BuildInputDecorator::new(
                         InputDecoration::new()
                             .label_text(LABEL_TEXT)
@@ -11916,7 +11921,7 @@ pub(crate) mod tests {
                     // Label appears floating above input field.
                     .is_focused(true),
                 );
-                check_label_color_and_size(&tester, &floating_label_style);
+                check_label_color_and_size(tester, &floating_label_style);
             });
         }
 
@@ -11924,9 +11929,10 @@ pub(crate) mod tests {
         // defaults to labelStyle'.
         #[test]
         fn floating_label_style_defaults_to_label_style() {
-            case(|| {
+            test_widgets(|tester| {
                 let label_style = style(Colors::AMBER.primary());
-                let tester = pump(
+                pump(
+                    tester,
                     BuildInputDecorator::new(
                         InputDecoration::new()
                             .label_text(LABEL_TEXT)
@@ -11936,7 +11942,7 @@ pub(crate) mod tests {
                     // Label appears floating above input field.
                     .is_focused(true),
                 );
-                check_label_color_and_size(&tester, &label_style);
+                check_label_color_and_size(tester, &label_style);
             });
         }
 
@@ -11944,10 +11950,11 @@ pub(crate) mod tests {
         // precedence over labelStyle'.
         #[test]
         fn floating_label_style_takes_precedence_over_label_style() {
-            case(|| {
+            test_widgets(|tester| {
                 let label_style = style(Colors::AMBER.primary());
                 let floating_label_style = style(Colors::INDIGO.primary());
-                let tester = pump(
+                pump(
+                    tester,
                     BuildInputDecorator::new(
                         InputDecoration::new()
                             .label_text(LABEL_TEXT)
@@ -11958,7 +11965,7 @@ pub(crate) mod tests {
                     // Label appears floating above input field.
                     .is_focused(true),
                 );
-                check_label_color_and_size(&tester, &floating_label_style);
+                check_label_color_and_size(tester, &floating_label_style);
             });
         }
 
@@ -11966,9 +11973,10 @@ pub(crate) mod tests {
         // InputDecorationThemeData.labelStyle overrides default style'.
         #[test]
         fn the_theme_label_style_overrides_the_default_style() {
-            case(|| {
+            test_widgets(|tester| {
                 let label_style = style(Colors::AMBER.primary());
-                let tester = pump(
+                pump(
+                    tester,
                     // Label appears inline, on top of the input field.
                     BuildInputDecorator::new(InputDecoration::new().label_text(LABEL_TEXT))
                         .is_empty(true)
@@ -11976,7 +11984,7 @@ pub(crate) mod tests {
                             InputDecorationThemeData::new().label_style(label_style.clone()),
                         ),
                 );
-                assert_eq!(color_of(&get_label_style(&tester)), color_of(&label_style));
+                assert_eq!(color_of(&get_label_style(tester)), color_of(&label_style));
             });
         }
 
@@ -11984,9 +11992,10 @@ pub(crate) mod tests {
         // InputDecorationThemeData.floatingLabelStyle overrides default style'.
         #[test]
         fn the_theme_floating_label_style_overrides_the_default_style() {
-            case(|| {
+            test_widgets(|tester| {
                 let floating_label_style = style(Colors::INDIGO.primary());
-                let tester = pump(
+                pump(
+                    tester,
                     BuildInputDecorator::new(InputDecoration::new().label_text(LABEL_TEXT))
                         .is_empty(true)
                         // Label appears floating above input field.
@@ -11997,7 +12006,7 @@ pub(crate) mod tests {
                         ),
                 );
                 assert_eq!(
-                    color_of(&get_label_style(&tester)),
+                    color_of(&get_label_style(tester)),
                     color_of(&floating_label_style)
                 );
             });
@@ -12007,7 +12016,7 @@ pub(crate) mod tests {
         // always used when FloatingLabelBehavior.always'.
         #[test]
         fn floating_label_style_is_always_used_when_the_label_always_floats() {
-            case(|| {
+            test_widgets(|tester| {
                 let label_style = style(Colors::AMBER.primary());
                 let floating_label_style = style(Colors::INDIGO.primary());
                 let decoration = InputDecoration::new()
@@ -12016,8 +12025,11 @@ pub(crate) mod tests {
                     .floating_label_style(floating_label_style.clone())
                     .floating_label_behavior(FloatingLabelBehavior::Always);
 
-                let mut tester = pump(BuildInputDecorator::new(decoration.clone()).is_empty(true));
-                check_label_color_and_size(&tester, &floating_label_style);
+                pump(
+                    tester,
+                    BuildInputDecorator::new(decoration.clone()).is_empty(true),
+                );
+                check_label_color_and_size(tester, &floating_label_style);
 
                 // Focus the input decorator.
                 tester.pump_widget(
@@ -12026,24 +12038,25 @@ pub(crate) mod tests {
                         .is_focused(true)
                         .build(),
                 );
-                check_label_color_and_size(&tester, &floating_label_style);
+                check_label_color_and_size(tester, &floating_label_style);
             });
         }
 
         // ----- Material3 - InputDecoration labelText layout / label layout -----
         //
         // Dart runs the same layout cases with `labelText` and with the `customLabel` widget; both
-        // are the label stand-in here, so each pair is one case below.
+        // are `label_text` here, so each pair is one case below.
 
         // input_decorator_test.dart 'Material3 - InputDecoration labelText layout - The label
         // appears above input' and 'Material3 - InputDecoration label layout - The label appears
         // above input'.
         #[test]
         fn the_label_appears_above_the_input() {
-            case(|| {
-                let tester = pump(BuildInputDecorator::new(
-                    InputDecoration::new().label(label()),
-                ));
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(InputDecoration::new().label_text(LABEL_TEXT)),
+                );
 
                 // Overall height for this InputDecorator is 56dp on mobile:
                 //    8 - top padding
@@ -12051,11 +12064,11 @@ pub(crate) mod tests {
                 //    4 - gap between label and input (this is not part of the M3 spec)
                 //   24 - input text (font size = 16, line height = 1.5)
                 //    8 - bottom padding
-                assert_eq!(get_decorator_rect(&tester).size(), Size::new(800.0, 56.0));
-                assert_eq!(get_label_rect(&tester).top, 8.0);
-                assert_eq!(get_label_rect(&tester).bottom, 20.0);
-                assert_eq!(get_input_rect(&tester).top, 24.0);
-                assert_eq!(get_input_rect(&tester).bottom, 48.0);
+                assert_eq!(get_decorator_rect(tester).size(), Size::new(800.0, 56.0));
+                assert_eq!(get_label_rect(tester).top, 8.0);
+                assert_eq!(get_label_rect(tester).bottom, 20.0);
+                assert_eq!(get_input_rect(tester).top, 24.0);
+                assert_eq!(get_input_rect(tester).bottom, 48.0);
             });
         }
 
@@ -12063,20 +12076,22 @@ pub(crate) mod tests {
         // appears within the input when there is no text content' and its label layout twin.
         #[test]
         fn the_label_appears_within_the_input_when_there_is_no_text_content() {
-            case(|| {
-                let tester = pump(
-                    BuildInputDecorator::new(InputDecoration::new().label(label())).is_empty(true),
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(InputDecoration::new().label_text(LABEL_TEXT))
+                        .is_empty(true),
                 );
-                assert_eq!(get_decorator_rect(&tester).size(), Size::new(800.0, 56.0));
+                assert_eq!(get_decorator_rect(tester).size(), Size::new(800.0, 56.0));
                 // Label line height is forced to 1.0 and font size is 16.0,
                 // the label should be vertically centered (20 pixels above and below).
-                assert_eq!(get_label_rect(&tester).top, 20.0);
-                assert_eq!(get_label_rect(&tester).bottom, 36.0);
+                assert_eq!(get_label_rect(tester).top, 20.0);
+                assert_eq!(get_label_rect(tester).bottom, 36.0);
             });
         }
 
-        fn large_label_rect(decoration: InputDecoration) -> Rect {
-            let tester = pump(BuildInputDecorator::new(decoration).is_empty(true));
+        fn large_label_rect(tester: &mut WidgetTester, decoration: InputDecoration) -> Rect {
+            pump(tester, BuildInputDecorator::new(decoration).is_empty(true));
             let large = tester
                 .find_by_type::<SizedBox>()
                 .into_iter()
@@ -12084,27 +12099,30 @@ pub(crate) mod tests {
                     tester.widget(*element, |sized: &SizedBox| sized.width == Some(1000.0))
                 })
                 .expect("the large label");
-            rect_of(&tester, large)
+            rect_of(tester, large)
         }
 
         // input_decorator_test.dart 'Material3 - InputDecoration labelText layout - When the label
         // appears within the input its padding is correct'.
         #[test]
         fn a_label_within_the_input_fills_the_space_between_the_paddings() {
-            case(|| {
+            test_widgets(|tester| {
                 // Define a label larger than the available decorator, the label will fill
                 // all the available space (decorator width minus padding and affixes).
                 let large_label = || SizedBox::new().width(1000.0).height(16.0).into_widget();
 
                 // For filled and/or outlined decoration, the horizontal padding is 16.
                 let horizontal_padding = 16.0;
-                let rect =
-                    large_label_rect(InputDecoration::new().filled(true).label(large_label()));
+                let rect = large_label_rect(
+                    tester,
+                    InputDecoration::new().filled(true).label(large_label()),
+                );
                 assert_eq!(rect.left, horizontal_padding);
                 assert_eq!(rect.right, 800.0 - horizontal_padding);
 
                 // Outlined decorator.
                 let rect = large_label_rect(
+                    tester,
                     InputDecoration::new()
                         .border(OutlineInputBorder::new())
                         .label(large_label()),
@@ -12114,6 +12132,7 @@ pub(crate) mod tests {
 
                 // Rebuild with affixes.
                 let rect = large_label_rect(
+                    tester,
                     InputDecoration::new()
                         .filled(true)
                         .label(large_label())
@@ -12129,6 +12148,7 @@ pub(crate) mod tests {
 
                 // Outlined decorator.
                 let rect = large_label_rect(
+                    tester,
                     InputDecoration::new()
                         .border(OutlineInputBorder::new())
                         .label(large_label())
@@ -12145,18 +12165,19 @@ pub(crate) mod tests {
         // and its label layout twin.
         #[test]
         fn an_always_floating_label_appears_above_an_empty_input() {
-            case(|| {
-                let tester = pump(
+            test_widgets(|tester| {
+                pump(
+                    tester,
                     BuildInputDecorator::new(
                         InputDecoration::new()
-                            .label(label())
+                            .label_text(LABEL_TEXT)
                             .floating_label_behavior(FloatingLabelBehavior::Always),
                     )
                     .is_empty(true),
                 );
-                assert_eq!(get_decorator_rect(&tester).size(), Size::new(800.0, 56.0));
-                assert_eq!(get_label_rect(&tester).top, 8.0);
-                assert_eq!(get_label_rect(&tester).bottom, 20.0);
+                assert_eq!(get_decorator_rect(tester).size(), Size::new(800.0, 56.0));
+                assert_eq!(get_label_rect(tester).top, 8.0);
+                assert_eq!(get_label_rect(tester).bottom, 20.0);
             });
         }
 
@@ -12165,17 +12186,20 @@ pub(crate) mod tests {
         // and its label layout twin.
         #[test]
         fn a_never_floating_label_appears_within_an_input_with_content() {
-            case(|| {
-                let tester = pump(BuildInputDecorator::new(
-                    InputDecoration::new()
-                        .label(label())
-                        .floating_label_behavior(FloatingLabelBehavior::Never),
-                ));
-                assert_eq!(get_decorator_rect(&tester).size(), Size::new(800.0, 56.0));
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(
+                        InputDecoration::new()
+                            .label_text(LABEL_TEXT)
+                            .floating_label_behavior(FloatingLabelBehavior::Never),
+                    ),
+                );
+                assert_eq!(get_decorator_rect(tester).size(), Size::new(800.0, 56.0));
                 // Label line height is forced to 1.0 and font size is 16.0,
                 // the label should be vertically centered (20 pixels above and below).
-                assert_eq!(get_label_rect(&tester).top, 20.0);
-                assert_eq!(get_label_rect(&tester).bottom, 36.0);
+                assert_eq!(get_label_rect(tester).top, 20.0);
+                assert_eq!(get_label_rect(tester).bottom, 36.0);
             });
         }
 
@@ -12183,19 +12207,20 @@ pub(crate) mod tests {
         // floatingLabelBehavior is used'.
         #[test]
         fn the_ambient_theme_floating_label_behavior_is_used() {
-            case(|| {
-                let tester = pump(
-                    BuildInputDecorator::new(InputDecoration::new().label(label()))
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(InputDecoration::new().label_text(LABEL_TEXT))
                         .input_decoration_theme(
                             InputDecorationThemeData::new()
                                 .floating_label_behavior(FloatingLabelBehavior::Never),
                         ),
                 );
-                assert_eq!(get_decorator_rect(&tester).size(), Size::new(800.0, 56.0));
+                assert_eq!(get_decorator_rect(tester).size(), Size::new(800.0, 56.0));
                 // Label line height is forced to 1.0 and font size is 16.0,
                 // the label should be vertically centered (20 pixels above and below).
-                assert_eq!(get_label_rect(&tester).top, 20.0);
-                assert_eq!(get_label_rect(&tester).bottom, 36.0);
+                assert_eq!(get_label_rect(tester).top, 20.0);
+                assert_eq!(get_label_rect(tester).bottom, 36.0);
             });
         }
 
@@ -12210,11 +12235,11 @@ pub(crate) mod tests {
         // animation duration and curve' and its label layout twin.
         #[test]
         fn the_floating_label_animates_for_167_ms_along_fast_out_slow_in() {
-            case(|| {
+            test_widgets(|tester| {
                 let build = |is_focused: bool| {
                     BuildInputDecorator::new(
                         InputDecoration::new()
-                            .label(label())
+                            .label_text(LABEL_TEXT)
                             .floating_label_behavior(FloatingLabelBehavior::Auto),
                     )
                     .is_empty(true)
@@ -12222,21 +12247,20 @@ pub(crate) mod tests {
                     .build()
                 };
 
-                let mut tester = tester();
                 tester.pump_widget(build(false));
-                assert_eq!(get_label_rect(&tester).top, 20.0);
+                assert_eq!(get_label_rect(tester).top, 20.0);
 
                 // The label animates upwards and scales down.
                 // The animation duration is 167ms and the curve is fastOutSlowIn.
                 tester.pump_widget(build(true));
-                tester.pump(ms(42));
-                assert_close_to(get_label_rect(&tester).top, 17.09, 0.5);
-                tester.pump(ms(42));
-                assert_close_to(get_label_rect(&tester).top, 10.66, 0.5);
-                tester.pump(ms(42));
-                assert_close_to(get_label_rect(&tester).top, 8.47, 0.5);
-                tester.pump(ms(41));
-                assert_eq!(get_label_rect(&tester).top, 8.0);
+                tester.pump_by(ms(42));
+                assert_close_to(get_label_rect(tester).top, 17.09, 0.5);
+                tester.pump_by(ms(42));
+                assert_close_to(get_label_rect(tester).top, 10.66, 0.5);
+                tester.pump_by(ms(42));
+                assert_close_to(get_label_rect(tester).top, 8.47, 0.5);
+                tester.pump_by(ms(41));
+                assert_eq!(get_label_rect(tester).top, 8.0);
 
                 // If the animation changes direction without first reaching the
                 // AnimationStatus.completed or AnimationStatus.dismissed status,
@@ -12247,14 +12271,14 @@ pub(crate) mod tests {
                 // The label animates downwards and scales up.
                 // The animation duration is 167ms and the curve is fastOutSlowIn.
                 tester.pump_widget(build(false));
-                tester.pump(ms(42));
-                assert_close_to(get_label_rect(&tester).top, 10.90, 0.5);
-                tester.pump(ms(42));
-                assert_close_to(get_label_rect(&tester).top, 17.34, 0.5);
-                tester.pump(ms(42));
-                assert_close_to(get_label_rect(&tester).top, 19.69, 0.5);
-                tester.pump(ms(41));
-                assert_eq!(get_label_rect(&tester).top, 20.0);
+                tester.pump_by(ms(42));
+                assert_close_to(get_label_rect(tester).top, 10.90, 0.5);
+                tester.pump_by(ms(42));
+                assert_close_to(get_label_rect(tester).top, 17.34, 0.5);
+                tester.pump_by(ms(42));
+                assert_close_to(get_label_rect(tester).top, 19.69, 0.5);
+                tester.pump_by(ms(41));
+                assert_eq!(get_label_rect(tester).top, 20.0);
             });
         }
 
@@ -12262,13 +12286,12 @@ pub(crate) mod tests {
         // withdraws label when not empty or focused'.
         #[test]
         fn the_label_withdraws_when_not_empty_or_focused_while_enabled() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let mut pump_decorator = |focused: bool, enabled: bool, empty: bool| {
                     tester.pump_widget(
                         BuildInputDecorator::new(
                             InputDecoration::new()
-                                .label(ahem("Label", TextStyle::new()))
+                                .label_text("Label")
                                 .enabled(enabled)
                                 .filled(false)
                                 .focused_border(OutlineInputBorder::new())
@@ -12279,8 +12302,8 @@ pub(crate) mod tests {
                         .is_focused(focused)
                         .build(),
                     );
-                    tester.pump(K_TRANSITION_DURATION);
-                    let rect = text_rect(&tester, "Label");
+                    tester.pump_by(K_TRANSITION_DURATION);
+                    let rect = text_rect(tester, "Label");
                     (rect.top_left(), rect.size())
                 };
 
@@ -12301,40 +12324,37 @@ pub(crate) mod tests {
 
         // input_decorator_test.dart 'Material3 - InputDecoration labelText layout - InputDecorator
         // floating label width scales when focused'. Dart reads the width from the clip the
-        // label's ellipsized `Text` paints; here it is the label stand-in's laid out width.
+        // label's ellipsized `Text` paints; here it is the label's laid out width.
         #[test]
         fn the_floating_label_width_scales_up_when_focused() {
-            case(|| {
+            test_widgets(|tester| {
                 let long_string_a = "A".repeat(200);
                 let long_string_b = "B".repeat(200);
                 let build = |text: &str, is_focused: bool| {
                     Center::new()
                         .child(
                             SizedBox::square(Some(100.0)).child(
-                                BuildInputDecorator::new(
-                                    InputDecoration::new().label(ahem(text, TextStyle::new())),
-                                )
-                                .is_empty(true)
-                                .is_focused(is_focused)
-                                .build(),
+                                BuildInputDecorator::new(InputDecoration::new().label_text(text))
+                                    .is_empty(true)
+                                    .is_focused(is_focused)
+                                    .build(),
                             ),
                         )
                         .into_widget()
                 };
                 let label_size = |tester: &WidgetTester, text: &str| {
-                    let element = tester.find_ahem_text(text)[0];
+                    let element = tester.find_text(text)[0];
                     let render = tester.render_box_of(element);
                     let app = tester.cell.borrow();
                     render.size(&app)
                 };
 
-                let mut tester = tester();
                 tester.pump_widget(build(&long_string_a, false));
-                assert_eq!(label_size(&tester, &long_string_a), Size::new(100.0, 16.0));
+                assert_eq!(label_size(tester, &long_string_a), Size::new(100.0, 16.0));
 
                 tester.pump_widget(build(&long_string_b, true));
-                tester.pump(K_TRANSITION_DURATION);
-                let size = label_size(&tester, &long_string_b);
+                tester.pump_by(K_TRANSITION_DURATION);
+                let size = label_size(tester, &long_string_b);
                 // _kFinalLabelScale = 0.75
                 assert!((size.width() - 100.0 / 0.75).abs() < 1e-5, "{size:?}");
                 assert_eq!(size.height(), 16.0);
@@ -12345,11 +12365,12 @@ pub(crate) mod tests {
         // floating label Y coordinate'.
         #[test]
         fn the_floating_label_is_centred_on_a_wide_outline() {
-            case(|| {
-                let mut tester = pump(
+            test_widgets(|tester| {
+                pump(
+                    tester,
                     BuildInputDecorator::new(
                         InputDecoration::new()
-                            .label(label())
+                            .label_text(LABEL_TEXT)
                             .enabled_border(OutlineInputBorder::new().border_side(BorderSide {
                                 width: 4.0,
                                 ..BorderSide::default()
@@ -12358,15 +12379,16 @@ pub(crate) mod tests {
                     )
                     .is_empty(true),
                 );
-                tester.pump(K_TRANSITION_DURATION);
+                tester.pump_by(K_TRANSITION_DURATION);
 
                 // floatingLabelHeight = 12 (font size 16dps * 0.75 = 12)
                 // labelY = -floatingLabelHeight/2 + borderWidth/2
-                assert_eq!(get_label_rect(&tester).top, -4.0);
+                assert_eq!(get_label_rect(tester).top, -4.0);
             });
         }
 
         fn density_frames(
+            tester: &mut WidgetTester,
             visual_density: VisualDensity,
             height: f64,
             inline_label: (f64, f64),
@@ -12376,59 +12398,58 @@ pub(crate) mod tests {
             let decorator = |is_empty: bool, is_focused: bool| {
                 BuildInputDecorator::new(
                     InputDecoration::new()
-                        .label(label())
-                        .hint(ahem_hint(HINT_TEXT)),
+                        .label_text(LABEL_TEXT)
+                        .hint_text(HINT_TEXT),
                 )
                 .is_empty(is_empty)
                 .is_focused(is_focused)
                 .visual_density(visual_density)
                 .build()
             };
-            let mut tester = tester();
             tester.pump_widget(decorator(true, false));
 
-            assert_eq!(get_decorator_rect(&tester).size(), Size::new(800.0, height));
+            assert_eq!(get_decorator_rect(tester).size(), Size::new(800.0, height));
 
             // The decorator is empty, label is not floating and is vertically centered.
-            assert_eq!(get_label_rect(&tester).top, inline_label.0);
-            assert_eq!(get_label_rect(&tester).bottom, inline_label.1);
-            assert_eq!(get_hint_opacity(&tester), 0.0);
-            assert_eq!(get_border_bottom(&tester), height);
-            assert_eq!(get_border_weight(&tester), 1.0);
+            assert_eq!(get_label_rect(tester).top, inline_label.0);
+            assert_eq!(get_label_rect(tester).bottom, inline_label.1);
+            assert_eq!(get_hint_opacity(tester), 0.0);
+            assert_eq!(get_border_bottom(tester), height);
+            assert_eq!(get_border_weight(tester), 1.0);
 
             // When the decorator is focused, label moves upwards, hint is visible (opacity 1.0).
             tester.pump_widget(decorator(true, true));
-            tester.pump(K_TRANSITION_DURATION);
+            tester.pump_by(K_TRANSITION_DURATION);
 
             // The decorator is empty and focused, label and hint are visible.
-            assert_eq!(get_decorator_rect(&tester).size(), Size::new(800.0, height));
-            assert_eq!(get_label_rect(&tester).top, floating_label.0);
-            assert_eq!(get_label_rect(&tester).bottom, floating_label.1);
-            assert_eq!(get_hint_rect(&tester).top, content.0);
-            assert_eq!(get_hint_rect(&tester).bottom, content.1);
-            assert_eq!(get_hint_opacity(&tester), 1.0);
-            assert_eq!(get_border_bottom(&tester), height);
-            assert_eq!(get_border_weight(&tester), 2.0);
+            assert_eq!(get_decorator_rect(tester).size(), Size::new(800.0, height));
+            assert_eq!(get_label_rect(tester).top, floating_label.0);
+            assert_eq!(get_label_rect(tester).bottom, floating_label.1);
+            assert_eq!(get_hint_rect(tester).top, content.0);
+            assert_eq!(get_hint_rect(tester).bottom, content.1);
+            assert_eq!(get_hint_opacity(tester), 1.0);
+            assert_eq!(get_border_bottom(tester), height);
+            assert_eq!(get_border_weight(tester), 2.0);
 
             tester.pump_widget(decorator(false, true));
-            tester.pump(K_TRANSITION_DURATION);
+            tester.pump_by(K_TRANSITION_DURATION);
 
             // The decorator is focused and not empty, label and input are visible.
-            assert_eq!(get_decorator_rect(&tester).size(), Size::new(800.0, height));
-            assert_eq!(get_label_rect(&tester).top, floating_label.0);
-            assert_eq!(get_label_rect(&tester).bottom, floating_label.1);
-            assert_eq!(get_input_rect(&tester).top, content.0);
-            assert_eq!(get_input_rect(&tester).bottom, content.1);
-            assert_eq!(get_hint_opacity(&tester), 0.0);
-            assert_eq!(get_border_bottom(&tester), height);
-            assert_eq!(get_border_weight(&tester), 2.0);
+            assert_eq!(get_decorator_rect(tester).size(), Size::new(800.0, height));
+            assert_eq!(get_label_rect(tester).top, floating_label.0);
+            assert_eq!(get_label_rect(tester).bottom, floating_label.1);
+            assert_eq!(get_input_rect(tester).top, content.0);
+            assert_eq!(get_input_rect(tester).bottom, content.1);
+            assert_eq!(get_hint_opacity(tester), 0.0);
+            assert_eq!(get_border_bottom(tester), height);
+            assert_eq!(get_border_weight(tester), 2.0);
         }
 
         // input_decorator_test.dart 'Material3 - InputDecoration labelText layout - InputDecorator
         // respects reduced theme visualDensity'.
         #[test]
         fn the_decorator_respects_a_reduced_theme_visual_density() {
-            case(|| {
+            test_widgets(|tester| {
                 // Overall height for this InputDecorator is 48dp:
                 //    4 - top padding (8 minus 4 due to reduced visual density)
                 //   12 - floating label (font size = 16 * 0.75, line height is forced to 1.0)
@@ -12436,6 +12457,7 @@ pub(crate) mod tests {
                 //   24 - input text (font size = 16, line height = 1.5)
                 //    4 - bottom padding (8 minus 4 due to reduced visual density)
                 density_frames(
+                    tester,
                     VisualDensity::COMPACT,
                     48.0,
                     (16.0, 32.0),
@@ -12449,7 +12471,7 @@ pub(crate) mod tests {
         // respects increased theme visualDensity'.
         #[test]
         fn the_decorator_respects_an_increased_theme_visual_density() {
-            case(|| {
+            test_widgets(|tester| {
                 // Overall height for this InputDecorator is 64dp:
                 //   12 - top padding (8 plus 4 due to increased visual density)
                 //   12 - floating label (font size = 16 * 0.75, line height is forced to 1.0)
@@ -12457,6 +12479,7 @@ pub(crate) mod tests {
                 //   24 - input text (font size = 16, line height = 1.5)
                 //   12 - bottom padding (8 plus 4 due to increased visual density)
                 density_frames(
+                    tester,
                     VisualDensity::new(2.0, 2.0),
                     64.0,
                     (24.0, 40.0),
@@ -12471,11 +12494,12 @@ pub(crate) mod tests {
         // is a text widget (focused)'.
         #[test]
         fn the_theme_floating_label_style_reaches_a_text_label_widget() {
-            case(|| {
+            test_widgets(|tester| {
                 let floating_label_style = TextStyle::new()
                     .font_size(16.0)
                     .merge(Some(&TextStyle::new().color(Colors::INDIGO.primary())));
-                let tester = pump(
+                pump(
+                    tester,
                     BuildInputDecorator::new(InputDecoration::new().label(Text::new("label")))
                         .is_empty(true)
                         // Label appears floating above input field.
@@ -12487,7 +12511,7 @@ pub(crate) mod tests {
                 );
                 // Verify that the styles were passed along.
                 assert_eq!(
-                    color_of(&get_label_style(&tester)),
+                    color_of(&get_label_style(tester)),
                     color_of(&floating_label_style)
                 );
             });
@@ -12498,11 +12522,12 @@ pub(crate) mod tests {
         // text widget'.
         #[test]
         fn the_theme_label_style_reaches_a_text_label_widget() {
-            case(|| {
+            test_widgets(|tester| {
                 let label_style = TextStyle::new()
                     .font_size(16.0)
                     .merge(Some(&TextStyle::new().color(Colors::PURPLE.primary())));
-                let tester = pump(
+                pump(
+                    tester,
                     // Label appears inline, on top of the input field.
                     BuildInputDecorator::new(InputDecoration::new().label(Text::new("label")))
                         .is_empty(true)
@@ -12511,23 +12536,23 @@ pub(crate) mod tests {
                         ),
                 );
                 // Verify that the styles were passed along.
-                assert_eq!(color_of(&get_label_style(&tester)), color_of(&label_style));
+                assert_eq!(color_of(&get_label_style(tester)), color_of(&label_style));
             });
         }
 
         // ----- Material3 - InputDecoration hint -----
 
         /// The decoration of a hint case: filled or outlined, with or without a label, the hint
-        /// and label as stand-ins.
+        /// and label as texts.
         fn hint_decoration(outlined: bool, with_label: bool) -> InputDecoration {
-            let mut decoration = InputDecoration::new().hint(ahem_hint(HINT_TEXT));
+            let mut decoration = InputDecoration::new().hint_text(HINT_TEXT);
             decoration = if outlined {
                 decoration.border(OutlineInputBorder::new())
             } else {
                 decoration.filled(true)
             };
             if with_label {
-                decoration = decoration.label(label());
+                decoration = decoration.label_text(LABEL_TEXT);
             }
             decoration
         }
@@ -12548,32 +12573,31 @@ pub(crate) mod tests {
 
         /// One "hint and input align vertically" case.
         fn check_hint_alignment(
+            tester: &mut WidgetTester,
             decorator: BuildInputDecorator,
             container_height: f64,
             input: (f64, f64),
             hint_opacity: f64,
         ) {
-            let tester = pump(decorator);
-            assert_eq!(get_container_rect(&tester).height(), container_height);
-            assert_eq!(get_input_rect(&tester).top, input.0);
-            assert_eq!(get_input_rect(&tester).bottom, input.1);
-            assert_eq!(get_hint_rect(&tester).top, get_input_rect(&tester).top);
-            assert_eq!(
-                get_hint_rect(&tester).bottom,
-                get_input_rect(&tester).bottom
-            );
-            assert_eq!(get_hint_opacity(&tester), hint_opacity);
+            pump(tester, decorator);
+            assert_eq!(get_container_rect(tester).height(), container_height);
+            assert_eq!(get_input_rect(tester).top, input.0);
+            assert_eq!(get_input_rect(tester).bottom, input.1);
+            assert_eq!(get_hint_rect(tester).top, get_input_rect(tester).top);
+            assert_eq!(get_hint_rect(tester).bottom, get_input_rect(tester).bottom);
+            assert_eq!(get_hint_opacity(tester), hint_opacity);
         }
 
         /// One "hint has correct style when visible" case.
         fn check_hint_style(
+            tester: &mut WidgetTester,
             decorator: BuildInputDecorator,
             expected_color: fn(&ThemeData) -> Color,
         ) {
-            let tester = pump(decorator);
+            pump(tester, decorator);
             // Hint is visible because decorator is empty.
-            assert_eq!(get_hint_opacity(&tester), 1.0);
-            let theme = decorator_theme(&tester);
+            assert_eq!(get_hint_opacity(tester), 1.0);
+            let theme = decorator_theme(tester);
             let expected_style = theme
                 .text_theme
                 .body_large
@@ -12581,7 +12605,7 @@ pub(crate) mod tests {
                 .expect("bodyLarge")
                 .copy_with()
                 .color(expected_color(&theme));
-            assert_eq!(get_hint_style(&tester), expected_style);
+            assert_eq!(get_hint_style(tester), expected_style);
         }
 
         fn on_surface_variant(theme: &ThemeData) -> Color {
@@ -12601,10 +12625,10 @@ pub(crate) mod tests {
                 #[doc = concat!("input_decorator_test.dart '", $dart, "'.")]
                 #[test]
                 fn $name() {
-                    case(|| {
+                    test_widgets(|tester| {
                         let $d = hint_decoration($outlined, $with_label);
                         let $b = BuildInputDecorator::new($decoration);
-                        check_hint_alignment($builder, $height, $input, $opacity);
+                        check_hint_alignment(tester, $builder, $height, $input, $opacity);
                     });
                 }
             )*
@@ -12769,10 +12793,10 @@ pub(crate) mod tests {
                 #[doc = concat!("input_decorator_test.dart '", $dart, "'.")]
                 #[test]
                 fn $name() {
-                    case(|| {
+                    test_widgets(|tester| {
                         let $d = hint_style_decoration($outlined, $with_label);
                         let $b = BuildInputDecorator::new($decoration);
-                        check_hint_style($builder, $color);
+                        check_hint_style(tester, $builder, $color);
                     });
                 }
             )*
@@ -12825,20 +12849,21 @@ pub(crate) mod tests {
         // InputDecoration.label vertically aligned with the hint'.
         #[test]
         fn align_label_with_hint_centres_the_label_on_the_hint() {
-            case(|| {
-                let tester = pump(
+            test_widgets(|tester| {
+                pump(
+                    tester,
                     BuildInputDecorator::new(
                         InputDecoration::new()
-                            .label(label())
+                            .label_text(LABEL_TEXT)
                             .align_label_with_hint(true)
-                            .hint(ahem_hint(HINT_TEXT)),
+                            .hint_text(HINT_TEXT),
                     )
                     .is_empty(true),
                 );
                 // Label and hint should be vertically aligned.
                 assert_eq!(
-                    get_label_rect(&tester).center().dy(),
-                    get_hint_rect(&tester).center().dy()
+                    get_label_rect(tester).center().dy(),
+                    get_hint_rect(tester).center().dy()
                 );
             });
         }
@@ -12851,22 +12876,23 @@ pub(crate) mod tests {
         // Label for outlined decoration aligns horizontally with prefixIcon by default'.
         #[test]
         fn an_outlined_label_aligns_with_the_prefix_icon_by_default() {
-            case(|| {
-                let tester = pump(
+            test_widgets(|tester| {
+                pump(
+                    tester,
                     BuildInputDecorator::new(
                         InputDecoration::new()
                             .prefix_icon(ac_unit())
-                            .label(label())
+                            .label_text(LABEL_TEXT)
                             .border(OutlineInputBorder::new()),
                     )
                     .is_focused(true),
                 );
                 // Label left padding is 16.0 (12.0 right padding for a decoration with icons + 4.0
                 // extra padding for the floating label)
-                assert_eq!(get_label_rect(&tester).left, 16.0);
+                assert_eq!(get_label_rect(tester).left, 16.0);
                 // Based on M3 spec, the expected horizontal position is 52 (12 padding, 24 icon, 16
                 // gap between icon and input).
-                assert_eq!(get_input_rect(&tester).left, 52.0);
+                assert_eq!(get_input_rect(tester).left, 52.0);
             });
         }
 
@@ -12875,18 +12901,19 @@ pub(crate) mod tests {
         // true'.
         #[test]
         fn an_outlined_label_aligned_with_the_hint_aligns_with_the_input() {
-            case(|| {
-                let tester = pump(
+            test_widgets(|tester| {
+                pump(
+                    tester,
                     BuildInputDecorator::new(
                         InputDecoration::new()
                             .prefix_icon(ac_unit())
-                            .label(label())
+                            .label_text(LABEL_TEXT)
                             .border(OutlineInputBorder::new())
                             .align_label_with_hint(true),
                     )
                     .is_focused(true),
                 );
-                assert_eq!(get_label_rect(&tester).left, get_input_rect(&tester).left);
+                assert_eq!(get_label_rect(tester).left, get_input_rect(tester).left);
             });
         }
 
@@ -12894,19 +12921,20 @@ pub(crate) mod tests {
         // Label for filled decoration is horizontally aligned with text by default'.
         #[test]
         fn a_filled_label_aligns_with_the_input_by_default() {
-            case(|| {
-                let tester = pump(
+            test_widgets(|tester| {
+                pump(
+                    tester,
                     BuildInputDecorator::new(
                         InputDecoration::new()
                             .prefix_icon(ac_unit())
-                            .label(label())
+                            .label_text(LABEL_TEXT)
                             .filled(true),
                     )
                     .is_focused(true),
                 );
                 // Label and input are horizontally aligned despite `alignLabelWithHint` being
                 // false (default value).
-                assert_eq!(get_label_rect(&tester).left, get_input_rect(&tester).left);
+                assert_eq!(get_label_rect(tester).left, get_input_rect(tester).left);
             });
         }
 
@@ -12922,6 +12950,7 @@ pub(crate) mod tests {
         /// The three 'hint opacity animation' cases: the hint fades in when the empty decorator
         /// gains the focus and out when it loses it, in steps of `step` for `steps` steps.
         fn check_hint_fade(
+            tester: &mut WidgetTester,
             decoration: InputDecoration,
             theme: Option<InputDecorationThemeData>,
             step: u64,
@@ -12937,43 +12966,43 @@ pub(crate) mod tests {
                 builder.build()
             };
             // Build once without focus.
-            let mut tester = tester();
             tester.pump_widget(build(false));
             // Hint is not visible (opacity 0.0).
-            assert_eq!(get_hint_opacity(&tester), 0.0);
+            assert_eq!(get_hint_opacity(tester), 0.0);
 
             // Focus the decorator to trigger the animation.
             tester.pump_widget(build(true));
-            tester.pump(ms(step));
-            let first = get_hint_opacity(&tester);
+            tester.pump_by(ms(step));
+            let first = get_hint_opacity(tester);
             assert_in_exclusive_range(first, 0.0, 1.0);
-            tester.pump(ms(step));
-            let second = get_hint_opacity(&tester);
+            tester.pump_by(ms(step));
+            let second = get_hint_opacity(tester);
             assert_in_exclusive_range(second, first, 1.0);
-            tester.pump(settle.map_or(K_TRANSITION_DURATION, ms));
+            tester.pump_by(settle.map_or(K_TRANSITION_DURATION, ms));
             // Hint is fully visible (opacity 1.0).
-            assert_eq!(get_hint_opacity(&tester), 1.0);
+            assert_eq!(get_hint_opacity(tester), 1.0);
 
             // Unfocus the decorator to trigger the reversed animation.
             tester.pump_widget(build(false));
-            tester.pump(ms(step));
-            let first = get_hint_opacity(&tester);
+            tester.pump_by(ms(step));
+            let first = get_hint_opacity(tester);
             assert_in_exclusive_range(first, 0.0, 1.0);
-            tester.pump(ms(step));
-            let second = get_hint_opacity(&tester);
+            tester.pump_by(ms(step));
+            let second = get_hint_opacity(tester);
             assert_in_exclusive_range(second, 0.0, first);
             if let Some(settle) = settle {
-                tester.pump(ms(settle));
-                assert_eq!(get_hint_opacity(&tester), 0.0);
+                tester.pump_by(ms(settle));
+                assert_eq!(get_hint_opacity(tester), 0.0);
             }
         }
 
         // input_decorator_test.dart 'hint opacity animation - default duration'.
         #[test]
         fn the_hint_fades_in_and_out_in_20_ms_by_default() {
-            case(|| {
+            test_widgets(|tester| {
                 // The animation's default duration is 20ms.
                 check_hint_fade(
+                    tester,
                     InputDecoration::new()
                         .label_text(LABEL_TEXT)
                         .hint_text(HINT_TEXT),
@@ -12987,9 +13016,10 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'hint opacity animation - custom duration'.
         #[test]
         fn the_hint_fades_for_the_decoration_hint_fade_duration() {
-            case(|| {
+            test_widgets(|tester| {
                 // The animation's duration is set to 120ms.
                 check_hint_fade(
+                    tester,
                     InputDecoration::new()
                         .label_text(LABEL_TEXT)
                         .hint_text(HINT_TEXT)
@@ -13004,9 +13034,10 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'hint opacity animation - duration from theme'.
         #[test]
         fn the_hint_fades_for_the_theme_hint_fade_duration() {
-            case(|| {
+            test_widgets(|tester| {
                 // The animation's duration is set to 120ms.
                 check_hint_fade(
+                    tester,
                     InputDecoration::new()
                         .label_text(LABEL_TEXT)
                         .hint_text(HINT_TEXT),
@@ -13021,10 +13052,11 @@ pub(crate) mod tests {
         // widget'.
         #[test]
         fn the_decorator_shows_a_hint_widget() {
-            case(|| {
-                let tester = pump(BuildInputDecorator::new(
-                    InputDecoration::new().hint(Text::new("hint")),
-                ));
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(InputDecoration::new().hint(Text::new("hint"))),
+                );
                 assert_eq!(tester.find_text("hint").len(), 1);
             });
         }
@@ -13032,7 +13064,7 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Material3 - InputDecoration hint - hint style overflow works'.
         #[test]
         fn the_hint_style_overflow_reaches_the_hint_text() {
-            case(|| {
+            test_widgets(|tester| {
                 let hint_text = "hint text".repeat(20);
                 let hint_style = TextStyle::new()
                     .font_size(14.0)
@@ -13040,8 +13072,8 @@ pub(crate) mod tests {
                 let decoration = InputDecoration::new()
                     .hint_text(hint_text.clone())
                     .hint_style(hint_style);
-                let mut tester = pump(BuildInputDecorator::new(decoration.clone()));
-                tester.pump(K_TRANSITION_DURATION);
+                pump(tester, BuildInputDecorator::new(decoration.clone()));
+                tester.pump_by(K_TRANSITION_DURATION);
 
                 let hint = tester.find_text(&hint_text)[0];
                 let overflow = tester.widget(hint, |text: &Text| {
@@ -13061,42 +13093,31 @@ pub(crate) mod tests {
         // from hint height when maintainHintSize is false'.
         #[test]
         fn the_height_collapses_from_the_hint_height_without_maintain_hint_size() {
-            case(|| {
+            test_widgets(|tester| {
                 let decoration = InputDecoration::new()
                     .hint_text("hint".repeat(20))
                     .hint_max_lines(3)
                     .maintain_hint_size(false);
-                let tester = pump(BuildInputDecorator::new(decoration));
-                assert_eq!(get_decorator_rect(&tester).height(), 48.0);
+                pump(tester, BuildInputDecorator::new(decoration));
+                assert_eq!(get_decorator_rect(tester).height(), 48.0);
             });
         }
 
         // input_decorator_test.dart 'Material3 - InputDecoration hint - Widget height stays at hint
-        // height by default'. Dart's 80-character hint wraps onto two lines of FlutterTest; the
-        // stand-in breaks it there itself.
+        // height by default'.
         #[test]
         fn the_height_stays_at_the_hint_height_by_default() {
-            case(|| {
+            test_widgets(|tester| {
+                // Dart's hint is 'hint' * 20, which wraps onto two lines at 800: FlutterTest
+                // breaks a word too long for its line, which Waft's text layout does not, so
+                // the line break is explicit here.
                 let hint_text = format!("{}\n{}", "hint".repeat(10), "hint".repeat(10));
-                let hint = {
-                    let hint_text = hint_text.clone();
-                    waft_widgets::Builder::new(move |app, context| {
-                        let style = Theme::of(app, context)
-                            .text_theme
-                            .body_large
-                            .clone()
-                            .expect("bodyLarge");
-                        waft_widgets::DefaultTextStyle::new(
-                            style,
-                            crate::test_support::AhemText::new(&hint_text),
-                        )
-                        .into_widget()
-                    })
-                };
-                let decoration = InputDecoration::new().hint_max_lines(3).hint(hint);
-                let tester = pump(BuildInputDecorator::new(decoration));
-                let hint_height = text_rect(&tester, &hint_text).height();
-                let input_height = get_decorator_rect(&tester).height();
+                let decoration = InputDecoration::new()
+                    .hint_max_lines(3)
+                    .hint_text(hint_text.clone());
+                pump(tester, BuildInputDecorator::new(decoration));
+                let hint_height = text_rect(tester, &hint_text).height();
+                let input_height = get_decorator_rect(tester).height();
                 assert_eq!(input_height, hint_height + 16.0);
             });
         }
@@ -13118,12 +13139,12 @@ pub(crate) mod tests {
         // hint fade-in when maintainHintSize is false'.
         #[test]
         fn the_hint_fade_duration_applies_to_the_fade_in_without_maintain_hint_size() {
-            case(|| {
+            test_widgets(|tester| {
                 // Build once with empty content.
-                let mut tester = pump(BuildInputDecorator::new(fading_hint_decoration()));
+                pump(tester, BuildInputDecorator::new(fading_hint_decoration()));
 
                 // Hint is not exist.
-                assert_eq!(hint_count(&tester), 0);
+                assert_eq!(hint_count(tester), 0);
 
                 // Rebuild with empty content.
                 tester.pump_widget(
@@ -13133,14 +13154,14 @@ pub(crate) mod tests {
                 );
 
                 // The hint's opacity animates from 0.0 to 1.0.
-                tester.pump(ms(50));
-                let hint_opacity_50ms = get_hint_opacity(&tester);
+                tester.pump_by(ms(50));
+                let hint_opacity_50ms = get_hint_opacity(tester);
                 assert_in_exclusive_range(hint_opacity_50ms, 0.0, 1.0);
-                tester.pump(ms(50));
-                let hint_opacity_100ms = get_hint_opacity(&tester);
+                tester.pump_by(ms(50));
+                let hint_opacity_100ms = get_hint_opacity(tester);
                 assert_in_exclusive_range(hint_opacity_100ms, hint_opacity_50ms, 1.0);
-                tester.pump(ms(20));
-                assert_eq!(get_hint_opacity(&tester), 1.0);
+                tester.pump_by(ms(20));
+                assert_eq!(get_hint_opacity(tester), 1.0);
             });
         }
 
@@ -13148,53 +13169,60 @@ pub(crate) mod tests {
         // hint fade-out when maintainHintSize is false'.
         #[test]
         fn the_hint_fade_duration_applies_to_the_fade_out_without_maintain_hint_size() {
-            case(|| {
+            test_widgets(|tester| {
                 // Build once with empty content.
-                let mut tester =
-                    pump(BuildInputDecorator::new(fading_hint_decoration()).is_empty(true));
+                pump(
+                    tester,
+                    BuildInputDecorator::new(fading_hint_decoration()).is_empty(true),
+                );
 
                 // Hint is visible (opacity 1.0).
-                assert_eq!(get_hint_opacity(&tester), 1.0);
+                assert_eq!(get_hint_opacity(tester), 1.0);
 
                 // Rebuild with non-empty content.
                 tester.pump_widget(BuildInputDecorator::new(fading_hint_decoration()).build());
 
                 // The hint's opacity animates from 1.0 to 0.0.
-                tester.pump(ms(50));
-                let hint_opacity_50ms = get_hint_opacity(&tester);
+                tester.pump_by(ms(50));
+                let hint_opacity_50ms = get_hint_opacity(tester);
                 assert_in_exclusive_range(hint_opacity_50ms, 0.0, 1.0);
-                tester.pump(ms(50));
-                let hint_opacity_100ms = get_hint_opacity(&tester);
+                tester.pump_by(ms(50));
+                let hint_opacity_100ms = get_hint_opacity(tester);
                 assert_in_exclusive_range(hint_opacity_100ms, 0.0, hint_opacity_50ms);
-                tester.pump(ms(20));
-                assert_eq!(get_hint_opacity(&tester), 0.0);
-                tester.pump(ms(1));
+                tester.pump_by(ms(20));
+                assert_eq!(get_hint_opacity(tester), 0.0);
+                tester.pump_by(ms(1));
                 // The hintText replaced with SizeBox.
-                assert_eq!(hint_count(&tester), 0);
+                assert_eq!(hint_count(tester), 0);
             });
         }
 
-        fn hint_edge(maintain_hint_size: bool, text_direction: TextDirection) -> Rect {
-            let tester = pump(
+        fn hint_edge(
+            tester: &mut WidgetTester,
+            maintain_hint_size: bool,
+            text_direction: TextDirection,
+        ) -> Rect {
+            pump(
+                tester,
                 BuildInputDecorator::new(
                     InputDecoration::new()
-                        .hint(ahem_hint(HINT_TEXT))
+                        .hint_text(HINT_TEXT)
                         .maintain_hint_size(maintain_hint_size),
                 )
                 .is_empty(true)
                 .text_direction(text_direction),
             );
-            get_hint_rect(&tester)
+            get_hint_rect(tester)
         }
 
         // input_decorator_test.dart 'Material3 - InputDecoration hint - Hint does not change
         // position when maintainHintSize is false - LTR'.
         #[test]
         fn the_hint_keeps_its_position_without_maintain_hint_size_in_ltr() {
-            case(|| {
-                let expected_hint_left = hint_edge(true, TextDirection::Ltr).left;
+            test_widgets(|tester| {
+                let expected_hint_left = hint_edge(tester, true, TextDirection::Ltr).left;
                 assert_eq!(
-                    hint_edge(false, TextDirection::Ltr).left,
+                    hint_edge(tester, false, TextDirection::Ltr).left,
                     expected_hint_left
                 );
             });
@@ -13204,10 +13232,10 @@ pub(crate) mod tests {
         // position when maintainHintSize is false - RTL'.
         #[test]
         fn the_hint_keeps_its_position_without_maintain_hint_size_in_rtl() {
-            case(|| {
-                let expected_hint_right = hint_edge(true, TextDirection::Rtl).right;
+            test_widgets(|tester| {
+                let expected_hint_right = hint_edge(tester, true, TextDirection::Rtl).right;
                 assert_eq!(
-                    hint_edge(false, TextDirection::Rtl).right,
+                    hint_edge(tester, false, TextDirection::Rtl).right,
                     expected_hint_right
                 );
             });
@@ -13216,22 +13244,17 @@ pub(crate) mod tests {
 
     // input_decorator_test.dart's helper/counter/error,
     // constraints, prefix/suffix, collapsed, floatingLabelAlignment and isDense groups.
-    //
-    // Stand-ins (see `common`): where a case measures a text, `labelText` is
-    // `label(ahem(LABEL_TEXT))`, `helperText` is `helper(ahem_supporting(HELPER_TEXT))`,
-    // `counterText` is `counter(ahem_supporting(COUNTER_TEXT))`, `errorText` is
-    // `error(ahem(ERROR_TEXT))` (the decorator gives an error widget the error style) and the
-    // collapsed `hintText` is `hint(ahem_hint(HINT_TEXT))`. The multiline helper/error/hint cases
-    // keep the strings, as they pin `maxLines`, and measure the OS font's lines with Dart's 0.25
-    // tolerance. Cases that read styles or colours keep Dart's strings.
     mod supporting_and_affixes {
         #![allow(deprecated)]
+        use waft_widgets::testing::{
+            TargetPlatformVariant, WidgetTester, test_widgets, test_widgets_variant,
+        };
 
         use std::cell::Cell;
         use std::rc::Rc;
         use std::time::Duration;
 
-        use waft_embedder::{Color, Rect, Size, TargetPlatform};
+        use waft_embedder::{Color, Rect, Size};
         use waft_foundation::Listener;
         use waft_painting::{EdgeInsetsGeometry, TextDirection, TextStyle};
         use waft_rendering::BoxConstraints;
@@ -13245,7 +13268,6 @@ pub(crate) mod tests {
         use super::common::*;
         use crate::icons::Icons;
         use crate::input_border::OutlineInputBorder;
-        use crate::test_support::WidgetTester;
         use crate::theme::Theme;
         use crate::theme_data::ThemeData;
 
@@ -13273,16 +13295,8 @@ pub(crate) mod tests {
         const COUNTER_END_PADDING: f64 = 16.0;
 
         /// A tester with the Material icon font, whose glyphs the icon cases measure.
-        fn icon_tester() -> WidgetTester {
-            let tester = tester();
-            crate::icons::install_material_icon_font(&mut tester.cell.borrow_mut());
-            tester
-        }
-
-        fn pump(decorator: BuildInputDecorator) -> WidgetTester {
-            let mut tester = icon_tester();
+        fn pump(tester: &mut WidgetTester, decorator: BuildInputDecorator) {
             tester.pump_widget(decorator.build());
-            tester
         }
 
         /// Dart's `Theme.of(tester.element(findDecorator()))`.
@@ -13329,11 +13343,11 @@ pub(crate) mod tests {
         }
 
         /// The decoration of the 'Helper and counter are correctly positioned' cases, with
-        /// stand-ins for the label, helper and counter.
+        /// the label, helper and counter texts.
         fn measured_supporting(base: InputDecoration) -> InputDecoration {
-            base.label(ahem(LABEL_TEXT, TextStyle::new()))
-                .helper(ahem_supporting(HELPER_TEXT))
-                .counter(ahem_supporting(COUNTER_TEXT))
+            base.label_text(LABEL_TEXT)
+                .helper_text(HELPER_TEXT)
+                .counter_text(COUNTER_TEXT)
         }
 
         /// The decoration of the 'Helper and counter are correctly styled' cases.
@@ -13405,9 +13419,12 @@ pub(crate) mod tests {
         // text field - when field is enabled - Helper and counter are correctly positioned'.
         #[test]
         fn filled_enabled_helper_and_counter_are_correctly_positioned() {
-            case(|| {
-                let tester = pump(BuildInputDecorator::new(measured_supporting(filled())));
-                check_helper_and_counter_positions(&tester);
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(measured_supporting(filled())),
+                );
+                check_helper_and_counter_positions(tester);
             });
         }
 
@@ -13415,9 +13432,12 @@ pub(crate) mod tests {
         // and counter are correctly styled'.
         #[test]
         fn filled_enabled_helper_and_counter_are_correctly_styled() {
-            case(|| {
-                let tester = pump(BuildInputDecorator::new(styled_supporting(filled())));
-                check_helper_and_counter_style(&tester, on_surface_variant);
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(styled_supporting(filled())),
+                );
+                check_helper_and_counter_style(tester, on_surface_variant);
             });
         }
 
@@ -13425,11 +13445,12 @@ pub(crate) mod tests {
         // and counter are correctly positioned'.
         #[test]
         fn filled_disabled_helper_and_counter_are_correctly_positioned() {
-            case(|| {
-                let tester = pump(BuildInputDecorator::new(measured_supporting(
-                    filled().enabled(false),
-                )));
-                check_helper_and_counter_positions(&tester);
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(measured_supporting(filled().enabled(false))),
+                );
+                check_helper_and_counter_positions(tester);
             });
         }
 
@@ -13437,11 +13458,12 @@ pub(crate) mod tests {
         // and counter are correctly styled'.
         #[test]
         fn filled_disabled_helper_and_counter_are_correctly_styled() {
-            case(|| {
-                let tester = pump(BuildInputDecorator::new(styled_supporting(
-                    filled().enabled(false),
-                )));
-                check_helper_and_counter_style(&tester, disabled_on_surface);
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(styled_supporting(filled().enabled(false))),
+                );
+                check_helper_and_counter_style(tester, disabled_on_surface);
             });
         }
 
@@ -13449,10 +13471,12 @@ pub(crate) mod tests {
         // and counter are correctly positioned'.
         #[test]
         fn filled_hovered_helper_and_counter_are_correctly_positioned() {
-            case(|| {
-                let tester =
-                    pump(BuildInputDecorator::new(measured_supporting(filled())).is_hovering(true));
-                check_helper_and_counter_positions(&tester);
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(measured_supporting(filled())).is_hovering(true),
+                );
+                check_helper_and_counter_positions(tester);
             });
         }
 
@@ -13460,10 +13484,12 @@ pub(crate) mod tests {
         // and counter are correctly styled'.
         #[test]
         fn filled_hovered_helper_and_counter_are_correctly_styled() {
-            case(|| {
-                let tester =
-                    pump(BuildInputDecorator::new(styled_supporting(filled())).is_hovering(true));
-                check_helper_and_counter_style(&tester, on_surface_variant);
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(styled_supporting(filled())).is_hovering(true),
+                );
+                check_helper_and_counter_style(tester, on_surface_variant);
             });
         }
 
@@ -13471,10 +13497,12 @@ pub(crate) mod tests {
         // and counter are correctly positioned'.
         #[test]
         fn filled_focused_helper_and_counter_are_correctly_positioned() {
-            case(|| {
-                let tester =
-                    pump(BuildInputDecorator::new(measured_supporting(filled())).is_focused(true));
-                check_helper_and_counter_positions(&tester);
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(measured_supporting(filled())).is_focused(true),
+                );
+                check_helper_and_counter_positions(tester);
             });
         }
 
@@ -13482,15 +13510,18 @@ pub(crate) mod tests {
         // and counter are correctly styled'.
         #[test]
         fn filled_focused_helper_and_counter_are_correctly_styled() {
-            case(|| {
-                let tester =
-                    pump(BuildInputDecorator::new(styled_supporting(filled())).is_focused(true));
-                check_helper_and_counter_style(&tester, on_surface_variant);
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(styled_supporting(filled())).is_focused(true),
+                );
+                check_helper_and_counter_style(tester, on_surface_variant);
             });
         }
 
-        fn check_error_shows_and_helper_hides(base: InputDecoration) {
-            let tester = pump(
+        fn check_error_shows_and_helper_hides(tester: &mut WidgetTester, base: InputDecoration) {
+            pump(
+                tester,
                 BuildInputDecorator::new(styled_supporting(base).error_text(ERROR_TEXT))
                     .is_focused(true),
             );
@@ -13499,52 +13530,55 @@ pub(crate) mod tests {
             assert!(tester.find_text(HELPER_TEXT).is_empty());
         }
 
-        fn check_error_positions(base: InputDecoration) {
-            let tester = pump(
-                BuildInputDecorator::new(
-                    measured_supporting(base).error(ahem(ERROR_TEXT, TextStyle::new())),
-                )
-                .is_focused(true),
+        fn check_error_positions(tester: &mut WidgetTester, base: InputDecoration) {
+            pump(
+                tester,
+                BuildInputDecorator::new(measured_supporting(base).error_text(ERROR_TEXT))
+                    .is_focused(true),
             );
-            check_error_and_counter_positions(&tester);
+            check_error_and_counter_positions(tester);
         }
 
-        fn check_error_style(base: InputDecoration) {
-            let tester = pump(
+        fn check_error_style(tester: &mut WidgetTester, base: InputDecoration) {
+            pump(
+                tester,
                 BuildInputDecorator::new(styled_supporting(base).error_text(ERROR_TEXT))
                     .is_focused(true),
             );
-            check_error_and_counter_style(&tester);
+            check_error_and_counter_style(tester);
         }
 
         // input_decorator_test.dart '... for filled text field - when field is in error - Error and
         // counter are visible, helper is not visible'.
         #[test]
         fn filled_error_and_counter_are_visible_and_the_helper_is_not() {
-            case(|| check_error_shows_and_helper_hides(filled()));
+            test_widgets(|tester| check_error_shows_and_helper_hides(tester, filled()));
         }
 
         // input_decorator_test.dart '... for filled text field - when field is in error - Error and
         // counter are correctly positioned'.
         #[test]
         fn filled_error_and_counter_are_correctly_positioned() {
-            case(|| check_error_positions(filled()));
+            test_widgets(|tester| check_error_positions(tester, filled()));
         }
 
         // input_decorator_test.dart '... for filled text field - when field is in error - Error and
         // counter are correctly styled'.
         #[test]
         fn filled_error_and_counter_are_correctly_styled() {
-            case(|| check_error_style(filled()));
+            test_widgets(|tester| check_error_style(tester, filled()));
         }
 
         // input_decorator_test.dart '... for outlined text field - when field is enabled - Helper
         // and counter are correctly positioned'.
         #[test]
         fn outlined_enabled_helper_and_counter_are_correctly_positioned() {
-            case(|| {
-                let tester = pump(BuildInputDecorator::new(measured_supporting(outlined())));
-                check_helper_and_counter_positions(&tester);
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(measured_supporting(outlined())),
+                );
+                check_helper_and_counter_positions(tester);
             });
         }
 
@@ -13552,9 +13586,12 @@ pub(crate) mod tests {
         // and counter are correctly styled'.
         #[test]
         fn outlined_enabled_helper_and_counter_are_correctly_styled() {
-            case(|| {
-                let tester = pump(BuildInputDecorator::new(styled_supporting(outlined())));
-                check_helper_and_counter_style(&tester, on_surface_variant);
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(styled_supporting(outlined())),
+                );
+                check_helper_and_counter_style(tester, on_surface_variant);
             });
         }
 
@@ -13562,11 +13599,12 @@ pub(crate) mod tests {
         // and counter are correctly positioned'.
         #[test]
         fn outlined_disabled_helper_and_counter_are_correctly_positioned() {
-            case(|| {
-                let tester = pump(BuildInputDecorator::new(measured_supporting(
-                    outlined().enabled(false),
-                )));
-                check_helper_and_counter_positions(&tester);
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(measured_supporting(outlined().enabled(false))),
+                );
+                check_helper_and_counter_positions(tester);
             });
         }
 
@@ -13574,11 +13612,12 @@ pub(crate) mod tests {
         // and counter are correctly styled'.
         #[test]
         fn outlined_disabled_helper_and_counter_are_correctly_styled() {
-            case(|| {
-                let tester = pump(BuildInputDecorator::new(styled_supporting(
-                    outlined().enabled(false),
-                )));
-                check_helper_and_counter_style(&tester, disabled_on_surface);
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(styled_supporting(outlined().enabled(false))),
+                );
+                check_helper_and_counter_style(tester, disabled_on_surface);
             });
         }
 
@@ -13586,11 +13625,12 @@ pub(crate) mod tests {
         // and counter are correctly positioned'.
         #[test]
         fn outlined_hovered_helper_and_counter_are_correctly_positioned() {
-            case(|| {
-                let tester = pump(
+            test_widgets(|tester| {
+                pump(
+                    tester,
                     BuildInputDecorator::new(measured_supporting(outlined())).is_hovering(true),
                 );
-                check_helper_and_counter_positions(&tester);
+                check_helper_and_counter_positions(tester);
             });
         }
 
@@ -13598,10 +13638,12 @@ pub(crate) mod tests {
         // and counter are correctly styled'.
         #[test]
         fn outlined_hovered_helper_and_counter_are_correctly_styled() {
-            case(|| {
-                let tester =
-                    pump(BuildInputDecorator::new(styled_supporting(outlined())).is_hovering(true));
-                check_helper_and_counter_style(&tester, on_surface_variant);
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(styled_supporting(outlined())).is_hovering(true),
+                );
+                check_helper_and_counter_style(tester, on_surface_variant);
             });
         }
 
@@ -13609,11 +13651,12 @@ pub(crate) mod tests {
         // and counter are correctly positioned'.
         #[test]
         fn outlined_focused_helper_and_counter_are_correctly_positioned() {
-            case(|| {
-                let tester = pump(
+            test_widgets(|tester| {
+                pump(
+                    tester,
                     BuildInputDecorator::new(measured_supporting(outlined())).is_focused(true),
                 );
-                check_helper_and_counter_positions(&tester);
+                check_helper_and_counter_positions(tester);
             });
         }
 
@@ -13621,10 +13664,12 @@ pub(crate) mod tests {
         // and counter are correctly styled'.
         #[test]
         fn outlined_focused_helper_and_counter_are_correctly_styled() {
-            case(|| {
-                let tester =
-                    pump(BuildInputDecorator::new(styled_supporting(outlined())).is_focused(true));
-                check_helper_and_counter_style(&tester, on_surface_variant);
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(styled_supporting(outlined())).is_focused(true),
+                );
+                check_helper_and_counter_style(tester, on_surface_variant);
             });
         }
 
@@ -13632,21 +13677,21 @@ pub(crate) mod tests {
         // and counter are visible, helper is not visible'.
         #[test]
         fn outlined_error_and_counter_are_visible_and_the_helper_is_not() {
-            case(|| check_error_shows_and_helper_hides(outlined()));
+            test_widgets(|tester| check_error_shows_and_helper_hides(tester, outlined()));
         }
 
         // input_decorator_test.dart '... for outlined text field - when field is in error - Error
         // and counter are correctly positioned'.
         #[test]
         fn outlined_error_and_counter_are_correctly_positioned() {
-            case(|| check_error_positions(outlined()));
+            test_widgets(|tester| check_error_positions(tester, outlined()));
         }
 
         // input_decorator_test.dart '... for outlined text field - when field is in error - Error
         // and counter are correctly styled'.
         #[test]
         fn outlined_error_and_counter_are_correctly_styled() {
-            case(|| check_error_style(outlined()));
+            test_widgets(|tester| check_error_style(tester, outlined()));
         }
 
         fn assert_close(actual: f64, expected: f64, tolerance: f64) {
@@ -13657,15 +13702,20 @@ pub(crate) mod tests {
         }
 
         /// The error or helper `text`, `lines` lines high, and the decorator below it.
-        fn check_supporting_lines(decoration: InputDecoration, text: &str, lines: f64) {
-            let tester = pump(BuildInputDecorator::new(decoration));
+        fn check_supporting_lines(
+            tester: &mut WidgetTester,
+            decoration: InputDecoration,
+            text: &str,
+            lines: f64,
+        ) {
+            pump(tester, BuildInputDecorator::new(decoration));
             assert_close(
-                string_rect(&tester, text).height(),
+                string_rect(tester, text).height(),
                 ERROR_HEIGHT * lines,
                 0.25,
             );
             assert_close(
-                get_decorator_rect(&tester).height(),
+                get_decorator_rect(tester).height(),
                 CONTAINER_HEIGHT + HELPER_GAP + ERROR_HEIGHT * lines,
                 0.25,
             );
@@ -13675,8 +13725,9 @@ pub(crate) mod tests {
         // error text'.
         #[test]
         fn the_error_grows_to_accommodate_its_text() {
-            case(|| {
+            test_widgets(|tester| {
                 check_supporting_lines(
+                    tester,
                     filled()
                         .label_text("label")
                         .error_text(THREE_LINES)
@@ -13691,8 +13742,9 @@ pub(crate) mod tests {
         // errorMaxLines is restricted'.
         #[test]
         fn the_error_height_is_correct_when_error_max_lines_is_restricted() {
-            case(|| {
+            test_widgets(|tester| {
                 check_supporting_lines(
+                    tester,
                     filled()
                         .label_text("label")
                         .error_text(THREE_LINES)
@@ -13707,8 +13759,9 @@ pub(crate) mod tests {
         // errorMaxLines is bigger than the number of lines in errorText'.
         #[test]
         fn the_error_height_is_its_line_count_when_error_max_lines_is_bigger() {
-            case(|| {
+            test_widgets(|tester| {
                 check_supporting_lines(
+                    tester,
                     filled()
                         .label_text("label")
                         .error_text(TWO_LINES)
@@ -13723,8 +13776,9 @@ pub(crate) mod tests {
         // default'.
         #[test]
         fn the_error_height_is_not_limited_by_default() {
-            case(|| {
+            test_widgets(|tester| {
                 check_supporting_lines(
+                    tester,
                     filled().label_text("label").error_text(THREE_LINES),
                     THREE_LINES,
                     3.0,
@@ -13736,18 +13790,19 @@ pub(crate) mod tests {
         // behaves as default value'.
         #[test]
         fn the_theme_hint_max_lines_is_the_default() {
-            case(|| {
-                let tester = pump(
+            test_widgets(|tester| {
+                pump(
+                    tester,
                     BuildInputDecorator::new(InputDecoration::new().hint_text(THREE_LINES))
                         .input_decoration_theme(InputDecorationThemeData::new().hint_max_lines(2)),
                 );
                 assert_close(
-                    string_rect(&tester, THREE_LINES).height(),
+                    string_rect(tester, THREE_LINES).height(),
                     HINT_HEIGHT * 2.0,
                     0.25,
                 );
                 assert_close(
-                    get_decorator_rect(&tester).height(),
+                    get_decorator_rect(tester).height(),
                     TOP_PADDING + HINT_HEIGHT * 2.0 + BOTTOM_PADDING,
                     0.25,
                 );
@@ -13758,13 +13813,14 @@ pub(crate) mod tests {
         // expands with hintText'.
         #[test]
         fn the_hint_expands_with_its_text_by_default() {
-            case(|| {
-                let tester = pump(
+            test_widgets(|tester| {
+                pump(
+                    tester,
                     BuildInputDecorator::new(InputDecoration::new().hint_text(THREE_LINES))
                         .input_decoration_theme(InputDecorationThemeData::new()),
                 );
                 assert_eq!(
-                    get_decorator_rect(&tester).height(),
+                    get_decorator_rect(tester).height(),
                     TOP_PADDING + HINT_HEIGHT * 3.0 + BOTTOM_PADDING
                 );
             });
@@ -13774,8 +13830,9 @@ pub(crate) mod tests {
         // helper text'.
         #[test]
         fn the_helper_grows_to_accommodate_its_text() {
-            case(|| {
+            test_widgets(|tester| {
                 check_supporting_lines(
+                    tester,
                     filled()
                         .label_text("label")
                         .helper_text(THREE_LINES)
@@ -13790,8 +13847,9 @@ pub(crate) mod tests {
         // maxLines is restricted'.
         #[test]
         fn the_helper_height_is_correct_when_helper_max_lines_is_restricted() {
-            case(|| {
+            test_widgets(|tester| {
                 check_supporting_lines(
+                    tester,
                     filled()
                         .label_text("label")
                         .helper_text(THREE_LINES)
@@ -13806,8 +13864,9 @@ pub(crate) mod tests {
         // helperMaxLines is bigger than the number of lines in helperText'.
         #[test]
         fn the_helper_height_is_its_line_count_when_helper_max_lines_is_bigger() {
-            case(|| {
+            test_widgets(|tester| {
                 check_supporting_lines(
+                    tester,
                     filled()
                         .label_text("label")
                         .helper_text(TWO_LINES)
@@ -13822,8 +13881,9 @@ pub(crate) mod tests {
         // default'.
         #[test]
         fn the_helper_height_is_not_limited_by_default() {
-            case(|| {
+            test_widgets(|tester| {
                 check_supporting_lines(
+                    tester,
                     filled().label_text("label").helper_text(THREE_LINES),
                     THREE_LINES,
                     3.0,
@@ -13834,11 +13894,14 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Helper widget - InputDecorator shows helper widget'.
         #[test]
         fn the_decorator_shows_a_helper_widget() {
-            case(|| {
-                let tester = pump(BuildInputDecorator::new(
-                    InputDecoration::new()
-                        .helper(Text::new("helper").style(TextStyle::new().font_size(20.0))),
-                ));
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(
+                        InputDecoration::new()
+                            .helper(Text::new("helper").style(TextStyle::new().font_size(20.0))),
+                    ),
+                );
                 assert_eq!(tester.find_text("helper").len(), 1);
             });
         }
@@ -13848,23 +13911,29 @@ pub(crate) mod tests {
         #[test]
         #[should_panic(expected = "Declaring both helper and helperText is not supported.")]
         fn a_helper_text_and_a_helper_widget_together_panic() {
-            case(|| {
-                pump(BuildInputDecorator::new(
-                    InputDecoration::new()
-                        .helper_text("helperText")
-                        .helper(Text::new("helper").style(TextStyle::new().font_size(20.0))),
-                ));
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(
+                        InputDecoration::new()
+                            .helper_text("helperText")
+                            .helper(Text::new("helper").style(TextStyle::new().font_size(20.0))),
+                    ),
+                );
             });
         }
 
         // input_decorator_test.dart 'Error widget - InputDecorator shows error widget'.
         #[test]
         fn the_decorator_shows_an_error_widget() {
-            case(|| {
-                let tester = pump(BuildInputDecorator::new(
-                    InputDecoration::new()
-                        .error(Text::new("error").style(TextStyle::new().font_size(20.0))),
-                ));
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(
+                        InputDecoration::new()
+                            .error(Text::new("error").style(TextStyle::new().font_size(20.0))),
+                    ),
+                );
                 assert_eq!(tester.find_text("error").len(), 1);
             });
         }
@@ -13874,12 +13943,15 @@ pub(crate) mod tests {
         #[test]
         #[should_panic(expected = "Declaring both error and errorText is not supported.")]
         fn an_error_text_and_an_error_widget_together_panic() {
-            case(|| {
-                pump(BuildInputDecorator::new(
-                    InputDecoration::new()
-                        .error_text("errorText")
-                        .error(Text::new("error").style(TextStyle::new().font_size(20.0))),
-                ));
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(
+                        InputDecoration::new()
+                            .error_text("errorText")
+                            .error(Text::new("error").style(TextStyle::new().font_size(20.0))),
+                    ),
+                );
             });
         }
 
@@ -13887,14 +13959,15 @@ pub(crate) mod tests {
         // to errorStyle'.
         #[test]
         fn an_error_widget_text_style_defaults_to_the_error_style() {
-            case(|| {
-                let tester = pump(BuildInputDecorator::new(
-                    InputDecoration::new().error(Text::new(ERROR_TEXT)),
-                ));
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(InputDecoration::new().error(Text::new(ERROR_TEXT))),
+                );
                 assert_eq!(tester.find_text(ERROR_TEXT).len(), 1);
-                let theme = decorator_theme(&tester);
+                let theme = decorator_theme(tester);
                 assert_eq!(
-                    text_style(&tester, ERROR_TEXT),
+                    text_style(tester, ERROR_TEXT),
                     body_small_with(&theme, theme.color_scheme.error)
                 );
             });
@@ -13904,8 +13977,7 @@ pub(crate) mod tests {
         // InputDecorator with counter does not crash when given a 0 size'.
         #[test]
         fn a_decorator_with_a_counter_does_not_crash_at_zero_size() {
-            case(|| {
-                let mut tester = icon_tester();
+            test_widgets(|tester| {
                 let decorator = BuildInputDecorator::new(
                     InputDecoration::new()
                         .content_padding(EdgeInsetsGeometry::directional(99.0, 99.0, 99.0, 99.0))
@@ -13918,7 +13990,7 @@ pub(crate) mod tests {
                         .child(SizedBox::new().width(0.0).height(0.0).child(decorator))
                         .into_widget(),
                 );
-                tester.pump(K_TRANSITION_DURATION);
+                tester.pump_by(K_TRANSITION_DURATION);
 
                 assert_eq!(tester.find_by_type::<InputDecorator>().len(), 1);
                 let counter = tester.find_text("COUNTER")[0];
@@ -13931,11 +14003,11 @@ pub(crate) mod tests {
         // constraints'.
         #[test]
         fn without_constraints_the_decorator_fills_the_width_at_the_default_height() {
-            case(|| {
-                let tester = pump(BuildInputDecorator::new(InputDecoration::new()));
+            test_widgets(|tester| {
+                pump(tester, BuildInputDecorator::new(InputDecoration::new()));
                 // Should fill the screen width and be default height.
                 assert_eq!(
-                    get_decorator_rect(&tester).size(),
+                    get_decorator_rect(tester).size(),
                     Size::new(800.0, crate::constants::K_MIN_INTERACTIVE_DIMENSION)
                 );
             });
@@ -13957,12 +14029,13 @@ pub(crate) mod tests {
         // InputDecoratorThemeData constraints'.
         #[test]
         fn the_theme_constraints_apply() {
-            case(|| {
-                let tester = pump(
+            test_widgets(|tester| {
+                pump(
+                    tester,
                     BuildInputDecorator::new(InputDecoration::new()).theme(theme_with_constraints),
                 );
                 // Theme settings should make it 300x40 pixels.
-                assert_eq!(get_decorator_rect(&tester).size(), Size::new(300.0, 40.0));
+                assert_eq!(get_decorator_rect(tester).size(), Size::new(300.0, 40.0));
             });
         }
 
@@ -13970,8 +14043,9 @@ pub(crate) mod tests {
         // constraints'.
         #[test]
         fn the_decoration_constraints_override_the_theme() {
-            case(|| {
-                let tester = pump(
+            test_widgets(|tester| {
+                pump(
+                    tester,
                     BuildInputDecorator::new(InputDecoration::new().constraints(BoxConstraints {
                         max_width: 200.0,
                         max_height: 32.0,
@@ -13981,7 +14055,7 @@ pub(crate) mod tests {
                 );
                 // InputDecoration.constraints should override the theme. It should be
                 // only 200x32 pixels.
-                assert_eq!(get_decorator_rect(&tester).size(), Size::new(200.0, 32.0));
+                assert_eq!(get_decorator_rect(tester).size(), Size::new(200.0, 32.0));
             });
         }
 
@@ -14080,14 +14154,15 @@ pub(crate) mod tests {
         }
 
         fn check_icon_color(
+            tester: &mut WidgetTester,
             decorator: BuildInputDecorator,
             icon: IconData,
             color: impl Fn(&ThemeData) -> Color,
         ) {
-            let tester = pump(decorator);
-            let theme = decorator_theme(&tester);
+            pump(tester, decorator);
+            let theme = decorator_theme(tester);
             assert_eq!(
-                icon_style(&tester, &icon).color.map(|color| *color),
+                icon_style(tester, &icon).color.map(|color| *color),
                 Some(color(&theme))
             );
         }
@@ -14111,10 +14186,10 @@ pub(crate) mod tests {
                 $(#[$doc])*
                 #[test]
                 fn $position() {
-                    case(|| {
+                    test_widgets(|tester| {
                         let $builder = BuildInputDecorator::new($decorate($base));
-                        let tester = pump($configure);
-                        $check(&tester, $direction);
+                        pump(tester, $configure);
+                        $check(tester, $direction);
                     });
                 }
             )*
@@ -14222,9 +14297,9 @@ pub(crate) mod tests {
             $(
                 #[test]
                 fn $name() {
-                    case(|| {
+                    test_widgets(|tester| {
                         let $builder = BuildInputDecorator::new($decorate($base));
-                        check_icon_color($configure, $icon, $color);
+                        check_icon_color(tester, $configure, $icon, $color);
                     });
                 }
             )*
@@ -14311,27 +14386,30 @@ pub(crate) mod tests {
         // `TextField` that builds one.
         #[test]
         fn the_icon_colors_reach_the_icon_themes() {
-            case(|| {
-                let tester = pump(BuildInputDecorator::new(
-                    InputDecoration::new()
-                        .icon(Icon::new(Some(Icons::cabin())))
-                        .prefix_icon(Icon::new(Some(Icons::sailing())))
-                        .suffix_icon(Icon::new(Some(Icons::close())))
-                        .icon_color(crate::colors::Colors::AMBER.primary())
-                        .prefix_icon_color(crate::colors::Colors::GREEN.primary())
-                        .suffix_icon_color(crate::colors::Colors::RED.primary())
-                        .filled(true),
-                ));
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(
+                        InputDecoration::new()
+                            .icon(Icon::new(Some(Icons::cabin())))
+                            .prefix_icon(Icon::new(Some(Icons::sailing())))
+                            .suffix_icon(Icon::new(Some(Icons::close())))
+                            .icon_color(crate::colors::Colors::AMBER.primary())
+                            .prefix_icon_color(crate::colors::Colors::GREEN.primary())
+                            .suffix_icon_color(crate::colors::Colors::RED.primary())
+                            .filled(true),
+                    ),
+                );
                 assert_eq!(
-                    icon_theme_color(&tester, &Icons::cabin()),
+                    icon_theme_color(tester, &Icons::cabin()),
                     Some(crate::colors::Colors::AMBER.primary())
                 );
                 assert_eq!(
-                    icon_theme_color(&tester, &Icons::sailing()),
+                    icon_theme_color(tester, &Icons::sailing()),
                     Some(crate::colors::Colors::GREEN.primary())
                 );
                 assert_eq!(
-                    icon_theme_color(&tester, &Icons::close()),
+                    icon_theme_color(tester, &Icons::close()),
                     Some(crate::colors::Colors::RED.primary())
                 );
             });
@@ -14354,6 +14432,7 @@ pub(crate) mod tests {
         /// Dart's 'Prefix/Suffix ignores pointer when hidden' on an `InputDecorator`: the
         /// `TextField` Dart taps to focus becomes a rebuild with `is_focused`.
         fn check_affix_ignores_pointer_when_hidden(
+            tester: &mut WidgetTester,
             affix: fn(InputDecoration, WidgetRef) -> InputDecoration,
         ) {
             let tapped = Rc::new(Cell::new(false));
@@ -14371,16 +14450,15 @@ pub(crate) mod tests {
                 .is_focused(is_focused)
                 .build()
             };
-            let mut tester = icon_tester();
             tester.pump_widget(build(false));
             assert!(!tapped.get());
 
             // Initially the affix icon should be hidden.
-            assert_eq!(affix_opacity(&tester), 0.0);
+            assert_eq!(affix_opacity(tester), 0.0);
 
-            let icon_center = rect_of(&tester, tester.find_by_type::<Icon>()[0]).center();
+            let icon_center = rect_of(tester, tester.find_by_type::<Icon>()[0]).center();
             tester.tap(icon_center, 1);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // The affix icon should ignore pointer events when hidden.
             assert!(!tapped.get());
@@ -14389,12 +14467,12 @@ pub(crate) mod tests {
             tester.pump_widget(build(true));
 
             // The affix icon should be visible.
-            assert_eq!(affix_opacity(&tester), 1.0);
+            assert_eq!(affix_opacity(tester), 1.0);
 
             // Tap the affix icon.
-            let icon_center = rect_of(&tester, tester.find_by_type::<Icon>()[0]).center();
+            let icon_center = rect_of(tester, tester.find_by_type::<Icon>()[0]).center();
             tester.tap(icon_center, 2);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // The affix icon should be tapped.
             assert!(tapped.get());
@@ -14404,8 +14482,8 @@ pub(crate) mod tests {
         // pointer when hidden'.
         #[test]
         fn the_prefix_ignores_the_pointer_when_hidden() {
-            case(|| {
-                check_affix_ignores_pointer_when_hidden(|decoration, prefix| {
+            test_widgets(|tester| {
+                check_affix_ignores_pointer_when_hidden(tester, |decoration, prefix| {
                     decoration.prefix(prefix)
                 })
             });
@@ -14415,8 +14493,8 @@ pub(crate) mod tests {
         // pointer when hidden'.
         #[test]
         fn the_suffix_ignores_the_pointer_when_hidden() {
-            case(|| {
-                check_affix_ignores_pointer_when_hidden(|decoration, suffix| {
+            test_widgets(|tester| {
+                check_affix_ignores_pointer_when_hidden(tester, |decoration, suffix| {
                     decoration.suffix(suffix)
                 })
             });
@@ -14424,7 +14502,7 @@ pub(crate) mod tests {
 
         /// Dart's `getHintOpacity(tester)`: the value of the first `FadeTransition` above the hint.
         fn hint_opacity(tester: &WidgetTester) -> f64 {
-            let hint = tester.find_ahem_text(HINT_TEXT)[0];
+            let hint = tester.find_text(HINT_TEXT)[0];
             let fade = tester
                 .ancestors(hint)
                 .into_iter()
@@ -14438,25 +14516,23 @@ pub(crate) mod tests {
         }
 
         fn collapsed() -> InputDecoration {
-            InputDecoration::collapsed(None).hint(ahem_hint(HINT_TEXT))
+            InputDecoration::collapsed(None).hint_text(HINT_TEXT)
         }
 
         // Overall height for a collapsed InputDecorator is 24dp which is the input
         // height (font size = 16, line height = 1.5).
         const COLLAPSED_INPUT_HEIGHT: f64 = 24.0;
 
-        fn check_collapsed_height_on(platform: TargetPlatform) {
-            let mut tester = WidgetTester::on(platform);
-            tester.install_platform_fonts();
+        fn check_collapsed_height(tester: &mut WidgetTester) {
             tester.pump_widget(BuildInputDecorator::new(collapsed()).build());
 
             assert_eq!(
-                get_decorator_rect(&tester).size(),
+                get_decorator_rect(tester).size(),
                 Size::new(800.0, COLLAPSED_INPUT_HEIGHT)
             );
-            assert_eq!(input_rect(&tester).height(), COLLAPSED_INPUT_HEIGHT);
-            assert_eq!(input_rect(&tester).top, 0.0);
-            assert_eq!(hint_opacity(&tester), 0.0);
+            assert_eq!(input_rect(tester).height(), COLLAPSED_INPUT_HEIGHT);
+            assert_eq!(input_rect(tester).top, 0.0);
+            assert_eq!(hint_opacity(tester), 0.0);
 
             // The hint should appear.
             tester.pump_widget(
@@ -14468,58 +14544,45 @@ pub(crate) mod tests {
             tester.pump_and_settle();
 
             assert_eq!(
-                get_decorator_rect(&tester).size(),
+                get_decorator_rect(tester).size(),
                 Size::new(800.0, COLLAPSED_INPUT_HEIGHT)
             );
-            assert_eq!(input_rect(&tester).height(), COLLAPSED_INPUT_HEIGHT);
-            assert_eq!(input_rect(&tester).top, 0.0);
-            assert_eq!(hint_opacity(&tester), 1.0);
+            assert_eq!(input_rect(tester).height(), COLLAPSED_INPUT_HEIGHT);
+            assert_eq!(input_rect(tester).top, 0.0);
+            assert_eq!(hint_opacity(tester), 1.0);
             assert_eq!(
-                text_rect(&tester, HINT_TEXT).height(),
+                text_rect(tester, HINT_TEXT).height(),
                 COLLAPSED_INPUT_HEIGHT
             );
-            assert_eq!(text_rect(&tester, HINT_TEXT).top, 0.0);
+            assert_eq!(text_rect(tester, HINT_TEXT).top, 0.0);
         }
 
         // input_decorator_test.dart 'Material3 - InputDecoration collapsed - Decoration height is
         // set to input height on mobile' (TargetPlatformVariant.mobile()).
         #[test]
         fn a_collapsed_decoration_is_the_input_height_on_mobile() {
-            case(|| {
-                for platform in [
-                    TargetPlatform::Android,
-                    TargetPlatform::IOS,
-                    TargetPlatform::Fuchsia,
-                ] {
-                    check_collapsed_height_on(platform);
-                }
-            });
+            test_widgets_variant(TargetPlatformVariant::mobile(), check_collapsed_height);
         }
 
         // input_decorator_test.dart 'Material3 - InputDecoration collapsed - Decoration height is
         // set to input height on desktop' (TargetPlatformVariant.desktop()).
         #[test]
         fn a_collapsed_decoration_is_the_input_height_on_desktop() {
-            case(|| {
-                for platform in [
-                    TargetPlatform::MacOS,
-                    TargetPlatform::Linux,
-                    TargetPlatform::Windows,
-                ] {
-                    check_collapsed_height_on(platform);
-                }
-            });
+            test_widgets_variant(TargetPlatformVariant::desktop(), check_collapsed_height);
         }
 
         // input_decorator_test.dart 'Material3 - InputDecoration collapsed -
         // InputDecoration.collapsed defaults to no border'.
         #[test]
         fn a_collapsed_decoration_has_no_border() {
-            case(|| {
-                let tester = pump(BuildInputDecorator::new(InputDecoration::collapsed(Some(
-                    HINT_TEXT.to_owned(),
-                ))));
-                assert_eq!(get_border_weight(&tester), 0.0);
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(InputDecoration::collapsed(Some(
+                        HINT_TEXT.to_owned(),
+                    ))),
+                );
+                assert_eq!(get_border_weight(tester), 0.0);
             });
         }
 
@@ -14527,12 +14590,15 @@ pub(crate) mod tests {
         // InputDecoration.collapsed accepts constraints'.
         #[test]
         fn a_collapsed_decoration_takes_constraints() {
-            case(|| {
-                let tester = pump(BuildInputDecorator::new(
-                    InputDecoration::collapsed(Some(HINT_TEXT.to_owned()))
-                        .constraints(BoxConstraints::tight_for(Some(200.0), Some(32.0))),
-                ));
-                assert_eq!(get_decorator_rect(&tester).size(), Size::new(200.0, 32.0));
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(
+                        InputDecoration::collapsed(Some(HINT_TEXT.to_owned()))
+                            .constraints(BoxConstraints::tight_for(Some(200.0), Some(32.0))),
+                    ),
+                );
+                assert_eq!(get_decorator_rect(tester).size(), Size::new(200.0, 32.0));
             });
         }
 
@@ -14540,13 +14606,16 @@ pub(crate) mod tests {
         // InputDecoration.collapsed accepts hintMaxLines'.
         #[test]
         fn a_collapsed_decoration_takes_hint_max_lines() {
-            case(|| {
-                let tester = pump(BuildInputDecorator::new(
-                    InputDecoration::collapsed(Some(THREE_LINES.to_owned())).hint_max_lines(2),
-                ));
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(
+                        InputDecoration::collapsed(Some(THREE_LINES.to_owned())).hint_max_lines(2),
+                    ),
+                );
                 const HINT_LINE_HEIGHT: f64 = 24.0; // font size = 16 and font height = 1.5.
                 assert_eq!(
-                    get_decorator_rect(&tester).size(),
+                    get_decorator_rect(tester).size(),
                     Size::new(800.0, 2.0 * HINT_LINE_HEIGHT)
                 );
             });
@@ -14556,10 +14625,9 @@ pub(crate) mod tests {
         // InputDecoration.collapsed accepts hintFadeDuration'.
         #[test]
         fn a_collapsed_decoration_takes_hint_fade_duration() {
-            case(|| {
+            test_widgets(|tester| {
                 let decoration = || collapsed().hint_fade_duration(Duration::from_millis(120));
                 // Build once with empty content.
-                let mut tester = icon_tester();
                 tester.pump_widget(
                     BuildInputDecorator::new(decoration())
                         .is_empty(true)
@@ -14567,25 +14635,25 @@ pub(crate) mod tests {
                 );
 
                 // Hint is visible (opacity 1.0).
-                assert_eq!(hint_opacity(&tester), 1.0);
+                assert_eq!(hint_opacity(tester), 1.0);
 
                 // Rebuild with non-empty content.
                 tester.pump_widget(BuildInputDecorator::new(decoration()).build());
 
                 // The hint's opacity animates from 1.0 to 0.0.
                 // The animation's default duration is 20ms.
-                tester.pump(Duration::from_millis(50));
-                let hint_opacity_50ms = hint_opacity(&tester);
+                tester.pump_by(Duration::from_millis(50));
+                let hint_opacity_50ms = hint_opacity(tester);
                 assert!(hint_opacity_50ms > 0.0 && hint_opacity_50ms < 1.0);
-                tester.pump(Duration::from_millis(50));
-                let hint_opacity_100ms = hint_opacity(&tester);
+                tester.pump_by(Duration::from_millis(50));
+                let hint_opacity_100ms = hint_opacity(tester);
                 assert!(hint_opacity_100ms > 0.0 && hint_opacity_100ms < hint_opacity_50ms);
-                tester.pump(Duration::from_millis(50));
-                assert_eq!(hint_opacity(&tester), 0.0);
+                tester.pump_by(Duration::from_millis(50));
+                assert_eq!(hint_opacity(tester), 0.0);
             });
         }
 
-        /// Dart's `buildInputDecoratorWithFloatingLabel`, the label a stand-in.
+        /// Dart's `buildInputDecoratorWithFloatingLabel`, the label a text.
         fn floating_label_decorator(
             text_direction: TextDirection,
             has_icon: bool,
@@ -14595,7 +14663,7 @@ pub(crate) mod tests {
             let mut decoration = InputDecoration::new()
                 .content_padding(EdgeInsetsGeometry::directional(40.0, 12.0, 0.0, 12.0))
                 .floating_label_alignment(alignment)
-                .label(ahem(LABEL_TEXT, TextStyle::new()))
+                .label_text(LABEL_TEXT)
                 .hint_text(HINT_TEXT)
                 .filled(true);
             if has_icon {
@@ -14612,12 +14680,12 @@ pub(crate) mod tests {
         /// Pumps the filled and then the outlined frame of a floatingLabelAlignment case and
         /// checks each with `check`.
         fn check_floating_label(
+            tester: &mut WidgetTester,
             text_direction: TextDirection,
             has_icon: bool,
             alignment: FloatingLabelAlignment,
             check: impl Fn(Rect),
         ) {
-            let mut tester = icon_tester();
             for border_is_outline in [false, true] {
                 tester.pump_widget(floating_label_decorator(
                     text_direction,
@@ -14625,7 +14693,7 @@ pub(crate) mod tests {
                     alignment,
                     border_is_outline,
                 ));
-                check(get_label_rect(&tester));
+                check(get_label_rect(tester));
             }
         }
 
@@ -14633,8 +14701,9 @@ pub(crate) mod tests {
         // icon aligned - start'.
         #[test]
         fn ltr_with_an_icon_the_floating_label_aligns_to_the_start() {
-            case(|| {
+            test_widgets(|tester| {
                 check_floating_label(
+                    tester,
                     TextDirection::Ltr,
                     true,
                     FloatingLabelAlignment::START,
@@ -14647,8 +14716,9 @@ pub(crate) mod tests {
         // input_decorator_test.dart '... - LTR with icon aligned - center'.
         #[test]
         fn ltr_with_an_icon_the_floating_label_aligns_to_the_center() {
-            case(|| {
+            test_widgets(|tester| {
                 check_floating_label(
+                    tester,
                     TextDirection::Ltr,
                     true,
                     FloatingLabelAlignment::CENTER,
@@ -14661,8 +14731,9 @@ pub(crate) mod tests {
         // input_decorator_test.dart '... - LTR without icon aligned - start'.
         #[test]
         fn ltr_without_an_icon_the_floating_label_aligns_to_the_start() {
-            case(|| {
+            test_widgets(|tester| {
                 check_floating_label(
+                    tester,
                     TextDirection::Ltr,
                     false,
                     FloatingLabelAlignment::START,
@@ -14675,8 +14746,9 @@ pub(crate) mod tests {
         // input_decorator_test.dart '... - LTR without icon aligned - center'.
         #[test]
         fn ltr_without_an_icon_the_floating_label_aligns_to_the_center() {
-            case(|| {
+            test_widgets(|tester| {
                 check_floating_label(
+                    tester,
                     TextDirection::Ltr,
                     false,
                     FloatingLabelAlignment::CENTER,
@@ -14689,8 +14761,9 @@ pub(crate) mod tests {
         // input_decorator_test.dart '... - RTL with icon aligned - start'.
         #[test]
         fn rtl_with_an_icon_the_floating_label_aligns_to_the_start() {
-            case(|| {
+            test_widgets(|tester| {
                 check_floating_label(
+                    tester,
                     TextDirection::Rtl,
                     true,
                     FloatingLabelAlignment::START,
@@ -14703,8 +14776,9 @@ pub(crate) mod tests {
         // input_decorator_test.dart '... - RTL with icon aligned - center'.
         #[test]
         fn rtl_with_an_icon_the_floating_label_aligns_to_the_center() {
-            case(|| {
+            test_widgets(|tester| {
                 check_floating_label(
+                    tester,
                     TextDirection::Rtl,
                     true,
                     FloatingLabelAlignment::CENTER,
@@ -14717,8 +14791,9 @@ pub(crate) mod tests {
         // input_decorator_test.dart '... - RTL without icon aligned - start'.
         #[test]
         fn rtl_without_an_icon_the_floating_label_aligns_to_the_start() {
-            case(|| {
+            test_widgets(|tester| {
                 check_floating_label(
+                    tester,
                     TextDirection::Rtl,
                     false,
                     FloatingLabelAlignment::START,
@@ -14731,8 +14806,9 @@ pub(crate) mod tests {
         // input_decorator_test.dart '... - RTL without icon aligned - center'.
         #[test]
         fn rtl_without_an_icon_the_floating_label_aligns_to_the_center() {
-            case(|| {
+            test_widgets(|tester| {
                 check_floating_label(
+                    tester,
                     TextDirection::Rtl,
                     false,
                     FloatingLabelAlignment::CENTER,
@@ -14749,14 +14825,13 @@ pub(crate) mod tests {
         // outlined decoration'.
         #[test]
         fn the_dense_layout_of_an_outlined_decoration() {
-            case(|| {
-                let tester = pump(BuildInputDecorator::new(
-                    outlined()
-                        .label(ahem(LABEL_TEXT, TextStyle::new()))
-                        .is_dense(true),
-                ));
-                let container_rect = get_container_rect(&tester);
-                let input_rect = input_rect(&tester);
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(outlined().label_text(LABEL_TEXT).is_dense(true)),
+                );
+                let container_rect = get_container_rect(tester);
+                let input_rect = input_rect(tester);
 
                 // Content padding is EdgeInsetsDirectional.fromSTEB(12.0, 16.0, 12.0, 8.0).
                 // Vertical padding affects the container height not the input vertical
@@ -14778,15 +14853,14 @@ pub(crate) mod tests {
         // and non-outlined decoration'.
         #[test]
         fn the_dense_layout_of_a_filled_decoration() {
-            case(|| {
-                let tester = pump(BuildInputDecorator::new(
-                    filled()
-                        .label(ahem(LABEL_TEXT, TextStyle::new()))
-                        .is_dense(true),
-                ));
-                let container_rect = get_container_rect(&tester);
-                let input_rect = input_rect(&tester);
-                let label_rect = get_label_rect(&tester);
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(filled().label_text(LABEL_TEXT).is_dense(true)),
+                );
+                let container_rect = get_container_rect(tester);
+                let input_rect = input_rect(tester);
+                let label_rect = get_label_rect(tester);
 
                 // Content padding is EdgeInsetsDirectional.fromSTEB(12.0, 4.0, 12.0, 4.0).
                 assert_eq!(container_rect.height(), 48.0);
@@ -14807,15 +14881,16 @@ pub(crate) mod tests {
         // non-filled and non-outlined decoration'.
         #[test]
         fn the_dense_layout_of_an_unfilled_underlined_decoration() {
-            case(|| {
-                let tester = pump(BuildInputDecorator::new(
-                    InputDecoration::new()
-                        .label(ahem(LABEL_TEXT, TextStyle::new()))
-                        .is_dense(true),
-                ));
-                let container_rect = get_container_rect(&tester);
-                let input_rect = input_rect(&tester);
-                let label_rect = get_label_rect(&tester);
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    BuildInputDecorator::new(
+                        InputDecoration::new().label_text(LABEL_TEXT).is_dense(true),
+                    ),
+                );
+                let container_rect = get_container_rect(tester);
+                let input_rect = input_rect(tester);
+                let label_rect = get_label_rect(tester);
 
                 // Content padding is EdgeInsetsDirectional.fromSTEB(0.0, 4.0, 0.0, 4.0).
                 assert_eq!(container_rect.height(), 48.0);
@@ -14829,12 +14904,13 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Material3 - InputDecoration isDense - Ambient theme is used'.
         #[test]
         fn the_ambient_theme_is_dense() {
-            case(|| {
-                let tester = pump(
+            test_widgets(|tester| {
+                pump(
+                    tester,
                     BuildInputDecorator::new(InputDecoration::new().label_text(LABEL_TEXT))
                         .input_decoration_theme(InputDecorationThemeData::new().is_dense(true)),
                 );
-                assert_eq!(get_container_rect(&tester).height(), 48.0);
+                assert_eq!(get_container_rect(tester).height(), 48.0);
             });
         }
 
@@ -14842,8 +14918,9 @@ pub(crate) mod tests {
         // without diagnostics, the decoration's eleven children, one per slot.
         #[test]
         fn a_decoration_with_every_slot_has_eleven_children() {
-            case(|| {
-                let tester = pump(
+            test_widgets(|tester| {
+                pump(
+                    tester,
                     BuildInputDecorator::new(
                         InputDecoration::new()
                             .icon(Text::new("icon"))
@@ -14874,16 +14951,10 @@ pub(crate) mod tests {
 
     // input_decorator_test.dart's cases on themes, widget-state values, intrinsics, the local
     // theme's overrides, icon button themes and custom borders.
-    //
-    // Stand-ins (D16): the hints of 'visualDensity', the intrinsic-width cases and 'Min intrinsic
-    // height matches the laid out height' are `ahem_hint`s; the label of 'floatingLabelBehavior'
-    // and 'floatingLabelAlignment' is `ahem(LABEL_TEXT, ..)` (Dart's `customLabel` and
-    // `labelText`); the input child is `input_text()` where Dart's case gives a `TextField` its
-    // `EditableText`. Cases whose Dart is a `TextField` but whose behaviour is the decorator's run
-    // on an `InputDecorator` with the `TextField`'s `isEmpty`/`isFocused` (said at each case).
     mod themes_and_intrinsics {
         use std::time::Duration;
         use waft_painting::OutlinedBorderRef;
+        use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
 
         use waft_embedder::valo::Op;
         use waft_embedder::{Color, Offset, PaintStyle, Radius, Size};
@@ -14914,7 +14985,7 @@ pub(crate) mod tests {
         use crate::material::Material;
         use crate::material_state::WidgetStateInputBorder;
         use crate::scaffold::Scaffold;
-        use crate::test_support::{Drawn, WidgetTester};
+        use crate::test_support::{Drawn, PaintInspection};
         use crate::theme::Theme;
         use crate::theme_data::VisualDensity;
 
@@ -15065,16 +15136,14 @@ pub(crate) mod tests {
             render.size(&tester.cell.borrow())
         }
 
-        fn pump(decorator: BuildInputDecorator) -> WidgetTester {
-            let mut tester = tester();
+        fn pump(tester: &mut WidgetTester, decorator: BuildInputDecorator) {
             tester.pump_widget(decorator.build());
-            tester
         }
 
         // input_decorator_test.dart 'InputDecorationThemeData.inputDecoration with WidgetState'.
         #[test]
         fn widget_state_values_go_from_the_theme_to_the_decoration_unless_it_has_its_own() {
-            case(|| {
+            test_widgets(|_tester| {
                 let theme_style: AnyTextStyle =
                     WidgetStateTextStyle::resolve_with(|_states: &WidgetStates| {
                         TextStyle::new().color(Colors::GREEN.primary())
@@ -15211,7 +15280,7 @@ pub(crate) mod tests {
         // mouse over it.
         #[test]
         fn a_widget_state_input_border_paints_the_border_of_the_state() {
-            case(|| {
+            test_widgets(|tester| {
                 let outline_input_border = || {
                     WidgetStateInputBorder::from_map(vec![
                         (
@@ -15234,10 +15303,9 @@ pub(crate) mod tests {
                         .is_hovering(is_hovering)
                         .build()
                 };
-                let mut tester = tester();
                 tester.pump_widget(build(false, false));
                 assert!(
-                    border_strokes(&tester)
+                    border_strokes(tester)
                         .iter()
                         .any(|(_, width)| *width == 1.0)
                 );
@@ -15246,7 +15314,7 @@ pub(crate) mod tests {
                 tester.pump_and_settle();
                 let blue: waft_embedder::valo::Color = Colors::BLUE.primary().into();
                 assert!(
-                    border_strokes(&tester)
+                    border_strokes(tester)
                         .iter()
                         .any(|(color, width)| *color == blue && *width == 4.0)
                 );
@@ -15255,7 +15323,7 @@ pub(crate) mod tests {
                 tester.pump_and_settle();
                 let cyan: waft_embedder::valo::Color = Colors::CYAN.primary().into();
                 assert!(
-                    border_strokes(&tester)
+                    border_strokes(tester)
                         .iter()
                         .any(|(color, width)| *color == cyan && *width == 8.0)
                 );
@@ -15265,10 +15333,9 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'InputDecorator constrained to 0x0'.
         #[test]
         fn a_decorator_constrained_to_zero_by_zero_lays_out() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 tester.pump_widget(
-                    Material::new()
+                    crate::material::Material::new()
                         .child(Directionality::new(
                             TextDirection::Ltr,
                             UnconstrainedBox::new().child(
@@ -15328,17 +15395,16 @@ pub(crate) mod tests {
         // suffix", on an empty `InputDecorator` that the tap focuses.
         #[test]
         fn the_label_width_is_not_affected_by_the_prefix_or_suffix() {
-            case(|| {
+            test_widgets(|tester| {
                 const PREFIX_TEXT: &str = "The five boxing wizards jump quickly.";
                 const SUFFIX_TEXT: &str = "Suffix";
-                let mut tester = tester();
                 // Build with no prefix or suffix.
                 tester.pump_widget(labeled_input_decorator(false, false));
 
                 // Get the width of the label when there is no prefix/suffix.
                 assert!(tester.find_text(PREFIX_TEXT).is_empty());
                 assert!(tester.find_text(SUFFIX_TEXT).is_empty());
-                let label_width = text_size(&tester, "My Label").width();
+                let label_width = text_size(tester, "My Label").width();
 
                 // Build with a prefix and suffix.
                 tester.pump_widget(labeled_input_decorator(true, false));
@@ -15346,10 +15412,10 @@ pub(crate) mod tests {
                 // The prefix and suffix exist but aren't visible. They have not affected
                 // the width of the label.
                 assert_eq!(tester.find_text(PREFIX_TEXT).len(), 1);
-                assert_eq!(get_opacity(&tester, PREFIX_TEXT), 0.0);
+                assert_eq!(get_opacity(tester, PREFIX_TEXT), 0.0);
                 assert_eq!(tester.find_text(SUFFIX_TEXT).len(), 1);
-                assert_eq!(get_opacity(&tester, SUFFIX_TEXT), 0.0);
-                assert_eq!(text_size(&tester, "My Label").width(), label_width);
+                assert_eq!(get_opacity(tester, SUFFIX_TEXT), 0.0);
+                assert_eq!(text_size(tester, "My Label").width(), label_width);
 
                 // Tap to focus.
                 tester.pump_widget(labeled_input_decorator(true, true));
@@ -15357,16 +15423,17 @@ pub(crate) mod tests {
 
                 // The prefix and suffix are visible, and the label is floating and still
                 // hasn't had its width affected.
-                assert_eq!(text_size(&tester, "My Label").width(), label_width);
-                assert_eq!(get_opacity(&tester, PREFIX_TEXT), 1.0);
+                assert_eq!(text_size(tester, "My Label").width(), label_width);
+                assert_eq!(get_opacity(tester, PREFIX_TEXT), 1.0);
             });
         }
 
         // input_decorator_test.dart 'Prefix and suffix are not visible when decorator is empty'.
         #[test]
         fn the_prefix_and_suffix_are_hidden_when_the_decorator_is_empty() {
-            case(|| {
-                let tester = pump(
+            test_widgets(|tester| {
+                pump(
+                    tester,
                     BuildInputDecorator::new(
                         InputDecoration::new()
                             .filled(true)
@@ -15378,8 +15445,8 @@ pub(crate) mod tests {
                 );
 
                 // Prefix and suffix are hidden.
-                assert_eq!(get_opacity(&tester, "Prefix"), 0.0);
-                assert_eq!(get_opacity(&tester, "Suffix"), 0.0);
+                assert_eq!(get_opacity(tester, "Prefix"), 0.0);
+                assert_eq!(get_opacity(tester, "Suffix"), 0.0);
             });
         }
 
@@ -15387,8 +15454,9 @@ pub(crate) mod tests {
         // floating behavior is FloatingBehavior.always'.
         #[test]
         fn the_prefix_and_suffix_show_when_the_decorator_is_empty_and_the_label_always_floats() {
-            case(|| {
-                let tester = pump(
+            test_widgets(|tester| {
+                pump(
+                    tester,
                     BuildInputDecorator::new(
                         InputDecoration::new()
                             .filled(true)
@@ -15401,8 +15469,8 @@ pub(crate) mod tests {
                 );
 
                 // Prefix and suffix are visible.
-                assert_eq!(get_opacity(&tester, "Prefix"), 1.0);
-                assert_eq!(get_opacity(&tester, "Suffix"), 1.0);
+                assert_eq!(get_opacity(tester, "Prefix"), 1.0);
+                assert_eq!(get_opacity(tester, "Suffix"), 1.0);
             });
         }
 
@@ -15439,22 +15507,21 @@ pub(crate) mod tests {
         // tap focuses.
         #[test]
         fn a_long_floating_outlined_label_is_wider_than_its_inline_width() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 tester.pump_widget(long_labeled_input_decorator(
                     FloatingLabelBehavior::Never,
                     false,
                 ));
 
-                let label_width = get_label_rect(&tester).width();
+                let label_width = get_label_rect(tester).width();
 
                 tester.pump_widget(long_labeled_input_decorator(
                     FloatingLabelBehavior::Always,
                     false,
                 ));
-                tester.pump(K_TRANSITION_DURATION);
+                tester.pump_by(K_TRANSITION_DURATION);
 
-                let floated_label_width = get_label_rect(&tester).width();
+                let floated_label_width = get_label_rect(tester).width();
 
                 assert!(floated_label_width > label_width);
 
@@ -15462,9 +15529,9 @@ pub(crate) mod tests {
                     FloatingLabelBehavior::Auto,
                     false,
                 ));
-                tester.pump(K_TRANSITION_DURATION);
+                tester.pump_by(K_TRANSITION_DURATION);
 
-                assert_eq!(get_label_rect(&tester).width(), label_width);
+                assert_eq!(get_label_rect(tester).width(), label_width);
 
                 // Click for Focus.
                 tester.pump_widget(long_labeled_input_decorator(
@@ -15472,14 +15539,14 @@ pub(crate) mod tests {
                     true,
                 ));
                 // Default animation duration is 167ms.
-                tester.pump(Duration::from_millis(80));
+                tester.pump_by(Duration::from_millis(80));
 
-                assert!(get_label_rect(&tester).width() > label_width);
-                assert!(get_label_rect(&tester).width() <= floated_label_width);
+                assert!(get_label_rect(tester).width() > label_width);
+                assert!(get_label_rect(tester).width() <= floated_label_width);
 
-                tester.pump(K_TRANSITION_DURATION);
+                tester.pump_by(K_TRANSITION_DURATION);
 
-                assert_eq!(get_label_rect(&tester).width(), floated_label_width);
+                assert_eq!(get_label_rect(tester).width(), floated_label_width);
             });
         }
 
@@ -15530,17 +15597,16 @@ pub(crate) mod tests {
         // result in the same size widget', on `InputDecorator`s around the `TextField`'s input.
         #[test]
         fn constrained_and_unconstrained_heights_give_the_same_size_given_enough_space() {
-            case(|| {
+            test_widgets(|tester| {
                 let key_unconstrained = GlobalKey::new();
                 let key_constrained = GlobalKey::new();
-                let mut tester = tester();
                 tester.pump_widget(density_row(
                     VisualDensity::STANDARD,
                     &key_unconstrained,
                     &key_constrained,
                 ));
-                let constrained_height = key_size(&tester, &key_constrained).height();
-                let unconstrained_height = key_size(&tester, &key_unconstrained).height();
+                let constrained_height = key_size(tester, &key_constrained).height();
+                let unconstrained_height = key_size(tester, &key_unconstrained).height();
                 assert_eq!(constrained_height, unconstrained_height);
 
                 tester.pump_widget(density_row(
@@ -15548,8 +15614,8 @@ pub(crate) mod tests {
                     &key_unconstrained,
                     &key_constrained,
                 ));
-                let constrained_height_compact = key_size(&tester, &key_constrained).height();
-                let unconstrained_height_compact = key_size(&tester, &key_unconstrained).height();
+                let constrained_height_compact = key_size(tester, &key_constrained).height();
+                let unconstrained_height_compact = key_size(tester, &key_unconstrained).height();
                 assert_eq!(constrained_height_compact, unconstrained_height_compact);
             });
         }
@@ -15558,25 +15624,27 @@ pub(crate) mod tests {
         // inside of itself', on an `InputDecorator` around the `TextField`'s input.
         #[test]
         fn a_vertically_constrained_decorator_positions_its_text_inside_itself() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 tester.pump_widget(
                     MaterialApp::new()
-                        .home(Material::new().child(
-                            Center::new().child(
-                                SizedBox::new().width(200.0).height(28.0).child(
-                                    InputDecorator::new(InputDecoration::new()).child(ahem(
-                                        "A",
-                                        TextStyle::new().font_size(16.0).height(1.5),
-                                    )),
+                        .home(
+                            Material::new().child(
+                                Center::new().child(
+                                    SizedBox::new().width(200.0).height(28.0).child(
+                                        InputDecorator::new(InputDecoration::new()).child(
+                                            Text::new("A").style(
+                                                TextStyle::new().font_size(16.0).height(1.5),
+                                            ),
+                                        ),
+                                    ),
                                 ),
                             ),
-                        ))
+                        )
                         .into_widget(),
                 );
 
-                let field = get_decorator_rect(&tester);
-                let text = text_rect(&tester, "A");
+                let field = get_decorator_rect(tester);
+                let text = text_rect(tester, "A");
 
                 // The text is inside the field.
                 assert!(text.height() < field.bottom - field.top);
@@ -15589,11 +15657,10 @@ pub(crate) mod tests {
         // calculation', on `InputDecorator`s around the `TextField`'s input.
         #[test]
         fn the_visual_density_is_included_in_the_intrinsic_height() {
-            case(|| {
+            test_widgets(|tester| {
                 let key = GlobalKey::new();
                 let intrinsic_height_key = GlobalKey::new();
                 let (k1, k2) = (key.clone(), intrinsic_height_key.clone());
-                let mut tester = tester();
                 tester.pump_widget(
                     MaterialApp::new()
                         .home(Material::new().child(Builder::new(move |app, context| {
@@ -15630,8 +15697,8 @@ pub(crate) mod tests {
                         .into_widget(),
                 );
 
-                let height = key_size(&tester, &key).height();
-                let intrinsic_height = key_size(&tester, &intrinsic_height_key).height();
+                let height = key_size(tester, &key).height();
+                let intrinsic_height = key_size(tester, &intrinsic_height_key).height();
                 assert_eq!(intrinsic_height, height);
             });
         }
@@ -15639,8 +15706,11 @@ pub(crate) mod tests {
         /// Dart's `SizedBox(width:, child: IntrinsicHeight(child: Column(children:
         /// [TextField(decoration:)])))` under `Center` in a `Material` app, on an
         /// `InputDecorator` around the `TextField`'s input.
-        fn pump_intrinsic_column(width: Option<f64>, decoration: InputDecoration) {
-            let mut tester = tester();
+        fn pump_intrinsic_column(
+            tester: &mut WidgetTester,
+            width: Option<f64>,
+            decoration: InputDecoration,
+        ) {
             let column = IntrinsicHeight::new().child(
                 Column::new().children([InputDecorator::new(decoration)
                     .child(input_text())
@@ -15660,8 +15730,9 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Min intrinsic height for TextField with no content padding'.
         #[test]
         fn the_min_intrinsic_height_lays_out_with_no_content_padding() {
-            case(|| {
+            test_widgets(|tester| {
                 pump_intrinsic_column(
+                    tester,
                     None,
                     InputDecoration::new()
                         .label_text("Label Text")
@@ -15674,8 +15745,9 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Min intrinsic height for TextField with prefix icon'.
         #[test]
         fn the_min_intrinsic_height_lays_out_with_a_prefix_icon() {
-            case(|| {
+            test_widgets(|tester| {
                 pump_intrinsic_column(
+                    tester,
                     Some(100.0),
                     InputDecoration::new().prefix_icon(icon(Icons::search())),
                 );
@@ -15685,8 +15757,9 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Min intrinsic height for TextField with suffix icon'.
         #[test]
         fn the_min_intrinsic_height_lays_out_with_a_suffix_icon() {
-            case(|| {
+            test_widgets(|tester| {
                 pump_intrinsic_column(
+                    tester,
                     Some(100.0),
                     InputDecoration::new().suffix_icon(icon(Icons::search())),
                 );
@@ -15696,8 +15769,9 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Min intrinsic height for TextField with prefix'.
         #[test]
         fn the_min_intrinsic_height_lays_out_with_a_prefix() {
-            case(|| {
+            test_widgets(|tester| {
                 pump_intrinsic_column(
+                    tester,
                     Some(100.0),
                     InputDecoration::new().prefix(Text::new("prefix")),
                 );
@@ -15707,8 +15781,9 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Min intrinsic height for TextField with suffix'.
         #[test]
         fn the_min_intrinsic_height_lays_out_with_a_suffix() {
-            case(|| {
+            test_widgets(|tester| {
                 pump_intrinsic_column(
+                    tester,
                     Some(100.0),
                     InputDecoration::new().suffix(Text::new("suffix")),
                 );
@@ -15718,8 +15793,9 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Min intrinsic height for TextField with icon'.
         #[test]
         fn the_min_intrinsic_height_lays_out_with_an_icon() {
-            case(|| {
+            test_widgets(|tester| {
                 pump_intrinsic_column(
+                    tester,
                     Some(100.0),
                     InputDecoration::new().icon(icon(Icons::search())),
                 );
@@ -15748,25 +15824,24 @@ pub(crate) mod tests {
         // container height'.
         #[test]
         fn the_min_intrinsic_height_does_not_change_the_container_height() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 // Build once with enough width for the helper to fit in one line.
                 tester.pump_widget(helper_decoration(300.0));
-                let default_container_height = get_container_rect(&tester).height();
+                let default_container_height = get_container_rect(tester).height();
 
                 // Build once with a smaller width that will force the helper text to wrap.
                 tester.pump_widget(helper_decoration(150.0));
 
                 // The container height should be the same as before.
                 assert_eq!(
-                    get_container_rect(&tester).height(),
+                    get_container_rect(tester).height(),
                     default_container_height
                 );
             });
         }
 
         /// The four decorations of Dart's 'Min intrinsic height matches the laid out height'
-        /// group, with an `ahem_hint` for `hintText`.
+        /// group, with `hintText`.
         fn intrinsic_decoration(name: &str) -> InputDecoration {
             match name {
                 "isDense and isCollapsed" => InputDecoration::new()
@@ -15774,16 +15849,16 @@ pub(crate) mod tests {
                     .is_collapsed(true)
                     .content_padding(EdgeInsets::ZERO.into())
                     .border(InputBorderRef::none())
-                    .hint(ahem_hint(HINT_TEXT)),
+                    .hint_text(HINT_TEXT),
                 "isDense with zero content padding" => InputDecoration::new()
                     .is_dense(true)
                     .content_padding(EdgeInsets::ZERO.into())
-                    .hint(ahem_hint(HINT_TEXT)),
+                    .hint_text(HINT_TEXT),
                 "isCollapsed" => InputDecoration::new()
                     .is_collapsed(true)
-                    .hint(ahem_hint(HINT_TEXT)),
+                    .hint_text(HINT_TEXT),
                 "InputDecoration.collapsed" => {
-                    InputDecoration::collapsed(None).hint(ahem_hint(HINT_TEXT))
+                    InputDecoration::collapsed(None).hint_text(HINT_TEXT)
                 }
                 _ => unreachable!("one of the group's decorations"),
             }
@@ -15791,15 +15866,18 @@ pub(crate) mod tests {
 
         /// One case of Dart's 'Min intrinsic height matches the laid out height' group, on an
         /// empty `InputDecorator` around the `TextField`'s input.
-        fn check_min_intrinsic_height_matches(name: &str, visual_density: VisualDensity) {
+        fn check_min_intrinsic_height_matches(
+            tester: &mut WidgetTester,
+            name: &str,
+            visual_density: VisualDensity,
+        ) {
             let decoration = intrinsic_decoration(name);
-            let mut tester = tester();
             let theme = ThemeData::builder()
                 .visual_density(visual_density)
                 .build(&tester.cell.borrow());
             tester.pump_widget(crate::test_support::material_app(
                 theme,
-                Material::new()
+                crate::material::Material::new()
                     .child(
                         Center::new().child(
                             SizedBox::new().width(200.0).child(
@@ -15812,7 +15890,7 @@ pub(crate) mod tests {
                     .into_widget(),
             ));
 
-            let decorator = decorator_render(&tester);
+            let decorator = decorator_render(tester);
             let mut app = tester.cell.borrow_mut();
             let height = decorator.size(&app).height();
             assert_eq!(decorator.get_min_intrinsic_height(&mut app, 200.0), height);
@@ -15823,8 +15901,9 @@ pub(crate) mod tests {
         // and isCollapsed with standard visual density'.
         #[test]
         fn the_min_intrinsic_height_matches_the_layout_dense_and_collapsed_at_standard_density() {
-            case(|| {
+            test_widgets(|tester| {
                 check_min_intrinsic_height_matches(
+                    tester,
                     "isDense and isCollapsed",
                     VisualDensity::STANDARD,
                 )
@@ -15835,8 +15914,9 @@ pub(crate) mod tests {
         // with zero content padding with standard visual density'.
         #[test]
         fn the_min_intrinsic_height_matches_the_layout_dense_without_padding_at_standard_density() {
-            case(|| {
+            test_widgets(|tester| {
                 check_min_intrinsic_height_matches(
+                    tester,
                     "isDense with zero content padding",
                     VisualDensity::STANDARD,
                 )
@@ -15847,7 +15927,9 @@ pub(crate) mod tests {
         // isCollapsed with standard visual density'.
         #[test]
         fn the_min_intrinsic_height_matches_the_layout_collapsed_at_standard_density() {
-            case(|| check_min_intrinsic_height_matches("isCollapsed", VisualDensity::STANDARD));
+            test_widgets(|tester| {
+                check_min_intrinsic_height_matches(tester, "isCollapsed", VisualDensity::STANDARD)
+            });
         }
 
         // input_decorator_test.dart 'Min intrinsic height matches the laid out height -
@@ -15855,8 +15937,9 @@ pub(crate) mod tests {
         #[test]
         fn the_min_intrinsic_height_matches_the_layout_of_a_collapsed_decoration_at_standard_density()
          {
-            case(|| {
+            test_widgets(|tester| {
                 check_min_intrinsic_height_matches(
+                    tester,
                     "InputDecoration.collapsed",
                     VisualDensity::STANDARD,
                 )
@@ -15867,8 +15950,9 @@ pub(crate) mod tests {
         // and isCollapsed with compact visual density'.
         #[test]
         fn the_min_intrinsic_height_matches_the_layout_dense_and_collapsed_at_compact_density() {
-            case(|| {
+            test_widgets(|tester| {
                 check_min_intrinsic_height_matches(
+                    tester,
                     "isDense and isCollapsed",
                     VisualDensity::COMPACT,
                 )
@@ -15879,8 +15963,9 @@ pub(crate) mod tests {
         // with zero content padding with compact visual density'.
         #[test]
         fn the_min_intrinsic_height_matches_the_layout_dense_without_padding_at_compact_density() {
-            case(|| {
+            test_widgets(|tester| {
                 check_min_intrinsic_height_matches(
+                    tester,
                     "isDense with zero content padding",
                     VisualDensity::COMPACT,
                 )
@@ -15891,7 +15976,9 @@ pub(crate) mod tests {
         // isCollapsed with compact visual density'.
         #[test]
         fn the_min_intrinsic_height_matches_the_layout_collapsed_at_compact_density() {
-            case(|| check_min_intrinsic_height_matches("isCollapsed", VisualDensity::COMPACT));
+            test_widgets(|tester| {
+                check_min_intrinsic_height_matches(tester, "isCollapsed", VisualDensity::COMPACT)
+            });
         }
 
         // input_decorator_test.dart 'Min intrinsic height matches the laid out height -
@@ -15899,8 +15986,9 @@ pub(crate) mod tests {
         #[test]
         fn the_min_intrinsic_height_matches_the_layout_of_a_collapsed_decoration_at_compact_density()
          {
-            case(|| {
+            test_widgets(|tester| {
                 check_min_intrinsic_height_matches(
+                    tester,
                     "InputDecoration.collapsed",
                     VisualDensity::COMPACT,
                 )
@@ -15912,8 +16000,7 @@ pub(crate) mod tests {
         // `InputDecorator` around the `TextField`'s input.
         #[test]
         fn an_intrinsic_height_does_not_overflow_with_a_dense_collapsed_decorator() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let theme = ThemeData::builder()
                     .visual_density(VisualDensity::COMPACT)
                     .build(&tester.cell.borrow());
@@ -15938,7 +16025,7 @@ pub(crate) mod tests {
                                                                 EdgeInsets::ZERO.into(),
                                                             )
                                                             .border(InputBorderRef::none())
-                                                            .hint(ahem_hint(HINT_TEXT)),
+                                                            .hint_text(HINT_TEXT),
                                                     )
                                                     .is_empty(true)
                                                     .child(input_text())
@@ -15960,15 +16047,18 @@ pub(crate) mod tests {
         }
 
         /// Dart's `measureText`: the size of the input text in an intrinsic-width decorator.
-        fn measure_text(decoration: InputDecoration, direction: TextDirection) -> Size {
-            let mut tester = tester();
+        fn measure_text(
+            tester: &mut WidgetTester,
+            decoration: InputDecoration,
+            direction: TextDirection,
+        ) -> Size {
             tester.pump_widget(
                 BuildInputDecorator::new(decoration)
                     .use_intrinsic_width(true)
                     .text_direction(direction)
                     .build(),
             );
-            let found = tester.find_ahem_text(INPUT_TEXT)[0];
+            let found = tester.find_text(INPUT_TEXT)[0];
             tester.render_box_of(found).size(&tester.cell.borrow())
         }
 
@@ -15993,10 +16083,10 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Intrinsic width - with prefixIcon in LTR'.
         #[test]
         fn the_intrinsic_width_keeps_the_text_width_with_a_prefix_icon_ltr() {
-            case(|| {
+            test_widgets(|tester| {
                 assert_eq!(
-                    measure_text(with_prefix(), TextDirection::Ltr).width(),
-                    measure_text(without_icons(), TextDirection::Ltr).width()
+                    measure_text(tester, with_prefix(), TextDirection::Ltr).width(),
+                    measure_text(tester, without_icons(), TextDirection::Ltr).width()
                 );
             });
         }
@@ -16004,10 +16094,10 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Intrinsic width - with suffixIcon in LTR'.
         #[test]
         fn the_intrinsic_width_keeps_the_text_width_with_a_suffix_icon_ltr() {
-            case(|| {
+            test_widgets(|tester| {
                 assert_eq!(
-                    measure_text(with_suffix(), TextDirection::Ltr).width(),
-                    measure_text(without_icons(), TextDirection::Ltr).width()
+                    measure_text(tester, with_suffix(), TextDirection::Ltr).width(),
+                    measure_text(tester, without_icons(), TextDirection::Ltr).width()
                 );
             });
         }
@@ -16015,10 +16105,10 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Intrinsic width - with prefixIcon and suffixIcon in LTR'.
         #[test]
         fn the_intrinsic_width_keeps_the_text_width_with_both_icons_ltr() {
-            case(|| {
+            test_widgets(|tester| {
                 assert_eq!(
-                    measure_text(with_affixes(), TextDirection::Ltr).width(),
-                    measure_text(without_icons(), TextDirection::Ltr).width()
+                    measure_text(tester, with_affixes(), TextDirection::Ltr).width(),
+                    measure_text(tester, without_icons(), TextDirection::Ltr).width()
                 );
             });
         }
@@ -16026,10 +16116,10 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Intrinsic width - with prefixIcon in RTL'.
         #[test]
         fn the_intrinsic_width_keeps_the_text_width_with_a_prefix_icon_rtl() {
-            case(|| {
+            test_widgets(|tester| {
                 assert_eq!(
-                    measure_text(with_prefix(), TextDirection::Rtl).width(),
-                    measure_text(without_icons(), TextDirection::Rtl).width()
+                    measure_text(tester, with_prefix(), TextDirection::Rtl).width(),
+                    measure_text(tester, without_icons(), TextDirection::Rtl).width()
                 );
             });
         }
@@ -16037,10 +16127,10 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Intrinsic width - with suffixIcon in RTL'.
         #[test]
         fn the_intrinsic_width_keeps_the_text_width_with_a_suffix_icon_rtl() {
-            case(|| {
+            test_widgets(|tester| {
                 assert_eq!(
-                    measure_text(with_suffix(), TextDirection::Rtl).width(),
-                    measure_text(without_icons(), TextDirection::Rtl).width()
+                    measure_text(tester, with_suffix(), TextDirection::Rtl).width(),
+                    measure_text(tester, without_icons(), TextDirection::Rtl).width()
                 );
             });
         }
@@ -16048,26 +16138,28 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Intrinsic width - with prefixIcon and suffixIcon in RTL'.
         #[test]
         fn the_intrinsic_width_keeps_the_text_width_with_both_icons_rtl() {
-            case(|| {
+            test_widgets(|tester| {
                 assert_eq!(
-                    measure_text(with_affixes(), TextDirection::Rtl).width(),
-                    measure_text(without_icons(), TextDirection::Rtl).width()
+                    measure_text(tester, with_affixes(), TextDirection::Rtl).width(),
+                    measure_text(tester, without_icons(), TextDirection::Rtl).width()
                 );
             });
         }
 
         fn intrinsic_width_of(
+            tester: &mut WidgetTester,
             decoration: InputDecoration,
             is_empty: bool,
             child: WidgetRef,
         ) -> f64 {
-            let tester = pump(
+            pump(
+                tester,
                 BuildInputDecorator::new(decoration)
                     .use_intrinsic_width(true)
                     .is_empty(is_empty)
                     .child(child),
             );
-            get_decorator_rect(&tester).width()
+            get_decorator_rect(tester).width()
         }
 
         fn sized_width(width: f64) -> WidgetRef {
@@ -16078,11 +16170,11 @@ pub(crate) mod tests {
         // when decorator is empty'.
         #[test]
         fn the_intrinsic_width_of_an_empty_decorator_is_the_wider_of_hint_and_content() {
-            case(|| {
+            test_widgets(|tester| {
                 let decoration_with_hint = || {
                     InputDecoration::new()
                         .content_padding(EdgeInsets::ZERO.into())
-                        .hint(ahem_hint("Hint"))
+                        .hint_text("Hint")
                 };
                 const HINT_TEXT_WIDTH: f64 = 66.0;
                 const SMALL_CONTENT_WIDTH: f64 = 20.0;
@@ -16091,6 +16183,7 @@ pub(crate) mod tests {
                 // Decorator width depends on the hint because the hint is larger than the content.
                 assert_eq!(
                     intrinsic_width_of(
+                        tester,
                         decoration_with_hint(),
                         true,
                         sized_width(SMALL_CONTENT_WIDTH)
@@ -16101,6 +16194,7 @@ pub(crate) mod tests {
                 // Decorator width depends on the content because the content is larger than the hint.
                 assert_eq!(
                     intrinsic_width_of(
+                        tester,
                         decoration_with_hint(),
                         true,
                         sized_width(LARGE_CONTENT_WIDTH)
@@ -16114,16 +16208,21 @@ pub(crate) mod tests {
         // not empty and maintainHintSize is false'.
         #[test]
         fn the_intrinsic_width_ignores_the_hint_when_not_empty_and_not_maintaining_its_size() {
-            case(|| {
+            test_widgets(|tester| {
                 let decoration_with_hint = InputDecoration::new()
                     .content_padding(EdgeInsets::ZERO.into())
-                    .hint(ahem_hint("Hint"))
+                    .hint_text("Hint")
                     .maintain_hint_size(false);
                 const CONTENT_WIDTH: f64 = 20.0;
 
                 // The hint width is ignored even if larger than the content width.
                 assert_eq!(
-                    intrinsic_width_of(decoration_with_hint, false, sized_width(CONTENT_WIDTH)),
+                    intrinsic_width_of(
+                        tester,
+                        decoration_with_hint,
+                        false,
+                        sized_width(CONTENT_WIDTH)
+                    ),
                     CONTENT_WIDTH
                 );
             });
@@ -16133,14 +16232,19 @@ pub(crate) mod tests {
         // empty and maintainHintSize is true'.
         #[test]
         fn the_intrinsic_width_keeps_the_hint_width_when_maintaining_its_size() {
-            case(|| {
+            test_widgets(|tester| {
                 let decoration_with_hint = InputDecoration::new()
                     .content_padding(EdgeInsets::ZERO.into())
-                    .hint(ahem_hint("Hint"));
+                    .hint_text("Hint");
                 const CONTENT_WIDTH: f64 = 20.0;
                 const HINT_TEXT_WIDTH: f64 = 66.0;
                 assert_eq!(
-                    intrinsic_width_of(decoration_with_hint, false, sized_width(CONTENT_WIDTH)),
+                    intrinsic_width_of(
+                        tester,
+                        decoration_with_hint,
+                        false,
+                        sized_width(CONTENT_WIDTH)
+                    ),
                     HINT_TEXT_WIDTH
                 );
             });
@@ -16157,10 +16261,11 @@ pub(crate) mod tests {
         // decorator is empty and maintainLabelSize is false'.
         #[test]
         fn the_intrinsic_width_of_an_empty_decorator_ignores_the_label() {
-            case(|| {
+            test_widgets(|tester| {
                 // The label width is ignored even if larger than the content width.
                 assert_eq!(
                     intrinsic_width_of(
+                        tester,
                         decoration_with_label(false),
                         true,
                         SizedBox::shrink().into_widget()
@@ -16174,9 +16279,10 @@ pub(crate) mod tests {
         // empty and maintainLabelSize is true'.
         #[test]
         fn the_intrinsic_width_of_an_empty_decorator_keeps_the_label_when_maintaining_its_size() {
-            case(|| {
+            test_widgets(|tester| {
                 assert_eq!(
                     intrinsic_width_of(
+                        tester,
                         decoration_with_label(true),
                         true,
                         SizedBox::shrink().into_widget()
@@ -16190,10 +16296,15 @@ pub(crate) mod tests {
         // decorator is not empty and maintainLabelSize is false'.
         #[test]
         fn the_intrinsic_width_ignores_the_label() {
-            case(|| {
+            test_widgets(|tester| {
                 // The label width is ignored even if larger than the content width.
                 assert_eq!(
-                    intrinsic_width_of(decoration_with_label(false), false, sized_width(20.0)),
+                    intrinsic_width_of(
+                        tester,
+                        decoration_with_label(false),
+                        false,
+                        sized_width(20.0)
+                    ),
                     20.0
                 );
             });
@@ -16203,9 +16314,14 @@ pub(crate) mod tests {
         // not empty and maintainLabelSize is true'.
         #[test]
         fn the_intrinsic_width_keeps_the_label_when_maintaining_its_size() {
-            case(|| {
+            test_widgets(|tester| {
                 assert_eq!(
-                    intrinsic_width_of(decoration_with_label(true), false, sized_width(20.0)),
+                    intrinsic_width_of(
+                        tester,
+                        decoration_with_label(true),
+                        false,
+                        sized_width(20.0)
+                    ),
                     30.0
                 );
             });
@@ -16215,7 +16331,7 @@ pub(crate) mod tests {
         // TextField is focused', on an empty `InputDecorator` that the focus request focuses.
         #[test]
         fn the_label_style_height_is_unchanged_when_focused() {
-            case(|| {
+            test_widgets(|tester| {
                 let build = |is_focused: bool| {
                     MaterialApp::new()
                         .home(
@@ -16228,14 +16344,13 @@ pub(crate) mod tests {
                         )
                         .into_widget()
                 };
-                let mut tester = tester();
                 tester.pump_widget(build(false));
-                let before_style = get_label_style(&tester);
+                let before_style = get_label_style(tester);
                 // Focused.
                 tester.pump_widget(build(true));
-                tester.pump(K_TRANSITION_DURATION);
+                tester.pump_by(K_TRANSITION_DURATION);
 
-                assert_eq!(get_label_style(&tester).height, before_style.height);
+                assert_eq!(get_label_style(tester).height, before_style.height);
             });
         }
 
@@ -16257,12 +16372,15 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Local InputDecorationTheme overrides default - labelStyle'.
         #[test]
         fn a_local_theme_label_style_overrides_the_default() {
-            case(|| {
-                let tester = pump(local(
-                    InputDecorationThemeData::new().label_style(indigo_style()),
-                    InputDecoration::new().label_text(LABEL_TEXT),
-                ));
-                assert_eq!(style_color(&get_label_style(&tester)), Some(indigo()));
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    local(
+                        InputDecorationThemeData::new().label_style(indigo_style()),
+                        InputDecoration::new().label_text(LABEL_TEXT),
+                    ),
+                );
+                assert_eq!(style_color(&get_label_style(tester)), Some(indigo()));
             });
         }
 
@@ -16270,30 +16388,34 @@ pub(crate) mod tests {
         // floatingLabelStyle'.
         #[test]
         fn a_local_theme_floating_label_style_overrides_the_default() {
-            case(|| {
-                let tester = pump(
+            test_widgets(|tester| {
+                pump(
+                    tester,
                     local(
                         InputDecorationThemeData::new().floating_label_style(indigo_style()),
                         InputDecoration::new().label_text(LABEL_TEXT),
                     )
                     .is_focused(true), // Label appears floating above input field.
                 );
-                assert_eq!(style_color(&get_label_style(&tester)), Some(indigo()));
+                assert_eq!(style_color(&get_label_style(tester)), Some(indigo()));
             });
         }
 
         // input_decorator_test.dart 'Local InputDecorationTheme overrides default - helperStyle'.
         #[test]
         fn a_local_theme_helper_style_overrides_the_default() {
-            case(|| {
-                let tester = pump(local(
-                    InputDecorationThemeData::new().helper_style(indigo_style()),
-                    InputDecoration::new()
-                        .label_text(LABEL_TEXT)
-                        .helper_text(HELPER_TEXT),
-                ));
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    local(
+                        InputDecorationThemeData::new().helper_style(indigo_style()),
+                        InputDecoration::new()
+                            .label_text(LABEL_TEXT)
+                            .helper_text(HELPER_TEXT),
+                    ),
+                );
                 assert_eq!(
-                    style_color(&rich_text_style(&tester, HELPER_TEXT)),
+                    style_color(&rich_text_style(tester, HELPER_TEXT)),
                     Some(indigo())
                 );
             });
@@ -16312,25 +16434,28 @@ pub(crate) mod tests {
         // helperMaxLines'.
         #[test]
         fn a_local_theme_helper_max_lines_overrides_the_default() {
-            case(|| {
+            test_widgets(|tester| {
                 const HELPER_MAX_LINES: i32 = 2;
-                let tester = pump(local(
-                    InputDecorationThemeData::new().helper_max_lines(HELPER_MAX_LINES),
-                    InputDecoration::new()
-                        .label_text(LABEL_TEXT)
-                        .helper_text(THREE_LINES),
-                ));
+                pump(
+                    tester,
+                    local(
+                        InputDecorationThemeData::new().helper_max_lines(HELPER_MAX_LINES),
+                        InputDecoration::new()
+                            .label_text(LABEL_TEXT)
+                            .helper_text(THREE_LINES),
+                    ),
+                );
 
                 const HELPER_GAP: f64 = 4.0;
                 const HELPER_HEIGHT: f64 = 16.0;
                 const CONTAINER_HEIGHT: f64 = 56.0;
-                let helper_rect = string_rect(&tester, THREE_LINES);
+                let helper_rect = string_rect(tester, THREE_LINES);
                 assert!(
                     (helper_rect.height() - HELPER_HEIGHT * f64::from(HELPER_MAX_LINES)).abs()
                         <= 0.25,
                     "{helper_rect:?}"
                 );
-                let height = get_decorator_rect(&tester).height();
+                let height = get_decorator_rect(tester).height();
                 assert!(
                     (height
                         - (CONTAINER_HEIGHT
@@ -16346,15 +16471,18 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Local InputDecorationTheme overrides default - hintStyle'.
         #[test]
         fn a_local_theme_hint_style_overrides_the_default() {
-            case(|| {
-                let tester = pump(local(
-                    InputDecorationThemeData::new().hint_style(indigo_style()),
-                    InputDecoration::new()
-                        .label_text(LABEL_TEXT)
-                        .hint_text(HINT_TEXT),
-                ));
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    local(
+                        InputDecorationThemeData::new().hint_style(indigo_style()),
+                        InputDecoration::new()
+                            .label_text(LABEL_TEXT)
+                            .hint_text(HINT_TEXT),
+                    ),
+                );
                 assert_eq!(
-                    style_color(&rich_text_style(&tester, HINT_TEXT)),
+                    style_color(&rich_text_style(tester, HINT_TEXT)),
                     Some(indigo())
                 );
             });
@@ -16364,7 +16492,7 @@ pub(crate) mod tests {
         // hintFadeDuration'.
         #[test]
         fn a_local_theme_hint_fade_duration_overrides_the_default() {
-            case(|| {
+            test_widgets(|tester| {
                 const HINT_FADE_DURATION: Duration = Duration::from_millis(404);
                 let build = |is_empty: bool| {
                     local(
@@ -16376,41 +16504,43 @@ pub(crate) mod tests {
                 };
 
                 // Build once with empty content.
-                let mut tester = tester();
                 tester.pump_widget(build(true));
 
                 // Hint is visible (opacity 1.0).
-                assert_eq!(get_opacity(&tester, HINT_TEXT), 1.0);
+                assert_eq!(get_opacity(tester, HINT_TEXT), 1.0);
 
                 // Rebuild with non-empty content.
                 tester.pump_widget(build(false));
 
                 // The hint's opacity animates from 1.0 to 0.0.
                 // The animation's default duration is 20ms.
-                tester.pump(Duration::from_millis(200));
-                let hint_opacity_200ms = get_opacity(&tester, HINT_TEXT);
+                tester.pump_by(Duration::from_millis(200));
+                let hint_opacity_200ms = get_opacity(tester, HINT_TEXT);
                 assert!(hint_opacity_200ms > 0.0 && hint_opacity_200ms < 1.0);
-                tester.pump(Duration::from_millis(200));
-                let hint_opacity_400ms = get_opacity(&tester, HINT_TEXT);
+                tester.pump_by(Duration::from_millis(200));
+                let hint_opacity_400ms = get_opacity(tester, HINT_TEXT);
                 assert!(hint_opacity_400ms > 0.0 && hint_opacity_400ms < hint_opacity_200ms);
-                tester.pump(Duration::from_millis(4));
-                assert_eq!(get_opacity(&tester, HINT_TEXT), 0.0);
+                tester.pump_by(Duration::from_millis(4));
+                assert_eq!(get_opacity(tester, HINT_TEXT), 0.0);
             });
         }
 
         // input_decorator_test.dart 'Local InputDecorationTheme overrides default - hintMaxLines'.
         #[test]
         fn a_local_theme_hint_max_lines_overrides_the_default() {
-            case(|| {
+            test_widgets(|tester| {
                 const HINT_MAX_LINES: i32 = 2;
-                let tester = pump(local(
-                    InputDecorationThemeData::new().hint_max_lines(HINT_MAX_LINES),
-                    InputDecoration::collapsed(Some(THREE_LINES.to_owned())),
-                ));
+                pump(
+                    tester,
+                    local(
+                        InputDecorationThemeData::new().hint_max_lines(HINT_MAX_LINES),
+                        InputDecoration::collapsed(Some(THREE_LINES.to_owned())),
+                    ),
+                );
 
                 const HINT_LINE_HEIGHT: f64 = 24.0; // Font size = 16 and font height = 1.5.
                 assert_eq!(
-                    get_decorator_rect(&tester).size(),
+                    get_decorator_rect(tester).size(),
                     Size::new(800.0, f64::from(HINT_MAX_LINES) * HINT_LINE_HEIGHT)
                 );
             });
@@ -16419,8 +16549,9 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Local InputDecorationTheme overrides default - errorStyle'.
         #[test]
         fn a_local_theme_error_style_overrides_the_default() {
-            case(|| {
-                let tester = pump(
+            test_widgets(|tester| {
+                pump(
+                    tester,
                     local(
                         InputDecorationThemeData::new().error_style(indigo_style()),
                         InputDecoration::new()
@@ -16430,7 +16561,7 @@ pub(crate) mod tests {
                     .is_focused(true),
                 );
                 assert_eq!(
-                    style_color(&rich_text_style(&tester, ERROR_TEXT)),
+                    style_color(&rich_text_style(tester, ERROR_TEXT)),
                     Some(indigo())
                 );
             });
@@ -16440,26 +16571,29 @@ pub(crate) mod tests {
         // errorMaxLines'.
         #[test]
         fn a_local_theme_error_max_lines_overrides_the_default() {
-            case(|| {
+            test_widgets(|tester| {
                 const ERROR_MAX_LINES: i32 = 2;
-                let tester = pump(local(
-                    InputDecorationThemeData::new().error_max_lines(ERROR_MAX_LINES),
-                    InputDecoration::new()
-                        .error_text(THREE_LINES)
-                        .label_text("label")
-                        .filled(true),
-                ));
+                pump(
+                    tester,
+                    local(
+                        InputDecorationThemeData::new().error_max_lines(ERROR_MAX_LINES),
+                        InputDecoration::new()
+                            .error_text(THREE_LINES)
+                            .label_text("label")
+                            .filled(true),
+                    ),
+                );
 
                 const HELPER_GAP: f64 = 4.0;
                 const CONTAINER_HEIGHT: f64 = 56.0;
                 const ERROR_HEIGHT: f64 = 16.0;
 
-                let error_rect = string_rect(&tester, THREE_LINES);
+                let error_rect = string_rect(tester, THREE_LINES);
                 assert!(
                     (error_rect.height() - ERROR_HEIGHT * f64::from(ERROR_MAX_LINES)).abs() <= 0.25,
                     "{error_rect:?}"
                 );
-                let height = get_decorator_rect(&tester).height();
+                let height = get_decorator_rect(tester).height();
                 assert!(
                     (height
                         - (CONTAINER_HEIGHT
@@ -16476,18 +16610,21 @@ pub(crate) mod tests {
         // floatingLabelBehavior'.
         #[test]
         fn a_local_theme_floating_label_behavior_overrides_the_default() {
-            case(|| {
-                let tester = pump(local(
-                    InputDecorationThemeData::new()
-                        .floating_label_behavior(FloatingLabelBehavior::Never),
-                    InputDecoration::new().label(ahem(LABEL_TEXT, TextStyle::new())),
-                ));
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    local(
+                        InputDecorationThemeData::new()
+                            .floating_label_behavior(FloatingLabelBehavior::Never),
+                        InputDecoration::new().label_text(LABEL_TEXT),
+                    ),
+                );
 
-                assert_eq!(get_decorator_rect(&tester).size(), Size::new(800.0, 56.0));
+                assert_eq!(get_decorator_rect(tester).size(), Size::new(800.0, 56.0));
                 // Label line height is forced to 1.0 and font size is 16.0,
                 // the label should be vertically centered (20 pixels above and below).
-                assert_eq!(get_label_rect(&tester).top, 20.0);
-                assert_eq!(get_label_rect(&tester).bottom, 36.0);
+                assert_eq!(get_label_rect(tester).top, 20.0);
+                assert_eq!(get_label_rect(tester).bottom, 36.0);
             });
         }
 
@@ -16495,15 +16632,16 @@ pub(crate) mod tests {
         // floatingLabelAlignment', through Dart's `buildInputDecoratorWithFloatingLabel`.
         #[test]
         fn a_local_theme_floating_label_alignment_overrides_the_default() {
-            case(|| {
-                let tester = pump(
+            test_widgets(|tester| {
+                pump(
+                    tester,
                     BuildInputDecorator::new(
                         InputDecoration::new()
                             .content_padding(
                                 EdgeInsetsDirectional::only(40.0, 12.0, 0.0, 12.0).into(),
                             )
                             .icon(icon(Icons::insert_link()))
-                            .label(ahem(LABEL_TEXT, TextStyle::new()))
+                            .label_text(LABEL_TEXT)
                             .hint_text(HINT_TEXT)
                             .filled(true),
                     )
@@ -16513,19 +16651,22 @@ pub(crate) mod tests {
                     ),
                 );
                 // icon (40) + (decorator (800) - icon (40)) / 2
-                assert_eq!(get_label_rect(&tester).center().dx(), 420.0);
+                assert_eq!(get_label_rect(tester).center().dx(), 420.0);
             });
         }
 
         // input_decorator_test.dart 'Local InputDecorationTheme overrides default - isDense'.
         #[test]
         fn a_local_theme_is_dense_overrides_the_default() {
-            case(|| {
-                let tester = pump(local(
-                    InputDecorationThemeData::new().is_dense(true),
-                    InputDecoration::new().label_text(LABEL_TEXT),
-                ));
-                assert_eq!(get_container_rect(&tester).height(), 48.0);
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    local(
+                        InputDecorationThemeData::new().is_dense(true),
+                        InputDecoration::new().label_text(LABEL_TEXT),
+                    ),
+                );
+                assert_eq!(get_container_rect(tester).height(), 48.0);
             });
         }
 
@@ -16533,39 +16674,43 @@ pub(crate) mod tests {
         // contentPadding'.
         #[test]
         fn a_local_theme_content_padding_overrides_the_default() {
-            case(|| {
+            test_widgets(|tester| {
                 const START: f64 = 11.0;
                 const TOP: f64 = 13.0;
                 const END: f64 = 15.0;
                 const BOTTOM: f64 = 17.0;
 
-                let tester = pump(local(
-                    InputDecorationThemeData::new().content_padding(
-                        EdgeInsetsDirectional::only(START, TOP, END, BOTTOM).into(),
+                pump(
+                    tester,
+                    local(
+                        InputDecorationThemeData::new().content_padding(
+                            EdgeInsetsDirectional::only(START, TOP, END, BOTTOM).into(),
+                        ),
+                        InputDecoration::new().label_text(LABEL_TEXT),
                     ),
-                    InputDecoration::new().label_text(LABEL_TEXT),
-                ));
+                );
 
                 const LABEL_HEIGHT: f64 = 16.0;
                 const INPUT_HEIGHT: f64 = 24.0;
                 assert_eq!(
-                    get_container_rect(&tester).height(),
+                    get_container_rect(tester).height(),
                     TOP + LABEL_HEIGHT + INPUT_HEIGHT + BOTTOM
                 );
-                assert_eq!(text_rect(&tester, INPUT_TEXT).left, START);
-                assert_eq!(text_rect(&tester, INPUT_TEXT).right, 800.0 - END);
+                assert_eq!(text_rect(tester, INPUT_TEXT).left, START);
+                assert_eq!(text_rect(tester, INPUT_TEXT).right, 800.0 - END);
             });
         }
 
         // input_decorator_test.dart 'Local InputDecorationTheme overrides default - isCollapsed'.
         #[test]
         fn a_local_theme_is_collapsed_overrides_the_default() {
-            case(|| {
+            test_widgets(|tester| {
                 // Overall height for a collapsed InputDecorator is 24dp which is the input
                 // height (font size = 16, line height = 1.5).
                 const INPUT_HEIGHT: f64 = 24.0;
 
-                let tester = pump(
+                pump(
+                    tester,
                     local(
                         InputDecorationThemeData::new().is_collapsed(true),
                         InputDecoration::new().label_text(LABEL_TEXT),
@@ -16574,7 +16719,7 @@ pub(crate) mod tests {
                 );
 
                 assert_eq!(
-                    get_decorator_rect(&tester).size(),
+                    get_decorator_rect(tester).size(),
                     Size::new(800.0, INPUT_HEIGHT)
                 );
             });
@@ -16583,21 +16728,25 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Local InputDecorationTheme overrides default - iconColor'.
         #[test]
         fn a_local_theme_icon_color_overrides_the_default() {
-            case(|| {
-                let tester = pump(local(
-                    InputDecorationThemeData::new().icon_color(indigo()),
-                    InputDecoration::new().icon(icon(Icons::cabin())),
-                ));
-                assert_eq!(icon_theme_color(&tester, &Icons::cabin()), Some(indigo()));
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    local(
+                        InputDecorationThemeData::new().icon_color(indigo()),
+                        InputDecoration::new().icon(icon(Icons::cabin())),
+                    ),
+                );
+                assert_eq!(icon_theme_color(tester, &Icons::cabin()), Some(indigo()));
             });
         }
 
         // input_decorator_test.dart 'Local InputDecorationTheme overrides default - prefixStyle'.
         #[test]
         fn a_local_theme_prefix_style_overrides_the_default() {
-            case(|| {
+            test_widgets(|tester| {
                 const PREFIX_LABEL: &str = "prefix";
-                let tester = pump(
+                pump(
+                    tester,
                     local(
                         InputDecorationThemeData::new().prefix_style(indigo_style()),
                         InputDecoration::new().prefix(Text::new(PREFIX_LABEL)),
@@ -16605,7 +16754,7 @@ pub(crate) mod tests {
                     .is_focused(true),
                 );
                 assert_eq!(
-                    style_color(&rich_text_style(&tester, PREFIX_LABEL)),
+                    style_color(&rich_text_style(tester, PREFIX_LABEL)),
                     Some(indigo())
                 );
             });
@@ -16615,12 +16764,15 @@ pub(crate) mod tests {
         // prefixIconColor'.
         #[test]
         fn a_local_theme_prefix_icon_color_overrides_the_default() {
-            case(|| {
-                let tester = pump(local(
-                    InputDecorationThemeData::new().prefix_icon_color(indigo()),
-                    InputDecoration::new().prefix_icon(icon(Icons::cabin())),
-                ));
-                assert_eq!(icon_theme_color(&tester, &Icons::cabin()), Some(indigo()));
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    local(
+                        InputDecorationThemeData::new().prefix_icon_color(indigo()),
+                        InputDecoration::new().prefix_icon(icon(Icons::cabin())),
+                    ),
+                );
+                assert_eq!(icon_theme_color(tester, &Icons::cabin()), Some(indigo()));
             });
         }
 
@@ -16628,25 +16780,29 @@ pub(crate) mod tests {
         // prefixIconConstraints'.
         #[test]
         fn a_local_theme_prefix_icon_constraints_override_the_default() {
-            case(|| {
-                let tester = pump(local(
-                    InputDecorationThemeData::new().prefix_icon_constraints(BoxConstraints {
-                        min_width: 60.0,
-                        min_height: 60.0,
-                        ..BoxConstraints::new()
-                    }),
-                    InputDecoration::new().prefix_icon(icon(Icons::cabin())),
-                ));
-                assert_eq!(icon_size(&tester, &Icons::cabin()), Size::new(60.0, 60.0));
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    local(
+                        InputDecorationThemeData::new().prefix_icon_constraints(BoxConstraints {
+                            min_width: 60.0,
+                            min_height: 60.0,
+                            ..BoxConstraints::new()
+                        }),
+                        InputDecoration::new().prefix_icon(icon(Icons::cabin())),
+                    ),
+                );
+                assert_eq!(icon_size(tester, &Icons::cabin()), Size::new(60.0, 60.0));
             });
         }
 
         // input_decorator_test.dart 'Local InputDecorationTheme overrides default - suffixStyle'.
         #[test]
         fn a_local_theme_suffix_style_overrides_the_default() {
-            case(|| {
+            test_widgets(|tester| {
                 const SUFFIX_LABEL: &str = "suffix";
-                let tester = pump(
+                pump(
+                    tester,
                     local(
                         InputDecorationThemeData::new().suffix_style(indigo_style()),
                         InputDecoration::new().suffix(Text::new(SUFFIX_LABEL)),
@@ -16654,7 +16810,7 @@ pub(crate) mod tests {
                     .is_focused(true),
                 );
                 assert_eq!(
-                    style_color(&rich_text_style(&tester, SUFFIX_LABEL)),
+                    style_color(&rich_text_style(tester, SUFFIX_LABEL)),
                     Some(indigo())
                 );
             });
@@ -16664,12 +16820,15 @@ pub(crate) mod tests {
         // suffixIconColor'.
         #[test]
         fn a_local_theme_suffix_icon_color_overrides_the_default() {
-            case(|| {
-                let tester = pump(local(
-                    InputDecorationThemeData::new().suffix_icon_color(indigo()),
-                    InputDecoration::new().suffix_icon(icon(Icons::cabin())),
-                ));
-                assert_eq!(icon_theme_color(&tester, &Icons::cabin()), Some(indigo()));
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    local(
+                        InputDecorationThemeData::new().suffix_icon_color(indigo()),
+                        InputDecoration::new().suffix_icon(icon(Icons::cabin())),
+                    ),
+                );
+                assert_eq!(icon_theme_color(tester, &Icons::cabin()), Some(indigo()));
             });
         }
 
@@ -16677,16 +16836,19 @@ pub(crate) mod tests {
         // suffixIconConstraints'.
         #[test]
         fn a_local_theme_suffix_icon_constraints_override_the_default() {
-            case(|| {
-                let tester = pump(local(
-                    InputDecorationThemeData::new().suffix_icon_constraints(BoxConstraints {
-                        min_width: 60.0,
-                        min_height: 60.0,
-                        ..BoxConstraints::new()
-                    }),
-                    InputDecoration::new().suffix_icon(icon(Icons::cabin())),
-                ));
-                assert_eq!(icon_size(&tester, &Icons::cabin()), Size::new(60.0, 60.0));
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    local(
+                        InputDecorationThemeData::new().suffix_icon_constraints(BoxConstraints {
+                            min_width: 60.0,
+                            min_height: 60.0,
+                            ..BoxConstraints::new()
+                        }),
+                        InputDecoration::new().suffix_icon(icon(Icons::cabin())),
+                    ),
+                );
+                assert_eq!(icon_size(tester, &Icons::cabin()), Size::new(60.0, 60.0));
             });
         }
 
@@ -16694,15 +16856,18 @@ pub(crate) mod tests {
         // counterStyle'.
         #[test]
         fn a_local_theme_counter_style_overrides_the_default() {
-            case(|| {
-                let tester = pump(local(
-                    InputDecorationThemeData::new().counter_style(indigo_style()),
-                    InputDecoration::new()
-                        .label_text(LABEL_TEXT)
-                        .counter_text(COUNTER_TEXT),
-                ));
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    local(
+                        InputDecorationThemeData::new().counter_style(indigo_style()),
+                        InputDecoration::new()
+                            .label_text(LABEL_TEXT)
+                            .counter_text(COUNTER_TEXT),
+                    ),
+                );
                 assert_eq!(
-                    style_color(&rich_text_style(&tester, COUNTER_TEXT)),
+                    style_color(&rich_text_style(tester, COUNTER_TEXT)),
                     Some(indigo())
                 );
             });
@@ -16712,19 +16877,22 @@ pub(crate) mod tests {
         // fillColor'.
         #[test]
         fn a_local_theme_filled_and_fill_color_override_the_default() {
-            case(|| {
-                let tester = pump(local(
-                    InputDecorationThemeData::new()
-                        .filled(true)
-                        .fill_color(indigo()),
-                    InputDecoration::new()
-                        .label_text(LABEL_TEXT)
-                        .counter_text(COUNTER_TEXT),
-                ));
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    local(
+                        InputDecorationThemeData::new()
+                            .filled(true)
+                            .fill_color(indigo()),
+                        InputDecoration::new()
+                            .label_text(LABEL_TEXT)
+                            .counter_text(COUNTER_TEXT),
+                    ),
+                );
                 assert!(
-                    paints_fill(&tester, indigo()),
+                    paints_fill(tester, indigo()),
                     "{:?}",
-                    border_painted(&tester)
+                    border_painted(tester)
                 );
             });
         }
@@ -16733,29 +16901,33 @@ pub(crate) mod tests {
         // activeIndicatorBorder'.
         #[test]
         fn a_local_theme_active_indicator_border_overrides_the_default() {
-            case(|| {
+            test_widgets(|tester| {
                 let active_indicator_border = BorderSide {
                     color: Colors::AMBER.primary(),
                     width: 2.0,
                     ..BorderSide::default()
                 };
-                let tester = pump(local(
-                    InputDecorationThemeData::new()
-                        .filled(true)
-                        .active_indicator_border(active_indicator_border),
-                    InputDecoration::new().label_text(LABEL_TEXT),
-                ));
+                pump(
+                    tester,
+                    local(
+                        InputDecorationThemeData::new()
+                            .filled(true)
+                            .active_indicator_border(active_indicator_border),
+                        InputDecoration::new().label_text(LABEL_TEXT),
+                    ),
+                );
 
-                assert_eq!(get_border_color(&tester), active_indicator_border.color);
-                assert_eq!(get_border_weight(&tester), active_indicator_border.width);
+                assert_eq!(get_border_color(tester), active_indicator_border.color);
+                assert_eq!(get_border_weight(tester), active_indicator_border.width);
             });
         }
 
         // input_decorator_test.dart 'Local InputDecorationTheme overrides default - hoverColor'.
         #[test]
         fn a_local_theme_hover_color_overrides_the_default() {
-            case(|| {
-                let tester = pump(
+            test_widgets(|tester| {
+                pump(
+                    tester,
                     local(
                         InputDecorationThemeData::new()
                             .filled(true)
@@ -16775,29 +16947,31 @@ pub(crate) mod tests {
                 };
                 let focus_color = theme.color_scheme.surface_container_highest();
                 assert!(
-                    paints_fill(&tester, Color::alpha_blend(indigo(), focus_color)),
+                    paints_fill(tester, Color::alpha_blend(indigo(), focus_color)),
                     "{:?}",
-                    border_painted(&tester)
+                    border_painted(tester)
                 );
             });
         }
 
-        fn settled(decorator: BuildInputDecorator) -> WidgetTester {
-            let mut tester = pump(decorator);
+        fn settled(tester: &mut WidgetTester, decorator: BuildInputDecorator) {
+            pump(tester, decorator);
             tester.pump_and_settle(); // Border changes are animated.
-            tester
         }
 
         // input_decorator_test.dart 'Local InputDecorationTheme overrides default - errorBorder'.
         #[test]
         fn a_local_theme_error_border_overrides_the_default() {
-            case(|| {
+            test_widgets(|tester| {
                 let error_border = outline(Colors::RED.primary(), 1.5);
-                let tester = settled(local(
-                    InputDecorationThemeData::new().error_border(error_border),
-                    InputDecoration::new().error_text("error"),
-                ));
-                assert!(border_is(&tester, &error_border));
+                settled(
+                    tester,
+                    local(
+                        InputDecorationThemeData::new().error_border(error_border),
+                        InputDecoration::new().error_text("error"),
+                    ),
+                );
+                assert!(border_is(tester, &error_border));
             });
         }
 
@@ -16805,16 +16979,17 @@ pub(crate) mod tests {
         // focusedErrorBorder'.
         #[test]
         fn a_local_theme_focused_error_border_overrides_the_default() {
-            case(|| {
+            test_widgets(|tester| {
                 let focused_error_border = outline(Colors::RED.primary(), 1.5);
-                let tester = settled(
+                settled(
+                    tester,
                     local(
                         InputDecorationThemeData::new().focused_error_border(focused_error_border),
                         InputDecoration::new().error_text("error"),
                     )
                     .is_focused(true),
                 );
-                assert!(border_is(&tester, &focused_error_border));
+                assert!(border_is(tester, &focused_error_border));
             });
         }
 
@@ -16822,16 +16997,17 @@ pub(crate) mod tests {
         // focusedBorder'.
         #[test]
         fn a_local_theme_focused_border_overrides_the_default() {
-            case(|| {
+            test_widgets(|tester| {
                 let focused_border = outline(Colors::GREEN.primary(), 1.5);
-                let tester = settled(
+                settled(
+                    tester,
                     local(
                         InputDecorationThemeData::new().focused_border(focused_border),
                         InputDecoration::new(),
                     )
                     .is_focused(true),
                 );
-                assert!(border_is(&tester, &focused_border));
+                assert!(border_is(tester, &focused_border));
             });
         }
 
@@ -16839,13 +17015,16 @@ pub(crate) mod tests {
         // enabledBorder'.
         #[test]
         fn a_local_theme_enabled_border_overrides_the_default() {
-            case(|| {
+            test_widgets(|tester| {
                 let enabled_border = outline(Colors::TEAL.primary(), 5.0);
-                let tester = settled(local(
-                    InputDecorationThemeData::new().enabled_border(enabled_border),
-                    InputDecoration::new(),
-                ));
-                assert!(border_is(&tester, &enabled_border));
+                settled(
+                    tester,
+                    local(
+                        InputDecorationThemeData::new().enabled_border(enabled_border),
+                        InputDecoration::new(),
+                    ),
+                );
+                assert!(border_is(tester, &enabled_border));
             });
         }
 
@@ -16853,36 +17032,42 @@ pub(crate) mod tests {
         // disabledBorder'.
         #[test]
         fn a_local_theme_disabled_border_overrides_the_default() {
-            case(|| {
+            test_widgets(|tester| {
                 let disabled_border = outline(Colors::TEAL.primary(), 3.0);
-                let tester = settled(local(
-                    InputDecorationThemeData::new().disabled_border(disabled_border),
-                    InputDecoration::new().enabled(false),
-                ));
-                assert!(border_is(&tester, &disabled_border));
+                settled(
+                    tester,
+                    local(
+                        InputDecorationThemeData::new().disabled_border(disabled_border),
+                        InputDecoration::new().enabled(false),
+                    ),
+                );
+                assert!(border_is(tester, &disabled_border));
             });
         }
 
         // input_decorator_test.dart 'Local InputDecorationTheme overrides default - border'.
         #[test]
         fn a_local_theme_border_overrides_the_default() {
-            case(|| {
+            test_widgets(|tester| {
                 let border_radius = BorderRadius::all(Radius::circular(6.0));
-                let tester = pump(local(
-                    InputDecorationThemeData::new()
-                        .border(OutlineInputBorder::new().border_radius(border_radius)),
-                    InputDecoration::new(),
-                ));
+                pump(
+                    tester,
+                    local(
+                        InputDecorationThemeData::new()
+                            .border(OutlineInputBorder::new().border_radius(border_radius)),
+                        InputDecoration::new(),
+                    ),
+                );
 
                 // The real instance of border is created based on the given border.
                 // The type and the borderRadius should be the same as the given border.
                 assert!(
-                    get_border(&tester)
+                    get_border(tester)
                         .expect("a border")
                         .as_any()
                         .is::<OutlineInputBorder>()
                 );
-                assert_eq!(get_border_radius(&tester), Some(border_radius));
+                assert_eq!(get_border_radius(tester), Some(border_radius));
             });
         }
 
@@ -16890,8 +17075,9 @@ pub(crate) mod tests {
         // alignLabelWithHint'.
         #[test]
         fn a_local_theme_align_label_with_hint_overrides_the_default() {
-            case(|| {
-                let tester = pump(
+            test_widgets(|tester| {
+                pump(
+                    tester,
                     local(
                         InputDecorationThemeData::new().align_label_with_hint(true),
                         InputDecoration::new()
@@ -16902,8 +17088,8 @@ pub(crate) mod tests {
                     .is_focused(true),
                 );
                 assert_eq!(
-                    get_label_rect(&tester).left,
-                    text_rect(&tester, INPUT_TEXT).left
+                    get_label_rect(tester).left,
+                    text_rect(tester, INPUT_TEXT).left
                 );
             });
         }
@@ -16911,18 +17097,21 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Local InputDecorationTheme overrides default - constraints'.
         #[test]
         fn local_theme_constraints_override_the_default() {
-            case(|| {
-                let tester = pump(local(
-                    InputDecorationThemeData::new().constraints(BoxConstraints {
-                        max_width: 300.0,
-                        max_height: 40.0,
-                        ..BoxConstraints::new()
-                    }),
-                    InputDecoration::new().label_text(LABEL_TEXT),
-                ));
+            test_widgets(|tester| {
+                pump(
+                    tester,
+                    local(
+                        InputDecorationThemeData::new().constraints(BoxConstraints {
+                            max_width: 300.0,
+                            max_height: 40.0,
+                            ..BoxConstraints::new()
+                        }),
+                        InputDecoration::new().label_text(LABEL_TEXT),
+                    ),
+                );
 
                 // Theme settings should make it 300x40 pixels.
-                assert_eq!(get_decorator_rect(&tester).size(), Size::new(300.0, 40.0));
+                assert_eq!(get_decorator_rect(tester).size(), Size::new(300.0, 40.0));
             });
         }
 
@@ -16930,14 +17119,15 @@ pub(crate) mod tests {
         // visualDensity'.
         #[test]
         fn a_local_theme_visual_density_overrides_the_default() {
-            case(|| {
-                let tester = pump(
+            test_widgets(|tester| {
+                pump(
+                    tester,
                     local(
                         InputDecorationThemeData::new()
                             .visual_density(VisualDensity::new(2.0, 2.0)),
                         InputDecoration::new()
                             .label_text(LABEL_TEXT)
-                            .hint(ahem_hint(HINT_TEXT)),
+                            .hint_text(HINT_TEXT),
                     )
                     .is_empty(true),
                 );
@@ -16948,15 +17138,16 @@ pub(crate) mod tests {
                 //    4 - gap between label and input (this is not part of the M3 spec)
                 //   24 - input text (font size = 16, line height = 1.5)
                 //   12 - bottom padding (8 plus 4 due to increased visual density)
-                assert_eq!(get_decorator_rect(&tester).size().height(), 64.0);
+                assert_eq!(get_decorator_rect(tester).size().height(), 64.0);
             });
         }
 
         // input_decorator_test.dart 'Helper and counter are correctly styled'.
         #[test]
         fn the_focused_filled_helper_and_counter_are_styled_on_surface_variant() {
-            case(|| {
-                let tester = pump(
+            test_widgets(|tester| {
+                pump(
+                    tester,
                     BuildInputDecorator::new(
                         InputDecoration::new()
                             .filled(true)
@@ -16980,8 +17171,8 @@ pub(crate) mod tests {
                     .expect("bodySmall")
                     .copy_with()
                     .color(expected_color);
-                assert_eq!(rich_text_style(&tester, HELPER_TEXT), expected_style);
-                assert_eq!(rich_text_style(&tester, COUNTER_TEXT), expected_style);
+                assert_eq!(rich_text_style(tester, HELPER_TEXT), expected_style);
+                assert_eq!(rich_text_style(tester, COUNTER_TEXT), expected_style);
             });
         }
 
@@ -16992,7 +17183,11 @@ pub(crate) mod tests {
         }
 
         /// Dart's 'Prefix IconButton inherits IconButtonTheme' and its suffix twin.
-        fn check_icon_button_inherits_icon_button_theme(prefix: bool, button_icon: IconData) {
+        fn check_icon_button_inherits_icon_button_theme(
+            tester: &mut WidgetTester,
+            prefix: bool,
+            button_icon: IconData,
+        ) {
             let background_color = Color::new(0xffff0000);
             let foreground_color = Color::new(0xff00ff00);
             let overlay_color = Color::new(0xff0000ff);
@@ -17016,7 +17211,6 @@ pub(crate) mod tests {
             } else {
                 InputDecoration::new().suffix_icon(button)
             };
-            let mut tester = tester();
             tester.pump_widget(
                 IconButtonTheme::new(
                     IconButtonThemeData::new().style(icon_button_style),
@@ -17042,7 +17236,7 @@ pub(crate) mod tests {
             });
 
             assert_eq!(
-                icon_glyph_color(&tester, &button_icon),
+                icon_glyph_color(tester, &button_icon),
                 Some(foreground_color)
             );
 
@@ -17051,7 +17245,7 @@ pub(crate) mod tests {
                 let rect = tester.get_rect(render);
                 rect.center()
             };
-            let mut gesture = WidgetTester::mouse(1, 0);
+            let mut gesture = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut gesture, Offset::ZERO);
             tester.move_to(&mut gesture, center, false);
             tester.pump_and_settle();
@@ -17070,18 +17264,26 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Prefix IconButton inherits IconButtonTheme'.
         #[test]
         fn a_prefix_icon_button_inherits_the_icon_button_theme() {
-            case(|| check_icon_button_inherits_icon_button_theme(true, Icons::person()));
+            test_widgets(|tester| {
+                check_icon_button_inherits_icon_button_theme(tester, true, Icons::person())
+            });
         }
 
         // input_decorator_test.dart 'Suffix IconButton inherits IconButtonTheme'.
         #[test]
         fn a_suffix_icon_button_inherits_the_icon_button_theme() {
-            case(|| check_icon_button_inherits_icon_button_theme(false, Icons::delete()));
+            test_widgets(|tester| {
+                check_icon_button_inherits_icon_button_theme(tester, false, Icons::delete())
+            });
         }
 
         /// Dart's 'Prefix IconButton color respects IconButtonTheme foreground color states' and
         /// its suffix twin.
-        fn check_icon_button_color_respects_foreground_states(prefix: bool, button_icon: IconData) {
+        fn check_icon_button_color_respects_foreground_states(
+            tester: &mut WidgetTester,
+            prefix: bool,
+            button_icon: IconData,
+        ) {
             let icon_error_color = Color::new(0xffff0000);
             let icon_color = Color::new(0xff00ff00);
             let icon_button_style =
@@ -17109,11 +17311,10 @@ pub(crate) mod tests {
             };
 
             // Test the prefix IconButton color when there is an error text.
-            let mut tester = tester();
             tester.pump_widget(build(Some("error")));
 
             assert_eq!(
-                icon_glyph_color(&tester, &button_icon),
+                icon_glyph_color(tester, &button_icon),
                 Some(icon_error_color)
             );
 
@@ -17121,44 +17322,48 @@ pub(crate) mod tests {
             tester.pump_widget(build(None));
             tester.pump_and_settle();
 
-            assert_eq!(icon_glyph_color(&tester, &button_icon), Some(icon_color));
+            assert_eq!(icon_glyph_color(tester, &button_icon), Some(icon_color));
         }
 
         // input_decorator_test.dart 'Prefix IconButton color respects IconButtonTheme foreground
         // color states'.
         #[test]
         fn a_prefix_icon_button_colour_follows_the_icon_button_theme_foreground_states() {
-            case(|| check_icon_button_color_respects_foreground_states(true, Icons::person()));
+            test_widgets(|tester| {
+                check_icon_button_color_respects_foreground_states(tester, true, Icons::person())
+            });
         }
 
         // input_decorator_test.dart 'Suffix IconButton color respects IconButtonTheme foreground
         // color states'.
         #[test]
         fn a_suffix_icon_button_colour_follows_the_icon_button_theme_foreground_states() {
-            case(|| check_icon_button_color_respects_foreground_states(false, Icons::search()));
+            test_widgets(|tester| {
+                check_icon_button_color_respects_foreground_states(tester, false, Icons::search())
+            });
         }
 
         // input_decorator_test.dart 'Custom borders - InputDecoration shows custom focused border'.
         #[test]
         fn a_decoration_shows_its_custom_focused_border() {
-            case(|| {
+            test_widgets(|tester| {
                 let focused_border = outline(Colors::TEAL.primary(), 5.0);
-                let tester = settled(
+                settled(
+                    tester,
                     BuildInputDecorator::new(InputDecoration::new().focused_border(focused_border))
                         .is_focused(true),
                 );
-                assert!(border_is(&tester, &focused_border));
+                assert!(border_is(tester, &focused_border));
             });
         }
 
         // input_decorator_test.dart 'Custom borders - InputDecoration shows custom error borders'.
         #[test]
         fn a_decoration_shows_its_custom_error_borders() {
-            case(|| {
+            test_widgets(|tester| {
                 let error_border = outline(Colors::RED.primary(), 1.5);
                 let focused_error_border = outline(Colors::TEAL.primary(), 5.0);
 
-                let mut tester = tester();
                 let mut check_borders =
                     |is_focused: bool,
                      enabled: bool,
@@ -17181,7 +17386,7 @@ pub(crate) mod tests {
                                 .build(),
                         );
                         tester.pump_and_settle(); // Border changes are animated.
-                        assert!(border_is(&tester, expected_border));
+                        assert!(border_is(tester, expected_border));
                     };
 
                 // Test with errorText.
@@ -17200,12 +17405,13 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Custom borders - InputDecoration shows custom enabled border'.
         #[test]
         fn a_decoration_shows_its_custom_enabled_border() {
-            case(|| {
+            test_widgets(|tester| {
                 let enabled_border = outline(Colors::TEAL.primary(), 5.0);
-                let tester = settled(BuildInputDecorator::new(
-                    InputDecoration::new().enabled_border(enabled_border),
-                ));
-                assert!(border_is(&tester, &enabled_border));
+                settled(
+                    tester,
+                    BuildInputDecorator::new(InputDecoration::new().enabled_border(enabled_border)),
+                );
+                assert!(border_is(tester, &enabled_border));
             });
         }
 
@@ -17213,28 +17419,23 @@ pub(crate) mod tests {
         // border'.
         #[test]
         fn a_decoration_shows_its_custom_disabled_border() {
-            case(|| {
+            test_widgets(|tester| {
                 let disabled_border = outline(Colors::TEAL.primary(), 3.0);
-                let tester = settled(BuildInputDecorator::new(
-                    InputDecoration::new()
-                        .enabled(false)
-                        .disabled_border(disabled_border),
-                ));
-                assert!(border_is(&tester, &disabled_border));
+                settled(
+                    tester,
+                    BuildInputDecorator::new(
+                        InputDecoration::new()
+                            .enabled(false)
+                            .disabled_border(disabled_border),
+                    ),
+                );
+                assert!(border_is(tester, &disabled_border));
             });
         }
     }
 
     // input_decorator_test.dart's 'Material2' group and the
     // cases after it.
-    //
-    // Stand-ins (D16, see `common`): Dart's `labelText: 'label'` is
-    // `label(ahem(LABEL_TEXT, ..))`, styled by the decorator's AnimatedDefaultTextStyle; `hintText`
-    // is `hint(..)` in the hint style's metrics (`titleMedium` in Material 2, `bodyLarge` in
-    // Material 3); `helperText` and `counterText` are `helper(..)`/`counter(..)` in `bodySmall`'s
-    // metrics; `errorText` is `error(ahem(..))`, which the decorator styles with its error style;
-    // `prefixText`/`suffixText` are `prefix(..)`/`suffix(..)`, which the decorator styles with the
-    // affix style. The input child is `ahem("text", ..)` in Dart's child style.
     mod material2_and_layout {
         use waft_embedder::{Color, Offset, Rect, Size};
         use waft_painting::{
@@ -17242,6 +17443,7 @@ pub(crate) mod tests {
             TextDirection, TextStyle,
         };
         use waft_rendering::BoxConstraints;
+        use waft_widgets::testing::{WidgetTester, test_widgets};
         use waft_widgets::{
             AnyElement, Builder, Directionality, FadeTransition, GlobalKey, Icon, IntoWidget,
             IntrinsicWidth, Padding, SizedBox, WidgetRef, downcast_widget,
@@ -17254,7 +17456,7 @@ pub(crate) mod tests {
         use crate::icons::Icons;
         use crate::input_border::{InputBorderRef, OutlineInputBorder, UnderlineInputBorder};
         use crate::material::Material;
-        use crate::test_support::{AhemText, WidgetTester, material_app};
+        use crate::test_support::{PaintInspection, material_app};
         use crate::text_theme::TextTheme;
         use crate::theme::Theme;
         use crate::theme_data::{ThemeData, VisualDensity};
@@ -17420,33 +17622,9 @@ pub(crate) mod tests {
 
         /// Dart's M2 input child: `Text('text', style: TextStyle(fontSize: 16.0))`.
         fn m2_input_text() -> WidgetRef {
-            ahem(INPUT_TEXT, TextStyle::new().font_size(16.0))
-        }
-
-        /// The label stand-in, styled by the decorator: Dart's `labelText: 'label'`.
-        fn label() -> WidgetRef {
-            ahem(LABEL_TEXT, TextStyle::new())
-        }
-
-        /// The Material 2 hint stand-in: Dart's `hintText: 'hint'`, styled `titleMedium`.
-        fn m2_hint() -> WidgetRef {
-            ahem_themed(HINT_TEXT, |theme| {
-                theme
-                    .text_theme
-                    .title_medium
-                    .clone()
-                    .expect("the text theme has titleMedium")
-            })
-        }
-
-        /// The error stand-in, styled by the decorator: Dart's `errorText`.
-        fn error(text: &str) -> WidgetRef {
-            ahem(text, TextStyle::new())
-        }
-
-        /// An affix stand-in, styled by the decorator: Dart's `prefixText`/`suffixText`.
-        fn affix(text: &str) -> WidgetRef {
-            ahem(text, TextStyle::new())
+            Text::new(INPUT_TEXT)
+                .style(TextStyle::new().font_size(16.0))
+                .into_widget()
         }
 
         fn top(tester: &WidgetTester, text: &str) -> f64 {
@@ -17479,9 +17657,9 @@ pub(crate) mod tests {
         }
 
         /// Dart's `getOpacity(tester, text)`: the value of the nearest `FadeTransition` above the
-        /// stand-in showing `text`.
+        /// `Text` showing `text`.
         fn get_opacity(tester: &WidgetTester, text: &str) -> f64 {
-            let found = tester.find_ahem_text(text);
+            let found = tester.find_text(text);
             let element = found[0];
             let fade = tester
                 .ancestors(element)
@@ -17502,10 +17680,9 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Material2 - InputDecorator input/label text layout'.
         #[test]
         fn material2_input_and_label_text_layout() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 // The label appears above the input text
-                M2::new(InputDecoration::new().label(label())).pump(&mut tester);
+                M2::new(InputDecoration::new().label_text(LABEL_TEXT)).pump(tester);
                 tester.pump_and_settle();
 
                 // Overall height for this InputDecorator is 56dps:
@@ -17514,168 +17691,168 @@ pub(crate) mod tests {
                 //    4 - floating label / input text gap
                 //   16 - input text (font size 16dps)
                 //   12 - bottom padding
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 56.0));
-                assert_eq!(top(&tester, INPUT_TEXT), 28.0);
-                assert_eq!(bottom(&tester, INPUT_TEXT), 44.0);
-                assert_eq!(top(&tester, LABEL_TEXT), 12.0);
-                assert_eq!(bottom(&tester, LABEL_TEXT), 24.0);
-                assert_eq!(get_border_bottom(&tester), 56.0);
-                assert_eq!(get_border_weight(&tester), 1.0);
+                assert_eq!(decorator_size(tester), Size::new(800.0, 56.0));
+                assert_eq!(top(tester, INPUT_TEXT), 28.0);
+                assert_eq!(bottom(tester, INPUT_TEXT), 44.0);
+                assert_eq!(top(tester, LABEL_TEXT), 12.0);
+                assert_eq!(bottom(tester, LABEL_TEXT), 24.0);
+                assert_eq!(get_border_bottom(tester), 56.0);
+                assert_eq!(get_border_weight(tester), 1.0);
 
                 // The label appears within the input when there is no text content
-                M2::new(InputDecoration::new().label(label()))
+                M2::new(InputDecoration::new().label_text(LABEL_TEXT))
                     .is_empty(true)
-                    .pump(&mut tester);
+                    .pump(tester);
                 tester.pump_and_settle();
-                assert_eq!(top(&tester, LABEL_TEXT), 20.0);
+                assert_eq!(top(tester, LABEL_TEXT), 20.0);
 
                 // The label appears above the input text when there is no content and
                 // floatingLabelBehavior is always
                 M2::new(
                     InputDecoration::new()
-                        .label(label())
+                        .label_text(LABEL_TEXT)
                         .floating_label_behavior(FloatingLabelBehavior::Always),
                 )
                 .is_empty(true)
-                .pump(&mut tester);
+                .pump(tester);
                 tester.pump_and_settle();
-                assert_eq!(top(&tester, LABEL_TEXT), 12.0);
+                assert_eq!(top(tester, LABEL_TEXT), 12.0);
 
                 // The label appears within the input text when there is content and
                 // floatingLabelBehavior is never
                 M2::new(
                     InputDecoration::new()
-                        .label(label())
+                        .label_text(LABEL_TEXT)
                         .floating_label_behavior(FloatingLabelBehavior::Never),
                 )
-                .pump(&mut tester);
+                .pump(tester);
                 tester.pump_and_settle();
-                assert_eq!(top(&tester, LABEL_TEXT), 20.0);
+                assert_eq!(top(tester, LABEL_TEXT), 20.0);
 
                 // isFocused: true increases the border's weight from 1.0 to 2.0
                 // but does not change the overall height.
-                M2::new(InputDecoration::new().label(label()))
+                M2::new(InputDecoration::new().label_text(LABEL_TEXT))
                     .is_focused(true)
-                    .pump(&mut tester);
+                    .pump(tester);
                 tester.pump_and_settle();
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 56.0));
-                assert_eq!(top(&tester, INPUT_TEXT), 28.0);
-                assert_eq!(bottom(&tester, INPUT_TEXT), 44.0);
-                assert_eq!(top(&tester, LABEL_TEXT), 12.0);
-                assert_eq!(bottom(&tester, LABEL_TEXT), 24.0);
-                assert_eq!(get_border_bottom(&tester), 56.0);
-                assert_eq!(get_border_weight(&tester), 2.0);
+                assert_eq!(decorator_size(tester), Size::new(800.0, 56.0));
+                assert_eq!(top(tester, INPUT_TEXT), 28.0);
+                assert_eq!(bottom(tester, INPUT_TEXT), 44.0);
+                assert_eq!(top(tester, LABEL_TEXT), 12.0);
+                assert_eq!(bottom(tester, LABEL_TEXT), 24.0);
+                assert_eq!(get_border_bottom(tester), 56.0);
+                assert_eq!(get_border_weight(tester), 2.0);
 
                 // isEmpty: true causes the label to be aligned with the input text
-                M2::new(InputDecoration::new().label(label()))
+                M2::new(InputDecoration::new().label_text(LABEL_TEXT))
                     .is_empty(true)
-                    .pump(&mut tester);
+                    .pump(tester);
 
                 // The label animates downwards from it's initial position
                 // above the input text. The animation's duration is 167ms.
-                tester.pump(Duration::from_millis(50));
-                let label_y_50ms = top(&tester, LABEL_TEXT);
+                tester.pump_by(Duration::from_millis(50));
+                let label_y_50ms = top(tester, LABEL_TEXT);
                 assert!(
                     in_exclusive_range(label_y_50ms, 12.0, 20.0),
                     "{label_y_50ms}"
                 );
-                tester.pump(Duration::from_millis(50));
-                let label_y_100ms = top(&tester, LABEL_TEXT);
+                tester.pump_by(Duration::from_millis(50));
+                let label_y_100ms = top(tester, LABEL_TEXT);
                 assert!(
                     in_exclusive_range(label_y_100ms, label_y_50ms, 20.0),
                     "{label_y_100ms}"
                 );
                 tester.pump_and_settle();
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 56.0));
-                assert_eq!(top(&tester, INPUT_TEXT), 28.0);
-                assert_eq!(bottom(&tester, INPUT_TEXT), 44.0);
-                assert_eq!(top(&tester, LABEL_TEXT), 20.0);
-                assert_eq!(bottom(&tester, LABEL_TEXT), 36.0);
-                assert_eq!(get_border_bottom(&tester), 56.0);
-                assert_eq!(get_border_weight(&tester), 1.0);
+                assert_eq!(decorator_size(tester), Size::new(800.0, 56.0));
+                assert_eq!(top(tester, INPUT_TEXT), 28.0);
+                assert_eq!(bottom(tester, INPUT_TEXT), 44.0);
+                assert_eq!(top(tester, LABEL_TEXT), 20.0);
+                assert_eq!(bottom(tester, LABEL_TEXT), 36.0);
+                assert_eq!(get_border_bottom(tester), 56.0);
+                assert_eq!(get_border_weight(tester), 1.0);
 
                 // isFocused: true causes the label to move back up above the input text.
-                M2::new(InputDecoration::new().label(label()))
+                M2::new(InputDecoration::new().label_text(LABEL_TEXT))
                     .is_empty(true)
                     .is_focused(true)
-                    .pump(&mut tester);
+                    .pump(tester);
 
                 // The label animates upwards from it's initial position
                 // above the input text. The animation's duration is 167ms.
-                tester.pump(Duration::from_millis(50));
-                let label_y_50ms = top(&tester, LABEL_TEXT);
+                tester.pump_by(Duration::from_millis(50));
+                let label_y_50ms = top(tester, LABEL_TEXT);
                 assert!(
                     in_exclusive_range(label_y_50ms, 12.0, 28.0),
                     "{label_y_50ms}"
                 );
-                tester.pump(Duration::from_millis(50));
-                let label_y_100ms = top(&tester, LABEL_TEXT);
+                tester.pump_by(Duration::from_millis(50));
+                let label_y_100ms = top(tester, LABEL_TEXT);
                 assert!(
                     in_exclusive_range(label_y_100ms, 12.0, label_y_50ms),
                     "{label_y_100ms}"
                 );
 
                 tester.pump_and_settle();
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 56.0));
-                assert_eq!(top(&tester, INPUT_TEXT), 28.0);
-                assert_eq!(bottom(&tester, INPUT_TEXT), 44.0);
-                assert_eq!(top(&tester, LABEL_TEXT), 12.0);
-                assert_eq!(bottom(&tester, LABEL_TEXT), 24.0);
-                assert_eq!(get_border_bottom(&tester), 56.0);
-                assert_eq!(get_border_weight(&tester), 2.0);
+                assert_eq!(decorator_size(tester), Size::new(800.0, 56.0));
+                assert_eq!(top(tester, INPUT_TEXT), 28.0);
+                assert_eq!(bottom(tester, INPUT_TEXT), 44.0);
+                assert_eq!(top(tester, LABEL_TEXT), 12.0);
+                assert_eq!(bottom(tester, LABEL_TEXT), 24.0);
+                assert_eq!(get_border_bottom(tester), 56.0);
+                assert_eq!(get_border_weight(tester), 2.0);
 
                 // enabled: false produces a hairline border if filled: false (the default)
                 // The widget's size and layout is the same as for enabled: true.
-                M2::new(InputDecoration::new().label(label()).enabled(false))
+                M2::new(InputDecoration::new().label_text(LABEL_TEXT).enabled(false))
                     .is_empty(true)
-                    .pump(&mut tester);
+                    .pump(tester);
                 tester.pump_and_settle();
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 56.0));
-                assert_eq!(top(&tester, INPUT_TEXT), 28.0);
-                assert_eq!(bottom(&tester, INPUT_TEXT), 44.0);
-                assert_eq!(top(&tester, LABEL_TEXT), 20.0);
-                assert_eq!(bottom(&tester, LABEL_TEXT), 36.0);
-                assert_eq!(get_border_weight(&tester), 0.0);
+                assert_eq!(decorator_size(tester), Size::new(800.0, 56.0));
+                assert_eq!(top(tester, INPUT_TEXT), 28.0);
+                assert_eq!(bottom(tester, INPUT_TEXT), 44.0);
+                assert_eq!(top(tester, LABEL_TEXT), 20.0);
+                assert_eq!(bottom(tester, LABEL_TEXT), 36.0);
+                assert_eq!(get_border_weight(tester), 0.0);
 
                 // enabled: false produces a transparent border if filled: true.
                 // The widget's size and layout is the same as for enabled: true.
                 M2::new(
                     InputDecoration::new()
-                        .label(label())
+                        .label_text(LABEL_TEXT)
                         .enabled(false)
                         .filled(true),
                 )
                 .is_empty(true)
-                .pump(&mut tester);
+                .pump(tester);
                 tester.pump_and_settle();
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 56.0));
-                assert_eq!(top(&tester, INPUT_TEXT), 28.0);
-                assert_eq!(bottom(&tester, INPUT_TEXT), 44.0);
-                assert_eq!(top(&tester, LABEL_TEXT), 20.0);
-                assert_eq!(bottom(&tester, LABEL_TEXT), 36.0);
-                assert_eq!(get_border_color(&tester), Colors::TRANSPARENT);
+                assert_eq!(decorator_size(tester), Size::new(800.0, 56.0));
+                assert_eq!(top(tester, INPUT_TEXT), 28.0);
+                assert_eq!(bottom(tester, INPUT_TEXT), 44.0);
+                assert_eq!(top(tester, LABEL_TEXT), 20.0);
+                assert_eq!(bottom(tester, LABEL_TEXT), 36.0);
+                assert_eq!(get_border_color(tester), Colors::TRANSPARENT);
 
                 // alignLabelWithHint: true positions the label at the text baseline,
                 // aligned with the hint.
                 M2::new(
                     InputDecoration::new()
-                        .label(label())
+                        .label_text(LABEL_TEXT)
                         .align_label_with_hint(true)
-                        .hint(m2_hint()),
+                        .hint_text(HINT_TEXT),
                 )
                 .is_empty(true)
-                .pump(&mut tester);
+                .pump(tester);
                 tester.pump_and_settle();
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 56.0));
-                assert_eq!(top(&tester, LABEL_TEXT), top(&tester, HINT_TEXT));
-                assert_eq!(bottom(&tester, LABEL_TEXT), bottom(&tester, HINT_TEXT));
+                assert_eq!(decorator_size(tester), Size::new(800.0, 56.0));
+                assert_eq!(top(tester, LABEL_TEXT), top(tester, HINT_TEXT));
+                assert_eq!(bottom(tester, LABEL_TEXT), bottom(tester, HINT_TEXT));
             });
         }
 
         fn pump_floating_label(tester: &mut WidgetTester, is_focused: bool) {
             M2::new(
                 InputDecoration::new()
-                    .label(label())
+                    .label_text(LABEL_TEXT)
                     .floating_label_behavior(FloatingLabelBehavior::Auto),
             )
             .is_empty(true)
@@ -17694,22 +17871,21 @@ pub(crate) mod tests {
         // and curve'.
         #[test]
         fn material2_floating_label_animation_duration_and_curve() {
-            case(|| {
-                let mut tester = tester();
-                pump_floating_label(&mut tester, false);
-                assert_eq!(top(&tester, LABEL_TEXT), 20.0);
+            test_widgets(|tester| {
+                pump_floating_label(tester, false);
+                assert_eq!(top(tester, LABEL_TEXT), 20.0);
 
                 // The label animates upwards and scales down.
                 // The animation duration is 167ms and the curve is fastOutSlowIn.
-                pump_floating_label(&mut tester, true);
-                tester.pump(Duration::from_millis(42));
-                assert_close(top(&tester, LABEL_TEXT), 18.06, 0.5);
-                tester.pump(Duration::from_millis(42));
-                assert_close(top(&tester, LABEL_TEXT), 13.78, 0.5);
-                tester.pump(Duration::from_millis(42));
-                assert_close(top(&tester, LABEL_TEXT), 12.31, 0.5);
-                tester.pump(Duration::from_millis(41));
-                assert_eq!(top(&tester, LABEL_TEXT), 12.0);
+                pump_floating_label(tester, true);
+                tester.pump_by(Duration::from_millis(42));
+                assert_close(top(tester, LABEL_TEXT), 18.06, 0.5);
+                tester.pump_by(Duration::from_millis(42));
+                assert_close(top(tester, LABEL_TEXT), 13.78, 0.5);
+                tester.pump_by(Duration::from_millis(42));
+                assert_close(top(tester, LABEL_TEXT), 12.31, 0.5);
+                tester.pump_by(Duration::from_millis(41));
+                assert_eq!(top(tester, LABEL_TEXT), 12.0);
 
                 // If the animation changes direction without first reaching the
                 // AnimationStatus.completed or AnimationStatus.dismissed status,
@@ -17719,154 +17895,153 @@ pub(crate) mod tests {
 
                 // The label animates downwards and scales up.
                 // The animation duration is 167ms and the curve is fastOutSlowIn.
-                pump_floating_label(&mut tester, false);
-                tester.pump(Duration::from_millis(42));
-                assert_close(top(&tester, LABEL_TEXT), 13.94, 0.5);
-                tester.pump(Duration::from_millis(42));
-                assert_close(top(&tester, LABEL_TEXT), 18.22, 0.5);
-                tester.pump(Duration::from_millis(42));
-                assert_close(top(&tester, LABEL_TEXT), 19.69, 0.5);
-                tester.pump(Duration::from_millis(41));
-                assert_eq!(top(&tester, LABEL_TEXT), 20.0);
+                pump_floating_label(tester, false);
+                tester.pump_by(Duration::from_millis(42));
+                assert_close(top(tester, LABEL_TEXT), 13.94, 0.5);
+                tester.pump_by(Duration::from_millis(42));
+                assert_close(top(tester, LABEL_TEXT), 18.22, 0.5);
+                tester.pump_by(Duration::from_millis(42));
+                assert_close(top(tester, LABEL_TEXT), 19.69, 0.5);
+                tester.pump_by(Duration::from_millis(41));
+                assert_eq!(top(tester, LABEL_TEXT), 20.0);
             });
         }
 
         // input_decorator_test.dart 'Material2 - InputDecorator input/hint layout'.
         #[test]
         fn material2_input_and_hint_layout() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 // The hint aligns with the input text
-                M2::new(InputDecoration::new().hint(m2_hint()))
+                M2::new(InputDecoration::new().hint_text(HINT_TEXT))
                     .is_empty(true)
-                    .pump(&mut tester);
+                    .pump(tester);
 
                 assert_eq!(
-                    decorator_size(&tester),
+                    decorator_size(tester),
                     Size::new(800.0, K_MIN_INTERACTIVE_DIMENSION)
                 );
-                assert_eq!(top(&tester, INPUT_TEXT), 16.0);
-                assert_eq!(bottom(&tester, INPUT_TEXT), 32.0);
-                assert_eq!(top(&tester, HINT_TEXT), 16.0);
-                assert_eq!(bottom(&tester, HINT_TEXT), 32.0);
-                assert_eq!(get_border_bottom(&tester), 48.0);
-                assert_eq!(get_border_weight(&tester), 1.0);
+                assert_eq!(top(tester, INPUT_TEXT), 16.0);
+                assert_eq!(bottom(tester, INPUT_TEXT), 32.0);
+                assert_eq!(top(tester, HINT_TEXT), 16.0);
+                assert_eq!(bottom(tester, HINT_TEXT), 32.0);
+                assert_eq!(get_border_bottom(tester), 48.0);
+                assert_eq!(get_border_weight(tester), 1.0);
 
                 assert_eq!(
-                    text_rect(&tester, HINT_TEXT).width(),
-                    text_rect(&tester, INPUT_TEXT).width()
+                    text_rect(tester, HINT_TEXT).width(),
+                    text_rect(tester, INPUT_TEXT).width()
                 );
             });
         }
 
         fn label_and_hint() -> InputDecoration {
-            InputDecoration::new().label(label()).hint(m2_hint())
+            InputDecoration::new()
+                .label_text(LABEL_TEXT)
+                .hint_text(HINT_TEXT)
         }
 
         // input_decorator_test.dart 'Material2 - InputDecorator input/label/hint layout'.
         #[test]
         fn material2_input_label_and_hint_layout() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 // Label is visible, hint is not (opacity 0.0).
-                M2::new(label_and_hint()).is_empty(true).pump(&mut tester);
+                M2::new(label_and_hint()).is_empty(true).pump(tester);
 
                 // The label is not floating so it's vertically centered.
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 56.0));
-                assert_eq!(top(&tester, INPUT_TEXT), 28.0);
-                assert_eq!(bottom(&tester, INPUT_TEXT), 44.0);
-                assert_eq!(top(&tester, LABEL_TEXT), 20.0);
-                assert_eq!(bottom(&tester, LABEL_TEXT), 36.0);
-                assert_eq!(get_opacity(&tester, HINT_TEXT), 0.0);
-                assert_eq!(get_border_bottom(&tester), 56.0);
-                assert_eq!(get_border_weight(&tester), 1.0);
+                assert_eq!(decorator_size(tester), Size::new(800.0, 56.0));
+                assert_eq!(top(tester, INPUT_TEXT), 28.0);
+                assert_eq!(bottom(tester, INPUT_TEXT), 44.0);
+                assert_eq!(top(tester, LABEL_TEXT), 20.0);
+                assert_eq!(bottom(tester, LABEL_TEXT), 36.0);
+                assert_eq!(get_opacity(tester, HINT_TEXT), 0.0);
+                assert_eq!(get_border_bottom(tester), 56.0);
+                assert_eq!(get_border_weight(tester), 1.0);
 
                 // Label moves upwards, hint is visible (opacity 1.0).
                 M2::new(label_and_hint())
                     .is_empty(true)
                     .is_focused(true)
-                    .pump(&mut tester);
+                    .pump(tester);
 
                 // The hint's opacity animates from 0.0 to 1.0.
                 // The animation's default duration is 20ms.
-                tester.pump(Duration::from_millis(9));
-                let hint_opacity_9ms = get_opacity(&tester, HINT_TEXT);
+                tester.pump_by(Duration::from_millis(9));
+                let hint_opacity_9ms = get_opacity(tester, HINT_TEXT);
                 assert!(in_exclusive_range(hint_opacity_9ms, 0.0, 1.0));
-                tester.pump(Duration::from_millis(9));
-                let hint_opacity_18ms = get_opacity(&tester, HINT_TEXT);
+                tester.pump_by(Duration::from_millis(9));
+                let hint_opacity_18ms = get_opacity(tester, HINT_TEXT);
                 assert!(in_exclusive_range(hint_opacity_18ms, hint_opacity_9ms, 1.0));
 
                 tester.pump_and_settle();
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 56.0));
-                assert_eq!(top(&tester, INPUT_TEXT), 28.0);
-                assert_eq!(bottom(&tester, INPUT_TEXT), 44.0);
-                assert_eq!(top(&tester, LABEL_TEXT), 12.0);
-                assert_eq!(bottom(&tester, LABEL_TEXT), 24.0);
-                assert_eq!(top(&tester, HINT_TEXT), 28.0);
-                assert_eq!(bottom(&tester, HINT_TEXT), 44.0);
-                assert_eq!(get_opacity(&tester, HINT_TEXT), 1.0);
-                assert_eq!(get_border_bottom(&tester), 56.0);
-                assert_eq!(get_border_weight(&tester), 2.0);
+                assert_eq!(decorator_size(tester), Size::new(800.0, 56.0));
+                assert_eq!(top(tester, INPUT_TEXT), 28.0);
+                assert_eq!(bottom(tester, INPUT_TEXT), 44.0);
+                assert_eq!(top(tester, LABEL_TEXT), 12.0);
+                assert_eq!(bottom(tester, LABEL_TEXT), 24.0);
+                assert_eq!(top(tester, HINT_TEXT), 28.0);
+                assert_eq!(bottom(tester, HINT_TEXT), 44.0);
+                assert_eq!(get_opacity(tester, HINT_TEXT), 1.0);
+                assert_eq!(get_border_bottom(tester), 56.0);
+                assert_eq!(get_border_weight(tester), 2.0);
 
-                M2::new(label_and_hint()).is_focused(true).pump(&mut tester);
+                M2::new(label_and_hint()).is_focused(true).pump(tester);
 
                 // The hint's opacity animates from 1.0 to 0.0.
                 // The animation's default duration is 20ms.
-                tester.pump(Duration::from_millis(9));
-                let hint_opacity_9ms = get_opacity(&tester, HINT_TEXT);
+                tester.pump_by(Duration::from_millis(9));
+                let hint_opacity_9ms = get_opacity(tester, HINT_TEXT);
                 assert!(in_exclusive_range(hint_opacity_9ms, 0.0, 1.0));
-                tester.pump(Duration::from_millis(9));
-                let hint_opacity_18ms = get_opacity(&tester, HINT_TEXT);
+                tester.pump_by(Duration::from_millis(9));
+                let hint_opacity_18ms = get_opacity(tester, HINT_TEXT);
                 assert!(in_exclusive_range(hint_opacity_18ms, 0.0, hint_opacity_9ms));
 
                 tester.pump_and_settle();
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 56.0));
-                assert_eq!(top(&tester, INPUT_TEXT), 28.0);
-                assert_eq!(bottom(&tester, INPUT_TEXT), 44.0);
-                assert_eq!(top(&tester, LABEL_TEXT), 12.0);
-                assert_eq!(bottom(&tester, LABEL_TEXT), 24.0);
-                assert_eq!(top(&tester, HINT_TEXT), 28.0);
-                assert_eq!(bottom(&tester, HINT_TEXT), 44.0);
-                assert_eq!(get_opacity(&tester, HINT_TEXT), 0.0);
-                assert_eq!(get_border_bottom(&tester), 56.0);
-                assert_eq!(get_border_weight(&tester), 2.0);
+                assert_eq!(decorator_size(tester), Size::new(800.0, 56.0));
+                assert_eq!(top(tester, INPUT_TEXT), 28.0);
+                assert_eq!(bottom(tester, INPUT_TEXT), 44.0);
+                assert_eq!(top(tester, LABEL_TEXT), 12.0);
+                assert_eq!(bottom(tester, LABEL_TEXT), 24.0);
+                assert_eq!(top(tester, HINT_TEXT), 28.0);
+                assert_eq!(bottom(tester, HINT_TEXT), 44.0);
+                assert_eq!(get_opacity(tester, HINT_TEXT), 0.0);
+                assert_eq!(get_border_bottom(tester), 56.0);
+                assert_eq!(get_border_weight(tester), 2.0);
             });
         }
 
         // input_decorator_test.dart 'Material2 - InputDecorator input/label/hint dense layout'.
         #[test]
         fn material2_input_label_and_hint_dense_layout() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 // Label is visible, hint is not (opacity 0.0).
                 M2::new(label_and_hint().is_dense(true))
                     .is_empty(true)
-                    .pump(&mut tester);
+                    .pump(tester);
 
                 // The label is not floating so it's vertically centered.
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 48.0));
-                assert_eq!(top(&tester, INPUT_TEXT), 24.0);
-                assert_eq!(bottom(&tester, INPUT_TEXT), 40.0);
-                assert_eq!(top(&tester, LABEL_TEXT), 16.0);
-                assert_eq!(bottom(&tester, LABEL_TEXT), 32.0);
-                assert_eq!(get_opacity(&tester, HINT_TEXT), 0.0);
-                assert_eq!(get_border_bottom(&tester), 48.0);
-                assert_eq!(get_border_weight(&tester), 1.0);
+                assert_eq!(decorator_size(tester), Size::new(800.0, 48.0));
+                assert_eq!(top(tester, INPUT_TEXT), 24.0);
+                assert_eq!(bottom(tester, INPUT_TEXT), 40.0);
+                assert_eq!(top(tester, LABEL_TEXT), 16.0);
+                assert_eq!(bottom(tester, LABEL_TEXT), 32.0);
+                assert_eq!(get_opacity(tester, HINT_TEXT), 0.0);
+                assert_eq!(get_border_bottom(tester), 48.0);
+                assert_eq!(get_border_weight(tester), 1.0);
 
                 // Label is visible, hint is not (opacity 0.0).
                 M2::new(label_and_hint().is_dense(true))
                     .is_empty(true)
                     .is_focused(true)
-                    .pump(&mut tester);
+                    .pump(tester);
                 tester.pump_and_settle();
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 48.0));
-                assert_eq!(top(&tester, INPUT_TEXT), 24.0);
-                assert_eq!(bottom(&tester, INPUT_TEXT), 40.0);
-                assert_eq!(top(&tester, LABEL_TEXT), 8.0);
-                assert_eq!(bottom(&tester, LABEL_TEXT), 20.0);
-                assert_eq!(get_opacity(&tester, HINT_TEXT), 1.0);
-                assert_eq!(get_border_bottom(&tester), 48.0);
-                assert_eq!(get_border_weight(&tester), 2.0);
+                assert_eq!(decorator_size(tester), Size::new(800.0, 48.0));
+                assert_eq!(top(tester, INPUT_TEXT), 24.0);
+                assert_eq!(bottom(tester, INPUT_TEXT), 40.0);
+                assert_eq!(top(tester, LABEL_TEXT), 8.0);
+                assert_eq!(bottom(tester, LABEL_TEXT), 20.0);
+                assert_eq!(get_opacity(tester, HINT_TEXT), 1.0);
+                assert_eq!(get_border_bottom(tester), 48.0);
+                assert_eq!(get_border_weight(tester), 2.0);
             });
         }
 
@@ -17882,36 +18057,35 @@ pub(crate) mod tests {
             build(true).pump(tester);
 
             // The hint's opacity animates from 0.0 to 1.0.
-            tester.pump(step);
+            tester.pump_by(step);
             let first = get_opacity(tester, HINT_TEXT);
             assert!(in_exclusive_range(first, 0.0, 1.0), "{first}");
-            tester.pump(step);
+            tester.pump_by(step);
             let second = get_opacity(tester, HINT_TEXT);
             assert!(in_exclusive_range(second, first, 1.0), "{second}");
-            tester.pump(step);
+            tester.pump_by(step);
             assert_eq!(get_opacity(tester, HINT_TEXT), 1.0);
 
             // Unfocus to hide the hint.
             build(false).pump(tester);
 
             // The hint's opacity animates from 1.0 to 0.0.
-            tester.pump(step);
+            tester.pump_by(step);
             let first = get_opacity(tester, HINT_TEXT);
             assert!(in_exclusive_range(first, 0.0, 1.0), "{first}");
-            tester.pump(step);
+            tester.pump_by(step);
             let second = get_opacity(tester, HINT_TEXT);
             assert!(in_exclusive_range(second, 0.0, first), "{second}");
-            tester.pump(step);
+            tester.pump_by(step);
             assert_eq!(get_opacity(tester, HINT_TEXT), 0.0);
         }
 
         // input_decorator_test.dart 'Material2 - InputDecorator default hint animation duration'.
         #[test]
         fn material2_default_hint_animation_duration() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 check_hint_fade(
-                    &mut tester,
+                    tester,
                     |is_focused| {
                         M2::new(label_and_hint())
                             .is_empty(true)
@@ -17925,10 +18099,9 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Material2 - InputDecorator custom hint animation duration'.
         #[test]
         fn material2_custom_hint_animation_duration() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 check_hint_fade(
-                    &mut tester,
+                    tester,
                     |is_focused| {
                         M2::new(label_and_hint().hint_fade_duration(Duration::from_millis(120)))
                             .is_empty(true)
@@ -17943,10 +18116,9 @@ pub(crate) mod tests {
         // theme'.
         #[test]
         fn material2_custom_hint_animation_duration_from_theme() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 check_hint_fade(
-                    &mut tester,
+                    tester,
                     |is_focused| {
                         M2::new(label_and_hint())
                             .input_decoration_theme(
@@ -17964,135 +18136,133 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Material2 - InputDecorator with no input border'.
         #[test]
         fn material2_decorator_with_no_input_border_has_a_zero_weight_border() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 M2::new(InputDecoration::new().border(InputBorderRef::none()))
                     .is_empty(true)
-                    .pump(&mut tester);
-                assert_eq!(get_border_weight(&tester), 0.0);
+                    .pump(tester);
+                assert_eq!(get_border_weight(tester), 0.0);
             });
         }
 
         // input_decorator_test.dart 'Material2 - InputDecorator error/helper/counter layout'.
         #[test]
         fn material2_error_helper_and_counter_layout() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 M2::new(
                     InputDecoration::new()
-                        .label(label())
-                        .helper(ahem_supporting(HELPER_TEXT))
-                        .counter(ahem_supporting(COUNTER_TEXT))
+                        .label_text(LABEL_TEXT)
+                        .helper_text(HELPER_TEXT)
+                        .counter_text(COUNTER_TEXT)
                         .filled(true),
                 )
                 .is_empty(true)
-                .pump(&mut tester);
+                .pump(tester);
 
                 // isEmpty: true, the label is not floating
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 76.0));
-                assert_eq!(top(&tester, INPUT_TEXT), 28.0);
-                assert_eq!(bottom(&tester, INPUT_TEXT), 44.0);
-                assert_eq!(top(&tester, LABEL_TEXT), 20.0);
-                assert_eq!(bottom(&tester, LABEL_TEXT), 36.0);
-                assert_eq!(get_border_bottom(&tester), 56.0);
-                assert_eq!(get_border_weight(&tester), 1.0);
+                assert_eq!(decorator_size(tester), Size::new(800.0, 76.0));
+                assert_eq!(top(tester, INPUT_TEXT), 28.0);
+                assert_eq!(bottom(tester, INPUT_TEXT), 44.0);
+                assert_eq!(top(tester, LABEL_TEXT), 20.0);
+                assert_eq!(bottom(tester, LABEL_TEXT), 36.0);
+                assert_eq!(get_border_bottom(tester), 56.0);
+                assert_eq!(get_border_weight(tester), 1.0);
                 assert_eq!(
-                    text_rect(&tester, HELPER_TEXT).top_left(),
+                    text_rect(tester, HELPER_TEXT).top_left(),
                     Offset::new(12.0, 64.0)
                 );
                 assert_eq!(
-                    text_rect(&tester, COUNTER_TEXT).top_right(),
+                    text_rect(tester, COUNTER_TEXT).top_right(),
                     Offset::new(788.0, 64.0)
                 );
 
                 // If errorText is specified then the helperText isn't shown
                 M2::new(
                     InputDecoration::new()
-                        .label(label())
-                        .error(error(ERROR_TEXT))
-                        .helper(ahem_supporting(HELPER_TEXT))
-                        .counter(ahem_supporting(COUNTER_TEXT))
+                        .label_text(LABEL_TEXT)
+                        .error_text(ERROR_TEXT)
+                        .helper_text(HELPER_TEXT)
+                        .counter_text(COUNTER_TEXT)
                         .filled(true),
                 )
-                .pump(&mut tester);
+                .pump(tester);
                 tester.pump_and_settle();
 
                 // isEmpty: false, the label _is_ floating
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 76.0));
-                assert_eq!(top(&tester, INPUT_TEXT), 28.0);
-                assert_eq!(bottom(&tester, INPUT_TEXT), 44.0);
-                assert_eq!(top(&tester, LABEL_TEXT), 12.0);
-                assert_eq!(bottom(&tester, LABEL_TEXT), 24.0);
-                assert_eq!(get_border_bottom(&tester), 56.0);
-                assert_eq!(get_border_weight(&tester), 1.0);
+                assert_eq!(decorator_size(tester), Size::new(800.0, 76.0));
+                assert_eq!(top(tester, INPUT_TEXT), 28.0);
+                assert_eq!(bottom(tester, INPUT_TEXT), 44.0);
+                assert_eq!(top(tester, LABEL_TEXT), 12.0);
+                assert_eq!(bottom(tester, LABEL_TEXT), 24.0);
+                assert_eq!(get_border_bottom(tester), 56.0);
+                assert_eq!(get_border_weight(tester), 1.0);
                 assert_eq!(
-                    text_rect(&tester, ERROR_TEXT).top_left(),
+                    text_rect(tester, ERROR_TEXT).top_left(),
                     Offset::new(12.0, 64.0)
                 );
                 assert_eq!(
-                    text_rect(&tester, COUNTER_TEXT).top_right(),
+                    text_rect(tester, COUNTER_TEXT).top_right(),
                     Offset::new(788.0, 64.0)
                 );
-                assert!(tester.find_ahem_text(HELPER_TEXT).is_empty());
+                assert!(tester.find_text(HELPER_TEXT).is_empty());
 
                 // The layout of the error/helper/counter supportingText doesn't change for dense
                 // layout.
                 M2::new(
                     InputDecoration::new()
                         .is_dense(true)
-                        .label(label())
-                        .error(error(ERROR_TEXT))
-                        .helper(ahem_supporting(HELPER_TEXT))
-                        .counter(ahem_supporting(COUNTER_TEXT))
+                        .label_text(LABEL_TEXT)
+                        .error_text(ERROR_TEXT)
+                        .helper_text(HELPER_TEXT)
+                        .counter_text(COUNTER_TEXT)
                         .filled(true),
                 )
-                .pump(&mut tester);
+                .pump(tester);
                 tester.pump_and_settle();
 
                 // isEmpty: false, the label _is_ floating
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 68.0));
-                assert_eq!(top(&tester, INPUT_TEXT), 24.0);
-                assert_eq!(bottom(&tester, INPUT_TEXT), 40.0);
-                assert_eq!(top(&tester, LABEL_TEXT), 8.0);
-                assert_eq!(bottom(&tester, LABEL_TEXT), 20.0);
-                assert_eq!(get_border_bottom(&tester), 48.0);
-                assert_eq!(get_border_weight(&tester), 1.0);
+                assert_eq!(decorator_size(tester), Size::new(800.0, 68.0));
+                assert_eq!(top(tester, INPUT_TEXT), 24.0);
+                assert_eq!(bottom(tester, INPUT_TEXT), 40.0);
+                assert_eq!(top(tester, LABEL_TEXT), 8.0);
+                assert_eq!(bottom(tester, LABEL_TEXT), 20.0);
+                assert_eq!(get_border_bottom(tester), 48.0);
+                assert_eq!(get_border_weight(tester), 1.0);
                 assert_eq!(
-                    text_rect(&tester, ERROR_TEXT).top_left(),
+                    text_rect(tester, ERROR_TEXT).top_left(),
                     Offset::new(12.0, 56.0)
                 );
                 assert_eq!(
-                    text_rect(&tester, COUNTER_TEXT).top_right(),
+                    text_rect(tester, COUNTER_TEXT).top_right(),
                     Offset::new(788.0, 56.0)
                 );
 
                 M2::new(
                     InputDecoration::new()
                         .is_dense(true)
-                        .label(label())
-                        .error(error(ERROR_TEXT))
-                        .helper(ahem_supporting(HELPER_TEXT))
-                        .counter(ahem_supporting(COUNTER_TEXT))
+                        .label_text(LABEL_TEXT)
+                        .error_text(ERROR_TEXT)
+                        .helper_text(HELPER_TEXT)
+                        .counter_text(COUNTER_TEXT)
                         .filled(true),
                 )
                 .is_empty(true)
-                .pump(&mut tester);
+                .pump(tester);
                 tester.pump_and_settle();
 
                 // isEmpty: false, the label is not floating
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 68.0));
-                assert_eq!(top(&tester, INPUT_TEXT), 24.0);
-                assert_eq!(bottom(&tester, INPUT_TEXT), 40.0);
-                assert_eq!(top(&tester, LABEL_TEXT), 16.0);
-                assert_eq!(bottom(&tester, LABEL_TEXT), 32.0);
-                assert_eq!(get_border_bottom(&tester), 48.0);
-                assert_eq!(get_border_weight(&tester), 1.0);
+                assert_eq!(decorator_size(tester), Size::new(800.0, 68.0));
+                assert_eq!(top(tester, INPUT_TEXT), 24.0);
+                assert_eq!(bottom(tester, INPUT_TEXT), 40.0);
+                assert_eq!(top(tester, LABEL_TEXT), 16.0);
+                assert_eq!(bottom(tester, LABEL_TEXT), 32.0);
+                assert_eq!(get_border_bottom(tester), 48.0);
+                assert_eq!(get_border_weight(tester), 1.0);
                 assert_eq!(
-                    text_rect(&tester, ERROR_TEXT).top_left(),
+                    text_rect(tester, ERROR_TEXT).top_left(),
                     Offset::new(12.0, 56.0)
                 );
                 assert_eq!(
-                    text_rect(&tester, COUNTER_TEXT).top_right(),
+                    text_rect(tester, COUNTER_TEXT).top_right(),
                     Offset::new(788.0, 56.0)
                 );
             });
@@ -18118,8 +18288,7 @@ pub(crate) mod tests {
         // error widget'. The `errorText` steps keep Dart's string; the `error` steps hand a widget.
         #[test]
         fn material2_error_border_shows_for_error_text_and_error_widget() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let with_text = || {
                     InputDecoration::new()
                         .error_text(ERROR_TEXT)
@@ -18133,17 +18302,17 @@ pub(crate) mod tests {
                         .focused_error_border(focused_error_border())
                 };
                 for decoration in [with_text as fn() -> InputDecoration, with_widget] {
-                    M2::new(decoration()).is_focused(true).pump(&mut tester);
+                    M2::new(decoration()).is_focused(true).pump(tester);
                     tester.pump_and_settle(); // Border changes are animated.
-                    assert!(*get_border(&tester).unwrap() == *focused_error_border());
+                    assert!(*get_border(tester).unwrap() == *focused_error_border());
 
-                    M2::new(decoration()).pump(&mut tester);
+                    M2::new(decoration()).pump(tester);
                     tester.pump_and_settle(); // Border changes are animated.
-                    assert!(*get_border(&tester).unwrap() == *error_border());
+                    assert!(*get_border(tester).unwrap() == *error_border());
 
-                    M2::new(decoration().enabled(false)).pump(&mut tester);
+                    M2::new(decoration().enabled(false)).pump(tester);
                     tester.pump_and_settle(); // Border changes are animated.
-                    assert!(*get_border(&tester).unwrap() == *error_border());
+                    assert!(*get_border(tester).unwrap() == *error_border());
                 }
             });
         }
@@ -18151,64 +18320,62 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Material2 - InputDecorator prefix/suffix texts'.
         #[test]
         fn material2_prefix_and_suffix_texts() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 M2::new(
                     InputDecoration::new()
-                        .prefix(affix("p"))
-                        .suffix(affix("s"))
+                        .prefix_text("p")
+                        .suffix_text("s")
                         .filled(true),
                 )
-                .pump(&mut tester);
+                .pump(tester);
 
                 // The prefix and suffix wrap the input text and are left and right justified
                 // respectively. They should have the same height as the input text (16).
                 assert_eq!(
-                    decorator_size(&tester),
+                    decorator_size(tester),
                     Size::new(800.0, K_MIN_INTERACTIVE_DIMENSION)
                 );
-                assert_eq!(text_rect(&tester, INPUT_TEXT).height(), 16.0);
-                assert_eq!(text_rect(&tester, "p").height(), 16.0);
-                assert_eq!(text_rect(&tester, "s").height(), 16.0);
-                assert_eq!(top(&tester, INPUT_TEXT), 16.0);
-                assert_eq!(top(&tester, "p"), 16.0);
-                assert_eq!(text_rect(&tester, "p").left, 12.0);
-                assert_eq!(top(&tester, "s"), 16.0);
-                assert_eq!(text_rect(&tester, "s").right, 788.0);
+                assert_eq!(text_rect(tester, INPUT_TEXT).height(), 16.0);
+                assert_eq!(text_rect(tester, "p").height(), 16.0);
+                assert_eq!(text_rect(tester, "s").height(), 16.0);
+                assert_eq!(top(tester, INPUT_TEXT), 16.0);
+                assert_eq!(top(tester, "p"), 16.0);
+                assert_eq!(text_rect(tester, "p").left, 12.0);
+                assert_eq!(top(tester, "s"), 16.0);
+                assert_eq!(text_rect(tester, "s").right, 788.0);
 
                 // layout is a row: [p text s]
-                assert_eq!(text_rect(&tester, "p").left, 12.0);
-                assert!(text_rect(&tester, "p").right <= text_rect(&tester, INPUT_TEXT).left);
-                assert!(text_rect(&tester, INPUT_TEXT).right <= text_rect(&tester, "s").left);
+                assert_eq!(text_rect(tester, "p").left, 12.0);
+                assert!(text_rect(tester, "p").right <= text_rect(tester, INPUT_TEXT).left);
+                assert!(text_rect(tester, INPUT_TEXT).right <= text_rect(tester, "s").left);
             });
         }
 
         // input_decorator_test.dart 'Material2 - InputDecorator icon/prefix/suffix'.
         #[test]
         fn material2_icon_prefix_and_suffix() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 M2::new(
                     InputDecoration::new()
-                        .prefix(affix("p"))
-                        .suffix(affix("s"))
+                        .prefix_text("p")
+                        .suffix_text("s")
                         .icon(Icon::new(Some(Icons::android())))
                         .filled(true),
                 )
-                .pump(&mut tester);
+                .pump(tester);
 
                 assert_eq!(
-                    decorator_size(&tester),
+                    decorator_size(tester),
                     Size::new(800.0, K_MIN_INTERACTIVE_DIMENSION)
                 );
-                assert_eq!(text_rect(&tester, INPUT_TEXT).height(), 16.0);
-                assert_eq!(text_rect(&tester, "p").height(), 16.0);
-                assert_eq!(text_rect(&tester, "s").height(), 16.0);
-                assert_eq!(top(&tester, INPUT_TEXT), 16.0);
-                assert_eq!(top(&tester, "p"), 16.0);
-                assert_eq!(top(&tester, "s"), 16.0);
-                assert_eq!(text_rect(&tester, "s").right, 788.0);
-                let icon = icon_rect(&tester, &Icons::android());
+                assert_eq!(text_rect(tester, INPUT_TEXT).height(), 16.0);
+                assert_eq!(text_rect(tester, "p").height(), 16.0);
+                assert_eq!(text_rect(tester, "s").height(), 16.0);
+                assert_eq!(top(tester, INPUT_TEXT), 16.0);
+                assert_eq!(top(tester, "p"), 16.0);
+                assert_eq!(top(tester, "s"), 16.0);
+                assert_eq!(text_rect(tester, "s").right, 788.0);
+                let icon = icon_rect(tester, &Icons::android());
                 assert_eq!(icon.height(), 24.0);
 
                 // The 24dps high icon is centered on the 16dps high input line
@@ -18216,17 +18383,16 @@ pub(crate) mod tests {
 
                 // layout is a row: [icon, p text s]
                 assert_eq!(icon.left, 0.0);
-                assert!(icon.right <= text_rect(&tester, "p").left);
-                assert!(text_rect(&tester, "p").right <= text_rect(&tester, INPUT_TEXT).left);
-                assert!(text_rect(&tester, INPUT_TEXT).right <= text_rect(&tester, "s").left);
+                assert!(icon.right <= text_rect(tester, "p").left);
+                assert!(text_rect(tester, "p").right <= text_rect(tester, INPUT_TEXT).left);
+                assert!(text_rect(tester, INPUT_TEXT).right <= text_rect(tester, "s").left);
             });
         }
 
         // input_decorator_test.dart 'Material2 - InputDecorator prefix/suffix widgets'.
         #[test]
         fn material2_prefix_and_suffix_widgets() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let p_key = GlobalKey::new();
                 let s_key = GlobalKey::new();
                 M2::new(
@@ -18234,16 +18400,16 @@ pub(crate) mod tests {
                         .prefix(
                             Padding::new(EdgeInsetsGeometry::all(4.0))
                                 .key(p_key.clone().into())
-                                .child(AhemText::new("p")),
+                                .child(Text::new("p")),
                         )
                         .suffix(
                             Padding::new(EdgeInsetsGeometry::all(4.0))
                                 .key(s_key.clone().into())
-                                .child(AhemText::new("s")),
+                                .child(Text::new("s")),
                         )
                         .filled(true),
                 )
-                .pump(&mut tester);
+                .pump(tester);
 
                 // Overall height for this InputDecorator is 48dps because
                 // the prefix and the suffix widget is surrounded with padding:
@@ -18252,35 +18418,34 @@ pub(crate) mod tests {
                 //   16 - input text (font size 16dps)
                 //    4 - bottom prefix/suffix padding
                 //   12 - bottom padding
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 48.0));
-                assert_eq!(text_rect(&tester, INPUT_TEXT).height(), 16.0);
-                assert_eq!(key_rect(&tester, &p_key).height(), 24.0);
-                assert_eq!(text_rect(&tester, "p").height(), 16.0);
-                assert_eq!(key_rect(&tester, &s_key).height(), 24.0);
-                assert_eq!(text_rect(&tester, "s").height(), 16.0);
-                assert_eq!(top(&tester, INPUT_TEXT), 16.0);
-                assert_eq!(key_rect(&tester, &p_key).top, 12.0);
-                assert_eq!(top(&tester, "p"), 16.0);
-                assert_eq!(key_rect(&tester, &s_key).top, 12.0);
-                assert_eq!(top(&tester, "s"), 16.0);
-                assert_eq!(key_rect(&tester, &s_key).right, 788.0);
-                assert_eq!(text_rect(&tester, "s").right, 784.0);
+                assert_eq!(decorator_size(tester), Size::new(800.0, 48.0));
+                assert_eq!(text_rect(tester, INPUT_TEXT).height(), 16.0);
+                assert_eq!(key_rect(tester, &p_key).height(), 24.0);
+                assert_eq!(text_rect(tester, "p").height(), 16.0);
+                assert_eq!(key_rect(tester, &s_key).height(), 24.0);
+                assert_eq!(text_rect(tester, "s").height(), 16.0);
+                assert_eq!(top(tester, INPUT_TEXT), 16.0);
+                assert_eq!(key_rect(tester, &p_key).top, 12.0);
+                assert_eq!(top(tester, "p"), 16.0);
+                assert_eq!(key_rect(tester, &s_key).top, 12.0);
+                assert_eq!(top(tester, "s"), 16.0);
+                assert_eq!(key_rect(tester, &s_key).right, 788.0);
+                assert_eq!(text_rect(tester, "s").right, 784.0);
 
                 // layout is a row: [prefix text suffix]
-                assert_eq!(key_rect(&tester, &p_key).left, 12.0);
+                assert_eq!(key_rect(tester, &p_key).left, 12.0);
                 assert_eq!(
-                    key_rect(&tester, &p_key).right,
-                    text_rect(&tester, INPUT_TEXT).left
+                    key_rect(tester, &p_key).right,
+                    text_rect(tester, INPUT_TEXT).left
                 );
-                assert!(text_rect(&tester, INPUT_TEXT).right <= key_rect(&tester, &s_key).right);
+                assert!(text_rect(tester, INPUT_TEXT).right <= key_rect(tester, &s_key).right);
             });
         }
 
         // input_decorator_test.dart 'Material2 - InputDecorator tall prefix'.
         #[test]
         fn material2_tall_prefix() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let p_key = GlobalKey::new();
                 M2::new(
                     InputDecoration::new()
@@ -18288,21 +18453,25 @@ pub(crate) mod tests {
                         .filled(true),
                 )
                 // Set the fontSize so that everything works out to whole numbers.
-                .child(ahem(INPUT_TEXT, TextStyle::new().font_size(20.0)))
-                .pump(&mut tester);
+                .child(
+                    Text::new(INPUT_TEXT)
+                        .style(TextStyle::new().font_size(20.0))
+                        .into_widget(),
+                )
+                .pump(tester);
 
-                assert_eq!(decorator_size(&tester).width(), 800.0);
-                assert_eq!(decorator_size(&tester).height(), 129.0);
-                assert_eq!(text_rect(&tester, INPUT_TEXT).height(), 20.0);
-                assert_eq!(key_rect(&tester, &p_key).height(), 100.0);
-                assert_eq!(top(&tester, INPUT_TEXT), 97.0); // 12 + 100 - 15
-                assert_eq!(key_rect(&tester, &p_key).top, 12.0);
+                assert_eq!(decorator_size(tester).width(), 800.0);
+                assert_eq!(decorator_size(tester).height(), 129.0);
+                assert_eq!(text_rect(tester, INPUT_TEXT).height(), 20.0);
+                assert_eq!(key_rect(tester, &p_key).height(), 100.0);
+                assert_eq!(top(tester, INPUT_TEXT), 97.0); // 12 + 100 - 15
+                assert_eq!(key_rect(tester, &p_key).top, 12.0);
 
                 // layout is a row: [prefix text suffix]
-                assert_eq!(key_rect(&tester, &p_key).left, 12.0);
+                assert_eq!(key_rect(tester, &p_key).left, 12.0);
                 assert_eq!(
-                    key_rect(&tester, &p_key).right,
-                    text_rect(&tester, INPUT_TEXT).left
+                    key_rect(tester, &p_key).right,
+                    text_rect(tester, INPUT_TEXT).left
                 );
             });
         }
@@ -18310,8 +18479,7 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Material2 - InputDecorator tall prefix with border'.
         #[test]
         fn material2_tall_prefix_with_border() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let p_key = GlobalKey::new();
                 M2::new(
                     InputDecoration::new()
@@ -18320,26 +18488,30 @@ pub(crate) mod tests {
                         .filled(true),
                 )
                 // Set the fontSize so that everything works out to whole numbers.
-                .child(ahem(INPUT_TEXT, TextStyle::new().font_size(20.0)))
-                .pump(&mut tester);
+                .child(
+                    Text::new(INPUT_TEXT)
+                        .style(TextStyle::new().font_size(20.0))
+                        .into_widget(),
+                )
+                .pump(tester);
 
                 // When a border is present, the input text and prefix/suffix are centered
                 // within the input. Here, that will be content of height 106, centered
                 // within an input of height 145. That gives 20 pixels of space on each side
                 // of the content, so the prefix is positioned at 19, and the text is at
                 // 20+100-15=105.
-                assert_eq!(decorator_size(&tester).width(), 800.0);
-                assert_eq!(decorator_size(&tester).height(), 145.0);
-                assert_eq!(text_rect(&tester, INPUT_TEXT).height(), 20.0);
-                assert_eq!(key_rect(&tester, &p_key).height(), 100.0);
-                assert_eq!(top(&tester, INPUT_TEXT), 105.0);
-                assert_eq!(key_rect(&tester, &p_key).top, 20.0);
+                assert_eq!(decorator_size(tester).width(), 800.0);
+                assert_eq!(decorator_size(tester).height(), 145.0);
+                assert_eq!(text_rect(tester, INPUT_TEXT).height(), 20.0);
+                assert_eq!(key_rect(tester, &p_key).height(), 100.0);
+                assert_eq!(top(tester, INPUT_TEXT), 105.0);
+                assert_eq!(key_rect(tester, &p_key).top, 20.0);
 
                 // layout is a row: [prefix text suffix]
-                assert_eq!(key_rect(&tester, &p_key).left, 12.0);
+                assert_eq!(key_rect(tester, &p_key).left, 12.0);
                 assert_eq!(
-                    key_rect(&tester, &p_key).right,
-                    text_rect(&tester, INPUT_TEXT).left
+                    key_rect(tester, &p_key).right,
+                    text_rect(tester, INPUT_TEXT).left
                 );
             });
         }
@@ -18347,33 +18519,32 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Material2 - InputDecorator prefixIcon/suffixIcon'.
         #[test]
         fn material2_prefix_icon_and_suffix_icon() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 M2::new(
                     InputDecoration::new()
                         .prefix_icon(Icon::new(Some(Icons::pages())))
                         .suffix_icon(Icon::new(Some(Icons::satellite())))
                         .filled(true),
                 )
-                .pump(&mut tester);
+                .pump(tester);
 
                 // Overall height for this InputDecorator is 48dps because the prefix icon's minimum
                 // size is 48x48 and the rest of the elements only require 40dps.
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 48.0));
-                assert_eq!(text_rect(&tester, INPUT_TEXT).height(), 16.0);
-                let pages = icon_rect(&tester, &Icons::pages());
-                let satellite = icon_rect(&tester, &Icons::satellite());
+                assert_eq!(decorator_size(tester), Size::new(800.0, 48.0));
+                assert_eq!(text_rect(tester, INPUT_TEXT).height(), 16.0);
+                let pages = icon_rect(tester, &Icons::pages());
+                let satellite = icon_rect(tester, &Icons::satellite());
                 assert_eq!(pages.height(), 48.0);
                 assert_eq!(satellite.height(), 48.0);
-                assert_eq!(top(&tester, INPUT_TEXT), 12.0);
+                assert_eq!(top(tester, INPUT_TEXT), 12.0);
                 assert_eq!(pages.top, 0.0);
                 assert_eq!(satellite.top, 0.0);
                 assert_eq!(satellite.right, 800.0);
 
                 // layout is a row: [icon text icon]
                 assert_eq!(pages.left, 0.0);
-                assert!(pages.right <= text_rect(&tester, INPUT_TEXT).left);
-                assert!(text_rect(&tester, INPUT_TEXT).right <= satellite.left);
+                assert!(pages.right <= text_rect(tester, INPUT_TEXT).left);
+                assert!(text_rect(tester, INPUT_TEXT).right <= satellite.left);
             });
         }
 
@@ -18381,8 +18552,7 @@ pub(crate) mod tests {
         // prefixIconConstraints/suffixIconConstraints'.
         #[test]
         fn material2_prefix_icon_and_suffix_icon_constraints() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 M2::new(
                     InputDecoration::new()
                         .prefix_icon(Icon::new(Some(Icons::pages())))
@@ -18399,19 +18569,19 @@ pub(crate) mod tests {
                         })
                         .is_dense(true), // has to be true to go below 48px height
                 )
-                .pump(&mut tester);
+                .pump(tester);
 
                 // Overall height for this InputDecorator is 32px because the prefix icon
                 // is now a custom value
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 32.0));
-                assert_eq!(text_rect(&tester, INPUT_TEXT).height(), 16.0);
-                let pages = icon_rect(&tester, &Icons::pages());
-                let satellite = icon_rect(&tester, &Icons::satellite());
+                assert_eq!(decorator_size(tester), Size::new(800.0, 32.0));
+                assert_eq!(text_rect(tester, INPUT_TEXT).height(), 16.0);
+                let pages = icon_rect(tester, &Icons::pages());
+                let satellite = icon_rect(tester, &Icons::satellite());
                 assert_eq!(pages.height(), 32.0);
                 assert_eq!(satellite.height(), 25.0);
 
                 // (InputDecorator height - Text widget height) / 2
-                assert_eq!(top(&tester, INPUT_TEXT), (32.0 - 16.0) / 2.0);
+                assert_eq!(top(tester, INPUT_TEXT), (32.0 - 16.0) / 2.0);
                 // prefixIcon should take up the entire height of InputDecorator
                 assert_eq!(pages.top, 0.0);
                 // (InputDecorator height - suffixIcon height) / 2
@@ -18424,8 +18594,7 @@ pub(crate) mod tests {
         // 48 by 48'.
         #[test]
         fn material2_prefix_and_suffix_icons_are_centered_when_smaller_than_48_by_48() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let prefix_key = GlobalKey::new();
                 M2::new(
                     InputDecoration::new()
@@ -18436,11 +18605,11 @@ pub(crate) mod tests {
                         )))
                         .filled(true),
                 )
-                .pump(&mut tester);
+                .pump(tester);
 
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 48.0));
-                assert_eq!(key_rect(&tester, &prefix_key).height(), 16.0);
-                assert_eq!(key_rect(&tester, &prefix_key).top, 16.0);
+                assert_eq!(decorator_size(tester), Size::new(800.0, 48.0));
+                assert_eq!(key_rect(tester, &prefix_key).height(), 16.0);
+                assert_eq!(key_rect(tester, &prefix_key).top, 16.0);
             });
         }
 
@@ -18482,10 +18651,10 @@ pub(crate) mod tests {
 
             // The hint's opacity animates from 0.0 to 1.0.
             // The animation's default duration is 20ms.
-            tester.pump(Duration::from_millis(9));
+            tester.pump_by(Duration::from_millis(9));
             let hint_opacity_9ms = get_opacity(tester, HINT_TEXT);
             assert!(in_exclusive_range(hint_opacity_9ms, 0.0, 1.0));
-            tester.pump(Duration::from_millis(9));
+            tester.pump_by(Duration::from_millis(9));
             let hint_opacity_18ms = get_opacity(tester, HINT_TEXT);
             assert!(in_exclusive_range(hint_opacity_18ms, hint_opacity_9ms, 1.0));
 
@@ -18508,10 +18677,10 @@ pub(crate) mod tests {
 
             // The hint's opacity animates from 1.0 to 0.0.
             // The animation's default duration is 20ms.
-            tester.pump(Duration::from_millis(9));
+            tester.pump_by(Duration::from_millis(9));
             let hint_opacity_9ms = get_opacity(tester, HINT_TEXT);
             assert!(in_exclusive_range(hint_opacity_9ms, 0.0, 1.0));
-            tester.pump(Duration::from_millis(9));
+            tester.pump_by(Duration::from_millis(9));
             let hint_opacity_18ms = get_opacity(tester, HINT_TEXT);
             assert!(in_exclusive_range(hint_opacity_18ms, 0.0, hint_opacity_9ms));
 
@@ -18522,10 +18691,9 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Material2 - InputDecorator respects reduced theme visualDensity'.
         #[test]
         fn material2_decorator_respects_reduced_theme_visual_density() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 check_visual_density(
-                    &mut tester,
+                    tester,
                     VisualDensity::COMPACT,
                     DensityFrame {
                         height: 48.0,
@@ -18541,10 +18709,9 @@ pub(crate) mod tests {
         // visualDensity'.
         #[test]
         fn material2_decorator_respects_increased_theme_visual_density() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 check_visual_density(
-                    &mut tester,
+                    tester,
                     VisualDensity::new(2.0, 2.0),
                     DensityFrame {
                         height: 64.0,
@@ -18560,31 +18727,29 @@ pub(crate) mod tests {
         // when larger than 48 by 48'.
         #[test]
         fn material2_prefix_and_suffix_icons_increase_height_when_larger_than_48_by_48() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let prefix_key = GlobalKey::new();
                 M2::new(
                     InputDecoration::new()
                         .prefix_icon(sized(&prefix_key, 100.0, 100.0))
                         .filled(true),
                 )
-                .pump(&mut tester);
+                .pump(tester);
 
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 100.0));
-                assert_eq!(key_rect(&tester, &prefix_key).height(), 100.0);
-                assert_eq!(key_rect(&tester, &prefix_key).top, 0.0);
+                assert_eq!(decorator_size(tester), Size::new(800.0, 100.0));
+                assert_eq!(key_rect(tester, &prefix_key).height(), 100.0);
+                assert_eq!(key_rect(tester, &prefix_key).top, 0.0);
             });
         }
 
         // input_decorator_test.dart 'Material2 - constraints - No InputDecorator constraints'.
         #[test]
         fn material2_no_constraints_fill_the_width_at_the_default_height() {
-            case(|| {
-                let mut tester = tester();
-                M2::new(InputDecoration::new()).pump(&mut tester);
+            test_widgets(|tester| {
+                M2::new(InputDecoration::new()).pump(tester);
 
                 // Should fill the screen width and be default height
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 48.0));
+                assert_eq!(decorator_size(tester), Size::new(800.0, 48.0));
             });
         }
 
@@ -18603,62 +18768,69 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Material2 - constraints - InputDecoratorThemeData constraints'.
         #[test]
         fn material2_theme_constraints_size_the_decorator() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 M2::new(InputDecoration::new())
                     .theme(theme_with_constraints)
-                    .pump(&mut tester);
+                    .pump(tester);
 
                 // Theme settings should make it 300x40 pixels
-                assert_eq!(decorator_size(&tester), Size::new(300.0, 40.0));
+                assert_eq!(decorator_size(tester), Size::new(300.0, 40.0));
             });
         }
 
         // input_decorator_test.dart 'Material2 - constraints - InputDecorator constraints'.
         #[test]
         fn material2_decoration_constraints_override_the_theme() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 M2::new(InputDecoration::new().constraints(BoxConstraints {
                     max_width: 200.0,
                     max_height: 32.0,
                     ..BoxConstraints::new()
                 }))
                 .theme(theme_with_constraints)
-                .pump(&mut tester);
+                .pump(tester);
 
                 // InputDecoration.constraints should override the theme. It should be
                 // only 200x32 pixels
-                assert_eq!(decorator_size(&tester), Size::new(200.0, 32.0));
+                assert_eq!(decorator_size(tester), Size::new(200.0, 32.0));
             });
         }
 
         /// Dart's `Text(text, style: TextStyle(fontFamily: 'FlutterTest', fontSize: 20.0))`, set so
         /// that everything works out to whole numbers.
         fn text_20() -> WidgetRef {
-            ahem(INPUT_TEXT, TextStyle::new().font_size(20.0))
+            Text::new(INPUT_TEXT)
+                .style(TextStyle::new().font_size(20.0))
+                .into_widget()
         }
 
         /// The input's top in an expanded Material 2 decorator with `decoration` aligned by
         /// `align`: the cases of 'textAlignVertical position'.
-        fn expanded_input_top(decoration: InputDecoration, align: TextAlignVertical) -> f64 {
-            let mut tester = tester();
+        fn expanded_input_top(
+            tester: &mut WidgetTester,
+            decoration: InputDecoration,
+            align: TextAlignVertical,
+        ) -> f64 {
             M2::new(decoration)
                 .expands(true) // so we have a tall input where align can vary
                 .text_align_vertical(align)
                 .child(text_20())
-                .pump(&mut tester);
-            top(&tester, INPUT_TEXT)
+                .pump(tester);
+            top(tester, INPUT_TEXT)
         }
 
         // input_decorator_test.dart 'Material2 - textAlignVertical position - simple case - align
         // top (default)'.
         #[test]
         fn material2_text_align_vertical_top_puts_the_input_at_the_top() {
-            case(|| {
+            test_widgets(|tester| {
                 // Same as the default case above.
                 assert_eq!(
-                    expanded_input_top(InputDecoration::new().filled(true), TextAlignVertical::TOP),
+                    expanded_input_top(
+                        tester,
+                        InputDecoration::new().filled(true),
+                        TextAlignVertical::TOP
+                    ),
                     12.0
                 );
             });
@@ -18668,10 +18840,11 @@ pub(crate) mod tests {
         // center'.
         #[test]
         fn material2_text_align_vertical_center_centers_the_input() {
-            case(|| {
+            test_widgets(|tester| {
                 // Below the top aligned case.
                 assert_eq!(
                     expanded_input_top(
+                        tester,
                         InputDecoration::new().filled(true),
                         TextAlignVertical::CENTER
                     ),
@@ -18684,10 +18857,11 @@ pub(crate) mod tests {
         // bottom'.
         #[test]
         fn material2_text_align_vertical_bottom_puts_the_input_at_the_bottom() {
-            case(|| {
+            test_widgets(|tester| {
                 // Below the center aligned case.
                 assert_eq!(
                     expanded_input_top(
+                        tester,
                         InputDecoration::new().filled(true),
                         TextAlignVertical::BOTTOM
                     ),
@@ -18700,10 +18874,11 @@ pub(crate) mod tests {
         // as a double'.
         #[test]
         fn material2_text_align_vertical_as_a_double_interpolates() {
-            case(|| {
+            test_widgets(|tester| {
                 // In between the center and bottom aligned cases.
                 assert_eq!(
                     expanded_input_top(
+                        tester,
                         InputDecoration::new().filled(true),
                         TextAlignVertical::new(0.75)
                     ),
@@ -18716,8 +18891,7 @@ pub(crate) mod tests {
         // with density and content padding'.
         #[test]
         fn material2_text_align_vertical_works_with_density_and_content_padding() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let key = GlobalKey::new();
                 let container_key = GlobalKey::new();
                 const TOTAL_HEIGHT: f64 = 100.0;
@@ -18734,7 +18908,7 @@ pub(crate) mod tests {
                 .text_align_vertical(TextAlignVertical::CENTER)
                 .visual_density(visual_density)
                 .child(SizedBox::new().key(key.clone().into()).height(CHILD_HEIGHT))
-                .build(&tester);
+                .build(tester);
                 tester.pump_widget(
                     waft_widgets::Center::new()
                         .child(
@@ -18757,8 +18931,8 @@ pub(crate) mod tests {
                 let child_top = density_dy / 2.0 + content_padding.top + child_margin;
 
                 assert_eq!(
-                    key_rect(&tester, &key).top,
-                    key_rect(&tester, &container_key).top + child_top
+                    key_rect(tester, &key).top,
+                    key_rect(tester, &container_key).top + child_top
                 );
             });
         }
@@ -18773,11 +18947,11 @@ pub(crate) mod tests {
         // align top'.
         #[test]
         fn material2_outline_text_align_vertical_top_leaves_room_for_the_border() {
-            case(|| {
+            test_widgets(|tester| {
                 // Similar to the case without a border, but with a little extra room at
                 // the top to make room for the border.
                 assert_eq!(
-                    expanded_input_top(filled_outline(), TextAlignVertical::TOP),
+                    expanded_input_top(tester, filled_outline(), TextAlignVertical::TOP),
                     24.0
                 );
             });
@@ -18787,10 +18961,10 @@ pub(crate) mod tests {
         // align center (default)'.
         #[test]
         fn material2_outline_text_align_vertical_center_centers_the_input() {
-            case(|| {
+            test_widgets(|tester| {
                 // Below the top aligned case.
                 assert_eq!(
-                    expanded_input_top(filled_outline(), TextAlignVertical::CENTER),
+                    expanded_input_top(tester, filled_outline(), TextAlignVertical::CENTER),
                     290.0
                 );
             });
@@ -18800,10 +18974,10 @@ pub(crate) mod tests {
         // align bottom'.
         #[test]
         fn material2_outline_text_align_vertical_bottom_puts_the_input_at_the_bottom() {
-            case(|| {
+            test_widgets(|tester| {
                 // Below the center aligned case.
                 assert_eq!(
-                    expanded_input_top(filled_outline(), TextAlignVertical::BOTTOM),
+                    expanded_input_top(tester, filled_outline(), TextAlignVertical::BOTTOM),
                     564.0
                 );
             });
@@ -18811,8 +18985,12 @@ pub(crate) mod tests {
 
         /// The input's and the prefix's tops for a tall prefix, under `align`, in an expanded
         /// decorator when `expands`.
-        fn tall_prefix_tops(outline: bool, expands: bool, align: TextAlignVertical) -> (f64, f64) {
-            let mut tester = tester();
+        fn tall_prefix_tops(
+            tester: &mut WidgetTester,
+            outline: bool,
+            expands: bool,
+            align: TextAlignVertical,
+        ) -> (f64, f64) {
             let p_key = GlobalKey::new();
             let mut decoration = InputDecoration::new()
                 .prefix(sized(&p_key, 10.0, 100.0))
@@ -18824,18 +19002,18 @@ pub(crate) mod tests {
                 .expands(expands)
                 .text_align_vertical(align)
                 .child(text_20())
-                .pump(&mut tester);
-            (top(&tester, INPUT_TEXT), key_rect(&tester, &p_key).top)
+                .pump(tester);
+            (top(tester, INPUT_TEXT), key_rect(tester, &p_key).top)
         }
 
         // input_decorator_test.dart 'Material2 - textAlignVertical position - prefix - InputDecorator
         // tall prefix align top'.
         #[test]
         fn material2_tall_prefix_align_top() {
-            case(|| {
+            test_widgets(|tester| {
                 // Same as the default case above.
                 assert_eq!(
-                    tall_prefix_tops(false, false, TextAlignVertical::TOP),
+                    tall_prefix_tops(tester, false, false, TextAlignVertical::TOP),
                     (97.0, 12.0)
                 );
             });
@@ -18845,10 +19023,10 @@ pub(crate) mod tests {
         // tall prefix align center'.
         #[test]
         fn material2_tall_prefix_align_center() {
-            case(|| {
+            test_widgets(|tester| {
                 // Same as the default case above.
                 assert_eq!(
-                    tall_prefix_tops(false, false, TextAlignVertical::CENTER),
+                    tall_prefix_tops(tester, false, false, TextAlignVertical::CENTER),
                     (97.0, 12.0)
                 );
             });
@@ -18858,10 +19036,10 @@ pub(crate) mod tests {
         // tall prefix align bottom'.
         #[test]
         fn material2_tall_prefix_align_bottom() {
-            case(|| {
+            test_widgets(|tester| {
                 // Top of the input + 100 prefix height - overlap
                 assert_eq!(
-                    tall_prefix_tops(false, false, TextAlignVertical::BOTTOM),
+                    tall_prefix_tops(tester, false, false, TextAlignVertical::BOTTOM),
                     (97.0, 12.0)
                 );
             });
@@ -18871,10 +19049,10 @@ pub(crate) mod tests {
         // prefix - InputDecorator tall prefix align center'.
         #[test]
         fn material2_outline_tall_prefix_align_center() {
-            case(|| {
+            test_widgets(|tester| {
                 // In the middle of the expanded InputDecorator.
                 assert_eq!(
-                    tall_prefix_tops(true, true, TextAlignVertical::CENTER),
+                    tall_prefix_tops(tester, true, true, TextAlignVertical::CENTER),
                     (332.5, 247.5)
                 );
             });
@@ -18884,11 +19062,11 @@ pub(crate) mod tests {
         // prefix - InputDecorator tall prefix with border align top'.
         #[test]
         fn material2_outline_tall_prefix_align_top() {
-            case(|| {
+            test_widgets(|tester| {
                 // Above the center example; the prefix is positioned at the top of the input, so
                 // its value is the same as the top aligned test without a prefix.
                 assert_eq!(
-                    tall_prefix_tops(true, true, TextAlignVertical::TOP),
+                    tall_prefix_tops(tester, true, true, TextAlignVertical::TOP),
                     (109.0, 24.0)
                 );
             });
@@ -18898,10 +19076,10 @@ pub(crate) mod tests {
         // prefix - InputDecorator tall prefix with border align bottom'.
         #[test]
         fn material2_outline_tall_prefix_align_bottom() {
-            case(|| {
+            test_widgets(|tester| {
                 // Below the center example.
                 assert_eq!(
-                    tall_prefix_tops(true, true, TextAlignVertical::BOTTOM),
+                    tall_prefix_tops(tester, true, true, TextAlignVertical::BOTTOM),
                     (564.0, 479.0)
                 );
             });
@@ -18911,10 +19089,10 @@ pub(crate) mod tests {
         // prefix - InputDecorator tall prefix with border align double'.
         #[test]
         fn material2_outline_tall_prefix_align_double() {
-            case(|| {
+            test_widgets(|tester| {
                 // Between the top and center examples.
                 let (input_top, prefix_top) =
-                    tall_prefix_tops(true, true, TextAlignVertical::new(0.1));
+                    tall_prefix_tops(tester, true, true, TextAlignVertical::new(0.1));
                 // Waft's `Matrix4` is f32, so a position read through `local_to_global` keeps f32
                 // precision where Dart's is a double.
                 assert_close(input_top, 355.65, 1e-4);
@@ -18923,18 +19101,18 @@ pub(crate) mod tests {
         }
 
         fn filled_with_label() -> InputDecoration {
-            InputDecoration::new().label(label()).filled(true)
+            InputDecoration::new().label_text(LABEL_TEXT).filled(true)
         }
 
         // input_decorator_test.dart 'Material2 - textAlignVertical position - label - align top
         // (default)'.
         #[test]
         fn material2_label_text_align_vertical_top_starts_the_input_lower() {
-            case(|| {
+            test_widgets(|tester| {
                 // The label causes the text to start slightly lower than it would
                 // otherwise.
                 assert_eq!(
-                    expanded_input_top(filled_with_label(), TextAlignVertical::TOP),
+                    expanded_input_top(tester, filled_with_label(), TextAlignVertical::TOP),
                     28.0
                 );
             });
@@ -18943,11 +19121,11 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Material2 - textAlignVertical position - label - align center'.
         #[test]
         fn material2_label_text_align_vertical_center_is_slightly_lower() {
-            case(|| {
+            test_widgets(|tester| {
                 // The label reduces the amount of space available for text, so the
                 // center is slightly lower.
                 assert_eq!(
-                    expanded_input_top(filled_with_label(), TextAlignVertical::CENTER),
+                    expanded_input_top(tester, filled_with_label(), TextAlignVertical::CENTER),
                     298.0
                 );
             });
@@ -18956,11 +19134,11 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Material2 - textAlignVertical position - label - align bottom'.
         #[test]
         fn material2_label_text_align_vertical_bottom_keeps_the_bottom_line() {
-            case(|| {
+            test_widgets(|tester| {
                 // The label reduces the amount of space available for text, but the
                 // bottom line is still in the same place.
                 assert_eq!(
-                    expanded_input_top(filled_with_label(), TextAlignVertical::BOTTOM),
+                    expanded_input_top(tester, filled_with_label(), TextAlignVertical::BOTTOM),
                     568.0
                 );
             });
@@ -18969,26 +19147,27 @@ pub(crate) mod tests {
         /// The decorator's size and the input's top and bottom for `decoration`, with Dart's
         /// border bottom and weight checked alongside.
         fn check_outline_alignment(
+            tester: &mut WidgetTester,
             decoration: InputDecoration,
             size: Size,
             input_top: f64,
             border_weight: f64,
         ) {
-            let mut tester = tester();
-            M2::new(decoration).pump(&mut tester);
-            assert_eq!(decorator_size(&tester), size);
-            assert_eq!(top(&tester, INPUT_TEXT), input_top);
-            assert_eq!(bottom(&tester, INPUT_TEXT), input_top + 16.0);
-            assert_eq!(get_border_bottom(&tester), size.height());
-            assert_eq!(get_border_weight(&tester), border_weight);
+            M2::new(decoration).pump(tester);
+            assert_eq!(decorator_size(tester), size);
+            assert_eq!(top(tester, INPUT_TEXT), input_top);
+            assert_eq!(bottom(tester, INPUT_TEXT), input_top + 16.0);
+            assert_eq!(get_border_bottom(tester), size.height());
+            assert_eq!(get_border_weight(tester), border_weight);
         }
 
         // input_decorator_test.dart 'Material2 - OutlineInputBorder - default alignment - Centers
         // when border'.
         #[test]
         fn material2_outline_centers_the_input() {
-            case(|| {
+            test_widgets(|tester| {
                 check_outline_alignment(
+                    tester,
                     InputDecoration::new().border(OutlineInputBorder::new()),
                     Size::new(800.0, 56.0),
                     20.0,
@@ -19001,10 +19180,11 @@ pub(crate) mod tests {
         // when border and label'.
         #[test]
         fn material2_outline_with_a_label_centers_the_input() {
-            case(|| {
+            test_widgets(|tester| {
                 check_outline_alignment(
+                    tester,
                     InputDecoration::new()
-                        .label(label())
+                        .label_text(LABEL_TEXT)
                         .border(OutlineInputBorder::new()),
                     Size::new(800.0, 56.0),
                     20.0,
@@ -19017,8 +19197,9 @@ pub(crate) mod tests {
         // when border and contentPadding'.
         #[test]
         fn material2_outline_with_content_padding_centers_the_input() {
-            case(|| {
+            test_widgets(|tester| {
                 check_outline_alignment(
+                    tester,
                     InputDecoration::new()
                         .border(OutlineInputBorder::new())
                         .content_padding(EdgeInsetsGeometry::from(EdgeInsets::from_ltrb(
@@ -19035,10 +19216,11 @@ pub(crate) mod tests {
         // when border and contentPadding and label'.
         #[test]
         fn material2_outline_with_content_padding_and_label_centers_the_input() {
-            case(|| {
+            test_widgets(|tester| {
                 check_outline_alignment(
+                    tester,
                     InputDecoration::new()
-                        .label(label())
+                        .label_text(LABEL_TEXT)
                         .border(OutlineInputBorder::new())
                         .content_padding(EdgeInsetsGeometry::from(EdgeInsets::from_ltrb(
                             12.0, 14.0, 8.0, 14.0,
@@ -19054,10 +19236,11 @@ pub(crate) mod tests {
         // when border and lopsided contentPadding and label'.
         #[test]
         fn material2_outline_with_lopsided_content_padding_and_label_centers_the_input() {
-            case(|| {
+            test_widgets(|tester| {
                 check_outline_alignment(
+                    tester,
                     InputDecoration::new()
-                        .label(label())
+                        .label_text(LABEL_TEXT)
                         .border(OutlineInputBorder::new())
                         .content_padding(EdgeInsetsGeometry::from(EdgeInsets::from_ltrb(
                             12.0, 104.0, 8.0, 0.0,
@@ -19073,21 +19256,20 @@ pub(crate) mod tests {
         // aligns horizontally with text'.
         #[test]
         fn material2_outline_label_aligns_horizontally_with_the_text() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 M2::new(
                     InputDecoration::new()
                         .prefix_icon(Icon::new(Some(Icons::ac_unit())))
-                        .label(label())
+                        .label_text(LABEL_TEXT)
                         .border(OutlineInputBorder::new()),
                 )
                 .is_focused(true)
-                .pump(&mut tester);
+                .pump(tester);
 
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 56.0));
-                assert_eq!(text_rect(&tester, LABEL_TEXT).left, 48.0);
-                assert_eq!(text_rect(&tester, INPUT_TEXT).left, 48.0);
-                assert_eq!(get_border_weight(&tester), 2.0);
+                assert_eq!(decorator_size(tester), Size::new(800.0, 56.0));
+                assert_eq!(text_rect(tester, LABEL_TEXT).left, 48.0);
+                assert_eq!(text_rect(tester, INPUT_TEXT).left, 48.0);
+                assert_eq!(get_border_weight(tester), 2.0);
             });
         }
 
@@ -19095,28 +19277,31 @@ pub(crate) mod tests {
         // label for filled input decoration is horizontally aligned with text'.
         #[test]
         fn material2_filled_floating_label_aligns_horizontally_with_the_text() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 M2::new(
                     InputDecoration::new()
                         .prefix_icon(Icon::new(Some(Icons::ac_unit())))
-                        .label(label())
+                        .label_text(LABEL_TEXT)
                         .filled(true),
                 )
                 .is_focused(true)
-                .pump(&mut tester);
+                .pump(tester);
 
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 56.0));
-                assert_eq!(text_rect(&tester, LABEL_TEXT).left, 48.0);
-                assert_eq!(text_rect(&tester, INPUT_TEXT).left, 48.0);
-                assert_eq!(get_border_weight(&tester), 2.0);
+                assert_eq!(decorator_size(tester), Size::new(800.0, 56.0));
+                assert_eq!(text_rect(tester, LABEL_TEXT).left, 48.0);
+                assert_eq!(text_rect(tester, INPUT_TEXT).left, 48.0);
+                assert_eq!(get_border_weight(tester), 2.0);
             });
         }
 
         /// The input's top and bottom in an expanded outlined decorator with `padding`, aligned by
         /// `align`: the '3 point interpolation alignment' cases.
-        fn check_three_point(align: TextAlignVertical, padding: EdgeInsets, input_top: f64) {
-            let mut tester = tester();
+        fn check_three_point(
+            tester: &mut WidgetTester,
+            align: TextAlignVertical,
+            padding: EdgeInsets,
+            input_top: f64,
+        ) {
             M2::new(
                 InputDecoration::new()
                     .border(OutlineInputBorder::new())
@@ -19124,22 +19309,23 @@ pub(crate) mod tests {
             )
             .expands(true)
             .text_align_vertical(align)
-            .pump(&mut tester);
+            .pump(tester);
 
-            assert_eq!(decorator_size(&tester), Size::new(800.0, 600.0));
-            assert_eq!(top(&tester, INPUT_TEXT), input_top);
-            assert_eq!(bottom(&tester, INPUT_TEXT), input_top + 16.0);
-            assert_eq!(get_border_bottom(&tester), 600.0);
-            assert_eq!(get_border_weight(&tester), 1.0);
+            assert_eq!(decorator_size(tester), Size::new(800.0, 600.0));
+            assert_eq!(top(tester, INPUT_TEXT), input_top);
+            assert_eq!(bottom(tester, INPUT_TEXT), input_top + 16.0);
+            assert_eq!(get_border_bottom(tester), 600.0);
+            assert_eq!(get_border_weight(tester), 1.0);
         }
 
         // input_decorator_test.dart 'Material2 - OutlineInputBorder - 3 point interpolation
         // alignment - top align includes padding'.
         #[test]
         fn material2_three_point_top_align_includes_padding() {
-            case(|| {
+            test_widgets(|tester| {
                 // Aligned to the top including the 24px padding.
                 check_three_point(
+                    tester,
                     TextAlignVertical::TOP,
                     EdgeInsets::from_ltrb(12.0, 24.0, 8.0, 2.0),
                     24.0,
@@ -19151,9 +19337,10 @@ pub(crate) mod tests {
         // alignment - center align ignores padding'.
         #[test]
         fn material2_three_point_center_align_ignores_padding() {
-            case(|| {
+            test_widgets(|tester| {
                 // Baseline is on the center of the 600px high input.
                 check_three_point(
+                    tester,
                     TextAlignVertical::CENTER,
                     EdgeInsets::from_ltrb(12.0, 24.0, 8.0, 2.0),
                     292.0,
@@ -19165,9 +19352,10 @@ pub(crate) mod tests {
         // alignment - bottom align includes padding'.
         #[test]
         fn material2_three_point_bottom_align_includes_padding() {
-            case(|| {
+            test_widgets(|tester| {
                 // Includes bottom padding of 2px.
                 check_three_point(
+                    tester,
                     TextAlignVertical::BOTTOM,
                     EdgeInsets::from_ltrb(12.0, 24.0, 8.0, 2.0),
                     582.0,
@@ -19179,9 +19367,10 @@ pub(crate) mod tests {
         // alignment - padding exceeds middle keeps top at middle'.
         #[test]
         fn material2_three_point_padding_beyond_the_middle_keeps_the_top_at_the_middle() {
-            case(|| {
+            test_widgets(|tester| {
                 // Same position as the center example above.
                 check_three_point(
+                    tester,
                     TextAlignVertical::TOP,
                     EdgeInsets::from_ltrb(12.0, 504.0, 8.0, 0.0),
                     292.0,
@@ -19190,20 +19379,23 @@ pub(crate) mod tests {
         }
 
         /// The decorator's size and the counter's rect for a filled decoration with a counter.
-        fn counter_layout(text_direction: TextDirection, is_dense: bool) -> (Size, Rect, Rect) {
-            let mut tester = tester();
+        fn counter_layout(
+            tester: &mut WidgetTester,
+            text_direction: TextDirection,
+            is_dense: bool,
+        ) -> (Size, Rect, Rect) {
             M2::new(
                 InputDecoration::new()
-                    .counter(ahem_supporting("test"))
+                    .counter_text("test")
                     .filled(true)
                     .is_dense(is_dense),
             )
             .text_direction(text_direction)
-            .pump(&mut tester);
+            .pump(tester);
             (
-                decorator_size(&tester),
-                get_decorator_rect(&tester),
-                text_rect(&tester, "test"),
+                decorator_size(tester),
+                get_decorator_rect(tester),
+                text_rect(tester, "test"),
             )
         }
 
@@ -19211,10 +19403,10 @@ pub(crate) mod tests {
         // dense'.
         #[test]
         fn material2_counter_right_margin_ltr_not_dense() {
-            case(|| {
+            test_widgets(|tester| {
                 // Margin for text decoration is 12 when filled
                 // (dx) - 12 = (text offset)x.
-                let (size, decorator, counter) = counter_layout(TextDirection::Ltr, false);
+                let (size, decorator, counter) = counter_layout(tester, TextDirection::Ltr, false);
                 assert_eq!(size, Size::new(800.0, 68.0));
                 assert_eq!(counter.right, decorator.right - 12.0);
             });
@@ -19224,10 +19416,10 @@ pub(crate) mod tests {
         // dense'.
         #[test]
         fn material2_counter_right_margin_rtl_not_dense() {
-            case(|| {
+            test_widgets(|tester| {
                 // Margin for text decoration is 12 when filled and top left offset is (0, 0)
                 // 0 + 12 = 12.
-                let (size, _, counter) = counter_layout(TextDirection::Rtl, false);
+                let (size, _, counter) = counter_layout(tester, TextDirection::Rtl, false);
                 assert_eq!(size, Size::new(800.0, 68.0));
                 assert_eq!(counter.left, 12.0);
             });
@@ -19237,8 +19429,8 @@ pub(crate) mod tests {
         // dense'.
         #[test]
         fn material2_counter_right_margin_ltr_dense() {
-            case(|| {
-                let (size, decorator, counter) = counter_layout(TextDirection::Ltr, true);
+            test_widgets(|tester| {
+                let (size, decorator, counter) = counter_layout(tester, TextDirection::Ltr, true);
                 assert_eq!(size, Size::new(800.0, 52.0));
                 assert_eq!(counter.right, decorator.right - 12.0);
             });
@@ -19247,8 +19439,8 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Material2 - counter text has correct right margin - RTL, dense'.
         #[test]
         fn material2_counter_right_margin_rtl_dense() {
-            case(|| {
-                let (size, _, counter) = counter_layout(TextDirection::Rtl, true);
+            test_widgets(|tester| {
+                let (size, _, counter) = counter_layout(tester, TextDirection::Rtl, true);
                 assert_eq!(size, Size::new(800.0, 52.0));
                 assert_eq!(counter.left, 12.0);
             });
@@ -19257,136 +19449,139 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Material2 - InputDecorator error/helper/counter RTL layout'.
         #[test]
         fn material2_error_helper_and_counter_rtl_layout() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 M2::new(
                     InputDecoration::new()
-                        .label(label())
-                        .helper(ahem_supporting(HELPER_TEXT))
-                        .counter(ahem_supporting(COUNTER_TEXT))
+                        .label_text(LABEL_TEXT)
+                        .helper_text(HELPER_TEXT)
+                        .counter_text(COUNTER_TEXT)
                         .filled(true),
                 )
                 .text_direction(TextDirection::Rtl)
-                .pump(&mut tester);
+                .pump(tester);
 
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 76.0));
-                assert_eq!(top(&tester, INPUT_TEXT), 28.0);
-                assert_eq!(bottom(&tester, INPUT_TEXT), 44.0);
-                assert_eq!(top(&tester, LABEL_TEXT), 12.0);
-                assert_eq!(bottom(&tester, LABEL_TEXT), 24.0);
-                assert_eq!(get_border_bottom(&tester), 56.0);
-                assert_eq!(get_border_weight(&tester), 1.0);
+                assert_eq!(decorator_size(tester), Size::new(800.0, 76.0));
+                assert_eq!(top(tester, INPUT_TEXT), 28.0);
+                assert_eq!(bottom(tester, INPUT_TEXT), 44.0);
+                assert_eq!(top(tester, LABEL_TEXT), 12.0);
+                assert_eq!(bottom(tester, LABEL_TEXT), 24.0);
+                assert_eq!(get_border_bottom(tester), 56.0);
+                assert_eq!(get_border_weight(tester), 1.0);
                 assert_eq!(
-                    text_rect(&tester, COUNTER_TEXT).top_left(),
+                    text_rect(tester, COUNTER_TEXT).top_left(),
                     Offset::new(12.0, 64.0)
                 );
                 assert_eq!(
-                    text_rect(&tester, HELPER_TEXT).top_right(),
+                    text_rect(tester, HELPER_TEXT).top_right(),
                     Offset::new(788.0, 64.0)
                 );
 
                 // If both error and helper are specified, show the error
                 M2::new(
                     InputDecoration::new()
-                        .label(label())
-                        .helper(ahem_supporting(HELPER_TEXT))
-                        .error(error(ERROR_TEXT))
-                        .counter(ahem_supporting(COUNTER_TEXT))
+                        .label_text(LABEL_TEXT)
+                        .helper_text(HELPER_TEXT)
+                        .error_text(ERROR_TEXT)
+                        .counter_text(COUNTER_TEXT)
                         .filled(true),
                 )
                 .text_direction(TextDirection::Rtl)
-                .pump(&mut tester);
+                .pump(tester);
                 tester.pump_and_settle();
                 assert_eq!(
-                    text_rect(&tester, COUNTER_TEXT).top_left(),
+                    text_rect(tester, COUNTER_TEXT).top_left(),
                     Offset::new(12.0, 64.0)
                 );
                 assert_eq!(
-                    text_rect(&tester, ERROR_TEXT).top_right(),
+                    text_rect(tester, ERROR_TEXT).top_right(),
                     Offset::new(788.0, 64.0)
                 );
-                assert!(tester.find_ahem_text(HELPER_TEXT).is_empty());
+                assert!(tester.find_text(HELPER_TEXT).is_empty());
             });
         }
 
         // input_decorator_test.dart 'Material2 - InputDecorator prefix/suffix RTL'.
         #[test]
         fn material2_prefix_and_suffix_rtl() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 M2::new(
                     InputDecoration::new()
-                        .prefix(affix("p"))
-                        .suffix(affix("s"))
+                        .prefix_text("p")
+                        .suffix_text("s")
                         .filled(true),
                 )
                 .text_direction(TextDirection::Rtl)
-                .pump(&mut tester);
+                .pump(tester);
 
                 assert_eq!(
-                    decorator_size(&tester),
+                    decorator_size(tester),
                     Size::new(800.0, K_MIN_INTERACTIVE_DIMENSION)
                 ); // 40 bumped up to minimum.
-                assert_eq!(text_rect(&tester, INPUT_TEXT).height(), 16.0);
-                assert_eq!(text_rect(&tester, "p").height(), 16.0);
-                assert_eq!(text_rect(&tester, "s").height(), 16.0);
-                assert_eq!(top(&tester, INPUT_TEXT), 16.0);
-                assert_eq!(top(&tester, "p"), 16.0);
-                assert_eq!(top(&tester, "s"), 16.0);
+                assert_eq!(text_rect(tester, INPUT_TEXT).height(), 16.0);
+                assert_eq!(text_rect(tester, "p").height(), 16.0);
+                assert_eq!(text_rect(tester, "s").height(), 16.0);
+                assert_eq!(top(tester, INPUT_TEXT), 16.0);
+                assert_eq!(top(tester, "p"), 16.0);
+                assert_eq!(top(tester, "s"), 16.0);
 
                 // layout is a row: [s text p]
-                assert_eq!(text_rect(&tester, "s").left, 12.0);
-                assert!(text_rect(&tester, "s").right <= text_rect(&tester, INPUT_TEXT).left);
-                assert!(text_rect(&tester, INPUT_TEXT).right <= text_rect(&tester, "p").left);
+                assert_eq!(text_rect(tester, "s").left, 12.0);
+                assert!(text_rect(tester, "s").right <= text_rect(tester, INPUT_TEXT).left);
+                assert!(text_rect(tester, INPUT_TEXT).right <= text_rect(tester, "p").left);
             });
         }
 
         // input_decorator_test.dart 'Material2 - InputDecorator contentPadding RTL layout'.
         #[test]
         fn material2_content_padding_rtl_layout() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let decoration = || {
                     InputDecoration::new()
                         .content_padding(EdgeInsetsGeometry::from(EdgeInsetsDirectional::only(
                             40.0, 12.0, 0.0, 12.0,
                         )))
-                        .label(label())
-                        .hint(m2_hint())
+                        .label_text(LABEL_TEXT)
+                        .hint_text(HINT_TEXT)
                         .filled(true)
                 };
                 // LTR: content left edge is contentPadding.start: 40.0
-                M2::new(decoration()).pump(&mut tester);
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 56.0));
-                assert_eq!(text_rect(&tester, INPUT_TEXT).left, 40.0);
-                assert_eq!(text_rect(&tester, LABEL_TEXT).left, 40.0);
-                assert_eq!(text_rect(&tester, HINT_TEXT).left, 40.0);
+                M2::new(decoration()).pump(tester);
+                assert_eq!(decorator_size(tester), Size::new(800.0, 56.0));
+                assert_eq!(text_rect(tester, INPUT_TEXT).left, 40.0);
+                assert_eq!(text_rect(tester, LABEL_TEXT).left, 40.0);
+                assert_eq!(text_rect(tester, HINT_TEXT).left, 40.0);
 
                 // RTL: content right edge is 800 - contentPadding.start: 760.0.
                 M2::new(decoration())
                     .is_focused(true) // label is floating, still adjusted for contentPadding
                     .text_direction(TextDirection::Rtl)
-                    .pump(&mut tester);
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 56.0));
-                assert_eq!(text_rect(&tester, INPUT_TEXT).right, 760.0);
-                assert_eq!(text_rect(&tester, LABEL_TEXT).right, 760.0);
-                assert_eq!(text_rect(&tester, HINT_TEXT).right, 760.0);
+                    .pump(tester);
+                assert_eq!(decorator_size(tester), Size::new(800.0, 56.0));
+                assert_eq!(text_rect(tester, INPUT_TEXT).right, 760.0);
+                assert_eq!(text_rect(tester, LABEL_TEXT).right, 760.0);
+                assert_eq!(text_rect(tester, HINT_TEXT).right, 760.0);
             });
         }
 
-        fn check_input_width(decoration: InputDecoration, height: f64, left: f64, right: f64) {
-            let mut tester = tester();
-            M2::new(decoration).pump(&mut tester);
-            assert_eq!(decorator_size(&tester), Size::new(800.0, height));
-            assert_eq!(text_rect(&tester, INPUT_TEXT).left, left);
-            assert_eq!(text_rect(&tester, INPUT_TEXT).right, right);
+        fn check_input_width(
+            tester: &mut WidgetTester,
+            decoration: InputDecoration,
+            height: f64,
+            left: f64,
+            right: f64,
+        ) {
+            M2::new(decoration).pump(tester);
+            assert_eq!(decorator_size(tester), Size::new(800.0, height));
+            assert_eq!(text_rect(tester, INPUT_TEXT).left, left);
+            assert_eq!(text_rect(tester, INPUT_TEXT).right, right);
         }
 
         // input_decorator_test.dart 'Material2 - inputText width - outline textField'.
         #[test]
         fn material2_outline_input_text_width() {
-            case(|| {
+            test_widgets(|tester| {
                 check_input_width(
+                    tester,
                     InputDecoration::new().border(OutlineInputBorder::new()),
                     56.0,
                     12.0,
@@ -19399,8 +19594,9 @@ pub(crate) mod tests {
         // suffix icons'.
         #[test]
         fn material2_outline_input_text_width_with_prefix_and_suffix_icons() {
-            case(|| {
+            test_widgets(|tester| {
                 check_input_width(
+                    tester,
                     InputDecoration::new()
                         .border(OutlineInputBorder::new())
                         .prefix_icon(Icon::new(Some(Icons::visibility())))
@@ -19415,8 +19611,14 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Material2 - inputText width - filled textField'.
         #[test]
         fn material2_filled_input_text_width() {
-            case(|| {
-                check_input_width(InputDecoration::new().filled(true), 48.0, 12.0, 788.0);
+            test_widgets(|tester| {
+                check_input_width(
+                    tester,
+                    InputDecoration::new().filled(true),
+                    48.0,
+                    12.0,
+                    788.0,
+                );
             });
         }
 
@@ -19424,8 +19626,9 @@ pub(crate) mod tests {
         // suffix icons'.
         #[test]
         fn material2_filled_input_text_width_with_prefix_and_suffix_icons() {
-            case(|| {
+            test_widgets(|tester| {
                 check_input_width(
+                    tester,
                     InputDecoration::new()
                         .filled(true)
                         .prefix_icon(Icon::new(Some(Icons::visibility())))
@@ -19440,19 +19643,19 @@ pub(crate) mod tests {
         /// The label's rect in Dart's `buildInputDecoratorWithFloatingLabel` of the Material 2
         /// 'floatingLabelAlignment' group.
         fn floating_label_rect(
+            tester: &mut WidgetTester,
             text_direction: TextDirection,
             has_icon: bool,
             alignment: FloatingLabelAlignment,
             border_is_outline: bool,
         ) -> Rect {
-            let mut tester = tester();
             let mut decoration = InputDecoration::new()
                 .content_padding(EdgeInsetsGeometry::from(EdgeInsetsDirectional::only(
                     40.0, 12.0, 0.0, 12.0,
                 )))
                 .floating_label_alignment(alignment)
-                .label(label())
-                .hint(m2_hint())
+                .label_text(LABEL_TEXT)
+                .hint_text(HINT_TEXT)
                 .filled(true);
             if has_icon {
                 decoration = decoration.icon(Icon::new(Some(Icons::insert_link())));
@@ -19462,18 +19665,19 @@ pub(crate) mod tests {
             }
             M2::new(decoration)
                 .text_direction(text_direction)
-                .pump(&mut tester);
-            get_label_rect(&tester)
+                .pump(tester);
+            get_label_rect(tester)
         }
 
         // input_decorator_test.dart 'Material2 - floatingLabelAlignment - LTR with icon aligned -
         // start'.
         #[test]
         fn material2_floating_label_starts_after_the_icon_ltr() {
-            case(|| {
+            test_widgets(|tester| {
                 for outline in [false, true] {
                     // icon (40) + contentPadding (40)
                     let rect = floating_label_rect(
+                        tester,
                         TextDirection::Ltr,
                         true,
                         FloatingLabelAlignment::START,
@@ -19488,10 +19692,11 @@ pub(crate) mod tests {
         // center'.
         #[test]
         fn material2_floating_label_centers_beside_the_icon_ltr() {
-            case(|| {
+            test_widgets(|tester| {
                 for outline in [false, true] {
                     // icon (40) + (decorator (800) - icon (40)) / 2
                     let rect = floating_label_rect(
+                        tester,
                         TextDirection::Ltr,
                         true,
                         FloatingLabelAlignment::CENTER,
@@ -19506,10 +19711,11 @@ pub(crate) mod tests {
         // start'.
         #[test]
         fn material2_floating_label_starts_at_the_padding_ltr() {
-            case(|| {
+            test_widgets(|tester| {
                 for outline in [false, true] {
                     // contentPadding (40)
                     let rect = floating_label_rect(
+                        tester,
                         TextDirection::Ltr,
                         false,
                         FloatingLabelAlignment::START,
@@ -19524,10 +19730,11 @@ pub(crate) mod tests {
         // center'.
         #[test]
         fn material2_floating_label_centers_in_the_decorator_ltr() {
-            case(|| {
+            test_widgets(|tester| {
                 for outline in [false, true] {
                     // decorator (800) / 2
                     let rect = floating_label_rect(
+                        tester,
                         TextDirection::Ltr,
                         false,
                         FloatingLabelAlignment::CENTER,
@@ -19542,10 +19749,11 @@ pub(crate) mod tests {
         // start'.
         #[test]
         fn material2_floating_label_starts_after_the_icon_rtl() {
-            case(|| {
+            test_widgets(|tester| {
                 for outline in [false, true] {
                     // decorator (800) - icon (40) - contentPadding (40)
                     let rect = floating_label_rect(
+                        tester,
                         TextDirection::Rtl,
                         true,
                         FloatingLabelAlignment::START,
@@ -19560,10 +19768,11 @@ pub(crate) mod tests {
         // center'.
         #[test]
         fn material2_floating_label_centers_beside_the_icon_rtl() {
-            case(|| {
+            test_widgets(|tester| {
                 for outline in [false, true] {
                     // (decorator (800) / icon (40)) / 2
                     let rect = floating_label_rect(
+                        tester,
                         TextDirection::Rtl,
                         true,
                         FloatingLabelAlignment::CENTER,
@@ -19578,10 +19787,11 @@ pub(crate) mod tests {
         // start'.
         #[test]
         fn material2_floating_label_starts_at_the_padding_rtl() {
-            case(|| {
+            test_widgets(|tester| {
                 for outline in [false, true] {
                     // decorator (800) - contentPadding (40)
                     let rect = floating_label_rect(
+                        tester,
                         TextDirection::Rtl,
                         false,
                         FloatingLabelAlignment::START,
@@ -19596,10 +19806,11 @@ pub(crate) mod tests {
         // center'.
         #[test]
         fn material2_floating_label_centers_in_the_decorator_rtl() {
-            case(|| {
+            test_widgets(|tester| {
                 for outline in [false, true] {
                     // decorator (800) / 2
                     let rect = floating_label_rect(
+                        tester,
                         TextDirection::Rtl,
                         false,
                         FloatingLabelAlignment::CENTER,
@@ -19613,55 +19824,53 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Material2 - InputDecorator prefix/suffix dense layout'.
         #[test]
         fn material2_prefix_and_suffix_dense_layout() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 M2::new(
                     InputDecoration::new()
                         .is_dense(true)
-                        .prefix(affix("p"))
-                        .suffix(affix("s"))
+                        .prefix_text("p")
+                        .suffix_text("s")
                         .filled(true),
                 )
                 .is_focused(true)
-                .pump(&mut tester);
+                .pump(tester);
 
                 // The only difference from normal layout for this case is that the
                 // padding above and below the prefix, input text, suffix, is 8 instead of 12.
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 32.0));
-                assert_eq!(text_rect(&tester, INPUT_TEXT).height(), 16.0);
-                assert_eq!(text_rect(&tester, "p").height(), 16.0);
-                assert_eq!(text_rect(&tester, "s").height(), 16.0);
-                assert_eq!(top(&tester, INPUT_TEXT), 8.0);
-                assert_eq!(top(&tester, "p"), 8.0);
-                assert_eq!(text_rect(&tester, "p").left, 12.0);
-                assert_eq!(top(&tester, "s"), 8.0);
-                assert_eq!(text_rect(&tester, "s").right, 788.0);
+                assert_eq!(decorator_size(tester), Size::new(800.0, 32.0));
+                assert_eq!(text_rect(tester, INPUT_TEXT).height(), 16.0);
+                assert_eq!(text_rect(tester, "p").height(), 16.0);
+                assert_eq!(text_rect(tester, "s").height(), 16.0);
+                assert_eq!(top(tester, INPUT_TEXT), 8.0);
+                assert_eq!(top(tester, "p"), 8.0);
+                assert_eq!(text_rect(tester, "p").left, 12.0);
+                assert_eq!(top(tester, "s"), 8.0);
+                assert_eq!(text_rect(tester, "s").right, 788.0);
 
                 // layout is a row: [p text s]
-                assert_eq!(text_rect(&tester, "p").left, 12.0);
-                assert!(text_rect(&tester, "p").right <= text_rect(&tester, INPUT_TEXT).left);
-                assert!(text_rect(&tester, INPUT_TEXT).right <= text_rect(&tester, "s").left);
+                assert_eq!(text_rect(tester, "p").left, 12.0);
+                assert!(text_rect(tester, "p").right <= text_rect(tester, INPUT_TEXT).left);
+                assert!(text_rect(tester, INPUT_TEXT).right <= text_rect(tester, "s").left);
 
-                assert_eq!(get_border_bottom(&tester), 32.0);
-                assert_eq!(get_border_weight(&tester), 2.0);
+                assert_eq!(get_border_bottom(tester), 32.0);
+                assert_eq!(get_border_weight(tester), 2.0);
             });
         }
 
         // input_decorator_test.dart 'Material2 - InputDecorator with empty InputDecoration'.
         #[test]
         fn material2_empty_decoration_is_bumped_up_to_the_minimum_height() {
-            case(|| {
-                let mut tester = tester();
-                M2::new(InputDecoration::new()).pump(&mut tester);
+            test_widgets(|tester| {
+                M2::new(InputDecoration::new()).pump(tester);
 
                 assert_eq!(
-                    decorator_size(&tester),
+                    decorator_size(tester),
                     Size::new(800.0, K_MIN_INTERACTIVE_DIMENSION)
                 ); // 40 bumped up to minimum.
-                assert_eq!(text_rect(&tester, INPUT_TEXT).height(), 16.0);
-                assert_eq!(top(&tester, INPUT_TEXT), 16.0);
-                assert_eq!(get_border_bottom(&tester), K_MIN_INTERACTIVE_DIMENSION); // 40 bumped up to minimum.
-                assert_eq!(get_border_weight(&tester), 1.0);
+                assert_eq!(text_rect(tester, INPUT_TEXT).height(), 16.0);
+                assert_eq!(top(tester, INPUT_TEXT), 16.0);
+                assert_eq!(get_border_bottom(tester), K_MIN_INTERACTIVE_DIMENSION); // 40 bumped up to minimum.
+                assert_eq!(get_border_weight(tester), 1.0);
             });
         }
 
@@ -19669,157 +19878,152 @@ pub(crate) mod tests {
         // kMinInteractiveDimension'.
         #[test]
         fn material2_content_padding_smaller_than_the_minimum_interactive_dimension() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const VERTICAL_PADDING: f64 = 1.0;
                 M2::new(
                     InputDecoration::new()
-                        .hint(m2_hint())
+                        .hint_text(HINT_TEXT)
                         .content_padding(EdgeInsetsGeometry::from(EdgeInsets::symmetric(
                             VERTICAL_PADDING,
                             0.0,
                         )))
                         .is_dense(true),
                 )
-                .pump(&mut tester);
+                .pump(tester);
 
                 // The overall height is 18dps. This is shorter than
                 // kMinInteractiveDimension, but because isDense is true, the minimum is
                 // ignored.
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 18.0));
-                assert_eq!(text_rect(&tester, INPUT_TEXT).height(), 16.0);
-                assert_eq!(top(&tester, INPUT_TEXT), 1.0);
-                assert_eq!(get_opacity(&tester, HINT_TEXT), 0.0);
-                assert_eq!(get_border_weight(&tester), 1.0);
+                assert_eq!(decorator_size(tester), Size::new(800.0, 18.0));
+                assert_eq!(text_rect(tester, INPUT_TEXT).height(), 16.0);
+                assert_eq!(top(tester, INPUT_TEXT), 1.0);
+                assert_eq!(get_opacity(tester, HINT_TEXT), 0.0);
+                assert_eq!(get_border_weight(tester), 1.0);
 
                 // InputDecoration.collapsed does not support contentPadding
-                M2::new(InputDecoration::collapsed(None).hint(m2_hint())).pump(&mut tester);
+                M2::new(InputDecoration::collapsed(None).hint_text(HINT_TEXT)).pump(tester);
 
                 // The overall height is 16dps. This is shorter than
                 // kMinInteractiveDimension, but because isCollapsed is true, the minimum is
                 // ignored. There is no padding at all, because isCollapsed doesn't support
                 // contentPadding.
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 16.0));
-                assert_eq!(text_rect(&tester, INPUT_TEXT).height(), 16.0);
-                assert_eq!(top(&tester, INPUT_TEXT), 0.0);
-                assert_eq!(get_opacity(&tester, HINT_TEXT), 0.0);
-                assert_eq!(get_border_weight(&tester), 1.0);
+                assert_eq!(decorator_size(tester), Size::new(800.0, 16.0));
+                assert_eq!(text_rect(tester, INPUT_TEXT).height(), 16.0);
+                assert_eq!(top(tester, INPUT_TEXT), 0.0);
+                assert_eq!(get_opacity(tester, HINT_TEXT), 0.0);
+                assert_eq!(get_border_weight(tester), 1.0);
 
-                M2::new(InputDecoration::new().hint(m2_hint()).content_padding(
+                M2::new(InputDecoration::new().hint_text(HINT_TEXT).content_padding(
                     EdgeInsetsGeometry::from(EdgeInsets::symmetric(VERTICAL_PADDING, 0.0)),
                 ))
-                .pump(&mut tester);
+                .pump(tester);
 
                 // The requested overall height is 18dps, however the minimum height is
                 // kMinInteractiveDimension because neither isDense or isCollapsed are true.
                 assert_eq!(
-                    decorator_size(&tester),
+                    decorator_size(tester),
                     Size::new(800.0, K_MIN_INTERACTIVE_DIMENSION)
                 );
-                assert_eq!(text_rect(&tester, INPUT_TEXT).height(), 16.0);
-                assert_eq!(top(&tester, INPUT_TEXT), 16.0);
-                assert_eq!(get_opacity(&tester, HINT_TEXT), 0.0);
-                assert_eq!(get_border_weight(&tester), 0.0);
+                assert_eq!(text_rect(tester, INPUT_TEXT).height(), 16.0);
+                assert_eq!(top(tester, INPUT_TEXT), 16.0);
+                assert_eq!(get_opacity(tester, HINT_TEXT), 0.0);
+                assert_eq!(get_border_weight(tester), 0.0);
             });
         }
 
         // input_decorator_test.dart 'Material2 - InputDecorator.collapsed'.
         #[test]
         fn material2_collapsed_decorator_has_no_minimum_height() {
-            case(|| {
-                let mut tester = tester();
-                M2::new(InputDecoration::collapsed(None).hint(m2_hint())).pump(&mut tester);
+            test_widgets(|tester| {
+                M2::new(InputDecoration::collapsed(None).hint_text(HINT_TEXT)).pump(tester);
 
                 // Overall height for this InputDecorator is 16dps. There is no minimum
                 // height when InputDecoration.collapsed is used.
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 16.0));
-                assert_eq!(text_rect(&tester, INPUT_TEXT).height(), 16.0);
-                assert_eq!(top(&tester, INPUT_TEXT), 0.0);
-                assert_eq!(get_opacity(&tester, HINT_TEXT), 0.0);
-                assert_eq!(get_border_weight(&tester), 0.0);
+                assert_eq!(decorator_size(tester), Size::new(800.0, 16.0));
+                assert_eq!(text_rect(tester, INPUT_TEXT).height(), 16.0);
+                assert_eq!(top(tester, INPUT_TEXT), 0.0);
+                assert_eq!(get_opacity(tester, HINT_TEXT), 0.0);
+                assert_eq!(get_border_weight(tester), 0.0);
 
                 // The hint should appear
-                M2::new(InputDecoration::collapsed(None).hint(m2_hint()))
+                M2::new(InputDecoration::collapsed(None).hint_text(HINT_TEXT))
                     .is_empty(true)
                     .is_focused(true)
-                    .pump(&mut tester);
+                    .pump(tester);
                 tester.pump_and_settle();
 
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 16.0));
-                assert_eq!(text_rect(&tester, INPUT_TEXT).height(), 16.0);
-                assert_eq!(top(&tester, INPUT_TEXT), 0.0);
-                assert_eq!(text_rect(&tester, HINT_TEXT).height(), 16.0);
-                assert_eq!(top(&tester, HINT_TEXT), 0.0);
-                assert_eq!(get_border_weight(&tester), 0.0);
+                assert_eq!(decorator_size(tester), Size::new(800.0, 16.0));
+                assert_eq!(text_rect(tester, INPUT_TEXT).height(), 16.0);
+                assert_eq!(top(tester, INPUT_TEXT), 0.0);
+                assert_eq!(text_rect(tester, HINT_TEXT).height(), 16.0);
+                assert_eq!(top(tester, HINT_TEXT), 0.0);
+                assert_eq!(get_border_weight(tester), 0.0);
             });
         }
 
-        // input_decorator_test.dart 'Material2 - InputDecorator with baseStyle'. The hint stand-in
-        // has the hint style's metrics, which the base style gives.
+        // input_decorator_test.dart 'Material2 - InputDecorator with baseStyle'.
         #[test]
         fn material2_decorator_with_base_style() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 // Setting the baseStyle of the InputDecoration and the style of the input
                 // text child to a smaller font reduces the InputDecoration's vertical size.
                 let style = TextStyle::new().font_size(10.0);
                 M2::new(
                     InputDecoration::new()
-                        .hint(ahem(HINT_TEXT, style.clone()))
-                        .label(label()),
+                        .hint_text(HINT_TEXT)
+                        .label_text(LABEL_TEXT),
                 )
                 .is_empty(true)
                 .base_style(style.clone())
-                .child(ahem(INPUT_TEXT, style))
-                .pump(&mut tester);
+                .child(Text::new(INPUT_TEXT).style(style))
+                .pump(tester);
 
                 assert_eq!(
-                    decorator_size(&tester),
+                    decorator_size(tester),
                     Size::new(800.0, K_MIN_INTERACTIVE_DIMENSION)
                 ); // 45.5 bumped up to minimum.
-                assert_eq!(text_rect(&tester, HINT_TEXT).height(), 10.0);
-                assert_eq!(text_rect(&tester, LABEL_TEXT).height(), 10.0);
-                assert_eq!(text_rect(&tester, INPUT_TEXT).height(), 10.0);
-                assert_eq!(top(&tester, HINT_TEXT), 24.75);
-                assert_eq!(top(&tester, LABEL_TEXT), 19.0);
-                assert_eq!(top(&tester, INPUT_TEXT), 24.75);
+                assert_eq!(text_rect(tester, HINT_TEXT).height(), 10.0);
+                assert_eq!(text_rect(tester, LABEL_TEXT).height(), 10.0);
+                assert_eq!(text_rect(tester, INPUT_TEXT).height(), 10.0);
+                assert_eq!(top(tester, HINT_TEXT), 24.75);
+                assert_eq!(top(tester, LABEL_TEXT), 19.0);
+                assert_eq!(top(tester, INPUT_TEXT), 24.75);
             });
         }
 
         // input_decorator_test.dart 'Material2 - InputDecorator with empty style overrides'.
         #[test]
         fn material2_empty_style_overrides_lay_out_as_no_overrides() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 // Same as not specifying any style overrides
                 M2::new(
                     InputDecoration::new()
-                        .label(label())
-                        .hint(m2_hint())
-                        .helper(ahem_supporting(HELPER_TEXT))
-                        .counter(ahem_supporting(COUNTER_TEXT))
+                        .label_text(LABEL_TEXT)
+                        .hint_text(HINT_TEXT)
+                        .helper_text(HELPER_TEXT)
+                        .counter_text(COUNTER_TEXT)
                         .label_style(TextStyle::new())
                         .hint_style(TextStyle::new())
                         .error_style(TextStyle::new())
                         .helper_style(TextStyle::new())
                         .filled(true),
                 )
-                .pump(&mut tester);
+                .pump(tester);
 
                 // Label is floating because isEmpty is false.
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 76.0));
-                assert_eq!(top(&tester, INPUT_TEXT), 28.0);
-                assert_eq!(bottom(&tester, INPUT_TEXT), 44.0);
-                assert_eq!(top(&tester, LABEL_TEXT), 12.0);
-                assert_eq!(bottom(&tester, LABEL_TEXT), 24.0);
-                assert_eq!(get_border_bottom(&tester), 56.0);
-                assert_eq!(get_border_weight(&tester), 1.0);
+                assert_eq!(decorator_size(tester), Size::new(800.0, 76.0));
+                assert_eq!(top(tester, INPUT_TEXT), 28.0);
+                assert_eq!(bottom(tester, INPUT_TEXT), 44.0);
+                assert_eq!(top(tester, LABEL_TEXT), 12.0);
+                assert_eq!(bottom(tester, LABEL_TEXT), 24.0);
+                assert_eq!(get_border_bottom(tester), 56.0);
+                assert_eq!(get_border_weight(tester), 1.0);
                 assert_eq!(
-                    text_rect(&tester, HELPER_TEXT).top_left(),
+                    text_rect(tester, HELPER_TEXT).top_left(),
                     Offset::new(12.0, 64.0)
                 );
                 assert_eq!(
-                    text_rect(&tester, COUNTER_TEXT).top_right(),
+                    text_rect(tester, COUNTER_TEXT).top_right(),
                     Offset::new(788.0, 64.0)
                 );
             });
@@ -19829,24 +20033,23 @@ pub(crate) mod tests {
             InputDecoration::new()
                 .border(OutlineInputBorder::new().border_side(BorderSide::NONE))
                 .floating_label_behavior(FloatingLabelBehavior::Never)
-                .label(label())
+                .label_text(LABEL_TEXT)
         }
 
         // input_decorator_test.dart 'Material2 - InputDecoration outline shape with no border and no
         // floating placeholder'.
         #[test]
         fn material2_outline_shape_with_no_border_and_no_floating_placeholder() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 M2::new(borderless_outline_never_floating())
                     .is_empty(true)
-                    .pump(&mut tester);
+                    .pump(tester);
 
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 56.0));
-                assert_eq!(top(&tester, LABEL_TEXT), 20.0);
-                assert_eq!(bottom(&tester, LABEL_TEXT), 36.0);
-                assert_eq!(get_border_bottom(&tester), 56.0);
-                assert_eq!(get_border_weight(&tester), 0.0);
+                assert_eq!(decorator_size(tester), Size::new(800.0, 56.0));
+                assert_eq!(top(tester, LABEL_TEXT), 20.0);
+                assert_eq!(bottom(tester, LABEL_TEXT), 36.0);
+                assert_eq!(get_border_bottom(tester), 56.0);
+                assert_eq!(get_border_weight(tester), 0.0);
             });
         }
 
@@ -19854,38 +20057,36 @@ pub(crate) mod tests {
         // floating placeholder not empty'.
         #[test]
         fn material2_outline_shape_with_no_border_and_no_floating_placeholder_not_empty() {
-            case(|| {
-                let mut tester = tester();
-                M2::new(borderless_outline_never_floating()).pump(&mut tester);
+            test_widgets(|tester| {
+                M2::new(borderless_outline_never_floating()).pump(tester);
 
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 56.0));
-                assert_eq!(top(&tester, LABEL_TEXT), 20.0);
-                assert_eq!(bottom(&tester, LABEL_TEXT), 36.0);
-                assert_eq!(get_border_bottom(&tester), 56.0);
-                assert_eq!(get_border_weight(&tester), 0.0);
+                assert_eq!(decorator_size(tester), Size::new(800.0, 56.0));
+                assert_eq!(top(tester, LABEL_TEXT), 20.0);
+                assert_eq!(bottom(tester, LABEL_TEXT), 36.0);
+                assert_eq!(get_border_bottom(tester), 56.0);
+                assert_eq!(get_border_weight(tester), 0.0);
 
                 // The label should not be seen.
-                assert_eq!(get_opacity(&tester, LABEL_TEXT), 0.0);
+                assert_eq!(get_opacity(tester, LABEL_TEXT), 0.0);
             });
         }
 
         // input_decorator_test.dart 'Material2 - InputDecorationThemeData outline border'.
         #[test]
         fn material2_theme_outline_border_centers_the_label() {
-            case(|| {
-                let mut tester = tester();
-                M2::new(InputDecoration::new().label(label()))
+            test_widgets(|tester| {
+                M2::new(InputDecoration::new().label_text(LABEL_TEXT))
                     .is_empty(true) // label appears, vertically centered
                     .input_decoration_theme(
                         InputDecorationThemeData::new().border(OutlineInputBorder::new()),
                     )
-                    .pump(&mut tester);
+                    .pump(tester);
 
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 56.0));
-                assert_eq!(top(&tester, LABEL_TEXT), 20.0);
-                assert_eq!(bottom(&tester, LABEL_TEXT), 36.0);
-                assert_eq!(get_border_bottom(&tester), 56.0);
-                assert_eq!(get_border_weight(&tester), 1.0);
+                assert_eq!(decorator_size(tester), Size::new(800.0, 56.0));
+                assert_eq!(top(tester, LABEL_TEXT), 20.0);
+                assert_eq!(bottom(tester, LABEL_TEXT), 36.0);
+                assert_eq!(get_border_bottom(tester), 56.0);
+                assert_eq!(get_border_weight(tester), 1.0);
             });
         }
 
@@ -19893,8 +20094,7 @@ pub(crate) mod tests {
         // layout'.
         #[test]
         fn material2_theme_outline_border_dense_layout() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 M2::new(label_and_hint())
                     .is_empty(true) // label appears, vertically centered
                     .input_decoration_theme(
@@ -19902,13 +20102,13 @@ pub(crate) mod tests {
                             .border(OutlineInputBorder::new())
                             .is_dense(true),
                     )
-                    .pump(&mut tester);
+                    .pump(tester);
 
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 48.0));
-                assert_eq!(top(&tester, LABEL_TEXT), 16.0);
-                assert_eq!(bottom(&tester, LABEL_TEXT), 32.0);
-                assert_eq!(get_border_bottom(&tester), 48.0);
-                assert_eq!(get_border_weight(&tester), 1.0);
+                assert_eq!(decorator_size(tester), Size::new(800.0, 48.0));
+                assert_eq!(top(tester, LABEL_TEXT), 16.0);
+                assert_eq!(bottom(tester, LABEL_TEXT), 32.0);
+                assert_eq!(get_border_bottom(tester), 48.0);
+                assert_eq!(get_border_weight(tester), 1.0);
             });
         }
 
@@ -19971,37 +20171,42 @@ pub(crate) mod tests {
         }
 
         /// Dart's 'InputDecorationThemeData style overrides' (and its focused twin): the layout
-        /// with stand-ins in the overridden styles' metrics, then the styles passed along with
+        /// with the overridden styles' metrics, then the styles passed along with
         /// Dart's strings.
-        fn check_style_overrides(focused: bool, label_top: f64, label_height: f64, weight: f64) {
-            let mut tester = tester();
+        fn check_style_overrides(
+            tester: &mut WidgetTester,
+            focused: bool,
+            label_top: f64,
+            label_height: f64,
+            weight: f64,
+        ) {
             let styles = OverrideStyles::new();
             M2::new(
                 InputDecoration::new()
-                    .label(label())
-                    .hint(ahem(HINT_TEXT, styles.hint_style.clone()))
-                    .prefix(affix("prefix"))
-                    .suffix(affix("suffix"))
-                    .helper(ahem(HELPER_TEXT, styles.helper_style.clone()))
-                    .counter(ahem(COUNTER_TEXT, styles.counter_style.clone())),
+                    .label_text(LABEL_TEXT)
+                    .hint_text(HINT_TEXT)
+                    .prefix_text("prefix")
+                    .suffix_text("suffix")
+                    .helper_text(HELPER_TEXT)
+                    .counter_text(COUNTER_TEXT),
             )
             .is_empty(true)
             .is_focused(focused)
             .input_decoration_theme(styles.theme(focused))
-            .pump(&mut tester);
+            .pump(tester);
 
             // Overall height for this InputDecorator is 76dps.
-            assert_eq!(decorator_size(&tester), Size::new(800.0, 76.0));
-            assert_eq!(top(&tester, LABEL_TEXT), label_top);
-            assert_eq!(bottom(&tester, LABEL_TEXT), label_top + label_height);
-            assert_eq!(get_border_bottom(&tester), 56.0);
-            assert_eq!(get_border_weight(&tester), weight);
+            assert_eq!(decorator_size(tester), Size::new(800.0, 76.0));
+            assert_eq!(top(tester, LABEL_TEXT), label_top);
+            assert_eq!(bottom(tester, LABEL_TEXT), label_top + label_height);
+            assert_eq!(get_border_bottom(tester), 56.0);
+            assert_eq!(get_border_weight(tester), weight);
             assert_eq!(
-                text_rect(&tester, HELPER_TEXT).top_left(),
+                text_rect(tester, HELPER_TEXT).top_left(),
                 Offset::new(0.0, 64.0)
             );
             assert_eq!(
-                text_rect(&tester, COUNTER_TEXT).top_right(),
+                text_rect(tester, COUNTER_TEXT).top_right(),
                 Offset::new(800.0, 64.0)
             );
 
@@ -20018,25 +20223,25 @@ pub(crate) mod tests {
             .is_empty(true)
             .is_focused(focused)
             .input_decoration_theme(styles.theme(focused))
-            .pump(&mut tester);
+            .pump(tester);
             assert_eq!(
-                text_style_color(&tester, HINT_TEXT),
+                text_style_color(tester, HINT_TEXT),
                 color_of(&styles.hint_style)
             );
             assert_eq!(
-                text_style_color(&tester, "prefix"),
+                text_style_color(tester, "prefix"),
                 color_of(&styles.prefix_style)
             );
             assert_eq!(
-                text_style_color(&tester, "suffix"),
+                text_style_color(tester, "suffix"),
                 color_of(&styles.suffix_style)
             );
             assert_eq!(
-                text_style_color(&tester, HELPER_TEXT),
+                text_style_color(tester, HELPER_TEXT),
                 color_of(&styles.helper_style)
             );
             assert_eq!(
-                text_style_color(&tester, COUNTER_TEXT),
+                text_style_color(tester, COUNTER_TEXT),
                 color_of(&styles.counter_style)
             );
             let label_style = if focused {
@@ -20044,39 +20249,38 @@ pub(crate) mod tests {
             } else {
                 &styles.label_style
             };
-            assert_eq!(color_of(&get_label_style(&tester)), color_of(label_style));
+            assert_eq!(color_of(&get_label_style(tester)), color_of(label_style));
         }
 
         // input_decorator_test.dart 'Material2 - InputDecorationThemeData style overrides'.
         #[test]
         fn material2_theme_style_overrides() {
-            case(|| check_style_overrides(false, 20.0, 16.0, 1.0));
+            test_widgets(|tester| check_style_overrides(tester, false, 20.0, 16.0, 1.0));
         }
 
         // input_decorator_test.dart 'Material2 - InputDecorationThemeData style overrides
         // (focused)'.
         #[test]
         fn material2_theme_style_overrides_focused() {
-            case(|| check_style_overrides(true, 12.0, 12.0, 2.0));
+            test_widgets(|tester| check_style_overrides(tester, true, 12.0, 12.0, 2.0));
         }
 
         // input_decorator_test.dart 'Material2 - InputDecorator with empty border and label'.
         #[test]
         fn material2_empty_border_with_a_label() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 // Regression test for https://github.com/flutter/flutter/issues/14165
                 M2::new(
                     InputDecoration::new()
-                        .label(label())
+                        .label_text(LABEL_TEXT)
                         .border(InputBorderRef::none()),
                 )
-                .pump(&mut tester);
+                .pump(tester);
 
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 56.0));
-                assert_eq!(get_border_weight(&tester), 0.0);
-                assert_eq!(top(&tester, LABEL_TEXT), 12.0);
-                assert_eq!(bottom(&tester, LABEL_TEXT), 24.0);
+                assert_eq!(decorator_size(tester), Size::new(800.0, 56.0));
+                assert_eq!(get_border_weight(tester), 0.0);
+                assert_eq!(top(tester, LABEL_TEXT), 12.0);
+                assert_eq!(bottom(tester, LABEL_TEXT), 24.0);
             });
         }
 
@@ -20097,8 +20301,7 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Material2 - InputDecorator draws and animates hoverColor'.
         #[test]
         fn material2_decorator_draws_and_animates_hover_color() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let fill_color = Color::new(0x0A000000);
                 let hover_color = Color::new(0xFF00FF00);
                 let disabled_color = Color::new(0x05000000);
@@ -20119,28 +20322,28 @@ pub(crate) mod tests {
                     };
 
                 // Test filled text field.
-                pump_decorator(&mut tester, false, true, true);
-                same_color(get_container_color(&tester), fill_color);
-                tester.pump(Duration::from_secs(10));
-                same_color(get_container_color(&tester), fill_color);
+                pump_decorator(tester, false, true, true);
+                same_color(get_container_color(tester), fill_color);
+                tester.pump_by(Duration::from_secs(10));
+                same_color(get_container_color(tester), fill_color);
 
-                pump_decorator(&mut tester, true, true, true);
-                same_color(get_container_color(&tester), fill_color);
-                tester.pump(Duration::from_millis(15));
-                same_color(get_container_color(&tester), hover_color);
+                pump_decorator(tester, true, true, true);
+                same_color(get_container_color(tester), fill_color);
+                tester.pump_by(Duration::from_millis(15));
+                same_color(get_container_color(tester), hover_color);
 
-                pump_decorator(&mut tester, false, true, true);
-                same_color(get_container_color(&tester), hover_color);
-                tester.pump(Duration::from_millis(15));
-                same_color(get_container_color(&tester), fill_color);
+                pump_decorator(tester, false, true, true);
+                same_color(get_container_color(tester), hover_color);
+                tester.pump_by(Duration::from_millis(15));
+                same_color(get_container_color(tester), fill_color);
 
                 // Test that for high refresh rate displays, the color mid-animation is somewhere
                 // between the fill color and the hover color.
-                pump_decorator(&mut tester, true, true, true);
-                same_color(get_container_color(&tester), fill_color);
-                tester.pump(Duration::from_millis(6));
+                pump_decorator(tester, true, true, true);
+                same_color(get_container_color(tester), fill_color);
+                tester.pump_by(Duration::from_millis(6));
                 let hover_value =
-                    with_border_painter(&tester, |app, painter| painter.hover_animation.value(app));
+                    with_border_painter(tester, |app, painter| painter.hover_animation.value(app));
                 let mid_hover_color = Color::lerp(
                     Some(hover_color.with_alpha(0)),
                     Some(hover_color),
@@ -20148,55 +20351,54 @@ pub(crate) mod tests {
                 )
                 .expect("both colours are given");
                 same_color(
-                    get_container_color(&tester),
+                    get_container_color(tester),
                     Color::alpha_blend(mid_hover_color, fill_color),
                 );
 
-                pump_decorator(&mut tester, false, false, true);
-                same_color(get_container_color(&tester), disabled_color);
-                tester.pump(Duration::from_secs(10));
-                same_color(get_container_color(&tester), disabled_color);
+                pump_decorator(tester, false, false, true);
+                same_color(get_container_color(tester), disabled_color);
+                tester.pump_by(Duration::from_secs(10));
+                same_color(get_container_color(tester), disabled_color);
 
-                pump_decorator(&mut tester, true, false, true);
-                same_color(get_container_color(&tester), disabled_color);
-                tester.pump(Duration::from_secs(10));
-                same_color(get_container_color(&tester), disabled_color);
+                pump_decorator(tester, true, false, true);
+                same_color(get_container_color(tester), disabled_color);
+                tester.pump_by(Duration::from_secs(10));
+                same_color(get_container_color(tester), disabled_color);
 
                 // Test outline text field.
                 let blended_hover_color = Color::new(0x74004400);
-                pump_decorator(&mut tester, false, true, false);
+                pump_decorator(tester, false, true, false);
                 tester.pump_and_settle();
-                same_color(get_border_color(&tester), enabled_border_color);
-                tester.pump(Duration::from_secs(10));
-                same_color(get_border_color(&tester), enabled_border_color);
+                same_color(get_border_color(tester), enabled_border_color);
+                tester.pump_by(Duration::from_secs(10));
+                same_color(get_border_color(tester), enabled_border_color);
 
-                pump_decorator(&mut tester, true, true, false);
-                same_color(get_border_color(&tester), enabled_border_color);
-                tester.pump(Duration::from_millis(167));
-                same_color(get_border_color(&tester), blended_hover_color);
+                pump_decorator(tester, true, true, false);
+                same_color(get_border_color(tester), enabled_border_color);
+                tester.pump_by(Duration::from_millis(167));
+                same_color(get_border_color(tester), blended_hover_color);
 
-                pump_decorator(&mut tester, false, true, false);
-                same_color(get_border_color(&tester), blended_hover_color);
-                tester.pump(Duration::from_millis(167));
-                same_color(get_border_color(&tester), enabled_border_color);
+                pump_decorator(tester, false, true, false);
+                same_color(get_border_color(tester), blended_hover_color);
+                tester.pump_by(Duration::from_millis(167));
+                same_color(get_border_color(tester), enabled_border_color);
 
-                pump_decorator(&mut tester, false, false, false);
-                same_color(get_border_color(&tester), enabled_border_color);
-                tester.pump(Duration::from_millis(167));
-                same_color(get_border_color(&tester), disabled_color);
+                pump_decorator(tester, false, false, false);
+                same_color(get_border_color(tester), enabled_border_color);
+                tester.pump_by(Duration::from_millis(167));
+                same_color(get_border_color(tester), disabled_color);
 
-                pump_decorator(&mut tester, true, false, false);
-                same_color(get_border_color(&tester), disabled_color);
-                tester.pump(Duration::from_secs(10));
-                same_color(get_border_color(&tester), disabled_color);
+                pump_decorator(tester, true, false, false);
+                same_color(get_border_color(tester), disabled_color);
+                tester.pump_by(Duration::from_secs(10));
+                same_color(get_border_color(tester), disabled_color);
             });
         }
 
         // input_decorator_test.dart 'Material2 - InputDecorator draws and animates focusColor'.
         #[test]
         fn material2_decorator_draws_and_animates_focus_color() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let focus_color = Color::new(0xFF0000FF);
                 let disabled_color = Color::new(0x05000000);
                 let enabled_border_color = Color::new(0x61000000);
@@ -20216,31 +20418,31 @@ pub(crate) mod tests {
                 };
 
                 // Test outline text field default border.
-                pump_decorator(&mut tester, false, true);
+                pump_decorator(tester, false, true);
                 tester.pump_and_settle();
-                assert_eq!(get_border_color(&tester), enabled_border_color);
-                tester.pump(Duration::from_secs(10));
-                assert_eq!(get_border_color(&tester), enabled_border_color);
+                assert_eq!(get_border_color(tester), enabled_border_color);
+                tester.pump_by(Duration::from_secs(10));
+                assert_eq!(get_border_color(tester), enabled_border_color);
 
-                pump_decorator(&mut tester, true, true);
-                assert_eq!(get_border_color(&tester), enabled_border_color);
-                tester.pump(Duration::from_millis(167));
-                assert_eq!(get_border_color(&tester), focus_color);
+                pump_decorator(tester, true, true);
+                assert_eq!(get_border_color(tester), enabled_border_color);
+                tester.pump_by(Duration::from_millis(167));
+                assert_eq!(get_border_color(tester), focus_color);
 
-                pump_decorator(&mut tester, false, true);
-                assert_eq!(get_border_color(&tester), focus_color);
-                tester.pump(Duration::from_millis(167));
-                assert_eq!(get_border_color(&tester), enabled_border_color);
+                pump_decorator(tester, false, true);
+                assert_eq!(get_border_color(tester), focus_color);
+                tester.pump_by(Duration::from_millis(167));
+                assert_eq!(get_border_color(tester), enabled_border_color);
 
-                pump_decorator(&mut tester, false, false);
-                assert_eq!(get_border_color(&tester), enabled_border_color);
-                tester.pump(Duration::from_millis(167));
-                assert_eq!(get_border_color(&tester), disabled_color);
+                pump_decorator(tester, false, false);
+                assert_eq!(get_border_color(tester), enabled_border_color);
+                tester.pump_by(Duration::from_millis(167));
+                assert_eq!(get_border_color(tester), disabled_color);
 
-                pump_decorator(&mut tester, true, false);
-                assert_eq!(get_border_color(&tester), disabled_color);
-                tester.pump(Duration::from_secs(10));
-                assert_eq!(get_border_color(&tester), disabled_color);
+                pump_decorator(tester, true, false);
+                assert_eq!(get_border_color(tester), disabled_color);
+                tester.pump_by(Duration::from_secs(10));
+                assert_eq!(get_border_color(tester), disabled_color);
             });
         }
 
@@ -20248,13 +20450,12 @@ pub(crate) mod tests {
         // focused'.
         #[test]
         fn material2_decorator_withdraws_the_label_when_not_empty_or_focused() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let pump_decorator =
                     |tester: &mut WidgetTester, focused: bool, enabled: bool, empty: bool| {
                         M2::new(
                             InputDecoration::new()
-                                .label(ahem("Label", TextStyle::new()))
+                                .label_text("Label")
                                 .enabled(enabled)
                                 .filled(false)
                                 .focused_border(OutlineInputBorder::new())
@@ -20274,30 +20475,30 @@ pub(crate) mod tests {
                     assert_eq!(rect.size(), size);
                 };
 
-                pump_decorator(&mut tester, false, true, true);
-                check(&tester, Offset::new(12.0, 20.0), label_size);
+                pump_decorator(tester, false, true, true);
+                check(tester, Offset::new(12.0, 20.0), label_size);
 
-                pump_decorator(&mut tester, false, true, false);
-                check(&tester, Offset::new(12.0, -5.5), floating_size);
+                pump_decorator(tester, false, true, false);
+                check(tester, Offset::new(12.0, -5.5), floating_size);
 
-                pump_decorator(&mut tester, true, true, true);
-                check(&tester, Offset::new(12.0, -5.5), floating_size);
+                pump_decorator(tester, true, true, true);
+                check(tester, Offset::new(12.0, -5.5), floating_size);
 
-                pump_decorator(&mut tester, true, true, false);
-                check(&tester, Offset::new(12.0, -5.5), floating_size);
+                pump_decorator(tester, true, true, false);
+                check(tester, Offset::new(12.0, -5.5), floating_size);
 
-                pump_decorator(&mut tester, false, false, true);
-                check(&tester, Offset::new(12.0, 20.0), label_size);
+                pump_decorator(tester, false, false, true);
+                check(tester, Offset::new(12.0, 20.0), label_size);
 
-                pump_decorator(&mut tester, false, false, false);
-                check(&tester, Offset::new(12.0, -5.5), floating_size);
+                pump_decorator(tester, false, false, false);
+                check(tester, Offset::new(12.0, -5.5), floating_size);
 
                 // Focused and disabled happens with NavigationMode.directional.
-                pump_decorator(&mut tester, true, false, true);
-                check(&tester, Offset::new(12.0, 20.0), label_size);
+                pump_decorator(tester, true, false, true);
+                check(tester, Offset::new(12.0, 20.0), label_size);
 
-                pump_decorator(&mut tester, true, false, false);
-                check(&tester, Offset::new(12.0, -5.5), floating_size);
+                pump_decorator(tester, true, false, false);
+                check(tester, Offset::new(12.0, -5.5), floating_size);
             });
         }
 
@@ -20305,8 +20506,7 @@ pub(crate) mod tests {
         #[test]
         #[allow(deprecated)]
         fn material2_default_border_uses_the_color_scheme() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let theme = m2(&tester.cell.borrow());
                 // Dart's `withOpacity`, deprecated there too.
                 let enabled_color = theme.color_scheme.on_surface.with_opacity(0.38);
@@ -20315,53 +20515,53 @@ pub(crate) mod tests {
                     Color::alpha_blend(theme.hover_color.with_opacity(0.12), enabled_color);
 
                 // Enabled
-                M2::new(InputDecoration::new()).theme(m2).pump(&mut tester);
+                M2::new(InputDecoration::new()).theme(m2).pump(tester);
                 tester.pump_and_settle();
-                assert_eq!(get_border_color(&tester), enabled_color);
+                assert_eq!(get_border_color(tester), enabled_color);
 
                 // Filled
                 M2::new(InputDecoration::new().filled(true))
                     .theme(m2)
-                    .pump(&mut tester);
+                    .pump(tester);
                 tester.pump_and_settle();
-                assert_eq!(get_border_color(&tester), theme.hint_color);
+                assert_eq!(get_border_color(tester), theme.hint_color);
 
                 // Hovering
                 M2::new(InputDecoration::new())
                     .theme(m2)
                     .is_hovering(true)
-                    .pump(&mut tester);
+                    .pump(tester);
                 tester.pump_and_settle();
-                assert_eq!(get_border_color(&tester), hover_color);
+                assert_eq!(get_border_color(tester), hover_color);
 
                 // Focused
                 M2::new(InputDecoration::new())
                     .theme(m2)
                     .is_focused(true)
-                    .pump(&mut tester);
+                    .pump(tester);
                 tester.pump_and_settle();
-                assert_eq!(get_border_color(&tester), theme.color_scheme.primary);
+                assert_eq!(get_border_color(tester), theme.color_scheme.primary);
 
                 // Error
                 M2::new(InputDecoration::new().error_text("Nope"))
                     .theme(m2)
-                    .pump(&mut tester);
+                    .pump(tester);
                 tester.pump_and_settle();
-                assert_eq!(get_border_color(&tester), theme.color_scheme.error);
+                assert_eq!(get_border_color(tester), theme.color_scheme.error);
 
                 // Disabled
                 M2::new(InputDecoration::new().enabled(false))
                     .theme(m2)
-                    .pump(&mut tester);
+                    .pump(tester);
                 tester.pump_and_settle();
-                assert_eq!(get_border_color(&tester), disabled_color);
+                assert_eq!(get_border_color(tester), disabled_color);
 
                 // Disabled, filled
                 M2::new(InputDecoration::new().enabled(false).filled(true))
                     .theme(m2)
-                    .pump(&mut tester);
+                    .pump(tester);
                 tester.pump_and_settle();
-                assert_eq!(get_border_color(&tester), Colors::TRANSPARENT);
+                assert_eq!(get_border_color(tester), Colors::TRANSPARENT);
             });
         }
 
@@ -20376,8 +20576,7 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Material2 - InputDecoration borders'.
         #[test]
         fn material2_decoration_borders_per_state() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let error_border = outline(Colors::RED.primary(), 1.5);
                 let focused_border = outline(Colors::GREEN.primary(), 4.0);
                 let focused_error_border = outline(Colors::TEAL.primary(), 5.0);
@@ -20404,50 +20603,44 @@ pub(crate) mod tests {
                     );
                 };
 
-                check(&mut tester, decoration(), false, &*enabled_border);
-                check(&mut tester, decoration(), true, &*focused_border);
+                check(tester, decoration(), false, &*enabled_border);
+                check(tester, decoration(), true, &*focused_border);
                 check(
-                    &mut tester,
+                    tester,
                     decoration().error_text(ERROR_TEXT),
                     true,
                     &*focused_error_border,
                 );
                 check(
-                    &mut tester,
+                    tester,
                     decoration().error_text(ERROR_TEXT),
                     false,
                     &*error_border,
                 );
                 check(
-                    &mut tester,
+                    tester,
                     decoration().error_text(ERROR_TEXT).enabled(false),
                     false,
                     &*error_border,
                 );
                 check(
-                    &mut tester,
+                    tester,
                     decoration().enabled(false),
                     false,
                     &*disabled_border,
                 );
-                check(
-                    &mut tester,
-                    decoration().enabled(false),
-                    true,
-                    &*disabled_border,
-                );
+                check(tester, decoration().enabled(false), true, &*disabled_border);
             });
         }
 
         // input_decorator_test.dart 'Material2 - InputDecorator floating label Y coordinate'.
         #[test]
         fn material2_floating_label_y_coordinate() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 // Regression test for https://github.com/flutter/flutter/issues/54028
                 M2::new(
                     InputDecoration::new()
-                        .label(label())
+                        .label_text(LABEL_TEXT)
                         .enabled_border(OutlineInputBorder::new().border_side(BorderSide {
                             width: 4.0,
                             ..BorderSide::default()
@@ -20455,12 +20648,12 @@ pub(crate) mod tests {
                         .floating_label_behavior(FloatingLabelBehavior::Always),
                 )
                 .is_empty(true)
-                .pump(&mut tester);
+                .pump(tester);
                 tester.pump_and_settle();
 
                 // floatingLabelHeight = 12 (font size 16dps * 0.75 = 12)
                 // labelY = -floatingLabelHeight/2 + borderWidth/2
-                assert_eq!(top(&tester, LABEL_TEXT), -4.0);
+                assert_eq!(top(tester, LABEL_TEXT), -4.0);
             });
         }
 
@@ -20468,19 +20661,18 @@ pub(crate) mod tests {
         // floatingLabelBehavior'.
         #[test]
         fn material2_floating_label_obeys_floating_label_behavior() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 M2::new(
                     InputDecoration::new()
-                        .label(label())
+                        .label_text(LABEL_TEXT)
                         .floating_label_behavior(FloatingLabelBehavior::Never),
                 )
-                .pump(&mut tester);
+                .pump(tester);
 
                 // Passing floating behavior never results in a dy offset of 20
                 // because the label is not initially floating.
-                assert_eq!(bottom(&tester, LABEL_TEXT), 36.0);
-                assert_eq!(top(&tester, LABEL_TEXT), 20.0);
+                assert_eq!(bottom(tester, LABEL_TEXT), 36.0);
+                assert_eq!(top(tester, LABEL_TEXT), 20.0);
             });
         }
 
@@ -20488,37 +20680,34 @@ pub(crate) mod tests {
         // floatingLabelBehavior is always'.
         #[test]
         fn material2_hint_is_displayed_when_the_label_always_floats() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 M2::new(
                     InputDecoration::new()
                         .floating_label_behavior(FloatingLabelBehavior::Always)
-                        .hint(m2_hint())
-                        .label(label()),
+                        .hint_text(HINT_TEXT)
+                        .label_text(LABEL_TEXT),
                 )
                 .is_empty(true)
-                .pump(&mut tester);
+                .pump(tester);
                 tester.pump_and_settle();
 
-                assert_eq!(get_opacity(&tester, HINT_TEXT), 1.0);
+                assert_eq!(get_opacity(tester, HINT_TEXT), 1.0);
             });
         }
 
         // input_decorator_test.dart 'Material2 - InputDecorator floating label width scales when
-        // focused'. Dart reads the clip of the label's ellipsized paragraph; the stand-in is
-        // measured instead: its width is the label's constraint, which the clip is in Dart.
+        // focused'. Dart reads the clip of the label's ellipsized paragraph; the label's
+        // width is measured instead: it is the label's constraint, which the clip is in Dart.
         #[test]
         fn material2_floating_label_width_scales_when_focused() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let long_string_a: String = "A".repeat(200);
                 let long_string_b: String = "B".repeat(200);
                 let pump = |tester: &mut WidgetTester, text: &str, is_focused: bool| {
-                    let decorator =
-                        M2::new(InputDecoration::new().label(ahem(text, TextStyle::new())))
-                            .is_empty(true)
-                            .is_focused(is_focused)
-                            .build(tester);
+                    let decorator = M2::new(InputDecoration::new().label_text(text))
+                        .is_empty(true)
+                        .is_focused(is_focused)
+                        .build(tester);
                     tester.pump_widget(
                         waft_widgets::Center::new()
                             .child(SizedBox::new().width(100.0).height(100.0).child(decorator))
@@ -20527,16 +20716,16 @@ pub(crate) mod tests {
                     tester.pump_and_settle();
                 };
 
-                pump(&mut tester, &long_string_a, false);
-                let label = tester.find_ahem_text(&long_string_a)[0];
+                pump(tester, &long_string_a, false);
+                let label = tester.find_text(&long_string_a)[0];
                 let size = {
                     let render = tester.render_box_of(label);
                     render.size(&tester.cell.borrow())
                 };
                 assert_eq!(size, Size::new(100.0, 16.0));
 
-                pump(&mut tester, &long_string_b, true);
-                let label = tester.find_ahem_text(&long_string_b)[0];
+                pump(tester, &long_string_b, true);
+                let label = tester.find_text(&long_string_b)[0];
                 let size = {
                     let render = tester.render_box_of(label);
                     render.size(&tester.cell.borrow())
@@ -20551,8 +20740,7 @@ pub(crate) mod tests {
         // Dart's string: the case compares its positions only.
         #[test]
         fn material2_text_align_vertical_can_be_updated() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 // Regression test for https://github.com/flutter/flutter/issues/56933
                 let alignment: Rc<std::cell::Cell<Option<TextAlignVertical>>> =
                     Rc::new(std::cell::Cell::new(Some(TextAlignVertical::TOP)));
@@ -20582,17 +20770,17 @@ pub(crate) mod tests {
                     set_state(&mut tester.cell.borrow_mut(), &mut move |_app| {
                         alignment.set(value)
                     });
-                    tester.pump(Duration::ZERO);
+                    tester.pump();
                 };
 
-                let top_position = hint_top(&tester);
+                let top_position = hint_top(tester);
 
-                set(&mut tester, Some(TextAlignVertical::BOTTOM));
-                assert!(hint_top(&tester) > top_position);
+                set(tester, Some(TextAlignVertical::BOTTOM));
+                assert!(hint_top(tester) > top_position);
 
                 // Setting textAlignVertical back to null works and reverts to the default.
-                set(&mut tester, None);
-                assert_eq!(hint_top(&tester), top_position);
+                set(tester, None);
+                assert_eq!(hint_top(tester), top_position);
             });
         }
 
@@ -20600,29 +20788,28 @@ pub(crate) mod tests {
         // overrides label widget styles when the widget is a text widget (focused)'.
         #[test]
         fn material2_theme_floating_label_style_styles_a_label_widget() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let floating_label_style = TextStyle::new()
                     .font_size(16.0)
                     .merge(Some(&TextStyle::new().color(Colors::INDIGO.primary())));
-                M2::new(InputDecoration::new().label(label()))
+                M2::new(InputDecoration::new().label_text(LABEL_TEXT))
                     .is_empty(true)
                     .is_focused(true) // Label appears floating above input field.
                     .input_decoration_theme(
                         InputDecorationThemeData::new()
                             .floating_label_style(floating_label_style.clone()),
                     )
-                    .pump(&mut tester);
+                    .pump(tester);
 
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 56.0));
-                assert_eq!(top(&tester, LABEL_TEXT), 12.0);
-                assert_eq!(bottom(&tester, LABEL_TEXT), 24.0);
-                assert_eq!(get_border_bottom(&tester), 56.0);
-                assert_eq!(get_border_weight(&tester), 2.0);
+                assert_eq!(decorator_size(tester), Size::new(800.0, 56.0));
+                assert_eq!(top(tester, LABEL_TEXT), 12.0);
+                assert_eq!(bottom(tester, LABEL_TEXT), 24.0);
+                assert_eq!(get_border_bottom(tester), 56.0);
+                assert_eq!(get_border_weight(tester), 2.0);
 
                 // Verify that the styles were passed along
                 assert_eq!(
-                    color_of(&get_label_style(&tester)),
+                    color_of(&get_label_style(tester)),
                     color_of(&floating_label_style)
                 );
             });
@@ -20632,34 +20819,32 @@ pub(crate) mod tests {
         // widget styles when the widget is a text widget'.
         #[test]
         fn material2_theme_label_style_styles_a_label_widget() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let label_style = TextStyle::new()
                     .font_size(16.0)
                     .merge(Some(&TextStyle::new().color(Colors::PURPLE.primary())));
-                M2::new(InputDecoration::new().label(label()))
+                M2::new(InputDecoration::new().label_text(LABEL_TEXT))
                     .is_empty(true) // Label appears inline, on top of the input field.
                     .input_decoration_theme(
                         InputDecorationThemeData::new().label_style(label_style.clone()),
                     )
-                    .pump(&mut tester);
+                    .pump(tester);
 
-                assert_eq!(decorator_size(&tester), Size::new(800.0, 56.0));
-                assert_eq!(top(&tester, LABEL_TEXT), 20.0);
-                assert_eq!(bottom(&tester, LABEL_TEXT), 36.0);
-                assert_eq!(get_border_bottom(&tester), 56.0);
-                assert_eq!(get_border_weight(&tester), 1.0);
+                assert_eq!(decorator_size(tester), Size::new(800.0, 56.0));
+                assert_eq!(top(tester, LABEL_TEXT), 20.0);
+                assert_eq!(bottom(tester, LABEL_TEXT), 36.0);
+                assert_eq!(get_border_bottom(tester), 56.0);
+                assert_eq!(get_border_weight(tester), 1.0);
 
                 // Verify that the styles were passed along
-                assert_eq!(color_of(&get_label_style(&tester)), color_of(&label_style));
+                assert_eq!(color_of(&get_label_style(tester)), color_of(&label_style));
             });
         }
 
         // input_decorator_test.dart 'Material2 - prefixIcon in RTL with asymmetric padding'.
         #[test]
         fn material2_prefix_icon_in_rtl_with_asymmetric_padding_stays_inside() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 // Regression test for https://github.com/flutter/flutter/issues/129591
                 M2::new(
                     InputDecoration::new()
@@ -20669,14 +20854,14 @@ pub(crate) mod tests {
                         .prefix_icon(waft_widgets::Focus::new(Icon::new(Some(Icons::search())))),
                 )
                 .text_direction(TextDirection::Rtl)
-                .pump(&mut tester);
+                .pump(tester);
                 tester.pump_and_settle();
 
                 assert_eq!(tester.find_by_type::<InputDecorator>().len(), 1);
                 assert_eq!(tester.find_by_type::<Icon>().len(), 1);
 
-                let decorator_right = get_decorator_rect(&tester).right;
-                let prefix_right = rect_of(&tester, tester.find_by_type::<Icon>()[0]).right;
+                let decorator_right = get_decorator_rect(tester).right;
+                let prefix_right = rect_of(tester, tester.find_by_type::<Icon>()[0]).right;
 
                 // The prefix is inside the decorator.
                 assert!(decorator_right <= prefix_right);
@@ -20686,18 +20871,17 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'Material2 - intrinsic width with prefixIcon/suffixIcon'.
         #[test]
         fn material2_intrinsic_width_with_prefix_and_suffix_icons_keeps_the_text_width() {
-            case(|| {
+            test_widgets(|tester| {
                 // Regression test for https://github.com/flutter/flutter/issues/137937
                 for direction in [TextDirection::Rtl, TextDirection::Ltr] {
-                    let measure_text = |decoration: InputDecoration| {
-                        let mut tester = tester();
+                    let mut measure_text = |decoration: InputDecoration| {
                         M2::new(decoration)
                             .use_intrinsic_width(true)
                             .text_direction(direction)
-                            .pump(&mut tester);
+                            .pump(tester);
                         tester.pump_and_settle();
-                        assert_eq!(tester.find_ahem_text(INPUT_TEXT).len(), 1);
-                        text_rect(&tester, INPUT_TEXT).size()
+                        assert_eq!(tester.find_text(INPUT_TEXT).len(), 1);
+                        text_rect(tester, INPUT_TEXT).size()
                     };
                     let padding = || EdgeInsetsDirectional::only(12.0, 0.0, 24.0, 0.0);
                     let icon =
@@ -20735,8 +20919,7 @@ pub(crate) mod tests {
         // anything'.
         #[test]
         fn an_underline_border_with_no_style_paints_no_ring() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 // Regression test for https://github.com/flutter/flutter/issues/143746
                 tester.pump_widget(
                     BuildInputDecorator::new(
@@ -20779,8 +20962,7 @@ pub(crate) mod tests {
         // `ValueListenableBuilder` rebuilds; both update the decorator with a new decoration.
         #[test]
         fn the_error_text_updates_when_the_decoration_changes() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const HELPER_TEXT_VALUE: &str = "helper text";
                 let pump = |tester: &mut WidgetTester, value: Option<&str>| {
                     let mut decoration = InputDecoration::new().helper_text(HELPER_TEXT_VALUE);
@@ -20790,12 +20972,12 @@ pub(crate) mod tests {
                     tester.pump_widget(BuildInputDecorator::new(decoration).build());
                     tester.pump_and_settle();
                 };
-                pump(&mut tester, Some("initial error"));
+                pump(tester, Some("initial error"));
 
                 assert_eq!(tester.find_onstage_text("initial error").len(), 1);
                 assert!(tester.find_onstage_text(HELPER_TEXT_VALUE).is_empty());
 
-                pump(&mut tester, None);
+                pump(tester, None);
 
                 assert!(tester.find_onstage_text("initial error").is_empty());
                 assert_eq!(tester.find_onstage_text(HELPER_TEXT_VALUE).len(), 1);
@@ -20824,7 +21006,7 @@ pub(crate) mod tests {
         }
 
         fn string_rect(tester: &WidgetTester, text: &str) -> Rect {
-            if !tester.find_ahem_text(text).is_empty() {
+            if !tester.find_text(text).is_empty() {
                 return text_rect(tester, text);
             }
             let found = tester.find_onstage_text(text);
@@ -20836,8 +21018,7 @@ pub(crate) mod tests {
         // Dart's strings: it reads the edges of a text that wraps to the available width.
         #[test]
         fn helper_and_error_text_default_padding_is_correct() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const DEFAULT_PADDING: f64 = 16.0; // From M3 spec.
                 const LONG_TEXT: &str =
                     "This is a very long text that should wrap and fill the available width";
@@ -20851,8 +21032,8 @@ pub(crate) mod tests {
                         } else {
                             decoration.helper_text(LONG_TEXT)
                         };
-                        pump_in_scaffold(&mut tester, m3, direction, INPUT_WIDTH, decoration);
-                        let rect = string_rect(&tester, LONG_TEXT);
+                        pump_in_scaffold(tester, m3, direction, INPUT_WIDTH, decoration);
+                        let rect = string_rect(tester, LONG_TEXT);
                         assert_eq!(rect.left, DEFAULT_PADDING, "{direction:?} error: {error}");
                         assert_eq!(
                             rect.right,
@@ -20867,8 +21048,7 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'InputDecorator does not crash at zero area'.
         #[test]
         fn the_decorator_does_not_crash_at_zero_area() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 for decoration in [
                     InputDecoration::new(),
                     InputDecoration::new().border(OutlineInputBorder::new()),
@@ -20879,7 +21059,7 @@ pub(crate) mod tests {
                             .child(SizedBox::shrink().child(InputDecorator::new(decoration))),
                     );
                     tester.pump_widget(material_app(theme, home.into_widget()));
-                    assert_eq!(decorator_size(&tester), Size::ZERO);
+                    assert_eq!(decorator_size(tester), Size::ZERO);
                 }
             });
         }
@@ -20891,12 +21071,12 @@ pub(crate) mod tests {
         ) -> InputDecoration {
             let mut decoration = InputDecoration::new()
                 .filled(true)
-                .counter(ahem_supporting(COUNTER_TEXT));
+                .counter_text(COUNTER_TEXT);
             if let Some(error_text) = error_text {
-                decoration = decoration.error(error(error_text));
+                decoration = decoration.error_text(error_text);
             }
             if let Some(helper_text) = helper_text {
-                decoration = decoration.helper(ahem_supporting(HELPER_TEXT));
+                decoration = decoration.helper_text(HELPER_TEXT);
                 assert_eq!(helper_text, HELPER_TEXT);
             }
             if let Some(padding) = supporting_text_padding {
@@ -20914,12 +21094,11 @@ pub(crate) mod tests {
         const INPUT_GAP: f64 = 4.0; // _kInputExtraPadding in Material 3 filled field.
 
         // input_decorator_test.dart 'supportingTextPadding defined in InputDecoration is used for
-        // supporting text'. The error, helper and counter are stand-ins: an edge at a text's width
-        // is a fraction in the OS font, which the f32 transforms of a position round.
+        // supporting text'. An edge at a text's width is a fraction of FlutterTest's letter
+        // spacing, which the f32 transforms of a position round.
         #[test]
         fn supporting_text_padding_of_the_decoration_places_the_supporting_text() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const START: f64 = 32.0;
                 const END: f64 = 24.0;
                 const TOP: f64 = 16.0;
@@ -20930,18 +21109,18 @@ pub(crate) mod tests {
                 // Calculate default vertical bounds first to ensure new vertical padding shifts
                 // correctly.
                 pump_in_scaffold(
-                    &mut tester,
+                    tester,
                     m3,
                     TextDirection::Ltr,
                     INPUT_WIDTH,
                     supporting_decoration(Some(ERROR_TEXT), None, None),
                 );
-                let default_error_dy = string_rect(&tester, ERROR_TEXT).top;
-                let default_total_height = decorator_size(&tester).height();
+                let default_error_dy = string_rect(tester, ERROR_TEXT).top;
+                let default_total_height = decorator_size(tester).height();
 
                 // LTR with custom supportingTextPadding (error).
                 pump_in_scaffold(
-                    &mut tester,
+                    tester,
                     m3,
                     TextDirection::Ltr,
                     INPUT_WIDTH,
@@ -20951,19 +21130,19 @@ pub(crate) mod tests {
                         Some(EdgeInsetsGeometry::directional(START, TOP, END, BOTTOM)),
                     ),
                 );
-                edge_eq(string_rect(&tester, ERROR_TEXT).left, START + INPUT_GAP);
+                edge_eq(string_rect(tester, ERROR_TEXT).left, START + INPUT_GAP);
                 edge_eq(
-                    string_rect(&tester, COUNTER_TEXT).right,
+                    string_rect(tester, COUNTER_TEXT).right,
                     INPUT_WIDTH - END - INPUT_GAP,
                 );
 
                 // Verify vertical padding shift.
-                assert!(string_rect(&tester, ERROR_TEXT).top > default_error_dy);
-                assert!(decorator_size(&tester).height() > default_total_height);
+                assert!(string_rect(tester, ERROR_TEXT).top > default_error_dy);
+                assert!(decorator_size(tester).height() > default_total_height);
 
                 // RTL with custom supportingTextPadding (error).
                 pump_in_scaffold(
-                    &mut tester,
+                    tester,
                     m3,
                     TextDirection::Rtl,
                     INPUT_WIDTH,
@@ -20971,39 +21150,39 @@ pub(crate) mod tests {
                 );
                 // In RTL, "start" is from the right, so errorText is placed on the right.
                 edge_eq(
-                    string_rect(&tester, ERROR_TEXT).right,
+                    string_rect(tester, ERROR_TEXT).right,
                     INPUT_WIDTH - START - INPUT_GAP,
                 );
                 // In RTL, "end" is from the left, so counterText is placed on the left.
-                edge_eq(string_rect(&tester, COUNTER_TEXT).left, END + INPUT_GAP);
+                edge_eq(string_rect(tester, COUNTER_TEXT).left, END + INPUT_GAP);
 
                 // LTR with custom supportingTextPadding (helper).
                 pump_in_scaffold(
-                    &mut tester,
+                    tester,
                     m3,
                     TextDirection::Ltr,
                     INPUT_WIDTH,
                     supporting_decoration(None, Some(HELPER_TEXT), padding),
                 );
-                edge_eq(string_rect(&tester, HELPER_TEXT).left, START + INPUT_GAP);
+                edge_eq(string_rect(tester, HELPER_TEXT).left, START + INPUT_GAP);
                 edge_eq(
-                    string_rect(&tester, COUNTER_TEXT).right,
+                    string_rect(tester, COUNTER_TEXT).right,
                     INPUT_WIDTH - END - INPUT_GAP,
                 );
 
                 // RTL with custom supportingTextPadding (helper).
                 pump_in_scaffold(
-                    &mut tester,
+                    tester,
                     m3,
                     TextDirection::Rtl,
                     INPUT_WIDTH,
                     supporting_decoration(None, Some(HELPER_TEXT), padding),
                 );
                 edge_eq(
-                    string_rect(&tester, HELPER_TEXT).right,
+                    string_rect(tester, HELPER_TEXT).right,
                     INPUT_WIDTH - START - INPUT_GAP,
                 );
-                edge_eq(string_rect(&tester, COUNTER_TEXT).left, END + INPUT_GAP);
+                edge_eq(string_rect(tester, COUNTER_TEXT).left, END + INPUT_GAP);
             });
         }
 
@@ -21022,40 +21201,39 @@ pub(crate) mod tests {
         // for supporting text'.
         #[test]
         fn supporting_text_padding_of_the_theme_places_the_supporting_text() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const THEME_START: f64 = 40.0;
                 const THEME_END: f64 = 20.0;
                 const INPUT_WIDTH: f64 = 300.0;
                 for (error, helper) in [(Some(ERROR_TEXT), None), (None, Some(HELPER_TEXT))] {
                     let text = error.or(helper).expect("one of them");
                     pump_in_scaffold(
-                        &mut tester,
+                        tester,
                         theme_with_supporting_text_padding,
                         TextDirection::Ltr,
                         INPUT_WIDTH,
                         supporting_decoration(error, helper, None),
                     );
-                    edge_eq(string_rect(&tester, text).left, THEME_START + INPUT_GAP);
+                    edge_eq(string_rect(tester, text).left, THEME_START + INPUT_GAP);
                     edge_eq(
-                        string_rect(&tester, COUNTER_TEXT).right,
+                        string_rect(tester, COUNTER_TEXT).right,
                         INPUT_WIDTH - THEME_END - INPUT_GAP,
                     );
 
                     // In RTL, "start" is from the right, "end" is from the left.
                     pump_in_scaffold(
-                        &mut tester,
+                        tester,
                         theme_with_supporting_text_padding,
                         TextDirection::Rtl,
                         INPUT_WIDTH,
                         supporting_decoration(error, helper, None),
                     );
                     edge_eq(
-                        string_rect(&tester, text).right,
+                        string_rect(tester, text).right,
                         INPUT_WIDTH - THEME_START - INPUT_GAP,
                     );
                     edge_eq(
-                        string_rect(&tester, COUNTER_TEXT).left,
+                        string_rect(tester, COUNTER_TEXT).left,
                         THEME_END + INPUT_GAP,
                     );
                 }
@@ -21066,8 +21244,7 @@ pub(crate) mod tests {
         // correctly in LTR and RTL'.
         #[test]
         fn supporting_text_padding_with_an_icon_shifts_only_the_start() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const INPUT_WIDTH: f64 = 300.0;
                 let pump =
                     |tester: &mut WidgetTester, direction: TextDirection, with_icon: bool| {
@@ -21083,30 +21260,30 @@ pub(crate) mod tests {
                     };
 
                 // Measure baseline start/end offsets without icon in LTR.
-                pump(&mut tester, TextDirection::Ltr, false);
-                let ltr_start_without_icon = string_rect(&tester, ERROR_TEXT).left;
-                let ltr_end_without_icon = string_rect(&tester, COUNTER_TEXT).right;
+                pump(tester, TextDirection::Ltr, false);
+                let ltr_start_without_icon = string_rect(tester, ERROR_TEXT).left;
+                let ltr_end_without_icon = string_rect(tester, COUNTER_TEXT).right;
 
                 // With icon in LTR: start offset increases by _boxSize(icon).width; end is
                 // unaffected.
-                pump(&mut tester, TextDirection::Ltr, true);
-                let ltr_start_with_icon = string_rect(&tester, ERROR_TEXT).left;
-                let ltr_end_with_icon = string_rect(&tester, COUNTER_TEXT).right;
+                pump(tester, TextDirection::Ltr, true);
+                let ltr_start_with_icon = string_rect(tester, ERROR_TEXT).left;
+                let ltr_end_with_icon = string_rect(tester, COUNTER_TEXT).right;
                 // The delta is the actual _boxSize(icon).width added by the layout.
                 let icon_box_width = ltr_start_with_icon - ltr_start_without_icon;
                 assert!(icon_box_width > 0.0); // Icon shifts start offset right in LTR.
                 assert_eq!(ltr_end_with_icon, ltr_end_without_icon); // End (counter) is unaffected by icon.
 
                 // Measure baseline start/end offsets without icon in RTL.
-                pump(&mut tester, TextDirection::Rtl, false);
-                let rtl_start_without_icon = string_rect(&tester, ERROR_TEXT).right;
-                let rtl_end_without_icon = string_rect(&tester, COUNTER_TEXT).left;
+                pump(tester, TextDirection::Rtl, false);
+                let rtl_start_without_icon = string_rect(tester, ERROR_TEXT).right;
+                let rtl_end_without_icon = string_rect(tester, COUNTER_TEXT).left;
 
                 // With icon in RTL: start offset decreases by _boxSize(icon).width; end is
                 // unaffected.
-                pump(&mut tester, TextDirection::Rtl, true);
-                let rtl_start_with_icon = string_rect(&tester, ERROR_TEXT).right;
-                let rtl_end_with_icon = string_rect(&tester, COUNTER_TEXT).left;
+                pump(tester, TextDirection::Rtl, true);
+                let rtl_start_with_icon = string_rect(tester, ERROR_TEXT).right;
+                let rtl_end_with_icon = string_rect(tester, COUNTER_TEXT).left;
                 // In RTL the icon is on the right, so it reduces the start offset from the right.
                 assert_eq!(rtl_start_without_icon - rtl_start_with_icon, icon_box_width);
                 assert_eq!(rtl_end_with_icon, rtl_end_without_icon); // End (counter) is unaffected by icon.
@@ -21116,8 +21293,7 @@ pub(crate) mod tests {
         // input_decorator_test.dart 'supportingTextPadding in Material 2 (the 8.0 gap)'.
         #[test]
         fn supporting_text_padding_in_material2_replaces_the_8_gap() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let pump = |tester: &mut WidgetTester,
                             padding: Option<EdgeInsetsGeometry>,
                             error_text: Option<&str>,
@@ -21152,17 +21328,17 @@ pub(crate) mod tests {
                 };
 
                 // Default Material 2 behavior: gap between container bottom and helper text is 8.0.
-                pump(&mut tester, None, None, Some(HELPER_TEXT));
-                assert_eq!(gap(&tester, HELPER_TEXT), 8.0);
+                pump(tester, None, None, Some(HELPER_TEXT));
+                assert_eq!(gap(tester, HELPER_TEXT), 8.0);
 
                 // Default Material 2 behavior: gap between container bottom and error text is 8.0.
-                pump(&mut tester, None, Some(ERROR_TEXT), None);
-                assert_eq!(gap(&tester, ERROR_TEXT), 8.0);
+                pump(tester, None, Some(ERROR_TEXT), None);
+                assert_eq!(gap(tester, ERROR_TEXT), 8.0);
 
                 // Custom supportingTextPadding with explicit top overrides the 8.0 gap.
                 const CUSTOM_TOP_PADDING: f64 = 16.0;
                 pump(
-                    &mut tester,
+                    tester,
                     Some(EdgeInsetsGeometry::directional(
                         0.0,
                         CUSTOM_TOP_PADDING,
@@ -21172,17 +21348,17 @@ pub(crate) mod tests {
                     None,
                     Some(HELPER_TEXT),
                 );
-                assert_eq!(gap(&tester, HELPER_TEXT), CUSTOM_TOP_PADDING);
+                assert_eq!(gap(tester, HELPER_TEXT), CUSTOM_TOP_PADDING);
 
                 // Custom supportingTextPadding with only horizontal padding removes the 8.0 gap
                 // (top defaults to 0.0).
                 pump(
-                    &mut tester,
+                    tester,
                     Some(EdgeInsetsGeometry::directional(24.0, 0.0, 0.0, 0.0)),
                     None,
                     Some(HELPER_TEXT),
                 );
-                assert_eq!(gap(&tester, HELPER_TEXT), 0.0);
+                assert_eq!(gap(tester, HELPER_TEXT), 0.0);
             });
         }
 
@@ -21190,8 +21366,7 @@ pub(crate) mod tests {
         // hint'.
         #[test]
         fn the_label_and_hint_take_their_own_text_directions() {
-            case(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const HINT: &str = "Hint Text";
                 const LABEL: &str = "Label Text";
                 let theme = m3(&tester.cell.borrow());
@@ -21221,8 +21396,7 @@ pub(crate) mod tests {
         }
 
         /// Dart's 'Floating label hit test matches its painted position (textDirection)'.
-        fn check_floating_label_hit_test(text_direction: TextDirection) {
-            let mut tester = tester();
+        fn check_floating_label_hit_test(tester: &mut WidgetTester, text_direction: TextDirection) {
             let tap_count = Rc::new(std::cell::Cell::new(0));
             let label_key = GlobalKey::new();
             let on_tap = {
@@ -21247,7 +21421,7 @@ pub(crate) mod tests {
 
             // The label floats (isEmpty is false), so it is painted scaled and moved up
             // onto the border, above its layout position.
-            let label_rect = key_rect(&tester, &label_key);
+            let label_rect = key_rect(tester, &label_key);
             assert_eq!(label_rect.width(), 75.0);
 
             // Taps at the painted label hit the label.
@@ -21264,14 +21438,14 @@ pub(crate) mod tests {
         // (TextDirection.rtl)'.
         #[test]
         fn the_floating_label_is_hit_where_it_is_painted_rtl() {
-            case(|| check_floating_label_hit_test(TextDirection::Rtl));
+            test_widgets(|tester| check_floating_label_hit_test(tester, TextDirection::Rtl));
         }
 
         // input_decorator_test.dart 'Floating label hit test matches its painted position
         // (TextDirection.ltr)'.
         #[test]
         fn the_floating_label_is_hit_where_it_is_painted_ltr() {
-            case(|| check_floating_label_hit_test(TextDirection::Ltr));
+            test_widgets(|tester| check_floating_label_hit_test(tester, TextDirection::Ltr));
         }
     }
 }

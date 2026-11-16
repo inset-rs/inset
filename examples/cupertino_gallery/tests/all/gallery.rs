@@ -4,24 +4,15 @@
 //! catalog arm that names a missing sub-page, or a route that stops carrying its title all fail
 //! here.
 
-use std::rc::Rc;
 use std::time::Duration;
 
 use cupertino_gallery_lib::{Entry, entry_route, gallery, sub_route};
-use waft_cupertino::{CupertinoNavigationBarBackButton, install_cupertino_icon_font};
-use waft_embedder::{
-    Offset, PointerChange, PointerData, PointerDataPacket, PointerDeviceKind, TargetPlatform,
-};
-use waft_foundation::AppCell;
-use waft_gestures::GestureBinding;
-use waft_painting::PaintingBinding;
-use waft_rendering::{AnyRenderObject, RenderParagraph, RendererBinding};
-use waft_scheduler::SchedulerBinding;
-use waft_test::{IMPLICIT_VIEW_ID, TestPlatform, TestView};
-use waft_widgets::{
-    AnyElement, GlobalKey, IntoWidget, NavigatorState, RouteRef, Text, WidgetsBinding,
-    downcast_widget, run_app,
-};
+use waft_cupertino::CupertinoNavigationBarBackButton;
+use waft_embedder::{Offset, Size, TargetPlatform};
+use waft_rendering::RenderParagraph;
+use waft_test::TestPlatform;
+use waft_widgets::testing::WidgetTester;
+use waft_widgets::{AnyElement, GlobalKey, NavigatorState, RouteRef, Text, downcast_widget};
 
 /// The window `main.rs` opens, in logical points.
 const VIEW: [f64; 2] = [420.0, 720.0];
@@ -37,41 +28,24 @@ enum Search {
 
 /// The mounted gallery, plus the key its navigator is reached through.
 struct Fixture {
-    cell: Rc<AppCell>,
+    tester: WidgetTester,
     navigator: GlobalKey,
-    at: Duration,
 }
 
 impl Fixture {
     fn new() -> Fixture {
-        // A 420x720 view at 1x, so `run_app` finds one to attach to.
-        let platform = TestPlatform::new()
-            .on(TargetPlatform::IOS)
-            .with_view(Rc::new(TestView::new(VIEW[0], VIEW[1])));
-        let cell = AppCell::with_platform(Rc::new(platform));
-        let mut app = cell.borrow_mut();
-        // What the shell does at start-up: the app-wide fonts every paragraph shapes against.
-        PaintingBinding::instance(&mut app).install_fonts(&mut app, |fonts| {
-            fonts.add_source(valo_system_fonts::SystemFonts::load());
-        });
-
-        let navigator = GlobalKey::new();
-        run_app(
-            &mut app,
-            gallery().navigator_key(navigator.clone()).into_widget(),
+        // The window at flutter_test's device pixel ratio, on the platform the gallery is for.
+        let mut tester = WidgetTester::with_physical_size(
+            TestPlatform::new().on(TargetPlatform::IOS),
+            Size::new(
+                VIEW[0] * WidgetTester::DEVICE_PIXEL_RATIO,
+                VIEW[1] * WidgetTester::DEVICE_PIXEL_RATIO,
+            ),
         );
-        // The same ordering constraint the binary has: `run_app` is what attaches the tree the
-        // icon glyphs are shaped in.
-        install_cupertino_icon_font(&mut app);
-        // `run_app` attaches the root widget on the next timer turn, as Dart's `Timer.run` does.
-        drop(app);
-        cell.elapse(Duration::ZERO);
+        let navigator = GlobalKey::new();
+        tester.pump_widget(gallery().navigator_key(navigator.clone()));
 
-        let mut fixture = Fixture {
-            cell,
-            navigator,
-            at: Duration::ZERO,
-        };
+        let mut fixture = Fixture { tester, navigator };
         fixture.settle();
         fixture
     }
@@ -79,28 +53,15 @@ impl Fixture {
     /// Pumps a fixed span of frames rather than waiting for quiescence: the Activity entry's
     /// spinner never stops asking for the next frame, so "settled" is not a state this app
     /// reaches. Forty frames is 800 ms — comfortably past the route transition.
-    ///
-    /// Each frame phase ends with the checkpoint the shell runs after every platform event, so
-    /// a continuation awaiting a route's result resumes as it would in the app.
     fn settle(&mut self) {
         for _ in 0..40 {
-            self.pump(Duration::from_millis(20));
+            self.tester.pump_by(Duration::from_millis(20));
         }
     }
 
     /// One frame, rather than the forty `settle` pumps, for watching a transition start.
     fn frame(&mut self) {
-        self.pump(Duration::from_millis(16));
-    }
-
-    /// A frame of the app's view `step` after the last.
-    fn pump(&mut self, step: Duration) {
-        self.at += step;
-        let views = [IMPLICIT_VIEW_ID];
-        SchedulerBinding::handle_begin_frame(&mut self.cell.borrow_mut(), &views, Some(self.at));
-        self.cell.checkpoint();
-        SchedulerBinding::handle_draw_frame(&mut self.cell.borrow_mut(), &views);
-        self.cell.checkpoint();
+        self.tester.pump_by(Duration::from_millis(16));
     }
 
     /// Where the topmost thing reading `text` sits, or `None` when nothing does.
@@ -108,98 +69,64 @@ impl Fixture {
         let mut elements = self.elements();
         elements.reverse();
         for element in elements {
-            let Some(object) = element.render_object(&self.cell.borrow()) else {
+            let Some(object) = element.render_object(&self.tester.cell.borrow()) else {
                 continue;
             };
-            let Some(paragraph) = object.downcast::<RenderParagraph>(&self.cell.borrow()) else {
+            let Some(paragraph) = object.downcast::<RenderParagraph>(&self.tester.cell.borrow())
+            else {
                 continue;
             };
             if !paragraph
-                .text(&self.cell.borrow())
+                .text(&self.tester.cell.borrow())
                 .to_plain_text(true, true)
                 .contains(text)
             {
                 continue;
             }
             let object = object.as_box().expect("a paragraph is a box");
-            return Some(object.local_to_global(&self.cell.borrow(), Offset::ZERO, None));
+            return Some(object.local_to_global(&self.tester.cell.borrow(), Offset::ZERO, None));
         }
         None
     }
 
     fn navigator(&mut self) -> waft_foundation::Handle<NavigatorState> {
         self.navigator
-            .current_state::<NavigatorState>(&self.cell.borrow_mut())
+            .current_state::<NavigatorState>(&self.tester.cell.borrow_mut())
             .expect("the CupertinoApp's navigator is mounted")
     }
 
     fn push(&mut self, route: RouteRef) {
         let navigator = self.navigator();
-        navigator.push(&mut self.cell.borrow_mut(), route);
+        navigator.push(&mut self.tester.cell.borrow_mut(), route);
         self.settle();
     }
 
     /// The same call the row's chevron makes.
     fn push_entry(&mut self, entry: Entry) {
-        let route = entry_route(&mut self.cell.borrow_mut(), entry);
+        let route = entry_route(&mut self.tester.cell.borrow_mut(), entry);
         self.push(route);
     }
 
     fn push_sub_page(&mut self, entry: Entry, index: usize) {
-        let route = sub_route(&mut self.cell.borrow_mut(), entry, index);
+        let route = sub_route(&mut self.tester.cell.borrow_mut(), entry, index);
         self.push(route);
     }
 
     fn pop(&mut self) {
         let navigator = self.navigator();
-        navigator.pop(&mut self.cell.borrow_mut(), None);
+        navigator.pop(&mut self.tester.cell.borrow_mut(), None);
         self.settle();
     }
 
     fn can_pop(&mut self) -> bool {
         let navigator = self.navigator();
-        navigator.can_pop(&self.cell.borrow())
-    }
-
-    /// Every render object of the mounted tree, parents before children: the render tree of
-    /// the one view the app shows.
-    fn render_objects(&mut self) -> Vec<AnyRenderObject> {
-        let root = {
-            let mut app = self.cell.borrow_mut();
-            let render_views = RendererBinding::instance(&mut app).render_views(&app);
-            let [render_view] = render_views[..] else {
-                panic!("the app shows one view, not {}", render_views.len());
-            };
-            render_view.as_object()
-        };
-        let mut all = vec![root];
-        let mut visited = 0;
-        while visited < all.len() {
-            let object = all[visited];
-            object.visit_children(&self.cell.borrow(), &mut |child| all.push(child));
-            visited += 1;
-        }
-        all
+        navigator.can_pop(&self.tester.cell.borrow())
     }
 
     /// The mounted elements in tree order: a subtree is visited before its next sibling, so the
     /// overlay's topmost route comes last.
     fn elements(&mut self) -> Vec<AnyElement> {
-        let root = {
-            let mut app = self.cell.borrow_mut();
-            WidgetsBinding::instance(&mut app)
-                .root_element(&app)
-                .expect("a mounted app")
-        };
-        let mut all = Vec::new();
-        let mut stack = vec![root];
-        while let Some(element) = stack.pop() {
-            all.push(element);
-            let mut children = element.children(&self.cell.borrow());
-            children.reverse();
-            stack.extend(children);
-        }
-        all
+        self.tester.elements()
     }
 
     /// What the top screen's automatic back button says.
@@ -213,7 +140,7 @@ impl Fixture {
             .rev()
             .find(|element| {
                 downcast_widget::<CupertinoNavigationBarBackButton>(
-                    &**element.widget(&self.cell.borrow()),
+                    &**element.widget(&self.tester.cell.borrow()),
                 )
                 .is_some()
             })
@@ -223,12 +150,13 @@ impl Fixture {
         let mut labels = Vec::new();
         let mut stack = vec![button];
         while let Some(element) = stack.pop() {
-            if let Some(text) = downcast_widget::<Text>(&**element.widget(&self.cell.borrow()))
+            if let Some(text) =
+                downcast_widget::<Text>(&**element.widget(&self.tester.cell.borrow()))
                 && let Some(data) = &text.data
             {
                 labels.push(data.clone());
             }
-            stack.extend(element.children(&self.cell.borrow()));
+            stack.extend(element.children(&self.tester.cell.borrow()));
         }
         labels.join(" ")
     }
@@ -245,22 +173,23 @@ impl Fixture {
             elements.reverse();
         }
         for element in elements {
-            let Some(object) = element.render_object(&self.cell.borrow()) else {
+            let Some(object) = element.render_object(&self.tester.cell.borrow()) else {
                 continue;
             };
-            let Some(paragraph) = object.downcast::<RenderParagraph>(&self.cell.borrow()) else {
+            let Some(paragraph) = object.downcast::<RenderParagraph>(&self.tester.cell.borrow())
+            else {
                 continue;
             };
             if !paragraph
-                .text(&self.cell.borrow())
+                .text(&self.tester.cell.borrow())
                 .to_plain_text(true, true)
                 .contains(text)
             {
                 continue;
             }
             let object = object.as_box().expect("a paragraph is a box");
-            let size = object.size(&self.cell.borrow());
-            let origin = object.local_to_global(&self.cell.borrow(), Offset::ZERO, None);
+            let size = object.size(&self.tester.cell.borrow());
+            let origin = object.local_to_global(&self.tester.cell.borrow(), Offset::ZERO, None);
             return origin + Offset::new(size.width() / 2.0, size.height() / 2.0);
         }
         panic!("nothing on screen reads {text:?}; saw {:?}", self.texts())
@@ -278,47 +207,38 @@ impl Fixture {
         self.tap_at(point);
     }
 
-    fn tap_at(&mut self, point: Offset) {
-        self.send(PointerChange::Down, point);
-        self.at += Duration::from_millis(20);
-        self.send(PointerChange::Up, point);
+    /// Drags the screen up by `distance` from the middle of the window, as a finger scrolls
+    /// a page to what is below the fold, and lets the scroll come to rest.
+    fn scroll_up(&mut self, distance: f64) {
+        let middle = Offset::new(VIEW[0] / 2.0, VIEW[1] / 2.0);
+        self.tester
+            .drag_from(middle, Offset::new(0.0, -distance), 1);
         self.settle();
     }
 
-    fn send(&mut self, change: PointerChange, at_point: Offset) {
-        {
-            let mut app = self.cell.borrow_mut();
-            GestureBinding::instance(&mut app).handle_pointer_data_packet(
-                &mut app,
-                PointerDataPacket::new(vec![PointerData {
-                    change,
-                    kind: PointerDeviceKind::Touch,
-                    time_stamp: self.at,
-                    pointer_identifier: 1,
-                    physical_x: at_point.dx(),
-                    physical_y: at_point.dy(),
-                    ..PointerData::default()
-                }]),
-            );
-        }
-        self.cell.checkpoint();
+    fn tap_at(&mut self, point: Offset) {
+        self.tester.tap(point, 1);
+        self.settle();
     }
 
     /// The plain text of every paragraph on screen.
     fn texts(&mut self) -> Vec<String> {
-        self.render_objects()
+        let paragraphs = self.tester.all::<RenderParagraph>();
+        let app = self.tester.cell.borrow();
+        paragraphs
             .into_iter()
-            .filter_map(|object| object.downcast::<RenderParagraph>(&self.cell.borrow()))
-            .map(|paragraph| {
-                paragraph
-                    .text(&self.cell.borrow())
-                    .to_plain_text(true, true)
-            })
+            .map(|paragraph| paragraph.text(&app).to_plain_text(true, true))
             .collect()
     }
 
     fn shows(&mut self, text: &str) -> bool {
         self.texts().iter().any(|shown| shown.contains(text))
+    }
+
+    /// Whether a paragraph on screen reads exactly `text`, for a value that other text on the
+    /// page may contain, such as a dash in a footer.
+    fn shows_paragraph(&mut self, text: &str) -> bool {
+        self.texts().iter().any(|shown| shown == text)
     }
 }
 
@@ -474,11 +394,22 @@ fn tapping_a_row_opens_its_entry() {
 fn an_alert_dialog_opens_and_reports_its_answer() {
     let mut fixture = Fixture::new();
     fixture.push_entry(Entry::Dialogs);
+    let button = fixture.position_of("Ask a question");
+    // FlutterTest's square glyphs wrap the footers onto more lines than the system fonts do,
+    // which puts the Result row below the fold, where the list does not build it.
+    fixture.scroll_up(VIEW[1]);
     assert!(
-        fixture.shows("\u{2014}"),
+        fixture.shows("Last answer") && fixture.shows_paragraph("\u{2014}"),
         "no answer yet; saw {:?}",
         fixture.texts()
     );
+    // Back to the top, where the buttons are, in drags that stay inside the window.
+    for _ in 0..10 {
+        if fixture.position_of("Ask a question") == button {
+            break;
+        }
+        fixture.scroll_up(-VIEW[1] / 2.0);
+    }
 
     fixture.tap("Ask a question");
     assert!(
@@ -493,9 +424,10 @@ fn an_alert_dialog_opens_and_reports_its_answer() {
         "the action popped the dialog; saw {:?}",
         fixture.texts()
     );
+    fixture.scroll_up(VIEW[1]);
     assert!(
-        fixture.shows("Yes"),
-        "the popped result reached the page; saw {:?}",
+        fixture.shows("Last answer") && fixture.shows_paragraph("Yes"),
+        "the popped result reached the Result row; saw {:?}",
         fixture.texts()
     );
 }
@@ -615,9 +547,9 @@ fn the_page_behind_sits_still_on_the_frame_a_push_is_measured() {
     let mut fixture = Fixture::new();
     let resting = fixture.position_of("Widgets").expect("the index is up");
 
-    let route = entry_route(&mut fixture.cell.borrow_mut(), Entry::Segments);
+    let route = entry_route(&mut fixture.tester.cell.borrow_mut(), Entry::Segments);
     let navigator = fixture.navigator();
-    navigator.push(&mut fixture.cell.borrow_mut(), route);
+    navigator.push(&mut fixture.tester.cell.borrow_mut(), route);
 
     fixture.frame();
     assert_eq!(

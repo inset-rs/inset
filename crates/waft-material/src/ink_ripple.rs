@@ -422,24 +422,22 @@ impl InkFeatureLeaf for InkRipple {
 mod tests {
     use std::cell::Cell;
 
-    use waft_embedder::{Size, TargetPlatform};
+    use waft_embedder::Size;
     use waft_painting::BoxShape;
     use waft_widgets::{
         Actions, ActivateIntent, BuildContext, Builder, Center, Directionality,
         FocusHighlightStrategy, FocusManager, IntoWidget, SizedBox, WidgetRef,
     };
 
+    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+
     use super::*;
 
     use crate::ink_well::{InkResponse, InkWell};
     use crate::material::{Material, RenderInkFeatures};
-    use crate::test_support::{Drawn, WidgetTester, with_main_thread_stack};
+    use crate::test_support::{Drawn, PaintInspection};
     use crate::theme::Theme;
     use crate::theme_data::ThemeData;
-
-    fn tester() -> WidgetTester {
-        WidgetTester::on(TargetPlatform::Android)
-    }
 
     const HIGHLIGHT_COLOR: Color = Color::new(0xAAFF0000);
     const SPLASH_COLOR: Color = Color::new(0xB40000FF);
@@ -508,46 +506,44 @@ mod tests {
 
     #[test]
     fn the_ink_well_widget_renders_an_ink_ripple() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(ripple_frame(None));
             let tap_down_offset = TOP_LEFT;
             tester.tap(tap_down_offset, 1);
-            tester.pump(Duration::ZERO); // start gesture
+            tester.pump(); // start gesture
 
             // Initially the ripple's center is where the tap occurred;
             // ripplePattern always add a translation of tapDownOffset.
-            assert_ripple(&tester, Offset::ZERO, 30.0, 0);
+            assert_ripple(tester, Offset::ZERO, 30.0, 0);
 
             // The ripple fades in for 75ms. During that time its alpha is eased from
             // 0 to the splashColor's alpha value and its center moves towards the
             // center of the ink well.
-            tester.pump(Duration::from_millis(50));
-            assert_ripple(&tester, Offset::new(17.0, 17.0), 56.0, 120);
+            tester.pump_by(Duration::from_millis(50));
+            assert_ripple(tester, Offset::new(17.0, 17.0), 56.0, 120);
 
             // At 75ms the ripple has fade in: it's alpha matches the splashColor's
             // alpha and its center has moved closer to the ink well's center.
-            tester.pump(Duration::from_millis(25));
-            assert_ripple(&tester, Offset::new(29.0, 29.0), 73.0, 180);
+            tester.pump_by(Duration::from_millis(25));
+            assert_ripple(tester, Offset::new(29.0, 29.0), 73.0, 180);
 
             // At this point the splash radius has expanded to its limit: 5 past the
             // ink well's radius parameter. The splash center has moved to its final
             // location at the inkwell's center and the fade-out is about to start.
             // The fade-out begins at 225ms = 50ms + 25ms + 150ms.
-            tester.pump(Duration::from_millis(150));
-            assert_ripple(&tester, INK_WELL_CENTER - tap_down_offset, 105.0, 180);
+            tester.pump_by(Duration::from_millis(150));
+            assert_ripple(tester, INK_WELL_CENTER - tap_down_offset, 105.0, 180);
 
             // After another 150ms the fade-out is complete.
-            tester.pump(Duration::from_millis(150));
-            assert_ripple(&tester, INK_WELL_CENTER - tap_down_offset, 105.0, 0);
+            tester.pump_by(Duration::from_millis(150));
+            assert_ripple(tester, INK_WELL_CENTER - tap_down_offset, 105.0, 0);
         });
     }
 
     /// Dart sends the shortcut's key; here the intent is invoked under the focused ink well.
     #[test]
     fn the_ink_well_widget_renders_an_activate_action_induced_ink_ripple() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             {
                 let mut app = tester.cell.borrow_mut();
                 FocusManager::instance(&mut app)
@@ -568,38 +564,37 @@ mod tests {
 
             let context = inner.get().expect("built");
             Actions::invoke(&mut tester.cell.borrow_mut(), context, &ActivateIntent);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // ripplePattern always add a translation of topLeft.
-            assert_ripple(&tester, inkwell_center, 30.0, 0);
+            assert_ripple(tester, inkwell_center, 30.0, 0);
 
             // The ripple fades in for 75ms. During that time its alpha is eased from
             // 0 to the splashColor's alpha value.
-            tester.pump(Duration::from_millis(50));
-            assert_ripple(&tester, inkwell_center, 56.0, 120);
+            tester.pump_by(Duration::from_millis(50));
+            assert_ripple(tester, inkwell_center, 56.0, 120);
 
             // At 75ms the ripple has faded in: it's alpha matches the splashColor's
             // alpha.
-            tester.pump(Duration::from_millis(25));
-            assert_ripple(&tester, inkwell_center, 73.0, 180);
+            tester.pump_by(Duration::from_millis(25));
+            assert_ripple(tester, inkwell_center, 73.0, 180);
 
             // At this point the splash radius has expanded to its limit: 5 past the
             // ink well's radius parameter. The fade-out is about to start.
             // The fade-out begins at 225ms = 50ms + 25ms + 150ms.
-            tester.pump(Duration::from_millis(150));
-            assert_ripple(&tester, inkwell_center, 105.0, 180);
+            tester.pump_by(Duration::from_millis(150));
+            assert_ripple(tester, inkwell_center, 105.0, 180);
 
             // After another 150ms the fade-out is complete.
-            tester.pump(Duration::from_millis(150));
-            assert_ripple(&tester, inkwell_center, 105.0, 0);
+            tester.pump_by(Duration::from_millis(150));
+            assert_ripple(tester, inkwell_center, 105.0, 0);
         });
     }
 
     #[test]
     fn cancel_an_ink_ripple_that_was_disposed_when_its_animation_ended() {
         // Regression test for https://github.com/flutter/flutter/issues/14391
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(
                 Directionality::new(
                     TextDirection::Ltr,
@@ -617,12 +612,12 @@ mod tests {
                 .into_widget(),
             );
             tester.tap(TOP_LEFT, 1);
-            tester.pump(Duration::ZERO); // start splash
-            tester.pump(K_FADE_OUT_DURATION); // _kFadeOutDuration, in_ripple.dart
+            tester.pump(); // start splash
+            tester.pump_by(K_FADE_OUT_DURATION); // _kFadeOutDuration, in_ripple.dart
 
-            let mut gesture = WidgetTester::touch(2);
+            let mut gesture = TestPointer::touch(2);
             tester.down(&mut gesture, TOP_LEFT);
-            tester.pump(Duration::ZERO); // start gesture
+            tester.pump(); // start gesture
             tester.move_to(&mut gesture, Offset::ZERO, true);
             tester.up(&gesture); // generates a tap cancel
             tester.pump_and_settle();
@@ -632,17 +627,16 @@ mod tests {
     #[test]
     fn cancel_an_ink_ripple_before_it_started() {
         // Regression test for https://github.com/flutter/flutter/issues/14391
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(ripple_frame(None));
             tester.tap(TOP_LEFT, 1);
-            tester.pump(Duration::ZERO); // start splash
+            tester.pump(); // start splash
             // No delay here so _fadeInController.value=1.0 (InkRipple.dart)
 
             // Generate a tap cancel; Will cancel the ink splash before it started
-            let mut gesture = WidgetTester::touch(2);
+            let mut gesture = TestPointer::touch(2);
             tester.down(&mut gesture, TOP_LEFT);
-            tester.pump(Duration::ZERO); // start gesture
+            tester.pump(); // start gesture
             tester.move_to(&mut gesture, Offset::ZERO, true);
             tester.up(&gesture); // generates a tap cancel
 
@@ -702,8 +696,7 @@ mod tests {
 
     #[test]
     fn material2_custom_rect_callback_renders_an_ink_splash_from_its_center() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let splash_color = Color::new(0xff00ff00);
             let build_widget =
                 |tester: &WidgetTester, splash_factory: Option<InteractiveInkFeatureFactoryRef>| {
@@ -740,25 +733,25 @@ mod tests {
                 })
             };
 
-            let widget = build_widget(&tester, None);
+            let widget = build_widget(tester, None);
             tester.pump_widget(widget);
             let center = WidgetTester::SIZE.center(Offset::ZERO);
-            let mut gesture = WidgetTester::touch(1);
+            let mut gesture = TestPointer::touch(1);
             tester.down(&mut gesture, center);
-            tester.pump(Duration::ZERO); // start gesture
+            tester.pump(); // start gesture
             tester.pump_and_settle(); // Finish rendering ink splash.
-            assert_eq!(circle_center(&tester), Some(Offset::new(50.0, 100.0)));
+            assert_eq!(circle_center(tester), Some(Offset::new(50.0, 100.0)));
             tester.up(&gesture);
 
-            let widget = build_widget(&tester, Some(Rc::new(TopSquareRippleFactory)));
+            let widget = build_widget(tester, Some(Rc::new(TopSquareRippleFactory)));
             tester.pump_widget(widget);
             tester.pump_and_settle(); // Finish rendering ink splash.
 
-            let mut gesture = WidgetTester::touch(2);
+            let mut gesture = TestPointer::touch(2);
             tester.down(&mut gesture, center);
-            tester.pump(Duration::ZERO); // start gesture
+            tester.pump(); // start gesture
             tester.pump_and_settle(); // Finish rendering ink splash.
-            assert_eq!(circle_center(&tester), Some(Offset::new(50.0, 50.0)));
+            assert_eq!(circle_center(tester), Some(Offset::new(50.0, 50.0)));
         });
     }
 }

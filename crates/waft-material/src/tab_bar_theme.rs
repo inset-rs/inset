@@ -963,12 +963,14 @@ mod tests {
     use waft_painting::{BorderSide, BorderStyle, BoxDecoration, EdgeInsets};
     use waft_widgets::WidgetStateColor;
 
+    use waft_widgets::testing::test_widgets;
+
     use super::*;
     use crate::colors::Colors;
+    use crate::drawer_theme::tests::probe;
     use crate::drawer_theme::tests::theme_seen_through_capture;
     use crate::ink_ripple::InkRipple;
     use crate::tab_indicator::UnderlineTabIndicator;
-    use crate::test_support::{probe, test_cell, with_main_thread_stack};
     use crate::theme_data::ThemeData;
 
     #[test]
@@ -1199,13 +1201,12 @@ mod tests {
 
     #[test]
     fn of_returns_theme_data_tab_bar_theme_without_a_tab_bar_theme() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let expected = TabBarThemeData::new().divider_height(7.0);
             let theme_data_tab_bar = expected.clone();
 
             let seen = probe(
-                &cell,
+                tester,
                 move |app, child| {
                     let data = ThemeData::builder()
                         .tab_bar_theme(theme_data_tab_bar.clone())
@@ -1221,13 +1222,12 @@ mod tests {
 
     #[test]
     fn of_returns_the_closest_tab_bar_theme_over_theme_data() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
+        test_widgets(|tester| {
             let local = TabBarThemeData::new().divider_height(2.0);
             let expected = local.clone();
 
             let seen = probe(
-                &cell,
+                tester,
                 move |app, child| {
                     let data = ThemeData::builder()
                         .tab_bar_theme(TabBarThemeData::new().divider_height(7.0))
@@ -1247,11 +1247,9 @@ mod tests {
 
     #[test]
     fn a_captured_tab_bar_theme_is_kept_under_another_tab_bar_theme() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
-
+        test_widgets(|tester| {
             let seen = theme_seen_through_capture(
-                &cell,
+                tester,
                 |probe| {
                     TabBarTheme::new()
                         .with_data(TabBarThemeData::new().divider_height(1.0))
@@ -1273,9 +1271,8 @@ mod tests {
 
     #[test]
     fn theme_data_holds_the_tab_bar_theme() {
-        with_main_thread_stack(|| {
-            let cell = test_cell();
-            let app = cell.borrow();
+        test_widgets(|tester| {
+            let app = tester.cell.borrow();
             let theme = ThemeData::new(&app);
             assert_eq!(theme.tab_bar_theme, TabBarThemeData::new());
 
@@ -1308,9 +1305,9 @@ mod tests {
     mod tab_bar_cases {
         //! tab_bar_theme_test.dart's cases that build a `TabBar`; the four golden cases are
         //! not ported.
+        use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
 
         use std::panic::{AssertUnwindSafe, catch_unwind};
-        use std::time::Duration;
 
         use waft_embedder::{
             Color, FontStyle, FontWeight, Offset, RRect, Radius, Rect, Size, TextDirection,
@@ -1339,11 +1336,12 @@ mod tests {
         use crate::scaffold::Scaffold;
         use crate::tab_controller::{DefaultTabController, TabController};
         use crate::tabs::tests::{
-            close, first_render_box, is_line, only, painted_lines, rect_of, size_of, tester, text,
+            close, first_render_box, is_line, only, painted_lines, rect_of, size_of, text,
         };
         use crate::tabs::{Tab, TabAlignment, TabBar, TabBarIndicatorSize, TabIndicatorAnimation};
-        use crate::test_support::{TestVSync, WidgetTester, material_app, with_main_thread_stack};
+        use crate::test_support::{PaintInspection, material_app};
         use crate::theme_data::ThemeData;
+        use waft_widgets::testing::TestVSync;
 
         const TAB_1_TEXT: &str = "tab 1";
 
@@ -1600,8 +1598,7 @@ mod tests {
         // 'Local TabBarTheme overrides defaults'.
         #[test]
         fn a_local_tab_bar_theme_overrides_the_defaults() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let indicator_color = Colors::GREEN.primary();
                 const DIVIDER_COLOR: Color = Color::new(0xff000001);
                 const DIVIDER_HEIGHT: f64 = 20.5;
@@ -1623,18 +1620,18 @@ mod tests {
                     local_tab_bar_theme: Some(tab_bar_theme),
                     ..Build::default()
                 }
-                .build(&tester);
+                .build(tester);
                 tester.pump_widget(widget);
 
-                let selected_label = text_style(&tester, TAB_1_TEXT);
+                let selected_label = text_style(tester, TAB_1_TEXT);
                 assert_eq!(color_of(&selected_label), Some(LABEL_COLOR));
                 assert_eq!(selected_label.font_size, Some(32.0));
-                let unselected_label = text_style(&tester, TAB_2_TEXT);
+                let unselected_label = text_style(tester, TAB_2_TEXT);
                 assert_eq!(color_of(&unselected_label), Some(UNSELECTED_LABEL_COLOR));
                 assert_eq!(unselected_label.font_weight, Some(FontWeight::BOLD));
 
                 assert!(paints_line_then(
-                    &tester,
+                    tester,
                     DIVIDER_COLOR,
                     Some(DIVIDER_HEIGHT),
                     Some(indicator_color),
@@ -1688,20 +1685,19 @@ mod tests {
         }
 
         fn material3_defaults(secondary: bool) {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 // Test default label color and label styles.
                 let widget = Build {
                     secondary_tab_bar: secondary,
                     use_material3: true,
                     ..Build::default()
                 }
-                .build(&tester);
+                .build(tester);
                 tester.pump_widget(widget);
 
-                let theme = theme_with(&tester, None, true);
+                let theme = theme_with(tester, None, true);
                 let title_small = theme.text_theme.title_small.clone().expect("titleSmall");
-                let selected_label = text_style(&tester, TAB_1_TEXT);
+                let selected_label = text_style(tester, TAB_1_TEXT);
                 assert_eq!(selected_label.font_family, title_small.font_family);
                 assert_eq!(selected_label.font_size, Some(14.0));
                 let selected_color = if secondary {
@@ -1710,7 +1706,7 @@ mod tests {
                     theme.color_scheme.primary
                 };
                 assert_eq!(color_of(&selected_label), Some(selected_color));
-                let unselected_label = text_style(&tester, TAB_2_TEXT);
+                let unselected_label = text_style(tester, TAB_2_TEXT);
                 assert_eq!(unselected_label.font_family, title_small.font_family);
                 assert_eq!(unselected_label.font_size, Some(14.0));
                 assert_eq!(
@@ -1729,9 +1725,9 @@ mod tests {
                     use_material3: secondary,
                     ..Build::default()
                 }
-                .build(&tester);
+                .build(tester);
                 tester.pump_widget(widget);
-                check_default_label_padding(&tester, &keys, 52.0);
+                check_default_label_padding(tester, &keys, 52.0);
 
                 // Test default indicator & divider color.
                 let (then_rrect, then_line) = if secondary {
@@ -1740,7 +1736,7 @@ mod tests {
                     (Some(theme.color_scheme.primary), None)
                 };
                 assert!(paints_line_then(
-                    &tester,
+                    tester,
                     theme.color_scheme.outline_variant(),
                     Some(1.0),
                     then_rrect,
@@ -1764,31 +1760,26 @@ mod tests {
         // 'Tab bar theme overrides label color (selected)'.
         #[test]
         fn the_theme_label_color_colors_the_selected_label_and_icon() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let widget = Build {
                     tab_bar_theme: Some(TabBarThemeData::new().label_color(Colors::BLACK)),
                     ..Build::default()
                 }
-                .build(&tester);
+                .build(tester);
                 tester.pump_widget(widget);
 
                 assert_eq!(
-                    color_of(&text_style(&tester, TAB_1_TEXT)),
+                    color_of(&text_style(tester, TAB_1_TEXT)),
                     Some(Colors::BLACK)
                 );
-                assert_eq!(
-                    icon_color(&tester, &Icons::looks_one()),
-                    Some(Colors::BLACK)
-                );
+                assert_eq!(icon_color(tester, &Icons::looks_one()), Some(Colors::BLACK));
             });
         }
 
         // 'Tab bar theme overrides label padding'.
         #[test]
         fn the_theme_label_padding_insets_the_tabs() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const TOP_PADDING: f64 = 10.0;
                 const BOTTOM_PADDING: f64 = 7.0;
                 const RIGHT_PADDING: f64 = 13.0;
@@ -1809,12 +1800,12 @@ mod tests {
                     is_scrollable: true,
                     ..Build::default()
                 }
-                .build(&tester);
+                .build(tester);
                 tester.pump_widget(widget);
 
-                let tab_bar = rect_of(&tester, only::<TabBar>(&tester));
-                let tab_one_rect = key_rect(&tester, &keys[0]);
-                let tab_two_rect = key_rect(&tester, &keys[1]);
+                let tab_bar = rect_of(tester, only::<TabBar>(tester));
+                let tab_one_rect = key_rect(tester, &keys[0]);
+                let tab_two_rect = key_rect(tester, &keys[1]);
 
                 // verify coordinates of tabOne
                 assert_eq!(tab_one_rect.left, LEFT_PADDING);
@@ -1843,8 +1834,7 @@ mod tests {
         // 'Tab bar theme overrides label styles'.
         #[test]
         fn the_theme_label_styles_style_the_labels() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let widget = Build {
                     tab_bar_theme: Some(
                         TabBarThemeData::new()
@@ -1853,15 +1843,15 @@ mod tests {
                     ),
                     ..Build::default()
                 }
-                .build(&tester);
+                .build(tester);
                 tester.pump_widget(widget);
 
                 assert_eq!(
-                    text_style(&tester, TAB_1_TEXT).font_family.as_deref(),
+                    text_style(tester, TAB_1_TEXT).font_family.as_deref(),
                     Some("foobar")
                 );
                 assert_eq!(
-                    text_style(&tester, TAB_2_TEXT).font_family.as_deref(),
+                    text_style(tester, TAB_2_TEXT).font_family.as_deref(),
                     Some("baz")
                 );
             });
@@ -1870,22 +1860,21 @@ mod tests {
         // 'Tab bar theme with just label style specified'.
         #[test]
         fn a_theme_with_only_a_label_style_leaves_the_unselected_label_to_the_defaults() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let widget = Build {
                     tab_bar_theme: Some(
                         TabBarThemeData::new().label_style(TextStyle::new().font_family("foobar")),
                     ),
                     ..Build::default()
                 }
-                .build(&tester);
+                .build(tester);
                 tester.pump_widget(widget);
 
                 assert_eq!(
-                    text_style(&tester, TAB_1_TEXT).font_family.as_deref(),
+                    text_style(tester, TAB_1_TEXT).font_family.as_deref(),
                     Some("foobar")
                 );
-                let unselected_label = text_style(&tester, TAB_2_TEXT);
+                let unselected_label = text_style(tester, TAB_2_TEXT);
                 assert_eq!(unselected_label.font_family.as_deref(), Some("Roboto"));
                 assert_eq!(unselected_label.font_size, Some(14.0));
                 assert_eq!(
@@ -1898,10 +1887,9 @@ mod tests {
         // 'Tab bar label styles override theme label styles'.
         #[test]
         fn the_tab_bar_label_styles_override_the_theme_label_styles() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let theme = theme_with(
-                    &tester,
+                    tester,
                     Some(
                         TabBarThemeData::new()
                             .label_style(TextStyle::new().font_family("3"))
@@ -1909,7 +1897,7 @@ mod tests {
                     ),
                     true,
                 );
-                let controller = controller(&tester, 3);
+                let controller = controller(tester, 3);
                 tester.pump_widget(material_app(
                     theme,
                     Scaffold::new()
@@ -1923,19 +1911,18 @@ mod tests {
                 ));
 
                 assert_eq!(
-                    text_style(&tester, TAB_1_TEXT).font_family.as_deref(),
+                    text_style(tester, TAB_1_TEXT).font_family.as_deref(),
                     Some("1")
                 );
                 assert_eq!(
-                    text_style(&tester, TAB_2_TEXT).font_family.as_deref(),
+                    text_style(tester, TAB_2_TEXT).font_family.as_deref(),
                     Some("2")
                 );
             });
         }
 
         fn label_padding_overrides_theme(use_material3: bool) {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const TAB_START_OFFSET: f64 = 52.0;
                 const VERTICAL_PADDING: f64 = 10.0;
                 const HORIZONTAL_PADDING: f64 = 10.0;
@@ -1943,7 +1930,7 @@ mod tests {
                 const INDICATOR_WEIGHT: f64 = 2.0; // default value
 
                 let theme = theme_with(
-                    &tester,
+                    tester,
                     Some(
                         TabBarThemeData::new()
                             .label_padding(EdgeInsetsGeometry::symmetric(20.0, 20.0)),
@@ -1951,7 +1938,7 @@ mod tests {
                     use_material3,
                 );
                 let (tabs, keys) = sized_tabs();
-                let controller = controller(&tester, tabs.len());
+                let controller = controller(tester, tabs.len());
                 tester.pump_widget(material_app(
                     theme,
                     Scaffold::new()
@@ -1969,9 +1956,9 @@ mod tests {
                         .into_widget(),
                 ));
 
-                let tab_bar = rect_of(&tester, only::<TabBar>(&tester));
-                let tab_one_rect = key_rect(&tester, &keys[0]);
-                let tab_two_rect = key_rect(&tester, &keys[1]);
+                let tab_bar = rect_of(tester, only::<TabBar>(tester));
+                let tab_one_rect = key_rect(tester, &keys[0]);
+                let tab_two_rect = key_rect(tester, &keys[1]);
 
                 // verify coordinates of tabOne
                 let start = if use_material3 { TAB_START_OFFSET } else { 0.0 };
@@ -2024,33 +2011,28 @@ mod tests {
         // 'Tab bar theme overrides label color (unselected)'.
         #[test]
         fn the_theme_unselected_label_color_colors_the_unselected_label_and_icon() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let widget = Build {
                     tab_bar_theme: Some(
                         TabBarThemeData::new().unselected_label_color(Colors::BLACK),
                     ),
                     ..Build::default()
                 }
-                .build(&tester);
+                .build(tester);
                 tester.pump_widget(widget);
 
                 assert_eq!(
-                    color_of(&text_style(&tester, TAB_2_TEXT)),
+                    color_of(&text_style(tester, TAB_2_TEXT)),
                     Some(Colors::BLACK)
                 );
-                assert_eq!(
-                    icon_color(&tester, &Icons::looks_two()),
-                    Some(Colors::BLACK)
-                );
+                assert_eq!(icon_color(tester, &Icons::looks_two()), Some(Colors::BLACK));
             });
         }
 
         // 'Tab bar theme overrides tab mouse cursor'.
         #[test]
         fn the_theme_mouse_cursor_is_the_tabs_cursor() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let widget = Build {
                     tab_bar_theme: Some(
                         TabBarThemeData::new().mouse_cursor(<dyn WidgetStateProperty<
@@ -2061,12 +2043,12 @@ mod tests {
                     ),
                     ..Build::default()
                 }
-                .build(&tester);
+                .build(tester);
                 tester.pump_widget(widget);
 
-                let tab_bar = tester.ancestor_of_type::<TabBar>(text(&tester, TAB_1_TEXT));
-                let center = rect_of(&tester, tab_bar).center();
-                let mut gesture = WidgetTester::mouse(1, 0);
+                let tab_bar = tester.ancestor_of_type::<TabBar>(text(tester, TAB_1_TEXT));
+                let center = rect_of(tester, tab_bar).center();
+                let mut gesture = TestPointer::mouse(1, 0);
                 tester.add_pointer(&mut gesture, Offset::ZERO);
                 tester.move_to(&mut gesture, center, false);
                 tester.pump_and_settle();
@@ -2078,9 +2060,8 @@ mod tests {
         /// `tester.takeException()` after `pumpWidget`.
         fn pump_panics(make: impl FnOnce() -> Build + Send) -> bool {
             let mut panicked = false;
-            with_main_thread_stack(|| {
-                let mut tester = tester();
-                let widget = make().build(&tester);
+            test_widgets(|tester| {
+                let widget = make().build(tester);
                 panicked = catch_unwind(AssertUnwindSafe(|| tester.pump_widget(widget))).is_err();
             });
             panicked
@@ -2162,23 +2143,22 @@ mod tests {
             p1_x: f64,
             p2_x: f64,
         ) {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let theme = theme_with(
-                    &tester,
+                    tester,
                     Some(TabBarThemeData::new().indicator_size(indicator_size)),
                     use_material3,
                 );
-                let widget = four_tabs_top_left(&tester, theme.clone(), secondary);
+                let widget = four_tabs_top_left(tester, theme.clone(), secondary);
                 tester.pump_widget(widget);
 
-                let tab_bar_box = first_render_box::<TabBar>(&tester);
+                let tab_bar_box = first_render_box::<TabBar>(tester);
                 assert_eq!(tab_bar_box.size(&tester.cell.borrow()).height(), 48.0);
 
                 const INDICATOR_WEIGHT: f64 = 2.0;
                 const INDICATOR_Y: f64 = 48.0 - (INDICATOR_WEIGHT / 2.0);
 
-                let lines = painted_lines(&tester, tab_bar_box.as_object());
+                let lines = painted_lines(tester, tab_bar_box.as_object());
                 #[allow(deprecated)]
                 let indicator_color = if use_material3 {
                     theme.color_scheme.primary
@@ -2250,12 +2230,11 @@ mod tests {
         // 'TabBar divider can use TabBarTheme.dividerColor & TabBarTheme.dividerHeight'.
         #[test]
         fn the_divider_takes_the_theme_divider_color_and_height() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const DIVIDER_COLOR: Color = Color::new(0xff00ff00);
                 const DIVIDER_HEIGHT: f64 = 10.0;
                 let theme = theme_with(
-                    &tester,
+                    tester,
                     Some(
                         TabBarThemeData::new()
                             .divider_color(DIVIDER_COLOR)
@@ -2263,14 +2242,14 @@ mod tests {
                     ),
                     true,
                 );
-                let controller = controller(&tester, 3);
+                let controller = controller(tester, 3);
                 tester.pump_widget(app_bar_tab_bar(
                     theme,
                     TabBar::new(three_tabs()).controller(controller),
                 ));
 
                 // Test divider color.
-                let lines = painted_lines(&tester, first_render_box::<TabBar>(&tester).as_object());
+                let lines = painted_lines(tester, first_render_box::<TabBar>(tester).as_object());
                 assert!(
                     lines
                         .iter()
@@ -2283,12 +2262,11 @@ mod tests {
         // 'dividerColor & dividerHeight overrides TabBarTheme.dividerColor'.
         #[test]
         fn the_tab_bar_divider_color_and_height_override_the_themes() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const DIVIDER_COLOR: Color = Color::new(0xff0000ff);
                 const DIVIDER_HEIGHT: f64 = 8.0;
                 let theme = theme_with(
-                    &tester,
+                    tester,
                     Some(
                         TabBarThemeData::new()
                             .divider_color(Colors::PINK.primary())
@@ -2296,7 +2274,7 @@ mod tests {
                     ),
                     true,
                 );
-                let controller = controller(&tester, 3);
+                let controller = controller(tester, 3);
                 tester.pump_widget(app_bar_tab_bar(
                     theme,
                     TabBar::new(three_tabs())
@@ -2306,7 +2284,7 @@ mod tests {
                 ));
 
                 // Test divider color.
-                let lines = painted_lines(&tester, first_render_box::<TabBar>(&tester).as_object());
+                let lines = painted_lines(tester, first_render_box::<TabBar>(tester).as_object());
                 assert!(
                     lines
                         .iter()
@@ -2344,29 +2322,28 @@ mod tests {
         }
 
         fn respects_theme_tab_alignment(use_material3: bool) {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 // Test non-scrollable tab bar.
                 let theme = theme_with(
-                    &tester,
+                    tester,
                     Some(TabBarThemeData::new().tab_alignment(TabAlignment::Center)),
                     use_material3,
                 );
-                let controller1 = controller(&tester, 2);
+                let controller1 = controller(tester, 2);
                 tester.pump_widget(app_bar_tab_bar(
                     theme,
                     TabBar::new(two_tabs()).controller(controller1),
                 ));
-                check_centered(&tester);
+                check_centered(tester);
 
                 if use_material3 {
                     // Test scrollable tab bar.
                     let theme = theme_with(
-                        &tester,
+                        tester,
                         Some(TabBarThemeData::new().tab_alignment(TabAlignment::Start)),
                         true,
                     );
-                    let controller2 = controller(&tester, 2);
+                    let controller2 = controller(tester, 2);
                     tester.pump_widget(app_bar_tab_bar(
                         theme,
                         TabBar::new(two_tabs())
@@ -2374,7 +2351,7 @@ mod tests {
                             .controller(controller2),
                     ));
                     tester.pump_and_settle();
-                    check_start(&tester);
+                    check_start(tester);
                 }
             });
         }
@@ -2392,31 +2369,30 @@ mod tests {
         }
 
         fn tab_alignment_overrides_theme(use_material3: bool) {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 // Test non-scrollable tab bar.
                 let theme = theme_with(
-                    &tester,
+                    tester,
                     Some(TabBarThemeData::new().tab_alignment(TabAlignment::Fill)),
                     use_material3,
                 );
-                let controller1 = controller(&tester, 2);
+                let controller1 = controller(tester, 2);
                 tester.pump_widget(app_bar_tab_bar(
                     theme,
                     TabBar::new(two_tabs())
                         .tab_alignment(TabAlignment::Center)
                         .controller(controller1),
                 ));
-                check_centered(&tester);
+                check_centered(tester);
 
                 if use_material3 {
                     // Test scrollable tab bar.
                     let theme = theme_with(
-                        &tester,
+                        tester,
                         Some(TabBarThemeData::new().tab_alignment(TabAlignment::Center)),
                         true,
                     );
-                    let controller2 = controller(&tester, 2);
+                    let controller2 = controller(tester, 2);
                     tester.pump_widget(app_bar_tab_bar(
                         theme,
                         TabBar::new(two_tabs())
@@ -2425,7 +2401,7 @@ mod tests {
                             .controller(controller2),
                     ));
                     tester.pump_and_settle();
-                    check_start(&tester);
+                    check_start(tester);
                 }
             });
         }
@@ -2488,8 +2464,7 @@ mod tests {
         // 'TabBar labels use colors from TabBarTheme.labelStyle & TabBarTheme.unselectedLabelStyle'.
         #[test]
         fn the_labels_take_their_colors_from_the_theme_label_styles() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 // Test tab bar with TabBarTheme labelStyle & unselectedLabelStyle.
                 let widget = Build {
                     tab_bar_theme: Some(
@@ -2499,12 +2474,12 @@ mod tests {
                     ),
                     ..Build::default()
                 }
-                .build(&tester);
+                .build(tester);
                 tester.pump_widget(widget);
 
                 // Selected tab should use labelStyle color; unselected unselectedLabelStyle.
                 assert_eq!(
-                    label_colors(&tester),
+                    label_colors(tester),
                     styled_by(STYLE_COLOR, UNSELECTED_STYLE_COLOR)
                 );
             });
@@ -2516,8 +2491,7 @@ mod tests {
         // "TabBarTheme's labelColor & unselectedLabelColor override labelStyle & unselectedLabelStyle colors".
         #[test]
         fn the_theme_label_colors_override_the_theme_label_style_colors() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let styles = || {
                     TabBarThemeData::new()
                         .label_style(label_style())
@@ -2527,7 +2501,7 @@ mod tests {
                     tab_bar_theme: Some(styles()),
                     ..Build::default()
                 }
-                .build(&tester);
+                .build(tester);
                 tester.pump_widget(widget);
 
                 // Test tab bar with TabBarTheme labelStyle & unselectedLabelStyle. Dart pumps a
@@ -2537,10 +2511,10 @@ mod tests {
                     tab_bar_theme: Some(styles()),
                     ..Build::default()
                 }
-                .build(&tester);
+                .build(tester);
                 tester.pump_widget(widget);
                 assert_eq!(
-                    label_colors(&tester),
+                    label_colors(tester),
                     styled_by(STYLE_COLOR, UNSELECTED_STYLE_COLOR)
                 );
 
@@ -2553,11 +2527,11 @@ mod tests {
                     ),
                     ..Build::default()
                 }
-                .build(&tester);
+                .build(tester);
                 tester.pump_widget(widget);
                 tester.pump_and_settle();
                 assert_eq!(
-                    label_colors(&tester),
+                    label_colors(tester),
                     styled_by(LABEL_COLOR, UNSELECTED_LABEL_COLOR)
                 );
             });
@@ -2566,8 +2540,7 @@ mod tests {
         // "TabBarTheme's labelColor & unselectedLabelColor override TabBar.labelStyle & TabBar.unselectedLabelStyle colors".
         #[test]
         fn the_theme_label_colors_override_the_tab_bar_label_style_colors() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let build = |tester: &WidgetTester, tab_bar_theme: Option<TabBarThemeData>| {
                     let theme = theme_with(tester, tab_bar_theme, true);
                     material_app(
@@ -2587,16 +2560,16 @@ mod tests {
                 };
 
                 // Test tab bar with [TabBar.labelStyle] & [TabBar.unselectedLabelStyle].
-                let widget = build(&tester, None);
+                let widget = build(tester, None);
                 tester.pump_widget(widget);
                 assert_eq!(
-                    label_colors(&tester),
+                    label_colors(tester),
                     styled_by(STYLE_COLOR, UNSELECTED_STYLE_COLOR)
                 );
 
                 // Add TabBarTheme with labelColor & unselectedLabelColor.
                 let widget = build(
-                    &tester,
+                    tester,
                     Some(
                         TabBarThemeData::new()
                             .label_color(LABEL_COLOR)
@@ -2606,29 +2579,28 @@ mod tests {
                 tester.pump_widget(widget);
                 tester.pump_and_settle();
                 assert_eq!(
-                    label_colors(&tester),
+                    label_colors(tester),
                     styled_by(LABEL_COLOR, UNSELECTED_LABEL_COLOR)
                 );
             });
         }
 
         fn material2_defaults(secondary: bool) {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 // Test default label color and label styles.
                 let widget = Build {
                     secondary_tab_bar: secondary,
                     ..Build::default()
                 }
-                .build(&tester);
+                .build(tester);
                 tester.pump_widget(widget);
 
-                let theme = theme_with(&tester, None, false);
-                let selected_label = text_style(&tester, TAB_1_TEXT);
+                let theme = theme_with(tester, None, false);
+                let selected_label = text_style(tester, TAB_1_TEXT);
                 assert_eq!(selected_label.font_family.as_deref(), Some("Roboto"));
                 assert_eq!(selected_label.font_size, Some(14.0));
                 assert_eq!(color_of(&selected_label), Some(Colors::WHITE));
-                let unselected_label = text_style(&tester, TAB_2_TEXT);
+                let unselected_label = text_style(tester, TAB_2_TEXT);
                 assert_eq!(unselected_label.font_family.as_deref(), Some("Roboto"));
                 assert_eq!(unselected_label.font_size, Some(14.0));
                 assert_eq!(
@@ -2643,14 +2615,14 @@ mod tests {
                     is_scrollable: true,
                     ..Build::default()
                 }
-                .build(&tester);
+                .build(tester);
                 tester.pump_widget(widget);
-                check_default_label_padding(&tester, &keys, 0.0);
+                check_default_label_padding(tester, &keys, 0.0);
 
                 // Test default indicator color.
                 #[allow(deprecated)]
                 let indicator_color = theme.indicator_color;
-                let lines = painted_lines(&tester, indicator_paint(&tester));
+                let lines = painted_lines(tester, indicator_paint(tester));
                 assert!(
                     lines
                         .iter()
@@ -2698,10 +2670,9 @@ mod tests {
         // 'Material3 - TabBar indicator respects TabBarTheme.indicatorColor'.
         #[test]
         fn material3_the_indicator_takes_the_theme_indicator_color() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const TAB_BAR_THEME_INDICATOR_COLOR: Color = Color::new(0xffff0000);
-                let controller = controller(&tester, 4);
+                let controller = controller(tester, 4);
                 let build = |theme: ThemeData| {
                     let tabs =
                         (0..4).map(|index| Tab::new().text(format!("Tab {index}")).into_widget());
@@ -2717,30 +2688,29 @@ mod tests {
                     )
                 };
 
-                let theme = theme_with(&tester, None, true);
+                let theme = theme_with(tester, None, true);
                 tester.pump_widget(build.clone()(theme.clone()));
-                assert!(paints_rrect_color(&tester, theme.color_scheme.primary));
+                assert!(paints_rrect_color(tester, theme.color_scheme.primary));
 
                 let theme = theme_with(
-                    &tester,
+                    tester,
                     Some(TabBarThemeData::new().indicator_color(TAB_BAR_THEME_INDICATOR_COLOR)),
                     true,
                 );
                 tester.pump_widget(build(theme));
                 tester.pump_and_settle();
-                assert!(paints_rrect_color(&tester, TAB_BAR_THEME_INDICATOR_COLOR));
+                assert!(paints_rrect_color(tester, TAB_BAR_THEME_INDICATOR_COLOR));
             });
         }
 
         // 'Material2 - TabBar indicator respects TabBarTheme.indicatorColor'.
         #[test]
         fn material2_the_indicator_takes_the_theme_indicator_color() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const TAB_BAR_THEME_INDICATOR_COLOR: Color = Color::new(0xffffff00);
-                let controller = controller(&tester, 4);
+                let controller = controller(tester, 4);
                 let theme = theme_with(
-                    &tester,
+                    tester,
                     Some(TabBarThemeData::new().indicator_color(TAB_BAR_THEME_INDICATOR_COLOR)),
                     false,
                 );
@@ -2757,7 +2727,7 @@ mod tests {
                         .into_widget(),
                 ));
 
-                let lines = painted_lines(&tester, first_render_box::<TabBar>(&tester).as_object());
+                let lines = painted_lines(tester, first_render_box::<TabBar>(tester).as_object());
                 assert!(lines.iter().any(
                     |line| line.color.to_argb32() == TAB_BAR_THEME_INDICATOR_COLOR.to_argb32()
                 ));
@@ -2798,16 +2768,15 @@ mod tests {
         // 'TabBarTheme.labelColor resolves material states'.
         #[test]
         fn a_theme_widget_state_label_color_resolves_per_selection() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let widget = Build {
                     tab_bar_theme: Some(TabBarThemeData::new().label_color(state_label_color())),
                     ..Build::default()
                 }
-                .build(&tester);
+                .build(tester);
                 tester.pump_widget(widget);
                 assert_eq!(
-                    state_colors(&tester),
+                    state_colors(tester),
                     colored(SELECTED_STATE_COLOR, UNSELECTED_STATE_COLOR)
                 );
             });
@@ -2816,8 +2785,7 @@ mod tests {
         // 'TabBarTheme.labelColor & TabBarTheme.unselectedLabelColor override material state TabBarTheme.labelColor'.
         #[test]
         fn plain_theme_label_colors_replace_a_widget_state_label_color() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const SELECTED_COLOR: Color = Color::new(0xff00ffff);
                 const UNSELECTED_COLOR: Color = Color::new(0xffff12ff);
 
@@ -2826,10 +2794,10 @@ mod tests {
                     tab_bar_theme: Some(TabBarThemeData::new().label_color(state_label_color())),
                     ..Build::default()
                 }
-                .build(&tester);
+                .build(tester);
                 tester.pump_widget(widget);
                 assert_eq!(
-                    state_colors(&tester),
+                    state_colors(tester),
                     colored(SELECTED_STATE_COLOR, UNSELECTED_STATE_COLOR)
                 );
 
@@ -2842,11 +2810,11 @@ mod tests {
                     ),
                     ..Build::default()
                 }
-                .build(&tester);
+                .build(tester);
                 tester.pump_widget(widget);
                 tester.pump_and_settle();
                 assert_eq!(
-                    state_colors(&tester),
+                    state_colors(tester),
                     colored(SELECTED_COLOR, UNSELECTED_COLOR)
                 );
             });
@@ -2855,8 +2823,7 @@ mod tests {
         // 'TabBarTheme.textScaler overrides tab label text scale, textScaleFactor = noScaling, 1.75, 2.0'.
         #[test]
         fn the_theme_text_scaler_overrides_the_ambient_one() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 let build = |tester: &WidgetTester, text_scaler: TextScaler| {
                     let theme = theme_with(
                         tester,
@@ -2881,26 +2848,26 @@ mod tests {
                     )
                 };
 
-                let widget = build(&tester, TextScaler::NO_SCALING);
+                let widget = build(tester, TextScaler::NO_SCALING);
                 tester.pump_widget(widget);
                 assert_eq!(
-                    size_of(&tester, text(&tester, "Tab 1")),
+                    size_of(tester, text(tester, "Tab 1")),
                     Size::new(70.5, 20.0)
                 );
 
-                let widget = build(&tester, TextScaler::linear(1.75));
+                let widget = build(tester, TextScaler::linear(1.75));
                 tester.pump_widget(widget);
                 tester.pump_and_settle();
                 assert_eq!(
-                    size_of(&tester, text(&tester, "Tab 1")),
+                    size_of(tester, text(tester, "Tab 1")),
                     Size::new(123.0, 35.0)
                 );
 
-                let widget = build(&tester, TextScaler::linear(2.0));
+                let widget = build(tester, TextScaler::linear(2.0));
                 tester.pump_widget(widget);
                 tester.pump_and_settle();
                 assert_eq!(
-                    size_of(&tester, text(&tester, "Tab 1")),
+                    size_of(tester, text(tester, "Tab 1")),
                     Size::new(140.5, 40.0)
                 );
             });
@@ -2927,10 +2894,9 @@ mod tests {
         // 'TabBarTheme indicatorAnimation can customize tab indicator animation'.
         #[test]
         fn the_theme_indicator_animation_moves_the_indicator_linearly_or_elastically() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const INDICATOR_WIDTH: f64 = 50.0;
-                let controller = controller(&tester, 4);
+                let controller = controller(tester, 4);
                 let build = |tester: &WidgetTester, indicator_animation: TabIndicatorAnimation| {
                     let theme = theme_with(
                         tester,
@@ -2956,20 +2922,20 @@ mod tests {
                 };
 
                 // Test tab indicator animation with TabIndicatorAnimation.linear.
-                let widget = build(&tester, TabIndicatorAnimation::Linear);
+                let widget = build(tester, TabIndicatorAnimation::Linear);
                 tester.pump_widget(widget);
 
                 // Idle at tab 0.
                 assert!(indicator_paints_rrect(
-                    &tester,
+                    tester,
                     indicator_rrect(75.0, 125.0, 48.0)
                 ));
 
                 // Start moving tab indicator.
                 controller.set_offset(&mut tester.cell.borrow_mut(), 0.2);
-                tester.pump(Duration::ZERO);
+                tester.pump();
                 assert!(indicator_paints_rrect(
-                    &tester,
+                    tester,
                     indicator_rrect(115.0, 165.0, 48.0)
                 ));
 
@@ -2977,11 +2943,11 @@ mod tests {
                 controller.set_offset(&mut tester.cell.borrow_mut(), 0.0);
 
                 // Test tab indicator animation with TabIndicatorAnimation.elastic.
-                let widget = build(&tester, TabIndicatorAnimation::Elastic);
+                let widget = build(tester, TabIndicatorAnimation::Elastic);
                 tester.pump_widget(widget);
                 tester.pump_and_settle();
 
-                let height = first_render_box::<TabBar>(&tester)
+                let height = first_render_box::<TabBar>(tester)
                     .size(&tester.cell.borrow())
                     .height();
                 let elastic = |from: Rect, to: Rect, progress: f64| {
@@ -2998,16 +2964,16 @@ mod tests {
                 // Idle at tab 0.
                 let from_rect = Rect::from_ltrb(75.0, 0.0, 125.0, 48.0);
                 assert!(indicator_paints_rrect(
-                    &tester,
+                    tester,
                     elastic(from_rect, from_rect, 0.0)
                 ));
 
                 // Start moving tab indicator.
                 controller.set_offset(&mut tester.cell.borrow_mut(), 0.2);
-                tester.pump(Duration::ZERO);
+                tester.pump();
                 let to_rect = Rect::from_ltrb(275.0, 0.0, 325.0, 48.0);
                 assert!(indicator_paints_rrect(
-                    &tester,
+                    tester,
                     elastic(from_rect, to_rect, 0.2)
                 ));
             });
@@ -3016,8 +2982,7 @@ mod tests {
         // 'Tab bar inherits fontFamily from theme when labelStyle and unselectedLabelStyle are specified'.
         #[test]
         fn the_labels_inherit_the_theme_font_family_unless_their_styles_do_not_inherit() {
-            with_main_thread_stack(|| {
-                let mut tester = tester();
+            test_widgets(|tester| {
                 const FONT_FAMILY: &str = "TestFont";
                 let families = |tester: &WidgetTester| {
                     [TAB_1_TEXT, TAB_2_TEXT].map(|label| text_style(tester, label).font_family)
@@ -3028,9 +2993,9 @@ mod tests {
                     font_family: Some(FONT_FAMILY),
                     ..Build::default()
                 }
-                .build(&tester);
+                .build(tester);
                 tester.pump_widget(widget);
-                assert_eq!(families(&tester), some());
+                assert_eq!(families(tester), some());
 
                 let widget = Build {
                     font_family: Some(FONT_FAMILY),
@@ -3041,9 +3006,9 @@ mod tests {
                     ),
                     ..Build::default()
                 }
-                .build(&tester);
+                .build(tester);
                 tester.pump_widget(widget);
-                assert_eq!(families(&tester), some());
+                assert_eq!(families(tester), some());
 
                 let widget = Build {
                     font_family: Some(FONT_FAMILY),
@@ -3051,9 +3016,9 @@ mod tests {
                     unselected_label_style: Some(TextStyle::new()),
                     ..Build::default()
                 }
-                .build(&tester);
+                .build(tester);
                 tester.pump_widget(widget);
-                assert_eq!(families(&tester), some());
+                assert_eq!(families(tester), some());
 
                 // if inherit is false, the fontFamily should not be applied
                 let widget = Build {
@@ -3065,9 +3030,9 @@ mod tests {
                     ),
                     ..Build::default()
                 }
-                .build(&tester);
+                .build(tester);
                 tester.pump_widget(widget);
-                assert_eq!(families(&tester), [None, None]);
+                assert_eq!(families(tester), [None, None]);
 
                 let widget = Build {
                     font_family: Some(FONT_FAMILY),
@@ -3075,19 +3040,18 @@ mod tests {
                     unselected_label_style: Some(TextStyle::new().inherit(false)),
                     ..Build::default()
                 }
-                .build(&tester);
+                .build(tester);
                 tester.pump_widget(widget);
-                assert_eq!(families(&tester), [None, None]);
+                assert_eq!(families(tester), [None, None]);
             });
         }
 
         // 'TabBar inherits splashBorderRadius from theme'.
         #[test]
         fn the_tab_bar_takes_the_theme_splash_border_radius() {
-            with_main_thread_stack(|| {
+            test_widgets(|tester| {
                 use crate::material::RenderInkFeatures;
 
-                let mut tester = tester();
                 const HOVER_COLOR: Color = Color::new(0xfff44336);
                 const RADIUS: f64 = 20.0;
                 tester.pump_widget(
@@ -3126,14 +3090,14 @@ mod tests {
                         )
                         .into_widget(),
                 );
-                let mut gesture = WidgetTester::mouse(1, 0);
+                let mut gesture = TestPointer::mouse(1, 0);
                 tester.add_pointer(&mut gesture, Offset::ZERO);
-                let center = rect_of(&tester, only::<Tab>(&tester)).center();
+                let center = rect_of(tester, only::<Tab>(tester)).center();
                 tester.move_to(&mut gesture, center, false);
                 tester.pump_and_settle();
 
-                let ink_well = only::<crate::ink_well::InkWell>(&tester);
-                let ink_well_rect = rect_of(&tester, ink_well);
+                let ink_well = only::<crate::ink_well::InkWell>(tester);
+                let ink_well_rect = rect_of(tester, ink_well);
                 let material = {
                     let app = tester.cell.borrow();
                     Material::of(&app, ink_well)

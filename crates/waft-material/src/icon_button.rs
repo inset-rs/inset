@@ -1392,7 +1392,7 @@ mod tests {
     use std::rc::Rc;
     use std::time::Duration;
 
-    use waft_embedder::{Offset, Radius, TargetPlatform, TextDirection};
+    use waft_embedder::{Offset, Radius, TextDirection};
     use waft_foundation::Listenable;
     use waft_painting::{
         BorderRadius, BorderSide, OutlinedBorderRef, RoundedRectangleBorder, ShapeBorder,
@@ -1405,13 +1405,15 @@ mod tests {
         StatefulBuilder, WidgetStates,
     };
 
+    use waft_widgets::testing::{TestPointer, WidgetTester, test_widgets};
+
     use super::*;
     use crate::color_scheme::ColorScheme;
     use crate::colors::Colors;
     use crate::icon_button_theme::IconButtonThemeData;
     use crate::icons::Icons;
     use crate::material::{Material, MaterialType};
-    use crate::test_support::{Drawn, WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::{Drawn, PaintInspection, material_app};
     use crate::theme_data::ThemeData;
 
     /// `IconButton::new` or one of its named constructors.
@@ -1419,13 +1421,6 @@ mod tests {
 
     /// The colour a case expects of a scheme.
     type ContainerColor = fn(&ColorScheme) -> Color;
-
-    /// A tester whose fonts lay out an `Icon`'s glyph.
-    fn tester() -> WidgetTester {
-        let tester = WidgetTester::on(TargetPlatform::Android);
-        tester.install_fonts();
-        tester
-    }
 
     /// Dart's `ThemeData.from(colorScheme: const ColorScheme.light())`.
     fn m3_theme(tester: &WidgetTester) -> ThemeData {
@@ -1607,10 +1602,10 @@ mod tests {
     /// A tap that a frame starts and 100ms carries, then lifted and settled.
     fn press_and_release(tester: &mut WidgetTester) {
         let center = button_center(tester);
-        let mut touch = WidgetTester::touch(1);
+        let mut touch = TestPointer::touch(1);
         tester.down(&mut touch, center);
-        tester.pump(Duration::ZERO);
-        tester.pump(Duration::from_millis(100));
+        tester.pump();
+        tester.pump_by(Duration::from_millis(100));
         tester.up(&touch);
         tester.pump_and_settle();
     }
@@ -1658,11 +1653,10 @@ mod tests {
     // 'test icon is findable by key'
     #[test]
     fn an_icon_button_is_findable_by_key() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let key = GlobalKey::new();
             let widget = wrap(
-                &tester,
+                tester,
                 IconButton::new(noop(), icon(Icons::link())).key(key.clone().into()),
                 true,
             );
@@ -1674,18 +1668,17 @@ mod tests {
     // 'test default icon buttons are sized up to 48'
     #[test]
     fn a_default_icon_button_is_sized_up_to_48() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let pressed = Rc::new(Cell::new(0));
             let widget = wrap(
-                &tester,
+                tester,
                 IconButton::new(counter(&pressed), icon(Icons::link())),
                 true,
             );
             tester.pump_widget(widget);
-            assert_eq!(button_size(&tester), Size::new(48.0, 48.0));
+            assert_eq!(button_size(tester), Size::new(48.0, 48.0));
 
-            let center = button_center(&tester);
+            let center = button_center(tester);
             tester.tap(center, 1);
             assert_eq!(pressed.get(), 1);
         });
@@ -1694,43 +1687,40 @@ mod tests {
     // 'test small icons are sized up to 48dp'
     #[test]
     fn a_small_icon_is_sized_up_to_48() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let widget = wrap(
-                &tester,
+                tester,
                 IconButton::new(noop(), icon(Icons::link())).icon_size(10.0),
                 true,
             );
             tester.pump_widget(widget);
-            assert_eq!(button_size(&tester), Size::new(48.0, 48.0));
+            assert_eq!(button_size(tester), Size::new(48.0, 48.0));
         });
     }
 
     // 'test icons can be small when total size is >48dp'
     #[test]
     fn a_small_icon_with_large_padding_is_larger_than_48() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let widget = wrap(
-                &tester,
+                tester,
                 IconButton::new(noop(), icon(Icons::link()))
                     .icon_size(10.0)
                     .padding(EdgeInsets::all(30.0).into()),
                 true,
             );
             tester.pump_widget(widget);
-            assert_eq!(button_size(&tester), Size::new(70.0, 70.0));
+            assert_eq!(button_size(tester), Size::new(70.0, 70.0));
         });
     }
 
     // 'when both iconSize and IconTheme.of(context).size are null, size falls back to 24.0'
     #[test]
     fn the_icon_size_falls_back_to_24() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let focus_node = focus_node(&tester);
+        test_widgets(|tester| {
+            let focus_node = focus_node(tester);
             let widget = wrap(
-                &tester,
+                tester,
                 IconTheme::new(
                     IconThemeData::new(),
                     IconButton::new(noop(), icon(Icons::link())).focus_node(focus_node),
@@ -1738,15 +1728,14 @@ mod tests {
                 true,
             );
             tester.pump_widget(widget);
-            assert_eq!(icon_size(&tester), Size::new(24.0, 24.0));
+            assert_eq!(icon_size(tester), Size::new(24.0, 24.0));
         });
     }
 
     // 'when null, iconSize is overridden by closest IconTheme'
     #[test]
     fn without_an_icon_size_the_closest_icon_theme_sizes_the_icon() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let button = || IconButton::new(noop(), icon(Icons::link()));
             let themed = |tester: &WidgetTester, size: f64, child: WidgetRef| {
                 let theme = ThemeData::builder()
@@ -1756,44 +1745,43 @@ mod tests {
             };
 
             let widget = wrap(
-                &tester,
+                tester,
                 IconTheme::new(IconThemeData::new().size(10.0), button()),
                 true,
             );
             tester.pump_widget(widget);
-            assert_eq!(icon_size(&tester), Size::new(10.0, 10.0));
+            assert_eq!(icon_size(tester), Size::new(10.0, 10.0));
 
-            let child = themed(&tester, 10.0, button().into_widget());
-            let widget = wrap(&tester, child, true);
+            let child = themed(tester, 10.0, button().into_widget());
+            let widget = wrap(tester, child, true);
             tester.pump_widget(widget);
-            assert_eq!(icon_size(&tester), Size::new(10.0, 10.0));
+            assert_eq!(icon_size(tester), Size::new(10.0, 10.0));
 
             let child = themed(
-                &tester,
+                tester,
                 20.0,
                 IconTheme::new(IconThemeData::new().size(10.0), button()).into_widget(),
             );
-            let widget = wrap(&tester, child, true);
+            let widget = wrap(tester, child, true);
             tester.pump_widget(widget);
-            assert_eq!(icon_size(&tester), Size::new(10.0, 10.0));
+            assert_eq!(icon_size(tester), Size::new(10.0, 10.0));
 
             let child = IconTheme::new(
                 IconThemeData::new().size(20.0),
-                themed(&tester, 10.0, button().into_widget()),
+                themed(tester, 10.0, button().into_widget()),
             );
-            let widget = wrap(&tester, child, true);
+            let widget = wrap(tester, child, true);
             tester.pump_widget(widget);
-            assert_eq!(icon_size(&tester), Size::new(10.0, 10.0));
+            assert_eq!(icon_size(tester), Size::new(10.0, 10.0));
         });
     }
 
     // 'when non-null, iconSize precedes IconTheme.of(context).size'
     #[test]
     fn an_icon_size_precedes_the_icon_theme_size() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let widget = wrap(
-                &tester,
+                tester,
                 IconTheme::new(
                     IconThemeData::new().size(30.0),
                     IconButton::new(noop(), icon(Icons::link())).icon_size(10.0),
@@ -1801,34 +1789,33 @@ mod tests {
                 true,
             );
             tester.pump_widget(widget);
-            assert_eq!(icon_size(&tester), Size::new(10.0, 10.0));
+            assert_eq!(icon_size(tester), Size::new(10.0, 10.0));
         });
     }
 
     // 'Small icons with non-null constraints can be <48dp for M2, but =48dp for M3'
     #[test]
     fn small_icons_with_constraints_are_smaller_than_48_in_m2_only() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             for (material3, expected) in [(true, 48.0), (false, 26.0)] {
-                let mut tester = tester();
                 let button = IconButton::new(noop(), icon(Icons::link()))
                     .icon_size(10.0)
                     .constraints(BoxConstraints::new());
                 let widget = if material3 {
-                    wrap(&tester, button, true)
+                    wrap(tester, button, true)
                 } else {
                     // Dart's `wrap` gives no theme, whose fallback is Material 3 now; the
                     // Material 2 sizes need a Material 2 theme.
-                    let theme = m2_theme(&tester);
-                    wrap(&tester, Theme::new(theme, button), false)
+                    let theme = m2_theme(tester);
+                    wrap(tester, Theme::new(theme, button), false)
                 };
                 tester.pump_widget(widget);
                 // By default IconButton has a padding of 8.0 on all sides, so both
                 // width and height are 10.0 + 2 * 8.0 = 26.0
                 // M3 IconButton is a subclass of ButtonStyleButton which has a minimum
                 // Size(48.0, 48.0).
-                assert_eq!(button_size(&tester), Size::new(expected, expected));
-                assert_eq!(icon_size(&tester), Size::new(10.0, 10.0));
+                assert_eq!(button_size(tester), Size::new(expected, expected));
+                assert_eq!(icon_size(tester), Size::new(10.0, 10.0));
             }
         });
     }
@@ -1836,24 +1823,23 @@ mod tests {
     // 'Small icons with non-null constraints and custom padding can be <48dp'
     #[test]
     fn small_icons_with_constraints_and_padding_are_smaller_than_48_in_m2_only() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             for (material3, expected) in [(true, 48.0), (false, 16.0)] {
-                let mut tester = tester();
                 let button = IconButton::new(noop(), icon(Icons::link()))
                     .icon_size(10.0)
                     .padding(EdgeInsets::all(3.0).into())
                     .constraints(BoxConstraints::new());
                 let widget = if material3 {
-                    wrap(&tester, button, true)
+                    wrap(tester, button, true)
                 } else {
                     // Dart's `wrap` gives no theme, whose fallback is Material 3 now; the
                     // Material 2 sizes need a Material 2 theme.
-                    let theme = m2_theme(&tester);
-                    wrap(&tester, Theme::new(theme, button), false)
+                    let theme = m2_theme(tester);
+                    wrap(tester, Theme::new(theme, button), false)
                 };
                 tester.pump_widget(widget);
-                assert_eq!(button_size(&tester), Size::new(expected, expected));
-                assert_eq!(icon_size(&tester), Size::new(10.0, 10.0));
+                assert_eq!(button_size(tester), Size::new(expected, expected));
+                assert_eq!(icon_size(tester), Size::new(10.0, 10.0));
             }
         });
     }
@@ -1861,12 +1847,11 @@ mod tests {
     // 'Small icons comply with VisualDensity requirements'
     #[test]
     fn small_icons_follow_the_visual_density() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             for (material3, expected) in [
                 (true, Size::new(52.0, 44.0)),
                 (false, Size::new(36.0, 28.0)),
             ] {
-                let mut tester = tester();
                 let density = VisualDensity::new(1.0, -1.0);
                 let theme = if material3 {
                     ThemeData::builder()
@@ -1882,7 +1867,7 @@ mod tests {
                         .build(&tester.cell.borrow())
                 };
                 let widget = wrap(
-                    &tester,
+                    tester,
                     Theme::new(
                         theme,
                         IconButton::new(noop(), icon(Icons::link()))
@@ -1896,7 +1881,7 @@ mod tests {
                 // width by 4 pixels and decreases its height by 4 pixels, giving
                 // final width 32.0 + 4.0 = 36.0 and
                 // final height 32.0 - 4.0 = 28.0
-                assert_eq!(button_size(&tester), expected);
+                assert_eq!(button_size(tester), expected);
             }
         });
     }
@@ -1904,25 +1889,23 @@ mod tests {
     // 'test default icon buttons are constrained'
     #[test]
     fn a_default_icon_button_is_as_large_as_its_icon() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let widget = wrap(
-                &tester,
+                tester,
                 IconButton::new(noop(), icon(Icons::ac_unit()))
                     .padding(EdgeInsets::ZERO.into())
                     .icon_size(80.0),
                 true,
             );
             tester.pump_widget(widget);
-            assert_eq!(button_size(&tester), Size::new(80.0, 80.0));
+            assert_eq!(button_size(tester), Size::new(80.0, 80.0));
         });
     }
 
     // 'test default icon buttons can be stretched if specified'
     #[test]
     fn a_default_icon_button_stretches_in_a_stretching_row() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let row = || {
                 Row::new()
                     .cross_axis_alignment(CrossAxisAlignment::Stretch)
@@ -1931,40 +1914,38 @@ mod tests {
             tester.pump_widget(
                 Directionality::new(TextDirection::Ltr, Material::new().child(row())).into_widget(),
             );
-            assert_eq!(button_size(&tester), Size::new(48.0, 600.0));
+            assert_eq!(button_size(tester), Size::new(48.0, 600.0));
 
             // Test for Material 3
             let widget = material_app(
-                m3_theme(&tester),
+                m3_theme(tester),
                 Directionality::new(TextDirection::Ltr, row()).into_widget(),
             );
             tester.pump_widget(widget);
-            assert_eq!(button_size(&tester), Size::new(48.0, 600.0));
+            assert_eq!(button_size(tester), Size::new(48.0, 600.0));
         });
     }
 
     // 'test default padding'
     #[test]
     fn the_default_padding_is_8() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let widget = wrap(
-                &tester,
+                tester,
                 IconButton::new(noop(), icon(Icons::ac_unit())).icon_size(80.0),
                 true,
             );
             tester.pump_widget(widget);
-            assert_eq!(button_size(&tester), Size::new(96.0, 96.0));
+            assert_eq!(button_size(tester), Size::new(96.0, 96.0));
         });
     }
 
     // 'test default alignment'
     #[test]
     fn the_default_alignment_is_center() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let widget = wrap(
-                &tester,
+                tester,
                 IconButton::new(noop(), icon(Icons::ac_unit())).icon_size(80.0),
                 true,
             );
@@ -1980,8 +1961,7 @@ mod tests {
     // 'test tooltip'
     #[test]
     fn a_tooltip_is_shown_on_hover_and_the_button_still_taps() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let pressed = Rc::new(Cell::new(0));
             let build = |tester: &WidgetTester, tooltip: Option<&str>| {
                 let mut button = IconButton::new(counter(&pressed), icon(Icons::ac_unit()));
@@ -1995,7 +1975,7 @@ mod tests {
                         .into_widget(),
                 )
             };
-            let widget = build(&tester, None);
+            let widget = build(tester, None);
             tester.pump_widget(widget);
             assert!(tester.find_by_type::<Tooltip>().is_empty());
 
@@ -2006,18 +1986,18 @@ mod tests {
                     .into_widget(),
             );
 
-            let widget = build(&tester, Some("Test tooltip"));
+            let widget = build(tester, Some("Test tooltip"));
             tester.pump_widget(widget);
             assert_eq!(tester.find_by_type::<Tooltip>().len(), 1);
 
-            let center = button_center(&tester);
+            let center = button_center(tester);
             tester.tap(center, 1);
             assert_eq!(pressed.get(), 1);
 
             // Hovering over the button should show the tooltip.
-            let mut mouse = WidgetTester::mouse(2, 0);
+            let mut mouse = TestPointer::mouse(2, 0);
             tester.add_pointer(&mut mouse, center);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert_eq!(tester.find_text("Test tooltip").len(), 1);
         });
     }
@@ -2025,9 +2005,8 @@ mod tests {
     // 'IconButton AppBar size'
     #[test]
     fn an_icon_button_in_an_app_bar_is_sized_and_centred_in_the_toolbar() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = m3_theme(&tester);
+        test_widgets(|tester| {
+            let theme = m3_theme(tester);
             let material3 = theme.use_material3;
             let widget = material_app(
                 theme,
@@ -2045,20 +2024,19 @@ mod tests {
 
             let bar = tester.find_by_type::<crate::app_bar::AppBar>()[0];
             let bar_size = tester.render_box_of(bar).size(&tester.cell.borrow());
-            let icon_size = button_size(&tester);
+            let icon_size = button_size(tester);
             assert_eq!(
                 icon_size.height(),
                 if material3 { 48.0 } else { bar_size.height() }
             );
-            assert_eq!(button_center(&tester).dy(), 28.0);
+            assert_eq!(button_center(tester).dy(), 28.0);
         });
     }
 
     // 'IconButton with explicit splashColor and highlightColor - M2'
     #[test]
     fn m2_splash_and_highlight_colors_come_from_the_button_then_the_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let direct_splash_color = Color::new(0xFF00000F);
             let direct_highlight_color = Color::new(0xFF0000F0);
             let circles = |tester: &WidgetTester| -> Vec<u32> {
@@ -2086,41 +2064,41 @@ mod tests {
             };
 
             let button_widget = wrap(
-                &tester,
+                tester,
                 IconButton::new(noop(), icon(Icons::android()))
                     .splash_color(direct_splash_color)
                     .highlight_color(direct_highlight_color),
                 false,
             );
-            let widget = themed(&tester, None, None, button_widget);
+            let widget = themed(tester, None, None, button_widget);
             tester.pump_widget(widget);
 
-            let center = button_center(&tester);
-            let mut touch = WidgetTester::touch(1);
+            let center = button_center(tester);
+            let mut touch = TestPointer::touch(1);
             tester.down(&mut touch, center);
-            tester.pump(Duration::ZERO); // start gesture
-            tester.pump(Duration::from_millis(200)); // wait for splash to be well under way
+            tester.pump(); // start gesture
+            tester.pump_by(Duration::from_millis(200)); // wait for splash to be well under way
             assert_eq!(
-                circles(&tester),
+                circles(tester),
                 vec![argb(direct_splash_color), argb(direct_highlight_color)]
             );
 
             let theme_splash_color1 = Color::new(0xFF000F00);
             let theme_highlight_color1 = Color::new(0xFF00FF00);
             let button_widget = wrap(
-                &tester,
+                tester,
                 IconButton::new(noop(), icon(Icons::android())),
                 false,
             );
             let widget = themed(
-                &tester,
+                tester,
                 Some(theme_highlight_color1),
                 Some(theme_splash_color1),
                 button_widget.clone(),
             );
             tester.pump_widget(widget);
             assert_eq!(
-                circles(&tester),
+                circles(tester),
                 vec![argb(theme_splash_color1), argb(theme_highlight_color1)]
             );
 
@@ -2128,14 +2106,14 @@ mod tests {
             let theme_highlight_color2 = Color::new(0xFF001100);
             // same widget, so does not get updated because of us
             let widget = themed(
-                &tester,
+                tester,
                 Some(theme_highlight_color2),
                 Some(theme_splash_color2),
                 button_widget,
             );
             tester.pump_widget(widget);
             assert_eq!(
-                circles(&tester),
+                circles(tester),
                 vec![argb(theme_splash_color2), argb(theme_highlight_color2)]
             );
 
@@ -2146,11 +2124,10 @@ mod tests {
     // 'IconButton with explicit splash radius - M2'
     #[test]
     fn m2_an_explicit_splash_radius_sizes_the_splash() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let splash_radius = 30.0;
             let widget = material_app(
-                m2_theme(&tester),
+                m2_theme(tester),
                 Material::new()
                     .child(
                         Center::new().child(
@@ -2162,11 +2139,11 @@ mod tests {
             );
             tester.pump_widget(widget);
 
-            let center = button_center(&tester);
-            let mut touch = WidgetTester::touch(1);
+            let center = button_center(tester);
+            let mut touch = TestPointer::touch(1);
             tester.down(&mut touch, center);
-            tester.pump(Duration::ZERO); // Start gesture.
-            tester.pump(Duration::from_millis(1000)); // Wait for splash to be well under way.
+            tester.pump(); // Start gesture.
+            tester.pump_by(Duration::from_millis(1000)); // Wait for splash to be well under way.
 
             let splash = tester
                 .ink_drawn()
@@ -2186,29 +2163,28 @@ mod tests {
     // 'IconButton loses focus when disabled.'
     #[test]
     fn a_button_loses_focus_when_disabled() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let focus_node = focus_node(&tester);
+        test_widgets(|tester| {
+            let focus_node = focus_node(tester);
             let widget = wrap(
-                &tester,
+                tester,
                 IconButton::new(noop(), icon(Icons::link()))
                     .focus_node(focus_node.clone())
                     .autofocus(true),
                 true,
             );
             tester.pump_widget(widget);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert!(focus_node.has_primary_focus(&tester.cell.borrow()));
 
             let widget = wrap(
-                &tester,
+                tester,
                 IconButton::new(None, icon(Icons::link()))
                     .focus_node(focus_node.clone())
                     .autofocus(true),
                 true,
             );
             tester.pump_widget(widget);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert!(!focus_node.has_primary_focus(&tester.cell.borrow()));
         });
     }
@@ -2216,9 +2192,8 @@ mod tests {
     // 'IconButton keeps focus when disabled in directional navigation mode.'
     #[test]
     fn a_button_keeps_focus_when_disabled_in_directional_navigation() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let focus_node = focus_node(&tester);
+        test_widgets(|tester| {
+            let focus_node = focus_node(tester);
             let frame = |tester: &WidgetTester, on_pressed: Option<Listener>| {
                 wrap(
                     tester,
@@ -2233,14 +2208,14 @@ mod tests {
                     true,
                 )
             };
-            let widget = frame(&tester, noop());
+            let widget = frame(tester, noop());
             tester.pump_widget(widget);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert!(focus_node.has_primary_focus(&tester.cell.borrow()));
 
-            let widget = frame(&tester, None);
+            let widget = frame(tester, None);
             tester.pump_widget(widget);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert!(focus_node.has_primary_focus(&tester.cell.borrow()));
         });
     }
@@ -2248,12 +2223,11 @@ mod tests {
     // "Disabled IconButton can't be traversed to when disabled."
     #[test]
     fn a_disabled_button_cannot_be_traversed_to() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let focus_node1 = focus_node(&tester);
-            let focus_node2 = focus_node(&tester);
+        test_widgets(|tester| {
+            let focus_node1 = focus_node(tester);
+            let focus_node2 = focus_node(tester);
             let widget = wrap(
-                &tester,
+                tester,
                 Column::new().children([
                     IconButton::new(noop(), icon(Icons::link()))
                         .focus_node(focus_node1.clone())
@@ -2266,13 +2240,13 @@ mod tests {
                 true,
             );
             tester.pump_widget(widget);
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             assert!(focus_node1.has_primary_focus(&tester.cell.borrow()));
             assert!(!focus_node2.has_primary_focus(&tester.cell.borrow()));
 
             assert!(!focus_node1.next_focus(&mut tester.cell.borrow_mut()));
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             assert!(focus_node1.has_primary_focus(&tester.cell.borrow()));
             assert!(!focus_node2.has_primary_focus(&tester.cell.borrow()));
@@ -2282,8 +2256,7 @@ mod tests {
     // 'IconButton responds to density changes.'
     #[test]
     fn the_button_responds_to_density_changes() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let build = |tester: &mut WidgetTester, visual_density: VisualDensity| {
                 let widget = material_app(
                     m3_theme(tester),
@@ -2300,22 +2273,22 @@ mod tests {
                 tester.pump_and_settle();
             };
 
-            build(&mut tester, VisualDensity::STANDARD);
-            assert_eq!(button_size(&tester), Size::new(48.0, 48.0));
+            build(tester, VisualDensity::STANDARD);
+            assert_eq!(button_size(tester), Size::new(48.0, 48.0));
 
-            build(&mut tester, VisualDensity::new(3.0, 3.0));
-            assert_eq!(button_size(&tester), Size::new(64.0, 64.0));
+            build(tester, VisualDensity::new(3.0, 3.0));
+            assert_eq!(button_size(tester), Size::new(64.0, 64.0));
 
-            build(&mut tester, VisualDensity::new(-3.0, -3.0));
+            build(tester, VisualDensity::new(-3.0, -3.0));
             // IconButton is a subclass of ButtonStyleButton in Material 3, so the negative
             // visualDensity cannot be applied to horizontal padding.
             // The size of the Button with padding is (24 + 8 + 8, 24) -> (40, 24)
             // minSize of M3 IconButton is (48 - 12, 48 - 12) -> (36, 36)
             // So, the button size in Material 3 is (40, 36)
-            assert_eq!(button_size(&tester), Size::new(40.0, 36.0));
+            assert_eq!(button_size(tester), Size::new(40.0, 36.0));
 
-            build(&mut tester, VisualDensity::new(3.0, -3.0));
-            assert_eq!(button_size(&tester), Size::new(64.0, 36.0));
+            build(tester, VisualDensity::new(3.0, -3.0));
+            assert_eq!(button_size(tester), Size::new(64.0, 36.0));
         });
     }
 
@@ -2334,77 +2307,73 @@ mod tests {
     // 'IconButton.mouseCursor changes cursor on hover'
     #[test]
     fn the_mouse_cursor_changes_on_hover() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             // Test argument works
             let widget = cursor_frame(
-                &tester,
+                tester,
                 IconButton::new(noop(), icon(Icons::play_arrow()))
                     .mouse_cursor(SystemMouseCursors::FORBIDDEN.into()),
             );
             tester.pump_widget(widget);
-            let mut mouse = WidgetTester::mouse(1, 0);
-            let center = button_center(&tester);
+            let mut mouse = TestPointer::mouse(1, 0);
+            let center = button_center(tester);
             tester.add_pointer(&mut mouse, center);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             let forbidden: MouseCursorRef = SystemMouseCursors::FORBIDDEN.into();
-            assert!(*active_cursor(&tester) == *forbidden);
+            assert!(*active_cursor(tester) == *forbidden);
 
             // Test default is click on web, basic on non-web
-            let widget = cursor_frame(&tester, IconButton::new(noop(), icon(Icons::play_arrow())));
+            let widget = cursor_frame(tester, IconButton::new(noop(), icon(Icons::play_arrow())));
             tester.pump_widget(widget);
             let basic: MouseCursorRef = SystemMouseCursors::BASIC.into();
-            assert!(*active_cursor(&tester) == *basic);
+            assert!(*active_cursor(tester) == *basic);
         });
     }
 
     // 'disabled IconButton has basic mouse cursor'
     #[test]
     fn a_disabled_button_has_the_basic_mouse_cursor() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let widget = cursor_frame(&tester, IconButton::new(None, icon(Icons::play_arrow())));
+        test_widgets(|tester| {
+            let widget = cursor_frame(tester, IconButton::new(None, icon(Icons::play_arrow())));
             tester.pump_widget(widget);
-            let mut mouse = WidgetTester::mouse(1, 0);
-            let center = button_center(&tester);
+            let mut mouse = TestPointer::mouse(1, 0);
+            let center = button_center(tester);
             tester.add_pointer(&mut mouse, center);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             let basic: MouseCursorRef = SystemMouseCursors::BASIC.into();
-            assert!(*active_cursor(&tester) == *basic);
+            assert!(*active_cursor(tester) == *basic);
         });
     }
 
     // 'IconButton.mouseCursor overrides implicit setting of mouse cursor'
     #[test]
     fn the_mouse_cursor_overrides_the_implicit_one() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let none: MouseCursorRef = SystemMouseCursors::NONE.into();
             let widget = cursor_frame(
-                &tester,
+                tester,
                 IconButton::new(None, icon(Icons::play_arrow())).mouse_cursor(none.clone()),
             );
             tester.pump_widget(widget);
-            let mut mouse = WidgetTester::mouse(1, 0);
-            let center = button_center(&tester);
+            let mut mouse = TestPointer::mouse(1, 0);
+            let center = button_center(tester);
             tester.add_pointer(&mut mouse, center);
-            tester.pump(Duration::ZERO);
-            assert!(*active_cursor(&tester) == *none);
+            tester.pump();
+            assert!(*active_cursor(tester) == *none);
 
             let widget = cursor_frame(
-                &tester,
+                tester,
                 IconButton::new(noop(), icon(Icons::play_arrow())).mouse_cursor(none.clone()),
             );
             tester.pump_widget(widget);
-            assert!(*active_cursor(&tester) == *none);
+            assert!(*active_cursor(tester) == *none);
         });
     }
 
     // 'IconTheme opacity test'; Dart's `Scaffold` is the `Material` it provides.
     #[test]
     fn m2_the_icon_color_takes_the_icon_theme_opacity() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = ThemeData::from(ColorScheme::light())
                 .use_material3(false)
                 .build(&tester.cell.borrow());
@@ -2418,7 +2387,7 @@ mod tests {
                     .into_widget(),
             );
             tester.pump_widget(widget);
-            assert_eq!(icon_color(&tester), Some(purple));
+            assert_eq!(icon_color(tester), Some(purple));
 
             let widget = material_app(
                 theme,
@@ -2431,50 +2400,49 @@ mod tests {
                     .into_widget(),
             );
             tester.pump_widget(widget);
-            assert_eq!(icon_color(&tester), Some(purple.with_opacity(0.5)));
+            assert_eq!(icon_color(tester), Some(purple.with_opacity(0.5)));
         });
     }
 
     // 'IconButton defaults - M3'
     #[test]
     fn m3_standard_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let widget = material_app(
-                m3_theme(&tester),
+                m3_theme(tester),
                 Center::new()
                     .child(IconButton::new(noop(), icon(Icons::ac_unit())))
                     .into_widget(),
             );
             tester.pump_widget(widget);
-            check_material(&tester, Colors::TRANSPARENT, &stadium());
-            check_icon_alignment_and_size(&tester);
+            check_material(tester, Colors::TRANSPARENT, &stadium());
+            check_icon_alignment_and_size(tester);
 
-            press_and_release(&mut tester);
+            press_and_release(tester);
             // No change vs enabled and not pressed.
-            check_material(&tester, Colors::TRANSPARENT, &stadium());
+            check_material(tester, Colors::TRANSPARENT, &stadium());
 
             // Disabled IconButton
             let widget = material_app(
-                m3_theme(&tester),
+                m3_theme(tester),
                 Center::new()
                     .child(IconButton::new(None, icon(Icons::ac_unit())))
                     .into_widget(),
             );
             tester.pump_widget(widget);
-            check_material(&tester, Colors::TRANSPARENT, &stadium());
+            check_material(tester, Colors::TRANSPARENT, &stadium());
         });
     }
 
     /// Dart's `... default overlayColor resolves pressed state` cases: hovered, then pressed,
     /// then focused, each the overlay `colors` gives for the state.
     fn check_overlay_by_state(
+        tester: &mut WidgetTester,
         button: Constructor,
         colors: fn(&ColorScheme) -> (Color, Color, Color),
     ) {
-        let mut tester = tester();
-        let focus_node = focus_node(&tester);
-        let theme = default_theme(&tester);
+        let focus_node = focus_node(tester);
+        let theme = default_theme(tester);
         let (hovered, pressed, focused) = colors(&theme.color_scheme);
         let widget = material_app(
             theme,
@@ -2492,17 +2460,17 @@ mod tests {
         tester.pump_widget(widget);
 
         // Hovered.
-        let center = button_center(&tester);
-        let mut mouse = WidgetTester::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+        let center = button_center(tester);
+        let mut mouse = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
         tester.add_pointer(&mut mouse, Offset::ZERO);
         tester.move_to(&mut mouse, center, false);
         tester.pump_and_settle();
-        assert_eq!(ink_rects(&tester), vec![argb(hovered)]);
+        assert_eq!(ink_rects(tester), vec![argb(hovered)]);
 
         // Highlighted (pressed).
         tester.send(&mouse, waft_embedder::PointerChange::Down);
         tester.pump_and_settle();
-        assert_eq!(ink_rects(&tester)[1], argb(pressed));
+        assert_eq!(ink_rects(tester)[1], argb(pressed));
         // Remove pressed and hovered states
         tester.up(&mouse);
         tester.pump_and_settle();
@@ -2512,14 +2480,14 @@ mod tests {
         // Focused.
         focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
         tester.pump_and_settle();
-        assert_eq!(ink_rects(&tester), vec![argb(focused)]);
+        assert_eq!(ink_rects(tester), vec![argb(focused)]);
     }
 
     // 'IconButton default overlayColor resolves pressed state'
     #[test]
     fn m3_standard_overlay_resolves_by_state() {
-        with_main_thread_stack(|| {
-            check_overlay_by_state(IconButton::new, |colors| {
+        test_widgets(|tester| {
+            check_overlay_by_state(tester, IconButton::new, |colors| {
                 (
                     colors.on_surface_variant().with_opacity(0.08),
                     colors.on_surface_variant().with_opacity(0.1),
@@ -2532,8 +2500,8 @@ mod tests {
     // 'IconButton.fill default overlayColor resolves pressed state'
     #[test]
     fn m3_filled_overlay_resolves_by_state() {
-        with_main_thread_stack(|| {
-            check_overlay_by_state(IconButton::filled, |colors| {
+        test_widgets(|tester| {
+            check_overlay_by_state(tester, IconButton::filled, |colors| {
                 (
                     colors.on_primary.with_opacity(0.08),
                     colors.on_primary.with_opacity(0.1),
@@ -2546,8 +2514,8 @@ mod tests {
     // 'IconButton.filledTonal default overlayColor resolves pressed state'
     #[test]
     fn m3_filled_tonal_overlay_resolves_by_state() {
-        with_main_thread_stack(|| {
-            check_overlay_by_state(IconButton::filled_tonal, |colors| {
+        test_widgets(|tester| {
+            check_overlay_by_state(tester, IconButton::filled_tonal, |colors| {
                 (
                     colors.on_secondary_container().with_opacity(0.08),
                     colors.on_secondary_container().with_opacity(0.1),
@@ -2560,8 +2528,8 @@ mod tests {
     // 'IconButton.outlined default overlayColor resolves pressed state'
     #[test]
     fn m3_outlined_overlay_resolves_by_state() {
-        with_main_thread_stack(|| {
-            check_overlay_by_state(IconButton::outlined, |colors| {
+        test_widgets(|tester| {
+            check_overlay_by_state(tester, IconButton::outlined, |colors| {
                 (
                     colors.on_surface_variant().with_opacity(0.08),
                     colors.on_surface.with_opacity(0.1),
@@ -2580,29 +2548,22 @@ mod tests {
     // 'IconButton.fill defaults - M3'
     #[test]
     fn m3_filled_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let colors = ColorScheme::light();
-            pump_m3(
-                &mut tester,
-                IconButton::filled(noop(), icon(Icons::ac_unit())),
-            );
-            assert_eq!(icon_color(&tester), Some(colors.on_primary));
-            check_material(&tester, colors.primary, &stadium());
-            check_icon_alignment_and_size(&tester);
+            pump_m3(tester, IconButton::filled(noop(), icon(Icons::ac_unit())));
+            assert_eq!(icon_color(tester), Some(colors.on_primary));
+            check_material(tester, colors.primary, &stadium());
+            check_icon_alignment_and_size(tester);
 
-            press_and_release(&mut tester);
+            press_and_release(tester);
             // No change vs enabled and not pressed.
-            check_material(&tester, colors.primary, &stadium());
+            check_material(tester, colors.primary, &stadium());
 
             // Disabled IconButton
-            pump_m3(
-                &mut tester,
-                IconButton::filled(None, icon(Icons::ac_unit())),
-            );
-            check_material(&tester, colors.on_surface.with_opacity(0.12), &stadium());
+            pump_m3(tester, IconButton::filled(None, icon(Icons::ac_unit())));
+            check_material(tester, colors.on_surface.with_opacity(0.12), &stadium());
             assert_eq!(
-                icon_color(&tester),
+                icon_color(tester),
                 Some(colors.on_surface.with_opacity(0.38))
             );
         });
@@ -2611,37 +2572,36 @@ mod tests {
     // 'Toggleable IconButton.fill defaults - M3'
     #[test]
     fn m3_toggleable_filled_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let colors = ColorScheme::light();
             pump_m3(
-                &mut tester,
+                tester,
                 IconButton::filled(noop(), icon(Icons::ac_unit())).is_selected(true),
             );
-            assert_eq!(icon_color(&tester), Some(colors.on_primary));
-            check_material(&tester, colors.primary, &stadium());
-            check_icon_alignment_and_size(&tester);
+            assert_eq!(icon_color(tester), Some(colors.on_primary));
+            check_material(tester, colors.primary, &stadium());
+            check_icon_alignment_and_size(tester);
 
-            press_and_release(&mut tester);
+            press_and_release(tester);
             // No change vs enabled and not pressed.
-            check_material(&tester, colors.primary, &stadium());
+            check_material(tester, colors.primary, &stadium());
 
             // Enabled unselected IconButton
             pump_m3(
-                &mut tester,
+                tester,
                 IconButton::filled(noop(), icon(Icons::ac_unit())).is_selected(false),
             );
-            check_material(&tester, colors.surface_variant(), &stadium());
-            assert_eq!(icon_color(&tester), Some(colors.primary));
+            check_material(tester, colors.surface_variant(), &stadium());
+            assert_eq!(icon_color(tester), Some(colors.primary));
 
             // Disabled IconButton
             pump_m3(
-                &mut tester,
+                tester,
                 IconButton::filled(None, icon(Icons::ac_unit())).is_selected(true),
             );
-            check_material(&tester, colors.on_surface.with_opacity(0.12), &stadium());
+            check_material(tester, colors.on_surface.with_opacity(0.12), &stadium());
             assert_eq!(
-                icon_color(&tester),
+                icon_color(tester),
                 Some(colors.on_surface.with_opacity(0.38))
             );
         });
@@ -2650,27 +2610,26 @@ mod tests {
     // 'IconButton.filledTonal defaults - M3'
     #[test]
     fn m3_filled_tonal_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let colors = ColorScheme::light();
             pump_m3(
-                &mut tester,
+                tester,
                 IconButton::filled_tonal(noop(), icon(Icons::ac_unit())),
             );
-            assert_eq!(icon_color(&tester), Some(colors.on_secondary_container()));
-            check_material(&tester, colors.secondary_container(), &stadium());
-            check_icon_alignment_and_size(&tester);
+            assert_eq!(icon_color(tester), Some(colors.on_secondary_container()));
+            check_material(tester, colors.secondary_container(), &stadium());
+            check_icon_alignment_and_size(tester);
 
-            press_and_release(&mut tester);
-            check_material(&tester, colors.secondary_container(), &stadium());
+            press_and_release(tester);
+            check_material(tester, colors.secondary_container(), &stadium());
 
             pump_m3(
-                &mut tester,
+                tester,
                 IconButton::filled_tonal(None, icon(Icons::ac_unit())),
             );
-            check_material(&tester, colors.on_surface.with_opacity(0.12), &stadium());
+            check_material(tester, colors.on_surface.with_opacity(0.12), &stadium());
             assert_eq!(
-                icon_color(&tester),
+                icon_color(tester),
                 Some(colors.on_surface.with_opacity(0.38))
             );
         });
@@ -2679,34 +2638,33 @@ mod tests {
     // 'Toggleable IconButton.filledTonal defaults - M3'
     #[test]
     fn m3_toggleable_filled_tonal_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let colors = ColorScheme::light();
             pump_m3(
-                &mut tester,
+                tester,
                 IconButton::filled_tonal(noop(), icon(Icons::ac_unit())).is_selected(true),
             );
-            assert_eq!(icon_color(&tester), Some(colors.on_secondary_container()));
-            check_material(&tester, colors.secondary_container(), &stadium());
-            check_icon_alignment_and_size(&tester);
+            assert_eq!(icon_color(tester), Some(colors.on_secondary_container()));
+            check_material(tester, colors.secondary_container(), &stadium());
+            check_icon_alignment_and_size(tester);
 
-            press_and_release(&mut tester);
-            check_material(&tester, colors.secondary_container(), &stadium());
+            press_and_release(tester);
+            check_material(tester, colors.secondary_container(), &stadium());
 
             pump_m3(
-                &mut tester,
+                tester,
                 IconButton::filled_tonal(noop(), icon(Icons::ac_unit())).is_selected(false),
             );
-            check_material(&tester, colors.surface_variant(), &stadium());
-            assert_eq!(icon_color(&tester), Some(colors.on_surface_variant()));
+            check_material(tester, colors.surface_variant(), &stadium());
+            assert_eq!(icon_color(tester), Some(colors.on_surface_variant()));
 
             pump_m3(
-                &mut tester,
+                tester,
                 IconButton::filled_tonal(None, icon(Icons::ac_unit())).is_selected(true),
             );
-            check_material(&tester, colors.on_surface.with_opacity(0.12), &stadium());
+            check_material(tester, colors.on_surface.with_opacity(0.12), &stadium());
             assert_eq!(
-                icon_color(&tester),
+                icon_color(tester),
                 Some(colors.on_surface.with_opacity(0.38))
             );
         });
@@ -2715,39 +2673,24 @@ mod tests {
     // 'IconButton.outlined defaults - M3'
     #[test]
     fn m3_outlined_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let colors = ColorScheme::light();
-            pump_m3(
-                &mut tester,
-                IconButton::outlined(noop(), icon(Icons::ac_unit())),
-            );
-            assert_eq!(icon_color(&tester), Some(colors.on_surface_variant()));
-            check_material(
-                &tester,
-                Colors::TRANSPARENT,
-                &stadium_with(colors.outline()),
-            );
-            check_icon_alignment_and_size(&tester);
+            pump_m3(tester, IconButton::outlined(noop(), icon(Icons::ac_unit())));
+            assert_eq!(icon_color(tester), Some(colors.on_surface_variant()));
+            check_material(tester, Colors::TRANSPARENT, &stadium_with(colors.outline()));
+            check_icon_alignment_and_size(tester);
 
-            press_and_release(&mut tester);
-            check_material(
-                &tester,
-                Colors::TRANSPARENT,
-                &stadium_with(colors.outline()),
-            );
+            press_and_release(tester);
+            check_material(tester, Colors::TRANSPARENT, &stadium_with(colors.outline()));
 
-            pump_m3(
-                &mut tester,
-                IconButton::outlined(None, icon(Icons::ac_unit())),
-            );
+            pump_m3(tester, IconButton::outlined(None, icon(Icons::ac_unit())));
             check_material(
-                &tester,
+                tester,
                 Colors::TRANSPARENT,
                 &stadium_with(colors.on_surface.with_opacity(0.12)),
             );
             assert_eq!(
-                icon_color(&tester),
+                icon_color(tester),
                 Some(colors.on_surface.with_opacity(0.38))
             );
         });
@@ -2756,38 +2699,33 @@ mod tests {
     // 'Toggleable IconButton.outlined defaults - M3'
     #[test]
     fn m3_toggleable_outlined_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let colors = ColorScheme::light();
             pump_m3(
-                &mut tester,
+                tester,
                 IconButton::outlined(noop(), icon(Icons::ac_unit())).is_selected(true),
             );
-            assert_eq!(icon_color(&tester), Some(colors.on_inverse_surface()));
-            check_material(&tester, colors.inverse_surface(), &stadium());
-            check_icon_alignment_and_size(&tester);
+            assert_eq!(icon_color(tester), Some(colors.on_inverse_surface()));
+            check_material(tester, colors.inverse_surface(), &stadium());
+            check_icon_alignment_and_size(tester);
 
-            press_and_release(&mut tester);
-            check_material(&tester, colors.inverse_surface(), &stadium());
+            press_and_release(tester);
+            check_material(tester, colors.inverse_surface(), &stadium());
 
             pump_m3(
-                &mut tester,
+                tester,
                 IconButton::outlined(noop(), icon(Icons::ac_unit())).is_selected(false),
             );
-            check_material(
-                &tester,
-                Colors::TRANSPARENT,
-                &stadium_with(colors.outline()),
-            );
-            assert_eq!(icon_color(&tester), Some(colors.on_surface_variant()));
+            check_material(tester, Colors::TRANSPARENT, &stadium_with(colors.outline()));
+            assert_eq!(icon_color(tester), Some(colors.on_surface_variant()));
 
             pump_m3(
-                &mut tester,
+                tester,
                 IconButton::outlined(None, icon(Icons::ac_unit())).is_selected(true),
             );
-            check_material(&tester, colors.on_surface.with_opacity(0.12), &stadium());
+            check_material(tester, colors.on_surface.with_opacity(0.12), &stadium());
             assert_eq!(
-                icon_color(&tester),
+                icon_color(tester),
                 Some(colors.on_surface.with_opacity(0.38))
             );
         });
@@ -2796,9 +2734,8 @@ mod tests {
     // 'IconButton uses stateful color for icon color in different states - M3'
     #[test]
     fn m3_the_icon_color_follows_a_stateful_foreground_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let focus_node = focus_node(&tester);
+        test_widgets(|tester| {
+            let focus_node = focus_node(tester);
             let pressed_color = Color::new(0x00000001);
             let hover_color = Color::new(0x00000002);
             let focused_color = Color::new(0x00000003);
@@ -2823,7 +2760,7 @@ mod tests {
                     Some(default_color)
                 });
             let widget = material_app(
-                m3_theme(&tester),
+                m3_theme(tester),
                 StatefulBuilder::new({
                     let focus_node = focus_node.clone();
                     move |_app, _context, set_state| {
@@ -2851,39 +2788,38 @@ mod tests {
             tester.pump_widget(widget);
 
             // Default, not disabled.
-            assert_eq!(icon_color(&tester), Some(default_color));
+            assert_eq!(icon_color(tester), Some(default_color));
 
             // Selected
-            let center = button_center(&tester);
+            let center = button_center(tester);
             tester.tap(center, 1);
             tester.pump_and_settle();
-            assert_eq!(icon_color(&tester), Some(selected_color));
+            assert_eq!(icon_color(tester), Some(selected_color));
 
             // Focused.
             focus_node.request_focus(&mut tester.cell.borrow_mut(), None);
             tester.pump_and_settle();
-            assert_eq!(icon_color(&tester), Some(focused_color));
+            assert_eq!(icon_color(tester), Some(focused_color));
 
             // Hovered.
-            let mut mouse = WidgetTester::mouse(2, waft_gestures::K_PRIMARY_BUTTON);
+            let mut mouse = TestPointer::mouse(2, waft_gestures::K_PRIMARY_BUTTON);
             tester.add_pointer(&mut mouse, Offset::ZERO);
             tester.move_to(&mut mouse, center, false);
             tester.pump_and_settle();
-            assert_eq!(icon_color(&tester), Some(hover_color));
+            assert_eq!(icon_color(tester), Some(hover_color));
 
             // Highlighted (pressed).
             tester.send(&mouse, waft_embedder::PointerChange::Down);
-            tester.pump(Duration::ZERO); // Start the splash and highlight animations.
-            tester.pump(Duration::from_millis(800)); // Wait for splash and highlight to be well under way.
-            assert_eq!(icon_color(&tester), Some(pressed_color));
+            tester.pump(); // Start the splash and highlight animations.
+            tester.pump_by(Duration::from_millis(800)); // Wait for splash and highlight to be well under way.
+            assert_eq!(icon_color(tester), Some(pressed_color));
         });
     }
 
     // 'IconButton size is configurable by ThemeData.materialTapTargetSize - M3'
     #[test]
     fn m3_the_theme_tap_target_size_pads_the_button() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let build = |tester: &WidgetTester, tap_target_size: MaterialTapTargetSize| {
                 let theme = ThemeData::builder()
                     .material_tap_target_size(tap_target_size)
@@ -2903,21 +2839,20 @@ mod tests {
                 )
                 .into_widget()
             };
-            let widget = build(&tester, MaterialTapTargetSize::Padded);
+            let widget = build(tester, MaterialTapTargetSize::Padded);
             tester.pump_widget(widget);
-            assert_eq!(button_size(&tester), Size::new(48.0, 48.0));
+            assert_eq!(button_size(tester), Size::new(48.0, 48.0));
 
-            let widget = build(&tester, MaterialTapTargetSize::ShrinkWrap);
+            let widget = build(tester, MaterialTapTargetSize::ShrinkWrap);
             tester.pump_widget(widget);
-            assert_eq!(button_size(&tester), Size::new(40.0, 40.0));
+            assert_eq!(button_size(tester), Size::new(40.0, 40.0));
         });
     }
 
     // 'Override IconButton default padding - M3'
     #[test]
     fn m3_the_padding_is_overridden_by_the_button_then_its_style() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let padding_of = |tester: &WidgetTester| {
                 let button = icon_button_element(tester);
                 let padding = tester
@@ -2930,27 +2865,27 @@ mod tests {
 
             // Use [IconButton]'s padding property to override default value.
             pump_m3(
-                &mut tester,
+                tester,
                 IconButton::new(noop(), icon(Icons::ac_unit()))
                     .padding(EdgeInsets::all(20.0).into()),
             );
-            assert!(padding_of(&tester) == EdgeInsets::all(20.0).into());
+            assert!(padding_of(tester) == EdgeInsets::all(20.0).into());
 
             // Use [IconButton.style]'s padding property to override default value.
             pump_m3(
-                &mut tester,
+                tester,
                 IconButton::new(noop(), icon(Icons::ac_unit())).style(
                     IconButton::style_from()
                         .padding(EdgeInsets::all(20.0).into())
                         .build(),
                 ),
             );
-            assert!(padding_of(&tester) == EdgeInsets::all(20.0).into());
+            assert!(padding_of(tester) == EdgeInsets::all(20.0).into());
 
             // [IconButton.style]'s padding will override [IconButton]'s padding if both
             // values are not null.
             pump_m3(
-                &mut tester,
+                tester,
                 IconButton::new(noop(), icon(Icons::ac_unit()))
                     .padding(EdgeInsets::all(15.0).into())
                     .style(
@@ -2959,7 +2894,7 @@ mod tests {
                             .build(),
                     ),
             );
-            assert!(padding_of(&tester) == EdgeInsets::all(22.0).into());
+            assert!(padding_of(tester) == EdgeInsets::all(22.0).into());
         });
     }
 
@@ -3005,80 +2940,77 @@ mod tests {
     // 'Default IconButton is not selectable - M3'
     #[test]
     fn m3_a_default_button_is_not_selectable() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let colors = ColorScheme::light();
-            let widget = toggle_frame(&tester, None, ac_unit_button);
+            let widget = toggle_frame(tester, None, ac_unit_button);
             tester.pump_widget(widget);
 
-            assert_eq!(selected_of(&tester), None);
-            assert_eq!(icon_color(&tester), Some(colors.on_surface_variant()));
-            assert_eq!(material_color(&tester), Some(Colors::TRANSPARENT));
+            assert_eq!(selected_of(tester), None);
+            assert_eq!(icon_color(tester), Some(colors.on_surface_variant()));
+            assert_eq!(material_color(tester), Some(Colors::TRANSPARENT));
 
             // The non-toggle IconButton should not change appearance after clicking
-            let center = button_center(&tester);
+            let center = button_center(tester);
             tester.tap(center, 1);
             tester.pump_and_settle();
 
-            assert_eq!(selected_of(&tester), None);
-            assert_eq!(icon_color(&tester), Some(colors.on_surface_variant()));
-            assert_eq!(material_color(&tester), Some(Colors::TRANSPARENT));
+            assert_eq!(selected_of(tester), None);
+            assert_eq!(icon_color(tester), Some(colors.on_surface_variant()));
+            assert_eq!(material_color(tester), Some(Colors::TRANSPARENT));
         });
     }
 
     // 'Icon button is selectable when isSelected is not null - M3'
     #[test]
     fn m3_a_button_with_is_selected_toggles() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let colors = ColorScheme::light();
-            let widget = toggle_frame(&tester, Some(Rc::new(Cell::new(false))), ac_unit_button);
+            let widget = toggle_frame(tester, Some(Rc::new(Cell::new(false))), ac_unit_button);
             tester.pump_widget(widget);
 
-            assert_eq!(selected_of(&tester), Some(false));
-            assert_eq!(icon_color(&tester), Some(colors.on_surface_variant()));
-            assert_eq!(material_color(&tester), Some(Colors::TRANSPARENT));
+            assert_eq!(selected_of(tester), Some(false));
+            assert_eq!(icon_color(tester), Some(colors.on_surface_variant()));
+            assert_eq!(material_color(tester), Some(Colors::TRANSPARENT));
 
             // The toggle IconButton should change appearance after clicking
-            let center = button_center(&tester);
+            let center = button_center(tester);
             tester.tap(center, 1);
             tester.pump_and_settle();
 
-            assert_eq!(selected_of(&tester), Some(true));
-            assert_eq!(icon_color(&tester), Some(colors.primary));
-            assert_eq!(material_color(&tester), Some(Colors::TRANSPARENT));
+            assert_eq!(selected_of(tester), Some(true));
+            assert_eq!(icon_color(tester), Some(colors.primary));
+            assert_eq!(material_color(tester), Some(Colors::TRANSPARENT));
 
             // The IconButton should be unselected if it's clicked again
             tester.tap(center, 2);
             tester.pump_and_settle();
 
-            assert_eq!(selected_of(&tester), Some(false));
-            assert_eq!(icon_color(&tester), Some(colors.on_surface_variant()));
-            assert_eq!(material_color(&tester), Some(Colors::TRANSPARENT));
+            assert_eq!(selected_of(tester), Some(false));
+            assert_eq!(icon_color(tester), Some(colors.on_surface_variant()));
+            assert_eq!(material_color(tester), Some(Colors::TRANSPARENT));
         });
     }
 
     // 'The IconButton is in selected status if isSelected is true by default - M3'
     #[test]
     fn m3_a_button_selected_from_the_start_shows_selected() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let colors = ColorScheme::light();
-            let widget = toggle_frame(&tester, Some(Rc::new(Cell::new(true))), ac_unit_button);
+            let widget = toggle_frame(tester, Some(Rc::new(Cell::new(true))), ac_unit_button);
             tester.pump_widget(widget);
 
-            assert_eq!(selected_of(&tester), Some(true));
-            assert_eq!(icon_color(&tester), Some(colors.primary));
-            assert_eq!(material_color(&tester), Some(Colors::TRANSPARENT));
+            assert_eq!(selected_of(tester), Some(true));
+            assert_eq!(icon_color(tester), Some(colors.primary));
+            assert_eq!(material_color(tester), Some(Colors::TRANSPARENT));
 
             // The IconButton becomes unselected if it's clicked
-            let center = button_center(&tester);
+            let center = button_center(tester);
             tester.tap(center, 1);
             tester.pump_and_settle();
 
-            assert_eq!(selected_of(&tester), Some(false));
-            assert_eq!(icon_color(&tester), Some(colors.on_surface_variant()));
-            assert_eq!(material_color(&tester), Some(Colors::TRANSPARENT));
+            assert_eq!(selected_of(tester), Some(false));
+            assert_eq!(icon_color(tester), Some(colors.on_surface_variant()));
+            assert_eq!(material_color(tester), Some(Colors::TRANSPARENT));
         });
     }
 
@@ -3091,28 +3023,27 @@ mod tests {
     // "The selectedIcon is used if it's not null and the button is clicked"
     #[test]
     fn the_selected_icon_shows_while_selected() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let widget = toggle_frame(&tester, Some(Rc::new(Cell::new(false))), account_box_button);
+        test_widgets(|tester| {
+            let widget = toggle_frame(tester, Some(Rc::new(Cell::new(false))), account_box_button);
             tester.pump_widget(widget);
 
-            assert_eq!(find_icon(&tester, &Icons::account_box_outlined()).len(), 1);
-            assert!(find_icon(&tester, &Icons::account_box()).is_empty());
+            assert_eq!(find_icon(tester, &Icons::account_box_outlined()).len(), 1);
+            assert!(find_icon(tester, &Icons::account_box()).is_empty());
 
             // The icon becomes to selectedIcon
-            let center = button_center(&tester);
+            let center = button_center(tester);
             tester.tap(center, 1);
             tester.pump_and_settle();
 
-            assert_eq!(find_icon(&tester, &Icons::account_box()).len(), 1);
-            assert!(find_icon(&tester, &Icons::account_box_outlined()).is_empty());
+            assert_eq!(find_icon(tester, &Icons::account_box()).len(), 1);
+            assert!(find_icon(tester, &Icons::account_box_outlined()).is_empty());
 
             // The icon becomes the original icon when it's clicked again
             tester.tap(center, 2);
             tester.pump_and_settle();
 
-            assert_eq!(find_icon(&tester, &Icons::account_box_outlined()).len(), 1);
-            assert!(find_icon(&tester, &Icons::account_box()).is_empty());
+            assert_eq!(find_icon(tester, &Icons::account_box_outlined()).len(), 1);
+            assert!(find_icon(tester, &Icons::account_box()).is_empty());
         });
     }
 
@@ -3127,51 +3058,49 @@ mod tests {
     // 'The original icon is used for selected and unselected status when selectedIcon is null'
     #[test]
     fn without_a_selected_icon_the_icon_shows_in_both_states() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let widget = toggle_frame(
-                &tester,
+                tester,
                 Some(Rc::new(Cell::new(false))),
                 plain_account_box_button,
             );
             tester.pump_widget(widget);
 
-            assert_eq!(selected_of(&tester), Some(false));
+            assert_eq!(selected_of(tester), Some(false));
             assert!(
-                tester.widget(icon_button_element(&tester), |button: &IconButton| button
+                tester.widget(icon_button_element(tester), |button: &IconButton| button
                     .selected_icon
                     .is_none())
             );
-            assert_eq!(find_icon(&tester, &Icons::account_box()).len(), 1);
+            assert_eq!(find_icon(tester, &Icons::account_box()).len(), 1);
 
-            let center = button_center(&tester);
+            let center = button_center(tester);
             tester.tap(center, 1);
             tester.pump_and_settle();
 
-            assert_eq!(selected_of(&tester), Some(true));
+            assert_eq!(selected_of(tester), Some(true));
             assert!(
-                tester.widget(icon_button_element(&tester), |button: &IconButton| button
+                tester.widget(icon_button_element(tester), |button: &IconButton| button
                     .selected_icon
                     .is_none())
             );
-            assert_eq!(find_icon(&tester, &Icons::account_box()).len(), 1);
+            assert_eq!(find_icon(tester, &Icons::account_box()).len(), 1);
         });
     }
 
     // 'The selectedIcon is used for disabled button if isSelected is true - M3'
     #[test]
     fn m3_a_disabled_selected_button_shows_the_selected_icon() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             pump_m3(
-                &mut tester,
+                tester,
                 IconButton::new(None, icon(Icons::account_box()))
                     .is_selected(true)
                     .selected_icon(icon(Icons::ac_unit())),
             );
-            assert_eq!(selected_of(&tester), Some(true));
-            assert!(find_icon(&tester, &Icons::account_box()).is_empty());
-            assert_eq!(find_icon(&tester, &Icons::ac_unit()).len(), 1);
+            assert_eq!(selected_of(tester), Some(true));
+            assert!(find_icon(tester, &Icons::account_box()).is_empty());
+            assert_eq!(find_icon(tester, &Icons::ac_unit()).len(), 1);
         });
     }
 
@@ -3179,8 +3108,7 @@ mod tests {
     // configured by ThemeData - M3'
     #[test]
     fn m3_the_visual_density_comes_from_the_icon_button_theme_not_the_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let build = |tester: &mut WidgetTester,
                          icon_button_theme_density: Option<VisualDensity>,
                          theme_density: Option<VisualDensity>| {
@@ -3207,33 +3135,35 @@ mod tests {
                 tester.pump_and_settle();
             };
 
-            build(&mut tester, Some(VisualDensity::STANDARD), None);
-            assert_eq!(button_size(&tester), Size::new(48.0, 48.0));
+            build(tester, Some(VisualDensity::STANDARD), None);
+            assert_eq!(button_size(tester), Size::new(48.0, 48.0));
 
-            build(&mut tester, Some(VisualDensity::COMPACT), None);
-            assert_eq!(button_size(&tester), Size::new(40.0, 40.0));
+            build(tester, Some(VisualDensity::COMPACT), None);
+            assert_eq!(button_size(tester), Size::new(40.0, 40.0));
 
-            build(&mut tester, Some(VisualDensity::new(3.0, 3.0)), None);
-            assert_eq!(button_size(&tester), Size::new(64.0, 64.0));
+            build(tester, Some(VisualDensity::new(3.0, 3.0)), None);
+            assert_eq!(button_size(tester), Size::new(64.0, 64.0));
 
             // ThemeData.visualDensity will be ignored because useMaterial3 is true
-            build(&mut tester, None, Some(VisualDensity::STANDARD));
-            assert_eq!(button_size(&tester), Size::new(48.0, 48.0));
+            build(tester, None, Some(VisualDensity::STANDARD));
+            assert_eq!(button_size(tester), Size::new(48.0, 48.0));
 
-            build(&mut tester, None, Some(VisualDensity::COMPACT));
-            assert_eq!(button_size(&tester), Size::new(48.0, 48.0));
+            build(tester, None, Some(VisualDensity::COMPACT));
+            assert_eq!(button_size(tester), Size::new(48.0, 48.0));
 
-            build(&mut tester, None, Some(VisualDensity::new(3.0, 3.0)));
-            assert_eq!(button_size(&tester), Size::new(48.0, 48.0));
+            build(tester, None, Some(VisualDensity::new(3.0, 3.0)));
+            assert_eq!(button_size(tester), Size::new(48.0, 48.0));
         });
     }
 
     /// Hovers, presses, and then focuses by Tab the button `style` styles: the overlay colours
     /// the ink paints in each state.
-    fn hovered_pressed_and_focused_overlays(style: ButtonStyle) -> [Vec<u32>; 3] {
-        let mut tester = tester();
+    fn hovered_pressed_and_focused_overlays(
+        tester: &mut WidgetTester,
+        style: ButtonStyle,
+    ) -> [Vec<u32>; 3] {
         let widget = material_app(
-            default_theme(&tester),
+            default_theme(tester),
             Center::new()
                 .child(IconButton::new(noop(), icon(Icons::add())).style(style))
                 .into_widget(),
@@ -3241,17 +3171,17 @@ mod tests {
         tester.pump_widget(widget);
 
         // Hovered.
-        let center = button_center(&tester);
-        let mut mouse = WidgetTester::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+        let center = button_center(tester);
+        let mut mouse = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
         tester.add_pointer(&mut mouse, Offset::ZERO);
         tester.move_to(&mut mouse, center, false);
         tester.pump_and_settle();
-        let hovered = ink_rects(&tester);
+        let hovered = ink_rects(tester);
 
         // Highlighted (pressed).
         tester.send(&mouse, waft_embedder::PointerChange::Down);
         tester.pump_and_settle();
-        let pressed = ink_rects(&tester);
+        let pressed = ink_rects(tester);
         // Remove pressed and hovered states,
         tester.up(&mouse);
         tester.pump_and_settle();
@@ -3261,15 +3191,16 @@ mod tests {
         // Focused.
         tester.send_key_event(PhysicalKeyboardKey::TAB, LogicalKeyboardKey::TAB);
         tester.pump_and_settle();
-        [hovered, pressed, ink_rects(&tester)]
+        [hovered, pressed, ink_rects(tester)]
     }
 
     // 'IconButton.styleFrom overlayColor overrides default overlay color'
     #[test]
     fn style_from_overlay_color_overrides_the_default_overlay() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let overlay_color = Color::new(0xffff0000);
             let [hovered, pressed, focused] = hovered_pressed_and_focused_overlays(
+                tester,
                 IconButton::style_from()
                     .overlay_color(overlay_color)
                     .build(),
@@ -3289,7 +3220,7 @@ mod tests {
     // 'IconButton.styleFrom highlight, hover, focus colors overrides overlayColor'
     #[test]
     fn style_from_state_colors_override_the_overlay_color() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let hover_color = Color::new(0xff0000f2);
             let highlight_color = Color::new(0xff0000f1);
             let focus_color = Color::new(0xff0000f3);
@@ -3306,7 +3237,7 @@ mod tests {
                 .expect("an overlay")
                 .resolve(&states(&[WidgetState::Focused]));
             assert_eq!(focused, Some(focus_color));
-            let [hovered, pressed, focused] = hovered_pressed_and_focused_overlays(style);
+            let [hovered, pressed, focused] = hovered_pressed_and_focused_overlays(tester, style);
             assert_eq!(hovered, vec![argb(hover_color)]);
             assert_eq!(pressed, vec![argb(hover_color), argb(highlight_color)]);
             assert_eq!(focused, vec![argb(focus_color)]);
@@ -3316,7 +3247,7 @@ mod tests {
     // 'IconButton.styleFrom with transparent overlayColor'
     #[test]
     fn style_from_a_transparent_overlay_color_defeats_the_highlights() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let overlay_color = Colors::TRANSPARENT;
             let style = IconButton::style_from()
                 .overlay_color(overlay_color)
@@ -3328,7 +3259,7 @@ mod tests {
                 .resolve(&states(&[WidgetState::Focused]));
             assert_eq!(focused, Some(overlay_color));
             // Dart paints transparent rectangles; Valo records no draw that shows nothing.
-            let [hovered, pressed, focused] = hovered_pressed_and_focused_overlays(style);
+            let [hovered, pressed, focused] = hovered_pressed_and_focused_overlays(tester, style);
             assert!(hovered.is_empty());
             assert!(pressed.is_empty());
             assert!(focused.is_empty());
@@ -3338,8 +3269,7 @@ mod tests {
     // 'IconButton.color takes precedence over ambient IconButtonThemeData.iconColor'
     #[test]
     fn the_button_color_precedes_the_theme_icon_color() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let icon_button_color = Color::new(0xFFFF1234);
             let purple = Colors::PURPLE.primary();
             let theme = ThemeData::builder()
@@ -3364,19 +3294,18 @@ mod tests {
                     .into_widget(),
             );
             tester.pump_widget(widget);
-            assert_eq!(icon_color(&tester), Some(icon_button_color));
+            assert_eq!(icon_color(tester), Some(icon_button_color));
         });
     }
 
     // 'IconTheme overrides default values in M3'
     #[test]
     fn m3_the_icon_theme_overrides_the_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let red = Colors::RED.primary();
             let pink = Colors::PINK.primary();
             // Theme's IconTheme
-            let theme = m3_theme(&tester)
+            let theme = m3_theme(tester)
                 .copy_with()
                 .icon_theme(IconThemeData::new().color(red).size(37.0))
                 .build();
@@ -3385,12 +3314,12 @@ mod tests {
                 IconButton::new(noop(), icon(Icons::account_box())).into_widget(),
             );
             tester.pump_widget(widget);
-            assert_eq!(icon_color(&tester), Some(red));
-            assert_eq!(icon_size(&tester), Size::new(37.0, 37.0));
+            assert_eq!(icon_color(tester), Some(red));
+            assert_eq!(icon_size(tester), Size::new(37.0, 37.0));
 
             // custom IconTheme outside of IconButton
             let widget = material_app(
-                m3_theme(&tester),
+                m3_theme(tester),
                 IconTheme::merge(
                     None,
                     IconThemeData::new().color(pink).size(35.0),
@@ -3398,18 +3327,17 @@ mod tests {
                 ),
             );
             tester.pump_widget(widget);
-            assert_eq!(icon_color(&tester), Some(pink));
-            assert_eq!(icon_size(&tester), Size::new(35.0, 35.0));
+            assert_eq!(icon_color(tester), Some(pink));
+            assert_eq!(icon_size(tester), Size::new(35.0, 35.0));
         });
     }
 
     // 'Theme IconButtonTheme overrides IconTheme in Material3'
     #[test]
     fn m3_the_theme_icon_button_theme_overrides_the_icon_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let green = Colors::GREEN.primary();
-            let theme = m3_theme(&tester)
+            let theme = m3_theme(tester)
                 .copy_with()
                 .icon_theme(IconThemeData::new().color(Colors::RED.primary()).size(25.0))
                 .icon_button_theme(
@@ -3426,16 +3354,15 @@ mod tests {
                 IconButton::new(noop(), icon(Icons::account_box())).into_widget(),
             );
             tester.pump_widget(widget);
-            assert_eq!(icon_color(&tester), Some(green));
-            assert_eq!(icon_size(&tester), Size::new(27.0, 27.0));
+            assert_eq!(icon_color(tester), Some(green));
+            assert_eq!(icon_size(tester), Size::new(27.0, 27.0));
         });
     }
 
     // 'Button IconButtonTheme always overrides IconTheme in Material3'
     #[test]
     fn m3_an_icon_button_theme_always_overrides_the_icon_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let orange = Colors::ORANGE.primary();
             let blue = Colors::BLUE.primary();
             let build = |tester: &WidgetTester, outer: (Color, f64), inner: (Color, f64)| {
@@ -3458,25 +3385,24 @@ mod tests {
             };
 
             // When IconButtonTheme is closer to IconButton, IconButtonTheme overrides IconTheme
-            let widget = build(&tester, (orange, 36.0), (blue, 35.0));
+            let widget = build(tester, (orange, 36.0), (blue, 35.0));
             tester.pump_widget(widget);
-            assert_eq!(icon_color(&tester), Some(blue));
-            assert_eq!(icon_size(&tester), Size::new(35.0, 35.0));
+            assert_eq!(icon_color(tester), Some(blue));
+            assert_eq!(icon_size(tester), Size::new(35.0, 35.0));
 
             // When IconTheme is closer to IconButton, IconButtonTheme still overrides IconTheme
-            let widget = build(&tester, (blue, 35.0), (orange, 36.0));
+            let widget = build(tester, (blue, 35.0), (orange, 36.0));
             tester.pump_widget(widget);
             tester.pump_and_settle();
-            assert_eq!(icon_color(&tester), Some(orange));
-            assert_eq!(icon_size(&tester), Size::new(36.0, 36.0));
+            assert_eq!(icon_color(tester), Some(orange));
+            assert_eq!(icon_size(tester), Size::new(36.0, 36.0));
         });
     }
 
     // 'White icon color defined by users shows correctly in Material3'
     #[test]
     fn m3_a_white_icon_theme_color_shows_in_a_dark_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = ThemeData::from(ColorScheme::dark())
                 .build(&tester.cell.borrow())
                 .copy_with()
@@ -3487,7 +3413,7 @@ mod tests {
                 IconButton::new(noop(), icon(Icons::account_box())).into_widget(),
             );
             tester.pump_widget(widget);
-            assert_eq!(icon_color(&tester), Some(Colors::WHITE));
+            assert_eq!(icon_color(tester), Some(Colors::WHITE));
         });
     }
 
@@ -3496,9 +3422,8 @@ mod tests {
     // the icon reads.
     #[test]
     fn m3_an_icon_theme_size_alone_keeps_the_default_icon_color() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             for scheme in [ColorScheme::dark(), ColorScheme::light()] {
-                let mut tester = tester();
                 let scheme = scheme
                     .copy_with()
                     .with_on_surface_variant(Color::new(0xffe91e60));
@@ -3514,7 +3439,7 @@ mod tests {
                     ),
                 );
                 tester.pump_widget(widget);
-                assert_eq!(icon_color(&tester), Some(scheme.on_surface_variant()));
+                assert_eq!(icon_color(tester), Some(scheme.on_surface_variant()));
             }
         });
     }
@@ -3522,8 +3447,7 @@ mod tests {
     // "IconButton.styleFrom doesn't throw exception on passing only one cursor"
     #[test]
     fn a_style_with_only_an_enabled_cursor_builds() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             tester.pump_widget(
                 Directionality::new(
                     TextDirection::Ltr,
@@ -3543,10 +3467,9 @@ mod tests {
     // 'Material3 - IconButton memory leak'
     #[test]
     fn m3_removing_the_button_disposes_its_controllers() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let widget = material_app(
-                default_theme(&tester),
+                default_theme(tester),
                 IconButton::new(noop(), icon(Icons::search())).into_widget(),
             );
             tester.pump_widget(widget);
@@ -3558,10 +3481,9 @@ mod tests {
     // 'Tooltip is drawn when hovering within IconButton area but outside the Icon itself'
     #[test]
     fn the_tooltip_shows_when_hovering_the_button_outside_its_icon() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let widget = material_app(
-                default_theme(&tester),
+                default_theme(tester),
                 Material::new()
                     .child(Center::new().child(
                         IconButton::new(noop(), icon(Icons::favorite())).tooltip("Test tooltip"),
@@ -3574,7 +3496,7 @@ mod tests {
             assert!(tester.find_text("Test tooltip").is_empty());
 
             // Start hovering within IconButton area to show the tooltip.
-            let mut mouse = WidgetTester::mouse(1, 0);
+            let mut mouse = TestPointer::mouse(1, 0);
             tester.add_pointer(&mut mouse, Offset::ZERO);
             let icon = tester.render_box_of(tester.find_by_type::<Icon>()[0]);
             let top_left = tester.global_rect(icon).top_left();
@@ -3584,7 +3506,7 @@ mod tests {
                 Offset::new(top_left.dx() - 1.0, top_left.dy() - 1.0),
                 false,
             );
-            tester.pump(Duration::ZERO);
+            tester.pump();
 
             // Verify that the tooltip is shown.
             assert_eq!(tester.find_text("Test tooltip").len(), 1);
@@ -3638,8 +3560,7 @@ mod tests {
 
     /// Dart's `IconButton variants hovered & onLongPressed` cases; as in Dart, the filled,
     /// tonal and outlined rounds all aim at the button with the `add` icon.
-    fn check_variants_hover_and_long_press(use_material3: bool) {
-        let mut tester = tester();
+    fn check_variants_hover_and_long_press(tester: &mut WidgetTester, use_material3: bool) {
         let hovered = Rc::new(Cell::new(false));
         let long_pressed = Rc::new(Cell::new(false));
         let on_hover: ValueChanged<bool> = {
@@ -3650,34 +3571,34 @@ mod tests {
             let long_pressed = Rc::clone(&long_pressed);
             Listener::new(move |_app| long_pressed.set(true))
         };
-        let mut mouse = WidgetTester::mouse(1, 0);
+        let mut mouse = TestPointer::mouse(1, 0);
         let mut pointer = 10;
         for data in [Icons::favorite(), Icons::add(), Icons::add(), Icons::add()] {
             let widget = all_variants(
-                &tester,
+                tester,
                 true,
                 use_material3,
                 on_hover.clone(),
                 on_long_press.clone(),
             );
             tester.pump_widget(widget);
-            let offset = center_of_button_with(&tester, &data);
+            let offset = center_of_button_with(tester, &data);
             tester.add_pointer(&mut mouse, Offset::ZERO);
 
             tester.move_to(&mut mouse, offset, false);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert!(hovered.get());
 
             pointer += 1;
             tester.long_press(offset, pointer);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert!(long_pressed.get());
 
             hovered.set(false);
             long_pressed.set(false);
 
             let widget = all_variants(
-                &tester,
+                tester,
                 false,
                 use_material3,
                 on_hover.clone(),
@@ -3685,12 +3606,12 @@ mod tests {
             );
             tester.pump_widget(widget);
             tester.move_to(&mut mouse, offset, false);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert!(!hovered.get());
 
             pointer += 1;
             tester.long_press(offset, pointer);
-            tester.pump(Duration::ZERO);
+            tester.pump();
             assert!(!long_pressed.get());
 
             tester.send(&mouse, waft_embedder::PointerChange::Remove);
@@ -3700,18 +3621,17 @@ mod tests {
     // 'Material3 - IconButton variants hovered & onLongPressed'
     #[test]
     fn m3_every_variant_reports_hover_and_long_press_only_when_enabled() {
-        with_main_thread_stack(|| check_variants_hover_and_long_press(true));
+        test_widgets(|tester| check_variants_hover_and_long_press(tester, true));
     }
 
     // 'Material2 - IconButton variants hovered & onLongPressed'
     #[test]
     fn m2_every_variant_reports_hover_and_long_press_only_when_enabled() {
-        with_main_thread_stack(|| check_variants_hover_and_long_press(false));
+        test_widgets(|tester| check_variants_hover_and_long_press(tester, false));
     }
 
     /// Dart's `testStatesController`.
-    fn check_states_controller(button: Constructor) {
-        let mut tester = tester();
+    fn check_states_controller(tester: &mut WidgetTester, button: Constructor) {
         let count = Rc::new(Cell::new(0));
         let controller = MaterialStatesController::new(&mut tester.cell.borrow_mut(), None);
         {
@@ -3722,25 +3642,25 @@ mod tests {
             );
         }
         let widget = material_app(
-            default_theme(&tester),
+            default_theme(tester),
             Center::new()
                 .child(button(noop(), icon(Icons::add())).states_controller(controller.clone()))
                 .into_widget(),
         );
         tester.pump_widget(widget);
 
-        assert_eq!(states_value(&tester, controller.handle()), states(&[]));
+        assert_eq!(states_value(tester, controller.handle()), states(&[]));
         assert_eq!(count.get(), 0);
 
         let icon = tester.render_box_of(tester.find_by_type::<Icon>()[0]);
         let center = tester.global_rect(icon).center();
-        let mut mouse = WidgetTester::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+        let mut mouse = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
         tester.add_pointer(&mut mouse, Offset::ZERO);
         tester.move_to(&mut mouse, center, false);
         tester.pump_and_settle();
 
         assert_eq!(
-            states_value(&tester, controller.handle()),
+            states_value(tester, controller.handle()),
             states(&[WidgetState::Hovered])
         );
         assert_eq!(count.get(), 1);
@@ -3748,14 +3668,14 @@ mod tests {
         tester.move_to(&mut mouse, Offset::ZERO, false);
         tester.pump_and_settle();
 
-        assert_eq!(states_value(&tester, controller.handle()), states(&[]));
+        assert_eq!(states_value(tester, controller.handle()), states(&[]));
         assert_eq!(count.get(), 2);
 
         tester.move_to(&mut mouse, center, false);
         tester.pump_and_settle();
 
         assert_eq!(
-            states_value(&tester, controller.handle()),
+            states_value(tester, controller.handle()),
             states(&[WidgetState::Hovered])
         );
         assert_eq!(count.get(), 3);
@@ -3764,7 +3684,7 @@ mod tests {
         tester.pump_and_settle();
 
         assert_eq!(
-            states_value(&tester, controller.handle()),
+            states_value(tester, controller.handle()),
             states(&[WidgetState::Hovered, WidgetState::Pressed])
         );
         assert_eq!(count.get(), 4);
@@ -3773,7 +3693,7 @@ mod tests {
         tester.pump_and_settle();
 
         assert_eq!(
-            states_value(&tester, controller.handle()),
+            states_value(tester, controller.handle()),
             states(&[WidgetState::Hovered])
         );
         assert_eq!(count.get(), 5);
@@ -3781,13 +3701,13 @@ mod tests {
         tester.move_to(&mut mouse, Offset::ZERO, false);
         tester.pump_and_settle();
 
-        assert_eq!(states_value(&tester, controller.handle()), states(&[]));
+        assert_eq!(states_value(tester, controller.handle()), states(&[]));
         assert_eq!(count.get(), 6);
 
         tester.down(&mut mouse, center);
         tester.pump_and_settle();
         assert_eq!(
-            states_value(&tester, controller.handle()),
+            states_value(tester, controller.handle()),
             states(&[WidgetState::Hovered, WidgetState::Pressed])
         );
         assert_eq!(count.get(), 8); // adds hovered and pressed - two changes
@@ -3796,40 +3716,39 @@ mod tests {
     // 'IconButton statesController'
     #[test]
     fn the_states_controller_follows_hover_and_press() {
-        with_main_thread_stack(|| check_states_controller(IconButton::new));
+        test_widgets(|tester| check_states_controller(tester, IconButton::new));
     }
 
     // 'IconButton.filled statesController'
     #[test]
     fn the_filled_states_controller_follows_hover_and_press() {
-        with_main_thread_stack(|| check_states_controller(IconButton::filled));
+        test_widgets(|tester| check_states_controller(tester, IconButton::filled));
     }
 
     // 'IconButton.filledTonal statesController'
     #[test]
     fn the_filled_tonal_states_controller_follows_hover_and_press() {
-        with_main_thread_stack(|| check_states_controller(IconButton::filled_tonal));
+        test_widgets(|tester| check_states_controller(tester, IconButton::filled_tonal));
     }
 
     // 'IconButton.outlined statesController'
     #[test]
     fn the_outlined_states_controller_follows_hover_and_press() {
-        with_main_thread_stack(|| check_states_controller(IconButton::outlined));
+        test_widgets(|tester| check_states_controller(tester, IconButton::outlined));
     }
 
     // 'IconButton does not crash at zero area'
     #[test]
     fn a_button_lays_out_at_zero_area() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let widget = material_app(
-                default_theme(&tester),
+                default_theme(tester),
                 Center::new()
                     .child(SizedBox::shrink().child(IconButton::new(noop(), icon(Icons::add()))))
                     .into_widget(),
             );
             tester.pump_widget(widget);
-            assert_eq!(button_size(&tester), Size::ZERO);
+            assert_eq!(button_size(tester), Size::ZERO);
         });
     }
 
@@ -3857,35 +3776,33 @@ mod tests {
     // 'M3E IconButton size variants': 'default size is small (40x40)'
     #[test]
     fn m3e_the_default_size_is_small() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let widget = m3e_app(&tester, None, IconButton::new(noop(), icon(Icons::add())));
+        test_widgets(|tester| {
+            let widget = m3e_app(tester, None, IconButton::new(noop(), icon(Icons::add())));
             tester.pump_widget(widget);
             // ButtonStyleButton renders with minimum size 40x40, but tap target
             // padding brings it to 48x48.
-            assert_eq!(button_material_size(&tester), Size::new(40.0, 40.0));
-            assert_eq!(button_size(&tester), Size::new(48.0, 48.0));
+            assert_eq!(button_material_size(tester), Size::new(40.0, 40.0));
+            assert_eq!(button_size(tester), Size::new(48.0, 48.0));
         });
     }
 
     // 'xSmall size renders at 32dp minimum with 48dp tap target'
     #[test]
     fn m3e_extra_small_is_32_in_a_48_tap_target() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let press_count = Rc::new(Cell::new(0));
             let widget = m3e_app(
-                &tester,
+                tester,
                 None,
                 IconButton::new(counter(&press_count), icon(Icons::add()))
                     .style(ButtonStyle::new().size_variant(ButtonSizeVariant::XSmall)),
             );
             tester.pump_widget(widget);
 
-            assert_eq!(button_material_size(&tester), Size::new(32.0, 32.0));
-            assert_eq!(button_size(&tester), Size::new(48.0, 48.0));
+            assert_eq!(button_material_size(tester), Size::new(32.0, 32.0));
+            assert_eq!(button_size(tester), Size::new(48.0, 48.0));
 
-            let center = button_center(&tester);
+            let center = button_center(tester);
             for (pointer, offset) in [
                 Offset::new(23.0, 0.0),
                 Offset::new(-23.0, 0.0),
@@ -3896,7 +3813,7 @@ mod tests {
             .enumerate()
             {
                 tester.tap(center + offset, pointer as i64 + 1);
-                tester.pump(Duration::ZERO);
+                tester.pump();
             }
             assert_eq!(press_count.get(), 4);
         });
@@ -3905,10 +3822,9 @@ mod tests {
     // 'styleFrom sets the size variant'
     #[test]
     fn m3e_style_from_sets_the_size_variant() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let widget = m3e_app(
-                &tester,
+                tester,
                 None,
                 IconButton::new(noop(), icon(Icons::add())).style(
                     IconButton::style_from()
@@ -3917,8 +3833,8 @@ mod tests {
                 ),
             );
             tester.pump_widget(widget);
-            assert_eq!(button_material_size(&tester), Size::new(56.0, 56.0));
-            assert_eq!(button_size(&tester), Size::new(56.0, 56.0));
+            assert_eq!(button_material_size(tester), Size::new(56.0, 56.0));
+            assert_eq!(button_size(tester), Size::new(56.0, 56.0));
         });
     }
 
@@ -3926,17 +3842,16 @@ mod tests {
     // 'xLarge size renders at 136dp minimum'
     #[test]
     fn m3e_the_larger_sizes_render_at_their_minimum() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             for (size_variant, side) in [
                 (ButtonSizeVariant::Medium, 56.0),
                 (ButtonSizeVariant::Large, 96.0),
                 (ButtonSizeVariant::XLarge, 136.0),
             ] {
-                let mut tester = tester();
-                let widget = m3e_app(&tester, None, sized(size_variant));
+                let widget = m3e_app(tester, None, sized(size_variant));
                 tester.pump_widget(widget);
-                assert_eq!(button_material_size(&tester), Size::new(side, side));
-                assert_eq!(button_size(&tester), Size::new(side, side));
+                assert_eq!(button_material_size(tester), Size::new(side, side));
+                assert_eq!(button_size(tester), Size::new(side, side));
             }
         });
     }
@@ -3945,17 +3860,16 @@ mod tests {
     // widths'
     #[test]
     fn m3e_small_supports_three_widths() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let mut material_size_for = |width: IconButtonWidthVariant| {
                 let widget = m3e_app(
-                    &tester,
+                    tester,
                     None,
                     IconButton::new(noop(), icon(Icons::add()))
                         .style(ButtonStyle::new().icon_button_width(width)),
                 );
                 tester.pump_widget(widget);
-                button_material_size(&tester)
+                button_material_size(tester)
             };
             assert_eq!(
                 material_size_for(IconButtonWidthVariant::Narrow),
@@ -3971,7 +3885,7 @@ mod tests {
             );
 
             assert_eq!(
-                button_material(&tester, |material| material.animation_duration),
+                button_material(tester, |material| material.animation_duration),
                 crate::constants::K_THEME_CHANGE_DURATION
             );
         });
@@ -3980,8 +3894,7 @@ mod tests {
     // 'IconButtonThemeData style width sets default width'
     #[test]
     fn m3e_the_theme_style_width_sets_the_default_width() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let theme = ThemeData::builder()
                 .icon_button_theme(
                     IconButtonThemeData::new()
@@ -3990,42 +3903,40 @@ mod tests {
                 )
                 .build(&tester.cell.borrow());
             let widget = m3e_app(
-                &tester,
+                tester,
                 Some(theme),
                 IconButton::new(noop(), icon(Icons::add())),
             );
             tester.pump_widget(widget);
-            assert_eq!(button_material_size(&tester), Size::new(52.0, 40.0));
+            assert_eq!(button_material_size(tester), Size::new(52.0, 40.0));
         });
     }
 
     // 'M3E IconButton shape': 'default shape resolves M3E token shapes by state'
     #[test]
     fn m3e_the_default_shape_resolves_by_state() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let controller = MaterialStatesController::new(&mut tester.cell.borrow_mut(), None);
             let widget = m3e_app(
-                &tester,
+                tester,
                 None,
                 IconButton::new(noop(), icon(Icons::add()))
                     .states_controller(controller.clone())
                     .is_selected(true),
             );
             tester.pump_widget(widget);
-            assert!(material_shape_is(&tester, &rounded(12.0)));
+            assert!(material_shape_is(tester, &rounded(12.0)));
 
             controller.update(&mut tester.cell.borrow_mut(), WidgetState::Pressed, true);
             tester.pump_and_settle();
-            assert!(material_shape_is(&tester, &rounded(8.0)));
+            assert!(material_shape_is(tester, &rounded(8.0)));
         });
     }
 
     // 'square shape resolves M3E token shapes by state'
     #[test]
     fn m3e_the_square_shape_resolves_by_state() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let controller = MaterialStatesController::new(&mut tester.cell.borrow_mut(), None);
             let build = |tester: &WidgetTester, is_selected: bool| {
                 m3e_app(
@@ -4041,27 +3952,26 @@ mod tests {
                         ),
                 )
             };
-            let widget = build(&tester, false);
+            let widget = build(tester, false);
             tester.pump_widget(widget);
-            assert!(material_shape_is(&tester, &rounded(16.0)));
+            assert!(material_shape_is(tester, &rounded(16.0)));
 
             controller.update(&mut tester.cell.borrow_mut(), WidgetState::Pressed, true);
             tester.pump_and_settle();
-            assert!(material_shape_is(&tester, &rounded(12.0)));
+            assert!(material_shape_is(tester, &rounded(12.0)));
 
             controller.update(&mut tester.cell.borrow_mut(), WidgetState::Pressed, false);
-            let widget = build(&tester, true);
+            let widget = build(tester, true);
             tester.pump_widget(widget);
             tester.pump_and_settle();
-            assert!(material_shape_is(&tester, &stadium()));
+            assert!(material_shape_is(tester, &stadium()));
         });
     }
 
     // 'ButtonStyle.shape remains the stateful shape override API'
     #[test]
     fn m3e_a_style_shape_overrides_the_token_shapes() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let controller = MaterialStatesController::new(&mut tester.cell.borrow_mut(), None);
             let shape =
                 <dyn WidgetStateProperty<Option<OutlinedBorderRef>>>::resolve_with(|states| {
@@ -4071,18 +3981,18 @@ mod tests {
                     Some(OutlinedBorderRef::new(stadium()))
                 });
             let widget = m3e_app(
-                &tester,
+                tester,
                 None,
                 IconButton::new(noop(), icon(Icons::add()))
                     .states_controller(controller.clone())
                     .style(ButtonStyle::new().shape(shape)),
             );
             tester.pump_widget(widget);
-            assert!(material_shape_is(&tester, &stadium()));
+            assert!(material_shape_is(tester, &stadium()));
 
             controller.update(&mut tester.cell.borrow_mut(), WidgetState::Pressed, true);
             tester.pump_and_settle();
-            assert!(material_shape_is(&tester, &rounded(4.0)));
+            assert!(material_shape_is(tester, &rounded(4.0)));
         });
     }
 
@@ -4097,7 +4007,7 @@ mod tests {
     // container color'
     #[test]
     fn m3e_each_variant_has_its_container_color() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let cases: [(Constructor, ContainerColor); 3] = [
                 (IconButton::new, |_| Colors::TRANSPARENT),
                 (IconButton::filled, |scheme| scheme.primary),
@@ -4106,12 +4016,11 @@ mod tests {
                 }),
             ];
             for (button, color) in cases {
-                let mut tester = tester();
-                let widget = m3e_app(&tester, None, button(noop(), icon(Icons::add())));
+                let widget = m3e_app(tester, None, button(noop(), icon(Icons::add())));
                 tester.pump_widget(widget);
-                let scheme = scheme_of(&tester);
-                assert_eq!(material_color(&tester), Some(color(&scheme)));
-                assert!(material_shape_is(&tester, &stadium()));
+                let scheme = scheme_of(tester);
+                assert_eq!(material_color(tester), Some(color(&scheme)));
+                assert!(material_shape_is(tester, &stadium()));
             }
         });
     }
@@ -4119,18 +4028,17 @@ mod tests {
     // 'outlined variant resolves default side and transparent background'
     #[test]
     fn m3e_outlined_has_a_side_and_a_transparent_background() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let widget = m3e_app(
-                &tester,
+                tester,
                 None,
                 IconButton::outlined(noop(), icon(Icons::add())),
             );
             tester.pump_widget(widget);
-            let scheme = scheme_of(&tester);
-            assert_eq!(material_color(&tester), Some(Colors::TRANSPARENT));
+            let scheme = scheme_of(tester);
+            assert_eq!(material_color(tester), Some(Colors::TRANSPARENT));
             assert!(material_shape_is(
-                &tester,
+                tester,
                 &stadium_with(scheme.outline_variant())
             ));
         });
@@ -4139,22 +4047,22 @@ mod tests {
     // 'filled variant with style size', 'outlined variant with style size'
     #[test]
     fn m3e_filled_and_outlined_take_a_style_size() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             let cases: [(Constructor, ButtonSizeVariant, f64); 2] = [
                 (IconButton::filled, ButtonSizeVariant::Large, 96.0),
                 (IconButton::outlined, ButtonSizeVariant::Medium, 56.0),
             ];
             for (button, size_variant, side) in cases {
-                let mut tester = tester();
                 let widget = m3e_app(
-                    &tester,
+                    tester,
                     None,
                     button(noop(), icon(Icons::add()))
                         .style(ButtonStyle::new().size_variant(size_variant)),
                 );
                 tester.pump_widget(widget);
-                assert_eq!(button_material_size(&tester), Size::new(side, side));
-                assert_eq!(button_size(&tester), Size::new(side, side));
+                tester.pump_and_settle();
+                assert_eq!(button_material_size(tester), Size::new(side, side));
+                assert_eq!(button_size(tester), Size::new(side, side));
             }
         });
     }
@@ -4172,40 +4080,37 @@ mod tests {
     // 'M3E IconButton theme integration': 'IconButtonThemeData style size sets default size'
     #[test]
     fn m3e_the_theme_style_size_sets_the_default_size() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = m3e_theme_with_size(&tester, ButtonSizeVariant::Large);
+        test_widgets(|tester| {
+            let theme = m3e_theme_with_size(tester, ButtonSizeVariant::Large);
             let widget = m3e_app(
-                &tester,
+                tester,
                 Some(theme),
                 IconButton::new(noop(), icon(Icons::add())),
             );
             tester.pump_widget(widget);
-            assert_eq!(button_material_size(&tester), Size::new(96.0, 96.0));
-            assert_eq!(button_size(&tester), Size::new(96.0, 96.0));
+            assert_eq!(button_material_size(tester), Size::new(96.0, 96.0));
+            assert_eq!(button_size(tester), Size::new(96.0, 96.0));
         });
     }
 
     // 'widget size overrides theme size'
     #[test]
     fn m3e_the_button_size_overrides_the_theme_size() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let theme = m3e_theme_with_size(&tester, ButtonSizeVariant::Large);
-            let widget = m3e_app(&tester, Some(theme), sized(ButtonSizeVariant::XSmall));
+        test_widgets(|tester| {
+            let theme = m3e_theme_with_size(tester, ButtonSizeVariant::Large);
+            let widget = m3e_app(tester, Some(theme), sized(ButtonSizeVariant::XSmall));
             tester.pump_widget(widget);
-            assert_eq!(button_material_size(&tester), Size::new(32.0, 32.0));
-            assert_eq!(button_size(&tester), Size::new(48.0, 48.0));
+            assert_eq!(button_material_size(tester), Size::new(32.0, 32.0));
+            assert_eq!(button_size(tester), Size::new(48.0, 48.0));
         });
     }
 
     // 'IconButtonTheme wrapping sets size'
     #[test]
     fn m3e_an_icon_button_theme_sets_the_size() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let widget = m3e_app(
-                &tester,
+                tester,
                 None,
                 IconButtonTheme::new(
                     IconButtonThemeData::new()
@@ -4215,8 +4120,8 @@ mod tests {
                 ),
             );
             tester.pump_widget(widget);
-            assert_eq!(button_material_size(&tester), Size::new(56.0, 56.0));
-            assert_eq!(button_size(&tester), Size::new(56.0, 56.0));
+            assert_eq!(button_material_size(tester), Size::new(56.0, 56.0));
+            assert_eq!(button_size(tester), Size::new(56.0, 56.0));
         });
     }
 
@@ -4233,16 +4138,15 @@ mod tests {
     // regular icon'
     #[test]
     fn m3e_is_selected_picks_the_icon() {
-        with_main_thread_stack(|| {
+        test_widgets(|tester| {
             for (is_selected, shown, hidden) in [
                 (true, Icons::favorite(), Icons::favorite_border()),
                 (false, Icons::favorite_border(), Icons::favorite()),
             ] {
-                let mut tester = tester();
-                let widget = m3e_app(&tester, None, favorite_button(Some(is_selected)));
+                let widget = m3e_app(tester, None, favorite_button(Some(is_selected)));
                 tester.pump_widget(widget);
-                assert_eq!(find_icon(&tester, &shown).len(), 1);
-                assert!(find_icon(&tester, &hidden).is_empty());
+                assert_eq!(find_icon(tester, &shown).len(), 1);
+                assert!(find_icon(tester, &hidden).is_empty());
             }
         });
     }
@@ -4250,27 +4154,25 @@ mod tests {
     // 'external selected state does not affect non-toggleable visual state'
     #[test]
     fn m3e_an_external_selected_state_leaves_a_plain_button_as_it_is() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let controller = MaterialStatesController::new(&mut tester.cell.borrow_mut(), None);
             controller.update(&mut tester.cell.borrow_mut(), WidgetState::Selected, true);
             let widget = m3e_app(
-                &tester,
+                tester,
                 None,
                 favorite_button(None).states_controller(controller.clone()),
             );
             tester.pump_widget(widget);
-            assert!(material_shape_is(&tester, &stadium()));
-            assert_eq!(find_icon(&tester, &Icons::favorite_border()).len(), 1);
-            assert!(find_icon(&tester, &Icons::favorite()).is_empty());
+            assert!(material_shape_is(tester, &stadium()));
+            assert_eq!(find_icon(tester, &Icons::favorite_border()).len(), 1);
+            assert!(find_icon(tester, &Icons::favorite()).is_empty());
         });
     }
 
     // 'isSelected updates selected widget state when toggled through null'
     #[test]
     fn m3e_is_selected_updates_the_selected_state_through_null() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let controller = MaterialStatesController::new(&mut tester.cell.borrow_mut(), None);
             let selected = |tester: &WidgetTester| {
                 states_value(tester, controller.handle()).contains(&WidgetState::Selected)
@@ -4282,12 +4184,12 @@ mod tests {
                 (Some(true), true),
             ] {
                 let widget = m3e_app(
-                    &tester,
+                    tester,
                     None,
                     favorite_button(is_selected).states_controller(controller.clone()),
                 );
                 tester.pump_widget(widget);
-                assert_eq!(selected(&tester), expected);
+                assert_eq!(selected(tester), expected);
             }
         });
     }
@@ -4295,14 +4197,13 @@ mod tests {
     // 'M3E IconButton disabled state': 'disabled button has reduced opacity colors'
     #[test]
     fn m3e_a_disabled_button_has_reduced_opacity_colors() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let widget = m3e_app(&tester, None, IconButton::new(None, icon(Icons::add())));
+        test_widgets(|tester| {
+            let widget = m3e_app(tester, None, IconButton::new(None, icon(Icons::add())));
             tester.pump_widget(widget);
-            let scheme = scheme_of(&tester);
-            assert_eq!(material_color(&tester), Some(Colors::TRANSPARENT));
+            let scheme = scheme_of(tester);
+            assert_eq!(material_color(tester), Some(Colors::TRANSPARENT));
             assert_eq!(
-                icon_theme_color(&tester),
+                icon_theme_color(tester),
                 Some(
                     scheme
                         .on_surface
@@ -4315,20 +4216,19 @@ mod tests {
     // 'onLongPress without onPressed keeps button disabled', without its semantics
     #[test]
     fn m3e_a_long_press_without_on_pressed_does_nothing() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let long_pressed = Rc::new(Cell::new(0));
             let on_long_press = {
                 let long_pressed = Rc::clone(&long_pressed);
                 Listener::new(move |_app| long_pressed.set(long_pressed.get() + 1))
             };
             let widget = m3e_app(
-                &tester,
+                tester,
                 None,
                 IconButton::new(None, icon(Icons::add())).on_long_press(on_long_press),
             );
             tester.pump_widget(widget);
-            let center = button_center(&tester);
+            let center = button_center(tester);
             tester.long_press(center, 1);
             assert_eq!(long_pressed.get(), 0);
         });
@@ -4337,13 +4237,12 @@ mod tests {
     // 'disabled filled button has reduced background'
     #[test]
     fn m3e_a_disabled_filled_button_has_a_reduced_background() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let widget = m3e_app(&tester, None, IconButton::filled(None, icon(Icons::add())));
+        test_widgets(|tester| {
+            let widget = m3e_app(tester, None, IconButton::filled(None, icon(Icons::add())));
             tester.pump_widget(widget);
-            let scheme = scheme_of(&tester);
+            let scheme = scheme_of(tester);
             assert_eq!(
-                material_color(&tester),
+                material_color(tester),
                 Some(
                     scheme
                         .on_surface
@@ -4351,7 +4250,7 @@ mod tests {
                 )
             );
             assert_eq!(
-                icon_theme_color(&tester),
+                icon_theme_color(tester),
                 Some(
                     scheme
                         .on_surface
@@ -4364,12 +4263,11 @@ mod tests {
     // 'M3E IconButton variant opt in': 'IconButtonThemeData variant enables M3E defaults'
     #[test]
     fn m3e_the_theme_variant_opts_into_the_expressive_defaults() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
-            let widget = m3e_app(&tester, None, sized(ButtonSizeVariant::Medium));
+        test_widgets(|tester| {
+            let widget = m3e_app(tester, None, sized(ButtonSizeVariant::Medium));
             tester.pump_widget(widget);
-            assert_eq!(button_material_size(&tester), Size::new(56.0, 56.0));
-            assert_eq!(button_size(&tester), Size::new(56.0, 56.0));
+            assert_eq!(button_material_size(tester), Size::new(56.0, 56.0));
+            assert_eq!(button_size(tester), Size::new(56.0, 56.0));
         });
     }
 
@@ -4377,11 +4275,10 @@ mod tests {
     #[test]
     fn a_tooltip_passes_a_press_at_the_corner_of_the_layout_to_the_ink() {
         // This is a regression test for https://github.com/flutter/flutter/issues/153544.
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let box_key = GlobalKey::new();
             let widget = material_app(
-                default_theme(&tester),
+                default_theme(tester),
                 Material::new()
                     .child(
                         Center::new().child(
@@ -4414,7 +4311,7 @@ mod tests {
                 let render = tester.render_object(&box_key).as_box().expect("a box");
                 tester.global_rect(render).top_left()
             };
-            let mut gesture = WidgetTester::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
+            let mut gesture = TestPointer::mouse(1, waft_gestures::K_PRIMARY_BUTTON);
             tester.add_pointer(&mut gesture, Offset::ZERO);
             tester.move_to(&mut gesture, top_left, false);
             tester.down(&mut gesture, top_left);

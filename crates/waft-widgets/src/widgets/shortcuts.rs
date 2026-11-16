@@ -1834,9 +1834,9 @@ mod tests {
     use waft_services::{KeyDownEvent, KeyUpEvent, PhysicalKeyboardKey};
 
     use super::*;
+    use crate::testing::test_widgets;
     use crate::widgets::actions::{ActionRef, CallbackAction, Intent};
     use crate::widgets::basic::SizedBox;
-    use crate::widgets::focus_manager::tests::{app_with_view, mount};
 
     #[derive(Debug)]
     struct SaveIntent;
@@ -1870,218 +1870,224 @@ mod tests {
 
     #[test]
     fn a_shortcut_maps_a_key_event_to_an_intent_and_invokes_its_action() {
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
-        let log: Rc<RefCell<Vec<&'static str>>> = Rc::default();
-        let action = save_action(&mut app, &log);
-        let shortcuts: ShortcutMap = vec![(
-            Rc::new(SingleActivator::new(LogicalKeyboardKey::KEY_S).control(true)),
-            Rc::new(SaveIntent),
-        )];
-        drop(app);
-        mount(
-            &cell,
-            Shortcuts::new(
+        test_widgets(|tester| {
+            let mut app = tester.cell.borrow_mut();
+            let log: Rc<RefCell<Vec<&'static str>>> = Rc::default();
+            let action = save_action(&mut app, &log);
+            let shortcuts: ShortcutMap = vec![(
+                Rc::new(SingleActivator::new(LogicalKeyboardKey::KEY_S).control(true)),
+                Rc::new(SaveIntent),
+            )];
+            drop(app);
+            tester.pump_widget(Shortcuts::new(
                 shortcuts,
                 Actions::new(
                     HashMap::from([(TypeId::of::<SaveIntent>(), action)]),
                     Focus::new(SizedBox::shrink()).autofocus(true),
                 ),
-            )
-            .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
+            ));
+            let mut app = tester.cell.borrow_mut();
 
-        let keyboard = HardwareKeyboard::instance(&mut app);
-        // Without the modifier the activator does not accept the event.
-        assert!(!keyboard.handle_key_event(
-            &mut app,
-            &key_down(PhysicalKeyboardKey::KEY_S, LogicalKeyboardKey::KEY_S)
-        ));
-        assert!(log.borrow().is_empty());
-        keyboard.handle_key_event(
-            &mut app,
-            &key_up(PhysicalKeyboardKey::KEY_S, LogicalKeyboardKey::KEY_S),
-        );
+            let keyboard = HardwareKeyboard::instance(&mut app);
+            // Without the modifier the activator does not accept the event.
+            assert!(!keyboard.handle_key_event(
+                &mut app,
+                &key_down(PhysicalKeyboardKey::KEY_S, LogicalKeyboardKey::KEY_S)
+            ));
+            assert!(log.borrow().is_empty());
+            keyboard.handle_key_event(
+                &mut app,
+                &key_up(PhysicalKeyboardKey::KEY_S, LogicalKeyboardKey::KEY_S),
+            );
 
-        keyboard.handle_key_event(
-            &mut app,
-            &key_down(
-                PhysicalKeyboardKey::CONTROL_LEFT,
-                LogicalKeyboardKey::CONTROL_LEFT,
-            ),
-        );
-        assert!(keyboard.handle_key_event(
-            &mut app,
-            &key_down(PhysicalKeyboardKey::KEY_S, LogicalKeyboardKey::KEY_S)
-        ));
-        assert_eq!(*log.borrow(), ["saved"]);
+            keyboard.handle_key_event(
+                &mut app,
+                &key_down(
+                    PhysicalKeyboardKey::CONTROL_LEFT,
+                    LogicalKeyboardKey::CONTROL_LEFT,
+                ),
+            );
+            assert!(keyboard.handle_key_event(
+                &mut app,
+                &key_down(PhysicalKeyboardKey::KEY_S, LogicalKeyboardKey::KEY_S)
+            ));
+            assert_eq!(*log.borrow(), ["saved"]);
+        });
     }
 
     #[test]
     fn a_logical_key_set_activates_on_the_whole_combination() {
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
-        let log: Rc<RefCell<Vec<&'static str>>> = Rc::default();
-        let action = save_action(&mut app, &log);
-        let shortcuts: ShortcutMap = vec![(
-            Rc::new(LogicalKeySet::new(
-                LogicalKeyboardKey::CONTROL,
-                Some(LogicalKeyboardKey::KEY_S),
-                None,
-                None,
-            )),
-            Rc::new(SaveIntent),
-        )];
-        drop(app);
-        mount(
-            &cell,
-            Shortcuts::new(
+        test_widgets(|tester| {
+            let mut app = tester.cell.borrow_mut();
+            let log: Rc<RefCell<Vec<&'static str>>> = Rc::default();
+            let action = save_action(&mut app, &log);
+            let shortcuts: ShortcutMap = vec![(
+                Rc::new(LogicalKeySet::new(
+                    LogicalKeyboardKey::CONTROL,
+                    Some(LogicalKeyboardKey::KEY_S),
+                    None,
+                    None,
+                )),
+                Rc::new(SaveIntent),
+            )];
+            drop(app);
+            tester.pump_widget(Shortcuts::new(
                 shortcuts,
                 Actions::new(
                     HashMap::from([(TypeId::of::<SaveIntent>(), action)]),
                     Focus::new(SizedBox::shrink()).autofocus(true),
                 ),
-            )
-            .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
+            ));
+            let mut app = tester.cell.borrow_mut();
 
-        let keyboard = HardwareKeyboard::instance(&mut app);
-        keyboard.handle_key_event(
-            &mut app,
-            &key_down(
-                PhysicalKeyboardKey::CONTROL_LEFT,
-                LogicalKeyboardKey::CONTROL_LEFT,
-            ),
-        );
-        assert!(keyboard.handle_key_event(
-            &mut app,
-            &key_down(PhysicalKeyboardKey::KEY_S, LogicalKeyboardKey::KEY_S)
-        ));
-        assert_eq!(*log.borrow(), ["saved"]);
+            let keyboard = HardwareKeyboard::instance(&mut app);
+            keyboard.handle_key_event(
+                &mut app,
+                &key_down(
+                    PhysicalKeyboardKey::CONTROL_LEFT,
+                    LogicalKeyboardKey::CONTROL_LEFT,
+                ),
+            );
+            assert!(keyboard.handle_key_event(
+                &mut app,
+                &key_down(PhysicalKeyboardKey::KEY_S, LogicalKeyboardKey::KEY_S)
+            ));
+            assert_eq!(*log.borrow(), ["saved"]);
+        });
     }
 
     #[test]
     fn callback_shortcuts_call_every_binding_that_accepts_the_event() {
-        let cell = app_with_view();
-        let app = cell.borrow();
-        let log: Rc<RefCell<Vec<&'static str>>> = Rc::default();
-        let first = Rc::clone(&log);
-        let second = Rc::clone(&log);
-        let bindings: Vec<(ShortcutActivatorRef, Listener)> = vec![
-            (
-                Rc::new(SingleActivator::new(LogicalKeyboardKey::KEY_A)),
-                Listener::new(move |_app| first.borrow_mut().push("first")),
-            ),
-            (
-                Rc::new(CharacterActivator::new("a")),
-                Listener::new(move |_app| second.borrow_mut().push("second")),
-            ),
-        ];
-        drop(app);
-        mount(
-            &cell,
-            CallbackShortcuts::new(bindings, Focus::new(SizedBox::shrink()).autofocus(true))
-                .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
+        test_widgets(|tester| {
+            let app = tester.cell.borrow();
+            let log: Rc<RefCell<Vec<&'static str>>> = Rc::default();
+            let first = Rc::clone(&log);
+            let second = Rc::clone(&log);
+            let bindings: Vec<(ShortcutActivatorRef, Listener)> = vec![
+                (
+                    Rc::new(SingleActivator::new(LogicalKeyboardKey::KEY_A)),
+                    Listener::new(move |_app| first.borrow_mut().push("first")),
+                ),
+                (
+                    Rc::new(CharacterActivator::new("a")),
+                    Listener::new(move |_app| second.borrow_mut().push("second")),
+                ),
+            ];
+            drop(app);
+            tester.pump_widget(CallbackShortcuts::new(
+                bindings,
+                Focus::new(SizedBox::shrink()).autofocus(true),
+            ));
+            let mut app = tester.cell.borrow_mut();
 
-        let keyboard = HardwareKeyboard::instance(&mut app);
-        let event = KeyEvent::Down(
-            KeyDownEvent::new(
-                PhysicalKeyboardKey::KEY_A,
-                LogicalKeyboardKey::KEY_A,
-                Duration::ZERO,
-            )
-            .character("a"),
-        );
-        assert!(keyboard.handle_key_event(&mut app, &event));
-        assert_eq!(*log.borrow(), ["first", "second"]);
+            let keyboard = HardwareKeyboard::instance(&mut app);
+            let event = KeyEvent::Down(
+                KeyDownEvent::new(
+                    PhysicalKeyboardKey::KEY_A,
+                    LogicalKeyboardKey::KEY_A,
+                    Duration::ZERO,
+                )
+                .character("a"),
+            );
+            assert!(keyboard.handle_key_event(&mut app, &event));
+            assert_eq!(*log.borrow(), ["first", "second"]);
+        });
     }
 
     #[test]
     fn the_manager_reindexes_and_notifies_when_its_shortcuts_change() {
-        let cell = app_with_view();
-        mount(&cell, SizedBox::shrink().into_widget());
-        let mut app = cell.borrow_mut();
-        let manager = ShortcutManager::new(&mut app);
-        let notifications: Rc<RefCell<u32>> = Rc::default();
-        let sink = Rc::clone(&notifications);
-        manager.add_listener(&mut app, Listener::new(move |_app| *sink.borrow_mut() += 1));
+        test_widgets(|tester| {
+            tester.pump_widget(SizedBox::shrink().into_widget());
+            let mut app = tester.cell.borrow_mut();
+            let manager = ShortcutManager::new(&mut app);
+            let notifications: Rc<RefCell<u32>> = Rc::default();
+            let sink = Rc::clone(&notifications);
+            manager.add_listener(&mut app, Listener::new(move |_app| *sink.borrow_mut() += 1));
 
-        let activator: ShortcutActivatorRef =
-            Rc::new(SingleActivator::new(LogicalKeyboardKey::KEY_S));
-        let intent: IntentRef = Rc::new(SaveIntent);
-        let shortcuts: ShortcutMap = vec![(Rc::clone(&activator), Rc::clone(&intent))];
-        manager.set_shortcuts(&mut app, shortcuts.clone());
-        assert_eq!(*notifications.borrow(), 1);
+            let activator: ShortcutActivatorRef =
+                Rc::new(SingleActivator::new(LogicalKeyboardKey::KEY_S));
+            let intent: IntentRef = Rc::new(SaveIntent);
+            let shortcuts: ShortcutMap = vec![(Rc::clone(&activator), Rc::clone(&intent))];
+            manager.set_shortcuts(&mut app, shortcuts.clone());
+            assert_eq!(*notifications.borrow(), 1);
 
-        // The same pairs are not a change.
-        manager.set_shortcuts(&mut app, shortcuts);
-        assert_eq!(*notifications.borrow(), 1);
+            // The same pairs are not a change.
+            manager.set_shortcuts(&mut app, shortcuts);
+            assert_eq!(*notifications.borrow(), 1);
 
-        let keyboard = HardwareKeyboard::instance(&mut app);
-        let found = manager.find(
-            &mut app,
-            &key_down(PhysicalKeyboardKey::KEY_S, LogicalKeyboardKey::KEY_S),
-            keyboard,
-        );
-        assert!(found.is_some_and(|found| Rc::ptr_eq(&found, &intent)));
+            let keyboard = HardwareKeyboard::instance(&mut app);
+            let found = manager.find(
+                &mut app,
+                &key_down(PhysicalKeyboardKey::KEY_S, LogicalKeyboardKey::KEY_S),
+                keyboard,
+            );
+            assert!(found.is_some_and(|found| Rc::ptr_eq(&found, &intent)));
+        });
     }
 
     #[test]
     fn the_registry_merges_its_entries_into_the_registrars_manager() {
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
-        let log: Rc<RefCell<Vec<&'static str>>> = Rc::default();
-        let action = save_action(&mut app, &log);
-        let captured: Rc<std::cell::Cell<Option<BuildContext>>> = Rc::default();
-        let sink = Rc::clone(&captured);
-        drop(app);
-        mount(
-            &cell,
-            ShortcutRegistrar::new(Actions::new(
+        test_widgets(|tester| {
+            let mut app = tester.cell.borrow_mut();
+            let log: Rc<RefCell<Vec<&'static str>>> = Rc::default();
+            let action = save_action(&mut app, &log);
+            let captured: Rc<std::cell::Cell<Option<BuildContext>>> = Rc::default();
+            let sink = Rc::clone(&captured);
+            drop(app);
+            tester.pump_widget(ShortcutRegistrar::new(Actions::new(
                 HashMap::from([(TypeId::of::<SaveIntent>(), action)]),
                 crate::widgets::basic::Builder::new(move |_app, context| {
                     sink.set(Some(context));
                     Focus::new(SizedBox::shrink()).autofocus(true).into_widget()
                 }),
-            ))
-            .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        let context = captured.get().expect("the builder ran");
+            )));
+            let mut app = tester.cell.borrow_mut();
+            let context = captured.get().expect("the builder ran");
 
-        let registry = ShortcutRegistry::of(&mut app, context);
-        let entry = registry.add_all(
-            &mut app,
-            vec![(
-                Rc::new(SingleActivator::new(LogicalKeyboardKey::KEY_S)),
-                Rc::new(SaveIntent),
-            )],
-        );
-        // The registry notifies its listeners after the frame the entry was added in.
-        crate::test_harness::pump_every_view(&mut app, std::time::Duration::ZERO);
+            let registry = ShortcutRegistry::of(&mut app, context);
+            let entry = registry.add_all(
+                &mut app,
+                vec![(
+                    Rc::new(SingleActivator::new(LogicalKeyboardKey::KEY_S)),
+                    Rc::new(SaveIntent),
+                )],
+            );
+            // The registry notifies its listeners after the frame the entry was added in, a frame
+            // nothing else asks for here (a Waft-only case), so the case asks for it as a Dart test
+            // would with `tester.binding.scheduleFrame()`.
+            waft_scheduler::SchedulerBinding::schedule_frame(
+                &mut app,
+                waft_scheduler::FrameTarget::EveryView,
+            );
+            drop(app);
+            tester.pump();
+            let mut app = tester.cell.borrow_mut();
 
-        let keyboard = HardwareKeyboard::instance(&mut app);
-        assert!(keyboard.handle_key_event(
-            &mut app,
-            &key_down(PhysicalKeyboardKey::KEY_S, LogicalKeyboardKey::KEY_S)
-        ));
-        assert_eq!(*log.borrow(), ["saved"]);
+            let keyboard = HardwareKeyboard::instance(&mut app);
+            assert!(keyboard.handle_key_event(
+                &mut app,
+                &key_down(PhysicalKeyboardKey::KEY_S, LogicalKeyboardKey::KEY_S)
+            ));
+            assert_eq!(*log.borrow(), ["saved"]);
 
-        entry.dispose(&mut app);
-        crate::test_harness::pump_every_view(&mut app, std::time::Duration::ZERO);
-        log.borrow_mut().clear();
-        keyboard.handle_key_event(
-            &mut app,
-            &key_up(PhysicalKeyboardKey::KEY_S, LogicalKeyboardKey::KEY_S),
-        );
-        assert!(!keyboard.handle_key_event(
-            &mut app,
-            &key_down(PhysicalKeyboardKey::KEY_S, LogicalKeyboardKey::KEY_S)
-        ));
-        assert!(log.borrow().is_empty());
+            entry.dispose(&mut app);
+            waft_scheduler::SchedulerBinding::schedule_frame(
+                &mut app,
+                waft_scheduler::FrameTarget::EveryView,
+            );
+            drop(app);
+            tester.pump();
+            let mut app = tester.cell.borrow_mut();
+            log.borrow_mut().clear();
+            keyboard.handle_key_event(
+                &mut app,
+                &key_up(PhysicalKeyboardKey::KEY_S, LogicalKeyboardKey::KEY_S),
+            );
+            assert!(!keyboard.handle_key_event(
+                &mut app,
+                &key_down(PhysicalKeyboardKey::KEY_S, LogicalKeyboardKey::KEY_S)
+            ));
+            assert!(log.borrow().is_empty());
+        });
     }
 }

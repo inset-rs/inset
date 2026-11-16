@@ -9518,6 +9518,7 @@ mod tests {
         GlobalKey, IntoWidget, State, StateData, StatefulWidget, downcast_widget,
     };
     use crate::test_harness::{Harness, padding_under_root};
+    use crate::testing::{WidgetTester, test_widgets};
 
     /// The render object directly under the test root, typed.
     fn render_object_under_root<T: RenderObject>(harness: &Harness, app: &App) -> RenderHandle<T> {
@@ -10612,24 +10613,6 @@ mod tests {
         );
     }
 
-    /// An app whose one view is Flutter's test window, 800 x 600, mounted with `child` under it.
-    fn flutter_window_cell(child: WidgetRef) -> Rc<AppCell> {
-        let platform = waft_test::TestPlatform::new()
-            .on(waft_embedder::TargetPlatform::MacOS)
-            .with_view(Rc::new(waft_test::TestView::new(800.0, 600.0)));
-        let cell = AppCell::with_platform(Rc::new(platform));
-        crate::test_harness::binding_mount(&cell, child);
-        cell
-    }
-
-    /// Dart's `tester.pumpWidget(child)` after the first: `child` as the view's new root.
-    fn pump_root(app: &mut App, child: WidgetRef) {
-        let view = crate::test_harness::platform_view(app);
-        crate::binding::WidgetsBinding::instance(app)
-            .attach_root_widget(app, crate::view::View::new(view, child).into_widget());
-        crate::test_harness::binding_pump(app, std::time::Duration::from_millis(16));
-    }
-
     /// Dart's `tester.layers.whereType<ImageFilterLayer>()`: the image filter layers in the
     /// layer tree from the root, depth first.
     fn image_filter_layers(app: &mut App) -> Vec<Handle<waft_rendering::ImageFilterLayer>> {
@@ -10671,22 +10654,24 @@ mod tests {
 
     #[test]
     fn transform_translate_with_filter_quality_produces_filter_layer() {
-        let cell = flutter_window_cell(
-            Transform::translate(Offset::new(25.0, 25.0))
-                .filter_quality(FilterQuality::Low)
-                .child(square(100.0))
-                .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        assert_matrix_near(
-            the_filter_matrix(&mut app),
-            [
-                1.0, 0.0, 0.0, 0.0, //
-                0.0, 1.0, 0.0, 0.0, //
-                0.0, 0.0, 1.0, 0.0, //
-                25.0, 25.0, 0.0, 1.0,
-            ],
-        );
+        test_widgets(|tester| {
+            tester.pump_widget(
+                Transform::translate(Offset::new(25.0, 25.0))
+                    .filter_quality(FilterQuality::Low)
+                    .child(square(100.0))
+                    .into_widget(),
+            );
+            let mut app = tester.cell.borrow_mut();
+            assert_matrix_near(
+                the_filter_matrix(&mut app),
+                [
+                    1.0, 0.0, 0.0, 0.0, //
+                    0.0, 1.0, 0.0, 0.0, //
+                    0.0, 0.0, 1.0, 0.0, //
+                    25.0, 25.0, 0.0, 1.0,
+                ],
+            );
+        });
     }
 
     #[test]
@@ -10695,22 +10680,24 @@ mod tests {
         reason = "Dart's case scales by 3.14159, not by pi"
     )]
     fn transform_scale_with_filter_quality_produces_filter_layer() {
-        let cell = flutter_window_cell(
-            Transform::scale(Some(3.14159), None, None)
-                .filter_quality(FilterQuality::Low)
-                .child(square(100.0))
-                .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        assert_matrix_near(
-            the_filter_matrix(&mut app),
-            [
-                3.14159, 0.0, 0.0, 0.0, //
-                0.0, 3.14159, 0.0, 0.0, //
-                0.0, 0.0, 1.0, 0.0, //
-                -856.636, -642.477, 0.0, 1.0,
-            ],
-        );
+        test_widgets(|tester| {
+            tester.pump_widget(
+                Transform::scale(Some(3.14159), None, None)
+                    .filter_quality(FilterQuality::Low)
+                    .child(square(100.0))
+                    .into_widget(),
+            );
+            let mut app = tester.cell.borrow_mut();
+            assert_matrix_near(
+                the_filter_matrix(&mut app),
+                [
+                    3.14159, 0.0, 0.0, 0.0, //
+                    0.0, 3.14159, 0.0, 0.0, //
+                    0.0, 0.0, 1.0, 0.0, //
+                    -856.636, -642.477, 0.0, 1.0,
+                ],
+            );
+        });
     }
 
     /// The matrix both rotate cases expect: a quarter of a half turn about the window's center.
@@ -10739,68 +10726,76 @@ mod tests {
 
     #[test]
     fn transform_rotate_with_filter_quality_produces_filter_layer() {
-        let cell = flutter_window_cell(
-            Transform::rotate(std::f64::consts::FRAC_PI_4)
-                .filter_quality(FilterQuality::Low)
-                .child(square(100.0))
-                .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        assert_matrix_near(
-            the_filter_matrix(&mut app),
-            ROTATED_ABOUT_THE_WINDOWS_CENTER,
-        );
+        test_widgets(|tester| {
+            tester.pump_widget(
+                Transform::rotate(std::f64::consts::FRAC_PI_4)
+                    .filter_quality(FilterQuality::Low)
+                    .child(square(100.0))
+                    .into_widget(),
+            );
+            let mut app = tester.cell.borrow_mut();
+            assert_matrix_near(
+                the_filter_matrix(&mut app),
+                ROTATED_ABOUT_THE_WINDOWS_CENTER,
+            );
+        });
     }
 
     #[test]
     fn offset_transform_rotate_with_filter_quality_produces_filter_layer() {
-        let cell = flutter_window_cell(
-            square(400.0)
-                .child(
-                    Center::new().child(
-                        Transform::rotate(std::f64::consts::FRAC_PI_4)
-                            .filter_quality(FilterQuality::Low)
-                            .child(square(100.0)),
-                    ),
-                )
-                .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        assert_matrix_near(
-            the_filter_matrix(&mut app),
-            ROTATED_ABOUT_THE_WINDOWS_CENTER,
-        );
+        test_widgets(|tester| {
+            tester.pump_widget(
+                square(400.0)
+                    .child(
+                        Center::new().child(
+                            Transform::rotate(std::f64::consts::FRAC_PI_4)
+                                .filter_quality(FilterQuality::Low)
+                                .child(square(100.0)),
+                        ),
+                    )
+                    .into_widget(),
+            );
+            let mut app = tester.cell.borrow_mut();
+            assert_matrix_near(
+                the_filter_matrix(&mut app),
+                ROTATED_ABOUT_THE_WINDOWS_CENTER,
+            );
+        });
     }
 
     #[test]
     fn transform_layers_update_to_match_child_and_filter_quality() {
-        let rotated = || Transform::rotate(std::f64::consts::FRAC_PI_4);
-        let cell = flutter_window_cell(
-            rotated()
-                .filter_quality(FilterQuality::Low)
-                .child(square(100.0))
-                .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        assert_eq!(image_filter_layers(&mut app).len(), 1);
+        test_widgets(|tester| {
+            let rotated = || Transform::rotate(std::f64::consts::FRAC_PI_4);
+            tester.pump_widget(
+                rotated()
+                    .filter_quality(FilterQuality::Low)
+                    .child(square(100.0))
+                    .into_widget(),
+            );
+            let mut app = tester.cell.borrow_mut();
+            assert_eq!(image_filter_layers(&mut app).len(), 1);
 
-        pump_root(&mut app, rotated().child(square(100.0)).into_widget());
-        assert!(image_filter_layers(&mut app).is_empty());
+            drop(app);
+            tester.pump_widget(rotated().child(square(100.0)).into_widget());
+            let mut app = tester.cell.borrow_mut();
+            assert!(image_filter_layers(&mut app).is_empty());
 
-        pump_root(
-            &mut app,
-            rotated().filter_quality(FilterQuality::Low).into_widget(),
-        );
-        assert!(image_filter_layers(&mut app).is_empty());
+            drop(app);
+            tester.pump_widget(rotated().filter_quality(FilterQuality::Low).into_widget());
+            let mut app = tester.cell.borrow_mut();
+            assert!(image_filter_layers(&mut app).is_empty());
 
-        pump_root(
-            &mut app,
-            rotated()
-                .filter_quality(FilterQuality::Low)
-                .child(square(100.0))
-                .into_widget(),
-        );
-        assert_eq!(image_filter_layers(&mut app).len(), 1);
+            drop(app);
+            tester.pump_widget(
+                rotated()
+                    .filter_quality(FilterQuality::Low)
+                    .child(square(100.0))
+                    .into_widget(),
+            );
+            let mut app = tester.cell.borrow_mut();
+            assert_eq!(image_filter_layers(&mut app).len(), 1);
+        });
     }
 
     #[test]
@@ -11724,15 +11719,9 @@ mod tests {
         assert_eq!(shape.size(&app), Size::ZERO);
     }
 
-    /// An app on a platform whose one view has no area, Dart's
-    /// `tester.view.physicalSize = Size.zero`, mounted with `child` under that view.
-    pub(crate) fn zero_area_cell(child: WidgetRef) -> Rc<AppCell> {
-        let platform = waft_test::TestPlatform::new()
-            .on(waft_embedder::TargetPlatform::MacOS)
-            .with_view(Rc::new(waft_test::TestView::new(0.0, 0.0)));
-        let cell = AppCell::with_platform(Rc::new(platform));
-        crate::test_harness::binding_mount(&cell, child);
-        cell
+    /// A tester whose view has no area: Dart's `tester.view.physicalSize = Size.zero`.
+    pub(crate) fn zero_area_tester() -> WidgetTester {
+        WidgetTester::with_physical_size(waft_test::TestPlatform::new(), Size::ZERO)
     }
 
     fn keyed_size(app: &mut App, key: &GlobalKey) -> Size {
@@ -11750,28 +11739,23 @@ mod tests {
     #[test]
     fn a_physical_model_and_shape_in_a_view_of_no_area_take_no_space() {
         let key = GlobalKey::new();
-        let cell = zero_area_cell(
-            Directionality::new(
-                TextDirection::Ltr,
-                Center::new()
-                    .child(PhysicalModel::new(Color::new(0xAABBCC00)).key(key.clone().into())),
-            )
-            .into_widget(),
-        );
-        assert_eq!(keyed_size(&mut cell.borrow_mut(), &key), Size::ZERO);
+        let tester = &mut zero_area_tester();
+        tester.pump_widget(Directionality::new(
+            TextDirection::Ltr,
+            Center::new().child(PhysicalModel::new(Color::new(0xAABBCC00)).key(key.clone().into())),
+        ));
+        assert_eq!(keyed_size(&mut tester.cell.borrow_mut(), &key), Size::ZERO);
 
         let key = GlobalKey::new();
-        let cell = zero_area_cell(
-            Directionality::new(
-                TextDirection::Ltr,
-                Center::new().child(
-                    PhysicalShape::new(circle_clipper(), Color::new(0xAABBCC00))
-                        .key(key.clone().into()),
-                ),
-            )
-            .into_widget(),
-        );
-        assert_eq!(keyed_size(&mut cell.borrow_mut(), &key), Size::ZERO);
+        let tester = &mut zero_area_tester();
+        tester.pump_widget(Directionality::new(
+            TextDirection::Ltr,
+            Center::new().child(
+                PhysicalShape::new(circle_clipper(), Color::new(0xAABBCC00))
+                    .key(key.clone().into()),
+            ),
+        ));
+        assert_eq!(keyed_size(&mut tester.cell.borrow_mut(), &key), Size::ZERO);
     }
 
     fn list_children(width: f64, height: f64) -> Vec<WidgetRef> {

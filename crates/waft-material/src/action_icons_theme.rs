@@ -250,13 +250,15 @@ impl InheritedWidget for ActionIconTheme {
 
 #[cfg(test)]
 mod tests {
-    use waft_embedder::{Color, TargetPlatform};
+    use waft_embedder::Color;
     use waft_widgets::{Column, Icon, IconData, RichText, SizedBox};
+
+    use waft_widgets::testing::{WidgetTester, test_widgets};
 
     use super::*;
     use crate::action_buttons::{BackButton, CloseButton, DrawerButton, EndDrawerButton};
     use crate::material::Material;
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    use crate::test_support::material_app;
     use crate::theme_data::ThemeData;
 
     const GREEN: Color = Color::new(0xff00ff00);
@@ -300,12 +302,6 @@ mod tests {
             assert_eq!(style.color.as_ref().map(|color| color.color()), Some(GREEN));
         }
         assert_eq!(tester.find_by_type::<RichText>().len(), 4);
-    }
-
-    fn tester() -> WidgetTester {
-        let tester = WidgetTester::on(TargetPlatform::Android);
-        tester.install_fonts();
-        tester
     }
 
     // 'ActionIconThemeData copyWith, ==, hashCode basics'
@@ -387,8 +383,7 @@ mod tests {
     // 'Action buttons use ThemeData action icon theme'
     #[test]
     fn action_buttons_use_the_theme_datas_action_icon_theme() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let root = {
                 let app = tester.cell.borrow();
                 material_app(
@@ -400,15 +395,14 @@ mod tests {
             };
             tester.pump_widget(root);
 
-            expect_sample_icons(&tester);
+            expect_sample_icons(tester);
         });
     }
 
     // 'Action buttons use ActionIconTheme'
     #[test]
     fn action_buttons_use_the_action_icon_theme_widget() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let root = {
                 let app = tester.cell.borrow();
                 material_app(
@@ -418,15 +412,14 @@ mod tests {
             };
             tester.pump_widget(root);
 
-            expect_sample_icons(&tester);
+            expect_sample_icons(tester);
         });
     }
 
     // `ActionIconTheme.updateShouldNotify`: a theme with other builders rebuilds the buttons.
     #[test]
     fn a_changed_action_icon_theme_rebuilds_the_buttons() {
-        with_main_thread_stack(|| {
-            let mut tester = tester();
+        test_widgets(|tester| {
             let cell = Rc::clone(&tester.cell);
             let theme = |data: ActionIconThemeData| {
                 let app = cell.borrow();
@@ -446,7 +439,7 @@ mod tests {
 
             let root = theme(sample_theme());
             tester.pump_widget(root);
-            expect_sample_icons(&tester);
+            expect_sample_icons(tester);
         });
     }
 }

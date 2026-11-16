@@ -2884,13 +2884,11 @@ impl<T: ActionIntent + ?Sized> Action for ContextActionToActionAdapter<T> {
 mod tests {
     use std::cell::{Cell, RefCell};
 
-    use waft_embedder::{Offset, PointerDeviceKind};
-    use waft_gestures::{GestureBinding, PointerEvent, PointerHoverEvent};
+    use waft_embedder::Offset;
 
     use super::*;
-    use crate::test_harness::pump_every_view;
+    use crate::testing::{TestPointer, test_widgets};
     use crate::widgets::basic::{Builder, SizedBox};
-    use crate::widgets::focus_manager::tests::{app_with_view, mount};
     use crate::widgets::focus_manager::{FocusHighlightStrategy, FocusNodeLeaf};
 
     #[derive(Debug)]
@@ -2979,245 +2977,243 @@ mod tests {
 
     #[test]
     fn invoke_reaches_the_nearest_actions_widget_that_maps_the_intent() {
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
-        let log: Rc<RefCell<Vec<String>>> = Rc::default();
-        let outer = CountAction::new(&mut app, &log, "outer");
-        let inner = CountAction::new(&mut app, &log, "inner");
-        let captured: Rc<Cell<Option<BuildContext>>> = Rc::default();
-        drop(app);
-        mount(
-            &cell,
-            Actions::new(
-                map(TypeId::of::<CountIntent>(), outer.erase()),
+        test_widgets(|tester| {
+            let mut app = tester.cell.borrow_mut();
+            let log: Rc<RefCell<Vec<String>>> = Rc::default();
+            let outer = CountAction::new(&mut app, &log, "outer");
+            let inner = CountAction::new(&mut app, &log, "inner");
+            let captured: Rc<Cell<Option<BuildContext>>> = Rc::default();
+            drop(app);
+            tester.pump_widget(
                 Actions::new(
-                    map(TypeId::of::<CountIntent>(), inner.erase()),
-                    probe(&captured),
-                ),
-            )
-            .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        let context = captured.get().expect("the builder ran");
+                    map(TypeId::of::<CountIntent>(), outer.erase()),
+                    Actions::new(
+                        map(TypeId::of::<CountIntent>(), inner.erase()),
+                        probe(&captured),
+                    ),
+                )
+                .into_widget(),
+            );
+            let mut app = tester.cell.borrow_mut();
+            let context = captured.get().expect("the builder ran");
 
-        let result = Actions::invoke(&mut app, context, &CountIntent { amount: 2 });
-        assert_eq!(*log.borrow(), ["inner:2"]);
-        assert_eq!(as_i32(result), Some(4));
+            let result = Actions::invoke(&mut app, context, &CountIntent { amount: 2 });
+            assert_eq!(*log.borrow(), ["inner:2"]);
+            assert_eq!(as_i32(result), Some(4));
 
-        // A disabled action still stops the search, so nothing is invoked.
-        inner.set_enabled(&mut app, false);
-        log.borrow_mut().clear();
-        let result = Actions::maybe_invoke(&mut app, context, &CountIntent { amount: 3 });
-        assert!(log.borrow().is_empty());
-        assert_eq!(as_i32(result), None);
+            // A disabled action still stops the search, so nothing is invoked.
+            inner.set_enabled(&mut app, false);
+            log.borrow_mut().clear();
+            let result = Actions::maybe_invoke(&mut app, context, &CountIntent { amount: 3 });
+            assert!(log.borrow().is_empty());
+            assert_eq!(as_i32(result), None);
+        });
     }
 
     #[test]
     fn invoke_walks_past_an_actions_widget_that_does_not_map_the_intent() {
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
-        let log: Rc<RefCell<Vec<String>>> = Rc::default();
-        let outer = CountAction::new(&mut app, &log, "outer");
-        let unrelated = DoNothingAction::new(&mut app);
-        let captured: Rc<Cell<Option<BuildContext>>> = Rc::default();
-        drop(app);
-        mount(
-            &cell,
-            Actions::new(
-                map(TypeId::of::<CountIntent>(), outer.erase()),
+        test_widgets(|tester| {
+            let mut app = tester.cell.borrow_mut();
+            let log: Rc<RefCell<Vec<String>>> = Rc::default();
+            let outer = CountAction::new(&mut app, &log, "outer");
+            let unrelated = DoNothingAction::new(&mut app);
+            let captured: Rc<Cell<Option<BuildContext>>> = Rc::default();
+            drop(app);
+            tester.pump_widget(
                 Actions::new(
-                    map(TypeId::of::<OtherIntent>(), unrelated.erase()),
-                    probe(&captured),
-                ),
-            )
-            .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        let context = captured.get().expect("the builder ran");
+                    map(TypeId::of::<CountIntent>(), outer.erase()),
+                    Actions::new(
+                        map(TypeId::of::<OtherIntent>(), unrelated.erase()),
+                        probe(&captured),
+                    ),
+                )
+                .into_widget(),
+            );
+            let mut app = tester.cell.borrow_mut();
+            let context = captured.get().expect("the builder ran");
 
-        let result = Actions::invoke(&mut app, context, &CountIntent { amount: 5 });
-        assert_eq!(*log.borrow(), ["outer:5"]);
-        assert_eq!(as_i32(result), Some(10));
+            let result = Actions::invoke(&mut app, context, &CountIntent { amount: 5 });
+            assert_eq!(*log.borrow(), ["outer:5"]);
+            assert_eq!(as_i32(result), Some(10));
+        });
     }
 
     #[test]
     fn maybe_find_returns_the_bound_action_and_handler_only_when_it_is_enabled() {
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
-        let log: Rc<RefCell<Vec<String>>> = Rc::default();
-        let action = CountAction::new(&mut app, &log, "action");
-        let captured: Rc<Cell<Option<BuildContext>>> = Rc::default();
-        drop(app);
-        mount(
-            &cell,
-            Actions::new(
-                map(TypeId::of::<CountIntent>(), action.erase()),
-                probe(&captured),
-            )
-            .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        let context = captured.get().expect("the builder ran");
+        test_widgets(|tester| {
+            let mut app = tester.cell.borrow_mut();
+            let log: Rc<RefCell<Vec<String>>> = Rc::default();
+            let action = CountAction::new(&mut app, &log, "action");
+            let captured: Rc<Cell<Option<BuildContext>>> = Rc::default();
+            drop(app);
+            tester.pump_widget(
+                Actions::new(
+                    map(TypeId::of::<CountIntent>(), action.erase()),
+                    probe(&captured),
+                )
+                .into_widget(),
+            );
+            let mut app = tester.cell.borrow_mut();
+            let context = captured.get().expect("the builder ran");
 
-        assert_eq!(
-            Actions::maybe_find(&mut app, context, TypeId::of::<CountIntent>()),
-            Some(Action::as_action(action.handle()))
-        );
-        assert_eq!(
-            Actions::maybe_find(&mut app, context, TypeId::of::<OtherIntent>()),
-            None
-        );
+            assert_eq!(
+                Actions::maybe_find(&mut app, context, TypeId::of::<CountIntent>()),
+                Some(Action::as_action(action.handle()))
+            );
+            assert_eq!(
+                Actions::maybe_find(&mut app, context, TypeId::of::<OtherIntent>()),
+                None
+            );
 
-        let intent: IntentRef = Rc::new(CountIntent { amount: 7 });
-        let handler = Actions::handler(&mut app, context, Rc::clone(&intent))
-            .expect("an enabled action has a handler");
-        handler.call(&mut app);
-        assert_eq!(*log.borrow(), ["action:7"]);
+            let intent: IntentRef = Rc::new(CountIntent { amount: 7 });
+            let handler = Actions::handler(&mut app, context, Rc::clone(&intent))
+                .expect("an enabled action has a handler");
+            handler.call(&mut app);
+            assert_eq!(*log.borrow(), ["action:7"]);
 
-        action.set_enabled(&mut app, false);
-        assert!(Actions::handler(&mut app, context, intent).is_none());
+            action.set_enabled(&mut app, false);
+            assert!(Actions::handler(&mut app, context, intent).is_none());
+        });
     }
 
     #[test]
     fn an_overridable_action_prefers_the_override_above_its_lookup_context() {
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
-        let log: Rc<RefCell<Vec<String>>> = Rc::default();
-        let override_action = CountAction::new(&mut app, &log, "override");
-        let default_action = CountAction::new(&mut app, &log, "default");
-        let outer_context: Rc<Cell<Option<BuildContext>>> = Rc::default();
-        let inner_context: Rc<Cell<Option<BuildContext>>> = Rc::default();
-        let outer_sink = Rc::clone(&outer_context);
-        let inner_sink = Rc::clone(&inner_context);
-        drop(app);
-        mount(
-            &cell,
-            Actions::new(
-                map(TypeId::of::<CountIntent>(), override_action.erase()),
-                Builder::new(move |_app, context| {
-                    outer_sink.set(Some(context));
-                    probe(&inner_sink)
-                }),
-            )
-            .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        let lookup_context = outer_context.get().expect("the builder ran");
+        test_widgets(|tester| {
+            let mut app = tester.cell.borrow_mut();
+            let log: Rc<RefCell<Vec<String>>> = Rc::default();
+            let override_action = CountAction::new(&mut app, &log, "override");
+            let default_action = CountAction::new(&mut app, &log, "default");
+            let outer_context: Rc<Cell<Option<BuildContext>>> = Rc::default();
+            let inner_context: Rc<Cell<Option<BuildContext>>> = Rc::default();
+            let outer_sink = Rc::clone(&outer_context);
+            let inner_sink = Rc::clone(&inner_context);
+            drop(app);
+            tester.pump_widget(
+                Actions::new(
+                    map(TypeId::of::<CountIntent>(), override_action.erase()),
+                    Builder::new(move |_app, context| {
+                        outer_sink.set(Some(context));
+                        probe(&inner_sink)
+                    }),
+                )
+                .into_widget(),
+            );
+            let mut app = tester.cell.borrow_mut();
+            let lookup_context = outer_context.get().expect("the builder ran");
 
-        let overridable = AnyAction::overridable(&mut app, default_action.erase(), lookup_context);
-        let intent = CountIntent { amount: 1 };
-        overridable.invoke(&mut app, &intent, Some(lookup_context));
-        assert_eq!(*log.borrow(), ["override:1"]);
+            let overridable =
+                AnyAction::overridable(&mut app, default_action.erase(), lookup_context);
+            let intent = CountIntent { amount: 1 };
+            overridable.invoke(&mut app, &intent, Some(lookup_context));
+            assert_eq!(*log.borrow(), ["override:1"]);
 
-        // With no override above the lookup context, the default action runs.
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
-        let log: Rc<RefCell<Vec<String>>> = Rc::default();
-        let default_action = CountAction::new(&mut app, &log, "default");
-        let captured: Rc<Cell<Option<BuildContext>>> = Rc::default();
-        drop(app);
-        mount(&cell, probe(&captured));
-        let mut app = cell.borrow_mut();
-        let lookup_context = captured.get().expect("the builder ran");
-        let overridable = AnyAction::overridable(&mut app, default_action.erase(), lookup_context);
-        overridable.invoke(&mut app, &intent, Some(lookup_context));
-        assert_eq!(*log.borrow(), ["default:1"]);
+            // With no override above the lookup context, the default action runs.
+        });
+        test_widgets(|tester| {
+            let mut app = tester.cell.borrow_mut();
+            let log: Rc<RefCell<Vec<String>>> = Rc::default();
+            let default_action = CountAction::new(&mut app, &log, "default");
+            let captured: Rc<Cell<Option<BuildContext>>> = Rc::default();
+            drop(app);
+            tester.pump_widget(probe(&captured));
+            let mut app = tester.cell.borrow_mut();
+            let lookup_context = captured.get().expect("the builder ran");
+            let intent = CountIntent { amount: 1 };
+            let overridable =
+                AnyAction::overridable(&mut app, default_action.erase(), lookup_context);
+            overridable.invoke(&mut app, &intent, Some(lookup_context));
+            assert_eq!(*log.borrow(), ["default:1"]);
+        });
     }
 
     #[test]
     fn the_detector_reports_the_focus_highlight() {
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
-        FocusManager::instance(&mut app)
-            .set_highlight_strategy(&mut app, FocusHighlightStrategy::AlwaysTraditional);
-        let focus_highlights: Rc<RefCell<Vec<bool>>> = Rc::default();
-        let focused: Rc<RefCell<Vec<bool>>> = Rc::default();
-        let highlight_sink = Rc::clone(&focus_highlights);
-        let focus_sink = Rc::clone(&focused);
-        drop(app);
-        mount(
-            &cell,
-            FocusableActionDetector::new(SizedBox::expand())
-                .autofocus(true)
-                .on_show_focus_highlight(move |_app, show| highlight_sink.borrow_mut().push(show))
-                .on_focus_change(move |_app, has_focus| focus_sink.borrow_mut().push(has_focus))
-                .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        // The post-frame callback `init_state` registered decides whether a highlight may show.
-        pump_every_view(&mut app, std::time::Duration::ZERO);
+        test_widgets(|tester| {
+            let mut app = tester.cell.borrow_mut();
+            FocusManager::instance(&mut app)
+                .set_highlight_strategy(&mut app, FocusHighlightStrategy::AlwaysTraditional);
+            let focus_highlights: Rc<RefCell<Vec<bool>>> = Rc::default();
+            let focused: Rc<RefCell<Vec<bool>>> = Rc::default();
+            let highlight_sink = Rc::clone(&focus_highlights);
+            let focus_sink = Rc::clone(&focused);
+            drop(app);
+            tester.pump_widget(
+                FocusableActionDetector::new(SizedBox::expand())
+                    .autofocus(true)
+                    .on_show_focus_highlight(move |_app, show| {
+                        highlight_sink.borrow_mut().push(show)
+                    })
+                    .on_focus_change(move |_app, has_focus| focus_sink.borrow_mut().push(has_focus))
+                    .into_widget(),
+            );
+            // The post-frame callback `init_state` registered decides whether a highlight may show.
+            tester.pump();
 
-        assert_eq!(*focused.borrow(), [true]);
-        assert_eq!(*focus_highlights.borrow(), [true]);
+            assert_eq!(*focused.borrow(), [true]);
+            assert_eq!(*focus_highlights.borrow(), [true]);
+        });
     }
 
     #[test]
     fn the_detector_reports_the_hover_highlight() {
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
-        FocusManager::instance(&mut app)
-            .set_highlight_strategy(&mut app, FocusHighlightStrategy::AlwaysTraditional);
-        let hover_highlights: Rc<RefCell<Vec<bool>>> = Rc::default();
-        let sink = Rc::clone(&hover_highlights);
-        drop(app);
-        mount(
-            &cell,
-            FocusableActionDetector::new(SizedBox::expand())
-                .on_show_hover_highlight(move |_app, show| sink.borrow_mut().push(show))
-                .into_widget(),
-        );
-        let mut app = cell.borrow_mut();
-        pump_every_view(&mut app, std::time::Duration::ZERO);
+        test_widgets(|tester| {
+            let mut app = tester.cell.borrow_mut();
+            FocusManager::instance(&mut app)
+                .set_highlight_strategy(&mut app, FocusHighlightStrategy::AlwaysTraditional);
+            let hover_highlights: Rc<RefCell<Vec<bool>>> = Rc::default();
+            let sink = Rc::clone(&hover_highlights);
+            drop(app);
+            tester.pump_widget(
+                FocusableActionDetector::new(SizedBox::expand())
+                    .on_show_hover_highlight(move |_app, show| sink.borrow_mut().push(show))
+                    .into_widget(),
+            );
+            tester.pump();
 
-        let hover = |position: Offset| {
-            PointerEvent::Hover(PointerHoverEvent {
-                position,
-                kind: PointerDeviceKind::Mouse,
-                ..PointerHoverEvent::default()
-            })
-        };
-        let binding = GestureBinding::instance(&mut app);
-        binding.handle_pointer_event(&mut app, hover(Offset::new(10.0, 10.0)));
-        assert_eq!(*hover_highlights.borrow(), [true]);
+            let mut mouse = TestPointer::mouse(1, 0);
+            tester.move_to(&mut mouse, Offset::new(10.0, 10.0), false);
+            assert_eq!(*hover_highlights.borrow(), [true]);
 
-        binding.handle_pointer_event(&mut app, hover(Offset::new(10_000.0, 10_000.0)));
-        assert_eq!(*hover_highlights.borrow(), [true, false]);
+            tester.move_to(&mut mouse, Offset::new(10_000.0, 10_000.0), false);
+            assert_eq!(*hover_highlights.borrow(), [true, false]);
+        });
     }
 
     #[test]
     fn a_disabled_detector_shows_no_highlight() {
-        let cell = app_with_view();
-        let mut app = cell.borrow_mut();
-        FocusManager::instance(&mut app)
-            .set_highlight_strategy(&mut app, FocusHighlightStrategy::AlwaysTraditional);
-        let focus_highlights: Rc<RefCell<Vec<bool>>> = Rc::default();
-        let sink = Rc::clone(&focus_highlights);
-        let node = crate::FocusNode::new(&mut app);
-        let detector = |enabled: bool, sink: Rc<RefCell<Vec<bool>>>| {
-            FocusableActionDetector::new(SizedBox::expand())
-                .enabled(enabled)
-                .focus_node(node.erase())
-                .autofocus(true)
-                .on_show_focus_highlight(move |_app, show| sink.borrow_mut().push(show))
-                .into_widget()
-        };
-        drop(app);
-        mount(&cell, detector(false, Rc::clone(&sink)));
-        let mut app = cell.borrow_mut();
-        pump_every_view(&mut app, std::time::Duration::ZERO);
-        // A disabled detector sets `Focus.canRequestFocus` to false, so nothing is focused.
-        node.request_focus(&mut app, None);
-        app.drain_microtasks();
-        assert!(!node.has_primary_focus(&app));
-        assert!(focus_highlights.borrow().is_empty());
+        test_widgets(|tester| {
+            let mut app = tester.cell.borrow_mut();
+            FocusManager::instance(&mut app)
+                .set_highlight_strategy(&mut app, FocusHighlightStrategy::AlwaysTraditional);
+            let focus_highlights: Rc<RefCell<Vec<bool>>> = Rc::default();
+            let sink = Rc::clone(&focus_highlights);
+            let node = crate::FocusNode::new(&mut app);
+            let detector = |enabled: bool, sink: Rc<RefCell<Vec<bool>>>| {
+                FocusableActionDetector::new(SizedBox::expand())
+                    .enabled(enabled)
+                    .focus_node(node.erase())
+                    .autofocus(true)
+                    .on_show_focus_highlight(move |_app, show| sink.borrow_mut().push(show))
+                    .into_widget()
+            };
+            drop(app);
+            tester.pump_widget(detector(false, Rc::clone(&sink)));
+            tester.pump();
+            let mut app = tester.cell.borrow_mut();
+            // A disabled detector sets `Focus.canRequestFocus` to false, so nothing is focused.
+            node.request_focus(&mut app, None);
+            app.drain_microtasks();
+            assert!(!node.has_primary_focus(&app));
+            assert!(focus_highlights.borrow().is_empty());
 
-        drop(app);
-        mount(&cell, detector(true, Rc::clone(&sink)));
-        let mut app = cell.borrow_mut();
-        pump_every_view(&mut app, std::time::Duration::ZERO);
-        node.request_focus(&mut app, None);
-        app.drain_microtasks();
-        assert!(node.has_primary_focus(&app));
-        assert_eq!(*focus_highlights.borrow(), [true]);
+            drop(app);
+            tester.pump_widget(detector(true, Rc::clone(&sink)));
+            tester.pump();
+            let mut app = tester.cell.borrow_mut();
+            node.request_focus(&mut app, None);
+            app.drain_microtasks();
+            assert!(node.has_primary_focus(&app));
+            assert_eq!(*focus_highlights.borrow(), [true]);
+        });
     }
 }
