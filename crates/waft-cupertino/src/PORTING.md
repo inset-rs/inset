@@ -22,6 +22,7 @@ Ported against: 4765bd950d31784578608cfbb0c723453cc49216
 - magnifier.rs → magnifier.dart
 - radio.rs → radio.dart
 - spell_check_suggestions_toolbar.rs → spell_check_suggestions_toolbar.dart
+- search_field.rs → search_field.dart
 
 ## app.rs → app.dart
 
@@ -186,5 +187,6 @@ Ported against: 4765bd950d31784578608cfbb0c723453cc49216
 - switch.rs: the gesture detector's `excludeFromSemantics`. Trigger: the semantics tree.
 - switch.rs: `activeThumbImage`, `inactiveThumbImage`, `onActiveThumbImageError` and `onInactiveThumbImageError`, and the painter's cache of them. Trigger: painting's `DecorationImage` and the `image` field on `ShapeDecoration`.
 - switch.rs: the deprecated `activeColor` and `trackColor`, Dart's aliases of `activeTrackColor` and `inactiveTrackColor`. Trigger: never — port them only if Flutter un-deprecates them.
+- search_field.rs: the three tests of the field resizing under a scroll (its icons and placeholder fading, its top padding moving up), which the field's scroll handling ports. Trigger: widgets' `SliverResizingHeader`.
 - app.rs: `CupertinoApp.router` and everything only it fills. Trigger: `WidgetsApp.router` / `router.dart`.
 - app.rs: the three inspector-button builders and the button they build; the three debug flags reach the `WidgetsApp` as Dart passes them. Trigger: `widget_inspector.dart`'s `InspectorButton`.
