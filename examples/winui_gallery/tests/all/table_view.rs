@@ -1,4 +1,4 @@
-//! TableView: the header and every row sharing each column's width, resizing a column from its gripper, frozen columns staying put while the rest scroll, the sort cycle and a canceled sort, filtering, the selection by pointer, keyboard and code and following its item through a sort, and the empty state.
+//! TableView: the header and every row sharing each column's width, resizing a column from its gripper, frozen columns staying put while the rest scroll, the sort cycle and a canceled sort, filtering, the selection by pointer, keyboard and code, following its item through a sort and heard by a widget above the table, and the empty state.
 
 use crate::common::Fixture;
 use std::{
@@ -69,6 +69,8 @@ struct Table {
     sorted: Cell<usize>,
     cancel_sorting: Cell<bool>,
     selection_changes: RefCell<Vec<TableViewSelectionChangedEventArgs>>,
+    /// How many times the widget above the table that listens to the selection was built.
+    listener_builds: Cell<usize>,
 }
 
 /// How the table under test is set up.
@@ -77,6 +79,8 @@ struct Setup {
     width: f64,
     items: bool,
     frozen: bool,
+    /// A widget above the table rebuilds whenever the selection notifies.
+    listened_above: bool,
 }
 
 impl Default for Setup {
@@ -85,6 +89,7 @@ impl Default for Setup {
             width: 560.0,
             items: true,
             frozen: false,
+            listened_above: false,
         }
     }
 }
@@ -120,6 +125,7 @@ fn fixture(setup: Setup) -> (Fixture, Rc<Table>) {
             sorted: Cell::new(0),
             cancel_sorting: Cell::new(false),
             selection_changes: RefCell::default(),
+            listener_builds: Cell::new(0),
         });
         *slot.borrow_mut() = Some(table.clone());
         let view = TableView::new(source, vec![name, role, city, age])
@@ -138,6 +144,17 @@ fn fixture(setup: Setup) -> (Fixture, Rc<Table>) {
                 let table = table.clone();
                 move |_, args| table.selection_changes.borrow_mut().push(args.clone())
             });
+        let view = if setup.listened_above {
+            let table = table.clone();
+            ListenableBuilder::new(Rc::new(table.selection.clone()), move |_, _, child| {
+                table.listener_builds.set(table.listener_builds.get() + 1);
+                child.unwrap().clone()
+            })
+            .child(view)
+            .into_widget()
+        } else {
+            view.into_widget()
+        };
         run_app(
             app,
             WidgetsApp::new(AccentPalette::default().base)
@@ -529,6 +546,20 @@ fn new_items_clear_the_selection() {
     f.cell.checkpoint();
     settle(&mut f);
     assert_eq!(t.selection.selected_index(&f.cell.borrow()), None);
+}
+
+// The table binds its selection while it builds; binding changes nothing a listener reads, so a
+// widget above the table that rebuilds on every notification is not marked dirty during build.
+#[test]
+fn a_widget_above_the_table_hears_the_selection_change_but_not_its_binding() {
+    let (mut f, t) = fixture(Setup {
+        listened_above: true,
+        ..Setup::default()
+    });
+    assert_eq!(t.listener_builds.get(), 1);
+    tap_label(&mut f, "Diego");
+    assert_eq!(t.selection.selected_index(&f.cell.borrow()), Some(2));
+    assert_eq!(t.listener_builds.get(), 2);
 }
 
 // MARK: Live items

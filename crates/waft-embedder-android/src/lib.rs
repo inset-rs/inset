@@ -78,6 +78,8 @@ mod input;
 mod input_queues;
 #[cfg(target_os = "android")]
 mod intents;
+#[cfg(any(target_os = "android", test))]
+mod lifecycle;
 #[cfg(target_os = "android")]
 mod log;
 #[cfg(target_os = "android")]
