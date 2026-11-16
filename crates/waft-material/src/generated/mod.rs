@@ -1,11 +1,13 @@
 //! Material 3's generated defaults, each a Dart `part` of the file that uses it.
 
+pub(crate) mod action_chip_defaults_m3;
 pub(crate) mod app_bar_defaults_m3;
 pub(crate) mod badge_defaults_m3;
 pub(crate) mod banner_defaults_m3;
 pub(crate) mod bottom_sheet_defaults_m3;
 pub(crate) mod card_defaults_m3;
 pub(crate) mod checkbox_defaults_m3;
+pub(crate) mod chip_defaults_m3;
 pub(crate) mod color_scheme_defaults;
 pub(crate) mod dialog_defaults_m3;
 pub(crate) mod dialog_fullscreen_defaults_m3;
@@ -22,8 +24,10 @@ pub(crate) mod filled_icon_button_defaults_m3e;
 pub(crate) mod filled_tonal_button_defaults_m3;
 pub(crate) mod filled_tonal_icon_button_defaults_m3;
 pub(crate) mod filled_tonal_icon_button_defaults_m3e;
+pub(crate) mod filter_chip_defaults_m3;
 pub(crate) mod icon_button_defaults_m3;
 pub(crate) mod icon_button_defaults_m3e;
+pub(crate) mod input_chip_defaults_m3;
 pub(crate) mod input_decorator_defaults_m3;
 pub(crate) mod list_tile_defaults_m3;
 pub(crate) mod menu_defaults_m3;
@@ -39,6 +43,8 @@ pub(crate) mod outlined_icon_button_defaults_m3e;
 pub(crate) mod popup_menu_defaults_m3;
 pub(crate) mod progress_indicator_defaults_m3;
 pub(crate) mod radio_defaults_m3;
+pub(crate) mod range_slider_defaults_m3;
+pub(crate) mod segmented_button_defaults_m3;
 pub(crate) mod slider_defaults_m3;
 pub(crate) mod snackbar_defaults_m3;
 pub(crate) mod switch_defaults_m3;

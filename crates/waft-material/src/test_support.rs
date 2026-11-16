@@ -1429,10 +1429,43 @@ impl WidgetTester {
         })
     }
 
-    /// The pictures `render` and its subtree record, painted at the origin.
+    /// The pictures `render` and its subtree record, painted at the origin: the top-level
+    /// pictures only, not those of the layers `render` pushes.
     pub(crate) fn pictures(
         &self,
         render: waft_rendering::AnyRenderObject,
+    ) -> Vec<std::sync::Arc<waft_embedder::Picture>> {
+        self.pictures_painted(render, false)
+    }
+
+    /// Every picture `render` records and every picture of the layers it pushes (repaint
+    /// boundaries, transforms, clips and the rest), depth first in paint order: what Dart's
+    /// `paints` reads from a `TestRecordingCanvas`, which paints a child that is a repaint
+    /// boundary inline. Coordinates are those of each picture's own layer.
+    pub(crate) fn pictures_deep(
+        &self,
+        render: waft_rendering::AnyRenderObject,
+    ) -> Vec<std::sync::Arc<waft_embedder::Picture>> {
+        self.pictures_painted(render, true)
+    }
+
+    /// The ops of [`pictures_deep`](Self::pictures_deep), flattened.
+    pub(crate) fn painted_ops_deep(
+        &self,
+        render: waft_rendering::AnyRenderObject,
+    ) -> Vec<waft_embedder::valo::Op> {
+        self.pictures_deep(render)
+            .iter()
+            .flat_map(|picture| waft_embedder::flattened_ops(picture))
+            .collect()
+    }
+
+    /// Paints `render` at the origin into a layer of its own and collects the pictures under
+    /// it, descending into pushed layers when `deep`.
+    fn pictures_painted(
+        &self,
+        render: waft_rendering::AnyRenderObject,
+        deep: bool,
     ) -> Vec<std::sync::Arc<waft_embedder::Picture>> {
         let mut app = self.cell.borrow_mut();
         assert!(
@@ -1447,18 +1480,355 @@ impl WidgetTester {
         context.paint_child(&mut app, render, waft_embedder::Offset::ZERO);
         context.stop_recording_if_needed(&mut app);
         let mut pictures = Vec::new();
-        let mut child = container.first_child(&app);
-        while let Some(layer) = child {
-            if let Some(picture) = app
-                .handle::<waft_rendering::PictureLayer>(layer.id())
-                .and_then(|picture| picture.picture(&app))
-            {
-                pictures.push(std::sync::Arc::clone(picture));
-            }
-            child = layer.next_sibling(&app);
-        }
+        collect_pictures(&app, container, deep, &mut pictures);
         pictures
     }
+}
+
+/// Adds the pictures of the layers under `container` to `pictures`, in order, and those of the
+/// layers nested under them, depth first, when `deep`.
+fn collect_pictures(
+    app: &App,
+    container: waft_rendering::AnyContainerLayer,
+    deep: bool,
+    pictures: &mut Vec<std::sync::Arc<waft_embedder::Picture>>,
+) {
+    let mut child = container.first_child(app);
+    while let Some(layer) = child {
+        if let Some(picture) = app
+            .handle::<waft_rendering::PictureLayer>(layer.id())
+            .and_then(|picture| picture.picture(app))
+        {
+            pictures.push(std::sync::Arc::clone(picture));
+        }
+        if deep && let Some(nested) = layer.as_container_layer() {
+            collect_pictures(app, nested, deep, pictures);
+        }
+        child = layer.next_sibling(app);
+    }
+}
+
+/// The canvas method a recorded op stands for, as flutter_test's `TestRecordingCanvas` names
+/// it. Valo records `drawCircle`, `drawRRect`, `drawPath` and `drawOval` as one op; they are
+/// told apart by the path (an oval, a rounded rect, any other), and a stroked oval is the
+/// `drawPath` of `debugDisableShadows`' stand-in shadow. A `drawDRRect` is the even-odd path
+/// between two contours that `draw_drrect` records, and a `drawRRect` of a rounded rect without
+/// corners a `drawRect` (`draw_rrect`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CanvasCall {
+    DrawCircle,
+    DrawRRect,
+    DrawPath,
+    DrawDRRect,
+    DrawRect,
+    DrawShadow,
+    DrawParagraph,
+    Scale,
+    Other,
+}
+
+/// What `op` records, as the canvas method that made it.
+pub(crate) fn canvas_call_of(op: &waft_embedder::valo::Op) -> CanvasCall {
+    use waft_embedder::valo::{Op, PaintStyle};
+    match op {
+        Op::DrawPath {
+            path,
+            fill_rule,
+            paint,
+            ..
+        } => {
+            let stroked = matches!(paint.style, PaintStyle::Stroke(_));
+            if path.as_oval().is_some() && !stroked {
+                CanvasCall::DrawCircle
+            } else if path.as_round_rect().is_some() {
+                CanvasCall::DrawRRect
+            } else if is_drrect(path, *fill_rule) {
+                CanvasCall::DrawDRRect
+            } else {
+                CanvasCall::DrawPath
+            }
+        }
+        Op::DrawRect { .. } => CanvasCall::DrawRect,
+        Op::DrawShadow { .. } => CanvasCall::DrawShadow,
+        Op::GlyphRun { .. } => CanvasCall::DrawParagraph,
+        Op::Transform(matrix) => {
+            let [a, b, c, d, tx, ty] = matrix.to_affine();
+            // A scale by one is the identity, which a translation by zero is too: both read as a
+            // scale, the call Dart's `scale` matcher means.
+            if b == 0.0 && c == 0.0 && tx == 0.0 && ty == 0.0 && (a > 0.0 || d > 0.0) {
+                CanvasCall::Scale
+            } else {
+                CanvasCall::Other
+            }
+        }
+        _ => CanvasCall::Other,
+    }
+}
+
+/// Whether `path`, filled with `fill_rule`, is what `draw_drrect` records for `drawDRRect`: the
+/// area between two contours, filled even-odd. Valo keeps no record of the call, so a
+/// `drawPath` of such a path reads as a `drawDRRect` too.
+fn is_drrect(path: &waft_embedder::valo::Path, fill_rule: waft_embedder::valo::FillRule) -> bool {
+    fill_rule == waft_embedder::valo::FillRule::EvenOdd && path.flatten(1.0).len() == 2
+}
+
+/// One call of Dart's `paints` matcher, each argument checked only when given.
+#[derive(Clone, Debug)]
+pub(crate) enum PaintCall {
+    /// `..path(color:, style:, strokeWidth:)`.
+    Path {
+        color: Option<waft_embedder::Color>,
+        stroke_width: Option<f64>,
+        stroked: Option<bool>,
+    },
+    /// `..rect(color:)`.
+    Rect { color: Option<waft_embedder::Color> },
+    /// `..rrect(rrect:, color:)`.
+    RRect {
+        rrect: Option<waft_embedder::RRect>,
+        color: Option<waft_embedder::Color>,
+    },
+    /// `..drrect(color:)`.
+    DRRect { color: Option<waft_embedder::Color> },
+    /// `..circle(x:, y:, radius:, color:)`.
+    Circle {
+        x: Option<f64>,
+        y: Option<f64>,
+        radius: Option<f64>,
+        color: Option<waft_embedder::Color>,
+    },
+    /// `..shadow(elevation:, color:)`.
+    Shadow {
+        elevation: Option<f64>,
+        color: Option<waft_embedder::Color>,
+    },
+    /// `..paragraph()`.
+    Paragraph,
+    /// `..scale()`.
+    Scale,
+}
+
+impl PaintCall {
+    /// `..path(color:)`.
+    pub(crate) fn path(color: Option<waft_embedder::Color>) -> PaintCall {
+        PaintCall::Path {
+            color,
+            stroke_width: None,
+            stroked: None,
+        }
+    }
+
+    /// `..path(color:, style: PaintingStyle.stroke, strokeWidth:)`.
+    pub(crate) fn stroked_path(color: waft_embedder::Color, stroke_width: f64) -> PaintCall {
+        PaintCall::Path {
+            color: Some(color),
+            stroke_width: Some(stroke_width),
+            stroked: Some(true),
+        }
+    }
+
+    /// `..rect(color:)`.
+    pub(crate) fn rect(color: Option<waft_embedder::Color>) -> PaintCall {
+        PaintCall::Rect { color }
+    }
+
+    /// `..rrect(color:)`.
+    pub(crate) fn rrect(color: Option<waft_embedder::Color>) -> PaintCall {
+        PaintCall::RRect { rrect: None, color }
+    }
+
+    /// `..rrect(rrect:, color:)`.
+    pub(crate) fn rrect_at(
+        rrect: waft_embedder::RRect,
+        color: Option<waft_embedder::Color>,
+    ) -> PaintCall {
+        PaintCall::RRect {
+            rrect: Some(rrect),
+            color,
+        }
+    }
+
+    /// `..drrect(color:)`.
+    pub(crate) fn drrect(color: Option<waft_embedder::Color>) -> PaintCall {
+        PaintCall::DRRect { color }
+    }
+
+    /// `..circle(color:)`.
+    pub(crate) fn circle(color: Option<waft_embedder::Color>) -> PaintCall {
+        PaintCall::Circle {
+            x: None,
+            y: None,
+            radius: None,
+            color,
+        }
+    }
+
+    /// `..shadow(color:)`.
+    pub(crate) fn shadow(color: Option<waft_embedder::Color>) -> PaintCall {
+        PaintCall::Shadow {
+            elevation: None,
+            color,
+        }
+    }
+
+    /// Whether `op` is a call of this method, whatever its arguments. A stroked oval is either
+    /// call: `drawCircle` with a stroke paint, or the `drawPath` of a shadow's stand-in.
+    fn is_call(&self, op: &waft_embedder::valo::Op) -> bool {
+        let call = canvas_call_of(op);
+        let stroked_oval = matches!(
+            op,
+            waft_embedder::valo::Op::DrawPath { path, paint, .. }
+                if path.as_oval().is_some()
+                    && matches!(paint.style, waft_embedder::valo::PaintStyle::Stroke(_))
+        );
+        match self {
+            PaintCall::Path { .. } => call == CanvasCall::DrawPath,
+            PaintCall::Rect { .. } => call == CanvasCall::DrawRect,
+            // `draw_rrect` records a rounded rect without corners as `drawRect`.
+            PaintCall::RRect { rrect, .. } => {
+                call == CanvasCall::DrawRRect
+                    || (call == CanvasCall::DrawRect && rrect.is_none_or(drawn_as_rect))
+            }
+            PaintCall::DRRect { .. } => call == CanvasCall::DrawDRRect,
+            PaintCall::Circle { .. } => call == CanvasCall::DrawCircle || stroked_oval,
+            PaintCall::Shadow { .. } => call == CanvasCall::DrawShadow,
+            PaintCall::Paragraph => call == CanvasCall::DrawParagraph,
+            PaintCall::Scale => call == CanvasCall::Scale,
+        }
+    }
+
+    /// Whether `op`, a call of this method, has the arguments given, compared exactly as Dart's
+    /// predicates do, at the f32 precision Valo records in.
+    fn matches(&self, op: &waft_embedder::valo::Op) -> bool {
+        use waft_embedder::valo::{Op, PaintStyle};
+        let color_matches = |painted: waft_embedder::valo::Color,
+                             expected: &Option<waft_embedder::Color>| {
+            expected.is_none_or(|expected| colors_match(painted, expected))
+        };
+        match (self, op) {
+            (
+                PaintCall::Path {
+                    color,
+                    stroke_width,
+                    stroked,
+                },
+                Op::DrawPath { paint, .. },
+            ) => {
+                let width = match &paint.style {
+                    PaintStyle::Stroke(stroke) => Some(stroke.width),
+                    PaintStyle::Fill => None,
+                };
+                color_matches(paint.color, color)
+                    && stroked.is_none_or(|stroked| stroked == width.is_some())
+                    && stroke_width
+                        .is_none_or(|expected| width.is_some_and(|width| f32_is(width, expected)))
+            }
+            (PaintCall::Rect { color }, Op::DrawRect { paint, .. })
+            | (PaintCall::DRRect { color }, Op::DrawPath { paint, .. }) => {
+                color_matches(paint.color, color)
+            }
+            (PaintCall::RRect { rrect, color }, Op::DrawPath { path, paint, .. }) => {
+                color_matches(paint.color, color)
+                    && rrect.is_none_or(|rrect| {
+                        let mut canvas = waft_embedder::Canvas::new();
+                        waft_painting::draw_rrect(
+                            &mut canvas,
+                            rrect,
+                            &waft_embedder::Paint::default(),
+                        );
+                        let list = canvas.build();
+                        matches!(list.ops().first(), Some(Op::DrawPath { path: expected, .. }) if expected == path)
+                    })
+            }
+            (PaintCall::RRect { rrect, color }, Op::DrawRect { rect, paint, .. }) => {
+                color_matches(paint.color, color)
+                    && rrect.is_none_or(|rrect| {
+                        waft_embedder::valo::Rect::from(rrect.outer_rect()) == *rect
+                    })
+            }
+            (
+                PaintCall::Circle {
+                    x,
+                    y,
+                    radius,
+                    color,
+                },
+                Op::DrawPath { path, paint, .. },
+            ) => {
+                let Some(oval) = path.as_oval() else {
+                    return false;
+                };
+                color_matches(paint.color, color)
+                    && x.is_none_or(|x| f32_is(oval.x + oval.width / 2.0, x))
+                    && y.is_none_or(|y| f32_is(oval.y + oval.height / 2.0, y))
+                    && radius.is_none_or(|radius| f32_is(oval.width / 2.0, radius))
+            }
+            (
+                PaintCall::Shadow { elevation, color },
+                Op::DrawShadow {
+                    color: shadow,
+                    elevation: shadow_elevation,
+                    ..
+                },
+            ) => {
+                color.is_none_or(|color| colors_match(*shadow, color))
+                    && elevation.is_none_or(|elevation| f32_is(*shadow_elevation, elevation))
+            }
+            (PaintCall::Paragraph, Op::GlyphRun { .. }) | (PaintCall::Scale, Op::Transform(_)) => {
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
+/// Whether `draw_rrect` records `rrect` as a `drawRect`: every corner's radii are zero.
+fn drawn_as_rect(rrect: waft_embedder::RRect) -> bool {
+    [
+        rrect.tl_radius_x,
+        rrect.tl_radius_y,
+        rrect.tr_radius_x,
+        rrect.tr_radius_y,
+        rrect.br_radius_x,
+        rrect.br_radius_y,
+        rrect.bl_radius_x,
+        rrect.bl_radius_y,
+    ]
+    .iter()
+    .all(|radius| *radius == 0.0)
+}
+
+/// Dart's exact `==` on a value Valo recorded as an `f32`: equal within that value's rounding.
+fn f32_is(recorded: f32, expected: f64) -> bool {
+    (f64::from(recorded) - expected).abs() <= f64::from(f32::EPSILON) * expected.abs().max(1.0)
+}
+
+/// flutter_test's `_colorsMatch`: each channel within 1/255.
+pub(crate) fn colors_match(
+    painted: waft_embedder::valo::Color,
+    expected: waft_embedder::Color,
+) -> bool {
+    const LIMIT: f64 = 1.0 / 255.0;
+    (f64::from(painted.a) - expected.a).abs() < LIMIT
+        && (f64::from(painted.r) - expected.r).abs() < LIMIT
+        && (f64::from(painted.g) - expected.g).abs() < LIMIT
+        && (f64::from(painted.b) - expected.b).abs() < LIMIT
+}
+
+/// Dart's `expect(render, paints..a..b..)`: each call is the next call of its method after the
+/// last one matched, and has the arguments given; other methods' calls between are skipped.
+pub(crate) fn paints_calls(ops: &[waft_embedder::valo::Op], calls: &[PaintCall]) -> bool {
+    let mut ops = ops.iter();
+    calls.iter().all(|expected| {
+        ops.by_ref()
+            .find(|op| expected.is_call(op))
+            .is_some_and(|op| expected.matches(op))
+    })
+}
+
+/// Dart's `paintsExactlyCountTimes(method, count)`: how many calls of `call` the ops record.
+pub(crate) fn count_calls(ops: &[waft_embedder::valo::Op], call: CanvasCall) -> usize {
+    ops.iter().filter(|op| canvas_call_of(op) == call).count()
 }
 
 /// Adds `layer` and the layers under it to `layers`, depth first with a parent before its
