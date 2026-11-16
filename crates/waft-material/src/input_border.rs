@@ -2,11 +2,12 @@
 //!
 //! `InputBorder` is a trait over [`ShapeBorder`] whose `paint` takes the floating label's gap;
 //! each border's `ShapeBorder::paint` is that `paint` with Dart's default gap arguments, so a
-//! caller holding a `dyn InputBorder` names the trait: `InputBorder::paint(&*border, ..)`.
+//! caller holding an [`InputBorderRef`] names the trait: `InputBorder::paint(&*border, ..)`.
 
 use std::any::Any;
 use std::f64::consts::PI;
 use std::fmt::{self, Debug};
+use std::rc::Rc;
 
 use waft_embedder::{
     Canvas, FillRule, Offset, Paint, Path, PathBuilder, PathOperation, RRect, Radius, Rect,
@@ -46,7 +47,7 @@ pub trait InputBorder: ShapeBorder {
     fn border_side(&self) -> BorderSide;
 
     /// Creates a copy of this input border with the specified `border_side`.
-    fn copy_with(&self, border_side: Option<BorderSide>) -> Box<dyn InputBorder>;
+    fn copy_with(&self, border_side: Option<BorderSide>) -> InputBorderRef;
 
     /// True if this border will enclose the `InputDecorator`'s container.
     ///
@@ -77,31 +78,65 @@ pub trait InputBorder: ShapeBorder {
         text_direction: Option<TextDirection>,
     );
 
-    /// A heap clone typed as [`InputBorder`].
-    fn clone_input_border(&self) -> Box<dyn InputBorder>;
-
     /// Dart's `border is WidgetStateProperty<InputBorder>`: this border as the property it
     /// also is, for the borders that implement `WidgetStateProperty` (`WidgetStateInputBorder`
     /// and the deprecated `MaterialState` input borders).
-    fn as_widget_state_property(&self) -> Option<&dyn WidgetStateProperty<Box<dyn InputBorder>>> {
+    fn as_widget_state_property(&self) -> Option<&dyn WidgetStateProperty<InputBorderRef>> {
         None
     }
 }
 
-impl dyn InputBorder {
+/// An [`InputBorder`] held by value: what a Dart field or parameter typed `InputBorder`
+/// becomes; [`ShapeBorderRef`]'s sharing and equality, for the narrower type.
+#[derive(Clone)]
+pub struct InputBorderRef(Rc<dyn InputBorder>);
+
+impl InputBorderRef {
+    /// Erases an [`InputBorder`].
+    pub fn new(border: impl InputBorder) -> InputBorderRef {
+        InputBorderRef(Rc::new(border))
+    }
+
     /// No input border.
     ///
     /// Use this value with `InputDecoration.border` to specify that no border
     /// should be drawn. The `InputDecoration.collapsed` constructor sets
     /// its border to this value.
-    pub fn none() -> Box<dyn InputBorder> {
-        Box::new(NoInputBorder)
+    pub fn none() -> InputBorderRef {
+        InputBorderRef::new(NoInputBorder)
     }
 }
 
-impl Clone for Box<dyn InputBorder> {
-    fn clone(&self) -> Self {
-        self.clone_input_border()
+impl<T: InputBorder> From<T> for InputBorderRef {
+    fn from(border: T) -> InputBorderRef {
+        InputBorderRef::new(border)
+    }
+}
+
+/// Dart's `InputBorder extends ShapeBorder`: an input border is used wherever a shape is.
+impl From<InputBorderRef> for ShapeBorderRef {
+    fn from(border: InputBorderRef) -> ShapeBorderRef {
+        ShapeBorderRef::from_shared(border.0)
+    }
+}
+
+impl std::ops::Deref for InputBorderRef {
+    type Target = dyn InputBorder;
+
+    fn deref(&self) -> &dyn InputBorder {
+        &*self.0
+    }
+}
+
+impl PartialEq for InputBorderRef {
+    fn eq(&self, other: &InputBorderRef) -> bool {
+        Rc::ptr_eq(&self.0, &other.0) || self.0.eq_shape(&*other.0)
+    }
+}
+
+impl Debug for InputBorderRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        Debug::fmt(&*self.0, f)
     }
 }
 
@@ -111,20 +146,14 @@ impl PartialEq for dyn InputBorder {
     }
 }
 
-impl<T: InputBorder + 'static> From<T> for Box<dyn InputBorder> {
-    fn from(border: T) -> Box<dyn InputBorder> {
-        Box::new(border)
-    }
-}
-
 /// Dart's `T?` is `InputBorder?`: a `WidgetStateInputBorder` resolves to a border, which
-/// `resolve_as` wraps in `Some` for an `Option<Box<dyn InputBorder>>`.
-impl MaybeWidgetStateProperty<Box<dyn InputBorder>> for Box<dyn InputBorder> {
-    fn as_widget_state_property(&self) -> Option<&dyn WidgetStateProperty<Box<dyn InputBorder>>> {
+/// `resolve_as` wraps in `Some` for an `Option<InputBorderRef>`.
+impl MaybeWidgetStateProperty<InputBorderRef> for InputBorderRef {
+    fn as_widget_state_property(&self) -> Option<&dyn WidgetStateProperty<InputBorderRef>> {
         InputBorder::as_widget_state_property(&**self)
     }
 
-    fn from_resolved(value: Box<dyn InputBorder>) -> Box<dyn InputBorder> {
+    fn from_resolved(value: InputBorderRef) -> InputBorderRef {
         value
     }
 }
@@ -229,8 +258,8 @@ impl InputBorder for NoInputBorder {
         BorderSide::NONE
     }
 
-    fn copy_with(&self, _border_side: Option<BorderSide>) -> Box<dyn InputBorder> {
-        Box::new(NoInputBorder)
+    fn copy_with(&self, _border_side: Option<BorderSide>) -> InputBorderRef {
+        InputBorderRef::new(NoInputBorder)
     }
 
     fn is_outline(&self) -> bool {
@@ -247,10 +276,6 @@ impl InputBorder for NoInputBorder {
         _text_direction: Option<TextDirection>,
     ) {
         // Do not paint.
-    }
-
-    fn clone_input_border(&self) -> Box<dyn InputBorder> {
-        Box::new(NoInputBorder)
     }
 }
 
@@ -446,8 +471,8 @@ impl InputBorder for UnderlineInputBorder {
         self.border_side
     }
 
-    fn copy_with(&self, border_side: Option<BorderSide>) -> Box<dyn InputBorder> {
-        Box::new(UnderlineInputBorder::copy_with(self, border_side, None))
+    fn copy_with(&self, border_side: Option<BorderSide>) -> InputBorderRef {
+        InputBorderRef::new(UnderlineInputBorder::copy_with(self, border_side, None))
     }
 
     fn is_outline(&self) -> bool {
@@ -508,10 +533,6 @@ impl InputBorder for UnderlineInputBorder {
                 &self.border_side.to_paint(),
             );
         }
-    }
-
-    fn clone_input_border(&self) -> Box<dyn InputBorder> {
-        Box::new(*self)
     }
 }
 
@@ -870,8 +891,8 @@ impl InputBorder for OutlineInputBorder {
         self.border_side
     }
 
-    fn copy_with(&self, border_side: Option<BorderSide>) -> Box<dyn InputBorder> {
-        Box::new(OutlineInputBorder::copy_with(self, border_side, None, None))
+    fn copy_with(&self, border_side: Option<BorderSide>) -> InputBorderRef {
+        InputBorderRef::new(OutlineInputBorder::copy_with(self, border_side, None, None))
     }
 
     fn is_outline(&self) -> bool {
@@ -920,10 +941,6 @@ impl InputBorder for OutlineInputBorder {
             }
             _ => draw_rrect(canvas, center, &paint),
         }
-    }
-
-    fn clone_input_border(&self) -> Box<dyn InputBorder> {
-        Box::new(*self)
     }
 }
 
@@ -1167,8 +1184,8 @@ impl InputBorder for ShapedInputBorder {
         self.border_side
     }
 
-    fn copy_with(&self, border_side: Option<BorderSide>) -> Box<dyn InputBorder> {
-        Box::new(ShapedInputBorder::copy_with(self, border_side, None, None))
+    fn copy_with(&self, border_side: Option<BorderSide>) -> InputBorderRef {
+        InputBorderRef::new(ShapedInputBorder::copy_with(self, border_side, None, None))
     }
 
     fn is_outline(&self) -> bool {
@@ -1228,10 +1245,6 @@ impl InputBorder for ShapedInputBorder {
             },
         }
     }
-
-    fn clone_input_border(&self) -> Box<dyn InputBorder> {
-        Box::new(self.clone())
-    }
 }
 
 impl Debug for ShapedInputBorder {
@@ -1246,32 +1259,32 @@ impl Debug for ShapedInputBorder {
 /// A `dyn ShapeBorder` cannot be asked for a supertrait it does not name, so a border of
 /// another crate's `InputBorder` type answers `None`.
 #[allow(deprecated)]
-pub(crate) fn input_border_of(shape: &dyn ShapeBorder) -> Option<Box<dyn InputBorder>> {
+pub(crate) fn input_border_of(shape: &dyn ShapeBorder) -> Option<InputBorderRef> {
     let any = shape.as_any();
     if let Some(border) = any.downcast_ref::<NoInputBorder>() {
-        return Some(border.clone_input_border());
+        return Some(InputBorderRef::new(*border));
     }
     if let Some(border) = any.downcast_ref::<UnderlineInputBorder>() {
-        return Some(border.clone_input_border());
+        return Some(InputBorderRef::new(*border));
     }
     if let Some(border) = any.downcast_ref::<OutlineInputBorder>() {
-        return Some(border.clone_input_border());
+        return Some(InputBorderRef::new(*border));
     }
     if let Some(border) = any.downcast_ref::<ShapedInputBorder>() {
-        return Some(border.clone_input_border());
+        return Some(InputBorderRef::new(border.clone()));
     }
     if let Some(border) = any.downcast_ref::<crate::material_state::WidgetStateInputBorder>() {
-        return Some(border.clone_input_border());
+        return Some(InputBorderRef::new(border.clone()));
     }
     if let Some(border) =
         any.downcast_ref::<crate::material_state::MaterialStateOutlineInputBorder>()
     {
-        return Some(border.clone_input_border());
+        return Some(InputBorderRef::new(border.clone()));
     }
     if let Some(border) =
         any.downcast_ref::<crate::material_state::MaterialStateUnderlineInputBorder>()
     {
-        return Some(border.clone_input_border());
+        return Some(InputBorderRef::new(border.clone()));
     }
     None
 }

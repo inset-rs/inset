@@ -1,9 +1,9 @@
 //! Flutter counterpart: `painting/gradient.dart`.
 //!
-//! A gradient is a value: [`Gradient`] is Dart's abstract class as a trait, held as
-//! `Box<dyn Gradient>` the way [`ShapeBorder`](crate::ShapeBorder) is, and its transform is a
-//! shared [`GradientTransformRef`] so that every copy a gradient makes of itself (`scale`,
-//! `with_opacity`, `lerp`) holds the same transform object, as Dart's copies do.
+//! A gradient is a value: [`Gradient`] is Dart's abstract class as a trait, held as a
+//! [`GradientRef`] the way [`ShapeBorder`](crate::ShapeBorder) is held as a `ShapeBorderRef`,
+//! and its transform is a shared [`GradientTransformRef`] so that every copy a gradient makes of
+//! itself (`scale`, `with_opacity`, `lerp`) holds the same transform object, as Dart's copies do.
 //!
 //! `create_shader` builds Valo's [`Shader`] through the dart:ui `Gradient.linear`, `.radial` and
 //! `.sweep` constructors at the bottom of this file; what Valo's shader has no room for is said
@@ -231,11 +231,11 @@ pub trait Gradient: Any + Debug {
     /// scaling a gradient with values from 1.0 to 0.0 over time should cause the
     /// gradient to smoothly disappear.
     ///
-    /// Typically this is the same as interpolating from null (with [`lerp`](<dyn Gradient>::lerp)).
-    fn scale(&self, factor: f64) -> Box<dyn Gradient>;
+    /// Typically this is the same as interpolating from null (with [`lerp`](GradientRef::lerp)).
+    fn scale(&self, factor: f64) -> GradientRef;
 
     /// Returns a new [`Gradient`] with each color set to the given opacity.
-    fn with_opacity(&self, opacity: f64) -> Box<dyn Gradient>;
+    fn with_opacity(&self, opacity: f64) -> GradientRef;
 
     /// Returns a copy of this gradient with all of its [`colors`](Self::colors) replaced by the
     /// given `color`.
@@ -244,15 +244,15 @@ pub trait Gradient: Any + Debug {
     /// subclass-specific positioning) is preserved, so the result paints as a
     /// uniform `color`. This is useful to represent a solid color as a gradient,
     /// for example when interpolating between a color and a gradient with
-    /// [`lerp`](<dyn Gradient>::lerp).
+    /// [`lerp`](GradientRef::lerp).
     ///
     /// Subclasses should override this method to preserve their own geometry. The
     /// base implementation returns a [`LinearGradient`]; this is sufficient because
     /// a gradient with uniform colors paints as a solid color regardless of its
     /// geometry.
     #[allow(clippy::wrong_self_convention)]
-    fn from_color(&self, color: Color) -> Box<dyn Gradient> {
-        Box::new(LinearGradient {
+    fn from_color(&self, color: Color) -> GradientRef {
+        GradientRef::new(LinearGradient {
             stops: self.stops().map(<[f64]>::to_vec),
             transform: self.transform().cloned(),
             ..LinearGradient::new(vec![color; self.colors().len()])
@@ -262,14 +262,14 @@ pub trait Gradient: Any + Debug {
     /// Linearly interpolates from another [`Gradient`] to `this`.
     ///
     /// When implementing this method in subclasses, return None if this class
-    /// cannot interpolate from `a`. In that case, [`lerp`](<dyn Gradient>::lerp) will try `a`'s
+    /// cannot interpolate from `a`. In that case, [`lerp`](GradientRef::lerp) will try `a`'s
     /// [`lerp_to`](Self::lerp_to) method instead.
     ///
     /// If `a` is None, this must not return None. The base class implements this
     /// by deferring to [`scale`](Self::scale).
     ///
-    /// Instead of calling this directly, use [`lerp`](<dyn Gradient>::lerp).
-    fn lerp_from(&self, a: Option<&dyn Gradient>, t: f64) -> Option<Box<dyn Gradient>> {
+    /// Instead of calling this directly, use [`lerp`](GradientRef::lerp).
+    fn lerp_from(&self, a: Option<&dyn Gradient>, t: f64) -> Option<GradientRef> {
         if a.is_none() {
             return Some(self.scale(t));
         }
@@ -281,22 +281,19 @@ pub trait Gradient: Any + Debug {
     /// This is called if `b`'s [`lerp_to`](Self::lerp_to) did not know how to handle this class.
     ///
     /// When implementing this method in subclasses, return None if this class
-    /// cannot interpolate from `b`. In that case, [`lerp`](<dyn Gradient>::lerp) will apply a
+    /// cannot interpolate from `b`. In that case, [`lerp`](GradientRef::lerp) will apply a
     /// default behavior instead.
     ///
     /// If `b` is None, this must not return None. The base class implements this
     /// by deferring to [`scale`](Self::scale).
     ///
-    /// Instead of calling this directly, use [`lerp`](<dyn Gradient>::lerp).
-    fn lerp_to(&self, b: Option<&dyn Gradient>, t: f64) -> Option<Box<dyn Gradient>> {
+    /// Instead of calling this directly, use [`lerp`](GradientRef::lerp).
+    fn lerp_to(&self, b: Option<&dyn Gradient>, t: f64) -> Option<GradientRef> {
         if b.is_none() {
             return Some(self.scale(1.0 - t));
         }
         None
     }
-
-    /// A heap clone, so decorations and lerp can duplicate like Dart.
-    fn clone_box(&self) -> Box<dyn Gradient>;
 
     /// Downcast support for `is` / `as` in Dart.
     fn as_any(&self) -> &dyn Any;
@@ -324,30 +321,51 @@ impl dyn Gradient {
             .collect()
     }
 
+    fn resolve_transform(
+        &self,
+        bounds: Rect,
+        text_direction: Option<TextDirection>,
+    ) -> Option<Matrix4> {
+        self.transform()
+            .and_then(|transform| transform.transform(bounds, text_direction))
+    }
+}
+
+/// A [`Gradient`] held by value: what a Dart field or parameter typed `Gradient` becomes.
+///
+/// Clones share one gradient, as Dart's references do, so a gradient handed on keeps its
+/// identity. Two refs are equal when they share a gradient or when
+/// [`eq_gradient`](Gradient::eq_gradient) says so, Dart's `==`.
+#[derive(Clone)]
+pub struct GradientRef(Rc<dyn Gradient>);
+
+impl GradientRef {
+    /// Erases a [`Gradient`].
+    pub fn new(gradient: impl Gradient) -> GradientRef {
+        GradientRef(Rc::new(gradient))
+    }
+
     /// Linearly interpolates between two [`Gradient`]s.
     ///
     /// This defers to `b`'s [`lerp_to`](Gradient::lerp_to) function if `b` is not None. If `b` is
     /// None or if its [`lerp_to`](Gradient::lerp_to) returns None, it uses `a`'s
     /// [`lerp_from`](Gradient::lerp_from) function instead. If both return None, it returns `a`
     /// before `t == 0.5` and `b` after `t == 0.5`.
-    pub fn lerp(
-        a: Option<&dyn Gradient>,
-        b: Option<&dyn Gradient>,
-        t: f64,
-    ) -> Option<Box<dyn Gradient>> {
+    pub fn lerp(a: Option<&GradientRef>, b: Option<&GradientRef>, t: f64) -> Option<GradientRef> {
         match (a, b) {
             (None, None) => return None,
-            (Some(a), Some(b)) if std::ptr::addr_eq(a, b) => return Some(a.clone_box()),
+            (Some(a), Some(b)) if Rc::ptr_eq(&a.0, &b.0) => return Some(a.clone()),
             _ => {}
         }
+        let (a_gradient, b_gradient) = (a.map(|a| &*a.0), b.map(|b| &*b.0));
         let mut result = None;
-        if let Some(b) = b {
-            result = b.lerp_from(a, t); // if a is None, this must return Some
+        if let Some(b) = b_gradient {
+            result = b.lerp_from(a_gradient, t); // if a is None, this must return Some
         }
         if result.is_none()
-            && let Some(a) = a
+            && let Some(a) = a_gradient
         {
-            result = a.lerp_to(b, t); // if b is None, this must return Some
+            result = a.lerp_to(b_gradient, t); // if b is None, this must return Some
         }
         if result.is_some() {
             return result;
@@ -359,26 +377,31 @@ impl dyn Gradient {
             b.unwrap().scale((t - 0.5) * 2.0)
         })
     }
+}
 
-    fn resolve_transform(
-        &self,
-        bounds: Rect,
-        text_direction: Option<TextDirection>,
-    ) -> Option<Matrix4> {
-        self.transform()
-            .and_then(|transform| transform.transform(bounds, text_direction))
+impl<T: Gradient> From<T> for GradientRef {
+    fn from(gradient: T) -> GradientRef {
+        GradientRef::new(gradient)
     }
 }
 
-impl<T: Gradient> From<T> for Box<dyn Gradient> {
-    fn from(gradient: T) -> Box<dyn Gradient> {
-        Box::new(gradient)
+impl std::ops::Deref for GradientRef {
+    type Target = dyn Gradient;
+
+    fn deref(&self) -> &dyn Gradient {
+        &*self.0
     }
 }
 
-impl Clone for Box<dyn Gradient> {
-    fn clone(&self) -> Self {
-        self.clone_box()
+impl PartialEq for GradientRef {
+    fn eq(&self, other: &GradientRef) -> bool {
+        Rc::ptr_eq(&self.0, &other.0) || self.0.eq_gradient(&*other.0)
+    }
+}
+
+impl Debug for GradientRef {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        Debug::fmt(&*self.0, f)
     }
 }
 
@@ -388,8 +411,8 @@ impl PartialEq for dyn Gradient {
     }
 }
 
-fn boxed<T: Gradient>(gradient: Option<T>) -> Option<Box<dyn Gradient>> {
-    gradient.map(|gradient| Box::new(gradient) as Box<dyn Gradient>)
+fn boxed<T: Gradient>(gradient: Option<T>) -> Option<GradientRef> {
+    gradient.map(GradientRef::new)
 }
 
 /// Dart's `TileMode.toString()`.
@@ -603,19 +626,19 @@ impl Gradient for LinearGradient {
         )
     }
 
-    fn scale(&self, factor: f64) -> Box<dyn Gradient> {
-        Box::new(LinearGradient::scale(self, factor))
+    fn scale(&self, factor: f64) -> GradientRef {
+        GradientRef::new(LinearGradient::scale(self, factor))
     }
 
-    fn with_opacity(&self, opacity: f64) -> Box<dyn Gradient> {
-        Box::new(LinearGradient::with_opacity(self, opacity))
+    fn with_opacity(&self, opacity: f64) -> GradientRef {
+        GradientRef::new(LinearGradient::with_opacity(self, opacity))
     }
 
-    fn from_color(&self, color: Color) -> Box<dyn Gradient> {
-        Box::new(LinearGradient::from_color(self, color))
+    fn from_color(&self, color: Color) -> GradientRef {
+        GradientRef::new(LinearGradient::from_color(self, color))
     }
 
-    fn lerp_from(&self, a: Option<&dyn Gradient>, t: f64) -> Option<Box<dyn Gradient>> {
+    fn lerp_from(&self, a: Option<&dyn Gradient>, t: f64) -> Option<GradientRef> {
         match a {
             None => boxed(LinearGradient::lerp(None, Some(self), t)),
             Some(a) => {
@@ -625,7 +648,7 @@ impl Gradient for LinearGradient {
         }
     }
 
-    fn lerp_to(&self, b: Option<&dyn Gradient>, t: f64) -> Option<Box<dyn Gradient>> {
+    fn lerp_to(&self, b: Option<&dyn Gradient>, t: f64) -> Option<GradientRef> {
         match b {
             None => boxed(LinearGradient::lerp(Some(self), None, t)),
             Some(b) => {
@@ -633,10 +656,6 @@ impl Gradient for LinearGradient {
                 boxed(LinearGradient::lerp(Some(self), Some(b), t))
             }
         }
-    }
-
-    fn clone_box(&self) -> Box<dyn Gradient> {
-        Box::new(self.clone())
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -926,19 +945,19 @@ impl Gradient for RadialGradient {
         )
     }
 
-    fn scale(&self, factor: f64) -> Box<dyn Gradient> {
-        Box::new(RadialGradient::scale(self, factor))
+    fn scale(&self, factor: f64) -> GradientRef {
+        GradientRef::new(RadialGradient::scale(self, factor))
     }
 
-    fn with_opacity(&self, opacity: f64) -> Box<dyn Gradient> {
-        Box::new(RadialGradient::with_opacity(self, opacity))
+    fn with_opacity(&self, opacity: f64) -> GradientRef {
+        GradientRef::new(RadialGradient::with_opacity(self, opacity))
     }
 
-    fn from_color(&self, color: Color) -> Box<dyn Gradient> {
-        Box::new(RadialGradient::from_color(self, color))
+    fn from_color(&self, color: Color) -> GradientRef {
+        GradientRef::new(RadialGradient::from_color(self, color))
     }
 
-    fn lerp_from(&self, a: Option<&dyn Gradient>, t: f64) -> Option<Box<dyn Gradient>> {
+    fn lerp_from(&self, a: Option<&dyn Gradient>, t: f64) -> Option<GradientRef> {
         match a {
             None => boxed(RadialGradient::lerp(None, Some(self), t)),
             Some(a) => {
@@ -948,7 +967,7 @@ impl Gradient for RadialGradient {
         }
     }
 
-    fn lerp_to(&self, b: Option<&dyn Gradient>, t: f64) -> Option<Box<dyn Gradient>> {
+    fn lerp_to(&self, b: Option<&dyn Gradient>, t: f64) -> Option<GradientRef> {
         match b {
             None => boxed(RadialGradient::lerp(Some(self), None, t)),
             Some(b) => {
@@ -956,10 +975,6 @@ impl Gradient for RadialGradient {
                 boxed(RadialGradient::lerp(Some(self), Some(b), t))
             }
         }
-    }
-
-    fn clone_box(&self) -> Box<dyn Gradient> {
-        Box::new(self.clone())
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -1227,19 +1242,19 @@ impl Gradient for SweepGradient {
         )
     }
 
-    fn scale(&self, factor: f64) -> Box<dyn Gradient> {
-        Box::new(SweepGradient::scale(self, factor))
+    fn scale(&self, factor: f64) -> GradientRef {
+        GradientRef::new(SweepGradient::scale(self, factor))
     }
 
-    fn with_opacity(&self, opacity: f64) -> Box<dyn Gradient> {
-        Box::new(SweepGradient::with_opacity(self, opacity))
+    fn with_opacity(&self, opacity: f64) -> GradientRef {
+        GradientRef::new(SweepGradient::with_opacity(self, opacity))
     }
 
-    fn from_color(&self, color: Color) -> Box<dyn Gradient> {
-        Box::new(SweepGradient::from_color(self, color))
+    fn from_color(&self, color: Color) -> GradientRef {
+        GradientRef::new(SweepGradient::from_color(self, color))
     }
 
-    fn lerp_from(&self, a: Option<&dyn Gradient>, t: f64) -> Option<Box<dyn Gradient>> {
+    fn lerp_from(&self, a: Option<&dyn Gradient>, t: f64) -> Option<GradientRef> {
         match a {
             None => boxed(SweepGradient::lerp(None, Some(self), t)),
             Some(a) => {
@@ -1249,7 +1264,7 @@ impl Gradient for SweepGradient {
         }
     }
 
-    fn lerp_to(&self, b: Option<&dyn Gradient>, t: f64) -> Option<Box<dyn Gradient>> {
+    fn lerp_to(&self, b: Option<&dyn Gradient>, t: f64) -> Option<GradientRef> {
         match b {
             None => boxed(SweepGradient::lerp(Some(self), None, t)),
             Some(b) => {
@@ -1257,10 +1272,6 @@ impl Gradient for SweepGradient {
                 boxed(SweepGradient::lerp(Some(self), Some(b), t))
             }
         }
-    }
-
-    fn clone_box(&self) -> Box<dyn Gradient> {
-        Box::new(self.clone())
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -2143,7 +2154,12 @@ mod tests {
             .radius(10.0)
             .stops(vec![0.0, 1.0]);
         let lerp = |a: &RadialGradient, b: &RadialGradient, t| {
-            <dyn Gradient>::lerp(Some(a), Some(b), t).unwrap()
+            GradientRef::lerp(
+                Some(&GradientRef::new(a.clone())),
+                Some(&GradientRef::new(b.clone())),
+                t,
+            )
+            .unwrap()
         };
 
         assert_matches_radial(
@@ -2178,8 +2194,14 @@ mod tests {
             .begin(AlignmentGeometry::TOP_LEFT)
             .end(AlignmentGeometry::BOTTOM_RIGHT);
         let test_gradient2 = RadialGradient::new(colors(&[0x44444444, 0x88888888])).radius(20.0);
-        let lerp =
-            |t| <dyn Gradient>::lerp(Some(&test_gradient1), Some(&test_gradient2), t).unwrap();
+        let lerp = |t| {
+            GradientRef::lerp(
+                Some(&GradientRef::new(test_gradient1.clone())),
+                Some(&GradientRef::new(test_gradient2.clone())),
+                t,
+            )
+            .unwrap()
+        };
 
         assert!(lerp(0.0).eq_gradient(&test_gradient1));
         assert!(lerp(1.0).eq_gradient(&test_gradient2));

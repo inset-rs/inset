@@ -19,7 +19,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - fractional_offset.rs → fractional_offset.dart
 - text_scaler.rs → text_scaler.dart
 - notched_shapes.rs → notched_shapes.dart
-- box_border.rs → box_border.dart
 - circle_border.rs → circle_border.dart
 - oval_border.rs → oval_border.dart
 - rounded_rectangle_border.rs → rounded_rectangle_border.dart
@@ -29,7 +28,6 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
 - placeholder_span.rs → placeholder_span.dart
 - image_stream.rs → image_stream.dart (ImageInfo, ImageStreamListener, completer listener/keep-alive lifetime)
 - image_cache.rs → image_cache.dart (pending/live/LRU tracking, limits, status, and post-frame retention release)
-- gradient.rs → gradient.dart (with the dart:ui `Gradient.linear`, `.radial` and `.sweep` it calls)
 
 ## borders.rs (`AnyBorderSide`), text_style.rs (`AnyTextStyle`) → the `BorderSide` and `TextStyle` subclass mechanism
 
@@ -37,11 +35,11 @@ Ported against: ed2132410ee94b5a590cb7f67cee7a6ea9101a60
   Reason: language — `BorderSide` and `TextStyle` are values here and cannot be subclassed.
   Affect: only the fields that resolve a widget-state value hold these types; a side or style that reaches any other field has dropped its payload and no longer resolves or compares as its subclass.
 
-## borders.rs, decoration.rs → borders.dart, decoration.dart (`ShapeBorderRef`, `OutlinedBorderRef`, `DecorationRef`)
+## borders.rs, box_border.rs, decoration.rs, gradient.rs → borders.dart, box_border.dart, decoration.dart, gradient.dart (`ShapeBorderRef`, `OutlinedBorderRef`, `BoxBorderRef`, `DecorationRef`, `GradientRef`)
 
-- Change: a field or parameter Dart types `ShapeBorder`, `OutlinedBorder` or `Decoration` holds a `ShapeBorderRef`, `OutlinedBorderRef` or `DecorationRef`, which share one value between clones and are equal when they share it or when `eq_shape` / `eq_decoration` says so; a shared border becomes an `OutlinedBorderRef` through `ShapeBorder::into_outlined_border`, which every `OutlinedBorder` answers with `Some(self)`.
+- Change: a field or parameter Dart types `ShapeBorder`, `OutlinedBorder`, `BoxBorder`, `Decoration` or `Gradient` holds a `ShapeBorderRef`, `OutlinedBorderRef`, `BoxBorderRef`, `DecorationRef` or `GradientRef` (and waft-material's `InputBorder` an `InputBorderRef`), which share one value between clones and are equal when they share it or when `eq_shape` / `eq_decoration` / `eq_gradient` says so; a shared border becomes an `OutlinedBorderRef` or a `BoxBorderRef` through `ShapeBorder::into_outlined_border` or `into_box_border`, which every `OutlinedBorder` or `BoxBorder` answers with `Some(self)`.
   Reason: language — a Rust trait object has no identity of its own, a trait method on `&self` cannot hand out the shared value it is called on, and one trait object cannot be cast to another (Dart's `as OutlinedBorder`).
-  Affect: an `OutlinedBorder` implemented outside Waft that does not override `into_outlined_border` is not seen as outlined where a shared border is read as one: `OutlinedBorderRef::lerp` panics on it, as Dart's `as OutlinedBorder` does on a result of another kind, and `RawMaterialButton` does not resolve it by state; an implementation method Dart writes as `return this` (a `lerpFrom` or `copyWith` that changes nothing) returns a new value, unequal to the old one under identity equality.
+  Affect: an `OutlinedBorder` implemented outside Waft that does not override `into_outlined_border` is not seen as outlined where a shared border is read as one (nor a `BoxBorder` that does not override `into_box_border` as a box border): `OutlinedBorderRef::lerp` and `BoxBorderRef::lerp` panic on it, as Dart's `as OutlinedBorder` and `as BoxBorder?` do on a result of another kind, and `RawMaterialButton` does not resolve it by state; an implementation method Dart writes as `return this` (a `lerpFrom` or `copyWith` that changes nothing) returns a new value, unequal to the old one under identity equality.
 
 ## colors.rs → colors.dart (+ the `Color` subclass mechanism)
 

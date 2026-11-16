@@ -2,6 +2,7 @@
 
 use std::any::Any;
 use std::fmt::{Debug, Formatter, Result as FmtResult};
+use std::rc::Rc;
 
 use waft_embedder::{Canvas, Paint, PaintStyle, Path, PathBuilder, Stroke};
 use waft_embedder::{Color, Offset, RRect, Radius, Rect};
@@ -42,9 +43,6 @@ pub trait BoxBorder: ShapeBorder {
     /// typically more efficient to paint.
     fn is_uniform(&self) -> bool;
 
-    /// A heap clone typed as [`BoxBorder`].
-    fn clone_box_border(&self) -> Box<dyn BoxBorder>;
-
     /// Paints the border within the given [`Rect`] on the given [`Canvas`].
     ///
     /// This is an extension of the [`ShapeBorder::paint`] method. It allows
@@ -61,9 +59,134 @@ pub trait BoxBorder: ShapeBorder {
     );
 }
 
-impl<T: BoxBorder + 'static> From<T> for Box<dyn BoxBorder> {
-    fn from(border: T) -> Box<dyn BoxBorder> {
-        Box::new(border)
+/// A [`BoxBorder`] held by value: what a Dart field or parameter typed `BoxBorder` becomes;
+/// [`ShapeBorderRef`]'s sharing and equality, for the narrower type.
+#[derive(Clone)]
+pub struct BoxBorderRef(Rc<dyn BoxBorder>);
+
+impl BoxBorderRef {
+    /// Erases a [`BoxBorder`].
+    pub fn new(border: impl BoxBorder) -> BoxBorderRef {
+        BoxBorderRef(Rc::new(border))
+    }
+
+    pub(crate) fn from_rc(border: Rc<dyn BoxBorder>) -> BoxBorderRef {
+        BoxBorderRef(border)
+    }
+
+    /// Linearly interpolate between two borders.
+    ///
+    /// If a border is null, it is treated as having four [`BorderSide::NONE`]
+    /// borders.
+    pub fn lerp(
+        a: Option<&BoxBorderRef>,
+        b: Option<&BoxBorderRef>,
+        t: f64,
+    ) -> Option<BoxBorderRef> {
+        match (a, b) {
+            (None, None) => return None,
+            (Some(a), Some(b)) if Rc::ptr_eq(&a.0, &b.0) => return Some(a.clone()),
+            _ => {}
+        }
+        let (a_ref, b_ref) = (a, b);
+        let (a, b) = (a.map(|a| &*a.0), b.map(|b| &*b.0));
+        let a_is_border = a.is_none()
+            || a.and_then(|border| border.as_any().downcast_ref::<Border>())
+                .is_some();
+        let b_is_border = b.is_none()
+            || b.and_then(|border| border.as_any().downcast_ref::<Border>())
+                .is_some();
+        if a_is_border && b_is_border {
+            return Border::lerp(
+                a.and_then(|border| border.as_any().downcast_ref::<Border>())
+                    .copied(),
+                b.and_then(|border| border.as_any().downcast_ref::<Border>())
+                    .copied(),
+                t,
+            )
+            .map(BoxBorderRef::new);
+        }
+        let a_is_directional = a.is_none()
+            || a.and_then(|border| border.as_any().downcast_ref::<BorderDirectional>())
+                .is_some();
+        let b_is_directional = b.is_none()
+            || b.and_then(|border| border.as_any().downcast_ref::<BorderDirectional>())
+                .is_some();
+        if a_is_directional && b_is_directional {
+            return BorderDirectional::lerp(
+                a.and_then(|border| border.as_any().downcast_ref::<BorderDirectional>())
+                    .copied(),
+                b.and_then(|border| border.as_any().downcast_ref::<BorderDirectional>())
+                    .copied(),
+                t,
+            )
+            .map(BoxBorderRef::new);
+        }
+        let flip = b
+            .and_then(|border| border.as_any().downcast_ref::<Border>())
+            .is_some()
+            && a.and_then(|border| border.as_any().downcast_ref::<BorderDirectional>())
+                .is_some();
+        let (a_ref, b_ref, t) = if flip {
+            (b_ref, a_ref, 1.0 - t)
+        } else {
+            (a_ref, b_ref, t)
+        };
+        let (a, b) = (a_ref.map(|a| &*a.0), b_ref.map(|b| &*b.0));
+        if let (Some(a), Some(b)) = (
+            a.and_then(|border| border.as_any().downcast_ref::<Border>())
+                .copied(),
+            b.and_then(|border| border.as_any().downcast_ref::<BorderDirectional>())
+                .copied(),
+        ) {
+            return Some(lerp_border_to_directional(a, b, t));
+        }
+        let result = b
+            .and_then(|b| b.lerp_from(a.map(|a| a as &dyn ShapeBorder), t))
+            .or_else(|| a.and_then(|a| a.lerp_to(b.map(|b| b as &dyn ShapeBorder), t)));
+        // Dart's `result as BoxBorder? ?? (t < 0.5 ? a : b)`: a lerp of two box borders that
+        // gives another kind of border is a type error.
+        match result {
+            Some(result) => Some(
+                result
+                    .as_box_border_ref()
+                    .expect("the lerp of two box borders is a BoxBorder"),
+            ),
+            None if t < 0.5 => a_ref.cloned(),
+            None => b_ref.cloned(),
+        }
+    }
+}
+
+impl<T: BoxBorder> From<T> for BoxBorderRef {
+    fn from(border: T) -> BoxBorderRef {
+        BoxBorderRef::new(border)
+    }
+}
+
+impl From<BoxBorderRef> for ShapeBorderRef {
+    fn from(border: BoxBorderRef) -> ShapeBorderRef {
+        ShapeBorderRef::from_shared(border.0)
+    }
+}
+
+impl std::ops::Deref for BoxBorderRef {
+    type Target = dyn BoxBorder;
+
+    fn deref(&self) -> &dyn BoxBorder {
+        &*self.0
+    }
+}
+
+impl PartialEq for BoxBorderRef {
+    fn eq(&self, other: &BoxBorderRef) -> bool {
+        Rc::ptr_eq(&self.0, &other.0) || self.0.eq_shape(&*other.0)
+    }
+}
+
+impl Debug for BoxBorderRef {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        Debug::fmt(&*self.0, f)
     }
 }
 
@@ -111,88 +234,6 @@ impl dyn BoxBorder {
             end,
             bottom,
         }
-    }
-
-    /// Linearly interpolate between two borders.
-    ///
-    /// If a border is null, it is treated as having four [`BorderSide::NONE`]
-    /// borders.
-    pub fn lerp(
-        a: Option<&dyn BoxBorder>,
-        b: Option<&dyn BoxBorder>,
-        t: f64,
-    ) -> Option<Box<dyn BoxBorder>> {
-        match (a, b) {
-            (None, None) => return None,
-            (Some(a), Some(b)) if std::ptr::eq(a, b) => return Some(a.clone_box_border()),
-            _ => {}
-        }
-        let a_is_border = a.is_none()
-            || a.and_then(|border| border.as_any().downcast_ref::<Border>())
-                .is_some();
-        let b_is_border = b.is_none()
-            || b.and_then(|border| border.as_any().downcast_ref::<Border>())
-                .is_some();
-        if a_is_border && b_is_border {
-            return Border::lerp(
-                a.and_then(|border| border.as_any().downcast_ref::<Border>())
-                    .copied(),
-                b.and_then(|border| border.as_any().downcast_ref::<Border>())
-                    .copied(),
-                t,
-            )
-            .map(|border| Box::new(border) as Box<dyn BoxBorder>);
-        }
-        let a_is_directional = a.is_none()
-            || a.and_then(|border| border.as_any().downcast_ref::<BorderDirectional>())
-                .is_some();
-        let b_is_directional = b.is_none()
-            || b.and_then(|border| border.as_any().downcast_ref::<BorderDirectional>())
-                .is_some();
-        if a_is_directional && b_is_directional {
-            return BorderDirectional::lerp(
-                a.and_then(|border| border.as_any().downcast_ref::<BorderDirectional>())
-                    .copied(),
-                b.and_then(|border| border.as_any().downcast_ref::<BorderDirectional>())
-                    .copied(),
-                t,
-            )
-            .map(|border| Box::new(border) as Box<dyn BoxBorder>);
-        }
-        let (a, b, t) = if b
-            .and_then(|border| border.as_any().downcast_ref::<Border>())
-            .is_some()
-            && a.and_then(|border| border.as_any().downcast_ref::<BorderDirectional>())
-                .is_some()
-        {
-            (b, a, 1.0 - t)
-        } else {
-            (a, b, t)
-        };
-        if let (Some(a), Some(b)) = (
-            a.and_then(|border| border.as_any().downcast_ref::<Border>())
-                .copied(),
-            b.and_then(|border| border.as_any().downcast_ref::<BorderDirectional>())
-                .copied(),
-        ) {
-            return Some(lerp_border_to_directional(a, b, t));
-        }
-        let result = b
-            .and_then(|b| b.lerp_from(a.map(|a| a as &dyn ShapeBorder), t))
-            .or_else(|| a.and_then(|a| a.lerp_to(b.map(|b| b as &dyn ShapeBorder), t)));
-        result
-            .and_then(|result| {
-                result
-                    .as_box_border()
-                    .map(|border| border.clone_box_border())
-            })
-            .or_else(|| {
-                if t < 0.5 {
-                    a.map(BoxBorder::clone_box_border)
-                } else {
-                    b.map(BoxBorder::clone_box_border)
-                }
-            })
     }
 
     /// Paints a Border with different widths, styles and strokeAligns, on any
@@ -248,15 +289,9 @@ impl dyn BoxBorder {
     }
 }
 
-impl Clone for Box<dyn BoxBorder> {
-    fn clone(&self) -> Self {
-        self.clone_box_border()
-    }
-}
-
-fn lerp_border_to_directional(a: Border, b: BorderDirectional, t: f64) -> Box<dyn BoxBorder> {
+fn lerp_border_to_directional(a: Border, b: BorderDirectional, t: f64) -> BoxBorderRef {
     if b.start == BorderSide::NONE && b.end == BorderSide::NONE {
-        return Box::new(Border {
+        return BoxBorderRef::new(Border {
             top: BorderSide::lerp(a.top, b.top, t),
             right: BorderSide::lerp(a.right, BorderSide::NONE, t),
             bottom: BorderSide::lerp(a.bottom, b.bottom, t),
@@ -264,7 +299,7 @@ fn lerp_border_to_directional(a: Border, b: BorderDirectional, t: f64) -> Box<dy
         });
     }
     if a.left == BorderSide::NONE && a.right == BorderSide::NONE {
-        return Box::new(BorderDirectional {
+        return BoxBorderRef::new(BorderDirectional {
             top: BorderSide::lerp(a.top, b.top, t),
             start: BorderSide::lerp(BorderSide::NONE, b.start, t),
             end: BorderSide::lerp(BorderSide::NONE, b.end, t),
@@ -272,14 +307,14 @@ fn lerp_border_to_directional(a: Border, b: BorderDirectional, t: f64) -> Box<dy
         });
     }
     if t < 0.5 {
-        Box::new(Border {
+        BoxBorderRef::new(Border {
             top: BorderSide::lerp(a.top, b.top, t),
             right: BorderSide::lerp(a.right, BorderSide::NONE, t * 2.0),
             bottom: BorderSide::lerp(a.bottom, b.bottom, t),
             left: BorderSide::lerp(a.left, BorderSide::NONE, t * 2.0),
         })
     } else {
-        Box::new(BorderDirectional {
+        BoxBorderRef::new(BorderDirectional {
             top: BorderSide::lerp(a.top, b.top, t),
             start: BorderSide::lerp(BorderSide::NONE, b.start, (t - 0.5) * 2.0),
             end: BorderSide::lerp(BorderSide::NONE, b.end, (t - 0.5) * 2.0),
@@ -591,6 +626,10 @@ impl ShapeBorder for Border {
         Some(self)
     }
 
+    fn into_box_border(self: Rc<Self>) -> Option<Rc<dyn BoxBorder>> {
+        Some(self)
+    }
+
     fn eq_shape(&self, other: &dyn ShapeBorder) -> bool {
         other
             .as_any()
@@ -613,10 +652,6 @@ impl BoxBorder for Border {
             && self.width_is_uniform()
             && self.style_is_uniform()
             && self.stroke_align_is_uniform()
-    }
-
-    fn clone_box_border(&self) -> Box<dyn BoxBorder> {
-        Box::new(*self)
     }
 
     fn paint(
@@ -1003,6 +1038,10 @@ impl ShapeBorder for BorderDirectional {
         Some(self)
     }
 
+    fn into_box_border(self: Rc<Self>) -> Option<Rc<dyn BoxBorder>> {
+        Some(self)
+    }
+
     fn eq_shape(&self, other: &dyn ShapeBorder) -> bool {
         other
             .as_any()
@@ -1025,10 +1064,6 @@ impl BoxBorder for BorderDirectional {
             && self.width_is_uniform()
             && self.style_is_uniform()
             && self.stroke_align_is_uniform()
-    }
-
-    fn clone_box_border(&self) -> Box<dyn BoxBorder> {
-        Box::new(*self)
     }
 
     fn paint(
@@ -1211,7 +1246,7 @@ mod tests {
         ShapeBorderRef::new(*a).plus(&ShapeBorderRef::new(*b))
     }
 
-    fn expect_border(got: Option<Box<dyn BoxBorder>>, expected: Border) {
+    fn expect_border(got: Option<BoxBorderRef>, expected: Border) {
         let got = got.expect("expected a border");
         let got = got
             .as_any()
@@ -1220,7 +1255,7 @@ mod tests {
         assert_eq!(*got, expected);
     }
 
-    fn expect_directional(got: Option<Box<dyn BoxBorder>>, expected: BorderDirectional) {
+    fn expect_directional(got: Option<BoxBorderRef>, expected: BorderDirectional) {
         let got = got.expect("expected a border");
         let got = got
             .as_any()
@@ -1264,6 +1299,10 @@ mod tests {
             Some(self)
         }
 
+        fn into_box_border(self: Rc<Self>) -> Option<Rc<dyn BoxBorder>> {
+            Some(self)
+        }
+
         fn eq_shape(&self, other: &dyn ShapeBorder) -> bool {
             other.as_any().downcast_ref::<SillyBorder>().is_some()
         }
@@ -1280,10 +1319,6 @@ mod tests {
 
         fn is_uniform(&self) -> bool {
             true
-        }
-
-        fn clone_box_border(&self) -> Box<dyn BoxBorder> {
-            Box::new(*self)
         }
 
         fn paint(
@@ -1628,42 +1663,42 @@ mod tests {
             top: width(10.0),
             ..Border::default()
         };
-        assert!(<dyn BoxBorder>::lerp(None, None, -1.0).is_none());
+        assert!(BoxBorderRef::lerp(None, None, -1.0).is_none());
         expect_border(
-            <dyn BoxBorder>::lerp(Some(&border_all(10.0)), None, -1.0),
+            BoxBorderRef::lerp(Some(&BoxBorderRef::new(border_all(10.0))), None, -1.0),
             border_all(20.0),
         );
         expect_border(
-            <dyn BoxBorder>::lerp(None, Some(&border_all(10.0)), -1.0),
+            BoxBorderRef::lerp(None, Some(&BoxBorderRef::new(border_all(10.0))), -1.0),
             none_scaled(),
         );
         expect_directional(
-            <dyn BoxBorder>::lerp(Some(&directional_with_top10), None, -1.0),
+            BoxBorderRef::lerp(Some(&BoxBorderRef::new(directional_with_top10)), None, -1.0),
             BorderDirectional {
                 top: width(20.0),
                 ..BorderDirectional::default()
             },
         );
         expect_border(
-            <dyn BoxBorder>::lerp(
-                Some(&directional_with_top10),
-                Some(&visual_with_top100),
+            BoxBorderRef::lerp(
+                Some(&BoxBorderRef::new(directional_with_top10)),
+                Some(&BoxBorderRef::new(visual_with_top100)),
                 -1.0,
             ),
             Border::default(),
         );
         expect_border(
-            <dyn BoxBorder>::lerp(
-                Some(&directional_with_top10),
-                Some(&visual_with_top100),
+            BoxBorderRef::lerp(
+                Some(&BoxBorderRef::new(directional_with_top10)),
+                Some(&BoxBorderRef::new(visual_with_top100)),
                 0.0,
             ),
             visual_with_top10,
         );
         expect_border(
-            <dyn BoxBorder>::lerp(
-                Some(&directional_with_top10),
-                Some(&visual_with_top100),
+            BoxBorderRef::lerp(
+                Some(&BoxBorderRef::new(directional_with_top10)),
+                Some(&BoxBorderRef::new(visual_with_top100)),
                 0.25,
             ),
             Border {
@@ -1674,9 +1709,19 @@ mod tests {
 
         let silly = SillyBorder;
         let empty = Border::default();
-        let at_neg = <dyn BoxBorder>::lerp(Some(&silly), Some(&empty), -1.0).unwrap();
+        let at_neg = BoxBorderRef::lerp(
+            Some(&BoxBorderRef::new(silly)),
+            Some(&BoxBorderRef::new(empty)),
+            -1.0,
+        )
+        .unwrap();
         assert!(at_neg.eq_shape(&silly));
-        let at_075 = <dyn BoxBorder>::lerp(Some(&silly), Some(&empty), 0.75).unwrap();
+        let at_075 = BoxBorderRef::lerp(
+            Some(&BoxBorderRef::new(silly)),
+            Some(&BoxBorderRef::new(empty)),
+            0.75,
+        )
+        .unwrap();
         assert!(at_075.eq_shape(&none_scaled()));
     }
 

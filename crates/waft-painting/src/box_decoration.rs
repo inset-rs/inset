@@ -10,7 +10,7 @@ use waft_foundation::{App, VoidCallback};
 use crate::basic_types::TextDirection;
 use crate::border_radius::BorderRadiusGeometry;
 use crate::borders::{BorderSide, BorderStyle};
-use crate::box_border::{Border, BorderDirectional, BoxBorder, BoxShape};
+use crate::box_border::{Border, BorderDirectional, BoxBorder, BoxBorderRef, BoxShape};
 use crate::box_shadow::BoxShadow;
 use crate::circle_border::{oval_path, rrect_path};
 use crate::colors::AnyColor;
@@ -18,7 +18,7 @@ use crate::debug::debug_disable_shadows;
 use crate::decoration::{BoxPainter, Decoration, DecorationRef};
 use crate::draw::draw_rrect;
 use crate::edge_insets::{EdgeInsets, EdgeInsetsGeometry};
-use crate::gradient::Gradient;
+use crate::gradient::GradientRef;
 use crate::image_provider::ImageConfiguration;
 
 /// An immutable description of how to paint a box.
@@ -34,7 +34,7 @@ pub struct BoxDecoration {
     /// This is ignored if [`gradient`](Self::gradient) is non-null.
     pub color: Option<AnyColor>,
     /// A border to draw above the background [`color`](Self::color).
-    pub border: Option<Box<dyn BoxBorder>>,
+    pub border: Option<BoxBorderRef>,
     /// If non-null, the corners of this box are rounded by this
     /// `BorderRadius`.
     ///
@@ -46,7 +46,7 @@ pub struct BoxDecoration {
     /// A gradient to use when filling the box.
     ///
     /// If this is specified, [`color`](Self::color) has no effect.
-    pub gradient: Option<Box<dyn Gradient>>,
+    pub gradient: Option<GradientRef>,
     /// The blend mode applied to the [`color`](Self::color) or
     /// [`gradient`](Self::gradient) background of the box.
     ///
@@ -96,7 +96,7 @@ impl BoxDecoration {
     }
 
     /// A border to draw above the background [`color`](Self::color).
-    pub fn border(mut self, border: impl Into<Box<dyn BoxBorder>>) -> BoxDecoration {
+    pub fn border(mut self, border: impl Into<BoxBorderRef>) -> BoxDecoration {
         self.border = Some(border.into());
         self
     }
@@ -119,7 +119,7 @@ impl BoxDecoration {
     }
 
     /// A gradient to use when filling the box.
-    pub fn gradient(mut self, gradient: impl Into<Box<dyn Gradient>>) -> BoxDecoration {
+    pub fn gradient(mut self, gradient: impl Into<GradientRef>) -> BoxDecoration {
         self.gradient = Some(gradient.into());
         self
     }
@@ -142,10 +142,10 @@ impl BoxDecoration {
 
     fn from_fields(
         color: Option<AnyColor>,
-        border: Option<Box<dyn BoxBorder>>,
+        border: Option<BoxBorderRef>,
         border_radius: Option<BorderRadiusGeometry>,
         box_shadow: Option<Vec<BoxShadow>>,
-        gradient: Option<Box<dyn Gradient>>,
+        gradient: Option<GradientRef>,
         background_blend_mode: Option<BlendMode>,
         shape: BoxShape,
     ) -> BoxDecoration {
@@ -180,7 +180,7 @@ impl BoxDecoration {
     pub fn scale(&self, factor: f64) -> BoxDecoration {
         BoxDecoration::from_fields(
             AnyColor::lerp(None, self.color.as_ref(), factor).map(AnyColor::from),
-            <dyn BoxBorder>::lerp(None, self.border.as_deref(), factor),
+            BoxBorderRef::lerp(None, self.border.as_ref(), factor),
             BorderRadiusGeometry::lerp(None, self.border_radius, factor),
             BoxShadow::lerp_list(None, self.box_shadow.as_deref(), factor),
             self.gradient
@@ -222,10 +222,10 @@ impl BoxDecoration {
         let b = b.unwrap();
         Some(BoxDecoration::from_fields(
             AnyColor::lerp(a.color.as_ref(), b.color.as_ref(), t).map(AnyColor::from),
-            <dyn BoxBorder>::lerp(a.border.as_deref(), b.border.as_deref(), t),
+            BoxBorderRef::lerp(a.border.as_ref(), b.border.as_ref(), t),
             BorderRadiusGeometry::lerp(a.border_radius, b.border_radius, t),
             BoxShadow::lerp_list(a.box_shadow.as_deref(), b.box_shadow.as_deref(), t),
-            <dyn Gradient>::lerp(a.gradient.as_deref(), b.gradient.as_deref(), t),
+            GradientRef::lerp(a.gradient.as_ref(), b.gradient.as_ref(), t),
             if t < 0.5 {
                 a.background_blend_mode
             } else {
@@ -246,7 +246,7 @@ impl Clone for BoxDecoration {
     fn clone(&self) -> BoxDecoration {
         BoxDecoration {
             color: self.color.clone(),
-            border: self.border.as_ref().map(|b| b.clone_box_border()),
+            border: self.border.clone(),
             border_radius: self.border_radius,
             box_shadow: self.box_shadow.clone(),
             gradient: self.gradient.clone(),
@@ -259,28 +259,12 @@ impl Clone for BoxDecoration {
 impl PartialEq for BoxDecoration {
     fn eq(&self, other: &BoxDecoration) -> bool {
         self.color == other.color
-            && borders_eq(self.border.as_deref(), other.border.as_deref())
+            && self.border == other.border
             && self.border_radius == other.border_radius
             && self.box_shadow == other.box_shadow
-            && gradients_eq(self.gradient.as_deref(), other.gradient.as_deref())
+            && self.gradient == other.gradient
             && self.background_blend_mode == other.background_blend_mode
             && self.shape == other.shape
-    }
-}
-
-fn gradients_eq(a: Option<&dyn Gradient>, b: Option<&dyn Gradient>) -> bool {
-    match (a, b) {
-        (None, None) => true,
-        (Some(a), Some(b)) => a == b,
-        _ => false,
-    }
-}
-
-fn borders_eq(a: Option<&dyn BoxBorder>, b: Option<&dyn BoxBorder>) -> bool {
-    match (a, b) {
-        (None, None) => true,
-        (Some(a), Some(b)) => a.eq_shape(b),
-        _ => false,
     }
 }
 
@@ -616,7 +600,7 @@ impl BoxPainter for BoxDecorationPainter {
         self.paint_background_color(canvas, rect, text_direction);
         if let Some(border) = self.decoration.border.as_ref() {
             BoxBorder::paint(
-                border.as_ref(),
+                &**border,
                 canvas,
                 rect,
                 configuration.text_direction,
@@ -714,6 +698,10 @@ mod tests {
             Some(self)
         }
 
+        fn into_box_border(self: std::rc::Rc<Self>) -> Option<std::rc::Rc<dyn BoxBorder>> {
+            Some(self)
+        }
+
         fn eq_shape(&self, other: &dyn ShapeBorder) -> bool {
             other
                 .as_any()
@@ -739,10 +727,6 @@ mod tests {
 
         fn is_uniform(&self) -> bool {
             true
-        }
-
-        fn clone_box_border(&self) -> Box<dyn BoxBorder> {
-            Box::new(*self)
         }
 
         fn paint(

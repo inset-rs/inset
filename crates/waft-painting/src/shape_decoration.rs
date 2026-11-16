@@ -8,7 +8,7 @@ use waft_embedder::{Path, PathBuilder, Rect, Size};
 use waft_foundation::{App, VoidCallback};
 
 use crate::basic_types::TextDirection;
-use crate::borders::{BorderSide, BorderStyle, ShapeBorder, ShapeBorderRef};
+use crate::borders::{BorderSide, BorderStyle, ShapeBorderRef};
 use crate::box_border::{Border, BoxShape};
 use crate::box_decoration::BoxDecoration;
 use crate::box_shadow::BoxShadow;
@@ -17,7 +17,7 @@ use crate::colors::AnyColor;
 use crate::debug::debug_disable_shadows;
 use crate::decoration::{BoxPainter, Decoration, DecorationRef};
 use crate::edge_insets::EdgeInsetsGeometry;
-use crate::gradient::Gradient;
+use crate::gradient::GradientRef;
 use crate::image_provider::ImageConfiguration;
 use crate::rounded_rectangle_border::RoundedRectangleBorder;
 
@@ -41,7 +41,7 @@ pub struct ShapeDecoration {
     /// The gradient is under the image (image paint is deferred).
     ///
     /// If a [`color`](Self::color) is specified, [`gradient`](Self::gradient) must be None.
-    pub gradient: Option<Box<dyn Gradient>>,
+    pub gradient: Option<GradientRef>,
     /// A list of shadows cast by the [`shape`](Self::shape).
     pub shadows: Option<Vec<BoxShadow>>,
     /// The shape to fill the [`color`](Self::color) and [`gradient`](Self::gradient) into and
@@ -87,7 +87,7 @@ impl ShapeDecoration {
     }
 
     /// A gradient to use when filling the shape.
-    pub fn gradient(mut self, gradient: impl Into<Box<dyn Gradient>>) -> ShapeDecoration {
+    pub fn gradient(mut self, gradient: impl Into<GradientRef>) -> ShapeDecoration {
         self.gradient = Some(gradient.into());
         self.debug_assert_color_or_gradient();
         self
@@ -143,7 +143,7 @@ impl ShapeDecoration {
                         border_radius,
                     ))
                 } else if let Some(border) = source.border.as_ref() {
-                    ShapeBorderRef::from(border.clone_box_border() as Box<dyn ShapeBorder>)
+                    ShapeBorderRef::from(border.clone())
                 } else {
                     ShapeBorderRef::new(Border::default())
                 }
@@ -159,7 +159,7 @@ impl ShapeDecoration {
 
     fn from_fields(
         color: Option<AnyColor>,
-        gradient: Option<Box<dyn Gradient>>,
+        gradient: Option<GradientRef>,
         shadows: Option<Vec<BoxShadow>>,
         shape: ShapeBorderRef,
     ) -> ShapeDecoration {
@@ -225,7 +225,7 @@ impl ShapeDecoration {
         {
             b_gradient = Some(a_gradient.from_color(b_color.color()));
         }
-        let gradient = <dyn Gradient>::lerp(a_gradient.as_deref(), b_gradient.as_deref(), t);
+        let gradient = GradientRef::lerp(a_gradient.as_ref(), b_gradient.as_ref(), t);
         Some(ShapeDecoration::from_fields(
             // color and gradient are mutually exclusive, so only fall back to a color
             // when the interpolation did not produce a gradient.
@@ -254,7 +254,7 @@ impl ShapeDecoration {
 impl PartialEq for ShapeDecoration {
     fn eq(&self, other: &ShapeDecoration) -> bool {
         self.color == other.color
-            && match (self.gradient.as_deref(), other.gradient.as_deref()) {
+            && match (&self.gradient, &other.gradient) {
                 (None, None) => true,
                 (Some(a), Some(b)) => a == b,
                 _ => false,

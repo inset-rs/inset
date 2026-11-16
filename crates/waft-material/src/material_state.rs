@@ -20,7 +20,7 @@ use waft_widgets::{
     WidgetStatePropertyAll, WidgetStateTextStyle, WidgetStates, WidgetStatesController,
 };
 
-use crate::input_border::{InputBorder, OutlineInputBorder, UnderlineInputBorder};
+use crate::input_border::{InputBorder, InputBorderRef, OutlineInputBorder, UnderlineInputBorder};
 
 /// Interactive states that some of the Material widgets can take on when
 /// receiving input from the user.
@@ -265,7 +265,7 @@ macro_rules! state_input_border {
                 self.border.border_side
             }
 
-            fn copy_with(&self, border_side: Option<BorderSide>) -> Box<dyn InputBorder> {
+            fn copy_with(&self, border_side: Option<BorderSide>) -> InputBorderRef {
                 InputBorder::copy_with(&self.border, border_side)
             }
 
@@ -293,13 +293,7 @@ macro_rules! state_input_border {
                 );
             }
 
-            fn clone_input_border(&self) -> Box<dyn InputBorder> {
-                Box::new(self.clone())
-            }
-
-            fn as_widget_state_property(
-                &self,
-            ) -> Option<&dyn WidgetStateProperty<Box<dyn InputBorder>>> {
+            fn as_widget_state_property(&self) -> Option<&dyn WidgetStateProperty<InputBorderRef>> {
                 Some(self)
             }
         }
@@ -340,7 +334,7 @@ macro_rules! state_input_border {
 #[derive(Clone)]
 pub struct MaterialStateOutlineInputBorder {
     /// Dart's `_MaterialStateOutlineInputBorder._resolve`.
-    resolve: WidgetPropertyResolver<Box<dyn InputBorder>>,
+    resolve: WidgetPropertyResolver<InputBorderRef>,
     /// Dart's `super`: `MaterialStateOutlineInputBorder extends OutlineInputBorder`.
     border: OutlineInputBorder,
 }
@@ -359,7 +353,7 @@ impl MaterialStateOutlineInputBorder {
         note = "Use WidgetStateInputBorder.resolveWith() instead. Renamed to match other WidgetStateProperty objects. This feature was deprecated after v3.26.0-0.1.pre."
     )]
     pub fn resolve_with(
-        callback: impl Fn(&WidgetStates) -> Box<dyn InputBorder> + 'static,
+        callback: impl Fn(&WidgetStates) -> InputBorderRef + 'static,
     ) -> MaterialStateOutlineInputBorder {
         MaterialStateOutlineInputBorder {
             resolve: Rc::new(callback),
@@ -376,8 +370,8 @@ impl MaterialStateOutlineInputBorder {
 /// Returns a [`InputBorder`] that's to be used when a Material component is in the
 /// specified state.
 #[allow(deprecated)]
-impl WidgetStateProperty<Box<dyn InputBorder>> for MaterialStateOutlineInputBorder {
-    fn resolve(&self, states: &WidgetStates) -> Box<dyn InputBorder> {
+impl WidgetStateProperty<InputBorderRef> for MaterialStateOutlineInputBorder {
+    fn resolve(&self, states: &WidgetStates) -> InputBorderRef {
         (self.resolve)(states)
     }
 
@@ -385,7 +379,7 @@ impl WidgetStateProperty<Box<dyn InputBorder>> for MaterialStateOutlineInputBord
         self
     }
 
-    fn eq_property(&self, other: &dyn WidgetStateProperty<Box<dyn InputBorder>>) -> bool {
+    fn eq_property(&self, other: &dyn WidgetStateProperty<InputBorderRef>) -> bool {
         other
             .as_any()
             .downcast_ref::<Self>()
@@ -425,7 +419,7 @@ state_input_border!(
 #[derive(Clone)]
 pub struct MaterialStateUnderlineInputBorder {
     /// Dart's `_MaterialStateUnderlineInputBorder._resolve`.
-    resolve: WidgetPropertyResolver<Box<dyn InputBorder>>,
+    resolve: WidgetPropertyResolver<InputBorderRef>,
     /// Dart's `super`: `MaterialStateUnderlineInputBorder extends UnderlineInputBorder`.
     border: UnderlineInputBorder,
 }
@@ -444,7 +438,7 @@ impl MaterialStateUnderlineInputBorder {
         note = "Use WidgetStateInputBorder.resolveWith() instead. Renamed to match other WidgetStateProperty objects. This feature was deprecated after v3.26.0-0.1.pre."
     )]
     pub fn resolve_with(
-        callback: impl Fn(&WidgetStates) -> Box<dyn InputBorder> + 'static,
+        callback: impl Fn(&WidgetStates) -> InputBorderRef + 'static,
     ) -> MaterialStateUnderlineInputBorder {
         MaterialStateUnderlineInputBorder {
             resolve: Rc::new(callback),
@@ -461,8 +455,8 @@ impl MaterialStateUnderlineInputBorder {
 /// Returns a [`InputBorder`] that's to be used when a Material component is in the
 /// specified state.
 #[allow(deprecated)]
-impl WidgetStateProperty<Box<dyn InputBorder>> for MaterialStateUnderlineInputBorder {
-    fn resolve(&self, states: &WidgetStates) -> Box<dyn InputBorder> {
+impl WidgetStateProperty<InputBorderRef> for MaterialStateUnderlineInputBorder {
+    fn resolve(&self, states: &WidgetStates) -> InputBorderRef {
         (self.resolve)(states)
     }
 
@@ -470,7 +464,7 @@ impl WidgetStateProperty<Box<dyn InputBorder>> for MaterialStateUnderlineInputBo
         self
     }
 
-    fn eq_property(&self, other: &dyn WidgetStateProperty<Box<dyn InputBorder>>) -> bool {
+    fn eq_property(&self, other: &dyn WidgetStateProperty<InputBorderRef>) -> bool {
         other
             .as_any()
             .downcast_ref::<Self>()
@@ -510,9 +504,9 @@ pub struct WidgetStateInputBorder {
 #[derive(Clone)]
 enum InputBorderSubclass {
     /// `_WidgetStateInputBorder`.
-    ResolveWith(WidgetPropertyResolver<Box<dyn InputBorder>>),
+    ResolveWith(WidgetPropertyResolver<InputBorderRef>),
     /// `_WidgetInputBorderMapper`.
-    Mapper(Rc<WidgetStateMapper<Box<dyn InputBorder>>>),
+    Mapper(Rc<WidgetStateMapper<InputBorderRef>>),
 }
 
 impl WidgetStateInputBorder {
@@ -524,7 +518,7 @@ impl WidgetStateInputBorder {
     /// (if used as a regular [`InputBorder`], it acts the same as
     /// an empty `OutlineInputBorder()` constructor).
     pub fn resolve_with(
-        callback: impl Fn(&WidgetStates) -> Box<dyn InputBorder> + 'static,
+        callback: impl Fn(&WidgetStates) -> InputBorderRef + 'static,
     ) -> WidgetStateInputBorder {
         WidgetStateInputBorder {
             subclass: InputBorderSubclass::ResolveWith(Rc::new(callback)),
@@ -538,7 +532,7 @@ impl WidgetStateInputBorder {
     /// entry whose key is satisfied by the set of states, and returns its associated value.
     /// It should only be used for fields that support [`WidgetStateInputBorder`]
     /// objects, such as `InputDecoration.border`.
-    pub fn from_map(map: WidgetStateMap<Box<dyn InputBorder>>) -> WidgetStateInputBorder {
+    pub fn from_map(map: WidgetStateMap<InputBorderRef>) -> WidgetStateInputBorder {
         WidgetStateInputBorder {
             subclass: InputBorderSubclass::Mapper(Rc::new(WidgetStateMapper::new(map))),
             border: OutlineInputBorder::new(),
@@ -560,8 +554,8 @@ impl WidgetStateInputBorder {
     }
 }
 
-impl WidgetStateProperty<Box<dyn InputBorder>> for WidgetStateInputBorder {
-    fn resolve(&self, states: &WidgetStates) -> Box<dyn InputBorder> {
+impl WidgetStateProperty<InputBorderRef> for WidgetStateInputBorder {
+    fn resolve(&self, states: &WidgetStates) -> InputBorderRef {
         match &self.subclass {
             InputBorderSubclass::ResolveWith(resolve) => resolve(states),
             InputBorderSubclass::Mapper(mapper) => mapper.resolve(states),
@@ -572,14 +566,14 @@ impl WidgetStateProperty<Box<dyn InputBorder>> for WidgetStateInputBorder {
         self
     }
 
-    fn as_mapper(&self) -> Option<&WidgetStateMapper<Box<dyn InputBorder>>> {
+    fn as_mapper(&self) -> Option<&WidgetStateMapper<InputBorderRef>> {
         match &self.subclass {
             InputBorderSubclass::Mapper(mapper) => Some(mapper.as_ref()),
             InputBorderSubclass::ResolveWith(_) => None,
         }
     }
 
-    fn eq_property(&self, other: &dyn WidgetStateProperty<Box<dyn InputBorder>>) -> bool {
+    fn eq_property(&self, other: &dyn WidgetStateProperty<InputBorderRef>) -> bool {
         if let InputBorderSubclass::Mapper(mapper) = &self.subclass {
             return mapper.eq_property(other);
         }
