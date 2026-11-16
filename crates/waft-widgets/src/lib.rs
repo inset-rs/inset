@@ -110,6 +110,7 @@ pub use widgets::page_storage::*;
 pub use widgets::page_transitions_builder::*;
 pub use widgets::page_view::*;
 pub use widgets::pages::*;
+pub use widgets::placeholder::*;
 pub use widgets::platform_menu_bar::*;
 pub use widgets::platform_tray_icon::*;
 pub use widgets::pop_scope::*;

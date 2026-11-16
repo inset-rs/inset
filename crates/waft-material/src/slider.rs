@@ -3085,7 +3085,7 @@ struct AlwaysStoppedAtOne {
     animation: Option<Ref<AlwaysStoppedAnimation<f64>>>,
 }
 
-fn always_stopped_at_one(app: &mut App) -> AnyAnimation<f64> {
+pub(crate) fn always_stopped_at_one(app: &mut App) -> AnyAnimation<f64> {
     let statics = app.singleton::<AlwaysStoppedAtOne>();
     if let Some(animation) = app.get(statics).animation.handle() {
         return animation.as_animation();
@@ -3421,7 +3421,10 @@ pub(crate) mod tests {
     use crate::material::Material;
     use crate::slider_parts::SliderTickMarkShape;
     use crate::slider_value_indicator_shape::SliderComponentShape;
-    use crate::test_support::{WidgetTester, material_app, with_main_thread_stack};
+    pub(crate) use crate::test_support::colors_match;
+    use crate::test_support::{
+        PaintCall, WidgetTester, material_app, paints_calls, with_main_thread_stack,
+    };
     use crate::theme_data::ThemeData;
 
     /// Dart's `LoggingThumbShape`: a thumb shape that also logs its repaint center.
@@ -6158,91 +6161,13 @@ pub(crate) mod tests {
         });
     }
 
-    /// One call of Dart's `paints` matcher: `..rrect(rrect:, color:)` or `..circle(color:)`,
-    /// each argument checked only when given.
-    pub(crate) enum Paints {
-        RRect(Option<waft_embedder::RRect>, Option<Color>),
-        Circle(Option<Color>),
-        /// `..path(color:)`: any path.
-        Path(Option<Color>),
-        /// `..shadow(color:)`.
-        Shadow(Option<Color>),
-        /// `..paragraph()`: a run of glyphs.
-        Paragraph,
-    }
-
-    /// Whether `op` is the call `expected` names: a rounded rect is any path or rect that is
-    /// not a circle, compared with what `draw_rrect` records for the expected one.
-    fn matches_call(op: &Op, expected: &Paints) -> bool {
-        let same_color = |paint: &waft_embedder::Paint, color: &Option<Color>| {
-            color.is_none_or(|color| colors_match(paint.color, color))
-        };
-        match (op, expected) {
-            (Op::DrawPath { path, paint, .. }, Paints::Circle(color)) => {
-                circle_of(path).is_some() && same_color(paint, color)
-            }
-            (Op::DrawPath { path, paint, .. }, Paints::RRect(rrect, color)) => {
-                circle_of(path).is_none()
-                    && same_color(paint, color)
-                    && rrect.is_none_or(|rrect| {
-                        let mut canvas = waft_embedder::Canvas::new();
-                        waft_painting::draw_rrect(
-                            &mut canvas,
-                            rrect,
-                            &waft_embedder::Paint::default(),
-                        );
-                        let list = canvas.build();
-                        matches!(list.ops().first(), Some(Op::DrawPath { path: expected, .. }) if expected == path)
-                    })
-            }
-            (Op::DrawRect { paint, .. }, Paints::RRect(None, color)) => same_color(paint, color),
-            (Op::DrawPath { paint, .. }, Paints::Path(color)) => same_color(paint, color),
-            (Op::DrawShadow { color: shadow, .. }, Paints::Shadow(color)) => {
-                color.is_none_or(|color| colors_match(*shadow, color))
-            }
-            (Op::GlyphRun { .. }, Paints::Paragraph) => true,
-            _ => false,
-        }
-    }
-
-    /// flutter_test's `_colorsMatch`: each channel within 1/255, as Dart's `paints` matcher
-    /// compares a call's colour, the painted one read back from its 32-bit floats as Dart's
-    /// `Paint.color` is.
-    pub(crate) fn colors_match(painted: waft_embedder::valo::Color, expected: Color) -> bool {
-        const LIMIT: f64 = 1.0 / 255.0;
-        (f64::from(painted.a) - expected.a).abs() < LIMIT
-            && (f64::from(painted.r) - expected.r).abs() < LIMIT
-            && (f64::from(painted.g) - expected.g).abs() < LIMIT
-            && (f64::from(painted.b) - expected.b).abs() < LIMIT
-    }
-
-    /// Whether `op` is a call of the canvas method `expected` names, whatever its arguments:
-    /// Valo records a rounded rect, a plain path and a circle all as paths, told apart by the
-    /// circle's contour.
-    fn is_call_of(op: &Op, expected: &Paints) -> bool {
-        match (op, expected) {
-            (Op::DrawPath { path, .. }, Paints::Circle(_)) => circle_of(path).is_some(),
-            (Op::DrawPath { path, .. }, Paints::RRect(..) | Paints::Path(_)) => {
-                circle_of(path).is_none()
-            }
-            (Op::DrawRect { .. }, Paints::RRect(None, _)) => true,
-            (Op::DrawShadow { .. }, Paints::Shadow(_)) => true,
-            (Op::GlyphRun { .. }, Paints::Paragraph) => true,
-            _ => false,
-        }
-    }
-
-    /// Dart's `expect(render, paints..a..b..)`: each call is the next call of its method after
-    /// the last one matched, and has the arguments given; other methods' calls in between are
-    /// skipped.
-    pub(crate) fn paints(tester: &WidgetTester, render: AnyRenderObject, calls: &[Paints]) -> bool {
-        let ops = tester.painted_ops(render);
-        let mut ops = ops.iter();
-        calls.iter().all(|expected| {
-            ops.by_ref()
-                .find(|op| is_call_of(op, expected))
-                .is_some_and(|op| matches_call(op, expected))
-        })
+    /// Dart's `expect(render, paints..calls)`.
+    pub(crate) fn paints(
+        tester: &WidgetTester,
+        render: AnyRenderObject,
+        calls: &[PaintCall],
+    ) -> bool {
+        paints_calls(&tester.painted_ops(render), calls)
     }
 
     // 'Default Slider when year2023 is false'.
@@ -6310,22 +6235,18 @@ pub(crate) mod tests {
                 slider_render(&tester),
                 &[
                     // Active track.
-                    Paints::RRect(
-                        Some(rrect(24.0, 292.0, 356.4, 308.0, outer, inner, inner, outer)),
+                    PaintCall::rrect_at(
+                        rrect(24.0, 292.0, 356.4, 308.0, outer, inner, inner, outer),
                         Some(active_track_color),
                     ),
                     // Inactive track.
-                    Paints::RRect(
-                        Some(rrect(
-                            368.4, 292.0, 776.0, 308.0, inner, outer, outer, inner
-                        )),
+                    PaintCall::rrect_at(
+                        rrect(368.4, 292.0, 776.0, 308.0, inner, outer, outer, inner),
                         Some(inactive_track_color),
                     ),
                     // Secondary track.
-                    Paints::RRect(
-                        Some(rrect(
-                            368.4, 292.0, 588.0, 308.0, inner, outer, outer, inner
-                        )),
+                    PaintCall::rrect_at(
+                        rrect(368.4, 292.0, 588.0, 308.0, inner, outer, outer, inner),
                         Some(secondary_active_track_color),
                     ),
                 ],
@@ -6341,22 +6262,18 @@ pub(crate) mod tests {
                 slider_render(&tester),
                 &[
                     // Inactive track.
-                    Paints::RRect(
-                        Some(rrect(24.0, 292.0, 431.6, 308.0, outer, inner, inner, outer)),
+                    PaintCall::rrect_at(
+                        rrect(24.0, 292.0, 431.6, 308.0, outer, inner, inner, outer),
                         Some(inactive_track_color),
                     ),
                     // Active track.
-                    Paints::RRect(
-                        Some(rrect(
-                            443.6, 292.0, 776.0, 308.0, inner, outer, outer, inner
-                        )),
+                    PaintCall::rrect_at(
+                        rrect(443.6, 292.0, 776.0, 308.0, inner, outer, outer, inner),
                         Some(active_track_color),
                     ),
                     // Secondary track.
-                    Paints::RRect(
-                        Some(rrect(
-                            212.0, 292.0, 431.6, 308.0, outer, inner, inner, outer
-                        )),
+                    PaintCall::rrect_at(
+                        rrect(212.0, 292.0, 431.6, 308.0, outer, inner, inner, outer),
                         Some(secondary_active_track_color),
                     ),
                 ],
@@ -6370,33 +6287,32 @@ pub(crate) mod tests {
             assert!(paints(
                 &tester,
                 render,
-                &[Paints::Circle(None), Paints::RRect(None, Some(thumb_color))]
+                &[PaintCall::circle(None), PaintCall::rrect(Some(thumb_color))]
             ));
             assert!(!paints(
                 &tester,
                 render,
                 &[
-                    Paints::Circle(None),
-                    Paints::Circle(Some(disabled_thumb_color))
+                    PaintCall::circle(None),
+                    PaintCall::circle(Some(disabled_thumb_color))
                 ]
             ));
             assert!(!paints(
                 &tester,
                 render,
-                &[Paints::RRect(None, Some(disabled_active_track_color))]
+                &[PaintCall::rrect(Some(disabled_active_track_color))]
             ));
             assert!(!paints(
                 &tester,
                 render,
-                &[Paints::RRect(None, Some(disabled_inactive_track_color))]
+                &[PaintCall::rrect(Some(disabled_inactive_track_color))]
             ));
             assert!(!paints(
                 &tester,
                 render,
-                &[Paints::RRect(
-                    None,
-                    Some(disabled_secondary_active_track_color)
-                )]
+                &[PaintCall::rrect(Some(
+                    disabled_secondary_active_track_color
+                ))]
             ));
 
             // Test defaults colors for discrete slider.
@@ -6407,37 +6323,36 @@ pub(crate) mod tests {
                 &tester,
                 render,
                 &[
-                    Paints::RRect(None, Some(active_track_color)),
-                    Paints::RRect(None, Some(inactive_track_color)),
-                    Paints::RRect(None, Some(secondary_active_track_color)),
-                    Paints::Circle(Some(active_tick_mark_color)),
-                    Paints::Circle(Some(active_tick_mark_color)),
-                    Paints::Circle(Some(inactive_tick_mark_color)),
-                    Paints::Circle(Some(inactive_tick_mark_color)),
+                    PaintCall::rrect(Some(active_track_color)),
+                    PaintCall::rrect(Some(inactive_track_color)),
+                    PaintCall::rrect(Some(secondary_active_track_color)),
+                    PaintCall::circle(Some(active_tick_mark_color)),
+                    PaintCall::circle(Some(active_tick_mark_color)),
+                    PaintCall::circle(Some(inactive_tick_mark_color)),
+                    PaintCall::circle(Some(inactive_tick_mark_color)),
                 ],
             ));
             assert!(!paints(
                 &tester,
                 render,
-                &[Paints::Circle(Some(disabled_thumb_color))]
+                &[PaintCall::circle(Some(disabled_thumb_color))]
             ));
             assert!(!paints(
                 &tester,
                 render,
-                &[Paints::RRect(None, Some(disabled_active_track_color))]
+                &[PaintCall::rrect(Some(disabled_active_track_color))]
             ));
             assert!(!paints(
                 &tester,
                 render,
-                &[Paints::RRect(None, Some(disabled_inactive_track_color))]
+                &[PaintCall::rrect(Some(disabled_inactive_track_color))]
             ));
             assert!(!paints(
                 &tester,
                 render,
-                &[Paints::RRect(
-                    None,
-                    Some(disabled_secondary_active_track_color)
-                )]
+                &[PaintCall::rrect(Some(
+                    disabled_secondary_active_track_color
+                ))]
             ));
 
             // Test defaults colors for disabled slider.
@@ -6449,38 +6364,38 @@ pub(crate) mod tests {
                 &tester,
                 render,
                 &[
-                    Paints::RRect(None, Some(disabled_active_track_color)),
-                    Paints::RRect(None, Some(disabled_inactive_track_color)),
-                    Paints::RRect(None, Some(disabled_secondary_active_track_color)),
+                    PaintCall::rrect(Some(disabled_active_track_color)),
+                    PaintCall::rrect(Some(disabled_inactive_track_color)),
+                    PaintCall::rrect(Some(disabled_secondary_active_track_color)),
                 ],
             ));
             assert!(paints(
                 &tester,
                 render,
                 &[
-                    Paints::Circle(None),
-                    Paints::RRect(None, Some(disabled_thumb_color))
+                    PaintCall::circle(None),
+                    PaintCall::rrect(Some(disabled_thumb_color))
                 ]
             ));
             assert!(!paints(
                 &tester,
                 render,
-                &[Paints::Circle(None), Paints::RRect(None, Some(thumb_color))]
+                &[PaintCall::circle(None), PaintCall::rrect(Some(thumb_color))]
             ));
             assert!(!paints(
                 &tester,
                 render,
-                &[Paints::RRect(None, Some(active_track_color))]
+                &[PaintCall::rrect(Some(active_track_color))]
             ));
             assert!(!paints(
                 &tester,
                 render,
-                &[Paints::RRect(None, Some(inactive_track_color))]
+                &[PaintCall::rrect(Some(inactive_track_color))]
             ));
             assert!(!paints(
                 &tester,
                 render,
-                &[Paints::RRect(None, Some(secondary_active_track_color))]
+                &[PaintCall::rrect(Some(secondary_active_track_color))]
             ));
 
             // Test defaults colors for disabled discrete slider.
@@ -6491,35 +6406,35 @@ pub(crate) mod tests {
                 &tester,
                 render,
                 &[
-                    Paints::RRect(None, Some(disabled_active_track_color)),
-                    Paints::RRect(None, Some(disabled_inactive_track_color)),
-                    Paints::RRect(None, Some(disabled_secondary_active_track_color)),
-                    Paints::Circle(Some(disabled_active_tick_mark_color)),
-                    Paints::Circle(Some(disabled_active_tick_mark_color)),
-                    Paints::Circle(Some(disabled_inactive_tick_mark_color)),
-                    Paints::Circle(Some(disabled_inactive_tick_mark_color)),
-                    Paints::RRect(None, Some(disabled_thumb_color)),
+                    PaintCall::rrect(Some(disabled_active_track_color)),
+                    PaintCall::rrect(Some(disabled_inactive_track_color)),
+                    PaintCall::rrect(Some(disabled_secondary_active_track_color)),
+                    PaintCall::circle(Some(disabled_active_tick_mark_color)),
+                    PaintCall::circle(Some(disabled_active_tick_mark_color)),
+                    PaintCall::circle(Some(disabled_inactive_tick_mark_color)),
+                    PaintCall::circle(Some(disabled_inactive_tick_mark_color)),
+                    PaintCall::rrect(Some(disabled_thumb_color)),
                 ],
             ));
             assert!(!paints(
                 &tester,
                 render,
-                &[Paints::Circle(None), Paints::RRect(None, Some(thumb_color))]
+                &[PaintCall::circle(None), PaintCall::rrect(Some(thumb_color))]
             ));
             assert!(!paints(
                 &tester,
                 render,
-                &[Paints::RRect(None, Some(active_track_color))]
+                &[PaintCall::rrect(Some(active_track_color))]
             ));
             assert!(!paints(
                 &tester,
                 render,
-                &[Paints::RRect(None, Some(inactive_track_color))]
+                &[PaintCall::rrect(Some(inactive_track_color))]
             ));
             assert!(!paints(
                 &tester,
                 render,
-                &[Paints::RRect(None, Some(secondary_active_track_color))]
+                &[PaintCall::rrect(Some(secondary_active_track_color))]
             ));
 
             let app = build_app(Some(3), true, TextDirection::Ltr);
@@ -6540,11 +6455,10 @@ pub(crate) mod tests {
                 .iter()
                 .position(|op| matches!(op, Op::Transform(_)))
                 .expect("the value indicator scales");
-            assert!(
-                ops[scale..]
-                    .iter()
-                    .any(|op| matches_call(op, &Paints::RRect(None, Some(value_indicator_color))))
-            );
+            assert!(paints_calls(
+                &ops[scale..],
+                &[PaintCall::rrect(Some(value_indicator_color))]
+            ));
             tester.up(&gesture);
             waft_painting::set_debug_disable_shadows(shadows);
         });
@@ -6763,7 +6677,7 @@ pub(crate) mod tests {
                         paints(
                             tester,
                             render,
-                            &[Paints::Path(Some(red)), Paints::Paragraph],
+                            &[PaintCall::path(Some(red)), PaintCall::Paragraph],
                         )
                     });
                 assert_eq!(visible, is_visible);
@@ -6881,25 +6795,25 @@ pub(crate) mod tests {
             let tracks = |inactive: (f64, f64, f64, f64), active: (f64, f64, f64, f64)| {
                 [
                     // Inactive track.
-                    Paints::RRect(
-                        Some(RRect::from_ltrbr(
+                    PaintCall::rrect_at(
+                        RRect::from_ltrbr(
                             inactive.0,
                             inactive.1,
                             inactive.2,
                             inactive.3,
                             Radius::circular(2.0),
-                        )),
+                        ),
                         None,
                     ),
                     // Active track.
-                    Paints::RRect(
-                        Some(RRect::from_ltrbr(
+                    PaintCall::rrect_at(
+                        RRect::from_ltrbr(
                             active.0,
                             active.1,
                             active.2,
                             active.3,
                             Radius::circular(3.0),
-                        )),
+                        ),
                         None,
                     ),
                 ]
@@ -7479,7 +7393,7 @@ pub(crate) mod tests {
                         paints(
                             tester,
                             render,
-                            &[Paints::Path(Some(FILL_COLOR)), Paints::Paragraph],
+                            &[PaintCall::path(Some(FILL_COLOR)), PaintCall::Paragraph],
                         )
                     })
             };

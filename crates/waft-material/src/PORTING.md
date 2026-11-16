@@ -65,6 +65,11 @@ Ported against: 34b89b2086d4
 - generated/switch_defaults_m3.rs → generated/switch_defaults_m3.g.dart
 - generated/radio_defaults_m3.rs → generated/radio_defaults_m3.g.dart
 - generated/slider_defaults_m3.rs → generated/slider_defaults_m3.g.dart
+- segmented_button_theme.rs → segmented_button_theme.dart
+- generated/segmented_button_defaults_m3.rs → generated/segmented_button_defaults_m3.g.dart
+- toggle_buttons.rs → toggle_buttons.dart
+- toggle_buttons_theme.rs → toggle_buttons_theme.dart
+- generated/range_slider_defaults_m3.rs → generated/range_slider_defaults_m3.g.dart
 - progress_indicator_theme.rs → progress_indicator_theme.dart
 - generated/progress_indicator_defaults_m3.rs → generated/progress_indicator_defaults_m3.g.dart
 - card.rs → card.dart
@@ -376,6 +381,24 @@ Ported against: 34b89b2086d4
   Reason: platform — Dart's `paint` has no `parentBox` to find the view with, and the engine reads the implicit view, which Waft does not have.
   Affect: with several views of different pixel ratios, a range thumb's shadow may blur at another view's ratio.
 
+## segmented_button.rs → segmented_button.dart
+- Change: a `SegmentedButton` matches the segments of a rebuild by `ButtonSegment::value`, in `statesControllers` and in `didUpdateWidget`'s `segments.contains`; `ButtonSegment` compares by its fields, its widgets by identity, for the render object's `listEquals`.
+  Reason: language — Dart compares and keys segments by object identity, which a Rust value does not have, and canonicalizes `const` segments into one object.
+  Affect: a segment whose value stays keeps its states controller when the app builds new segment objects on a rebuild, where Dart disposes it and makes another; `ButtonSegment::value` must be unique, as Dart documents.
+
+- Change: `selected` and the argument of `on_selection_changed` are a `Vec<T>` in insertion order with each value once, where Dart has a `Set<T>`.
+  Reason: language — `T` is bounded by `Clone + PartialEq`, which a `HashSet` does not accept.
+  Affect: a caller passes and receives a `Vec`; two selections with the same members in another order are the same set to the button.
+
+- Change: `ButtonSegment`'s assert that one of `icon` and `label` is set runs in `SegmentedButton`'s `debug_check_constructor`.
+  Reason: language — a fluent chain has no point at which it has seen both fields.
+  Affect: a segment with neither panics when the button becomes a widget, not when the segment is made.
+
+## range_slider.rs → range_slider.dart
+- Change: `RangeSlider`'s constructor asserts (`min <= max`, `values` within `min..max` and ordered, `divisions > 0`) run in `into_widget`, in a debug build.
+  Reason: language — a fluent chain has no point at which it has seen every argument.
+  Affect: a bad combination panics where the slider is handed to the tree, not on its first build.
+
 ## slider_theme.rs → slider_theme.dart
 - Change: `SliderThemeData::overlay_color` is an `AnyColor`, and `lerp` gives it as a plain colour.
   Reason: language — a Dart `Color` field can hold a `WidgetStateColor` subclass, which the slider resolves with `resolveAs`, and a plain `Color` cannot.
@@ -535,6 +558,12 @@ Ported against: 34b89b2086d4
   Reason: language — Dart compares the list by identity and canonicalizes a `const` list, so a build that writes `const <DropdownMenuEntry>[…]` hands the same list every time; Rust has no constant heap values.
   Affect: a menu whose parent builds its entries anew on each build clears its highlight and filtered entries on each rebuild, where Dart's `const` entries keep them; a caller that keeps the `Rc` keeps them.
 
+## chip.rs, chip_theme.rs, action_chip.rs, choice_chip.rs, filter_chip.rs, input_chip.rs → their .dart files (and generated/{chip,action_chip,filter_chip,input_chip}_defaults_m3.rs)
+
+- Change: the forced-point `assert`s of `_RenderChipRedirectingHitDetection.hitTest` compare within f32 rounding, not exactly.
+  Reason: platform — positions pass through Valo's f32 transforms in the hit-test result.
+  Affect: a debug build accepts the rounded point where Dart asserts exact equality.
+
 ## Deferred
 - input_decorator.rs: the 13 cases Dart runs on a `TextField`, the 16 Material 2 cases and the `customLabel` twins listed in the step 11 review. Trigger: none, portable now.
 - text_form_field.rs: the ~38 text_form_field_test cases not ported. Trigger: none, portable now.
@@ -552,7 +581,18 @@ Ported against: 34b89b2086d4
 - switch.rs: `Switch`'s `activeThumbImage`, `onActiveThumbImageError`, `inactiveThumbImage` and `onInactiveThumbImageError`, the thumb decoration's `DecorationImage`, and the inactive thumb image's say in the thumb radius. Trigger: `DecorationImage`.
 - slider.rs: slider_test cases not ported: textScaleFactor, bold text, animations when reparented, the desktop focus/overlay cases at 4060/4175/4242/4305, arrow keys showing the value indicator, value label when focused, 'Discrete Slider.onChanged is called only once', 'Skip drawing ValueIndicator shape when label painter text is null', 'does not request focus when the value is changed', 'Update the divisions and value at the same time', 'Slider can be painted in a narrower constraint', 'SliderTheme change should trigger re-layout', 'track paints correctly when the shape is rectangular', and the M2 focus/hover/drag colour cases. Trigger: the next edit of slider.rs.
 - slider_theme.rs: slider_theme_test's shape-painting cases (default track/overlay/tick/paddle drawing, size overrides, the 'skip all component painting' set, value indicator stroke colours, track gap / thumb size when year2023 is false). Trigger: the next edit of slider_theme.rs.
-- range_slider_parts.rs: the slider_theme_test cases on `RangeSlider`. Trigger: `range_slider.dart`.
+- segmented_button.rs: segmented_button_test 'SegmentsButton when compositing does not crash' (a segment whose label composites ends the picture, so the `restore()` after `paint_child` lands on a fresh canvas, which dart:ui ignores and valo asserts on in debug). Trigger: seedeai/valo#9, which makes a restore at the base level a no-op, merged and published.
+- segmented_button.rs: segmented_button_test's semantics cases ('SegmentedButtons have correct semantics', 'Multi-select SegmentedButtons have correct semantics', 'SegmentedButton announce state on all platforms'), and its golden ('SegmentedButton vertical aligned golden image'). Trigger: the semantics tree; golden files.
+- segmented_button.rs: segmented_button_test's 'SegmentedButton clips border path when drawing segments', whose second segment's path is drawn at alpha 0, and 'SegmentedButton.styleFrom with transparent overlayColor', whose hover and press paint a rect at alpha 0: the display list drops a draw with no effect (`DisplayListBuilder::PaintResult`) where Flutter's `TestRecordingCanvas` sees it. Trigger: a test canvas in Waft that records calls.
+- segmented_button.rs, segmented_button_theme.rs: the `debugFillProperties` cases. Trigger: diagnostics.
+- toggle_buttons.rs: toggle_buttons_test's semantics-tree expectation in 'Toggle buttons constraints size does not affect minimum input padding' and its empty 'have correct semantics' case; the two 'Radius.x or Radius.y equal 0.0' cases and the golden files of the lone-button cases. Trigger: the semantics tree; golden files.
+- toggle_buttons.rs, toggle_buttons_theme.rs: the `debugFillProperties` cases. Trigger: diagnostics.
+- toggle_buttons.rs: the 'paints..path()' physical-model call of an unselected or disabled button, which Dart's recording canvas sees at fill alpha 0 and the display list drops (`DisplayListBuilder::PaintResult`); the border-path cases assert it only for a selected button. Trigger: a test canvas in Waft that records calls.
+- range_slider.rs: the semantics configuration of the two thumb nodes (`assembleSemanticsNode` and the increase and decrease semantic actions), the semantic formatter callback's use, and `markNeedsSemanticsUpdate`. The arrow-key actions run. Trigger: the semantics tree.
+- range_slider.rs: the debug properties of `RangeSlider`. Trigger: diagnostics.
+- range_slider.rs: range_slider_test's semantics cases ('RangeSlider.label info should not write to semantic node', 'Range Slider Semantics - ltr' and '- rtl', 'Keyboard focus also changes semantics focus', 'Semantic nodes do not throw an error after clearSemantics') and 'Range Slider implements debugFillProperties'. Trigger: the semantics tree, diagnostics.
+- range_slider.rs: range_slider_test's 'RangeSlider.padding can override the default RangeSlider padding', and slider_theme_test's 'The RangeSlider track layout correctly when the overlay size is smaller than the thumb size', 'SliderThemeData.padding can override the default RangeSlider padding' and 'Default paddle range slider value indicator shape draws correctly' (its zero-width track rrect at x 24), which expect a draw with no effect that the display list drops. Trigger: a test canvas in Waft that records calls.
+- range_slider.rs: range_slider_test's 'Range Slider removes value indicator from overlay if Slider gets disposed without value indicator animation completing', whose `paintsExactlyCountTimes(#drawPath, 6)` and `(#drawPath, 2)` over the Overlay count a button's physical shape as a `drawPath` and a thumb's `debugDisableShadows` shadow as one: valo records `drawPath`, `drawRRect` and `drawCircle` of a rounded rect or an oval as the same op (the Rust case reads the sequence and the paragraph counts); and slider_theme_test's 'Default paddle range slider value indicator shape draws correctly with debugDisableShadows', which also sets `debugDisableShadows`, a process-wide flag that parallel tests race on. Trigger: a test canvas in Waft that records calls; `debug_disable_shadows` scoped to a test's thread in waft-painting.
 - progress_indicator.rs: progress_indicator_test 'LinearProgressIndicator causes a repaint when it changes' (compares `tester.layers`). Trigger: a layer-list comparison helper in test_support.
 - app.rs: `MaterialApp.router` and the router fields only it fills (`routeInformationProvider`, `routeInformationParser`, `routerDelegate`, `backButtonDispatcher`, `routerConfig`), with `_usesRouter`'s `WidgetsApp.router` branch. Trigger: `router.dart` (`WidgetsApp.router`).
 - app.rs: the three inspector-button builders and `_MaterialInspectorButton`. Trigger: `widget_inspector.dart`'s `InspectorButton`.
@@ -599,7 +639,7 @@ Ported against: 34b89b2086d4
 - ink_well.rs: `InkResponse(onDoubleTap:)` reaching the gesture detector (the field and `handleDoubleTap` exist; a double tap never fires). Trigger: `DoubleTapGestureRecognizer` (waft-widgets gesture_detector deferral).
 - ink_decoration.rs: `Ink.image`. Trigger: `DecorationImage`.
 - debug.rs: the `describeMissingAncestor` part of the messages. Trigger: `BuildContext::describe_missing_ancestor` in waft-widgets.
-- theme_data.rs: the component theme fields, each with its factory and `copyWith` argument and its `lerp` and `==` branches: bottom_app_bar_theme, carousel_view_theme (`carousel_theme.dart`), chip_theme, data_table_theme, date_picker_theme, search_bar_theme, search_view_theme, segmented_button_theme, time_picker_theme, toggle_buttons_theme, button_bar_theme. Trigger: each one's `*_theme.dart`, with its component.
+- theme_data.rs: the component theme fields, each with its factory and `copyWith` argument and its `lerp` and `==` branches: bottom_app_bar_theme, carousel_view_theme (`carousel_theme.dart`), data_table_theme, date_picker_theme, search_bar_theme, search_view_theme, time_picker_theme, button_bar_theme. Trigger: each one's `*_theme.dart`, with its component.
 - button_theme.rs: `ButtonThemeData`'s methods that take a `MaterialButton` (`getBrightness`, `getTextTheme`, `getDisabledTextColor`, `getDisabledFillColor`, `getFillColor`, `getTextColor`, `getSplashColor`, `getFocusColor`, `getHoverColor`, `getHighlightColor`, the five elevation getters, `getPadding`, `getShape`, `getAnimationDuration`, `getConstraints`, `getMaterialTapTargetSize`). Trigger: material_button.dart.
 - theme_data.rs: `ThemeData(useSystemColors:)` and `_overrideWithSystemColors`. Trigger: dart:ui `SystemColor` in waft-embedder, with `floating_action_button_theme`.
 - theme_data.rs: `ThemeData`'s `hashCode` (`Hash`). Trigger: the first map or set keyed by a `ThemeData`.
@@ -634,3 +674,8 @@ Ported against: 34b89b2086d4
 - tabs.rs: tabs_test 'correct semantics', 'correct scrolling semantics', 'can override semantics of tabs' and 'Test semantics of TabPageSelector'. Trigger: the semantics tree.
 - tab_controller.rs: tab_controller_test '$TabController dispatches creation in constructor.' Trigger: leak tracking.
 - tab_bar_theme.rs: tab_bar_theme_test's `debugFillProperties` cases and the `hashCode` assert. Trigger: diagnostics; `Hash`.
+- chip.rs: `_RenderEnsureMinSemanticsSize`'s semantics overrides (`describeSemanticsConfiguration`, `assembleSemanticsNode`, `visitChildrenForSemantics`), the `Semantics` information of the delete icon and the checkmark, and every semantics case of chip_test, action/choice/filter/input chip tests. Trigger: the semantics tree.
+- chip.rs, chip_theme.rs: `debugFillProperties` of `RawChip`, `Chip` and `ChipThemeData` (and their tests), `ChipThemeData.hashCode` (`Hash`). Trigger: diagnostics; the first map or set keyed by one.
+- chip.rs tests (chip_test): 'Chip label only does layout once' (needs `WidgetToRenderBoxAdapter`); the `feedback.clickSoundCount` assertions of 'Chip control test' and 'FilterChip delete button control test'; the three 'Delete button semantic tap target ...' cases. Trigger: `WidgetToRenderBoxAdapter` in waft-widgets (its render object); `SystemSound`; the semantics tree.
+- chip.rs tests: the `matchesGoldenFile` expectations ('Delete button is visible on disabled RawChip', FilterChip and InputChip versions, the golden lines of the M3 sparkle cases). Trigger: golden comparison in waft-test.
+- chip.rs, chip_theme.rs: the chip_test cases that expect a draw with no effect: the six 'Chip uses stateful border side color …' cases (Material 2 and 3 of 'in different states', 'from resolveWith' and 'nullable border side color from resolveWith') and the paint half of 'Chip defers to theme, if shape and side resolves to null' and its Material 2 twin, whose borders are drawn in the alpha-0 colours `0x0000000N`, and the `..rect(color: Colors.transparent)` step of 'Chip does not glitch on hover when providing ThemeData.hoverColor'; chip_theme_test's four 'Chip uses stateful border side' cases (Material 2 and 3 of 'from resolveWith pattern' and 'from chip theme'), whose sides are tagged `0x00000001` and `0x00000002`. Trigger: a test canvas in Waft that records calls.
